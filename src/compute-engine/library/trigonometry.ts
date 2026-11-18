@@ -703,12 +703,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // factory's evaluate handler enforces the same carrier for a
       // non-finite value that only evaluation reveals. `NaN`
       // propagates (declared by `trigFunction()`). The RESULT stays the
-      // wide `number` on purpose: the compiled lanes' kind-preservation
-      // discipline documents its
-      // reliance on it (`resultIsComplexValued`,
-      // `compilation/javascript-target.ts` — a declared `complex` result
-      // flips synthesized callback wrappers to the complex kernel), and
-      // the per-call sharpness lives in the type handler. The parameter
+      // wide `number` on purpose, and the per-call sharpness lives in the
+      // type handler. The parameter
       // names `quantity`, as for every head of `trigFunction()`.
       signature: '(complex | quantity) -> number',
     },

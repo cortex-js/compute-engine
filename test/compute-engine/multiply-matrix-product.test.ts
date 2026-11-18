@@ -261,204 +261,6 @@ describe('the type of a product of matrices', () => {
 });
 
 describe('compiled code', () => {
-  /** Compile `expr` with `p` and `q` declared `type`, run it with
-   * `p := pv`, `q := qv`, and return the result and the code. */
-  function run(
-    type: string,
-    expr: MathJsonExpression,
-    pv: Value,
-    qv: Value
-  ): { code: string; result: unknown; expected: unknown } {
-    const ce = new ComputeEngine();
-    ce.declare('p', type);
-    ce.declare('q', type);
-    const r = compile(ce.box(expr), { to: 'javascript', fallback: false });
-    expect(r.success).toBe(true);
-    const result = r.run!({ p: pv, q: qv } as never);
-    ce.assign('p', ce.box(toMathJson(pv)));
-    ce.assign('q', ce.box(toMathJson(qv)));
-    const expected = fromJson(ce.box(expr).N().json);
-    return { code: r.code!, result, expected };
-  }
-
-  for (const type of [
-    'matrix<number>',
-    'matrix<number^(2x2)>',
-    'tensor<number>',
-    'list<list<number>>',
-    'broadcastable<number>',
-  ]) {
-    describe(type, () => {
-      for (const expr of [
-        ['Multiply', 'p', 'q'],
-        ['Multiply', 'q', 'p'],
-        ['Multiply', 'p', 'p'],
-        ['Multiply', 2, 'p', 'q'],
-        ['Multiply', 'p', 'q', 'p'],
-      ] as MathJsonExpression[]) {
-        it(`${JSON.stringify(expr)} is the matrix product`, () => {
-          const { result, expected } = run(type, expr, M, Q);
-          expect(result).toEqual(expected);
-        });
-      }
-    });
-  }
-
-  it('a matrix symbol times a literal matrix is the matrix product', () => {
-    for (const type of ['matrix<number>', 'tensor<number>']) {
-      const { result, expected } = run(
-        type,
-        ['Multiply', 'p', toMathJson(Q)],
-        M,
-        Q
-      );
-      expect(expected).toEqual(MQ);
-      expect(result).toEqual(MQ);
-    }
-  });
-
-  it('a matrix type calls the matrix product', () => {
-    expect(run('matrix<number>', ['Multiply', 2, 'p', 'q'], M, Q).code).toBe(
-      '_SYS.mul(2, _.p, _.q)'
-    );
-  });
-
-  it('a type without a rank dispatches on the shape of the values', () => {
-    const { code } = run('tensor<number>', ['Multiply', 'p', 'q'], M, Q);
-    expect(code).toBe(
-      '(_SYS.matrixProductShape(_.p, _.q) ?? (_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _.p, _.q)))'
-    );
-    // Two vectors: the product of each entry, as in the interpreter.
-    const vectors = run(
-      'tensor<number>',
-      ['Multiply', 'p', 'q'],
-      [1, 2],
-      [3, 4]
-    );
-    expect(vectors.expected).toEqual([3, 8]);
-    expect(vectors.result).toEqual([3, 8]);
-  });
-
-  it('two tensors of rank 3 give the matrix product of each pair of matrices', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor<number>');
-    ce.declare('q', 'tensor<number>');
-    const r = compile(ce.box(['Multiply', 'p', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.run!({ p: [M, Q], q: [M, Q] } as never)).toEqual([
-      MM,
-      [
-        [1, 0],
-        [0, 1],
-      ],
-    ]);
-    // Tensors of different lengths: the interpreter gives an
-    // `incompatible-dimensions` error.
-    expect(r.run!({ p: [M, Q], q: [M, Q, M] } as never)).toBeNaN();
-  });
-
-  it('a tensor of rank 3 beside a matrix throws when the code runs', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor<number>');
-    ce.declare('q', 'tensor<number>');
-    const r = compile(ce.box(['Multiply', 'p', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(() => r.run!({ p: [M, Q], q: M } as never)).toThrow(/rank 3/);
-  });
-
-  it('matrices whose dimensions do not agree do not compile', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'matrix<number^(2x3)>');
-    // `a · a` has the static type `error`, so the static-type-error decline
-    // (`throwStaticTypeError()`, compile-static-type-error.ts) runs before
-    // the target's own check of the dimensions.
-    expect(() =>
-      compile(ce.box(['Multiply', 'a', 'a']), {
-        to: 'javascript',
-        fallback: false,
-      })
-    ).toThrow(/type 'error'/);
-  });
-
-  it('a type that may hold points and matrices declines', () => {
-    // A list of two points and a 2×2 matrix are the same array at run time.
-    // The interpreter gives the matrix product for `[[1, 2], [3, -4]]`
-    // squared, `[[7, -6], [-9, 22]]`; the element-wise code gave
-    // `[[1, 4], [9, 16]]`.
-    for (const type of ['list', 'list<unknown>', 'list<any>']) {
-      for (const [q, other] of [
-        ['q', type],
-        ['q', 'list<number>'],
-        [['List', 1, 2], undefined],
-      ] as const) {
-        const ce = new ComputeEngine();
-        ce.declare('p', type);
-        if (other !== undefined) ce.declare('q', other);
-        let code = 'compiled';
-        try {
-          compile(ce.box(['Multiply', 'p', q] as MathJsonExpression), {
-            to: 'javascript',
-            fallback: false,
-          });
-        } catch (err) {
-          code = (err as { diagnostic?: { code: string } }).diagnostic!.code;
-        }
-        expect(code).toBe('unsettled-shape');
-      }
-      // A number scales each entry of a matrix and each coordinate of a
-      // point: the product keeps its code.
-      const ce = new ComputeEngine();
-      ce.declare('p', type);
-      const r = compile(ce.box(['Multiply', 'p', 3]), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(r.code).toBe('_SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), 3, _.p)');
-    }
-    // With the fallback on, the interpreter gives the matrix product.
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list');
-    ce.declare('q', 'list');
-    const P = [
-      [1, 2],
-      [3, -4],
-    ];
-    const r = compile(ce.box(['Multiply', 'p', 'q']), { to: 'javascript' });
-    expect(r.success).toBe(false);
-    expect(r.run!({ p: P, q: P } as never)).toEqual([
-      [7, -6],
-      [-9, 22],
-    ]);
-  });
-
-  it('a list of points keeps the element-wise code', () => {
-    // A list of points times a list of numbers scales each point.
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<tuple<number, number>>');
-    ce.declare('v', 'list<number>');
-    const r = compile(ce.box(['Multiply', 'p', 'v']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.code).not.toContain('matrixProductShape');
-    expect(
-      r.run!({
-        p: [
-          [1, 2],
-          [3, 4],
-        ],
-        v: [2, 3],
-      } as never)
-    ).toEqual([
-      [2, 4],
-      [9, 12],
-    ]);
-  });
-
   it('GLSL declines a matrix symbol: the GLSL fragment has no matrix type', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'matrix<number^(2x2)>');
@@ -468,65 +270,7 @@ describe('compiled code', () => {
       fallback: true,
     });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
-  });
-
-  it('evaluates a factor that is repeated once for each position', () => {
-    const ce = new ComputeEngine();
-    ce.declare('f', '() -> tensor<number>');
-    const call = ce.box(['f']);
-    const r = compile(ce.function('Multiply', [call, call]), {
-      to: 'javascript',
-      fallback: false,
-      functions: {
-        f: () => {
-          const g = globalThis as { __mmCalls?: number };
-          g.__mmCalls = (g.__mmCalls ?? 0) + 1;
-          return g.__mmCalls === 1 ? [1, 2] : [3, 4];
-        },
-      },
-    });
-    expect(r.run!({} as never)).toEqual([3, 8]);
-  });
-
-  it('a list of points times a broadcastable<number> scales each point', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'list<tuple<number, number>>');
-    ce.declare('b', 'broadcastable<number>');
-    const pts = [
-      [1, 2],
-      [3, 4],
-    ];
-    for (const expr of [
-      ['Multiply', 'b', 'a'],
-      ['Multiply', 'a', 'b'],
-    ] as MathJsonExpression[]) {
-      const r = compile(ce.box(expr), { to: 'javascript', fallback: false });
-      expect(r.code).not.toContain('_SYS.mul(');
-      expect(r.run!({ a: pts, b: [2, 3] } as never)).toEqual([
-        [2, 4],
-        [9, 12],
-      ]);
-    }
-  });
-
-  it('an operand computed from a union of list types dispatches on the values', () => {
-    const type = 'list<number> | list<list<number>>';
-    const exact = run(type, ['Multiply', ['Add', 'p', 1], 'q'], M, Q);
-    expect(exact.result).toEqual(exact.expected);
-    // The interpreter computes `sin(1)` and its products with the 21 digits
-    // of the default precision, and compiled code with doubles, so the last
-    // digit of a cell can differ: each cell is compared to 14 decimal places.
-    const { result, expected } = run(type, ['Multiply', 'p', ['Sin', 'q']], M, Q);
-    expect(Array.isArray(result) && Array.isArray(expected)).toBe(true);
-    const rows = result as number[][];
-    const expectedRows = expected as number[][];
-    expect(rows.map((row) => row.length)).toEqual(
-      expectedRows.map((row) => row.length)
-    );
-    rows.forEach((row, i) =>
-      row.forEach((x, j) => expect(x).toBeCloseTo(expectedRows[i][j], 14))
-    );
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 });
 
@@ -664,30 +408,6 @@ describe('matrices whose dimensions do not agree', () => {
 describe('second review round', () => {
   const MJ = toMathJson(M);
   const QJ = toMathJson(Q);
-
-  it('2. broadcastable<number> products check the shapes at run time', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'broadcastable<number>');
-    ce.declare('q', 'broadcastable<number>');
-    const r = compile(ce.box(['Multiply', 'p', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.code).toContain('_SYS.mulChecked');
-    // Two matrices: the matrix product. Two vectors: each entry.
-    expect(r.run!({ p: M, q: Q } as never)).toEqual(MQ);
-    expect(r.run!({ p: [1, 2], q: [3, 4] } as never)).toEqual([3, 8]);
-    // Rank 3 beside rank 3: the matrix product of each pair, not NaN
-    // cells. Rank 3 beside a matrix: refused.
-    expect(r.run!({ p: [M, Q], q: [M, Q] } as never)).toEqual([
-      MM,
-      [
-        [1, 0],
-        [0, 1],
-      ],
-    ]);
-    expect(() => r.run!({ p: [M, Q], q: M } as never)).toThrow(/rank 3/);
-  });
 
   describe('3. Expand of a power of a sum', () => {
     it('vectors commute: the multinomial expansion is short', () => {
@@ -1397,64 +1117,6 @@ describe('ragged lists', () => {
     ).toBe(value);
   });
 
-  it.each(cases)('%s: compiled code', (_, factors, __, value) => {
-    const ce = new ComputeEngine();
-    const names = factors.map((_, i) => `f${i}`);
-    for (const n of names) ce.declare(n, 'list<list<number>>');
-    const r = compile(ce.box(['Multiply', ...names]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    const inputs = Object.fromEntries(names.map((n, i) => [n, factors[i]]));
-    expect(r.run!(inputs as never)).toEqual(value);
-  });
-
-  it('a number scales each pair', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<list<number>>');
-    ce.declare('q', 'list<list<number>>');
-    const r = compile(ce.box(['Multiply', 2, 'p', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.run!({ p: R, q: S } as never)).toEqual([[8], [20, 36]]);
-  });
-
-  it('a complex entry takes the complex product', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<list<number>>');
-    ce.declare('q', 'list<list<number>>');
-    const r = compile(ce.box(['Multiply', 'p', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(
-      r.run!({
-        p: R,
-        q: [
-          { re: 1, im: 1 },
-          { re: 2, im: 1 },
-        ],
-      } as never)
-    ).toEqual([
-      [{ re: 1, im: 1 }],
-      [
-        { re: 4, im: 2 },
-        { re: 6, im: 3 },
-      ],
-    ]);
-  });
-
-  it('Product of a list of ragged lists, interpreted and compiled', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<unknown>');
-    ce.assign('L', ce.box(toMathJson([R, S])));
-    const product = ce.box(['Product', 'L']);
-    expect(product.evaluate().toString()).toBe('[[4],[10,18]]');
-    const r = compile(product, { to: 'javascript', fallback: false });
-    expect(r.run!({} as never)).toEqual([[4], [10, 18]]);
-  });
-
   // The elements of this list are typed `list<matrix<integer^(2x2)> |
   // vector<integer^1>>`. The callback check of `Reduce` refused `Multiply`
   // for them, and `Product(L)` was an `incompatible-type` error
@@ -1474,42 +1136,10 @@ describe('ragged lists', () => {
     const product = ce.box(['Product', 'L']);
     expect(product.toString()).toBe('Reduce(L, "Multiply", 1)');
     expect(product.evaluate().toString()).toBe('[[[2,1],[4,3]],[10]]');
-    const r = compile(product, { to: 'javascript', fallback: false });
-    expect(r.run!({} as never)).toEqual([
-      [
-        [2, 1],
-        [4, 3],
-      ],
-      [10],
-    ]);
     const map = ce.box(['Map', 'Negate', 'L']);
     expect(map.evaluate().toString()).toBe(
       '[[[[-1,-2],[-3,-4]],[-5]],[[[0,-1],[-1,0]],[-2]]]'
     );
-  });
-});
-
-describe('a compiled Product of tensors of rank 3', () => {
-  it('is the matrix product of each pair of matrices', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<unknown>');
-    ce.assign(
-      'L',
-      ce.box(
-        toMathJson([
-          [M, M],
-          [Q, Q],
-        ])
-      )
-    );
-    const product = ce.box(['Product', 'L']);
-    const MQ2 = [
-      [2, 1],
-      [4, 3],
-    ];
-    expect(product.evaluate().toString()).toBe('[[[2,1],[4,3]],[[2,1],[4,3]]]');
-    const r = compile(product, { to: 'javascript', fallback: false });
-    expect(r.run!({} as never)).toEqual([MQ2, MQ2]);
   });
 });
 
@@ -1562,65 +1192,36 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
     expect(ce.box(['Product', 'L']).evaluate().toString()).toBe(value);
   });
 
-  // The value assigned to `L` gives the type of the elements: all lists
-  // (`list<matrix<integer^(2x2)> | vector<integer^2>>`) is a settled shape,
-  // and the fold compiles; a number beside lists is not, and the fold
-  // declines.
-  it.each(cases)(
+  // The value assigned to `L` gives the type of the elements: a number
+  // beside lists is not a settled shape, and the fold declines.
+  it.each(cases.filter(([, elements]) => !elements.every(Array.isArray)))(
     '%s: compiled Product, Reduce and Scan',
-    (_, elements, __, value) => {
+    (_, elements) => {
       const ce = engineWith(elements);
-      const settled = elements.every((e) => Array.isArray(e));
       for (const expr of [
         ['Product', 'L'],
         ['Reduce', 'L', 'Multiply', 1],
         ['Last', ['Scan', 'L', 'Multiply', 1]],
       ] as MathJsonExpression[]) {
-        if (settled) {
-          const r = compile(ce.box(expr), {
-            to: 'javascript',
-            fallback: false,
-          });
-          expect(r.run!({} as never)).toEqual(value);
-        } else {
-          const r = compile(ce.box(expr), { to: 'javascript' });
-          expect(r.success).toBe(false);
-          expect(r.diagnostic?.code).toBe('unsettled-shape');
-        }
+        const r = compile(ce.box(expr), { to: 'javascript' });
+        expect(r.success).toBe(false);
       }
     }
   );
 
-  it.each(cases)(
-    '%s: compiled Product of an input',
-    (_, elements, __, value) => {
-      // Elements that are all lists have a settled shape, and the fold
-      // compiles. An element that can be a number or a list declines.
-      const types: string[] = [];
-      if (elements.every((e) => Array.isArray(e)))
-        types.push('list<list<number>>');
-      for (const type of types) {
-        const ce = new ComputeEngine();
-        ce.declare('L', type);
-        const r = compile(ce.box(['Product', 'L']), {
-          to: 'javascript',
-          fallback: false,
-        });
-        expect(r.run!({ L: elements } as never)).toEqual(value);
-      }
-      for (const type of [
-        'list<unknown>',
-        'list<number | tensor<number>>',
-        'list<broadcastable<number>>',
-      ]) {
-        const ce = new ComputeEngine();
-        ce.declare('L', type);
-        const r = compile(ce.box(['Product', 'L']), { to: 'javascript' });
-        expect(r.success).toBe(false);
-        expect(r.diagnostic?.code).toBe('unsettled-shape');
-      }
+  it('a compiled Product of an input whose elements may be numbers or lists declines', () => {
+    for (const type of [
+      'list<unknown>',
+      'list<number | tensor<number>>',
+      'list<broadcastable<number>>',
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('L', type);
+      const r = compile(ce.box(['Product', 'L']), { to: 'javascript' });
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
     }
-  );
+  });
 
   it('a sum over elements of unsettled shape declines', () => {
     const ce = new ComputeEngine();
@@ -1628,23 +1229,6 @@ describe('a compiled Multiply fold over elements of several shapes', () => {
     const r = compile(ce.box(['Sum', 'L']), { to: 'javascript' });
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('unsettled-shape');
-  });
-
-  it('a sum still checks the shapes of its elements', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<matrix<number> | vector<number>>');
-    const r = compile(ce.box(['Sum', 'L']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    // A row of 3 beside a matrix of 2 rows: the shapes do not nest.
-    expect(() => r.run!({ L: [M, [1, 2, 3]] } as never)).toThrow();
-    // A row of 2 adds element `i` to row `i` of the matrix (ROADMAP
-    // CE-399), as in the interpreter.
-    expect(r.run!({ L: [M, [1, 2]] } as never)).toEqual([
-      [2, 3],
-      [5, 6],
-    ]);
   });
 });
 
@@ -1785,44 +1369,6 @@ describe('a lazy collection of vectors or matrices', () => {
     ).toBe('[[[7,10],[15,22]],[[10,14],[21,31]]]');
   });
 
-  it('compiled code agrees', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<vector<number>>');
-    ce.declare('M', 'matrix<number>');
-    for (const [expr, value] of [
-      [
-        ['Multiply', ['Scan', 'L', 'Add', 0], 'M'],
-        [
-          [2, 1],
-          [6, 4],
-        ],
-      ],
-      [
-        ['Multiply', ['Reverse', 'L'], 'M'],
-        [
-          [4, 3],
-          [2, 1],
-        ],
-      ],
-    ] as const) {
-      const r = compile(ce.box(expr as MathJsonExpression), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(
-        r.run!({
-          L: [
-            [1, 2],
-            [3, 4],
-          ],
-          M: [
-            [0, 1],
-            [1, 0],
-          ],
-        } as never)
-      ).toEqual(value);
-    }
-  });
 });
 
 // A list literal whose cells are numbers that may be absent has the

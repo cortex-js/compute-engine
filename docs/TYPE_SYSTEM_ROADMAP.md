@@ -971,10 +971,8 @@ consumed.
   (`boxed-expression/boxed-value-definition.ts:913`), the
   `Sinh`/`Cosh` realness gate and `extremumType`'s bare-tier rungs
   (`library/type-handlers.ts`), `Sinc`/Fresnel's finite-limit gate
-  (`library/trigonometry.ts:124`), the tensor dtype dispatch
-  (`tensor/tensor-fields.ts:566`), and the compiled clause guard that
-  emits `!Number.isNaN` — which accepts `Infinity` — for a bare
-  `real` parameter (`compilation/base-compiler.ts:13277`).
+  (`library/trigonometry.ts:124`), and the tensor dtype dispatch
+  (`tensor/tensor-fields.ts:566`).
 - **Codemod scope.** Safe to automate: `finite_X → X` inside quoted
   type strings in `signature:` values, handler `return` statements,
   `parseType`/range-constructor arguments, and

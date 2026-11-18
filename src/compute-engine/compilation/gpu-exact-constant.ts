@@ -1,8 +1,7 @@
 /**
  * The exact value of a constant term of a shader expression: the operands
- * that the warning `float32-unsafe-argument` (`gpu-exact-trig.ts`, and
- * `amplifiedTrigMemo()` of `ir/adapter-glsl.ts`) and the exact sine hash read
- * as constants.
+ * that the warning `float32-unsafe-argument` (`amplifiedTrigMemo()` of
+ * `ir/adapter-glsl.ts`) reads as constants.
  */
 
 import type { Expression } from '../global-types.js';

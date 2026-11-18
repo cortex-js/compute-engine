@@ -19,17 +19,8 @@ function setup(): ComputeEngine {
 
 const ADD10 = ['Assign', 'gg', ['Function', ['Add', 't', 10], 't']];
 const SRC = ['Block', ADD10, ['gg', 1]];
-const DECLINE = /"gg" is not a local of the compiled expression/;
 
 describe('a call of a function that the enclosing block assigns', () => {
-  // A write to a symbol declared in the engine declines.
-  test('JavaScript declines', () => {
-    const ce = setup();
-    expect(() => compile(ce.box(SRC as any), { fallback: false })).toThrow(
-      DECLINE
-    );
-    expect(setup().box(SRC as any).evaluate().toString()).toBe('11');
-  });
 
   test('interval-js declines', () => {
     const ce = setup();

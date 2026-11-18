@@ -2,10 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { sumVariantInfo } from '../../src/compute-engine/sum-representation';
-
-import type { MathJsonExpression } from '../../src/math-json/types';
 
 //
 // SUM-TYPE DECLARATION SUGAR — `docs/plans/2026-08-12-sum-type-sugar-and-
@@ -425,37 +422,6 @@ describe('A5 — the variant-name collision guard, atomically', () => {
 });
 
 describe('re-declaration — the variant list and the back-pointers agree', () => {
-  test('a DROPPED variant loses its sum membership', () => {
-    // `_sumOf` (on the variant) and `_sumVariants` (on the sum) are the two
-    // halves of one relation, and the compile tier reads BOTH (§B1). A
-    // re-declaration that drops a variant overwrites the list but leaves the
-    // dropped record behind — its back-pointer has to go with the membership,
-    // or the orphan's constructor compiles under the policy the NEW variant
-    // set implies, flipping its representation without flipping the values
-    // already built with it.
-    const ce = new ComputeEngine();
-    // `a`/`b` are representation-disjoint (number vs string) → ERASED.
-    expect(
-      executeEpsil(ce, 'type s = a(number) | b(string)').diagnostics
-    ).toEqual([]);
-    expect(sumVariantInfo(ce, 'b')?.policy).toBe('erased');
-
-    // Drop `b`, add a colliding `c` → the sum is now TAGGED. `b` is still a
-    // perfectly good nominal type, but it is no longer a variant of `s`.
-    expect(
-      executeEpsil(ce, 'type s = a(number) | c(number)').diagnostics
-    ).toEqual([]);
-    expect(sumVariantInfo(ce, 'b')).toBeUndefined();
-    expect(sumVariantInfo(ce, 'a')?.policy).toBe('tagged');
-    expect(sumVariantInfo(ce, 'c')?.policy).toBe('tagged');
-    // …so `b`'s constructor keeps the plain D11 erasure it compiled under
-    // before the re-declaration, rather than growing a `_tag`.
-    expect(
-      compile(ce.box(['b', { str: 'x' }] as MathJsonExpression), {
-        fallback: false,
-      }).code
-    ).toBe('"x"');
-  });
 
   test('a stale back-pointer alone is not trusted', () => {
     // Belt to the suspenders above: `sumVariantInfo` cross-checks `_sumOf`

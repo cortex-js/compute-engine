@@ -27,9 +27,7 @@ export function resolveDerivativeFunctionLiteral(
     // Prefer the instance's own binding; fall back to a BY-NAME lookup in
     // the current scope — a symbol operand reaching a compile handler is
     // not necessarily bound (the compilation walks operand instances that
-    // may predate binding), the same reason `base-compiler.ts` resolves
-    // operator heads with `lookupApplicable` rather than through the
-    // instance.
+    // may predate binding).
     let vdef = expr.valueDefinition;
     let odef = expr.operatorDefinition;
     if (vdef === undefined && odef === undefined) {

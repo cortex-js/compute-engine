@@ -1596,72 +1596,6 @@ describe('§5.13 — G3, compile() emits a BOUNDED generic user function whole-f
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  it('declared route (E3): emits, and the call broadcasts like the interpreter', () => {
-    const ce = fresh();
-    ce.declare('gd', '(x: T) -> T where T: number');
-    ce.assign('gd', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    const r = compile(ce.box(['gd', 'y'] as any));
-    expect(r?.code ?? '').toContain('_fn_gd');
-    expect(r?.run?.({ y: 21 })).toBe(42);
-    // A list for `y`, which is not declared and whose type is inferred
-    // `number`, is a value outside the type of the input, so the compiled
-    // value is not specified (rule R5 of
-    // `docs/plans/2026-10-31-static-shape-compilation.md`). With `y`
-    // declared `list<real>`, the compiled call maps over the list, as the
-    // interpreter does.
-    const lists = fresh();
-    lists.declare('gd', '(x: T) -> T where T: number');
-    lists.assign(
-      'gd',
-      lists.box(['Function', ['Multiply', 2, 'x'], 'x'] as any)
-    );
-    lists.declare('y', 'list<real>');
-    const rl = compile(lists.box(['gd', 'y'] as any));
-    expect(rl?.code ?? '').toContain('_fn_gd');
-    const expected = lists
-      .box(['gd', 'y'] as any)
-      .subs({ y: lists.box(['List', 1, 2, 3] as any) })
-      .evaluate();
-    expect(rl?.run?.({ y: [1, 2, 3] })).toEqual(expected.ops!.map((x) => x.re));
-    expect(ce.box(['gd', 21] as any).evaluate().re).toBe(42);
-    expect(
-      ce
-        .box(['gd', ['List', 1, 2, 3]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[2,4,6]');
-  });
-
-  it('bare-assign route (own polytype marker): emits too', () => {
-    const ce = fresh();
-    ce.assign(
-      'hd',
-      e2(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x')
-    );
-    const r = compile(ce.box(['hd', 'y'] as any));
-    expect(r?.code ?? '').toContain('_fn_hd');
-    expect(r?.run?.({ y: 21 })).toBe(42);
-    // A list for `y`, which is not declared and whose type is inferred
-    // `number`, is a value outside the type of the input, so the compiled
-    // value is not specified (rule R5 of
-    // `docs/plans/2026-10-31-static-shape-compilation.md`). With `y`
-    // declared `list<real>`, the compiled call maps over the list, as the
-    // interpreter does.
-    const lists = fresh();
-    lists.assign(
-      'hd',
-      e2(lists, ['Add', 'x', 'x'], '(x: T) -> T where T: number', 'x')
-    );
-    lists.declare('y', 'list<real>');
-    const rl = compile(lists.box(['hd', 'y'] as any));
-    expect(rl?.code ?? '').toContain('_fn_hd');
-    const expected = lists
-      .box(['hd', 'y'] as any)
-      .subs({ y: lists.box(['List', 1, 2, 3] as any) })
-      .evaluate();
-    expect(rl?.run?.({ y: [1, 2, 3] })).toEqual(expected.ops!.map((x) => x.re));
-  });
-
   it('an UNBOUNDED variable still declines, fallback agrees with the interpreter', () => {
     const ce = fresh();
     ce.declare('gu', '(x: T) -> T where T');
@@ -1672,21 +1606,6 @@ describe('§5.13 — G3, compile() emits a BOUNDED generic user function whole-f
     // The fallback runner is the honest party.
     expect(r?.run?.({ y: 21 })).toBe(42);
     expect(ce.box(['gu', 21] as any).evaluate().re).toBe(42);
-  });
-
-  it('a GROUND annotated literal still compiles (the lift changes nothing there)', () => {
-    const ce = fresh();
-    ce.assign(
-      'kd',
-      ce.box([
-        'Function',
-        ['Add', 'x', 'x'],
-        ['Typed', 'x', { str: 'number' }],
-      ] as any)
-    );
-    const r = compile(ce.box(['kd', 'y'] as any));
-    expect(r?.code ?? '').toContain('_fn_kd');
-    expect(r?.run?.({ y: 21 })).toBe(42);
   });
 });
 

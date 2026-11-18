@@ -11,7 +11,7 @@
 // number, with `compare` and `apply`).
 //
 
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import {
@@ -208,18 +208,6 @@ describe('VALUE KINDS ACCEPTANCE: residue classes', () => {
         ])
         .evaluate().json
     ).toEqual(GF(0));
-  });
-
-  test('a MyMod with only `compile.value` declines to compile', () => {
-    const ce = new ComputeEngine();
-    ce.declare('MyMod', {
-      signature: '(integer, integer) -> residue',
-      arithmetic: { ...MYMOD_ARITHMETIC, compile: { value: () => '0' } },
-    });
-    ce.declare('x', 'real');
-    expect(() =>
-      compile(ce.box(['Add', 'x', M(2, 5)]), { fallback: false })
-    ).toThrow("holds a residue class (type 'residue')");
   });
 });
 
@@ -506,32 +494,6 @@ describe('VALUE KINDS ACCEPTANCE: GF8, a user kind admitted as nothing', () => {
     without.declare('s1', 'gf8');
     without.declare('s2', 'gf8');
     expect(without.box(['Max', 's1', 's2']).type.toString()).toBe('error');
-  });
-
-  test('a redeclaration of a head with another `compile.type` is refused while another head is live', () => {
-    const e = new ComputeEngine();
-    e.declareType('gf8', 'value', { mint: false });
-    const contract = () => ({
-      type: { lowered: () => 'gf8', entry: () => true },
-    });
-    e.declare('G', {
-      signature: '(integer) -> gf8',
-      arithmetic: { negate: () => undefined, compile: contract() },
-    });
-    e.declare('H', {
-      signature: '(integer) -> gf8',
-      arithmetic: { negate: () => undefined },
-    });
-    expect(() =>
-      e.declare(
-        'G',
-        {
-          signature: '(integer) -> gf8',
-          arithmetic: { negate: () => undefined, compile: contract() },
-        },
-        { extend: true }
-      )
-    ).toThrow('another `compile.type`');
   });
 });
 

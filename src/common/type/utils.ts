@@ -3974,32 +3974,6 @@ export function staticMembership(
 }
 
 /**
- * `t` with its infinite and NaN branches dropped.
- *
- * Written for the compiler's real-versus-complex LANE question, which asks
- * about the SHAPE of an emitted value — a plain number, or a `{re, im}`
- * object. An infinity or a NaN is representable in both shapes, so it
- * decides nothing there; the finite part of the claim does. This matters
- * because a head whose value can blow up must spell its result as a union
- * now that the bare numeric names are finite — `Artanh(r)` claims
- * `complex | +oo | -oo` — and `isNonRealNumber` of that whole union
- * is `false`, which would report a real lane for a head whose emitter
- * produces `{re, im}`.
- *
- * Returns `t` unchanged when it is not a union, and when dropping the
- * branches would leave nothing (a claim of `+oo | -oo` alone has no
- * finite part to read).
- */
-export function finitePartOfType(t: Readonly<Type>): Type {
-  if (typeof t === 'string' || t.kind !== 'union') return t as Type;
-  const finite = t.types.filter(
-    (b) => !isSubtype(b, 'infinity') && !isSubtype(b, 'nan')
-  );
-  if (finite.length === 0 || finite.length === t.types.length) return t as Type;
-  return finite.length === 1 ? finite[0] : { kind: 'union', types: finite };
-}
-
-/**
  * True if an operand of type `t` could be a non-real number: either the type
  * is a supertype of `complex` (`number`, `any`), or it is a numeric type
  * outside `real` (a complex literal types as `complex`, `i` as

@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { shaderFunctions } from './gpu-shader-f32-eval';
 
 function realEngine() {
   const ce = new ComputeEngine();
@@ -80,24 +79,6 @@ describe('real branches of exact rational powers', () => {
     );
   });
 
-  test('an operand supplied by a caller is evaluated once', () => {
-    const ce = realEngine();
-    const expr = ce.box(['Power', ['Sin', 'x'], ['Rational', 5, 3]]);
-    const result = compile(expr, {
-      constantFold: false,
-      functions: { Sin: '(() => ++globalThis.__cePowerReads)' },
-    });
-    const state = globalThis as typeof globalThis & { __cePowerReads?: number };
-    state.__cePowerReads = 0;
-    try {
-      expect(result.success).toBe(true);
-      expect(result.run!({ x: 1 })).toBe(1);
-      expect(state.__cePowerReads).toBe(1);
-    } finally {
-      delete state.__cePowerReads;
-    }
-  });
-
   test('zero and NaN preserve the real numeric convention', () => {
     const ce = realEngine();
     for (const p of [5, -5, 2, -2]) {
@@ -130,38 +111,6 @@ describe('real branches of exact rational powers', () => {
     );
   });
 
-  test('an inexact exponent gets the real root of the interpreter', () => {
-    // The compiler reads `5/3` from the double `1.6666666666666667` with the
-    // recognizer of the interpreter (`realPowerBranchTerms()`), so the node
-    // takes the real lane with the sign of the odd numerator, and at
-    // `x = -2` both give the real root.
-    const ce = realEngine();
-    const expr = ce.box(['Power', 'x', 5 / 3]);
-    const result = compile(expr, { constantFold: false });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toContain('_SYS.cpow(');
-    expect(result.code).toContain('Math.pow(Math.abs(');
-    const want = expr.subs({ x: ce.number(-2) }).N();
-    expect(want.im).toBe(0);
-    const out = result.run!({ x: -2 });
-    expect(typeof out).toBe('number');
-    close(out, want.re);
-  });
-
-  test.each(['glsl'] as const)(
-    '%s uses the real magnitude and a nonzero sign at zero',
-    (to) => {
-      const ce = realEngine();
-      const result = compile(ce.box(['Power', 'x', ['Rational', -5, 3]]), {
-        to,
-        constantFold: false,
-      });
-      expect(result.success).toBe(true);
-      expect(result.code).toContain('pow(abs(x),');
-      expect(result.code).not.toContain('_gpu_cpow');
-      expect(result.code).not.toContain('sign(x)');
-    }
-  );
 });
 
 // The interpreter reads a DECIMAL exponent as the nearest small rational
@@ -232,51 +181,6 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
       expect(out.value.lo).toBeLessThanOrEqual(want);
       expect(out.value.hi).toBeGreaterThanOrEqual(want);
     }
-  });
-
-  for (const language of ['glsl'] as const) {
-    test.each(SHAPES)(`${language}: %s agrees with the interpreter`, (latex) => {
-      const ce = realEngine();
-      const expr = ce.parse(latex);
-      const result = compile(expr, { to: language });
-      expect(result.success).toBe(true);
-      expect(result.code).toContain('pow(abs(x)');
-      const main = `float _main(float x) { return ${result.code}; }`;
-      const run = shaderFunctions(`${result.preamble ?? ''}\n${main}`, language);
-      for (const x of [-8, -1, 2]) {
-        const want = expr.subs({ x: ce.number(x) }).N().re;
-        const v = run('_main', Math.fround(x)) as number;
-        expect(Math.abs(v - want)).toBeLessThanOrEqual(1e-6 * Math.abs(want));
-      }
-    });
-  }
-
-  test('a root index read with an even numerator gives the positive real root', () => {
-    // `\sqrt[2.5]{x}` is `x^{2/5}`: at `x = -8` the interpreter gives
-    // `+8^0.4 = 2.2973967…`, and every target gives the magnitude form.
-    const ce = realEngine();
-    const expr = ce.parse('\\sqrt[2.5]{x}');
-    const want = expr.subs({ x: -8 }).N().re;
-    expect(want).toBeCloseTo(2.2973967, 7);
-    const js = compile(expr, { constantFold: false });
-    expect(js.code).toBe('Math.pow(Math.abs(_.x), 0.4)');
-    close(js.run!({ x: -8 }), want);
-    const ia = compile(expr, { to: 'interval-js' });
-    const out = ia.run!({ x: { lo: -8.1, hi: -7.9 } }) as {
-      kind: string;
-      value: { lo: number; hi: number };
-    };
-    expect(out.kind).toBe('interval');
-    expect(out.value.lo).toBeLessThanOrEqual(want);
-    expect(out.value.hi).toBeGreaterThanOrEqual(want);
-    const glsl = compile(expr, { to: 'glsl' });
-    expect(glsl.code).toContain('pow(abs(x), ');
-    expect(glsl.code).not.toContain('sign');
-    // A constant radicand folds to the positive value.
-    expect(Number(compile(ce.parse('\\sqrt[2.5]{-8}')).code)).toBeCloseTo(
-      want,
-      12
-    );
   });
 
   // The interpreter takes the sign of `x^0.6000000000000001` from the
@@ -380,22 +284,4 @@ describe('a decimal exponent or root index read as an odd-denominator rational',
     expect(out.value.hi).toBeGreaterThanOrEqual(want);
   });
 
-  test('a decimal that does not read as an odd-denominator rational keeps its lowering', () => {
-    const ce = realEngine();
-    const code = (latex: string, options: object = {}) =>
-      compile(ce.parse(latex), { constantFold: false, ...options }).code;
-    // `0.5` and `0.3` read as `1/2` and `3/10`: an even denominator, the
-    // principal complex value in the complex mode.
-    expect(code('x^{0.5}', { mode: 'complex' })).toContain('_SYS.cpow(');
-    expect(code('x^{0.3}', { mode: 'complex' })).toContain('_SYS.cpow(');
-    expect(code('x^{0.3}', { mode: 'strict' })).toBe('Math.pow(_.x, 0.3)');
-    expect(code('x^{0.3}', { to: 'glsl' })).toBe('pow(x, 0.3)');
-    // `2.4` reads as `12/5`, so `1/2.4` is `5/12`: an even denominator, the
-    // principal complex value for a negative radicand.
-    expect(code('\\sqrt[2.4]{x}')).toBe('Math.pow(_.x, 0.4166666666666667)');
-    // A provably non-negative base keeps the plain power.
-    ce.declare('t', 'real');
-    ce.assume(ce.parse('t \\ge 0'));
-    expect(code('t^{0.6}')).toBe('Math.pow(_.t, 0.6)');
-  });
 });

@@ -17,7 +17,6 @@
  * Each case checks that the evaluated value is a value of the static type.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const POINT = 'tuple<number, number>';
 
@@ -74,49 +73,6 @@ describe('CE-405: A broadcastable<T> PARAMETER MAPS TO THE CELLS', () => {
       type: 'list<tuple<vector<integer^2> | vector<integer^3>, vector<integer^2> | vector<integer^3>>>',
       value: '[([1,2], [1,2]),([3,4,5], [3,4,5])]',
     });
-  });
-});
-
-describe('CE-405: COMPILED', () => {
-  test('a matrix argument compiles to the element-wise call', () => {
-    const ce = engine();
-    ce.declare('M', 'matrix<number>');
-    const r = compile(ce.box(['f', 'M']), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(
-      r.run({
-        M: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-  });
-  test('a list of points compiles one call per point (ROADMAP CE-412)', () => {
-    const ce = engine();
-    ce.declare('P', `list<${POINT}>`);
-    const r = compile(ce.box(['g', 'P']), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(
-      r.run({
-        P: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
   });
 });
 

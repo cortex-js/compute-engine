@@ -16,7 +16,6 @@ import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type { StateEvent } from './engine-configuration-lifecycle.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
-import type { JsProfileSwitch } from './js-profile-switch.js';
 import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type { CacheStatsControl } from '../common/cache-stats.js';
 export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
@@ -87,11 +86,7 @@ import type {
   EvalContext as KernelEvalContext,
   EvaluateOptions as KernelEvaluateOptions,
 } from './types-kernel-evaluation.js';
-import type {
-  LanguageTarget,
-  CompilationResult,
-  JavaScriptCompilationTarget,
-} from './compilation/types.js';
+import type { CompilationResult } from './compilation/types.js';
 
 export type { RulePurpose } from './types-kernel-evaluation.js';
 
@@ -1507,23 +1502,6 @@ export interface IComputeEngine {
    * @internal */
   _debugBindings: boolean;
 
-  /** When set, `implicitCompile()` tries the profile `ir` of the
-   * JavaScript target first, for the consumers in `consumers` (all of them
-   * when it is absent), and uses the existing compiler when the profile
-   * declines (`js-profile-switch.ts`). Off (`undefined`) by default; the
-   * initial value comes from the `CE_JS_PROFILE` and
-   * `CE_JS_PROFILE_CONSUMERS` environment variables.
-   * @internal */
-  _jsProfile: JsProfileSwitch | undefined;
-
-  /** When `'ir'`, each compilation for the `javascript` target that asks
-   * for no profile also compiles the expression with the profile `ir`,
-   * discards that result and counts its outcome (the shadow measure,
-   * `js-profile-switch.ts`). Off (`false`) by default; the initial value
-   * comes from the `CE_JS_PROFILE_SHADOW` environment variable.
-   * @internal */
-  _jsProfileShadow: false | 'ir';
-
   /** True when an operation (`evaluate()`, `simplify()`, `compile()`, …)
    * that starts now opens an environment of its own (rule 8 of
    * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): no operation
@@ -2157,59 +2135,8 @@ export interface IComputeEngine {
     options?: Record<string, unknown>
   ): CompilationResult;
 
-  /**
-   * @internal Get a registered compilation target by name.
-   *
-   * The `javascript` target is typed concretely so its compiled `run` needs
-   * no cast: it accepts
-   * `number | boolean | string | ComplexResult | RunnerListInput` variables
-   * (plain reals, booleans, strings, complex domain-coloring inputs, or a
-   * list for a symbol that the code reads as a list) and returns a
-   * `CompiledValue`. Any other name (source-only or custom targets)
-   * falls back to the generic `LanguageTarget<Expression>`.
-   */
-  _getCompilationTarget(
-    name: 'javascript'
-  ): JavaScriptCompilationTarget<Expression> | undefined;
-  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
-
-  /** @internal Return the names of all registered compilation targets. */
+  /** @internal Return the names of the built-in compilation targets. */
   _listCompilationTargets(): string[];
-
-  /**
-   * Register a compilation target under `name`, so that
-   * `compile(expr, { to: name })` resolves it. A later registration under the
-   * same name replaces the earlier target. Throws when `name` is empty or the
-   * target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
-   * and `compile()`.
-   *
-   * Every engine compiles to `interval-js`, which `compile()` routes itself
-   * (a registration under that name throws), and has the target
-   * `javascript`. Every engine also has `glsl` once the full package entry,
-   * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
-   * the program, whichever entry made the engine and in whichever order. A
-   * program that loads only `@cortex-js/compute-engine/core`: import
-   * `GLSLTarget` from `@cortex-js/compute-engine/compile` and register it
-   * here.
-   */
-  registerCompilationTarget(
-    name: string,
-    target: LanguageTarget<Expression>
-  ): void;
-
-  /** @internal The pre-2026-10-26 spelling of `registerCompilationTarget`. */
-  _registerCompilationTarget(
-    name: string,
-    target: LanguageTarget<Expression>
-  ): void;
-
-  /** Remove the compilation target registered under `name`. A name that is
-   * not registered is ignored. `interval-js`, which `compile()` routes
-   * itself, cannot be removed: this throws. */
-  unregisterCompilationTarget(name: string): void;
-
-  /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */
-  _unregisterCompilationTarget(name: string): void;
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm(

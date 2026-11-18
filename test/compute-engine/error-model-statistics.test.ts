@@ -311,63 +311,7 @@ describe('the variance family', () => {
         `${label}: ${numeric}`
       );
     }
-    // Compiled with `x` as an input: the machine kernels see the double
-    // `Math.SQRT2`, whose power sums do not cancel exactly either.
-    const free = new ComputeEngine();
-    free.declare('x', 'real');
-    const one = ['Sqrt', 'x'];
-    const three = ['List', one, one, one];
-    const compiled: [string, any, string][] = [
-      ['Variance', one, 'NaN'],
-      ['StandardDeviation', one, 'NaN'],
-      ['Skewness', one, 'NaN'],
-      ['Kurtosis', one, 'NaN'],
-      ['PopulationVariance', one, '0'],
-      ['Variance', three, '0'],
-      ['Skewness', three, 'NaN'],
-      ['Kurtosis', three, 'NaN'],
-    ];
-    for (const [h, arg, expected] of compiled) {
-      const label = `compiled ${h}(${JSON.stringify(arg)})`;
-      const fn = compile(free.box([h, arg]));
-      expect(`${label}: ${fn.success}`).toBe(`${label}: true`);
-      expect(`${label}: ${fn.run!({ x: 2 })}`).toBe(`${label}: ${expected}`);
-    }
-  });
-
-  test('skewness and kurtosis of data far from zero do not cancel', () => {
-    // The mean of `[10⁸, 10⁸ + 1, 10⁸ + 3]` is large compared with the
-    // spread, so moments computed from raw power sums (`Σx² − (Σx)²/n`)
-    // subtracted nearly equal numbers: the machine skewness was about
-    // `1.16·10⁸` and the kurtosis about `2·10¹⁶`. The moments are
-    // accumulated from the deviations from the mean, so the result is the
-    // one of the shifted data `[0, 1, 3]` (skewness `0.3818…`, kurtosis
-    // `1.5`), on the exact route, under `.N()` at both precisions, and in
-    // compiled JavaScript.
-    const data = [1e8, 1e8 + 1, 1e8 + 3];
-    const expected: [string, number][] = [
-      ['Skewness', 0.3818017741606063],
-      ['Kurtosis', 1.5],
-    ];
-    for (const precision of [300, 'machine'] as const) {
-      const ce = new ComputeEngine();
-      ce.precision = precision;
-      ce.declare('L', 'list<real>');
-      for (const [h, value] of expected) {
-        const expr = ce.box([h, ['List', ...data]]);
-        const exact = expr.evaluate().N().re;
-        const numeric = expr.N().re;
-        expect(Math.abs(exact - value)).toBeLessThan(1e-14);
-        expect(Math.abs(numeric - value)).toBeLessThan(1e-14);
-        // Compiled code runs the machine kernel, as `.N()` does at machine
-        // precision.
-        const fn = compile(ce.box([h, 'L']));
-        expect(fn.success).toBe(true);
-        const run = fn.run!({ L: data }) as number;
-        expect(Math.abs(run - value)).toBeLessThan(1e-14);
-        if (precision === 'machine') expect(run).toBe(numeric);
-      }
-    }
+    // The compiler declines the statistics operators.
   });
 
   test('skewness and kurtosis keep the deviations in range and representable', () => {

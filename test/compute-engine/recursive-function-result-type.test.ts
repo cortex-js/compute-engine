@@ -10,7 +10,6 @@
  * builds a set refutes it.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compile';
 import { isSubtype } from '../../src/common/type/subtype';
 
 /** `F(n, K) = { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }` with
@@ -89,16 +88,6 @@ describe('a list-building self-recursion is typed list<T> (Tycho row 338)', () =
     expect(ce.box('F').type.toString()).toBe(
       '(unknown, unknown) -> list<number>'
     );
-  });
-
-  test('a head bound to the recursion and the compiled route read the list type', () => {
-    const ce = declareAndAssign(recursion('Join', 'List'));
-    ce.declare('C', 'unknown');
-    ce.assign('C', ce.box(['F', 0, 5]));
-    expect(ce.box('C').type.toString()).toBe('list<number>');
-    const result = compile(ce.box(['F', 0, 5]), { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run({})).toEqual([0, 1, 2, 3, 4]);
   });
 
   test('a numeric recursion and a non-recursive body are typed as before', () => {

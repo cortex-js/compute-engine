@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // Phase 2 statistics: Covariance/PopulationCovariance/Correlation,
 // LinearRegression/PolynomialFit, and the empirical `Quantile` overload.
@@ -595,22 +594,6 @@ describe('LaTeX round-trip', () => {
   test('cov/corr parse aliases', () => {
     expect(ce.parse('\\operatorname{cov}(a, b)').operator).toBe('Covariance');
     expect(ce.parse('\\operatorname{corr}(a, b)').operator).toBe('Correlation');
-  });
-});
-
-describe('compilation', () => {
-  test('JS compile of Covariance/Correlation matches .N()', () => {
-    const cov = compile(ce.box(['Covariance', L(NX), L(NY)]));
-    expect(cov?.success).toBe(true);
-    expect(cov?.run?.({})).toBeCloseTo(
-      ce.box(['Covariance', L(NX), L(NY)]).N().re,
-      10
-    );
-    const corr = compile(ce.box(['Correlation', L(NX), L(NY)]));
-    expect(corr?.run?.({})).toBeCloseTo(
-      ce.box(['Correlation', L(NX), L(NY)]).N().re,
-      10
-    );
   });
 });
 

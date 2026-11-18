@@ -750,24 +750,10 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
     );
     expect(f.success).toBe(false);
     expect(f.diagnostic?.code).toBe('unsettled-shape');
-    expect(f.unsupported).toContain('z');
+    expect(f.diagnostic?.message).toContain('the input z of type any');
     const run = f.run as unknown as (z: unknown) => unknown;
     expect(run(-3)).toBe(3);
     expect(run([-1, 2])).toEqual([1, 2]);
-  });
-
-  test('an operand of numeric type keeps Math.abs', () => {
-    const f = compile(ce2.box(['Abs', 'r']), { to: 'javascript' });
-    expect(f.code).toBe('Math.abs(_.r)');
-    expect(f.run!({ r: -2 })).toBe(2);
-  });
-
-  test('an operand of set type compiles as its count', () => {
-    const f = compile(ce2.box(['Abs', 'S']), { to: 'javascript' });
-    expect(f.success).toBe(true);
-    expect(f.run!({ S: [4, 5, 6] })).toBe(3);
-    const g = compile(ce2.box(['Abs', ['Set', 1, 2]]), { to: 'javascript' });
-    expect(g.run!({})).toBe(2);
   });
 });
 

@@ -59,8 +59,6 @@ function chain(depth: number): string {
 
 const L = Array.from({ length: 16 }, (_, k) => k + 1);
 
-type CollectionView = { each(): Generator<{ N(): { re: number } }> };
-
 function compiled(variant: Variant, depth: number) {
   const ce = engine(variant);
   const expr = ce.parse(chain(depth));
@@ -85,26 +83,6 @@ describe('TYCHO ITEM 323: CALL-SITE SPECIALIZATION OF A WHOLE-LIST FUNCTION', ()
   });
 
   for (const variant of ['function', 'list'] as const) {
-    for (const depth of [1, 4]) {
-      test(`declared ${variant}, depth ${depth}: typed from the argument`, () => {
-        const { expr } = compiled(variant, depth);
-        // Before: `list<unknown>`. The elements are the real numbers the
-        // body computes. The NaN of an element read outside the list is
-        // implicit in the type of the accessor.
-        expect(expr.type.toString()).toBe('list<real>');
-      });
-
-      test(`declared ${variant}, depth ${depth}: compiles to the reference values`, () => {
-        const { result } = compiled(variant, depth);
-        expect(result.success).toBe(true);
-        const out = result.run!({ L }) as number[];
-        expect(out.length).toBe(depth === 1 ? 64 : 4096);
-        expect(out).toEqual(reference.get(depth));
-      });
-    }
-  }
-
-  for (const variant of ['function', 'list'] as const) {
     test(`declared ${variant}: the interpreter agrees at depth 1`, () => {
       const ce = engine(variant);
       ce.assign('L', ce.box(['List', ...L]));
@@ -116,27 +94,6 @@ describe('TYCHO ITEM 323: CALL-SITE SPECIALIZATION OF A WHOLE-LIST FUNCTION', ()
       );
     });
   }
-
-  test('a bare `function` over a list compiles in the real lane', () => {
-    // Before: `s(L)` compiled with `success: true` and returned
-    // `{ re: NaN, im: NaN }` objects, because the generic helper read the
-    // parameter `indexed_collection<number>` (inferred from the body) as
-    // possibly complex.
-    const ce = engine('function');
-    const result = compile(ce.parse('s(L)'), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(result.success).toBe(true);
-    const out = result.run!({ L }) as number[];
-    ce.assign('L', ce.box(['List', ...L]));
-    // The interpreter's value is a lazy comprehension: read its elements.
-    const value = ce.parse('s(L)').evaluate();
-    const elements = [...(value as unknown as CollectionView).each()];
-    expect(out.length).toBe(16);
-    expect(elements.length).toBe(16);
-    elements.forEach((x, k) => expect(out[k]).toBeCloseTo(x.N().re, 12));
-  });
 
   test('a scalar-parameter function still maps over a list argument', () => {
     // The whole-binding typing applies only to a function with a

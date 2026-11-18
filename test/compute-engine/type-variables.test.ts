@@ -1772,17 +1772,6 @@ describe('ROUTE PARITY — `ce.function`, `ce.box`, `ce.parse`', () => {
 });
 
 describe('COMPILE (§6)', () => {
-  test('a CALL to a generic operator compiles (ground result)', () => {
-    const ce = fresh();
-    ce.declare('Echo', {
-      signature: '(T) -> T where T: number',
-      compile: (args, compile, { language }) =>
-        language === 'javascript' ? `(${compile(args[0])})` : undefined,
-    });
-    const target = ce._getCompilationTarget('javascript');
-    const fn = target.compile(ce.parse('\\mathrm{Echo}(x) + 1'));
-    expect(fn.run!({ x: 4 })).toEqual(5);
-  });
 
   test('a generic user function itself DECLINES cleanly (no throw)', () => {
     const ce = fresh();

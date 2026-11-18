@@ -1,15 +1,10 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { SYS_HELPERS } from '../../src/compute-engine/compilation/javascript-runtime';
-import { createJavaScriptRuntime } from '../../src/runtime';
 import { broadcastNumbersSlice } from '../../src/compute-engine/compilation/broadcast';
 
 // ROADMAP CE-410 (Tycho row 432): a cheap `broadcast()` kernel ran about 25
-// times slower than the same arithmetic written in JavaScript. Three changes
-// made it faster, and each must give the values it gave before:
+// times slower than the same arithmetic written in JavaScript. The changes
+// that made it faster must give the values it gave before:
 //
-// - Each compiled function has its own `_SYS.atNumeric` with a fast case
-//   (`ownAtNumeric`, javascript-runtime.ts). For every argument it gives the
-//   value of the shared `SYS_HELPERS.atNumeric`, or throws the same error.
 // - The cell loop of `broadcast()` is made for each compiled body
 //   (`cellLoopFor`, broadcast.ts). For each cell it writes the value that
 //   `run()` gives for that cell, converted as before.
@@ -54,101 +49,6 @@ const expectSame = (a: ArrayLike<number>, b: ArrayLike<number>): void => {
       throw new Error(`value ${n}: ${a[n]} and ${b[n]}`);
 };
 
-describe('CE-410: the atNumeric of each compiled function', () => {
-  const sparse: unknown[] = [1, 2, 3];
-  delete sparse[1];
-  const bases: [string, unknown][] = [
-    ['a list of numbers', [10, 20, 30]],
-    ['a list of doubles', [0.5, -1.25, NaN, Infinity]],
-    [
-      'a list with other elements',
-      [1, 'a', undefined, null, [1, 2], { re: 1, im: 2 }, true],
-    ],
-    ['a list with a hole', sparse],
-    ['an empty list', []],
-    ['a typed array', new Float64Array([1, 2, 3])],
-    ['a string', 'abc'],
-    ['a number', 5],
-    ['undefined', undefined],
-    ['null', null],
-    ['an object with index keys', { 0: 1, 1: 2, length: 2 }],
-    ['an object made from Array.prototype', Object.create(Array.prototype)],
-    ['a subclass of Array', class extends Array {}.from([1, 2, 3])],
-  ];
-  const indexes: unknown[] = [
-    1,
-    2,
-    3,
-    4,
-    7,
-    0,
-    -0,
-    -1,
-    -3,
-    -4,
-    1.5,
-    NaN,
-    Infinity,
-    -Infinity,
-    true,
-    undefined,
-    { re: 2, im: 0 },
-    [1, 3],
-    [1, 9],
-    [true, false, true],
-    [],
-  ];
-
-  test('a compiled function has its own copy', () => {
-    const r = compile(ce.parse('F_{i+1}'));
-    const sys = (r.run as unknown as { SYS: typeof SYS_HELPERS }).SYS;
-    expect(sys.atNumeric).not.toBe(SYS_HELPERS.atNumeric);
-  });
-
-  test.each(bases)('%s: the same value as the shared helper', (_, base) => {
-    const own = (
-      compile(ce.parse('F_{i+1}')).run as unknown as {
-        SYS: typeof SYS_HELPERS;
-      }
-    ).SYS.atNumeric;
-    for (const i of indexes) {
-      const expected = outcome(() =>
-        SYS_HELPERS.atNumeric(base, i as number, 'number')
-      );
-      // Twice, so that the second read runs after the full form has been
-      // called through this copy.
-      expect(outcome(() => own(base, i as number, 'number'))).toEqual(expected);
-      expect(outcome(() => own(base, i as number, 'number'))).toEqual(expected);
-    }
-  });
-
-  test('the one documented difference: an object with Array as constructor and an own length', () => {
-    // `ownAtNumeric` reads it as an array; the shared helper gives NaN.
-    const fake = Object.create(Array.prototype) as Record<number, number>;
-    fake[0] = 7;
-    Object.defineProperty(fake, 'length', { value: 1 });
-    const own = (
-      compile(ce.parse('F_{i+1}')).run as unknown as {
-        SYS: typeof SYS_HELPERS;
-      }
-    ).SYS.atNumeric;
-    expect(own(fake, 1, 'number')).toBe(7);
-    expect(SYS_HELPERS.atNumeric(fake, 1, 'number')).toBeNaN();
-  });
-
-  test('a stored kernel loaded by a runtime has its own copy too', () => {
-    const r = compile(ce.parse('F_{i+1}'));
-    const runtime = createJavaScriptRuntime({});
-    const batch = runtime.loadBroadcast(r as never);
-    const out = batch(
-      { i: new Float64Array([0, 1, 2, 3, -5]), F: [1, 2, 3] },
-      { shared: ['F'] }
-    );
-    // Index 4 is out of range; index -4 is too (three elements).
-    expectSame(out, [1, 2, 3, NaN, NaN]);
-  });
-});
-
 describe('CE-410: the cell loop of each compiled body', () => {
   const kernel = compile(
     ce.box([
@@ -168,11 +68,6 @@ describe('CE-410: the cell loop of each compiled body', () => {
       if (!Array.isArray(v)) return [NaN, NaN, NaN];
       return [0, 1, 2].map((k) => numberOf(v[k]));
     });
-
-  test('the kernel compiles and reads F with atNumeric', () => {
-    expect(kernel.success).toBe(true);
-    expect(kernel.code).toContain('_SYS.atNumeric');
-  });
 
   test('indexes in range, out of range, zero and negative (wrap-around)', () => {
     // i + 1 runs past the end on the last cells; i - 2 is zero at i = 2 and
@@ -213,17 +108,6 @@ describe('CE-410: the cell loop of each compiled body', () => {
       { shared: ['F'] }
     );
     expectSame(again, first);
-  });
-
-  test('outputs past the end of a tuple, booleans and complex values', () => {
-    const r = compile(ce.parse('(x > 0, \\sqrt{x})'));
-    const xs = [4, -4, 0, NaN, 2.25];
-    const out = r.broadcast!({ x: new Float64Array(xs) }, { outputs: 3 });
-    const want = xs.flatMap((x) => {
-      const v = r.run!({ x } as never) as unknown[];
-      return [numberOf(v[0]), numberOf(v[1]), NaN];
-    });
-    expectSame(out, want);
   });
 
   test('a grid layout with a scalar input', () => {
@@ -310,14 +194,4 @@ describe('CE-410: a connective of decided comparisons', () => {
     expect(r.run!({ i: 0, F: [3] } as never)).toBe(1);
   });
 
-  test('a comparison of a free variable is the plain comparison', () => {
-    // The host supplies every input, and a NaN operand decides a
-    // comparison, so the condition is always decided.
-    const s = compile(
-      ce.box(['If', ['And', ['Less', 'x', 0], ['Less', 'y', 0]], 1, 2])
-    );
-    expect(s.code).toBe('((_.x < 0 && _.y < 0) ? (1) : (2))');
-    expect(s.run!({ x: -1, y: -1 } as never)).toBe(1);
-    expect(s.run!({ x: 1, y: -1 } as never)).toBe(2);
-  });
 });

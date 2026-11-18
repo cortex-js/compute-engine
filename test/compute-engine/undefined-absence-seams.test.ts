@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // The absence semantics of the relational and logic family, of the handlers
 // of `First`/`Last` and `Distance`, and of a compiled numeric slot, for the
@@ -20,12 +19,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // `docs/ERROR-MODEL.md` §3 is the reference for the absence contract.
 
 const ce = new ComputeEngine();
-
-const run = (expr: any): unknown => {
-  const r = compile(ce.box(expr));
-  expect(r.success).toBe(true);
-  return r.run!({});
-};
 
 const value = (expr: unknown): string =>
   ce
@@ -114,16 +107,6 @@ describe('MISSING — seam 2: the absence-aware handlers', () => {
     expect(
       ce.box(['Distance', ['Tuple', 1, 1], 'Missing']).evaluate().symbol
     ).toBe('Missing');
-  });
-});
-
-describe('MISSING — the compiled numeric slot', () => {
-  // A written absence symbol in a NUMERIC slot reaches compiled code as the
-  // numeric absence marker `NaN` (the interpreter gives `Missing`, and
-  // compiled code may give `NaN` there: `docs/COMPILATION-MODEL.md`,
-  // "Caveats of compiled code").
-  it('an absence symbol in an arithmetic slot runs to NaN', () => {
-    expect(Number.isNaN(run(['Add', 'Missing', 1]) as number)).toBe(true);
   });
 });
 

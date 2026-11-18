@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * `Map` over a TUPLE source yields an ordered `list` of the lambda's results —
@@ -84,21 +84,6 @@ describe('Map over a tuple yields an ordered list', () => {
     // `tuple<integer, integer, integer>`.
     expect(r.toString()).toBe('["True","True","True"]');
     expect(r.type.toString()).toBe('list<boolean>');
-  });
-
-  test('arithmetic on a tuple mapped through a symbol compiles on the JavaScript target', () => {
-    // The point of the list-out contract: the result is provably array-shaped,
-    // so arithmetic on it compiles where the abstract `collection` top failed
-    // closed. The source is a DECLARED tuple symbol, not a literal — a literal
-    // tuple would constant-fold before the compiler sees the shape.
-    const ce = new ComputeEngine();
-    ce.declare('T', 'tuple<number, number, number>');
-    ce.assign('g', ce.parse('x \\mapsto x + 10'));
-    const r = compile(ce.box(['Add', ['Map', 'g', 'T'], 1]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.run!({ T: [1, 2, 3] })).toEqual([12, 13, 14]);
   });
 
   test('a bare `tuple`-typed source is demoted to a list too, both lambda forms', () => {

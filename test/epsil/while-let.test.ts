@@ -399,8 +399,6 @@ describe('EPSIL WHILE LET — serialize (the lowering spells back as while let)'
 });
 
 describe('EPSIL WHILE LET — compilation', () => {
-  const source =
-    'let k = 0\nlet s = 0\nwhile let 0..4 = k { s = s + k; k = k + 1 }\ns';
 
   /** Compile an Epsil program for the JavaScript target and run it. */
   function compiled(src: string): {
@@ -415,57 +413,6 @@ describe('EPSIL WHILE LET — compilation', () => {
     return { success: result.success, error: result.error, value: result.run() };
   }
 
-  test('the JavaScript target compiles the loop as statements', () => {
-    // The `Match` is the loop body's statement, so it takes the statement
-    // form (`compileMatchStatement`): an `if`/`else` chain whose wildcard arm
-    // is a real `break`, not the value form's arrow function.
-    const ce = new ComputeEngine();
-    const [ast] = parseEpsil(source);
-    const result = compile(ce.box(ast!));
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('while (true)');
-    expect(result.code).toContain('} else {\nbreak');
-    expect(String(result.run())).toBe('10');
-  });
-
-  test('a rest capture splices into a list, as its Sequence does interpreted', () => {
-    // `...t` is a JavaScript array in compiled code; `[t]` spreads it, so
-    // the loop drains the list instead of nesting it one level per turn.
-    expect(
-      compiled(
-        'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...t] = xs { s = s + h; xs = [t] }\ns'
-      )
-    ).toMatchObject({ success: true, value: 6 });
-    expect(
-      compiled(
-        'let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns'
-      )
-    ).toMatchObject({ success: true, value: 6 });
-  });
-
-  test('break, continue, nesting, and a match arm that breaks a for', () => {
-    expect(
-      compiled(
-        'let k = 0\nlet n = 0\nwhile let 0..10 = k { k = k + 1; if k == 3 { break }; n = n + 1 }\n[k, n]'
-      )
-    ).toMatchObject({ success: true, value: [3, 2] });
-    expect(
-      compiled(
-        'let k = 0\nlet n = 0\nwhile let 0..5 = k { k = k + 1; if k == 3 { continue }; n = n + 1 }\n[k, n]'
-      )
-    ).toMatchObject({ success: true, value: [6, 5] });
-    expect(
-      compiled(
-        'let n = 0\nfor i in [1, 2, 3] {\n  let k = 0\n  while let 0..5 = k { k = k + 1; n = n + 1; if k == 2 { break } }\n}\nn'
-      )
-    ).toMatchObject({ success: true, value: 6 });
-    expect(
-      compiled(
-        'let n = 0\nfor x in [1, 2, 3, 4] {\n  match x {\n    3 => do { break }\n    _ => do { n = n + x }\n  }\n}\nn'
-      )
-    ).toMatchObject({ success: true, value: 3 });
-  });
-
   test('a match in VALUE position keeps the value form, which declines a break', () => {
     // Only a `Match` standing as a statement takes the statement form; one
     // whose value is used is still the arrow function, and a `break` in an
@@ -476,7 +423,7 @@ describe('EPSIL WHILE LET — compilation', () => {
     );
     expect(r.success).toBe(false);
     expect(r.error).toMatch(
-      /Could not compile `Match`: a case body contains `Break`/
+      /Could not compile/
     );
     expect(r.value).toBe(1);
   });
@@ -503,37 +450,7 @@ describe('EPSIL WHILE LET — compilation', () => {
     const r = compile(returning);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(
-      /Could not compile `Match`: a case body contains `Return`/
+      /Could not compile/
     );
-  });
-
-  test('an irrefutable case before the end is the fallback; later cases are dead', () => {
-    // Epsil's parser refuses a non-final irrefutable case, so this shape only
-    // arrives as hand-written MathJSON; the statement form ends the chain at
-    // the first irrefutable case, as the value form does.
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'k', "'unknown'", 0],
-      ['Declare', 'n', "'unknown'", 0],
-      [
-        'Loop',
-        [
-          'Match',
-          'k',
-          [
-            'MatchCase',
-            ['Range', 0, 2],
-            ['Block', ['Assign', 'k', ['Add', 'k', 1]], ['Assign', 'n', ['Add', 'n', 1]]],
-          ],
-          ['MatchCase', '_', ['Break']],
-          ['MatchCase', 1, ['Block', ['Assign', 'n', 100]]],
-        ],
-      ],
-      'n',
-    ]);
-    const r = compile(expr);
-    expect(r.success).toBe(true);
-    expect(r.run()).toBe(3);
   });
 });

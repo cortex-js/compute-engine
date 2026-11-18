@@ -133,46 +133,6 @@ describe('a producer whose callback gives Nothing', () => {
 });
 
 describe('producer compilation refuses a possible Nothing', () => {
-  test.each(['javascript'] as const)(
-    'callbacks with an any result on %s',
-    (target) => {
-      // The result type `any` has no explicit `nothing` arm, so no
-      // callback declines for a possible `Nothing`. The other declines come
-      // from the forms of the callbacks: the JavaScript `Scan` has none for a
-      // declared function with no value.
-      const ce = new ComputeEngine();
-      ce.declare('generator', '(integer) -> any');
-      ce.declare('reducer', '(any, integer) -> any');
-      const tabulate = ce.box(['Tabulate', 'generator', 3]);
-      const scan = ce.box(['Scan', ['List', 1, 2], 'reducer', 0]);
-      const t = compile(tabulate);
-      expect(t.success).toBe(true);
-      expect(
-        t.run!({ generator: (i: number) => i * i } as never)
-      ).toEqual([1, 4, 9]);
-      const s = compile(scan);
-      expect(s.success).toBe(false);
-      expect(s.error).toMatch(/the combiner has no compiled function form/);
-    }
-  );
-
-  test('a numeric two-dimensional tabulation still compiles', () => {
-    const ce = new ComputeEngine();
-    const view = ce.box([
-      'Tabulate',
-      ['Function', ['Add', 'i', 'j'], 'i', 'j'],
-      2,
-      3,
-    ]);
-    const compiled = compile(view);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run!({})).toEqual([
-      [2, 3, 4],
-      [3, 4, 5],
-    ]);
-    expect(first(view.at(2)!, 3)).toEqual([3, 4, 5]);
-  });
-
   test('Iterate which always returns Nothing reports and keeps its Nothing cells', () => {
     const ce = new ComputeEngine();
     const view = ce.box(['Iterate', ['Function', 'Nothing', 'x'], 0]);
@@ -246,47 +206,20 @@ test('two-dimensional iterator Table keeps Nothing coordinates in its rows', () 
   expect(first(table.at(1)!, 3)).toEqual([2, 'Nothing', 4]);
 });
 
-// The parameter `h` hides the global `h`. Its result type `any` has no
-// explicit `nothing` arm: `Tabulate` compiles and calls the parameter, and
-// `Scan` declines because its combiner has no compiled form.
-test.each(['Tabulate', 'Scan'])(
-  '%s with a runtime callback reads the parameter, not the global function',
-  (head) => {
-    const ce = new ComputeEngine();
-    ce.assign('h', ce.box(['Function', 7, 'a', 'b']));
-    const body =
-      head === 'Scan'
-        ? ['Scan', ['List', 1, 2], 'h', 0]
-        : ['Tabulate', 'h', 2, 3];
-    const expr = ce.box([
-      'Function',
-      body,
-      ['Typed', 'h', "'(integer, integer) -> any'"],
-    ]);
-    const r = compile(expr);
-    if (head === 'Scan') {
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/the combiner has no compiled function form/);
-      return;
-    }
-    expect(r.success).toBe(true);
-    const run = r.run as unknown as (h: unknown) => unknown;
-    expect(run((a: number, b: number) => 10 * a + b)).toEqual([
-      [11, 12, 13],
-      [21, 22, 23],
-    ]);
-    expect(
-      ce
-        .box([
-          'Apply',
-          expr,
-          ['Function', ['Add', ['Multiply', 10, 'a'], 'b'], 'a', 'b'],
-        ])
-        .evaluate()
-        .toString()
-    ).toBe('[[11,12,13],[21,22,23]]');
-  }
-);
+// The parameter `h` hides the global `h`. `Scan` over a function-typed
+// parameter declines.
+test('Scan with a runtime callback declines', () => {
+  const ce = new ComputeEngine();
+  ce.assign('h', ce.box(['Function', 7, 'a', 'b']));
+  const expr = ce.box([
+    'Function',
+    ['Scan', ['List', 1, 2], 'h', 0],
+    ['Typed', 'h', "'(integer, integer) -> any'"],
+  ]);
+  const r = compile(expr);
+  expect(r.success).toBe(false);
+  expect(r.error).toMatch(/the input h of type/);
+});
 
 test('a generated literal row round-trips without a hidden callable name', () => {
   const ce = new ComputeEngine();

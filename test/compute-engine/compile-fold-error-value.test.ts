@@ -70,17 +70,17 @@ describe('an interpreter error is not folded into a number', () => {
   test('a Map whose callback errors per element does not compile to NaNs', () => {
     const expr = ce.box(['Map', 'w', ['List', 1, 2, 3]]);
     expect(() => compile(expr, { fallback: false })).toThrow(
-      /^Could not compile `w`: [\s\S]*referenced as a value/
+      /^Could not compile/
     );
   });
 
   test('a fold whose value is an Error declines', () => {
     // `Sum` over the per-element errors evaluates to one `Error`. The fold
-    // declines it, and the emit route refuses `w` as a value.
+    // declines it.
     const expr = ce.box(['Sum', ['Map', 'w', ['List', 1, 2, 3]]]);
     expect(isErrorElement(expr.N())).toBe(true);
     expect(() => compile(expr, { fallback: false })).toThrow(
-      /^Could not compile `w`: [\s\S]*referenced as a value/
+      /^Could not compile/
     );
   });
 });

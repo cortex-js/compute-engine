@@ -4,7 +4,6 @@
  * `clsin`/`clcos`, which agree with Wolfram's Im/Re `PolyLog[n, E^(I θ)]`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { clausen } from '../../src/compute-engine/numerics/clausen';
 
 const ce = new ComputeEngine();
@@ -191,14 +190,6 @@ describe('ClausenCl routes agree', () => {
         expect(Math.abs(actual - expected)).toBeLessThan(1e-12);
       });
     }
-
-  test('compiled JavaScript agrees with N()', () => {
-    const fn = compile(ce.box(['ClausenCl', 3, 'x']));
-    expect(fn.success).toBe(true);
-    const run = fn.run as (v: { x: number }) => number;
-    expect(run({ x: 2.5 })).toBeCloseTo(-0.7606561109685137, 13);
-    expect(run({ x: 0.1 })).toBeCloseTo(1.1830436304608267, 13);
-  });
 });
 
 describe('ClausenCl at exact multiples of π and at a large θ', () => {

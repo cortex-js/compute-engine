@@ -1103,7 +1103,7 @@ function rankOneSpectralNorm(
  * the maximum over the lines is NaN. It is tested before the comparison
  * because a `>` test is false for NaN and would skip that line
  * (`‖[[NaN, 1], [2, 3]]‖₁` would read 4). The compiled code propagates the
- * NaN too (`_SYS.norm`, `compilation/javascript-target.ts`). Otherwise, a magnitude with no
+ * NaN too (`_SYS.norm`, `compilation/javascript-runtime.ts`). Otherwise, a magnitude with no
  * numeric value (`|x|` for an unassigned `x`) leaves the norm undecided
  * (`undefined`). An infinite entry is handled by the caller, before this
  * function.
@@ -9579,75 +9579,6 @@ function flattenResultElementType(
     return flattenLeafType(elements, depth);
   }
   return undefined;
-}
-
-/**
- * The types of the values that `Flatten` keeps as one element and that
- * compiled JavaScript does not hold as an array: a compiled
- * `Array.prototype.flat()` keeps them as one element too. A tuple is not in
- * it: it is an array in compiled code, and `flat()` opens it. A set is not in
- * it either: the `Set` operator has no
- * JavaScript lowering, so no form of a set in compiled code is known to stay
- * whole under `flat()`.
- */
-const FLATTEN_NON_ARRAY_LEAF_TYPE = parseType(
-  'number | boolean | string | dictionary | record | function | missing | nothing'
-);
-
-/**
- * True when a compiled `Flatten(xs, depth)`, which opens every nested array in
- * JavaScript (`xs.flat(depth)`), can open a
- * value that the interpreter keeps as one element, for an operand `xs` of type
- * `type`. Compiled code can hold a tuple as an array or a list. The interpreter
- * keeps a set and a tuple: `Flatten([(1, 2), (3, 4)])` is `[(1, 2), (3, 4)]`,
- * where `flat()` would give `[1, 2, 3, 4]`.
- *
- * The answer is `false` only when the type shows that every element reached
- * at a level where `flat()` still descends is a list or a member of
- * `FLATTEN_NON_ARRAY_LEAF_TYPE`. Pass `Infinity` for a depth that is not a
- * literal: it is the most that `flat()` descends. At an infinite depth, a
- * union member that is a list type already on the descent (the
- * `T | tensor<T>` elements of `tensor<T>`) is skipped: its elements are
- * checked where it was first met.
- */
-export function flattenMayOpenKeptValue(
-  type: Readonly<Type>,
-  depth: number
-): boolean {
-  const seen = new Set<string>();
-  const check = (t: Readonly<Type>, depth: number, levels: number): boolean => {
-    if (depth <= 0) return false;
-    if (levels <= 0) return true;
-    t = resolveTypeAlias(t);
-    if (typeof t !== 'string' && t.kind === 'union')
-      return t.types.some((arm) => check(arm, depth, levels - 1));
-    if (t !== 'never' && isSubtype(t, 'list')) {
-      const key = JSON.stringify(t);
-      if (depth === Infinity) {
-        if (seen.has(key)) return false;
-        seen.add(key);
-      }
-      const elements = collectionElementType(t);
-      return elements === undefined || check(elements, depth - 1, levels - 1);
-    }
-    return !isSubtype(t, FLATTEN_NON_ARRAY_LEAF_TYPE);
-  };
-  // The operand itself is opened when it is a list or a tuple (a tuple
-  // operand is opened by both), and wrapped in a list when it is a number
-  // or a string.
-  const operand = (t: Readonly<Type>): boolean => {
-    t = resolveTypeAlias(t);
-    if (typeof t !== 'string' && t.kind === 'union')
-      return t.types.some(operand);
-    if (t === 'never' || isSubtype(t, 'number') || isSubtype(t, 'string'))
-      return false;
-    if (isSubtype(t, 'list') || isSubtype(t, 'tuple')) {
-      const elements = collectionElementType(t);
-      return elements === undefined || check(elements, depth, 32);
-    }
-    return true;
-  };
-  return operand(type);
 }
 
 /** True when `type` is a list type, or a union with a list type as a member. */

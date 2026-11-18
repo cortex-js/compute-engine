@@ -71,8 +71,8 @@ export class Decline extends Error {
 }
 
 /** A program whose inputs `names` have the type `unknown` or `any`: the
- *  adapters refuse it with the diagnostic of the existing compiler
- *  (`untyped-input`, `sliceError()`). */
+ *  adapters refuse it with the diagnostic `untyped-input`
+ *  (`sliceError()`). */
 export class UntypedInputs extends Decline {
   constructor(readonly names: string[]) {
     super(
@@ -107,8 +107,8 @@ function shapeClass(t: Type): string | undefined {
  *  `expression`, `broadcastable<…>`, a bare collection, or a collection
  *  whose elements are of such a type or of a union of several classes of
  *  shapes (`list<number | tensor>`). A union of shapes at the top
- *  (`list<real> | real`) is not: it is a declaration that the existing
- *  compilers read with one body per member. */
+ *  (`list<real> | real`) is not: it is a declaration of one shape per
+ *  member (rule R6), not an unsettled shape. */
 export function hasUnsettledShape(t: Type): boolean {
   const r = resolveTypeAlias(t);
   if (typeof r === 'string')
@@ -140,15 +140,14 @@ export function isUntyped(t: Type): boolean {
   return r === 'unknown' || r === 'any';
 }
 
-/** The definition `def` of the operator `name` has a lowering of its own,
- *  which the slice does not call: `compileHelpers`, or a `compile` handler
+/** The definition `def` of the operator `name` has a `compile` handler
  *  other than the one of the standard library's definition of `name` (a
- *  host that sets `ce.lookupDefinition('At').operator.compile`). */
+ *  host that sets `ce.lookupDefinition('At').operator.compile`). The key
+ *  `compileHelpers` throws when an operator is declared with it. */
 export function hasOwnLowering(
   name: string,
-  def: { compile?: unknown; compileHelpers?: unknown } | undefined
+  def: { compile?: unknown } | undefined
 ): boolean {
-  if (def?.compileHelpers !== undefined) return true;
   if (def?.compile === undefined) return false;
   const standard = STANDARD_LIBRARIES.flatMap((l) => [l.definitions].flat())
     .map((t) => t?.[name] as { compile?: unknown } | undefined)
@@ -159,15 +158,14 @@ export function hasOwnLowering(
 /** The answer of the host's `compile` handler of `e` (`hasOwnLowering()`)
  *  on the target `language`: `undefined` when it defers, the expression it
  *  returns, or the cause of a decline (text, a call of the `compile`
- *  callback, a throw, `compileHelpers` with no handler). The callback
- *  gives `'0'`, the placeholder of the reference analysis of the existing
- *  compilers, which a handler that records its operands' code already
- *  tells apart. README, "Selecting the pipeline". */
+ *  callback, a throw). The callback gives `'0'`, so that a handler that
+ *  builds code text from its operands' code declines and does not see
+ *  their code. README, "Selecting the pipeline". */
 export function handlerAnswer(
   e: Fn,
   language: string
 ): Expression | string | undefined {
-  const own = `the definition of ${e.operator} has its own lowering (compile or compileHelpers), which the profile does not call`;
+  const own = `the definition of ${e.operator} has a \`compile\` handler that returns code text, which 0.194.0 removed; return an Expression instead`;
   const handler = e.operatorDefinition?.compile;
   if (handler === undefined) return own;
   let asked = false;

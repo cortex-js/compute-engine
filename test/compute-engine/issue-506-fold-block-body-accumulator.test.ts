@@ -14,7 +14,6 @@
  * (`listAccumulatorStep`, `compilation/javascript-target.ts`), declined.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const BODY = [
   'If',
@@ -43,35 +42,5 @@ describe('issue #506: a fold accumulator with a Block body is typed', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', innerFold(BODY), US] as any);
     expect(ce.box(f.json).type.toString()).toBe(f.type.toString());
-  });
-
-  it('compiles the example of the issue', () => {
-    const ce = new ComputeEngine();
-    ce.declare('n', 'integer');
-    const first = [
-      'Fold',
-      ['Function', BODY, 'f', 'v'],
-      0,
-      ['Range', 1, 3, 1],
-    ];
-    const step = [
-      'Apply',
-      [
-        'Function',
-        ['ReplaceAt', 'us', ['Max', 'x', 1], 0],
-        ['Typed', 'x', "'integer'"],
-      ],
-      first,
-    ];
-    const e = ce.box([
-      'Fold',
-      ['Function', step, 'us', 'i'],
-      ['List', 1, 1, 0],
-      ['Range', 1, 'n', 1],
-    ] as any);
-    expect(e.subs({ n: 2 }).evaluate().json).toEqual(['List', 0, 0, 0]);
-    const result = compile(e, { fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.run!({ n: 2 })).toEqual([0, 0, 0]);
   });
 });

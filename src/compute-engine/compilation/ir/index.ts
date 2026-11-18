@@ -359,8 +359,7 @@ export type SliceOptions = {
   readonly attempted?: () => void;
 };
 
-/** The most passes of a `Sum` or a `Product` written out: the limit of the
- *  existing targets (`MAX_UNROLLED_CONSTANT_LIST_WIDTH`). */
+/** The most passes of a `Sum` or a `Product` written out. */
 const MAX_UNROLLED_SUM = 100;
 
 /** The longest list of a constant length that JavaScript writes out

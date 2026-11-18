@@ -187,10 +187,4 @@ describe('the other heads lowered by name', () => {
     );
   });
 
-  test('Which is overridable: the `compile` handler of a copy is used', () => {
-    const ce = engineWithCopy('Which', { ...HUNDRED, compile: () => '(42)' });
-    const f = compiled(ce, ['Which', ['Greater', 'x', 0], 1, 'True', 2]);
-    expect(f.success).toBe(true);
-    expect(f.run({ x: 0.7 })).toBe(42);
-  });
 });

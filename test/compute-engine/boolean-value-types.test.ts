@@ -10,7 +10,6 @@
  * Design: `docs/plans/2026-08-29-boolean-value-types.md`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 const ce = new ComputeEngine();
@@ -183,64 +182,6 @@ describe('boolean value types — storage', () => {
 });
 
 describe('boolean value types — compiler consumption', () => {
-  const eq = () => fn('Equal', [sym('a'), sym('a')]);
-  const code = (e: Expression, to?: string): string =>
-    String(compile(e, to ? { to } : {}).code).replace(/\s+/g, ' ');
-
-  test('a proven If drops its test and the dead arm', () => {
-    expect(code(fn('If', [eq(), sym('x'), sym('y')]))).toBe('_.x');
-    expect(code(fn('If', [ce.parse('1>2'), sym('x'), sym('y')]))).toBe('_.y');
-  });
-
-  test('an unproven If keeps the runtime test', () => {
-    // The test is kept. A NaN `a` decides `a < 3` false since the user
-    // decision of 2026-10-20, and the host supplies every input, so the
-    // operand has no test of its own.
-    expect(code(fn('If', [ce.parse('a<3'), sym('x'), sym('y')]))).toBe(
-      '((_.a < 3) ? (_.x) : (_.y))'
-    );
-  });
-
-  test('a proven If does not take the complex lane of its dead arm', () => {
-    // The dead arm `2i` is not emitted, so it does not put the result on the
-    // complex lane: the value is the real `x`, not `{ re: x, im: 0 }` (CE-230).
-    expect(code(fn('If', [eq(), sym('x'), ce.parse('2i')]))).toBe('_.x');
-  });
-
-  test('a dead Which clause is never compiled', () => {
-    // The dead arm holds an operator the JavaScript target has no lowering
-    // for (`Input`): compiled alone it fails closed to no code at all.
-    const arm = fn('Input', [ce.string('q')]);
-    expect(compile(arm, {}).code).toBe('');
-    const w = fn('Which', [ce.parse('1>2'), arm, ce.True, sym('x')]);
-    expect(code(w)).toBe('(_.x)');
-  });
-
-  test('Which skips a false clause and stops at a true one', () => {
-    const w = fn('Which', [
-      ce.parse('1>2'),
-      sym('x'),
-      eq(),
-      sym('y'),
-      ce.True,
-      ce.number(0),
-    ]);
-    expect(code(w)).toBe('(_.y)');
-  });
-
-  test('a proven test folds to the target literal on every target', () => {
-    expect(code(eq())).toBe('true');
-    expect(code(eq(), 'glsl')).toBe('true');
-    expect(code(fn('If', [eq(), sym('x'), sym('y')]), 'glsl')).toBe('x');
-    expect(code(fn('If', [eq(), sym('x'), sym('y')]), 'interval-js')).toBe(
-      '_.x'
-    );
-  });
-
-  test('a connective folds its proven operands', () => {
-    expect(code(fn('Not', [eq()]))).toBe('false');
-    expect(code(fn('Or', [eq(), ce.parse('x<y')]))).toBe('true');
-  });
 
   test('an impure condition is never dropped', () => {
     const impure = fn('Equal', [fn('Print', [ce.number(1)]), ce.number(1)]);

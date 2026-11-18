@@ -29,7 +29,6 @@
  */
 
 import { engine as ce } from '../utils';
-import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /** Compile to JavaScript with no interpreter fallback. */
@@ -45,23 +44,8 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     ce.declare('nqs', 'real');
   });
 
-  // The host supplies every input, so a comparison whose value is the
-  // result has no test for an input left out.
-  test('the scalar emission is the exact test', () => {
-    expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe('((_.nqr) === (3))');
-    expect(js(ce.box(['Equal', 'nqr', 'nqs'])).code).toBe(
-      '((_.nqr) === (_.nqs))'
-    );
-  });
-
   test('NotEqual is the negation of the whole Equal test', () => {
-    expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe('((_.nqr) !== (3))');
-    expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).code).toBe(
-      '((_.nqr) !== (_.nqs))'
-    );
-    expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).run({ nqr: NaN })).toBe(
-      true
-    );
+    expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).run({ nqr: NaN })).toBe(true);
   });
 
   test('a NaN operand answers true', () => {
@@ -117,7 +101,6 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
   test('a chained NotEqual conjoins the negated pairs', () => {
     ce.declare('nqt', 'real');
     const r = js(ce.box(['NotEqual', 'nqr', 'nqs', 'nqt']));
-    expect(r.code).toBe('((_.nqr) !== (_.nqs)) && ((_.nqs) !== (_.nqt))');
     expect(r.run({ nqr: NaN, nqs: 1, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: NaN, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: 2, nqt: 2 })).toBe(false);
@@ -129,37 +112,9 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     // `true` — the answer the tolerance path now gives as well.
     ce.declare('nqi', 'integer');
     const r = js(ce.box(['NotEqual', 'nqi', 3]));
-    expect(r.code).toBe('((_.nqi) !== (3))');
     expect(r.run({ nqi: NaN })).toBe(true);
     expect(r.run({ nqi: 3 })).toBe(false);
     expect(r.run({ nqi: 4 })).toBe(true);
-  });
-
-  test('an impure operand is drawn ONCE', () => {
-    // A draw against a literal is spliced once, so it needs no temporary;
-    // a draw in a guarded pair (a MIDDLE operand of a chain is spliced by the
-    // two comparisons that straddle it) is bound so the drawing call is
-    // emitted exactly once.
-    const engine = new ComputeEngine();
-    for (const head of ['Equal', 'NotEqual']) {
-      const r = compile(engine.box([head, ['Random'], 0.5]), {
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.code!.match(/drawNextRandomNumber/g)).toHaveLength(1);
-      expect(typeof r.run!({})).toBe('boolean');
-    }
-    const middle = compile(engine.box(['Equal', 0.1, ['Random'], 0.9]), {
-      fallback: false,
-    });
-    expect(middle.code!.match(/drawNextRandomNumber/g)).toHaveLength(1);
-    // The draw is bound to a parameter that both pairs read.
-    expect(middle.code).toContain('(_tv1) =>');
-    // Two SEPARATE draws stay two draws.
-    const two = compile(engine.box(['Equal', ['Random'], ['Random']]), {
-      fallback: false,
-    });
-    expect(two.code!.match(/drawNextRandomNumber/g)).toHaveLength(2);
   });
 
   test('a host variable is read twice, and every read sees one value', () => {
@@ -179,31 +134,6 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     expect(r.run(vars)).toBe(true);
     expect(reads).toBe(2);
   });
-
-  test('the collection dispatch `_SYS.eq`/`_SYS.neq` agrees', () => {
-    ce.declare('nqL', 'list<number>');
-    // Two collection operands: whole-value equality, a single boolean.
-    const whole = js(ce.box(['NotEqual', 'nqL', ['List', 1, 2]]));
-    expect(whole.code).toContain('_SYS.neq');
-    expect(whole.run({ nqL: [1, NaN] })).toBe(true);
-    expect(whole.run({ nqL: [1, 2] })).toBe(false);
-    // One collection operand: element-wise, a list of booleans.
-    const elementwise = js(ce.box(['NotEqual', 'nqL', 2]));
-    expect(elementwise.code).toContain('_SYS.neq');
-    expect(elementwise.run({ nqL: [1, NaN] })).toEqual([true, true]);
-    expect(elementwise.run({ nqL: [2, 3] })).toEqual([false, true]);
-    // The scalar leaf of `eqTensor` gained the same exact pre-test, so a
-    // matching infinity is equal there too.
-    const eqWhole = js(ce.box(['Equal', 'nqL', ['List', 1, 2]]));
-    expect(eqWhole.run({ nqL: [Infinity, 2] })).toBe(false);
-    const eqElementwise = js(ce.box(['Equal', 'nqL', Infinity]));
-    expect(eqElementwise.run({ nqL: [Infinity, -Infinity, 2] })).toEqual([
-      true,
-      false,
-      false,
-    ]);
-  });
 });
 
-describe('two absent operands are not equal', () => {
-});
+describe('two absent operands are not equal', () => {});

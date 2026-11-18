@@ -3,8 +3,8 @@
  *
  * Compiled code of the mode computes every integer as a JavaScript `bigint`.
  * The helpers below are added to the `_SYS` object of the JavaScript runtime
- * (`SYS_HELPERS` in `javascript-runtime.ts`), and only the code that the
- * bigint emitter writes (`compile-bigint-emit.ts`) calls them.
+ * (`SYS_HELPERS` in `javascript-runtime.ts`), and only the code of the mode
+ * calls them.
  *
  * Each helper takes and returns `bigint` values. A value that is not finite
  * (a "pole": `n!` at `n < 0`, a division by zero, `0^0`) has no `bigint`

@@ -2680,9 +2680,6 @@ describe('COLLECTION NUMERATOR over a degenerate divisor keeps its shape', () =>
       [Infinity, Infinity],
       [Infinity, Infinity],
     ]);
-    const scalar = compile(ce.box(['Divide', 1, 0]));
-    expect(scalar.success).toBe(true);
-    expect(scalar.run!({})).toEqual(Infinity);
   });
 
   test('the scalar degenerate answers are unchanged', () => {

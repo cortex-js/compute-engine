@@ -696,15 +696,13 @@ export type CompiledExpression = {
 };
 
 /**
- * The context passed to a custom operator {@link OperatorCompileHandler}. A
- * curated, stable subset of the internal compilation target: enough to emit
- * target-specific source without exposing the full internal machinery.
+ * The context passed to an operator {@link OperatorCompileHandler}.
  *
  * @category Compiling
  */
 export type OperatorCompileContext = {
-  /** The target language, e.g. `"javascript"`, `"glsl"`.
-   * Branch on this to emit target-specific source. */
+  /** The target language: `"javascript"`, `"glsl"` or
+   * `"interval-javascript"`. */
   readonly language: string;
   /** The operand type including facts established by this compilation's local
    * bindings. The expression's type remains the target-independent contract. */
@@ -712,16 +710,12 @@ export type OperatorCompileContext = {
 };
 
 /**
- * A custom compilation handler for an operator, set on an
- * `OperatorDefinition`. It mirrors a built-in compiled-function handler:
- * it receives the (canonical) operands, a `compile` callback to lower a
- * sub-expression to target source, and the compilation `context` (branch on
- * `context.language`: `'javascript'`, `'glsl'`, `'interval-javascript'`).
- * It returns one of three results:
+ * A compilation handler for an operator, set on an `OperatorDefinition`. It
+ * receives the (canonical) operands, a `compile` callback and the
+ * compilation `context` (branch on `context.language`), and returns:
  *
- * - `undefined` (or an empty string; a `null` returned from untyped
- *   JavaScript is tolerated and treated the same): the target's default
- *   compilation of this operator.
+ * - `undefined` (a `null` or an empty string from untyped JavaScript is
+ *   treated the same): the library's compilation of this operator.
  * - an `Expression`: it is compiled in place of the node, with the
  *   library's definitions. A node of the expression that the handler
  *   created is compiled with no compile handler consulted, whatever its
@@ -730,33 +724,21 @@ export type OperatorCompileContext = {
  *   object), found in the result, is compiled as usual, handlers
  *   consulted. Reuse the objects you were given: a copy of an operand
  *   (rebuilt from its JSON) is a created node, and an operator inside it no
- *   longer gets its handler. A result that holds the node itself declines. The compiler `profile: 'ir'` accepts this result and the
- *   `undefined` result; it declines a node whose handler returns text or
- *   calls `compile`.
- * - target source, as a string.
+ *   longer gets its handler. A result that holds the node itself declines.
+ *
+ * The compilation of the node declines when the handler returns text (a
+ * handler that writes code text is not supported since 0.194.0), calls the
+ * `compile` callback, or throws. The callback is kept so that `context`
+ * stays the third argument.
  *
  * The handler can be called more than once for one node in one
  * compilation: it must be a pure function of its operands and context for
  * the duration of a `compile()` call.
  *
- * Takes precedence over the target's built-in operator/function mapping and
- * broadcast lowering, so it can override how a built-in operator compiles
- * (e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
- * relational operator). It does NOT override the structural / control-flow
- * heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
- * `Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Match`,
- * `Block`), which have their own bespoke lowering; a handler declared on
- * one of those heads is ignored. `Which` is the exception: its handler is
- * consulted.
- *
  * ```ts
- * ce.declare('MyGcd', {
- *   signature: '(number, number) -> number',
- *   compile: (args, compile, { language }) =>
- *     language === 'javascript'
- *       ? `_gcd(${compile(args[0])}, ${compile(args[1])})`
- *       : undefined,
- * });
+ * const def = ce.lookupDefinition('Twice');
+ * if (def && 'operator' in def)
+ *   def.operator.compile = ([x]) => ce.box(['Multiply', 2, x]);
  * ```
  *
  * @category Compiling
@@ -765,7 +747,7 @@ export type OperatorCompileHandler = (
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
   context: OperatorCompileContext
-) => string | Expression | undefined;
+) => Expression | undefined;
 
 /**
  * Map of `TensorDataType` to JavaScript type.

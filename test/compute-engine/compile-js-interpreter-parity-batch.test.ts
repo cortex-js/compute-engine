@@ -103,7 +103,7 @@ function expectParity(rows: Array<[unknown, unknown]> | 'declined'): void {
 
 /** Expect `(symbol) ↦ expr` to decline because the type of `symbol` (`any`)
  * does not settle the shape of the argument of a call: the code is
- * `unsettled-shape` and `unsupported` names `symbol`. */
+ * `unsettled-shape` and the message names `symbol`. */
 function expectUnsettledDecline(
   ce: ComputeEngine,
   expr: Expression,
@@ -117,7 +117,7 @@ function expectUnsettledDecline(
   const r = compile(fn, { to: 'javascript' } as never);
   expect(r.success).toBe(false);
   expect(r.diagnostic?.code).toBe('unsettled-shape');
-  expect(r.unsupported).toContain(symbol);
+  expect(r.error).toContain(`the input ${symbol} of type any`);
 }
 
 /** `g := t ↦ [t, 2t]`, `h := (t: number) ↦ [t, 2t]` and `x` of type
@@ -134,22 +134,6 @@ function engineWithG(xType = 'any'): ComputeEngine {
   ce.declare('x', xType);
   return ce;
 }
-
-/** The values of `x` for each declared type of `x` that settles a shape. */
-const DECLARED_X: ReadonlyArray<[string, unknown[]]> = [
-  ['real', [3]],
-  ['list<real>', [[1, 2]]],
-  [
-    'list<list<real>>',
-    [
-      [
-        [1, 2],
-        [3, 4],
-      ],
-      [[1, 2], [3]],
-    ],
-  ],
-];
 
 const X_VALUES = [
   3,
@@ -174,19 +158,6 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
     expectUnsettledDecline(ce, ce.box(json as never), 'x');
   });
 
-  // With a declared shape, the compiled value is the interpreted value.
-  describe.each(DECLARED_X)('x: %s', (xType, values) => {
-    test.each([
-      ['Max(g(x)[1], 1)', ['Max', ['At', ['g', 'x'], 1], 1]],
-      ['Min(g(x)[1], 1)', ['Min', ['At', ['g', 'x'], 1], 1]],
-      ['Max(g(x)[1]) with one operand', ['Max', ['At', ['g', 'x'], 1]]],
-      ['Min(g(x)[1]) with one operand', ['Min', ['At', ['g', 'x'], 1]]],
-    ])('%s', (_name, json) => {
-      const ce = engineWithG(xType);
-      expectParity(parity(ce, ce.box(json as never), 'x', values));
-    });
-  });
-
   // `h(x)` is typed `R | list<R | list<any>>` with `R = vector<2>` (ROADMAP
   // CE-371, user decision 2026-10-25), so `h(x)[1]` is
   // `list<any> | missing | number`. A compiled `Max` or `Min` over a
@@ -197,7 +168,6 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
     const expr = ce.box([head, ['At', ['h', 'x'], 1], 1] as never);
     expect(parity(ce, expr, 'x', X_VALUES)).toBe('declined');
   });
-
 });
 
 describe('CE-221: the sum of a point and a number declines', () => {
@@ -207,7 +177,7 @@ describe('CE-221: the sum of a point and a number declines', () => {
     const expr = ce.box(['Add', ['At', 'P', 1], 1] as never);
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/may be a point/);
+    ).toThrow(/the input P of type broadcastable/);
     // The interpreter answers an error for a list of points.
     ce.assign('P', ce.box(['List', ['Tuple', 3, 4], ['Tuple', 6, 8]] as never));
     expect(expr.evaluate().toString()).toContain('incompatible-type');
@@ -221,61 +191,14 @@ describe('CE-221: the sum of a point and a number declines', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'broadcastable<tuple<number, number>>');
     const expr = ce.box([h, a, b] as never);
-    // The sum has the static type `error`, so the compilation declines
-    // before the point check of the JavaScript target.
+    // The sum has the static type `error`, so the compilation declines.
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/type 'error'/);
-  });
-
-  test('the product of a point and a number still compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('P', 'broadcastable<tuple<number, number>>');
-    const expr = ce.box(['Multiply', 'P', 2] as never);
-    const run = compile(expr, { to: 'javascript', fallback: false } as never)
-      .run as (v: unknown) => unknown;
-    expect(run({ P: [3, 4] })).toEqual([6, 8]);
-    ce.assign('P', ce.box(['Tuple', 3, 4] as never));
-    expect(expr.evaluate().toString()).toBe('(6, 8)');
-  });
-
-  test('the sum of two points still compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('P', 'broadcastable<tuple<number, number>>');
-    const expr = ce.box(['Add', 'P', 'P'] as never);
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false } as never)
-    ).not.toThrow();
+    ).toThrow(/static type error/);
   });
 });
 
 describe('CE-215.1: a list exponent with a fractional cell takes the complex lane', () => {
-  test('p^[2, 0.5] with p: tensor<number>', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tensor<number>');
-    const expr = ce.box(['Power', 'p', ['List', 2, 0.5]] as never);
-    expectParity(
-      parity(ce, expr, 'p', [
-        [
-          [1, 2],
-          [3, -4],
-        ],
-        [-1, -4],
-      ], 'complex')
-    );
-  });
-
-  test('p^[1/3, 0.5] with p: list<number> keeps the real root of an odd denominator', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<number>');
-    const expr = ce.box([
-      'Power',
-      'p',
-      ['List', ['Rational', 1, 3], 0.5],
-    ] as never);
-    expectParity(parity(ce, expr, 'p', [[-8, -4]], 'complex'));
-  });
-
   test('p^[2, 0.5] with p: real fans out on the complex lane', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');

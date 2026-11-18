@@ -47,25 +47,6 @@ const BUSY = storedLambda(
   '(ms) => { const t = Date.now() + ms; while (Date.now() < t); return ms; }'
 );
 
-/** `n ↦ Length(TakeWhile(1..∞, k ↦ k < n))`: `n - 1` when the walk of
- * `TakeWhile` stays within the iteration limit, an iteration-limit error
- * otherwise. */
-const takeWhile = () =>
-  compile(
-    ce.box([
-      'Function',
-      [
-        'Length',
-        [
-          'TakeWhile',
-          ['Range', 1, 'PositiveInfinity'],
-          ['Function', ['Less', 'k', 'n'], 'k'],
-        ],
-      ],
-      'n',
-    ])
-  );
-
 // Every pool is disposed after its test, also when an assertion failed
 // first: a live worker thread keeps jest from exiting.
 const pools: KernelPool[] = [];
@@ -137,10 +118,15 @@ describe('the call task of the kernel pool', () => {
     expect(value).toEqual([3, 5, 7]);
     expect(L).toEqual([1, 2, 3]);
 
+    // A lambda that falls back to the interpreter (a list of a number and a
+    // list) has no stored code: the pool refuses it, and the caller makes
+    // the call itself.
     const pair = compile(ce.parse('(n: integer) \\mapsto [n, [n+1, 2n]]'));
-    expect(await calls.runCall(pair, [4], undefined, undefined)).toEqual(
-      pair.run!(4)
-    );
+    expect(pair.success).toBe(false);
+    await expect(
+      calls.runCall(pair, [4], undefined, undefined)
+    ).rejects.toThrow(/no runtimeVersion/);
+    expect(pair.run!(4)).toEqual([4, [5, 8]]);
 
     // A boolean and a string argument, and a value that holds a
     // `Float64Array` at the top level of an array and deeper.
@@ -199,11 +185,12 @@ describe('the call task of the kernel pool', () => {
   test('a lambda that throws rejects with its message, and the worker takes the next call', async () => {
     const { pool, calls, log } = watchedPool({ size: 1 });
     await pool.prewarm();
-    const r = takeWhile();
-    expect(() => r.run!(5000)).toThrow(/Iteration limit of 1024 exceeded/);
+    const r = storedLambda(
+      "(n) => { if (n > 1024) throw new Error('n is too large'); return n - 1; }"
+    );
     await expect(
       calls.runCall(r, [5000], undefined, undefined)
-    ).rejects.toThrow(/Iteration limit of 1024 exceeded/);
+    ).rejects.toThrow(/n is too large/);
     expect(await calls.runCall(r, [10], undefined, undefined)).toBe(9);
     expect(log.created).toBe(1);
     expect(log.terminated).toBe(0);
@@ -213,13 +200,13 @@ describe('the call task of the kernel pool', () => {
     const { pool, calls, log } = watchedPool({ size: 1 });
     await pool.prewarm();
     const other = { ...storedLambda('(x) => x'), runtimeVersion: '0.0.0' };
-    await expect(calls.runCall(other, [1], undefined, undefined)).rejects.toThrow(
-      /compiled for runtime 0\.0\.0/
-    );
+    await expect(
+      calls.runCall(other, [1], undefined, undefined)
+    ).rejects.toThrow(/compiled for runtime 0\.0\.0/);
     // The second call is refused on the main thread: it is not sent.
-    await expect(calls.runCall(other, [1], undefined, undefined)).rejects.toThrow(
-      /compiled for runtime 0\.0\.0/
-    );
+    await expect(
+      calls.runCall(other, [1], undefined, undefined)
+    ).rejects.toThrow(/compiled for runtime 0\.0\.0/);
     expect(log.calls.length).toBe(1);
     // A stored expression (not a lambda) cannot be called.
     const expr = compile(ce.parse('x + 1'));
@@ -235,9 +222,9 @@ describe('the call task of the kernel pool', () => {
     const ctl = new AbortController();
     const reason = new Error('stop');
     ctl.abort(reason);
-    await expect(
-      calls.runCall(BUSY, [1], undefined, ctl.signal)
-    ).rejects.toBe(reason);
+    await expect(calls.runCall(BUSY, [1], undefined, ctl.signal)).rejects.toBe(
+      reason
+    );
     expect(log.created).toBe(0);
     expect(log.calls.length).toBe(0);
   });
@@ -285,21 +272,6 @@ describe('the call task of the kernel pool', () => {
     expect(log.results.length).toBe(1);
     expect(log.results[0].worker).toBe(1);
   }, 120_000);
-
-  test('the iteration limit of the call reaches the worker', async () => {
-    const { pool, calls } = watchedPool({ size: 1 });
-    await pool.prewarm();
-    const r = takeWhile();
-    // Within the worker's default limit (1024).
-    expect(await calls.runCall(r, [500], undefined, undefined)).toBe(
-      r.run!(500)
-    );
-    await expect(calls.runCall(r, [500], 100, undefined)).rejects.toThrow(
-      /Iteration limit of 100 exceeded/
-    );
-    // The limit holds for one task: the next call has the default again.
-    expect(await calls.runCall(r, [500], undefined, undefined)).toBe(499);
-  }, 60_000);
 
   test('a pool whose workers hold another runtime version rejects the call', async () => {
     const pool = createKernelPool({

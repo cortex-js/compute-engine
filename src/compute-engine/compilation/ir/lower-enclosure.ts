@@ -94,8 +94,8 @@ export function enclosureInput(
 
 /** True when a value of the type `t` may be a collection of enclosures
  *  (`list<enclosure>`), which the compiled form does not describe (the
- *  representation of a value kind is one value), as
- *  `holdsKindCollection()` of `kind-lowering.ts` reads it. */
+ *  representation of a value kind is one value), so such a value
+ *  declines (`COLLECTION`). */
 export function isEnclosureCollection(t: Type): boolean {
   if (!hasKindArm(t, ENCLOSURE)) return false;
   const rest = withoutKindArms(t, ENCLOSURE);
@@ -114,7 +114,7 @@ export const COLLECTION = `a collection of values of ${KIND}: the compiled repre
 
 /** The heads that the walk lowers with an enclosure operand as it lowers
  *  an interval: they hold, pass or choose a value, and compute nothing with
- *  it (`compileKindOperation()` of `compile-kinds.ts` reads the same). */
+ *  it. */
 const STRUCTURAL = new Set([
   ...CONTROL_FLOW_HEADS,
   'List',

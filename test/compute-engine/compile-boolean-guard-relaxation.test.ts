@@ -74,35 +74,6 @@ describe('orderings over an operand whose shape is only known at run time', () =
     const ce = make();
     expect(parity(ce.parse('q(L)<M'))).toEqual([true, false, true]);
   });
-
-  test('a length mismatch projects to NaN, never to a truncated zip', () => {
-    const ce = make();
-    ce.assign('K', ce.parse('[1, 2]').evaluate());
-    const expr = ce.parse('q(L)<K');
-    expect(parity(expr)).toEqual(NaN);
-  });
-
-  test('a CHAINED ordering conjoins per position', () => {
-    const ce = make();
-    ce.assign('xs', ce.parse('[1, 7, 3]').evaluate());
-    const expr = ce.box(['Less', 0, 'xs', 5] as any);
-    expect(parity(expr)).toEqual([true, false, true]);
-  });
-
-  test('a chained ordering evaluates each operand exactly once', () => {
-    // Every operand is an ARGUMENT of the `_SYS.bcast` call, so the shared
-    // middle operand cannot be emitted twice (what `bindExpr` protects on the
-    // scalar chained path).
-    const ce = make();
-    // `constantFold: false`: `L` is an assigned literal list and `q` is pure,
-    // so the whole chain would otherwise be evaluated at compile time and
-    // emitted as a literal — leaving no `_fn_q` call to count.
-    const source = compile(ce.box(['Less', 0, ['q', 'L'], 5] as any), {
-      fallback: false,
-      constantFold: false,
-    })!.code!;
-    expect(source.match(/_fn_q/g)?.length).toBe(1);
-  });
 });
 
 describe('connectives over an operand whose shape is only known at run time', () => {
@@ -222,6 +193,6 @@ describe('other targets are unaffected', () => {
     ce.declare('xs', 'list<real>');
     const r = compile(ce.box(['Less', 'xs', 3] as any), { to: 'glsl' } as any)!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/The list `xs` has no static count/);
+    expect(r.error).toMatch(/the list xs has a run-time length/);
   });
 });

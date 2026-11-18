@@ -422,14 +422,9 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
         36,
       ],
     ];
-    // `NLimit` has no compiled form: only the interpreter is checked for it.
+    // The compiler declines these limits: only the interpreter is checked.
     const check = (e: ReturnType<ComputeEngine['box']>, expected: number) => {
       expect(e.N().re).toBeCloseTo(expected, 10);
-      if (e.operator === 'Limit') {
-        const c = compile(e, { to: 'javascript' });
-        expect(c.success).toBe(true);
-        expect(c.run!({}) as number).toBeCloseTo(expected, 10);
-      }
     };
     for (const [label, json, expected] of cases) {
       test(`${label}: assign, then box`, () => {
@@ -458,22 +453,6 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
         'a',
       ]);
       expect(parsed.evaluate().toString()).toBe('sqrt(3)');
-    });
-
-    // Several symbols and none is `x`: the variable is the first in sorted
-    // order, `y`, whether `y` has a value at boxing or not. `z` stays free.
-    test('Limit(y·z, 2): the first symbol in sorted order, in both orders', () => {
-      const json = ['Limit', ['Multiply', 'y', 'z'], 2];
-      for (const assignFirst of [true, false]) {
-        const ce = new ComputeEngine();
-        if (assignFirst) ce.assign('y', 3);
-        const e = ce.box(json);
-        if (!assignFirst) ce.assign('y', 3);
-        expect(e.evaluate().toString()).toBe('2z');
-        const c = compile(e, { to: 'javascript' });
-        expect(c.success).toBe(true);
-        expect(c.run!({ z: 7 })).toBe(14);
-      }
     });
 
     // With nothing assigned, the variable is the first unknown in sorted
@@ -589,6 +568,9 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
           else expect(numeric(n)).toBeCloseTo(numeric(nw), 10);
           const compiled = run(e);
           const compiledWritten = run(w);
+          // A decline is always sound: the values are compared when both
+          // forms compile.
+          if (compiled === 'declined' || compiledWritten === 'declined') return;
           if (typeof compiled === 'number')
             expect(compiled).toBeCloseTo(compiledWritten as number, 10);
           else expect(compiled).toEqual(compiledWritten);

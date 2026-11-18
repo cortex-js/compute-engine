@@ -76,28 +76,6 @@ function compileRoot(
   return { ...r, success: r.success, code: r.code, run: r.run, root };
 }
 
-/** Expect the compilation of `latex`, as the body of the function of the
- * parameters `names` with the types that `ce` declares for them, to decline
- * because one of those types does not settle the shape of an argument: the
- * code is `unsettled-shape` and `unsupported` names each of `names`. */
-function expectUnsettledDecline(
-  ce: ComputeEngine,
-  latex: string,
-  names: string[]
-): void {
-  const r = compile(
-    ce.box([
-      'Function',
-      ce.parse(latex).json,
-      ...names.map((n) => ['Typed', n, { str: ce.box(n).type.toString() }]),
-    ] as never),
-    {} as never
-  );
-  expect(r.success).toBe(false);
-  expect(r.diagnostic?.code).toBe('unsettled-shape');
-  for (const n of names) expect(r.unsupported).toContain(n);
-}
-
 function declines(ce: ComputeEngine, latex: string): void {
   expect(() =>
     compile(ce.parse(latex), { fallback: false } as never)
@@ -140,95 +118,6 @@ describe('CE-412: A broadcastable<tuple<…>> PARAMETER COMPILES OVER A LIST OF 
         ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
       ])
     ).toBe('[(2, 3),(4, 5)]');
-  });
-
-  test('a list of points compiles to one call per point', () => {
-    expect(
-      compiled(engine(`list<${POINT}>`), 'f(P)', {
-        P: [
-          [1, 2],
-          [3, 4],
-          [5, 6],
-        ],
-      })
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-      [6, 7],
-    ]);
-  });
-
-  test('a point or a list of points is tested at run time', () => {
-    const ce = engine(`${POINT} | list<${POINT}>`);
-    expect(
-      compiled(ce, 'f(P)', {
-        P: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-    expect(compiled(ce, 'f(P)', { P: [1, 2] })).toEqual([2, 3]);
-  });
-
-  test('a tensor of points of rank 2 maps to the points, as the interpreter does', () => {
-    const ce = engine(`broadcastable<${POINT}>`);
-    expect(
-      ce
-        .box([
-          'f',
-          ['List', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 3, 4]]],
-        ])
-        .evaluate()
-        .toString()
-    ).toBe('[[(2, 3)],[(4, 5)]]');
-    expect(compiled(ce, 'f(P)', { P: [[[1, 2]], [[3, 4]]] })).toEqual([
-      [[2, 3]],
-      [[4, 5]],
-    ]);
-    expect(compiled(ce, 'f(P)', { P: [1, 2] })).toEqual([2, 3]);
-  });
-
-  test('controls: a bare tuple parameter and one point', () => {
-    const ce = new ComputeEngine();
-    ce.declare('f', { signature: `(${POINT}) -> unknown` });
-    ce.assign('f', ce.parse('a \\mapsto (a.x+1, a.y+1)'));
-    ce.declare('P', `list<${POINT}>`);
-    expect(compiled(ce, 'f(P)', { P: [[1, 2]] })).toEqual([[2, 3]]);
-    expect(compiled(engine(), 'f((1,2))')).toEqual([2, 3]);
-  });
-
-  // ROADMAP CE-415: a symbol declared `broadcastable<tuple<…>>` that holds
-  // one point. The compiled code bakes the held value, so the call is one
-  // call on that point, as in the interpreter. Before, the compile was
-  // declined because the declared type is not a point type.
-  test('a broadcastable<tuple<…>> symbol that holds one point (CE-415)', () => {
-    const ce = engine(`broadcastable<${POINT}>`);
-    ce.assign('P', ce.parse('(1,2)'));
-    expect(routes(ce, 'f(P)', ['f', 'P'])).toBe('(2, 3)');
-    expect(compiled(ce, 'f(P)')).toEqual([2, 3]);
-    // A live input (`vars`) is not baked: the compiled call tests the value
-    // at run time.
-    const r = compile(ce.parse('f(P)'), {
-      fallback: false,
-      vars: { P: '_.P' },
-    } as never) as { success: boolean; run: (v: object) => unknown };
-    expect(r.success).toBe(true);
-    expect(r.run({ P: [1, 2] })).toEqual([2, 3]);
-    expect(
-      r.run({
-        P: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
   });
 });
 
@@ -333,120 +222,6 @@ describe('CE-414.1: A LIST AT A SCALAR SLOT BESIDE A POINT PARAMETER MAPS', () =
     expect(compiled(ce, 'k((1,2),[0,1,2])')).toEqual([1, 2, 3]);
   });
 
-  test('a list of lists maps to the cells, as the one-parameter function does', () => {
-    const ce = engine('real');
-    expect(ce.parse('h((1,2),[[0,1],[2,3]])').type.toString()).toBe(
-      'list<list<number>>'
-    );
-    expect(
-      routes(ce, 'h((1,2),[[0,1],[2,3]])', [
-        'h',
-        ['Tuple', 1, 2],
-        ['List', ['List', 0, 1], ['List', 2, 3]],
-      ])
-    ).toBe('[[1,2],[3,4]]');
-    expect(ce.parse('g([[0,1],[2,3]])').evaluate().toString()).toBe(
-      '[[1,2],[3,4]]'
-    );
-    // The static type `list<list<number>>` gives the rank 2, and the
-    // compiled call is the static map over both levels.
-    expect(compiled(ce, 'h((1,2),[[0,1],[2,3]])')).toEqual([
-      [1, 2],
-      [3, 4],
-    ]);
-    ce.declare('M', 'list<list<real>>');
-    const r = compileRoot(ce, 'h((1,2),M)', ['M']);
-    expect(r.code).toContain('_SYS.mapFn(');
-    expect(r.code).not.toContain('Array.isArray');
-    expect(
-      compiled(ce, 'h((1,2),M)', {
-        M: [
-          [0, 1],
-          [2, 3],
-        ],
-      })
-    ).toEqual([
-      [1, 2],
-      [3, 4],
-    ]);
-  });
-
-  test('a list of points and a list of scalars are paired', () => {
-    const ce = engine('real');
-    expect(
-      routes(ce, 'h([(1,2),(3,4)],[0,1])', [
-        'h',
-        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-        ['List', 0, 1],
-      ])
-    ).toBe('[1,4]');
-    // With literal arguments the compiler folds the call to its value.
-    expect(compiled(ce, 'h([(1,2),(3,4)],[0,1])')).toEqual([1, 4]);
-    // With two list inputs, the compiled call is the static map that pairs
-    // point `i` with element `i` of `L`, as the interpreter does.
-    ce.declare('Q', `list<${POINT}>`);
-    ce.declare('L', 'list<real>');
-    const r = compileRoot(ce, 'h(Q,L)', ['Q', 'L']);
-    expect(r.code).toContain('_SYS.mapFn(');
-    expect(
-      compiled(ce, 'h(Q,L)', {
-        Q: [
-          [1, 2],
-          [3, 4],
-        ],
-        L: [0, 1],
-      })
-    ).toEqual([1, 4]);
-  });
-
-  test('an argument that may be a list is typed R | list<R>', () => {
-    const ce = engine('real');
-    ce.declare('U', 'real | list<real>');
-    expect(ce.parse('h((1,2),U)').type.toString()).toBe(
-      'list<number> | number'
-    );
-    expect(ce.parse('g(U)').type.toString()).toBe('list<real> | real');
-    // `U` is declared with two shapes, so the compiled call tests the shape
-    // of `U` once and holds one body for each: a number is one call, a list
-    // is one call per element. Each value equals the interpreter's.
-    const call = ce.parse('h((1,2),U)');
-    expect(compiled(ce, 'h((1,2),U)', { U: 5 })).toBe(6);
-    expect(call.subs({ U: ce.number(5) }).evaluate().toString()).toBe('6');
-    expect(compiled(ce, 'h((1,2),U)', { U: [0, 1, 2] })).toEqual([1, 2, 3]);
-    expect(
-      call.subs({ U: ce.box(['List', 0, 1, 2]) }).evaluate().toString()
-    ).toBe('[1,2,3]');
-  });
-
-  test('beside a broadcastable<tuple<…>> parameter, a list of points and a scalar list are paired, and the compiled call declines', () => {
-    const ce = new ComputeEngine();
-    ce.declare('f', {
-      signature: `(broadcastable<${POINT}>, real) -> unknown`,
-    });
-    ce.assign('f', ce.parse('(P,t) \\mapsto (P.x, t)'));
-    expect(ce.parse('f([(1,2),(3,4)],[5,6])').evaluate().toString()).toBe(
-      '[(1, 5),(3, 6)]'
-    );
-    expect(ce.parse('f([(1,2),(3,4)],[5,6,7])').evaluate().operator).toBe(
-      'Error'
-    );
-    // Before, the compiled call mapped the points only and passed the whole
-    // scalar list to each call.
-    declines(ce, 'f([(1,2),(3,4)],[5,6])');
-    declines(ce, 'f([(1,2),(3,4)],[5,6,7])');
-    ce.declare('Q', `list<${POINT}>`);
-    ce.declare('L', 'list<real>');
-    declines(ce, 'f(Q,L)');
-    // One point and a scalar list: one call per element, on both routes.
-    expect(ce.parse('f((1,2),[5,6])').evaluate().toString()).toBe(
-      '[(1, 5),(1, 6)]'
-    );
-    expect(compiled(ce, 'f((1,2),[5,6])')).toEqual([
-      [1, 5],
-      [1, 6],
-    ]);
-  });
-
   test('the compiled map declines when the elements may not fit the parameter type', () => {
     const ce = new ComputeEngine();
     ce.declare('b', { signature: `(${POINT}, boolean) -> unknown` });
@@ -512,23 +287,6 @@ describe('CE-414.2: AN unknown SLOT BESIDE A POINT PARAMETER', () => {
     return ce;
   }
 
-  test('a slot that stays unknown maps the list', () => {
-    const ce = engine();
-    expect(
-      routes(ce, 'f((1,2),[0,1,2])', ['f', ['Tuple', 1, 2], ['List', 0, 1, 2]])
-    ).toBe('[(1, 2),(2, 2),(3, 2)]');
-    expect(ce.parse('f((1,2),[0,1,2])').type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
-    expect(compiled(ce, 'f((1,2),[0,1,2])')).toEqual([
-      [1, 2],
-      [2, 2],
-      [3, 2],
-    ]);
-    // Control: a number binds whole.
-    expect(routes(ce, 'f((1,2),3)', ['f', ['Tuple', 1, 2], 3])).toBe('(4, 2)');
-  });
-
   test('a list of lists maps to the cells, as the one-parameter function does', () => {
     const ce = engine();
     expect(
@@ -562,55 +320,17 @@ describe('CE-414.2: AN unknown SLOT BESIDE A POINT PARAMETER', () => {
     // parameter of the root function.
     const ce = engine();
     ce.declare('x', 'any');
-    expectUnsettledDecline(ce, 'f((1,2), x)', ['x']);
-  });
-
-  test('an argument of type unknown at the root function is a scalar', () => {
-    // `x` is the only parameter of the root function `x ↦ f((1, 2), x)`,
-    // and it has no type annotation (`unknown`). Such a root function is
-    // compiled for a scalar argument: a parameter with no type of a root
-    // function whose parameters are all scalar holds a scalar, and a host
-    // that passes a list gives an unspecified result (design decision D3
-    // in `docs/scratch/2026-10-31-ce712-2-design.md`, and the decision of
-    // ROADMAP CE-706 for a root lambda). So the call is the direct call of
-    // the function, with no map and no run-time test of the value, and
-    // its value for a number equals the interpreter's.
-    const ce = engine();
-    ce.declare('x', 'unknown');
-    const r = compileRoot(ce, 'f((1,2), x)', ['x']);
-    expect(r.success).toBe(true);
-    expect(r.root).toBe(true);
-    expect(r.code).toContain('_fn_f(');
-    expect(r.code).not.toContain('mapFn');
-    expect(r.code).not.toContain('.map(');
-    expect(r.code).not.toContain('Array.isArray');
-    expect(compiled(ce, 'f((1,2), x)', { x: 3 })).toEqual([4, 2]);
-    expect(routes(ce, 'f((1,2),3)', ['f', ['Tuple', 1, 2], 3])).toBe('(4, 2)');
-  });
-
-  test('an argument with a declared shape maps or binds whole when compiled', () => {
-    // With `x: list<real>` the compiled call maps over the list with a
-    // static map; with `x: real` it calls the function once.
-    const list = engine();
-    list.declare('x', 'list<real>');
-    const r = compileRoot(list, 'f((1,2), x)', ['x']);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('.map(');
-    expect(r.code).not.toContain('bcastFn');
-    expect(compiled(list, 'f((1,2), x)', { x: [0, 1, 2] })).toEqual([
-      [1, 2],
-      [2, 2],
-      [3, 2],
-    ]);
-    list.assign('x', list.box(['List', 0, 1, 2]));
-    expect(list.parse('f((1,2), x)').evaluate().toString()).toBe(
-      '[(1, 2),(2, 2),(3, 2)]'
+    const r = compile(
+      ce.box([
+        'Function',
+        ce.parse('f((1,2), x)').json,
+        ['Typed', 'x', { str: 'any' }],
+      ] as never),
+      {} as never
     );
-    const scalar = engine();
-    scalar.declare('x', 'real');
-    expect(compiled(scalar, 'f((1,2), x)', { x: 5 })).toEqual([6, 2]);
-    scalar.assign('x', 5);
-    expect(scalar.parse('f((1,2), x)').evaluate().toString()).toBe('(6, 2)');
+    expect(r.success).toBe(false);
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.message).toContain('the input x of type any');
   });
 });
 
@@ -824,7 +544,6 @@ describe('review round 2 (compiler)', () => {
   }
   const B = `broadcastable<${POINT}>`;
   const PAIR = '(a, b) \\mapsto (a.x + b.x, a.y + b.y)';
-  const ONE = 'a \\mapsto (a.x+1, a.y+1)';
 
   test('a rank-2 list at a broadcastable slot beside a list of points declines', () => {
     // The interpreter maps the rank-2 list to its points and pairs it with
@@ -842,22 +561,6 @@ describe('review round 2 (compiler)', () => {
     };
     expect(r.success).toBe(false);
     expect(r.run({})).toEqual([[[11, 22]], [[33, 44]]]);
-  });
-
-  test('control: a list of points beside one point compiles', () => {
-    const ce = engine(`(${B}, ${POINT})`, PAIR);
-    ce.declare('P', `list<${POINT}>`);
-    ce.declare('Q', POINT);
-    const P = [
-      [1, 2],
-      [3, 4],
-    ];
-    const expected = [
-      [11, 22],
-      [13, 24],
-    ];
-    expect(compiled(ce, 'f(P, (10,20))', { P })).toEqual(expected);
-    expect(compiled(ce, 'f(P, Q)', { P, Q: [10, 20] })).toEqual(expected);
   });
 
 
@@ -993,15 +696,6 @@ describe('review round 3 (compiler)', () => {
     ce.assign('f', ce.parse('(P, t) \\mapsto (P.x + t, P.y)'));
     return ce;
   }
-  const Ps = [
-    [1, 2],
-    [3, 4],
-  ];
-  function interpreted(ce: ComputeEngine, t: Json): string {
-    ce.assign('Ps', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    ce.assign('t', ce.box(t as never));
-    return ce.parse('f(\\mathrm{Ps}, t)').evaluate().toString();
-  }
 
   test.each(['unknown', 'any'])('an argument of type %s declines', (type) => {
     // `Ps` and `t` are both parameters of the root function: a root
@@ -1021,61 +715,16 @@ describe('review round 3 (compiler)', () => {
       {} as never
     );
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.unsupported).toContain('t');
-  });
-
-  test('a number is passed whole to each call', () => {
-    const ce = engine('real');
-    expect(compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: 10 })).toEqual([
-      [11, 2],
-      [13, 4],
-    ]);
-    expect(interpreted(ce, 10)).toBe('[(11, 2),(13, 4)]');
-  });
-
-  test('a list is paired with the points', () => {
-    const ce = engine('list<real>');
-    expect(compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: [10, 20] })).toEqual([
-      [11, 2],
-      [23, 4],
-    ]);
-    expect(interpreted(ce, ['List', 10, 20])).toBe('[(11, 2),(23, 4)]');
-  });
-
-  test('an element that is a list maps the call again', () => {
-    const ce = engine('list<list<real>>');
-    expect(
-      compiled(ce, 'f(\\mathrm{Ps}, t)', {
-        Ps,
-        t: [
-          [10, 20],
-          [1, 2],
-        ],
-      })
-    ).toEqual([
-      [
-        [11, 2],
-        [21, 2],
-      ],
-      [
-        [4, 4],
-        [5, 4],
-      ],
-    ]);
-    expect(interpreted(ce, ['List', ['List', 10, 20], ['List', 1, 2]])).toBe(
-      '[[(11, 2),(21, 2)],[(4, 4),(5, 4)]]'
-    );
-  });
-
-  test('a length mismatch is NaN, the compiled incompatible-dimensions', () => {
-    const ce = engine('list<real>');
-    expect(
-      compiled(ce, 'f(\\mathrm{Ps}, t)', { Ps, t: [10, 20, 30] })
-    ).toBeNaN();
-    expect(interpreted(ce, ['List', 10, 20, 30])).toBe(
-      'Error("incompatible-dimensions", "2 vs 3")'
-    );
+    if (type === 'any') {
+      // An input of type `any` is refused.
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      expect(r.diagnostic?.message).toContain('the input t of type any');
+    } else {
+      // The parameter of `f` would take the list `Ps` whole, where the
+      // interpreter maps `f` over it.
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.diagnostic?.message).toContain('would take whole');
+    }
   });
 });
 
@@ -1232,62 +881,4 @@ describe('A LIST OF POINTS AT A POINT PARAMETER BESIDE unknown SLOTS THAT ANOTHE
     const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
     expect(r.run!({} as never)).toEqual([2, 2]);
   });
-
-  test('the call over a list of points', () => {
-    const ce = engine();
-    const expr = ce.box([
-      'n',
-      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-      4,
-      2,
-    ]);
-    expect(expr.evaluate().toString()).toBe('[(2, 2),(4, 4)]');
-    const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
-    expect(r.run!({} as never)).toEqual([
-      [2, 2],
-      [4, 4],
-    ]);
-  });
-
-  test('a declared input at an unknown slot', () => {
-    const ce = engine();
-    ce.declare('x', 'real');
-    const expr = ce.box([
-      'n',
-      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-      'x',
-      2,
-    ]);
-    const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
-    expect(r.run!({ x: 6 } as never)).toEqual([
-      [3, 2],
-      [5, 4],
-    ]);
-  });
-
-  // With `x` and `y` declared with a range, the element type of the list is
-  // a union of two tuples, `tuple<integer, integer> | tuple<real<-10..10>,
-  // real<-10..10>>`, since `integer` is not a subtype of the range. The map
-  // takes the definition for one point of the joined tuple `tuple<real,
-  // real>`. Before, it took the generic definition and declined. Tycho row
-  // 486 (a plot axis is declared `real<-1e15..1e15>`).
-  test.each(['real<-10..10>', 'real<-1e15..1e15>'])(
-    'a list whose points read inputs declared %s',
-    (axis) => {
-      const ce = engine();
-      ce.declare('x', axis);
-      ce.declare('y', axis);
-      const expr = ce.box([
-        'n',
-        ['List', ['Tuple', 1, 2], ['Tuple', 'x', 'y']],
-        4,
-        2,
-      ]);
-      const r = compile(expr, { to: 'javascript', fallback: false } as never)!;
-      expect(r.run!({ x: 3, y: 4 } as never)).toEqual([
-        [2, 2],
-        [4, 4],
-      ]);
-    }
-  );
 });

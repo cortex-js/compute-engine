@@ -224,7 +224,7 @@ describe('IR profile, batch G22: derivatives (CE-1354)', () => {
 
   test('a derivative whose closed form holds a head outside the slice: a decline with its cause', () => {
     expect(failure(() => js(['Apply', ['Derivative', 'Gamma'], 'x']))).toMatch(
-      /Digamma\(x\): the operator Digamma is not in the slice/
+      /Digamma\(x\): the operator Digamma is not supported by the compiler/
     );
   });
 
@@ -600,10 +600,10 @@ describe('IR profile, batch G22: the review’s fixes', () => {
     );
   });
 
-  test('D(Gamma(x), x): Digamma is not in the slice, on JavaScript and interval-js', () => {
+  test('D(Gamma(x), x): Digamma is not supported by the compiler, on JavaScript and interval-js', () => {
     for (const to of ['javascript', 'interval-js'])
       expect(fails(['D', ['Gamma', 'x'], 'x'], { to })).toMatch(
-        /Digamma\(x\): the operator Digamma is not in the slice/
+        /Digamma\(x\): the operator Digamma is not supported by the compiler/
       );
   });
 

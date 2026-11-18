@@ -5,7 +5,7 @@
  *
  * Every option of `compile()` is mapped or declined by name
  * (`optionDecline()`); an input with no type is the decline
- * `'untyped-input'` of the existing compiler, another `Decline` of the
+ * `'untyped-input'`, another `Decline` of the
  * slice the public decline of the code of its reason (`'unsettled-shape'`,
  * `'static-type-error'`, …) or `'outside-profile'`, any other error a
  * `'compile-error'`, and a cancellation is thrown as it is. `compile()`
@@ -61,7 +61,7 @@ import {
   type Region,
 } from './ir.js';
 
-const PREFIX = "Could not compile with the profile 'ir'";
+const PREFIX = 'Could not compile';
 
 /**
  * The class of each option of `compile()` in the profile: `mapped` (read
@@ -73,7 +73,6 @@ const PREFIX = "Could not compile with the profile 'ir'";
  */
 export const IR_OPTIONS = {
   to: 'mapped',
-  target: 'mapped',
   profile: 'mapped',
   fallback: 'mapped',
   entryChecks: 'mapped',
@@ -85,15 +84,9 @@ export const IR_OPTIONS = {
   mode: 'mapped',
   storage: 'no-op',
   quadrature: 'mapped',
-  functions: 'declined',
   vars: 'mapped',
   symbolic: 'mapped',
   inputs: 'mapped',
-  operators: 'declined',
-  imports: 'declined',
-  preamble: 'declined',
-  broadcast: 'no-op',
-  strictTypes: 'declined',
 } as const;
 
 type IrOptionName = keyof typeof IR_OPTIONS;
@@ -156,9 +149,6 @@ function given(x: unknown): boolean {
  *  with the value `value`, or `undefined` when the value is admitted. */
 function refusal(name: IrOptionName, value: unknown): string | undefined {
   switch (name) {
-    case 'strictTypes':
-    case 'broadcast':
-      return value === true ? `the option \`${name}\`` : undefined;
     case 'mode':
       return value !== undefined && value !== 'strict'
         ? `the option \`mode\` with the value '${String(value)}'`
@@ -171,8 +161,7 @@ function refusal(name: IrOptionName, value: unknown): string | undefined {
 /** The decline of the first option of `options` that the profile does not
  *  have on the target `where` (`''` or ` on <target>`), by the classes of
  *  `table`: `'unsupported-mode'` for a `mode` (a mode that the target does
- *  not offer, the decline of the existing compilers), `'outside-profile'`
- *  for another option. */
+ *  not offer), `'outside-profile'` for another option. */
 export function optionDecline(
   options: IrOptions | undefined,
   table: Readonly<Record<IrOptionName, string>>,
@@ -184,7 +173,7 @@ export function optionDecline(
     const text = refusal(name, options[name]);
     if (text !== undefined)
       throw decline(
-        `${text} is not supported by the profile 'ir'${where}`,
+        `${text} is not supported by the compiler${where}`,
         name === 'mode' ? { code: 'unsupported-mode', kind: 'capability' } : {}
       );
   }
@@ -320,7 +309,7 @@ export function entryInputs(
 
 /** The error of `compile()` for the error `e` of the slice or the adapter:
  *  a cancellation or a decline of `compile()` as it is, an input with no
- *  type thrown as the existing compiler refuses it (`'untyped-input'`), a
+ *  type as `'untyped-input'`, a
  *  `Decline` with the code of its reason (`'unsettled-shape'`, …) or
  *  `'outside-profile'`, any other error as `'compile-error'`. */
 export function sliceError(e: unknown): unknown {
@@ -373,7 +362,7 @@ function compileIr(
         ? "the option `quadrature` with the value 'monte-carlo'"
         : undefined;
   if (refused !== undefined)
-    throw decline(`${refused} is not supported by the profile 'ir'`);
+    throw decline(`${refused} is not supported by the compiler`);
   optionDecline(options, IR_OPTIONS, '');
   // `vars`: a name read as the host's text (`compile()` checks that each
   // entry is a string).
@@ -433,7 +422,7 @@ function compileIr(
     lists: [] as Key[],
     strings: new Map<Key, string>(),
     // The scalar boolean inputs (also in `real`), which `broadcast()` reads
-    // as columns, as `varsEntryPlan()` of the existing compiler.
+    // as columns.
     booleans: [] as Key[],
     bigints: [] as Key[],
     bigintLists: [] as Key[],
@@ -494,8 +483,7 @@ function compileIr(
     message: w.message,
   }));
   // A name of `vars` is read as the host's text, which a worker has only
-  // when it reads the inputs object (`CompileTarget.hostNames` of the
-  // existing compiler).
+  // when it reads the inputs object.
   const code = [slice.preambleOnce, slice.code].join('\n');
   const shippable =
     Object.values(vars).every(readsVarsObject) && isShippableCode(code);
@@ -510,7 +498,7 @@ function compileIr(
     target: 'javascript',
     success: true,
     runtimeVersion: RUNTIME_VERSION,
-    // A lambda loads from `code` alone, as one of the existing compiler: its
+    // A lambda loads from `code` alone: its
     // `code` evaluates the definitions and gives the function, and
     // `callCode` is the function without them (`StoredJavaScript.callCode`).
     code:
@@ -581,18 +569,8 @@ function compileIr(
     ? () => Promise.reject(bigintBroadcastError())
     : makeBroadcastAsync(asyncSpec);
   result.willUsePool = bigint ? () => false : makeWillUsePool(asyncSpec);
-  // `sys`, `check`, `finish` and `error` are read only with an asynchronous
-  // copy, which the profile does not make.
   const runAsyncSpec: RunAsyncSpec = {
-    result,
-    sys: undefined,
-    check: (args) => args,
-    finish: (value) => value,
-    error: (_, error) => error,
-    digits: result.reconstructionDigits,
     run: run as (inputs: unknown) => unknown,
-    workers: () => engine.workers,
-    iterationLimit: () => engine.iterationLimit,
   };
   result.runAsync = makeRunAsync(runAsyncSpec);
   result.willParallelize = makeWillParallelize(runAsyncSpec);

@@ -27,15 +27,12 @@ describe('an Apply whose callee is not a function value declines', () => {
     }
   );
 
-  test('the JavaScript reason names the type of the callee', () => {
+  test('the JavaScript reason names the callee', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(WITNESS));
     expect(r.success).toBe(false);
     expect(r.diagnostic?.message).toContain(
-      'the callee has the type `number`, which is not a function type'
-    );
-    expect(r.diagnostic?.message).toContain(
-      'The interpreter reads such a callee as a function of its free variables'
+      'Apply of a value that is not a function literal'
     );
   });
 
@@ -83,35 +80,6 @@ describe('a callee of a function type reaches the call', () => {
     ce.declare('c', 'boolean');
     return ce;
   }
-  const LIST_PARAMETER: MathJsonExpression = [
-    'Apply',
-    ['Function', ['Length', 'l'], ['Typed', 'l', "'list<real>'"]],
-    'L',
-  ];
-  const CHOSEN_LITERAL: MathJsonExpression = [
-    'Apply',
-    [
-      'If',
-      'c',
-      ['Function', ['Multiply', 2, 'x'], 'x'],
-      ['Function', ['Add', 'x', 1], 'x'],
-    ],
-    3,
-  ];
-
-  test('a function literal with a list parameter', () => {
-    const r = compile(engine().box(LIST_PARAMETER));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('(((l) => (l).length))(_.L)');
-    expect(r.run!({ L: [1, 2, 3] })).toBe(3);
-  });
-
-  test('an If that chooses between two function literals', () => {
-    const r = compile(engine().box(CHOSEN_LITERAL));
-    expect(r.success).toBe(true);
-    expect(r.run!({ c: true })).toBe(6);
-    expect(r.run!({ c: false })).toBe(4);
-  });
 
   test.each(['javascript'])(
     'on %s, an If between a literal and a number declines',
@@ -127,7 +95,7 @@ describe('a callee of a function type reaches the call', () => {
       );
       expect(r.success).toBe(false);
       expect(r.diagnostic?.message).toContain(
-        'compiled code settles the shape of a value at compile time'
+        'Apply of a value that is not a function literal'
       );
     }
   );

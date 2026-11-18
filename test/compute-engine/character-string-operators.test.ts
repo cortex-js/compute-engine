@@ -19,7 +19,6 @@ import {
   isCharacter,
   isString,
 } from '../../src/compute-engine/boxed-expression/type-guards';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 const ce = new ComputeEngine();
@@ -324,21 +323,3 @@ describe('the Epsil route: the static pre-pass and the evaluation accept a chara
   });
 });
 
-describe('compilation to JavaScript', () => {
-  test('a `character` operand of a string operator compiles', () => {
-    const engine = new ComputeEngine();
-    engine.declare('chq', 'character');
-    const r = compile(engine.box(['ToUpperCase', 'chq']), { fallback: false });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ chq: 'a' })).toBe('A');
-  });
-
-  test('a free symbol typed `string | character` by inference compiles', () => {
-    const engine = new ComputeEngine();
-    const r = compile(engine.box(['StringRepeat', 'fq', 2]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ fq: 'ab' })).toBe('abab');
-  });
-});

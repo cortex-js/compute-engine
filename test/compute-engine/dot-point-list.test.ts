@@ -1,6 +1,5 @@
 import { expectTypeBetween } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * `Dot` over a POINT LIST written as a tuple of coordinate lists — `(1, L)`
@@ -256,53 +255,5 @@ describe('Dot over a tuple with collection components', () => {
       expect(e.type.toString()).toBe('value');
       expect(e.evaluate().toString()).toBe('Dot([(1, 1),(1, 2)], [2,3])');
     });
-  });
-
-  describe('the compiled route agrees with the interpreter', () => {
-    // A tuple's list-valued coordinates broadcast into individual points.
-    function engine() {
-      const ce = new ComputeEngine();
-      ce.declare('L', 'list<number>');
-      return ce;
-    }
-
-    test('`Dot((1, L), (3, 4))` answers the interpreter value, not NaN', () => {
-      const r = compile(engine().parse('\\operatorname{Dot}((1,L),(3,4))'), {
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.run!({ L: [1, 2] })).toEqual([7, 11]);
-    });
-
-    test('an all-number point still compiles to the written-out product', () => {
-      const r = compile(engine().parse('\\operatorname{Dot}((1,2),(3,4))'), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.run!({})).toBe(11);
-    });
-
-    // A `list<number>` row is read as real in the default mode, as a
-    // `list<real>` row is; the runner refuses a complex entry of it when it
-    // is called.
-    test.each(['list<real>', 'list<number>'])(
-      'a matrix written as a list of %s rows still compiles',
-      (type) => {
-        const ce = new ComputeEngine();
-        ce.declare('r', type);
-        ce.declare('s', type);
-        const r = compile(
-          ce.parse('\\operatorname{Dot}([r,s],[[1,0],[0,1]])'),
-          { fallback: false, constantFold: false }
-        );
-        expect(r.success).toBe(true);
-        expect(r.code).toContain('_SYS.matmul');
-        expect(r.run!({ r: [1, 2], s: [3, 4] })).toEqual([
-          [1, 2],
-          [3, 4],
-        ]);
-      }
-    );
   });
 });

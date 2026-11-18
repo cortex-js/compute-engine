@@ -158,16 +158,6 @@ describe('Reduce over a list that is not written out, on interval-js', () => {
     );
   });
 
-  test('a caller override of the combiner declines', () => {
-    // This target reads no `operators` option, so `functions` is the only
-    // override.
-    expect(
-      declineCode(ce, ['Reduce', square(150), 'Max'], {
-        functions: { Max: (a: unknown) => a },
-      })
-    ).toBe('outside-profile');
-  });
-
   test('a definition that shadows the combiner declines', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('x', 'real');

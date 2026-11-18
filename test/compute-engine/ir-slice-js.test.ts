@@ -1487,7 +1487,7 @@ describe('IR slice: runtime', () => {
     const d = declineOf(() => js(['Digamma', 'x']));
     expect([d.head, d.cause]).toEqual([
       'Digamma',
-      'the operator Digamma is not in the slice',
+      'the operator Digamma is not supported by the compiler',
     ]);
     const g = declineOf(() =>
       compileSlice(ce.box(['Random'] as never), { target: 'glsl' })

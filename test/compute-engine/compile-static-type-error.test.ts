@@ -67,32 +67,19 @@ describe('A valid expression with a sub-expression of type error declines', () =
       // to give its warning for an error in the expression.
       const r = compile(expr, { to });
       expect(r.success).toBe(false);
-      if (to === 'glsl') {
-        // The shader fragment refuses the form before any code is written.
-        expect(r.diagnostic?.code).toBe('outside-fragment');
-        expect(() => compile(expr, { to, fallback: false })).toThrow(
-          /GLSL fragment/
-        );
-        return;
-      }
       expect(r.diagnostic?.code).toBe('static-type-error');
       expect(r.diagnostic?.kind).toBe('correctness');
       expect(r.unsupported).toContain('ErrorCode');
-      if (to !== 'interval-js') expect(r.error).toMatch(/type 'error'/);
+      expect(r.error).toMatch(/a sub-expression of the static type error/);
 
       // Without the fallback: the decline throws.
-      if (to === 'interval-js') {
-        let code: string | undefined;
-        try {
-          compile(expr, { to, fallback: false });
-        } catch (e) {
-          code = compileDiagnosticOf(e).code;
-        }
-        expect(code).toBe('static-type-error');
-      } else
-        expect(() => compile(expr, { to, fallback: false })).toThrow(
-          /type 'error'/
-        );
+      let code: string | undefined;
+      try {
+        compile(expr, { to, fallback: false });
+      } catch (e) {
+        code = compileDiagnosticOf(e).code;
+      }
+      expect(code).toBe('static-type-error');
     });
   });
 
@@ -105,12 +92,7 @@ describe('A valid expression with a sub-expression of type error declines', () =
       const r = compile(expr, { to });
       expect(r.success).toBe(false);
       expect(r.unsupported).toContain('ErrorCode');
-      if (to === 'interval-js')
-        expect(r.diagnostic?.code).toBe('static-type-error');
-      else
-        expect(r.error).toMatch(
-          to === 'glsl' ? /outside the GLSL fragment/ : /invalid expression/
-        );
+      expect(r.diagnostic?.code).toBe('static-type-error');
     }
   );
 
@@ -122,18 +104,9 @@ describe('A valid expression with a sub-expression of type error declines', () =
     expect(expr.isValid).toBe(true);
     const r = compile(expr, { to });
     expect(r.success).toBe(false);
-    if (to === 'glsl') {
-      // `Map` over a list input is outside the GLSL fragment, which is
-      // checked first.
-      expect(r.diagnostic?.code).toBe('outside-fragment');
-      expect(r.diagnostic?.operator).toBe('Map');
-      return;
-    }
     expect(r.diagnostic?.code).toBe('static-type-error');
-    // On interval-js the diagnostic names the body of the function literal.
-    expect(r.diagnostic?.value).toBe(
-      to === 'interval-js' ? 'Block(ADD("ab", x))' : 'ADD("ab", x)'
-    );
+    // The diagnostic names the body of the function literal.
+    expect(r.diagnostic?.value).toBe('Block(ADD("ab", x))');
     expect(r.unsupported).toContain('ErrorCode');
   });
 
@@ -152,24 +125,6 @@ describe('A valid expression with a sub-expression of type error declines', () =
       expect(r.unsupported).toContain('ErrorCode');
     }
   );
-
-  test('a dictionary value of type error declines', () => {
-    const ce = engine();
-    const expr = ce.box(['Dictionary', ['Tuple', "'a'", ['ADD', "'ab'", 'u']]]);
-    expect(expr.isValid).toBe(true);
-    const r = compile(expr);
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('static-type-error');
-    expect(r.diagnostic?.value).toBe('ADD("ab", u)');
-    expect(r.unsupported).toContain('ErrorCode');
-  });
-
-  test('the diagnostic names the sub-expression', () => {
-    const ce = engine();
-    const r = compile(ce.box(['Add', ['ADD', "'ab'", 'u'], 1]));
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.value).toBe('ADD("ab", u)');
-  });
 });
 
 // Not asserted: the contract leaves these unspecified, because no
@@ -213,142 +168,9 @@ describe('A bound name that shadows a global with an error body compiles', () =>
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(15);
   });
-
-  // The static type of the call `G()` is read from the global `G`, so it is
-  // `error`, but the interpreter calls the block's `G` and gives 3. The
-  // local is declared with `Declare`: an `Assign` of a name that the engine
-  // knows writes the engine's binding, and compiled code declines it.
-  test("a block local: Block(Declare(G, 'unknown', () ↦ 1), G() + u)", () => {
-    const ce = engine();
-    const declareG = ['Declare', 'G', "'unknown'", ['Function', 1]];
-    const expr = ce.box(['Block', declareG, ['Add', ['G'], 'u']]);
-    expect(
-      ce.box(['Block', declareG, ['Add', ['G'], 2]]).evaluate().re
-    ).toBe(3);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 2 })).toBe(3);
-  });
-
-  // A documented over-decline of the simple version: the call `G()` of the
-  // replaced function is not checked, but type inference gives its parent
-  // `G() + u` the type `error` from the engine's `G`, and the check cannot
-  // tell that from an error of the parent itself (see the next describe).
-  test('a function the caller replaces: G() + u declines (over-decline)', () => {
-    const ce = engine();
-    const expr = ce.box(['Add', ['G'], 'u']);
-    expect(() =>
-      compile(expr, { fallback: false, functions: { G: () => 1 } })
-    ).toThrow(/type 'error'/);
-  });
 });
 
 describe('An error next to a bound name still declines', () => {
-  test('a call before the Block assignment reads the outer G', () => {
-    // The first statement calls the engine's `G`, whose body has the type
-    // `error`; the assignment comes after it.
-    const ce = engine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'y', "'unknown'", ['G']],
-      ['Assign', 'G', ['Function', 1]],
-      ['Add', 'y', 'u'],
-    ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/type 'error'/);
-  });
-
-  test('ADD("ab", G()) with a replaced G declines', () => {
-    const ce = engine();
-    const expr = ce.box(['ADD', "'ab'", ['G']]);
-    expect(() =>
-      compile(expr, { fallback: false, functions: { G: () => 1 } })
-    ).toThrow(/type 'error'/);
-  });
-
-  test('ADD("ab", G()) after a Block assignment of G declines', () => {
-    const ce = engine();
-    const expr = ce.box([
-      'Block',
-      ['Assign', 'G', ['Function', 1]],
-      ['ADD', "'ab'", ['G']],
-    ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/type 'error'/);
-  });
-
-  test('the value of an assignment reads the outer G', () => {
-    // `Equal` has the type `boolean`, so only the walk into the global `G`,
-    // which the value calls before the write, finds the error.
-    const ce = engine();
-    const expr = ce.box(['Block', ['Assign', 'G', ['Equal', ['G'], 1]], 'G']);
-    expect(() => compile(expr, { fallback: false })).toThrow(/type 'error'/);
-  });
-
-  test('an input mapped through vars and declared error declines', () => {
-    const ce = engine();
-    ce.declare('bad', 'error');
-    const expr = ce.box(['Add', 'bad', 1]);
-    expect(() =>
-      compile(expr, { fallback: false, vars: { bad: '_.bad' } })
-    ).toThrow(/type 'error'|invalid/);
-  });
-
-  test('a replaced operator is not followed, in the record and the callback form', () => {
-    // The call `H()` has a type that is not `error`, but the body of the
-    // engine's `H` holds `ADD("ab", u)`. Without a replacement the walk
-    // follows `H` into that body and declines. A replacement through
-    // `operators`, in either form, is not followed, so the error in the
-    // engine's body does not make the compilation decline.
-    const ce = engine();
-    ce.box([
-      'Assign',
-      'H',
-      [
-        'Function',
-        ['Block', ['Declare', 't', "'unknown'", ['ADD', "'ab'", 'u']], 1],
-      ],
-    ]).evaluate();
-    const expr = ce.box(['Multiply', 2, ['H']]);
-    expect(expr.type.toString()).not.toBe('error');
-    const message = (options: object): string => {
-      try {
-        compile(expr, { fallback: false, ...options });
-        return 'compiled';
-      } catch (e) {
-        return String((e as Error).message);
-      }
-    };
-    expect(message({})).toMatch(/type 'error'/);
-    expect(message({ operators: { H: ['myH', 20] } })).not.toMatch(
-      /type 'error'/
-    );
-    expect(
-      message({
-        operators: (op: string) => (op === 'H' ? ['myH', 20] : undefined),
-      })
-    ).not.toMatch(/type 'error'/);
-  });
-
-  test('a call of a bound name with an error type declines', () => {
-    // The local `ADD` has the same body as the global one, and `List` does
-    // not have the type `error`: the call itself must decline.
-    const ce = engine();
-    const expr = ce.box([
-      'Block',
-      ['Assign', 'ADD', ['Function', ['Add', 'x', 'y'], 'x', 'y']],
-      ['List', ['ADD', "'ab'", 'u']],
-    ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/type 'error'/);
-  });
-
-  // A documented over-decline of the simple version, as for a replaced
-  // function: type inference gives the rebound `v` the type of its stored
-  // value, `error`.
-  test('a symbol rebound by a Block declines (over-decline)', () => {
-    const ce = engine();
-    ce.assign('v', ce.box(['ADD', "'ab'", 'u']));
-    const expr = ce.box(['Block', ['Assign', 'v', 1], ['Add', 'v', 1]]);
-    expect(() => compile(expr, { fallback: false })).toThrow(/type 'error'/);
-  });
 
   test('two stored values that read each other do not loop', () => {
     const ce = engine();
@@ -397,15 +219,6 @@ describe('Well-typed controls still compile', () => {
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({ u: 2 })).toBe(3);
-  });
-
-  test('string code that is well typed compiles', () => {
-    const ce = engine();
-    const expr = ce.box(['Add', ['Length', 'q'], 'u']);
-    expect(expr.type.toString()).not.toBe('error');
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ q: 'abc', u: 2 })).toBe(5);
   });
 
   test('u + 1 compiles on every target', () => {

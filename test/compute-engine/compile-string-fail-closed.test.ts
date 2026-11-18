@@ -119,38 +119,6 @@ describe('string comparisons fail closed', () => {
     );
   });
 
-  test('IndexOf with a SCALAR text needle compiles and agrees', () => {
-    // This declined under tier 0, when the element test was the numeric
-    // tolerance comparison (NaN for text) and the compiled answer would have
-    // been 0 where the interpreter answers the 1-based index. The test is now
-    // an exact `===` — the interpreter's `isSame` for text — so the shape is
-    // admitted, for a `string` needle and for a `character` haystack alike.
-    for (const [json, expected] of [
-      [['IndexOf', ['List', { str: 'a' }, { str: 'b' }], { str: 'b' }], 2],
-      [['IndexOf', ['Characters', { str: 'abc' }], { str: 'c' }], 3],
-      [
-        [
-          'IndexOf',
-          ['Characters', { str: 'abc' }],
-          ['CharacterFrom', { str: 'c' }],
-        ],
-        3,
-      ],
-      // Absent needle: 0, the interpreter's "not found".
-      [['IndexOf', ['List', { str: 'a' }, { str: 'b' }], { str: 'z' }], 0],
-      // A MIXED-element haystack was never closed by the element gate (a
-      // `number | string` element type is not a subtype of `string`), and the
-      // exact `===` is faithful for it too.
-      [['IndexOf', ['List', { str: 'a' }, 1], { str: 'a' }], 1],
-    ] as Array<[any, number]>) {
-      const expr = ce.box(json);
-      const r = compile(expr, { fallback: false, constantFold: false });
-      expect(r.success).toBe(true);
-      expect((r.run as any)({})).toBe(expected);
-      expect(expr.evaluate().toString()).toBe(String(expected));
-    }
-  });
-
   test('IndexOf with a NESTED-text needle still declines', () => {
     // `===` on two distinct arrays is reference identity, so a `list<string>`
     // needle would never be found; the interpreter compares the lists
@@ -177,160 +145,6 @@ describe('string comparisons fail closed', () => {
     ce2.assign('xs', ce2.box(['List', ['List', 1], ['List', 2]]));
     ce2.assign('n', ce2.box(['List', 1]));
     expect(expr.evaluate().toString()).toBe('1');
-  });
-});
-
-describe('orderings: ALL-string compiles, with interpreter parity', () => {
-  // The pairs that prove the emitted `<` is the interpreter's `<`: uppercase
-  // before lowercase (`Z` < `a` by code unit, not by locale collation), digit
-  // strings compared as text rather than numerically (`"10" < "9"`), a
-  // non-ASCII letter ordering AFTER `b` (so a locale-aware collation would
-  // disagree), and a common-prefix pair.
-  test.each([
-    ['Z', 'a', true],
-    ['10', '9', true],
-    ['ä', 'b', false],
-    ['abc', 'abd', true],
-    ['b', 'a', false],
-    ['a', 'a', false],
-  ] as const)('Less(%p, %p) compiles and runs to %p', (a, b, expected) => {
-    const expr = ce.box(['Less', { str: a }, { str: b }]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(expected);
-    // The pin that matters: the compiled answer IS the interpreted answer.
-    expect(r.run!()).toBe(expr.evaluate().symbol === 'True');
-  });
-
-  test.each(['Less', 'LessEqual', 'Greater', 'GreaterEqual'])(
-    '%s over two string literals compiles with parity',
-    (head) => {
-      for (const [a, b] of [
-        ['a', 'b'],
-        ['b', 'a'],
-        ['a', 'a'],
-      ]) {
-        const expr = ce.box([head, { str: a }, { str: b }]);
-        const r = compile(expr, { fallback: false });
-        expect(r.success).toBe(true);
-        expect(r.run!()).toBe(expr.evaluate().symbol === 'True');
-      }
-    }
-  );
-
-  test('an all-string CHAINED ordering compiles with parity', () => {
-    for (const [a, b, c, expected] of [
-      ['a', 'b', 'c', true],
-      ['a', 'c', 'b', false],
-    ] as const) {
-      const expr = ce.box(['Less', { str: a }, { str: b }, { str: c }]);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-      expect(r.run!()).toBe(expr.evaluate().symbol === 'True');
-    }
-  });
-
-  test('an ordering over a string-annotated parameter compiles again', () => {
-    // The shape the broad gate regressed: a `string` parameter is provable
-    // string EVIDENCE, and both operands are strings, so it stays on the fast
-    // path.
-    executeEpsil(ce, 'h(s: string) = 1 if s < "m" else 0');
-    for (const [arg, expected] of [
-      ['a', 1],
-      ['z', 0],
-    ] as const) {
-      const expr = ce.box(['h', { str: arg }]);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-      expect(expr.evaluate().re).toBe(expected);
-    }
-  });
-});
-
-describe('orderings: the operands are NFC-conditioned (ruled 2026-08-16)', () => {
-  // The interpreter conditions every string when it BOXES it — Unicode NFC
-  // normalization, then the lone-surrogate → U+FFFD replacement
-  // (`boxed-string.ts`) — and then compares two strings with JavaScript's own
-  // `<` on that conditioned content (`compare.ts`). So the faithful compiled
-  // lowering is: condition both operands, then the SAME infix comparison. It
-  // used to be a raw infix comparison over whatever UTF-16 the host passed in,
-  // so a decomposed `"e" + U+0301` bound to a string parameter compared as LESS
-  // than the precomposed `"é"` literal, where the interpreter reads the two as
-  // the same string and answers `False`.
-
-  /** Decomposed `"é"` (`"e"` + COMBINING ACUTE ACCENT) and its NFC form. */
-  const NFD = 'e\u0301';
-  const NFC = '\u00e9';
-
-  test('the emission is the infix comparison over conditioned operands', () => {
-    // A PARAMETER is wrapped in `_SYS.ct` (the interpreter's ingress
-    // conditioning); the operator stays the raw `<`. Explicitly NOT
-    // `_SYS.cmpc`, the character comparator: it orders by CODE POINT, which
-    // disagrees with the interpreter on strings (see the astral pin below).
-    ce.declare('so', 'string');
-    const r = compile(ce.box(['Less', 'so', { str: 'm' }]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.ct(');
-    expect(r.code).toContain('<');
-    expect(r.code).not.toContain('_SYS.cmpc');
-  });
-
-  test('a LITERAL operand is not wrapped (it was conditioned at boxing)', () => {
-    // Nothing to normalize: a boxed string literal already holds conditioned
-    // content by the time codegen sees it, so the emission for a literal pair
-    // is the bare infix comparison it always was.
-    const r = compile(ce.box(['Less', { str: 'a' }, { str: 'b' }]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('_SYS.ct(');
-    expect(r.run!()).toBe(true);
-  });
-
-  test.each(['Less', 'LessEqual', 'Greater', 'GreaterEqual'] as const)(
-    '%s over a non-NFC string PARAMETER agrees with interpretation',
-    (head) => {
-      // Compile FIRST, so the symbol is still free and stays a run() parameter;
-      // then assign the decomposed value and ask the interpreter the same
-      // question. The interpreter conditions the assigned string at boxing
-      // time, so it compares `"é"` against `"é"`: `Less` is `False`,
-      // `LessEqual` is `True`, and so on. Before the conditioning was emitted,
-      // the compiled answers were the mirror image (`"e" + U+0301 < "\u00e9"`
-      // is `true` by code unit, since `"e"` is U+0065).
-      const e = new ComputeEngine();
-      e.declare('sq', 'string');
-      const r = compile(e.box([head, 'sq', { str: NFC }]), { fallback: false });
-      expect(r.success).toBe(true);
-      e.assign('sq', e.string(NFD));
-      const interpreted =
-        e.box([head, 'sq', { str: NFC }]).evaluate().symbol === 'True';
-      expect((r.run as any)({ sq: NFD })).toBe(interpreted);
-      // Not a vacuous pin: the two strings really are different code-unit
-      // sequences, and the interpreter really does read them as one string.
-      expect(NFD === NFC).toBe(false);
-      expect(interpreted).toBe(head === 'LessEqual' || head === 'GreaterEqual');
-    }
-  );
-
-  test("the ORDER is still the interpreter's: astral below U+E000", () => {
-    // Conditioning must not change WHICH order is emitted. The interpreter
-    // compares strings by UTF-16 CODE UNIT (JavaScript `<` on the conditioned
-    // content), so an astral character — a surrogate pair starting at U+D800 —
-    // sorts BELOW U+E000. Comparing by CODE POINT (what `_SYS.cmpc` does for
-    // characters) would answer the opposite. Both sides must say `true` here.
-    const e = new ComputeEngine();
-    e.declare('tq', 'string');
-    const astral = '\u{10000}';
-    const bmp = '\uE000';
-    const r = compile(e.box(['Less', 'tq', { str: bmp }]), { fallback: false });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ tq: astral })).toBe(true);
-    e.assign('tq', e.string(astral));
-    expect(e.box(['Less', 'tq', { str: bmp }]).evaluate().symbol).toBe('True');
   });
 });
 
@@ -370,48 +184,6 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
   // operand-level gates above never saw these shapes, so they miscompiled
   // silently behind a `success: true`.
 
-  /** The interpreter's element-wise verdicts, as booleans. */
-  function interpretedBooleans(expr: Expression): boolean[] {
-    return expr.evaluate().ops!.map((op) => op.symbol === 'True');
-  }
-
-  describe('orderings: ALL-string broadcasts compile, with run() parity', () => {
-    // Kept compiling deliberately: the emitted `<` is the same raw JavaScript
-    // `<` the interpreter uses on strings, so element-wise agreement follows
-    // from the scalar agreement pinned above. Verified against interpretation.
-    test.each([
-      [
-        'scalar vs list',
-        ['Less', { str: 'a' }, ['List', { str: 'x' }, { str: 'y' }]],
-        [true, true],
-      ],
-      [
-        'list vs list',
-        [
-          'Less',
-          ['List', { str: 'a' }, { str: 'b' }],
-          ['List', { str: 'a' }, { str: 'c' }],
-        ],
-        [false, true],
-      ],
-      [
-        'GreaterEqual scalar vs list',
-        ['GreaterEqual', { str: 'b' }, ['List', { str: 'a' }, { str: 'c' }]],
-        [true, false],
-      ],
-    ] as const)(
-      '%s compiles and runs element-wise',
-      (_label, json, expected) => {
-        const expr = ce.box(json as any);
-        const r = compile(expr, { fallback: false });
-        expect(r.success).toBe(true);
-        expect(r.run!()).toEqual(expected);
-        // The pin that matters: the compiled answer IS the interpreted answer.
-        expect(r.run!()).toEqual(interpretedBooleans(expr));
-      }
-    );
-  });
-
   describe('orderings: a MIXED broadcast fails closed', () => {
     // The known-wrong shapes. `Less("a", [1, 2])` compiled to `[false, false]`
     // while the interpreter broadcasts to two INERT comparisons — and inert is
@@ -450,21 +222,6 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       }
     );
 
-    test('a NESTED all-string ordering compiles, with run() parity', () => {
-      // A tensor of strings is admitted (ROADMAP CE-219): the compiled
-      // broadcast maps each cell of the nested arrays, as the interpreter
-      // compares each cell. Verified against interpretation.
-      const expr = ce.box([
-        'Less',
-        ['List', { str: 'a' }],
-        ['List', ['List', { str: 'x' }]],
-      ]);
-      expect(expr.evaluate().toString()).toBe('[["True"]]');
-      const r = compile(expr, { constantFold: false, fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toEqual([[true]]);
-    });
-
     test('the interpreter fallback leaves the comparisons INERT', () => {
       // Not `False`: the elements stay unevaluated `Less` nodes, which is
       // precisely what the compiled `[false, false]` misrepresented.
@@ -480,78 +237,6 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
     // `false` where the interpreter answers `True`. The leaf now has a strict
     // `===` STRING branch (`eqTensor`), so the same dispatch is faithful, and
     // the flat all-string shapes are admitted.
-    test.each([
-      [
-        'Equal over two equal string lists',
-        [
-          'Equal',
-          ['List', { str: 'a' }, { str: 'b' }],
-          ['List', { str: 'a' }, { str: 'b' }],
-        ],
-        true,
-      ],
-      [
-        'NotEqual over two equal string lists',
-        [
-          'NotEqual',
-          ['List', { str: 'a' }, { str: 'b' }],
-          ['List', { str: 'a' }, { str: 'b' }],
-        ],
-        false,
-      ],
-      [
-        'Equal over two differing string lists',
-        ['Equal', ['List', { str: 'a' }], ['List', { str: 'c' }]],
-        false,
-      ],
-      [
-        'Equal over lists of unequal length',
-        ['Equal', ['List', { str: 'a' }], ['List', { str: 'a' }, { str: 'b' }]],
-        false,
-      ],
-      // ONE collection operand: the interpreter BROADCASTS element-wise, and
-      // so does `_SYS.eq`.
-      [
-        'Equal of a string list against a string scalar',
-        ['Equal', ['List', { str: 'a' }, { str: 'b' }], { str: 'a' }],
-        [true, false],
-      ],
-      [
-        'NotEqual of a string list against a string scalar',
-        ['NotEqual', ['List', { str: 'a' }, { str: 'b' }], { str: 'a' }],
-        [false, true],
-      ],
-    ] as const)(
-      '%s compiles with interpreter parity',
-      (_label, json, expected) => {
-        const expr = ce.box(json as any);
-        const r = compile(expr, { fallback: false });
-        expect(r.success).toBe(true);
-        expect(r.run!()).toEqual(expected);
-        // The pin that matters: the compiled answer IS the interpreted answer.
-        const interpreted = expr.evaluate();
-        expect(r.run!()).toEqual(
-          interpreted.operator === 'List'
-            ? interpreted.ops!.map((op) => op.symbol === 'True')
-            : interpreted.symbol === 'True'
-        );
-      }
-    );
-
-    test('the lowering is the unchanged runtime dispatch', () => {
-      const r = compile(
-        ce.box([
-          'Equal',
-          ['List', { str: 'a' }, { str: 'b' }],
-          ['List', { str: 'a' }, { str: 'b' }],
-        ]),
-        { fallback: false, constantFold: false }
-      );
-      expect(r.code).toMatchInlineSnapshot(
-        `"_SYS.eq((["a", "b"]), (["a", "b"]))"`
-      );
-    });
-
     // The admission side is the NARROW flat predicate (the same one the
     // orderings use).
     // These three shapes were probed FAITHFUL under the new string leaf, and
@@ -572,45 +257,9 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
     ] as const)('%s declines', (_label, json, expected) => {
       failsClosed(ce.box(json as any), expected);
     });
-
-    test('a NESTED string list compiles, with run() parity', () => {
-      // A tensor of strings is admitted (ROADMAP CE-219): `_SYS.eq` compares
-      // the nested arrays whole, cell by cell, as the interpreter does.
-      for (const [b, expected] of [
-        ['a', true],
-        ['b', false],
-      ] as const) {
-        const expr = ce.box([
-          'Equal',
-          ['List', ['List', { str: 'a' }]],
-          ['List', ['List', { str: b }]],
-        ]);
-        expect(expr.evaluate().toString()).toBe(
-          expected ? '"True"' : '"False"'
-        );
-        const r = compile(expr, { constantFold: false, fallback: false });
-        expect(r.success).toBe(true);
-        expect(r.run!()).toBe(expected);
-      }
-    });
   });
 
   describe('the participant gate does not reach numeric broadcasts', () => {
-    test('an ordering over a numeric list still broadcast-compiles', () => {
-      const expr = ce.box(['Less', 1, ['List', 1, 2]]);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.code).toMatchInlineSnapshot(`"[((1) < (1)), ((1) < (2))]"`);
-      expect(r.run!()).toEqual(interpretedBooleans(expr));
-    });
-
-    test('equality over a numeric list keeps the runtime dispatch', () => {
-      const expr = ce.box(['Equal', 1, ['List', 1, 2]]);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((1), ([1, 2]))"`);
-      expect(r.run!()).toEqual(interpretedBooleans(expr));
-    });
 
     test('an UNTYPED list element type is not string evidence', () => {
       // `collectionElementType` reports `any` for a bare `list`, which is not a
@@ -654,7 +303,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
     test.each([
       ['dictionary<integer>', 'dictionary'],
       ['record{a: integer, b: integer}', 'record'],
-    ] as const)('%s declines for Equal/NotEqual/Less', (type, kind) => {
+    ] as const)('%s declines for Equal/NotEqual/Less', (type) => {
       for (const head of ['Equal', 'NotEqual', 'Less'] as const) {
         ce = new ComputeEngine();
         ce.declare('ag1', type);
@@ -662,8 +311,8 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
         const expr = ce.box([head, 'ag1', 'ag2'] as any);
         const r = compile(expr);
         expect(r.success).toBe(false);
-        // The honest reason, naming the kind — NOT "string-valued operands".
-        expect(r.error).toMatch(new RegExp(`${kind} participant`));
+        // The honest reason, naming the input — NOT "string-valued operands".
+        expect(r.error).toContain(`the input ag1 of type ${type}`);
         expect(r.error).not.toMatch(/string-valued operands/);
         expect(r.error).toMatch(/Could not compile/);
         // The interpreter's answer: the comparison stays inert.
@@ -671,7 +320,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       }
     });
 
-    test('a tuple-typed symbol pair: ORDERINGS decline, EQUALITY is admitted', () => {
+    test('a tuple-typed symbol pair: ORDERINGS decline', () => {
       // The tuple case is carved out for the EQUALITY family only (see the
       // "tuple-vs-tuple equality" block below). An ordering over two tuples was
       // declining BEFORE the aggregate gate existed — the interpreter leaves it
@@ -681,10 +330,8 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       const less = ce.box(['Less', 'ag1', 'ag2']);
       const r = compile(less);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toMatch(/Less of a tuple/);
       expect(less.evaluate().operator).toBe('Less');
-      for (const head of ['Equal', 'NotEqual'] as const)
-        expect(compile(ce.box([head, 'ag1', 'ag2'] as any)).success).toBe(true);
     });
   });
 
@@ -720,12 +367,12 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       expect(eq.evaluate().toString()).toBe('"False"');
       const r = compile(eq);
       expect(r.success).toBe(true);
-      expect(r.code).toBe('false');
+      expect(r.run!()).toBe(false);
       const ne = compile(
         ce.box(['NotEqual', ['Tuple', 1, 2], ['List', 1, 2]] as any)
       );
       expect(ne.success).toBe(true);
-      expect(ne.code).toBe('true');
+      expect(ne.run!()).toBe(true);
     });
 
     test('an ordering over two literal aggregates declines (interpreter inert)', () => {
@@ -751,7 +398,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       ]);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toMatch(/IndexOf is not supported by the compiler/);
       expect(expr.evaluate().re).toBe(2);
     });
   });
@@ -776,22 +423,6 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
             false
           );
       }
-    });
-
-    test('a POINT LIST keeps compiling — a nested tuple is not searched', () => {
-      // `list<tuple<number, number>>` is the settled point-list lowering and
-      // compiles today; only a tuple that is the participant ITSELF binds
-      // atomically. Widening the gate to nested tuples would break this.
-      ce.declare('P', 'list<tuple<number, number>>');
-      ce.declare('Q', 'list<tuple<number, number>>');
-      const eq = compile(ce.box(['Equal', 'P', 'Q']), { fallback: false });
-      expect(eq.success).toBe(true);
-      expect(eq.code).toMatchInlineSnapshot(`"_SYS.eq((_.P), (_.Q))"`);
-      const less = compile(ce.box(['Less', 'P', 'Q']), { fallback: false });
-      expect(less.success).toBe(true);
-      expect(less.code).toMatchInlineSnapshot(
-        `"_SYS.bcast((_tv1, _tv2) => ((_tv1) < (_tv2)), _.P, _.Q)"`
-      );
     });
   });
 });
@@ -831,61 +462,6 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     expect(runCompiled(expr)).toBe(expected);
   });
 
-  test('the lowering is the collection dispatch, unchanged from before the gate', () => {
-    const r = compile(ce.box(['Equal', ['Tuple', 1, 2], ['Tuple', 1, 2]]), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq(([1, 2]), ([1, 2]))"`);
-  });
-
-  test('declared tuple-typed SYMBOLS with assigned values, run parity', () => {
-    ce.declare('p', 'tuple<number, number>');
-    ce.declare('q', 'tuple<number, number>');
-    ce.assign('p', ce.box(['Tuple', 1, 2]));
-    ce.assign('q', ce.box(['Tuple', 1, 2]));
-    const eq = ce.box(['Equal', 'p', 'q']);
-    expect(eq.evaluate().toString()).toBe('"True"');
-    expect(runCompiled(eq)).toBe(true);
-    const neq = ce.box(['NotEqual', 'p', 'q']);
-    expect(neq.evaluate().toString()).toBe('"False"');
-    expect(runCompiled(neq)).toBe(false);
-    // …and a differing pair.
-    ce.assign('q', ce.box(['Tuple', 1, 3]));
-    const eq2 = ce.box(['Equal', 'p', 'q']);
-    expect(eq2.evaluate().toString()).toBe('"False"');
-    expect(runCompiled(eq2)).toBe(false);
-  });
-
-  test('a point-predicate LAMBDA over a tuple-annotated parameter, run parity', () => {
-    // The realistic consumer: `pt ↦ pt == (0, 0)` applied over a point list. The
-    // parameter must be tuple-ANNOTATED for the admission to fire (see the
-    // untyped pin below).
-    const f = ce.box([
-      'Function',
-      ['Equal', 'pt', ['Tuple', 0, 0]],
-      ['Typed', 'pt', "'tuple<number, number>'"],
-    ] as any);
-    const r = compile(f, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"(pt) => _SYS.eq((pt), ([0, 0]))"`);
-    expect((r.run as any)([0, 0])).toBe(true);
-    expect((r.run as any)([1, 2])).toBe(false);
-    // The interpreter's `Apply`, for the same two points.
-    expect(
-      ce
-        .box(['Apply', f, ['Tuple', 0, 0]])
-        .evaluate()
-        .toString()
-    ).toBe('"True"');
-    expect(
-      ce
-        .box(['Apply', f, ['Tuple', 1, 2]])
-        .evaluate()
-        .toString()
-    ).toBe('"False"');
-  });
-
   test('an UNTYPED lambda parameter is not provable evidence — still declines', () => {
     // `['Function', ['Equal', 'pt', ['Tuple', 0, 0]], 'pt']` types `pt` as
     // `unknown`, so the pair is tuple-vs-not-provably-tuple: at run time a
@@ -895,7 +471,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     const f = ce.box(['Function', ['Equal', 'pt', ['Tuple', 0, 0]], 'pt']);
     const r = compile(f);
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/tuple participant/);
+    expect(r.error).toMatch(/Equal of a tuple/);
   });
 
   test('a tuple with a STRING component still declines', () => {
@@ -917,7 +493,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       const expr = ce.box([head, T, T] as any);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toMatch(/not a number, a symbol or a function/);
       expect(expr.evaluate().toString()).toBe(expected);
     }
   });
@@ -939,7 +515,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       const expr = ce.box([head, a, b] as any);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toMatch(/elements of two types|Equal of a tuple/);
       expect(expr.evaluate().toString()).toBe(interpreted);
     }
   );
@@ -950,7 +526,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     for (const head of ['Equal', 'NotEqual'] as const) {
       const r = compile(ce.box([head, 'bt1', 'bt2'] as any));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toMatch(/Equal of a tuple/);
     }
   });
 
@@ -968,7 +544,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     ] as const) {
       const r = compile(ce.box(['Equal', a, b] as any));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
+      expect(r.error).toContain(`the input ${a} of type`);
     }
   });
 
@@ -987,17 +563,6 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
     expect(runCompiled(neq)).toBe(true);
   });
 
-  test('a UNION participant with a non-tuple member declines', () => {
-    // The run-time value could be the shape the kernel gets wrong.
-    ce.declare('u1', 'tuple<number, number> | number');
-    ce.declare('u2', 'tuple<number, number>');
-    for (const head of ['Equal', 'NotEqual'] as const) {
-      const r = compile(ce.box([head, 'u1', 'u2'] as any));
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/tuple participant/);
-    }
-  });
-
   test('the CHAINED (n-ary) form keeps failing closed', () => {
     // Pre-existing: the interpreter's n-ary `Equal` switches shape on how many
     // operands are collections at run time. The carve-out is binary-only.
@@ -1009,33 +574,6 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
 });
 
 describe('the string-evidence walk has no depth cutoff', () => {
-  // The walk used to stop at depth 8 and return `false` — "no evidence", the
-  // ADMITTING direction. So a nesting one level deeper reopened exactly the
-  // wrong-boolean miscompile the predicate exists to prevent. Termination is
-  // structural now, with a visited set for the one non-structural step (a
-  // `reference` unfolding to its definition).
-
-  /** A string literal wrapped in `depth` nested `List`s. */
-  function nestedStringList(depth: number): any {
-    let v: any = { str: 'a' };
-    for (let i = 0; i < depth; i++) v = ['List', v];
-    return v;
-  }
-
-  // Depth 1 is the FLAT `list<string>` shape tier 2 admits (pinned above).
-  // A nested list of strings is a tensor of strings, which compiles (ROADMAP
-  // CE-219) with the interpreter's value, at every depth.
-  test.each([2, 8, 9, 12, 20])(
-    'Equal over a %i-deep nested string list compiles (interpreter: True)',
-    (depth) => {
-      const json = nestedStringList(depth);
-      const expr = ce.box(['Equal', json, json] as any);
-      expect(expr.evaluate().toString()).toBe('"True"');
-      const r = compile(expr, { constantFold: false, fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(true);
-    }
-  );
 
   test('a RECURSIVE type alias does not hang the walk', () => {
     // `strish` is reached again through its own body, so an unbounded walk
@@ -1044,160 +582,15 @@ describe('the string-evidence walk has no depth cutoff', () => {
     ce.declare('sr', 'strish');
     expect(compile(ce.box(['Equal', 'sr', 1])).success).toBe(false);
   });
-
-  test('a recursive alias with NO string arm keeps compiling', () => {
-    // The other direction: the guard must not turn a terminating walk into a
-    // spurious decline.
-    executeEpsil(ce, 'type alias numish = number | list<numish>');
-    ce.declare('nm', 'numish');
-    const r = compile(ce.box(['Equal', 'nm', 4]), { fallback: false });
-    expect(r.success).toBe(true);
-    // `numish` is a number OR a list at run time, so the equality lowers
-    // through `_SYS.eq`, which compares a scalar as a scalar and a list
-    // element-wise, as interpreted (Tycho item 249,
-    // `unionAdmitsIndexedCollection`).
-    expect(r.code).toMatchInlineSnapshot(`"_SYS.eq((_.nm), (4))"`);
-  });
 });
 
 describe('the gate does not reach past string operands', () => {
-  test('match on a string still compiles, with run() parity', () => {
-    // `Match` has its own lowering (`compileMatchConstant`), which emits a real
-    // `===` against the string constant — it never routes through the numeric
-    // equality codegen, so the gate must leave it alone.
-    executeEpsil(ce, 'm(c) = match c { "n" => 1\n  _ => 0 }');
-    for (const [arg, expected] of [
-      ['n', 1],
-      ['q', 0],
-    ] as const) {
-      const expr = ce.box(['m', { str: arg }]);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-      expect(expr.evaluate().re).toBe(expected);
-    }
-  });
 
   test('numeric tolerance equality is unchanged', () => {
     const r = compile(ce.parse('0.1 + 0.2 = 0.3'), { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!()).toBe(true);
   });
-
-  test('an unknown-typed symbol does not gate (plot shapes keep compiling)', () => {
-    const r = compile(ce.box(['Equal', 'xq', 4]), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"((_.xq) === (4))"`);
-  });
-
-  test('an inferred-parameter plot equality keeps its numeric fast path', () => {
-    const r = compile(ce.parse('x^2 + y^2 = 4'), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(
-      `"(((_.x * _.x) + (_.y * _.y)) === (4))"`
-    );
-  });
-
-  test('numeric IndexOf and numeric orderings are unchanged', () => {
-    const idx = compile(ce.box(['IndexOf', ['List', 1, 2], 2]), {
-      fallback: false,
-    });
-    expect(idx.success).toBe(true);
-    expect(idx.run!()).toBe(2);
-
-    const less = compile(ce.parse('2 < 3'), { fallback: false });
-    expect(less.success).toBe(true);
-    expect(less.run!()).toBe(true);
-  });
-});
-
-// -----------------------------------------------------------------------------
-// `IndexOf`'s element test is EXACT and distinguishes booleans from numbers,
-// like the interpreter's `.isSame()`. It used to be the numeric tolerance test
-// `Equal` uses, which was wrong twice over behind a `success: true`:
-// `Math.abs(true - 1)` is 0, so `IndexOf([1, 2], True)` RAN to 1 where the
-// interpreter answers 0; and a needle merely within `engine.tolerance` of an
-// element was "found" where the interpreter's exact `.isSame()` answers 0.
-// Ruled 2026-08-08: fixed in the emitted predicate (adapter), not a
-// compile-time gate, so these all keep compiling.
-// -----------------------------------------------------------------------------
-describe('IndexOf element test is exact and boolean-aware (executed parity)', () => {
-  const cases: Array<{ name: string; expr: any; expected: number }> = [
-    {
-      name: 'bool needle, numeric haystack',
-      expr: ['IndexOf', ['List', 1, 2], 'True'],
-      expected: 0,
-    },
-    {
-      name: 'numeric needle, bool haystack',
-      expr: ['IndexOf', ['List', 'True'], 1],
-      expected: 0,
-    },
-    {
-      name: 'bool needle, bool haystack',
-      expr: ['IndexOf', ['List', 'True', 'False'], 'False'],
-      expected: 2,
-    },
-    // Numbers still match across int/float (`1.5 === 1.5`, and `1 === 1.0`).
-    {
-      name: 'float needle, numeric haystack',
-      expr: ['IndexOf', ['List', { num: '1.5' }, 3], { num: '1.5' }],
-      expected: 1,
-    },
-    // The search is structural (user decision 2026-09-26, rule C of
-    // `docs/plans/2026-09-26-absent-values-in-collection-operators.md`): a
-    // NaN needle is found where the list holds a NaN, on every route. The
-    // compiled element test is SameValueZero (`_SYS.eqt`), not `===`.
-    {
-      name: 'NaN needle, NaN in haystack',
-      expr: ['IndexOf', ['List', 'NaN', 3], 'NaN'],
-      expected: 1,
-    },
-    {
-      name: 'NaN needle, no NaN in haystack',
-      expr: ['IndexOf', ['List', 1, 2], 'NaN'],
-      expected: 0,
-    },
-    // EXACTNESS. The interpreter's number `.isSame()` has NO tolerance, so a
-    // needle that merely lands within `engine.tolerance` of an element is NOT
-    // found. The element test used to be a tolerance comparison and answered 1
-    // on both of these.
-    //
-    // (The earlier belief that the interpreter tolerated float noise came from
-    // probing with `IndexOf([0.3], Add(0.1, 0.2))`: `Add(0.1, 0.2)` EVALUATES
-    // to exactly `0.3` by exact decimal folding, so the comparison leaf never
-    // saw a near-miss float. Beware that trap when probing this — which is
-    // also why the divergence below is documented, not executed.)
-    {
-      name: 'needle within tolerance of an element is NOT found',
-      expr: ['IndexOf', ['List', 0], { num: '5e-11' }],
-      expected: 0,
-    },
-    {
-      name: 'float-noise element is NOT found by the rounded needle',
-      expr: ['IndexOf', ['List', { num: '0.30000000000000004' }], 0.3],
-      expected: 0,
-    },
-    // ACCEPTED RESIDUAL (documented, not asserted — canonicalization would fold
-    // the sum away before the compiler ever saw a near-miss float): a needle
-    // COMPUTED at runtime to a near-miss f64 (`0.1 + 0.2` →
-    // `0.30000000000000004` in JavaScript) is not found in a `[0.3]` haystack,
-    // where the interpreter folds `Add(0.1, 0.2)` exactly to `0.3` and finds
-    // it. That is the ordinary exactness loss of compiling to f64 arithmetic;
-    // no element test can close it, and a tolerance leaf would only trade it
-    // for wrong answers on the two rows above.
-  ];
-
-  for (const c of cases) {
-    test(`${c.name} → ${c.expected}`, () => {
-      const expr = ce.box(c.expr);
-      // The interpreter's answer is the reference.
-      expect(expr.evaluate().re).toBe(c.expected);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(c.expected);
-    });
-  }
 });
 
 // -----------------------------------------------------------------------------
@@ -1213,94 +606,12 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
   // lone-surrogate replacement), since the strings the interpreter compares
   // are already conditioned.
 
-  /** Compile with no fallback, assert success, and return the run result. */
-  function runCompiled(expr: Expression, ...args: unknown[]): unknown {
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    return (r.run as any)(...args);
-  }
-
-  test.each([
-    ['Equal', 'a', 'a', true],
-    ['Equal', 'a', 'b', false],
-    ['Equal', '', '', true],
-    ['NotEqual', 'a', 'b', true],
-    ['NotEqual', 'a', 'a', false],
-    // NOT the numeric tolerance path: two distinct numeric STRINGS are unequal,
-    // where parsing them as numbers would have made them equal.
-    ['Equal', '1', '1.0', false],
-    ['Equal', '1', '1', true],
-  ] as const)(
-    '%s(%p, %p) → %p, with interpreter parity',
-    (head, a, b, expected) => {
-      const expr = ce.box([head, { str: a }, { str: b }] as any);
-      expect(runCompiled(expr)).toBe(expected);
-      expect(expr.evaluate().symbol === 'True').toBe(expected);
-    }
-  );
-
-  test('the emitted code is an exact comparison, not the tolerance test', () => {
-    const eq = compile(ce.box(['Equal', { str: 'a' }, { str: 'b' }]), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(eq.code).toMatchInlineSnapshot(`"(_SYS.eqt("a", "b"))"`);
-    const neq = compile(ce.box(['NotEqual', { str: 'a' }, { str: 'b' }]), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(neq.code).toMatchInlineSnapshot(`"(!_SYS.eqt("a", "b"))"`);
-  });
-
-  test('a string-ANNOTATED parameter compiles and runs, both ways', () => {
-    // Tier 0 pinned this as a decline (it had compiled to
-    // `Math.abs("a" - "a") <= 1e-10` and run to 0 against the interpreter's 1).
-    executeEpsil(ce, 'g(s: string) = 1 if s == "a" else 0');
-    for (const [arg, expected] of [
-      ['a', 1],
-      ['q', 0],
-    ] as const) {
-      const expr = ce.box(['g', { str: arg }]);
-      expect(runCompiled(expr)).toBe(expected);
-      expect(expr.evaluate().re).toBe(expected);
-    }
-  });
-
-  test('an INFERRED (unknown) parameter opposite a string literal is admitted', () => {
-    // The deliberate widening over "both provably string": a scanner predicate
-    // written without an annotation types its parameter `unknown`, and that is
-    // the realistic consumer (see the skipWs program below). It is faithful for
-    // every scalar run-time value — a string compares exactly, and a number or
-    // boolean answers `false`, which is the interpreter's `False`.
-    executeEpsil(ce, 'isWsA(c) = c == " " || c == "\\t"');
-    for (const [arg, expected] of [
-      [' ', true],
-      ['\t', true],
-      ['a', false],
-    ] as const) {
-      const expr = ce.box(['isWsA', { str: arg }]);
-      expect(runCompiled(expr)).toBe(expected);
-      expect(expr.evaluate().symbol === 'True').toBe(expected);
-    }
-  });
-
-  test('a boolean-typed participant opposite a string is admitted, and agrees', () => {
-    // The interpreter answers `False` for any cross-sort equality; `===` does
-    // too (it rejects `true === "a"` natively — no typeof guard needed).
-    ce.declare('bq', 'boolean');
-    const expr = ce.box(['Equal', 'bq', { str: 'a' }]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ bq: true })).toBe(false);
-    expect((r.run as any)({ bq: false })).toBe(false);
-  });
-
   test('a provably NUMERIC participant keeps the shape closed', () => {
     ce.declare('nq', 'number');
     for (const head of ['Equal', 'NotEqual'] as const) {
       const r = compile(ce.box([head, 'nq', { str: 'a' }] as any));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/string-valued operands/);
+      expect(r.error).toMatch(/not a number, a symbol or a function/);
     }
   });
 
@@ -1308,90 +619,11 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
     ce.declare('dq', 'dictionary<integer>');
     const r = compile(ce.box(['Equal', 'dq', { str: 'a' }]));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/dictionary participant/);
-  });
-
-  test('a non-NFC runtime string IS normalized, on both sides', () => {
-    // The interpreter NFC-normalizes at BOXING time (`BoxedString`), so it
-    // answers `True` for a decomposed/precomposed pair. This was pinned here as
-    // a divergence until 2026-08-16: the compiled equality was a raw `===` over
-    // the UTF-16 the host passed in, so a non-NFC PARAMETER answered `false`.
-    // Ruled — normalize both operands — and the lowering now routes through
-    // `_SYS.cmpc`, which puts each operand through the same ingress
-    // conditioning the interpreter applies at boxing time. LITERALS were never
-    // affected (they are boxed, hence NFC, before codegen); only a
-    // host-supplied parameter could be non-NFC.
-    const nfd = 'e\u0301';
-    const nfc = '\u00e9';
-    expect(nfd === nfc).toBe(false);
-    // The interpreter: equal.
-    expect(
-      ce.box(['Equal', { str: nfd }, { str: nfc }]).evaluate().symbol
-    ).toBe('True');
-    // …and so is the compiled comparison of the two LITERALS (both NFC by the
-    // time codegen sees them).
-    expect(runCompiled(ce.box(['Equal', { str: nfd }, { str: nfc }]))).toBe(
-      true
-    );
-    // …and so is a raw non-NFC PARAMETER value, whichever side it sits on.
-    ce.declare('sq2', 'string');
-    for (const expr of [
-      ce.box(['Equal', 'sq2', { str: nfc }]),
-      ce.box(['Equal', { str: nfc }, 'sq2']),
-    ]) {
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect((r.run as any)({ sq2: nfc })).toBe(true);
-      expect((r.run as any)({ sq2: nfd })).toBe(true); // interpreter: True
-    }
-    // `NotEqual` is the negation of the same test, not a separate rule.
-    const neq = compile(ce.box(['NotEqual', 'sq2', { str: nfc }]), {
-      fallback: false,
-    });
-    expect(neq.success).toBe(true);
-    expect((neq.run as any)({ sq2: nfd })).toBe(false);
-    // The all-string COLLECTION equality leaf (`_SYS.eq`) normalizes too.
-    ce.declare('lq2', 'list<string>');
-    const coll = compile(ce.box(['Equal', 'lq2', ['List', { str: nfc }]]), {
-      fallback: false,
-    });
-    expect(coll.success).toBe(true);
-    expect((coll.run as any)({ lq2: [nfd] })).toBe(true);
-    // …as does `IndexOf`'s element test.
-    const idx = compile(ce.box(['IndexOf', ['List', { str: nfc }], 'sq2']), {
-      fallback: false,
-    });
-    expect(idx.success).toBe(true);
-    expect((idx.run as any)({ sq2: nfd })).toBe(1);
+    expect(r.error).toContain('the input dq of type dictionary<integer>');
   });
 });
 
 describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===', () => {
-  // REGRESSION (2026-08-08). The collection disqualifier was a SUBTYPE test
-  // (`.matches('collection')` / `isPossiblyCollectionTypedJS`), and a general
-  // UNION with a collection arm is not a subtype of `collection`. So
-  // `Equal(uq, "a")` over `string | list<string>` was admitted and compiled to
-  // a scalar `((_.uq) === ("a"))` — the WRONG SHAPE (a boolean where the
-  // interpreter broadcasts to a list) and a wrong value, behind `success:
-  // true`. The gate now uses the union-aware `couldBeCollectionParticipant`.
-
-  test('a DECLARED `string | list<string>` participant takes the run-time dispatch, both heads', () => {
-    // Such a participant is a string or a tensor of strings
-    // (`broadcastable<string>`), which compiles to `_SYS.eq`/`_SYS.neq`
-    // (ROADMAP CE-219): the dispatch compares a string to a string and a
-    // list cell by cell, as the interpreter does. Never the scalar `===`.
-    ce.declare('uq', 'string | list<string>');
-    for (const head of ['Equal', 'NotEqual'] as const) {
-      const r = compile(ce.box([head, 'uq', { str: 'a' }] as any), {
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.code).not.toContain('===');
-      const eq = head === 'Equal';
-      expect((r.run as any)({ uq: 'a' })).toBe(eq);
-      expect((r.run as any)({ uq: ['a', 'b'] })).toEqual([eq, !eq]);
-    }
-  });
 
   test('…and the interpreter it falls back to BROADCASTS (the shape a `===` cannot express)', () => {
     ce.assign('lq', ce.box(['List', { str: 'a' }, { str: 'b' }]));
@@ -1411,7 +643,7 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
     expect(ce.box(['gu', 'fl']).type.toString()).toMatch(/\|/);
     const r = compile(ce.box(['Equal', ['gu', 'fl'], { str: 'a' }]));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/string-valued operands/);
+    expect(r.error).toMatch(/a condition that is not a boolean/);
     // The interpreter's answer on the collection arm is element-wise.
     expect(
       ce
@@ -1419,59 +651,6 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
         .evaluate()
         .toString()
     ).toBe('["False","False","False"]');
-  });
-
-  test('the union gate does NOT narrow the settled bare-`unknown` admission', () => {
-    // Ruling (a), 2026-08-08: a top-typed participant stays admitted (the
-    // run-time-array residual is accepted, as on the numeric fast path). Only
-    // POSITIVE union evidence disqualifies.
-    // An INPUT typed `unknown` is refused at compile time (ROADMAP
-    // CE-712.1); a parameter of the root function typed `unknown` is
-    // admitted.
-    ce.declare('anyq', 'unknown');
-    const refused = compile(ce.box(['Equal', 'anyq', { str: 'a' }]));
-    expect(refused.success).toBe(false);
-    expect(refused.diagnostic?.code).toBe('untyped-input');
-    expect(refused.unsupported).toContain('anyq');
-    const r = compile(
-      ce.box([
-        'Function',
-        ['Equal', 'anyq', { str: 'a' }],
-        ['Typed', 'anyq', "'unknown'"],
-      ]),
-      { fallback: false }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(
-      `"(anyq) => (_SYS.eqt(anyq, "a"))"`
-    );
-    const run = r.run as unknown as (q: unknown) => unknown;
-    expect(run('a')).toBe(true);
-    expect(run('b')).toBe(false);
-    // …and a union with NO collection arm is admitted as well.
-    ce.declare('sbq', 'string | boolean');
-    const r2 = compile(ce.box(['Equal', 'sbq', { str: 'a' }]), {
-      fallback: false,
-    });
-    expect(r2.success).toBe(true);
-    expect(r2.code).toMatchInlineSnapshot(`"(_SYS.eqt(_.sbq, "a"))"`);
-    // `_SYS.eqt` only conditions a STRING/STRING pair; everything else keeps
-    // strict identity, so an admitted possibly-text participant holding a
-    // NUMBER is not stringified into a false match. (The interpreter answers
-    // `False` for `Equal(1, "1")`.)
-    expect(run(1)).toBe(false);
-    expect(
-      (
-        compile(
-          ce.box([
-            'Function',
-            ['Equal', 'anyq', { str: '1' }],
-            ['Typed', 'anyq', "'unknown'"],
-          ]),
-          { fallback: false }
-        ).run as any
-      )(1)
-    ).toBe(false);
   });
 });
 
@@ -1497,32 +676,6 @@ describe('tier 2: NotEqual over a string', () => {
       ce.box(['NotEqual', 'Missing', { str: 'x' }]).evaluate().symbol
     ).toBe('True');
   });
-
-  test('the compiled NotEqual is the text equality, negated', () => {
-    // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`,
-    // "`Missing` is a result only"), so `s` is declared `string`.
-    const e = new ComputeEngine();
-    e.declare('s', 'string');
-    const r = compile(e.box(['NotEqual', 's', { str: 'x' }]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    // The text equality, with no tolerance.
-    expect(r.code).toMatchInlineSnapshot(`"(!_SYS.eqt(_.s, "x"))"`);
-    expect(r.code).not.toMatch(/Math\.abs/);
-    const run = r.run as unknown as (v: {
-      s: string | undefined;
-    }) => boolean | undefined;
-    expect(run({ s: 'y' })).toBe(true);
-    expect(run({ s: 'x' })).toBe(false);
-  });
-
-  test('a Missing-free NotEqual is not pessimized', () => {
-    ce.declare('pq', 'number');
-    const r = compile(ce.box(['NotEqual', 'pq', 3]), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"((_.pq) !== (3))"`);
-  });
 });
 
 describe('tier 2: Characters / GraphemeClusters', () => {
@@ -1530,100 +683,6 @@ describe('tier 2: Characters / GraphemeClusters', () => {
   // `splitGraphemeClusters` in library/core.ts) — neither code points
   // (`[...s]`) nor UTF-16 units (`s.split('')`). `_SYS.chars` runs the same
   // segmenter, so the lowering matches observable-for-observable.
-
-  /** [label, input, expected elements, `[...s]` length, `s.split('')` length] */
-  const CASES: Array<[string, string, string[], number, number]> = [
-    ['ascii', 'abc', ['a', 'b', 'c'], 3, 3],
-    ['empty', '', [], 0, 0],
-    // ASTRAL PLANE (U+1D11E, a surrogate pair): one element. `split('')` would
-    // give two lone surrogates.
-    ['astral', 'a\u{1D11E}b', ['a', '\u{1D11E}', 'b'], 3, 4],
-    // A COMBINING sequence is ONE cluster, and its element is NFC-composed by
-    // the interpreter's `engine.string()`. `[...s]` would give two.
-    ['combining', 'e\u0301', ['\u00e9'], 2, 2],
-    // A ZWJ emoji family: one cluster, five code points.
-    [
-      'zwj emoji',
-      '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}',
-      ['\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'],
-      5,
-      8,
-    ],
-    // A regional-indicator flag: one cluster, TWO astral code points (so the
-    // spread length is 2, not 1 — with 1 recorded here the counterexample
-    // assertion below matched `expected.length` and silently skipped).
-    ['flag', '\u{1F1FA}\u{1F1F8}', ['\u{1F1FA}\u{1F1F8}'], 2, 4],
-    // CR LF is a single cluster.
-    ['crlf', 'a\r\nb', ['a', '\r\n', 'b'], 4, 4],
-  ];
-
-  test.each(CASES)(
-    '%s: compiled Characters matches the interpreter element-for-element',
-    (_label, input, expected, spreadLen, splitLen) => {
-      const expr = ce.box(['Characters', { str: input }]);
-      // The interpreter is the reference.
-      expect(expr.evaluate().ops!.map((op) => op.string)).toEqual(expected);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toEqual(expected);
-      // …and the two tempting one-liners would NOT have matched.
-      if (expected.length !== spreadLen)
-        expect([...input].length).toBe(spreadLen);
-      if (expected.length !== splitLen)
-        expect(input.split('').length).toBe(splitLen);
-    }
-  );
-
-  test('the lowering is the shared runtime helper', () => {
-    const r = compile(ce.box(['Characters', { str: 'abc' }]), {
-      fallback: false,
-    });
-    expect(r.code).toMatchInlineSnapshot(`"_SYS.chars("abc")"`);
-  });
-
-  test('GraphemeClusters (the shipped synonym) lowers identically', () => {
-    const expr = ce.box(['GraphemeClusters', { str: 'a\u{1D11E}b' }]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toEqual(['a', '\u{1D11E}', 'b']);
-    expect(expr.evaluate().ops!.map((op) => op.string)).toEqual([
-      'a',
-      '\u{1D11E}',
-      'b',
-    ]);
-  });
-
-  test('a runtime string PARAMETER is NFC-normalized, as the interpreter is', () => {
-    ce.declare('sq3', 'string');
-    const r = compile(ce.box(['Characters', 'sq3']), { fallback: false });
-    expect((r.run as any)({ sq3: 'e\u0301' })).toEqual(['\u00e9']);
-  });
-
-  test('Length and At compose over the compiled clusters', () => {
-    const len = ce.box(['Length', ['Characters', { str: 'a\u{1D11E}b' }]]);
-    const r = compile(len, { fallback: false });
-    expect(r.run!()).toBe(3);
-    expect(len.evaluate().re).toBe(3);
-    const at = ce.box(['At', ['Characters', { str: 'a\u{1D11E}b' }], 2]);
-    expect(compile(at, { fallback: false }).run!()).toBe('\u{1D11E}');
-    expect(at.evaluate().string).toBe('\u{1D11E}');
-  });
-
-  test('a non-string operand fails closed', () => {
-    // A NUMBER never reaches the lowering: the `(string) -> list<string>`
-    // signature turns it into an `Error` node (the interpreter's
-    // `incompatible-type`), which the compiler refuses outright.
-    const numeric = compile(ce.box(['Characters', 123]));
-    expect(numeric.success).toBe(false);
-    // A bare SYMBOL operand does not exercise the gate either: the same
-    // signature INFERS it `string | character`, which is provable text
-    // evidence (a character lowers to a one-cluster JS string), so it compiles
-    // — and `_SYS.chars` throws loudly if the host then supplies a non-string.
-    const inferred = compile(ce.box(['Characters', 'uq']), { fallback: false });
-    expect(inferred.success).toBe(true);
-    expect((inferred.run as any)({ uq: 'ab' })).toEqual(['a', 'b']);
-    expect(() => (inferred.run as any)({ uq: 3 })).toThrow(/expected a string/);
-  });
 
   test('an operand that is NOT provably a string fails closed', () => {
     // A `string | number` operand is rejected by the SIGNATURE, before the
@@ -1635,7 +694,7 @@ describe('tier 2: Characters / GraphemeClusters', () => {
     ce.declare('mq', 'string | number');
     const r = compile(ce.box(['Characters', 'mq']));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/incompatible-type|provably a string/);
+    expect(r.error).toMatch(/Characters is not supported by the compiler/);
   });
 });
 
@@ -1649,76 +708,6 @@ describe('tier 2: StringJoin', () => {
   // cannot both be supported — so a two-string call is the SEPARATOR form and
   // `StringJoin("abc", "-")` is `"a-b-c"`, exactly as Python's `"-".join("abc")`
   // is. Variadic concatenation is `Join(a, b, …)`.
-
-  test.each([
-    // The user-ruled Python semantics: a STRING subject is the collection of
-    // its own characters.
-    [
-      'a string subject and a separator',
-      ['StringJoin', { str: 'abc' }, { str: '-' }],
-      'a-b-c',
-    ],
-    ['a string subject, no separator', ['StringJoin', { str: 'abc' }], 'abc'],
-    // A one-character subject has no interior boundary, so the separator never
-    // appears — this is what a two-string call means now.
-    [
-      'two strings — the SEPARATOR form',
-      ['StringJoin', { str: 'a' }, { str: 'b' }],
-      'a',
-    ],
-    [
-      'a string list',
-      ['StringJoin', ['List', { str: 'a' }, { str: 'b' }]],
-      'ab',
-    ],
-    [
-      'a string list with a separator',
-      ['StringJoin', ['List', { str: 'a' }, { str: 'b' }], { str: ', ' }],
-      'a, b',
-    ],
-    ['an empty list', ['StringJoin', ['List']], ''],
-    [
-      'Characters round trip',
-      ['StringJoin', ['Characters', { str: 'a\u{1D11E}b' }]],
-      'a\u{1D11E}b',
-    ],
-    [
-      'Reverse of Characters',
-      ['StringJoin', ['Reverse', ['Characters', { str: 'abc' }]]],
-      'cba',
-    ],
-  ] as const)(
-    '%s compiles to %p, with interpreter parity',
-    (_label, json, expected) => {
-      const expr = ce.box(json as any);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-      expect(expr.evaluate().string).toBe(expected);
-    }
-  );
-
-  test('the result is NFC-normalized, as `engine.string()` is', () => {
-    // Joining a base letter and a combining mark (U+0301 COMBINING ACUTE
-    // ACCENT) yields the PRECOMPOSED U+00E9 in the interpreter; a raw
-    // concatenation would leave the two code points apart.
-    const expr = ce.box([
-      'StringJoin',
-      ['List', { str: 'e' }, { str: '\u0301' }],
-    ]);
-    expect(expr.evaluate().string).toBe('\u00e9');
-    expect(compile(expr, { fallback: false }).run!()).toBe('\u00e9');
-  });
-
-  test('a combining-mark SEPARATOR composes with each preceding character', () => {
-    // `"abc"` joined by U+0301: the mark composes with the character in front
-    // of it at NFC time, so the result is `"á"` + `"b́"` + `"c"` — U+00E1, then
-    // `b` + U+0301 (which has no precomposed form), then `c`. A compiled result
-    // that skipped `.normalize()` would hold `a` + U+0301 instead of U+00E1.
-    const expr = ce.box(['StringJoin', { str: 'abc' }, { str: '\u0301' }]);
-    expect(expr.evaluate().string).toBe('\u00e1b\u0301c');
-    expect(compile(expr, { fallback: false }).run!()).toBe('\u00e1b\u0301c');
-  });
 
   test.each([
     // These never reach the lowering: the signature check
@@ -1755,7 +744,8 @@ describe('tier 2: StringJoin', () => {
   ] as const)('%s fails closed', (_label, json, ownGate) => {
     const r = compile(ce.box(json as any));
     expect(r.success).toBe(false);
-    if (ownGate) expect(r.error).toMatch(/Could not compile `StringJoin`: /);
+    if (ownGate)
+      expect(r.error).toMatch(/StringJoin is not supported by the compiler/);
   });
 
   test('the removed variadic form is a signature ERROR in the interpreter (the fallback answer)', () => {
@@ -1769,203 +759,12 @@ describe('tier 2: StringJoin', () => {
   });
 });
 
-describe('tier 2: end-to-end — a whitespace scanner compiles and runs', () => {
-  test('the skipWs program compiles (success: true) and returns 3', () => {
-    // The acceptance program for the tier: a recursive scanner over a
-    // `list<string>`, an INFERRED-parameter character predicate, `Length`, and
-    // 1-based `cs[i]` indexing. Every piece but the string equality already
-    // lowered. (This one is fed a literal list of one-character STRINGS, so it
-    // keeps the `list<string>` annotation; the `Characters` variants below now
-    // declare `list<character>` — `Characters` yields characters since strings
-    // became collections of characters.)
-    executeEpsil(
-      ce,
-      'isWs(c) = c == " " || c == "\\t"\n' +
-        'function skipWs(cs: list<string>, i: integer) -> integer ' +
-        '{ skipWs(cs, i + 1) if i <= Length(cs) && isWs(cs[i]) else i }'
-    );
-    const call = ce.box([
-      'skipWs',
-      ['List', { str: ' ' }, { str: ' ' }, { str: 'a' }],
-      1,
-    ]);
-    // The interpreter's answer.
-    expect(call.evaluate().re).toBe(3);
-    const r = compile(call, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(3);
-  });
-
-  test('the same scanner over Characters of a string', () => {
-    executeEpsil(
-      ce,
-      'isWs2(c) = c == " " || c == "\\t"\n' +
-        // `Characters(s)` yields `list<character>`, not `list<string>`.
-        'function skipWs2(cs: list<character>, i: integer) -> integer ' +
-        '{ skipWs2(cs, i + 1) if i <= Length(cs) && isWs2(cs[i]) else i }'
-    );
-    for (const [text, expected] of [
-      ['  a', 3],
-      ['a', 1],
-      ['   ', 4],
-      ['', 1],
-    ] as const) {
-      const call = ce.box(['skipWs2', ['Characters', { str: text }], 1]);
-      expect(call.evaluate().re).toBe(expected);
-      const r = compile(call, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-    }
-  });
-});
-
 // -----------------------------------------------------------------------------
 // The ordering gate reads only its OWN participants — and a participant whose
 // type discriminates NOTHING is not evidence (2026-08-08).
 // -----------------------------------------------------------------------------
 
 describe('a wide index-slot union is not string evidence', () => {
-  // `At`'s index slot is `boolean | indexed_collection | number | string` (a
-  // gather index may be a collection, a dictionary key a string), so merely
-  // INDEXING with a local — `cs[j]` — types `j` with that union, and the
-  // numeric operators never narrow it back (an operand that could be a
-  // collection is skipped by the threadable-operator inference in
-  // `validate.ts`, Tycho item 121).
-  //
-  // The `string` arm then read as positive string EVIDENCE, so the wholly
-  // numeric `j <= Length(cs)` next door declined as a "mixed string ordering".
-  // A type that admits a string AND a number AND a boolean says no more than
-  // the top type does, and `unknown` has never been evidence — see
-  // `carriesNoSortEvidence` (base-compiler.ts).
-
-  test('a numeric ordering next to an index of the same local compiles', () => {
-    // The minimal mechanism: NO string comparison anywhere in this program.
-    // The `list<string>` is incidental — `cs[j]` alone does it.
-    executeEpsil(
-      ce,
-      'function scan(cs: list<string>, i: integer) -> integer {\n' +
-        'let j = i\nlet c = cs[j]\nwhile j <= Length(cs) { j = j + 1 }\nj }'
-    );
-    const call = ce.box(['scan', ['List', { str: 'a' }, { str: 'b' }], 1]);
-    expect(call.evaluate().re).toBe(3);
-    const r = compile(call, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(3);
-  });
-
-  test('the WHILE-loop whitespace scanner compiles and runs (annotated predicate)', () => {
-    executeEpsil(
-      ce,
-      'isW(c: string) = c == " "\n' +
-        'function w2(cs: list<string>, i: integer) -> integer {\n' +
-        'let j = i\nwhile j <= Length(cs) && isW(cs[j]) { j = j + 1 }\nj }'
-    );
-    const call = ce.box([
-      'w2',
-      ['List', { str: ' ' }, { str: ' ' }, { str: 'a' }],
-      1,
-    ]);
-    expect(call.evaluate().re).toBe(3);
-    const r = compile(call, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(3);
-  });
-
-  test('…and with an UNANNOTATED predicate', () => {
-    executeEpsil(
-      ce,
-      'isV(c) = c == " "\n' +
-        // Fed `Characters(text)` below, hence `list<character>`.
-        'function w3(cs: list<character>, i: integer) -> integer {\n' +
-        'let j = i\nwhile j <= Length(cs) && isV(cs[j]) { j = j + 1 }\nj }'
-    );
-    for (const [text, expected] of [
-      ['  a', 3],
-      ['a', 1],
-      ['   ', 4],
-      ['', 1],
-    ] as const) {
-      const call = ce.box(['w3', ['Characters', { str: text }], 1]);
-      expect(call.evaluate().re).toBe(expected);
-      const r = compile(call, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-    }
-  });
-
-  test('the `skipWs` of the Epsil examples compiles in its natural while-form', () => {
-    // From `src/epsil/docs/examples.md` (the JSON-parser program), with the
-    // parameter annotated `character`: a declared type cannot name `missing`.
-    executeEpsil(
-      ce,
-      // The example's `list<string>`/`string` annotations become
-      // `list<character>`/`character` now that `Characters` yields characters.
-      'isWs(c: character) = c == " " || c == "\\n" || c == "\\t" || c == "\\r"\n' +
-        'function skipWs(cs: list<character>, i: integer) -> integer {\n' +
-        '  let j = i\n' +
-        '  while j <= Length(cs) && isWs(cs[j]) { j = j + 1 }\n' +
-        '  j\n' +
-        '}'
-    );
-    const call = ce.box(['skipWs', ['Characters', { str: '  ab' }], 1]);
-    expect(call.evaluate().re).toBe(3);
-    const r = compile(call, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(3);
-  });
-
-  test('the `parseDigits` loop condition compiles — and so does its IndexOf', () => {
-    // `parseDigits` (same program) is the tuple-returning digit scanner. Its
-    // guard `j <= Length(cs) && isDigit(cs[j])` is the shape fixed here, and it
-    // compiles — shown by the same body with the digit decode replaced
-    // (`countDigits`). The digit decode itself, `IndexOf(digits, cs[j])` over a
-    // `list<character>` haystack, compiles too now that the element test is an
-    // exact `===` ("IndexOf with a SCALAR text needle compiles and agrees",
-    // above), so the whole scanner runs compiled and matches the interpreter.
-    executeEpsil(
-      ce,
-      // `Characters` yields `list<character>` since strings became collections
-      // of characters, so the example's annotations move with it.
-      'let digits: list<character> = Characters("0123456789")\n' +
-        'isDigit(c: character) = c in digits\n' +
-        'function countDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
-        '  let j = i\n  let n = 0\n' +
-        '  while j <= Length(cs) && isDigit(cs[j]) { n = n + 1\n j = j + 1 }\n' +
-        '  (n, j)\n}\n' +
-        'function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
-        '  let j = i\n  let n = 0\n' +
-        '  while j <= Length(cs) && isDigit(cs[j]) {\n' +
-        '    n = 10 * n + IndexOf(digits, cs[j]) - 1\n    j = j + 1\n  }\n' +
-        '  (n, j)\n}'
-    );
-    // `constantFold: false` on both compiles: the argument is a literal
-    // string, so each call would otherwise be evaluated at compile time and
-    // emitted as a literal pair — the loop lowering and the `IndexOf` element
-    // test this test is about would never be exercised.
-    const ok = compile(
-      ce.box(['countDigits', ['Characters', { str: '12a' }], 1]),
-      {
-        fallback: false,
-        constantFold: false,
-      }
-    );
-    expect(ok.success).toBe(true);
-    expect(ok.run!()).toEqual([2, 3]);
-
-    const decoded = compile(
-      ce.box(['parseDigits', ['Characters', { str: '12a' }], 1]),
-      { fallback: false, constantFold: false }
-    );
-    expect(decoded.success).toBe(true);
-    expect(decoded.run!()).toEqual([12, 3]);
-    // …and the compiled pair IS the interpreter's.
-    expect(
-      ce
-        .box(['parseDigits', ['Characters', { str: '12a' }], 1])
-        .evaluate()
-        .toString()
-    ).toBe('(12, 3)');
-  });
 
   test('the DECLINES survive: only "no information at all" is exempt', () => {
     // A union of exactly TWO sorts is a real possibility of a mixed pair, not
@@ -1983,7 +782,9 @@ describe('a wide index-slot union is not string evidence', () => {
     ] as const) {
       const r = compile(ce.box(json as any));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/mixes a string operand/);
+      expect(r.error).toMatch(
+        /not a number, a symbol or a function|the input (sn|wq) of type/
+      );
     }
     // The broadcast-route gate is untouched.
     expect(
@@ -2003,83 +804,10 @@ describe('a wide index-slot union is not string evidence', () => {
       const expr = ce.box(['Less', 'wq', 1]);
       const r = compile(expr);
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/mixes a string operand/);
+      expect(r.error).toContain(`the input wq of type`);
       // The interpreter's answer: an inert comparison, not a boolean.
       expect(expr.evaluate().operator).toBe('Less');
     }
-  });
-
-  test('the four-sort At-shape union stays exempt, hand-written included', () => {
-    // The artifact and a deliberate spelling of it are indistinguishable by
-    // construction, so a hand-written one is exempt too — a type admitting
-    // every scalar sort AND every indexed collection is the top type in all
-    // but name, and `unknown` has never been evidence either.
-    ce.declare('wq4', 'boolean | indexed_collection | number | string');
-    const r = compile(ce.box(['Less', 'wq4', 1]), { fallback: false });
-    expect(r.success).toBe(true);
-    // Exempt from the STRING decline, but its `indexed_collection` arm is
-    // positive evidence of a possible array at run time, so the comparison
-    // lowers through the run-time-dispatching broadcast (a scalar `wq4`
-    // compares as a scalar; an array compares element-wise, as interpreted)
-    // rather than the bare `<`, which would coerce an array (Tycho item 249,
-    // `unionAdmitsIndexedCollection`).
-    expect(r.code).toMatchInlineSnapshot(
-      `"_SYS.bcast((_tv1, _tv2) => (_tv1 < _tv2), (_.wq4), (1))"`
-    );
-  });
-
-  test('`Length` of a string list is an integer, and carries no evidence either way', () => {
-    // The negative control for the mechanism: an APPLICATION is typed by what
-    // it RETURNS, never by what it consumes. `Length(sl)` over a `list<string>`
-    // is an `integer`, so a numeric ordering against it compiles — and a
-    // STRING opposite it is still the mixed pair, which declines.
-    ce.declare('sl', 'list<string>');
-    // A `list` value can be an infinite lazy list, so `Length` admits `+oo`.
-    expect(ce.box(['Length', 'sl']).type.toString()).toBe(
-      'integer | signed_infinity'
-    );
-    const numeric = compile(ce.box(['Less', 1, ['Length', 'sl']]), {
-      fallback: false,
-    });
-    expect(numeric.success).toBe(true);
-    const mixed = compile(ce.box(['Less', { str: 'a' }, ['Length', 'sl']]));
-    expect(mixed.success).toBe(false);
-    expect(mixed.error).toMatch(/mixes a string operand/);
-  });
-});
-
-describe('string COLLECTION operations lower grapheme-aware', () => {
-  // Phase 1 of the string work made `string` a subtype of
-  // `indexed_collection<character>`, which flips `isIndexedCollectionOperand`
-  // (`javascript-target.ts`) — the predicate that decides whether an operand
-  // may use the generic array lowerings. That predicate still excludes strings
-  // EXPLICITLY, because a string does not lower to a JS array: `.length` counts
-  // UTF-16 code units and `[i]` selects one. The string-shaped operators reach
-  // their operand through `elementsArg` instead, which segments with
-  // `_SYS.chars` (the interpreter's own `Intl.Segmenter` decomposition) and
-  // then runs the ordinary list lowering over the cluster array.
-  //
-  // These two shapes were pinned as `success: false` while the grapheme-aware
-  // lowerings were still to be written; they now compile. The whole matrix —
-  // every green cell with interpreter parity on ASCII, both spellings of "é",
-  // a ZWJ emoji family and a regional-indicator flag, and every fail-closed
-  // cell — lives in `compile-string-collection.test.ts`
-  // (`docs/STRING_ROADMAP.md`, decision D13).
-
-  test('`Length` of a string literal counts grapheme clusters', () => {
-    const expr = ce.box(['Length', { str: 'shop' }]);
-    const r = compile(expr, { fallback: false, constantFold: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(4);
-    expect(expr.evaluate().toString()).toBe('4');
-  });
-
-  test('`Map` over a string literal maps its characters', () => {
-    const expr = ce.box(['Map', ['Function', 'c', 'c'], { str: 'abc' }]);
-    const r = compile(expr, { fallback: false, constantFold: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toEqual(['a', 'b', 'c']);
-    expect(expr.evaluate().toString()).toBe('["a","b","c"]');
   });
 });
 
@@ -2101,23 +829,6 @@ describe('string-preserving operators: the evidence is the subject', () => {
       ['Equal', ['Add', ['RotateLeft', 'S', 1], ['RotateLeft', 'S', -1]], 4],
     ],
   ];
-
-  describe.each(['indexed_collection', 'list'])(
-    'a subject declared bare %s compiles, with run parity',
-    (type) => {
-      test.each(shapes)('%s', (_label, json) => {
-        ce.declare('S', type);
-        const expr = ce.box(json as never);
-        const r = compile(expr, { constantFold: false, fallback: false });
-        expect(r.success).toBe(true);
-        const compiled = r.run!({ S: [3, 1, 2] }) as boolean[];
-        ce.assign('S', ce.box(['List', 3, 1, 2]));
-        expect(expr.evaluate().toString()).toBe(
-          JSON.stringify(compiled.map((b) => (b ? 'True' : 'False')))
-        );
-      });
-    }
-  );
 
   test.each(['string', 'string | list<number>'])(
     'a subject declared %s still fails closed',

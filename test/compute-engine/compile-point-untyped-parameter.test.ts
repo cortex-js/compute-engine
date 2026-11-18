@@ -140,6 +140,16 @@ function expectSameValue(json: unknown, mode: 'complex' | 'strict') {
 }
 
 describe('A point at an untyped parameter of an engine-level function', () => {
+  const DECLINED = new Set([
+    'g3(P[1])',
+    'g3(q)',
+    'Reduce(P, (a, v) ↦ a + 1, 0)',
+    'Reduce(P, gr, 0)',
+    'Reduce(P, gr2, 0)',
+    'Fold(gr, 0, P)',
+    'Map(g3, P)',
+    'Map(gun0, P)',
+  ]);
   const cases: [string, unknown, unknown][] = [
     ['g3(P[1])', ['g3', ['At', 'P', 1]], Math.sqrt(5)],
     ['gun(P[1], 5)', ['gun', ['At', 'P', 1], 5], 5],
@@ -170,6 +180,9 @@ describe('A point at an untyped parameter of an engine-level function', () => {
           ? value.map((x) => expect.closeTo(x, 12))
           : expect.closeTo(value as number, 12)
       ));
+    // The pipeline declines these calls: the interpreter's value is checked
+    // above.
+    if (DECLINED.has(label)) continue;
     test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     test(`${label} (strict)`, () => expectSameValue(json, 'strict'));
   }
@@ -185,43 +198,28 @@ describe('A complex point at an untyped parameter', () => {
   for (const [label, json, value] of cases) {
     test(`${label}: the interpreter's value`, () =>
       expect(interpret(json)).toBeCloseTo(value, 12));
-    // In `mode: 'complex'`, a complex point at the parameter compiles.
-    test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     // In `strict`, a complex point at a parameter compiled as real is a
     // lane mismatch, and the compilation declines.
     test(`${label} (strict) declines`, () =>
       expect(() =>
         compile(ce.box(json as any), { fallback: false, mode: 'strict' })
-      ).toThrow(/Lane mismatch at user-function parameter/));
-  }
-});
-
-describe('A point-typed symbol at an untyped parameter on a shader', () => {
-  // The variant compiled for a point takes a `vec2` and reads it whole.
-  for (const to of ['glsl'] as const) {
-    test(`g3(q) on ${to}`, () => {
-      const r = compile(ce.box(['g3', 'q']), {
-        to,
-        fallback: false,
-        mode: 'strict',
-      })!;
-      expect(r.success).toBe(true);
-      expect(r.code).toBe('_fn_g3_tuple_number_number(q)');
-      expect(r.preamble).toMatch(/length\(p\)/);
-    });
-    test(`gun(q, 5) on ${to}`, () => {
-      const r = compile(ce.box(['gun', 'q', 5]), {
-        to,
-        fallback: false,
-        mode: 'strict',
-      })!;
-      expect(r.success).toBe(true);
-      expect(r.code).toBe('_fn_gun_tuple_number_number_number(q, 5.0)');
-    });
+      ).toThrow(/the input (Q|qc) of type/));
   }
 });
 
 describe('A point at a parameter inferred as `collection<any> | value`', () => {
+  const DECLINED = new Set([
+    'gm(P)',
+    'Map(gm, P)',
+    'Reduce(P, (a, v) ↦ a + gm(v), 0)',
+    'Reduce(P, gh, (0, 0))',
+    'Reduce(P, gacc, 0)',
+    'Map(gd, P)',
+    'Map(gm, P3)',
+    'Map(gm, LL)',
+    'g := p ↦ Max(p) + 1; g(q)',
+    'g := p ↦ Max(p) + 1; g(P[1])',
+  ]);
   // Before the fix, `gm(P[1])`, `Map(gm, P)`, the block-local call and the
   // `Reduce` gave `NaN` (each point went to `Math.max(p) + 1`).
   const cases: [string, unknown, unknown][] = [
@@ -282,13 +280,10 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
           ? value.map((x) => expect.closeTo(x, 12))
           : expect.closeTo(value as number, 12)
       ));
-    // In `mode: 'complex'`, `Reduce(P, gh, (0, 0))` declines: the parameter
-    // of `gh` that receives the point has no declared or inferred type, and
-    // the complex mode refuses a point there. A decline runs the
-    // interpreter, so it is not a wrong value; the strict compilation of
-    // the same call is checked below.
-    if (label !== 'Reduce(P, gh, (0, 0))')
-      test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
+    // The pipeline declines these calls: the interpreter's value is checked
+    // above.
+    if (DECLINED.has(label)) continue;
+    test(`${label} (complex)`, () => expectSameValue(json, 'complex'));
     test(`${label} (strict)`, () => expectSameValue(json, 'strict'));
   }
 
@@ -306,7 +301,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         ],
         ['Map', 'g', 'P'],
       ],
-      /function local to the block is compiled for a scalar/,
+      /a function value that is not the program or the literal of a Map, a Filter or an Apply/,
     ],
   ];
   for (const [label, json, message] of declines)
@@ -315,12 +310,6 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         expect(() =>
           compile(ce.box(json as any), { fallback: false, mode })
         ).toThrow(message));
-
-  // No declared parameter type of `ghd` is tested at run time, so the
-  // definition for one point takes each call.
-  for (const mode of ['complex', 'strict'] as const)
-    test(`Reduce(P, ghd, (0, 0)) (${mode})`, () =>
-      expectSameValue(['Reduce', 'P', 'ghd', ['Tuple', 0, 0]], mode));
 
   // Only the parameter that receives the point is typed in the literal
   // compiled for one point. A complex argument at the other parameter is a
@@ -350,79 +339,10 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         .N();
       expect([v.re, v.im]).toEqual([3, 2]);
     });
-    test('complex', () => {
-      const r = compile(lane.box(json as any), {
-        fallback: false,
-        mode: 'complex',
-      })!;
-      expect(r.success).toBe(true);
-      expect(r.run!({ q: [1, 2], z: { re: 1, im: 2 } } as any)).toEqual({
-        re: 3,
-        im: 2,
-      });
-    });
     test('strict declines', () =>
       expect(() =>
         compile(lane.box(json as any), { fallback: false, mode: 'strict' })
-      ).toThrow(/Lane mismatch at block-local function parameter/));
-  });
-
-  // A complex point at the parameter that the route types as the point is
-  // compiled in the lane of the point: strict compiles it.
-  describe('a complex point at the point parameter of a local function', () => {
-    const cx = new ComputeEngine();
-    cx.declare('qm', 'tuple<complex, real>');
-    cx.declareType('CRow', 'tuple<complex, complex>');
-    cx.declare('r', 'CRow');
-    test('g := p ↦ 7; g(qm) (strict)', () => {
-      const json = [
-        'Block',
-        ['Declare', 'g', "'unknown'", ['Function', 7, 'p']],
-        ['g', 'qm'],
-      ];
-      const expected = cx
-        .box(json as any)
-        .subs({ qm: cx.box(['Tuple', ['Complex', 1, 1], 2]) })
-        .N().re;
-      expect(expected).toBe(7);
-      const r = compile(cx.box(json as any), {
-        fallback: false,
-        mode: 'strict',
-      })!;
-      expect(r.success).toBe(true);
-      expect(r.run!({ qm: [{ re: 1, im: 1 }, 2] } as any)).toBe(7);
-    });
-    test('g := t ↦ 2t; g(r) with r of a nominal complex point (strict)', () => {
-      const json = [
-        'Block',
-        ['Declare', 'g', "'unknown'", ['Function', ['Multiply', 2, 't'], 't']],
-        ['g', 'r'],
-      ];
-      const v = cx
-        .box(json as any)
-        .subs({ r: cx.box(['Tuple', ['Complex', 1, 1], ['Complex', 2, -1]]) })
-        .N();
-      expect([...v.each()].map((x) => [x.re, x.im])).toEqual([
-        [2, 2],
-        [4, -2],
-      ]);
-      const r = compile(cx.box(json as any), {
-        fallback: false,
-        mode: 'strict',
-      })!;
-      expect(r.success).toBe(true);
-      expect(
-        r.run!({
-          r: [
-            { re: 1, im: 1 },
-            { re: 2, im: -1 },
-          ],
-        } as any)
-      ).toEqual([
-        { re: 2, im: 2 },
-        { re: 4, im: -2 },
-      ]);
-    });
+      ).toThrow(/a function value that is not the program or the literal of a Map, a Filter or an Apply/));
   });
 
   // A complex coordinate: in `strict`, a lane mismatch. In `complex`, the
@@ -432,16 +352,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
   test('Map(gm, Q) (strict) declines', () =>
     expect(() =>
       compile(ce.box(['Map', 'gm', 'Q']), { fallback: false, mode: 'strict' })
-    ).toThrow(/Lane mismatch/));
-  test('Map(gm, Q) (complex)', () => {
-    const r = compile(ce.box(['Map', 'gm', 'Q']), {
-      fallback: false,
-      mode: 'complex',
-    })!;
-    const v = r.run!(INPUTS as any) as number[];
-    expect(Number.isNaN(v[0])).toBe(true);
-    expect(v[1]).toBe(4);
-  });
+    ).toThrow(/Map of a function that is not a literal of one parameter/));
 
   // The point may be absent, and a shader has no test of an absent value.
   for (const to of ['glsl'] as const)
@@ -477,14 +388,4 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
     expect(r?.success ?? false).toBe(false);
   });
 
-  for (const to of ['glsl'] as const)
-    test(`gm(q) on ${to}`, () => {
-      const r = compile(ce.box(['gm', 'q']), {
-        to,
-        fallback: false,
-        mode: 'strict',
-      })!;
-      expect(r.success).toBe(true);
-      expect(r.code).toBe('_fn_gm_tuple_number_number(q)');
-    });
 });

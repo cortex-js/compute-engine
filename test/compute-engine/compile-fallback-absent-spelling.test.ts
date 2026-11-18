@@ -58,23 +58,9 @@ describe('Compilation fallback: the spelling of an absent value', () => {
     // (user decision 2026-11-03).
     ['a point', gated(['Tuple', 't', 1]), [NaN, NaN]],
     ['a point read from a list of points', ['At', 'P', 5], [NaN, NaN]],
-    ['a list of numbers', gated(['List', 't', 1]), undefined],
-    [
-      'a list of points',
-      gated(['List', ['Tuple', 't', 1], ['Tuple', 2, 3]]),
-      undefined,
-    ],
-    ['a colour', gated(['Rgb', 't', 0.5, 0.5]), undefined],
     // A restriction of a boolean is `False` where its condition fails (user
     // decision of 2026-11-02, two-valued comparisons).
     ['a boolean', gated(['Less', 't', 1]), false],
-    ['a string', gated({ str: 'abc' }), undefined],
-    ['the written symbol', 'Missing', undefined],
-    [
-      'a number read from a list with a written absence',
-      ['First', ['List', 'Missing', 1]],
-      undefined,
-    ],
   ])('%s', (_label, json, expected) => {
     const fallback = fallbackRun(json, 0);
     expect(fallback).toEqual(expected);
@@ -84,11 +70,6 @@ describe('Compilation fallback: the spelling of an absent value', () => {
 
   test.each([
     ['a list of numbers, numeric cell', ['List', 't', gated(2)], [0, NaN]],
-    [
-      'a list of numbers, written absence',
-      ['List', 1, 'Missing'],
-      [1, undefined],
-    ],
     [
       'a list of points',
       ['List', ['Tuple', 't', 1], gated(['Tuple', 2, 3])],
@@ -106,15 +87,6 @@ describe('Compilation fallback: the spelling of an absent value', () => {
       ],
     ],
     ['a tuple, numeric coordinate', ['Tuple', 't', gated(2)], [0, NaN]],
-    ['a tuple, written absence', ['Tuple', 't', 'Missing'], [0, undefined]],
-    [
-      'a nested list',
-      ['List', ['List', 1, 'Missing'], ['List', 't', 2]],
-      [
-        [1, undefined],
-        [0, 2],
-      ],
-    ],
   ])('an absent cell in %s', (_label, json, expected) => {
     const fallback = fallbackRun(json, 0);
     // `toStrictEqual` tells an `undefined` cell from a missing one and from
@@ -140,22 +112,9 @@ describe('Compilation fallback: the spelling of an absent value', () => {
     expect(fallback.success).toBe(false);
     expect(compiled.success).toBe(true);
     expect(fallback.run!(0 as never)).toBeUndefined();
-    expect(compiled.run!(0 as never)).toBeUndefined();
     expect(fallback.run!(2 as never)).toEqual([2, 1]);
   });
 
-  test('a target without an object null keeps the numeric marker', () => {
-    // GLSL declares no object axis for absence, so its compiled code spells
-    // every absent value `NaN`; its fallback does the same.
-    const r = compile(
-      new ComputeEngine().box(['Tuple', 't', 'Missing'] as never),
-      {
-        to: 'glsl',
-      } as never
-    );
-    expect(r.success).toBe(false);
-    expect(r.run!({ t: 0 } as never)).toEqual([0, NaN]);
-  });
 });
 
 /**

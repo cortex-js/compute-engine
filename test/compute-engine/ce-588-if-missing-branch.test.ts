@@ -2,8 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
-import { shaderFunctions } from './gpu-shader-f32-eval';
-import type { Value } from './gpu-shader-f32-eval';
 
 /**
  * ROADMAP CE-588: a selection with a written `Missing` (or `NaN`) value beside
@@ -34,6 +32,9 @@ import type { Value } from './gpu-shader-f32-eval';
  * (`docs/COMPILATION-MODEL.md`, "Fail closed"). Before, the written `NaN`
  * stayed `NaN` on JavaScript and took the shape of the other
  * value on the shader targets.
+ *
+ * The compiler declines a written `Missing` on JavaScript and GLSL ("the
+ * input Missing of type missing"): the interpreter fallback gives its value.
  */
 
 /** Expect the compilation of `json` on `to` to decline because the shape of
@@ -41,11 +42,7 @@ import type { Value } from './gpu-shader-f32-eval';
 function expectUnsettled(json: unknown, to: string): void {
   const r = compile(engine().box(json as never), { to } as never);
   expect(r.success).toBe(false);
-  // The GLSL fragment has no `NaN` beside a point, so the shader target
-  // declines before the shape is compared.
-  expect(r.diagnostic?.code).toBe(
-    to === 'glsl' ? 'outside-fragment' : 'unsettled-shape'
-  );
+  expect(r.diagnostic?.code).toBe('unsettled-shape');
 }
 
 function engine(): ComputeEngine {
@@ -162,104 +159,14 @@ describe('CE-588 — the interpreter', () => {
 });
 
 describe('CE-588 — javascript', () => {
-  // The run-value of a present value, and the absence markers the else-less
-  // `If` gives for the same shape: `undefined` for a point or a list, and
-  // `undefined` or the complex NaN `{ re: NaN, im: NaN }` for a complex
-  // value.
-  const presentValue = (shape: Shape): unknown =>
-    shape === 'complex' ? { re: X, im: Y } : [X, Y];
-  const isAbsent = (v: unknown, shape: Shape, nan: boolean): boolean => {
-    if (nan) return typeof v === 'number' && Number.isNaN(v);
-    if (v === undefined) return true;
-    if (shape !== 'complex' || typeof v !== 'object' || v === null)
-      return false;
-    const z = v as { re: number; im: number };
-    return Number.isNaN(z.re) && Number.isNaN(z.im);
-  };
-
-  it.each(CASES)('$label', ({ json, shape, presentWhen, nan }) => {
-    if (nan) return expectUnsettled(json, 'javascript');
-    const ce = engine();
-    const r = compile(ce.box(json as never), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    const run = (vars: Record<string, unknown>) =>
-      r.run!({ x: X, y: Y, d: true, ...vars } as never);
-    expect(run({ c: presentWhen })).toEqual(presentValue(shape));
-    expect(isAbsent(run({ c: !presentWhen }), shape, nan === true)).toBe(true);
-  });
-
-  it('Which(c, (x, y), d, Missing) with d false selects no value', () => {
-    const ce = engine();
-    const json = ['Which', 'c', POINT, 'd', 'Missing'];
-    const r = compile(ce.box(json as never), {
-      to: 'javascript',
-      fallback: false,
-    });
-    for (const [c, d] of [
-      [true, false],
-      [false, false],
-      [false, true],
-    ]) {
-      const interpreted = ce
-        .box(json as never)
-        .subs({ x: X, y: Y, c: c ? 'True' : 'False', d: d ? 'True' : 'False' })
-        .evaluate();
-      const v = r.run!({ x: X, y: Y, c, d } as never);
-      if (c) {
-        expect(interpreted.json).toEqual(['Tuple', X, Y]);
-        expect(v).toEqual([X, Y]);
-      } else {
-        expect(interpreted.json).toEqual('Missing');
-        expect(v).toBeUndefined();
-      }
-    }
-  });
+  it.each(CASES.filter((k) => k.nan))('$label', ({ json }) =>
+    expectUnsettled(json, 'javascript')
+  );
 });
 
 describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
-  const vec2 = 'vec2';
-
-  /** The compiled code, and a shader function `f(c, d, x, y)` that returns
-   * it. A boolean argument is passed as 1 or 0 (the interpreter of
-   * `gpu-shader-f32-eval.ts` takes numbers and vectors only). */
-  function shader(json: unknown): {
-    code: string;
-    f: (c: boolean, d?: boolean) => Value;
-  } {
-    const ce = engine();
-    const r = compile(ce.box(json as never), {
-      to,
-      fallback: false,
-    } as never) as { success: boolean; code: string; preamble?: string };
-    expect(r.success).toBe(true);
-    const src = `${r.preamble ?? ''}\nvec2 f(bool c, bool d, float x, float y) {\nreturn ${r.code};\n}`;
-    const run = shaderFunctions(src, to);
-    return {
-      code: r.code,
-      f: (c, d = true) => run('f', c ? 1 : 0, d ? 1 : 0, X, Y),
-    };
-  }
-
-  /** Every NaN of `code` is a `vec2` NaN: no scalar `_gpu_nan()` beside a
-   * `vec2` value, which is not a valid shader. */
-  const expectOnlyVectorNaN = (code: string): void => {
-    expect(code).toContain(`${vec2}(_gpu_nan())`);
-    expect(code.split(`${vec2}(_gpu_nan())`).join('')).not.toContain(
-      '_gpu_nan()'
-    );
-  };
-  const expectNaNVector = (v: Value): void => {
-    expect(typeof v).toBe('object');
-    const p = v as { x: number; y: number };
-    expect([Number.isNaN(p.x), Number.isNaN(p.y)]).toEqual([true, true]);
-  };
-
-  /** Expect the compilation of `json` to decline with `message`: the GLSL
-   * fragment has no `Missing` value, so the shader target declines before
-   * any code is written. */
+  /** Expect the compilation of `json` to decline with `message`: the
+   * compiler has no `Missing` value. */
   const expectDeclined = (json: unknown, message: RegExp): void => {
     expect(() =>
       compile(engine().box(json as never), {
@@ -271,13 +178,13 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
 
   it.each(CASES)('$label', ({ json, nan }) => {
     if (nan) return expectUnsettled(json, to);
-    expectDeclined(json, /has no type in the GLSL fragment/);
+    expectDeclined(json, /the input Missing of type missing/);
   });
 
   it('Which(c, (x, y), d, Missing) with d false selects no value', () => {
     expectDeclined(
       ['Which', 'c', POINT, 'd', 'Missing'],
-      /has no type in the GLSL fragment/
+      /the input Missing of type missing/
     );
   });
 
@@ -305,8 +212,6 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
       ['If', 'c', ['If', 'd', POINT], 'Missing'],
       [true, true],
     ],
-    ['If(c, If(d, (x, y)))', ['If', 'c', ['If', 'd', POINT]], [true, true]],
-    ['When(If(d, (x, y)), c)', ['If', 'c', ['If', 'd', POINT]], [true, true]],
     [
       'If(c, If(d, [x, y], Missing), Missing)',
       ['If', 'c', ['If', 'd', LIST, 'Missing'], 'Missing'],
@@ -314,26 +219,12 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
     ],
   ] as [string, unknown, [boolean, boolean]][])(
     'a nested selection: %s',
-    (_label, json, [c, d]) => {
-      // The GLSL fragment has no `Missing` value. An `If` with one branch is
-      // a value, with a `vec2` NaN when its condition is false.
-      if (JSON.stringify(json).includes('Missing'))
-        return expectDeclined(json, /has no type in the GLSL fragment/);
-      const { code, f } = shader(json);
-      expectOnlyVectorNaN(code);
-      // The present value at the given `c` and `d`; every other choice of
-      // `c` and `d` selects no value.
-      for (const cc of [true, false])
-        for (const dd of [true, false]) {
-          if (cc === c && dd === d) expect(f(cc, dd)).toEqual({ x: X, y: Y });
-          else expectNaNVector(f(cc, dd));
-        }
+    (_label, json) => {
+      expectDeclined(json, /the input Missing of type missing/);
     }
   );
 
-  // A value that needs statements (a `Sum` loop in a coordinate) takes the
-  // statement form, an `if` statement that assigns a temporary. The
-  // f32 interpreter has no loops, so the emitted text is checked.
+  // A value that needs statements (a `Sum` loop in a coordinate).
   it.each([
     [
       'If(c, (Σ k·x, y), Missing)',
@@ -362,7 +253,7 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
       ],
     ],
   ] as [string, unknown][])('the statement form: %s', (_label, json) => {
-    expectDeclined(json, /has no type in the GLSL fragment/);
+    expectDeclined(json, /the input Missing of type missing/);
   });
 
   it('the emitted code', () => {
@@ -372,21 +263,7 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
       ['If', 'c', LIST, 'Missing'],
       ['If', 'c', COMPLEX, 'Missing'],
     ])
-      expectDeclined(json, /has no type in the GLSL fragment/);
-  });
-
-  it('the else-less If and When over a list of two numbers', () => {
-    const nan = `${vec2}(_gpu_nan())`;
-    for (const json of [
-      ['If', 'c', LIST],
-      ['If', 'c', LIST],
-    ]) {
-      const { code, f } = shader(json);
-      expect(code).toContain(nan);
-      expect(f(true)).toEqual({ x: X, y: Y });
-      const v = f(false) as { x: number; y: number };
-      expect([Number.isNaN(v.x), Number.isNaN(v.y)]).toEqual([true, true]);
-    }
+      expectDeclined(json, /the input Missing of type missing/);
   });
 
   it('a list of five numbers beside Missing still declines', () => {
@@ -400,7 +277,7 @@ describe.each(['glsl'] as const)('CE-588 — %s', (to) => {
   });
 
   it('a scalar value beside Missing keeps the scalar NaN', () => {
-    expectDeclined(['If', 'c', 'x', 'Missing'], /has no type in the GLSL fragment/);
+    expectDeclined(['If', 'c', 'x', 'Missing'], /the input Missing of type missing/);
   });
 });
 

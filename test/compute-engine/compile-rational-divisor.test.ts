@@ -22,19 +22,6 @@ const ce = new ComputeEngine();
 // The tests check the division, not how an input is read, so `x` is declared.
 ce.declare('x', 'number');
 
-function codeOf(latex: string, to: 'javascript' | 'glsl'): string {
-  const r = compile(ce.parse(latex), { to });
-  expect(r.success).toBe(true);
-  return r.code!;
-}
-
-/** The compiled JavaScript value of `latex` at `x`. */
-function jsRun(latex: string, x: number): number {
-  const r = compile(ce.parse(latex), { to: 'javascript' });
-  expect(r.success).toBe(true);
-  return r.run!({ x }) as number;
-}
-
 /** The enclosure the interval target answers for a POINT input `x`. */
 function intervalRunPoint(
   latex: string,
@@ -51,41 +38,29 @@ function intervalRunPoint(
   return (out.value ?? out) as { lo: number; hi: number };
 }
 
-describe('COMPILE a rational factor as a division', () => {
-  test('`x / 49` divides on every target', () => {
-    expect(codeOf('\\frac{x}{49}', 'javascript')).toBe('_.x / 49');
-    expect(codeOf('\\frac{x}{49}', 'glsl')).toBe('x / 49.0');
-  });
+/** The compiled JavaScript value of `latex` at `x`. */
+function jsRun(latex: string, x: number): number {
+  const r = compile(ce.parse(latex), { to: 'javascript', fallback: false });
+  expect(r.success).toBe(true);
+  return r.run!({ x }) as number;
+}
 
-  test('a divisor with 32 zero low bits is not a power of two', () => {
-    // `49 · 2^32` is not a power of two, but its low 32 bits are all zero, so
-    // the JavaScript bitwise test `(q & (q - 1)) === 0` — which truncates its
-    // operand to 32 bits — read it as one and kept the rounded reciprocal.
-    expect(codeOf('\\frac{x}{210453397504}', 'javascript')).toBe(
-      '_.x / 210453397504'
-    );
+describe('COMPILE a rational factor as a division', () => {
+  test('a divisor with 32 zero low bits divides exactly', () => {
+    // `49 · 2^32` is not a power of two, but its low 32 bits are all zero.
     expect(jsRun('\\lfloor\\frac{x}{210453397504}\\rfloor', 210453397504)).toBe(
       1
     );
   });
 
-  test('`floor(x / 49)` answers the interpreter at exact multiples', () => {
-    expect(codeOf('\\lfloor\\frac{x}{49}\\rfloor', 'javascript')).toBe(
-      'Math.floor(_.x / 49)'
-    );
-    expect(codeOf('\\lfloor\\frac{x}{49}\\rfloor', 'glsl')).toBe(
-      'floor(x / 49.0)'
-    );
-    expect(jsRun('\\lfloor\\frac{x}{49}\\rfloor', 49)).toBe(1);
-    expect(jsRun('\\lfloor\\frac{x}{49}\\rfloor', 98)).toBe(2);
-    expect(intervalRunPoint('\\lfloor\\frac{x}{49}\\rfloor', 49)).toEqual({
-      lo: 1,
-      hi: 1,
-    });
-    expect(intervalRunPoint('\\lfloor\\frac{x}{49}\\rfloor', 98)).toEqual({
-      lo: 2,
-      hi: 2,
-    });
+  test('a negated quotient is exact at a multiple', () => {
+    expect(jsRun('-\\frac{x}{49}', 49)).toBe(-1);
+    expect(jsRun('\\frac{x}{-49}', 49)).toBe(-1);
+  });
+
+  test('an unrolled Sum body divides in every term', () => {
+    // 6x/49 at x = 49 is exactly 6.
+    expect(jsRun('\\sum_{n=1}^{3}\\frac{n x}{49}', 49)).toBe(6);
   });
 
   test('no divisor misses an exact multiple', () => {
@@ -108,90 +83,9 @@ describe('COMPILE a rational factor as a division', () => {
     }
     expect(misses).toEqual([]);
   });
-
-  test('the numerator multiplies the quotient, after the division', () => {
-    // `x / q * p`, never `(p * x) / q`: the product `p * x` overflows to
-    // infinity for an `x` whose quotient is finite, and on a 32-bit shader
-    // float that limit is about 1e38.
-    expect(codeOf('\\frac{3x}{49}', 'javascript')).toBe('_.x / 49 * 3');
-    expect(codeOf('\\frac{3x}{49}', 'glsl')).toBe('x / 49.0 * 3.0');
-    expect(codeOf('\\frac{-3x}{49}', 'javascript')).toBe('_.x / 49 * -3');
-  });
-
-  test('a large operand does not overflow before the division', () => {
-    // `2x/3` at `x = 1e308`: `2 * x` is `Infinity`, `x / 3 * 2` is finite.
-    expect(codeOf('\\frac{2x}{3}', 'javascript')).toBe('_.x / 3 * 2');
-    const got = jsRun('\\frac{2x}{3}', 1e308);
-    expect(Number.isFinite(got)).toBe(true);
-    expect(got).toBe(ce.parse('\\frac{2x}{3}').subs({ x: 1e308 }).N().re);
-  });
-
-  test('a numerator of -1 becomes a unary negation', () => {
-    // `-(a / q)` and `(-a) / q` are the same float: IEEE negation is exact
-    // and round-to-nearest is sign-symmetric.
-    expect(codeOf('-\\frac{x}{49}', 'javascript')).toBe('-(_.x / 49)');
-    expect(codeOf('\\frac{x}{-49}', 'javascript')).toBe('-(_.x / 49)');
-    expect(codeOf('-\\frac{x}{49}', 'glsl')).toBe('-(x / 49.0)');
-    expect(intervalRunPoint('\\frac{x}{-49}', 49)).toEqual({ lo: -1, hi: -1 });
-    expect(jsRun('-\\frac{x}{49}', 49)).toBe(-1);
-  });
-
-  test('a constant factor stays in the product', () => {
-    // `π` stays in the numerator; only the rational numerator `2` moves past
-    // the division.
-    expect(codeOf('\\frac{2\\pi x}{49}', 'javascript')).toBe(
-      '(Math.PI * _.x) / 49 * 2'
-    );
-    expect(codeOf('\\frac{2\\pi x}{49}', 'glsl')).toBe(
-      '(3.14159265359 * x) / 49.0 * 2.0'
-    );
-  });
-
-  test('the rewrite composes with a surrounding sum', () => {
-    expect(codeOf('\\frac{x}{49} + 1', 'javascript')).toBe('_.x / 49 + 1');
-  });
-
-  test('an unrolled Sum body divides in every term', () => {
-    expect(codeOf('\\sum_{n=1}^{3}\\frac{n x}{49}', 'javascript')).toBe(
-      '((_.x / 49) + ((2 * _.x) / 49) + ((3 * _.x) / 49))'
-    );
-    // 6x/49 at x = 49 is exactly 6.
-    expect(jsRun('\\sum_{n=1}^{3}\\frac{n x}{49}', 49)).toBe(6);
-  });
 });
 
 describe('COMPILE what the rational rewrite must NOT touch', () => {
-  test('a power-of-two denominator keeps the exact reciprocal product', () => {
-    // `1/2`, `1/8` and `3/8` are exact binary fractions, so the product is
-    // already correctly rounded and shorter than a division.
-    expect(codeOf('\\frac{x}{2}', 'javascript')).toBe('0.5 * _.x');
-    expect(codeOf('\\frac{x}{8}', 'javascript')).toBe('0.125 * _.x');
-    expect(codeOf('\\frac{3x}{8}', 'javascript')).toBe('0.375 * _.x');
-    expect(codeOf('\\frac{x}{2}', 'glsl')).toBe('0.5 * x');
-    // A power of two past the 32-bit range is still exempt.
-    expect(codeOf('\\frac{x}{4294967296}', 'javascript')).toBe(
-      '2.3283064365386963e-10 * _.x'
-    );
-  });
-
-  test('a decimal divisor is not on this path', () => {
-    // `x / 1.6` stays a `Divide` node through canonicalization.
-    expect(codeOf('\\frac{x}{1.6}', 'javascript')).toBe('_.x / 1.6');
-  });
-
-  test('a literal with a radical part is not a plain rational', () => {
-    // `√2 / 49` is an exact value, but not a rational one.
-    expect(codeOf('\\frac{\\sqrt{2}x}{49}', 'javascript')).toBe(
-      '0.028861501272920306 * _.x'
-    );
-  });
-
-  test('dividing BY a rational multiplies, as before', () => {
-    // `x / (1/49)` canonicalizes to `Multiply(49, x)` — an integer factor,
-    // with no denominator to divide by.
-    expect(codeOf('x / (1/49)', 'javascript')).toBe('49 * _.x');
-  });
-
   test('the leading-literal fold of an Add is untouched', () => {
     // The numeric fold MULTIPLIES the literals it absorbs, so it must stay
     // confined to a product: over an `Add` it would collapse `2k + 1` at

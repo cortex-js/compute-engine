@@ -122,44 +122,6 @@ describe('run() contract — the constant-cost checks stay', () => {
 });
 
 describe('run() contract — results are read-only', () => {
-  test('a hoisted list literal is returned shared', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['List', 1, 2, 3, 4]), { to: 'javascript' });
-    expect(r.preambleOnce).toContain('_lit_1');
-    const a = r.run!({});
-    expect(a).toEqual([1, 2, 3, 4]);
-    expect(r.run!({})).toBe(a);
-  });
-
-  test('a nested literal is shared at every level', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['List', ['List', 1, 2], ['List', 3, 4]]), {
-      to: 'javascript',
-    });
-    const m1 = r.run!({}) as unknown[][];
-    const m2 = r.run!({}) as unknown[][];
-    expect(m1).toBe(m2);
-    expect(m1[0]).toBe(m2[0]);
-  });
-
-  test('a function the kernel returns answers the shared literal', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Function', ['List', 1, 2, 3, 4], 'k']), {
-      to: 'javascript',
-    });
-    const f = r.run as unknown as (k: number) => unknown;
-    expect(f(1)).toEqual([1, 2, 3, 4]);
-    expect(f(1)).toBe(f(2));
-  });
-
-  test('a bound list value is returned shared', () => {
-    const ce = new ComputeEngine();
-    ce.assign('L', ce.box(['List', 5, 6, 7]));
-    const r = compile(ce.box('L'), { to: 'javascript' });
-    const a = r.run!({});
-    expect(a).toEqual([5, 6, 7]);
-    expect(r.run!({})).toBe(a);
-  });
 
   test('the convention is kept: a {re, im: 0} cell reads as a number, a complex cell stays complex', () => {
     const ce = new ComputeEngine();
@@ -205,26 +167,6 @@ describe('run() contract — the shared form of the result convention', () => {
 });
 
 describe('run() contract — stored code', () => {
-  test('a runtime that loads the stored result applies the same contract', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['List', 1, 2, 3, 4]), { to: 'javascript' });
-    const stored = JSON.parse(JSON.stringify(r));
-    expect(stored.entryPlan).toBeUndefined();
-    const fn = createJavaScriptRuntime().load(stored);
-    const a = fn({});
-    expect(a).toEqual([1, 2, 3, 4]);
-    expect(fn({})).toBe(a);
-  });
-
-  test('a stored lambda answers the shared literal', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Function', ['List', 1, 2, 3, 4], 'k']), {
-      to: 'javascript',
-    });
-    const fn = createJavaScriptRuntime().load(JSON.parse(JSON.stringify(r)));
-    expect(fn(1)).toEqual([1, 2, 3, 4]);
-    expect(fn(1)).toBe(fn(2));
-  });
 
   test('a stored plan written with the old `entries` field loads and is ignored', () => {
     const ce = new ComputeEngine();

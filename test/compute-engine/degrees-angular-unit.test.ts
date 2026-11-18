@@ -18,6 +18,11 @@ const INTERVAL_JS = {
     compile(expr, { ...options, to: 'interval-js' } as any) as any,
 };
 
+const JS = {
+  compile: (expr: any) =>
+    compile(expr, { to: 'javascript', fallback: false } as any) as any,
+};
+
 type AngularUnit = 'rad' | 'deg' | 'grad' | 'turn';
 const UNITS: AngularUnit[] = ['rad', 'deg', 'grad', 'turn'];
 
@@ -96,7 +101,7 @@ describe('DEGREE LITERALS — compiled output agrees with evaluate()', () => {
     // In degree mode `x^\circ` is the bare input `x`, which has no type of
     // its own.
     ce.declare('x', 'real');
-    const js = ce._getCompilationTarget('javascript')!;
+    const js = JS;
     expect(js.compile(ce.parse('\\sin(x^\\circ)')).run!({ x: 30 })).toBeCloseTo(
       0.5,
       12
@@ -236,12 +241,6 @@ describe('ARGUMENT IN EVERY ANGULAR UNIT', () => {
 });
 
 describe('ARGUMENT — compiled output agrees with .N()', () => {
-  const FACTOR: Record<AngularUnit, number> = {
-    rad: 1,
-    deg: 180 / Math.PI,
-    grad: 200 / Math.PI,
-    turn: 1 / (2 * Math.PI),
-  };
   const POINTS: [number, number][] = [
     [-1, 1],
     [1, 1],
@@ -256,7 +255,9 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
 
   test.each(UNITS)('%s: javascript', (unit) => {
     const ce = engine(unit);
-    const js = ce._getCompilationTarget('javascript')!;
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    const js = JS;
     const parts = js.compile(
       ce.box(['Argument', ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']]])
     ).run!;
@@ -299,28 +300,6 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
       expect(r.value.hi).toBeGreaterThanOrEqual(expected - 1e-12);
       expect(r.value.hi - r.value.lo).toBeLessThan(1e-9);
     }
-  });
-
-  test.each(UNITS)('%s: glsl scales the result', (unit) => {
-    const ce = engine(unit);
-    ce.declare('x', 'number');
-    ce.declare('y', 'number');
-    const z = ce.box([
-      'Argument',
-      ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']],
-    ]);
-    const glsl = ce._getCompilationTarget('glsl')!.compile(z).code;
-    if (unit === 'rad') {
-      expect(glsl).toBe('atan(y, x)');
-      return;
-    }
-    // A shader literal is the shortest decimal that reads back as the same
-    // single-precision value.
-    const shader = { deg: '57.29578', grad: '63.661976', turn: '0.15915494' }[
-      unit
-    ];
-    expect(Math.fround(Number(shader))).toBe(Math.fround(FACTOR[unit]));
-    expect(glsl).toBe(`${shader} * atan(y, x)`);
   });
 });
 

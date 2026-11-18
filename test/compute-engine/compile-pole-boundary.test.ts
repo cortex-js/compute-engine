@@ -98,20 +98,4 @@ describe('COMPILED POLE BOUNDARY — a `~oo` argument projects to Infinity', () 
       /compiled as a real number/
     );
   });
-
-  it('gives the pole one spelling across the produced and boundary routes', () => {
-    ce.declare('x', 'real');
-    // The value the compiled body PRODUCES for a pole and the value a `~oo`
-    // ARGUMENT becomes are now the same number.
-    const produced = compile(ce.box(['Divide', 1, 'w']), {
-      constantFold: false,
-    })?.run?.({ w: 0 });
-    const embedded = compile(ce.box('ComplexInfinity'))?.run?.({});
-    const boundary = compile(ce.box('x'))?.run?.({
-      x: ce.box('ComplexInfinity'),
-    } as any);
-    expect(produced).toBe(Infinity);
-    expect(embedded).toBe(Infinity);
-    expect(boundary).toBe(Infinity);
-  });
 });

@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { CancellationError } from '../../src/common/interruptible';
 import { _withIrProfileTestExtension } from '../../src/compute-engine/compilation/ir/adapter';
-import { _jsProfileStats } from '../../src/compute-engine/js-profile-switch';
 import { implicitCompile } from '../../src/compute-engine/implicit-compile';
 import type {
   CompilationResult,
@@ -25,7 +24,6 @@ import {
   sliceProgram,
 } from '../../src/compute-engine/compilation/ir';
 import { ALL_PASSES } from '../../src/compute-engine/compilation/ir/passes';
-import { hasOwnLowering } from '../../src/compute-engine/compilation/ir/lower-context';
 import { rangeCount } from '../../src/compute-engine/numerics/range-count';
 import { sinIntegral } from '../../src/compute-engine/numerics/special-functions';
 import {
@@ -87,15 +85,15 @@ function quiet<T>(f: () => T): T {
 }
 
 describe('the option selects the IR compiler', () => {
-  test('the code differs from the default route for a program both compile', () => {
+  test('the default route compiles with the profile: the same code', () => {
     const expr = box(['Add', 'x', ['Sin', 'x']]);
     const plain = compile(expr);
     const ir = compile(expr, IR);
     expect(plain.success && ir.success).toBe(true);
-    expect(ir.code).not.toBe(plain.code);
+    expect(ir.code).toBe(plain.code);
     expect(ir.code).toMatch(/^\(\(\) => \{/);
     expect(ir.profile).toBe('ir');
-    expect(plain.profile).toBeUndefined();
+    expect(plain.profile).toBe('ir');
     expect(ir.run!({ x: 1 })).toBe(plain.run!({ x: 1 }));
   });
   test('the result has the fields of a JavaScript result', () => {
@@ -223,18 +221,12 @@ describe('a decline', () => {
     const o = outcome(box(['SinIntegral', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile with the profile 'ir': SinIntegral\(x\)/
+      /^Could not compile: SinIntegral\(x\)/
     );
   });
 
   const OPTIONS: [string, Record<string, unknown>][] = [
-    ['functions', { functions: { g: 'Math.sin' } }],
-    ['operators', { operators: { Add: ['+', 11] } }],
-    ['operators', { operators: () => undefined }],
-    ['imports', { imports: [() => 1] }],
-    ['preamble', { preamble: 'const k = 1;' }],
     ['quadrature', { quadrature: 'monte-carlo' }],
-    ['strictTypes', { strictTypes: true }],
   ];
   test.each(OPTIONS)('of the option %s names it', (name, options) => {
     const o = outcome(box(['Add', ['At', 'L', 1], 'x']), options);
@@ -272,16 +264,12 @@ describe('a decline', () => {
       { constantFold: true },
       { mode: 'strict' },
       { mode: 'complex' },
-      { broadcast: false },
-      { broadcast: true },
       { entryChecks: false },
       { quadrature: 'adaptive' },
       // The JavaScript target ignores `storage` (`CompilationOptions.storage`).
       { storage: { x: 'sampler2D' } },
       { constantFold: false },
-      { functions: {} },
       { vars: {} },
-      { preamble: '  ' },
     ]) {
       const o = outcome(box(['Add', 'x', 1]), options);
       expect([options, 'result' in o]).toEqual([options, true]);
@@ -820,38 +808,29 @@ describe('stored code', () => {
   });
 });
 
-describe('the switch of the engine', () => {
-  test('the engine tries the profile ir for its own compilations', () => {
+describe('the compilations of the engine', () => {
+  test('the engine compiles its own compilations with the profile ir', () => {
     const engine = new ComputeEngine();
-    engine._jsProfile = {};
     const lambda = engine.box(['Function', ['Multiply', 'u', 2], 'u']);
     const admitted = implicitCompile(engine, lambda, 'nd');
     expect(admitted?.profile).toBe('ir');
     expect((admitted?.run as (u: number) => number)(3)).toBe(6);
-    // A decline: the existing compiler compiles it.
+    // A decline: no compiled function, the caller interprets.
     const declined = implicitCompile(
       engine,
       engine.box(['Function', ['SinIntegral', 'u'], 'u']),
       'nd'
     );
-    expect(declined?.success).toBe(true);
-    expect(declined?.profile).toBeUndefined();
-    expect(_jsProfileStats(engine).nd).toMatchObject({
-      attempts: 2,
-      admitted: 1,
-      declined: 1,
-      failed: 0,
-    });
+    expect(declined).toBeUndefined();
   });
 });
 
 describe('the default route', () => {
-  // The code of the default route is pinned by "the default route does
-  // not change" of compile-javascript-profile.test.ts.
-  test('a compilation with no option reports no profile', () => {
+  test('a compilation with no option is that of the profile', () => {
     for (const json of PROGRAMS.slice(0, 20)) {
       const r = quiet(() => compile(box(json)));
-      expect(r.profile).toBeUndefined();
+      const p = quiet(() => compile(box(json), { profile: 'ir' }));
+      expect([json, r.success, r.code]).toEqual([json, p.success, p.code]);
     }
   });
 });
@@ -2336,18 +2315,17 @@ describe('a library operator whose definition the host changed in place', () => 
     e.declare('N', 'integer');
     return e;
   };
-  test('a compile handler or compileHelpers set on the definition of At declines', () => {
+  test('a compile handler set on the definition of At declines', () => {
     const plain = outcome(box(PROGRAM, engine()));
     expect('result' in plain).toBe(true);
     for (const change of [
       (d: Record<string, unknown>) => (d.compile = () => '0'),
-      (d: Record<string, unknown>) => (d.compileHelpers = { h: () => 1 }),
     ]) {
       const e = engine();
       change(e.lookupDefinition('At')!.operator as never);
       const o = outcome(box(PROGRAM, e));
       expect('message' in o && o.message).toMatch(
-        /the definition of At has its own lowering/
+        /the definition of At has a `compile` handler that returns code text/
       );
     }
   });
@@ -2372,7 +2350,7 @@ describe('a library operator whose definition the host changed in place', () => 
         () => '(-777)';
       const o = outcome(box(json, e));
       expect('message' in o && o.message).toMatch(
-        /the definition of Range has its own lowering/
+        /the definition of Range has a `compile` handler that returns code text/
       );
     }
   });
@@ -2398,7 +2376,7 @@ describe('a library operator whose definition the host changed in place', () => 
     ).compile = () => '0';
     const h = outcome(box(json, e));
     expect('message' in h && h.message).toMatch(
-      /the definition of PointList has its own lowering/
+      /the definition of PointList has a `compile` handler that returns code text/
     );
   });
   test('a reduction of a List that is not the library one declines, not its elements', () => {
@@ -2418,7 +2396,7 @@ describe('a library operator whose definition the host changed in place', () => 
         () => '0';
       const o = outcome(box(json, host));
       expect('message' in o && o.message).toMatch(
-        /the definition of List has its own lowering/
+        /the definition of List has a `compile` handler that returns code text/
       );
       // A user function named `List` is called: `Max(List(1, 2))` is
       // `Max(1 - 2)`, not the largest element.
@@ -2454,21 +2432,9 @@ describe('a library operator whose definition the host changed in place', () => 
         () => '(-777)';
       const o = outcome(box(json, e));
       expect('message' in o && o.message).toMatch(
-        /the definition of Range has its own lowering/
+        /the definition of Range has a `compile` handler that returns code text/
       );
     }
-  });
-  test("the standard compile handler of PointList (and Field, ListFrom) is not the host's", () => {
-    const e = new ComputeEngine();
-    for (const name of ['PointList', 'Field', 'ListFrom']) {
-      const def = e.lookupDefinition(name)!.operator as { compile?: unknown };
-      expect(typeof def.compile).toBe('function');
-      expect(hasOwnLowering(name, def)).toBe(false);
-    }
-    expect(hasOwnLowering('PointList', { compile: () => '0' })).toBe(true);
-    expect(hasOwnLowering('At', e.lookupDefinition('At')!.operator)).toBe(
-      false
-    );
   });
 });
 

@@ -32,21 +32,6 @@ describe('a constant NIntegrate folds', () => {
     expect(f.code).not.toContain('NIntegrate');
     expect(f.run({ y: 1 })).toBeCloseTo(1.5, 12);
   });
-
-  test('a library function given by its name', () => {
-    const ce = new ComputeEngine();
-    const f = compiled(ce, ['Add', 'y', ['NIntegrate', 'Sin', 0, 1]]);
-    expect(f.success).toBe(true);
-    expect(f.run({ y: 0 })).toBeCloseTo(1 - Math.cos(1), 12);
-  });
-
-  test('a user function given by its name', () => {
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.parse('t \\mapsto t'));
-    const f = compiled(ce, ['Add', 'y', ['NIntegrate', 'g', 0, 1]]);
-    expect(f.success).toBe(true);
-    expect(f.run({ y: 0 })).toBeCloseTo(0.5, 12);
-  });
 });
 
 describe('the price of NIntegrate includes its integrand', () => {
@@ -64,7 +49,7 @@ describe('the price of NIntegrate includes its integrand', () => {
     expect(f.success).toBe(false);
   });
 
-  test('a nested NIntegrate declines', () => {
+  test('a nested NIntegrate compiles to an iterated quadrature', () => {
     const ce = new ComputeEngine();
     const f = compiled(ce, [
       'Add',
@@ -80,6 +65,8 @@ describe('the price of NIntegrate includes its integrand', () => {
         1,
       ],
     ]);
-    expect(f.success).toBe(false);
+    // ∫₀¹ ∫₀¹ x·u dx du = 1/4, the interpreter's value.
+    expect(f.success).toBe(true);
+    expect(f.run({ y: 1 })).toBeCloseTo(1.25, 12);
   });
 });

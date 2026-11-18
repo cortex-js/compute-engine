@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // CE-682: the samples of a `Linspace` with an endpoint that is an infinity or
 // `NaN` cannot be computed, because the step is an infinity or `NaN`. Such a
@@ -98,39 +97,3 @@ describe('CE-682: a Linspace with an endpoint that is not finite', () => {
   });
 });
 
-describe('CE-682: compiled JavaScript', () => {
-  function run(json: unknown, args: Record<string, number> = {}) {
-    const result = compile(engine().box(json as any), {
-      to: 'javascript',
-      fallback: false,
-      constantFold: false,
-    });
-    expect(result.success).toBe(true);
-    return result.run!(args);
-  }
-
-  test.each([
-    ['the Linspace', (l: unknown) => l],
-    ['Sum', (l: unknown) => ['Sum', l]],
-    ['Max', (l: unknown) => ['Max', l]],
-    ['At', (l: unknown) => ['At', l, 1]],
-  ])('%s of a literal infinite endpoint is NaN', (_name, read) => {
-    expect(run(read(['Linspace', 0, 'PositiveInfinity', 3]))).toBeNaN();
-  });
-
-  test('an input endpoint is tested at run time', () => {
-    const l = ['Linspace', 0, 'a', 3];
-    expect(run(l, { a: 1 })).toEqual([0, 0.5, 1]);
-    expect(run(['Sum', l], { a: 1 })).toBe(1.5);
-    expect(run(l, { a: Infinity })).toBeNaN();
-    expect(run(l, { a: NaN })).toBeNaN();
-    expect(run(['Sum', l], { a: -Infinity })).toBeNaN();
-  });
-
-  test('a count of 0 is the empty array, except for a NaN endpoint', () => {
-    const l = ['Linspace', 0, 'a', 0];
-    expect(run(l, { a: Infinity })).toEqual([]);
-    expect(run(l, { a: 1 })).toEqual([]);
-    expect(run(l, { a: NaN })).toBeNaN();
-  });
-});

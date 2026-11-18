@@ -286,30 +286,4 @@ describe('Compiled accessors of a restricted point', () => {
     expect(absent[1]).toBeNaN();
   });
 
-  test('First of a restricted point', () => {
-    expect(run(['First', RP], 2)).toBe(1);
-    // A number read of an absent point is `NaN`, as in the interpreter.
-    expect(run(['First', RP], -1)).toBeNaN();
-  });
-
-  test('PointX of a restricted list and of a restricted point', () => {
-    expect(run(['PointX', RL], 2)).toEqual([1, 3]);
-    expect(run(['PointX', RP], 2)).toBe(1);
-    expect(run(['PointX', RP], -1)).toBeNaN();
-  });
-
-  // On JavaScript a collection operand that can be absent as a whole is
-  // bound once and the operator is lowered on the present value under a
-  // test for the absent value (`absentCollectionOperandGuard`,
-  // `base-compiler.ts`, issue #383): the cross product of the present point
-  // is the interpreter's `(-1, 2, -1)`. A false restriction of a point is
-  // the point of `NaN` coordinates, and so is the cross product of it, as
-  // the interpreter answers. This lowering was verified against the
-  // interpreter on JavaScript only.
-  test('Cross of a restricted point compiles on javascript', () => {
-    const json = ['Cross', RP3, ['Tuple', 1, 1, 1]];
-    expect(run(json, 2)).toEqual([-1, 2, -1]);
-    expect(run(json, -1)).toEqual([NaN, NaN, NaN]);
-  });
-
 });

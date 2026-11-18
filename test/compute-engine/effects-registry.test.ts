@@ -2,7 +2,6 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type {
   ConsoleHandler,
   EffectHandlers,
@@ -554,34 +553,6 @@ describe('entropy', () => {
       expect([u, result.operator]).not.toEqual([u, 'Error']);
     }
   });
-
-  test('a compiled Monte-Carlo integral draws from the handler of the compiling engine', () => {
-    // `_SYS.integrate` / `_SYS.integrateMC` are static helpers; the engine
-    // binds its live draw into them, so compiled code follows a mock — and
-    // a denial, which THROWS out of the compiled function (compiled code has
-    // no error-value channel).
-    const ce = new ComputeEngine();
-    let calls = 0;
-    ce.effects = {
-      entropy: {
-        random: () => {
-          calls += 1;
-          return 0.5;
-        },
-      },
-    };
-    const r = compile(ce.parse('\\int_0^1 e^{-k x^2}\\,dx'), {
-      quadrature: 'monte-carlo',
-      vars: { k: '_.k' },
-    });
-    expect(r.code).toContain('_SYS.integrateMC(');
-    // Every sample is x = 0.5, so the estimate is e^{-k/4} to the digits the
-    // runner keeps (about nine); a genuine sample would be off at the fourth.
-    expect(r.run!({ k: 1 })).toBeCloseTo(Math.exp(-0.25), 8);
-    expect(calls).toBeGreaterThan(0);
-    ce.effects = { entropy: null };
-    expect(() => r.run!({ k: 1 })).toThrow('denies the "entropy" capability');
-  }, 60000);
 
   test('a seeded frame does not consult the handler', () => {
     const ce = new ComputeEngine();

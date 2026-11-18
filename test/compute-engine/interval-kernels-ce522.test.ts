@@ -441,12 +441,6 @@ describe('CE-522.8 the angular unit on interval-js uses exact factors', () => {
     }
   });
 
-  test('the other targets keep the float factors', () => {
-    const ce = new ComputeEngine();
-    ce.angularUnit = 'deg';
-    const js = ce._getCompilationTarget('javascript')!;
-    expect(js.compile(ce.parse('\\sin(x)')).run!({ x: 90 })).toBe(1);
-  });
 });
 
 describe('CE-522.9 fract rounds the subtraction outward', () => {

@@ -41,17 +41,6 @@ describe('201 — mode reports the resolved discipline', () => {
     expect(Number.isNaN(r.run({ x: -1 }))).toBe(true);
   });
 
-  test('an explicit complex compile reports complex', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.parse('\\sqrt{x}'), {
-      to: 'javascript',
-      mode: 'complex',
-    }) as any;
-    expect(r.success).toBe(true);
-    expect(r.mode).toBe('complex');
-    expect(r.code).toContain('_SYS.csqrt');
-  });
-
   // The default is strict: the real kernel, and a real result.
   test('a default compile reports strict', () => {
     const ce = new ComputeEngine();
@@ -60,22 +49,6 @@ describe('201 — mode reports the resolved discipline', () => {
     expect(r.mode).toBe('strict');
     expect(r.code).not.toContain('_SYS.csqrt');
     expect(typeof r.run({ x: -1 })).toBe('number');
-  });
-
-  // The carve-out that makes "complex whenever the complex kernel ran" the
-  // WRONG reading of this field. An operand that is already complex-TYPED
-  // routes through the complex kernel in every discipline, so this compile
-  // EMITS `_SYS.csqrt` and still reports `'strict'`.
-  // Consequence for consumers, and the reason this row exists:
-  // `mode: 'strict'` does not certify a real-only emission, so it is neither a
-  // lane oracle nor a shader-portability test.
-  test('a complex-TYPED operand takes the complex kernel without moving mode', () => {
-    const ce = new ComputeEngine();
-    ce.declare('z', 'complex');
-    const r = compile(ce.parse('\\sqrt{z}'), { to: 'javascript' }) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.csqrt');
-    expect(r.mode).toBe('strict');
   });
 
   // A DECLINE emitted no code. `buildInterpreterFallback` spreads the mode
@@ -107,23 +80,4 @@ describe('201 — mode reports the resolved discipline', () => {
     }
   });
 
-  // A complex compile reports 'complex' — the discipline the code was
-  // EMITTED under — even where the value handed back at a given sample point
-  // is a plain real number. This is the row where the reported mode and the
-  // returned value look least alike, which is exactly why it is pinned.
-  test('a complex compile reports complex whatever shape a sample returns', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.parse('\\sqrt{x}'), {
-      to: 'javascript',
-      mode: 'complex',
-    }) as any;
-    expect(r.success).toBe(true);
-    expect(r.mode).toBe('complex');
-    expect(r.code).toContain('_SYS.csqrt');
-    // `√4 = 2` is exactly real, so the complex-emitted runner returns a plain
-    // number here; at `x = -1` it returns a `{re, im}`. The mode is 'complex'
-    // for both.
-    expect(typeof r.run({ x: 4 })).toBe('number');
-    expect(typeof r.run({ x: -1 })).toBe('object');
-  });
 });

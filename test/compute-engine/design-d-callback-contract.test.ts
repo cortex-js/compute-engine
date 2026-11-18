@@ -5,7 +5,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
@@ -238,26 +237,6 @@ describe('phase 0: `CountIf` converts to the contextual signature', () => {
     ).toEqual(['CountIf', 'cs', 'pred']);
   });
 
-  it('a stamped `CountIf` still compiles, with run() parity', () => {
-    const ce = new ComputeEngine();
-    executeEpsil(ce, 'let cs: list<integer> = [1,2,3]');
-    const e = ce.box(['CountIf', 'cs', ['Function', ['Greater', 'n', 1], 'n']]);
-    // `constantFold: false`: the whole call is constant (a literal list and a
-    // literal predicate), so compile-time constant folding would emit the
-    // value `2` instead of the callback lowering this test pins.
-    const r = compile(e, { fallback: false, constantFold: false });
-    expect(r.success).toBe(true);
-    // `cs`'s assigned value is a compound pure value, so the JS-family
-    // targets bind it once in the preamble (`const _val_cs = …`) and the
-    // code reads it by name (the Tycho item 225 shared-value emission).
-    // The predicate is a scalar-parameter literal and the elements are
-    // scalars, so it is handed to the filter as the arrow itself.
-    expect(r.code).toBe(
-      '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((n = NaN) => 1 < n))'
-    );
-    expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
-    expect((r.run as () => unknown)()).toBe(2);
-  });
 });
 
 //

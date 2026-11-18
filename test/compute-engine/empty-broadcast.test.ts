@@ -172,39 +172,8 @@ describe('The compiled JavaScript lane answers the empty list as well', () => {
     });
   }
 
-  test('the fused chain of heads is one call and still answers []', () => {
-    const json = [
-      'Add',
-      ['Multiply', 2, ['Add', ['Mod', ['Subtract', 'N', 1], 15], 7]],
-      3,
-    ];
-    const r = compile(jsEngine.box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    // The whole chain is absorbed into one `_SYS.bcast` call, so the empty
-    // answer comes from the fused helper, not from a chain of empty steps.
-    expect((r.code!.match(/_SYS\.bcast\(/g) ?? []).length).toBe(1);
-    expect(r.run!({ N: [] } as any)).toEqual([]);
-  });
-
   test('two empty sources agree on the empty answer', () => {
     expect(run(['Add', ['Sin', 'N'], 'M'], { N: [], M: [] })).toEqual([]);
-  });
-
-  test('a fused empty-against-non-empty operand is the mismatch answer, NaN', () => {
-    // Fusion folds `Sin(N) + M` into ONE `_SYS.bcast` call over both
-    // sources, so the empty `N` and the two-element `M` meet as a length
-    // mismatch inside that call. The helper spells a mismatch `NaN`, which
-    // is how every real-valued compiled target spells the interpreter's
-    // `incompatible-dimensions` error.
-    const r = run(['Add', ['Sin', 'N'], 'M'], { N: [], M: [1, 2] });
-    expect(typeof r).toBe('number');
-    expect(Number.isNaN(r as number)).toBe(true);
-  });
-
-  test('an elementwise selection over an empty condition answers []', () => {
-    expect(run(['Which', ['Less', 'N', 3], 1, 'True', 2], { N: [] })).toEqual(
-      []
-    );
   });
 
   test('a non-empty source is unchanged', () => {

@@ -31,8 +31,7 @@ wrote**, not by the operand shapes:
    matrix needs a declared parameter: `g(A: matrix) := A^2`. The user decided
    (2026-10-15) to keep this mapping instead of passing a square matrix whole,
    because the alternative gives `f(x) := \sin x` the matrix sine instead of
-   the sines of the cells. Pinned by `test/compute-engine/apply-literal-maps.test.ts`
-   ("a nested list is mapped at its leaves, and typed so").
+   the sines of the cells.
 
    A parameter declared with one of the wide types `any`, `expression` or
    `value` is not a scalar parameter. These types admit a collection, so the
@@ -53,9 +52,7 @@ wrote**, not by the operand shapes:
    assigned, a declared callback slot, a value-kind declaration, a clause
    and a block-local function. The test is
    `isScalarType()`
-   (`boxed-expression/function-literal.ts`). Pinned by
-   `test/compute-engine/apply-literal-maps.test.ts` ("A PARAMETER DECLARED
-   WITH A WIDE TYPE").
+   (`boxed-expression/function-literal.ts`).
 
    Compiled code does not test the shape of a value at run time. It
    declines (falls back to the interpreter) arithmetic over a parameter
@@ -75,9 +72,7 @@ wrote**, not by the operand shapes:
    passes values whose type cannot be a collection: with `h := (t:
    expression) ↦ 2t`, `Map(h, L)` compiles when `L` is declared
    `list<real>`, and `Map(h, rows)` declines when `rows` is declared
-   `list<list<real>>`. The tests are
-   `collectionAtExpressionParameter()` (`compilation/compile-user-calls.ts`)
-   and `withCheckedCallback()` (`compilation/compile-callbacks.ts`).
+   `list<list<real>>`.
 
    A call where a collection is bound whole at such a parameter is not
    typed by the result of the signature, scalar or not: `(t: expression) ↦
@@ -220,19 +215,13 @@ Corollary rules for the strict regime:
   mismatched one projects to NaN, neither poisoning a sibling. A call of a
   user function over a list argument maps the function with `_SYS.mapFn`,
   over the number of list levels that the static type of the argument
-  gives. The fused emitter (`emitFusedBroadcast`, `base-compiler.ts`) folds
-  a chain of heads into ONE call, so `Sin(N) + M` with `N = []` and
-  `M = [1, 2]` reaches the helper as one length mismatch and answers NaN,
-  where the interpreter answers the `incompatible-dimensions` error.
+  gives.
 - Compiled pairing site (2026-07-31): the JavaScript `PointList` zip lowering
-  (`JAVASCRIPT_FUNCTIONS.PointList`, `javascript-target.ts`) emits
-  shortest-zip via `Math.min` over the source lengths — the pairing-regime
+  emits shortest-zip via `Math.min` over the source lengths — the pairing-regime
   contract carried into compiled code. Design:
   `docs/COLLECTIONS-MODEL.md`.
 - Pins: `compiled-elementwise-boolean.test.ts` ("the mismatch ruling reaches
   every broadcast path", including the `PointList` opt-out),
-  `pointlist-compile-zip.test.ts` (compiled shortest-zip — the pairing
-  contract in emitted JavaScript),
   `points-arithmetic.test.ts` (zip-to-shorter),
   `pointlist-lazy-broadcast.test.ts` (ragged lazy transpose),
   `multiply-mixed-collection-kinds.test.ts` (mixed-kind operands join the
@@ -311,8 +300,7 @@ Corollary rules for the strict regime:
     2026-10-18 that a point or a string cell with no match is absent
     (`Missing`, `undefined` in compiled JavaScript) and is read by
     `IsMissing` or `Coalesce`. The compiled JavaScript gives `[NaN, NaN]`
-    for such a point (`nanPointLiteral()` in
-    `compilation/compile-absence.ts`). A cell read from a held restriction
+    for such a point. A cell read from a held restriction
     whose condition is not decided is itself a restriction
     (`If([0 < t], [(1, 2)])` read at position 1 is `If(0 < t, (1, 2))`).
     When this cell is evaluated alone after the condition becomes false, it
@@ -362,8 +350,7 @@ Corollary rules for the strict regime:
     `Missing`.
   - The no-match value of a scalar `Which` is unchanged: `Missing`.
   - Tests: `elementwise-which.test.ts` ("the selection rule of 2026-11-02:
-    what is a static error"), `when-list-condition.test.ts`,
-    `compile-when-nested-mask.test.ts`,
+    what is a static error"), `compile-when-nested-mask.test.ts`,
     `tycho-item-335-when-indexed-collection-type.test.ts`.
 - Restriction and single-branch `If` (2026-11-02): the parser reads a
   restriction `e\{c\}` as `If(c, e)`, not `When(e, c)`, and the restriction

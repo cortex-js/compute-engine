@@ -19,13 +19,10 @@
  * - One decline per declined cause; `fallback`; `canCompile()`.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { compile, canCompile } from '../../src/compile';
 import { ComputeEngine } from '../../src/compute-engine';
 import { _withIrProfileTestExtension } from '../../src/compute-engine/compilation/ir/adapter';
-import { GLSL } from '../../src/compute-engine/compilation/ir/print-glsl';
-import { _jsProfileShadowStats } from '../../src/compute-engine/js-profile-switch';
 import { GlslDriver } from '../../scripts/glsl-check/glsl-driver';
 import { compileSlice } from '../../src/compute-engine/compilation/ir';
 import type { CompilationResult } from '../../src/compute-engine/compilation/types';
@@ -130,7 +127,6 @@ type Json = unknown;
 const IR = { to: 'glsl', profile: 'ir', fallback: false } as const;
 const glsl = (json: Json, options: object = {}) =>
   compile(ce.box(json as never), { ...IR, ...options });
-
 // prettier-ignore
 const PROGRAMS: [Json, Point[]][] = [
   [['Add', ['Multiply', 'x', 'x'], ['Multiply', 'y', ['Sin', 'x']]], [{ x: 0.5, y: 2 }, { x: -1.25, y: 0.3 }]],
@@ -147,6 +143,8 @@ const PROGRAMS: [Json, Point[]][] = [
   [['Less', ['Multiply', 'x', 'y'], 1], [{ x: 0.5, y: 1 }, { x: 2, y: 3 }]],
   [['And', 'p', ['Greater', 'x', 0]], [{ p: true, x: 1 }, { p: true, x: -1 }, { p: false, x: 1 }]],
   [['Mod', 'n', 3], [{ n: 7 }, { n: -7 }]],
+  // `_gpu_ir_fmod` (Tycho row 456: ANGLE Metal gave 1000 for the first).
+  [['Mod', 'x', 'y'], [{ x: -1e6, y: 1000 }, { x: 7, y: -3 }, { x: -0.25, y: 1 }]],
   [['Add', 'n', ['Multiply', 'm', 'x']], [{ n: 3, m: -2, x: 0.5 }]],
   [['Add', 'x', 'h'], [{ x: 0.5 }]],
   [['Round', 'x'], [{ x: 2.5 }, { x: -2.5 }, { x: 0.25 }]],
@@ -212,19 +210,6 @@ describe('IR profile on GLSL: the result', () => {
     expect(r.code).toMatch(/_gpu_ir_pow\(x, y\)/);
     expect(r.preamble).toMatch(/^float _gpu_ir_pow\(/m);
     expect(r.preamble).toMatch(/^float _fn_ir_\w+_h2\(/m);
-  });
-
-  test("no helper of the GLSL syntax is a helper of the existing target's preamble", () => {
-    const existing = readFileSync(
-      join(__dirname, '../../src/compute-engine/compilation/gpu-preambles.ts'),
-      'utf8'
-    );
-    const names = Object.keys(GLSL.helpers);
-    expect(names.length).toBeGreaterThan(0);
-    for (const name of names) {
-      expect(name).toMatch(/^_gpu_ir_/);
-      expect(existing).not.toMatch(new RegExp(`\\b${name}\\b`));
-    }
   });
 
   test('a captured value fills symbolDeps', () => {
@@ -348,14 +333,6 @@ const POINTS: [label: string, json: Json, options: object, points: PointValue[]]
   ['a list<boolean^2> input', ['If', ['At', 'BL2', 2], 'x', 'y'], {}, [{ BL2: [1, 0], x: 0.5, y: 2 }, { BL2: [0, 1], x: 0.5, y: 2 }]],
 ];
 
-/** The programs that the existing GLSL target does not compile, so their
- *  fields are not compared with its fields. */
-const NOT_COMPARED = new Set([
-  'a boolean tuple',
-  'a tuple<boolean, boolean> input',
-  'a list<boolean^2> input',
-]);
-
 /** The interpreter's value: a tuple or a list is an array; an input array
  *  is a `Tuple` for a tuple input, a `List` otherwise. */
 function interpretPoint(json: Json, point: PointValue): unknown {
@@ -444,40 +421,18 @@ function pointShaders(
 
 describe('IR profile on GLSL: points', () => {
   test.each(POINTS.map(([label, json, options]) => [label, json, options]))(
-    '%s: the fields of the existing target',
-    (label, json, options) => {
+    '%s: the same text twice',
+    (_label, json, options) => {
       const r = glsl(json, options as object);
       expect(r.profile).toBe('ir');
-      let existing: ReturnType<typeof glsl> | undefined;
-      try {
-        existing = compile(ce.box(json as never), {
-          to: 'glsl',
-          fallback: false,
-          ...(options as object),
-        });
-      } catch {
-        existing = undefined;
-      }
-      // `lowered` (the uniform type the host declares) and the type are the
-      // existing target's for each program it compiles.
-      expect(existing === undefined).toBe(NOT_COMPARED.has(label as string));
-      if (existing !== undefined) {
-        expect([...r.freeSymbols!].sort()).toEqual(
-          [...existing.freeSymbols!].sort()
-        );
-        expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
-      }
       const again = glsl(json, options as object);
       expect([again.code, again.preamble]).toEqual([r.code, r.preamble]);
     }
   );
 
-  test('the parametric witness is the code of the existing target', () => {
+  test('the parametric witness', () => {
     const json = ['Tuple', ['Cos', 't'], ['Sin', 't']];
     expect(glsl(json, TYCHO).code).toBe('vec2(cos(t), sin(t))');
-    expect(compile(ce.box(json as never), { to: 'glsl', ...TYCHO }).code).toBe(
-      'vec2(cos(t), sin(t))'
-    );
   });
 
   test('a point input is a vec2, a list<real^3> input a vec3; the vars text is written for the name, which stays an input', () => {
@@ -624,27 +579,8 @@ function interpretG3(json: Json, options: object, point: PointValue): unknown {
 }
 
 describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
-  test.each(G3.map(([label, json, options]) => [label, json, options]))(
-    '%s: the fields of the existing target',
-    (label, json, options) => {
-      const r = glsl(json, options as object);
-      expect(r.profile).toBe('ir');
-      // A Sum, a Max and an element-wise operation of a `float[6]` decline
-      // on the existing target.
-      if (/^(Sum|Max)\(L6\)$|2·L6/.test(label as string)) return;
-      const existing = compile(ce.box(json as never), {
-        to: 'glsl',
-        fallback: false,
-        ...(options as object),
-      });
-      expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
-    }
-  );
-
-  test('an array input is a float[6], as on the existing target; At with a run-time index reads the array in range only', () => {
+  test('an array input is a float[6]; At with a run-time index reads the array in range only', () => {
     const r = glsl(['At', 'L6', 'ix']);
-    const existing = compile(ce.box(['At', 'L6', 'ix']), { to: 'glsl' });
-    expect(r.freeSymbolTypes).toEqual(existing.freeSymbolTypes);
     expect(r.freeSymbolTypes!.L6.lowered).toBe('float[6]');
     expect(r.code).toMatch(/\? L6\[.*\] : uintBitsToFloat\(0x7fc00000u\)\)$/);
     expect(glsl(['At', 'P3', 'ix']).code).toMatch(
@@ -750,10 +686,6 @@ describe('IR profile on GLSL: arrays, At, the cap, point parameters', () => {
 describe('IR profile on GLSL: the float32-unsafe warning', () => {
   const codes = (r: ReturnType<typeof glsl>) =>
     r.warnings?.map((w) => [w.code, w.kind]);
-  const existing = (json: Json) =>
-    compile(typeof json === 'string' ? ce.parse(json) : ce.box(json as never), {
-      to: 'glsl',
-    });
   const ir = (json: Json) =>
     typeof json === 'string' ? compile(ce.parse(json), IR) : glsl(json);
   const WARNED = [['float32-unsafe-argument', 'correctness']];
@@ -764,19 +696,14 @@ describe('IR profile on GLSL: the float32-unsafe warning', () => {
     '\\operatorname{mod}(10^4\\sin(10^4x),2)',
     '\\operatorname{mod}(10^4y\\sin(x),1)',
     '\\operatorname{mod}(43758.5453\\sin(12.9898x^2),1)',
-  ])('%s: warned, as on the existing target', (latex) => {
-    expect(codes(existing(latex))).toEqual(WARNED);
+  ])('%s: warned', (latex) => {
     expect(codes(ir(latex))).toEqual(WARNED);
   });
 
-  test('an operand with an exact form on the existing target warns on the profile, which has none', () => {
+  test('an operand with an exact form on the earlier target warns on the profile, which has none', () => {
     const latex = '\\operatorname{mod}(10^4\\sin(10^4x),1)';
-    expect(existing(latex).float32Bounds).toEqual([
-      { operand: 'x', maxAbs: 2600 },
-    ]);
     const r = ir(latex);
     expect(codes(r)).toEqual(WARNED);
-    expect(r.float32Bounds).toBeUndefined();
     expect(codes(glsl(['Fract', ['Multiply', 1e4, ['Sin', 'x']]]))).toEqual(
       WARNED
     );
@@ -786,13 +713,9 @@ describe('IR profile on GLSL: the float32-unsafe warning', () => {
     const r = ir(
       '\\operatorname{mod}(43758.5453\\tan(y),1)+\\operatorname{mod}(43758.5453\\sin(x^2),1)+\\operatorname{mod}(43758.5453\\tan(y),1)'
     );
-    expect(r.warnings?.map((w) => w.value).sort()).toEqual(
-      existing(
-        '\\operatorname{mod}(43758.5453\\tan(y),1)+\\operatorname{mod}(43758.5453\\sin(x^2),1)+\\operatorname{mod}(43758.5453\\tan(y),1)'
-      )
-        .warnings?.map((w) => w.value)
-        .sort()
-    );
+    const values = r.warnings!.map((w) => w.value);
+    expect(values.length).toBeGreaterThan(0);
+    expect(new Set(values).size).toBe(values.length);
     expect(codes(glsl(['fh', 'x']))).toEqual(WARNED);
   });
 
@@ -874,9 +797,6 @@ const chainValue = (ix: number, n = 1_000) =>
     (a, b) => a + b,
     0
   );
-/** The programs that the existing target declines (it reads a list in a
- *  sampler only with `At`). */
-const STORED_DECLINED = /^(Sum|Max)\(S\)$|2·S/;
 
 /** The shaders of a host for a result read from `S`: `uniform sampler2D
  *  S;` and `precision highp sampler2D;` (a lowp fetch quantizes), the other
@@ -917,7 +837,7 @@ function storageShaders(
 
 describe('IR profile on GLSL: storage', () => {
   test.each(STORED.map(([label, json]) => [label, json]))(
-    '%s: the fields of the existing target',
+    '%s: the fields',
     (label, json) => {
       const r = glsl(json, STORAGE);
       expect(r.profile).toBe('ir');
@@ -925,15 +845,6 @@ describe('IR profile on GLSL: storage', () => {
       expect(r.code).not.toMatch(/\bS\[/);
       if (label !== 'Length(S) + x')
         expect(`${r.code}\n${r.preamble}`).toMatch(/_gpu_ir_texel\(/);
-      const existing = () =>
-        compile(ce.box(json as never), {
-          to: 'glsl',
-          fallback: false,
-          ...STORAGE,
-        });
-      if (STORED_DECLINED.test(label as string))
-        return void expect(existing).toThrow();
-      expect(r.freeSymbolTypes).toEqual(existing().freeSymbolTypes);
       expect(r.freeSymbolTypes!.S.lowered).toBe('float[7]');
     }
   );
@@ -1127,19 +1038,12 @@ describe('IR profile: a point or list result of a user function', () => {
       return failures;
     };
 
-    test('a list in a texture of width 1, 3, 7 or 10 gives the interpreter values; the existing target reads the same values from the same texture', async () => {
+    test('a list in a texture of width 1, 3, 7 or 10 gives the interpreter values', async () => {
       const items: (Parameters<GlslDriver['evaluate']>[0][number] & {
         expected: unknown;
       })[] = [];
       for (const [label, json, points] of STORED) {
         const r = glsl(json, STORAGE);
-        const existing = STORED_DECLINED.test(label)
-          ? undefined
-          : compile(ce.box(json as never), {
-              to: 'glsl',
-              fallback: false,
-              ...STORAGE,
-            });
         const first = interpretPoint(json, { ...points[0], S: SV });
         for (const p of points)
           for (const width of [1, 3, 7, 10]) {
@@ -1158,20 +1062,11 @@ describe('IR profile: a point or list result of a user function', () => {
                 expected: expected[k],
               })
             );
-            // The same host shader with the existing target's text.
-            if (existing !== undefined)
-              items.push({
-                name: `${at}, existing target`,
-                source: storageShaders(existing, first)[0],
-                uniforms,
-                textures,
-                expected: expected[0],
-              });
           }
       }
       const values = await driver.evaluate(items);
       expect(failuresOf(values, items, 1e-5)).toEqual([]);
-      expect(items.length).toBeGreaterThanOrEqual(100);
+      expect(items.length).toBeGreaterThanOrEqual(90);
     }, 120_000);
 
     test('Sum(2·E64 + x) and a chain of 100 reads give their values', async () => {
@@ -1342,12 +1237,6 @@ describe('IR profile on GLSL: declines', () => {
     ['a vars member with a gl_ prefix', ['Add', 'x', 1], { vars: { x: 'u.gl_x' } }, /the vars entry of x/],
     ['a vars member with __', ['Add', 'x', 1], { vars: { x: 'u.a__b' } }, /the vars entry of x/],
     ['a root Function literal', ['Function', ['Add', 'u', 1], 'u'], {}, /a Function literal/],
-    ['functions', ['Add', 'x', 1], { functions: { s: 'float s(float t) { return t; }' } }, /`functions`/],
-    ['operators', ['Add', 'x', 1], { operators: { Add: ['+', 11] } }, /`operators`/],
-    ['imports', ['Add', 'x', 1], { imports: ['a'] }, /`imports`/],
-    ['preamble', ['Add', 'x', 1], { preamble: 'float q;' }, /`preamble`/],
-    ['strictTypes', ['Add', 'x', 1], { strictTypes: true }, /`strictTypes`/],
-    ['broadcast', ['Add', 'x', 1], { broadcast: true }, /`broadcast`/],
     ['mode', ['Add', 'x', 1], { mode: 'bigint' }, /the bigint mode on glsl/],
     ['a Loop of more passes than the iterationBudget', ['Block', ['Declare', 's', 'real', 0],
       ['Loop', ['Assign', 's', ['Add', 's', 'k']], ['Element', 'k', ['Range', 1, 5]]], 's'],
@@ -1443,27 +1332,7 @@ describe('IR profile on GLSL: declines', () => {
     expect(r.success).toBe(true);
   });
 
-  test('fallback: true gives the result of the existing GLSL target, with a warning', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const r = compile(ce.box(['Add', 'x', 1] as never), {
-        to: 'glsl',
-        profile: 'ir',
-        vars: { x: 'u_x' },
-        preamble: '// host',
-      });
-      expect(r.success).toBe(true);
-      expect(r.profile).toBeUndefined();
-      expect(r.code).toMatch(/u_x/);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/profile: ir.*`preamble`/)
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  test('an internal error of the pipeline is a compile-error; with fallback, the existing target compiles', () => {
+  test('an internal error of the pipeline is a compile-error, also with fallback', () => {
     // A spelling whose helper list is not a list: the printer throws.
     const broken = {
       rows: [
@@ -1485,23 +1354,15 @@ describe('IR profile on GLSL: declines', () => {
           to: 'glsl',
           profile: 'ir',
         });
-        expect([r.success, r.profile]).toEqual([true, undefined]);
+        expect([r.success, r.code, r.diagnostic?.code]).toEqual([
+          false,
+          '',
+          'compile-error',
+        ]);
       } finally {
         warn.mockRestore();
       }
     });
-  });
-
-  test('the shadow measure counts a compile() with inputs once, on each target', () => {
-    const engine = new ComputeEngine();
-    engine._jsProfileShadow = 'ir';
-    const count = (consumer: string) => {
-      const s = _jsProfileShadowStats(engine)[consumer];
-      return s === undefined ? 0 : s.attempts + s.baselineDeclined;
-    };
-    for (const to of ['glsl', 'javascript'] as const)
-      compile(engine.box(['Add', 'x', 1]), { to, inputs: { x: 'real' } });
-    expect([count('glsl:public'), count('public')]).toEqual([1, 1]);
   });
 
   test('a shared graph of depth 20 (CE-584) compiles or declines in bounded time and text, on both targets', () => {

@@ -46,7 +46,6 @@ import {
   enclosureEq,
   numericEnclosure,
 } from './enclosure-arithmetic.js';
-import { ENCLOSURE_COMPILE } from './enclosure-compile.js';
 
 /** The types an endpoint may have: an extended real, or `NaN`. */
 const ENDPOINT_TYPE = 'real | signed_infinity | nan';
@@ -214,9 +213,9 @@ export const ENCLOSURE_LIBRARY: SymbolDefinitions = {
         return engine.type('enclosure');
       return engine.type('enclosure | nan');
     },
-    // Its compiled form (`ENCLOSURE_COMPILE`) is the interval of the
-    // `interval-js` target; every other target declines it.
-    arithmetic: { ...ENCLOSURE_ARITHMETIC, compile: ENCLOSURE_COMPILE },
+    // Its compiled form is the interval of the `interval-js` target
+    // (`compilation/ir/lower-enclosure.ts`); every other target declines it.
+    arithmetic: ENCLOSURE_ARITHMETIC,
     // The same point, or two disjoint enclosures, decide `Equal`; two
     // enclosures that overlap may hold the same real, and `Equal` stays
     // unevaluated (`enclosureEq()`).

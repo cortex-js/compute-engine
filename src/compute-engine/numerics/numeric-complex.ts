@@ -111,7 +111,7 @@ function pairExponent(x: number, y: number): number {
  * zero, infinite or NaN operand themselves, with their own conventions.
  *
  * The compiled JavaScript target uses this function too (`_SYS.cdivedge` and
- * the complex matrix kernels in `compilation/javascript-target.ts`), so that
+ * the complex matrix kernels in `compilation/javascript-runtime.ts`), so that
  * the interpreter and the compiled code give the same quotient.
  */
 export function scaledComplexDivide(
@@ -166,7 +166,7 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
  * The textbook formula is kept where it is accurate so that the quotient of
  * ordinary values does not change, bit for bit, from the formula that the
  * numeric values used before (it can differ from Smith's formula in the last
- * bit). The compiled JavaScript `Divide` (`compilation/javascript-target.ts`)
+ * bit). The compiled JavaScript `Divide` (`compilation/ir/`)
  * emits the same test, so the interpreter and the compiled code take the same
  * branch for the same operands: the textbook formula unless `|b|²` is not a
  * normal double, a numerator part is not finite, or a numerator part is

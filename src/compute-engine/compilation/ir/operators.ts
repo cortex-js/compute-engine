@@ -412,7 +412,7 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     results: real,
   },
   // The numeric derivative at `x` of the region's yield at its parameter:
-  // the stencil of the existing compiler.
+  // the stencil of the runtime (`_SYS.nd`).
   {
     op: 'derivative',
     effect: 'may-fail',

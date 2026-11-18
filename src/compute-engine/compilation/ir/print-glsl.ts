@@ -179,7 +179,7 @@ export const GLSL: Syntax = deepFreeze({
     'deg': 'radians($0)',
     ...calls('', ['floor', 'ceil']),
     'round': { text: '_gpu_ir_round($0)', helpers: ['_gpu_ir_round'] },
-    'mod': 'mod($0, $1)',
+    'mod': { text: '_gpu_ir_fmod($0, $1)', helpers: ['_gpu_ir_fmod'] },
     'mod.int': { text: '_gpu_ir_imod($0, $1)', helpers: ['_gpu_ir_imod'] },
     'max': 'max($0, $1)',
     'min': 'min($0, $1)',
@@ -302,6 +302,12 @@ export const GLSL: Syntax = deepFreeze({
   float r = floor(a);
   if (a - r >= 0.5) r += 1.0;
   return x < 0.0 ? -r : r;
+}`,
+    // `mod` rounds its quotient: `mod(1e8, 3.0)` is -2 on ANGLE Metal.
+    _gpu_ir_fmod: `float _gpu_ir_fmod(float x, float y) {
+  float r = mod(mod(x, y), y);
+  r = r + y * (1.0 - step(0.0, r * sign(y)));
+  return r - y * step(abs(y), r * sign(y));
 }`,
     // The floored modulo of integers, on `int`s: exact for every operand
     // within 2^24, intermediate values included (a `float` product `b * q`
@@ -507,7 +513,7 @@ export const GLSL: Syntax = deepFreeze({
   ],
   // A helper is named `_gpu_ir_…` and a user function `_fn_ir_…`: a host
   // that joins two compilations in one shader renames by `_gpu_` and `_fn_`,
-  // and the `ir_` keeps them apart from the existing GLSL target's names.
+  // and the `ir_` keeps them apart from the names of other GLSL code.
   call: (fn, args) => `_fn_ir_${fn}(${args.join(', ')})`,
   fn: (name, params, result, body) =>
     [

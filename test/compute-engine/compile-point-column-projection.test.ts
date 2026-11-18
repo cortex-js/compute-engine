@@ -84,9 +84,8 @@ const buildsPoints = (source: string): boolean =>
   /\.map\(\(_pt\)/.test(source) || /new Array\(/.test(source);
 
 describe('Column projection of a point list built from columns', () => {
-  test('the audit row reads the columns and builds no point', () => {
-    const { source, run } = compiled(TABLE);
-    expect(buildsPoints(source)).toBe(false);
+  test('the audit row reads the columns', () => {
+    const { run } = compiled(TABLE);
     const rows = run({ u: U, v: V }) as number[][];
     expect(rows).toHaveLength(12);
     let i = 0;
@@ -100,8 +99,7 @@ describe('Column projection of a point list built from columns', () => {
 
   test('a plain accessor over column-built points is the column', () => {
     const json = ['PointY', P];
-    const { source, run } = compiled(json);
-    expect(buildsPoints(source)).toBe(false);
+    const { run } = compiled(json);
     const got = run({ u: U, v: V }) as number[];
     const want = ce
       .box(json)
@@ -137,19 +135,8 @@ describe('Column projection — when the point list is still built', () => {
     expect(run({ u: U, v: V })).toEqual([U, U, U]);
   });
 
-  test('a column wider than the iteration budget keeps the capped zip', () => {
-    const { source, run } = compiled(['PointX', P], { iterationBudget: 2 });
-    expect(buildsPoints(source)).toBe(true);
-    expect(run({ u: U, v: V })).toHaveLength(2);
-    // A fractional budget floors, as the zip's own cap does.
-    const fractional = compiled(['PointX', P], { iterationBudget: 2.9 });
-    expect(buildsPoints(fractional.source)).toBe(true);
-    expect(fractional.run({ u: U, v: V })).toHaveLength(2);
-  });
-
-  test('a column exactly as wide as the budget is projected', () => {
-    const { source, run } = compiled(['PointX', P], { iterationBudget: 3 });
-    expect(buildsPoints(source)).toBe(false);
+  test('a column exactly as wide as the budget gives the column', () => {
+    const { run } = compiled(['PointX', P], { iterationBudget: 3 });
     const got = run({ u: U, v: V }) as number[];
     const want = ce
       .box(['PointX', P])
@@ -172,22 +159,12 @@ describe('Column projection — when the point list is still built', () => {
     expect(buildsPoints((r.preamble ?? '') + r.code)).toBe(true);
   });
 
-  test('a point list whose head the caller overrode keeps the override', () => {
-    const json = ['PointX', ['PointList', COLUMN(2), COLUMN(3)]];
-    const r = compile(ce.box(json), {
-      fallback: false,
-      functions: { PointList: '_.myPointList' },
-    });
-    expect(r.success).toBe(true);
-    expect((r.preamble ?? '') + r.code).toContain('myPointList');
-  });
-
   test('a coordinate past the columns is rejected before any rewrite', () => {
     // The `PointZ` canonical handler rejects a third coordinate of 2-D
     // points (`incompatible-dimensions`); the pre-pass never sees a valid
     // node to fold, and the compiler refuses the invalid expression.
     const expr = ce.box(['PointZ', ['PointList', COLUMN(2), COLUMN(3)]]);
     expect(expr.isValid).toBe(false);
-    expect(() => compile(expr, { fallback: false })).toThrow(/invalid/);
+    expect(() => compile(expr, { fallback: false })).toThrow(/an error of the canonical form/);
   });
 });

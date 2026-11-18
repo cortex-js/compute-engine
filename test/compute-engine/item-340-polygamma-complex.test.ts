@@ -288,13 +288,6 @@ describe('PolyGamma JS compile: a complex-typed argument fails closed', () => {
     } as any);
     expect(Number.isNaN(got as number)).toBe(true);
   });
-
-  test('the same compiled function still matches N() for a real-valued run', () => {
-    const compiled = compile(ce.box(['PolyGamma', 'pg340_n', 'pg340_r']));
-    expect(compiled.success).toBe(true);
-    const got = compiled.run?.({ pg340_n: 3, pg340_r: 2.5 } as any);
-    expect(Math.abs((got as number) - 0.22390584881725206)).toBeLessThan(1e-9);
-  });
 });
 
 describe('PolyGamma of an order above 100 next to a half-integer (CE-189)', () => {

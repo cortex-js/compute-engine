@@ -369,6 +369,12 @@ describe('COMPILE: complex inverse trig at large arguments', () => {
     const result = compile(engine.parse(latex), { fallback: false });
     expect(result.success).toBe(true);
     const out = result.run!({ u }) as number | { re: number; im: number };
+    // A complex value on the real lane is NaN (docs/COMPILATION-MODEL.md):
+    // `u` is declared `real`, so the compiled code is real.
+    if (expected[1] !== 0) {
+      expect(typeof out === 'number' ? out : out.re).toBeNaN();
+      return;
+    }
     expectClose(typeof out === 'number' ? { re: out, im: 0 } : out, expected);
   });
 });

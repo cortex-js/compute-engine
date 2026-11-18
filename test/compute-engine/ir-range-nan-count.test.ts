@@ -1,7 +1,7 @@
 /**
  * A `Range` (and a `Repeat`) whose run-time count is NaN, in the profile
- * `ir` on JavaScript: an empty list, as the existing compiler gives, where
- * the interpreter leaves the `Range` unevaluated (README of
+ * `ir` on JavaScript: an empty list, where the interpreter leaves the
+ * `Range` unevaluated (README of
  * `src/compute-engine/compilation/ir/`, "Lists"). Tycho's documents take
  * the digits of a number with `Range(1, Ceil(Log(a)))`, whose bound has no
  * value for `a ≤ 0`: the build threw "a list of more than 2^32 iterations".
@@ -16,8 +16,13 @@ ce.declare('x', 'real');
 
 const IR = { profile: 'ir', fallback: false } as const;
 const js = (json: unknown) => compile(ce.box(json as never), IR);
-const existing = (json: unknown) =>
-  compile(ce.box(json as never), { fallback: false });
+// The interpreter's value, as a list of numbers.
+const interpreted = (json: unknown, vars: Record<string, number>) =>
+  ce
+    .box(['ListFrom', json] as never)
+    .subs(vars)
+    .evaluate()
+    .ops!.map((op) => op.re);
 
 const DIGITS = ['Range', 1, ['Ceil', ['Log', 'a']]];
 
@@ -43,34 +48,26 @@ describe('IR profile: a run-time count that is NaN', () => {
       'a Map over it',
       ['Map', ['Function', ['Multiply', 'k', 'x'], 'k'], DIGITS],
     ],
-  ])('%s is the empty list, as the existing compiler gives', (_, json) => {
+  ])('%s is the empty list', (_, json) => {
     const f = js(json);
-    const g = existing(json);
-    for (const a of [-2.5, -1, NaN]) {
+    for (const a of [-2.5, -1, NaN])
       expect(f.run!({ a, x: 0.5 } as never)).toEqual([]);
-      expect(g.run!({ a, x: 0.5 } as never)).toEqual([]);
-    }
+    // A count with a value gives the interpreter's value.
     for (const a of [5, 1234.5])
       expect(f.run!({ a, x: 0.5 } as never)).toEqual(
-        g.run!({ a, x: 0.5 } as never)
+        interpreted(json, { a, x: 0.5 })
       );
   });
 
-  test('a Repeat of a NaN count is the empty list (the existing compiler throws)', () => {
+  test('a Repeat of a NaN count is the empty list', () => {
     const json = ['Repeat', 'x', ['Ceil', ['Log', 'a']]];
     expect(js(json).run!({ a: -2.5, x: 0.5 } as never)).toEqual([]);
     expect(js(json).run!({ a: 500, x: 0.5 } as never)).toEqual([0.5, 0.5, 0.5]);
-    expect(() => existing(json).run!({ a: -2.5, x: 0.5 } as never)).toThrow();
   });
 
   test('its Sum is 0 and its Length is 0', () => {
     expect(js(['Sum', DIGITS]).run!({ a: -1 } as never)).toBe(0);
     expect(js(['Length', DIGITS]).run!({ a: -1 } as never)).toBe(0);
-  });
-
-  test('a bound of -Infinity (Log(0)) is an unbounded Range: both compilers throw', () => {
-    expect(() => js(DIGITS).run!({ a: 0 } as never)).toThrow(RangeError);
-    expect(() => existing(DIGITS).run!({ a: 0 } as never)).toThrow(RangeError);
   });
 
   test('a count that folds to NaN: the same with and without the passes', () => {

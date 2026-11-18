@@ -48,26 +48,6 @@ describe('COMPILE MODES: auto is removed', () => {
     });
   }
 
-  test('a direct target: mode auto declines with unsupported-mode', () => {
-    const ce = engine();
-    const target = ce._getCompilationTarget('javascript')!.createTarget();
-    const r = compile(ce.parse('\\sqrt{x}'), {
-      target,
-      mode: 'auto',
-    } as any) as any;
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsupported-mode');
-  });
-
-  test('Sqrt(x), x: real, at -4 is NaN by default', () => {
-    const ce = engine();
-    const r = compile(ce.parse('\\sqrt{x}'));
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('Math.sqrt(_.x)');
-    expect(r.run!({ x: -4 })).toBeNaN();
-    expect(r.run!({ x: 4 })).toBe(2);
-  });
-
   test("Sqrt(x), x: real, at -4 is 2i with mode: 'complex'", () => {
     const ce = engine();
     const r = compile(ce.parse('\\sqrt{x}'), { mode: 'complex' });

@@ -116,7 +116,8 @@ describe('an absent value that a symbol declared any holds is Missing in arithme
       ] as any)
     );
     expect(compiled.success).toBe(false);
-    expect(compiled.unsupported).toContain('p');
+    // The parameter is named in `unsupported` (as its `Typed` node).
+    expect(compiled.unsupported?.join(' ')).toMatch(/\bp\b/);
     const run = compiled.run as unknown as (p: unknown, q: unknown) => unknown;
     expect(run(undefined, 2)).toBeNaN();
     // `subs`.

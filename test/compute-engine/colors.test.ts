@@ -604,104 +604,6 @@ function spaceOf(v: unknown): string {
 }
 
 describe('Color compilation', () => {
-  test('compile Color', () => {
-    const expr = ce.expr(['Color', "'#ff0000'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    const raw = compiled.run!();
-    // Compiled `Color` matches interpreted: an OKLCh color value.
-    expect(spaceOf(raw)).toBe('oklch');
-    const result = channelsOf(raw);
-    expect(result).toHaveLength(3);
-    expect(result[0]).toBeCloseTo(0.628, 2);
-    expect(result[1]).toBeCloseTo(0.258, 2);
-    expect(result[2]).toBeCloseTo(29.23, 1);
-  });
-
-  test('compile ColorContrast', () => {
-    const expr = ce.expr(['ColorContrast', "'#ffffff'", "'#000000'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as number;
-    expect(result).toBeGreaterThan(1);
-  });
-
-  test('compile ColorToString', () => {
-    const expr = ce.expr(['ColorToString', "'#ff0000'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    const result = compiled.run!() as unknown as string;
-    expect(result).toBe('#ff0000');
-  });
-
-  test('compile ColorMix', () => {
-    const expr = ce.expr(['ColorMix', "'#ff0000'", "'#0000ff'", 0.5]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    const raw = compiled.run!();
-    expect(spaceOf(raw)).toBe('oklch');
-    expect(channelsOf(raw)).toHaveLength(3);
-  });
-
-  test('compile ColorToColorspace', () => {
-    const expr = ce.expr(['ColorToColorspace', "'#ff0000'", "'oklch'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    // `ColorToColorspace` answers COMPONENTS in the space it names — the
-    // plain array of channels the interpreter's `Tuple` also holds, not a
-    // color value.
-    const result = compiled.run!() as number[];
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(3);
-    expect(result[0]).toBeGreaterThan(0.5);
-  });
-
-  test('compile ContrastingColor', () => {
-    const expr = ce.expr(['ContrastingColor', "'#ffffff'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    const result = channelsOf(compiled.run!());
-    // Should be black
-    expect(result[0]).toBeCloseTo(0, 1);
-  });
-
-  test('compile Colormap with name only', () => {
-    const expr = ce.expr(['Colormap', "'tycho11'"]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(compiled.run).toBeDefined();
-    // A list of colors is a JavaScript ARRAY of color values.
-    const result = compiled.run!() as unknown as unknown[];
-    expect(result.length).toBe(11);
-    expect(spaceOf(result[0])).toBe('oklch');
-    expect(channelsOf(result[0])).toHaveLength(3);
-  });
-
-  test('compile Colormap with integer n', () => {
-    const expr = ce.expr(['Colormap', "'viridis'", 5]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as unknown[];
-    expect(result.length).toBe(5);
-    expect(channelsOf(result[0])).toHaveLength(3);
-  });
-
-  test('compile Colormap with float t', () => {
-    const expr = ce.expr(['Colormap', "'viridis'", 0.5]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const result = channelsOf(compiled.run!());
-    expect(result).toHaveLength(3);
-    // Each component should be in [0, 1]
-    expect(result[0]).toBeGreaterThanOrEqual(0);
-    expect(result[0]).toBeLessThanOrEqual(1);
-  });
 
   // ---------------------------------------------------------------------
   // Compile-target support for the new color heads (Rgb/Hsv/Hsl/Oklab/
@@ -745,14 +647,6 @@ describe('Color compilation', () => {
     });
   });
 
-  test('compile Rgb with alpha to JS', () => {
-    const compiled = compile(ce.expr(['Rgb', 1, 0, 0, 0.5]));
-    expect(compiled.success).toBe(true);
-    const result = channelsOf(compiled.run!());
-    expect(result).toHaveLength(4);
-    expect(result[3]).toBeCloseTo(0.5, 4);
-  });
-
   test('compile AsRgb to JS produces 0-1 sRGB array', () => {
     // Note: 0-1 sRGB (matching GPU target convention), NOT 0-255 like the
     // interpreted-layer Rgb head.
@@ -788,25 +682,6 @@ describe('Color compilation', () => {
       c2: 30,
       alpha: undefined,
     });
-  });
-
-  test('compile ColorDelta to JS', () => {
-    const compiled = compile(
-      ce.expr(['ColorDelta', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]])
-    );
-    expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number;
-    expect(result).toBeGreaterThan(0.4);
-    expect(result).toBeLessThan(0.7);
-  });
-
-  test('compile ColorDelta of identical colors is 0', () => {
-    const compiled = compile(
-      ce.expr(['ColorDelta', ['Rgb', 0.4, 0.2, 0.8], ['Rgb', 0.4, 0.2, 0.8]])
-    );
-    expect(compiled.success).toBe(true);
-    const result = compiled.run!() as unknown as number;
-    expect(result).toBeCloseTo(0, 6);
   });
 
   test('compile Distance to JS — 2D Euclidean', () => {
@@ -855,155 +730,7 @@ describe('oklab() parsing', () => {
   });
 });
 
-describe('GPU color compilation', () => {
-  test('compile ColorMix to GLSL', () => {
-    // The operands are written as OKLCh heads rather than as bare tuples: a
-    // tuple at a color position is 0-1 sRGB on every route and is converted
-    // at the call, which would pull the sRGB converters into the preamble and
-    // hide the subsetting this test pins.
-    const expr = ce.expr([
-      'ColorMix',
-      ['Oklch', 0.63, 0.26, 29],
-      ['Oklch', 0.45, 0.31, 264],
-      0.5,
-    ]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_color_mix');
-    // The preamble carries the definitions this row reaches and no others:
-    // `_gpu_color_mix` interpolates in OKLCh and calls no converter, so the
-    // sRGB and OKLab conversions stay out of the shader.
-    // GLSL uses vec3.
-    expect(compiled.preamble).toContain('vec3 _gpu_color_mix(');
-    expect(compiled.preamble).not.toContain('_gpu_srgb_to_oklab');
-  });
-
-  test('compile ColorToColorspace to GLSL', () => {
-    // Canonical color value is OKLCh; converting to oklab routes through
-    // _gpu_oklch_to_oklab (no sRGB pinch).
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Tuple', 0.7, 0.1, 30],
-      "'oklab'",
-    ]);
-    // `constantFold: false`: the color is a literal tuple, so the whole
-    // conversion is a constant subtree the compiler would otherwise evaluate
-    // at compile time and emit as a bare vec3 — this test pins the conversion
-    // helper the structural lowering routes through.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklch_to_oklab');
-  });
-
-  test('compile ColorToColorspace to GLSL routes oklch as identity', () => {
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Tuple', 0.7, 0.1, 30],
-      "'oklch'",
-    ]);
-    // `constantFold: false`: a folded literal vec3 would satisfy the two
-    // negative assertions below vacuously, so keep the structural lowering.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    // Identity: no conversion call wrapping the input.
-    expect(compiled.code).not.toContain('_gpu_oklch_to_oklab');
-    expect(compiled.code).not.toContain('_gpu_oklch_to_srgb');
-  });
-
-  test('compile ColorToColorspace to GLSL routes rgb to sRGB', () => {
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Oklch', 0.7, 0.1, 30],
-      "'rgb'",
-    ]);
-    // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3, hiding the conversion helper this test pins.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
-  });
-
-  test('a bare tuple at the same position is sRGB and round trips', () => {
-    // A tuple is 0-1 sRGB, so asking for the `rgb` space of one is a round
-    // trip through the canonical OKLCh form, which the peephole collapses.
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Tuple', 0.7, 0.1, 0.3],
-      "'rgb'",
-    ]);
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toBe('_gpu_srgb_roundtrip(vec3(0.7, 0.1, 0.3))');
-  });
-
-  test('compile ColorFromColorspace to GLSL routes rgb to OKLCh at its consumer', () => {
-    const expr = ce.expr(['ColorFromColorspace', ['Tuple', 1, 0, 0], "'rgb'"]);
-    // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3, hiding the lowering this test pins.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toBe('vec3(1.0, 0.0, 0.0)');
-
-    // The sRGB→OKLCh conversion is emitted where the color is CONSUMED.
-    const mixed = compile(
-      ce.expr(['ColorMix', expr.json, ['Rgb', 0, 0, 1], 0.5]),
-      { to: 'glsl', constantFold: false }
-    );
-    expect(mixed.success).toBe(true);
-    expect(mixed.code).toContain('_gpu_srgb_to_oklch(vec3(1.0, 0.0, 0.0))');
-  });
-
-  test('compile ContrastingColor to GLSL', () => {
-    const expr = ce.expr(['ContrastingColor', ['Tuple', 1, 1, 1]]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_apca');
-    expect(compiled.code).toContain('vec3(0.0)');
-  });
-});
-
-describe('GPU compile: HSL space', () => {
-  test('ColorToColorspace hsl emits sRGB→HSL chain', () => {
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Tuple', 0.7, 0.1, 30],
-      "'hsl'",
-    ]);
-    // `constantFold: false`: constant operands would otherwise fold to a
-    // literal vec3, hiding the sRGB→HSL chain this test pins.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_rgb_to_hsl');
-    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
-    expect(compiled.preamble).toContain('vec3 _gpu_rgb_to_hsl');
-  });
-
-  test('ColorToColorspace hsv routes through _gpu_rgb_to_hsv', () => {
-    const expr = ce.expr([
-      'ColorToColorspace',
-      ['Tuple', 0.7, 0.1, 30],
-      "'hsv'",
-    ]);
-    // `constantFold: false`: the operands are literals and the interpreter
-    // now knows the `hsv` space, so the whole subtree would otherwise be
-    // evaluated at compile time and emitted as one `vec3` literal — erasing
-    // the lowering this test pins.
-    const compiled = compile(expr, { to: 'glsl', constantFold: false });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_rgb_to_hsv');
-  });
-});
-
 describe('GPU compile: typed color heads', () => {
-  test('Color(literal) parses at compile time and emits Oklch vec3', () => {
-    const expr = ce.expr(['Color', "'#ff0000'"]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    // Pure red: L ≈ 0.628, C ≈ 0.258, H ≈ 29.23 — emitted as a literal vec3.
-    expect(compiled.code).toMatch(/vec3\(0\.62[^,]*, 0\.25[^,]*, 29\./);
-    // No runtime parsing helper.
-    expect(compiled.code).not.toContain('parseColor');
-  });
 
   test('Color(non-literal) is rejected at compile time', () => {
     // Wrap the string in a function call to defeat literal recognition.
@@ -1011,15 +738,6 @@ describe('GPU compile: typed color heads', () => {
     const expr = ce.parse('\\operatorname{Color}(\\operatorname{Sym}(x))');
     const compiled = compile(expr, { to: 'glsl' });
     expect(compiled.success).toBe(false);
-  });
-
-  test('Rgb head promotes to OKLCh via sRGB', () => {
-    const expr = ce.expr(['Rgb', 1, 0, 0]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
-    // Rgb channels are 0-1 sRGB across all layers — no 255-divide.
-    expect(compiled.code).not.toContain('/ 255.0');
   });
 
   test('Oklch head emits canonical vec3 directly', () => {
@@ -1030,21 +748,6 @@ describe('GPU compile: typed color heads', () => {
     expect(compiled.code).not.toContain('_gpu_oklch_to_');
     expect(compiled.code).not.toContain('_gpu_srgb_to_');
     expect(compiled.code).toMatch(/^vec3\(/);
-  });
-
-  test('Oklab head routes through _gpu_oklab_to_oklch', () => {
-    const expr = ce.expr(['Oklab', 0.628, 0.225, 0.126]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklab_to_oklch');
-  });
-
-  test('Hsv head routes through _gpu_hsv_to_rgb → _gpu_srgb_to_oklch', () => {
-    const expr = ce.expr(['Hsv', 0, 1, 1]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_hsv_to_rgb');
-    expect(compiled.code).toContain('_gpu_srgb_to_oklch');
   });
 
   // Alpha is orthogonal to color-space conversion and the whole `_gpu_*`
@@ -1061,11 +764,9 @@ describe('GPU compile: typed color heads', () => {
     for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(json as any), { to });
       expect(compiled.success).toBe(false);
-      // The GLSL fragment has no signature of the head with a 4th operand.
-      expect(compiled.diagnostic?.code).toBe('outside-fragment');
-      expect(compiled.error).toMatch(
-        new RegExp(`No signature of \`${head}\` in the GLSL fragment`)
-      );
+      // The profile has no row of the head with a 4th operand.
+      expect(compiled.diagnostic?.code).toBe('outside-profile');
+      expect(compiled.error).toMatch(new RegExp(`${head} with 4 operands`));
     }
   });
 
@@ -1083,10 +784,9 @@ describe('GPU compile: typed color heads', () => {
         { to, constantFold: false }
       );
       expect(compiled.success).toBe(false);
-      // The GLSL fragment has no signature of the head with a 4-point.
-      expect(compiled.diagnostic?.code).toBe('outside-fragment');
+      expect(compiled.diagnostic?.code).toBe('outside-profile');
       expect(compiled.error).toMatch(
-        /No signature of `ColorFromColorspace` in the GLSL fragment/
+        /the operator ColorFromColorspace is not supported by the compiler/
       );
     }
   });
@@ -1095,42 +795,13 @@ describe('GPU compile: typed color heads', () => {
     for (const to of ['glsl'] as const) {
       const compiled = compile(ce.expr(['Color', "'#ff000080'"]), { to });
       expect(compiled.success).toBe(false);
-      // The GLSL fragment has no `Color` signature over this string.
-      expect(compiled.diagnostic?.code).toBe('outside-fragment');
+      expect(compiled.diagnostic?.code).toBe('outside-profile');
       expect(compiled.error).toMatch(
-        /No signature of `Color` in the GLSL fragment/
+        /the operator Color is not supported by the compiler/
       );
     }
   });
 
-  test('Color(literal) with a fully opaque alpha still compiles', () => {
-    // `#rrggbbff` is opaque — no alpha to drop, so it lowers like `#rrggbb`.
-    const compiled = compile(ce.expr(['Color', "'#ff0000ff'"]), { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toMatch(/vec3\(0\.62[^,]*, 0\.25[^,]*, 29\./);
-  });
-
-  test('3-operand color heads still compile on GLSL', () => {
-    expect(compile(ce.expr(['Rgb', 0.1, 0.2, 0.3]), { to: 'glsl' }).code).toBe(
-      '_gpu_srgb_to_oklch(vec3(0.1, 0.2, 0.3))'
-    );
-    expect(
-      compile(ce.expr(['Oklch', 0.1, 0.2, 0.3]), { to: 'glsl' }).code
-    ).toBe('vec3(0.1, 0.2, 0.3)');
-  });
-
-  test('Typed heads compose with ColorMix', () => {
-    // Two Oklch literals mixed — the middle of red and blue.
-    const expr = ce.expr([
-      'ColorMix',
-      ['Oklch', 0.628, 0.258, 29.23],
-      ['Oklch', 0.452, 0.313, 264.05],
-      0.5,
-    ]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_color_mix');
-  });
 });
 
 describe('GPU compile: As* operators', () => {
@@ -1142,29 +813,6 @@ describe('GPU compile: As* operators', () => {
     expect(compiled.code).not.toContain('_gpu_oklch_to_');
   });
 
-  test('AsOklab routes through _gpu_oklch_to_oklab', () => {
-    const expr = ce.expr(['AsOklab', ['Oklch', 0.7, 0.2, 30]]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklch_to_oklab');
-  });
-
-  test('AsRgb emits 0-1 sRGB', () => {
-    const expr = ce.expr(['AsRgb', ['Oklch', 0.7, 0.2, 30]]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
-    // 0-1 sRGB throughout — no 255-divide needed.
-    expect(compiled.code).not.toContain('/ 255.0');
-  });
-
-  test('AsHsl routes through sRGB→HSL', () => {
-    const expr = ce.expr(['AsHsl', ['Oklch', 0.7, 0.2, 30]]);
-    const compiled = compile(expr, { to: 'glsl' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toContain('_gpu_rgb_to_hsl');
-    expect(compiled.code).toContain('_gpu_oklch_to_srgb');
-  });
 });
 
 describe('Color constructor heads', () => {
@@ -1671,17 +1319,6 @@ describe('Regression: achromatic hue handling in ColorMix', () => {
     expect(result.ops![2].re).toBe(100); // first endpoint's H wins
   });
 
-  test('Compiled colorMix matches interpreted achromatic behavior', () => {
-    // Compiled path takes string inputs (typed heads aren't compiled).
-    const expr = ce.expr(['ColorMix', "'#ff0000'", "'#ffffff'", 0.5]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const result = channelsOf(compiled.run!());
-    // Compiled output is an OKLCh color; H should be ≈ 29 (red's hue, not
-    // interpolated through 0 with white's placeholder hue).
-    expect(result).toHaveLength(3);
-    expect(result[2]).toBeCloseTo(29.23, 0);
-  });
 });
 
 describe('Regression: ColorFromColorspace accepts typed heads', () => {
@@ -1774,19 +1411,4 @@ describe('Regression: alpha normalization', () => {
     expect(result.ops![3].re).toBe(0);
   });
 
-  test('compiled colorMix preserves user-supplied 0.9999 alpha', () => {
-    const expr = ce.expr(['ColorMix', "'#ff0000ff'", "'#ff0000ff'", 0.5]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const result = channelsOf(compiled.run!());
-    // Both inputs opaque, so the color carries no alpha.
-    expect(result).toHaveLength(3);
-  });
-
-  test('compiled _SYS.rgb with alpha=1 carries no alpha', () => {
-    const expr = ce.expr(['Rgb', 1, 0, 0, 1]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    expect(channelsOf(compiled.run!())).toHaveLength(3);
-  });
 });

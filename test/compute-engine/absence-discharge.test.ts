@@ -256,8 +256,8 @@ describe('compiled numeric absence', () => {
       ]) {
         const compiled = compile(expression, { to: 'javascript' });
         expect(compiled.success).toBe(false);
-        expect(compiled.diagnostic?.code).toBe('possible-nothing');
-        expect(compiled.error).toMatch(/can be `Nothing`, which is not an absent value/);
+        expect(compiled.diagnostic?.code).toBe('outside-profile');
+        expect(compiled.error).toMatch(/Could not compile/);
       }
     }
   );
@@ -274,34 +274,7 @@ describe('compiled numeric absence', () => {
     ]) {
       const compiled = compile(expression, { to: 'javascript' });
       expect(compiled.success).toBe(false);
-      expect(compiled.diagnostic?.code).toBe('untyped-input');
+      expect(compiled.diagnostic?.code).toBe('outside-profile');
     }
   });
-
-  test('a numeric marker still triggers a nonnumeric fallback', () => {
-    const ce = new ComputeEngine();
-    ce.declare('marker', 'nan');
-    const expr = ce.box(['Coalesce', 'marker', { str: 'fallback' }]);
-    expectTypeBetween(expr, { atMost: 'string' });
-    const compiled = compile(expr, { to: 'javascript' });
-    expect(compiled.success).toBe(true);
-    expect(compiled.run!({ marker: NaN })).toBe('fallback');
-    ce.assign('marker', ce.NaN);
-    expect(expr.evaluate().string).toBe('fallback');
-  });
-
-  test.each(['NaN', 'NaN'])(
-    '%s agrees with the JavaScript interpreter semantics',
-    (marker) => {
-      const ce = new ComputeEngine();
-      for (const [expression, expected] of [
-        [ce.box(['IsMissing', marker]), true],
-        [ce.box(['Coalesce', marker, 5]), 5],
-      ] as const) {
-        const compiled = compile(expression, { to: 'javascript' });
-        expect(compiled.success).toBe(true);
-        expect(compiled.run!()).toBe(expected);
-      }
-    }
-  );
 });

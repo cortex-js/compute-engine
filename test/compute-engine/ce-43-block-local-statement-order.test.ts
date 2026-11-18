@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { MathJsonExpression } from '../../src/math-json';
 
 // CE-43: the static type of a block local does not depend on the order of
@@ -95,13 +94,4 @@ describe('CE-43: an assignment in a match case is an assignment of the block loc
     );
   });
 
-  test('the compiled while-let loop reads the block local', () => {
-    const ce = new ComputeEngine();
-    const [ast] = parseEpsil(
-      'do { let xs = [1, 2, 3]\nlet s = 0\nwhile let [h, ...] = xs { s = s + h; xs = Rest(xs) }\ns }'
-    );
-    const result = compile(ce.box(ast!));
-    expect(result.success).toBe(true);
-    expect(result.run()).toBe(6);
-  });
 });

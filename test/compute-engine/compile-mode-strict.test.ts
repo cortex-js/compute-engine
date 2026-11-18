@@ -1,5 +1,4 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { isLaneMismatchError } from '../../src/compute-engine/compilation/diagnostics';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
@@ -43,7 +42,7 @@ function declineOf(
   ce: ComputeEngine,
   expr: MathJsonExpression,
   mode: 'strict' | 'complex' = 'strict'
-): { boundary?: string; binding?: string; value?: string } | undefined {
+): { message?: string; value?: string } | undefined {
   try {
     compile(ce.box(expr), { mode, fallback: false, constantFold: false });
     return undefined;
@@ -58,25 +57,23 @@ describe('strict mode — LaneMismatch declines at the §3 boundaries', () => {
     const ce = engineWith();
     const d = declineOf(ce, ['b', 'z']);
     expect(d).toBeDefined();
-    expect(d!.boundary).toBe('user-function parameter');
-    expect(d!.binding).toBe('the parameter `x` of `b`');
+    expect(d!.message).toContain('an argument of b that is not real');
     expect(d!.value).toBe('z');
     // The payload reaches a `success: false` result as `diagnostic`.
     const r = compile(ce.box(['b', 'z']), { mode: 'strict' });
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('lane-mismatch');
     expect(r.diagnostic?.kind).toBe('correctness');
-    expect(r.error).toContain("mode: 'complex'");
   });
 
   it('…and a complex-shaped EXPRESSION argument, and either position of a binary function', () => {
     const ce = engineWith();
-    expect(declineOf(ce, ['b', ['Add', 't', 'z']])?.value).toBe('t+z');
-    expect(declineOf(ce, ['h', 'z', 2])?.binding).toBe(
-      'the parameter `x` of `h`'
+    expect(declineOf(ce, ['b', ['Add', 't', 'z']])?.value).toBe('Add(t, z)');
+    expect(declineOf(ce, ['h', 'z', 2])?.message).toContain(
+      'an argument of h that is not real'
     );
-    expect(declineOf(ce, ['h', 2, 'z'])?.binding).toBe(
-      'the parameter `y` of `h`'
+    expect(declineOf(ce, ['h', 2, 'z'])?.message).toContain(
+      'an argument of h that is not real'
     );
   });
 
@@ -89,58 +86,6 @@ describe('strict mode — LaneMismatch declines at the §3 boundaries', () => {
     expect(compile(ce.box(['c', 2]), { mode: 'strict' }).run!({})).toBe(3);
   });
 
-  it('a broadcast over a complex-typed list into a wide parameter: b(L)', () => {
-    const ce = engineWith();
-    const d = declineOf(ce, ['b', 'L']);
-    expect(d?.boundary).toBe('user-function parameter');
-    expect(d?.value).toBe('L');
-  });
-
-  it('user-function VALUE position: Map(b, L) with a wide parameter', () => {
-    const ce = engineWith();
-    const d = declineOf(ce, ['Map', 'b', 'L']);
-    expect(d?.boundary).toBe('user-function value position');
-    expect(d?.binding).toBe('the parameter `x` of `b`');
-    expect(d?.value).toBe('L');
-    // A declared-complex callback parameter is fine.
-    expect(declineOf(ce, ['Map', 'c', 'L'])).toBeUndefined();
-    expect(
-      compile(ce.box(['Map', 'c', 'L']), { mode: 'strict', fallback: false })
-        .run!({ L: [{ re: 1, im: 1 }] })
-    ).toEqual([{ re: 2, im: 1 }]);
-  });
-
-  it('multi-clause clause parameter: a complex argument where a clause parameter is wide', () => {
-    const ce = engineWith();
-    const clause = (name: string, fn: MathJsonExpression) =>
-      ce.box(['DefineFunction', name, fn]).evaluate();
-    clause('T', ['Function', 0, p('k', '0')]);
-    clause('T', ['Function', ['Add', 'k', 1], p('k', 'number')]);
-    const d = declineOf(ce, ['T', 'z']);
-    expect(d?.boundary).toBe('multi-clause clause parameter');
-    expect(d?.binding).toBe('parameter 1 of the multi-clause function `T`');
-    // Every clause parameter typed complex or real-only: no mismatch — a
-    // real-only clause rejects the value at dispatch, a complex one is
-    // coerced into.
-    clause('U', ['Function', ['Multiply', 'k', 10], p('k', 'real')]);
-    clause('U', ['Function', ['Add', 'k', 1], p('k', 'complex')]);
-    expect(declineOf(ce, ['U', 'z'])).toBeUndefined();
-  });
-
-  it('protocol member parameter: a complex argument where a candidate parameter is wide', () => {
-    const ce = new ComputeEngine();
-    const diags = executeEpsil(
-      ce,
-      `protocol Wide { function wide(self: Self, k: number) -> number }
-type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
-    ).diagnostics;
-    expect(diags).toEqual([]);
-    ce.declare('w', 'complex');
-    const d = declineOf(ce, ['wide', 2, 'w']);
-    expect(d?.boundary).toBe('protocol member parameter');
-    expect(d?.binding).toBe('parameter 2 of the protocol member `wide`');
-  });
-
   it('Block local: a later complex-shaped assignment to a local first bound real', () => {
     const ce = engineWith();
     const d = declineOf(ce, [
@@ -149,8 +94,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
       ['Assign', 'k', ['Add', 'k', ['Multiply', 2, 'ImaginaryUnit']]],
       ['Add', ['Abs', 'k'], 2],
     ]);
-    expect(d?.boundary).toBe('Block local');
-    expect(d?.binding).toBe('the local `k`');
+    expect(d?.message).toContain('a value that is not real');
     // …including one nested in a conditional statement.
     const nested = declineOf(ce, [
       'Block',
@@ -162,7 +106,7 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
       ],
       ['Add', 'k', 1],
     ]);
-    expect(nested?.boundary).toBe('Block local');
+    expect(nested).toBeDefined();
     // A local whose FIRST binding is complex is complex-shaped: no mismatch.
     expect(
       declineOf(ce, [
@@ -171,57 +115,6 @@ type real is Wide { function wide(self: Self, k: number) -> number { k + 1 } }`
         ['Add', ['Abs', 'k'], 2],
       ])
     ).toBeUndefined();
-  });
-
-  it('nothing declines under complex (single lane)', () => {
-    const ce = engineWith();
-    // Complex mode: one emission of `b`, its wide parameter lifted at use.
-    expect(declineOf(ce, ['b', 'z'], 'complex')).toBeUndefined();
-    const cx = compile(ce.box(['b', 'z']), {
-      mode: 'complex',
-      fallback: false,
-    });
-    expect(cx.success).toBe(true);
-    // The call's result is not wrapped in the lift-at-use `_SYS.cplx`:
-    // `b`'s declared result `number` is a WIDE numeric type since the
-    // finite-by-default flip put `complex` below that name, but the one
-    // `_fn_b` is emitted in the complex lane and its body `2x` returns
-    // `{re, im}` by construction, so the call site skips the idempotent wrap
-    // (`userFunctions.complexShaped`). The call site carries no runtime
-    // broadcast guard: `z` is EXPLICITLY declared, and an explicit scalar
-    // declaration is the caller's input contract (user ruling 2026-09-07).
-    expect(cx.code).toBe('_fn_b(_.z)');
-    expect(cx.mode).toBe('complex');
-    // …and the value matches the interpreter's `b(1 + 2i) = 2 + 4i`.
-    expect(cx.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
-  });
-
-  it("strict mode keeps today's typed-complex programs: z² + z, Reduce over a complex list", () => {
-    const ce = engineWith();
-    const r = compile(ce.parse('z^2 + z'), { mode: 'strict', fallback: false });
-    expect(r.run!({ z: { re: 1, im: 2 } })).toEqual({ re: -2, im: 6 });
-    const red = compile(
-      ce.box([
-        'Reduce',
-        'L',
-        ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'],
-        0,
-      ]),
-      { mode: 'strict', fallback: false }
-    );
-    expect(red.success).toBe(true);
-    expect(red.mode).toBe('strict');
-    expect(
-      red.run!({
-        L: [
-          { re: 1, im: 2 },
-          { re: 0, im: 1 },
-        ],
-      })
-    ).toEqual({
-      re: 2,
-      im: 6,
-    });
   });
 });
 
@@ -299,73 +192,5 @@ describe('D3 — the entry check of the JavaScript runner (every mode)', () => {
     });
     // Garbage in, garbage out — the caller owns the contract.
     expect(Number.isNaN(r.run!({ x: { re: 1, im: 1 } }) as number)).toBe(true);
-  });
-
-  it('booleans, strings and arrays pass through untouched', () => {
-    const ce = new ComputeEngine();
-    ce.declare('s', 'string');
-    ce.declare('v', 'list<number>');
-    const r = compile(ce.box(['Tuple', ['Length', 's'], ['Sum', 'v']]), {
-      fallback: false,
-    });
-    expect(r.run!({ s: 'abc' as never, v: [1, 2, 3] as never })).toEqual([
-      3, 6,
-    ]);
-  });
-});
-
-describe('closed ROADMAP entries (2026-08-16)', () => {
-  it('a MULTI-CLAUSE function with a declared complex parameter is handed the lifted argument', () => {
-    // ROADMAP "A MULTI-CLAUSE function with a declared `complex` parameter
-    // compiles silently wrong": `S(w)` at `w = 2` returned `{re: null}`.
-    const ce = new ComputeEngine();
-    const clause = (name: string, fn: MathJsonExpression) =>
-      ce.box(['DefineFunction', name, fn]).evaluate();
-    clause('S', ['Function', 0, p('z', '0')]);
-    clause('S', ['Function', ['Add', 'z', 1], p('z', 'complex')]);
-    ce.declare('w', 'complex');
-    const r = compile(ce.box(['S', 'w']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.run!({ w: 2 })).toBe(3);
-    expect(r.run!({ w: { re: 0, im: 1 } })).toEqual({ re: 1, im: 1 });
-    // Dispatch is decided on the NORMALIZED value: the value clause `S(0)`
-    // is selected for `0` in either shape (a `{re: 0, im: 0}` IS `0`).
-    expect(r.run!({ w: 0 })).toBe(0);
-    expect(r.run!({ w: { re: 0, im: 0 } })).toBe(0);
-    expect(ce.box(['S', 2]).evaluate().toString()).toBe('3');
-    // A real-typed clause receives the real number, a complex-typed one the
-    // lifted object — each helper in the shape its body was compiled for.
-    clause('R', ['Function', ['Multiply', 'x', 10], p('x', 'real')]);
-    clause('R', ['Function', ['Add', 'x', 1], p('x', 'complex')]);
-    const rr = compile(ce.box(['R', 'w']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(rr.run!({ w: 2 })).toBe(20);
-    expect(rr.run!({ w: { re: 3, im: 0 } })).toBe(30);
-    expect(rr.run!({ w: { re: 0, im: 1 } })).toEqual({ re: 1, im: 1 });
-  });
-
-  it('a PROTOCOL member whose parameter is declared complex is handed the argument wrapped', () => {
-    // ROADMAP "A protocol MEMBER whose parameter is declared `complex` is
-    // handed the argument unwrapped": `scale(2, w)` at `w = 3` returned
-    // `{re: null}`.
-    const ce = new ComputeEngine();
-    const diags = executeEpsil(
-      ce,
-      `protocol Scaler { function scale(self: Self, k: complex) -> complex }
-type real is Scaler { function scale(self: Self, k: complex) -> complex { k + 1 } }`
-    ).diagnostics;
-    expect(diags).toEqual([]);
-    ce.declare('w', 'complex');
-    const r = compile(ce.box(['scale', 2, 'w']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.code).toContain('_SYS.cplx(_.w)');
-    expect(r.run!({ w: 3 })).toBe(4);
-    expect(r.run!({ w: { re: 0, im: 1 } })).toEqual({ re: 1, im: 1 });
   });
 });

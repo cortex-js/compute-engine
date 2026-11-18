@@ -198,48 +198,6 @@ export function rationalRangeCount(
 }
 
 /**
- * True when a reader that counts the elements of the `Range` `expr` in
- * machine arithmetic, with `rangeCount()`, gets a count that is not the
- * count of the `Range` collection handlers.
- *
- * This is the case when every operand is an exact rational number literal
- * (the handlers then use the exact count of `exactArithmeticRange()`) and
- * the machine count of the numeric values of the operands is a different
- * number: `Range(0, 9999999999999/10^12, 1)` has 10 elements, and
- * `rangeCount(0, 9.999999999999, 1)` is 11, because its tolerance for
- * rounding errors counts the end point 10. It is also the case when the
- * machine count is not finite: `Range(1, 10^400)` has 10^400 elements, but
- * its machine upper bound is `Infinity`. The two counts must be the same
- * integer: `Range(1, 10^20)` has 10^20 elements, which a `number` holds
- * exactly, but `Range(1, 10^20, 1/2)` has 199999999999999999999 elements,
- * and its machine count is the `number` 2·10^20.
- *
- * Compiled code counts the elements of a range in machine arithmetic, so the
- * compiler declines a range for which this function is true
- * (`BaseCompiler.findShadowedLibraryLowering()`). A pure operand is
- * evaluated, as the compiler folds it: `10^400`, or a symbol with an
- * assigned value, which compiled code reads as a constant
- * (`Range(0, a, 1)` with `a := 9999999999999/10^12`). An operand that is
- * not pure (`Random()`) is not evaluated, and neither is an operand with a
- * symbol for which `isRuntimeInput` is true: the compiled code reads that
- * symbol at run time (a `vars` input, a loop index), so its value at
- * compile time is not the value the compiled code uses.
- */
-export function machineRangeCountDiffers(
-  expr: Expression,
-  isRuntimeInput: (symbol: string) => boolean = () => false
-): boolean {
-  const r = rangeOperands(
-    expr,
-    (op) => op.isPure && !op.symbols.some(isRuntimeInput)
-  );
-  if (r === undefined || r.inexact) return false;
-  const machine = rangeCount(...r.machine);
-  if (!Number.isFinite(machine)) return true;
-  return BigInt(machine) !== exactCount(r.lower, r.upper, r.step);
-}
-
-/**
  * The parts of a `Range` for the closed forms below, or `undefined` when the
  * closed forms do not apply.
  *

@@ -1,25 +1,16 @@
 /**
- * The compile contract of the value kind `enclosure` (`ENCLOSURE_COMPILE`,
- * the `compile` field of `ENCLOSURE_ARITHMETIC`), and the tables that the
- * interval mode of the profile `ir` reads to compile it
- * (`compilation/ir/lower-enclosure.ts`;
+ * The tables that the interval mode of the profile `ir` reads to compile the
+ * value kind `enclosure` (`compilation/ir/lower-enclosure.ts`;
  * `docs/plans/2026-10-26-value-kinds.md`, section 4.9.2, "Compilation").
  *
  * The compiled form of an enclosure is the interval of the interval mode
- * (`compile(expr, { to: 'interval-js' })`), which lowers the kind itself:
- * the contract has no hook that writes code. On every other target the
- * contract has no representation (`lowered()` answers `undefined`), and the
- * compilation declines there with the message of the kind.
+ * (`compile(expr, { to: 'interval-js' })`), which lowers the kind itself.
+ * Every other target declines an expression that holds an enclosure.
  */
 
-import type { ArithmeticCompile } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isKindArm, type KindTypeNames } from '../../common/type/utils.js';
 import { isRecord } from '../interval/run-support.js';
-
-/** The `language` of the only target with a representation of an
- * enclosure, `interval-js`. */
-const TARGET = 'interval-javascript';
 
 const ENCLOSURE_KIND: KindTypeNames = { has: (name) => name === 'enclosure' };
 
@@ -80,18 +71,3 @@ export function isEnclosureEntry(value: unknown): boolean {
   if (Number.isNaN(lo) || Number.isNaN(hi) || lo > hi) return false;
   return !(lo === hi && !Number.isFinite(lo));
 }
-
-/**
- * The compile contract of the value kind `enclosure`, the `compile` field of
- * `ENCLOSURE_ARITHMETIC`. Only the interval target has a representation of
- * an enclosure; the interval mode lowers it with no hook
- * (`compilation/ir/lower-enclosure.ts`), and checks a host value with
- * `isEnclosureEntry()`.
- */
-export const ENCLOSURE_COMPILE: ArithmeticCompile = {
-  type: {
-    lowered: ({ language }) => (language === TARGET ? 'interval' : undefined),
-    entry: (value) => isEnclosureEntry(value),
-    shippable: false,
-  },
-};

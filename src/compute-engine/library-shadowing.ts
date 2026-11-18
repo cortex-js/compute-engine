@@ -444,8 +444,7 @@ let serializationFrame: SerializationFrame | undefined;
  * The current frame of the scopes of the serialized nodes, or `undefined`
  * outside a scoped node: the same object for the same nesting of scopes. A
  * cache of the serialized form of a node keys on it, because the qualifier
- * of a node depends on these scopes (`boxedInCurrentScope()`,
- * `compiler-core.ts`).
+ * of a node depends on these scopes (`boxedInCurrentScope()`).
  */
 export function currentSerializationFrame(): object | undefined {
   return serializationFrame;

@@ -308,6 +308,8 @@ export function listLowering(cx: Lowering) {
     // is 6.
     const [lo, hi] = [limits.ops[1], limits.ops[2]].map((x) => {
       const v = cx.scalar(x);
+      // The interpreter leaves a sum over an impure bound unevaluated.
+      if (x.isPure === false) decline(x, 'a bound that is not pure');
       // The interpreter sums a window of an infinite range; NaN is 1.
       const c = cx.constant(v);
       if (c !== undefined && !Number.isFinite(c))

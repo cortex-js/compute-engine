@@ -182,27 +182,6 @@ describe('MISSING in a numeric slot', () => {
     });
   });
 
-  describe('compiled JavaScript lane', () => {
-    // The interpreter gives `Missing` for the first two rows and `NaN` for
-    // the third; compiled code may give `NaN` or `undefined` where the
-    // interpreter gives `Missing` (`docs/COMPILATION-MODEL.md`, "Caveats of
-    // compiled code").
-    it('answers NaN or undefined for the same rows', () => {
-      for (const expr of [
-        ['Cos', 'Missing'],
-        ['Add', 'Missing', 1],
-        ['Sin', ['If', 'False', 1]],
-      ]) {
-        const result = compile(ce.expr(expr as any))!;
-        expect(result.success).toBe(true);
-        const value = result.run!({});
-        expect(value === undefined || Number.isNaN(value as number)).toBe(
-          true
-        );
-      }
-    });
-  });
-
   describe('the single-branch If restriction', () => {
     // The masking answer of a restriction is the absence marker of the value's own
     // type, never `Undefined`: `NaN` for a number (user decision 2026-09-25;

@@ -99,21 +99,6 @@ describe('The Function-literal construction seam is the only builder', () => {
       // operand's arrow through `refineDeclaredPlaceholders`; it never
       // builds one.
       'compute-engine/boxed-expression/validate.ts',
-      // The compiler refuses a named function definition that the
-      // interpreter refuses for its effects
-      // (`refuseEffectContractViolations`): it RUNS the walk over the
-      // definition's literal to read `escapingWrite` and the inferred set,
-      // and builds `EffectContractError` for the message. It builds no
-      // arrow.
-      'compute-engine/compilation/compile-locals.ts',
-      // The compiler's check of a held value against the type the expression
-      // was typed with (`assertHeldValueType`): it READS the value's type
-      // through `presentedValueType`, the one rule that removes the implicit
-      // `missing` marker before a declared-type comparison (the same rule the
-      // `ce.assign` check applies), so that a value holding a `Missing` cell
-      // compiles under its declared type (ROADMAP CE-791). It builds no
-      // arrow.
-      'compute-engine/compilation/compile-inner.ts',
       'compute-engine/engine-declarations.ts',
       // The provisional re-derivation checks a rebuilt VALUE-bound literal
       // against its declared effects contract (`installRebuiltLiteral`): it

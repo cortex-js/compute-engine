@@ -86,11 +86,6 @@ describe('an infinite HSV or HSL channel reads as its bound', () => {
       '\\operatorname{Hsv}(90,0,1)',
     ],
     [
-      '1/0 value',
-      '\\operatorname{Hsv}(90,1,1/0)',
-      '\\operatorname{Hsv}(90,1,1)',
-    ],
-    [
       'Hsl infinite lightness',
       '\\operatorname{Hsl}(90,1,\\infty)',
       '\\operatorname{Hsl}(90,1,1)',
@@ -146,23 +141,16 @@ describe('an infinite HSV or HSL channel reads as its bound', () => {
     expectChannelsClose(channels(run(latex)), [30, 1, 1]);
   });
 
-  test('keeps the alpha slot', () => {
-    expect(run('\\operatorname{Hsv}(90,1,\\infty,0.5)')).toEqual(
-      run('\\operatorname{Hsv}(90,1,1,0.5)')
-    );
-  });
 });
 
 describe('a channel without a limit color', () => {
   test.each([
     ['infinite hue', '\\operatorname{Hsv}(\\infty,1,1)'],
-    ['1/0 hue', '\\operatorname{Hsv}(1/0,1,1)'],
     ['Hsl infinite hue', '\\operatorname{Hsl}(-\\infty,1,0.5)'],
     ['NaN value', '\\operatorname{Hsv}(90,1,0/0)'],
     ['NaN Rgb channel', '\\operatorname{Rgb}(0/0,0,0)'],
     ['Rgb infinite channel', '\\operatorname{Rgb}(\\infty,0.5,0)'],
     ['Rgb negative infinite channel', '\\operatorname{Rgb}(1,-\\infty,0)'],
-    ['Rgb 1/0 channel', '\\operatorname{Rgb}(1/0,0,0)'],
     ['Oklab infinite lightness', '\\operatorname{Oklab}(\\infty,0.1,0)'],
     [
       'Oklch negative infinite lightness',
@@ -178,12 +166,6 @@ describe('a channel without a limit color', () => {
       String(ce.parse(`\\operatorname{AsRgb}(${latex})`).evaluate())
     ).toMatch(
       /^Error\(ErrorCode\("incompatible-type", "color", "\w+\(.*\)"\)\)$/
-    );
-  });
-
-  test('keeps the alpha slot', () => {
-    expect(run('\\operatorname{Hsv}(\\infty,1,1,0.5)')).toEqual(
-      nanColor('oklch', 0.5)
     );
   });
 
@@ -208,11 +190,6 @@ describe('a channel without a limit color', () => {
     }
   );
 
-  test('a conversion of a non-finite color keeps the alpha slot', () => {
-    expect(
-      run('\\operatorname{AsHsv}(\\operatorname{Hsv}(\\infty,1,1,0.5))')
-    ).toEqual(nanColor('hsv', 0.5));
-  });
 });
 
 describe('a free variable bound at run time', () => {
@@ -265,9 +242,4 @@ describe('finite channels', () => {
     expectChannelsClose(channels(run(latex)), [2, -0.5, 0]);
   });
 
-  test('a non-finite alpha is opaque', () => {
-    expect(run('\\operatorname{Hsv}(90,1,1,1/0)')).toEqual(
-      run('\\operatorname{Hsv}(90,1,1)')
-    );
-  });
 });

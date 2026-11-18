@@ -1,7 +1,6 @@
 /**
  * A host's `compile` handler in the profile `ir` (batch G28; README of
- * `src/compute-engine/compilation/ir/`, "Selecting the pipeline"), and an
- * expression result under the existing compilers.
+ * `src/compute-engine/compilation/ir/`, "Selecting the pipeline").
  *
  * A handler defers (`undefined`: the library's lowering), returns an
  * expression (lowered in place of the node; a node it created is lowered
@@ -66,8 +65,6 @@ const ir = (
     to,
     ...options,
   } as never);
-const existing = (ce: ComputeEngine, json: Json, to: To = 'javascript') =>
-  compile(ce.box(json as never), { fallback: false, to } as never);
 
 /** The message of a compilation that throws, or `undefined`. */
 function failure(f: () => unknown): string | undefined {
@@ -191,25 +188,10 @@ describe('IR profile, batch G28: a handler that defers', () => {
       );
       if (to === 'javascript')
         expect(failure(() => ir(ce, json, to))).toMatch(
-          /the definition of At has its own lowering/
+          /the definition of At has a `compile` handler that returns code text/
         );
       else expect(ir(ce, json, to).success).toBe(true);
     }
-  });
-
-  test('a definition with compileHelpers whose handler defers needs none', () => {
-    const ce = engine();
-    const def = ce.lookupDefinition('At') as {
-      operator: {
-        compile?: OperatorCompileHandler;
-        compileHelpers?: object;
-      };
-    };
-    def.operator.compileHelpers = { _h: () => 0 };
-    def.operator.compile = () => undefined;
-    expect(ir(ce, ['At', L3, 'i']).code).toBe(
-      ir(engine(), ['At', L3, 'i']).code
-    );
   });
 });
 
@@ -370,8 +352,6 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
     const r = ir(ce, ['At', L3, 'i']);
     expect(at.calls).toBe(1);
     expect(r.run!({ i: 2 } as never)).toBeCloseTo(Math.sin(20), 12);
-    const e = existing(ce, ['At', L3, 'i']);
-    expect(e.run!({ i: 2 } as never)).toBeCloseTo(Math.sin(20), 12);
   });
 
   test('a handler that rebuilds an operand: an At inside the copy gets no handler', () => {
@@ -437,7 +417,6 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
       attach(ce, 'At', handler(ce));
       // At i = 1: 10·L[2] + 100·10·L[3] = 20 + 3000.
       expect(ir(ce, json).run!({ i: 1 } as never)).toBe(3020);
-      expect(existing(ce, json).run!({ i: 1 } as never)).toBe(3020);
     }
   });
 
@@ -462,8 +441,7 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
     ce.declare('f', 'function');
     ce.assign('f', ce.box(['Function', ['At', L3, 'u'], 'u'] as never));
     expect(ir(ce, ['f', 'i']).run!({ i: 2.5 } as never)).toBe(20);
-    // An upper bound of an input: the existing compiler evaluates a closed
-    // Sum with the interpreter, whose At has no handler.
+    // An upper bound of an input.
     const sum = [
       'Sum',
       ['At', L3, ['Divide', 'k', 2]],
@@ -471,7 +449,6 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
     ];
     // Floors 1, 1, 2, 2, 3.
     expect(ir(ce, sum).run!({ n: 6 } as never)).toBe(90);
-    expect(existing(ce, sum).run!({ n: 6 } as never)).toBe(90);
   });
 
   test('symbolDeps names a user function of the result', () => {
@@ -495,7 +472,6 @@ describe('IR profile, batch G28: a handler that returns an expression', () => {
     for (const to of TARGETS)
       expect(ir(ce, ['Twice', 'x'], to)).toMatchObject({ success: true });
     expect(ir(ce, ['Twice', 'x']).run!({ x: 3 } as never)).toBe(6);
-    expect(existing(ce, ['Twice', 'x']).run!({ x: 3 } as never)).toBe(6);
   });
 
   test('each compile() call follows the handler of that call (no cache across calls)', () => {
@@ -535,7 +511,7 @@ describe('IR profile, batch G28: a handler that declines', () => {
       return ce.function('At', [...args]);
     });
     expect(failure(() => ir(ce, ['At', L3, 'i']))).toMatch(
-      /the definition of At has its own lowering/
+      /the definition of At has a `compile` handler that returns code text/
     );
   });
 });
@@ -546,7 +522,7 @@ describe('IR profile, batch G28: review round 2', () => {
     // children: the At under it is authored.
     // prettier-ignore
     const json = ['Which', ['And', ['Less', ['At', L3, 'i'], 25], ['Less', 'x', 0]], 1, 'True', 2];
-    for (const run of [ir, existing]) {
+    for (const run of [ir]) {
       const ce = engine();
       const at = attach(ce, 'At', floorIndex(ce));
       attach(ce, 'Which', (args) =>
@@ -565,7 +541,7 @@ describe('IR profile, batch G28: review round 2', () => {
   });
 
   test('F1: Multiply(2, 3·At(L, i)) merges into one Multiply: the At keeps its handler', () => {
-    for (const run of [ir, existing]) {
+    for (const run of [ir]) {
       const ce = engine();
       attach(ce, 'At', floorIndex(ce));
       attach(ce, 'Which', (args) =>
@@ -629,7 +605,7 @@ describe('IR profile, batch G28: review round 2', () => {
 
   test('F4: a handler on a control-flow head other than Which is ignored', () => {
     const json = ['If', ['Less', 'x', 0], 1, 2];
-    for (const run of [ir, existing]) {
+    for (const run of [ir]) {
       const ce = engine();
       const swap = attach(ce, 'If', (args) =>
         ce.function('If', [args[0], args[2], args[1]])
@@ -637,16 +613,6 @@ describe('IR profile, batch G28: review round 2', () => {
       expect(run(ce, json).run!({ x: -1 } as never)).toBe(1);
       expect(swap.calls).toBe(0);
     }
-  });
-
-  test('F5: authored nesting is not counted by the depth guard of the existing compiler', () => {
-    let json: Json = 'i';
-    for (let k = 0; k < 50; k++) json = ['At', L3, ['Divide', json, 10]];
-    const ce = engine();
-    attach(ce, 'At', floorIndex(ce));
-    expect(existing(ce, json).run!({ i: 2 } as never)).toEqual(
-      ir(ce, json).run!({ i: 2 } as never)
-    );
   });
 
   test('F6: an answer that holds its own node declines', () => {
@@ -749,51 +715,8 @@ describe('IR profile, batch G28: what a handler is given', () => {
     });
     expect(
       failure(() => ir(ce, ['Which', ['Less', 'x', 0], 1, 'True', 2]))
-    ).toMatch(/its own lowering/);
+    ).toMatch(/returns code text/);
     expect(codes).toEqual(['0']);
-  });
-});
-
-describe('Existing compilers, batch G28: an expression result', () => {
-  test('the index rewrite and the Which rewrite give the values of the profile', () => {
-    {
-      const ce = engine();
-      attach(ce, 'At', floorIndex(ce));
-      const a = existing(ce, ['At', L3, 'i']);
-      const b = ir(ce, ['At', L3, 'i']);
-      for (const i of POINTS)
-        expect(a.run!({ i } as never)).toEqual(b.run!({ i } as never));
-      // The interval mode contains the interpreter's value of the rewritten
-      // form.
-      const box = ir(ce, ['At', L3, 'i'], 'interval-js');
-      for (const i of POINTS) {
-        const v = interpreted(ce, floored(L3, 'i'), { i }) as number;
-        expect([i, contains(box.run!({ i } as never), v)]).toEqual([i, true]);
-      }
-    }
-    const ce = engine();
-    attach(ce, 'Which', (args) =>
-      ce.function('Which', [
-        args[0],
-        ce.function('Multiply', [ce.number(2), args[1]]),
-        ...args.slice(2),
-      ])
-    );
-    const json = ['Which', ['Less', 'x', 0], 'x', 'True', 5];
-    const a = existing(ce, json);
-    for (const x of [-2, 3])
-      expect(a.run!({ x } as never)).toBe(x < 0 ? 2 * x : 5);
-  });
-
-  test('a text result and undefined are as before', () => {
-    const ce = engine();
-    attach(ce, 'At', (args, c) => `(${c(args[1])} + 1000)`);
-    expect(existing(ce, ['At', L3, 'i']).run!({ i: 1 } as never)).toBe(1001);
-    const d = engine();
-    attach(d, 'At', () => undefined);
-    expect(existing(d, ['At', L3, 'i']).code).toBe(
-      existing(engine(), ['At', L3, 'i']).code
-    );
   });
 });
 

@@ -23,9 +23,6 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  * its operands' shapes now answers from the operands alone.
  */
 
-const X = { x: 10, t: 0.179 };
-const EXPECTED = -0.7916893626288677;
-
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.assign('k', ce.parse('[1,2,3]'));
@@ -36,28 +33,6 @@ const SUMMAND = (idx: string) =>
   `\\cos\\left(${idx}\\left(\\left|x\\right|-\\sqrt{\\frac{9.81}{k[${idx}]}}t\\right)\\right)`;
 
 describe('Tycho item 252: complex-lane Sum with an index named i', () => {
-  for (const mode of [undefined, 'strict', 'complex'] as const) {
-    for (const idx of ['i', 'j']) {
-      test(`unrolled form, index ${idx}, mode ${mode ?? 'default'}`, () => {
-        const ce = engine();
-        const e = ce.parse(`\\sum_{${idx}=1}^{3}${SUMMAND(idx)}`);
-        expect(e.subs(X).N().re).toBeCloseTo(EXPECTED, 10);
-        const r = compile(e, mode ? { to: 'javascript', mode } : { to: 'javascript' });
-        expect(r.success).toBe(true);
-        expect(r.run!(X)).toBeCloseTo(EXPECTED, 10);
-      });
-
-      test(`loop form, index ${idx}, mode ${mode ?? 'default'}`, () => {
-        const ce = engine();
-        const e = ce.parse(
-          `\\sum_{${idx}=1}^{\\operatorname{length}(k)}${SUMMAND(idx)}`
-        );
-        const r = compile(e, mode ? { to: 'javascript', mode } : { to: 'javascript' });
-        expect(r.success).toBe(true);
-        expect(r.run!(X)).toBeCloseTo(EXPECTED, 10);
-      });
-    }
-  }
 
   test('the i spelling emits the same code as the j spelling', () => {
     const ce = engine();

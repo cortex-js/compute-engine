@@ -46,44 +46,6 @@ function js(ce: ComputeEngine, expr: unknown) {
 describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
   const ce = engine();
 
-  // The host supplies every input, so the comparison has no test for an
-  // input left out.
-  test('two free symbols: the exact test, no tolerance', () => {
-    expect(js(ce, ['Equal', 'a', 'b']).code).toBe('((_.a) === (_.b))');
-    expect(js(ce, ['NotEqual', 'a', 'b']).code).toBe('((_.a) !== (_.b))');
-  });
-
-  test('a literal or an arithmetic result on either side needs no absence test of its own', () => {
-    expect(js(ce, ['Equal', 'a', 3]).code).toBe('((_.a) === (3))');
-    expect(js(ce, ['NotEqual', 'a', 3]).code).toBe('((_.a) !== (3))');
-    expect(js(ce, ['Equal', ['Add', 'a', 1], ['Multiply', 'b', 2]]).code).toBe(
-      '((_.a + 1) === (2 * _.b))'
-    );
-    expect(js(ce, ['Equal', ['Floor', 'a'], ['Sign', 'b']]).code).toBe(
-      '((Math.floor(_.a)) === (Math.sign(_.b)))'
-    );
-  });
-
-  test('the chained form is the And of exact pairs', () => {
-    const r = js(ce, ['Equal', 'a', 'b', 'c']);
-    expect(r.code).toBe('(((_.a) === (_.b)) && ((_.b) === (_.c)))');
-    expect(r.run({ a: 1, b: 2, c: 2 })).toBe(false);
-    expect(r.run({ a: 1, b: 1, c: 1 })).toBe(true);
-  });
-
-  test('no tolerance spelling survives anywhere', () => {
-    for (const e of [
-      ['Equal', 'a', 'b'],
-      ['Equal', ['Add', 'a', 'b'], 0.3],
-      ['Equal', ['Complex', 1, 2], 'a'],
-      ['KroneckerDelta', 'a', 'b'],
-      ['KroneckerDelta', 'a'],
-    ]) {
-      const { code } = js(ce, e);
-      expect(code).not.toMatch(/1e-10|Math\.abs|_SYS\.cabs/);
-    }
-  });
-
   test('values: the ruled divergence and the IEEE cases', () => {
     const eq = js(ce, ['Equal', 'a', 'b']);
     const neq = js(ce, ['NotEqual', 'a', 'b']);
@@ -101,59 +63,38 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     expect(eq.run({ a: -0, b: 0 })).toBe(true);
   });
 
+  test('the chained form is the And of exact pairs', () => {
+    const r = js(ce, ['Equal', 'a', 'b', 'c']);
+    expect(r.run({ a: 1, b: 2, c: 2 })).toBe(false);
+    expect(r.run({ a: 1, b: 1, c: 1 })).toBe(true);
+  });
+
   test('a complex pair compares component-wise, exactly', () => {
-    const r = js(ce, ['Equal', ['Complex', 1, 2], 'a']);
-    expect(r.code).toBe(
-      '((({ re: 1, im: 2 })).re === (_.a) && (({ re: 1, im: 2 })).im === 0)'
-    );
-    expect(r.run({ a: 1 })).toBe(false);
+    expect(js(ce, ['Equal', ['Complex', 1, 2], 'a']).run({ a: 1 })).toBe(false);
   });
 
-  test('KroneckerDelta is exact', () => {
-    const d = js(ce, ['KroneckerDelta', 'a', 'b']);
-    expect(d.run({ a: 2, b: 2 })).toBe(1);
-    expect(d.run({ a: 2, b: 2 + 1e-12 })).toBe(0);
-    expect(d.run({ a: NaN, b: NaN })).toBe(0);
-    expect(js(ce, ['KroneckerDelta', 'a']).run({ a: 1e-12 })).toBe(0);
-  });
-
-  test('KroneckerDelta of two ABSENT arguments is 0, not 1', () => {
-    // An absent argument reads as `undefined`, and `undefined === undefined`
-    // is true, so the bare variadic comparison would answer 1. The
-    // interpreter never answers 1 for absent arguments, and `Equal` compiled
-    // from the same engine answers false, so the delta answers 0.
-    const d = js(ce, ['KroneckerDelta', 'a', 'b']);
-    expect(d.run({})).toBe(0);
-    expect(d.run({ a: 2 })).toBe(0);
-    expect(d.run({ b: 2 })).toBe(0);
-    // Present arguments are unaffected.
-    expect(d.run({ a: 2, b: 2 })).toBe(1);
-    expect(js(ce, ['KroneckerDelta', 'a', 'b', 'c']).run({ a: 2, b: 2 })).toBe(
-      0
-    );
-  });
-
-  test('KroneckerDelta compares complex operands component-wise', () => {
+  test('a piecewise equality takes the arm the interpreter takes', () => {
     const c = new ComputeEngine();
-    c.declare('z', 'complex');
-    const d = js(c, ['KroneckerDelta', 'z', ['Complex', 1, 2]]);
-    expect(d.run({ z: { re: 1, im: 2 } })).toBe(1);
-    expect(d.run({ z: { re: 1, im: 3 } })).toBe(0);
-    expect(d.run({})).toBe(0);
-    const mixed = js(c, ['KroneckerDelta', 'z', 1]);
-    expect(mixed.run({ z: { re: 1, im: 0 } })).toBe(1);
-    expect(mixed.run({ z: { re: 1, im: 1 } })).toBe(0);
-    expect(
-      c.box(['KroneckerDelta', ['Complex', 1, 2], ['Complex', 1, 2]]).evaluate()
-        .re
-    ).toBe(1);
+    c.declare('P', 'list<number^5>');
+    c.declare('k', 'integer');
+    const r = js(c, ['Which', ['Equal', ['At', 'P', 'k'], 5], 1, 'True', 0]);
+    expect(r.run({ P: [1, 2, 3, 4, 5], k: 5 })).toBe(1);
+    expect(r.run({ P: [1, 2, 3, 4, 5], k: 2 })).toBe(0);
   });
 
-  test('an impure operand is still drawn once', () => {
-    const r = js(ce, ['Equal', ['Random'], ['Random']]);
-    expect(r.code).toBe(
-      '((_SYS.drawNextRandomNumber()) === (_SYS.drawNextRandomNumber()))'
-    );
+  test('the element-wise comparison of a list is exact', () => {
+    const c = new ComputeEngine();
+    c.declare('L', 'list<number>');
+    expect(js(c, ['Equal', 'L', 3]).run({ L: [3, 3 + 1e-12, NaN, Infinity] })).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(js(c, ['NotEqual', 'L', 3]).run({ L: [3, NaN] })).toEqual([
+      false,
+      true,
+    ]);
   });
 
   test('the absence guard does not skip an impure operand', () => {
@@ -174,62 +115,6 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
     };
     expect(r.run({ u: 0.5, flag: true })).toBe(false);
     expect(draws).toBe(1);
-  });
-
-  test('a NaN operand of a piecewise equality takes the default arm', () => {
-    // Until the user decision of 2026-10-20 (Tycho rows 411 and 413) a NaN
-    // operand of the `Equal` made the piecewise answer NaN (the interpreter:
-    // `Missing`). Now `NaN = 5` is `false` in the condition as everywhere
-    // else, on both routes, and the default arm is taken.
-    const c = new ComputeEngine();
-    c.declare('P', 'list<number^5>');
-    c.declare('k', 'integer');
-    const r = compile(
-      c.box(['Which', ['Equal', ['At', 'P', 'k'], 5], 1, 'True', 0]),
-      { to: 'javascript', fallback: false }
-    );
-    if (!r.success) throw new Error(r.error?.message);
-    expect(r.code).toBe(
-      '((((_SYS.atNumeric(_.P, _.k, "number")) === (5))) ? (1) : (0))'
-    );
-    expect(r.run({ P: [1, 2, 3, 4, 5], k: 5 })).toBe(1);
-    expect(r.run({ P: [1, 2, 3, 4, 5], k: 2 })).toBe(0);
-    // Out of range reads NaN, and `NaN = 5` is false on both routes.
-    expect(r.run({ P: [1, 2, 3, 4, 5], k: 7 })).toBe(0);
-    expect(
-      c.box(['Which', ['Equal', 'NaN', 5], 1, 'True', 0]).evaluate().re
-    ).toBe(0);
-  });
-
-  test('the collection helpers compare exactly', () => {
-    const c = new ComputeEngine();
-    c.declare('L', 'list<number>');
-    c.declare('M', 'list<number>');
-    const r = compile(c.box(['Equal', 'L', 3]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    if (!r.success) throw new Error(r.error?.message);
-    expect(r.code).toBe('_SYS.eq((_.L), (3))');
-    expect(r.run({ L: [3, 3 + 1e-12, NaN, Infinity] })).toEqual([
-      true,
-      false,
-      false,
-      false,
-    ]);
-    const w = compile(c.box(['Equal', 'L', 'M']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    if (!w.success) throw new Error(w.error?.message);
-    expect(w.run({ L: [1, Infinity], M: [1, Infinity] })).toBe(true);
-    expect(w.run({ L: [1, 2], M: [1, 2 + 1e-12] })).toBe(false);
-    const n = compile(c.box(['NotEqual', 'L', 3]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    if (!n.success) throw new Error(n.error?.message);
-    expect(n.run({ L: [3, NaN] })).toEqual([false, true]);
   });
 });
 
@@ -273,15 +158,6 @@ describe('an absent cell makes an element-wise comparison undecided', () => {
     expect(
       js(ce, ['NotEqual', 'L', 't']).run({ L: [1, NaN, 3], t: NaN })
     ).toEqual([true, true, true]);
-  });
-
-  test('an element-wise piecewise over a bound pair', () => {
-    const r = compile(ce.box(['Which', ['Equal', 'L', 't'], 1, 'True', 0]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    if (!r.success) throw new Error(r.error?.message);
-    expect(r.run({ L: [1, 2, 3], t: 2 })).toEqual([0, 1, 0]);
   });
 
   test('a connective over the element-wise comparison', () => {

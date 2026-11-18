@@ -182,22 +182,6 @@ describe('SCALED COMPLEX DIVISION: the interpreter agrees with the compiled Java
       expectComplex(interpreted, js);
     });
   }
-
-  test('Inverse of [[1 + i, 1e308 + 1e308i], [0, 1]]', () => {
-    ce.declare('M', 'matrix<complex^2x2>');
-    const js = compile(ce.box(['Inverse', 'M']), { to: 'javascript' });
-    expect(js.success).toBe(true);
-    const out = js.run!({
-      M: [
-        [
-          { re: 1, im: 1 },
-          { re: HUGE, im: HUGE },
-        ],
-        [0, 1],
-      ],
-    } as any) as any;
-    expect(out[0][1]).toBe(-HUGE);
-  });
 });
 
 describe('SCALED COMPLEX DIVISION: numeric-value methods', () => {

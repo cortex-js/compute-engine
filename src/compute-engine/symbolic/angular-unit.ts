@@ -71,8 +71,7 @@ const DERIVATIVE_HEADS = new Set(['D', 'Derivative', 'ND']);
  * and must be evaluated as such, while one that HAS a derivative head carries
  * two conventions at once and can be evaluated correctly under neither single
  * setting. The compile-time constant folder uses this to neutralize the
- * angular unit in the first case and to decline outright in the second
- * (`tryConstantFold`, `compilation/base-compiler.ts`).
+ * angular unit in the first case and to decline outright in the second.
  *
  * Kept next to {@link DERIVATIVE_HEADS} on purpose: a head added to the
  * rewrite's skip list must also become a decline for anyone evaluating the
@@ -137,10 +136,8 @@ export function angularChainFactor(ce: Expression['engine']): Expression {
  * compiled `Cos` of the point `0.25` was strictly positive and excluded the
  * true value 0.
  *
- * Lives in `symbolic/` rather than `compilation/` only so the derivative
- * lowering (`library/calculus.ts`) can reach it: `library/` must not import
- * from `compilation/`. `compilation/angular-unit.ts` re-exports it for the
- * targets.
+ * The compilation reads it (`compilation/jet-derivative.ts`,
+ * `compilation/derivative-closed-form.ts`).
  */
 export function rewriteAngularUnit(
   expr: Expression,
@@ -234,7 +231,7 @@ export function rewriteAngularUnit(
 /**
  * The refusal of the compilation of `AbsArg` in an angular unit other than
  * radians, by `rewriteAngularUnit()` and by the outermost
- * `BaseCompiler.compile()`, which also reads the stored definitions.
+ * compilation, which also reads the stored definitions.
  */
 export const ABS_ARG_REFUSAL =
   'Could not compile `AbsArg` when the angular unit is not radians: the ' +

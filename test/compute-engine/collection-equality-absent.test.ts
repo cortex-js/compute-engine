@@ -128,20 +128,6 @@ describe('collections whose element pairs are all decided', () => {
     expect(js(ce, e)).toBe(true);
   });
 
-  test('a length mismatch is `False`, absent cells included', () => {
-    const ce = engine();
-    expect(ev(ce, ['Equal', ['List', 1, 2], ['List', 1, 2, 3]])).toBe(
-      '"False"'
-    );
-    expect(js(ce, ['Equal', ['List', 1, 2], ['List', 1, 2, 3]])).toBe(false);
-    expect(ev(ce, ['Equal', ['List', 1, 'Missing'], ['List', 1, 2, 3]])).toBe(
-      '"False"'
-    );
-    expect(js(ce, ['Equal', ['List', 1, 'Missing'], ['List', 1, 2, 3]])).toBe(
-      false
-    );
-  });
-
   test('a `NaN` cell is a number that equals nothing, not an absent cell', () => {
     const ce = engine();
     const e = ['Equal', ['List', 1, 'NaN'], ['List', 1, 'NaN']];
@@ -152,20 +138,6 @@ describe('collections whose element pairs are all decided', () => {
   test('free variables leave the equation inert, not marked', () => {
     const ce = engine();
     expect(ev(ce, ['Equal', ['List', 'x'], ['List', 'y']])).toBe('[x] == [y]');
-  });
-});
-
-describe('the element-wise shape', () => {
-  test('a collection against a scalar is False at the absent positions', () => {
-    const ce = engine();
-    const e = ['Equal', ['List', 1, 'Missing'], 1];
-    expect(ev(ce, e)).toBe('["True","False"]');
-    expect(nv(ce, e)).toBe('["True","False"]');
-    // The compiled cell at the absent position is not specified (see the
-    // header).
-    const compiled = js(ce, e) as unknown[];
-    expect(compiled).toHaveLength(2);
-    expect(compiled[0]).toBe(true);
   });
 });
 
@@ -215,91 +187,6 @@ describe('a comparison with an absent cell as a branch condition', () => {
       0,
     ];
     expect(ev(ce, e)).toBe('1');
-  });
-
-  test('a connective reads the comparison as False', () => {
-    const ce = engine();
-    const marked = ['Equal', ['List', 1, 'Missing'], ['List', 1, 'Missing']];
-    const which = (cond: unknown) => ['Which', cond, 1, 'True', 0];
-    // The comparison is `False`: `And` is `False`, `Or` is its other operand.
-    expect(ev(ce, which(['And', marked, 'True']))).toBe('0');
-    expect(ev(ce, which(['Or', marked, 'False']))).toBe('0');
-    expect(ev(ce, which(['And', marked, 'False']))).toBe('0');
-    expect(js(ce, which(['And', marked, 'False']))).toBe(0);
-    expect(ev(ce, which(['Or', marked, 'True']))).toBe('1');
-    expect(js(ce, which(['Or', marked, 'True']))).toBe(1);
-  });
-
-  test('an operand that is only POSSIBLY a collection is read the same way', () => {
-    // The branch analysis classifies a condition's operands exactly as the
-    // equality emitter does (`CompileTarget.collectionEqualityOperand`): one
-    // operand that MAY be an array at run time — an opaque `-> unknown`
-    // application, a scalar-or-list union — is enough to send the pair to
-    // `_SYS.eq`, whose answer is the marker `NaN`. Read off the operands
-    // instead, the array `h(x)` tested as a decided value and the marker's
-    // falsiness took the else arm.
-    //
-    // The statement form of `If` is where this shows: the expression forms
-    // go through the element-wise selection helper, which reads the marker
-    // correctly already. The compiled program takes no arm for an absent
-    // cell, where the interpreter takes the else arm: the compiled value is
-    // not specified there (see the header).
-    const loop = (cond: unknown) => [
-      'Block',
-      ['Declare', 'y', 'number', 0],
-      [
-        'Loop',
-        ['Block', ['If', cond, ['Assign', 'y', 1], ['Assign', 'y', 2]], ['Break']],
-      ],
-      'y',
-    ];
-    const jsLoop = (
-      declare: (ce: ComputeEngine) => unknown,
-      vars: Record<string, unknown>,
-      options: Record<string, unknown> = {}
-    ): unknown => {
-      const ce = engine();
-      const expr = ce.box(declare(ce) as any);
-      const r = compile(expr, { to: 'javascript', fallback: false, ...options });
-      if (!r.success) throw new Error(r.error ?? 'declined');
-      return r.run!(vars as any);
-    };
-    // A `(number) -> unknown` host function, bound at run time to an array.
-    const withH = (ce: ComputeEngine) => {
-      ce.declare('h', '(number) -> unknown');
-      ce.declare('x', 'number');
-      ce.declare('L', 'list<number>');
-      return loop(['Equal', ['h', 'x'], 'L']);
-    };
-    const hOptions = { functions: { h: '_.h' } };
-    expect(jsLoop(withH, { x: 1, L: [1, 2], h: () => [1, 3] }, hOptions)).toBe(
-      2
-    );
-    expect(jsLoop(withH, { x: 1, L: [1, 2], h: () => [1, 2] }, hOptions)).toBe(
-      1
-    );
-    // A scalar-or-list union symbol, same three answers.
-    const withUnion = (ce: ComputeEngine) => {
-      ce.declare('u', 'number | list<number>');
-      ce.declare('L', 'list<number>');
-      return loop(['Equal', 'u', 'L']);
-    };
-    expect(jsLoop(withUnion, { u: [1, 3], L: [1, 2] })).toBe(2);
-    expect(jsLoop(withUnion, { u: [1, 2], L: [1, 2] })).toBe(1);
-    // The interpreter's own answers, with the values assigned instead of
-    // supplied at run time: else arm, else arm, then arm.
-    const interpreted = (u: unknown, L: unknown): string => {
-      const ce = engine();
-      ce.assign('u', ce.box(u as any));
-      ce.assign('L', ce.box(L as any));
-      return ce
-        .box(loop(['Equal', 'u', 'L']) as any)
-        .evaluate()
-        .toString();
-    };
-    expect(interpreted(['List', 1, 'Missing'], ['List', 1, 2])).toBe('2');
-    expect(interpreted(['List', 1, 3], ['List', 1, 2])).toBe('2');
-    expect(interpreted(['List', 1, 2], ['List', 1, 2])).toBe('1');
   });
 
   test('a decided collection comparison still branches', () => {

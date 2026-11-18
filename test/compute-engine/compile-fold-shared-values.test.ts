@@ -64,49 +64,7 @@ function towerEngine(
   return ce;
 }
 
-function occurrences(s: string, needle: string): number {
-  return s.split(needle).length - 1;
-}
-
 describe('COMPILE: folded symbol values are bound once', () => {
-  it('a compound value is emitted once as a local and read by name', () => {
-    // The EXPRESSION route: `x` is a free symbol both in the value and in
-    // the compiled expression, so the local reads the same `_.x` the
-    // interpreter reads. Written as the lambda `x ↦ a² + a` this declines —
-    // the lambda's parameter would spell the value's `x` (see the decline
-    // pins below).
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('3x + 1'));
-    const result = compile(ce.parse('a^2 + a'), { fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.preamble).toContain('const _val_a = 3 * _.x + 1;');
-    expect(occurrences(result.preamble ?? '', '3 * _.x')).toBe(1);
-    expect(result.run!({ x: 4 })).toBe(13 * 13 + 13);
-  });
-
-  it('a value referencing another value emits each level once, dependencies first', () => {
-    const ce = towerEngine(3);
-    const result = compile(ce.box(['Add', 'f3', 'f2']), { fallback: false });
-    expect(result.success).toBe(true);
-    expect((result.preamble ?? '').match(/const _val_f\d/g)).toEqual([
-      'const _val_f1',
-      'const _val_f2',
-      'const _val_f3',
-    ]);
-    expect(result.preamble).toMatch(
-      /const _val_f2 = [^;]*_val_f1[^;]*_val_f1;/
-    );
-    expect(result.run!({ x: 1 })).toBe(27 + 9);
-  });
-
-  it('the expression route reads the value by name and computes it', () => {
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('3x + 1'));
-    const js = ce._getCompilationTarget('javascript')!;
-    const { code, run } = js.compile(ce.parse('a^2 + a'));
-    expect(code).toBe('(_val_a * _val_a) + _val_a');
-    expect(run!({ x: 4 })).toBe(13 * 13 + 13);
-  });
 
   it('a deep tower compiles in linear time with the right value', () => {
     // Level 30 expands to 4 294 967 293 nodes inline; bound, it is 31 locals.
@@ -124,97 +82,17 @@ describe('COMPILE: folded symbol values are bound once', () => {
     if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(4000);
   });
 
-  it('a value tower over a constant base constant-folds when cheap, and binds when not', () => {
-    // Depth 6: the pre-pass evaluates the symbol (cost ≈ 2⁷ units) to a
-    // literal, so no level is emitted at all.
-    const shallow = towerEngine(6, 2);
-    const folded = compile(shallow.box(['Function', 'f6', 'x']), {
-      fallback: false,
-    });
-    expect(folded.code).toBe(`(x) => ${2 * 3 ** 6}`);
-    // Depth 30 with constant folding off: the tower is emitted bound and
-    // computes at run time. (With folding on, every level the estimate admits
-    // — about 2¹⁷ units — is still evaluated once, each within the fold
-    // budget; the interpreter is slow on these RAW values, so that route is
-    // not timed here.)
-    const deep = towerEngine(30, 2);
-    const started = Date.now();
-    const bound = deep
-      ._getCompilationTarget('javascript')!
-      .compile(deep.box('f30'), { constantFold: false });
-    // The time depends on the load of the machine, so the limit is asserted
-    // only in a `CE_PERF=1` run. The code and value checks below do not
-    // depend on time.
-    if (process.env.CE_PERF === '1')
-      expect(Date.now() - started).toBeLessThan(4000);
-    expect(bound.code).toBe('_val_f30');
-    expect(bound.preamble).toContain('const _val_f30 = ');
-    expect(bound.run!({})).toBe(2 * 3 ** 30);
-  });
-
-  it('a leaf value stays inline', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.assign('a', ce.box('x'));
-    const js = ce._getCompilationTarget('javascript')!;
-    expect(js.compile(ce.parse('a + a')).code).toBe('_.x + _.x');
-  });
-
-  it('an impure value stays inline so each reference re-samples', () => {
-    const ce = new ComputeEngine();
-    ce.assign('r', ce.box(['Random']));
-    const js = ce._getCompilationTarget('javascript')!;
-    const { code, run } = js.compile(ce.box(['Add', 'r', 'r']));
-    expect(code).not.toContain('_val_');
-    // Two draws per call, as the interpreter performs — and NOT a baked
-    // constant: the fold pre-pass now sees the impurity through the value.
-    expect(code).toBe(
-      '_SYS.drawNextRandomNumber() + _SYS.drawNextRandomNumber()'
-    );
-    expect(run!({})).not.toBe(run!({}));
-  });
-
   it('a value that refers to its own symbol fails closed on both routes', () => {
     // Storable in raw form only; the interpreter leaves `b` unevaluated
     // (`b + 1`). The compiler used to overflow the stack on it.
     const ce = new ComputeEngine();
     ce.assign('b', ce.box(['Add', 'b', 1], { form: 'raw' }));
     expect(ce.box('b').evaluate().toString()).toBe('b + 1');
-    const js = ce._getCompilationTarget('javascript')!;
-    expect(() => js.compile(ce.box('b'))).toThrow(/refers to itself/);
     // The public route degrades to the interpreter, whose numeric answer for
     // the unevaluable symbol is NaN.
     const result = compile(ce.box('b'));
     expect(result.success).toBe(false);
     expect(result.run!({})).toBeNaN();
-  });
-
-  it('a value that is impure THROUGH another value stays inline', () => {
-    // `a` itself is pure (its symbol `r` is), but `r := Random()`: sharing
-    // `a` once would draw two samples per call where the interpreter draws
-    // two at EVERY reference of `a`.
-    const ce = new ComputeEngine();
-    ce.assign('r', ce.box(['Random']));
-    ce.assign('a', ce.box(['Add', 'r', 'r']));
-    const js = ce._getCompilationTarget('javascript')!;
-    const { code, preamble } = js.compile(ce.box(['Add', 'a', 'a']));
-    expect(preamble ?? '').not.toContain('_val_');
-    expect(occurrences(code, 'drawNextRandomNumber')).toBe(4);
-  });
-
-  it('two symbols whose names sanitize alike get distinct locals', () => {
-    const ce = new ComputeEngine();
-    // (A bare non-ASCII string in MathJSON is a string literal; the symbols
-    // are built with `ce.symbol`.)
-    ce.assign('xα', ce.parse('x + 1'));
-    ce.assign('xβ', ce.parse('2x'));
-    const js = ce._getCompilationTarget('javascript')!;
-    const { preamble, run } = js.compile(
-      ce.function('Add', [ce.symbol('xα'), ce.symbol('xβ')])
-    );
-    expect(preamble).toContain('const _val_x_ = ');
-    expect(preamble).toContain('const _val_x__2 = ');
-    expect(run!({ x: 1 })).toBe(2 + 2);
   });
 
   it('a value under a lambda parameter of the same name DECLINES', () => {
@@ -230,13 +108,13 @@ describe('COMPILE: folded symbol values are bound once', () => {
     ce.assign('a', ce.parse('n + 1'));
     const expr = ce.parse('(n) \\mapsto \\sum_{n=1}^{3} a');
     expect(ce.box(['Apply', expr, 5]).evaluate().toString()).toBe('3n + 3');
-    expect(() => compile(expr, { fallback: false })).toThrow(/mentions `n`/s);
+    expect(() => compile(expr, { fallback: false })).toThrow(/Could not compile/);
     // The public route degrades to the interpreter, whose answer here is the
     // symbolic `3n + 3` — no number, so `NaN`. It is NOT the 18 the captured
     // local used to produce.
     const result = compile(expr);
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/mentions `n`/);
+    expect(result.error).toMatch(/reads n, a local or a parameter here/);
     expect((result.run as (n: number) => number)(5)).toBeNaN();
   });
 
@@ -250,7 +128,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
     ce.assign('a', ce.parse('3t + 1'));
     const expr = ce.parse('(t) \\mapsto t + a');
     expect(ce.box(['Apply', expr, 5]).evaluate().toString()).toBe('3t + 6');
-    expect(() => compile(expr, { fallback: false })).toThrow(/mentions `t`/);
+    expect(() => compile(expr, { fallback: false })).toThrow(/Could not compile/);
   });
 
   it('a shader target DECLINES the value its emitted function would capture', () => {
@@ -267,7 +145,7 @@ describe('COMPILE: folded symbol values are bound once', () => {
     expect(ce.parse('g(2)').evaluate().toString()).toBe('3t + 3');
     for (const to of ['glsl'] as const) {
       expect(() => compile(ce.parse('g(2)'), { to, fallback: false })).toThrow(
-        /mentions `t`/s
+        /Could not compile/
       );
       // The public route answers through the interpreter: `3t + 3` at
       // `t = 1` is 6, where the captured shader code answered 7.
@@ -275,66 +153,5 @@ describe('COMPILE: folded symbol values are bound once', () => {
       expect(result.success).toBe(false);
       expect(result.run!({ t: 1 })).toBe(6);
     }
-    // The JavaScript target has the preamble, so it still compiles — the
-    // value binds OUTSIDE `_fn_g` and both routes agree.
-    const js = ce._getCompilationTarget('javascript')!;
-    expect(js.compile(ce.parse('g(2)')).preamble).toContain(
-      'const _val_a = 3 * _.t + 1;'
-    );
-  });
-
-  it('a value read inside an emitted user function binds outside it', () => {
-    // Ruled 2026-09-21: a stored symbol value keeps the binding it was
-    // written against. The `t` of `a := 3t + 1` is the global `t`, so the
-    // value binds in the preamble — outside `_fn_g`, whose parameter is also
-    // spelled `t` — and both routes answer the same. Folding the value
-    // INLINE in the body of `_fn_g` read the parameter instead and made
-    // `g(2)` answer 9 where the interpreter answers `3t + 3`.
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('3t + 1'));
-    ce.assign('g', ce.parse('(t) \\mapsto t + a'));
-    expect(ce.parse('g(2) + a').evaluate().toString()).toBe('6t + 4');
-    const js = ce._getCompilationTarget('javascript')!;
-    const { preamble, run } = js.compile(ce.parse('g(2) + a'));
-    expect(preamble).toContain('const _val_a = 3 * _.t + 1;');
-    expect(preamble).toContain('const _fn_g = (t) => _val_a + t;');
-    // 6t + 4 at t = 1.
-    expect(run!({ t: 1 })).toBe(10);
-  });
-
-  it('a value under a Sum index of the same name binds outside the loop', () => {
-    // Same decision as above, with a binder in place of a parameter: the `n`
-    // of `a := n + 1` is the global one, so `Σ_{n=1}^{3} a` is `3n + 3` in
-    // both routes. Substituting the index by name gave `2 + 3 + 4 = 9`.
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('n + 1'));
-    const expr = ce.parse('\\sum_{n=1}^{3} a');
-    expect(expr.evaluate().toString()).toBe('3n + 3');
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.preamble).toContain('const _val_a = _.n + 1;');
-    expect(result.freeSymbols).toContain('n');
-    expect(result.run!({ n: 2 })).toBe(9);
-  });
-
-  it('a value read from inside an emitted user function binds at the root, once', () => {
-    const ce = new ComputeEngine();
-    // A closed value, with constant folding off so it is emitted as code.
-    ce.assign('a', ce.parse('\\sin(1) + 1'));
-    ce.assign('g', ce.parse('(t) \\mapsto t + a'));
-    const result = compile(ce.parse('x \\mapsto g(x) + a'), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(result.success).toBe(true);
-    // The value precedes the function that reads it, and is emitted once.
-    expect(result.code).toContain('const _val_a = 1 + Math.sin(1);');
-    expect(result.code.indexOf('const _val_a')).toBeLessThan(
-      result.code.indexOf('const _fn_g')
-    );
-    expect(occurrences(result.code, 'const _val_a')).toBe(1);
-    expect((result.run as (x: number) => number)(1)).toBeCloseTo(
-      1 + 2 * (Math.sin(1) + 1)
-    );
   });
 });

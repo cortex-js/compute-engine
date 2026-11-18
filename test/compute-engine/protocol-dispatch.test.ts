@@ -1170,27 +1170,6 @@ Quartile([1, 2, 3, 4, 5])`
 });
 
 describe('compilation', () => {
-  // Since `docs/COMPILATION-MODEL.md` a compilable
-  // dispatch COMPILES on the JS target (this pin previously recorded the
-  // fail-closed posture): a single string-target conformance reifies to a
-  // `typeof` guard chain, and a receiver no conformance covers THROWS where
-  // the interpreter yields the `protocol-implementation-missing` error value
-  // (the multi-clause `no-matching-clause` convention).
-  test('a bare dispatch with an unknown receiver compiles to a guard chain', () => {
-    const ce = engineFor(`${COMPARABLE}
-type string is Comparable {
-  function compare(self: Self, other: Self) -> string { "proto" }
-}`);
-    ce.declare('x', 'string | integer');
-    ce.declare('y', 'string | integer');
-    const result = compile(ce.box(['compare', 'x', 'y'] as any));
-    expect(result.success).toBe(true);
-    expect(result.unsupported).not.toContain('compare');
-    expect(result.run?.({ x: 'a', y: 'b' })).toBe('proto');
-    expect(() => result.run?.({ x: 1, y: 2 })).toThrow(
-      'protocol-implementation-missing: compare'
-    );
-  });
 
   // A protocol with NO conformance at all has nothing to dispatch to: the
   // compiler still declines (fail closed, D6) — deliberately re-pinned.

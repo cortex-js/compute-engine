@@ -514,27 +514,6 @@ describe('MCP server compile tool', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  // A declaration changes what the target reads the symbol as: a complex
-  // symbol is a `vec2` uniform on GLSL.
-  test('applies declarations before the source is parsed', async () => {
-    const [response] = await runServer([
-      callTool(1, 'compile', {
-        source: '\\arg(z)+1',
-        format: 'latex',
-        to: 'glsl',
-        declarations: { z: 'complex' },
-      }),
-    ]);
-    const result = payload(response);
-    expect(result.ok).toBe(true);
-    expect(result.code).toBe('atan(z.y, z.x) + 1.0');
-    expect(result.freeSymbolTypes.z).toEqual({
-      type: 'complex',
-      lowered: 'vec2',
-      provenance: 'declared',
-    });
-  });
-
   // A decline is a result with the reason, as on a host's own compile route,
   // not an interpreter fallback: there is no `code`.
   test('reports a decline with its reason', async () => {

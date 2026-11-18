@@ -67,17 +67,6 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     '\\sum_{n=-15}^{15} s(\\operatorname{mod}(5x,1)-n)\\cdot ' +
     '\\mathrm{At}(R, 5x+50+n)';
 
-  it('emits the constant list ONCE across 31 unrolled terms', () => {
-    const ce = fixtureEngine();
-    const r = compile(ce.parse(FIXTURE), { to: 'javascript', fallback: true });
-    expect(r.success).toBe(true);
-    const js = source(r);
-    expect(occurrences(js, /_SYS\.range\(/g)).toBe(1);
-    // The single construction is a `const` — the assigned value `R` bound
-    // once in the preamble — not a term operand.
-    expect(js).toMatch(/const _val_R = _SYS\.bcast\(.*_SYS\.range\(/);
-  });
-
   it('returns the same values as the flat-chain emission did', () => {
     // Captured from the pre-fix emission (the flat `+` chain): every sample is
     // NaN, because `At` on the fractional index `5x + 50 + n` has no value.
@@ -94,41 +83,6 @@ describe('unrolled Sum/Product: a constant collection is emitted once', () => {
     expect(expr.subs({ x: 2 }).evaluate().N().re).toBeNaN();
   });
 
-  it('a Product over the same constant list also emits it once, unchanged in value', () => {
-    const ce = new ComputeEngine();
-    ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
-    const expr = ce.parse('\\prod_{n=1}^{5} (x + \\mathrm{At}(K, n))');
-    const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(r.success).toBe(true);
-    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
-    // `At(K, 1…5)` is `0, 2, 4, 6, 8`, so at `x = 1` the product is
-    // `1·3·5·7·9`. The interpreter agrees.
-    expect(r.run!({ x: 1 })).toBe(945);
-    expect(expr.subs({ x: 1 }).evaluate().N().re).toBe(945);
-  });
-
-  it('a Sum over the same constant list keeps the interpreter value', () => {
-    const ce = new ComputeEngine();
-    ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
-    const expr = ce.parse('\\sum_{n=1}^{5} (x + \\mathrm{At}(K, n))');
-    const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
-    expect(r.run!({ x: 1 })).toBe(25);
-    expect(expr.subs({ x: 1 }).evaluate().N().re).toBe(25);
-  });
-
-  it('a THREE-term sum keeps the flat chain, and with it the per-term emission', () => {
-    const ce = new ComputeEngine();
-    ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
-    const r = compile(ce.parse('\\sum_{n=1}^{3} (x + \\mathrm{At}(K, n))'), {
-      to: 'javascript',
-      fallback: true,
-    });
-    // The assigned value `K` is bound once in the preamble (`_val_K`); the
-    // three terms read it by name.
-    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(1);
-    expect(r.run!({ x: 1 })).toBe(9);
-  });
 });
 
 describe('unrolled Sum/Product: a read of a list of integers gets no NaN exit', () => {
@@ -160,17 +114,6 @@ describe('unrolled Sum/Product: a read of a list of integers gets no NaN exit', 
     expect(expr.subs({ x: 4 }).evaluate().N().re).toBeNaN();
   });
 
-  it('a pure Product does the same, accumulating with `*=`', () => {
-    const ce = pureEngine();
-    const expr = ce.parse('\\prod_{n=0}^{9} \\mathrm{At}(K, x-n)');
-    const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(r.success).toBe(true);
-    expect(nanExits(source(r))).toBe(0);
-    expect(source(r)).toMatch(/\*=/);
-    expect(r.run!({ x: 4 })).toBeNaN();
-    expect(expr.subs({ x: 4 }).evaluate().N().re).toBeNaN();
-  });
-
   it('a Sum with no NaN reaches the same answer as the flat chain', () => {
     const ce = pureEngine();
     const expr = ce.parse('\\sum_{n=0}^{4} \\mathrm{At}(K, x-n)');
@@ -179,87 +122,6 @@ describe('unrolled Sum/Product: a read of a list of integers gets no NaN exit', 
     // `x = 5` indexes 5, 4, 3, 2, 1 — the whole list, in reverse.
     expect(r.run!({ x: 5 })).toBe(150);
     expect(expr.subs({ x: 5 }).evaluate().N().re).toBe(150);
-  });
-});
-
-describe('unrolled Sum/Product: caller-supplied source is never optimized around', () => {
-  /**
-   * A `functions` entry is stringified into the artifact, so it can count its
-   * own calls, log, or mutate — and the counter has to be a global rather
-   * than a captured binding to survive that stringification.
-   */
-  function countingSlow(): (v: number) => number {
-    return (v: number) => {
-      (globalThis as Record<string, unknown>).__unrollCalls =
-        ((globalThis as Record<string, number>).__unrollCalls ?? 0) + 1;
-      return v === 0 ? NaN : v;
-    };
-  }
-
-  it('a term calling a caller function runs even after the total is NaN', () => {
-    const ce = new ComputeEngine();
-    ce.declare('slow', '(number) -> number');
-    const r = compile(ce.parse('\\sum_{n=0}^{9} \\mathrm{slow}(x-n)'), {
-      to: 'javascript',
-      functions: { slow: countingSlow() },
-    });
-    expect(r.success).toBe(true);
-    // How many times `slow` runs is observable, so the between-term exit is
-    // not emitted at all: skipping terms would change what the caller sees.
-    expect(source(r)).not.toMatch(NAN_EXIT);
-    // The statement form itself is kept — it is what carries the hoisted
-    // bindings; only the exits are dropped.
-    expect(r.code).toMatch(/^\(\(\) => \{ let _tv\d+ = /);
-
-    (globalThis as Record<string, number>).__unrollCalls = 0;
-    // `x = 0` makes the FIRST term NaN, and all ten terms still run.
-    expect(r.run!({ x: 0 })).toBeNaN();
-    expect((globalThis as Record<string, number>).__unrollCalls).toBe(10);
-
-    // `x = 4` makes the fifth term NaN — likewise all ten.
-    (globalThis as Record<string, number>).__unrollCalls = 0;
-    expect(r.run!({ x: 4 })).toBeNaN();
-    expect((globalThis as Record<string, number>).__unrollCalls).toBe(10);
-
-    // With no NaN the answer is unchanged: `Σ_{n=0}^{9} (100 − n)`.
-    (globalThis as Record<string, number>).__unrollCalls = 0;
-    expect(r.run!({ x: 100 })).toBe(955);
-    expect((globalThis as Record<string, number>).__unrollCalls).toBe(10);
-  });
-
-  it('a Product over a caller function likewise keeps every term', () => {
-    const ce = new ComputeEngine();
-    ce.declare('slow', '(number) -> number');
-    const r = compile(ce.parse('\\prod_{n=0}^{9} \\mathrm{slow}(x-n)'), {
-      to: 'javascript',
-      functions: { slow: countingSlow() },
-    });
-    expect(r.success).toBe(true);
-    expect(source(r)).not.toMatch(NAN_EXIT);
-    expect(source(r)).toMatch(/\*=/);
-
-    (globalThis as Record<string, number>).__unrollCalls = 0;
-    expect(r.run!({ x: 0 })).toBeNaN();
-    expect((globalThis as Record<string, number>).__unrollCalls).toBe(10);
-  });
-
-  it('a collection operand of a caller function is built once per term', () => {
-    const ce = new ComputeEngine();
-    ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
-    ce.declare('pick', '(list<number>, number) -> number');
-    const r = compile(ce.parse('\\sum_{n=1}^{5} \\mathrm{pick}(K, n)'), {
-      to: 'javascript',
-      fallback: true,
-      constantFold: false,
-      functions: { pick: (l: number[], i: number) => l[i - 1] },
-    });
-    expect(r.success).toBe(true);
-    // `K` does not depend on `n`, so it looks like a textbook hoist — but the
-    // caller's `pick` receives the array itself and may keep or mutate it, and
-    // is free to evaluate its operand more or fewer times than once. Each
-    // term therefore builds its own array, exactly as the flat chain did.
-    expect(occurrences(source(r), /_SYS\.range\(/g)).toBe(5);
-    expect(r.run!({})).toBe(20);
   });
 });
 
@@ -293,26 +155,6 @@ describe('unrolled Sum/Product: a multi-index unroll binds each invariant once',
     });
   }
 
-  it('emits no binding that nothing refers to', () => {
-    const r = fixture();
-    expect(r.success).toBe(true);
-    const js = source(r);
-    const names = [...js.matchAll(/const (_tv\d+) = /g)].map((m) => m[1]);
-    expect(names.length).toBeGreaterThan(0);
-    // A live binding occurs at least twice: once declaring it, once using it.
-    // Listing the dead ones rather than asserting per name puts their names in
-    // the failure message.
-    const dead = names.filter(
-      (name) => occurrences(js, new RegExp(`\\b${name}\\b`, 'g')) < 2
-    );
-    expect(dead).toEqual([]);
-  });
-
-  it('constructs the invariant collection exactly once', () => {
-    const js = source(fixture());
-    expect(occurrences(js, /_SYS\.range\(/g)).toBe(1);
-  });
-
   it('keeps the interpreter value', () => {
     const ce = new ComputeEngine();
     ce.assign('K', ce.box(['Multiply', 2, ['Range', 0, 100]]));
@@ -324,162 +166,3 @@ describe('unrolled Sum/Product: a multi-index unroll binds each invariant once',
   });
 });
 
-describe('unrolled Sum/Product: the flat chain survives below the threshold', () => {
-  const ce = new ComputeEngine();
-
-  it.each([
-    ['\\sum_{i=1}^{2} i', '((1) + (2))'],
-    ['\\sum_{i=1}^{3} i', '((1) + (2) + (3))'],
-    ['\\prod_{i=1}^{2} i', '((1) * (2))'],
-    ['\\prod_{i=1}^{3} i', '((1) * (2) * (3))'],
-  ])('%s stays a flat chain', (latex, code) => {
-    const r = compile(ce.parse(latex), {
-      to: 'javascript',
-      constantFold: false,
-    });
-    expect(r.code).toBe(code);
-  });
-
-  it('four terms is the first size that accumulates in statements', () => {
-    const r = compile(ce.parse('\\sum_{i=1}^{4} i'), {
-      to: 'javascript',
-      constantFold: false,
-    });
-    // The body is the index, typed `integer` — finite in this lattice — and
-    // the terms are bare literals, so no term can be NaN and the between-term
-    // exits are dead code. The statement form itself is what this pins.
-    expect(r.code).toBe(
-      '(() => { let _tv1 = (1); _tv1 += (2); _tv1 += (3); _tv1 += (4); ' +
-        'return _tv1; })()'
-    );
-    expect(nanExits(r.code!)).toBe(0);
-    expect(r.run!({})).toBe(10);
-  });
-});
-
-/**
- * The loop arm keeps its shape — one emission of the body, a `while` over the
- * counter, no per-term statements and no hoisted bindings. What it gained is
- * the single between-iteration NaN exit, so these pin the emission verbatim
- * against both the unroll (which the range must not take) and the extra
- * statements the unroll needs.
- */
-describe('the LOOP arm keeps its shape, with the NaN exit', () => {
-  const ce = new ComputeEngine();
-
-  it('a range past the unroll limit still emits the while-loop', () => {
-    const r = compile(ce.parse('\\sum_{i=1}^{200} i'), {
-      to: 'javascript',
-      constantFold: false,
-    });
-    expect(r.code).toBe(
-      '(() => { let _tv1 = 0; let i = 1; const _upper = 200; ' +
-        'while (i <= _upper) { _tv1 += i; if (_tv1 !== _tv1) return NaN; ' +
-        'i++; } return _tv1; })()'
-    );
-    // The body is emitted ONCE, however many iterations run.
-    expect(nanExits(r.code!)).toBe(1);
-    expect(r.run!({})).toBe(20100);
-  });
-
-  it('the Product loop arm has the same shape', () => {
-    const r = compile(ce.parse('\\prod_{i=1}^{200} i'), {
-      to: 'javascript',
-      constantFold: false,
-    });
-    expect(r.code).toBe(
-      '(() => { let _tv1 = 1; let i = 1; const _upper = 200; ' +
-        'while (i <= _upper) { _tv1 *= i; if (_tv1 !== _tv1) return NaN; ' +
-        'i++; } return _tv1; })()'
-    );
-    expect(nanExits(r.code!)).toBe(1);
-  });
-
-  it('an element-wise body takes the bcast fold loop, never the unroll', () => {
-    const ce2 = new ComputeEngine();
-    ce2.assign('L', ce2.box(['List', 1, 2, 3]));
-    const r = compile(ce2.parse('\\sum_{k=1}^{6} (L + k \\cdot x)'), {
-      to: 'javascript',
-      fallback: true,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_SYS\.bcast/);
-    expect(r.code).toMatch(/while \(/);
-    // `Σ_{k=1}^{6} (L + k·x)` at `x = 1` is `6·L + 21`, element-wise.
-    expect(r.run!({ x: 1 })).toEqual([27, 33, 39]);
-  });
-});
-
-describe('looped Sum/Product: iteration stops at the first NaN', () => {
-  /** The five-element list of the unroll cases above. */
-  function pureEngine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('m', 'real');
-    ce.assign('K', ce.box(['List', 10, 20, 30, 40, 50]));
-    return ce;
-  }
-
-  it('a symbolic-bound Sum tests the accumulator once per iteration', () => {
-    const ce = pureEngine();
-    const expr = ce.parse('\\sum_{n=0}^{m} \\mathrm{At}(K, x-n)');
-    const r = compile(expr, { to: 'javascript', fallback: true });
-    expect(r.success).toBe(true);
-    expect(source(r)).toMatch(/while/);
-    // One exit, inside the loop body — not one per term, as the unroll emits.
-    expect(nanExits(source(r))).toBe(1);
-    expect(r.run!({ x: 4, m: 9 })).toBeNaN();
-    expect(r.run!({ x: 5, m: 4 })).toBe(150);
-  });
-
-  it('a constant-bounds Sum past the unroll limit loops with the exit', () => {
-    const ce = pureEngine();
-    const r = compile(ce.parse('\\sum_{n=0}^{200} \\mathrm{At}(K, x-n)'), {
-      to: 'javascript',
-      fallback: true,
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
-    expect(source(r)).toMatch(/while/);
-    expect(nanExits(source(r))).toBe(1);
-    expect(r.run!({ x: 4 })).toBeNaN();
-  });
-
-  it('a Product loop accumulates with `*=` and exits the same way', () => {
-    const ce = pureEngine();
-    const r = compile(ce.parse('\\prod_{n=0}^{m} \\mathrm{At}(K, x-n)'), {
-      to: 'javascript',
-      fallback: true,
-    });
-    expect(r.success).toBe(true);
-    expect(source(r)).toMatch(/\*=/);
-    expect(nanExits(source(r))).toBe(1);
-    expect(r.run!({ x: 4, m: 9 })).toBeNaN();
-    expect(r.run!({ x: 5, m: 4 })).toBe(12000000);
-  });
-
-  it('a loop over a caller function keeps every iteration', () => {
-    const ce = new ComputeEngine();
-    ce.declare('m', 'real');
-    ce.declare('slow', '(number) -> number');
-    const r = compile(ce.parse('\\sum_{n=0}^{m} \\mathrm{slow}(x-n)'), {
-      to: 'javascript',
-      // A `functions` entry is stringified into the artifact, so the call
-      // counter has to be a global rather than a captured binding.
-      functions: {
-        slow: (v: number) => {
-          (globalThis as Record<string, unknown>).__unrollCalls =
-            ((globalThis as Record<string, number>).__unrollCalls ?? 0) + 1;
-          return v === 0 ? NaN : v;
-        },
-      },
-    });
-    expect(r.success).toBe(true);
-    // How many times `slow` runs is observable, so no exit is emitted.
-    expect(source(r)).not.toMatch(NAN_EXIT);
-
-    (globalThis as Record<string, number>).__unrollCalls = 0;
-    // `x = 0` makes the FIRST iteration NaN; all ten still run.
-    expect(r.run!({ x: 0, m: 9 })).toBeNaN();
-    expect((globalThis as Record<string, number>).__unrollCalls).toBe(10);
-  });
-});

@@ -254,7 +254,7 @@ describe('EulerE compilation and LaTeX', () => {
         fallback: false,
         constantFold: false,
       } as any)
-    ).toThrow(/outside the GLSL fragment/);
+    ).toThrow(/the operator EulerE is not supported by the compiler/);
   });
 
   test('LaTeX round trip', () => {

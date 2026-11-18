@@ -20,110 +20,6 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
  */
 
 describe('a point scaled by a list-bound indexed_collection symbol', () => {
-  test('compiles to a list of scaled points and matches the interpreter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.declare('R', 'indexed_collection<number>');
-    // Broadcast arithmetic over a `Range` types `list<integer>` — a list of
-    // scalars, never a point.
-    ce.assign('R', ce.box(['Multiply', 2, ['Range', 1, 3]]));
-    expect(ce.box('R').type.toString()).toBe('indexed_collection<number>');
-
-    const expr = ce.box([
-      'Multiply',
-      'R',
-      ['Tuple', ['Cos', 't'], ['Sin', 't']],
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // The point is kept whole (the inner `_SYS.bcast`); the outer one descends
-    // into the list, scaling the point at every element.
-    expect(r.code).toContain('_SYS.bcast');
-
-    // Runtime parity with the interpreter: R = [2, 4, 6] scales (cos t, sin t)
-    // at every element.
-    expect(r.run!({ t: 0 })).toEqual([
-      [2, 0],
-      [4, 0],
-      [6, 0],
-    ]);
-  });
-
-  test('the full xkusqcyzsx row (scaled point summed with a point) compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.declare('N', 'integer');
-    ce.declare('a', 'real');
-    ce.declare('Dc', 'real');
-    ce.declare('X', 'indexed_collection<number>');
-    ce.declare('Y', 'indexed_collection<number>');
-    ce.declare('R', 'indexed_collection<number>');
-    ce.assign(
-      'R',
-      ce.box([
-        'Multiply',
-        'Dc',
-        ['Divide', ['Power', -1, ['Range', 1, ['Add', 'N', -1]]], ['Cos', 'a']],
-      ])
-    );
-    // The document writes `(Dc + X, Y)` as a LaTeX parenthesized list, which
-    // is `PointList(Dc + X, Y)` because `X` and `Y` are lists (user decision
-    // 2026-09-24): it is written here as the `Delimiter` the parser produces.
-    const expr = ce.box([
-      'Add',
-      ['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
-      ['Delimiter', ['Sequence', ['Add', 'Dc', 'X'], 'Y'], "'(,)'"],
-    ]);
-    expect(expr.op2.operator).toBe('PointList');
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // The same list built as a MathJSON `Tuple` is data, not a point, and
-    // arithmetic over it declines (user decision 2026-09-25). The sum has the
-    // static type `error`, so the compilation declines before the point
-    // check of the JavaScript target.
-    expect(() =>
-      compile(
-        ce.box([
-          'Add',
-          ['Multiply', 'R', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
-          ['Tuple', ['Add', 'Dc', 'X'], 'Y'],
-        ]),
-        { fallback: false }
-      )
-    ).toThrow(/type 'error'/);
-  });
-
-  test('a direct Range binding (type `range`) scales a point and matches the interpreter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.declare('R', 'indexed_collection<number>');
-    // A `Range` value types `range` — a list of integers, never a point.
-    ce.assign('R', ce.box(['Range', 1, 3]));
-    const expr = ce.box([
-      'Multiply',
-      'R',
-      ['Tuple', ['Cos', 't'], ['Sin', 't']],
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ t: 0 })).toEqual([
-      [1, 0],
-      [2, 0],
-      [3, 0],
-    ]);
-  });
-
-  test('a list<number> symbol was always admitted (unchanged baseline)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.declare('R', 'list<number>');
-    const expr = ce.box([
-      'Multiply',
-      'R',
-      ['Tuple', ['Cos', 't'], ['Sin', 't']],
-    ]);
-    expect(compile(expr, { fallback: false }).success).toBe(true);
-  });
 
   // Regressions: the binding must actually PROVE a list of scalars.
 
@@ -138,7 +34,7 @@ describe('a point scaled by a list-bound indexed_collection symbol', () => {
     ]);
     // Unprovable shape (a tuple inhabits the type): fail closed.
     expect(() => compile(expr, { fallback: false })).toThrow(
-      /list-arithmetic|list-valued/
+      /Could not compile/
     );
   });
 

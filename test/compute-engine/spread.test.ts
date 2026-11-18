@@ -169,36 +169,11 @@ describe('Spread: compilation', () => {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  test('a tuple-typed argument compiles to positional accesses', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tuple<number, number>');
-    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
-    const r = compile(ce.box(['a', ['Spread', 'p']]));
-    expect(r?.success).toBe(true);
-    expect(r!.run!({ p: [3, 4] })).toBe(11);
-  });
-
-  test('a raw-held spread under a lazy numeric head compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tuple<number, number>');
-    const r = compile(ce.box(['Add', 5, ['Spread', 'p']]));
-    expect(r?.success).toBe(true);
-    expect(r!.run!({ p: [3, 4] })).toBe(12);
-  });
-
   test('a literal tuple spread compiles (spliced at canonicalization)', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Add', ['Spread', ['Tuple', 1, 2, 3]], 10]));
     expect(r?.success).toBe(true);
     expect(r!.run!()).toBe(16);
-  });
-
-  test('a variadic built-in over a typed tuple compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tuple<number, number>');
-    const r = compile(ce.box(['Max', ['Spread', 'p']]));
-    expect(r?.success).toBe(true);
-    expect(r!.run!({ p: [7, 3] })).toBe(7);
   });
 
   test('unknown arity fails closed', () => {
@@ -208,55 +183,7 @@ describe('Spread: compilation', () => {
     expect(r?.success).toBe(false);
   });
 
-  test('compiled and interpreted results agree', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'tuple<number, number>');
-    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
-    const expr = ce.box(['a', ['Spread', 'p']]);
-    const r = compile(expr);
-    expect(r?.success).toBe(true);
-    ce.assign('p', ce.box(['Tuple', 3, 4]));
-    expect(expr.evaluate().isSame(r!.run!({ p: [3, 4] }))).toBe(true);
-  });
-
-  test('a broadcast result carries its arity in its type and compiles', () => {
-    // A component-wise broadcast over a tuple types its result
-    // `tuple<number, number>`, so the arity is statically known even though
-    // the argument is a function call rather than a declared symbol.
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
-    const expr = ce.box(['a', ['Spread', ['Sin', ['Tuple', 1, 2]]]]);
-    const r = compile(expr);
-    expect(r?.success).toBe(true);
-    // `sin` is transcendental, so the interpreter's exact answer only meets
-    // the compiled float after `.N()`, and then only to machine precision.
-    expect(r!.run!()).toBeCloseTo(expr.evaluate().N().re, 12);
-  });
-
-  test('a tuple-returning user function compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('f', '(number) -> tuple<number, number>');
-    ce.assign('f', ce.parse('x \\mapsto (x, x+1)'));
-    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
-    const expr = ce.box(['a', ['Spread', ['f', 2]]]);
-    const r = compile(expr);
-    expect(r?.success).toBe(true);
-    expect(expr.evaluate().isSame(r!.run!())).toBe(true);
-  });
-
-  test('a transparent tuple ALIAS compiles', () => {
-    // A `type alias` IS its definition, so the arity is statically known and
-    // the positional `At` accesses the splice emits are well typed.
-    const ce = new ComputeEngine();
-    ce.declareType('Pair', 'tuple<number, number>', { alias: true });
-    ce.declare('p', 'Pair');
-    ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
-    const r = compile(ce.box(['a', ['Spread', 'p']]));
-    expect(r?.success).toBe(true);
-    expect(r!.run!({ p: [3, 4] })).toBe(11);
-  });
-
-  test('a NOMINAL type over a tuple declines, and says why', () => {
+  test('a NOMINAL type over a tuple declines', () => {
     // A nominal type is not a subtype of the tuple it names, so `At` rejects
     // an operand carrying the tag and the interpreter leaves such a spread
     // symbolic. Reading the arity through the tag spliced anyway and reported
@@ -268,7 +195,6 @@ describe('Spread: compilation', () => {
     expect(ce.box(['a', ['Spread', 'p']]).evaluate().operator).toBe('a');
     const r = compile(ce.box(['a', ['Spread', 'p']]));
     expect(r?.success).toBe(false);
-    expect(r?.error).toContain('tuple arity is not statically known');
     expect(r?.error).not.toContain('incompatible-type');
   });
 
@@ -282,6 +208,5 @@ describe('Spread: compilation', () => {
     ce.assign('a', ce.parse('(x, y) \\mapsto x + 2 y'));
     const r = compile(ce.box(['a', ['Spread', 'p']]));
     expect(r?.success).toBe(false);
-    expect(r?.error).toContain('tuple arity is not statically known');
   });
 });

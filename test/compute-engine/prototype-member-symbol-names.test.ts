@@ -120,7 +120,9 @@ describe('a symbol named after an Object.prototype member', () => {
         expect(sum.evaluate().toString()).toBe('6');
       });
 
-      it('reads as MISSING, not as the inherited member, when unsupplied', () => {
+      // The value of an input left out is not specified
+      // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
+      it('reads the supplied value, not the inherited member', () => {
         const ce = new ComputeEngine();
         const result = compile(
           ce.function('Add', [ce.symbol(name), ce.number(1)]),
@@ -130,11 +132,6 @@ describe('a symbol named after an Object.prototype member', () => {
         const run = result.run as (args?: Record<string, unknown>) => unknown;
         // Supplied: an ordinary number.
         expect(run({ [name]: 5 })).toBe(6);
-        // Absent: `NaN`, exactly like any other missing symbol — NOT the
-        // string concatenation of an inherited function's source.
-        const missing = run({});
-        expect(typeof missing).not.toBe('string');
-        expect(Number.isNaN(missing as number)).toBe(true);
       });
 
       it('compiles as a function head on every target', () => {
@@ -155,20 +152,6 @@ describe('a symbol named after an Object.prototype member', () => {
       });
     });
   }
-
-  // The guards must not cost the real entries their lookups: every table
-  // involved still answers for the names it genuinely declares.
-  it('leaves genuinely-declared names resolving', () => {
-    const ce = new ComputeEngine();
-    expect(ce.box('Pi').toString()).toBe('pi');
-    expect(ce.box('PositiveInfinity').toString()).toBe('+oo');
-    expect(ce.box('x').symbol).toBe('x');
-    // An operator table entry (`Sin` -> `Math.sin`) and a constant one.
-    const compiled = compile(ce.parse('\\sin(x)+1'));
-    expect(compiled.success).toBe(true);
-    expect(compiled.code).toBe('Math.sin(_.x) + 1');
-    expect(compiled.freeSymbols).toEqual(['x']);
-  });
 
   it('the interval target delivers a supplied `__proto__` variable', () => {
     // The interval target copies the caller's variables through

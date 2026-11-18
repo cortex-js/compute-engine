@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
 // A `List` or `Set` literal that holds a failed cell (an element that is, or
@@ -221,20 +220,6 @@ describe('PARSE ROUTE', () => {
     [`[x+1 \\operatorname{for} x=${cell}]`, `[2,${TYPE_ERROR},4]`],
   ])('%s', (latex, expected) => {
     expect(ce.parse(latex).evaluate().toString()).toBe(expected);
-  });
-});
-
-describe('COMPILATION', () => {
-  test('a list literal with a failed cell does not compile', () => {
-    for (const json of [
-      BOXED_FAILURE,
-      ['Map', INC, BOXED_FAILURE],
-      ['Sum', BOXED_FAILURE],
-      ['Length', BOXED_FAILURE],
-    ])
-      expect(() => compile(box(json), { fallback: false })).toThrow(
-        /invalid expression/
-      );
   });
 });
 

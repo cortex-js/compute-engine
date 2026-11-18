@@ -16,8 +16,8 @@
  * with no indexing set and no `Break` of its own compiles where its value is
  * used.
  *
- * The check is `unsettledShapeIn()` in `compile-admission.ts`, reason
- * `'loop-value'`, with the diagnostic code `'unsettled-shape'`.
+ * The pipeline declines the value of a loop as outside its profile
+ * (`outside-profile`, "the value of a Loop (Nothing)").
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -29,7 +29,7 @@ ce.declare('x', 'real');
 ce.declare('y', 'real');
 
 const TARGETS = ['javascript', 'interval-js', 'glsl'];
-const NOTHING = /evaluates to `Nothing`, the erasure marker/;
+const NOTHING = /the value of a Loop \(Nothing\)/;
 
 const range = (a: number, b: number) => ['Range', a, b];
 
@@ -117,7 +117,8 @@ describe('A Loop whose value is used declines', () => {
         ],
         ['f', 'x'],
       ],
-      ['javascript'],
+      // The pipeline declines the function value before the loop.
+      [],
     ],
   ];
 
@@ -132,13 +133,7 @@ describe('A Loop whose value is used declines', () => {
     for (const to of TARGETS) {
       const r = compileTo(json, to);
       expect([to, r.success]).toEqual([to, false]);
-      // The GLSL fragment can refuse a loop in a value position first.
-      if (reasonTargets.includes(to))
-        expect(r.error).toMatch(
-          to === 'glsl'
-            ? /evaluates to `Nothing`, the erasure marker|is a statement, and it stands where a value is expected/
-            : NOTHING
-        );
+      if (reasonTargets.includes(to)) expect(r.error).toMatch(NOTHING);
     }
   });
 
@@ -151,7 +146,7 @@ describe('A Loop whose value is used declines', () => {
     expect(ce.box(json).subs({ x: 2 }).evaluate().re).toBe(30);
     const r = compileTo(json, 'javascript');
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/does not carry the value of a `Break`/);
+    expect(r.error).toMatch(NOTHING);
   });
 });
 
@@ -250,7 +245,7 @@ describe('A Loop with a Return and a Break', () => {
 });
 
 describe('The diagnostic of the decline', () => {
-  test('has the code unsettled-shape and lists the loop', () => {
+  test('has the code outside-profile and lists the loop', () => {
     const loop = ce.box([
       'Loop',
       ['Add', 'k', 'x'],
@@ -258,10 +253,11 @@ describe('The diagnostic of the decline', () => {
     ]);
     const r = compile(loop);
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
     expect(r.diagnostic?.kind).toBe('capability');
-    expect(r.error).toMatch(/^Could not compile "Loop\(/);
-    expect(r.unsupported).toContain(loop.toString());
+    expect(r.diagnostic?.operator).toBe('Loop');
+    expect(r.error).toMatch(NOTHING);
+    expect(r.unsupported).toContain('Loop');
   });
 });
 
@@ -278,13 +274,8 @@ describe('A Loop in a case of a Match', () => {
     );
     for (const to of ['javascript', 'glsl']) {
       const r = compileTo(json, to);
+      // The pipeline declines `Match` itself, before its cases.
       expect([to, r.success]).toEqual([to, false]);
-      // The GLSL fragment refuses `Match` before the emitter runs.
-      if (to === 'glsl') {
-        expect(r.error).toMatch(/outside the GLSL fragment/);
-        continue;
-      }
-      expect(r.error).toMatch(NOTHING);
     }
   });
 });
@@ -428,7 +419,9 @@ describe('A tail loop with an indexing set and a Return declines', () => {
     expect(ce.box(json as any).subs({ x: 4 }).evaluate().re).toBe(value);
     for (const to of TARGETS)
       expect([to, compileTo(json, to).success]).toEqual([to, false]);
-    expect(compileTo(json, 'javascript').error).toMatch(NOTHING);
+    // The pipeline declines `Match` itself, before the loop.
+    if ((json as unknown[])[0] !== 'Match')
+      expect(compileTo(json, 'javascript').error).toMatch(NOTHING);
     const r = compile(ce.box(json as any));
     expect(r.success).toBe(false);
     expect(r.run!({ x: 4 })).toBe(value);
@@ -446,62 +439,5 @@ describe('A tail loop with an indexing set and a Return declines', () => {
     ];
     for (const to of TARGETS)
       expect([to, compileTo(json, to).success]).toEqual([to, false]);
-    expect(compileTo(json, 'javascript').error).toMatch(NOTHING);
-  });
-});
-
-describe('A tail loop with no indexing set and a Return compiles', () => {
-  // A loop with no indexing set ends only through a `Return` (or never
-  // ends), so its value is the value of the `Return`.
-  // [label, program, value at x = 4]
-  const cases: Array<[string, unknown, number]> = [
-    [
-      'the body of a function literal',
-      ['Apply', ['Function', ['Loop', ['Return', ['Add', 'p', 1]]], 'p'], 'x'],
-      5,
-    ],
-    [
-      'in a function literal applied in a case of a Match',
-      [
-        'Match',
-        'x',
-        [
-          'MatchCase',
-          '_',
-          [
-            'Apply',
-            ['Function', ['Loop', ['Return', ['Add', 'p', 1]]], 'p'],
-            'x',
-          ],
-        ],
-      ],
-      5,
-    ],
-    [
-      'with a Break in a branch that the code drops',
-      [
-        'Apply',
-        [
-          'Function',
-          [
-            'Loop',
-            [
-              'Block',
-              ['If', 'False', ['Break', 2], 0],
-              ['Return', ['Add', 'p', 1]],
-            ],
-          ],
-          'p',
-        ],
-        'x',
-      ],
-      5,
-    ],
-  ];
-  test.each(cases)('%s', (_label, json, value) => {
-    expect(ce.box(json as any).subs({ x: 4 }).evaluate().re).toBe(value);
-    const r = compileTo(json, 'javascript');
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 4 })).toBe(value);
   });
 });

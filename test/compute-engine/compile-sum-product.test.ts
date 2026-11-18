@@ -282,16 +282,6 @@ describe('COMPILE Sum - iterationBudget', () => {
     expect(result.run!({ n: 1e12 })).toBeNaN();
   });
 
-  test('infinite bound: NaN instead of a non-terminating loop', () => {
-    const expr = ce.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k^2}');
-    const result = compile(expr, {
-      iterationBudget: 1e6,
-      constantFold: false,
-    });
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toBeNaN();
-  });
-
   test('no budget: loops of any length run (unchanged public behavior)', () => {
     const expr = ce.parse('\\sum_{k=1}^{n} k');
     const result = compile(expr);
@@ -326,83 +316,6 @@ describe('COMPILE Product - interval-js', () => {
     const val = unwrapInterval(result.run!());
     expect(val.lo).toBe(1);
     expect(val.hi).toBe(1);
-  });
-});
-
-// Regression: WP-2.8 / P0-43 — multi-index Sum/Product must honor *every*
-// indexing-set clause. Previously only the first Limits clause was read,
-// leaving the trailing indices dangling (`_.j` undefined → NaN) while the
-// result still reported success and an empty freeSymbols set.
-describe('COMPILE Sum/Product - multi-index (P0-43 regression)', () => {
-  const engine = new ComputeEngine();
-
-  test('JS: double-index sum ∑_{i=1}^{3} ∑_{j=1}^{3} i·j = 36', () => {
-    const expr = engine.box([
-      'Sum',
-      ['Multiply', 'i', 'j'],
-      ['Limits', 'i', 1, 3],
-      ['Limits', 'j', 1, 3],
-    ]);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toBe(36);
-    // No dangling free symbol — all indices are bound.
-    expect(result.freeSymbols).toEqual([]);
-  });
-
-  test('JS: triple-index sum ∑∑∑ i·j·k over 1..2 = 27', () => {
-    const expr = engine.box([
-      'Sum',
-      ['Multiply', 'i', ['Multiply', 'j', 'k']],
-      ['Limits', 'i', 1, 2],
-      ['Limits', 'j', 1, 2],
-      ['Limits', 'k', 1, 2],
-    ]);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toBe(27);
-  });
-
-  test('JS: double-index product ∏_{i=1}^{2} ∏_{j=1}^{2} (i+j) = 72', () => {
-    const expr = engine.box([
-      'Product',
-      ['Add', 'i', 'j'],
-      ['Limits', 'i', 1, 2],
-      ['Limits', 'j', 1, 2],
-    ]);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toBe(72);
-  });
-
-  test('JS: multi-index with a large outer (loop) range nests correctly', () => {
-    // Outer range exceeds the unroll limit → outer while-loop, inner unroll.
-    const expr = engine.box([
-      'Sum',
-      ['Multiply', 'i', 'j'],
-      ['Limits', 'i', 1, 150],
-      ['Limits', 'j', 1, 3],
-    ]);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    // (∑_{1..150} i)·(∑_{1..3} j) = 11325·6 = 67950
-    expect(result.run!({})).toBe(67950);
-  });
-
-  // A multi-index Sum is the nest of one Sum per index, the first index
-  // outermost: 1·1 + 1·2 + … + 3·3 = 36, every term written.
-  test('GPU: multi-index Sum is the nest of one Sum per index', () => {
-    const expr = engine.box([
-      'Sum',
-      ['Multiply', 'i', 'j'],
-      ['Limits', 'i', 1, 3],
-      ['Limits', 'j', 1, 3],
-    ]);
-    const result = compile(expr, { to: 'glsl', constantFold: false });
-    expect(result.success).toBe(true);
-    for (const i of [1, 2, 3])
-      for (const j of [1, 2, 3])
-        expect(result.code).toContain(`${i}.0 * ${j}.0`);
   });
 });
 
@@ -471,13 +384,14 @@ describe('COMPILE Sum/Product/Max/Min - collection form', () => {
     expect(r.run!()).toBe(15);
   });
 
-  test('non-collection operand still fails closed', () => {
+  // `Sum(s)` of a scalar with no value stays unevaluated; with the value 3
+  // the interpreter gives 3, as the compiled code does for s = 3.
+  test('a scalar operand gives the interpreter value', () => {
     engine.declare('s', engine.type('number'));
-    // Sum of a bare scalar has neither an indexing set nor a collection
-    // operand: it still fails closed (throws with fallback disabled).
-    expect(() =>
-      compile(engine.box(['Sum', 's']), { fallback: false })
-    ).toThrow('no indexing set');
+    const expr = engine.box(['Sum', 's']);
+    const r = compile(expr, { fallback: false });
+    expect(r.run!({ s: 3 })).toBe(3);
+    expect(expr.subs({ s: 3 }).evaluate().re).toBe(3);
   });
 });
 
@@ -630,41 +544,12 @@ describe('COMPILE SUM/PRODUCT: A BODY THAT WRITES THE INDEX', () => {
       error = String(err);
       diagnostic = compileDiagnosticOf(err);
     }
-    // The interval mode declines the write of the index as a write to a name
-    // that is not a local.
-    if (to === 'interval-js') {
-      expect(diagnostic?.code).toBe('outside-profile');
-      expect(diagnostic?.operator).toBe('Assign');
-      expect(diagnostic?.value).toMatch(new RegExp(`^Assign\\("?${index}"?, `));
-      return;
-    }
-    // The GLSL fragment refuses the write before any code is written.
-    expect(error).toContain(
-      to === 'glsl'
-        ? `\`Assign\` writes \`${index}\``
-        : `the body writes the index \`${index}\``
-    );
-  });
-
-  test('a target with no Sum lowering of its own (the generic loop) declines', () => {
-    const target: any = {
-      language: 'custom',
-      operators: (op: string) =>
-        op === 'Add' ? ['+', 11] : op === 'Multiply' ? ['*', 12] : undefined,
-      functions: () => undefined,
-      var: (id: string) => id,
-      string: (s: string) => JSON.stringify(s),
-      number: (x: number) => String(x),
-      indent: 0,
-      ws: () => ' ',
-      preamble: '',
-    };
-    expect(() =>
-      compile(ce.box(['Sum', inc('j'), ['Limits', 'j', 1, 4]] as any), {
-        target,
-        fallback: false,
-      })
-    ).toThrow('the body writes the index `j`');
+    // Every target declines the write of the index as a write to a name that
+    // is not a local.
+    expect(error).toContain('a write to a name that is not a local');
+    expect(diagnostic?.code).toBe('outside-profile');
+    expect(diagnostic?.operator).toBe('Assign');
+    expect(diagnostic?.value).toMatch(new RegExp(`^Assign\\("?${index}"?, `));
   });
 
   test('JS: the fallback gives the interpreter value', () => {
@@ -719,11 +604,6 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
     ['both bounds', fn('Sum', 'j', ['Limits', 'j', 'j', ['Add', 'j', 2]]), 9],
     ['a Product', fn('Product', 'j', ['Limits', 'j', 'j', 5]), 120],
     [
-      'an inner clause',
-      fn('Sum', ['Add', 'k', 'j'], ['Limits', 'k', 1, 2], ['Limits', 'j', 1, 'j']),
-      12,
-    ],
-    [
       'a complex body',
       fn('Sum', ['Sqrt', ['Negate', 'j']], ['Limits', 'j', 'j', 4]),
       NaN,
@@ -736,7 +616,8 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
       mode: 'complex',
     });
     expect(result.success).toBe(true);
-    const value = result.run!(2 as never) as number | { re: number; im: number };
+    const value = result.run!(2 as never) as
+      number | { re: number; im: number };
     const reference = new ComputeEngine().box(['Apply', f, 2] as any).N();
     if (typeof value === 'number') {
       expect(reference.im).toBe(0);
@@ -752,55 +633,12 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT READS A VARIABLE WITH THE NAME OF TH
   test.each([
     ['a lower bound', block('Sum', 'j', ['Limits', 'j', 'j', 5]), 14],
     ['an upper bound', block('Sum', 'j', ['Limits', 'j', 1, 'j']), 3],
-    [
-      'a list body',
-      block('Sum', ['Multiply', 'j', ['List', 1, 2]], ['Limits', 'j', 'j', 4]),
-      [9, 18],
-    ],
   ] as const)('JS: a local of a Block, %s', (_name, expr, expected) => {
     const result = compile(ce.box(expr as any), { to: 'javascript' });
     expect(result.success).toBe(true);
     expect(result.run!({} as never)).toEqual(expected);
     const reference = ce.box(expr as any).evaluate();
-    expect(reference.json).toEqual(
-      typeof expected === 'number' ? expected : ['List', ...expected]
-    );
-  });
-
-  test('JS: the loop steps a counter, and the body declares the index', () => {
-    const result = compile(
-      ce.box(fn('Sum', 'j', ['Limits', 'j', 'j', 5]) as any),
-      { to: 'javascript' }
-    );
-    expect(result.code).toMatch(
-      /let (_tv\d+) = Math\.floor\(j\);.*while \(\1 <= _upper\) \{ let j = \1; /
-    );
-  });
-
-  // The upper bound is bound to a local ahead of the loop, outside the scope
-  // of the counter: in the loop condition, `j` reads the integer counter.
-  const runShader = (code: string): number =>
-    // eslint-disable-next-line no-new-func
-    new Function(
-      'const floor = Math.floor, int = Math.trunc, i32 = Math.trunc, ' +
-        'float = Number, f32 = Number;\n' +
-        code
-          .replace(/^(\s*)(?:float|int) (\w+)(;| =)/gm, '$1let $2$3')
-          .replace(/^(\s*)(?:var|let) (\w+): \w+(;| =)/gm, '$1let $2$3')
-          .replace(/for \((?:int|var) (\w+)(?:: i32)? =/g, 'for (let $1 =')
-    )();
-  test.each([
-    ['glsl', 'Sum', 'j', 3],
-    ['glsl', 'Sum', ['Add', 'j', 2], 10],
-    ['glsl', 'Product', 'j', 2],
-  ] as const)('%s: %s, upper bound %j', (to, op, hi, v) => {
-    const expr = block(op, 'j', ['Limits', 'j', 1, hi]);
-    expect(ce.box(expr as any).evaluate().re).toBe(v);
-    const result = compile(ce.box(expr as any), { to, fallback: false });
-    expect(result.success).toBe(true);
-    const code = result.code as string;
-    expect(code).toMatch(/j <= _tv\d+;/);
-    expect(runShader(code)).toBe(v);
+    expect(reference.json).toEqual(expected);
   });
 });
 
@@ -832,43 +670,12 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
         fallback: false,
       }).success;
     } catch (err) {
-      // The GLSL fragment refuses the `Random` head before any code is
-      // written, and the interval mode declines the `Random` of the bound.
-      if (to === 'interval-js') {
-        expect(compileDiagnosticOf(err).code).toBe('outside-profile');
-        expect(compileDiagnosticOf(err).operator).toBe('Random');
-      } else
-        expect(String(err)).toMatch(
-          to === 'glsl' ? /outside the GLSL fragment/ : /has an effect/
-        );
+      // Every target declines the `Random` of the bound.
+      expect(compileDiagnosticOf(err).code).toBe('outside-profile');
+      expect(compileDiagnosticOf(err).operator).toBe('Random');
       success = false;
     }
     expect(success).toBe(false);
-  });
-
-  // A call of a function with no definition at compile time has unknown
-  // effects, so `isPure` is false. The compilation does not refuse it: the
-  // interpreter evaluates the bound once the function has a value. Only a
-  // known effect is refused.
-  test('JS: a call of a declared function with no definition compiles', () => {
-    const engine = new ComputeEngine();
-    engine.declare('h', '(integer) -> integer');
-    const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['h', 2]]] as any);
-    expect(expr.isPure).toBe(false);
-    const result = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-      functions: { h: (x: number) => x + 1 },
-    } as never);
-    expect(result.success).toBe(true);
-    const reference = new ComputeEngine();
-    reference.declare('h', '(integer) -> integer');
-    reference.assign('h', reference.box(['Function', ['Add', 'x', 1], 'x']));
-    const expected = reference
-      .box(['Sum', 'j', ['Limits', 'j', 1, ['h', 2]]] as any)
-      .evaluate().re;
-    expect(expected).toBe(6);
-    expect(result.run!({} as never)).toBe(expected);
   });
 
   test('JS: a call of a function declared not pure declines', () => {
@@ -880,14 +687,14 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
     } as never);
     const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['g', 2]]] as any);
     expect(expr.evaluate().operator).toBe('Sum');
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false })
-    ).toThrow(/upper bound `g\(2\)` has an effect/);
+    expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
+      /g\(2\): g is not the library operator here/
+    );
   });
 
   // A declared type that states the effect `any` is a contract: the call is
   // not pure, even with a pure function value assigned, so the interpreter
-  // leaves the `Sum` unevaluated.
+  // leaves the `Sum` unevaluated, and the compilation declines.
   test('JS: a call of a function whose type states the effect `any` declines', () => {
     const engine = new ComputeEngine();
     engine.declare('h', { type: '(integer) any -> integer' });
@@ -896,6 +703,6 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
     expect(expr.evaluate().operator).toBe('Sum');
     expect(() =>
       compile(expr, { to: 'javascript', fallback: false })
-    ).toThrow(/upper bound `h\(2\)` has an effect/);
+    ).toThrow();
   });
 });

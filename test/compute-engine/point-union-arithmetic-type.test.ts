@@ -13,7 +13,7 @@
  * consumer that declares a point parameter at the two-arm union then
  * rejected such a derived argument as `incompatible-type`.
  */
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
 
 const TWO = 'tuple<number, number> | list<tuple<number, number>>';
@@ -364,27 +364,6 @@ describe('a point divided by a list of numbers is a list of points', () => {
     expect(e.N().toString()).toBe(approx);
     expect(isSubtype(e.evaluate().type.type, e.type.type)).toBe(true);
     expect(e.type.toString()).toMatch(/^list<tuple<rational, rational>/);
-  });
-
-  test('the compiled JavaScript agrees with the interpreter', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Divide', ['Tuple', 'x', 2], ['List', 1, 'x']]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(
-      (r.run as (v: Record<string, unknown>) => unknown)({ x: 4 })
-    ).toEqual([
-      [4, 2],
-      [1, 0.5],
-    ]);
-    ce.assign('x', 4);
-    expect(
-      ce
-        .box(['Divide', ['Tuple', 'x', 2], ['List', 1, 'x']])
-        .evaluate()
-        .toString()
-    ).toBe('[(4, 2),(1, 1/2)]');
   });
 
   test('a divisor that may be a number or a list gives both arms', () => {

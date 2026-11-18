@@ -638,7 +638,7 @@ type, and the capture of bindings (question Q11 of
   plan above. This is a compiler capability, not a change to the omission
   policy. An unseeded `Reduce` over an empty list is `Nothing` in the
   interpreter and `NaN` when compiled (`Reduce([], Multiply)`), the stand-in for
-  `Nothing` pinned in `compile.test.ts`.
+  `Nothing`.
 - **CE-218.2** Tuple-call lowering can leave an unannotated pass-through result
   typed `any` even when the argument is a numeric tuple, so the tuple
   constructor refuses compilation. Annotating the parameter with its numeric
@@ -685,8 +685,7 @@ the statements make to a symbol the call reads.
 The 24 `Array.from` range sites in the corpus are all places where the range is
 needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
 no site needs only a counting loop. The 7 gather sites need a gather/reduce
-fusion in `emitCollectionReduce` (`javascript-target.ts`), which is a new
-lowering.
+fusion, which is a new lowering.
 
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
@@ -697,10 +696,9 @@ Compiled float arithmetic does not keep a pole. The interpreter's `~oo - ~oo` is
 `~oo`; compiled, it is `Infinity - Infinity`, which is `NaN`. So a guard on a
 produced value asks a different question than the interpreter. Example: with
 `g(a: infinity) = 1; g(x: number) = 0`, compiled `g(1 / w - 1 / w)` at `w = 0`
-answers 0 where the interpreter answers 1. `jsClauseParamGuard`
-(`src/compute-engine/compilation/base-compiler.ts`) therefore declines the whole
-clause set for those tiers and for the non-finite VALUE types, and the set runs
-interpreted (pinned in `test/compute-engine/multi-clause-compile.test.ts`).
+answers 0 where the interpreter answers 1. The compiler therefore declines the
+whole clause set for those tiers and for the non-finite VALUE types, and the set
+runs interpreted.
 
 A change to the guard does not fix this (measured 2026-08-30). Compilation needs
 either a float encoding in which a pole stays a pole through arithmetic, or a
@@ -712,13 +710,11 @@ compiler that never folds a pole into a plain JavaScript number.
 **Witness:** corpus; Tycho census: four terrain triangle rows of `art/nxlddeh5zv` decline at the fold-size guard; a corpus decline.
 
 On the `javascript` and `interval-js` targets, a symbol's compound pure value is
-emitted once as a preamble local (`ensureFoldedValueEmitted`,
-`base-compiler.ts`). The inline target (GLSL) still folds a value into the
-emission at each reference, so `MAX_FOLD_EXPANDED_NODES = 20 000`
-(`expandedFoldSize` / `assertFoldableSize`, `base-compiler.ts`; fail closed by
-decision 2026-08-23) refuses a pathological DAG-shared tower there. The public
-`fallback: true` route falls back to interpreted evaluation; the direct
-registered-target route throws (pinned in `compile-fold-size-guard.test.ts`).
+emitted once as a preamble local. The inline target (GLSL) still folds a value
+into the emission at each reference, so `MAX_FOLD_EXPANDED_NODES = 20 000` (fail
+closed by decision 2026-08-23) refuses a pathological DAG-shared tower there.
+The `fallback: true` route falls back to interpreted evaluation (pinned in
+`compile-fold-size-guard.test.ts`).
 
 - **CE-269.1** Inline targets: add the same preamble binding, or a
   runtime-binding channel (a `_SYS` engine-value lookup) so a compiled member
@@ -774,20 +770,10 @@ design limits, not candidates.
 **Witness:** corpus; 272.2: Tycho `5qn5kcrszu`, 6 javascript records decline (Tycho item 206); 272.1 (no witness) and 272.3 (zero demand) are drop.
 
 The evaluator broadcasts `Which` element-wise over collection-valued operands,
-and the `javascript` target lowers the same shape (`compileJSSelection`,
-`javascript-target.ts`). The `glsl` and `interval-js` targets fail closed: the
-interval target holds one interval per quantity (no collection values, by
-design), and the GPU element-wise selection (`compileGPUSelection`,
-`gpu-target.ts`) lowers only static `vec2`–`vec4` shapes.
-
-The pre-pass `fixed-width-unroll.ts` covers part of this (pinned in
-`test/compute-engine/compile-elementwise-selection-unroll.test.ts`). It pushes a
-literal index through a `Which`/`If` whose first condition is a list, and on
-through the ordering relations, `Equal`/`NotEqual` against a scalar, `Mod`, the
-other element-wise heads and a literal `Range`, down to the literal list. It
-also writes a `Which`/`If` whose first condition is a WIDE list built from
-non-constant lists (five or more elements, at most 64) as the list of its
-per-position selections. This covers `ccoc40kfhj` (24 `interval-js` records).
+and the `javascript` target lowers the same shape. The `glsl` and `interval-js`
+targets fail closed: the interval target holds one interval per quantity (no
+collection values, by design), and the GPU element-wise selection lowers only
+static `vec2`–`vec4` shapes.
 
 - **CE-272.1** A selection with no default clause and a point arm is not
   covered: a position that no clause selects is `NaN` element-wise but `Missing`
@@ -806,17 +792,14 @@ The general design is target-independent: a static broadcast unroll before
 target lowering. When every collection leaf in the `Which` clauses is statically
 enumerable (materialized `List`/`PointList`/`Range` literals) with one common
 length N, project the broadcast expression per element and rewrite to N scalar
-selections. `compileGPUExtremum` already folds compile-time component lists of
-any length, and the interval `Min`/`Max` handlers fold n scalar arguments. The
-projection must fail closed when a collection subterm is not statically
-enumerable, when lengths disagree, or when an index-sensitive operator (`Sort`,
-`Unique`, …) sits between the leaf and the selection.
+selections. The projection must fail closed when a collection subterm is not
+statically enumerable, when lengths disagree, or when an index-sensitive
+operator (`Sort`, `Unique`, …) sits between the leaf and the selection.
 
 Caution: on `glsl`, `Power`/`Square` of a vec operand with a scalar exponent
 fails closed on its own (`_gpu_powi` is scalar-only, and the `pow` builtin
-requires matching genTypes), pinned in
-`test/compute-engine/compile-gpu-shape-gate-holes.test.ts`. Unrolling to SCALAR
-selections avoids it; a design that lifts the vec-width cap meets it.
+requires matching genTypes). Unrolling to SCALAR selections avoids it; a design
+that lifts the vec-width cap meets it.
 
 ### CE-280. Compile-target coverage: heads and shapes that decline on GLSL
 
@@ -854,8 +837,7 @@ array-uniform loop codegen, and it needs witnesses first.
     tuple component of `PointList`, refused since 2026-10-18).
   - **CE-280.9** Projecting an EMPTY point list diverges: compiled `[]`,
     interpreter absence. The evaluated empty transpose types `list<never>`, so
-    the point-ness cannot be recovered. Pinned as a known parity edge in
-    `pointlist-compile-zip.test.ts`.
+    the point-ness cannot be recovered.
   - The consumer must count again how much of the 11 states / 36 members + 2
     states closed. Do not mark this bucket resolved on CE numbers.
 - **CE-280.10** Complex-element collections in the generic shape check.

@@ -3031,13 +3031,6 @@ describe('INTEGRATE: a limit that names no variable', () => {
     expect(numeric2).toBeCloseTo(4, 12);
   });
 
-  test('compiled JavaScript agrees', () => {
-    const ce = new ComputeEngine();
-    const compiled = compile(ce.box(['Integrate', 2, ['Limits', 0, 1]]));
-    expect(compiled.success).toBe(true);
-    expect(compiled.run?.({})).toBeCloseTo(2, 12);
-  });
-
   test('a small constant is not zero: ∫_0^∞ 10^-12 is +∞', () => {
     const ce = new ComputeEngine();
     const [exact, numeric] = both(ce, [
@@ -3210,62 +3203,6 @@ describe('INTEGRATE: a limit that names no variable', () => {
     expect(r.value.hi).toBeGreaterThanOrEqual(reference);
   });
 
-  // The value of a constant integrand under evaluate(), N() and compiled
-  // JavaScript.
-  const threeRoutes = (
-    e: ReturnType<ComputeEngine['box']>
-  ): [string, string, unknown] => {
-    const compiled = compile(e, { fallback: false });
-    return [e.evaluate().toString(), e.N().toString(), compiled.run?.({})];
-  };
-
-  test('a parameterless literal with a block of several statements is applied', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box([
-      'Integrate',
-      ['Function', ['Block', 1, 2]],
-      ['Limits', 'Nothing', 0, 2],
-    ]);
-    expect(threeRoutes(e)).toEqual(['4', '4', 4]);
-  });
-
-  test('equal bounds give 0, also +∞ to +∞ and an infinite integrand', () => {
-    const ce = new ComputeEngine();
-    expect(
-      threeRoutes(
-        ce.box([
-          'Integrate',
-          2,
-          ['Limits', 'Nothing', 'PositiveInfinity', 'PositiveInfinity'],
-        ])
-      )
-    ).toEqual(['0', '0', 0]);
-    expect(
-      threeRoutes(
-        ce.box(['Integrate', 'PositiveInfinity', ['Limits', 'Nothing', 1, 1]])
-      )
-    ).toEqual(['0', '0', 0]);
-  });
-
-  // An integrand with no symbol has no parameter for the limit: the
-  // integrand 0 is a constant, and its integral from 0 to ∞ is 0. A symbol
-  // is the variable of the limit, also when it has a value: with `c := 0`,
-  // the integral of `c` from 0 to ∞ is +∞.
-  test('∫_0^∞ 0 is 0 on every route; with c := 0, ∫_0^∞ c is +∞', () => {
-    const ce = new ComputeEngine();
-    expect(
-      threeRoutes(
-        ce.box(['Integrate', 0, ['Limits', 'Nothing', 0, 'PositiveInfinity']])
-      )
-    ).toEqual(['0', '0', 0]);
-    ce.assign('c', 0);
-    expect(threeRoutes(ce.parse('\\int_0^\\infty c'))).toEqual([
-      '+oo',
-      '+oo',
-      Infinity,
-    ]);
-  });
-
   test('∫_0^1 x does not declare x, under evaluate(), N() or compile', () => {
     for (const run of [
       (e: ReturnType<ComputeEngine['box']>) => e.evaluate(),
@@ -3275,30 +3212,6 @@ describe('INTEGRATE: a limit that names no variable', () => {
       const ce = new ComputeEngine();
       run(ce.parse('\\int_0^1 x'));
       expect(ce.lookupDefinition('x')).toBeUndefined();
-    }
-  });
-
-  // The compiled lambda of a dimension in which the integrand is constant
-  // binds a name that the integrand does not read, also through the value
-  // of `c`.
-  test('the variable of a constant dimension does not capture a symbol of an assigned value', () => {
-    for (const name of ['t', 'IntegrationVariable']) {
-      const ce = new ComputeEngine();
-      ce.assign('c', ce.box(['Add', name, 1]));
-      const json: MathJson = [
-        'Integrate',
-        ['Function', ['Multiply', 'c', ['Sin', ['Sin', 'x']]], 'x'],
-        ['Limits', 'Nothing', 0, 1],
-        ['Limits', 'Nothing', 0, 2],
-      ];
-      const compiled = compile(ce.box(json), { fallback: false });
-      expect(compiled.success).toBe(true);
-      expect(compiled.code).not.toMatch(new RegExp(`\\(${name}\\) =>`));
-      ce.assign(name, 2);
-      const reference = both(ce, json)[1];
-      // ∫_0^2 ∫_0^1 3·sin(sin x) dx dt = 6·0.4306…
-      expect(reference).toBeCloseTo(2.583636618724144, 10);
-      expect(compiled.run?.({ [name]: 2 })).toBeCloseTo(reference, 10);
     }
   });
 

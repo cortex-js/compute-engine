@@ -9,7 +9,6 @@
  * type already says enough (a numeric fold) is not touched.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { canonicalFunctionLiteral } from '../../src/compute-engine/function-utils';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
@@ -46,7 +45,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
     ]);
   });
 
-  it('a view over the fold is a list on the interpreter, as it is compiled', () => {
+  it('a view over the fold is a list on the interpreter', () => {
     // Before: the fold was typed `collection<any>`, and `Map`/`Filter` over
     // it materialized as a `Set` while the compiled result was an array.
     const ce = engine();
@@ -63,9 +62,6 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
         .evaluate()
         .toString()
     ).toBe('[6,4]');
-    expect(compile(mapped, { fallback: false }).run!({ p: [3, 1, 2] })).toEqual(
-      [7, 3, 5]
-    );
   });
 
   it('types Scan, a seedless fold, an Append fold and a fold of lists the same way', () => {
@@ -243,7 +239,7 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
     expect(fold.type.toString()).not.toContain('string');
   });
 
-  it('a block local holding the fold is typed precisely, so its consumers compile statically', () => {
+  it('a block local holding the fold is typed precisely', () => {
     const ce = engine();
     const program = ce.box(
       parseEpsil(
@@ -251,9 +247,6 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       )[0]
     );
     expect(program.evaluate().toString()).toBe('9');
-    const r = compile(program, { fallback: false });
-    expect(r.run!({ p: [3, 1, 2] })).toBe(9);
-    expect(r.code).not.toContain('_SYS.arr');
   });
 
   it('keeps the rank of a matrix result', () => {
@@ -280,8 +273,5 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       ['List', 3, 4],
     ]);
     expect(value.type.matches(fold.type)).toBe(true);
-    const r = compile(fold, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ n: 2 })).toEqual([[[1, 2], 2], [3, 4]]);
   });
 });

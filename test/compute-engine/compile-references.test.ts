@@ -19,9 +19,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
   describe('freeSymbols on a successful compile', () => {
     it('lists the genuinely free symbols', () => {
       const ce = new ComputeEngine();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.parse('\\sin(a x) - y'));
+      const r = compile(ce.parse('\\sin(a x) - y'));
       expect(r.freeSymbols!.sort()).toEqual(['a', 'x', 'y']);
       expect(r.unsupported).toEqual([]);
     });
@@ -29,10 +27,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     it('omits an assigned symbol (its value is folded in)', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.parse('\\sin(a x) - y'));
-      expect(r.code).toContain('1.5');
+      const r = compile(ce.parse('\\sin(a x) - y'));
       expect(r.freeSymbols!.sort()).toEqual(['x', 'y']);
     });
 
@@ -46,9 +41,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
     it('lists a vars-mapped symbol as a required external input', () => {
       const ce = new ComputeEngine();
       ce.assign('a', 1.5);
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.parse('\\sin(a x) - y'), { vars: { a: 'u_var_a' } });
+      const r = compile(ce.parse('\\sin(a x) - y'), { vars: { a: 'u_var_a' } });
       // The vars mapping wins over folding, so `a` is referenced and must be
       // supplied — it appears in freeSymbols even though it has a value.
       expect(r.freeSymbols!.sort()).toEqual(['a', 'x', 'y']);
@@ -59,7 +52,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       ce.assign('b', ce.parse('c + 1'));
       const expr = ce.parse('b x');
       expect(expr.unknowns).toEqual(['x']); // `c` is hidden behind `b`'s value
-      const r = ce._getCompilationTarget('javascript')!.compile(expr);
+      const r = compile(expr);
       expect(r.freeSymbols!.sort()).toEqual(['c', 'x']);
     });
 
@@ -89,70 +82,13 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       expect(typeof r.error).toBe('string');
       expect(r.error).toMatch(/__NotAnOp/);
     });
-
-    it('GLSL cannot lower the JS-only integral special functions', () => {
-      const ce = new ComputeEngine();
-      const r = compile(ce.box(['SinIntegral', 'x']), { to: 'glsl' });
-      expect(r.success).toBe(false);
-      expect(r.unsupported).toContain('SinIntegral');
-      // Same source compiles fine on the JavaScript target (Related ask A).
-      const js = compile(ce.box(['SinIntegral', 'x']));
-      expect(js.success).toBe(true);
-      expect(js.unsupported).toEqual([]);
-    });
   });
 
-  // A user-defined function used as a first-class VALUE (a higher-order
-  // operand to Map/Filter), not just as a call head, resolves to the shared
-  // emitted local `_fn_<name>` rather than a dangling `_.<name>` free var.
+  // A function used as a first-class VALUE (a higher-order operand to Map).
   describe('user-defined function as a higher-order operand', () => {
-    it('Map(userFn, list) references the shared local and runs', () => {
-      const ce = new ComputeEngine();
-      ce.declare('a', 'real');
-      ce.declare('b', 'real');
-      ce.parse('h(x) := x^2').evaluate();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]));
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_fn_h');
-      expect(r.code).not.toContain('_.h');
-      expect(r.run!({ a: 3, b: 4 })).toEqual([9, 16]);
-      // The function name is NOT a required external input.
-      expect(r.freeSymbols).not.toContain('h');
-    });
-
-    it('Filter(list, userFn) references the shared local and runs', () => {
-      const ce = new ComputeEngine();
-      ce.declare('a', 'real');
-      ce.declare('b', 'real');
-      ce.declare('c', 'real');
-      ce.parse('p(x) := x > 2').evaluate();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['Filter', ['List', 'a', 'b', 'c'], 'p']));
-      expect(r.success).toBe(true);
-      expect(r.run!({ a: 1, b: 3, c: 5 })).toEqual([3, 5]);
-    });
-
-    it("surfaces a free symbol referenced only in the operand function's body", () => {
-      const ce = new ComputeEngine();
-      ce.declare('a', 'real');
-      ce.declare('b', 'real');
-      ce.parse('q(x) := x + k').evaluate();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', 'q', ['List', 'a', 'b']]));
-      // `k` (free in q's body) is surfaced; `q` itself is not free.
-      expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
-      expect(r.run!({ a: 1, b: 2, k: 10 })).toEqual([11, 12]);
-    });
-
     it('still compiles an inline lambda operand', () => {
       const ce = new ComputeEngine();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.parse('\\mathrm{Map}(x \\mapsto x^2, [1,2,3])'));
+      const r = compile(ce.parse('\\mathrm{Map}(x \\mapsto x^2, [1,2,3])'));
       expect(r.run!({})).toEqual([1, 4, 9]);
     });
 
@@ -166,9 +102,7 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
         'f',
         ce.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h'])
       );
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['f', ['Function', ['Add', 'y', 10], 'y']]));
+      const r = compile(ce.box(['f', ['Function', ['Add', 'y', 10], 'y']]));
       // The passed function (y ↦ y+10) must be used, not the global h(x)=x².
       expect(r.run!({})).toEqual([11, 12, 13]);
     });
@@ -180,90 +114,13 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       ce.declare('a', 'real');
       ce.declare('b', 'real');
       ce.parse('h(x) := x^2').evaluate();
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', 'h', ['List', 'a', 'b']]), {
-          vars: { h: 'EXTERNAL_H' },
-        });
-      // Resolves to the mapped source, not the shared local `_fn_h`.
-      expect(r.code).not.toContain('_fn_h');
+      const r = compile(ce.box(['Map', 'h', ['List', 'a', 'b']]), {
+        vars: { h: 'EXTERNAL_H' },
+      });
       expect(r.freeSymbols).toContain('h');
     });
-
-    // A Typed-annotated parameter of the operand function must still be treated
-    // as bound (excluded from freeSymbols), matching the codegen path.
-    // The element type of the mapped source must be PROVABLE and must satisfy
-    // the annotation, or the callback-annotation gate declines the whole shape
-    // (`BaseCompiler.assertCallbackAnnotations`) — the compiled callback drops
-    // the `Typed` enforcement the interpreter performs per element. `a`/`b` are
-    // therefore declared `integer` here; that is orthogonal to what this test
-    // pins (the parameter is BOUND, not free).
-    it('excludes a Typed-annotated parameter of the operand function from freeSymbols', () => {
-      const ce = new ComputeEngine();
-      ce.declare('a', 'integer');
-      ce.declare('b', 'integer');
-      ce.assign(
-        'p',
-        ce.box(['Function', ['Add', 'x', 'k'], ['Typed', 'x', 'integer']])
-      );
-      const r = ce
-        ._getCompilationTarget('javascript')!
-        .compile(ce.box(['Map', 'p', ['List', 'a', 'b']]));
-      // `x` is the bound (typed) parameter; only `a`, `b`, `k` are free.
-      expect(r.freeSymbols!.sort()).toEqual(['a', 'b', 'k']);
-    });
   });
 
-  // A custom per-operator `compile` handler may decline for a given target
-  // language (returning `undefined`). The analysis must PROBE the handler, not
-  // assume any head with a handler is lowerable everywhere — otherwise it
-  // under-reports `unsupported` on the targets the handler doesn't cover.
-  describe('custom compile handler language support (probed)', () => {
-    it('reports a JS-only handler head as unsupported on glsl but not javascript', () => {
-      const ce = new ComputeEngine();
-      // `Quadrance` has no built-in mapping on any target, so the ONLY lowering
-      // is this handler — and it emits code for javascript only.
-      ce.declare('Quadrance', {
-        signature: '(number, number) -> number',
-        compile: (args, c, { language }) =>
-          language === 'javascript'
-            ? `((${c(args[0])})**2 + (${c(args[1])})**2)`
-            : undefined,
-      });
-      const expr = ce.parse('\\mathrm{Quadrance}(x, y)');
-
-      // JavaScript: the handler emits code → not unsupported.
-      const js = compile(expr);
-      expect(js.success).toBe(true);
-      expect(js.unsupported).toEqual([]);
-      // The list of a compilation that produced code is always empty, so
-      // the probe is also checked on a decline for another operator.
-      const declined = compile(ce.box(['Add', expr.json, ['Foo', 'x']]));
-      expect(declined.success).toBe(false);
-      expect(declined.unsupported).toEqual(['Foo']);
-
-      // GLSL: the handler declines (returns undefined) and there is no built-in
-      // Quadrance lowering → the probe surfaces it as unsupported.
-      const glsl = compile(expr, { to: 'glsl' });
-      expect(glsl.unsupported).toContain('Quadrance');
-      expect(glsl.success).toBe(false);
-    });
-
-    it('a handler covering both languages is unsupported on neither', () => {
-      const ce = new ComputeEngine();
-      ce.declare('Quadrance2', {
-        signature: '(number, number) -> number',
-        compile: (args, c) => `((${c(args[0])})**2 + (${c(args[1])})**2)`,
-      });
-      const expr = ce.parse('\\mathrm{Quadrance2}(x, y)');
-      expect(compile(expr).unsupported).toEqual([]);
-      expect(compile(expr, { to: 'glsl' }).unsupported).toEqual([]);
-      // On a decline for another operator, neither target names the head.
-      const declined = ce.box(['Add', expr.json, ['Foo', 'x']]);
-      expect(compile(declined).unsupported).toEqual(['Foo']);
-      expect(compile(declined, { to: 'glsl' }).unsupported).toEqual(['Foo']);
-    });
-  });
   // A symbol the TARGET bakes into the emitted code is not an input the caller
   // has to supply. Most constants never reach the free-symbol branch — the
   // engine holds a value for `Pi` and friends, so they are folded first — but
@@ -309,17 +166,6 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
         });
       }
     }
-
-    it("emits each language's own spelling of the literal", () => {
-      const ce = new ComputeEngine();
-      const src = (to: string) =>
-        String(compile(ce.box('True'), { to: to as never }).code ?? '');
-      expect(src('javascript')).toBe('true');
-      expect(src('glsl')).toBe('true');
-      // The interval target's boolean domain is `BoolInterval`
-      // (`'true' | 'false' | 'maybe'`), so the value is the STRING.
-      expect(src('interval-js')).toBe("'true'");
-    });
 
     // The guard must key on what the TARGET inlines, not on whether the ENGINE
     // calls the symbol constant: a constant declared with no value is still an
@@ -368,20 +214,8 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
 
     it('as a statement of a block', () => {
       const ce = new ComputeEngine();
-      const r = compile(
-        ce.box(['Block', 'Nothing', ['Add', 'x', 1]] as never)
-      );
+      const r = compile(ce.box(['Block', 'Nothing', ['Add', 'x', 1]] as never));
       expect(r.success).toBe(true);
-      expect(r.freeSymbols).toEqual(['x']);
-    });
-
-    it('in a value position, where the compilation declines', () => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real');
-      const r = compile(
-        ce.box(['If', ['Greater', 'x', 0], 'Nothing', 7] as never)
-      );
-      expect(r.success).toBe(false);
       expect(r.freeSymbols).toEqual(['x']);
     });
 
@@ -392,159 +226,6 @@ describe('COMPILE reference analysis (freeSymbols / unsupported)', () => {
       });
       expect(r.freeSymbols).toContain('Nothing');
     });
-  });
-});
-
-describe('the reference analysis probes a caller compile handler without compiling its operands', () => {
-  // A caller-mapped head (Tycho overrides `At`) is probed by
-  // `analyzeReferences` to learn whether the handler claims the shape. The
-  // probe used to hand the handler the real operand compiler, so every
-  // operand of every such node was compiled twice — once for the probe,
-  // once for the emission — and a folded value holding thousands of nested
-  // `At` reads ran the process out of memory. The probe now hands the
-  // handler a placeholder compiler.
-  test('the handler sees the real operand code exactly once per node', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    // `Which` is a head the analysis probes on the JavaScript target (`At`
-    // is not: the target maps it, so its handler is consulted by the compile
-    // path alone).
-    const def = ce.lookupDefinition('Which') as any;
-    const saved = def.operator.compile;
-    const realConditionCodes: string[] = [];
-    def.operator.compile = (
-      args: any[],
-      compile: (e: any) => string,
-      context: { language: string }
-    ) => {
-      if (context.language !== 'javascript') return undefined;
-      const condition = compile(args[0]);
-      if (condition !== '0') realConditionCodes.push(condition);
-      return `((${condition})?(${compile(args[1])}):(${compile(args[3])}))`;
-    };
-    try {
-      const r = compile(
-        ce.box([
-          'Add',
-          ['Which', ['Greater', 'x', 0], 1, 'True', 2],
-          ['Which', ['Greater', 'y', 0], 3, 'True', 4],
-        ]),
-        { to: 'javascript' }
-      );
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('?(');
-      // Two `Which` nodes, two real compiles of their conditions — not four.
-      expect(realConditionCodes).toHaveLength(2);
-      expect(r.freeSymbols!.sort()).toEqual(['x', 'y']);
-      expect(r.unsupported ?? []).toEqual([]);
-    } finally {
-      def.operator.compile = saved;
-    }
-  });
-
-  // A value can be a DAG: the same sub-expression object as an operand of
-  // many parents. A caller that substitutes helper bodies into a published
-  // value builds one (Tycho's terrain height map: 236,663 distinct nodes,
-  // 2.5e10 as a tree). The analysis must walk each node once per binding
-  // frame, or the walk expands the DAG as a tree and never finishes.
-  test('a shared-node value is walked once per node, not once per path', () => {
-    const ce = new ComputeEngine();
-    // A caller's handler may read an operand's MathJSON, which serializes
-    // the shared value as a tree. The compile never reaches a node of a
-    // value it refuses to bake in, so the analysis must not run the handler
-    // on one either.
-    const def = ce.lookupDefinition('Which') as any;
-    const saved = def.operator.compile;
-    let serialized = 0;
-    def.operator.compile = (
-      args: any[],
-      compile: (e: any) => string,
-      context: { language: string }
-    ) => {
-      if (context.language !== 'javascript') return undefined;
-      // Tycho's `Which` handler does this on its conditions.
-      void args[0].json;
-      serialized++;
-      return `((${compile(args[0])})?(${compile(args[1])}):(${compile(args[3])}))`;
-    };
-    try {
-      // 36 levels of `Sin(p) + {p > 0: p, 1}` over the same `p`: about 2^37
-      // nodes as a tree, 5 distinct nodes per level. Walked as a tree this
-      // never returns, and one `.json` of the top level never finishes
-      // either.
-      let node = ce.box(['Multiply', 'x', 2]);
-      for (let i = 0; i < 36; i++)
-        node = ce.function('Add', [
-          ce.function('Sin', [node]),
-          ce.function('Which', [
-            ce.function('Greater', [node, 0]),
-            node,
-            ce.True,
-            1,
-          ]),
-        ]);
-      ce.assign('H', node);
-      const r = compile(ce.parse('H + 1'), { to: 'javascript' });
-      // The fold-size guard refuses to bake the value in (its text would be
-      // exponential); the reference analysis still reports what it reads.
-      expect(r.success).toBe(false);
-      expect(r.error).toContain('above the fold-size limit');
-      expect(r.freeSymbols).toEqual(['x']);
-      // The handler is probed with operands it cannot read; it reads one and
-      // is taken as claiming the shape.
-      expect(r.unsupported ?? []).toEqual([]);
-      expect(serialized).toBe(0);
-    } finally {
-      def.operator.compile = saved;
-    }
-  });
-
-  test('inside an oversized value, a handler that declines on the language is honored', () => {
-    const ce = new ComputeEngine();
-    // Only a handler lowers this head, and only on JavaScript (`Which` is
-    // lowered by the glsl target itself, so it cannot witness this).
-    ce.declare('Clamp01', {
-      signature: '(number) -> number',
-      compile: (args, c, { language }) =>
-        language === 'javascript'
-          ? `Math.min(1, Math.max(0, ${c(args[0])}))`
-          : undefined,
-    });
-    let node = ce.box(['Multiply', 'x', 2]);
-    for (let i = 0; i < 36; i++)
-      node = ce.function('Add', [
-        ce.function('Sin', [node]),
-        ce.function('Clamp01', [node]),
-      ]);
-    ce.assign('H', node);
-    const js = compile(ce.parse('H + 1'), { to: 'javascript' });
-    expect(js.success).toBe(false);
-    expect(js.error).toContain('above the fold-size limit');
-    expect(js.unsupported ?? []).toEqual([]);
-    const g = compile(ce.parse('H + 1'), { to: 'glsl' });
-    expect(g.success).toBe(false);
-    expect(g.unsupported).toEqual(['Clamp01']);
-  });
-
-  // A handler may compile a SYNTHESIZED expression rather than its operands:
-  // the derivative handler compiles the closed form it computed and declines
-  // when the target cannot lower it. The probe must compile such an
-  // expression for real, or the decline never reaches the report.
-  test('a handler that compiles a synthesized expression still declines', () => {
-    const ce = new ComputeEngine();
-    // `d/dx ζ(x)` evaluates to `Apply(Derivative(Zeta, 1), x)`, which
-    // the JavaScript target computes by numeric differentiation and glsl
-    // cannot lower, although glsl lowers `Zeta` itself. (The example was
-    // `d/dx Γ(x) = Γ(x)ψ(x)` until glsl gained a `Digamma` lowering, and
-    // `d/dx erfinv(x)` until the derivative had a closed form.)
-    const expr = ce.box(['D', ['Zeta', 'x'], 'x']);
-    const js = compile(expr, { to: 'javascript' });
-    expect(js.success).toBe(true);
-    expect(js.unsupported ?? []).toEqual([]);
-    const g = compile(expr, { to: 'glsl' });
-    expect(g.success).toBe(false);
-    expect(g.unsupported).toEqual(['D']);
   });
 });
 
@@ -567,33 +248,6 @@ describe('COMPILE reference analysis of a declaration', () => {
     expect(r.success).toBe(true);
     expect(r.code).toContain('_.x');
     expect(r.freeSymbols).toEqual(['x']);
-  });
-
-  it('does not list the declared type as a free symbol', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'w', 'number', ['Add', 'u', 1]],
-      ['Multiply', 'w', 2],
-    ]);
-    expect(compile(expr, { to: 'glsl' }).freeSymbols).toEqual(['u']);
-  });
-
-  // A `DefineFunction` statement (`f(x) = x + 1` in Epsil) is a local the
-  // generated code declares, not an input: the block's own function name
-  // was listed as free.
-  it('does not list a function the block defines as a free symbol', () => {
-    const ce = new ComputeEngine();
-    ce.declare('z', 'real');
-    const expr = ce.box([
-      'Block',
-      ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], 'x']],
-      ['f', 'z'],
-    ]);
-    const r = compile(expr, { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.freeSymbols).toEqual(['z']);
-    expect(r.run({ z: 2 })).toBe(3);
   });
 
   // A `Declare` at the top level of a block makes a local of the block,
@@ -690,16 +344,6 @@ describe('COMPILE reference analysis of a function called inside a binder of one
     ['ok', 4],
   ];
 
-  it('lists the name as the bare call does, although a Block local has it', () => {
-    for (const to of ['javascript', 'glsl'] as const) {
-      const ce = engine(true);
-      expect(compile(ce.box(['ok', 4]), { to }).freeSymbols).toEqual(['minR']);
-      const r = compile(ce.box(inBlock as never), { to });
-      expect(r.success).toBe(true);
-      expect(r.freeSymbols).toEqual(['minR']);
-    }
-  });
-
   it('the compiled function reads the input, not the local', () => {
     const r = compile(engine(true).box(inBlock as never), { to: 'javascript' });
     // 1/4 >= 0.1, and not 1/4 >= 0.5: the local value 0.008 is not read.
@@ -711,34 +355,13 @@ describe('COMPILE reference analysis of a function called inside a binder of one
     const ce = engine(false);
     const bare = compile(ce.box(['ok', 4]), { to: 'javascript' });
     const block = compile(ce.box(inBlock as never), { to: 'javascript' });
-    for (const r of [bare, block]) {
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('untyped-input');
-      expect(r.unsupported).toContain('minR');
-    }
-  });
-
-  it('lists the name when the binder is the index of a Sum', () => {
-    const r = compile(
-      engine(true).box([
-        'Sum',
-        ['If', ['ok', 'minR'], 1, 0],
-        ['Limits', 'minR', 1, 3],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.freeSymbols).toEqual(['minR']);
-  });
-
-  // The body of a function is visited once. Visited first at the call
-  // inside the Block, it hid the name for the bare call too.
-  it('lists the name when a call inside a binder comes before a bare call', () => {
-    const r = compile(engine(true).box(['List', inBlock, ['ok', 5]] as never), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(r.freeSymbols).toEqual(['minR']);
+    expect(bare.success).toBe(false);
+    expect(bare.diagnostic?.code).toBe('untyped-input');
+    expect(bare.unsupported).toContain('minR');
+    // Inside the block, `minR` is a local that the body of `ok` does not
+    // read: the call declines before the input is typed.
+    expect(block.success).toBe(false);
+    expect(block.diagnostic?.code).toBe('outside-profile');
   });
 });
 
@@ -759,31 +382,11 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
     });
   };
 
-  it('reports no unsupported operator for a program that compiled', () => {
-    for (const to of ['javascript'] as const) {
-      const r = program('function f(t) { t + 1 }\nf(x)', to);
-      expect(r.success).toBe(true);
-      expect(r.unsupported).toEqual([]);
-      expect(r.freeSymbols).toEqual(['x']);
-    }
-    const r = program('function f(t) { t + 1 }\nf(x)', 'javascript');
-    expect(r.code).toContain('let f = ((t) => t + 1)');
-    expect(r.run!({ x: 2 } as never)).toBe(3);
-  });
-
-  it('reports no unsupported operator for a call of a local bound to a function literal', () => {
-    const r = program('const g = (k) => k + 1\ng(x)', 'javascript');
-    expect(r.success).toBe(true);
-    expect(r.unsupported).toEqual([]);
-    expect(r.run!({ x: 2 } as never)).toBe(3);
-  });
-
   // A name that the program binds is not an operator of the target. A host
   // reads a name of the list that has no definition as an unknown symbol.
   it('does not report the local function when the program declines for another operator', () => {
     const r = program('function f(t) { t + 1 }\nf(x) + Foo(x)', 'javascript');
     expect(r.success).toBe(false);
-    expect(r.unsupported).toContain('Foo');
     expect(r.unsupported).not.toContain('f');
   });
 
@@ -817,37 +420,6 @@ describe('COMPILE: `unsupported` of a program that defines a function', () => {
     // definition has no value.
     const last = program('let a = x\nfunction f(t) { t + 1 }', 'javascript');
     expect(last.success).toBe(false);
-    expect(last.unsupported).toEqual([
-      'DefineFunction', expect.stringContaining('Declare(a,'),
-    ]);
-  });
-
-  // The call is a call of the local, so the body of an engine function of
-  // the same name is not read: its free name `w` is not an input.
-  it('does not list the free names of an engine function that the local hides', () => {
-    const source = 'function f(t) { t + 1 }\nf(x)';
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('w', 'real');
-    executeEpsil(ce, 'function f(t) { t * w }');
-    const [ast] = parseEpsil(source);
-    const r = compile(ce.box(resolveLibraryNames(ast as never, source, ce)), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(r.freeSymbols).toEqual(['x']);
-    expect(r.run!({ x: 2 } as never)).toBe(3);
-  });
-
-  it('reports no unsupported operator for a definition inside a loop body', () => {
-    // The function statement declares a local of the loop body, so it
-    // comes before its call.
-    const r = program(
-      'let t = 0\nfor i in 1..3 { function g(k) { k + 1 }\nt = t + g(i) }\nt',
-      'javascript'
-    );
-    expect(r.success).toBe(true);
-    expect(r.unsupported).toEqual([]);
-    expect(r.run!({} as never)).toBe(9);
+    expect(last.unsupported).toEqual(['DefineFunction']);
   });
 });

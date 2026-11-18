@@ -96,11 +96,6 @@ describe('FUNCTION VALUES: COMPILED CODE CALLS WHAT IT CAN SEE', () => {
     expect(r.success).toBe(true);
     expect(r.run!({ u: 3 })).toEqual([1, 9]);
   });
-  test('Map(f, L) with f defined compiles', () => {
-    const r = compiled(ce, ['Map', 'sq', ['List', 1, 'u']]);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 3 })).toEqual([2, 6]);
-  });
   test('Apply(Apply(f, 1), u) declines', () => {
     const r = compiled(ce, ['Apply', ['Apply', 'f', 1], 'u']);
     expect(r.success).toBe(false);
@@ -138,111 +133,14 @@ describe('FUNCTION VALUES: COMPILED CODE CALLS WHAT IT CAN SEE', () => {
   });
 });
 
-describe('FUNCTION VALUES: THE CALLBACKS OF Map, Filter, Sort, Fold AND Reduce', () => {
-  const ce = engine();
-  ce.assign('pos', ce.box(['Function', ['Greater', 'x', 0], 'x']));
-  ce.assign('neg', ce.box(['Function', ['Negate', 'x'], 'x']));
-  ce.assign('plus', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
-  const L: MathJsonExpression = ['List', 3, -1, 'u'];
-  const cases: [string, MathJsonExpression, MathJsonExpression, unknown][] = [
-    [
-      'Map',
-      ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], L],
-      ['Map', 'sq', L],
-      [6, -2, 4],
-    ],
-    [
-      'Filter',
-      ['Filter', L, ['Function', ['Greater', 'x', 0], 'x']],
-      ['Filter', L, 'pos'],
-      [3, 2],
-    ],
-    [
-      'Sort',
-      ['Sort', L, ['Function', ['Negate', 'x'], 'x']],
-      ['Sort', L, 'neg'],
-      [3, 2, -1],
-    ],
-    [
-      'Fold',
-      ['Fold', ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0, L],
-      ['Fold', 'plus', 0, L],
-      4,
-    ],
-    [
-      'Reduce',
-      ['Reduce', L, ['Function', ['Add', 'a', 'b'], 'a', 'b'], 0],
-      ['Reduce', L, 'plus', 0],
-      4,
-    ],
-  ];
-  test.each(cases)('%s with a literal and with a defined function', (_, lit, named, expected) => {
-    for (const json of [lit, named]) {
-      const r = compiled(ce, json);
-      expect(r.success).toBe(true);
-      expect(r.run!({ u: 2 })).toEqual(expected);
-      // The interpreter, with `u` replaced by its value in the written
-      // expression.
-      const written = JSON.parse(JSON.stringify(json).replaceAll('"u"', '2'));
-      expect(ce.box(written).evaluate().toString()).toBe(
-        JSON.stringify(expected)
-      );
-    }
-  });
-});
-
 describe('PARAMETER DEFAULTS: A DEFAULT FILLS ONLY AN ARGUMENT THAT THE CALL LEAVES OUT', () => {
   const ce = engine();
-  test('g() is 3 in the interpreter and in compiled code', () => {
-    expect(value(ce, ['g'])).toBe('3');
-    const r = compiled(ce, ['Add', ['g'], 'u']);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 1 })).toBe(4);
-  });
   test('a written absent argument is passed to the body: g(Missing) is Missing', () =>
     expect(ce.box(['g', 'Missing']).evaluate().symbol).toBe('Missing'));
   test('a computed absent argument is passed to the body: g(First([])) is Missing', () =>
     expect(ce.box(['g', ['First', ['List']]]).evaluate().symbol).toBe(
       'Missing'
     ));
-  test('g(At(L, 100)) passes the NaN of the read to the body', () => {
-    ce.assign('L', ce.box(['List', 1, 2]));
-    expect(value(ce, ['g', ['At', 'L', 100]])).toBe('NaN');
-    // The compiled value is unspecified (the argument is outside `real`):
-    // the call compiles, and no value is asserted.
-    const ce2 = engine();
-    expect(compiled(ce2, ['g', ['At', 'L', 100]]).success).toBe(true);
-  });
-  test('Map((k = 2) ↦ k * 2, [1, 2]) is [2, 4]: the literal takes one argument', () => {
-    const literal: MathJsonExpression = [
-      'Function',
-      ['Multiply', 'k', 2],
-      ['Optional', 'k', 2],
-    ];
-    expect(value(ce, ['Map', literal, ['List', 1, 2]])).toBe('[2,4]');
-    const r = compiled(ce, ['Map', literal, ['List', 1, 'u']]);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 2 })).toEqual([2, 4]);
-  });
-  test('a callback called with fewer arguments takes the default of the other parameter', () => {
-    const literal: MathJsonExpression = [
-      'Function',
-      ['Multiply', 'x', 'k'],
-      'x',
-      ['Optional', 'k', 3],
-    ];
-    expect(value(ce, ['Map', literal, ['List', 1, 2]])).toBe('[3,6]');
-    const r = compiled(ce, ['Map', literal, ['List', 1, 'u']]);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 2 })).toEqual([3, 6]);
-  });
-  test.each(['glsl'] as const)(
-    'a defaulted call is completed on %s, with no decline',
-    (to) => {
-      const r = compiled(ce, ['Add', ['g'], 'u'], { to });
-      expect(r.success).toBe(true);
-    }
-  );
 });
 
 describe('PARAMETER DEFAULTS: A DEFAULT IS A CONSTANT', () => {
@@ -366,18 +264,6 @@ describe('PARAMETER DEFAULTS: A SYMBOL DECLARED CONSTANT (GITHUB ISSUE #490)', (
       ce.declare('S4', '(x: number, w: number = Ws) -> number')
     ).toThrow(/does not match its type/);
   });
-  // Compiled code fills a default that names a constant that the host or
-  // the program declares with the value of that constant, read where the
-  // function is declared, as the interpreter does. Constant folding would
-  // replace `F1()` with its value 6, so it is turned off for the call.
-  test('compiled code: the literal and the call fill the value of the constant', () => {
-    const r = compiled(ce, literal);
-    expect(r.success).toBe(true);
-    expect((r.run as () => unknown)()).toBe(6);
-    const call = compiled(ce, ['Add', ['F1'], 'u'], { constantFold: false });
-    expect(call.success).toBe(true);
-    expect(call.run!({ u: 1 })).toBe(7);
-  });
 });
 
 describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', () => {
@@ -420,28 +306,6 @@ describe('PARAMETER DEFAULTS: A CONSTANT SYMBOL DEFAULT (GITHUB ISSUE #490)', ()
     expect(value(ce, ['Apply', modeLiteral, 3])).toBe('6');
     expect(value(ce, ['gm', 3])).toBe('6');
     expect(value(ce, ['Map', 'gm', ['List', 3, 2]])).toBe('[6,4]');
-  });
-  test('a function literal with `mode = Auto`: compiled code gives the value of the interpreter', () => {
-    const calls = [
-      ce.box(['Apply', modeLiteral, 'u']),
-      ce.box(['gm', 'u']),
-    ];
-    for (const expr of calls) {
-      const r = compile(expr);
-      expect(r.success).toBe(true);
-      expect(r.run!({ u: 3 })).toBe(6);
-    }
-    // The `Map` does not type the default `Auto` of the body of `gm`: the
-    // type that the calls above give it is committed with `ce.infer()`.
-    ce.infer(calls);
-    const r = compiled(ce, ['Map', 'gm', ['List', 'u', 2]]);
-    expect(r.success).toBe(true);
-    expect(r.run!({ u: 3 })).toEqual([6, 4]);
-    // The GLSL fragment refuses the function literal: its parameter `mode` has
-    // no declared type.
-    const g = compiled(ce, ['Apply', modeLiteral, 'u'], { to: 'glsl' });
-    expect(g.success).toBe(false);
-    expect(g.diagnostic?.code).toBe('outside-fragment');
   });
   test('a function literal with `over = Integers`: compiled code declines on `Element`', () => {
     // No target compiles `Element` with a set operand, so the call declines

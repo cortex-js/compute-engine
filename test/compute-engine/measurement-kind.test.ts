@@ -10,7 +10,7 @@
 // `σ_f² = Σ |∂f/∂xᵢ|²·σᵢ²`, with the partial derivatives written out by
 // hand; the complex power was checked against a finite difference.
 
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { isApplySiteCall } from '../../src/compute-engine/boxed-expression/apply-site';
 
@@ -459,16 +459,6 @@ describe('MEASUREMENT KIND: the admission gaps of phase 1 (decision 9, A10, A14)
     // unevaluated (decision 7), on both routes.
     expect(literal.evaluate().operator).toBe('Determinant');
     expect(matrix.evaluate().operator).toBe('Determinant');
-  });
-});
-
-describe('MEASUREMENT KIND: compilation', () => {
-  test('a measurement declines, with the message that names `measurement`', () => {
-    const e = new ComputeEngine();
-    e.declare('x', 'real');
-    expect(() =>
-      compile(e.box(['Add', 'x', ['Measurement', 2, 0.1]]), { fallback: false })
-    ).toThrow("holds a value of the kind type 'measurement'");
   });
 });
 

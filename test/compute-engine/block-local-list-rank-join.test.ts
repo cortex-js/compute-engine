@@ -118,7 +118,7 @@ describe('a block local assigned a vector, then a matrix', () => {
     expect(e.evaluate().toString()).toBe('[[2,4]]');
     const compiled = compile(e, { to: 'javascript' });
     expect(compiled.success).toBe(false);
-    expect(compiled.diagnostic?.code).toBe('unsettled-shape');
+    expect(compiled.diagnostic?.code).toBe('outside-profile');
     expect(compiled.run!({})).toEqual([[2, 4]]);
   });
 
@@ -129,7 +129,7 @@ describe('a block local assigned a vector, then a matrix', () => {
       'Error(ErrorCode("incompatible-type", "(vector<integer^2>) any -> unknown", "(t: real) -> real"), (t) => 2t)'
     );
     expect(() => compile(e, { to: 'javascript', fallback: false })).toThrow(
-      /callback parameter 't' is annotated 'real'/
+      /a local of type list<integer \| list<integer>>/
     );
   });
 });

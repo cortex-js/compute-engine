@@ -78,19 +78,3 @@ describe('the result type', () => {
     expect(String(ce.box(['Sign', 'u']).type)).toBe('complex | nan');
   });
 });
-
-describe('the javascript target', () => {
-  test('a complex operand takes the complex sign, a real one Math.sign', () => {
-    ce.declare('w', 'complex');
-    const c = compile(ce.box(['Sign', 'w']), { to: 'javascript', fallback: false });
-    expect(c.code).toBe('_SYS.csign(_.w)');
-    expect(c.run!({ w: { re: 3, im: 4 } })).toEqual({ re: 0.6, im: 0.8 });
-    const big = c.run!({ w: { re: Number.MAX_VALUE, im: Number.MAX_VALUE } }) as { re: number; im: number };
-    expect(big.re).toBeCloseTo(Math.SQRT1_2, 12);
-    expect(c.run!({ w: { re: -7, im: 0 } })).toBe(-1);
-    // A zero imaginary part is unwrapped to the plain number at the boundary.
-    expect(c.run!({ w: { re: 0, im: 0 } })).toBe(0);
-    ce.declare('x', 'real');
-    expect(compile(ce.box(['Sign', 'x']), { to: 'javascript' }).code).toBe('Math.sign(_.x)');
-  });
-});

@@ -81,19 +81,6 @@ describe('COMPILE Which', () => {
       expect(result.run!({ x: -4 })).toBe(4); // -(-4)
       expect(result.run!({ x: 0 })).toBe(0); // 0^2
     });
-
-    it('should generate chained ternary code', () => {
-      const expr = ce.expr([
-        'Which',
-        ['Greater', 'x', 0],
-        1,
-        'True',
-        -1,
-      ]);
-      const result = compile(expr)!;
-      expect(result.code).toContain('?');
-      expect(result.code).toContain(':');
-    });
   });
 
   describe('Interval JavaScript target', () => {
@@ -215,28 +202,6 @@ describe('COMPILE Which', () => {
     it('a condition declared `boolean | missing` is a static error', () => {
       const engine = new ComputeEngine();
       expect(() => engine.declare('b', 'boolean | missing')).toThrow();
-    });
-
-    it('needs no `_SYS.cond` guard and no operand test', () => {
-      // A relation is boolean-valued, so it never needed the throwing
-      // `_SYS.cond` guard. A NaN operand decides the comparison `false`
-      // (user decision 2026-10-20), and the host supplies every input, so
-      // the comparison has no test.
-      const engine = new ComputeEngine();
-      engine.declare('r', 'real');
-      const expr = engine.expr([
-        'Which',
-        ['Greater', ['Multiply', 2, 'r'], 0],
-        1,
-        'True',
-        -1,
-      ]);
-      const result = compile(expr, { fallback: false })!;
-      expect(result.code).not.toContain('_SYS.cond');
-      expect(result.code).toBe('((0 < 2 * _.r) ? (1) : (-1))');
-      expect(result.run!({ r: 5 })).toBe(1);
-      expect(result.run!({ r: -3 })).toBe(-1);
-      expect(result.run!({ r: NaN })).toBe(-1);
     });
 
     it('a name bound by a Sum or a parameter is not a read of a global of that name', () => {

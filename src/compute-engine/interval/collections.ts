@@ -721,7 +721,7 @@ export type SeededChoiceDomain =
  * applies when it enters the frame. The element formulas are the
  * interpreter's (`selectRandomElement` in `library/core.ts`) and the
  * JavaScript target's (`makeRandomHelpers` in
- * `compilation/javascript-target.ts`), so the values are bit-identical to
+ * `compilation/javascript-runtime.ts`), so the values are bit-identical to
  * both.
  *
  * `k` is a number or an interval. It must be a POINT interval — a count in

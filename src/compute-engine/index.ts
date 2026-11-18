@@ -111,11 +111,6 @@ import {
 } from './boxed-expression/function-literal.js';
 import { debugBindingsDefault } from './boxed-expression/binding-tombstone.js';
 import {
-  jsProfileSwitchDefault,
-  jsProfileShadowDefault,
-  type JsProfileSwitch,
-} from './js-profile-switch.js';
-import {
   _mapAutoCompileStats,
   type MapAutoCompileStats,
 } from './map-auto-compile-stats.js';
@@ -274,7 +269,6 @@ import {
   type CommonSymbolTable,
   resetCommonSymbols,
 } from './engine-common-symbols.js';
-import { CompilationTargetRegistry } from './engine-compilation-targets.js';
 import {
   EngineConfigurationLifecycle,
   type StateEvent,
@@ -334,9 +328,6 @@ export {
 
 // Export compilation types and classes for advanced users
 export type {
-  CompileTarget,
-  CompiledOperators,
-  CompiledFunctions,
   CompilationOptions,
   CompilationResult,
   CompileMode,
@@ -344,9 +335,6 @@ export type {
   CompileDiagnosticKind,
   StorageHint,
   StorageKind,
-  LanguageTarget,
-  TargetSource,
-  CompiledFunction,
 } from './compilation/types.js';
 export {
   CompileDeclineError,
@@ -358,20 +346,9 @@ export {
 // Export BigDecimal for arbitrary-precision arithmetic
 export { BigDecimal } from '../big-decimal/index.js';
 
-// Only the two targets that every engine registers are exported from the
-// engine module. The GPU targets are exported by the full entry
-// (`src/compute-engine.ts`) and by `src/compile.ts`, so that the `./core`
-// entry does not bundle them (`engine-compilation-targets.ts` says why).
-export { JavaScriptTarget } from './compilation/javascript-target.js';
-export { BaseCompiler } from './compilation/base-compiler.js';
-
 // Import for internal use
-import type {
-  LanguageTarget,
-  JavaScriptCompilationTarget,
-  CompilationResult,
-} from './compilation/types.js';
-import { ROUTED_TARGETS } from './compilation/targets.js';
+import type { CompilationResult } from './compilation/types.js';
+import { BUILT_IN_TARGETS } from './compilation/targets.js';
 import { compile as _compile } from './compilation/compile-expression.js';
 import { fu as _fu } from './symbolic/fu.js';
 
@@ -575,9 +552,6 @@ export class ComputeEngine implements IComputeEngine {
   private _harmonizationRules = new SimplificationRuleStore([
     ...HARMONIZATION_RULES,
   ]);
-
-  /** @internal Registry of compilation targets */
-  private _compilationTargets = new CompilationTargetRegistry();
 
   /** @internal Fu trigonometric simplification algorithm */
   _fuAlgorithm = _fu;
@@ -1527,16 +1501,6 @@ export class ComputeEngine implements IComputeEngine {
   _inferenceTxDepth = 0;
   _hasAsyncOnlyOperator = false;
 
-  /** See `IComputeEngine._jsProfile`.
-   * @internal
-   */
-  _jsProfile: JsProfileSwitch | undefined = jsProfileSwitchDefault();
-
-  /** See `IComputeEngine._jsProfileShadow`.
-   * @internal
-   */
-  _jsProfileShadow: false | 'ir' = jsProfileShadowDefault();
-
   /** When true, a scope being discarded tombstones its value definitions and
    * the symbol resolution sites report a use of a dead binding with both
    * stacks (`boxed-expression/binding-tombstone.ts`). Debugging aid, not a
@@ -1862,9 +1826,6 @@ export class ComputeEngine implements IComputeEngine {
     // this will be the "global" scope
     this.pushScope(undefined, 'global');
 
-    // Register default compilation targets
-    this._compilationTargets.registerDefaults();
-
     // Store the injected LatexSyntax instance (if any)
     if (options?.latexSyntax) this._latexSyntax = options.latexSyntax;
 
@@ -1922,76 +1883,10 @@ export class ComputeEngine implements IComputeEngine {
     return _compile(expr, options);
   }
 
-  /** @internal Get a registered compilation target by name. */
-  _getCompilationTarget(
-    name: 'javascript'
-  ): JavaScriptCompilationTarget<Expression> | undefined;
-  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined;
-  _getCompilationTarget(name: string): LanguageTarget<Expression> | undefined {
-    return this._compilationTargets.get(name);
-  }
-
-  /** @internal Return the names this engine compiles to: the names that
-   * `compile()` routes itself (`ROUTED_TARGETS`), then the registered
-   * targets. */
+  /** @internal Return the names this engine compiles to: the built-in
+   * targets, which `compile()` routes itself (`BUILT_IN_TARGETS`). */
   _listCompilationTargets(): string[] {
-    return [
-      ...new Set<string>([
-        ...ROUTED_TARGETS,
-        ...this._compilationTargets.list(),
-      ]),
-    ];
-  }
-
-  /**
-   * Register a compilation target under `name`, so that
-   * `compile(expr, { to: name })` resolves it. A later registration under the
-   * same name replaces the earlier target. The name must be a non-empty
-   * string and the target must implement `getOperators()`, `getFunctions()`,
-   * `createTarget()` and `compile()`; otherwise this throws.
-   *
-   * Every engine compiles to `interval-js`, which `compile()` routes itself
-   * (a registration under that name throws), and has the target
-   * `javascript`. Every engine also has `glsl` once the full package entry,
-   * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
-   * the program, whichever entry made the engine and in whichever order. A
-   * program that loads only `@cortex-js/compute-engine/core`: import
-   * `GLSLTarget` from `@cortex-js/compute-engine/compile` and register it
-   * here.
-   */
-  registerCompilationTarget(
-    name: string,
-    target: LanguageTarget<Expression>
-  ): void {
-    if (name === 'interval-js')
-      throw new Error(
-        'The compilation target "interval-js" is built in and cannot be registered'
-      );
-    this._compilationTargets.register(name, target);
-  }
-
-  /** @internal The pre-2026-10-26 spelling of `registerCompilationTarget`. */
-  _registerCompilationTarget(
-    name: string,
-    target: LanguageTarget<Expression>
-  ): void {
-    this.registerCompilationTarget(name, target);
-  }
-
-  /** Remove the compilation target registered under `name`. A name that is
-   * not registered is ignored. `interval-js`, which `compile()` routes
-   * itself, cannot be removed: this throws. */
-  unregisterCompilationTarget(name: string): void {
-    if (name === 'interval-js')
-      throw new Error(
-        'The compilation target "interval-js" is built in and cannot be unregistered'
-      );
-    this._compilationTargets.unregister(name);
-  }
-
-  /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */
-  _unregisterCompilationTarget(name: string): void {
-    this.unregisterCompilationTarget(name);
+    return [...BUILT_IN_TARGETS];
   }
 
   get precision(): number {

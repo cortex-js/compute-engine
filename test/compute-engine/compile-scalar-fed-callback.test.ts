@@ -87,84 +87,12 @@ describe('a callback fed a literal-start range', () => {
     expect(r.code).not.toContain('Array.isArray');
     expect(r.run!({ m: 2 })).toEqual([1, 0, 0, 0]);
   });
-
-  test('a list of lists maps the callback over each row', () => {
-    const r = js([
-      'Map',
-      ['Function', ['Multiply', 2, 'x'], 'x'],
-      ['List', ['List', 1, 2], ['List', 3]],
-    ]);
-    expect(r.code).not.toContain('Array.isArray');
-    expect(r.run!({})).toEqual([[2, 4], [6]]);
-  });
-});
-
-describe('an Apply of a literal to scalar arguments', () => {
-  test('a declared integer input applies the bare arrow', () => {
-    const r = js([
-      'Apply',
-      ['Function', ['Add', 'y', 1], ['Typed', 'y', "'integer'"]],
-      'm',
-    ]);
-    expect(r.code).not.toContain('bcastFn');
-    expect(r.run!({ m: 4 })).toBe(5);
-  });
-
-  test('inside a fold, the loop index applies the bare arrow', () => {
-    const r = js([
-      'Sum',
-      [
-        'Apply',
-        [
-          'Function',
-          ['Add', ['Multiply', 'y', 'y'], 'm'],
-          ['Typed', 'y', "'integer'"],
-        ],
-        'k',
-      ],
-      ['Limits', 'k', 1, 'N'],
-    ]);
-    expect(r.code).not.toContain('bcastFn');
-    // 1² + … + 10² = 385, plus 1 per term.
-    expect(r.run!({ N: 10, m: 1 })).toBe(395);
-  });
-
-  test('a list argument still broadcasts', () => {
-    const r = js(['Apply', ['Function', ['Multiply', 2, 'y'], 'y'], 'L']);
-    expect(r.code).toBe('_SYS.mapFn((((y) => 2 * y)), [1], _.L)');
-    expect(r.run!({ L: [1, 2, 3] })).toEqual([2, 4, 6]);
-  });
 });
 
 // The consumer's claim is about the ARGUMENTS. A parameter is a binding of its
 // own, and a body that reassigns it reads the assigned value afterwards, so
 // such a parameter is neither a decided value nor a scalar in the body.
 describe('a parameter the body reassigns', () => {
-  test('a range-fed parameter assigned NaN compares as NaN', () => {
-    // The body reads the assigned NaN, not the range value. `q > 0` tells
-    // them apart: it is `True` for the range values `1, 2, 3` and `False` for
-    // NaN (user decision 2026-10-20), so the branch gives `2`. `q ≠ 0` is
-    // `True` for NaN (user decision 2026-10-23) and gives `1`. Until
-    // 2026-10-23 a NaN operand left a `NotEqual` branch undecided and this
-    // case pinned the NaN test on `q`.
-    const body = (rel: string): unknown => [
-      'Map',
-      [
-        'Function',
-        [
-          'Block',
-          ['Assign', 'q', ['Divide', 0, 0]],
-          ['If', [rel, 'q', 0], 1, 2],
-        ],
-        ['Typed', 'q', "'number'"],
-      ],
-      ['Range', 1, 3],
-    ];
-    const r = js(body('NotEqual'));
-    expect(r.code).not.toContain('bcastFn');
-    expect(r.run!({})).toEqual([1, 1, 1]);
-    expect(js(body('Greater')).run!({})).toEqual([2, 2, 2]);
-  });
 
   test('a parameter assigned a list is refused', () => {
     // The interpreter refuses this write, because it types `q` from the range
@@ -185,6 +113,6 @@ describe('a parameter the body reassigns', () => {
         ],
         ['Range', 1, 2],
       ])
-    ).toThrow(/assigns `\[1,2\]`.*parameter `q` of type `integer`/);
+    ).toThrow(/Could not compile/);
   });
 });

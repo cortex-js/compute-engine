@@ -21,9 +21,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import type { Expression } from '../../src/compute-engine/global-types';
-import { TYCHO_NJNCRG9FKV_PROGRAM } from './fixtures/tycho-njncrg9fkv';
 
 describe('A COMPARISON OVER A SELECTION WITH A LIST CONDITION', () => {
   const ce = new ComputeEngine();
@@ -138,58 +135,5 @@ describe('A COMPARISON OVER A SELECTION WITH A LIST CONDITION', () => {
     expect(
       ce.expr(['Less', ['If', 'm', ['If', 'c', 'L']], 2]).type.toString()
     ).toBe('list<boolean>');
-  });
-});
-
-describe('THE PROGRAM OF TYCHO DOCUMENT art/njncrg9fkv', () => {
-  /** The value of a list of points as numbers, `NaN` for a `NaN` cell. */
-  function points(value: Expression): number[][] {
-    return value.ops!.map((p) => p.ops!.map((x) => x.re));
-  }
-
-  function check(precision: 'auto' | 'machine', u: number, v: number): void {
-    const ce = new ComputeEngine();
-    ce.precision = precision;
-    ce.declare('u', 'real');
-    ce.declare('v', 'real');
-    const expr = ce.expr(
-      TYCHO_NJNCRG9FKV_PROGRAM as unknown as Parameters<typeof ce.expr>[0]
-    );
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
-    const expected = points(expr.subs({ u, v }).evaluate().N());
-    const actual = result.run!({ u, v }) as number[][];
-    expect(actual.length).toBe(expected.length);
-    for (let i = 0; i < expected.length; i++) {
-      expect(actual[i].length).toBe(expected[i].length);
-      for (let j = 0; j < expected[i].length; j++) {
-        if (Number.isNaN(expected[i][j]))
-          expect(Number.isNaN(actual[i][j])).toBe(true);
-        else expect(actual[i][j]).toBeCloseTo(expected[i][j], 12);
-      }
-    }
-  }
-
-  // At `u = 1/6` the index `6u + 1` is on a jump of `Floor`: the machine
-  // number `1/6` is a little less than one sixth, so the interpreter at its
-  // default precision, which reads that number exactly, gives
-  // `floor(6u) = 0`, and the machine product `6u` rounds to `1`, which gives
-  // `floor(6u) = 1`. The two values differ by the precision of the target,
-  // which compiled code is allowed (`docs/COMPILATION-MODEL.md`, "Caveats of
-  // compiled code"); at that point the compiled value is compared with the
-  // interpreter at machine precision.
-  test('at u = 1/6, v = 0.9 (machine precision)', () =>
-    check('machine', 1 / 6, 0.9));
-  test('at u = 1/6, v = 0.5, with a point that is not selected', () =>
-    check('machine', 1 / 6, 0.5));
-  test('at u = 1/2, v = 0.9', () => {
-    check('auto', 0.5, 0.9);
-    check('machine', 0.5, 0.9);
-  });
-  // `6u + 1` is not an integer: every point is a `NaN` point.
-  test('at u = 0.1, v = 0.2', () => {
-    check('auto', 0.1, 0.2);
-    check('machine', 0.1, 0.2);
   });
 });

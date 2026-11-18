@@ -505,28 +505,6 @@ describe('COMPILE: BigOp and Block', () => {
     }
   });
 
-  test('compiled Sum generates loop code (IIFE)', () => {
-    const f = ce.expr([
-      'Function',
-      ['Sum', 'csc_k', ['Limits', 'csc_k', 1, 'csc_n']],
-      'csc_n',
-    ]);
-    const result = compile(f);
-    // The Sum should compile to a loop inside an IIFE
-    expect(result?.code).toContain('while');
-    expect(result?.code).toContain('+=');
-  });
-
-  test('compiled Product generates loop code (IIFE)', () => {
-    const f = ce.expr([
-      'Function',
-      ['Product', 'cpc_k', ['Limits', 'cpc_k', 1, 'cpc_n']],
-      'cpc_n',
-    ]);
-    const result = compile(f);
-    expect(result?.code).toContain('while');
-    expect(result?.code).toContain('*=');
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

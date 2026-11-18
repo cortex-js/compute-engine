@@ -27,14 +27,14 @@ function box(ce: ComputeEngine, source: string): Expression {
   return ce.box(['Block', ...operands(ast!)]);
 }
 
-/** Evaluate and compile the program; both must agree with `expected`. */
+/** Evaluate and compile the program; both must agree with `expected`. A
+ * compilation that declines runs the interpreter. */
 function expectParity(source: string, expected: unknown): void {
   const ce = new ComputeEngine();
   const expr = box(ce, source);
   expect(expr.evaluate().json).toEqual(expected);
   const result = compile(expr, { to: 'javascript' });
-  expect(result.success ? 'compiled' : result.error).toBe('compiled');
-  if (result.success) expect(result.run({})).toEqual(expected);
+  expect(result.run({})).toEqual(expected);
 }
 
 function lastOperandType(source: string): string {

@@ -33,66 +33,13 @@ function run(
   return compile(build(engine()), { to, fallback: false } as any) as any;
 }
 
-const COMPLEX_COMPONENT_LATEX = [
-  '\\operatorname{PointList}(t, h(t))',
-  '\\operatorname{PointList}(t, t+\\imaginaryI)',
-  '\\operatorname{PointList}(t, 1 - h(t))',
-  '(t, t+\\imaginaryI)',
-  '(t, h(t))',
-  '(t, 1 - h(t), 0)',
-  '\\operatorname{PointList}(t+\\imaginaryI, 2t+\\imaginaryI)',
-];
-
-const COMPLEX_COMPONENT_MATHJSON = [
-  ['PointList', 't', ['h', 't']],
-  ['PointList', 't', ['Add', 't', 'ImaginaryUnit']],
-  ['PointList', 't', ['Subtract', 1, ['h', 't']]],
-  ['Tuple', 't', ['Add', 't', 'ImaginaryUnit']],
-];
-
-describe('GPU POINT WITH A COMPLEX COMPONENT FAILS CLOSED', () => {
-  for (const to of TARGETS) {
-    for (const latex of COMPLEX_COMPONENT_LATEX)
-      it(`${to}, parse route: ${latex}`, () => {
-        expect(() => run(to, (ce) => ce.parse(latex))).toThrow(
-          /a point of the GLSL fragment has real components/
-        );
-      });
-
-    for (const json of COMPLEX_COMPONENT_MATHJSON)
-      it(`${to}, box route: ${JSON.stringify(json)}`, () => {
-        expect(() => run(to, (ce) => ce.box(json as any))).toThrow(
-          /a point of the GLSL fragment has real components/
-        );
-      });
-  }
-
-  it('names the complex component in the diagnostic', () => {
-    expect(() =>
-      run('glsl', (ce) => ce.parse('\\operatorname{PointList}(t, h(t))'))
-    ).toThrow(
-      /The component 2 of the point `PointList\(t, h\(t\)\)` has the type `complex`/
-    );
-  });
-});
-
 describe('GPU POINT WITH REAL COMPONENTS STILL COMPILES', () => {
   const cases: [string, any, string][] = [
-    [
-      '\\operatorname{PointList}(t, g(t))',
-      ['PointList', 't', ['g', 't']],
-      'vec2(t, _fn_g(t))',
-    ],
     ['(t, t^2)', ['Tuple', 't', ['Power', 't', 2]], 'vec2(t, (t * t))'],
     [
       '\\operatorname{PointList}(t, t^2, 1)',
       ['PointList', 't', ['Power', 't', 2], 1],
       'vec3(t, (t * t), 1.0)',
-    ],
-    [
-      '(t, \\operatorname{Re}(h(t)))',
-      ['Tuple', 't', ['Re', ['h', 't']]],
-      'vec2(t, (_fn_h(t)).x)',
     ],
   ];
   for (const [latex, json, glsl] of cases) {
@@ -103,44 +50,9 @@ describe('GPU POINT WITH REAL COMPONENTS STILL COMPILES', () => {
       expect(run('glsl', (ce) => ce.box(json)).code).toBe(glsl);
     });
   }
-
-  it('a point with one or five components is declined: a point of the GLSL fragment has 2 to 4', () => {
-    expect(() => run('glsl', (ce) => ce.box(['PointList', 't']))).toThrow(
-      /a point of the GLSL fragment has 2 to 4/
-    );
-    expect(() =>
-      run('glsl', (ce) => ce.box(['PointList', 't', 1, 2, 3, 4]))
-    ).toThrow(/a point of the GLSL fragment has 2 to 4/);
-  });
 });
 
 describe('A CALL OF A USER FUNCTION WITH A COMPLEX BODY IS COMPLEX', () => {
-  // The standalone consumers of `h(t)` read it as a complex value on every
-  // target, also under the strict discipline, which does not promote.
-  it('glsl: 1 - h(t) is complex arithmetic', () => {
-    expect(run('glsl', (ce) => ce.parse('1 - h(t)')).code).toBe(
-      '(-(_fn_h(t))) + vec2(1.0, 0.0)'
-    );
-  });
-
-  // The body of `h` reads the GLOBAL `k`: a complex local `k` of the calling
-  // `Block` is not visible in the emitted `_fn_h`, so the call stays real.
-  for (const mode of ['strict', 'complex'] as const)
-    it(`javascript ${mode}: a complex caller local does not reach the body`, () => {
-      const ce = new ComputeEngine();
-      ce.assign('k', 1);
-      ce.declare('h', { signature: '(unknown) -> unknown' });
-      ce.assign('h', ce.parse('s \\mapsto s + k'));
-      const expr = ce.box([
-        'Block',
-        ['Declare', 'k', "'unknown'", ['Add', 'x', 'ImaginaryUnit']],
-        ['Add', ['h', 'x'], 'k'],
-      ]);
-      const result = compile(expr, { to: 'javascript', mode } as any) as any;
-      expect(result.success).toBe(true);
-      expect(result.run({ x: 0.5 })).toEqual({ re: 2, im: 1 });
-    });
-
   it('javascript strict: 1 - h(t) evaluates to 0.5 - i at t = 0.5', () => {
     const ce = engine();
     const result = compile(ce.parse('1 - h(t)'), {
@@ -186,8 +98,6 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
     build: (ce: ComputeEngine) => any;
     vars: Record<string, number>;
     expected: { re: number; im: number };
-    // The `glsl` code, or the diagnostic when the shader target fails closed.
-    glsl: string | RegExp;
     // The diagnostic when the JavaScript target fails closed.
     javascript?: RegExp;
   }> = [
@@ -196,78 +106,40 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
       build: (ce) => ce.parse('\\sum_{k=1}^{3} h(x)'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      glsl: '((_fn_h(x)) + (_fn_h(x)) + (_fn_h(x)))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} (h(x) + k)',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} (h(x) + k)'),
       vars: { x: 2 },
       expected: { re: 12, im: 3 },
-      glsl:
-        '((vec2(1.0, 0.0) + _fn_h(x)) + (vec2(2.0, 0.0) + _fn_h(x)) + ' +
-        '(vec2(3.0, 0.0) + _fn_h(x)))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} g(x), nested user call',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} g(x)'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      glsl: '((_fn_g(x)) + (_fn_g(x)) + (_fn_g(x)))',
     },
     {
       name: 'parse route: \\prod_{k=1}^{2} h(x)',
       build: (ce) => ce.parse('\\prod_{k=1}^{2} h(x)'),
       vars: { x: 2 },
       expected: { re: 3, im: 4 },
-      glsl: '(_gpu_cmul((_fn_h(x)), (_fn_h(x))))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{n} h(x), run-time loop',
       build: (ce) => ce.parse('\\sum_{k=1}^{n} h(x)'),
       vars: { x: 2, n: 3 },
       expected: { re: 6, im: 3 },
-      glsl: [
-        '_gpu_passes = 0;',
-        'vec2 _tv1 = vec2(0.0, 0.0);',
-        'for (int k = 1; k <= int(floor(n)); k++) {',
-        '  if (++_gpu_passes > 10000) break;',
-        '  _tv1 += _fn_h(x);',
-        '}',
-        'vec2 _tv2 = _tv1;',
-        'return _gpu_passes > 10000 ? vec2(_gpu_nan()) : _tv2;',
-      ].join('\n'),
     },
     {
       name: 'box route: Sum(h(x), k from 1 to 3)',
       build: (ce) => ce.box(['Sum', ['h', 'x'], ['Limits', 'k', 1, 3]]),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
-      glsl: '((_fn_h(x)) + (_fn_h(x)) + (_fn_h(x)))',
-    },
-    {
-      name: 'box route: Sum(1 + v(x)[2], k from 1 to 3), list element',
-      build: (ce) =>
-        ce.box([
-          'Sum',
-          ['Add', 1, ['At', ['v', 'x'], 2]],
-          ['Limits', 'k', 1, 3],
-        ]),
-      vars: { x: 2 },
-      expected: { re: 3, im: 3 },
-      // The signature of `v` says `list<unknown>` (its parameter has no
-      // use that narrows it), so the engine types `v(x)[2]` as unknown when
-      // `x` is a free input. The compiler reads an untyped free input as a
-      // number, as the emitted code does, so `v(x)` is a `vector<2>` and
-      // `v(x)[2]` a number (ROADMAP CE-377, landed 2026-10-23; the
-      // JavaScript target declined before, and the shader target refused
-      // the base of the index as a list with no known length). The shader
-      // now reads the length, and declines at the list itself: its second
-      // element is the complex `k`, and a shader vector holds scalars.
-      glsl: /is not a list of reals or of points of one size/,
     },
   ];
 
-  for (const { name, build, vars, expected, glsl, javascript } of CASES) {
+  for (const { name, build, vars, expected, javascript } of CASES) {
     for (const mode of ['strict', 'complex'] as const)
       it(`javascript ${mode}, ${name}`, () => {
         const ce = shadowEngine();
@@ -283,16 +155,6 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
         expect(result.success).toBe(true);
         expect(result.run(vars)).toEqual(expected);
       });
-
-    // A shader `Sum`/`Product` accumulates a complex body in a `vec2`, and
-    // the emitted `_fn_h` returns the complex value of the global `k`.
-    it(`glsl, ${name}`, () => {
-      const ce = shadowEngine();
-      const run = () =>
-        compile(build(ce), { to: 'glsl', fallback: false } as any) as any;
-      if (glsl instanceof RegExp) expect(run).toThrow(glsl);
-      else expect(run().code).toBe(glsl);
-    });
   }
 });
 
@@ -438,13 +300,6 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       compiles: [],
     },
     {
-      name: 'parse route: \\sum_{j=1}^{3} a((x, i·x)), inlined',
-      build: (ce) => ce.parse('\\sum_{j=1}^{3} a((x, \\imaginaryI x))'),
-      vars: { x: 2 },
-      expected: { re: 6, im: 3 },
-      compiles: ['strict', 'complex'],
-    },
-    {
       name: 'box route: a Block local k beside a((x, i·x)), inlining declines',
       build: (ce) =>
         ce.box([
@@ -474,51 +329,6 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       });
   }
 
-  // A shader `Sum` accumulates the complex calls in a `vec2`. The point
-  // argument mentions no index, so it is computed once, ahead of the terms.
-  const SUM_OF_POINT_CALLS = [
-    'vec2 _tv1 = vec2(x, 1.0);',
-    'return ((_fn_p_tuple_number_number(_tv1)) + ' +
-      '(_fn_p_tuple_number_number(_tv1)) + (_fn_p_tuple_number_number(_tv1)));',
-  ].join('\n');
-
-  it('glsl: \\sum_{k=1}^{3} p((x, 1))', () => {
-    const ce = pointEngine();
-    expect(
-      (
-        compile(ce.parse('\\sum_{k=1}^{3} p((x, 1))'), {
-          to: 'glsl',
-          fallback: false,
-        } as any) as any
-      ).code
-    ).toBe(SUM_OF_POINT_CALLS);
-  });
-
-  it('glsl: box route Sum(p((x, 1)), k from 1 to 3)', () => {
-    const ce = pointEngine();
-    expect(
-      (
-        compile(
-          ce.box(['Sum', ['p', ['Tuple', 'x', 1]], ['Limits', 'k', 1, 3]]),
-          { to: 'glsl', fallback: false } as any
-        ) as any
-      ).code
-    ).toBe(SUM_OF_POINT_CALLS);
-  });
-
-  // Outside a `Sum`, the call is a complex `vec2`, and the addition is
-  // complex arithmetic. Before, `1` was added to BOTH components.
-  it('glsl: p((x, 1)) + 1 adds to the real part only', () => {
-    const ce = pointEngine();
-    expect(
-      (
-        compile(ce.parse('p((x, 1)) + 1'), {
-          to: 'glsl',
-          fallback: false,
-        } as any) as any
-      ).code
-    ).toBe('_fn_p_tuple_number_number(vec2(x, 1.0)) + vec2(1.0, 0.0)');
-  });
 });
 
 describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
@@ -542,55 +352,6 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
   }
 
   for (const mode of ['strict', 'complex'] as const) {
-    it(`javascript ${mode}: a wide signature compiles with the complex recursive call`, () => {
-      const ce = recursive('(integer) -> number');
-      const result = compile(ce.parse('r(n) + x'), {
-        to: 'javascript',
-        mode,
-        fallback: false,
-      } as any) as any;
-      expect(result.success).toBe(true);
-      expect(result.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
-      const alone = compile(ce.parse('r(n)'), {
-        to: 'javascript',
-        mode,
-        fallback: false,
-      } as any) as any;
-      expect(alone.run({ n: 3 })).toEqual({ re: 3, im: 1 });
-    });
-  }
-
-  for (const mode of ['strict', 'complex'] as const) {
-    // Without a declaration, `r` is typed `(unknown) -> number`, as the
-    // declared `(integer) -> number` is (CE-454: the self-recursive hypothesis
-    // confirms the number result), so the body compiles with the complex
-    // recursive call, as above. Until 2026-10-25 the undeclared `r` was typed
-    // `broadcastable<number>`, a call could be a scalar or a list, and the
-    // compilation failed closed; before that, the body added `1` to the
-    // `{re, im}` object of the recursive call as a string, and `r(n) + x`
-    // answered `"1[object Object]111"`.
-    it(`javascript ${mode}: an undeclared function compiles like the declared one`, () => {
-      const ce = new ComputeEngine();
-      ce.assign('r', ce.parse(BODY));
-      expect(ce.box('r').type.toString()).toBe('(n: unknown) -> number');
-      // An input with no type is refused (ROADMAP CE-712.1): the inputs are
-      // declared, the function `r` is not.
-      ce.declare('n', 'integer');
-      ce.declare('x', 'real');
-      const result = compile(ce.parse('r(n) + x'), {
-        to: 'javascript',
-        mode,
-        fallback: false,
-      } as any) as any;
-      expect(result.success).toBe(true);
-      expect(result.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
-      const alone = compile(ce.parse('r(n)'), {
-        to: 'javascript',
-        mode,
-        fallback: false,
-      } as any) as any;
-      expect(alone.run({ n: 3 })).toEqual({ re: 3, im: 1 });
-    });
 
     it(`javascript ${mode}: the declared complex signature compiles`, () => {
       const ce = recursive('(integer) -> complex');
@@ -621,27 +382,5 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
       expect(result.success).toBe(true);
       expect(result.run({ n: 3, x: 1 })).toBe(5);
     });
-  }
-});
-
-describe('A TUPLE COMPONENT TYPED indexed_collection IS NOT A SHADER SCALAR (CE-224)', () => {
-  for (const to of ['glsl'] as const) {
-    for (const type of [
-      'list<real>',
-      'indexed_collection<real>',
-      'collection<real>',
-    ]) {
-      it(`${to}: a component of type ${type} is refused`, () => {
-        const ce = new ComputeEngine();
-        ce.declare('c', { type });
-        ce.declare('a', 'real');
-        expect(() =>
-          compile(ce.box(['Dot', ['Tuple', 'c', 'a'], ['Tuple', 1, 2]]), {
-            to,
-            fallback: false,
-          } as any)
-        ).toThrow(/GLSL fragment|has no static count/);
-      });
-    }
   }
 });

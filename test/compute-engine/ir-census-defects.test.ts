@@ -12,8 +12,8 @@
  *   `Truncate` and `Mod` (`Floor(x/49)` at 49 is 1). A sweep against the
  *   interpreter on JavaScript, and a sample in WebGL2 (the headless
  *   Chromium of `scripts/glsl-check/glsl-driver.ts`; skipped without it).
- * - An integral has no Monte-Carlo fallback: where the quadrature would
- *   sample, it is NaN, the same at each run.
+ * - An integrand that overflows is its value in log space, as in the
+ *   interpreter.
  * - A `Range` with an infinite operand declines, and so does a bound of a
  *   `Sum` or a `Product` that assigns a name outside it.
  * - The three robustness tests, with rational products.
@@ -168,7 +168,7 @@ describe('IR profile, batch G13: a product or a power of matrices (D1)', () => {
       ['Power', 'B', 2],
     ])
       expect(failure(() => js(json))?.message).toMatch(
-        /MatrixPower is not in the slice/
+        /MatrixPower is not supported by the compiler/
       );
   });
 
@@ -398,13 +398,19 @@ describe('IR profile, batch G13: an integral whose fallback meets a value that i
     ['Limits', 'x', 0, 'PositiveInfinity'],
   ];
 
-  test('an integrand that overflows gives NaN, the same at each run', () => {
+  // 100! and 150!, as the interpreter: a sample that is not finite is its
+  // value in log space (CE-1437).
+  const factorial = (n: number) =>
+    Array.from({ length: n }, (_, k) => k + 1).reduce((p, k) => p * k, 1);
+
+  test('an integrand that overflows is its value in log space', () => {
     const r = js(integral(100));
     expect(r.code).toMatch(/_SYS\.irIntegrate\(/);
     expect(r.shippable).toBe(false);
-    const values = Array.from({ length: 5 }, () => r.run!({} as never));
-    expect(values).toEqual([NaN, NaN, NaN, NaN, NaN]);
-    expect(js(integral(150)).run!({} as never)).toBeNaN();
+    for (const n of [100, 150]) {
+      const v = js(integral(n)).run!({} as never) as unknown as number;
+      expect(Math.abs(v / factorial(n) - 1)).toBeLessThan(1e-9);
+    }
   });
 
   test('a finite integrand keeps the estimate of the fallback', () => {
@@ -425,7 +431,7 @@ describe('IR profile, batch G13: an integral whose fallback meets a value that i
     }
   });
 
-  test('an integral to a bound past the overflow is NaN', () => {
+  test('an integral to a bound past the overflow has its value', () => {
     const json = [
       'Function',
       [
@@ -444,7 +450,7 @@ describe('IR profile, batch G13: an integral whose fallback meets a value that i
       'y',
     ];
     const run = js(json).run as unknown as (y: number) => number;
-    expect([run(1500), run(1500)]).toEqual([NaN, NaN]);
+    expect(Math.abs(run(1500) / factorial(100) - 1)).toBeLessThan(1e-9);
   });
 });
 
@@ -491,8 +497,8 @@ describe('IR profile, batch G13: the declines of D4 and D6', () => {
           new RegExp(`a bound of ${op} that assigns a name outside it`)
         );
       }
-      // A local of the bound is not a name outside it (the interpreter
-      // leaves a big operator over a bound with an effect unevaluated).
+      // A bound that assigns a local of its own is not pure either: the
+      // interpreter leaves the big operator unevaluated, and it declines.
       const local = [
         op,
         'i',
@@ -503,7 +509,10 @@ describe('IR profile, batch G13: the declines of D4 and D6', () => {
           ['Block', ['Declare', 'w', 'real', 0], ['Assign', 'w', 3], 'w'],
         ],
       ];
-      expect(js(local).run!({} as never)).toBe(6);
+      expect(ce.box(local as never).evaluate().operator).toBe(op);
+      expect(failure(() => js(local))?.message).toMatch(
+        /a bound that is not pure/
+      );
     }
   );
 });

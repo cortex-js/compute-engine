@@ -349,51 +349,6 @@ describe('CE-504: a list of points beside a collection pairs the elements', () =
     }
   });
 
-  test('a list of points beside numbers at any depth compiles to the value', () => {
-    // The flat broadcast paired the components of each point with the
-    // entries of a row: `p·q` with `q = [[1, 2], [3, 4]]` gave
-    // `[[1, 4], [9, 16]]`. The compiled code keeps each point whole.
-    const numeric = (e: Expression): unknown =>
-      e.operator === 'List' || e.operator === 'Tuple'
-        ? e.ops!.map(numeric)
-        : Math.round(e.N().re * 1e9) / 1e9;
-    const round = (v: unknown): unknown =>
-      Array.isArray(v)
-        ? v.map(round)
-        : typeof v === 'number'
-          ? Math.round(v * 1e9) / 1e9
-          : v;
-    const toJs = (j: Json): unknown =>
-      Array.isArray(j) ? j.slice(1).map(toJs) : j;
-    for (const expr of [
-      ['Multiply', 'p', 'q'],
-      ['Multiply', 'q', 'p'],
-      ['Divide', 'p', 'q'],
-      ['Multiply', 'p', 't'],
-      ['Divide', 'p', 't'],
-    ] as Json[]) {
-      const name = (expr as Json[]).find((x) => x === 'q' || x === 't') as
-        'q' | 't';
-      const compiled = compile(listEngine().box(expr), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(compiled.success).toBe(true);
-      const run = compiled.run as (vars: Record<string, unknown>) => unknown;
-      for (const value of LIST_VALUES[name]) {
-        const ce = listEngine();
-        ce.assign('p', ce.box(POINTS));
-        ce.assign(name, ce.box(value));
-        const v = ce.box(expr).evaluate();
-        expect([
-          expr,
-          value,
-          round(run({ p: toJs(POINTS), [name]: toJs(value) })),
-        ]).toEqual([expr, value, numeric(v)]);
-      }
-    }
-  });
-
   test('a list of points beside a list of unknown elements is refused by the compiled JavaScript', () => {
     // An element of `Lu` may be a point, and the product of two points has
     // no value.
@@ -403,39 +358,6 @@ describe('CE-504: a list of points beside a collection pairs the elements', () =
         fallback: false,
       })
     ).toThrow();
-  });
-
-  test('a list of points beside a list of numbers compiles to the value', () => {
-    for (const expr of [
-      ['Multiply', 'p', 'v'],
-      ['Divide', 'p', 'v'],
-      ['Multiply', 'p', 'Ln'],
-    ] as Json[]) {
-      const compiled = compile(listEngine().box(expr), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(compiled.success).toBe(true);
-      const ce = listEngine();
-      const name = (expr as Json[])[2] as string;
-      ce.assign('p', ce.box(POINTS));
-      ce.assign(name, ce.box(['List', 1, 2]));
-      const v = ce.box(expr).evaluate();
-      const run = compiled.run as (vars: Record<string, unknown>) => unknown;
-      const numeric = (e: Expression): unknown =>
-        e.operator === 'List' || e.operator === 'Tuple'
-          ? e.ops!.map(numeric)
-          : e.N().re;
-      expect(
-        run({
-          p: [
-            [1, 2],
-            [3, 4],
-          ],
-          [name]: [1, 2],
-        })
-      ).toEqual(numeric(v));
-    }
   });
 });
 

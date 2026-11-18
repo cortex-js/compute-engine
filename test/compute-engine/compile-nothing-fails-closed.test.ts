@@ -32,18 +32,10 @@ describe('a bare Nothing fails closed on every target', () => {
   test.each(TARGETS)('%s: bare `Nothing` is declined', (to) => {
     const r = compileOn(to, 'Nothing');
     expect(r.success).toBe(false);
-    // The GLSL fragment gives `Nothing` no type, and refuses it first.
-    if (to === 'glsl') {
-      expect(r.diagnostic?.code).toBe('outside-fragment');
-      expect(r.diagnostic?.message ?? r.error ?? '').toMatch(
-        /has no type in the GLSL fragment/
-      );
-      return;
-    }
     expect(r.diagnostic?.code).toBe('possible-nothing');
     if (to === 'interval-js') return;
     expect(r.diagnostic?.message ?? r.error ?? '').toMatch(
-      /read here as an operand/
+      /Nothing as a value/
     );
   });
 

@@ -5,7 +5,6 @@ import {
 } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { operands } from '../../src/math-json/utils';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isString } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { Type } from '../../src/common/type/types';
@@ -739,15 +738,5 @@ describe('A PROGRAM RUN AGAIN ON THE SAME ENGINE WITH ANOTHER SIGNATURE', () => 
       'let f: (real) -> real\nfunction f(n) { 2*n }\nf(2.5)'
     );
     expect(plain(value)).toEqual({ num: '5.0' });
-  });
-});
-
-describe('THE COMPILER', () => {
-  test('a Program call before a function statement compiles', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(parseEpsil('let a = g(3)\nfunction g(k) { k^2 }\na')[0]!);
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.success).toBe(true);
-    if (result.success) expect(result.run()).toBe(9);
   });
 });

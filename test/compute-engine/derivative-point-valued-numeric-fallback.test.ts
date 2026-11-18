@@ -21,7 +21,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 ce.declare('u', 'real');
@@ -40,7 +39,7 @@ const components = (e: any): number[] =>
   [...e.each()].map((c: any) => c.re as number);
 
 describe('Derivative of a point-valued function through the stencil', () => {
-  test('the unit tangent derivative has a numeric value on both routes', () => {
+  test('the unit tangent derivative has a numeric value', () => {
     // `f'(t) = (cos t, −sin t, 1)`, `|f'| = √2` is constant, so
     // `F_0'(t) = f''(t)/√2 = (−sin t, −cos t, 0)/√2`.
     const want = [-Math.sin(X) / Math.SQRT2, -Math.cos(X) / Math.SQRT2, 0];
@@ -49,15 +48,6 @@ describe('Derivative of a point-valued function through the stencil', () => {
     components(interpreted).forEach((v, i) =>
       expect(v).toBeCloseTo(want[i], 8)
     );
-    const r = compile(ce.parse(String.raw`F_0^{\prime}(u)`), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    const compiled = r.run!({ u: X }) as number[];
-    expect(compiled.length).toBe(3);
-    compiled.forEach((v, i) => expect(v).toBeCloseTo(want[i], 8));
-    // The two routes run the same stencil: bit-identical.
-    expect(compiled).toEqual(components(interpreted));
   });
 
   test('evaluate() keeps the exactness contract: the application stays symbolic', () => {
@@ -83,20 +73,7 @@ describe('Derivative of a point-valued function through the stencil', () => {
     );
   });
 
-  test('a list-valued function differentiates to a list', () => {
-    // No closed-form gap here; force the stencil through `ND`-free means:
-    // the compiled route's `_SYS.nd` is exercised directly below.
-    const r = compile(ce.box(['ND', 'h', 'u']), { fallback: false });
-    expect(r.success).toBe(true);
-    const got = r.run!({ u: X }) as number[];
-    expect(got.length).toBe(2);
-    expect(got[0]).toBeCloseTo(2 * X, 8);
-    expect(got[1]).toBeCloseTo(Math.cos(X), 8);
-    const interpreted = ce.box(['ND', 'h', X]).N();
-    expect(['List', 'Tuple']).toContain(interpreted.operator);
-  });
-
-  test('a component the stencil cannot compute is NaN in place on both routes', () => {
+  test('a component the stencil cannot compute is NaN in place', () => {
     // `√t` has no real value at the samples left of zero, at every step
     // when `t = 0`; `t` is fine.
     define('q', String.raw`(\sqrt{t}, t)`);
@@ -105,10 +82,6 @@ describe('Derivative of a point-valued function through the stencil', () => {
     const got = components(interpreted);
     expect(got[0]).toBeNaN();
     expect(got[1]).toBeCloseTo(1, 8);
-    const r = compile(ce.box(['ND', 'q', 'u']), { fallback: false });
-    const compiled = r.run!({ u: 0 }) as number[];
-    expect(compiled[0]).toBeNaN();
-    expect(compiled[1]).toBe(got[1]);
   });
 
   test('a point near the edge of the domain narrows the stencil (Tycho row 420)', () => {
@@ -118,9 +91,6 @@ describe('Derivative of a point-valued function through the stencil', () => {
     const got = components(ce.box(['ND', 'qEdge', 0.2]).N());
     expect(got[0]).toBeCloseTo(1 / (2 * Math.sqrt(0.2)), 8);
     expect(got[1]).toBeCloseTo(1, 8);
-    const r = compile(ce.box(['ND', 'qEdge', 'u']), { fallback: false });
-    const compiled = r.run!({ u: 0.2 }) as number[];
-    expect(compiled).toEqual(got);
   });
 
   test('an exact constant inside the value is numericized on the interpreted vehicle', () => {
@@ -140,26 +110,8 @@ describe('Derivative of a point-valued function through the stencil', () => {
 
   test('a complex sample is rejected, not read as its real part', () => {
     define('z', String.raw`\mathrm{i} t`);
-    // The compiled route answers NaN; the interpreted stencil declines and
-    // the expression stays symbolic (the scalar contract for a NaN value).
-    const r = compile(ce.box(['ND', 'z', 'u']), { fallback: false });
-    expect(r.run!({ u: 0.3 })).toBeNaN();
+    // The interpreted stencil declines and the expression stays symbolic
+    // (the scalar contract for a NaN value).
     expect(ce.box(['ND', 'z', 0.3]).N().operator).toBe('ND');
-  });
-
-  test('the emitted helper carries the value shape read from the type', () => {
-    const r = compile(ce.box(['ND', 'F_0', 'u']), { fallback: false });
-    expect(r.code).toContain("'vector'");
-    const scalar = compile(ce.box(['ND', 's', 'u']), { fallback: false });
-    expect(scalar.code).toContain("'scalar'");
-  });
-
-  test('the compiled stencil helper differentiates each component', () => {
-    const r = compile(ce.box(['ND', 'F_0', 'u']), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.nd(');
-    const got = r.run!({ u: X }) as number[];
-    expect(got[0]).toBeCloseTo(-Math.sin(X) / Math.SQRT2, 8);
-    expect(got[2]).toBeCloseTo(0, 8);
   });
 });

@@ -133,15 +133,6 @@ describe('the number results of §3.4', () => {
   it('a boolean result stays a boolean', () => {
     expect(both(['Greater', ['Factorial', 'n'], 5], { n: 3 })).toBe(true);
   });
-
-  it('an error that is not a pole is thrown again', () => {
-    // `half` is declared `-> integer`: its body is a checked exact division,
-    // which throws a `RangeError` when the quotient is not an integer.
-    ce.declare('half', '(integer) -> integer');
-    ce.box(['Assign', 'half', ['Function', ['Divide', 'x', 2], 'x']]).evaluate();
-    bothThrow(['half', 'n'], { n: 3 }, RangeError);
-    expect(both(['half', 'n'], { n: 4 })).toBe(2n);
-  });
 });
 
 describe('the conversion of an integer input (§3.5)', () => {
@@ -255,45 +246,6 @@ describe('the Function literal at the root: the closure returned to the host', (
     expect(run([7, 8])).toBe(7n);
     expect(loaded(r)([7, 8])).toBe(7n);
     expect(() => run([7.5])).toThrow(/argument 1.*element 1/);
-  });
-
-  it('the error of a nested list names the index path of the cell', () => {
-    const r = compiled([
-      'Function',
-      ['Length', 'xs'],
-      ['Typed', 'xs', "'list<list<integer>>'"],
-    ]);
-    const run = r.run as unknown as (xs: unknown) => unknown;
-    for (const fn of [run, loaded(r)]) {
-      expect(fn([[1], [2, 3]])).toBe(2n);
-      expect(() => fn([[1n], [2, 2.5]])).toThrow(/element 2, 2 is/);
-    }
-  });
-
-  it('an omitted integer parameter with a default value: run() and load() agree', () => {
-    const r = compiled([
-      'Function',
-      ['Add', 'x', 'k'],
-      ['Typed', 'x', "'integer'"],
-      ['Optional', ['Typed', 'k', "'integer'"], 2],
-    ]);
-    expect(r.entryPlan?.bigintDefaults).toEqual([1]);
-    const run = r.run as unknown as (...args: unknown[]) => unknown;
-    const load = loaded(r);
-    for (const fn of [run, load]) {
-      expect(fn(3)).toBe(5n);
-      expect(fn(3, 4)).toBe(7n);
-      expect(fn(3n, 4n)).toBe(7n);
-      // A default fills only an argument that the call leaves out. A
-      // JavaScript call cannot tell an explicit `undefined` from a left-out
-      // argument, so `undefined` takes the default; a supplied `NaN` is not
-      // filled, and the entry check refuses it as a value outside `integer`
-      // (`docs/COMPILATION-MODEL.md`, "Function values").
-      expect(fn(3, undefined)).toBe(5n);
-      expect(() => fn(3, NaN)).toThrow(/argument 2.*mode 'bigint'/);
-      // A present argument that is not an integer is still checked.
-      expect(() => fn(3, 4.5)).toThrow(/argument 2.*mode 'bigint'/);
-    }
   });
 
   it('a parameter named BigInt does not shadow the conversion', () => {

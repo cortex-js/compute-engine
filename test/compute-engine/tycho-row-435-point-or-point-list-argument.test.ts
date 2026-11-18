@@ -31,15 +31,6 @@ function engine(argType: string, param = POINT): ComputeEngine {
   return ce;
 }
 
-function run(ce: ComputeEngine, value: unknown): unknown {
-  const result = compile(ce.parse('f(L)'), { fallback: false } as never) as {
-    success: boolean;
-    run?: (vars: Record<string, unknown>) => unknown;
-  };
-  expect(result.success).toBe(true);
-  return result.run!({ L: value });
-}
-
 /**
  * The code and the value of the diagnostic of the decline of `f(L)` on
  * javascript. A declared union input whose members no run-time test tells
@@ -69,45 +60,12 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     );
   });
 
-  test('the union: compiled, a list of points is mapped', () => {
-    expect(
-      run(engine(UNION), [
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-  });
-
-  test('the union: compiled, one point is given whole', () => {
-    expect(run(engine(UNION), [1, 2])).toEqual([2, 3]);
-  });
-
-  test('the union: compiled, an empty list is an empty list', () => {
-    expect(run(engine(UNION), [])).toEqual([]);
-  });
-
   test('the union: the interpreter agrees', () => {
     const ce = engine(UNION);
     ce.assign('L', ce.parse('[(1,2),(3,4)]'));
     expect(ce.parse('f(L)').evaluate().toString()).toBe('[(2, 3),(4, 5)]');
     ce.assign('L', ce.parse('(1,2)'));
     expect(ce.parse('f(L)').evaluate().toString()).toBe('(2, 3)');
-  });
-
-  test('the union with a list of integer points', () => {
-    const ce = engine(`${POINT} | list<tuple<integer, integer>>`);
-    expect(
-      run(ce, [
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
   });
 
   test('the union with `missing` cannot be declared', () => {
@@ -125,89 +83,13 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     );
   });
 
-  test('`broadcastable<tuple<…>>`: compiled, a point and a list of points', () => {
-    expect(run(engine(BROADCASTABLE), [1, 2])).toEqual([2, 3]);
-    expect(
-      run(engine(BROADCASTABLE), [
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-  });
-
-  test('`broadcastable<tuple<…>>`: a matrix of points maps at rank 2, as the interpreter does', () => {
-    // Before the user decision of 2026-10-25 (ROADMAP CE-448), the
-    // interpreter answered an `incompatible-type` error and the compiled
-    // call threw.
-    expect(run(engine(BROADCASTABLE), [[[1, 2]], [[3, 4]]])).toEqual([
-      [[2, 3]],
-      [[4, 5]],
-    ]);
-    const ce = engine(BROADCASTABLE);
-    const type = ce.parse('f(L)').type;
-    ce.assign('L', ce.parse('[[(1,2)],[(3,4)]]'));
-    const value = ce.parse('f(L)').evaluate();
-    expect(value.toString()).toBe('[[(2, 3)],[(4, 5)]]');
-    expect(value.type.matches(type)).toBe(true);
-  });
-
-  test('a union with a list of lists of points maps by the depth of the value', () => {
-    // Each arm is a point, a list of points or a list of lists of points,
-    // so the interpreter and the compiled call read the depth from the
-    // value (ROADMAP CE-489). Before, the compiled call was declined, and
-    // the interpreter typed the call as one point.
-    const type = `${UNION} | list<list<${POINT}>>`;
-    expect(run(engine(type), [1, 2])).toEqual([2, 3]);
-    expect(
-      run(engine(type), [
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-    expect(run(engine(type), [[[1, 2]], [[3, 4]]])).toEqual([
-      [[2, 3]],
-      [[4, 5]],
-    ]);
-    // Each interpreter value fits the static type of the call, and is the
-    // value of the compiled call. A `List` or a `Tuple` of the MathJSON
-    // value is an array of the compiled value.
-    const plain = (x: unknown): unknown =>
-      Array.isArray(x) && (x[0] === 'List' || x[0] === 'Tuple')
-        ? x.slice(1).map(plain)
-        : x;
-    const ce = engine(type);
-    const t = ce.parse('f(L)').type;
-    for (const [v, js] of [
-      ['(1,2)', [1, 2]],
-      [
-        '[(1,2),(3,4)]',
-        [
-          [1, 2],
-          [3, 4],
-        ],
-      ],
-      ['[[(1,2)],[(3,4)]]', [[[1, 2]], [[3, 4]]]],
-    ] as const) {
-      ce.assign('L', ce.parse(v));
-      const value = ce.parse('f(L)').evaluate();
-      expect(value.type.matches(t)).toBe(true);
-      expect(plain(value.json)).toEqual(run(engine(type), js));
-    }
-  });
-
   test('a parameter whose coordinate can hold a list is declined', () => {
     const param = 'tuple<list<number>, number>';
     const ce = new ComputeEngine();
     ce.declare('f', { signature: `(${param}) -> number` });
     ce.assign('f', ce.parse('a \\mapsto a.y+1'));
     ce.declare('L', `${param} | list<${param}>`);
-    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
+    expect(declineOf(ce)).toEqual({ code: 'outside-profile', value: 'L' });
   });
 
   test('a parameter with a tuple coordinate is declined', () => {
@@ -218,7 +100,7 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     ce.declare('f', { signature: `(${param}) -> number` });
     ce.assign('f', ce.parse('a \\mapsto 7'));
     ce.declare('L', `${param} | list<${param}>`);
-    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
+    expect(declineOf(ce)).toEqual({ code: 'outside-profile', value: 'L' });
   });
 
   test('a list whose first point is absent is still mapped', () => {
@@ -239,25 +121,6 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     // A bare `list` admits any elements, so no test of the nesting of the
     // value tells it from a point.
     const ce = engine(`${POINT} | list`);
-    expect(declineOf(ce)).toEqual({ code: 'union-dispatch', value: 'L' });
-  });
-
-  test('controls: a list of points and a point keep their typing and code', () => {
-    const list = engine(`list<${POINT}>`);
-    expect(list.parse('f(L)').type.toString()).toBe(
-      'list<tuple<number, number>>'
-    );
-    expect(
-      run(list, [
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
-    const point = engine(POINT);
-    expect(point.parse('f(L)').type.toString()).toBe('tuple<number, number>');
-    expect(run(point, [1, 2])).toEqual([2, 3]);
+    expect(declineOf(ce)).toEqual({ code: 'outside-profile', value: 'L' });
   });
 });

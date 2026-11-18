@@ -146,58 +146,14 @@ describe('AssertPresent — serialization', () => {
   });
 });
 
-describe('AssertPresent — compiled (JavaScript)', () => {
-  const js = (expr: any) => {
-    const r = compile(expr, { to: 'javascript' });
-    if (!r.success) throw new Error(r.error ?? 'not compiled');
-    return r;
-  };
-
-  test('a present element is returned; an absent one throws at run time', () => {
-    const r = js(ce.box(['AssertPresent', ['At', 'xs', 'i']]));
-    expect(r.run({ i: 1 })).toBe('a');
-    expect(() => r.run({ i: 5 })).toThrow(/expected-present/);
-  });
-
-  test('a numeric absent value throws too', () => {
-    ce.declare('zs', 'list<number>');
-    ce.assign('zs', ce.box(['List', 4, 9]));
-    const r = js(ce.box(['Add', ['AssertPresent', ['At', 'zs', 'i']], 1]));
-    expect(r.run({ i: 2 })).toBe(10);
-    expect(() => r.run({ i: 7 })).toThrow(/expected-present/);
-  });
-
-  test('a read is never proved present: the check stays', () => {
-    // A type does not show that a read may be absent, so an expression that
-    // holds a read is not proved present by its type, also when a declared
-    // length proves the position (`docs/ERROR-MODEL.md`, "`Missing` is a
-    // result only").
-    ce.declare('ys', 'list<string^3>');
-    const r = js(ce.box(['AssertPresent', ['At', 'ys', 2]]));
-    expect(String(r.code)).toContain('expected-present');
-  });
-
-  test('a numeric cell keeps the check: `number` admits NaN', () => {
-    ce.declare('ns', 'list<number^3>');
-    const r = js(ce.box(['AssertPresent', ['At', 'ns', 2]]));
-    expect(String(r.code)).toContain('expected-present');
-  });
-
+describe('AssertPresent — compiled', () => {
   test('a shader target declines the head (P5)', () => {
     ce.declare('x', 'number');
     for (const to of ['glsl'] as const) {
-      const sh = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), { to });
-      // The GLSL fragment does not take the `AssertPresent` head.
-      expect(sh.success).toBe(false);
-      expect(sh.diagnostic?.code).toBe('outside-fragment');
+      const r = compile(ce.box(['Add', ['AssertPresent', 'x'], 1]), { to });
+      expect(r.success).toBe(false);
+      expect(r.diagnostic?.code).toBe('outside-profile');
     }
-    // The identity is not read as a proof: a later absence test on the
-    // value keeps its own rule (declined on a shader, kept on JavaScript).
-    const later = compile(ce.box(['IsMissing', ['AssertPresent', 'x']]), {
-      to: 'javascript',
-    });
-    expect(later.success).toBe(true);
-    expect(String(later.code)).toContain('Number.isNaN');
   });
 
   test('an operand that may be Nothing is declined', () => {

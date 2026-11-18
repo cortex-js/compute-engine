@@ -36,8 +36,6 @@ const NESTED: MathJsonExpression = [
   ['Add', 'a', 'b'],
 ];
 
-const DECLINE = /pattern has the name 'a' at more than one position/;
-
 /** The result of the compilation, or the message and the diagnostic of its
  * decline: with no interpreter fallback, a decline throws on most targets. */
 function compileTo(ce: ComputeEngine, json: MathJsonExpression, to: string) {
@@ -61,24 +59,12 @@ describe('A destructuring declaration with a repeated name declines', () => {
     for (const json of [FLAT, NESTED]) {
       const r = compileTo(ce, json, to);
       expect(r.success).toBe(false);
-      // The GLSL fragment refuses any pattern that is not a name or a tuple
-      // of names, before the repeated name is found.
-      if (to === 'glsl' && json === NESTED)
-        expect(r.error).toMatch(
-          /declares a pattern that is not a name or a tuple of names/
-        );
-      else if (to === 'glsl')
-        expect(r.error).toMatch(
-          /The destructuring declaration has the name `a` at more than one position/
-        );
-      // The interval mode of the IR pipeline declines a destructuring
-      // declaration with the generic code of its profile.
-      else if (to === 'interval-js')
-        expect(r.diagnostic).toMatchObject({
-          code: 'outside-profile',
-          operator: 'Declare',
-        });
-      else expect(r.error).toMatch(DECLINE);
+      // The IR pipeline declines a destructuring declaration with the
+      // generic code of its profile.
+      expect(r.diagnostic).toMatchObject({
+        code: 'outside-profile',
+        operator: 'Declare',
+      });
     }
   });
 });

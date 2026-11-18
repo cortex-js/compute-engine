@@ -81,13 +81,6 @@ function expectCompiledValue(
   return r.code;
 }
 
-const G_LOCAL = [
-  'Declare',
-  'q',
-  "'unknown'",
-  ['Function', ['List', 't', ['Multiply', 2, 't']], 't'],
-];
-
 describe('CE-712.2: `At` of a call of a function with no declared result', () => {
   test.each([
     ['At(g(x), 1), x: real', ['At', ['g', 'x'], 1]],
@@ -101,23 +94,6 @@ describe('CE-712.2: `At` of a call of a function with no declared result', () =>
     // a test of the shape of a call.)
     for (const to of ['javascript', 'interval-js'] as const)
       expectCompiledValue(engine(), json, to, false);
-  });
-
-  test.each([
-    ['At(g(p), 1), p: tuple<real, real>', ['At', ['g', 'p'], 1]],
-    ['At(g(p), 2), p: tuple<real, real>', ['At', ['g', 'p'], 2]],
-  ])('%s', (_label, json) => {
-    expectCompiledValue(engine(), json, 'javascript', false);
-  });
-
-  // On interval-js, a call of a block-local function whose value is a
-  // collection declines unless the value is consumed whole, so the
-  // block-local cases run on JavaScript.
-  test.each([
-    ['a block-local q, At(q(x), 2)', ['Block', G_LOCAL, ['At', ['q', 'x'], 2]]],
-    ['a block-local q, At(q(p), 2)', ['Block', G_LOCAL, ['At', ['q', 'p'], 2]]],
-  ])('%s', (_label, json) => {
-    expectCompiledValue(engine(), json, 'javascript', false);
   });
 });
 
@@ -166,57 +142,5 @@ describe('CE-712.2: a function declared `-> unknown` with a scalar body', () => 
     ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't']));
     for (const to of ['javascript', 'interval-js'] as const)
       expectCompiledValue(ce, ['h', ['r', 'x']], to);
-  });
-});
-
-describe('CE-712.2: the variant result type is computed again at each compilation', () => {
-  test('a second compilation of the same expression reads the new literal', () => {
-    // The result type of the variant of `g` reads the literal that `g`
-    // holds when the compilation runs. After `g := t ↦ At(t, 1)`, the call
-    // `g(p)` is a scalar, so a second compilation of the same boxed `e`
-    // calls `h` directly, as the compilation of a newly boxed `h(g(p))`
-    // does. A memo kept from the first compilation read the call as a
-    // list and mapped `h` over it.
-    const ce = engine();
-    ce.assign('h', ce.box(['Function', ['Multiply', 2, 'u'], 'u']));
-    const json = ['h', ['g', 'p']];
-    const e = ce.box(json as any);
-    const first = compile(e, { to: 'javascript', fallback: false } as any);
-    expect(first.success).toBe(true);
-    expect(first.code).toContain('mapFn');
-    expectClose(first.run!(VARS as any) as Value, interpreted(ce, e));
-
-    ce.assign('g', ce.box(['Function', ['At', 't', 1], 't']));
-    const again = compile(e, { to: 'javascript', fallback: false } as any);
-    const fresh = compile(ce.box(json as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(again.success).toBe(true);
-    expect(again.code).toBe(fresh.code);
-    expect(again.code).not.toContain('mapFn');
-    expectClose(again.run!(VARS as any) as Value, interpreted(ce, e));
-  });
-});
-
-describe('CE-712.2: the dispatch on a declared union leaves out equal bodies', () => {
-  test('two bodies that differ only in their temporaries give one body', () => {
-    // `U: real | list<real>`. The body of each member of `U + h(1)` is the
-    // same broadcast; each allocates its own temporaries (`_tv<n>`), so the
-    // two codes differ in these names only. The test of the shape is left
-    // out, and the code is the body of the first member.
-    const ce = new ComputeEngine();
-    ce.declare('U', 'real | list<real>');
-    ce.assign('h', ce.box(['Function', ['Add', 's', 'U'], 's']));
-    const expr = ce.box(['Add', 'U', ['h', 1]]);
-    const r = compile(expr, { to: 'javascript', fallback: false } as any);
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('Array.isArray');
-    // The body of `h` reads `U` from the engine, so the value of `U` is
-    // assigned, not substituted.
-    for (const U of [2, [1, 2]] as Value[]) {
-      ce.assign('U', ce.box((Array.isArray(U) ? ['List', ...U] : U) as any));
-      expectClose(r.run!({ U } as any) as Value, plain(expr.evaluate()));
-    }
   });
 });

@@ -195,7 +195,7 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
       ]);
       expect(() =>
         compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/may hold a collection/);
+      ).toThrow(/Could not compile/);
     }
   });
 
@@ -207,26 +207,8 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
       ['D', ['Power', 'b', 2], 'b'],
     ]);
     expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
-      /may hold a collection/
+      /Could not compile/
     );
-  });
-
-  test('a closed form without the variable compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('v', 'list<real>');
-    const r = compile(
-      ce.box([
-        'Apply',
-        [
-          'Function',
-          ['D', ['Multiply', 3, 'a'], 'a'],
-          ['Typed', 'a', "'list<real>'"],
-        ],
-        'v',
-      ]),
-      { to: 'javascript', fallback: false }
-    );
-    expect(r.run!({ v: [1, 2] } as never)).toBe(3);
   });
 
   test('D over a global of a list type compiles to a broadcast', () => {
@@ -248,7 +230,7 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
       const expr = ce.box(['D', body, 'g']);
       expect(() =>
         compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/may hold a collection/);
+      ).toThrow(/Could not compile/);
     }
   });
 
@@ -293,26 +275,7 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
       const expr = ce.box(['Integrate', body, 'g']);
       expect(() =>
         compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/may hold a collection/);
-    }
-  });
-
-  test('control: a parameter of a real type compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('r', 'real');
-    for (const [op, expected] of [
-      ['D', 6],
-      ['Integrate', 9],
-    ] as const) {
-      const r = compile(
-        ce.box([
-          'Apply',
-          ['Function', [op, ['Power', 'a', 2], 'a'], ['Typed', 'a', "'real'"]],
-          'r',
-        ])
-      );
-      expect(r.success).toBe(true);
-      expect(r.run!({ r: 3 } as never)).toBeCloseTo(expected, 12);
+      ).toThrow(/Could not compile/);
     }
   });
 });

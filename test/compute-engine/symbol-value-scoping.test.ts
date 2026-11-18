@@ -41,7 +41,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 function engine(): ComputeEngine {
@@ -93,24 +92,6 @@ describe('SPEC: staleness (one-evaluate-late)', () => {
     expect(epsilWithGlobals(['x'], 'let d = 3x^2 + 1\nx = 2\nN(d)')).toEqual(
       '13'
     );
-  });
-
-  test('the compiled route agrees with evaluate()', () => {
-    // `BaseCompiler.tryFoldKnownSymbol` folds the value AND its nested free
-    // symbols. It reported 13 while evaluate() still reported `3x^2 + 1` —
-    // among interpret / N / compile, plain evaluate() was the outlier. All
-    // three now agree.
-    const ce = engine();
-    assignD(ce);
-    ce.box(['Assign', 'x', 2]).evaluate();
-    // The JS target binds `d`'s folded value once in the preamble
-    // (`const _val_d = 13;` — the Tycho item 225 shared-value emission), so
-    // the agreement this spec pins is on the RUN value, with the folded
-    // constant visible in the preamble.
-    const r = compile(ce.box('d'));
-    expect(r?.preamble).toContain('const _val_d = 13;');
-    expect(r?.run()).toEqual(13);
-    expect(ce.box('d').evaluate().toString()).toEqual('13');
   });
 
   test('the constant path already re-evaluates on dereference', () => {

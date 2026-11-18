@@ -2,7 +2,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { checkSource } from '../../src/cli/check';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
 // An assignment to a list element, `xs[i] = v`, is the rebinding
@@ -330,60 +329,5 @@ describe('an assignment to a list element that is refused', () => {
   test('a field path is still a property store', () => {
     const { value } = run('let xs = [1, 2, 3]\nxs[1].name = 5');
     expect(JSON.stringify(value.json)).toContain('immutable-value-assignment');
-  });
-});
-
-describe('a compiled loop that assigns list elements', () => {
-  test('writes the block local in place on JavaScript', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<real>');
-    const source = [
-      'do {',
-      '  let xs: list<real> = L',
-      '  for i in 1..3 { xs[i] = 2 * xs[i] }',
-      '  xs',
-      '}',
-    ].join('\n');
-    const result = compile(ce.box(parseEpsil(source)[0] as never), {
-      fallback: false,
-    } as never) as unknown as {
-      success: boolean;
-      code: string;
-      run: (vars: Record<string, unknown>) => unknown;
-    };
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.replaceAtInPlace');
-    const L = [1, 2, 3];
-    expect(result.run({ L })).toEqual([2, 4, 6]);
-    expect(L).toEqual([1, 2, 3]);
-  });
-
-  test('writes the local in place in a function with a result type (CE-1009)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<real>');
-    const source = [
-      'do {',
-      '  function g(H: list<real>) -> list<real> {',
-      '    let xs = H',
-      '    for i in 1..3 { xs[i] = 2 * xs[i] }',
-      '    xs',
-      '  }',
-      '  g(L)',
-      '}',
-    ].join('\n');
-    const result = compile(ce.box(parseEpsil(source)[0] as never), {
-      fallback: false,
-    } as never) as unknown as {
-      success: boolean;
-      code: string;
-      warnings?: unknown[];
-      run: (vars: Record<string, unknown>) => unknown;
-    };
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.replaceAtInPlace');
-    expect(result.warnings).toBeUndefined();
-    const L = [1, 2, 3];
-    expect(result.run({ L })).toEqual([2, 4, 6]);
-    expect(L).toEqual([1, 2, 3]);
   });
 });

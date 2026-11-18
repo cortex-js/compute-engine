@@ -1,8 +1,6 @@
 // The closed form of a definite integral for compiled code: the
 // antiderivative-first attempt, its budgets and its record of timeouts. The
-// IR pipeline (`interval-quadrature.ts`) and the existing compilers
-// (`compile-integrals.ts`) share it; it imports no module of the existing
-// compilers.
+// IR pipeline (`interval-quadrature.ts`) shares it.
 
 import type {
   Expression,
@@ -23,7 +21,6 @@ import {
 } from '../../common/interruptible.js';
 import { multiClauseState } from '../multi-clause.js';
 import { unstableClosedForms } from '../symbolic/antiderivative.js';
-import type { CompileTarget } from './types.js';
 import { userFunctionLiteral } from './user-function-literal.js';
 
 /**
@@ -56,7 +53,7 @@ import { userFunctionLiteral } from './user-function-literal.js';
  * compile-integrate suite and the Rubi benchmark, with headroom, so no
  * integral that legitimately closes is pushed onto the numeric path.
  */
-export const ANTIDERIVATIVE_ATTEMPT_STEPS = 300_000;
+const ANTIDERIVATIVE_ATTEMPT_STEPS = 300_000;
 
 /** The wall-clock guard of all the attempts of one compilation. An attempt
  *  that spends its time in code that does not count steps (a polynomial
@@ -67,7 +64,7 @@ export const ANTIDERIVATIVE_ATTEMPT_STEPS = 300_000;
  *  compilation spend 30 s in total, a case that does not reach the step
  *  pool first unless each step is slow: there the result can still depend
  *  on the machine. */
-export const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
+const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
 
 /**
  * Shared step budget for ALL antiderivative-first attempts in one
@@ -83,23 +80,20 @@ export const ANTIDERIVATIVE_COMPILATION_HANG_MS = 30_000;
  * straight to its numeric emitter. Sized for a handful of hard legitimate
  * resolutions plus dozens of ordinary ones.
  *
- * Reset at each DEPTH-0 entry of `BaseCompiler.compile` — the boundary
- * every route crosses: `compileRoot` (raw custom targets),
- * `compileCseRoot` (registered targets invoked directly), and the public
- * `compile()` entry. Nested
+ * Reset at each DEPTH-0 entry of `withCompilationBudgets()`. Nested
  * compilations consume the outer pool rather than getting a fresh one, so
  * the aggregate is bounded by one pool per depth-0 entry. A caller that
  * deliberately issues several root compilations against one target — a
- * multi-statement shader body compiles each statement separately
- * (`compileShaderBody`) — therefore gets one pool per statement, which
+ * multi-statement shader body compiles each statement separately —
+ * therefore gets one pool per statement, which
  * keeps each statement's compile time bounded exactly as one expression's
  * is.
  */
-export const ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
+const ANTIDERIVATIVE_COMPILATION_STEPS = 600_000;
 
 /** The wall-clock guard of one attempt: see
  *  {@link ANTIDERIVATIVE_ATTEMPT_STEPS}. */
-export const ANTIDERIVATIVE_ATTEMPT_HANG_MS = 30_000;
+const ANTIDERIVATIVE_ATTEMPT_HANG_MS = 30_000;
 
 /**
  * The budgets of the antiderivative-first attempts, module state that both
@@ -107,7 +101,7 @@ export const ANTIDERIVATIVE_ATTEMPT_HANG_MS = 30_000;
  * accessors). Module state is safe: compilation is synchronous and
  * single-threaded.
  */
-export const antiderivativeBudgets = {
+const antiderivativeBudgets = {
   /** Remaining wall-clock guard of the current compilation — see
    *  {@link ANTIDERIVATIVE_COMPILATION_HANG_MS}. */
   hangMsLeft: ANTIDERIVATIVE_COMPILATION_HANG_MS,
@@ -127,49 +121,24 @@ export const antiderivativeBudgets = {
   attemptCount: 0,
 };
 
-/** Whether a compilation of the existing compilers is in progress: set by
- *  `compiler-state.ts` when it loads, so that this module does not import
- *  it. */
-let existingCompilationInProgress: () => boolean = () => false;
-
-/** Set the test of {@link existingCompilationInProgress}. */
-export function setExistingCompilationProbe(probe: () => boolean): void {
-  existingCompilationInProgress = probe;
-}
-
-/**
- * Shorten the per-attempt step budget, or restore it when called with no
- * argument. For tests only: a test of what follows a spent budget needs a
- * search that spends it, and quickly.
- */
-export function setAntiderivativeAttemptBudgetForTesting(steps?: number): void {
-  antiderivativeBudgets.attemptSteps = steps ?? ANTIDERIVATIVE_ATTEMPT_STEPS;
-}
-
 /**
  * Start a fresh compilation's shared budgets — today just the
  * antiderivative pool. Called from the depth-0 boundary of
- * `BaseCompiler.compile` (`resetOutermostCompilation()` in
- * `compiler-core.ts`), which every route of the existing emitter crosses
- * (see {@link ANTIDERIVATIVE_COMPILATION_STEPS} for why no shallower entry
- * covers them all).
+ * `withCompilationBudgets()` (see {@link ANTIDERIVATIVE_COMPILATION_STEPS}
+ * for why no shallower entry covers them all).
  */
-export function resetSharedCompilationBudgets(): void {
+function resetSharedCompilationBudgets(): void {
   antiderivativeBudgets.stepsLeft = ANTIDERIVATIVE_COMPILATION_STEPS;
   antiderivativeBudgets.hangMsLeft = ANTIDERIVATIVE_COMPILATION_HANG_MS;
 }
 
 /**
- * `f()`, a compilation of the IR pipeline, with a fresh antiderivative pool
- * when no compilation of either kind is in progress; a compilation that
- * starts inside it (of the IR pipeline, or of the existing compilers at
- * their depth 0) consumes its pool.
+ * `f()`, a compilation, with a fresh antiderivative pool when no
+ * compilation is in progress; a compilation that starts inside it consumes
+ * its pool.
  */
 export function withCompilationBudgets<T>(f: () => T): T {
-  if (
-    !existingCompilationInProgress() &&
-    antiderivativeBudgets.irCompileDepth === 0
-  )
+  if (antiderivativeBudgets.irCompileDepth === 0)
     resetSharedCompilationBudgets();
   antiderivativeBudgets.irCompileDepth += 1;
   try {
@@ -223,7 +192,7 @@ export function withCompilationBudgets<T>(f: () => T): T {
  * So `integrals` maps the key of an integral to the lists of declared types
  * it timed out under, in the order of the key's names.
  */
-export const antiderivativeTimeouts = new WeakMap<
+const antiderivativeTimeouts = new WeakMap<
   object,
   {
     stamp: string;
@@ -234,14 +203,14 @@ export const antiderivativeTimeouts = new WeakMap<
 
 /** A number for each definition object met by {@link antiderivativeKey},
  *  so that a key can say WHICH definition a name resolved to. */
-export const definitionIds = new WeakMap<object, number>();
+const definitionIds = new WeakMap<object, number>();
 
 /** The most lists of types {@link antiderivativeTimeouts} holds for one
  *  engine; the record is emptied when it would grow past this. */
-export const MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS = 256;
+const MAX_ANTIDERIVATIVE_TIMEOUT_RECORDS = 256;
 
 /** How many lists of types a record holds, over all its integrals. */
-export function recordedTypeLists(integrals: Map<string, Type[][]>): number {
+function recordedTypeLists(integrals: Map<string, Type[][]>): number {
   let count = 0;
   for (const lists of integrals.values()) count += lists.length;
   return count;
@@ -249,7 +218,7 @@ export function recordedTypeLists(integrals: Map<string, Type[][]>): number {
 
 /** The engine state a record of {@link antiderivativeTimeouts} is valid
  *  in. */
-export function antiderivativeStateStamp(engine: ComputeEngine): string {
+function antiderivativeStateStamp(engine: ComputeEngine): string {
   return String(engine._semanticVersion);
 }
 
@@ -269,7 +238,7 @@ export function antiderivativeStateStamp(engine: ComputeEngine): string {
  * time. A declaration replaces the inferred type with a stated one, and
  * that does change the key.
  */
-export function antiderivativeKey(
+function antiderivativeKey(
   engine: ComputeEngine,
   args: ReadonlyArray<Expression>,
   ops: ReadonlyArray<unknown>,
@@ -360,7 +329,7 @@ export function antiderivativeKey(
  * again in its own scope, and the caller's `compile()` resolves the free
  * symbols of a closed form by name.
  */
-export function shadowedOperandSymbols(
+function shadowedOperandSymbols(
   engine: ComputeEngine,
   args: ReadonlyArray<Expression>
 ): Map<string, Type> {
@@ -381,11 +350,19 @@ export function shadowedOperandSymbols(
   return result;
 }
 
+/** The names that a fold must not read the value of
+ *  (`reachesExcludedName()`): the `vars`-mapped symbols, the operators
+ *  that the caller overrides, and the memo of the answers per name. */
+type FoldExclusions = {
+  varsKeys?: ReadonlySet<string>;
+  foldExcludedOps?: ReadonlySet<string>;
+  foldReachMemo?: Map<string, boolean>;
+};
+
 /** What `closedFormIntegral()` reads of a target: its `vars` rule. */
-export type ClosedFormTarget = Pick<
-  CompileTarget<Expression>,
-  'varsKeys' | 'var' | 'foldExcludedOps' | 'foldReachMemo'
->;
+export type ClosedFormTarget = FoldExclusions & {
+  var: (id: string) => string | undefined;
+};
 
 /**
  * Whether any operand of the integral reaches a `vars`-mapped symbol — one
@@ -406,7 +383,7 @@ export type ClosedFormTarget = Pick<
  * read), and so does a caller-overridden operator: `evaluate()` would not
  * run the caller's implementation.
  */
-export function referencesVarsSymbol(
+function referencesVarsSymbol(
   args: ReadonlyArray<Expression>,
   target: ClosedFormTarget
 ): boolean {
@@ -428,7 +405,7 @@ export function referencesVarsSymbol(
       const reduced = {
         varsKeys: valued,
         foldExcludedOps: target.foldExcludedOps,
-      } as CompileTarget<Expression>;
+      } as FoldExclusions;
       return args.some((a) => reachesExcludedName(a, reduced));
     }
   }
@@ -470,12 +447,9 @@ export function referencesVarsSymbol(
  * mention that is not there, and a spurious mention costs one fold, never
  * a wrong value.
  */
-export function reachesExcludedName(
+function reachesExcludedName(
   expr: Expression,
-  target: Pick<
-    CompileTarget<Expression>,
-    'varsKeys' | 'foldExcludedOps' | 'foldReachMemo'
-  >
+  target: FoldExclusions
 ): boolean {
   const vars = target.varsKeys;
   const ops = target.foldExcludedOps;
@@ -576,8 +550,7 @@ export function reachesExcludedName(
  * CALLER's target has no lowering for, so callers must compile it inside a
  * `try` and fall through to their numeric emitter when that throws.
  *
- * `readsAngularDefinition`: the test of the existing compilers' constant
- * folder (`compile-integrals.ts`), needed only in an angular unit other
+ * `readsAngularDefinition`: a test needed only in an angular unit other
  * than radians; without it there is no closed form in such a unit.
  */
 export function closedFormIntegral(

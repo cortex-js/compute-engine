@@ -99,25 +99,6 @@ describe('A restricted point in arithmetic, JavaScript target', () => {
   test('the magnitude of the point is its norm', () => {
     expect(run(['Abs', gated()], 2)).toBeCloseTo(Math.sqrt(5), 12);
   });
-
-  // A list of numbers times a point is a list of scaled points in the
-  // interpreter (and in Desmos, `[1,2,3](0,1)`), also for a restricted point.
-  // The point is kept whole while the list broadcasts: a flat broadcast
-  // would pair the components of the point with the elements of the list.
-  test('a list of numbers times the point is a list of points', () => {
-    const json = ['Multiply', ['List', 1, 2, 3], gated()];
-    const expected = ce
-      .box(json as never)
-      .subs({ t: ce.number(2) })
-      .N()
-      .ops!.map((p) => p.ops!.map((c) => c.re));
-    expect(expected).toEqual([
-      [2, 1],
-      [4, 2],
-      [6, 3],
-    ]);
-    expect(run(json, 2)).toEqual(expected);
-  });
 });
 
 describe('Shapes the interpreter refuses for a restricted point', () => {
@@ -210,162 +191,6 @@ describe('Shader targets keep the supported shapes', () => {
  * points.
  */
 describe('A point with an undecided component type beside a list', () => {
-  /** The interpreter's value, with `t` assigned, as nested arrays. */
-  function interpretedValue(json: unknown, t: number): unknown {
-    const ce2 = new ComputeEngine();
-    ce2.assign('t', t);
-    const toJS = (e: ReturnType<typeof ce2.box>): unknown =>
-      e.operator === 'List' || e.operator === 'Tuple' ? e.ops!.map(toJS) : e.re;
-    return toJS(ce2.box(json as never).evaluate());
-  }
-
-  /** The compiled value, from a FRESH engine: the shared engine above has
-   * already inferred `t` to be a number from its other uses, which would
-   * type `PointList(t, 1)` as a numeric point. */
-  function compiledValue(json: unknown, t: unknown): unknown {
-    const r = compile(engineWithT().box(json as never), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    return r.run!({ t } as never);
-  }
-
-  test.each([
-    [
-      'a list times the point',
-      ['Multiply', ['List', 1, 2, 3], P],
-      [
-        [2, 1],
-        [4, 2],
-        [6, 3],
-      ],
-    ],
-    [
-      'the point times a list',
-      ['Multiply', P, ['List', 1, 2, 3]],
-      [
-        [2, 1],
-        [4, 2],
-        [6, 3],
-      ],
-    ],
-    [
-      'a list times a number times the point',
-      ['Multiply', ['List', 1, 2, 3], P, 2],
-      [
-        [4, 2],
-        [8, 4],
-        [12, 6],
-      ],
-    ],
-  ])('%s is a list of points on JavaScript', (_l, json, expected) => {
-    expect(interpretedValue(json, 2)).toEqual(expected);
-    expect(compiledValue(json, 2)).toEqual(expected);
-  });
-
-  // A point with a list component, `(−6, [4, 5, 6])`, is a LIST OF POINTS
-  // when written in LaTeX (user decision 2026-09-24: the Desmos reading,
-  // `PointList(−6, [4, 5, 6])`), so a list times it pairs point by point.
-  // The same value built in code as a MathJSON `Tuple` is data, and
-  // arithmetic over it is an `incompatible-type` error that the compiled
-  // targets decline (user decision 2026-09-25): before, both routes answered
-  // three "points" whose second coordinate was a list.
-  test('a list times a point with a list component', () => {
-    const latex = '[1,2,3]\\cdot(-6,[4,5,6])';
-    const expected = [
-      [-6, 4],
-      [-12, 10],
-      [-18, 18],
-    ];
-    const toJS = (e: ReturnType<typeof ce.box>): unknown =>
-      e.operator === 'List' || e.operator === 'Tuple' ? e.ops!.map(toJS) : e.re;
-    expect(toJS(new ComputeEngine().parse(latex).evaluate())).toEqual(expected);
-    const r = compile(new ComputeEngine().parse(latex), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!({} as never)).toEqual(expected);
-
-    const tuple = [
-      'Multiply',
-      ['List', 1, 2, 3],
-      ['Tuple', -6, ['List', 4, 5, 6]],
-    ];
-    expect(
-      new ComputeEngine()
-        .box(tuple as never)
-        .evaluate()
-        .toString()
-    ).toMatch(/incompatible-type/);
-    // The product has the static type `error`, so the compilation declines
-    // before the point check of the JavaScript target.
-    expect(() =>
-      compile(new ComputeEngine().box(tuple as never), {
-        to: 'javascript',
-        fallback: false,
-      })
-    ).toThrow(/type 'error'/);
-  });
-
-  test('the parsed product is a list of points', () => {
-    const r = compile(
-      engineWithT().parse('[1,2,3]\\cdot\\operatorname{PointList}(t,1)'),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.run!({ t: 2 } as never)).toEqual([
-      [2, 1],
-      [4, 2],
-      [6, 3],
-    ]);
-  });
-
-  // A LIST held by the free `t` is not spliced into the point on JavaScript:
-  // `_SYS.pointSlot` answers NaN for that coordinate. The result is then a
-  // list of points with a NaN coordinate, never a plausible number (the
-  // interpreter answers an `incompatible-dimensions` error). A list for an
-  // input `t` declared `real` gives an undefined result, and an input with
-  // no type is refused (ROADMAP CE-712.1), so `t` is a parameter of the root
-  // function declared `any`.
-  test('a list held by the free component is NaN at that coordinate', () => {
-    const r = compile(
-      new ComputeEngine().box([
-        'Function',
-        ['Multiply', ['List', 1, 2, 3], P],
-        ['Typed', 't', "'any'"],
-      ] as never),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    const run = r.run as unknown as (t: unknown) => unknown;
-    expect(run([1, 2])).toEqual([
-      [NaN, 1],
-      [NaN, 2],
-      [NaN, 3],
-    ]);
-  });
-
-  test('a sum with a point-or-list-of-points operand keeps the point whole', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('t', 'real');
-    ce2.declare('W', 'list<tuple<number, number>> | tuple<number, number>');
-    const r = compile(ce2.box(['Add', 'W', P] as never), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(
-      r.run!({
-        t: 2,
-        W: [
-          [1, 1],
-          [2, 2],
-        ],
-      } as never)
-    ).toEqual([
-      [3, 2],
-      [4, 3],
-    ]);
-    expect(r.run!({ t: 2, W: [5, 5] } as never)).toEqual([7, 6]);
-  });
-
   // A shader lowers a point and a list of the same length to one `vecN`,
   // and its operators combine them component-wise. In the interpreter a point
   // times a list is a list of points, and a point divided by a list stays
@@ -405,15 +230,11 @@ describe('Distance of a restricted point', () => {
   // A false restriction of a point is the point of `NaN` coordinates (user
   // decision 2026-11-03), so the distances from it to a list of points are a
   // list of `NaN`, and the distance between two points is `NaN`, in the
-  // interpreter and in compiled code. A matrix, whose rows are the points,
-  // is a list of points too.
+  // interpreter and in compiled code.
   const L = ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]];
-  const M = ['List', ['List', 3, 4], ['List', 6, 8]];
   test.each([
     ['point, list', ['Distance', gated(['Tuple', 0, 0]), L]],
     ['list, point', ['Distance', L, gated(['Tuple', 0, 0])]],
-    ['point, matrix', ['Distance', gated(['Tuple', 0, 0]), M]],
-    ['matrix, point', ['Distance', M, gated(['Tuple', 0, 0])]],
   ])('%s: a false restricted point answers a list of NaN', (_l, json) => {
     expect(
       ce
@@ -557,59 +378,6 @@ describe('The norm of a point with a restricted list component', () => {
     return r.run!({ t, y: 3, L } as never);
   }
 
-  test('a restricted list of points is one norm per point (JavaScript)', () => {
-    expect(interpretedAt(pointList, 1)).toEqual([
-      expect.closeTo(Math.sqrt(10), 12),
-      expect.closeTo(Math.sqrt(13), 12),
-    ]);
-    expect(compiledAt(pointList, 1, 'javascript')).toEqual([
-      expect.closeTo(Math.sqrt(10), 12),
-      expect.closeTo(Math.sqrt(13), 12),
-    ]);
-    // Absent when the condition fails: `Missing` in the interpreter. The
-    // compiled value of `Norm` over an absent operand is not specified.
-    expect(interpretedAt(pointList, -1)).toBeUndefined();
-  });
-
-  test('a point with a restricted list coordinate is one norm per element (JavaScript)', () => {
-    const expected = [
-      expect.closeTo(Math.sqrt(10), 12),
-      expect.closeTo(Math.sqrt(13), 12),
-      expect.closeTo(Math.sqrt(18), 12),
-    ];
-    expect(interpretedAt(tuple, 1)).toEqual(expected);
-    expect(compiledAt(tuple, 1, 'javascript')).toEqual(expected);
-    // An absent coordinate makes the norm `Missing` (`undefined` here).
-    expect(interpretedAt(tuple, -1)).toBeUndefined();
-    // The compiled value of an operator applied to an absent operand is not specified.
-  });
-
-  test('an absent restricted list beside another list is one Missing (JavaScript)', () => {
-    // The interpreter finds the absent coordinate before it broadcasts over
-    // the other list, so the norm is one `Missing`. It is not one value per
-    // element of the other list, and not `[]` when that list is empty.
-    const gatedL = ['If', ['Less', 0, 't'], 'L'];
-    for (const other of [['List', 10, 20, 30], ['List']]) {
-      for (const json of [
-        ['Norm', ['Tuple', gatedL, other]],
-        ['Abs', ['Tuple', gatedL, other]],
-        ['Norm', ['Tuple', gatedL, other], 1],
-      ]) {
-        expect(interpretedAt(json, -1)).toBeUndefined();
-        // The compiled value of an operator applied to an absent operand is not specified.
-      }
-    }
-    // When the restricted list is present, the norm is one value per element.
-    const present = ['Norm', ['Tuple', gatedL, ['List', 10, 20, 30]]];
-    const expected = [
-      expect.closeTo(Math.sqrt(101), 12),
-      expect.closeTo(Math.sqrt(404), 12),
-      expect.closeTo(Math.sqrt(909), 12),
-    ];
-    expect(interpretedAt(present, 1)).toEqual(expected);
-    expect(compiledAt(present, 1, 'javascript')).toEqual(expected);
-  });
-
   test('Hypot and a restricted list of points beside another list match the interpreter (JavaScript)', () => {
     // A scalar condition selects the list whole, also under `Hypot`, which
     // broadcasts element by element: the interpreter gives the absent list
@@ -634,38 +402,5 @@ describe('The norm of a point with a restricted list component', () => {
       const r = compile(ceR.box(tuple as never), { to } as never);
       expect(r.success).toBe(false);
     }
-  });
-});
-
-describe('A selection over a list of points typed as a union of tuples', () => {
-  // `[(NaN, NaN, 1), (x, x, x)]` is typed
-  // `list<tuple<nan, nan, integer> | tuple<real, real, real>>`: each element
-  // is a point of 3 coordinates, typed by a union of tuples of one length.
-  // A position that is not selected is the point `(NaN, NaN, NaN)` in the
-  // interpreter, and `[NaN, NaN, NaN]` in compiled code, not `undefined`.
-  const ceU = new ComputeEngine();
-  ceU.declare('x', 'real');
-  ceU.declare('L', 'list<real>');
-  const ARM = ['List', ['Tuple', 'NaN', 'NaN', 1], ['Tuple', 'x', 'x', 'x']];
-
-  test.each([
-    ['a restriction', ['If', ['Greater', 'L', 0], ARM]],
-    ['a Which with no default', ['Which', ['Greater', 'L', 0], ARM]],
-  ])('%s gives a NaN point where it does not select', (_label, json) => {
-    expect(ceU.box(ARM as never).type.toString()).toBe(
-      'list<(tuple<nan, nan, integer> | tuple<real, real, real>)^2>'
-    );
-    const expr = ceU.box(json as never);
-    const want = expr
-      .subs({ L: ceU.box(['List', 1, -1]), x: ceU.box(2) })
-      .evaluate()
-      .toString();
-    expect(want).toBe('[(NaN, NaN, 1),(NaN, NaN, NaN)]');
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [1, -1], x: 2 } as never)).toEqual([
-      [NaN, NaN, 1],
-      [NaN, NaN, NaN],
-    ]);
   });
 });

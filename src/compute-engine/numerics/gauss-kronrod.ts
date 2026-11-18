@@ -2345,7 +2345,7 @@ function adaptiveFinite(
 /**
  * The number of `adaptiveQuadrature` calls on the call stack. The quadrature
  * is synchronous, so module state is safe here, as for `activeIntegrals` in
- * `compilation/javascript-target.ts`.
+ * `interval/integrate.ts`.
  */
 let activeQuadratures = 0;
 

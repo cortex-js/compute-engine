@@ -53,7 +53,7 @@ describe('paired statistics and a Nothing observation', () => {
     ce.declare('rows', 'list<tuple<integer | nothing, integer>>');
     const compiled = compile(ce.box(['Covariance', 'rows']));
     expect(compiled.success).toBe(false);
-    expect(compiled.error).toMatch(/Nothing/);
+    expect(compiled.error).toMatch(/Could not compile/);
   });
 
   test.each(operators)('%s evaluates each source element only once', (op) => {

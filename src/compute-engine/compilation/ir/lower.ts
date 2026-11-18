@@ -136,6 +136,7 @@ import {
   intervalQuadratureSize,
 } from '../interval-quadrature.js';
 import { derivativeClosedForm } from '../derivative-closed-form.js';
+import { logSpaceProduct } from '../../symbolic/log-space-product.js';
 import { withVarsValuesHidden } from '../vars-inputs.js';
 import { prefersJetDerivative } from '../jet-derivative.js';
 import {
@@ -333,8 +334,8 @@ export function lower(
   };
   const known = new WeakMap<Expression, Facts>();
   // The answers of the host's `compile` handlers, per node of this lowering
-  // (`handlerAnswer()`; not of a control-flow head other than `Which`, as in
-  // the existing compilers), and the nodes that an answer created (not a
+  // (`handlerAnswer()`; not of a control-flow head other than `Which`, whose
+  // handler is ignored), and the nodes that an answer created (not a
   // node under the operands of a node that a handler was asked about): the
   // library lowers those, with no handler, and the memo of `value()` keys
   // them apart (`idOf()`).
@@ -346,11 +347,11 @@ export function lower(
     authored.add(x);
     x.ops.forEach(author);
   };
-  // The size of a node as a tree, up to the limit of the existing compilers
-  // plus one. A handler can serialize its operands, and a value that shares
-  // its nodes has a text of exponential length: no handler is asked about a
-  // node above the limit or about a node under one (`unasked`), as the
-  // existing compilers ask none inside a value they refuse to bake in.
+  // The size of a node as a tree, up to `MAX_FOLD_EXPANDED_NODES` plus one.
+  // A handler can serialize its operands, and a value that shares its nodes
+  // has a text of exponential length: no handler is asked about a node
+  // above the limit or about a node under one (`unasked`), a value too
+  // large to write out.
   const sizes = new WeakMap<Expression, number>();
   const size = (x: Expression): number => {
     if (!isFunction(x)) return 1;
@@ -1375,7 +1376,7 @@ export function lower(
         if (e.nops !== 3 || (r?.arity !== 'variadic' && r?.arity !== 2))
           decline(
             e,
-            'a Reduce with no initial value, or not by a variadic or binary library operator of the slice'
+            'a Reduce with no initial value, or not by a variadic or binary library operator that the compiler supports'
           );
         return lists.reduce(e, r, [lists.source(l)], scalar(init));
       }
@@ -1432,7 +1433,7 @@ export function lower(
       case 'D': {
         // A variable that holds a value (not a `vars` name) is read with it
         // by the engine. With no closed form, JavaScript takes the stencil of
-        // the existing compiler (`_SYS.nd`), of `D(f, x)` of a pure real body
+        // the runtime (`_SYS.nd`), of `D(f, x)` of a pure real body
         // at the value of the name outside (`D` binds `x`).
         const [body, x] = e.ops;
         const valued = (v: Expression) =>
@@ -1469,8 +1470,8 @@ export function lower(
         // the canonical form.) `Apply(Derivative(g, n…), a1, …)` is the
         // application of the function literal of the derivative, which
         // declines with none, and at a total order of 3 or more of a large
-        // body (the existing compiler's forward mode,
-        // `prefersJetDerivative()`) before the engine is asked.
+        // body (the rule of the forward mode, `prefersJetDerivative()`)
+        // before the engine is asked.
         const [g, ...args] = e.ops;
         let f: Expression | undefined = g;
         if (isFunction(g, 'Derivative')) {
@@ -1560,7 +1561,7 @@ export function lower(
     const reduction = REDUCTIONS.get(e.operator);
     const r = rowOfHead(rows, reduction?.row ?? e.operator);
     if (r === undefined)
-      decline(e, `the operator ${e.operator} is not in the slice`);
+      decline(e, `the operator ${e.operator} is not supported by the compiler`);
     // The interpreter does not evaluate a `Sum` or a `Product` over a bound
     // with an effect, and does not change `p` for `Limits(i, 1, (p := 4;
     // 2))` (rule R3 of docs/COMPILATION-MODEL.md).
@@ -1789,8 +1790,8 @@ export function lower(
   };
 
   /** The expression that `ask()` gives at compile time for `e` (the closed
-   *  form of a derivative), with the values of the `vars` names hidden as on
-   *  the existing targets; `undefined` when there is none; a decline under
+   *  form of a derivative), with the values of the `vars` names hidden from
+   *  the engine; `undefined` when there is none; a decline under
    *  an angular unit other than radians (the walk converts the units
    *  itself), when `e` or it has more than `CLOSED_SIZE` nodes, and when it
    *  reads a name that the walk would read in another binding (`foreign()`).
@@ -2682,6 +2683,9 @@ export function lower(
         }
       };
       statements(0);
+      // A block that ends in a declaration or an assignment is `Nothing`.
+      if (want && ['Assign', 'Declare'].includes(e.ops[e.nops - 1].operator))
+        decline(e, 'a block that ends in an assignment (Nothing)');
       if (want && result === undefined) decline(e, 'a block with no value');
       return result;
     });
@@ -2903,8 +2907,8 @@ export function lower(
         e,
         'an integrand whose parameter is not the variable of the integral'
       );
-    // JavaScript: the closed form that the engine gives at compile time, as
-    // on the existing compiler, with the guards of `closedForm()`; with none,
+    // JavaScript: the closed form that the engine gives at compile time,
+    // with the guards of `closedForm()`; with none,
     // a guard that fails or a closed form that does not lower, the
     // quadrature. Not with a draw, which the engine would read once, and
     // not for an indefinite integral, a function of its variable. Not when
@@ -2996,7 +3000,7 @@ export function lower(
     const [out] = region(
       'integrate',
       [lo, hi],
-      ...realBody(e, name, literal?.ops[0] ?? f, 'an integrand'),
+      ...realBody(e, name, literal?.ops[0] ?? f, 'an integrand', true),
       e,
       interval ? quadrature!.n : undefined,
       closed
@@ -3012,7 +3016,8 @@ export function lower(
     e: Fn,
     name: string,
     body: Expression,
-    what: string
+    what: string,
+    log = false
   ): [V[], () => V[]] => {
     const t = b.newValue(scalarType('real'));
     return [
@@ -3023,7 +3028,18 @@ export function lower(
           const y = scalar(body);
           if (!isSubLane(type(y).lane, 'real'))
             decline(e, `${what} that is not real`);
-          return [y];
+          // A sample that is not finite: its finite value in log space, if any.
+          const form =
+            log && options.javascript && logSpaceProduct(body, [name]);
+          if (!form) return [y];
+          const big = b.constant(Infinity, 'real');
+          const fin = (v: V) => apply(e, 'Less', [apply(e, 'Abs', [v]), big]);
+          const keep = () => y;
+          const alt = () => {
+            const w = scalar(form);
+            return branch(e, fin(w), () => w, keep, true);
+          };
+          return [branch(e, fin(y), keep, alt, true)!];
         }),
     ];
   };

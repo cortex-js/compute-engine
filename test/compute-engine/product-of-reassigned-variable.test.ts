@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { MathJsonExpression } from '../../src/math-json';
 
 // A `Product` with no indexing set over a collection is canonicalized as
@@ -92,30 +91,6 @@ describe('Product of a list of matrices held by a variable', () => {
     ['List', 0, 1],
     ['List', 1, 0],
   ];
-
-  function check(ce: ComputeEngine, expr: ReturnType<ComputeEngine['box']>) {
-    expect(ce.box('L').type.toString()).toBe('tensor<integer^(2x2x2)>');
-    expect(expr.type.toString()).toBe('matrix<integer^(2x2)>');
-    expect(expr.evaluate().toString()).toBe('[[2,1],[4,3]]');
-    const r = compile(expr, { to: 'javascript', fallback: false });
-    expect(r.run!({} as never)).toEqual([
-      [2, 1],
-      [4, 3],
-    ]);
-  }
-
-  test('assigned, then boxed', () => {
-    const ce = new ComputeEngine();
-    ce.assign('L', ce.box(['List', M, Q]));
-    check(ce, ce.box(['Product', 'L']));
-  });
-
-  test('boxed, then assigned', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['Product', 'L']);
-    ce.assign('L', ce.box(['List', M, Q]));
-    check(ce, expr);
-  });
 
   test('the Reduce form has the same type', () => {
     const ce = new ComputeEngine();

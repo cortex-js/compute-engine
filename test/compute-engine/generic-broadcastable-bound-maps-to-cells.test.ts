@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * A GENERIC declared `broadcastable<T>` parameter whose bound cannot hold a
@@ -21,15 +20,6 @@ function engine(signature: string, body: string): ComputeEngine {
   ce.declare('w', signature);
   ce.assign('w', ce.parse(body));
   return ce;
-}
-
-function compiled(ce: ComputeEngine, latex: string): unknown {
-  const result = compile(ce.parse(latex), { fallback: false } as never) as {
-    success: boolean;
-    run?: (vars: Record<string, unknown>) => unknown;
-  };
-  expect(result.success).toBe(true);
-  return result.run!({});
 }
 
 const BOUNDED = '(x: broadcastable<T>) -> list<T> where T: number';
@@ -61,25 +51,6 @@ describe('a generic broadcastable<T> with T: number maps to the cells (CE-409)',
     expect(e.isValid).toBe(true);
     expect(e.type.toString()).toBe('list<list<list<integer>>>');
     expect(e.evaluate().toString()).toBe('[[[1],[2]],[[3],[4],[5]]]');
-  });
-
-  test('the compiled code agrees', () => {
-    const ce = engine(BOUNDED, 'x \\mapsto [x]');
-    expect(compiled(ce, 'w([[1,2],[3,4]])')).toEqual([
-      [[1], [2]],
-      [[3], [4]],
-    ]);
-    const add = engine(
-      '(x: broadcastable<T>) -> T where T: number',
-      'x \\mapsto x+1'
-    );
-    expect(add.parse('w([[1,2],[3,4]])').evaluate().toString()).toBe(
-      '[[2,3],[4,5]]'
-    );
-    expect(compiled(add, 'w([[1,2],[3,4]])')).toEqual([
-      [2, 3],
-      [4, 5],
-    ]);
   });
 
   test('controls: a list and a number are unchanged', () => {

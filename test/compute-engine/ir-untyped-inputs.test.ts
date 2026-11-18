@@ -1,11 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile, canCompile } from '../../src/compile';
 import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
-import { implicitCompile } from '../../src/compute-engine/implicit-compile';
-import {
-  _jsProfileShadowStats,
-  _jsProfileStats,
-} from '../../src/compute-engine/js-profile-switch';
 
 // An input of the profile `ir` whose type is `unknown` or `any` is refused
 // with the diagnostic of the existing compiler (`ir/README.md`, "Inputs";
@@ -231,7 +226,6 @@ describe('IR profile: an input with no type', () => {
 
   test('the names are in the order the lowering reads them', () => {
     const json = ['Sum', 'w', ['Limits', 'k', 'v', 'u']];
-    expect(compiled(json, { fallback: false }).diagnostic?.value).toBe('w,v,u');
     expect(
       compiled(json, { profile: 'ir', fallback: false }).diagnostic?.value
     ).toBe('v,u,w');
@@ -266,32 +260,6 @@ describe('IR profile: an input with no type', () => {
           .diagnostic?.code
       ).not.toBe('untyped-input');
     }
-  });
-
-  test('the statistics of the profile count the refusal as declined', () => {
-    // The existing compiler compiles it (the branch is dropped); the
-    // profile refuses `z`.
-    const json = ['If', ['Less', 2, 3], 0, 'z'];
-    const shadow = new ComputeEngine();
-    shadow._jsProfile = undefined;
-    shadow._jsProfileShadow = 'ir';
-    expect(compile(shadow.box(json as never)).success).toBe(true);
-    expect(_jsProfileShadowStats(shadow).public).toMatchObject({
-      attempts: 1,
-      declined: 1,
-      failed: 0,
-    });
-    const tried = new ComputeEngine();
-    tried._jsProfileShadow = false;
-    tried._jsProfile = {};
-    expect(
-      implicitCompile(tried, tried.box(json as never), 'limit-probe')
-    ).toBeDefined();
-    expect(_jsProfileStats(tried)['limit-probe']).toMatchObject({
-      attempts: 1,
-      declined: 1,
-      failed: 0,
-    });
   });
 
   test('canCompile() with the profile', () => {

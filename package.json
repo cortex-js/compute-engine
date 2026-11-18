@@ -41,8 +41,7 @@
     "test:core": "node scripts/test-core.mjs",
     "check:docs": "node scripts/check-doc-references.mjs",
     "setup:agents": "node scripts/setup-agent-skills.mjs",
-    "test:tools": "node --test scripts/tests/*.test.mjs",
-    "test:glsl": "tsx --test scripts/glsl-check/glsl-driver.test.ts"
+    "test:tools": "node --test scripts/tests/*.test.mjs"
   },
   "name": "@cortex-js/compute-engine",
   "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",

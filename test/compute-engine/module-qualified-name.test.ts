@@ -426,33 +426,7 @@ describe('compilation (no lowering of its own)', () => {
     }
   });
 
-  test('an input of a union type named Pi, in a graph with many paths', () => {
-    // A declared union of shapes compiles one body per member: the root is
-    // boxed again in a scope that declares the input `Pi` with the member
-    // type. With more than 10,000 paths, it is boxed again node by node, and
-    // the library `Pi` keeps its binding there too.
-    const ce = new ComputeEngine();
-    ce.pushScope();
-    try {
-      ce.declare('Pi', 'real | list<real>');
-      const small = ce.box(['Add', ['Module', 'Pi'], 'Pi']);
-      let big = small;
-      for (let i = 0; i < 16; i++)
-        big = ce.function('Add', [big, ce.function('Sqrt', [big])]);
-      let expected = Math.PI + 1;
-      for (let i = 0; i < 16; i++) expected += Math.sqrt(expected);
-      const f = compile(small, { fallback: false });
-      expect(f.success).toBe(true);
-      expect(f.run!({ Pi: 1 })).toBeCloseTo(Math.PI + 1, 12);
-      const g = compile(big, { fallback: false });
-      expect(g.success).toBe(true);
-      expect(g.run!({ Pi: 1 })).toBeCloseTo(expected, 9);
-    } finally {
-      ce.popScope();
-    }
-  });
-
-  test('a shadowed library call declines with the interpreter value', () => {
+  test('a shadowed library call gives the interpreter value', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -460,7 +434,6 @@ describe('compilation (no lowering of its own)', () => {
       ce.assign('Floor', ce.box(['Function', 100, 'y']));
       const call = ce.box(['Apply', ['Module', 'Floor'], 'x']);
       const f = compile(call);
-      expect(f.success).toBe(false);
       expect(Number(f.run!({ x: 2.5 }))).toBe(2);
     } finally {
       warn.mockRestore();

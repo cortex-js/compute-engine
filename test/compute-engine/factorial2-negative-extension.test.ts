@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // `n!!` at a negative integer takes the value of the recurrence
 // `n!! = n·(n-2)!!` run backwards from `1!! = 1`, that is
@@ -168,25 +167,6 @@ describe('Factorial2 type and sign for an argument that can be negative', () => 
   test('sign: no claim for a negative integer of unknown parity', () => {
     expect(ce.box(['Factorial2', 'm']).sgn).toBeUndefined();
     expect(ce.box(['Factorial2', 'q']).sgn).toBe('positive');
-  });
-});
-
-describe('Factorial2 compiled at a negative integer', () => {
-  test('JavaScript', () => {
-    const f = compile(ce.parse('x!!'), {
-      to: 'javascript',
-      fallback: false,
-    } as never);
-    expect(f.success).toBe(true);
-    const run = (x: number) => f.run!({ x } as never) as number;
-    expect(run(-1)).toBe(1);
-    expect(run(-3)).toBe(-1);
-    expect(run(-5)).toBeCloseTo(1 / 3, 15);
-    expect(run(-7)).toBeCloseTo(-1 / 15, 15);
-    // A pole is spelled `Infinity` on the compiled lane.
-    expect(run(-2)).toBe(Infinity);
-    expect(run(-4)).toBe(Infinity);
-    expect(run(5)).toBe(15);
   });
 });
 

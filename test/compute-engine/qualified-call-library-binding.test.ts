@@ -244,7 +244,7 @@ describe('a shadowed qualified call is the library call', () => {
     }
   });
 
-  test('the compiler declines a shadowed library call, with the interpreter value', () => {
+  test('a qualified call of a shadowed library operator compiles to the library call', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -253,7 +253,7 @@ describe('a shadowed qualified call is the library call', () => {
       ce.declare('x', 'real');
       const e = ce.box(['Apply', ['Module', 'If'], ['Greater', 'x', 0], 1, 2]);
       const f = compile(e);
-      expect(f.success).toBe(false);
+      expect(f.success).toBe(true);
       expect(Number(f.run!({ x: 1 }))).toBe(1);
       expect(Number(f.run!({ x: -1 }))).toBe(2);
     } finally {

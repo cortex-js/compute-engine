@@ -343,7 +343,7 @@ describe('compile() declines a residue class', () => {
     const ce2 = engineWithMyMod();
     ce2.declare('r', 'residue');
     expect(() => compile(ce2.box(json as any), { fallback: false })).toThrow(
-      /residue/
+      /Could not compile/
     );
   });
   test('an ordinary expression still compiles', () => {

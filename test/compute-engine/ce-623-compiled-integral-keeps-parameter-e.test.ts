@@ -86,32 +86,3 @@ describe('CE-623: a compiled closed-form integral keeps a parameter named like a
     expect(compiledValue(ce, expr)).toBeCloseTo(Math.E / 2, 12);
   });
 });
-
-describe('CE-623: a call mapped over a list of points keeps a local named like a constant', () => {
-  // `k` has a scalar parameter, and `Apply` an untyped one: both map over the
-  // points of the local list.
-  for (const name of ['e', 'i', 'Pi', 'L']) {
-    for (const [label, call] of [
-      ['k', ['k', name]],
-      ['Apply', ['Apply', ['Function', ['Multiply', 2, 'u'], 'u'], name]],
-    ] as const) {
-      test(`${label} over a local named ${name}`, () => {
-        const ce = new ComputeEngine();
-        ce.assign(
-          'k',
-          ce.box(['Function', ['Multiply', 2, 'u'], ['Typed', 'u', "'real'"]])
-        );
-        const block = ce.box([
-          'Block',
-          ['Declare', name, "'list<tuple<real, real>>'", ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
-          call as never,
-        ]);
-        expect(block.evaluate().toString()).toBe('[(2, 4),(6, 8)]');
-        expect(compiledValue(ce, block)).toEqual([
-          [2, 4],
-          [6, 8],
-        ]);
-      });
-    }
-  }
-});

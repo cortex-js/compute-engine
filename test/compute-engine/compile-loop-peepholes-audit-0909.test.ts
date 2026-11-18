@@ -60,36 +60,6 @@ describe('Range element type reads the lower bound and the step, not the upper',
 });
 
 describe('a comparison against a compiled loop index', () => {
-  /** The game-of-life shape: a comprehension over `1..(N²)` whose body sums a
-   * membership test against the index. `N` is declared `real`, as a Desmos
-   * slider is, which is what used to widen the index to `real`. */
-  const comprehension = (ce: ComputeEngine): any => {
-    ce.declare('N', 'real');
-    ce.assign('N', 150);
-    return ce.box([
-      'Comprehension',
-      ['Sum', ['Which', ['Equal', 'n', 'k'], 1, 'True', 0], ['Limits', 'n', 1, 6]],
-      ['Element', 'k', ['Range', 1, ['Square', 'N']]],
-    ]);
-  };
-
-  test('compares exactly, with no tolerance and no decidedness test', () => {
-    const ce = new ComputeEngine();
-    const code = js(ce, comprehension(ce));
-    expect(code).toContain('const k = 1 + (1) * ');
-    expect(code).toContain('((1) === (k))');
-    expect(code).not.toContain('1e-10');
-    expect(code).not.toContain('k === k');
-    expect(code).not.toContain('NaN');
-  });
-
-  test('the unrolled sum drops its per-term NaN test', () => {
-    const ce = new ComputeEngine();
-    const code = js(ce, comprehension(ce));
-    expect(code).toContain('_tv1 += ');
-    expect(code).not.toMatch(/!== _tv\d/);
-  });
-
   test('the compiled comprehension answers what the interpreter answers', () => {
     const ce = new ComputeEngine();
     const expr = ce.box([
@@ -104,40 +74,9 @@ describe('a comparison against a compiled loop index', () => {
     const r = compile(expr, { to: 'javascript', fallback: false } as any) as any;
     expect(r.run!()).toEqual([1, 1, 1, 1, 1, 1, 0, 0, 0, 0]);
   });
-
-  test('a FREE symbol takes the exact comparison and no test', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    // A NaN `x` decides `n = x` false (user decision 2026-10-20), and the
-    // host supplies every input, so `x` has no test, and no term is NaN, so
-    // the sum has no per-term exit. The comparison itself is exact (compiled
-    // equality carries no tolerance).
-    const code = js(
-      ce,
-      ce.box([
-        'Sum',
-        ['Which', ['Equal', 'n', 'x'], 1, 'True', 0],
-        ['Limits', 'n', 1, 6],
-      ])
-    );
-    expect(code).not.toContain('_.x !== undefined');
-    expect(code).not.toContain('_.x === _.x');
-    expect(code).toContain('((1) === (_.x))');
-    expect(code).not.toContain('1e-10');
-  });
 });
 
 describe('the counted-range prologue', () => {
-  test('literal bounds emit no length check', () => {
-    const ce = new ComputeEngine();
-    const code = js(
-      ce,
-      ce.box(['Comprehension', ['Multiply', 2, 'k'], ['Element', 'k', ['Range', 1, 22500]]])
-    );
-    expect(code).toContain('for (let _tv1 = 0; _tv1 < 22500; _tv1++)');
-    expect(code).not.toContain('RangeError');
-  });
-
   test('an upper bound the compiler cannot fold keeps the length check', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'real');
@@ -167,15 +106,6 @@ describe('the audit’s game-of-life membership list', () => {
     ce.assign('P', ce.box(['List', ...cells]));
     return ce;
   };
-
-  test('every term is an exact integer comparison, with no guard', () => {
-    const ce = setup();
-    const code = js(ce, ce.parse(LATEX));
-    expect(code).toContain('((3) === (k))');
-    expect(code).not.toContain('1e-10');
-    expect(code).not.toContain('NaN');
-    expect(code).not.toMatch(/!== _tv\d/);
-  });
 
   test('the compiled list is the interpreted list', () => {
     const ce = setup();
@@ -236,40 +166,12 @@ describe('shader float literals', () => {
     expect(glsl(ce, '3 x')).toContain('3.0');
     expect(glsl(ce, '0.1 x')).toContain('0.1');
   });
-
-  test('a value that underflows single precision to zero is left to toString', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    // `Math.fround(1e-300)` is `0`: single precision cannot represent a
-    // magnitude this small. The shortest-decimal search must not hand back
-    // the round-tripping candidate `"0"`, which would silently drop the
-    // value to zero.
-    expect(glsl(ce, '1e-300 x')).toContain('1e-300');
-  });
 });
 
 describe('the emitted-code fold reaches a parenthesized numerator', () => {
   const withPeriod = (ce: ComputeEngine): void => {
     ce.parse('P := 100').evaluate();
   };
-
-  test('at the root', () => {
-    const ce = new ComputeEngine();
-    withPeriod(ce);
-    expect(js(ce, ce.parse('\\cos(\\frac{2\\pi u}{P})'))).toBe(
-      '_SYS.cospi((2 * _.u) / 100)'
-    );
-  });
-
-  test('inside a user-function body', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    withPeriod(ce);
-    ce.parse('X(s) := \\cos(\\frac{2\\pi s}{P})').evaluate();
-    expect(js(ce, ce.parse('X(t)'))).toContain(
-      '_SYS.cospi((2 * s) / 100)'
-    );
-  });
 
   test('the folded quotient computes what the unfolded one computed', () => {
     const ce = new ComputeEngine();

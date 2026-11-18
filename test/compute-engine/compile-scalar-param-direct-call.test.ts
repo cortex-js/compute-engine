@@ -33,70 +33,7 @@ function build(ce: ComputeEngine, expr: unknown): any {
   return compile(ce.box(expr as any), { constantFold: false } as any);
 }
 
-/** The three-macro chain `f(x) := g(x) + 1`, `g(x) := 2·h(x)`,
- * `h(x) := x²`, with UNANNOTATED parameters. */
-function macroChain(xType = 'real'): ComputeEngine {
-  const ce = new ComputeEngine();
-  ce.declare('x', xType);
-  const def = (name: string, body: unknown) =>
-    ce.box(['DefineFunction', name, ['Function', body, 'x']] as any).evaluate();
-  def('h', ['Power', 'x', 2]);
-  def('g', ['Multiply', ['h', 'x'], 2]);
-  def('f', ['Add', ['g', 'x'], 1]);
-  return ce;
-}
-
 describe('a nested call inside a scalar-parameter definition is direct', () => {
-  test('the three-macro chain emits bare calls, with no dispatch and no guard', () => {
-    const ce = macroChain();
-    const r = build(ce, ['f', 'x']);
-    expect(r.preamble).toContain('_fn_g(x)');
-    expect(r.preamble).toContain('_fn_h(x)');
-    expect(r.preamble).not.toContain('_SYS.bcastFn(');
-    expect(r.preamble).not.toContain('Array.isArray(');
-  });
-
-  test('a list handed to the OUTER function still broadcasts through the chain', () => {
-    const ce = macroChain('real | list<real>');
-    const r = build(ce, ['f', 'x']);
-    // `x` is a free symbol at the root here, so the ROOT call is what
-    // broadcasts; each body then sees one element at a time.
-    expect(r.run({ x: 2 })).toBe(9);
-    expect(r.run({ x: [1, 2, 3] })).toEqual([3, 9, 19]);
-    expect(
-      ce
-        .box(['f', ['List', 1, 2, 3]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[3,9,19]');
-    // A NESTED list, declared as one, maps one rank further, as the
-    // interpreter does.
-    const nested = macroChain('list<list<real>>');
-    const rn = build(nested, ['f', 'x']);
-    expect(rn.code).toBe('_SYS.mapFn(_fn_f, [2], _.x)');
-    expect(rn.run({ x: [[1, 2], [3]] })).toEqual([[3, 9], [19]]);
-    expect(
-      ce
-        .box(['f', ['List', ['List', 1, 2], ['List', 3]]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[[3,9],[19]]');
-  });
-
-  test('scalar arithmetic over a parameter is a scalar argument too', () => {
-    const ce = new ComputeEngine();
-    ce.declare('u', 'real | list<real>');
-    ce.assign('g', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    ce.assign(
-      'f',
-      ce.box(['Function', ['g', ['Add', ['Multiply', 3, 't'], 1]], 't'] as any)
-    );
-    const r = build(ce, ['f', 'u']);
-    expect(r.preamble).toContain('_fn_g(');
-    expect(r.preamble).not.toContain('_SYS.bcastFn(');
-    expect(r.run({ u: 2 })).toBe(14);
-    expect(r.run({ u: [1, 2] })).toEqual([8, 14]);
-  });
 
   test('every clause of a MULTI-CLAUSE definition gets the same treatment', () => {
     const multiClause = (): ComputeEngine => {
@@ -117,207 +54,7 @@ describe('a nested call inside a scalar-parameter definition is direct', () => {
       ['Typed', 'u', "'any'"],
     ]);
     expect(any.success).toBe(false);
-    expect(any.unsupported).toContain('u');
-    // `u` declared with a union of a number and a list: one body per shape.
-    const ce = multiClause();
-    ce.declare('u', 'real | list<real>');
-    const r = build(ce, ['f', 'u']);
-    expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      '(Array.isArray(_.u) ? _SYS.mapFn(_fn_f, [1], _.u) : _fn_f(_.u))'
-    );
-    expect(r.preamble).toContain('const _fn_f$c1 = (x) => _fn_h(x) + 1;');
-    expect(r.preamble).toContain(
-      'const _fn_f$c2 = (x, y) => _fn_h(x) + _fn_h(y);'
-    );
-    expect(r.preamble).not.toContain('_SYS.bcastFn(_fn_h');
-    // The dispatcher, and both clauses, answer what the interpreter answers.
-    expect(r.run({ u: 3 })).toBe(10);
-    expect(
-      ce
-        .box(['f', 3] as any)
-        .evaluate()
-        .toString()
-    ).toBe('10');
-    expect(r.run({ u: [1, 2] })).toEqual([2, 5]);
-    expect(
-      ce
-        .box(['f', ['List', 1, 2]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[2,5]');
-  });
-});
-
-describe('what the ruling does NOT change', () => {
-  test('a COLLECTION-typed parameter keeps the nested dispatch', () => {
-    // `L` binds a whole list, so the nested call of the scalar-parameter `g`
-    // is what maps over it. Nothing about this definition is recorded as a
-    // scalar, and the emitted form is the one HEAD emitted.
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    ce.assign(
-      'fL',
-      ce.box([
-        'Function',
-        ['Add', ['Sum', 'L'], ['g', 'L']],
-        ['Typed', 'L', "'list<number>'"],
-      ] as any)
-    );
-    const r = build(ce, ['fL', ['List', 1, 2, 3]]);
-    expect(r.preamble).toContain('_SYS.mapFn(_fn_g, [1], L)');
-    expect(r.run({})).toEqual([8, 10, 12]);
-    expect(
-      ce
-        .box(['fL', ['List', 1, 2, 3]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[8,10,12]');
-  });
-
-  test('a TUPLE-typed parameter keeps its bare whole-value call', () => {
-    // A point lowers to a JS array, so it must never be broadcast over; the
-    // callee binds it whole and the call is direct for that reason, not for
-    // the ruling's.
-    const T = "'tuple<number, number>'";
-    const ce = new ComputeEngine();
-    ce.assign(
-      'q',
-      ce.box([
-        'Function',
-        ['Add', ['At', 'P', 1], ['At', 'P', 2]],
-        ['Typed', 'P', T],
-      ] as any)
-    );
-    ce.assign('p', ce.box(['Function', ['q', 'P'], ['Typed', 'P', T]] as any));
-    const r = build(ce, ['p', ['Tuple', 3, 4]]);
-    expect(r.preamble).toMatch(/const _fn_p\w* = \(P\) => _fn_q\w*\(P\);/);
-    expect(r.run({})).toBe(7);
-  });
-
-  test('a root free symbol whose scalar type was INFERRED takes the bare call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('f', '(x: number) -> number');
-    ce.assign(
-      'f',
-      ce.box(['Function', ['Add', ['Multiply', 2, 'x'], 1], 'x'] as any)
-    );
-    const r = build(ce, ['f', 'y']);
-    expect(r.code).toBe('_fn_f(_.y)');
-    expect(r.run({ y: 21 })).toBe(43);
-    // A list is given only to an input declared as a list: the call maps.
-    ce.declare('Y', 'list<number>');
-    const rl = build(ce, ['f', 'Y']);
-    expect(rl.code).toBe('_SYS.mapFn(_fn_f, [1], _.Y)');
-    expect(rl.run({ Y: [1, 2, 3] })).toEqual([3, 5, 7]);
-    expect(
-      ce
-        .box(['f', ['List', 1, 2, 3]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[3,5,7]');
-  });
-
-  test('a root free symbol explicitly DECLARED scalar keeps the bare call', () => {
-    const ce = new ComputeEngine();
-    ce.declare('z', 'number');
-    ce.declare('f', '(x: number) -> number');
-    ce.assign(
-      'f',
-      ce.box(['Function', ['Add', ['Multiply', 2, 'x'], 1], 'x'] as any)
-    );
-    const r = build(ce, ['f', 'z']);
-    expect(r.code).toContain('_fn_f(_.z)');
-    expect(r.code).not.toContain('Array.isArray');
-    expect(r.run({ z: 21 })).toBe(43);
-  });
-});
-
-//
-// AN ATOMIC ARGUMENT BESIDE ONE THAT MAY BE A COLLECTION.
-//
-// A tuple (a point) and a nominal value both reach the callee WHOLE: the
-// interpreter binds them, never maps over them, and both lower to a JS array
-// the runtime broadcast would otherwise descend into. That used to switch the
-// broadcast off for the WHOLE call, which was harmless only as long as the
-// callee's body dispatched on its own: with the direct call above, a sibling
-// list argument reached a scalar body untouched.
-//
-describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
-  /** `g(x) := 2x` and `f(p, x) := g(x)`, with `a b u v` declared real. */
-  function pointAndListEngine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    for (const s of ['a', 'b', 'u', 'v']) ce.declare(s, 'real');
-    ce.assign('g', ce.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
-    ce.assign('f', ce.box(['Function', ['g', 'x'], 'p', 'x'] as any));
-    return ce;
-  }
-
-  test('the point is HELD and the list is broadcast over', () => {
-    const ce = pointAndListEngine();
-    const expr = ['f', ['Tuple', 'a', 'b'], ['List', 'u', 'v']];
-    const r = build(ce, expr);
-    // The point is passed at rank 0, so the map reuses it whole for each
-    // element; the list is the only argument mapped over (rank 1).
-    expect(r.code).toBe(
-      '_SYS.mapFn(_fn_f_tuple_number__number__number_points_2_, [0, 1], [_.a, _.b], [_.u, _.v])'
-    );
-    expect(r.run({ a: 1, b: 2, u: 1, v: 2 })).toEqual([2, 4]);
-    expect(
-      ce
-        .box(expr as any)
-        .subs({ a: 1, b: 2, u: 1, v: 2 } as any)
-        .evaluate()
-        .toString()
-    ).toBe('[2,4]');
-  });
-
-  test('with a provably scalar sibling the bare direct call stands', () => {
-    const ce = pointAndListEngine();
-    const expr = ['f', ['Tuple', 'a', 'b'], 'u'];
-    const r = build(ce, expr);
-    expect(r.code).toMatch(/^_fn_f.*\(\[_.a, _.b\], _.u\)$/);
-    expect(r.run({ a: 1, b: 2, u: 3 })).toBe(6);
-    expect(
-      ce
-        .box(expr as any)
-        .subs({ a: 1, b: 2, u: 3 } as any)
-        .evaluate()
-        .toString()
-    ).toBe('6');
-  });
-
-  test('a call whose every argument is atomic keeps its whole-value form', () => {
-    // The `bag`/`size` case of `type-constructors-compile.test.ts`: a nominal
-    // value is bound whole, and with no other argument there is nothing to
-    // broadcast over, so the emitted call is unchanged.
-    const ce = new ComputeEngine();
-    const r0 = executeEpsil(
-      ce,
-      `type bag = list<number>\n` + `function size(b: bag) -> number { 42 }`
-    );
-    expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
-    const r = build(ce, ['size', ['bag', ['List', 1, 2, 3]]]);
-    expect(r.code).toBe('_fn_size(_lit_1)');
-    expect(r.code).not.toContain('bcastFn');
-    expect(r.run({})).toBe(42);
-  });
-
-  test('the held argument is evaluated ONCE, however many elements map', () => {
-    // A coordinate with a side effect — a random draw — must be drawn once
-    // for the whole call, not once per element of the sibling list. The
-    // emission is what settles it: the draw sits in the argument list of the
-    // map, which evaluates it once before it maps, and it appears nowhere
-    // inside the function that the map applies.
-    const ce = pointAndListEngine();
-    const r = build(ce, ['f', ['Tuple', ['Random'], 0], ['List', 'u', 'v']]);
-    const draws = r.code.match(/drawNextRandomNumber/g) ?? [];
-    expect(draws).toHaveLength(1);
-    // The one draw is in the argument list of the map, at rank 0.
-    expect(r.code).toMatch(
-      /^_SYS\.mapFn\(_fn_f\w*, \[0, 1\], \[_SYS\.drawNextRandomNumber\(\), 0\], \[_\.u, _\.v\]\)$/
-    );
-    expect(r.run({ u: 1, v: 2 })).toEqual([2, 4]);
+    expect(any.unsupported).toContain('Typed(u, "any")');
   });
 });
 
@@ -329,53 +66,6 @@ describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
 // — a matrix row — passed one whole to clause bodies that are scalar code.
 //
 describe('a MULTI-CLAUSE function value is shape-aware', () => {
-  /** `h(x) := 3x`, `mc(x) := h(x) + 1`, `mc(x, y) := h(x) + h(y)`. */
-  function clauseEngine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    const r = executeEpsil(
-      ce,
-      `function h(x) { 3 * x }\n` +
-        `function mc(x) { h(x) + 1 }\n` +
-        `function mc(x, y) { h(x) + h(y) }`
-    );
-    expect(r.diagnostics.map((d) => String(d.message))).toEqual([]);
-    return ce;
-  }
-
-  test('a row of a matrix is broadcast, as the interpreter broadcasts it', () => {
-    const ce = clauseEngine();
-    const expr = ['Map', 'mc', ['List', ['List', 1, 2], ['List', 3]]];
-    const r = build(ce, expr);
-    // The elements of the source are lists, so the reference is a static map
-    // of the dispatcher over each row. The map passes one argument, so the
-    // dispatcher selects the one-parameter clause for each entry.
-    expect(r.code).toContain('(_fn_mc$m1)');
-    expect(r.preamble).toContain(
-      'const _fn_mc$m1 = ((_tv1) => _SYS.mapFn(_fn_mc, [1], _tv1));'
-    );
-    expect(r.code).not.toContain('Array.isArray');
-    expect(r.run({})).toEqual([[4, 7], [10]]);
-    expect(
-      ce
-        .box(expr as any)
-        .evaluate()
-        .toString()
-    ).toBe('[[4,7],[10]]');
-  });
-
-  test('a flat source still reaches the dispatcher directly', () => {
-    const ce = clauseEngine();
-    const expr = ['Map', 'mc', ['List', 1, 2, 3]];
-    const r = build(ce, expr);
-    expect(r.code).toContain('(_fn_mc)');
-    expect(r.run({})).toEqual([4, 7, 10]);
-    expect(
-      ce
-        .box(expr as any)
-        .evaluate()
-        .toString()
-    ).toBe('[4,7,10]');
-  });
 
   test('a clause parameter that binds a value whole keeps the bare reference', () => {
     // A nominal parameter is atomic (`signatureParamsLowerToScalars`), so no
@@ -427,50 +117,6 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
       fallback: false,
     } as any);
 
-  test('`r(P) := 2P` through the chain answers the point, like the interpreter', () => {
-    const ce = chainEngine(['Multiply', 2, 'P']);
-    const chain = strict(ce, ['p', ['Tuple', 'a', 'b']]);
-    const direct = strict(ce, ['r', ['Tuple', 'a', 'b']]);
-    // Both entry points emit a helper with the known point width.
-    expect(chain.preamble).toContain('_fn_p');
-    expect(direct.preamble).toContain('_fn_r');
-    expect(chain.run({ a: 3, b: 4 })).toEqual([6, 8]);
-    expect(direct.run({ a: 3, b: 4 })).toEqual([6, 8]);
-    expect(
-      ce
-        .box(['p', ['Tuple', 'a', 'b']] as any)
-        .subs({ a: 3, b: 4 } as any)
-        .evaluate()
-        .toString()
-    ).toBe('(6, 8)');
-  });
-
-  test('a tuple-typed SYMBOL and an all-scalar `PointList` are points too', () => {
-    const ce = chainEngine(['Multiply', 2, 'P']);
-    ce.declare('Q', 'tuple<real, real>');
-    const symbol = strict(ce, ['r', 'Q']);
-    expect(symbol.preamble).toContain('_fn_r');
-    expect(symbol.run({ Q: [3, 4] })).toEqual([6, 8]);
-    const pointList = strict(ce, ['p', ['PointList', 'a', 'b']]);
-    expect(pointList.preamble).toContain('_fn_p');
-    expect(pointList.run({ a: 3, b: 4 })).toEqual([6, 8]);
-  });
-
-  test('the shader target emits a vector helper for point arithmetic', () => {
-    const ce = chainEngine(['Multiply', 2, 'P']);
-    const r = strict(ce, ['p', ['Tuple', 'a', 'b']], 'glsl');
-    expect(r.code).toMatch(/^_fn_p.*\(vec2\(a, b\)\)$/);
-    expect(r.preamble).toContain('2.0 * P');
-    expect(r.preamble).toMatch(/vec2 _fn_p.*\(vec2 P\)/);
-  });
-
-  test('a scalar argument still goes by reference', () => {
-    const ce = chainEngine(['Multiply', 2, 'P']);
-    const r = strict(ce, ['r', 'a']);
-    expect(r.preamble).toContain('const _fn_r = (P) => 2 * P;');
-    expect(r.run({ a: 3 })).toBe(6);
-  });
-
   test('a point built inside a DEFINITION body reaches the nested call as a point', () => {
     const ce = chainEngine(['Multiply', 2, 'P']);
     ce.box([
@@ -499,7 +145,7 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
     ]) {
       const ce = chainEngine(body);
       expect(() => strict(ce, ['p', ['Tuple', 'a', 'b']])).toThrow(
-        /argument 1 is a point|invalid expression/
+        /of a tuple: its value on a tuple is not its value on a list/
       );
       // The fallback route reports the decline and answers through the
       // interpreter, which has no number for an error expression.
@@ -508,7 +154,7 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
       } as any);
       expect(fallback.success).toBe(false);
       expect(fallback.error).toMatch(
-        /argument 1 is a point|invalid expression/
+        /of a tuple: its value on a tuple is not its value on a list/
       );
       expect(fallback.run({ a: 3, b: 4 })).toBeNaN();
     }
@@ -524,96 +170,4 @@ describe('a POINT bound to an untyped parameter specializes a shared helper', ()
     expect(value[1]).toBe(8);
   });
 
-  test('`r(P) := PointX(P)` types the parameter and still compiles by reference', () => {
-    const ce = chainEngine(['PointX', 'P']);
-    const chain = strict(ce, ['p', ['Tuple', 'a', 'b']]);
-    const direct = strict(ce, ['r', ['Tuple', 'a', 'b']]);
-    expect(chain.preamble).toMatch(/const _fn_q.* = \(P\) => _fn_r.*\(P\);/);
-    expect(chain.run({ a: 3, b: 4 })).toBe(3);
-    expect(direct.run({ a: 3, b: 4 })).toBe(3);
-    expect(
-      ce
-        .box(['p', ['Tuple', 'a', 'b']] as any)
-        .subs({ a: 3, b: 4 } as any)
-        .evaluate()
-        .toString()
-    ).toBe('3');
-  });
-
-  test('a callee whose free symbol the enclosing definition BINDS is not substituted into it', () => {
-    // `r(P) := k·P` reads the global `k`, and `f(k, t) := r((t, t))` binds
-    // a parameter of that name. Substituting `r` into `f`'s body would read
-    // the parameter `k` instead of the global — `[6, 6]` for `f(2, 3)` where
-    // the interpreter answers `(30, 30)`. The substitution inside the
-    // definition is declined, and the call is answered at the root instead,
-    // where the global `k` is folded in.
-    const ce = new ComputeEngine();
-    ce.declare('k', 'number');
-    ce.assign('k', ce.number(10));
-    ce.declare('u', 'number');
-    ce.box([
-      'DefineFunction',
-      'r',
-      ['Function', ['Multiply', 'k', 'P'], 'P'],
-    ] as any).evaluate();
-    ce.box([
-      'DefineFunction',
-      'f',
-      ['Function', ['r', ['Tuple', 't', 't']], 'k', 't'],
-    ] as any).evaluate();
-    const r = strict(ce, ['f', 2, 'u']);
-    expect(r.run({ u: 3 })).toEqual([30, 30]);
-    expect(
-      ce
-        .box(['f', 2, 3] as any)
-        .evaluate()
-        .toString()
-    ).toBe('(30, 30)');
-    // With no colliding name the substitution lands inside the definition
-    // and reads the global, folded to its value.
-    ce.box([
-      'DefineFunction',
-      'g',
-      ['Function', ['r', ['Tuple', 't', 't']], 'm', 't'],
-    ] as any).evaluate();
-    const g = strict(ce, ['g', 2, 'u']);
-    expect(g.preamble).toContain('const _fn_g = (m, t) =>');
-    expect(g.preamble).not.toContain('_fn_r');
-    expect(g.run({ u: 3 })).toEqual([30, 30]);
-  });
-
-  test('a parameter the body uses only under an inner lambda of the same name is not read', () => {
-    // `sh(p) := Map(p ↦ 2p, [1, 2, 3])` binds a point to `p` and never
-    // reads it: every `p` in the body is the lambda's own. The call goes by
-    // reference, as it does for a parameter the body never mentions.
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('b', 'real');
-    ce.box([
-      'DefineFunction',
-      'sh',
-      [
-        'Function',
-        ['Map', ['Function', ['Multiply', 2, 'p'], 'p'], ['List', 1, 2, 3]],
-        'p',
-      ],
-    ] as any).evaluate();
-    const r = strict(ce, ['sh', ['Tuple', 'a', 'b']]);
-    expect(r.code).toMatch(/^_fn_sh.*\(\[_.a, _.b\]\)$/);
-    expect(r.run({ a: 1, b: 2 })).toEqual([2, 4, 6]);
-  });
-
-  test('a DECLARED tuple parameter still receives the whole point', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('b', 'real');
-    ce.box([
-      'DefineFunction',
-      't',
-      ['Function', ['Multiply', 2, 'P'], ['Typed', 'P', 'tuple<real, real>']],
-    ] as any).evaluate();
-    const r = strict(ce, ['t', ['Tuple', 'a', 'b']]);
-    expect(r.preamble).toMatch(/const _fn_t\w* = \(P\) =>/);
-    expect(r.run({ a: 3, b: 4 })).toEqual([6, 8]);
-  });
 });

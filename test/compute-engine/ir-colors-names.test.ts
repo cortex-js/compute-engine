@@ -497,7 +497,9 @@ describe('IR profile, batch G9: the declines', () => {
     for (const to of ['javascript', 'glsl'] as const) {
       const d = failure(() => compile(e.box(['AsOklab', 'Cm']), { ...IR, to }));
       expect(d?.code).toBe('outside-profile');
-      expect(d?.message).toMatch(/the operator ColorMix is not in the slice/);
+      expect(d?.message).toMatch(
+        /the operator ColorMix is not supported by the compiler/
+      );
     }
   });
 

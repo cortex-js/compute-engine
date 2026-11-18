@@ -23,7 +23,6 @@ import { kindArmNames, resolveTypeAlias } from '../../common/type/utils.js';
 import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { hasEnclosureSymbol } from './compiler-type-facts.js';
 import { isBooleanBindingType } from './type-facts.js';
 import { interpreterFallback } from './interpreter-fallback.js';
 import { compileDiagnosticOf } from './diagnostics.js';
@@ -56,6 +55,24 @@ export function holdsEnclosureInputOrResult(expr: Expression): boolean {
   )
     return true;
   return hasEnclosureSymbol(expr);
+}
+
+/**
+ * True when a symbol of `expr`, at any depth, has a type with an
+ * `enclosure` arm at any level (`enclosure`, `real | enclosure`,
+ * `list<enclosure>`).
+ */
+function hasEnclosureSymbol(expr: Expression): boolean {
+  const kinds = kindTypeNames(expr.engine);
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (seen.has(e)) return false;
+    seen.add(e);
+    if (isSymbol(e))
+      return kindArmNames(e.type.type, kinds).includes('enclosure');
+    return isFunction(e) && e.ops.some(visit);
+  };
+  return visit(expr);
 }
 
 /**
@@ -311,7 +328,7 @@ function collapseIntervalInput(value: unknown): unknown {
 export function buildIntervalFallback(
   expr: Expression,
   error: string,
-  options: Pick<CompilationOptions<Expression>, 'vars'>,
+  options: Pick<CompilationOptions, 'vars'>,
   diagnostic?: CompileDiagnostic
 ): CompilationResult<'interval-js', IntervalValue> {
   console.warn(

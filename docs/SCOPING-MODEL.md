@@ -467,18 +467,12 @@ the same rule: it reaches only the occurrences that DENOTE the index
 (`substituteBinderValues`, `library/utils.ts`). Substituting by name captured
 the globals a stored value refers to.
 
-The COMPILED route honours the same rule: a folded symbol value is emitted
-once as a preamble local outside every emitted function
-(`bindsFoldedValue`/`ensureFoldedValueEmitted`, `compilation/base-compiler.ts`)
-rather than inline where a parameter or an index could rebind its names, and a
-value still written inline — a leaf, an impure value — compiles against the
-preamble owner when the position would capture one of its names
-(`inlineFoldTarget`). The reference analysis descends into such a value the
-same way, so a name the value reads is reported in `freeSymbols`. Two shapes
-still read a local of the same name — a compiled top-level lambda,
-whose preamble has to sit inside the lambda body, and the shader targets,
-which have no place for an untyped value binding. Both are recorded in
-`ROADMAP.md`.
+The COMPILED route honours the same rule: the compiler
+(`compilation/ir/`) lowers the value of a name where the name is read, and
+declines when a name that the value reads is a local, a parameter or an index
+at that place, or has another binding there than in the value, so a parameter
+or an index never rebinds a name of the value (`compilation/ir/README.md`,
+the paragraph on the value of a name).
 
 A node that owns a local scope — a comprehension, a sum, a block — pushes an
 activation of that scope on every evaluation ("Activations" below). Its names

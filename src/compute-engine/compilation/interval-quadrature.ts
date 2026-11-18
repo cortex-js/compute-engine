@@ -52,9 +52,7 @@ const INTEGRATE_STATS = [
 const INTEGRATE_PATHS_SATURATION = 1_000_000;
 
 /** `numeric`: an `NIntegrate` node counts as one level too. The interval
- *  mode of the IR pipeline compiles it as an enclosure; the existing
- *  interval target does not compile it (a closed one is folded to a
- *  constant before), so it does not count it. */
+ *  mode of the IR pipeline compiles it as an enclosure. */
 function integrateStats(expr: Expression, numeric: boolean): IntegrateStats {
   const memo = INTEGRATE_STATS[numeric ? 1 : 0];
   const cached = memo.get(expr);
@@ -149,8 +147,7 @@ const NUMERIC_INTEGRALS: ReadonlySet<string> = new Set(['NIntegrate']);
 
 /**
  * The closed form of the integral of the operands `args`, for the IR
- * pipeline (the interval mode and JavaScript), by the rule of the existing
- * targets
+ * pipeline (the interval mode and JavaScript)
  * (`closedFormIntegral()`: the engine's antiderivative under the budgets of
  * the compilation, and no fold of a `vars` name that holds an engine value
  * or whose text is not a plain read). `vars`: the `vars` texts of the

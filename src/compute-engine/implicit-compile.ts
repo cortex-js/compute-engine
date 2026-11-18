@@ -13,16 +13,6 @@ import {
   boundVariableNames,
   callableBindingInContext,
 } from './boxed-expression/binders.js';
-import {
-  compileDiagnosticOf,
-  isCompileDeclineError,
-} from './compilation/diagnostics.js';
-import {
-  markImplicitCompileOptions,
-  recordJsProfileAttempt,
-  refusalOutcome,
-  type JsProfileSwitch,
-} from './js-profile-switch.js';
 
 /**
  * Compile `expr` for an **implicit** (engine-initiated) code-generation path —
@@ -48,14 +38,9 @@ import {
  * request keeps failing loudly with the environment's own error, regardless
  * of the flag.
  *
- * `consumer` names the caller (`map`, `integrand`, `nd`, …). With the
- * internal switch `ce._jsProfile` on for this consumer, the compilation is
- * tried with the profile `ir` first, and the existing compiler
- * runs when the profile does not give code (`tryProfile()`).
- *
- * With the shadow measure `ce._jsProfileShadow` on, the compilation of the
- * existing compiler is counted under `implicit:<consumer>`
- * (`js-profile-switch.ts`), unless the switch tried the profile first.
+ * `consumer` names the caller (`map`, `integrand`, `nd`, …). The
+ * compilation is that of `compile()`, with the profile `ir`, which compiles
+ * the built-in targets.
  *
  * The compile mode is the target's default, `'strict'`, unless `options`
  * names one: an operation whose value is complex (`Sqrt(x)` at `x = -4`)
@@ -76,25 +61,12 @@ export function implicitCompile(
   options?: Record<string, unknown>
 ): ReturnType<IComputeEngine['_compile']> | undefined {
   if (ce.jit === 'off') return undefined;
-  const profile = ce._jsProfile;
   try {
     // `entryChecks: false`: an implicit caller owns its argument contract and
     // validates the runner's result itself (see `CompilationOptions.entryChecks`).
-    return withCapturedCallBindings(ce, expr, () => {
-      const tried =
-        profile !== undefined && profileApplies(profile, consumer, options);
-      if (tried) {
-        const result = tryProfile(ce, expr, consumer, options);
-        if (result !== undefined) return result;
-      }
-      const existingOptions = {
-        ...options,
-        fallback: false,
-        entryChecks: false,
-      };
-      markImplicitCompileOptions(existingOptions, tried ? null : consumer);
-      return ce._compile(expr, existingOptions);
-    });
+    return withCapturedCallBindings(ce, expr, () =>
+      ce._compile(expr, { ...options, fallback: false, entryChecks: false })
+    );
   } catch (e) {
     if (e instanceof EvalError) {
       ce.jit = 'off';
@@ -106,98 +78,6 @@ export function implicitCompile(
 }
 
 /**
- * Whether `implicitCompile()` with the switch `profile` on tries the
- * profile for `consumer` with `options` (`tryProfile()`).
- *
- * The profile is tried when `consumer` is in the list of the switch (or the
- * list is absent) and the options do not select another target (`to` other
- * than `javascript`, `target`) or a profile. The other options are passed:
- * the profile declines those it does not have, and that decline is counted.
- * The `vars` of the series walk (`_["k"]`, `compiledSeriesTerm()`) is the
- * read of an input under another name, which the profile admits.
- */
-function profileApplies(
-  profile: JsProfileSwitch,
-  consumer: string,
-  options: Record<string, unknown> | undefined
-): boolean {
-  if (profile.consumers !== undefined && !profile.consumers.has(consumer))
-    return false;
-  return !(
-    options !== undefined &&
-    ((options.to !== undefined && options.to !== 'javascript') ||
-      options.target !== undefined ||
-      options.profile !== undefined)
-  );
-}
-
-/**
- * The compilation of `expr` with the profile of the switch, for
- * `implicitCompile()` with the switch on, when `profileApplies()`, or
- * `undefined` when the profile does not give code; the existing compiler
- * then runs, with the options of the caller.
- *
- * The sets that the compiler fills (`symbolDeps`, `varsObjectRefs`) are
- * replaced by fresh sets for the attempt, and their contents are added to
- * the sets of the caller only when the profile gives code: an attempt that
- * does not leaves no trace.
- *
- * A decline with the code `outside-profile` is counted `declined`; another
- * failure is counted `failed`. An `EvalError` or a `CancellationError` is
- * thrown again, for `implicitCompile()` to handle as for the existing
- * compiler.
- */
-function tryProfile(
-  ce: IComputeEngine,
-  expr: Expression,
-  consumer: string,
-  options: Record<string, unknown> | undefined
-): ReturnType<IComputeEngine['_compile']> | undefined {
-  const symbolDeps = options?.symbolDeps as Set<string> | undefined;
-  const varsObjectRefs = options?.varsObjectRefs as Set<string> | undefined;
-  const attemptDeps = symbolDeps === undefined ? undefined : new Set<string>();
-  const attemptRefs =
-    varsObjectRefs === undefined ? undefined : new Set<string>();
-  let result: ReturnType<IComputeEngine['_compile']>;
-  try {
-    result = ce._compile(expr, {
-      ...options,
-      ...(attemptDeps === undefined ? {} : { symbolDeps: attemptDeps }),
-      ...(attemptRefs === undefined ? {} : { varsObjectRefs: attemptRefs }),
-      profile: 'ir',
-      fallback: false,
-      entryChecks: false,
-    });
-  } catch (e) {
-    if (e instanceof EvalError || e instanceof CancellationError) throw e;
-    const diagnostic = compileDiagnosticOf(e);
-    recordJsProfileAttempt(
-      ce,
-      consumer,
-      isCompileDeclineError(e) ? refusalOutcome(diagnostic.code) : 'failed',
-      diagnostic.message
-    );
-    return undefined;
-  }
-  if (result.success !== true) {
-    const diagnostic = result.diagnostic;
-    recordJsProfileAttempt(
-      ce,
-      consumer,
-      refusalOutcome(diagnostic?.code),
-      diagnostic?.message ?? result.error
-    );
-    return undefined;
-  }
-  recordJsProfileAttempt(ce, consumer, 'admitted');
-  if (attemptDeps !== undefined)
-    for (const name of attemptDeps) symbolDeps!.add(name);
-  if (attemptRefs !== undefined)
-    for (const name of attemptRefs) varsObjectRefs!.add(name);
-  return result;
-}
-
-/**
  * Run `build` (a compilation of `expr`) with each callable name of `expr`
  * resolving to the binding that its occurrence in `expr` was made with.
  *
@@ -205,7 +85,7 @@ function tryProfile(
  * binding that its name has where it is evaluated (`docs/SCOPING-MODEL.md`,
  * "Callable resolution"). The compiler reads every name in the current scope,
  * and it declines a call whose function differs from the function of its
- * name there (`assertCapturedCallableBindings()`, `base-compiler.ts`). So
+ * name there. So
  * with `c(y, D, e) := ∫ n(x, y, e) dx`, the numeric value of
  * `∫₀¹ y·c(y, L, 0.001) dy` was not computed in a scope that declares
  * another `c`: the compiled kernel was declined, and the interpreter could

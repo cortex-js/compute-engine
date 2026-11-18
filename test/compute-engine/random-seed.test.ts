@@ -107,19 +107,6 @@ describe('Seeding is WithRandomSeed', () => {
 });
 
 describe('Compiled draws — no compile-time bake path', () => {
-  // The bake path existed solely to give `ce.randomSeed` a compiled meaning:
-  // each `Random` node became a constant derived from the compile-time seed.
-  // With no compile-time seed there is nothing to bake. Phase 3 of the
-  // redesign routes every compiled draw through `_SYS.drawNextRandomNumber()`,
-  // which branches at CALL time on whether a frame is active.
-  it('Random() emits the frame-aware helper, never a baked constant', () => {
-    const ce = new ComputeEngine();
-    // NOT a bare `Math.random()`: whether a frame is active is a CALL-time
-    // property, so the branch lives inside the helper (spec §7).
-    expect(compile(ce.box(['Random'])).code).toBe(
-      '_SYS.drawNextRandomNumber()'
-    );
-  });
 
   it('a compiled draw is live: repeated calls differ', () => {
     const ce = new ComputeEngine();

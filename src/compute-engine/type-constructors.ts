@@ -28,8 +28,6 @@ import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
 import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
-import { sumVariantInfo } from './sum-representation.js';
-import { recordEngineCompileHandler } from './compilation/engine-compile-handlers.js';
 
 /**
  * Value constructors minted by a type declaration
@@ -500,56 +498,6 @@ export function mintTypeConstructor(
     def.eq = constructorEq;
   }
 
-  // §4.6 / D11: compilation is type erasure. A constructor application compiles
-  // exactly where the equivalent plain value compiles, to the same emission —
-  // no more, no less. Unary (scalar/list/… bodies): the compiled operand
-  // itself, zero cost. N-ary (tuple bodies): whatever the SAME-target `Tuple`
-  // construction emits (JS pair, GLSL `vecN`), by lowering an actual
-  // `Tuple` node through the caller's `compile` callback — so a target/position
-  // where `Tuple` fails closed declines identically, with that path's own
-  // diagnostic. Both kinds erase: an alias identity constructor can appear
-  // un-evaluated inside a compiled expression too.
-  //
-  // AMENDED by the sum-type plan
-  // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B1): the tag is
-  // erased iff it is statically discharged. A variant of a SUGAR-DECLARED sum
-  // whose sibling variants share its JS representation has nothing to discharge
-  // the tag against at run time, so its constructor REIFIES the tag —
-  // `{ _tag: 'plus', _ops: [a, b] }` (`{ _tag: 'red' }` when nullary). Every
-  // other constructor, this same sum's variants included when they are
-  // representation-disjoint, keeps the erasure above verbatim.
-  def.compile = (args, compile, context) => {
-    // An OBJECT constructor declines, fail-closed: compiled targets have no
-    // object representation yet (the engine⇄compiled boundary for objects is
-    // Appendix B ruling B9, a later phase), and erasing the construction would
-    // silently produce a value with none of an object's identity semantics.
-    if (objectFields !== undefined) return undefined;
-    const info = sumVariantInfo(ce, name);
-    const js = (context?.language ?? 'javascript') === 'javascript';
-    if (info?.policy === 'tagged') {
-      // JS target only (§B2): every other target fails closed on a tagged
-      // value by declining here, with the caller's own diagnostic.
-      if (!js) return undefined;
-      const tag = JSON.stringify(name);
-      if (args.length === 0) return `({ _tag: ${tag} })`;
-      const ops = args.map((x) => compile(x)).join(', ');
-      return `({ _tag: ${tag}, _ops: [${ops}] })`;
-    }
-    // ERASED policy, `nothing` payload: the variant has no operands to erase
-    // TO, so give it the one JS value its representation bucket names. (A
-    // nullary constructor outside a sum still declines — there is nothing to
-    // distinguish it from, and D11 never gave it an emission.)
-    if (info !== undefined && info.shape === 'nothing')
-      return js ? 'null' : undefined;
-    if (args.length === 0) return undefined;
-    if (!nAry) return args.length === 1 ? compile(args[0]) : undefined;
-    return compile(args[0].engine.function('Tuple', args as Expression[]));
-  };
-  // The handler writes only engine code (the operand, a tuple or a tagged
-  // object), so the code can run on a worker of the kernel pool. It is made
-  // for each type, so the standard library tables do not hold it.
-  recordEngineCompileHandler(def.compile);
-
   ce.declare(name, def);
 
   const binding = scope.bindings.get(name);
@@ -1017,31 +965,7 @@ export function installConstructorFunction(
         return engine._fn(name, [...payload.ops]);
       return engine._fn(name, [payload]);
     },
-    // §4.6: the tag erases. A raw-shaped application compiles exactly where
-    // the equivalent plain value compiles; a user-arm application compiles as
-    // an ordinary application of the user's function literal (the body
-    // computes the payload, whose representation IS the erased value). An
-    // undecidable shape declines.
-    compile: (args, compile) => {
-      if (args.length === 0) return undefined;
-      const engine = args[0].engine;
-      const verdict = rawArmMatch(args as ReadonlyArray<Expression>, rawCheck);
-      if (verdict === 'yes') {
-        if (!nAryRaw) return args.length === 1 ? compile(args[0]) : undefined;
-        return compile(engine.function('Tuple', args as Expression[]));
-      }
-      if (verdict === 'no')
-        return compile(
-          engine.function('Apply', [literal, ...(args as Expression[])])
-        );
-      return undefined;
-    },
   };
-  // The handler writes only engine code (the payload, or a call of the
-  // user's function literal, which the compiler emits itself), so the code
-  // can run on a worker of the kernel pool. It is made for each constructor,
-  // so the standard library tables do not hold it.
-  recordEngineCompileHandler(def.compile);
 
   // Install: update the existing binding IN PLACE when this scope has one
   // (the auto-minted constructor being overridden, or the shell the

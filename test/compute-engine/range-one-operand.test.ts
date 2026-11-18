@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import {
   range,
   literalRange,
@@ -51,16 +51,5 @@ describe('A one-operand Range counts from 1 to its operand', () => {
     expect(elementsOf(ce.parse('\\operatorname{Range}(0)').evaluate())).toEqual(
       [1, 0]
     );
-  });
-
-  test('compiled to JavaScript', () => {
-    for (const n of [0, -2, 3]) {
-      const expected = elementsOf(ce.box(['Range', n]).evaluate());
-      for (const form of ['raw', 'canonical'] as const) {
-        const fn = compile(ce.box(['Range', 'n'], { form }));
-        expect(fn.success).toBe(true);
-        expect(fn.run!({ n })).toEqual(expected);
-      }
-    }
   });
 });

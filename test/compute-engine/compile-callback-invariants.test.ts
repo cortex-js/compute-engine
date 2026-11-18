@@ -17,101 +17,10 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { parseEpsil } from '../../src/epsil/parse-epsil';
-
-describe('a synthesized derivative callback shares its repeated subexpressions', () => {
-  const ce = new ComputeEngine();
-  // A minimum of squared distances read twice in the body: the derivative
-  // of `Min` has no closed form, so the stencil fallback compiles
-  // `Function(body, x)` at emission time.
-  const latex =
-    '\\frac{\\mathrm{d}}{\\mathrm{d}x}\\left(\\min((x-1)^2+(y-2)^2,(x-3)^2+(y-1)^2)^2+3\\min((x-1)^2+(y-2)^2,(x-3)^2+(y-1)^2)\\right)';
-
-  test('the minimum is bound once inside the callback', () => {
-    const fn = compile(ce.parse(latex), { to: 'javascript' });
-    expect(fn.success).toBe(true);
-    const code = fn.code!;
-    expect(code).toContain('_SYS.nd(');
-    const callback = code.slice(code.indexOf('_SYS.nd('));
-    // One `Math.min` for the two reads, not one per read, bound inside the
-    // stencil callback, where the parameter it mentions is in scope.
-    expect(callback.split('Math.min(').length - 1).toBe(1);
-    expect(callback).toMatch(
-      /\(x\) => \(\(\) => \{ const (_cse\d+) = Math\.min\(.*; return 3 \* \1 \+ _SYS\.pow2\(\1\); \}\)\(\)/
-    );
-  });
-
-  test('the value agrees with the unshared stencil', () => {
-    const fn = compile(ce.parse(latex), { to: 'javascript' });
-    const plain = compile(ce.parse(latex), { to: 'javascript', cse: false });
-    expect(plain.success).toBe(true);
-    for (const [x, y] of [
-      [1.2, 2.1],
-      [2.9, 1.3],
-      [2.2, 4.4],
-    ])
-      expect(fn.run!({ x, y })).toBe(plain.run!({ x, y }));
-  });
-});
-
-describe('a generic literal rebuilt at its ground bound still shares its body', () => {
-  // A generic literal is re-boxed at its ground signature before its body
-  // compiles (`literalAtGroundSignature`), so the harvested tree's region is
-  // keyed on the node the rebuild replaced: the body takes the nested
-  // harvest, and must share exactly as the plain literal does.
-  const ce = new ComputeEngine();
-  const body = 'Min(xs)^2 + 3 * Min(xs) + Sin(Min(xs))';
-  const program = (signature: string) => {
-    const [ast] = parseEpsil(
-      `function gm${signature} { ${body} }\ngm([1, 2, 3])`,
-      { parseLatex: (latex: string) => ce.parse(latex).json }
-    );
-    return compile(ce.box(ast as never), {
-      to: 'javascript',
-      fallback: false,
-      constantFold: false,
-    });
-  };
-
-  test('one reduction for three reads, generic and plain alike', () => {
-    const generic = program('(xs: T) -> number where T: list<number>');
-    const plain = program('(xs: list<number>) -> number');
-    for (const r of [generic, plain]) {
-      expect(r.success).toBe(true);
-      expect(r.code!.split('Math.min(').length - 1).toBe(1);
-      expect(r.code).toMatch(
-        /const (_cse\d+) = .*reduce.*Math\.min.*\(xs\); return 3 \* \1 \+ Math\.sin\(\1\) \+ _SYS\.pow2\(\1\);/
-      );
-      expect(r.run!({})).toBeCloseTo(1 + 3 + Math.sin(1), 12);
-    }
-  });
-});
 
 describe('an integrand computes its loop invariants once', () => {
   const ce = new ComputeEngine();
   ce.declare('k', 'number');
-  const latex =
-    '\\int_{x}^{10}\\frac{\\exp(-(y/2))y^{k/2-1}}{\\Gamma(\\frac{k}{2})\\sqrt{2}^{k}}\\,\\mathrm{d}y';
-
-  test('JavaScript: the gamma product is assigned on the first sample only', () => {
-    const fn = compile(ce.parse(latex), { to: 'javascript' });
-    expect(fn.success).toBe(true);
-    const code = fn.code!;
-    // Once in the bindings of the integrand, and once in those of its
-    // log-space form (`_SYS.finiteOr`, ROADMAP CE-394), which computes its
-    // constant factors on its own first call.
-    expect(code.split('_SYS.gamma(').length - 1).toBe(2);
-    expect(code).toContain('_SYS.finiteOr');
-    // The lambda the quadrature calls tests a flag and reads the bindings;
-    // the held body reads them by name.
-    expect(code).toMatch(/let (_tv\d+) = false; let _tv\d+/);
-    expect(code).toMatch(
-      /const _tv\d+ = \(y\) => \(_SYS\.finiteOr\(.*_SYS\.pow\(y, _tv\d+\)\) \/ _tv\d+, _tv\d+, y\)\)/
-    );
-    const value = fn.run!({ x: 2, k: 5 }) as number;
-    const plain = compile(ce.parse(latex), { to: 'javascript', cse: false });
-    expect(value).toBeCloseTo(plain.run!({ x: 2, k: 5 }) as number, 12);
-  });
 
   test('a nested integral with a dependent bound keeps its value', () => {
     // The inner integrand reads the outer variable, so the inner bindings

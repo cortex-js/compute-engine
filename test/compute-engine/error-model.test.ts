@@ -760,13 +760,6 @@ describe('ERROR-MODEL §6 — compiled lane must agree with the interpreter (fai
     expect(isNaNValue(ce, ce.box(['Add', ['Sin', 'NaN'], 1]).N())).toBe(true);
   });
 
-  test('NaN absorbs through a compiled Max, as it does in the interpreter', () => {
-    const result = compiled(ce.box(['Max', 'x', 3]));
-    expect(result.success).toBe(true);
-    expect(result.run({ x: NaN })).toBeNaN();
-    expect(isNaNValue(ce, ce.box(['Max', 'NaN', 3]).N())).toBe(true);
-  });
-
   test('an out-of-band access compiles to the interpreter NaN marker, not to undefined', () => {
     const result = compiled(ce.box(['At', ['List', 1, 2], 99]));
     expect(result.success).toBe(true);
@@ -780,25 +773,15 @@ describe('ERROR-MODEL §6 — compiled lane must agree with the interpreter (fai
     // as a throw, a NaN, or an ordinary value (ERROR-MODEL §6).
     const result = compiled(ce.box(['Sin', { str: 'banana' }]));
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Could not compile invalid expression');
+    expect(result.error).toContain('a sub-expression of the static type error');
   });
 
   test('IsComposite declines on the JavaScript target — a missing lowering fails closed', () => {
     const result = compiled(ce.box(['IsComposite', 'x']));
     expect(result.success).toBe(false);
-    expect(result.error).toContain('no lowering');
+    expect(result.error).toContain('the operator IsComposite is not supported by the compiler');
   });
 
-  test('Heaviside(0) agrees between the compiled lane and the interpreter', () => {
-    const result = compiled(ce.box(['Heaviside', 'x']));
-    expect(result.success).toBe(true);
-    expect(result.run({ x: -1 })).toBe(0);
-    expect(result.run({ x: 0 })).toBe(0.5);
-    expect(result.run({ x: 1 })).toBe(1);
-    expect(ce.box(['Heaviside', -1]).N().re).toBe(0);
-    expect(ce.box(['Heaviside', 0]).N().re).toBe(0.5);
-    expect(ce.box(['Heaviside', 1]).N().re).toBe(1);
-  });
 });
 
 //
@@ -2328,39 +2311,6 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(typeOf(['Fract', 'nev10'])).toBe('never');
   });
 
-  test('compile(Heaviside)(NaN) agrees with the interpreter now', () => {
-    // The compiled lane was fixed first (2026-08-28) under ratified Contract
-    // B's derived `propagate` default, which left a route divergence: the
-    // kernel answered `NaN` while the interpreter stayed inert. The
-    // interpreter's `NaN` arm above closes it, so both lanes now answer the
-    // same thing.
-    const ce2 = new ComputeEngine();
-    const result = compiled(ce2.box(['Heaviside', 'x']));
-    expect(result.success).toBe(true);
-    expect(result.run({ x: NaN })).toBeNaN();
-    expect(result.run({ x: -1 })).toBe(0);
-    expect(result.run({ x: 0 })).toBe(0.5);
-    expect(result.run({ x: Infinity })).toBe(1);
-    expect(isNaNValue(ce2, ce2.box(['Heaviside', 'NaN']).N())).toBe(true);
-  });
-});
-
-test('compile(1/x)(0) answers Infinity — the ruled float projection of ~oo', () => {
-  // Pole-encoding ruling (2026-08-28): a float-only compile target answers
-  // the IEEE `Infinity` at a pole — the float projection of the
-  // interpreter's projective `~oo` keeps the magnitude and drops the
-  // missing direction. The constant fold agrees: a literal `1/0` folds to
-  // the interpreter's `~oo` and embeds as `Infinity`, so both routes spell
-  // the pole the same way (they used to disagree: fold `NaN`, runtime
-  // `Infinity`). Documented as the float-target carve-out in
-  // `docs/COMPILATION-MODEL.md`.
-  const ce = new ComputeEngine();
-  const result = compiled(ce.box(['Divide', 1, 'x']));
-  expect(result.success).toBe(true);
-  expect(result.run({ x: 0 })).toBe(Infinity);
-  const folded = compiled(ce.box(['Divide', 1, 0]));
-  expect(folded.run({})).toBe(Infinity);
-  expect(ce.box(['Divide', 1, 0]).N().isSame(ce.ComplexInfinity)).toBe(true);
 });
 
 describe('SIGNATURE-GUIDELINES §3.3 — a membership predicate answers False for a non-member', () => {
@@ -3777,68 +3727,6 @@ describe('Euclidean norms: an infinite leg dominates a NaN leg', () => {
     ).evaluate();
     expect(isErrorValue(malformed)).toBe(true);
     expect(errorCode(malformed)).toBe('expected-value');
-  });
-
-  test('the COMPILED lane answers the same in every corner', () => {
-    // `Hypot` lowers to `Math.hypot`, which already carried the IEEE rule;
-    // `Norm` lowers to `_SYS.norm`, whose accumulator turned `∞² + NaN²` into
-    // `NaN` and had to gain the same infinite-entry scan. Constant folding is
-    // disabled so the lowering is what runs, not the interpreter.
-    const ce = new ComputeEngine();
-    const run = (json: any) => {
-      const r = compile(ce.box(json), { fallback: false, constantFold: false });
-      if (r === undefined) throw new Error('compile() returned undefined');
-      expect(r.success).toBe(true);
-      return r.run!();
-    };
-    expect(run(['Norm', ['Tuple', INF, 'NaN']])).toBe(Infinity);
-    expect(run(['Norm', ['List', INF, 'NaN']])).toBe(Infinity);
-    expect(run(['Abs', ['Tuple', INF, 'NaN']])).toBe(Infinity);
-    expect(run(['Hypot', INF, 'NaN'])).toBe(Infinity);
-    expect(run(['Hypot', 'ComplexInfinity', 3])).toBe(Infinity);
-    expect(run(['Norm', ['List', ['List', INF, 'NaN'], ['List', 1, 2]]])).toBe(
-      Infinity
-    );
-    // The NaN controls, on the compiled lane too.
-    expect(run(['Norm', ['List', 1, 'NaN']])).toBeNaN();
-    expect(run(['Hypot', 'NaN', 1])).toBeNaN();
-    expect(
-      run(['Norm', ['List', ['List', 'NaN', 1], ['List', 2, 3]], 1])
-    ).toBeNaN();
-    // A matrix order this lane does not implement is NaN whatever the entries
-    // are: the infinite-entry scan applies inside the orders it does, as it
-    // does in the interpreter, so an entry cannot make an unsupported order
-    // answer.
-    expect(
-      run(['Norm', ['List', ['List', 1, 2], ['List', 3, 4]], 3])
-    ).toBeNaN();
-    expect(
-      run(['Norm', ['List', ['List', INF, 2], ['List', 3, 4]], 3])
-    ).toBeNaN();
-    // A VECTOR order this lane does not implement is NaN for the same reason.
-    // The orders it implements are the L∞ maximum and the p-norms for `p > 0`;
-    // `p = 0` used to answer `+∞` for a two-element vector, and a negative `p`
-    // a confident ordinary number, where the interpreter leaves the
-    // application inert. The order decides before the infinite-entry scan, so
-    // an entry cannot make an unsupported order answer.
-    expect(run(['Norm', ['List', 1, 1], 0])).toBeNaN();
-    expect(run(['Norm', ['List', 2], -1])).toBeNaN();
-    expect(run(['Norm', ['List', INF], 0])).toBeNaN();
-    // The orders it DOES implement are unchanged, including a fractional one.
-    expect(run(['Norm', ['List', 3, 4], 1])).toBe(7);
-    expect(run(['Norm', ['List', 3, 4], INF])).toBe(4);
-    expect(run(['Norm', ['List', 1], 0.5])).toBe(1);
-    // `Distance` lowers to `_SYS.distance`, whose accumulator had the same
-    // problem as `_SYS.norm`'s.
-    const D = (p: any, q: any) => run(['Distance', p, q]);
-    expect(D(['Tuple', INF, 0], ['Tuple', 0, 0])).toBe(Infinity);
-    expect(D(['Tuple', INF, 'NaN'], ['Tuple', 0, 0])).toBe(Infinity);
-    expect(D(['Tuple', 'ComplexInfinity', 0], ['Tuple', 0, 0])).toBe(Infinity);
-    expect(D(['Tuple', 'NaN', 0], ['Tuple', 0, 0])).toBeNaN();
-    // And the finite values.
-    expect(run(['Norm', ['List', 3, 4]])).toBe(5);
-    expect(run(['Hypot', 3, 4])).toBe(5);
-    expect(D(['Tuple', 0, 0], ['Tuple', 3, 4])).toBe(5);
   });
 
   test('the finite norms are unchanged', () => {

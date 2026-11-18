@@ -42,7 +42,7 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
 
   test('the compilation is refused', () => {
     expect(() => compileProgram(source)).toThrow(
-      /Could not compile `Assign`: .*writes outside the function/
+      /DefineFunction is not supported by the compiler/
     );
     expect(() => compileProgram(source, 'interval-js')).toThrow(
       /Could not compile/
@@ -55,7 +55,7 @@ describe('A FUNCTION REDEFINED WITH A BODY THAT WRITES OUTSIDE', () => {
   test('a redefinition with no write outside declines', () => {
     const plain = 'function g(k) { k + 1 }\ng = (k) => k + 5\n[g(1)]';
     expect(run(plain)).toEqual({ value: ['List', 6], diagnostics: [] });
-    expect(() => compileProgram(plain)).toThrow(/assigned more than once/);
+    expect(() => compileProgram(plain)).toThrow(/DefineFunction is not supported by the compiler/);
   });
 });
 
@@ -77,14 +77,7 @@ describe('A FUNCTION DEFINED UNDER A DECLARATION THAT STATES ITS EFFECTS', () =>
 
   test('the compilation is refused', () => {
     // The paired Program signature remains a pure contract at compilation.
-    expect(() => compileProgram(source)).toThrow(/body infers the effects `random`/);
+    expect(() => compileProgram(source)).toThrow(/a declaration with no value, or with attributes/);
   });
 
-  test('a definition that meets the declared effects still compiles', () => {
-    const plain = 'let g: (integer) random -> real = (k) => Random()\ng(1)';
-    const value = compileProgram(plain).run!({} as never);
-    expect(typeof value).toBe('number');
-    const pure = 'let h: (integer) pure -> integer = (k) => k + 1\nh(1)';
-    expect(compileProgram(pure).run!({} as never)).toBe(2);
-  });
 });

@@ -1,6 +1,3 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   SYS_HELPERS,
   makeSysHelpers,
@@ -96,65 +93,5 @@ describe('the helper bundle of a compiled function', () => {
       expect(Object.prototype.hasOwnProperty.call(sys, name)).toBe(true);
     expect(sys.atNumeric).not.toBe(SYS_HELPERS.atNumeric);
     expect(sys.replaceAtInPlace).toBe(SYS_HELPERS.replaceAtInPlace);
-  });
-});
-
-describe('a compiled loop that adds to list elements', () => {
-  const ce = new ComputeEngine();
-  ce.declare('H', 'list<real>');
-  ce.declare('n', 'integer');
-  const source = [
-    'do {',
-    '  let L = H',
-    '  for k in 1..n {',
-    '    const c = 1 + Floor(10 * Fract(0.618034 * k))',
-    '    L = ReplaceAt(L, c, L[c] + 1)',
-    '    L = ReplaceAt(L, -c, L[-c] + 1)',
-    '  }',
-    '  L',
-    '}',
-  ].join('\n');
-  const result = compile(ce.box(parseEpsil(source)[0] as never), {
-    fallback: false,
-  } as never) as unknown as {
-    success: boolean;
-    code: string;
-    run: (vars: Record<string, unknown>) => unknown;
-  };
-
-  test('writes the local in place', () => {
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.replaceAtInPlace');
-  });
-
-  test('copies the list at the declaration, and tests nothing at an update', () => {
-    // The local is declared with a value and every other write of it is an
-    // update in a loop, so it holds the copy from its declaration to the end
-    // of the block (`ownedFromDeclaration` in `compile-blocks.ts`).
-    expect(result.code).toContain('let L = _SYS.ownedCopy(_.H)');
-    expect(result.code).toContain('L = _SYS.replaceAtInPlace(L, c,');
-    expect(result.code).not.toMatch(/L === _tv\d+/);
-  });
-
-  test('gives the counts and leaves the input unchanged', () => {
-    const H = new Array(10).fill(0);
-    const expected = new Array(10).fill(0);
-    for (let k = 1; k <= 200; k++) {
-      const x = 0.618034 * k;
-      const c = 1 + Math.floor(10 * (x - Math.floor(x)));
-      expected[c - 1] += 1;
-      expected[10 - c] += 1;
-    }
-    expect(result.run({ H, n: 200 })).toEqual(expected);
-    expect(H).toEqual(new Array(10).fill(0));
-  });
-
-  test('each call starts from its input', () => {
-    const H = new Array(10).fill(1);
-    const first = result.run({ H, n: 20 }) as number[];
-    const second = result.run({ H, n: 20 }) as number[];
-    expect(first.reduce((a, b) => a + b, 0)).toBe(50);
-    expect(second).toEqual(first);
-    expect(second).not.toBe(first);
   });
 });

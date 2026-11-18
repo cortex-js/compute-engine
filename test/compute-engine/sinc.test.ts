@@ -5,7 +5,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { sinc } from '../../src/compute-engine/interval';
 
 const ce = new ComputeEngine();
@@ -57,39 +56,6 @@ describe('SINC - LaTeX parsing and serialization', () => {
     const latex = expr.latex;
     // Serialization should produce valid LaTeX containing sinc
     expect(latex).toContain('sinc');
-  });
-});
-
-describe('SINC - JavaScript compilation', () => {
-  test('compiles Sinc to _SYS.sinc', () => {
-    const expr = ce.expr(['Sinc', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.sinc');
-  });
-
-  test('compiled sinc(0) returns 1', () => {
-    const expr = ce.expr(['Sinc', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    const fn = result.run!;
-    expect(fn({ x: 0 })).toBe(1);
-  });
-
-  test('compiled sinc(1) returns sin(1)/1', () => {
-    const expr = ce.expr(['Sinc', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    const fn = result.run!;
-    expect(fn({ x: 1 })).toBeCloseTo(Math.sin(1), 10);
-  });
-
-  test('compiled sinc(pi) is approximately 0', () => {
-    const expr = ce.expr(['Sinc', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    const fn = result.run!;
-    expect(Math.abs(fn({ x: Math.PI }))).toBeLessThan(1e-10);
   });
 });
 

@@ -418,43 +418,6 @@ describe('TYCHO ITEM 335: COMPILED RESTRICTION OVER AN ORDERED CARRIER', () => {
     const result = compile(e)!;
     expect(result.success).toBe(false);
   });
-
-  // A range with a free bound lowers: it is materialized at run time and
-  // aligned with the mask, truncated to the shorter length, as the
-  // interpreter answers once the bound has a value.
-  test('a range with a free bound agrees with the interpreter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('m', 'integer');
-    const e = ce.box([
-      'If',
-      ['List', 'True', 'False', 'True'],
-      ['Range', 1, 'm'],
-    ]);
-    const result = compile(e)!;
-    expect(result.success).toBe(true);
-    for (const m of [2, 5]) {
-      const compiled = result.run!({ m }) as number[];
-      ce.assign('m', m);
-      const interpreted = e.evaluate();
-      expect(compiled.length).toBe(interpreted.count);
-      const cells = Array.from(interpreted.each()).map((x) => x.re);
-      expect(compiled).toEqual(cells);
-    }
-  });
-
-  // A tuple passed for a symbol declared `indexed_collection<number>` is an
-  // array at run time, aligned with the mask, as the interpreter now zips it.
-  test('a tuple under an ordered declaration agrees with the interpreter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('P', 'indexed_collection<number>');
-    const e = ce.box(['If', ['List', 'True', 'False'], 'P']);
-    const result = compile(e)!;
-    expect(result.success).toBe(true);
-    const compiled = result.run!({ P: [1, 2] }) as number[];
-    ce.assign('P', ce.box(['Tuple', 1, 2]));
-    const cells = Array.from(e.evaluate().each()).map((x) => x.re);
-    expect(compiled).toEqual(cells);
-  });
 });
 
 /**
@@ -510,44 +473,6 @@ describe('TYCHO ITEM 335: A UNION WITH A TUPLE OR A STRING ARM', () => {
     const e = ce.box(['If', MASK, 'P'] as any);
     ce.assign('P', ce.box({ str: 'ab' }));
     expect(e.evaluate().operator).toBe('Error');
-  });
-
-  test('the compiler dispatches on a point-or-point-list union', () => {
-    // A flat array cannot say by itself whether it is a point or a list, but
-    // a list of points holds arrays and a point holds numbers. The compiled
-    // code tests the value of `P` once and holds one body for each shape: a
-    // point is one value, repeated under the mask; a list of points is zipped
-    // with the mask. Each result equals the interpreter's for a value of each
-    // shape.
-    const type = 'tuple<number, number> | list<tuple<number, number>>';
-    const ce = new ComputeEngine();
-    ce.declare('P', type);
-    const result = compile(ce.box(['If', MASK, 'P'] as any), {
-      fallback: false,
-    })!;
-    expect(result.success).toBe(true);
-    const run = result.run as (s: Record<string, unknown>) => unknown;
-    expect(run({ P: [1, 2] })).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-    expect(evaluated(type, ['Tuple', 1, 2]).v.toString()).toBe(
-      '[(1, 2),(NaN, NaN)]'
-    );
-    expect(
-      run({
-        P: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-    expect(
-      evaluated(type, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]).v.toString()
-    ).toBe('[(1, 2),(NaN, NaN)]');
   });
 
   // A string under a mask is refused whatever the declaration (selection

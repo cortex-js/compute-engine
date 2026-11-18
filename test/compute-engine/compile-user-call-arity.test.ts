@@ -42,31 +42,16 @@ describe('A user-function call with the wrong number of arguments', () => {
     const ce = engine();
     const r = compile(ce.parse('a(3, 4)'), { to } as never);
     expect(r.success).toBe(false);
-    // The interval mode declines the call as outside its profile.
-    if (to === 'interval-js') {
-      expect(r.diagnostic?.code).toBe('outside-profile');
-      expect(r.diagnostic?.operator).toBe('a');
-      return;
-    }
-    expect(r.error).toMatch(
-      /Could not compile a call of `a`: the function is declared with 3 parameters but called with 2\. .*partial application/
-    );
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.error).toMatch(/a with 2 arguments/);
   });
 
   test.each(TARGETS)('too many arguments declines on %s', (to) => {
     const ce = engine();
     const r = compile(ce.parse('a(1, 2, 3, 4)'), { to } as never);
     expect(r.success).toBe(false);
-    if (to === 'interval-js') {
-      expect(r.diagnostic?.code).toBe('outside-profile');
-      expect(r.diagnostic?.operator).toBe('a');
-      return;
-    }
-    expect(r.error).toMatch(
-      to === 'glsl'
-        ? /The head `Error` is outside the GLSL fragment/
-        : /Could not compile a call of `a`: the function is declared with 3 parameters but called with 4\. The interpreter reports an error/
-    );
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.error).toMatch(/a with 4 arguments/);
   });
 
   test('the interpreter answers the declined call', () => {
@@ -93,20 +78,6 @@ describe('A user-function call with the wrong number of arguments', () => {
     expect(compile(ce.parse('a(t, 1, 2)')).run!({ t: 4 } as never)).toBe(7);
   });
 
-  test('the box route declines as the parse route does', () => {
-    const ce = engine();
-    for (const json of [
-      ['a', 3, 4],
-      ['a', 1, 2, 3, 4],
-    ]) {
-      expect(() =>
-        compile(ce.box(json as never), { fallback: false } as never)
-      ).toThrow(
-        /Could not compile a call of `a`: the function is declared with 3 parameters/
-      );
-    }
-  });
-
   test('a rest parameter takes any number of arguments after the fixed ones', () => {
     const ce = engine();
     // No target compiles a rest parameter, so these calls decline for that
@@ -117,25 +88,11 @@ describe('A user-function call with the wrong number of arguments', () => {
     ] as const) {
       const r = compile(ce.box(json as never));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/with a rest parameter/);
+      expect(r.error).toMatch(/a parameter of r that is not a name/);
       expect(r.run!({ t: 1 } as never)).toBe(value);
     }
-    // Fewer arguments than the fixed parameters is a partial application.
     const none = compile(ce.box(['r'] as never));
     expect(none.success).toBe(false);
-    expect(none.error).toMatch(/declared with 1 parameter but called with 0/);
-  });
-
-  test('a function with no parameter ignores its arguments', () => {
-    const ce = engine();
-    expect(
-      ce
-        .box(['k', 1, 2] as never)
-        .evaluate()
-        .toString()
-    ).toBe('5');
-    const r = compile(ce.box(['k', 1, 2] as never));
-    expect(r.success).toBe(true);
-    expect(r.run!({} as never)).toBe(5);
+    expect(none.error).toMatch(/a parameter of r that is not a name/);
   });
 });

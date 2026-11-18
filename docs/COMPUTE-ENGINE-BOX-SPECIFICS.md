@@ -190,5 +190,5 @@ after the other. The areas, by the files they change most:
 | Types                      | `src/common/type/`, `src/compute-engine/types-*.ts`                                          |
 
 Two sessions in one area wait for each other at the box lock and the staging
-queue, and their changes to `base-compiler.ts` and `boxed-expression/`
+queue, and their changes to `compilation/ir/` and `boxed-expression/`
 conflict.

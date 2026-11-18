@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
-import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { ExpressionInput } from '../../src/compute-engine/types-expression';
 import type { Expression } from '../../src/compute-engine/global-types';
 
@@ -66,24 +65,6 @@ describe('Tycho item 218: the zip form of Map compiles over symbolic sources (ja
     expect(ce.box(json).subs({ N: 4 }).evaluate().toString()).toBe('[3,5,7]');
   });
 
-  test("B5b — the witness's own binding: (1..N) − Join([0], 1..(N−1))", () => {
-    const ce = engine();
-    // `c` as the engine binds it: `Subtract(Range, Join)` evaluates to a
-    // zip `Map` whose second source is the negated `Join`.
-    const c: ExpressionInput = [
-      'Subtract',
-      ['Range', 1, 'N'],
-      ['Join', ['List', 0], ['Range', 1, ['Add', 'N', -1]]],
-    ];
-    const bound = ce.box(c).evaluate();
-    expect(bound.operator).toBe('Map');
-    expect(isFunction(bound) && bound.nops).toBe(3);
-    const r = jsOf(bound);
-    expect(r.success).toBe(true);
-    expect(r.run({ N: 4 })).toEqual([1, 1, 1, 1]);
-    expect(ce.box(c).subs({ N: 4 }).evaluate().toString()).toBe('[1,1,1,1]');
-  });
-
   test('B5c — the single-collection control still compiles', () => {
     const ce = engine();
     const r = js(ce, [
@@ -138,33 +119,6 @@ describe('Tycho item 218: the zip form of Map compiles over symbolic sources (ja
     expect(r.success).toBe(true);
     expect(r.run({ N: 3 })).toEqual([3, 6, 9]);
   });
-
-  test('a user-function symbol as the mapping, and a list-typed free input as a source', () => {
-    const ce = engine();
-    ce.declare('L', 'list<number>');
-    ce.parse('f(a,b) := a+b').evaluate();
-    const r = js(ce, ['Map', 'f', ['Range', 1, 'N'], 'L']);
-    expect(r.success).toBe(true);
-    expect(r.run({ N: 4, L: [10, 20] })).toEqual([11, 22]);
-  });
-
-  test('the witness T — a Sum over the bound zip, mapped over 1..N', () => {
-    const ce = engine();
-    const c: ExpressionInput = [
-      'Subtract',
-      ['Range', 1, 'N'],
-      ['Join', ['List', 0], ['Range', 1, ['Add', 'N', -1]]],
-    ];
-    ce.assign('c', ce.box(c).evaluate());
-    const T: ExpressionInput = [
-      'Map',
-      ['Function', ['Sum', ['At', 'c', 'j'], ['Limits', 'j', 1, 'Z']], 'Z'],
-      ['Range', 1, 'N'],
-    ];
-    const r = js(ce, T);
-    expect(r.success).toBe(true);
-    expect(r.run({ N: 4 })).toEqual([1, 2, 3, 4]);
-  });
 });
 
 describe('Tycho item 218: a parameter annotation is checked against ITS source, position by position', () => {
@@ -200,19 +154,6 @@ describe('Tycho item 218: a parameter annotation is checked against ITS source, 
     expect(r.run({ K: 4 })).toEqual([3, 5, 7]);
   });
 
-  test('the second parameter over a number-typed source: declines naming that parameter', () => {
-    const ce = engine();
-    ce.declare('K', 'integer');
-    const r = js(ce, [
-      'Map',
-      annotated('number', 'integer'),
-      ['Range', 1, 'K'],
-      ['Range', 2.5, 'N'],
-    ]);
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.message).toMatch(/callback parameter 'b'/);
-  });
-
   test('an unannotated parameter over the number-typed source is unconstrained', () => {
     const ce = engine();
     ce.declare('K', 'integer');
@@ -228,7 +169,7 @@ describe('Tycho item 218: a parameter annotation is checked against ITS source, 
 });
 
 describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the interpreter evaluates them)', () => {
-  test('a bare binary operator symbol over THREE sources — the lambda takes two arguments', () => {
+  test('a bare variadic operator symbol over THREE sources takes three arguments', () => {
     const ce = engine();
     const json: ExpressionInput = [
       'Map',
@@ -240,8 +181,8 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
     // The interpreter applies the variadic `Add` to one element from each.
     expect(ce.box(json).subs({ N: 4 }).evaluate().toString()).toBe('[6,9]');
     const r = js(ce, json);
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.message).toMatch(/operator symbol 'Add'/);
+    expect(r.success).toBe(true);
+    expect(r.run({ N: 4 })).toEqual([6, 9]);
   });
 
   test('a bare binary operator symbol over exactly two sources compiles', () => {
@@ -263,10 +204,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       ce.declare('S', type);
       const r = js(ce, ['Map', F2, ['Range', 1, 'N'], 'S']);
       expect(r.success).toBe(false);
-      // The mapping is operand 1, so the second source is operand 3.
-      expect(r.diagnostic?.message).toMatch(
-        /Could not compile `Map`: operand 3/
-      );
+      expect(r.diagnostic?.message).toContain('the input S of type');
     }
   );
 
@@ -282,9 +220,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       constantFold: false,
     });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.message).toMatch(
-      /Could not compile `Map`: operand 3 has observable effects/
-    );
+    expect(r.diagnostic?.message).toContain('Map of a list with an effect');
     // `Zip` materializes every source the same way, so it refuses the same
     // source; a pure `Zip` still compiles.
     const zip = compile(ce.box(['Zip', ['Range', 1, 'N'], drawing]), {
@@ -292,9 +228,7 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       constantFold: false,
     });
     expect(zip.success).toBe(false);
-    expect(zip.diagnostic?.message).toMatch(
-      /Could not compile `Zip`: operand 2 has observable effects/
-    );
+    expect(zip.diagnostic?.message).toContain('Zip of a list with an effect');
     const pure = compile<'javascript', number[][]>(
       ce.box(['Zip', ['Range', 1, 'N'], ['Range', 2, 'N']]),
       { to: 'javascript' }

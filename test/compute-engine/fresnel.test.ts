@@ -7,7 +7,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   fresnelS,
   fresnelC,
@@ -222,50 +221,6 @@ describe('FRESNEL - LaTeX parsing', () => {
   test('FresnelC round-trip', () => {
     const expr = ce.parse('\\operatorname{FresnelC}(x)');
     expect(expr.latex).toContain('FresnelC');
-  });
-});
-
-describe('FRESNEL - JavaScript compilation', () => {
-  test('compiles FresnelS to _SYS.fresnelS', () => {
-    const expr = ce.expr(['FresnelS', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.fresnelS');
-  });
-
-  test('compiles FresnelC to _SYS.fresnelC', () => {
-    const expr = ce.expr(['FresnelC', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('_SYS.fresnelC');
-  });
-
-  test('compiled FresnelS(0) returns 0', () => {
-    const expr = ce.expr(['FresnelS', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 0 })).toBe(0);
-  });
-
-  test('compiled FresnelC(0) returns 0', () => {
-    const expr = ce.expr(['FresnelC', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 0 })).toBe(0);
-  });
-
-  test('compiled FresnelS(1) matches direct evaluation', () => {
-    const expr = ce.expr(['FresnelS', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 1 })).toBeCloseTo(fresnelS(1), 14);
-  });
-
-  test('compiled FresnelC(1) matches direct evaluation', () => {
-    const expr = ce.expr(['FresnelC', 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: 1 })).toBeCloseTo(fresnelC(1), 14);
   });
 });
 

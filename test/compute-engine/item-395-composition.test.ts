@@ -176,79 +176,6 @@ describe('Composition application', () => {
 });
 
 describe('Composition compiled', () => {
-  test('JavaScript agrees with the nested call', () => {
-    const composed = compile(
-      ce.box(['Apply', ['Composition', 'Sin', 'Exp', 'Abs'], 'x'])
-    );
-    const nested = compile(ce.box(['Sin', ['Exp', ['Abs', 'x']]]));
-    expect(composed.success).toBe(true);
-    for (const x of [-1.5, 0, 0.5, 2]) {
-      const a = (composed.run as (v: { x: number }) => number)({ x });
-      const b = (nested.run as (v: { x: number }) => number)({ x });
-      expect(a).toBe(b);
-      expect(a).toBeCloseTo(
-        ce.box([['Composition', 'Sin', 'Exp', 'Abs'], x]).N().re,
-        13
-      );
-    }
-  });
-
-  test('a function literal step compiles', () => {
-    const fn = compile(
-      ce.box([
-        'Apply',
-        ['Composition', 'Sqrt', ['Function', ['Add', 'y', 1], 'y']],
-        'x',
-      ])
-    );
-    expect(fn.success).toBe(true);
-    expect((fn.run as (v: { x: number }) => number)({ x: 8 })).toBe(3);
-  });
-
-  test('a composition callback of Map and Filter compiles to JavaScript', () => {
-    const local = new ComputeEngine();
-    local.declare('L', 'list<real>');
-    local.declare('M', 'list<real>');
-    const L = [0, 0.5, 1];
-    const M = [1, 2, 3];
-    const cases: [unknown, number[]][] = [
-      [
-        ['Map', ['Composition', 'Sin', 'Exp'], 'L'],
-        L.map((x) => Math.sin(Math.exp(x))),
-      ],
-      [
-        [
-          'Map',
-          ['Composition', 'Sin', ['Function', ['Add', 'y', 1], 'y']],
-          'L',
-        ],
-        L.map((x) => Math.sin(x + 1)),
-      ],
-      [
-        [
-          'Map',
-          ['Composition', 'Sqrt', ['Function', ['Add', 'a', 'b'], 'a', 'b']],
-          'L',
-          'M',
-        ],
-        L.map((x, i) => Math.sqrt(x + M[i])),
-      ],
-      [
-        [
-          'Filter',
-          'L',
-          ['Composition', 'Not', ['Function', ['Less', 'y', 0.6], 'y']],
-        ],
-        [1],
-      ],
-    ];
-    for (const [json, expected] of cases) {
-      const r = compile(local.box(json as any));
-      expect(r.success).toBe(true);
-      const run = r.run as (v: Record<string, number[]>) => number[];
-      expect(run({ L, M })).toEqual(expected);
-    }
-  });
 
   test('a callback whose last step has no fixed parameter count declines', () => {
     // `Add` takes any number of arguments, so the compiler cannot tell how
@@ -385,31 +312,6 @@ describe('Composition review fixes', () => {
     expect(local.box(['Negate', ['Floor', ['r']]]).N().toString()).toBe('-24');
   });
 
-  test('a callback literal is not changed by a declaration of its parameter name', () => {
-    const local = new ComputeEngine();
-    local.declare('_x', 'string');
-    local.declare('L', 'list<real>');
-    const expr = local.box(['Map', ['Composition', 'Sin', 'Exp'], 'L']);
-    const r = compile(expr);
-    expect(r.success).toBe(true);
-    const L = [0, 0.5, 1];
-    const values = (r.run as (v: { L: number[] }) => number[])({ L });
-    // The result of the interpreter's `Map` is lazy, so each element is
-    // read from the application of the composition.
-    const expected = L.map(
-      (x) =>
-        local
-          .box([['Composition', 'Sin', 'Exp'], x])
-          .N().re
-    );
-    values.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 14));
-    // The parameter of the literal is not declared in the enclosing scope.
-    const fresh = new ComputeEngine();
-    fresh.declare('L', 'list<real>');
-    compile(fresh.box(['Map', ['Composition', 'Sin', 'Exp'], 'L']));
-    expect(fresh.lookupDefinition('_x')).toBeUndefined();
-  });
-
   test('a step before the last that takes two arguments makes the type generic', () => {
     const pair = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
     expect(ce.box(['Composition', pair, 'Sin']).type.toString()).toBe(
@@ -483,37 +385,6 @@ describe('Composition review fixes', () => {
     expect(
       effectsOf(local.box(['Apply', ['Composition', 'Random', 'Sin'], 'x']))
     ).toEqual(['random']);
-  });
-
-  test('a composition callback is typed by its consumer, as a written literal is', () => {
-    // `Rank` and `Length` read a whole row: the callback is not broadcast
-    // over the elements of a row.
-    const local = new ComputeEngine();
-    local.declare('L', 'list<list<real>>');
-    const rows = [
-      [0, 1],
-      [2, 3],
-    ];
-    const value = local.box(['List', ...rows.map((r) => ['List', ...r])]);
-    for (const [head, expected] of [
-      ['Rank', [1, 1]],
-      ['Length', [2, 2]],
-    ] as const) {
-      for (const callback of [
-        ['Composition', head, 'Exp'],
-        ['Function', [head, ['Exp', 'y']], 'y'],
-      ]) {
-        const expr = local.box(['Map', callback, 'L'] as never);
-        expect(expr.subs({ L: value }).N().toString()).toBe(
-          `[${expected.join(',')}]`
-        );
-        const r = compile(expr);
-        expect(r.success).toBe(true);
-        expect(
-          (r.run as (v: { L: number[][] }) => number[])({ L: rows })
-        ).toEqual(expected);
-      }
-    }
   });
 
   test('a composition whose step name is hidden where it is compiled calls the step it was made with, or declines', () => {

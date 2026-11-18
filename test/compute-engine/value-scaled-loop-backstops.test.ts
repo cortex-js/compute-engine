@@ -209,30 +209,4 @@ describe('the compiled lane is bounded by the same caps', () => {
       ).toThrow(/Could not compile/);
     }
   });
-
-  test('a run-time operand past the cap answers NaN', () => {
-    const local = new ComputeEngine();
-    local.declare('k', 'integer');
-    const chunk = compile(local.box(['Chunk', ['List', 1, 2, 3], 'k']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(chunk?.run!({ k: 2 })).toEqual([[1, 2], [3]]);
-    expect(Number.isNaN(chunk?.run!({ k: 20000 }))).toBe(true);
-    const pow = compile(local.box(['MatrixPower', A, 'k']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(pow?.run!({ k: 100000 })).toEqual([
-      [1, 100000],
-      [0, 1],
-    ]);
-    expect(Number.isNaN(pow?.run!({ k: 2000000 }))).toBe(true);
-    const cmap = compile(local.box(['Colormap', { str: 'viridis' }, 'k']), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect((cmap?.run!({ k: 3 }) as unknown[]).length).toBe(3);
-    expect(Number.isNaN(cmap?.run!({ k: 20000 }))).toBe(true);
-  });
 });

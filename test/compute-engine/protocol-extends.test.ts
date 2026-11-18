@@ -24,7 +24,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { protocolClosure } from '../../src/compute-engine/engine-protocols';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import type { Expression } from '../../src/compute-engine/types-expression';
 
 let ce: ComputeEngine;
@@ -952,20 +951,6 @@ describe('the readers of the registry see the derived edges', () => {
         'function fl(a: T) -> integer where T is FloorRing { floor(a) }\nfl(Money(6))'
       )
     ).toBe('6');
-  });
-
-  test('a compiled dispatch through a derived edge', () => {
-    boxProtocol('Describable', { describe: '(self: Self) -> string' });
-    boxProtocol('Labelled', {}, ['Describable']);
-    run(
-      'type integer is Labelled {\n  function describe(self: Self) -> string { "an integer" }\n}'
-    );
-    const result = compile(ce.box(['describe', 42] as never));
-    expect(result.success).toBe(true);
-    expect(result.run?.()).toBe('an integer');
-    expect(ce.box(['describe', 42] as never).evaluate().toString()).toBe(
-      '"an integer"'
-    );
   });
 
   test('R10: a qualified property names only a property the protocol declares', () => {

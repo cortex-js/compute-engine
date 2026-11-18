@@ -341,7 +341,7 @@ describe('Interval target — a symbol holding a lazy Map or Range value', () =>
     expectEncloses(run(ce, 'I', { n: pt(3) }).out, [1, 2, 3]);
   });
 
-  test('a symbol holding a lazy Map at the root, and an overridden head', () => {
+  test('a symbol holding a lazy Map at the root', () => {
     const ce = engine();
     ce.assign('M', ce.parse('\\sin(10^4 \\cdot [1...3])').evaluate());
     const head = ce.box('M').value?.operator;
@@ -351,18 +351,6 @@ describe('Interval target — a symbol holding a lazy Map or Range value', () =>
       [1, 2, 3].map((k) => Math.sin(1e4 * k)),
       1e-9
     );
-    // An override of `Range` (the option `functions`) declines.
-    ce.assign('I', ce.parse('1..n').evaluate());
-    try {
-      compile(ce.parse('\\operatorname{length}(I)'), {
-        to: 'interval-js',
-        fallback: false,
-        functions: { Range: '_IA.range' },
-      });
-      throw new Error('no decline');
-    } catch (e) {
-      expect(compileDiagnosticOf(e).code).toBe('outside-profile');
-    }
   });
 });
 
@@ -1098,18 +1086,6 @@ describe('Interval target — a selection among list values', () => {
       [3, 3],
       [1, 1],
     ]);
-    // A caller-supplied `Which` implementation (the option `functions`)
-    // declines.
-    try {
-      compile(which(ce, ['List', 'x', 1], ['List', 1, 2]), {
-        to: 'interval-js',
-        fallback: false,
-        functions: { Which: () => '_IA.point(42)' },
-      });
-      throw new Error('no decline');
-    } catch (e) {
-      expect(compileDiagnosticOf(e).code).toBe('outside-profile');
-    }
   });
 
   test('what keeps declining', () => {

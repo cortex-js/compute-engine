@@ -24,7 +24,7 @@ expressions. Its capabilities fall into a few categories:
   arbitrary precision).
 - **Simplify**, **expand**, **factor**, **solve**, differentiate, and integrate.
 - **Reason** about expressions using assumptions and a type system.
-- **Compile** expressions to executable JavaScript (and GLSL/WGSL).
+- **Compile** expressions to executable JavaScript (and GLSL).
 - **Serialize** back to LaTeX, MathASCII, or MathJSON.
 
 ## The big picture: three representations and one engine
@@ -105,7 +105,7 @@ src/
     ├── rubi/                 Rubi rule-based integrator (loader, matcher, driver)
     ├── numerics/             Numeric algorithms (primes, rationals, special functions)
     ├── numeric-value/        NumericValue abstraction (exact / machine / bignum)
-    ├── compilation/          Expression → JS/GLSL/WGSL code generation
+    ├── compilation/          Expression → JS/GLSL code generation
     ├── interval/             Interval arithmetic
     └── tensor/               Vectors, matrices, multi-dimensional arrays
 ```
@@ -133,7 +133,7 @@ relative to `src/compute-engine/` unless noted):
 | Integration (symbolic)                       | `symbolic/antiderivative.ts` for built-ins; `rubi/` for the rule-based integrator; `latex-syntax/dictionary/README.md` for the ∫ parse→eval→serialize pipeline |
 | Solve                                        | `boxed-expression/solve.ts`, `boxed-expression/solve-linear-system.ts`                                                                                         |
 | Type-inference bug                           | `library/type-handlers.ts`, `src/common/type/`                                                                                                                 |
-| Compilation target bug                       | `compilation/<target>.ts`; the tree walk is in `compilation/base-compiler.ts`                                                                                  |
+| Compilation target bug                       | `compilation/ir/` (the compiler; `ir/README.md`); the dispatch is in `compilation/compile-expression.ts`                                                       |
 | Assumptions / `verify()` / `ask()`           | `engine-assumptions.ts`, `assume.ts`                                                                                                                           |
 | Step-by-step explanations                    | `boxed-expression/explain.ts`, `explain-labels.ts`                                                                                                             |
 
@@ -690,9 +690,8 @@ public API groups into:
   name).
 - **Reasoning**: `assume()`, `ask()`, `verify()`, `forget()`.
 - **Compilation**: `compile()` on boxed expressions and the standalone
-  `compile()` export. The target registry is internal
-  (`_registerCompilationTarget()`, `_getCompilationTarget()`,
-  `_listCompilationTargets()`, `_unregisterCompilationTarget()`).
+  `compile()` export. `_listCompilationTargets()` (internal) names the built-in
+  targets.
 - **Temporary state**: `withValues()` gives names values for one computation;
   declarations made in a scope pushed with `pushScope()` are removed by
   `popScope()`. There is no API that rewinds the engine to an earlier state.
@@ -708,8 +707,8 @@ public API groups into:
 Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,
 `engine-assumptions.ts`, `engine-numeric-configuration.ts`,
-`engine-runtime-state.ts`, `engine-cache.ts`, `engine-compilation-targets.ts`,
-`engine-extension-contracts.ts`, …).
+`engine-runtime-state.ts`, `engine-cache.ts`, `engine-extension-contracts.ts`,
+…).
 
 **Scopes & assumptions.** Symbol and operator definitions live in lexical scopes
 with proper inheritance. Assumptions (e.g. "x > 0") are recorded per scope and
@@ -1151,23 +1150,18 @@ Two related cases that are neither kernel dust nor comparison:
 ## Compilation
 
 `src/compute-engine/compilation/` turns a boxed expression into source code in a
-target language. `base-compiler.ts` walks the expression tree
-language-agnostically and delegates formatting to a `LanguageTarget` /
-`CompileTarget` (`types.ts`). Built-in targets:
+target language. `compile-expression.ts` sends each of the three built-in
+targets (`BUILT_IN_TARGETS` in `targets.ts`) to the compiler in
+`compilation/ir/` (its `README.md` has the contracts):
 
-- `javascript-target.ts` — executable JavaScript (with `constant-folding.ts`).
-- `glsl-target.ts`, `wgsl-target.ts`, `gpu-target.ts` — GPU shaders.
-  `gpu-target.ts` is the re-export facade of the `gpu-*.ts` modules:
-  `gpu-shader-target.ts` (shared target class), `gpu-functions.ts` (operator
-  handlers), `gpu-at.ts`, `gpu-points.ts`, `gpu-reduce.ts`, `gpu-random.ts`,
-  `gpu-preambles.ts`, `gpu-shapes.ts`, `gpu-finite-proof.ts` and others.
+- `javascript` — executable JavaScript (`ir/adapter.ts`, `ir/print-js.ts`). The
+  code runs on the runtime of `javascript-runtime.ts`.
+- `glsl` — GLSL ES 3.00 shader code (`ir/adapter-glsl.ts`, `ir/print-glsl.ts`).
 - `interval-js` — JavaScript with interval arithmetic, compiled by the interval
-  mode of the IR pipeline (`ir/adapter-interval.ts`); `compile()` routes the
-  name itself (`targets.ts`).
+  mode of the pipeline (`ir/adapter-interval.ts`).
 
-Built-in targets are registered in the engine's internal compilation-target
-registry and validated by the extension contracts. Consumers pass custom target
-instances directly to the standalone `compile()` function.
+There are no custom targets. A decline falls back to the interpreter
+(`docs/COMPILATION-MODEL.md`).
 
 ## Packaging and entry points
 
@@ -1186,17 +1180,17 @@ copies). `runtime` and `kernel-worker` are single self-contained files on
 purpose: compiled code runs on the runtime without the engine, and a host copies
 the worker script.
 
-| Import path                 | Source                     | Contents                                                                                                                                            |
-| --------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@cortex-js/compute-engine` | `src/compute-engine.ts`    | Full: engine + LaTeX + all five compilation targets + free functions                                                                                |
-| `…/core`                    | `src/core.ts`              | Engine + free functions, **no** LaTeX; only the `javascript` and `interval-js` targets (`ce.registerCompilationTarget()` adds one from `…/compile`) |
-| `…/math-json`               | `src/math-json.ts`         | MathJSON types + utilities only                                                                                                                     |
-| `…/latex-syntax`            | `src/latex-syntax.ts`      | Standalone LaTeX parser/serializer                                                                                                                  |
-| `…/numerics`                | `src/numerics.ts`          | Numeric primitives (BigDecimal, rationals, special functions)                                                                                       |
-| `…/interval`                | `src/interval.ts`          | Interval arithmetic                                                                                                                                 |
-| `…/compile`                 | `src/compile.ts`           | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, …)                                                                     |
-| `…/identities`              | `src/identities.ts`        | Fungrim identities loader (rules-as-data plugin)                                                                                                    |
-| `…/integration-rules`       | `src/integration-rules.ts` | Rubi rule-based integration plugin                                                                                                                  |
+| Import path                 | Source                     | Contents                                                                    |
+| --------------------------- | -------------------------- | --------------------------------------------------------------------------- |
+| `@cortex-js/compute-engine` | `src/compute-engine.ts`    | Full: engine + LaTeX + the three compilation targets + free functions       |
+| `…/core`                    | `src/core.ts`              | Engine + free functions, **no** LaTeX                                       |
+| `…/math-json`               | `src/math-json.ts`         | MathJSON types + utilities only                                             |
+| `…/latex-syntax`            | `src/latex-syntax.ts`      | Standalone LaTeX parser/serializer                                          |
+| `…/numerics`                | `src/numerics.ts`          | Numeric primitives (BigDecimal, rationals, special functions)               |
+| `…/interval`                | `src/interval.ts`          | Interval arithmetic                                                         |
+| `…/compile`                 | `src/compile.ts`           | The `compile()` and `canCompile()` functions and the types of a compilation |
+| `…/identities`              | `src/identities.ts`        | Fungrim identities loader (rules-as-data plugin)                            |
+| `…/integration-rules`       | `src/integration-rules.ts` | Rubi rule-based integration plugin                                          |
 
 The **full** entry (`compute-engine.ts`) registers
 `ComputeEngine._latexSyntaxFactory` and a default-engine factory that injects

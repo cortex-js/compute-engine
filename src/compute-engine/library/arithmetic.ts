@@ -8394,9 +8394,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // this declaration adds. `NaN` propagates, declared explicitly
       // because the extended carrier is not a subtype of `complex`, so the
       // policy derived from the signature would be `reject` (see
-      // `docs/ERROR-MODEL.md` §4). The RESULT stays the wide `number`: the
-      // compiled lanes' kind-preservation discipline relies on it
-      // (`resultIsComplexValued`, javascript-target.ts), and the per-call
+      // `docs/ERROR-MODEL.md` §4). The RESULT stays the wide `number`, and the per-call
       // sharpness lives in the type handler below.
       //
       // The hot box route and `.div()` call `canonicalDivide` through the
@@ -10818,7 +10816,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[1],
             (z, b) => {
               // One kernel per base, shared with the compile targets
-              // (`BaseCompiler.fixedLogBase`): a base of 10 or 2 with a
+              // (`fixedLogBase`): a base of 10 or 2 with a
               // non-negative argument goes through `Math.log10` / `Math.log2`,
               // so a folded `Log(x, 2)` and a compiled runtime one agree to the
               // last bit. `ln(x) / ln(b)` differs from those kernels on about
@@ -12591,9 +12589,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // propagates (declared explicitly: these extended carriers are not
       // subtypes of `complex`, so the policy derived from the signature
       // would be `reject` — see `docs/ERROR-MODEL.md` §4). The RESULT
-      // stays the wide `number`: the compiled lanes' kind-preservation
-      // discipline relies on it (`resultIsComplexValued`,
-      // javascript-target.ts), and the per-call sharpness lives in the
+      // stays the wide `number`, and the per-call sharpness lives in the
       // type handler below.
       signature: '(complex | infinity, complex | signed_infinity) -> number',
       examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
@@ -13967,9 +13963,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // must not evaluate (the retired `closedRealSign` fold did, for
           // the sole benefit of the compile targets). The consumer that
           // needs the value's shape is the compiler, and it folds constants
-          // itself before deciding lowerings (`constantFoldValue` /
-          // `isComplexValued`'s Sqrt carve-out in
-          // `compilation/base-compiler.ts`), so such a radicand now types
+          // itself before deciding lowerings, so such a radicand now types
           // the `complex` hedge while its compiled bytes are
           // unchanged. See the §5.4 `Sqrt` row of
           // `docs/plans/2026-08-22-type-handlers-on-types.md`.
@@ -15108,7 +15102,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // With `e0 > e1` the formula is used as written: the result falls from
       // 1 to 0 as `x` goes from `e1` to `e0`. The built-in has no defined
       // result when `e0 >= e1`, so the shader targets write the formula out
-      // (`_gpu_smoothstep`, `compilation/gpu-nan-safe.ts`), and every target
+      // (`_gpu_smoothstep`), and every target
       // gives these values.
       evaluate: ([e0, e1, x], { engine: ce, numericApproximation }) => {
         const n = numericApproximation === true;
@@ -15462,7 +15456,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // finite integer). A truncation whose convergence is unestablished
           // is a silently wrong number, so stay unevaluated instead
           // (user-ruled 2026-08-14; the compile-time constant folder guards
-          // against the same hazard in `BaseCompiler.containsUnboundedBigOp`).
+          // against the same hazard).
           return undefined;
         }
         // A capture-unsafe term (`evaluateBigOpTerm` declined) must keep the
@@ -15988,7 +15982,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // A truncation whose convergence is unestablished is a silently
           // wrong number, so stay unevaluated instead (user-ruled
           // 2026-08-14; the compile-time constant folder guards against the
-          // same hazard in `BaseCompiler.containsUnboundedBigOp`).
+          // same hazard).
           return undefined;
         }
         // Capture-unsafe decline flag — see the Product sync handler.

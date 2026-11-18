@@ -440,8 +440,7 @@ rule:
   impure operand to a temporary (because the operand appears more than once in
   the emitted code), it binds every impure operand of that node, in argument
   order. Binding only one of them would run its draw before the draws of
-  operands written to its left (`javascript-target.ts`, the comments on
-  binding impure chain operands).
+  operands written to its left.
 - The run-time real check of a real-only head in `complex` mode (`Max(√x, …)`,
   an ordering comparison) does not move or skip a draw. When an operand has
   an effect, every operand is evaluated before the check, once and in
@@ -449,8 +448,8 @@ rule:
   is not real. The check binds an operand node once, so a head that has the
   same boxed node with an effect at two positions (`Max(e, e)` with
   `e = √(Random() − 0.5)`, which the interpreter evaluates twice) declines
-  with the code `shared-impure-operand`, and the interpreter gives the value
-  (`realOperandGuard()` in `compiler-core.ts`).
+  with the code `shared-impure-operand`, and the interpreter gives the
+  value.
 
 Consequence, stated rather than hidden: **editing a body so that it draws
 earlier shifts every later draw in the same frame.** That is inherent to a
@@ -731,16 +730,13 @@ not derive the support of a source (the interval mode of the IR pipeline,
 
 ## 8. The GPU target has no draw
 
-The GLSL target compiles only the GLSL fragment (`docs/COMPILATION-MODEL.md`),
-and `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` and
-`RandomShuffle` are not in it: `canCompile()` refuses an expression that
-contains one, and `compile()` to `glsl` declines it before it writes any code.
-A GLSL target object passed to `compile()` as the `target` option has no
-lowering for these heads either, and declines them.
+The GLSL target has no draw: `compile()` to `glsl` declines an expression
+that draws with `Random`, `WithRandomSeed`, `RandomChoice`, `RandomSample` or
+`RandomShuffle`, and `canCompile()` answers `ok: false` for it.
 
 A seeded frame whose value is a constant (`WithRandomSeed(42, Random())`) is
-folded to that constant before the fragment check, as on every target, so it
-compiles to the number it draws. A shader that needs random values computes
+folded to that constant, as on every target, so it compiles to the number it
+draws (`0.73673004` on `glsl`). A shader that needs random values computes
 them from its own inputs (for example a hash of the fragment coordinate)
 outside the engine.
 
@@ -779,6 +775,5 @@ draw in it (§5). Nothing errors; every value below the edit simply changes.
 | `RandomShuffle` | `src/compute-engine/library/collections.ts` |
 | `RandomSample` | `src/compute-engine/library/statistics.ts` |
 | shared `k` validation | `src/compute-engine/library/random-utils.ts` |
-| `_SYS` random helpers, domain descriptors | `src/compute-engine/compilation/javascript-target.ts` |
+| `_SYS` random helpers, domain descriptors | `src/compute-engine/compilation/javascript-runtime.ts` |
 | stability vectors | `test/compute-engine/random-vectors.test.ts` |
-| GPU tier | `test/compute-engine/random-gpu.test.ts` |

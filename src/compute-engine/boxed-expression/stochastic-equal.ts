@@ -4,7 +4,7 @@ import { mixTags } from '../numerics/random.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 
 // Lazy reference to break circular dependency:
-// compare → stochastic-equal → compile-expression → base-compiler → utils → ...
+// compare → stochastic-equal → compile-expression → … → utils → ...
 // Inline the subset of `compile`'s return type we actually need, so we don't
 // import from compile-expression.ts at all (madge follows import type too).
 type ComplexResult = { re: number; im: number };

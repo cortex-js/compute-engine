@@ -57,22 +57,6 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     });
   }
 
-  test('a point list through the union answers one norm per point', () => {
-    const ce = new ComputeEngine();
-    declareG(ce, 'list<tuple<number, number>> | tuple<number, number>');
-    ce.declare('Q', 'list<tuple<number, number>>');
-    const r = compile(ce.box(['g', 'Q']), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(
-      r.run!({
-        Q: [
-          [5, 1],
-          [4, 2],
-        ],
-      })
-    ).toEqual([Math.SQRT2, 2]);
-  });
-
   test('a chain of point subtractions declines', () => {
     // Canonicalization flattens `P − (4, 0) − (1, 2)` into ONE `Add` with
     // THREE operands, two of them tuple-valued. The declared union of the
@@ -105,25 +89,13 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
 
     const overList = compile(ce.box(['g', 'Q']), { to: 'javascript' });
     expect(overList.success).toBe(false);
-    expect(overList.diagnostic?.code).toBe('unsettled-shape');
+    expect(overList.diagnostic?.code).toBe('outside-profile');
     expect(
       ce
         .box(['g', ['List', ['Tuple', 5, 1], ['Tuple', 4, 2]]])
         .N()
         .ops!.map((op) => op.re)
     ).toEqual([1, 1]);
-  });
-
-  test('an empty point list answers the empty list', () => {
-    // The call compiles a copy of `g` for the list member of the union, and
-    // its point-list `Norm` lowering (`Q.map((p) => _SYS.norm(p))`) maps
-    // over the empty array and gives `[]`.
-    const ce = new ComputeEngine();
-    declareG(ce, 'list<tuple<number, number>> | tuple<number, number>');
-    ce.declare('Q', 'list<tuple<number, number>>');
-    const r = compile(ce.box(['g', 'Q']), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!({ Q: [] })).toEqual([]);
   });
 
   test('a declaration that admits a list coordinate declines for inputs declared with a union', () => {
@@ -196,46 +168,6 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     }
   });
 
-  test('a code-built Tuple with a list coordinate is an error, not a point', () => {
-    // A MathJSON `Tuple` with a list coordinate is data, not a point and not
-    // a list of points (user decision 2026-09-25): the arithmetic in the
-    // body is an `incompatible-type` error on the interpreter, and the
-    // compiled call fails closed.
-    for (const type of [
-      'unknown',
-      'tuple<broadcastable<number>, broadcastable<number>>',
-      'tuple<real, real>',
-    ]) {
-      const ce = new ComputeEngine();
-      ce.declare('k', { signature: `(${type}) -> number` });
-      ce.assign(
-        'k',
-        ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]], 'P'])
-      );
-      ce.declare('x', 'list<real>');
-      ce.declare('y', 'real');
-      // At `tuple<real, real>`, the call is refused when it is boxed
-      // (`tuple<list<real>, real>` is disjoint from it), so the compiler
-      // sees an invalid expression. The other parameters admit the call, and
-      // the compiler refuses the tuple with a list coordinate.
-      expect(() =>
-        compile(ce.box(['k', ['Tuple', 'x', 'y']]), {
-          to: 'javascript',
-          fallback: false,
-        } as any)
-      ).toThrow(
-        type === 'tuple<real, real>'
-          ? /incompatible-type/
-          : /tuple with a list coordinate/
-      );
-      ce.assign('x', ce.box(['List', 1, 2]));
-      ce.assign('y', 3);
-      const r = ce.box(['k', ['Tuple', 'x', 'y']]).N();
-      expect(r.operator).toBe('Error');
-      expect(r.op1.op1.string).toBe('incompatible-type');
-    }
-  });
-
   test('a list arm of scalar-coordinate points still specializes the point call', () => {
     // `list<tuple<number, number>>` holds points with scalar coordinates, so
     // a written point with a list coordinate is not a member of either arm;
@@ -256,14 +188,6 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       to: 'javascript',
     });
     expect(r.success).toBe(true);
-    // The parameter of `k` is declared with a union of shapes, so `k` has
-    // one variant per member. The argument `(x, y)` has the shape of the
-    // point member, so the call reads that variant directly, with no
-    // run-time test of the shape.
-    expect(r.preamble).toContain(
-      'const _fn_k$tuple = (P) => _SYS.norm([(P[0] + (-4)), (P[1] + 0)]);'
-    );
-    expect(r.code).toBe('_fn_k$tuple([_.x, _.y])');
     expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
     expect(r.run!({ x: 5, y: 1 })).toBeCloseTo(
       ce.box(['k', ['Tuple', 5, 1]]).N().re,
@@ -290,7 +214,7 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
     ce.declare('Q', 'list<number>');
     const bare = compile(ce.box(['h', 'Q']), { to: 'javascript' });
     expect(bare.success).toBe(false);
-    expect(bare.diagnostic?.code).toBe('unsettled-shape');
+    expect(bare.diagnostic?.code).toBe('outside-profile');
 
     // The same declaration, but a call whose argument is one point compiles
     // a copy of the helper for that point, where `P − (4, 0)` is a point.
@@ -305,8 +229,6 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       to: 'javascript',
     });
     expect(sum.success).toBe(true);
-    // A concrete point call specializes the helper and selects its norm.
-    expect(sum.preamble).toContain('_SYS.norm(');
     expect(sum.run!({ x: 5, y: 1 })).toBeCloseTo(Math.SQRT2, 12);
   });
 

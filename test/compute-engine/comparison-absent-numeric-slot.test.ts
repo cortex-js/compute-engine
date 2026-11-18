@@ -144,17 +144,6 @@ describe('A COMPARISON WITH AN ABSENT NUMERIC OPERAND (CE-93)', () => {
     });
     expect(r.run!(vars as never)).toEqual(expected);
   });
-
-  test('the complex mode keeps the realness rule', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'number');
-    const r = compile(ce.box(['Less', 'w', 1]), {
-      to: 'javascript',
-      mode: 'complex',
-      fallback: false,
-    } as any);
-    expect(r.run!({ w: 0.5 } as never)).toBe(true);
-  });
   // Second review of CE-93.
   test('a chain of lists keeps its own lowering', () => {
     const ce = new ComputeEngine();

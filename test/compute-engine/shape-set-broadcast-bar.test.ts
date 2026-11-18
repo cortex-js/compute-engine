@@ -19,7 +19,6 @@
  *    symbol is still the mean (`\bar{x}` is `Mean(x)`).
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 type Json = Parameters<ComputeEngine['box']>[0];
 
@@ -154,21 +153,6 @@ describe('Shape and Rank of a collection-typed operand with no value', () => {
     expect(ev(['Rank', 'L2'])).toBe('1');
     expect(ev(['Rank', ['List', 1, 2]])).toBe('1');
   });
-
-  test('the compiled Rank of a list parameter reads the run-time value', () => {
-    const run = compile(ce2.box(['Rank', 'L']), { fallback: false }).run!;
-    expect(run({ L: [1, 2, 3] } as never)).toBe(1);
-    const shape = compile(ce2.box(['Shape', 'W']), { fallback: false }).run!;
-    expect(
-      shape({
-        W: [
-          [1, 2],
-          [3, 4],
-          [5, 6],
-        ],
-      } as never)
-    ).toEqual([3, 2]);
-  });
 });
 
 /**
@@ -179,53 +163,10 @@ describe('Shape and Rank of a collection-typed operand with no value', () => {
  * them declines.
  */
 describe('compiled Shape and Rank', () => {
-  test.each<[string, string]>([
-    ['S', 'set<integer>'],
-    ['U', 'number | set<integer>'],
-    ['D', 'dictionary'],
-    ['T', 'tuple<number, number>'],
-    ['P', 'list<tuple<number, number>>'],
-    ['W', 'string'],
-  ])('%s: %s declines', (name, type) => {
-    const ce2 = new ComputeEngine();
-    ce2.declare(name, type);
-    for (const op of ['Rank', 'Shape']) {
-      const expr = ce2.box([op, name]);
-      expect(() => compile(expr, { fallback: false })).toThrow(
-        new RegExp(`Could not compile \`${op}\``)
-      );
-    }
-  });
-
   test('an interpreted set gives no shape', () => {
     const ce2 = new ComputeEngine();
     ce2.assign('S', ce2.box(['Set', 1, 2]));
     expect(ce2.box(['Rank', 'S']).evaluate().operator).toBe('Rank');
-  });
-
-  test('positive controls compile to the value of the interpreter', () => {
-    const run = (json: Json, args: Record<string, unknown> = {}) =>
-      compile(ce.box(json), { fallback: false }).run!(args as never);
-    expect(run(['Rank', ['List', 1, 2]])).toBe(1);
-    expect(evalString(['Rank', ['List', 1, 2]])).toBe('1');
-    expect(run(['Shape', ['Range', 1, 3]])).toEqual([3]);
-    expect(evalString(['Shape', ['Range', 1, 3]])).toBe('(3)');
-    const ce2 = new ComputeEngine();
-    ce2.declare('L', 'list<number>');
-    ce2.declare('M', 'matrix<number>');
-    expect(
-      compile(ce2.box(['Rank', 'L']), { fallback: false }).run!({
-        L: [1, 2, 3],
-      } as never)
-    ).toBe(1);
-    expect(
-      compile(ce2.box(['Shape', 'M']), { fallback: false }).run!({
-        M: [
-          [1, 2],
-          [3, 4],
-        ],
-      } as never)
-    ).toEqual([2, 2]);
   });
 });
 

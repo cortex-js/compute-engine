@@ -14,7 +14,6 @@ import { expectTypeBetween } from '../utils';
 const ce = new ComputeEngine();
 
 const evalStr = (mj: any) => ce.box(mj).evaluate().toString();
-const run = (mj: any) => ce._getCompilationTarget('javascript')!.compile(ce.box(mj)).run!({});
 
 describe('ElementMax / ElementMin — evaluate', () => {
   test('broadcasts a scalar over a collection', () => {
@@ -121,37 +120,32 @@ describe('Clamp — evaluate', () => {
   });
 });
 
-describe('ElementMax / ElementMin / Clamp — compile', () => {
-  test('scalar⊗collection compiles to a broadcast and runs', () => {
+describe('ElementMax / ElementMin / Clamp — compiled values', () => {
+  const run = (mj: any) =>
+    compile(ce.box(mj), { to: 'javascript', fallback: false }).run!({});
+  test('scalar⊗collection broadcasts', () => {
     expect(run(['ElementMax', 0, ['List', 1, -2, 3]])).toEqual([1, 0, 3]);
     expect(run(['ElementMin', 0, ['List', 1, -2, 3]])).toEqual([0, -2, 0]);
   });
-  test('Clamp (3-ary) compiles to a broadcast and runs', () => {
+  test('Clamp (3-ary) broadcasts', () => {
     expect(run(['Clamp', ['List', -1, 0.5, 2], 0, 1])).toEqual([0, 0.5, 1]);
   });
-  test('scalar⊗scalar compiles to a plain call', () => {
+  test('scalar operands give a scalar', () => {
     expect(run(['ElementMax', 2, 5])).toBe(5);
     expect(run(['Clamp', 5, 0, 10])).toBe(5);
   });
-
-  test('variadic (n-ary) compiles to a broadcast and runs', () => {
+  test('variadic (n-ary)', () => {
     expect(run(['ElementMax', 0, ['List', 1, -2, 3], 2])).toEqual([2, 2, 3]);
     expect(run(['ElementMax', 1, 5, 3])).toBe(5);
+  });
+  test('Max/Min of a scalar and a collection reduce to one value', () => {
+    expect(run(['Max', 0, ['List', 1, -2, 3]])).toBe(3);
+    expect(run(['Min', 5, ['List', 1, -2, 3]])).toBe(-2);
+    expect(run(['Max', ['List', 1, 2, 3]])).toBe(3);
   });
 });
 
 describe('Max / Min — scalar+collection compile fix (reduction, was NaN)', () => {
-  test('Max(scalar, collection) reduces to the overall max at run time', () => {
-    // evaluate and compile now agree (both reduce to the scalar maximum).
-    expect(evalStr(['Max', 0, ['List', 1, -2, 3]])).toBe('3');
-    expect(run(['Max', 0, ['List', 1, -2, 3]])).toBe(3);
-  });
-  test('Min(scalar, collection) reduces to the overall min', () => {
-    expect(run(['Min', 5, ['List', 1, -2, 3]])).toBe(-2);
-  });
-  test('Max of a single collection is unchanged', () => {
-    expect(run(['Max', ['List', 1, 2, 3]])).toBe(3);
-  });
   test('NaN inside a collection absorbs, matching top-level Max/Min (B5)', () => {
     // Max(NaN, 5) → NaN, so Max([1, NaN, 3]) must also be NaN (was 3).
     expect(evalStr(['Max', 'NaN', 5])).toBe('NaN');
@@ -181,14 +175,6 @@ describe('cross-target compilation', () => {
         x: { lo: -1, hi: 0.5 },
       })
     ).toEqual({ kind: 'interval', value: { lo: 0, hi: 0.5 } });
-  });
-
-  test('glsl: map to native clamp/max/min', () => {
-    for (const t of ['glsl']) {
-      expect(compileOn(t, ['Clamp', 'x', 0, 1]).code).toContain('clamp(');
-      expect(compileOn(t, ['ElementMax', 'x', 0]).code).toContain('max(');
-      expect(compileOn(t, ['ElementMin', 'x', 0]).code).toContain('min(');
-    }
   });
 });
 

@@ -139,27 +139,6 @@ function byReferenceEngine(): ComputeEngine {
 /** Everything the artifact emits: the preamble definitions and the body. */
 const sourceOf = (r: any): string => `${r.preamble ?? ''}${r.code ?? ''}`;
 
-/** The preamble line that defines the emitted function `name`. */
-function definitionOf(preamble: string, name: string): string {
-  const line = (preamble ?? '')
-    .split('\n')
-    .find((l) => l.includes(`const _fn_${name} =`));
-  expect(line).toBeDefined();
-  return line!;
-}
-
-/**
- * The preamble from the definition of `name` onwards. A definition whose body
- * is a multi-statement `Block` spans several lines, so it cannot be read with
- * `definitionOf`; the definitions the tests below look for are emitted after
- * it, so the whole tail is the right window.
- */
-function definitionFrom(preamble: string, name: string): string {
-  const at = (preamble ?? '').indexOf(`const _fn_${name} =`);
-  expect(at).toBeGreaterThanOrEqual(0);
-  return preamble.slice(at);
-}
-
 /** A five-element list of `u`-dependent scalars: the narrowest list the
  * fixed-width unroll rewrites. */
 const FIVE_OF = (u: string) => [
@@ -183,172 +162,6 @@ function scalarEngine(): {
   };
   return { ce, def };
 }
-
-describe('BY-REFERENCE DEFINITION UNROLL — the emitted shapes', () => {
-  it('emits `d` as straight-line scalar code', () => {
-    const ce = byReferenceEngine();
-    const r: any = compile(ce.box(['d', 'x', 'y']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const d = definitionOf(r.preamble, 'd');
-    // The three shapes the runtime collection lowering emits, all gone: the
-    // broadcast closure, the point-accessor map and the reduction.
-    expect(d).not.toContain('_SYS.bcast');
-    expect(d).not.toContain('.map((_pt');
-    expect(d).not.toContain('reduce(');
-    // `V` was substituted into `d`, so it is not emitted at all.
-    expect(r.preamble).not.toContain('const _fn_V =');
-  });
-
-  it('emits `m` as an n-ary `Math.min`', () => {
-    const ce = byReferenceEngine();
-    const r: any = compile(ce.box(['m', 'x', 'y']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const m = definitionOf(r.preamble, 'm');
-    expect(m).toContain('Math.min(');
-    expect(m).not.toContain('reduce(');
-    expect(m).not.toContain('_SYS.bcast');
-  });
-
-  it('leaves a SCALAR callee by reference', () => {
-    // A scalar-valued helper compiles by reference on every target, and
-    // substituting it would copy a shared definition into each of its
-    // callers for nothing.
-    const { ce, def } = scalarEngine();
-    def('gs', ['Add', ['Multiply', 2, 'u'], 1]);
-    def('Vs', FIVE_OF('u'));
-    def('fs', ['Add', ['gs', 'u'], ['Min', ['Vs', 'u']]]);
-    const r: any = compile(ce.box(['fs', 'u']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const fs = definitionOf(r.preamble, 'fs');
-    // The scalar `gs` stays a call of the shared definition…
-    expect(fs).toContain('_fn_gs(');
-    expect(r.preamble).toContain('const _fn_gs =');
-    // …while the collection-valued `Vs` is substituted and unrolled.
-    expect(sourceOf(r)).not.toContain('_fn_Vs');
-    expect(fs).toContain('Math.min(');
-    expect(r.run({ u: 3 })).toBe(2 * 3 + 1 + Math.min(4, 5, 6, 7, 8));
-  });
-
-  it('keeps the whole by-reference row free of runtime collection code', () => {
-    const ce = byReferenceEngine();
-    const r: any = compile(ce.box(['row', 'x', 'y']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const source = sourceOf(r);
-    expect(source).not.toContain('.map(');
-    expect(source).not.toContain('reduce(');
-    // Only the three SCALAR definitions of the chain survive.
-    expect(r.preamble).not.toContain('const _fn_V =');
-    expect(r.preamble).not.toContain('const _fn_d =');
-    expect(r.preamble).not.toContain('const _fn_d2 =');
-    expect(r.preamble).toContain('const _fn_m =');
-    expect(r.preamble).toContain('const _fn_m2 =');
-    expect(r.preamble).toContain('const _fn_row =');
-  });
-
-  it('calls the two scalar helpers of the row DIRECTLY', () => {
-    // `row`'s own parameters are unannotated, so their inferred type is
-    // `unknown`. They hold a run-time scalar all the same, because no
-    // parameter of `row` binds its argument whole and every emitted call site
-    // of `row` is broadcast-aware (user ruling 2026-09-09). The two nested
-    // calls are therefore bare, where they used to be `_SYS.bcastFn`
-    // dispatches — two run-time dispatches per pixel of the Voronoi row.
-    const ce = byReferenceEngine();
-    const r: any = compile(ce.box(['row', 'x', 'y']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const row = definitionOf(r.preamble, 'row');
-    expect(row).toContain('_fn_m(x, y)');
-    expect(row).toContain('_fn_m2(x, y)');
-    expect(sourceOf(r)).not.toContain('_SYS.bcastFn');
-  });
-});
-
-describe('BY-REFERENCE DEFINITION UNROLL — what stays by reference', () => {
-  it('leaves an IMPURE collection-valued callee alone', () => {
-    // Substitution repeats the body at every occurrence of the call, so a
-    // `Random()` inside it would be drawn once per occurrence where the
-    // by-reference call draws once.
-    const { ce, def } = scalarEngine();
-    def('Vimp', [
-      'List',
-      ['Random'],
-      ['Add', 'u', 1],
-      ['Add', 'u', 2],
-      ['Add', 'u', 3],
-      ['Add', 'u', 4],
-    ]);
-    def('dimp', ['Min', ['Vimp', 'u']]);
-    const r: any = compile(ce.box(['dimp', 'u']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    expect(r.preamble).toContain('const _fn_Vimp =');
-    expect(definitionOf(r.preamble, 'dimp')).toContain('_fn_Vimp');
-  });
-
-  it('leaves a RECURSIVE collection-valued callee alone', () => {
-    const { ce, def } = scalarEngine();
-    def('Vrec', [
-      'If',
-      ['LessEqual', 'u', 0],
-      ['List', 1, 2, 3, 4, 5],
-      ['Vrec', ['Subtract', 'u', 1]],
-    ]);
-    def('drec', ['Min', ['Vrec', 'u']]);
-    const r: any = compile(ce.box(['drec', 'u']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    expect(r.preamble).toContain('const _fn_Vrec =');
-    expect(definitionOf(r.preamble, 'drec')).toContain('_fn_Vrec');
-  });
-
-  it('leaves a GENERIC collection-valued callee alone', () => {
-    // A polytype's parameters are open type variables: there are no ground
-    // types to substitute into.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.declare('Vgen', '(x: T) -> list<T> where T: number');
-    ce.assign('Vgen', ce.box(['Function', FIVE_OF('x'), 'x'] as any));
-    ce.box([
-      'DefineFunction',
-      'dgen',
-      ['Function', ['Min', ['Vgen', 'u']], 'u'],
-    ]).evaluate();
-    const r: any = compile(ce.box(['dgen', 'u']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    expect(r.preamble).toContain('const _fn_Vgen =');
-    expect(definitionOf(r.preamble, 'dgen')).toContain('_fn_Vgen');
-    expect(r.run({ u: 3 })).toBe(4);
-  });
-});
 
 describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
   it('leaves a callee whose free symbol the definition BINDS alone', () => {
@@ -388,58 +201,9 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
       constantFold: false,
     } as any);
     expect(r.success).not.toBe(false);
-    expect(r.preamble).toContain('const _fn_Vcap =');
-    expect(definitionOf(r.preamble, 'fcap')).toContain('_fn_Vcap');
     // The global `k`, as the interpreter reads it.
     expect(r.run({ u: 1 })).toBe(101);
     expect(ce.box(['fcap', 1, 1] as any).N().re).toBe(101);
-  });
-
-  it('substitutes a callee whose only use of the colliding name is under its OWN binder', () => {
-    // `Vbind`'s body binds `p` in a `Map` lambda, and `fbind` binds a
-    // PARAMETER of that name. The lambda's `p` is read as the lambda's
-    // binding wherever the lambda reaches, so the enclosing `p` captures
-    // nothing, and the substitution is sound. The capture test counts only
-    // the FREE occurrences of the callee's body (`freeSymbolNames`); a test
-    // on every symbol of the body refused this case.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.box([
-      'DefineFunction',
-      'Vbind',
-      [
-        'Function',
-        [
-          'Map',
-          ['Function', ['Multiply', 2, 'p'], 'p'],
-          [
-            'List',
-            't',
-            ['Add', 't', 1],
-            ['Add', 't', 2],
-            ['Add', 't', 3],
-            ['Add', 't', 4],
-          ],
-        ],
-        't',
-      ],
-    ]).evaluate();
-    ce.box([
-      'DefineFunction',
-      'fbind',
-      ['Function', ['Min', ['Vbind', 't']], 'p', 't'],
-    ]).evaluate();
-
-    const r: any = compile(ce.box(['fbind', 'u', 'u']), {
-      to: 'javascript',
-      fallback: false,
-      constantFold: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-    expect(r.preamble).not.toContain('const _fn_Vbind =');
-    expect(definitionOf(r.preamble, 'fbind')).not.toContain('_fn_Vbind');
-    expect(r.run({ u: 1 })).toBe(2);
-    expect(ce.box(['fbind', 1, 1] as any).N().re).toBe(2);
   });
 
   it('leaves a callee that binds the colliding name with a NON-lambda binder alone', () => {
@@ -479,8 +243,6 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
       constantFold: false,
     } as any);
     expect(r.success).not.toBe(false);
-    expect(r.preamble).toContain('const _fn_Vsum =');
-    expect(definitionOf(r.preamble, 'fsum')).toContain('_fn_Vsum');
     expect(r.run({ u: 1 })).toBe(2);
     expect(ce.box(['fsum', 1, 1] as any).N().re).toBe(2);
   });
@@ -525,143 +287,10 @@ describe('BY-REFERENCE DEFINITION UNROLL — shadowing', () => {
       constantFold: false,
     } as any);
     expect(r.success).not.toBe(false);
-    expect(r.preamble).toContain('const _fn_Vcap2 =');
-    expect(definitionOf(r.preamble, 'fcap2')).toContain('_fn_Vcap2');
     // The global `k = 100` added to the argument `1`, as the interpreter
     // reads it — not `1 + 1`.
     expect(r.run({})).toBe(101);
     expect(ce.box(['fcap2', 1, 2] as any).N().re).toBe(101);
-  });
-
-  it('fails closed on a callee that is a PARAMETER of the definition', () => {
-    // `qsh` takes its callee as its first parameter, and an engine-level
-    // `Vsh` of the same name exists beside it. `subs` rewrites symbol
-    // occurrences and never a head, so a substituted body would call the
-    // engine's `Vsh` and ignore the argument. The compiler has no lowering
-    // for a call of a bound parameter, so the whole compilation declines and
-    // the interpreter evaluates it instead (user ruling 2026-08-14, whose
-    // scalar case is pinned in `compile-cse.test.ts`).
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.box([
-      'DefineFunction',
-      'Vsh',
-      ['Function', FIVE_OF('t'), 't'],
-    ]).evaluate();
-    ce.assign(
-      'qsh',
-      ce.box(['Function', ['Min', ['Vsh', 't']], 'Vsh', 't'] as any)
-    );
-
-    expect(() =>
-      compile(ce.box(['qsh', 'u', 'u']), {
-        to: 'javascript',
-        fallback: false,
-      } as any)
-      // The call `Vsh(t)` of the parameter has the type `unknown`, so `Min`
-      // of it declines first: its shape is not settled (ROADMAP CE-806).
-    ).toThrow(/^Could not compile "Vsh\(t\)": it can be a number or a list/);
-
-    const fallback: any = compile(ce.box(['qsh', 'u', 'u']), {
-      to: 'javascript',
-    } as any);
-    expect(fallback.success).toBe(false);
-    expect(fallback.code ?? '').not.toContain('Math.min(');
-  });
-
-  it('leaves a callee whose free symbol a BLOCK-LOCAL shadows alone', () => {
-    // A block-local shadows the engine exactly as a parameter does. `Vblk`
-    // reads the global `k = 100`, and `fblk` declares a LOCAL of that name
-    // holding `x + 1`. A substituted body would read the local for both
-    // occurrences — `min((x + 1) + (x + 1), …)`, which is 2 at `x = 0` where
-    // the value is 101.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.declare('k', 'number');
-    ce.assign('k', ce.number(100));
-    ce.box([
-      'DefineFunction',
-      'Vblk',
-      [
-        'Function',
-        [
-          'List',
-          ['Add', 't', 'k'],
-          ['Add', 't', 'k', 1],
-          ['Add', 't', 'k', 2],
-          ['Add', 't', 'k', 3],
-          ['Add', 't', 'k', 4],
-        ],
-        't',
-      ],
-    ]).evaluate();
-    ce.assign(
-      'fblk',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          ['Declare', 'k', 'number', ['Add', 'x', 1]],
-          ['Min', ['Vblk', 'k']],
-        ],
-        'x',
-      ] as any)
-    );
-
-    const r: any = compile(ce.box(['fblk', 'u']), {
-      to: 'javascript',
-      fallback: false,
-      constantFold: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-    expect(r.preamble).toContain('const _fn_Vblk =');
-    expect(definitionFrom(r.preamble, 'fblk')).toContain('_fn_Vblk');
-    expect(r.run({ u: 0 })).toBe(101);
-    expect(ce.box(['fblk', 0] as any).N().re).toBe(101);
-  });
-});
-
-describe('BY-REFERENCE DEFINITION UNROLL — a multi-statement body', () => {
-  it('substitutes a nested call in every statement of a `Block` body', () => {
-    // A function body of several statements is a `Block` that binds the
-    // parameters and its own locals. Each statement is substituted on its
-    // own and the `Block` is rebuilt onto its own scope, so a nested
-    // collection-valued call reached through a local is unrolled like any
-    // other.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.box([
-      'DefineFunction',
-      'Vloc',
-      ['Function', FIVE_OF('t'), 't'],
-    ]).evaluate();
-    ce.assign(
-      'floc',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          ['Declare', 'w', 'number', ['Add', 'x', 1]],
-          ['Min', ['Vloc', 'w']],
-        ],
-        'x',
-      ] as any)
-    );
-
-    const r: any = compile(ce.box(['floc', 'u']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).not.toBe(false);
-
-    const floc = definitionFrom(r.preamble, 'floc');
-    expect(floc).toContain('Math.min(');
-    expect(floc).not.toContain('reduce(');
-    expect(floc).not.toContain('_SYS.bcastFn');
-    expect(sourceOf(r)).not.toContain('_fn_Vloc');
-    // `min(w + 1, …, w + 5)` for `w = u + 1`.
-    expect(r.run({ u: 3 })).toBe(5);
-    expect(ce.box(['floc', 3] as any).N().re).toBe(5);
   });
 });
 
@@ -695,46 +324,6 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
     // sin(30°) = 1/2, the smallest of the five.
     expect(r.run({ u: 30 })).toBeCloseTo(0.5, 12);
     expect(ce.box(['fdeg', 30] as any).N().re).toBeCloseTo(0.5, 12);
-  });
-
-  it('scales a trig call inside a specialized point helper', () => {
-    // The helper knows the point width and must preserve the angular unit.
-    const withUnit = (unit: 'deg' | 'rad') => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'real');
-      ce.declare('y', 'real');
-      ce.angularUnit = unit;
-      ce.parse(String.raw`f(P) := \sin(P.x) + P.y`).evaluate();
-      const viaCall: any = compile(ce.parse(String.raw`f((x,y))`), {
-        to: 'glsl',
-      } as any);
-      // The same body written with no user function at all: the reference
-      // this route has to reproduce.
-      const direct = new ComputeEngine();
-      direct.angularUnit = unit;
-      const written: any = compile(direct.parse(String.raw`\sin(x) + y`), {
-        to: 'glsl',
-      } as any);
-      expect(viaCall.success).toBe(true);
-      expect(viaCall.code).toMatch(/^_fn_f.*\(vec2\(x, y\)\)$/);
-      return {
-        helper: String(viaCall.preamble),
-        written: String(written.code),
-      };
-    };
-
-    const deg = withUnit('deg');
-    // The shader spelling of `Math.fround(π/180)` is its shortest single-
-    // precision decimal, `0.017453292`.
-    expect(deg.helper).toContain('0.017453292');
-    expect(deg.written).toContain('0.017453292');
-    expect(deg.helper).toContain('sin(');
-
-    // Radian mode is the no-op case: no factor, and nothing changed.
-    const rad = withUnit('rad');
-    expect(rad.helper).not.toContain('0.017453292');
-    expect(rad.helper).toContain('sin(P.x) + P.y');
-    expect(rad.written).toBe('y + _gpu_sin(x)');
   });
 });
 

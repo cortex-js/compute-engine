@@ -1146,10 +1146,8 @@ these rules. `epsil check` reports each one with its own code:
   `if s > 3 { … }`), as `parallel-accumulator-read`. A read by another
   route, such as a function that the body calls, `parse("s")` or a function
   of the host, is not reported, and its value is unspecified too. The
-  interpreter and the JavaScript target run the passes in order, and such a
-  read gives the value that the earlier passes gave. A target that runs the
-  passes in parallel declines a pass that reads an accumulator (see the
-  examples after this list). A loop with no accumulator, and a parallel
+  interpreter runs the passes in order, and such a read gives the value that
+  the earlier passes gave (see the examples after this list). A loop with no accumulator, and a parallel
   comprehension, can call any function.
 - The effects of the body can only be `random` (see
   [effect specifiers](#effect-specifiers)): a `print` in the body is
@@ -1181,7 +1179,7 @@ parallel for k in 1..3 { if s < 2 { s += k } }   // parallel-accumulator-read
 ```
 
 A read through a function is not reported, and its value is unspecified.
-Today the interpreter and the JavaScript target give 11 for `s` here (the
+Today the interpreter gives 11 for `s` here (the
 passes add 1, 3 and 7), but this value is not guaranteed:
 
 ```epsil
@@ -1234,29 +1232,14 @@ which is a lazy collection, a parallel comprehension is evaluated at once.
 `parallel` is a contextual keyword: it is read as a keyword only before `for`,
 and it stays an identifier everywhere else. The statement lowers to
 `["ParallelLoop", body, ["Element", "x", "xs"]]`, and the comprehension to
-`["ParallelComprehension", body, …clauses]`. Compiled to JavaScript, the
-passes run in order, with the same direct draws as the interpreter. The
-other compile targets do not compile them.
+`["ParallelComprehension", body, …clauses]`.
 
-**On worker threads.** A host that compiles a program to JavaScript can call
-`runAsync()` on the result in place of `run()`. When the engine has a worker
-pool, `runAsync()` gives each worker one range of consecutive passes of a
-`parallel for`, and adds the sums of the workers to the accumulators. A loop
-that does not meet the conditions of the compiler runs in order, as with
-`run()`; a loop that reads an accumulator is one of these. Three conditions
-depend on how the program is written:
-
-- The domain is a range, `a..b`, not a list.
-- Each accumulator is a number or a list of numbers, declared with `let` in
-  the function or block that holds the loop, and the loop changes it only
-  with `+=`.
-- The loop is a statement of a function (also inside an `if`, a `for` or a
-  `while`), and the program calls that function as a statement, as the value
-  of `let a = f(…)` or of `a = f(…)`, or as its last value. A call in an
-  operand, `f(…) + 1`, runs the loop in order: write `let a = f(…)`, then
-  `a + 1`.
-
-This function meets the three conditions:
+**On one thread.** In version 0.194.0, the passes of a `parallel for` and of
+a parallel comprehension run in order, on one thread. A program that holds
+one does not compile, on any target: `compile()` declines, and `run()`
+evaluates the program with the interpreter, as `executeEpsil()` does. A later
+release will run these loops on the worker pool again; a program that follows
+the rules above will then need no change.
 
 ```epsil-live
 function count(H: list<integer>, n: integer) -> list<integer> {
@@ -1268,10 +1251,8 @@ count([0, 0, 0], 9)
 // ➔ [3, 3, 3]
 ```
 
-The other conditions, the threshold of 20 000 passes, and the values (an
-accumulator of integers gives the value of `run()`, one of real numbers can
-differ in rounding) are in the
-[compile guide](/compute-engine/guides/compiling/#parallel-loops-on-worker-threads-runasync).
+See the
+[compile guide](/compute-engine/guides/compiling/#parallel-loops-runasync).
 
 ## Pipelines
 

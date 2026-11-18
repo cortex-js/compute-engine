@@ -59,8 +59,6 @@ const IR_INTERVAL_OPTIONS = {
   entryChecks: 'no-op',
   mode: 'declined',
   quadrature: 'no-op',
-  // `compile()` applies it to the result (`strictTypesChecked()`).
-  strictTypes: 'mapped',
 } as const satisfies Record<
   keyof typeof IR_OPTIONS,
   'mapped' | 'no-op' | 'declined'

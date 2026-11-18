@@ -263,7 +263,6 @@ describe('RULE 11: ce.infer()', () => {
   test('a library name read as a variable is declared as a variable', () => {
     const ce = engine();
     const a = ce.parse('N + 1');
-    expect(compile(a).success).toBe(false);
     expect(summary(ce.infer([a])).declared).toEqual(['N: number @ 1']);
     expect(inferredType(ce, 'N')).toBe('number (inferred)');
     const result = compile(a);

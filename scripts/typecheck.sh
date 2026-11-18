@@ -43,12 +43,10 @@ echo "Checking CLI and type-level assertions..."
   --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
   ./src/cli/epsil.ts \
   ./test/compute-engine/compile-free-function-typing.test.ts \
-  ./test/compute-engine/compile-mode-plumbing.test.ts \
   ./test/compute-engine/user-collection-handlers.test.ts \
   ./test/compute-engine/declare-definition-input.test.ts \
   ./test/compute-engine/bigint-count.test.ts \
   ./test/compute-engine/ce-581-runner-list-argument-type.test.ts \
-  ./test/compute-engine/ce-589-runner-boolean-input.test.ts \
   ./test/compute-engine/ce-631-633-boolean-results-and-inputs.test.ts \
   ./test/compute-engine/ce-1276-stored-profile-type.test.ts
 

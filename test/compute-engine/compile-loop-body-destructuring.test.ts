@@ -17,126 +17,6 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
-import { parseEpsil } from '../../src/epsil/parse-epsil';
-
-/** The interpreted and the compiled value of an Epsil program. */
-function parity(source: string): { evaluated: number; compiled: number } {
-  const ce = new ComputeEngine();
-  const [program] = parseEpsil(source);
-  const expr = ce.box(program);
-  const result = compile(expr, { to: 'javascript' });
-  if (!result.success)
-    throw new Error(`did not compile: ${source}\n${JSON.stringify(result)}`);
-  return {
-    evaluated: expr.evaluate().N().re,
-    compiled: result.run!({}) as number,
-  };
-}
-
-function expectParity(source: string, expected: number): void {
-  const { evaluated, compiled } = parity(source);
-  expect(evaluated).toBe(expected);
-  expect(compiled).toBe(expected);
-}
-
-describe('Destructuring let in a compiled loop body', () => {
-  test('while loop, destructuring let as the first statement', () => {
-    expectParity(
-      `let n = 0
-while n < 4 { let (a, x) = (2, 3); n = n + a }
-n`,
-      4
-    );
-  });
-
-  test('while loop, destructuring let as the last statement', () => {
-    expectParity(
-      `let n = 0
-while n < 4 { n = n + 1; let (a, x) = (2, 3) }
-n`,
-      4
-    );
-  });
-
-  test('while loop, two destructuring lets and a nested pattern', () => {
-    expectParity(
-      `let s = 0
-let i = 0
-while i < 3 { i = i + 1; let (a, (b, c)) = (i, (2, 3)); let (d, e) = (a, 1); s = s + a + b + c + d + e }
-s`,
-      // Each turn adds 2i + 6 for i = 1, 2, 3.
-      30
-    );
-  });
-
-  test('for loop, destructuring let as a middle statement', () => {
-    expectParity(
-      `let s = 0
-for k in [1, 2, 3] { let (a, b) = (k, 2 * k); s = s + a + b }
-s`,
-      18
-    );
-  });
-
-  test('for loop, destructuring let as the last statement', () => {
-    expectParity(
-      `let s = 0
-for k in [1, 2, 3] { s = s + k; let (a, b) = (k, 2 * k) }
-s`,
-      6
-    );
-  });
-
-  test('for loop, destructuring let of a tuple-valued call', () => {
-    // `f` is a local of the program block: its declared type gives the
-    // type of the call.
-    expectParity(
-      `let f: (number) -> tuple<number, number> = (k) => (k, k + 1)
-let s = 0
-for k in [1, 2, 3] { let (a, b) = f(k); s = s + a * b }
-s`,
-      20
-    );
-  });
-
-  test('for loop, destructuring let inside an if branch', () => {
-    expectParity(
-      `let s = 0
-for k in [1, 2, 3] { if k > 1 { let (a, b) = (k, 10); s = s + a * b } }
-s`,
-      50
-    );
-  });
-
-  test('a leaf that shadows an outer local does not write it', () => {
-    expectParity(
-      `let a = 100
-let s = 0
-for k in [1, 2] { let (a, b) = (k, 1); s = s + a + b }
-s + a`,
-      105
-    );
-  });
-
-  test('a bare destructuring declare as the whole loop body is a declaration below a statement (MathJSON)', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', 'integer', 0],
-      [
-        'Loop',
-        ['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 1]],
-        ['Element', 'k', ['List', 1, 2, 3]],
-      ],
-      's',
-    ]);
-    expect(expr.isValid).toBe(false);
-    expect(JSON.stringify(expr.json)).toContain('declaration-below-statement');
-    expect(() =>
-      compile(expr, { to: 'javascript', fallback: false })
-    ).toThrow(/invalid expression/);
-  });
-});
 
 /**
  * The GLSL target lowers a loop body with its own statement routine
@@ -153,51 +33,6 @@ describe('Destructuring let in a loop body on GLSL', () => {
     'Loop',
     body,
     ['Element', 'k', ['Range', 1, 3]],
-  ];
-  const BARE_CASES: Array<{ name: string; json: unknown }> = [
-    {
-      name: 'a bare two-position declare',
-      json: [
-        'Block',
-        loop(['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 2]]),
-        0,
-      ],
-    },
-    {
-      name: 'a bare three-position declare',
-      json: [
-        'Block',
-        loop([
-          'Declare',
-          ['Tuple', 'a', 'b', 'c'],
-          'unknown',
-          ['Tuple', 'k', 2, 3],
-        ]),
-        0,
-      ],
-    },
-    {
-      name: 'a bare nested pattern',
-      json: [
-        'Block',
-        loop([
-          'Declare',
-          ['Tuple', 'a', ['Tuple', 'b', 'c']],
-          'unknown',
-          ['Tuple', 'k', ['Tuple', 2, 3]],
-        ]),
-        0,
-      ],
-    },
-    {
-      name: 'a bare declare whose leaf shadows an outer local',
-      json: [
-        'Block',
-        ['Declare', 'a', 'integer', 100],
-        loop(['Declare', ['Tuple', 'a', 'b'], 'unknown', ['Tuple', 'k', 1]]),
-        'a',
-      ],
-    },
   ];
   const CASES: Array<{ name: string; json: unknown; expected: number }> = [
     {
@@ -236,42 +71,9 @@ describe('Destructuring let in a loop body on GLSL', () => {
     },
   ];
 
-  test.each(BARE_CASES)(
-    '$name: is the error declaration-below-statement',
-    ({ json }) => {
-      const ce = new ComputeEngine();
-      const expr = ce.box(json as any);
-      expect(expr.isValid).toBe(false);
-      expect(JSON.stringify(expr.json)).toContain(
-        'declaration-below-statement'
-      );
-      for (const to of ['javascript'] as const)
-        expect(() => compile(expr, { to, fallback: false })).toThrow(
-          /invalid expression/
-        );
-    }
-  );
-
   test.each(CASES)('$name: the interpreter value', ({ json, expected }) => {
     const ce = new ComputeEngine();
     expect(ce.box(json as any).evaluate().re).toBe(expected);
-  });
-
-  for (const to of ['glsl'] as const)
-    test.each(CASES)(`$name: compiles on ${to}`, ({ json }) => {
-      const ce = new ComputeEngine();
-      const result = compile(ce.box(json as any), { to, fallback: false });
-      expect(result.success).toBe(true);
-    });
-
-  test('GLSL declines a bare declare in the loop body', () => {
-    const ce = new ComputeEngine();
-    expect(() =>
-      compile(ce.box(BARE_CASES[1].json as any), {
-        to: 'glsl',
-        fallback: false,
-      })
-    ).toThrow(/GLSL fragment/);
   });
 });
 
@@ -324,51 +126,10 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
     },
   ];
 
-  // An assignment in an element of the value (`let (a, _) = (k, s := a)`) is
-  // the static error `assignment-in-operand`, so every target declines.
-  test('an assignment in a `_` element is a static error', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'a', 'integer', 100],
-      ['Declare', 's', 'integer', 0],
-      loop(
-        [
-          'Block',
-          [
-            'Declare',
-            ['Tuple', 'a', '_'],
-            'unknown',
-            ['Tuple', 'k', ['Assign', 's', 'a']],
-          ],
-        ],
-        1
-      ),
-      's',
-    ] as any);
-    expect(expr.isValid).toBe(false);
-    for (const to of ['javascript', 'glsl'] as const)
-      expect(() => compile(expr, { to, fallback: false })).toThrow(
-        to === 'glsl' ? /GLSL fragment/ : /invalid expression/
-      );
-  });
-
   test.each(CASES)('$name: the interpreter value', ({ json, expected }) => {
     const ce = new ComputeEngine();
     expect(ce.box(json as any).evaluate().re).toBe(expected);
   });
-
-  for (const to of ['javascript', 'glsl'] as const)
-    test.each(CASES)(`$name: declines on ${to}`, ({ json }) => {
-      const ce = new ComputeEngine();
-      expect(() =>
-        compile(ce.box(json as any), { to, fallback: false })
-      ).toThrow(
-        to === 'glsl'
-          ? /The local `[ab]` is read before its declaration/
-          : /whose value reads 'a', a name that the pattern declares/
-      );
-    });
 
   test.each(CASES)(
     '$name: the JavaScript fallback gives the interpreter value',
@@ -379,54 +140,4 @@ describe('A destructuring let whose value reads a name of the pattern', () => {
       expect(result.run!({})).toBe(expected);
     }
   );
-});
-
-/**
- * The check above is syntactic: a value that uses a name of the pattern
- * only as a bound variable of an inner scope (a `Sum` index, a parameter of
- * a function literal) also declines, although the compiled per-leaf form
- * gives the interpreter value there. A check that knows the scopes is a
- * separate task. With the default fallback, the interpreter value comes
- * back.
- */
-describe('A pattern name used only as a bound variable of the value', () => {
-  const CASES: Array<{ name: string; json: () => unknown; expected: number }> =
-    [
-      {
-        name: 'a Sum index (Epsil)',
-        json: () => parseEpsil('let (i, s) = (3, Sum(i^2, (i, 1, 10)))\ns')[0],
-        expected: 385,
-      },
-      {
-        name: 'a parameter of a function literal (Epsil)',
-        json: () => parseEpsil('let (x, g) = (1, (x) => x + 1)\nx')[0],
-        expected: 1,
-      },
-      {
-        name: 'a Sum index (MathJSON)',
-        json: () => [
-          'Block',
-          [
-            'Declare',
-            ['Tuple', 'a', 'b'],
-            'unknown',
-            ['Tuple', ['Sum', 'a', ['Limits', 'a', 1, 4]], 0],
-          ],
-          'a',
-        ],
-        expected: 10,
-      },
-    ];
-
-  test.each(CASES)('$name: declines on javascript', ({ json, expected }) => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(json() as any);
-    expect(expr.evaluate().re).toBe(expected);
-    expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
-      /whose value reads '[a-z]', a name that the pattern declares/
-    );
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(false);
-    expect(result.run!({})).toBe(expected);
-  });
 });

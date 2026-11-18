@@ -1061,8 +1061,7 @@ function excludesEveryScalar(t: Type): boolean {
  *   result, the mean of the squares. The compiled form of such a function
  *   follows: a call with a list argument at the lifted slot compiles a
  *   helper specialized to the argument's list type, whose body maps the
- *   element-wise operators over the array
- *   (`ensureSpecializedUserCallEmitted`, `compilation/base-compiler.ts`),
+ *   element-wise operators over the array,
  *   so the two routes agree.
  * - The operand is the ONLY operand of that application: `mean(xs)`
  *   counts, `mean(x, 1)`, `max(x, 0)` and `hypot(x, 1)` do not. With several
@@ -1472,8 +1471,7 @@ function literalFirstSlotCollectionArm(
  * `Max`, `Min`, `GCD`, `LCM`, `Sum`, `Product` and `ListFrom` read a
  * collection operand whole too, and are listed. A compiled call with a list
  * argument at a lifted slot compiles a helper specialized to the argument's
- * list type, which reduces the array (`ensureSpecializedUserCallEmitted`,
- * `compilation/base-compiler.ts`); where no such helper can be emitted the
+ * list type, which reduces the array; where no such helper can be emitted the
  * compilation declines and the interpreter answers, so the two routes
  * agree. `SetFrom` and `TupleFrom` have no JavaScript lowering, and
  * `Flatten` declines an operand that is not typed as an indexed collection.

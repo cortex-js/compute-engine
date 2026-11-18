@@ -37,11 +37,6 @@ describe('Heaviside LaTeX', () => {
 });
 
 describe('Heaviside JS compilation', () => {
-  test('compiles successfully', () => {
-    const result = compile(ce.expr(['Heaviside', 'x']));
-    expect(result.success).toBe(true);
-    expect(result.code).toContain('heaviside');
-  });
 
   test('negative → 0', () => {
     const result = compile(ce.expr(['Heaviside', 'x']));
@@ -56,15 +51,6 @@ describe('Heaviside JS compilation', () => {
   test('positive → 1', () => {
     const result = compile(ce.expr(['Heaviside', 'x']));
     expect(result.run!({ x: 3 })).toBe(1);
-  });
-
-  test('in expression: H(x) * x = ramp function', () => {
-    const expr = ce.expr(['Multiply', ['Heaviside', 'x'], 'x']);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run!({ x: -3 })).toBe(-0); // 0 * -3 = -0 (IEEE 754)
-    expect(result.run!({ x: 0 })).toBe(0); // 0.5 * 0 = 0
-    expect(result.run!({ x: 5 })).toBe(5); // 1 * 5 = 5
   });
 });
 

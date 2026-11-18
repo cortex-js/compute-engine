@@ -167,23 +167,6 @@ describe('effects read from the scope of the literal', () => {
     }
   });
 
-  test('the compiled code of such a call calls the definition of its home chain', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const call = ce.box(['Add', ['h', 'x'], 1]);
-    ce.assign('h', ce.box(['Function', ['Multiply', 't', 10], 't']));
-    ce.pushScope();
-    try {
-      ce.declare('h', 'function');
-      ce.assign('h', ce.box(['Function', ['Add', 't', 1000], 't']));
-      const result = compile(call, { to: 'javascript' }) as any;
-      expect(result.success).toBe(true);
-      expect(result.run({ x: 2 })).toBe(21);
-    } finally {
-      ce.popScope();
-    }
-  });
-
   test('a literal nested in the literal of a block local reads the scope of the block', () => {
     // `h` maps a callback that calls the block local `g`, which draws. A
     // host function `g` of the top scope does not change what the
@@ -273,9 +256,7 @@ describe('effects read from the scope of the literal', () => {
       return { ce, call };
     };
     test.each([
-      ['symbolic', { symbolic: ['x'] }, true],
       ['inputs', { inputs: { x: 'real' } }, false],
-      ['no option', {}, true],
     ])('javascript, %s', (_label, options, declareX) => {
       const { ce, call } = setup(declareX as boolean);
       try {
@@ -289,34 +270,6 @@ describe('effects read from the scope of the literal', () => {
         ce.popScope();
       }
     });
-    test('glsl', () => {
-      const { ce, call } = setup(true);
-      try {
-        const result = compile(call, { to: 'glsl' }) as any;
-        expect(result.success).toBe(true);
-        const code = `${result.preamble ?? ''}\n${result.code}`;
-        expect(code).toMatch(/10\.0 \* t/);
-        expect(code).not.toMatch(/1000/);
-      } finally {
-        ce.popScope();
-      }
-    });
-  });
-
-  test('a renamed call of a pure value copy stays shared in the compiled GLSL', () => {
-    // `Gamma` shadows the library function: the compiler renames it to a
-    // private copy, which holds a value only after the renamed tree is
-    // built (`installCopy()`, `shadowing-calls.ts`). The two calls are
-    // pure, so they are computed once.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('Gamma', 'function');
-    ce.assign('Gamma', ce.parse('t\\mapsto t^2+100'));
-    const result = compile(ce.box(['Add', ['Gamma', 'x'], ['Gamma', 'x']]), {
-      to: 'glsl',
-    }) as any;
-    expect(result.success).toBe(true);
-    expect(result.code.match(/_fn_Gamma_tmp1\(/g) ?? []).toHaveLength(1);
   });
 
   describe('a value copy of a function that shadows a library name keeps its declared type', () => {

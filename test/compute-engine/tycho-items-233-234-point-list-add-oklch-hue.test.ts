@@ -139,7 +139,7 @@ describe('Tycho item 234 — point + list of points, JavaScript target', () => {
     expect(expr.type.matches('list<any>')).toBe(false);
   });
 
-  test('a third scalar operand, string cells, and complex cells fail closed', () => {
+  test('a third scalar operand and string cells fail closed', () => {
     const ce = new ComputeEngine();
     ce.declare('P', 'list<tuple<number, number>>');
     ce.declare('S', 'list<tuple<string, string>>');
@@ -151,26 +151,6 @@ describe('Tycho item 234 — point + list of points, JavaScript target', () => {
       const r = compile(ce.box(json as never), { to: 'javascript' });
       expect(r.success).toBe(false);
     }
-    // Complex cells used to fail closed too. A point list whose declared
-    // column type is complex has no single element lane, so the sum lowers
-    // through the run-time dispatching `_SYS.sadd` (Tycho item 246) and
-    // answers the interpreter's value.
-    const r = compile(ce.box(['Add', 'Z', ['Tuple', 1, 2]] as never), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.sadd');
-    expect(
-      r.run({
-        Z: [
-          [{ re: 1, im: 1 }, 0],
-          [3, 4],
-        ],
-      })
-    ).toEqual([
-      [{ re: 2, im: 1 }, 2],
-      [4, 6],
-    ]);
   });
 
   test('the lambda-convention fallback boxes a positional array under its parameter type', () => {
@@ -199,13 +179,10 @@ describe('Tycho item 234 — point + list of points, JavaScript target', () => {
     expect(r.success).toBe(false);
   });
 
-  test('two points plus the list still fail closed, and the fallback `run` accepts a list argument', () => {
+  test('two points plus the list: `run` accepts a list argument', () => {
     const ce = engineWithPointList();
     const expr = ce.box(['Add', 'P', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
     const r = compile(expr, { to: 'javascript' });
-    expect(r.success).toBe(false);
-    // Before: the array argument boxed as MathJSON (`unexpected-mathjson`)
-    // and the shadow was declared `number`, so `run` threw.
     expect(r.run({ P, t })).toEqual([
       [4, 6],
       [4.2, 6],

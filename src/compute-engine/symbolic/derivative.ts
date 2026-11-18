@@ -1124,7 +1124,7 @@ function symbolDependenciesValid(deps: SymbolDependency[]): boolean {
  * rather than n: `Derivative(f, 3)` continues the chain `Derivative(f, 2)`
  * left behind. It also serves the compile path, which asks for the same
  * closed form twice — once when the reference analysis probes whether the
- * `Derivative` head lowers (`BaseCompiler.analyzeReferences`), once when the
+ * `Derivative` head lowers, once when the
  * code is emitted.
  */
 const derivativeChains = new WeakMap<Expression, DerivativeChainCache>();

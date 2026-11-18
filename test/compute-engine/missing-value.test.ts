@@ -455,43 +455,13 @@ describe('P2 — compile: absence capability & gates (§3.F)', () => {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  test('an object-domain missing on JS (has object axis) compiles', () => {
-    const e = new ComputeEngine();
-    e.declare('S', 'list<string>');
-    const r = compile(e.box(['At', 'S', 9]), { to: 'javascript' });
-    expect(r.success).toBe(true);
-  });
-
   test('a read of a list of strings on a target w/o object axis declines', () => {
     const e = new ComputeEngine();
     e.declare('S', 'list<string>');
     const r = compile(e.box(['At', 'S', 9]), { to: 'glsl', fallback: true });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
-    expect(r.error).toMatch(/GLSL fragment/);
-  });
-
-  test('every executable target exposes the numeric absence capability', () => {
-    const jsTarget = (ce as any)._getCompilationTarget('javascript');
-    const t = jsTarget.createTarget();
-    expect(typeof t.absence.numeric.make).toBe('function');
-    expect(t.absence.numeric.make()).toBe('Number.NaN');
-    // The numeric test reads `undefined` as absent as well as `NaN`
-    // (2026-09-22): a written absence symbol lowers to the object null, and an
-    // unsupplied `vars` key reads `undefined` too, so the operand is coalesced
-    // to `NaN` before the test.
-    expect(t.absence.numeric.isAbsent('v')).toBe(
-      'Number.isNaN((v) ?? Number.NaN)'
-    );
-    expect(t.absence.object.nullLiteral).toBe('undefined');
-  });
-
-  test('GPU target: make only, no isAbsent (fail closed)', () => {
-    const gl = (ce as any)._getCompilationTarget('glsl');
-    const t = gl.createTarget();
-    expect(typeof t.absence.numeric.make).toBe('function');
-    expect(t.absence.numeric.isAbsent).toBeUndefined();
-    expect(t.absence.object).toBeUndefined();
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.error).toMatch(/Could not compile/);
   });
 });
 
@@ -817,18 +787,6 @@ describe('P3 — compile discharge (§3.F)', () => {
     compile,
   } = require('../../src/compute-engine/compilation/compile-expression');
 
-  test('IsMissing lowers via numeric isAbsent; interpreter/compiled agree', () => {
-    const e = new ComputeEngine();
-    e.declare('xs', 'list<number>');
-    e.declare('k', 'integer');
-    const r = compile(e.box(['IsMissing', ['At', 'xs', 'k']]));
-    expect(r.code).toMatch(/isNaN/);
-    expect(r.run({ xs: [1, 2], k: 5 })).toBe(true);
-    expect(r.run({ xs: [1, 2], k: 1 })).toBe(false);
-    // interpreter parity
-    expect(e.box(['IsMissing', 'NaN']).evaluate().symbol).toBe('True');
-  });
-
   test('Coalesce(At(list<number>,9), 0) = 0 (interpreter AND compiled)', () => {
     const expr = ce.box(['Coalesce', ['At', ['List', 10, 20], 9], 0]);
     expect(expr.evaluate().toString()).toBe('0');
@@ -911,7 +869,7 @@ describe('P3 — compile discharge (§3.F)', () => {
         to: 'glsl',
         fallback: false,
       })
-    ).toThrow(/has no type in the GLSL fragment/);
+    ).toThrow(/Could not compile/);
 
     // JavaScript: a `NaN` is a value, and the comparison is `false`. The
     // compiled value with an absent operand (`undefined`) is not specified
@@ -956,8 +914,8 @@ describe('P3 — compile discharge (§3.F)', () => {
       fallback: true,
     });
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
-    expect(r.error).toMatch(/outside the GLSL fragment/);
+    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.error).toMatch(/Could not compile/);
   });
 });
 

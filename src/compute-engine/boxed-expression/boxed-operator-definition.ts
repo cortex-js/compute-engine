@@ -23,7 +23,6 @@ import {
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { noteArithmeticDefinition } from './arithmetic-order-override.js';
-import { assertValidCompileHelpers } from './compile-helpers-check.js';
 import {
   hasDeclaredEffectLabel,
   isEffectSubset,
@@ -189,8 +188,6 @@ const OPERATOR_DEF_KEYS = new Set([
   'evaluateAsync',
   'evalDimension',
   'compile',
-  'compileShippable',
-  'compileHelpers',
   'derivative',
 
   'eq',
@@ -854,12 +851,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   ) => Expression;
 
   compile?: OperatorCompileHandler;
-
-  /** See `OperatorDefinition.compileShippable`. */
-  compileShippable?: boolean;
-
-  /** See `OperatorDefinition.compileHelpers`. */
-  compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
   /** The partial derivatives of the operator, as given by the `derivative`
    * key of its definition: an array of function literals, one for each
@@ -2015,6 +2006,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._writeVersion += 1;
     this._bindsLocal = isLocalBinding(def);
 
+    assertNoRemovedCompileKey(this.name, def);
+
     if (this.engine.strict) {
       for (const key in def) {
         // Silently ignore private fields so that spreading an existing boxed
@@ -2065,12 +2058,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // An in-place update that does not mention `arithmetic` keeps it. A
     // redeclaration builds a new definition, so it carries `arithmetic` only
     // when the new definition gives it.
-    if (def.arithmetic?.compile?.type?.helpers !== undefined)
-      assertValidCompileHelpers(
-        `Operator Definition "${this.name}"`,
-        def.arithmetic.compile.type.helpers,
-        'arithmetic.compile.type.helpers'
-      );
     this.arithmetic = def.arithmetic ?? this.arithmetic;
     this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;
@@ -2319,23 +2306,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evalDimension = def.evalDimension ?? this.evalDimension;
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
-    // `compileShippable` and `compileHelpers` describe the code of one
-    // handler: an update that gives a new handler takes them from the same
-    // update (absent means not shippable and no helpers), and an update with
-    // no handler keeps them.
-    if (def.compile !== undefined) {
-      this.compile = def.compile;
-      this.compileShippable = def.compileShippable;
-      this.compileHelpers = def.compileHelpers;
-    } else {
-      this.compileShippable = def.compileShippable ?? this.compileShippable;
-      this.compileHelpers = def.compileHelpers ?? this.compileHelpers;
-    }
-    if (def.compileHelpers !== undefined)
-      assertValidCompileHelpers(
-        `Operator Definition "${this.name}"`,
-        def.compileHelpers
-      );
+    this.compile = def.compile ?? this.compile;
     if (def.derivative !== undefined)
       assertValidDerivativeKey(this.name, def.derivative);
     this.derivative = def.derivative ?? this.derivative;
@@ -3202,4 +3173,26 @@ function checkOperandRole(
         `Operator Definition "${name}": unknown operand role "${(role as { kind: unknown }).kind}"`
       );
   }
+}
+
+/**
+ * Throw when `def` gives a key of the compilation that 0.194.0 removed:
+ * `compileHelpers`, `compileShippable`, or the `compile` field of
+ * `arithmetic`. A JavaScript caller gets this error, in every mode of the
+ * engine, rather than a key that is silently ignored.
+ */
+function assertNoRemovedCompileKey(name: string, def: object): void {
+  const removed = ['compileHelpers', 'compileShippable'].find(
+    (k) => (def as Record<string, unknown>)[k] !== undefined
+  );
+  const arithmetic = (def as { arithmetic?: object }).arithmetic;
+  const key =
+    removed ??
+    ((arithmetic as Record<string, unknown> | undefined)?.compile !== undefined
+      ? 'arithmetic.compile'
+      : undefined);
+  if (key !== undefined)
+    throw new Error(
+      `Operator Definition "${name}": the key "${key}" was removed in 0.194.0. A \`compile\` handler returns an expression, which the compiler lowers. See the migration note of 0.194.0 in the changelog.`
+    );
 }

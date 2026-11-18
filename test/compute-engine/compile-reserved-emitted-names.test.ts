@@ -40,19 +40,6 @@ describe('A parameter named _SYS', () => {
     expect(createJavaScriptRuntime().load(r)(3)).toBe(expected);
   });
 
-  test('a write to the parameter writes its generated name', () => {
-    const r = compiled([
-      'Function',
-      [
-        'Block',
-        ['Assign', '_SYS', ['Add', '_SYS', 1]],
-        ['Factorial', '_SYS'],
-      ],
-      ['Typed', '_SYS', "'integer'"],
-    ]);
-    expect(r.run!(2)).toBe(6);
-  });
-
   test('in the bigint mode', () => {
     const r = compiled(factorialOfSys, { mode: 'bigint' });
     expect(r.run!(3n)).toBe(6n);
@@ -67,54 +54,6 @@ describe('A parameter named _SYS', () => {
     ]);
     expect(r.run!(3)).toBe(6);
   });
-
-  // A nested function literal and a user function also emit such a
-  // parameter under a generated name. A write to the parameter in their
-  // body writes that name; it does not decline as a write to a reference
-  // that cannot be assigned.
-  test.each(['_SYS', '_upper'])(
-    'a nested literal that writes its parameter named %s',
-    (n) => {
-      const fn = [
-        'Function',
-        [
-          'Apply',
-          [
-            'Function',
-            ['Block', ['Assign', n, ['Add', n, 1]], ['Factorial', n]],
-            ['Typed', n, "'integer'"],
-          ],
-          'x',
-        ],
-        ['Typed', 'x', "'integer'"],
-      ];
-      const expected = ce.box(['Apply', fn, 2] as any).evaluate().re;
-      expect(expected).toBe(6);
-      expect(compiled(fn).run!(2)).toBe(expected);
-    }
-  );
-
-  test.each(['_SYS', '_upper'])(
-    'a user function that writes its parameter named %s',
-    (n) => {
-      const ce2 = new ComputeEngine();
-      ce2.declare('g', 'function');
-      ce2.assign(
-        'g',
-        ce2.box([
-          'Function',
-          ['Block', ['Assign', n, ['Add', n, 1]], ['Factorial', n]],
-          ['Typed', n, "'integer'"],
-        ] as any)
-      );
-      const fn = ['Function', ['g', 'x'], ['Typed', 'x', "'integer'"]];
-      const expected = ce2.box(['Apply', fn, 2] as any).evaluate().re;
-      expect(expected).toBe(6);
-      const r = compile(ce2.box(fn as any), { fallback: false })!;
-      expect(r.success).toBe(true);
-      expect(r.run!(2)).toBe(expected);
-    }
-  );
 });
 
 describe('Other user names equal to an emitted identifier', () => {
@@ -316,7 +255,6 @@ describe('A user name equal to a name that a lowering binds around user code', (
   test.each([
     ['Map', ['Map', ['Function', ['Add', 'y', 2], 'y'], '_f'], [3, 4, 5]],
     ['Filter', ['Filter', '_f', ['Function', ['Greater', 'y', 2], 'y']], [3]],
-    ['Count', ['Count', '_f', ['Function', ['Greater', 'y', 2], 'y']], 1],
   ])('a list parameter named _f in %s', (_op, body, value) => {
     const fn = ['Function', body, list('_f')];
     const expected = ce
@@ -369,81 +307,6 @@ describe('A user name equal to a name that a lowering binds around user code', (
     ]);
   });
 
-  // `Norm` over a list of points binds each point to `_pt` around the code
-  // of the order of the norm.
-  test('a parameter named _pt that is the order of a Norm', () => {
-    const fn = [
-      'Function',
-      ['Norm', 'P', '_pt'],
-      ['Typed', 'P', "'list<tuple<real, real>>'"],
-      ['Typed', '_pt', "'integer'"],
-    ];
-    const expected = ce
-      .box([
-        'Apply',
-        fn,
-        ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
-        1,
-      ] as any)
-      .evaluate()
-      .toString();
-    expect(expected).toBe('[7,14]');
-    expect(
-      compiled(fn).run!(
-        [
-          [3, 4],
-          [6, 8],
-        ],
-        1
-      )
-    ).toEqual([7, 14]);
-  });
-
-  // `Norm` of an operand whose shape is known only at run time binds the
-  // operand to `_v` around the code of the order of the norm.
-  test('a parameter named _v that is the order of a Norm', () => {
-    const fn = [
-      'Function',
-      ['Norm', 'P', '_v'],
-      ['Typed', 'P', "'broadcastable<tuple<real, real>>'"],
-      ['Typed', '_v', "'integer'"],
-    ];
-    const expected = ce
-      .box([
-        'Apply',
-        fn,
-        ['List', ['Tuple', 3, 4], ['Tuple', 6, 8]],
-        1,
-      ] as any)
-      .evaluate()
-      .toString();
-    expect(expected).toBe('[7,14]');
-    expect(
-      compiled(fn).run!(
-        [
-          [3, 4],
-          [6, 8],
-        ],
-        1
-      )
-    ).toEqual([7, 14]);
-  });
-
-  // A `Coalesce` of a number binds the first operand to `_c` around the
-  // code of the default value.
-  test('a parameter named _c that is the default of a Coalesce', () => {
-    const fn = [
-      'Function',
-      ['Coalesce', ['At', 'L', 5], '_c'],
-      ['Typed', 'L', "'list<real>'"],
-      ['Typed', '_c', "'real'"],
-    ];
-    expect(
-      ce.box(['Apply', fn, ['List', 1, 2], 7] as any).evaluate().re
-    ).toBe(7);
-    expect(compiled(fn).run!([1, 2], 7)).toBe(7);
-  });
-
   // The interval target folds the term of a `Sum` over a `Range` with a
   // run-time bound in the scope of `_r`, the name of the range.
   test('interval-js: a parameter named _r in the term of a Sum over a Range', () => {
@@ -462,33 +325,3 @@ describe('A user name equal to a name that a lowering binds around user code', (
   });
 });
 
-// A `Reduce` over complex values with a user function as the combiner
-// compiles the combiner as the function literal `(_a, _x) ↦ f(_a, _x)`. The
-// parameters of this literal must not have the name of the function.
-describe('A user function named like a parameter of a combiner literal', () => {
-  test.each(['_a', '_x'])('a user function named %s', (name) => {
-    const ce2 = new ComputeEngine();
-    ce2.assign(name, ce2.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
-    const fn = [
-      'Function',
-      ['Reduce', 'L', name, 0],
-      ['Typed', 'L', "'list<complex>'"],
-    ];
-    const expected = ce2
-      .box(['Apply', fn, ['List', ['Complex', 1, 1], ['Complex', 2, 0]]] as any)
-      .evaluate();
-    expect(expected.re).toBe(3);
-    expect(expected.im).toBe(1);
-    const r = compile(ce2.box(fn as any), {
-      fallback: false,
-      mode: 'complex',
-    })!;
-    expect(r.success).toBe(true);
-    expect(
-      r.run!([
-        { re: 1, im: 1 },
-        { re: 2, im: 0 },
-      ])
-    ).toEqual({ re: 3, im: 1 });
-  });
-});

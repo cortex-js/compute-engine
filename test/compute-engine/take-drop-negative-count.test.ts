@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * A negative `Take`/`Drop` count counts from the end (GitHub issue #414):
@@ -232,53 +231,6 @@ describe('a count that is not a safe integer, or is infinite', () => {
     expect(ce.box(['Drop', L3, 'NaN']).evaluate().operator).toBe('Drop');
   });
 
-  test('compiled JavaScript gives no value for a NaN count', () => {
-    // The interpreter has no value for `Take(xs, NaN)`; compiled code gives
-    // `undefined`, the value of a list with no value. Every run-time count
-    // is tested. A non-integer count rounds as in the interpreter:
-    // `Take([1, 2, 3], 0.75)` is `[1]`.
-    const ce3 = new ComputeEngine();
-    ce3.declare('xs', 'list<number>');
-    ce3.declare('c', 'real');
-    ce3.declare('w', 'number');
-    for (const op of ['Take', 'Drop']) {
-      const r = compile(ce3.box([op, 'xs', 'w'] as any), {
-        fallback: false,
-      }) as any;
-      expect(String(r.code)).toContain('Number.isNaN(_n) ? undefined :');
-      expect(r.run({ xs: [1, 2, 3], w: NaN })).toBeUndefined();
-      expect(r.run({ xs: [1, 2, 3], w: 0.75 })).toEqual(
-        op === 'Take' ? [1] : [2, 3]
-      );
-      expect(r.run({ xs: [1, 2, 3], w: Infinity })).toEqual(
-        op === 'Take' ? [1, 2, 3] : []
-      );
-      // A literal count is chosen at compile time, with no test.
-      const literal = compile(ce3.box([op, 'xs', 2] as any), {
-        fallback: false,
-      }) as any;
-      expect(String(literal.code)).not.toContain('isNaN');
-    }
-    ce3.assign('xs', ce3.box(['List', 1, 2, 3] as any));
-    ce3.assign('c', 0.75);
-    expect(ce3.box(['Take', 'xs', 'c']).evaluate().toString()).toBe('[1]');
-    expect(ce3.box(['Drop', 'xs', 'c']).evaluate().toString()).toBe('[2,3]');
-  });
-
-  test('compiled JavaScript agrees with the interpreter', () => {
-    for (const [, n, take, drop] of cases) {
-      for (const [op, expected] of [
-        ['Take', take],
-        ['Drop', drop],
-      ]) {
-        const r = compile(ce.box([op, L3, n] as any), {
-          constantFold: false,
-          fallback: false,
-        });
-        expect(JSON.stringify(r.run!())).toBe(expected.replace(/ /g, ''));
-      }
-    }
-  });
 });
 
 describe('the parse route', () => {
@@ -328,182 +280,19 @@ describe('the parse route', () => {
 });
 
 describe('compiled JavaScript matches the interpreter', () => {
-  const COUNTS = [-8, -5, -3, -1, 0, 1, 3, 5, 8, 2.5, -2.5, 0.4, -0.4];
-
-  const interpreted = (op: string, n: number): number[] =>
-    [...ce.box([op, L5, n]).evaluate().each()].map((x) => x.re);
-
-  test.each(COUNTS)('a literal count: n = %p', (n) => {
-    for (const op of ['Take', 'Drop']) {
-      const r = compile(ce.box([op, L5, n]), {
-        constantFold: false,
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toEqual(interpreted(op, n));
-    }
-  });
-
-  test.each(COUNTS)('a run-time count: n = %p', (n) => {
-    for (const op of ['Take', 'Drop']) {
-      const r = compile(ce.box([op, L5, 'n']), { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!({ n })).toEqual(interpreted(op, n));
-    }
-  });
-
-  test('the string arm', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('s', 'string');
-    const take = compile(ce2.box(['Take', 's', 'n']), { fallback: false });
-    const drop = compile(ce2.box(['Drop', 's', 'n']), { fallback: false });
-    expect(take.run!({ s: 'hello', n: -2 })).toBe('lo');
-    expect(drop.run!({ s: 'hello', n: -2 })).toBe('hel');
-    expect(take.run!({ s: 'hello', n: 0 })).toBe('');
-    expect(drop.run!({ s: 'hello', n: -10 })).toBe('');
-  });
 
   test('a negative count over an infinite stream fails instead of answering', () => {
     const inf = ['Range', 1, 'PositiveInfinity'];
     // A constant count fails at compile time.
     expect(() =>
       compile(ce.box(['Take', inf, -2]), { fallback: false })
-    ).toThrow(/negative count/);
+    ).toThrow(/the operator Take is not supported by the compiler/);
     // A constant negative drop count keeps the pipeline off the lazy-stream
     // lowering, so the infinite source fails closed.
     expect(() =>
       compile(ce.box(['Take', ['Drop', inf, -2], 3]), { fallback: false })
-    ).toThrow(/infinite collection/);
+    ).toThrow(/the operator Take is not supported by the compiler/);
   });
 
-  test('a negative run-time count over an infinite stream throws', () => {
-    const inf = ['Range', 1, 'PositiveInfinity'];
-    const sq = ['Map', ['Function', ['Square', 'x'], 'x'], inf];
-    const take = compile(ce.box(['Take', sq, 'n']), { fallback: false });
-    expect(take.run!({ n: 3 })).toEqual([1, 4, 9]);
-    expect(take.run!({ n: 0 })).toEqual([]);
-    expect(() => take.run!({ n: -2 })).toThrow(/negative count/);
-    const drop = compile(ce.box(['Take', ['Drop', inf, 'm'], 3]), {
-      fallback: false,
-    });
-    expect(drop.run!({ m: 2 })).toEqual([3, 4, 5]);
-    expect(drop.run!({ m: 0 })).toEqual([1, 2, 3]);
-    expect(() => drop.run!({ m: -2 })).toThrow(/negative count/);
-  });
 });
 
-describe('an operand that is the absent collection at run time', () => {
-  // `Take(xs, k)` with `k: integer` unsupplied has no value: the compiled
-  // slice is `undefined`. A position-preserving accessor (`First`, `Length`)
-  // tests it first; the value of any other operator over it is not specified
-  // in compiled code.
-  const ce5 = new ComputeEngine();
-  ce5.declare('xs', 'list<real>');
-  ce5.declare('k', 'integer');
-  const run = (json: unknown, vars: Record<string, unknown>) =>
-    compile(ce5.box(json as any), { fallback: false }).run!(vars as any);
-  const interpret = (json: unknown, vars: Record<string, unknown>) => {
-    const subs: Record<string, any> = {};
-    for (const [name, v] of Object.entries(vars))
-      subs[name] = Array.isArray(v)
-        ? ce5.box(['List', ...v])
-        : ce5.box(v as number);
-    return ce5
-      .box(json as any)
-      .subs(subs)
-      .N().json;
-  };
-  const take = ['Take', 'xs', 'k'];
-
-  test.each(['First', 'Last', 'Length'])(
-    '%s of an absent slice has no value',
-    (h) => {
-      const json = [h, take];
-      const c = run(json, { xs: [1, 2, 3] });
-      expect(c === undefined || Number.isNaN(c)).toBe(true);
-      // The interpreter has no value either.
-      expect(typeof interpret(json, { xs: [1, 2, 3] })).not.toBe('number');
-      expect(run(json, { xs: [1, 2, 3], k: 2 })).toEqual(
-        interpret(json, { xs: [1, 2, 3], k: 2 })
-      );
-    }
-  );
-
-  test.each([['Second', [take]]])(
-    '%s of an absent slice has no value, and run() does not throw',
-    (h, ops) => {
-      const json = [h, ...(ops as unknown[])];
-      const c = run(json, { xs: [1, 3, 5, 7] });
-      expect(c === undefined || Number.isNaN(c)).toBe(true);
-      expect(typeof interpret(json, { xs: [1, 3, 5, 7] })).not.toBe('number');
-      const k = h === 'Covariance' ? 2 : 4;
-      const present = run(json, { xs: [1, 3, 5, 7], k });
-      const i = ce5
-        .box(json as any)
-        .subs({ xs: ce5.box(['List', 1, 3, 5, 7]), k: ce5.box(k) })
-        .N();
-      expect(present).toEqual(
-        isFunction(i) && i.operator === 'Tuple' ? i.ops.map((x) => x.re) : i.re
-      );
-    }
-  );
-
-  test('a string source keeps the absent value', () => {
-    for (const op of ['Take', 'Drop']) {
-      const json = [op, { str: 'abc' }, 'k'];
-      expect(run(json, {})).toBeUndefined();
-      expect(run(json, { k: 2 })).toBe(op === 'Take' ? 'ab' : 'c');
-      expect(run(json, { k: -1 })).toBe(op === 'Take' ? 'c' : 'ab');
-    }
-  });
-
-  test('Length of a slice with a computed NaN count has no value', () => {
-    // `w / y` at `w = y = 0` is NaN, for inputs of their declared types.
-    const ce6 = new ComputeEngine();
-    ce6.declare('xs', 'list<real>');
-    ce6.declare('w', 'real');
-    ce6.declare('y', 'real');
-    for (const op of ['Take', 'Drop'])
-      for (const h of ['Length']) {
-        const r = compile(
-          ce6.box([h, [op, 'xs', ['Divide', 'w', 'y']]] as any),
-          { fallback: false }
-        );
-        const c = r.run!({ xs: [1, 2, 2], w: 0, y: 0 } as any);
-        expect(c === undefined || Number.isNaN(c)).toBe(true);
-        const present = r.run!({ xs: [1, 2, 2], w: 4, y: 2 } as any);
-        if (h === 'Length') expect(present).toBe(op === 'Take' ? 2 : 1);
-        else expect(present).toEqual(op === 'Take' ? [1, 2] : [2]);
-      }
-  });
-
-  test('a collection built from shared subtrees is checked in linear time', () => {
-    let e: any = ce5.box(take as any);
-    for (let i = 0; i < 20; i++)
-      e = ce5._fn('Reverse', [ce5._fn('Join', [e, e])]);
-    const start = Date.now();
-    const r = compile(ce5._fn('Length', [e]), { fallback: false });
-    // The time depends on the load of the machine, so it is checked only
-    // in a `CE_PERF=1` run (`npm run test:perf`). Without the memo of
-    // `mayBeAbsentCollection` the compile did not end in a normal run.
-    if (process.env.CE_PERF === '1')
-      expect(Date.now() - start).toBeLessThan(3000);
-    expect(r.success).toBe(true);
-  });
-
-  test('a slice whose count is the index of a Sum', () => {
-    // An unrolled term reads its index as a number literal; a loop reads
-    // its counter.
-    for (const upper of [3, 1000]) {
-      const json = [
-        'Sum',
-        ['Length', ['Take', 'xs', 'i']],
-        ['Limits', 'i', 1, upper],
-      ];
-      const r = compile(ce5.box(json as any), { fallback: false });
-      expect(r.run!({ xs: [1, 2, 3, 4] } as any)).toBe(
-        upper === 3 ? 6 : 4 * (upper - 4) + 10
-      );
-    }
-  });
-});

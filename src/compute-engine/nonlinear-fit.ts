@@ -682,9 +682,9 @@ function makeNumericFn(
  * run, or `undefined` when it cannot: a result of another target than
  * `javascript`, a lambda, a result with no `runtimeVersion`, or code that
  * names a helper reading the engine's random stream or entropy handler
- * (`isShippableCode`). The implicit compile of the fit passes no `functions`,
- * `vars` or `preamble` option, so the code names no identifier of the host
- * (the condition `CompileTarget.hostNames` records for `broadcastAsync`).
+ * (`isShippableCode`). The implicit compile of the fit passes no
+ * `vars` option, so the code names no identifier of the host (the
+ * condition that `broadcastAsync` checks).
  */
 function storedKernel(
   result: ReturnType<IComputeEngine['_compile']>

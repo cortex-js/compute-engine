@@ -1,5 +1,6 @@
 import { engine as ce } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const evalN = (expr: any) => ce.expr(expr).evaluate().toString();
 
@@ -459,13 +460,6 @@ describe('Binomial(n, n) and Binomial(n, n - 1) for a symbolic n', () => {
     expect(ce.box(['Binomial', 'n', 'm']).evaluate().operator).toBe('Binomial');
     expect(ce.box(['Binomial', 5, 4]).evaluate().toString()).toBe('5');
   });
-
-  test('the compiled code agrees at a numeric n', () => {
-    const run = ce
-      ._getCompilationTarget('javascript')
-      .compile(ce.box(['Binomial', 'n', ['Subtract', 'n', 1]])).run!;
-    expect(run({ n: 7 })).toBe(7);
-  });
 });
 
 describe('Fibonacci and BellNumber with a polynomial argument', () => {
@@ -529,8 +523,8 @@ describe('Fibonacci and BellNumber with a polynomial argument', () => {
   });
 
   test('the compiled code declines the polynomial form instead of dropping x', () => {
-    const target = ce._getCompilationTarget('javascript');
-    expect(() => target.compile(ce.box(['Fibonacci', 5, 'x']))).toThrow(/no lowering/);
-    expect(target.compile(ce.box(['Fibonacci', 'n'])).run!({ n: 10 })).toBe(55);
+    expect(() =>
+      compile(ce.box(['Fibonacci', 5, 'x']), { fallback: false })
+    ).toThrow(/Could not compile/);
   });
 });

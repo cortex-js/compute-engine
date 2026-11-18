@@ -7131,54 +7131,6 @@ export function protocolDispatchCandidates(
 }
 
 /**
- * The implementation `dispatchMember` would select for a receiver whose type
- * IS `receiver` — the static half of the compiled tier's "tier A" decision.
- * `ambiguous` mirrors the interpreter's `protocol-call-ambiguous`;
- * `undecided` is the P32 gate.
- */
-export function staticProtocolResolution(
-  ce: IComputeEngine,
-  implKey: string,
-  receiver: Type,
-  only?: string
-):
-  | { status: 'undecided' | 'none' | 'ambiguous' }
-  | {
-      status: 'unique';
-      record: ProtocolRecord;
-      edge: ConformanceRecord;
-      /** The GROUND target the winning edge stands for at `receiver`. */
-      target: Type;
-    } {
-  if (!isDecidedReceiverType(receiver)) return { status: 'undecided' };
-  const cands = protocolDispatchCandidates(ce, implKey, only);
-  if (cands === null || cands.length === 0) return { status: 'none' };
-  const records = [...new Set(cands.map((c) => c.record))];
-  const best = bestCandidates(ce, records, implKey, receiver);
-  if (best.length === 0) return { status: 'none' };
-  if (best.length > 1) return { status: 'ambiguous' };
-  const b = best[0];
-  return { status: 'unique', record: b.record, edge: b.edge, target: b.target };
-}
-
-/**
- * The arity a call to the FUNCTION member `member` of `record` must have, or
- * `undefined` when the requirement does not pin one (unparseable, optional or
- * variadic parameters) — the planner declines those.
- */
-export function requirementArityOf(
-  ce: IComputeEngine,
-  record: ProtocolRecord,
-  member: string
-): number | undefined {
-  const sig = requirementShape(ce, record, member);
-  if (sig === null) return undefined;
-  if ((sig.optArgs?.length ?? 0) > 0 || sig.variadicArg !== undefined)
-    return undefined;
-  return sig.args?.length ?? 0;
-}
-
-/**
  * The stored implementation of `implKey` on `edge`, rebuilt as a RAW function
  * literal whose type annotations are GROUND — every `Self`-bearing annotation
  * re-parsed at `Self = edge.target` (P12's substitution, via the same

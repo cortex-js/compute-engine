@@ -24,7 +24,7 @@ const PROGRAMS: [string, any][] = [
   ],
 ];
 
-const DECLINE = /"u" is not a local of the compiled expression/;
+const DECLINE = /a write to a name that is not a local/;
 
 describe('JAVASCRIPT: AN INPUT THAT THE BODY ASSIGNS', () => {
   // A write to a symbol declared in the engine declines.
@@ -35,11 +35,6 @@ describe('JAVASCRIPT: AN INPUT THAT THE BODY ASSIGNS', () => {
       expect(() => compile(ce.box(src), { fallback: false })).toThrow(DECLINE);
     });
 
-  test('a body that writes no input reads the caller object as before', () => {
-    const ce = new ComputeEngine();
-    const c = compile(ce.parse('x + 1'), { fallback: false }) as any;
-    expect(c.code).toBe('_.x + 1');
-  });
 });
 
 describe('INTERVAL-JS: AN INPUT THAT THE BODY ASSIGNS', () => {

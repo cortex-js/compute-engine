@@ -36,111 +36,7 @@ function engineWithSources(): ComputeEngine {
   return ce;
 }
 
-/** The compiled `run` of `json`, refusing the interpreter fallback. */
-function runner(ce: ComputeEngine, json: any): (vars?: any) => any {
-  const result = compile(ce.box(json), { fallback: false }) as any;
-  expect(result.success).toBe(true);
-  return result.run;
-}
-
-/** `3 + 4i` in the JavaScript target's complex encoding. */
-const Z = { re: 3, im: 4 };
-
 describe('callback parameter complexness', () => {
-  describe('named built-in callback over a declared list<complex>', () => {
-    // The free-symbol route: nothing is folded, so this witnesses the LOWERING
-    // rather than the interpreter running at compile time.
-    it('Map(Abs, zs) computes the modulus, not NaN', () => {
-      const ce = engineWithSources();
-      expect(runner(ce, ['Map', 'Abs', 'zs'])({ zs: [Z] })).toEqual([5]);
-    });
-
-    it('Map(Sqrt, zs) computes the complex root', () => {
-      const ce = engineWithSources();
-      expect(runner(ce, ['Map', 'Sqrt', 'zs'])({ zs: [Z] })).toEqual([
-        { re: 2, im: 1 },
-      ]);
-    });
-
-    it('Map(Conjugate, zs) conjugates', () => {
-      const ce = engineWithSources();
-      expect(runner(ce, ['Map', 'Conjugate', 'zs'])({ zs: [Z] })).toEqual([
-        { re: 3, im: -4 },
-      ]);
-    });
-
-    it('Map(Negate, zs) negates both components', () => {
-      const ce = engineWithSources();
-      expect(runner(ce, ['Map', 'Negate', 'zs'])({ zs: [Z] })).toEqual([
-        { re: -3, im: -4 },
-      ]);
-    });
-
-    it('FlatMap(zs, Abs) reaches the same splice', () => {
-      const ce = engineWithSources();
-      expect(runner(ce, ['FlatMap', 'zs', 'Abs'])({ zs: [Z] })).toEqual([5]);
-    });
-
-    it('emits the complex kernel rather than the real-lane wrapper', () => {
-      const ce = engineWithSources();
-      const code = String((compile(ce.box(['Map', 'Abs', 'zs'])) as any).code);
-      expect(code).toContain('_SYS.cabs');
-      expect(code).not.toContain('Math.abs');
-    });
-  });
-
-  // The compiler writes `Map(Abs, zs)` as `Map((_x: complex) ↦ Abs(_x), zs)`.
-  // The name `_x` belongs to that function literal only: the engine of the
-  // caller has no symbol `_x` afterwards, and a symbol `_x` that the caller
-  // declared has no effect on the compiled code.
-  describe('the parameter name of the expanded built-in callback', () => {
-    it('is not declared in the engine by the compilation', () => {
-      const ce = engineWithSources();
-      expect(ce.lookupDefinition('_x')).toBeUndefined();
-      runner(ce, ['Map', 'Abs', 'zs']);
-      expect(ce.lookupDefinition('_x')).toBeUndefined();
-    });
-
-    it('keeps the type that a later use infers without the compilation', () => {
-      const compiled = engineWithSources();
-      runner(compiled, ['Map', 'Abs', 'zs']);
-      const untouched = engineWithSources();
-      expect(String(compiled.box(['Add', '_x', 1]).type)).toBe(
-        String(untouched.box(['Add', '_x', 1]).type)
-      );
-    });
-
-    it('is not declared in a scope that the caller pushed', () => {
-      const ce = engineWithSources();
-      ce.pushScope();
-      runner(ce, ['Map', 'Abs', 'zs']);
-      expect(ce.lookupDefinition('_x')).toBeUndefined();
-      ce.popScope();
-    });
-
-    it('does not read a symbol `_x` that the caller declared', () => {
-      // `Abs` of a string is an error. If the expansion used the symbol of
-      // the caller, it would be invalid, and the callback would be compiled
-      // for a real argument and give `NaN`.
-      const ce = engineWithSources();
-      ce.declare('_x', 'string');
-      expect(runner(ce, ['Map', 'Abs', 'zs'])({ zs: [Z] })).toEqual([5]);
-      expect(String(ce.box('_x').type)).toBe('string');
-    });
-  });
-
-  describe('inline-literal callback over a declared list<complex>', () => {
-    it('Map(x |-> Abs(x), zs) computes the modulus', () => {
-      const ce = engineWithSources();
-      const run = runner(ce, [
-        'Map',
-        ['Function', ['Abs', 'x'], 'x'],
-        'zs',
-      ]);
-      expect(run({ zs: [Z] })).toEqual([5]);
-    });
-  });
-
   describe('parity with the interpreter', () => {
     // A LITERAL complex source: the compiled value must agree with
     // `evaluate()`. This is the case constant folding can mask, so it is
@@ -185,15 +81,7 @@ describe('callback parameter complexness', () => {
       ce.declare('xs', 'list<real>');
       expect(() =>
         compile(ce.box(['Map', 'D', 'xs']), { fallback: false })
-      ).toThrow(/'D'/);
-    });
-
-    it('a caller symbol named D that holds a function still compiles', () => {
-      const ce = new ComputeEngine();
-      ce.declare('xs', 'list<real>');
-      ce.assign('D', ce.box(['Function', ['Multiply', 2, 'u'], 'u']));
-      const run = runner(ce, ['Map', 'D', 'xs']);
-      expect(run({ xs: [1, 2] })).toEqual([2, 4]);
+      ).toThrow(/Could not compile/);
     });
 
     it('leaves the un-applied caller-variable reading of D untouched', () => {

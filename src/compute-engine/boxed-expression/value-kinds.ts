@@ -35,7 +35,6 @@
  */
 
 import type {
-  ArithmeticCompile,
   ArithmeticDefinition,
   BoxedOperatorDefinition,
   IComputeEngine as ComputeEngine,
@@ -287,15 +286,12 @@ export function prepareKindRegistration(
   const supersedes = options.supersedes;
   const admittedAs = arithmetic.admittedAs;
   const resultType = arithmetic.resultType;
-  const compileType = arithmetic.compile?.type;
   for (const typeName of kindTypes) {
     const rec = registry.types.get(typeName);
     if (rec === undefined) continue;
 
     // A LIBRARY type keeps the fields its library heads gave, and gets no
-    // field they left out: a `compile.type` given by another head would set
-    // the lowering of every free symbol of the type and of the library
-    // head's own arithmetic.
+    // field they left out.
     if (rec.library) {
       if (admittedAs !== undefined && admittedAs !== rec.admittedAs)
         refuse(
@@ -308,13 +304,6 @@ export function prepareKindRegistration(
           rec.resultType === undefined
             ? `the kind type \`${typeName}\` is declared by the library without a \`resultType\`; another head of the type cannot add one`
             : `the kind type \`${typeName}\` is declared by the library with another \`resultType\`; a head of the type must give the same function or none`
-        );
-      if (compileType !== undefined && compileType !== rec.compileType)
-        refuse(
-          name,
-          rec.compileType === undefined
-            ? `the kind type \`${typeName}\` is declared by the library without a \`compile.type\`; another head of the type cannot add one`
-            : `the kind type \`${typeName}\` is declared by the library with another \`compile.type\`; a head of the type must give the same object or none`
         );
       continue;
     }
@@ -342,15 +331,6 @@ export function prepareKindRegistration(
       refuse(
         name,
         `another head of the kind type \`${typeName}\` gives another \`resultType\` function; the heads of one kind type must give the same function (the same object, not a copy) or none`
-      );
-    if (
-      compileType !== undefined &&
-      rec.compileType !== undefined &&
-      compileType !== rec.compileType
-    )
-      refuse(
-        name,
-        `another head of the kind type \`${typeName}\` gives another \`compile.type\`; the heads of one kind type must give the same object or none`
       );
   }
 
@@ -387,14 +367,12 @@ export function commitKindRegistration(
   const { arithmetic, kindTypes, library } = registration;
   const admittedAs = arithmetic.admittedAs;
   const resultType = arithmetic.resultType;
-  const compileType = arithmetic.compile?.type;
   for (const typeName of kindTypes) {
     const rec = registry.types.get(typeName);
     if (rec === undefined) {
       registry.types.set(typeName, {
         admittedAs: admittedAs ?? 'none',
         resultType,
-        compileType,
         heads: new Set([def]),
         library,
       });
@@ -404,13 +382,11 @@ export function commitKindRegistration(
       // No live head remains: this head's fields REPLACE the type's.
       rec.admittedAs = admittedAs ?? 'none';
       rec.resultType = resultType;
-      rec.compileType = compileType;
     } else {
       // The fields agree (checked by `prepareKindRegistration`); a field the
       // other heads left out is added.
       if (admittedAs !== undefined) rec.admittedAs = admittedAs;
       if (resultType !== undefined) rec.resultType = resultType;
-      if (compileType !== undefined) rec.compileType = compileType;
     }
     rec.heads.add(def);
   }
@@ -598,7 +574,7 @@ export function kindTypesOfHead(
 export function kindTypeHasHook(
   ce: ComputeEngine,
   name: string,
-  hook: keyof ArithmeticDefinition | keyof ArithmeticCompile
+  hook: keyof ArithmeticDefinition
 ): boolean {
   const registry = registryOf(ce);
   const rec = registry.types.get(name);
@@ -606,11 +582,7 @@ export function kindTypeHasHook(
   for (const head of rec.heads) {
     const arithmetic = registry.dispatch.get(head)?.arithmetic;
     if (arithmetic === undefined) continue;
-    if (hook === 'type') {
-      if (arithmetic.compile?.type !== undefined) return true;
-    } else if (hook === 'value') {
-      if (arithmetic.compile?.value !== undefined) return true;
-    } else if (arithmetic[hook] !== undefined) return true;
+    if (arithmetic[hook] !== undefined) return true;
   }
   return false;
 }

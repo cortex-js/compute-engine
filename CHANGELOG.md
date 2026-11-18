@@ -2,6 +2,84 @@
 
 ### Breaking Changes
 
+- **`compile()` uses one compiler for JavaScript, GLSL and interval arithmetic,
+  and the compilation APIs of the previous compilers are removed.**
+  `compile(expr, { to })` with `to` set to `'javascript'` (the default),
+  `'glsl'` or `'interval-js'` gives a result of the same shape as before; the
+  option `profile: 'ir'` is no longer needed, and is accepted with no effect.
+  Removed:
+  - the `compile()` options `target`, `functions`, `operators`, `imports`,
+    `preamble`, `strictTypes` and `broadcast`. The option types no longer have
+    them, and a call that still passes one throws an `Error` that names it:
+    `The compilation option "functions" was removed in 0.194.0: …`. The
+    option `callerLocals` is accepted and ignored: a GLSL function takes every
+    input that its body reads as a parameter.
+  - custom targets: `ce.registerCompilationTarget()`,
+    `ce.unregisterCompilationTarget()`, the classes `JavaScriptTarget`,
+    `GLSLTarget`, `GPUShaderTarget` and `BaseCompiler`, and the types
+    `CompileTarget`, `LanguageTarget`, `CompiledOperators`, `CompiledFunctions`,
+    `CompiledFunction`, `TargetSource` and `ExecutableTarget`.
+  - the operator-definition keys `compileHelpers` and `compileShippable`, a
+    `compile` handler that returns code text, and the value-kind compile
+    contract (`arithmetic.compile`, `ArithmeticCompile`). A definition with one
+    of these keys throws. A `compile` handler that returns an `Expression` works
+    as before: the expression is compiled in place of the node; a handler that
+    returns text, or calls its `compile` callback, declines.
+  - the result field `float32Bounds` (the exact form of a GLSL sine hash). Such
+    an operand is reported in `warnings` with the code
+    `'float32-unsafe-argument'`.
+  - `canCompile()` answers by running the compilation, on the three targets:
+    `{ ok: true }` exactly when `compile()` gives code.
+  - the option `onLoop` of `runAsync()` and the types `ParallelLoopReport`
+    and `ParallelLoopReason`: no `parallel for` runs on the worker pool in
+    this release (below). `RunAsyncOptions` keeps `signal` and `minPasses`.
+
+  What to do instead: compile to a built-in target with `to`; define a function
+  that the code calls in the engine with a body (`f(t) := t^2 + 1` compiles), or
+  give its operator a `compile` handler that returns an `Expression`; read
+  `freeSymbolTypes[name].provenance` instead of `strictTypes`; call
+  `broadcast()` of the result with no option. An operator defined with an
+  `evaluate` function only, and a function the host passes at run time, are not
+  compiled: the compilation declines. The migration note
+  `docs/MIGRATION-0.194.md` gives an example for each removed API.
+
+  What changes in results:
+  - A decline falls back to the interpreter: `success: false` with a `run` that
+    evaluates, and a `diagnostic` whose `code` is one of `'outside-profile'`,
+    `'untyped-input'`, `'unsettled-shape'`, `'static-type-error'`,
+    `'lane-mismatch'`, `'unsupported-mode'`, `'bigint-lane'`,
+    `'possible-nothing'`, `'union-dispatch'` or `'compile-error'`. On GLSL the
+    result has no code, and its `run` evaluates with the interpreter. The codes
+    `'caller-local-source'`, `'caller-local-type'`, `'inexact-jump-operand'`,
+    `'inline-collection-too-large'`, `'non-real-operand'` and
+    `'shared-impure-operand'`, and the warning `'copying-list-update'`, are no
+    longer given.
+  - `freeSymbols` lists the names the code reads, in the order of their first
+    reading (a read in the body of a function counts at the call), with the
+    `vars` names the code reads. `freeSymbolTypes` is also set on JavaScript
+    results.
+  - A program with a `parallel for` (`ParallelLoop`) declines, and the
+    interpreter runs its passes in order, on one thread. `runAsync()` of a
+    result gives the value of `run()`, and `willParallelize()` is `false`.
+    `broadcastAsync()` still uses the worker pool (`ce.workers`). A later
+    release compiles `parallel for` and sends it to the pool again.
+  - Some programs that the previous compilers compiled decline, among them
+    `Dot`, `Cross`, `Norm`, `Sort`, `Take`, `Mean`, `Median`, `Unique`,
+    `EvaluateAt`, `BesselJ` and a list of points multiplied by another shape:
+    they run in the interpreter on JavaScript.
+  - `epsil --compile` refuses a program that defines a function and calls
+    it (`f(x) = x^2 + 1; f(3)`, CE-1443) and a program with a `parallel for`:
+    it reports `compile declined: Could not compile: …` and exits with 1.
+    Both run without `--compile`.
+  - The message of a decline starts with `Could not compile: `, and an
+    operator that the compiler does not support is named as such
+    (`Could not compile: Sort(L): the operator Sort is not supported by the
+    compiler`).
+
+  The entry on `interval-js` above is superseded where it differs: the removed
+  options throw on `interval-js` too, and `ce.registerCompilationTarget()` no
+  longer exists.
+
 - **The `interval-js` target compiles with the interval mode of the IR
   pipeline, and `IntervalJavaScriptTarget` is removed.**
   `compile(expr, { to: 'interval-js' })` gives the same result shape as

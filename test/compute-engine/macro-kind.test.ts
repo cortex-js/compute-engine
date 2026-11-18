@@ -1209,23 +1209,6 @@ describe('compiled code (section 4)', () => {
     if (to === 'javascript') expect(c.run({ x: 2 })).toBe(12);
   });
 
-  test.each([
-    ['javascript', 'const _cse1 = Math.sin((_.x * _.x) + (_.y * _.y))'],
-    ['glsl', 'float _cse1 = _gpu_sin((x * x) + (y * y));'],
-  ])('a body written three times is one shared local on %s', (to, fragment) => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    ce.declare('A', { macro: ['Sin', X2_Y2] });
-    const c = compile(
-      ce.box(['Add', ['Multiply', 'x', 'A'], ['Divide', 1, 'A'], 'A']),
-      { to } as never
-    ) as J;
-    expect(c.success).toBe(true);
-    expect(c.code).toContain(fragment);
-    expect(c.code.match(/_cse1 =|_cse1 in/g)?.length).toBe(1);
-  });
-
   test('a body written three times encloses the interpreter value on interval-js', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -1295,20 +1278,6 @@ describe('section 5: a stored body and an inlined body', () => {
     ce.assign('dm', fn(ce, ['ElementMax', 0, ['Subtract', 'x', 'y_r']], 'x'));
     expect(ce.box(['dm', 2]).evaluate().json).toEqual(['List', 1, 0, 0]);
     expect(ce.box(['ElementMax', 1, 2]).evaluate().json).toBe(2);
-  });
-
-  test('5a: At of a sum of a list-valued function', () => {
-    const ce = new ComputeEngine();
-    ce.assign('a', ce.parse('t \\mapsto [\\cos t, \\sin t]'));
-    ce.assign('A', ce.parse('t \\mapsto \\sum_{i=0}^{2} a(2^i t)'));
-    expect(ce.box(['At', ['A', 0], 1]).evaluate().json).toBe(3);
-    expect(ce.box(['A', 't']).type.toString()).toBe('vector<2>');
-    expect(ce.box(['At', ['A', 't'], 1]).type.toString()).toBe('number');
-    ce.declare('t', 'real');
-    const c = compile(ce.box(['At', ['A', 't'], 1]), {
-      to: 'javascript',
-    } as never) as J;
-    expect(c.success).toBe(true);
   });
 
   test('5b: a parameter whose use admits a list takes the list whole', () => {

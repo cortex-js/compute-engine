@@ -53,11 +53,6 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
         .evaluate({ numericApproximation: true }) as any;
       expect(rel(v.re, ref)).toBeLessThan(TOLERANCE);
     });
-    test(`${name} (compiled)`, () => {
-      const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
-      expect(r.success).toBe(true);
-      expect(rel(r.run!({ s, z }) as number, ref)).toBeLessThan(TOLERANCE);
-    });
   }
 
   // −1 < s < −½ with s + 1 ≤ z ≲ 0.01: the Legendre fraction needed more
@@ -96,31 +91,25 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
     [-8.999999276617382, 0.34338853700989597, 1138.68406525965139780709],
     [-1.0005077417878792, 0.003694186837323924, 265.2958312889191747453224],
   ]) {
-    test(`Gamma(${s}, ${z}) = ${ref} (kernel and compiled)`, () => {
+    test(`Gamma(${s}, ${z}) = ${ref} (kernel)`, () => {
       expect(rel(incompleteGammaUpper(s, z), ref)).toBeLessThan(TOLERANCE);
-      const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
-      expect(rel(r.run!({ s, z }) as number, ref)).toBeLessThan(TOLERANCE);
     });
   }
 
   test('an overflow within 0.05 of a pole after the shift is +Infinity', () => {
     // mpmath: 1.73e323 and 4.6e1201 (the complex kernel answered NaN)
-    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
     for (const [s, z] of [
       [-57.00707326638518, 1.9909707833817464e-6],
       [-212.9944237232914, 2.2248478364088193e-6],
     ]) {
       expect(incompleteGammaUpper(s, z)).toBe(Infinity);
-      expect(r.run!({ s, z })).toBe(Infinity);
     }
   });
 
-  test('Gamma(s, +Infinity) is 0 (kernel, compiled and .N())', () => {
+  test('Gamma(s, +Infinity) is 0 (kernel and .N())', () => {
     // The continued fraction formed 0·∞: NaN for every order.
-    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
     for (const s of [-1.5, -2, 0, 1e-9, 2.5]) {
       expect(incompleteGammaUpper(s, Infinity)).toBe(0);
-      expect(r.run!({ s, z: Infinity })).toBe(0);
       expect(ce.expr(['Gamma', s, 'PositiveInfinity']).N().re).toBe(0);
     }
     expect(incompleteGammaUpper(Infinity, Infinity)).toBeNaN();
@@ -153,40 +142,7 @@ describe('GAMMA(s, z) for non-integer s < -1 and small z', () => {
     expect(v.re).toBeCloseTo(21020.937167123548, 6);
   });
 
-  test('compiled Gamma(s, z) keeps its second operand', () => {
-    const r = compile(ce.expr(['Gamma', 's', 'z']), { fallback: false });
-    // Γ(2.5) is 1.329…; Γ(2.5, 1) is 1.1288…
-    expect(r.run!({ s: 2.5, z: 1 }) as number).toBeCloseTo(
-      1.1288027918891033,
-      12
-    );
-  });
-
-  test('compiled Gamma(s, z) takes the complex kernel for a complex operand', () => {
-    const r = compile(ce.expr(['Gamma', 's', ['Complex', -0.5, 0.25]]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    const v = r.run!({ s: -1.5 }) as any;
-    expect(v.re).toBeCloseTo(0.521238022262048, 10);
-    expect(v.im).toBeCloseTo(3.0631394125454936, 10);
-  });
-
-  test('compiled Gamma(s, z) promotes a real z < 0 to the complex kernel in complex mode', () => {
-    // The default `strict` mode keeps the real kernel, which gives `NaN`
-    // for `z < 0`.
-    const r = compile(ce.expr(['Gamma', 's', 'z']), {
-      fallback: false,
-      mode: 'complex',
-    });
-    expect(r.success).toBe(true);
-    // Γ(1, z) = e^{−z} is real on the whole real line
-    const real = r.run!({ s: 1, z: -1 });
-    expect(typeof real).toBe('number');
-    expect(real as number).toBeCloseTo(Math.E, 12);
-    const v = r.run!({ s: -1.5, z: -0.5 }) as any;
-    expect(v.re).toBeCloseTo(2.363271801207355, 10);
-    expect(v.im).toBeCloseTo(3.964483508345547, 10);
+  test('Gamma(-1.5, -0.5) is complex (.N())', () => {
     const n = ce.expr(['Gamma', -1.5, -0.5]).N();
     expect(n.re).toBeCloseTo(2.363271801207355, 10);
     expect(n.im).toBeCloseTo(3.964483508345547, 10);

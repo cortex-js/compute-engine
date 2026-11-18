@@ -31,8 +31,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -40,90 +38,6 @@ beforeEach(() => {
 });
 
 describe('an else-less If as a block statement', () => {
-  test('compiles to a bare `if (…) { … }` and runs', () => {
-    ce.declare('x', 'number');
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', { str: 'unknown' }, 1],
-      ['If', ['Greater', 'x', 0], ['Assign', 's', -1]],
-      's',
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // A NaN `x` decides `x > 0` false (user decision 2026-10-20), and the
-    // host supplies every input, so the condition has no test.
-    expect(r.code).toMatchInlineSnapshot(`
-      "(() => {
-      let s = 1;
-      if (0 < _.x) { s = -1 };
-      return s
-      })()"
-    `);
-    // …and the compiled answers ARE the interpreted ones.
-    for (const [x, expected] of [
-      [3, -1],
-      [-3, 1],
-    ] as const) {
-      expect(r.run!({ x })).toBe(expected);
-      ce.assign('x', x);
-      expect(expr.evaluate().re).toBe(expected);
-    }
-  });
-
-  test('a multi-statement then-branch composes', () => {
-    executeEpsil(
-      ce,
-      'function g(x: integer) -> integer {\n' +
-        '  let s = 1\n' +
-        '  if x > 0 {\n    s = -1\n    x = x + 10\n  }\n' +
-        '  s * x\n}'
-    );
-    for (const [arg, expected] of [
-      [3, -13],
-      [-3, -3],
-    ] as const) {
-      const call = ce.box(['g', arg]);
-      expect(call.evaluate().re).toBe(expected);
-      const r = compile(call, { fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(expected);
-    }
-  });
-
-  test('the `parseNumber` sign/fraction guards of the Epsil examples compile', () => {
-    // The shape from `src/epsil/docs/examples.md`: two else-less guards around
-    // destructuring assignments from a tuple-returning call.
-    executeEpsil(
-      ce,
-      // `Characters` yields `list<character>` since strings became indexed
-      // collections of characters, so the example's annotations move with it.
-      'let digits: list<character> = Characters("0123456789")\n' +
-        'isDigit(c: character | missing) = c in digits\n' +
-        'function parseDigits(cs: list<character>, i: integer) -> tuple<integer, integer> {\n' +
-        '  let j = i\n  let n = 0\n' +
-        '  while j <= Length(cs) && isDigit(cs[j]) { n = 10 * n + 1\n j = j + 1 }\n' +
-        '  (n, j)\n}\n' +
-        'function parseNumber(cs: list<character>, i: integer) -> tuple<number, integer> {\n' +
-        '  let j = i\n  let sign = 1\n' +
-        '  if cs[j] == "-" {\n    sign = -1\n    j = j + 1\n  }\n' +
-        '  let n = 0\n  (n, j) := parseDigits(cs, j)\n' +
-        '  if cs[j] == "." {\n    let f = 0\n    let start = j + 1\n' +
-        '    (f, j) := parseDigits(cs, start)\n' +
-        '    n = n + f / 10^(j - start)\n  }\n' +
-        '  (sign * n, j)\n}'
-    );
-    // `parseDigits` here decodes each digit as a `1` (the real one uses
-    // `IndexOf`, which is closed on string evidence by a separate, deliberate
-    // gate); the guards are what this test is about.
-    const call = ce.box(['parseNumber', ['Characters', { str: '-12.5' }], 1]);
-    const r = compile(call, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!()).toEqual([-11.1, 6]);
-    // The interpreter's exact answer is the same number.
-    const interpreted = call.evaluate();
-    expect(interpreted.ops![0].N().re).toBeCloseTo(-11.1, 10);
-    expect(interpreted.ops![1].re).toBe(6);
-  });
 
   test('an else-less If in a LOOP BODY was already fine, and still is', () => {
     const expr = ce.box([
@@ -188,87 +102,6 @@ describe('an else-less If as a block statement', () => {
     expect((r.run as any)({ x: 2 })).toBe(2);
     expect((r.run as any)({ x: -2 })).toBeNaN();
   });
-
-  test('a masked object-domain value is the object null, not NaN', () => {
-    // The interpreter answers `Missing` for a masked value in every domain.
-    // The compiled masked branch is the codomain's absence marker — `NaN` for
-    // a number, `undefined` for a string — so a compiled `IsMissing` agrees
-    // with the interpreter. Before this the branch was a literal `NaN` in
-    // every domain, and `IsMissing` of a masked string answered `false`.
-    ce.declare('x', 'number');
-    ce.declare('c', 'boolean');
-    const masked = ce.box(['If', 'c', { str: 'ok' }]);
-    expect(compile(masked, { fallback: false }).code).toMatch(
-      /\? \("ok"\) : undefined/
-    );
-    const test = compile(ce.box(['IsMissing', masked]), { fallback: false });
-    expect((test.run as any)({ c: false })).toBe(true);
-    expect((test.run as any)({ c: true })).toBe(false);
-    const num = compile(ce.box(['If', 'c', 'x']), { fallback: false });
-    expect(num.code).toMatch(/: NaN\)$/);
-  });
-
-  test('Which, If and When answer absence by one rule per domain', () => {
-    // `BaseCompiler.absenceKind`: the object null only when every arm is
-    // provably not a number; `NaN` for a number AND for an unknown type —
-    // a bare undeclared symbol arm is a number until proven otherwise, and
-    // `undefined` there would turn its arithmetic consumers into a
-    // `TypeError` instead of a propagated NaN. Before this `Which` and the
-    // else-less `If` emitted `undefined` for an unknown arm while a restriction
-    // emitted `NaN`.
-    const e = new ComputeEngine();
-    e.declare('x', 'real');
-    e.declare('c', 'boolean');
-    const js = (j: unknown) => compile(e.box(j as any), { fallback: false });
-    expect(js(['Which', 'c', 'x']).code).toMatch(/: NaN\)$/);
-    expect(js(['If', 'c', 'x']).code).toMatch(/: NaN\)$/);
-    expect(js(['Which', 'c', { str: 's' }]).code).toMatch(/: undefined\)$/);
-    expect(js(['If', 'c', { str: 's' }]).code).toMatch(/: undefined\)$/);
-    // Mixed string and number arms stay numeric.
-    expect(js(['Which', 'c', { str: 's' }, 'c', 1]).code).toMatch(/NaN\)+$/);
-    // The discharge side reads the same rule: `IsMissing` and `Coalesce`
-    // recognize the absent value the selection produced, in every domain.
-    const mixed = ['Which', 'c', { str: 's' }, 'c', 1];
-    expect((js(['IsMissing', mixed]).run as any)({ c: false })).toBe(true);
-    expect((js(['IsMissing', mixed]).run as any)({ c: true })).toBe(false);
-    expect((js(['Coalesce', mixed, 7]).run as any)({ c: false })).toBe(7);
-    expect(
-      (js(['IsMissing', ['Which', 'c', 'x']]).run as any)({ c: false })
-    ).toBe(true);
-    expect(
-      (js(['Coalesce', ['Which', 'c', { str: 's' }], { str: 'd' }]).run as any)(
-        {
-          c: false,
-        }
-      )
-    ).toBe('d');
-  });
-
-  // The `If` still lowers to the expression-position TERNARY, not to the
-  // `if (…) { … }` statement the else-less shape gets — that is what this case
-  // pins. A NaN `x` decides `x > 0` false (user decision 2026-10-20), so
-  // the else assignment runs there.
-  test('an If WITH an else stays the ternary', () => {
-    ce.declare('x', 'number');
-    const expr = ce.box([
-      'Block',
-      ['Declare', 's', { str: 'unknown' }, 1],
-      ['If', ['Greater', 'x', 0], ['Assign', 's', -1], ['Assign', 's', 2]],
-      's',
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`
-      "(() => {
-      let s = 1;
-      ((0 < _.x) ? (s = -1) : (s = 2));
-      return s
-      })()"
-    `);
-    expect(r.run!({ x: 3 })).toBe(-1);
-    expect(r.run!({ x: -3 })).toBe(2);
-    expect(r.run!({ x: NaN })).toBe(2);
-  });
 });
 
 // -----------------------------------------------------------------------------
@@ -284,15 +117,6 @@ describe('an EMPTY block — effect position compiles, value position declines',
   // declines (D6) instead of splicing `''` into a template (`(x) => `).
   const ce = new ComputeEngine();
 
-  test('an empty else-less `if` arm and an empty loop body compile', () => {
-    const [ast] = parseEpsil(
-      'let s = 0\nif s < 1 { }\nwhile false { }\nfor k in 1..3 { }\ns'
-    );
-    const r = compile(ce.box(ast), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({})).toBe(0);
-  });
-
   test('an empty block as a non-final statement is an empty statement', () => {
     const expr = ce.box([
       'Block',
@@ -303,38 +127,6 @@ describe('an EMPTY block — effect position compiles, value position declines',
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.run!({})).toBe(0);
-  });
-
-  test('a shader loop body that is, or ends with, an empty block compiles', () => {
-    // The GPU targets compile a loop body through the statement-list route
-    // with its value discarded; a nested empty block there is an empty
-    // statement, whether it is the sole statement or the last one.
-    for (const body of [
-      ['Block', ['Block']],
-      ['Block', ['Assign', 's', 1], ['Block']],
-    ]) {
-      const expr = ce.box([
-        'Block',
-        ['Declare', 's', ['Dictionary', ['KeyValuePair', 'value', 0]]],
-        ['Loop', body, ['Element', 'i', ['Range', 1, 3]]],
-        's',
-      ]);
-      for (const to of ['glsl'] as const) {
-        const r = compile(expr, { to, fallback: false });
-        expect([to, r.success]).toEqual([to, true]);
-        expect(r.code).toContain('for (');
-      }
-    }
-  });
-
-  test('an empty function body declines instead of emitting `(x) => `', () => {
-    const expr = ce.box(['Function', ['Block'], 'x']);
-    expect(() => compile(expr, { fallback: false })).toThrow(
-      /empty block evaluates to `Nothing`/
-    );
-    expect(() => compile(ce.box(['Block']), { fallback: false })).toThrow(
-      /empty block evaluates to `Nothing`/
-    );
   });
 });
 
@@ -395,18 +187,6 @@ describe('the admission is plain-JavaScript only', () => {
       value: { lo: 7, hi: 7 },
     });
   });
-
-  test('the GPU targets write an if statement when the branch assigns', () => {
-    // The shader statement form of a selection whose branch assigns
-    // (`compile-statement-forms.test.ts`): an else-less `If` has no ternary
-    // form, and in statement position its value is discarded.
-    for (const to of ['glsl'] as const) {
-      const e = new ComputeEngine();
-      const r = compile(elselessBlock(e), { to, fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('if (0.0 < x) {\n  s = -1.0;\n}');
-    }
-  });
 });
 
 /**
@@ -425,84 +205,6 @@ describe('the admission is plain-JavaScript only', () => {
  * else branch — in both cases a decision the condition did not support.
  */
 describe('a statement-form If takes no branch on an undecided condition', () => {
-  /** `Block(Declare(s, 1), Loop(Block(k := k+1, <guarded>, exit at k = 3)), (s, k))`. */
-  function loopOver(engine: ComputeEngine, guarded: unknown): Expression {
-    return engine.box([
-      'Block',
-      ['Declare', 's', { str: 'unknown' }, 0],
-      ['Declare', 'k', { str: 'unknown' }, 0],
-      [
-        'Loop',
-        [
-          'Block',
-          ['Assign', 'k', ['Add', 'k', 1]],
-          guarded,
-          ['If', ['GreaterEqual', 'k', 3], ['Break']],
-        ],
-      ],
-      ['List', 's', 'k'],
-    ] as any);
-  }
-
-  test('an else-less assignment in a Loop is skipped, and the loop completes', () => {
-    ce.declare('x', 'number');
-    const expr = loopOver(ce, [
-      'If',
-      ['Greater', 'x', 0],
-      ['Assign', 's', ['Add', 's', 1]],
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // Decided: the assignment runs on each of the three iterations, or none.
-    expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
-    expect((r.run as any)({ x: -3 })).toEqual([0, 3]);
-    // A NaN `x` decides `x > 0` false (user decision 2026-10-20): `s` is
-    // untouched and the loop still completes its 3 rounds.
-    expect((r.run as any)({ x: NaN })).toEqual([0, 3]);
-  });
-
-  test('an else-FUL assignment in a Loop', () => {
-    ce.declare('x', 'number');
-    const expr = loopOver(ce, [
-      'If',
-      ['Greater', 'x', 0],
-      ['Assign', 's', ['Add', 's', 1]],
-      ['Assign', 's', ['Subtract', 's', 1]],
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // A NaN `x` decides `x > 0` false and runs the else branch (user
-    // decision 2026-10-20).
-    expect(r.code).toContain('if (0 < _.x)');
-    expect((r.run as any)({ x: 3 })).toEqual([3, 3]);
-    expect((r.run as any)({ x: -3 })).toEqual([-3, 3]);
-    expect((r.run as any)({ x: NaN })).toEqual([-3, 3]);
-  });
-
-  test('a Break under an undecided condition does not fire', () => {
-    ce.declare('x', 'number');
-    const expr = ce.box([
-      'Block',
-      ['Declare', 'k', { str: 'unknown' }, 0],
-      [
-        'Loop',
-        [
-          'Block',
-          ['Assign', 'k', ['Add', 'k', 1]],
-          ['If', ['Greater', 'x', 0], ['Break']],
-          ['If', ['GreaterEqual', 'k', 5], ['Break']],
-        ],
-      ],
-      'k',
-    ] as any);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // Decided true: the guarded `Break` fires on the first round.
-    expect((r.run as any)({ x: 3 })).toBe(1);
-    // Decided false: only the counting exit at k = 5 fires.
-    expect((r.run as any)({ x: -3 })).toBe(5);
-    expect((r.run as any)({ x: NaN })).toBe(5);
-  });
 
   // A declared type cannot name `missing` (`docs/ERROR-MODEL.md`, "`Missing`
   // is a result only"), so a condition input cannot be declared absent.

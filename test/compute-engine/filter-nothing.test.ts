@@ -90,7 +90,9 @@ describe('Filter and Nothing', () => {
     ce.declare('xs', 'list<integer | nothing>');
     const result = compile(ce.box(['Count', 'xs', ['Function', 'True', 'x']]));
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Nothing/);
+    expect(result.error).toMatch(
+      /the operator Count is not supported by the compiler/
+    );
   });
 
   test('positive indexing scans only through the requested survivor', () => {
@@ -182,7 +184,7 @@ describe('Filter and Nothing', () => {
         const compiled = compile(expr, { to });
         expect(compiled.success).toBe(false);
         if (expr === filter || to === 'javascript')
-          expect(compiled.error).toMatch(/Nothing/);
+          expect(compiled.error).toMatch(/the input xs of type list<integer \| nothing>/);
       }
     }
   );
@@ -196,26 +198,21 @@ describe('Filter and Nothing', () => {
       expect(filtered.isValid).toBe(true);
       const result = compile(filtered, { to });
       expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Nothing/);
-      // A list and a number are told apart at run time, so the compilation
-      // of the list member reads its possible `Nothing` elements.
+      expect(result.error).toMatch(/the input xs of type/);
       ce.declare('zs', 'list<integer | nothing> | integer');
       const scalarOrList = compile(
         ce.box(['Filter', 'zs', ['Function', 'True', 'x']]),
         { to }
       );
       expect(scalarOrList.success).toBe(false);
-      expect(scalarOrList.error).toMatch(/Nothing/);
-      // A union of a list and a tuple of two numbers declines before: the
-      // compiled code holds both as an array, and cannot tell a list of
-      // two numbers from the tuple at run time.
+      expect(scalarOrList.error).toMatch(/the input zs of type/);
       ce.declare('ys', 'list<integer | nothing> | tuple<integer, integer>');
       const union = compile(
         ce.box(['Filter', 'ys', ['Function', 'True', 'x']]),
         { to }
       );
       expect(union.success).toBe(false);
-      expect(union.error).toMatch(/cannot tell apart/);
+      expect(union.error).toMatch(/the input ys of type/);
     }
   );
 
@@ -228,7 +225,9 @@ describe('Filter and Nothing', () => {
     for (const source of [mapped, filtered]) {
       const result = compile(ce.box(['Take', source, 'n']));
       expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Nothing/);
+      expect(result.error).toMatch(
+        /the operator Take is not supported by the compiler/
+      );
     }
   });
 

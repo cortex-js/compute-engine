@@ -48,7 +48,6 @@ export type {
   CollectionHandlers,
   ArithmeticDefinition,
   ArithmeticContext,
-  ArithmeticCompile,
   KindOperands,
   KindOperand,
   KindFold,

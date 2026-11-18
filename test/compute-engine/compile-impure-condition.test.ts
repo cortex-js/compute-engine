@@ -139,6 +139,6 @@ describe('an impure branch condition is lowered three-valued', () => {
         to: 'glsl',
         fallback: false,
       } as any)
-    ).toThrow(/The head `Random` is outside the GLSL fragment/);
+    ).toThrow(/Random on glsl/);
   });
 });

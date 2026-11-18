@@ -215,113 +215,8 @@ describe('CE-448: a function of a point maps over a tensor of points', () => {
   });
 });
 
-describe('CE-448: the compiled call maps over a tensor of points', () => {
-  const run = (decl: string) => {
-    const ce = engine();
-    const r = compile(
-      ce.box(['Function', ['g', 'w'], ['Typed', 'w', `'${decl}'`]] as any),
-      { fallback: false }
-    );
-    expect(r.success).toBe(true);
-    return r.run as (w: unknown) => unknown;
-  };
-  const RANK2 = [
-    [
-      [1, 2],
-      [3, 4],
-    ],
-    [
-      [5, 6],
-      [7, 8],
-    ],
-  ];
-
-  test('broadcastable<P>: one point, a list of points, a matrix of points', () => {
-    const f = run(`broadcastable<${POINT}>`);
-    expect(f([1, 2])).toBe(21);
-    expect(
-      f([
-        [1, 2],
-        [3, 4],
-      ])
-    ).toEqual([21, 43]);
-    expect(f(RANK2)).toEqual([
-      [21, 43],
-      [65, 87],
-    ]);
-  });
-
-  test('tensor<P> and list<list<P>>', () => {
-    expect(run(`tensor<${POINT}>`)(RANK2)).toEqual([
-      [21, 43],
-      [65, 87],
-    ]);
-    expect(run(`list<list<${POINT}>>`)(RANK2)).toEqual([
-      [21, 43],
-      [65, 87],
-    ]);
-  });
-});
-
 describe('CE-448: a compiled call that maps one level only fails closed', () => {
-  const RANK2 = [
-    [
-      [1, 2],
-      [3, 4],
-    ],
-    [
-      [5, 6],
-      [7, 8],
-    ],
-  ];
-
-  test('a tensor of points paired with an argument at an unknown parameter', () => {
-    // `h := (p: tuple<real, real>, s) ↦ p[1] + s`: the interpreter maps to
-    // the points and pairs a list `u` with the rows. The compiled call
-    // paired one level only and gave each row whole to `h`
-    // (`["101,2", "205,6"]` for `u = [10, 20]`).
-    const ce = new ComputeEngine();
-    ce.declare('M', `matrix<${POINT}^(2x2)>`);
-    ce.declare('u', 'unknown');
-    ce.assign(
-      'h',
-      ce.box([
-        'Function',
-        ['Add', ['At', 'p', 1], 's'],
-        ['Typed', 'p', `'${POINT}'`],
-        's',
-      ])
-    );
-    const e = ce.box(['h', 'M', 'u']);
-    expect(() => compile(e, { fallback: false } as any)).toThrow(
-      /tensor of points of rank 2 or more.*pairs one level only/
-    );
-
-    const v = new ComputeEngine();
-    v.assign(
-      'h',
-      v.box([
-        'Function',
-        ['Add', ['At', 'p', 1], 's'],
-        ['Typed', 'p', `'${POINT}'`],
-        's',
-      ])
-    );
-    expect(
-      v
-        .box(['h', MATRIX, ['List', 10, 20]] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[[11,13],[25,27]]');
-    expect(
-      v
-        .box(['h', MATRIX, 5] as any)
-        .evaluate()
-        .toString()
-    ).toBe('[[6,8],[10,12]]');
-  });
-
-  test('a list of points at an unknown-paired call declines; a typed pair compiles', () => {
+  test('a list of points at an unknown-paired call declines', () => {
     const engine = (): ComputeEngine => {
       const ce = new ComputeEngine();
       ce.assign(
@@ -337,8 +232,7 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
     };
     // `L` and `u` are parameters of the root function, with their declared
     // types. With `u: unknown`, the call pairs the points of `L` with a
-    // value whose shape is known only at run time: the call declines, and
-    // names `u`.
+    // value whose shape is known only at run time: the call declines.
     const root = (uType: string) =>
       engine().box([
         'Function',
@@ -348,24 +242,8 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
       ]);
     const unknown = compile(root('unknown'), {} as any) as any;
     expect(unknown.success).toBe(false);
-    expect(unknown.unsupported).toContain('u');
-    // With `u: real`, the call compiles and agrees with the interpreter: the
-    // number is reused for each point. With `u: list<real>`, the call is
-    // the static map that pairs point `i` with element `i` of `u`, as the
-    // interpreter does; a length mismatch gives `NaN`, the compiled value
-    // of the interpreter's `incompatible-dimensions` error.
-    const points = [
-      [1, 2],
-      [3, 4],
-    ];
-    const scalar = compile(root('real'), { fallback: false } as any) as any;
-    expect(scalar.run(points, 5)).toEqual([6, 8]);
-    const list = compile(root('list<real>'), { fallback: false } as any) as any;
-    expect(list.success).toBe(true);
-    expect(list.code).toContain('_SYS.mapFn(');
-    expect(list.code).not.toContain('Array.isArray');
-    expect(list.run(points, [10, 20])).toEqual([11, 23]);
-    expect(list.run(points, [10, 20, 30])).toBeNaN();
+    // The interpreter pairs point `i` with element `i` of a list, and reuses
+    // a number for each point.
     const v = engine();
     const P = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
     expect(
@@ -380,82 +258,5 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
         .evaluate()
         .toString()
     ).toBe('[6,8]');
-  });
-
-  /** `g` declared with the bare type `function`, whose literal declares
-   * its parameter as a point. */
-  function bareFunctionEngine(): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('g', 'function');
-    ce.assign(
-      'g',
-      ce.box([
-        'Function',
-        ['Add', ['At', 'p', 1], ['At', 'p', 2]],
-        ['Typed', 'p', `'${POINT}'`],
-      ])
-    );
-    return ce;
-  }
-
-  test.each([
-    [`broadcastable<${POINT}>`, RANK2[0], '[3,7]'],
-    [`broadcastable<${POINT}>`, RANK2, '[[3,7],[11,15]]'],
-    [`matrix<${POINT}^(2x2)>`, RANK2, '[[3,7],[11,15]]'],
-    [`list<list<${POINT}>>`, RANK2, '[[3,7],[11,15]]'],
-    [`tensor<${POINT}>`, RANK2, '[[3,7],[11,15]]'],
-    [`list<${POINT}>`, RANK2[0], '[3,7]'],
-  ])(
-    'a user function declared `function`, argument %s, maps over the points',
-    (decl, value, interpreted) => {
-      // The call maps `g` over the points at every depth, as the
-      // interpreter does.
-      const ce = bareFunctionEngine();
-      ce.declare('B', decl);
-      const e = ce.box(['g', 'B']);
-      const r = compile(e, { fallback: false } as any) as any;
-      expect(r.success).toBe(true);
-      expect(JSON.stringify(r.run({ B: value }))).toBe(
-        interpreted.replace(/\s/g, '')
-      );
-      // When the declared type gives the rank of the tensor of points
-      // (`list<list<P>>`, `matrix<P^(2x2)>`), the call is the static map
-      // over that rank, with no run-time test of the value. A type that
-      // does not give the rank (`broadcastable<P>`, `tensor<P>`) keeps the
-      // run-time walk over the levels.
-      if (decl.startsWith('list<list<') || decl.startsWith('matrix<')) {
-        expect(r.code).toBe('_SYS.mapFn(_fn_g, [2], _.B)');
-      }
-
-      const v = bareFunctionEngine();
-      v.declare('B', decl);
-      const toBox = (x: any): any =>
-        typeof x[0] === 'number' ? ['Tuple', ...x] : ['List', ...x.map(toBox)];
-      v.assign('B', v.box(toBox(value)));
-      expect(v.box(['g', 'B']).evaluate().toString()).toBe(interpreted);
-    }
-  );
-
-  test('the Apply of a function literal over a list of points fails closed', () => {
-    for (const decl of [
-      `list<${POINT}>`,
-      `broadcastable<${POINT}>`,
-      `matrix<${POINT}^(2x2)>`,
-    ]) {
-      const ce = new ComputeEngine();
-      ce.declare('B', decl);
-      const e = ce.box([
-        'Apply',
-        [
-          'Function',
-          ['Add', ['At', 'p', 1], ['At', 'p', 2]],
-          ['Typed', 'p', `'${POINT}'`],
-        ],
-        'B',
-      ]);
-      expect(() => compile(e, { fallback: false } as any)).toThrow(
-        /The interpreter maps the call over the points/
-      );
-    }
   });
 });

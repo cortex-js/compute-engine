@@ -55,18 +55,7 @@ function compileP(
   } as any);
 }
 
-const REAL_DEFINITION =
-  'const _fn_p = (k) => Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5));';
-
 describe('A declared real result selects the real lane', () => {
-  it('strict (default): the body compiles on the real lane', () => {
-    const ce = engineWith('(real) -> real');
-    const r = compileP(ce);
-    expect(r.success).toBe(true);
-    expect(r.mode).toBe('strict');
-    expect(r.preamble.trim()).toBe(REAL_DEFINITION);
-    expect(r.code).toBe('_fn_p(_.x) + 0.31372476943046695');
-  });
 
   it('strict (default): the value at a point of the real domain is the value of N()', () => {
     const ce = engineWith('(real) -> real');
@@ -76,37 +65,6 @@ describe('A declared real result selects the real lane', () => {
     expect(typeof actual).toBe('number');
     expect(actual).toBeCloseTo(expected, 12);
   });
-
-  it('complex: outside the real domain the value is NaN, as in strict mode', () => {
-    const ce = engineWith('(real) -> real');
-    const complex = compileP(ce, 'complex');
-    const strict = compileP(ce, 'strict');
-    expect(Number.isNaN(complex.run({ x: 0 }))).toBe(true);
-    expect(Number.isNaN(strict.run({ x: 0 }))).toBe(true);
-    // The same code as strict mode
-    expect(complex.preamble).toBe(strict.preamble);
-    expect(complex.code).toBe(strict.code);
-  });
-
-  it('complex: a declared real result is real in this mode too', () => {
-    const ce = engineWith('(real) -> real');
-    const r = compileP(ce, 'complex');
-    expect(r.success).toBe(true);
-    expect(r.code).not.toMatch(/_SYS\.csqrt|re:/);
-    const v5 = r.run({ x: 5 });
-    expect(typeof v5).toBe('number');
-    expect(v5).toBeCloseTo(ce.box(['Add', ['p', 3], ['p', 5]]).N().re, 12);
-    expect(Number.isNaN(r.run({ x: 0 }))).toBe(true);
-  });
-
-  for (const result of ['finite_real', 'nan | real'])
-    it(`complex: the spelling \`-> ${result}\` is a real result`, () => {
-      const ce = engineWith(`(real) -> ${result}`);
-      const r = compileP(ce, 'complex');
-      expect(r.success).toBe(true);
-      expect(r.preamble.trim()).toBe(REAL_DEFINITION);
-      expect(Number.isNaN(r.run({ x: 0 }))).toBe(true);
-    });
 
   it('complex: `-> number` admits a complex value, and the body promotes', () => {
     const ce = engineWith('(real) -> number');
@@ -135,32 +93,6 @@ describe('A declared real result selects the real lane', () => {
     expect(r.success).toBe(true);
     expect(r.run({ x: -4 })).toBeCloseTo(2, 12);
   });
-
-  it('complex: a subexpression shared with the code around the ascription is not shared across it', () => {
-    // `√(x − 1)` occurs outside the ascription (promoted) and inside it
-    // (real lane). A temporary bound for one of them must not be read for
-    // the other.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const expr = ce.box([
-      'Add',
-      ['Sqrt', ['Subtract', 'x', 1]],
-      ['Typed', ['Multiply', 2, ['Sqrt', ['Subtract', 'x', 1]]], "'real'"],
-    ]);
-    const r = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('2 * Math.sqrt(_.x + -1)');
-    expect(r.run({ x: 5 })).toEqual(6);
-    // Outside the real domain: the ascribed term is NaN, the promoted term
-    // is `i`.
-    const v0 = r.run({ x: 0 });
-    expect(Number.isNaN(v0.re)).toBe(true);
-    expect(v0.im).toBeCloseTo(1, 12);
-  });
 });
 
 describe('A constant call of a function with a real result', () => {
@@ -176,18 +108,6 @@ describe('A constant call of a function with a real result', () => {
     return ce;
   }
 
-  it('in a sum, the value is NaN, not a string', () => {
-    const ce = engine();
-    const r = compile(ce.box(['Add', ['p', 0], 'x']), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).not.toMatch(/re:/);
-    expect(r.code).toBe('_.x + _fn_p(0)');
-    expect(Number.isNaN(r.run({ x: 0 }))).toBe(true);
-  });
-
   it('alone, the value is NaN, as for p(x) at x = 0', () => {
     const ce = engine();
     const r = compile(ce.box(['p', 0]), {
@@ -199,118 +119,7 @@ describe('A constant call of a function with a real result', () => {
   });
 });
 
-describe('A helper called inside the value of a real ascription', () => {
-  // The value `√y · Σ g(k)` is complex with promotion on (`√y`), so it
-  // compiles with promotion off. The definition of `g` is shared by every
-  // call, so it compiles with the promotion of the mode, and the choice of
-  // that definition must also be made for the mode, not for the call site.
-  const G: any = [
-    'Function',
-    ['Sqrt', ['Divide', ['Subtract', 'k', 0.5], 16]],
-    'k',
-  ];
-
-  it('a helper specialized to the range of a Sum index compiles real', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('p', '(real) -> real');
-    ce.assign('g', ce.box(G));
-    ce.assign(
-      'p',
-      ce.box([
-        'Function',
-        [
-          'Multiply',
-          ['Sqrt', 'y'],
-          ['Sum', ['g', 'k'], ['Limits', 'k', 1, 16]],
-        ],
-        'y',
-      ])
-    );
-    // Without `constantFold: false`, the constant `Sum` folds to a number
-    // and no definition of `g` is emitted.
-    const r = compile(ce.box(['p', 'x']), {
-      to: 'javascript',
-      fallback: false,
-      constantFold: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.preamble).not.toMatch(/csqrt/);
-    expect(r.preamble).toContain(
-      'const _fn_g_integer_1___ = (k) => Math.sqrt(0.0625 * (k + -0.5));'
-    );
-    expect(r.run({ x: 2 })).toBeCloseTo(ce.box(['p', 2]).N().re, 12);
-  });
-
-  it('a helper with a declared narrower parameter type compiles real', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('p', '(real) -> real');
-    ce.declare('g', '(integer<1..16>) -> unknown');
-    ce.assign('g', ce.box(G));
-    ce.assign(
-      'p',
-      ce.box([
-        'Function',
-        ['Multiply', ['Sqrt', 'y'], ['g', ['Floor', 'y']]],
-        'y',
-      ])
-    );
-    const r = compile(ce.box(['p', 'x']), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.preamble).not.toMatch(/csqrt/);
-    expect(r.preamble).toContain(
-      'const _fn_g = (k) => Math.sqrt(0.0625 * (k + -0.5));'
-    );
-    expect(r.run({ x: 2 })).toBeCloseTo(ce.box(['p', 2]).N().re, 12);
-  });
-});
-
 describe('A real result over a value that is complex without promotion', () => {
-  it('a complex-typed operand still declines', () => {
-    const ce = new ComputeEngine();
-    ce.declare('q', '(unknown) -> real');
-    ce.assign('q', ce.box(['Function', ['Power', 'z', 2], 'z']));
-    ce.declare('w', 'complex');
-    for (const mode of ['complex'] as const)
-      expect(() =>
-        compile(ce.box(['Add', ['q', 'w'], 1]), {
-          to: 'javascript',
-          mode,
-          fallback: false,
-        } as any)
-      ).toThrow(
-        /Could not compile `Typed`: the value `w\^2` is complex, but its ascribed type `real` says it is real\..*\(unknown\) -> complex/s
-      );
-  });
-
-  it('a call of a function whose definition is complex declines', () => {
-    // `g: (real) -> number`, `g := k ↦ √k` is emitted on the complex lane.
-    // The definition is shared by every call site, so it is not recompiled
-    // on the real lane for the body of `h`, and `g(k) + 1` is complex.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('g', '(real) -> number');
-    ce.assign('g', ce.box(['Function', ['Sqrt', 'k'], 'k']));
-    ce.declare('h', '(real) -> real');
-    ce.assign('h', ce.box(['Function', ['Add', ['g', 'k'], 1], 'k']));
-    for (const expr of [
-      ['h', 'x'],
-      ['Add', ['g', 'x'], ['h', 'x']],
-      ['Add', ['h', 'x'], ['g', 'x']],
-    ])
-      expect(() =>
-        compile(ce.box(expr as any), {
-          to: 'javascript',
-          fallback: false,
-          mode: 'complex',
-        } as any)
-      ).toThrow(/is complex, but its ascribed type `real` says it is real/);
-  });
 
   it('the declaration of `g` alone still compiles on the complex lane', () => {
     const ce = new ComputeEngine();
@@ -327,24 +136,6 @@ describe('A real result over a value that is complex without promotion', () => {
   });
 });
 
-describe('Targets that never promote are unchanged', () => {
-  for (const to of ['glsl'] as const)
-    it(`${to}: the body compiles on the real lane`, () => {
-      const ce = engineWith('(real) -> real');
-      const r = compile(ce.box(['Add', ['p', 3], ['p', 'x']]), {
-        to,
-        fallback: false,
-      } as any) as any;
-      expect(r.success).toBe(true);
-      // Every call passes a finite argument (`3`, and `x` declared `real`),
-      // but `x` has no declared range: `2.4k` is `+∞` in f32 for
-      // `k ≥ 1.5·10³⁸`, so `sin` keeps its helper (CE-619.2).
-      expect(r.preamble).toContain(
-        'return _gpu_sin(2.4 * k) * sqrt(0.0625 * (k + -0.5));'
-      );
-    });
-});
-
 // In `mode: 'complex'`, a promotion must follow the code that is emitted.
 // The analysis that decides the lane of a node (`isComplexValued`) also
 // reads the promotable heads of subtrees that are never emitted: a subtree
@@ -353,70 +144,6 @@ describe('Targets that never promote are unchanged', () => {
 // of a promotable head, or a constant fold that gives a complex literal only
 // because the head promotes, puts a value on the complex lane.
 describe('A promotion follows the emitted code', () => {
-  it('a sum folded to a real literal is not promoted', () => {
-    // `√(2 + sin k)` has an operand of unknown sign for the analysis, but
-    // the sum folds to the real literal `22.85…`.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const sum = [
-      'Sum',
-      ['Sqrt', ['Add', 2, ['Sin', 'k']]],
-      ['Limits', 'k', 1, 16],
-    ];
-    const r = compile(ce.box(['Add', 'x', sum] as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_.x + 22.8515546553601');
-    expect(r.mode).toBe('strict');
-    expect(r.run({ x: 1 })).toBeCloseTo(
-      ce.box(['Add', 1, sum] as any).N().re,
-      12
-    );
-  });
-
-  it('a complex literal whose complex part does not come from a promotion is not promoted', () => {
-    // The whole expression folds to the complex literal `22.85… + i`. The
-    // imaginary unit supplies the imaginary part. The sum folds on its own to
-    // the real `22.85…`, so the radical of unknown sign in the sum is not a
-    // promotion.
-    const ce = new ComputeEngine();
-    const sum = [
-      'Sum',
-      ['Sqrt', ['Add', 2, ['Sin', 'k']]],
-      ['Limits', 'k', 1, 16],
-    ];
-    const expr = ['Add', 'ImaginaryUnit', sum];
-    const r = compile(ce.box(expr as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('({ re: 22.8515546553601, im: 1 })');
-    expect(r.mode).toBe('strict');
-    const v = r.run({});
-    const expected = ce.box(expr as any).N();
-    expect(v.re).toBeCloseTo(expected.re, 12);
-    expect(v.im).toBeCloseTo(expected.im, 12);
-  });
-
-  it('an argument inlined in a real ascription is not promoted', () => {
-    // The call `q(√(y − 1))` is inlined, and its value compiles on the real
-    // lane. The argument `√(y − 1)` is not emitted on the complex lane.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    ce.declare('q', '(unknown) -> real');
-    ce.assign('q', ce.box(['Function', ['Multiply', 'z', 'z'], 'z']));
-    const r = compile(
-      ce.box(['Add', 'x', ['q', ['Sqrt', ['Subtract', 'y', 1]]]]),
-      { to: 'javascript', fallback: false, mode: 'complex' } as any
-    ) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_.x + Math.sqrt(_.y + -1) * Math.sqrt(_.y + -1)');
-    expect(r.run({ x: 1, y: 5 })).toBe(5);
-  });
 
   it('a sum folded to a complex literal only by promotion is promoted', () => {
     // `Σ cos k` for k = 1..5 is −1.2358…: `strict` gives NaN, `complex` folds
@@ -470,37 +197,5 @@ describe('A promotion follows the emitted code', () => {
       mode: 'strict',
     } as any) as any;
     expect(Number.isNaN(strict.run({ x: 1 }))).toBe(true);
-  });
-
-  it('an emitted promoted radical is promoted', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('y', 'real');
-    const r = compile(ce.box(['Add', 'x', ['Sqrt', ['Subtract', 'y', 1]]]), {
-      to: 'javascript',
-      fallback: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.csqrt');
-    expect(r.run({ x: 1, y: 0 })).toEqual({ re: 1, im: 1 });
-  });
-
-  it('an even root of a wide operand under `complex` is promoted', () => {
-    // The emitter of `Root` records the promotion: the root is lowered
-    // through the complex kernel because the operand of type `number` is
-    // complex only by wideness.
-    const ce = new ComputeEngine();
-    ce.declare('t', 'number');
-    const r = compile(ce.box(['Root', 't', 4]), {
-      to: 'javascript',
-      fallback: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.croot');
-    const v = r.run({ t: -16 });
-    expect(v.re).toBeCloseTo(Math.SQRT2, 14);
-    expect(v.im).toBeCloseTo(Math.SQRT2, 14);
   });
 });

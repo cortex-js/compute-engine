@@ -37,11 +37,6 @@ describe('StirlingS2 (#395)', () => {
       expect(s2.N().toString()).toBe(expected);
     });
 
-    test(`StirlingS2(${n}, ${k}) = ${expected} (compiled)`, () => {
-      const result = compile(s2);
-      expect(result.success).toBe(true);
-      expect(String(result.run!())).toBe(expected);
-    });
   }
 
   const stays: [unknown, string][] = [

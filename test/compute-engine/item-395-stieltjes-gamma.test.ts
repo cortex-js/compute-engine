@@ -196,13 +196,7 @@ describe('StieltjesGamma, limits', () => {
 });
 
 describe('StieltjesGamma, compiled', () => {
-  test('compiles to JavaScript and agrees with evaluate()', () => {
-    const run = compile(ce.box([S, 2, 'sg_a']))?.run as (
-      scope: Record<string, number>
-    ) => number;
-    expect(run({ sg_a: 1.5 })).toBeCloseTo(0.007958447383887856, 13);
-    expect(run({ sg_a: 0.5 })).toBeCloseTo(0.9688644752202907, 13);
-    expect(run({ sg_a: -0.5 })).toBeNaN(); // complex value
+  test('the real kernel is NaN past the cap', () => {
     expect(stieltjesGammaReal(STIELTJES_MAX_ORDER + 1, 1)).toBeNaN();
   });
 

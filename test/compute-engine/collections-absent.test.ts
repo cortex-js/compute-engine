@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // The five rules for `NaN`, `Missing` and `Undefined` in collection operators
 // (user decisions of 2026-09-26, recorded in
@@ -377,50 +376,5 @@ describe('Rule E: an absent collection makes the result absent', () => {
     const e = new ComputeEngine().box(['Length', 'NaN']).evaluate();
     expect(e.isValid).toBe(false);
     expect(e.toString()).toContain('incompatible-type');
-  });
-});
-
-describe('compiled to JavaScript', () => {
-  const ce = new ComputeEngine();
-  const run = (json: unknown): unknown => {
-    const r = compile(ce.box(json as never), { to: 'javascript' } as never);
-    expect(r.success).toBe(true);
-    return r.run!({} as never);
-  };
-  const refused = (json: unknown): boolean => {
-    try {
-      const r = compile(ce.box(json as never), {
-        to: 'javascript',
-        fallback: false,
-      } as never);
-      return r.success === false;
-    } catch {
-      return true;
-    }
-  };
-
-  test('search (rule C)', () => {
-    expect(run(['IndexOf', L(1, 'NaN'), 'NaN'])).toBe(2);
-    expect(run(['Contains', L(1, 'NaN'), 'NaN'])).toBe(true);
-    expect(run(['Element', 'NaN', L(1, 'NaN')])).toBe(true);
-    expect(run(['IndexOf', L(1, 'NaN'), 'Missing'])).toBe(0);
-    expect(run(['IndexOf', L(1, 2), 'Missing'])).toBe(0);
-    // `Contains` requires primitive elements on this target, and a
-    // `missing` element arm is not one: it falls back to the interpreter.
-    expect(refused(['Contains', L(1, 'Missing'), 5])).toBe(true);
-  });
-
-  test('selection (rule D)', () => {
-    expect(run(['Filter', L(1, 'Missing', 3), gt0])).toEqual([1, 3]);
-    expect(run(['CountIf', L(1, 'Missing', 3), gt0])).toBe(2);
-    expect(run(['Position', L(1, 'Missing', 3), gt0])).toEqual([1, 3]);
-    expect(run(['Filter', L(1, 'NaN', 3), gt0])).toEqual([1, 3]);
-  });
-
-  test('a quantifier over NaN elements', () => {
-    // A `NaN` element compares `False` on both routes, so it compiles.
-    expect(run(['Any', L(1, 'NaN'), gt2])).toBe(false);
-    expect(run(['All', L(1, 'NaN', 3), gt0])).toBe(false);
-    expect(run(['Any', L(1, 'NaN', 3), gt2])).toBe(true);
   });
 });

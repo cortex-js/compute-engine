@@ -1,22 +1,14 @@
-import type { Expression, LibraryDefinition } from './global-types.js';
+import type { LibraryDefinition } from './global-types.js';
 import { assertStorageHintsShape } from './compilation/storage-hints.js';
-import type {
-  LanguageTarget,
-  CompileTarget,
-  CompilationOptions,
-} from './compilation/types.js';
+import type { CompilationOptions } from './compilation/types.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
 function assertExtensionName(
   value: unknown,
-  options: { kind: 'library' | 'compilation target' }
+  options: { kind: 'library' }
 ): string {
   if (typeof value !== 'string')
     throw new Error(`${options.kind} name must be a string`);
@@ -35,36 +27,8 @@ function assertExtensionName(
   return value;
 }
 
-export function assertCompilationTargetName(name: unknown): string {
-  return assertExtensionName(name, { kind: 'compilation target' });
-}
-
 export function assertLibraryName(name: unknown): string {
   return assertExtensionName(name, { kind: 'library' });
-}
-
-const REQUIRED_TARGET_METHODS = [
-  'getOperators',
-  'getFunctions',
-  'createTarget',
-  'compile',
-] as const;
-
-export function assertCompilationTargetContract(
-  target: unknown
-): asserts target is LanguageTarget<Expression> {
-  if (!isRecord(target))
-    throw new Error(
-      'Invalid compilation target: expected an object implementing LanguageTarget'
-    );
-
-  for (const methodName of REQUIRED_TARGET_METHODS) {
-    if (typeof target[methodName] !== 'function') {
-      throw new Error(
-        `Invalid compilation target: missing required method "${methodName}()"`
-      );
-    }
-  }
 }
 
 function assertLibraryRequires(value: unknown, libraryName: string): void {
@@ -123,66 +87,12 @@ export function assertLibraryDefinitionContract(
   assertLibraryDefinitions(library.definitions, name);
 }
 
-function assertCompileTargetContract(
-  target: unknown
-): asserts target is CompileTarget<Expression> {
-  if (!isRecord(target))
-    throw new Error('Invalid compile target: expected an object');
-
-  if (typeof target.var !== 'function')
-    throw new Error('Invalid compile target: missing required method "var()"');
-  if (typeof target.string !== 'function')
-    throw new Error(
-      'Invalid compile target: missing required method "string()"'
-    );
-  if (typeof target.number !== 'function')
-    throw new Error(
-      'Invalid compile target: missing required method "number()"'
-    );
-  if (typeof target.ws !== 'function')
-    throw new Error('Invalid compile target: missing required method "ws()"');
-  if (typeof target.preamble !== 'string')
-    throw new Error('Invalid compile target: "preamble" must be a string');
-  if (!isFiniteNumber(target.indent))
-    throw new Error('Invalid compile target: "indent" must be a finite number');
-
-  if (
-    target.operators !== undefined &&
-    typeof target.operators !== 'function'
-  ) {
-    throw new Error('Invalid compile target: "operators" must be a function');
-  }
-
-  if (
-    target.functions !== undefined &&
-    typeof target.functions !== 'function'
-  ) {
-    throw new Error('Invalid compile target: "functions" must be a function');
-  }
-
-  if (target.language !== undefined && typeof target.language !== 'string') {
-    throw new Error('Invalid compile target: "language" must be a string');
-  }
-
-  if (
-    target.beginCompilation !== undefined &&
-    typeof target.beginCompilation !== 'function'
-  ) {
-    throw new Error(
-      'Invalid compile target: "beginCompilation" must be a function'
-    );
-  }
-
-  assertCompileTargetModesContract(target);
-}
-
 /**
  * The mode names that pass option validation. `'auto'` is not a
  * `CompileMode` any more, but it is accepted here so that a request for it
- * reaches `resolveCompileMode`, which declines it with
- * `code: 'unsupported-mode'` and names `'complex'` as its replacement. An
- * option error here would throw out of `compile()` instead of giving that
- * decline.
+ * reaches `compile()`, which declines it with `code: 'unsupported-mode'` and
+ * names `'complex'` as its replacement. An option error here would throw out
+ * of `compile()` instead of giving that decline.
  */
 const COMPILE_MODES: readonly string[] = [
   'strict',
@@ -192,119 +102,30 @@ const COMPILE_MODES: readonly string[] = [
 ];
 
 /**
- * The mode names that a target can declare in `supportedModes`: the
- * `CompileMode` values. `'auto'` is not among them, because no target can
- * offer it.
+ * The options of `compile()` that 0.194.0 removed, with the replacement that
+ * the error names (the migration note of 0.194.0 in `CHANGELOG.md`). The
+ * option types no longer have them; a JavaScript caller that still passes
+ * one gets this error rather than an option that is silently ignored.
  */
-const SUPPORTED_MODES: readonly string[] = COMPILE_MODES.filter(
-  (m) => m !== 'auto'
-);
+const REMOVED_OPTIONS: Readonly<Record<string, string>> = {
+  target:
+    "compile to a built-in target with the option `to` ('javascript', 'glsl' or 'interval-js')",
+  functions:
+    'define the function in the engine with a body, or give its operator a `compile` handler that returns an expression',
+  operators: 'the operators of a target are not configurable',
+  imports: 'the compiled code is self-contained',
+  preamble: 'put the definitions in the host code that uses the result',
+  strictTypes:
+    'read the `provenance` of each entry of `freeSymbolTypes` in the result',
+  broadcast: '`broadcast()` of the result needs no option',
+};
 
-/**
- * The compile-mode declaration of a custom target (`CompileTarget.mode`,
- * `supportedModes`, `complexLift`, `complexIsReal`): each is
- * well-formed when present, and a target that DECLARES `'complex'` provides
- * the two lowering hooks the complex discipline is emitted through — a
- * declaration without them is rejected here, at option validation, rather
- * than discovered as a missing hook mid-emission.
- */
-function assertCompileTargetModesContract(
-  target: Record<string, unknown>
-): void {
-  if (
-    target.mode !== undefined &&
-    !COMPILE_MODES.includes(target.mode as string)
-  )
-    throw new Error(
-      `Invalid compile target: "mode" must be one of ${COMPILE_MODES.map((m) => `"${m}"`).join(', ')}`
-    );
-  const declared = target.supportedModes;
-  if (declared !== undefined) {
-    if (
-      !Array.isArray(declared) ||
-      declared.some((m) => !SUPPORTED_MODES.includes(m as string))
-    )
+function assertNoRemovedOption(options: Record<string, unknown>): void {
+  for (const [name, replacement] of Object.entries(REMOVED_OPTIONS))
+    if (options[name] !== undefined)
       throw new Error(
-        `Invalid compile target: "supportedModes" must be an array of ${SUPPORTED_MODES.map((m) => `"${m}"`).join(', ')}`
+        `The compilation option "${name}" was removed in 0.194.0: ${replacement}. See the migration note of 0.194.0 in the changelog.`
       );
-    if (
-      declared.includes('complex') &&
-      (typeof target.complexLift !== 'function' ||
-        typeof target.complexIsReal !== 'function')
-    )
-      throw new Error(
-        'Invalid compile target: a target whose "supportedModes" includes "complex" must provide the "complexLift()" and "complexIsReal()" hooks'
-      );
-  }
-  for (const hook of ['complexLift', 'complexIsReal'] as const)
-    if (target[hook] !== undefined && typeof target[hook] !== 'function')
-      throw new Error(`Invalid compile target: "${hook}" must be a function`);
-}
-
-function assertOperatorEntry(operator: string, value: unknown): void {
-  if (value === undefined) return;
-
-  if (
-    !Array.isArray(value) ||
-    value.length !== 2 ||
-    typeof value[0] !== 'string' ||
-    !isFiniteNumber(value[1])
-  ) {
-    throw new Error(
-      `Invalid compilation option "operators.${operator}": expected [string, number]`
-    );
-  }
-}
-
-function assertCompilationOptionsOperators(value: unknown): void {
-  if (value === undefined) return;
-
-  if (typeof value === 'function') return;
-
-  if (!isRecord(value) || Array.isArray(value)) {
-    throw new Error(
-      'Invalid compilation option "operators": expected a function or a record'
-    );
-  }
-
-  for (const [operator, entry] of Object.entries(value)) {
-    assertOperatorEntry(operator, entry);
-  }
-}
-
-function assertCompilationOptionsFunctions(value: unknown): void {
-  if (value === undefined) return;
-
-  if (!isRecord(value) || Array.isArray(value)) {
-    throw new Error(
-      'Invalid compilation option "functions": expected a record'
-    );
-  }
-
-  for (const [name, fn] of Object.entries(value)) {
-    if (typeof fn === 'string' || typeof fn === 'function') continue;
-    // The descriptor form, which adds a purity declaration to the same
-    // implementation: `{ source, pure? }`. Its `source` carries exactly what
-    // the bare form would, so it is checked with the same test.
-    if (isRecord(fn) && !Array.isArray(fn) && 'source' in fn) {
-      const source = (fn as { source: unknown }).source;
-      if (typeof source !== 'string' && typeof source !== 'function') {
-        throw new Error(
-          `Invalid compilation option "functions.${name}.source": expected a string or function`
-        );
-      }
-      const pure = (fn as { pure?: unknown }).pure;
-      if (pure !== undefined && typeof pure !== 'boolean') {
-        throw new Error(
-          `Invalid compilation option "functions.${name}.pure": expected a boolean`
-        );
-      }
-      continue;
-    }
-    throw new Error(
-      `Invalid compilation option "functions.${name}": expected a string, a function, or a { source, pure? } descriptor`
-    );
-  }
 }
 
 function assertCompilationOptionsVars(value: unknown): void {
@@ -323,17 +144,9 @@ function assertCompilationOptionsVars(value: unknown): void {
   }
 }
 
-function assertCompilationOptionsImports(value: unknown): void {
-  if (value === undefined) return;
-
-  if (!Array.isArray(value)) {
-    throw new Error('Invalid compilation option "imports": expected an array');
-  }
-}
-
 export function assertCompilationOptionsContract(
   options: unknown
-): asserts options is CompilationOptions<Expression> & {
+): asserts options is CompilationOptions & {
   fallback?: boolean;
 } {
   if (options === undefined) return;
@@ -346,18 +159,9 @@ export function assertCompilationOptionsContract(
     throw new Error('Invalid compilation option "to": expected a string');
   }
 
-  if (options.target !== undefined) {
-    assertCompileTargetContract(options.target);
-  }
+  assertNoRemovedOption(options);
 
-  assertCompilationOptionsOperators(options.operators);
-  assertCompilationOptionsFunctions(options.functions);
   assertCompilationOptionsVars(options.vars);
-  assertCompilationOptionsImports(options.imports);
-
-  if (options.preamble !== undefined && typeof options.preamble !== 'string') {
-    throw new Error('Invalid compilation option "preamble": expected a string');
-  }
 
   if (options.fallback !== undefined && typeof options.fallback !== 'boolean') {
     throw new Error(
@@ -380,15 +184,6 @@ export function assertCompilationOptionsContract(
   ) {
     throw new Error(
       'Invalid compilation option "constantFold": expected a boolean'
-    );
-  }
-
-  if (
-    options.broadcast !== undefined &&
-    typeof options.broadcast !== 'boolean'
-  ) {
-    throw new Error(
-      'Invalid compilation option "broadcast": expected a boolean'
     );
   }
 

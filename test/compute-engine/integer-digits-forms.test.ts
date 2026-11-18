@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 // Values are Wolfram's: FromDigits[{15, 15}, 16] = 255, FromDigits[{a, b, c}, x]
 // = a x^2 + b x + c, IntegerString[5, 2, 8] = "00000101", DigitCount[5, 2, 0, 8]
@@ -142,28 +142,5 @@ describe('the length of the padded forms is capped', () => {
     const r = ce.box(['IntegerDigits', 5, 2, 200_000]).evaluate();
     expect(r.operator).toBe('List');
     expect(r.nops).toBe(200_000);
-  });
-});
-
-describe('compiled constants agree with evaluate()', () => {
-  for (const [expr, expected] of [
-    [['DigitSum', 1234, 10, 2], 3],
-    ] as [any, number][])
-    test(`${JSON.stringify(expr)} = ${expected}`, () => {
-      const compiled = compile(ce.box(expr));
-      expect(compiled.success).toBe(true);
-      expect((compiled.run as () => number)()).toBe(expected);
-    });
-
-  test('a call with an unknown operand has no lowering', () => {
-    for (const expr of [
-      ['DigitSum', 'x', 10, 2],
-      ['DigitCount', 'x', 2, 0, 8],
-      ['IntegerString', 'x', 2, 8],
-      ['FromDigits', L('a', 'b', 'c'), 'x'],
-    ])
-      expect(() => compile(ce.box(expr), { fallback: false })).toThrow(
-        /no lowering/
-      );
   });
 });

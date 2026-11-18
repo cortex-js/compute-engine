@@ -354,6 +354,8 @@ describe('TYCHO ROW 422: THE REVIEW CASES ON BOTH ROUTES', () => {
     expect(Math.abs(v2.re - 0.5)).toBeLessThan(1e-3);
   });
 
+  // The first is the estimate of the Monte-Carlo fallback, as in the
+  // interpreter; the second the quadrature of its log-space form (CE-1437).
   test('compiled, with a variable bound: a tail where the terms overflow keeps its value', () => {
     // Reference values: Simpson's rule on `[0, 40]` with 400,000 panels (the
     // tail past 40 is smaller than 1e-17).

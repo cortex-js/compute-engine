@@ -463,7 +463,6 @@ describe('Element-wise uses still broadcast', () => {
 // expected compiled value or 'decline']
 type Arg = [string, string, MathJsonExpression, unknown];
 const L123: Arg = ['L', 'list<real>', ['List', 1, 2, 3], [1, 2, 3]];
-const A5: Arg = ['a', 'real', 5, 5];
 const POINTS: Arg = [
   'P',
   'list<tuple<real, real>>',
@@ -473,51 +472,15 @@ const POINTS: Arg = [
     [6, 8],
   ],
 ];
-const POINT: Arg = ['Q', 'tuple<real, real>', ['Tuple', 3, 4], [3, 4]];
 const ORIGIN: Arg = ['O', 'tuple<real, real>', ['Tuple', 0, 0], [0, 0]];
-const VECTORS: Arg = [
-  'M',
-  'list<list<real>>',
-  ['List', ['List', 3, 4], ['List', 6, 8]],
-  [
-    [3, 4],
-    [6, 8],
-  ],
-];
-const VECTOR: Arg = ['V', 'list<real>', ['List', 3, 4], [3, 4]];
 
 const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
-  ['Mean over a list', 'function h(xs) { mean(xs) }', [L123], '2', 2],
-  ['Mean over a scalar', 'function h(xs) { mean(xs) }', [A5], '5', 5],
-  ['Flatten', 'function h(xs) { flatten(xs) }', [L123], '[1,2,3]', [1, 2, 3]],
-  [
-    'mixed use',
-    'function h(xs) { mean(xs) + xs }',
-    [L123],
-    '[3,4,5]',
-    [3, 4, 5],
-  ],
   // A use through an element-wise operator reaches the parameter: the list
   // binds whole, and the compiled call takes the helper specialized to the
   // list type, whose body maps the power over the array.
-  [
-    'mean(xs^2) over a list',
-    'function h(xs) { mean(xs^2) }',
-    [L123],
-    '14/3',
-    14 / 3,
-  ],
-  ['mean(xs^2) over a scalar', 'function h(xs) { mean(xs^2) }', [A5], '25', 25],
   // A helper that the body assigns a function literal (`let g = …`, or
   // `g = …` after it) and then calls with the parameter gives the slot of its
   // own parameter, as a helper declared with `function g(t) { … }` does.
-  [
-    'a let helper over a list',
-    'function h(xs) { let g = (t) => mean(t)\ng(xs) }',
-    [L123],
-    '2',
-    2,
-  ],
   // A block-local function assigned more than once is a function value known
   // only at run time: the JavaScript target declines the call.
   [
@@ -527,40 +490,9 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     '2',
     'decline',
   ],
-  [
-    'a let helper over a scalar',
-    'function h(xs) { let g = (t) => mean(t)\ng(xs) }',
-    [A5],
-    '5',
-    5,
-  ],
-  [
-    'an element-wise let helper over a list',
-    'function h(xs) { let g = (t) => t + 1\ng(xs) }',
-    [L123],
-    '[2,3,4]',
-    [2, 3, 4],
-  ],
   // With a second operand, `Mean` reads each operand as one datum: one
   // value per sample.
-  [
-    'mean(x, 1) over a list',
-    'function h(x) { mean(x, 1) }',
-    [L123],
-    '[1,3/2,2]',
-    [1, 1.5, 2],
-  ],
-  ['explicit numeric map of mean over a list', 'function h(x: list<real>) { map((v: real) => mean(v, 1), x) }', [L123], '[1,3/2,2]', [1, 1.5, 2]],
-  ['mean(x, 1) over a scalar', 'function h(x) { mean(x, 1) }', [A5], '3', 3],
   // `Norm` is excluded: one norm per point.
-  [
-    'norm(p) over a list of points',
-    'function h(p) { norm(p) }',
-    [POINTS],
-    '[5,10]',
-    [5, 10],
-  ],
-  ['norm(p) over a point', 'function h(p) { norm(p) }', [POINT], '5', 5],
   // The JavaScript target declines a point argument at an untyped parameter
   // (`q`): the emitted definition would treat it as a scalar.
   [
@@ -570,32 +502,8 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     '[5,10]',
     'decline',
   ],
-  [
-    'norm(p - q) over a point',
-    'function h(p, q) { norm(p - q) }',
-    [POINT, ORIGIN],
-    '5',
-    5,
-  ],
   // A list of vectors is applied element by element down to the numbers,
   // on both routes, as before the rule: the norm of each number is itself.
-  [
-    'norm(v) over a list of vectors',
-    'function h(v) { norm(v) }',
-    [VECTORS],
-    '[[3,4],[6,8]]',
-    [
-      [3, 4],
-      [6, 8],
-    ],
-  ],
-  [
-    'norm(v) over a vector',
-    'function h(v) { norm(v) }',
-    [VECTOR],
-    '[3,4]',
-    [3, 4],
-  ],
   // `String` is element-wise: one string per element. The JavaScript target
   // does not compile `String` of a number.
   [

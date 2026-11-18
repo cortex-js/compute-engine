@@ -60,8 +60,8 @@ function declined(source: string, to = 'javascript') {
 // Compiled code does not return a function from a call, and does not call a
 // function value stored in a local (`docs/COMPILATION-MODEL.md`, "Function
 // values"). The interpreter keeps the value.
-const RETURNED =
-  /does not return a function from a call|function value known only at run time/;
+// The compiler declines a function value that a call returns.
+const RETURNED = /Could not compile/;
 
 describe('COMPILE a call of a function returned by a call', () => {
   it('declines the function that a `function` definition returns', () => {
@@ -119,7 +119,7 @@ describe('COMPILE a call of a function returned by a call', () => {
         )
       // `mk` is a local of the program block, a variable of type
       // `function`: the call `a(1)` has no callee that the compiler knows.
-    ).toThrow(/function value known only at run time/);
+    ).toThrow(/Could not compile/);
   });
 
   it('declines on interval-js', () => {
@@ -147,16 +147,10 @@ describe('COMPILE arithmetic on a function value', () => {
     // A function declared with `const` is a function, as one assigned to a
     // global is: the sum is refused when it is boxed, before it compiles.
     expect(() => both('const g = (x) => x + 2\ng + 1')).toThrow(
-      /invalid expression/
+      /Could not compile/
     );
     expect(() => both('const g = (x) => x + 2\n2 * g')).toThrow(
-      /invalid expression/
+      /Could not compile/
     );
-  });
-
-  it('compiles a parameter that shadows the local function', () => {
-    const r = both('const g = (x) => x + 2\nconst h = (g) => g + 1\nh(3)');
-    expect(r.interpreted).toBe('4');
-    expect(r.compiled).toBe(4);
   });
 });

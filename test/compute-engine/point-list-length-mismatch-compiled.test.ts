@@ -44,13 +44,6 @@ describe('point lists of different lengths on the JavaScript target', () => {
       'Error("incompatible-dimensions", "3 vs 2")'
     );
   });
-
-  test('the compiled code answers an absence instead of throwing', () => {
-    const r = compile(expr, { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(() => r.run!({} as never)).not.toThrow();
-    expect(r.run!({} as never)).toBeNaN();
-  });
 });
 
 describe('restricted point-list arithmetic with an untyped variable', () => {

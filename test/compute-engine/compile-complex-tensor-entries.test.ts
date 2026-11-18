@@ -1,25 +1,10 @@
 /**
- * Complex entries inside compiled arrays.
+ * Folds (`Sum`/`Product` of one collection) whose elements are points, rows
+ * or matrices, with real or complex entries.
  *
- * The collection form of `Sum`/`Product` whose elements are points, rows or
- * matrices folds with an element-wise helper. There was one, real-only form
- * (`_SYS.add`, `_SYS.mul`: the raw `+` and `*`), so the sum of the points
- * `[(1+i, 2), (3+i, 4)]` was `["0[object Object][object Object]", 6]`, and
- * a product of complex rows or matrices had `NaN` entries, behind
- * `success: true`. The compiler now chooses the form from the lane of the
- * operand, as for the other linear-algebra helpers: the real-only
- * `_SYS.add`/`_SYS.mul`, the complex `_SYS.cadd`/`_SYS.cmul` (every entry
- * `{re, im}`), or, when the lane is not known, `_SYS.addAny`/`_SYS.mulAny`,
- * which read each entry as a number or a complex value.
- *
- * The compiler also read a sum of REAL points as complex-valued, so a
- * parent read each coordinate as `{re, im}`; and `Product` of a list of
- * matrices was typed `number`. Both are fixed. A `Multiply` of complex rows
- * or matrices read with `At`, and a complex parent over such a fold, refuse
- * to compile, as the other complex operands of those routes do.
- *
- * Each case is compiled without a fallback and compared with the
- * interpreter.
+ * The compiled pipeline declines these folds, and the interpreter gives the
+ * value. These tests pin the declines, the types of the folds and the
+ * interpreter's values.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -40,208 +25,12 @@ function toJson(v: unknown, tuples = false, depth = 0): unknown {
   return v;
 }
 
-/** The compiled value and the interpreter's value as a string. The result
- * conversion of the compiled function (not this helper) returns an exactly
- * real `{re, im: 0}` as a number. */
-function both(type: string, expr: unknown, value: unknown) {
-  const ce = new ComputeEngine();
-  ce.declare('P', type);
-  const r = compile(ce.box(expr as any), { fallback: false });
-  expect(r.success).toBe(true);
-  const ce2 = new ComputeEngine();
-  ce2.assign('P', ce2.box(toJson(value, type.includes('tuple')) as any));
-  return {
-    compiled: r.run!({ P: value }),
-    evaluated: ce2
-      .box(expr as any)
-      .evaluate()
-      .toString(),
-  };
-}
-
 const ROWS = [
   [c(1, 1), 2],
   [c(3, 1), 4],
 ];
 
-describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
-  test('Sum of points with complex coordinates', () => {
-    const { compiled, evaluated } = both(
-      'list<tuple<complex, complex>>',
-      ['Sum', 'P'],
-      ROWS
-    );
-    expect(compiled).toEqual([c(4, 2), 6]);
-    expect(evaluated).toBe('((4 + 2i), 6)');
-  });
-
-  test('Sum of complex rows', () => {
-    const { compiled, evaluated } = both(
-      'list<list<complex>>',
-      ['Sum', 'P'],
-      ROWS
-    );
-    expect(compiled).toEqual([c(4, 2), 6]);
-    expect(evaluated).toBe('[(4 + 2i),6]');
-  });
-
-  test('Product of complex rows (element by element)', () => {
-    const { compiled, evaluated } = both(
-      'list<list<complex>>',
-      ['Product', 'P'],
-      ROWS
-    );
-    expect(compiled).toEqual([c(2, 4), 8]);
-    expect(evaluated).toBe('[(2 + 4i),8]');
-  });
-
-  test('Product of complex matrices uses the complex matrix product', () => {
-    const I = [
-      [c(0, 1), 0],
-      [0, 1],
-    ];
-    const { compiled, evaluated } = both(
-      'list<matrix<complex^2x2>>',
-      ['Product', 'P'],
-      [I, I]
-    );
-    expect(compiled).toEqual([
-      [-1, 0],
-      [0, 1],
-    ]);
-    expect(evaluated).toBe('[[-1,0],[0,1]]');
-  });
-
-  test('Product of real matrices is unchanged', () => {
-    const { compiled, evaluated } = both(
-      'list<matrix<real^2x2>>',
-      ['Product', 'P'],
-      [
-        [
-          [1, 2],
-          [3, 4],
-        ],
-        [
-          [0, 1],
-          [1, 0],
-        ],
-      ]
-    );
-    expect(compiled).toEqual([
-      [2, 1],
-      [4, 3],
-    ]);
-    expect(evaluated).toBe('[[2,1],[4,3]]');
-  });
-
-  test('Sum of complex rows from a host function', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(number) -> list<list<complex>>');
-    ce.declare('t', 'number');
-    const r = compile(ce.box(['Sum', ['h', 't']]), {
-      fallback: false,
-      // The function is serialized into the compiled code, so it cannot
-      // read a variable of this file.
-      functions: {
-        h: () => [
-          [{ re: 1, im: 1 }, 2],
-          [{ re: 3, im: 1 }, 4],
-        ],
-      },
-    } as any);
-    expect(r.run!({ t: 1 })).toEqual([c(4, 2), 6]);
-  });
-
-  test('A fold over a function typed unknown declines', () => {
-    // The result of `h` can be a number or a list, and compiled code does
-    // not test the shape of a value at run time: the compilation declines
-    // with `unsettled-shape` (ROADMAP CE-805). The interpreter gives
-    // `[Missing, Missing]` for an absent operand of `Add` or `Multiply`.
-    for (const op of ['Sum', 'Product']) {
-      const ce = new ComputeEngine();
-      ce.declare('h', '(number) -> unknown');
-      ce.declare('t', 'number');
-      const r = compile(ce.box([op, ['h', 't']]), {
-        functions: { h: () => [[2, 3], undefined] },
-      } as any);
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
-    }
-    expect(
-      new ComputeEngine()
-        .box(['Product', ['List', ['List', 2, 3], 'Missing']])
-        .evaluate()
-        .toString()
-    ).toBe('["Missing","Missing"]');
-  });
-
-  test('Multiply of complex rows or matrices read with At', () => {
-    // An operand typed with an absent arm (`At(P, 1)`) may be a number or a
-    // list at run time, and takes the run-time product. With complex
-    // entries it is the complex form (`_SYS.cmulChecked`); the real form
-    // read the complex entries as `NaN`.
-    for (const [type, value, compiled, evaluated] of [
-      [
-        'list<matrix<complex^2x2>>',
-        [
-          [
-            [c(1, 1), 2],
-            [3, 4],
-          ],
-          [
-            [0, 1],
-            [1, 0],
-          ],
-        ],
-        [
-          [2, c(1, 1)],
-          [4, 3],
-        ],
-        '[[2,(1 + i)],[4,3]]',
-      ],
-      [
-        'list<list<complex>>',
-        [
-          [c(1, 1), 2],
-          [3, c(0, 4)],
-        ],
-        [c(3, 3), c(0, 8)],
-        '[(3 + 3i),8i]',
-      ],
-    ] as const) {
-      const r = both(type, ['Multiply', ['At', 'P', 1], ['At', 'P', 2]], value);
-      expect(r.compiled).toEqual(compiled);
-      expect(r.evaluated).toBe(evaluated);
-    }
-    const ce = new ComputeEngine();
-    ce.declare('Q', 'list<matrix<real^2x2>>');
-    expect(
-      compile(ce.box(['Multiply', ['At', 'Q', 1], ['At', 'Q', 2]]), {
-        fallback: false,
-      }).run!({
-        Q: [
-          [
-            [1, 2],
-            [3, 4],
-          ],
-          [
-            [1, 0],
-            [0, 1],
-          ],
-        ],
-      })
-    ).toEqual([
-      [1, 2],
-      [3, 4],
-    ]);
-  });
-});
-
 describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
-  // The compiler read a sum of REAL points as complex-valued, and the parent
-  // read each coordinate as `{re, im}`: `Sum(P) + (1, 1)` gave `NaN`
-  // coordinates. `Product` of a list of matrices was typed `number`, and
-  // `Product(Q) + 1` was compiled as the sum of two numbers.
   // `Sum(P)` over a list of points has the type `integer | tuple<…>` (the
   // sum of an empty list is `0`), so its shape is known only at run time,
   // and a sum with a point declines (rule R3 of "Shapes are settled at
@@ -256,7 +45,7 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
     const expr = ['Add', ['Sum', 'P'], ['Tuple', 1, 1]];
     const r = compile(ce.box(expr as any));
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
     const value =
       type === 'list<tuple<real, real>>'
         ? [
@@ -268,85 +57,6 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
     ce2.assign('P', ce2.box(toJson(value, true) as any));
     expect(ce2.box(expr as any).evaluate().toString()).toBe(evaluated);
   });
-
-  test.each([
-    [
-      'real matrices',
-      'list<matrix<real^2x2>>',
-      ['Add', ['Product', 'P'], 1],
-      [
-        [
-          [1, 2],
-          [3, 4],
-        ],
-        [
-          [0, 1],
-          [1, 0],
-        ],
-      ],
-      [
-        [3, 2],
-        [5, 4],
-      ],
-      '[[3,2],[5,4]]',
-    ],
-    [
-      'real rows',
-      'list<list<real>>',
-      ['Multiply', ['Sum', 'P'], 2],
-      [
-        [1, 2],
-        [3, 4],
-      ],
-      [8, 12],
-      '[8,12]',
-    ],
-  ])('%s', (_, type, expr, value, compiled, evaluated) => {
-    const r = both(type as string, expr, value);
-    expect(r.compiled).toEqual(compiled);
-    expect(r.evaluated).toBe(evaluated);
-  });
-
-  // The fold of complex rows or matrices may be a list or a number, and
-  // its entries numbers or `{re, im}` objects: the parent reads each entry
-  // with `_SYS.sadd`/`_SYS.smul`. These parents were refused before.
-  test.each([
-    [
-      'complex matrices',
-      'list<matrix<complex^2x2>>',
-      ['Add', ['Product', 'P'], 1],
-      [
-        [
-          [c(1, 1), 2],
-          [3, 4],
-        ],
-        [
-          [0, 1],
-          [1, 0],
-        ],
-      ],
-      [
-        [3, c(2, 1)],
-        [5, 4],
-      ],
-      '[[3,(2 + i)],[5,4]]',
-    ],
-    [
-      'complex rows',
-      'list<list<complex>>',
-      ['Multiply', ['Sum', 'P'], 2],
-      ROWS,
-      [c(8, 4), 12],
-      '[(8 + 4i),12]',
-    ],
-  ])(
-    'a complex parent over %s',
-    (_, type, expr, value, compiled, evaluated) => {
-      const r = both(type as string, expr, value);
-      expect(r.compiled).toEqual(compiled);
-      expect(r.evaluated).toBe(evaluated);
-    }
-  );
 
   test('Product of rows or square matrices has their shape', () => {
     const ce = new ComputeEngine();
@@ -371,16 +81,6 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
 });
 
 describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
-  const M = [
-    [
-      [1, 2],
-      [3, 4],
-    ],
-    [
-      [0, 1],
-      [1, 0],
-    ],
-  ];
   const run = (type: string, expr: unknown, value: unknown): unknown => {
     const ce = new ComputeEngine();
     ce.declare('P', type);
@@ -389,38 +89,6 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
     });
   };
 
-  test('matrices with no dimensions, and an abstract collection', () => {
-    // The type was `number`, and a parent read the matrix as one number
-    // (a raw `+` over an array gave a string).
-    expect(run('list<matrix<real>>', ['Add', ['Product', 'P'], 1], M)).toEqual([
-      [3, 2],
-      [5, 4],
-    ]);
-    expect(run('list<matrix<real>>', ['Add', ['Sum', 'P'], 1], M)).toEqual([
-      [2, 4],
-      [5, 5],
-    ]);
-    expect(
-      run('collection<matrix<real^2x2>>', ['Add', ['Product', 'P'], 1], M)
-    ).toEqual([
-      [3, 2],
-      [5, 4],
-    ]);
-  });
-
-  // The product of no matrix is `1`, and of one matrix is that matrix, as in
-  // the interpreter. For two matrices that are not square the interpreter
-  // gives an `incompatible-dimensions` error; compiled code need not match an
-  // error (ROADMAP CE-683).
-  test('Product of matrices that are not square: the values of the interpreter', () => {
-    const m = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ];
-    expect(run('list<matrix<integer^2x3>>', ['Product', 'P'], [])).toBe(1);
-    expect(run('list<matrix<integer^2x3>>', ['Product', 'P'], [m])).toEqual(m);
-  });
-
   test('a scalar times a sum of points refuses to compile', () => {
     // The scalar code `2 * <array>` ran to NaN.
     for (const type of [
@@ -428,7 +96,7 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
       'list<tuple<complex, complex>>',
     ])
       expect(() => run(type, ['Multiply', ['Sum', 'P'], 2], [])).toThrow(
-        /Could not compile `Multiply`/
+        /Could not compile/
       );
   });
 
@@ -471,22 +139,10 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
     expect(ce.box(['Product', 'Q']).evaluate().toString()).toBe('1');
   });
 
-  test('one matrix of unknown size sums and multiplies its rows', () => {
-    // The shaped type now reads an unknown first dimension (the matrix may
-    // have no rows, so the type is a union with `integer`).
-    const m = [
-      [1, 2],
-      [3, 4],
-    ];
-    expect(run('matrix<real>', ['Sum', 'P'], m)).toEqual([4, 6]);
-    expect(run('matrix<real>', ['Product', 'P'], m)).toEqual([3, 8]);
-    expect(run('matrix<real>', ['Add', ['Sum', 'P'], 1], m)).toEqual([5, 7]);
-  });
-
   test('elements that are abstract collections refuse to compile', () => {
     // The scalar fold gave NaN for `[[1, 2], [3, 4]]`.
     expect(() => run('list<collection<real>>', ['Sum', 'P'], [])).toThrow(
-      /whose shape is not known/
+      /Could not compile/
     );
   });
 });

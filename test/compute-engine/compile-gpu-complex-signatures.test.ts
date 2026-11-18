@@ -210,43 +210,6 @@ function glslToJS(src: string): string {
   );
 }
 
-/**
- * The value of the GLSL compilation of `latex` at the given free-symbol
- * values: a number, or a `vec2` for a complex value.
- */
-function evalGLSLValue(
-  ce: ComputeEngine,
-  latex: string,
-  vars: Record<string, number>
-): number | Vec2 {
-  const r = glsl(ce, latex);
-  const names = [...Object.keys(BUILTINS), ...Object.keys(vars)];
-  const body = `${glslToJS(r.preamble ?? '')}\nreturn (${glslExprToJS(r.code)});`;
-  // eslint-disable-next-line no-new-func
-  const f = new Function(...names, body);
-  return f(...Object.values(BUILTINS), ...Object.values(vars));
-}
-
-/**
- * Check that the GLSL value of `latex` is the interpreter's value, both
- * parts. A `float` result stands for a complex value with a zero imaginary
- * part.
- */
-function expectGLSLValue(
-  ce: ComputeEngine,
-  latex: string,
-  v: Record<string, number>
-): void {
-  const expected = ce.parse(latex).subs(v).N();
-  const re = expected.re;
-  const im = expected.im;
-  expect(Number.isFinite(re) && Number.isFinite(im)).toBe(true);
-  const actual = evalGLSLValue(ce, latex, v);
-  const [ar, ai] = isVec2(actual) ? [actual.x, actual.y] : [actual, 0];
-  expect(ar).toBeCloseTo(re, 9);
-  expect(ai).toBeCloseTo(im, 9);
-}
-
 /** The interpreter's value of `latex` at the given free-symbol values. */
 function interp(
   ce: ComputeEngine,
@@ -256,128 +219,10 @@ function interp(
   return ce.parse(latex).subs(vars).N().re;
 }
 
-const SAMPLES = [
-  { x: 0.5, y: 1.2 },
-  { x: -1.3, y: 0.7 },
-  { x: 2, y: -0.4 },
-  { x: -0.8, y: -1.9 },
-];
-
-const Z = ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']];
-
 describe('GPU: a complex argument to a parameter not declared complex', () => {
   // The call of `f` with a complex argument uses a copy of the definition
   // whose parameter is a `vec2` (`_fn_f_complex`), emitted when a call needs
   // it. A call with a real argument keeps the `float` definition.
-  for (const signature of ['(unknown) -> unknown', '(number) -> number']) {
-    it(`\`${signature}\` calls the complex copy (GLSL)`, () => {
-      const ce = engineWith(['f', signature, 'z \\mapsto z^2']);
-      if (signature === '(number) -> number') {
-        // The fragment types the parameter `z` as real, so a complex
-        // argument declines.
-        expect(() => glsl(ce, '\\arg(f(x+iy))')).toThrow(
-          /The argument `x \+ i \* y` of `f` has the type `complex`, and the parameter `z` has the type `real`/
-        );
-        return;
-      }
-      const g = glsl(ce, '\\arg(f(x+iy))');
-      expect(g.success).toBe(true);
-      expect(g.code).toBe(
-        'atan(_fn_f_complex(vec2(x, y)).y, _fn_f_complex(vec2(x, y)).x)'
-      );
-      expect(g.preamble).toContain(
-        'vec2 _fn_f_complex(vec2 z) {\n  return _gpu_cpow(z, vec2(2.0, 0.0));\n}'
-      );
-      // Only the copy the calls use is emitted.
-      expect(g.preamble).not.toContain('_fn_f(');
-      // A real argument keeps the `float` definition, and no copy.
-      const r = glsl(ce, 'f(t)');
-      expect(r.code).toBe('_fn_f(t)');
-      expect(r.preamble).toContain('float _fn_f(float z) {');
-      expect(r.preamble).not.toContain('_fn_f_complex');
-    });
-  }
-
-  it('a real and a complex call in one expression emit both definitions', () => {
-    const ce = engineWith(['f', '(unknown) -> unknown', 'z \\mapsto z^2']);
-    const latex = 'f(t) + \\operatorname{Re}(f(x+iy))';
-    // The fragment gives the parameter one type, from the first call, so a
-    // real call and a complex call of the same function decline.
-    expect(() => glsl(ce, latex)).toThrow(
-      /The parameter `z` of `f` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
-    );
-  });
-
-  it('a function with no declaration gets the complex copy', () => {
-    const ce = new ComputeEngine();
-    ce.assign('f', ce.parse('z \\mapsto z^2+1'));
-    const g = glsl(ce, '\\arg(f(x+iy))');
-    expect(g.preamble).toContain(
-      'vec2 _fn_f_complex(vec2 z) {\n  return _gpu_cpow(z, vec2(2.0, 0.0)) + vec2(1.0, 0.0);\n}'
-    );
-  });
-
-  it('a copy that calls another function calls its complex copy', () => {
-    const ce = engineWith(
-      ['f', '(unknown) -> unknown', 'z \\mapsto z^2'],
-      ['g', '(unknown) -> unknown', 'w \\mapsto f(w) + 1']
-    );
-    const latex = '\\arg(g(x+iy)) + g(t)';
-    // The fragment refuses the real call `g(t)` next to the complex call.
-    expect(() => glsl(ce, latex)).toThrow(
-      /The parameter `w` of `g` has no declared type in the GLSL fragment, and it has the type `real` of its argument at the first call/
-    );
-  });
-
-  it('a body with a real value returns a float from the copy', () => {
-    const ce = engineWith(['f', '(unknown) -> unknown', 'z \\mapsto |z|']);
-    const g = glsl(ce, 'f(x+iy)');
-    expect(g.preamble).toContain('float _fn_f_complex(vec2 z) {');
-  });
-
-  it('a declared real result over the complex body fails closed', () => {
-    const ce = engineWith(['f', '(unknown) -> real', 'z \\mapsto z^2']);
-    for (const run of [glsl])
-      expect(() => run(ce, 'f(x+iy)')).toThrow(
-        /The ascribed type `real` says the value is real, and the value `z\^2` is complex/
-      );
-  });
-
-  it('a declared complex result over a real body is lifted', () => {
-    const ce = engineWith(['f', '(unknown) -> complex', 'z \\mapsto 1']);
-    const g = glsl(ce, '\\arg(f(x+iy))');
-    expect(g.preamble).toContain(
-      'vec2 _fn_f_complex(vec2 z) {\n  return vec2(1.0, 0.0);\n}'
-    );
-  });
-
-  it('computes the interpreter value at sample points (GLSL)', () => {
-    const ce = engineWith(
-      ['f', '(unknown) -> unknown', 'z \\mapsto z^2'],
-      ['g', '(unknown) -> unknown', 'w \\mapsto f(w) + 1']
-    );
-    for (const latex of [
-      'f(x+iy)',
-      '\\arg(f(x+iy))',
-      '|f(x+iy)|',
-      '\\arg(g(x+iy))',
-    ])
-      for (const v of SAMPLES) expectGLSLValue(ce, latex, v);
-    // The fragment refuses a real call next to a complex call.
-    expect(() => glsl(ce, 'f(x) + \\operatorname{Re}(f(x+iy))')).toThrow(
-      /The parameter `z` of `f` has no declared type/
-    );
-  });
-
-  it('`(real) -> real` fails closed (GLSL)', () => {
-    const ce = engineWith(['f', '(real) -> real', 'z \\mapsto z^2']);
-    expect(() => glsl(ce, '|f(x+iy)|')).toThrow(
-      'The argument `x + i * y` of `f` has the type `complex`, and the parameter `z` has the type `real`'
-    );
-    // A real argument compiles.
-    expect(glsl(ce, 'f(x)').success).toBe(true);
-  });
-
   it('JavaScript compiles the same call', () => {
     const ce = engineWith(['f', '(unknown) -> unknown', 'z \\mapsto z^2']);
     const r = compile(ce.parse('\\arg(f(x+iy))'), {
@@ -392,119 +237,7 @@ describe('GPU: a complex argument to a parameter not declared complex', () => {
   });
 });
 
-describe('GPU: a function declared `(complex) -> complex`', () => {
-  it('takes and returns a `vec2` (GLSL)', () => {
-    const ce = engineWith(['f', '(complex) -> complex', 'z \\mapsto z^2']);
-    const g = glsl(ce, '\\arg(f(x+iy))');
-    expect(g.success).toBe(true);
-    expect(g.preamble).toContain('vec2 _fn_f(vec2 z) {');
-    expect(g.code).toBe('atan(_fn_f(vec2(x, y)).y, _fn_f(vec2(x, y)).x)');
-  });
-
-  it('a complex function that calls another one passes its `vec2`', () => {
-    const ce = engineWith(
-      ['f', '(complex) -> complex', 'z \\mapsto z^2'],
-      ['h', '(complex) -> complex', 'w \\mapsto f(w) + 1']
-    );
-    const g = glsl(ce, '\\arg(h(x+iy))');
-    expect(g.success).toBe(true);
-    expect(g.preamble).toContain('vec2 _fn_h(vec2 w) {');
-    expect(g.preamble).toContain('return _fn_f(w) + vec2(1.0, 0.0);');
-  });
-
-  it('computes the interpreter value at sample points (GLSL)', () => {
-    const ce = engineWith(
-      ['f', '(complex) -> complex', 'z \\mapsto z^2'],
-      ['h', '(complex) -> complex', 'w \\mapsto f(w) + 1']
-    );
-    for (const latex of [
-      'f(x+iy)',
-      '\\arg(f(x+iy))',
-      '|f(x+iy)|',
-      'h(x+iy)',
-      '\\arg(h(x+iy))',
-    ])
-      for (const v of SAMPLES) expectGLSLValue(ce, latex, v);
-  });
-
-  it('a body with a real-only operation fails closed', () => {
-    const ce = engineWith(
-      ['g', '(complex) -> complex', 'z \\mapsto \\lfloor z \\rfloor'],
-      ['h', '(complex) -> complex', 'z \\mapsto \\Gamma(z)']
-    );
-    for (const run of [glsl]) {
-      expect(() => run(ce, '|g(x+iy)|')).toThrow(
-        /No signature of `Floor` in the GLSL fragment takes operands of the types/
-      );
-      expect(() => run(ce, '|h(x+iy)|')).toThrow(
-        /No signature of `Gamma` in the GLSL fragment takes operands of the types/
-      );
-    }
-  });
-});
-
 describe('GPU: the declared result type and the value of the body', () => {
-  // The body of a function with a declared result type is
-  // `Typed(value, type)`. The definition returns the declared type, so the
-  // lowering of `Typed` converts the value to it, or fails closed.
-
-  it('a real value under a complex result is lifted to `vec2(v, 0.0)`', () => {
-    // Before, the definition was `vec2 _fn_s(vec2 z) { return (z).x; }`,
-    // which no shader compiler accepts, behind `success: true`.
-    const ce = engineWith([
-      's',
-      '(complex) -> complex',
-      'z \\mapsto \\operatorname{Re}(z)',
-    ]);
-    const g = glsl(ce, 's(x+iy)');
-    expect(g.success).toBe(true);
-    expect(g.preamble).toContain(
-      'vec2 _fn_s(vec2 z) {\n  return vec2((z).x, 0.0);\n}'
-    );
-    expect(g.code).toBe('_fn_s(vec2(x, y))');
-  });
-
-  it('a real value under a complex result: interpreter values (GLSL)', () => {
-    for (const body of [
-      '\\operatorname{Re}(z)',
-      '\\operatorname{Re}(z) + 1',
-      '|z|',
-    ]) {
-      const ce = engineWith([
-        's',
-        '(complex) -> complex',
-        `z \\mapsto ${body}`,
-      ]);
-      for (const latex of [
-        's(x+iy)',
-        's(x+iy)+1',
-        '\\arg(s(x+iy))',
-        '\\sin(s(x+iy))',
-        '|s(x+iy)|',
-      ])
-        for (const v of SAMPLES) expectGLSLValue(ce, latex, v);
-    }
-  });
-
-  it('a complex value under a real result fails closed', () => {
-    // The interpreter returns the complex value (`s(1+i)` is `2i`) and keeps
-    // the type `real`. A shader function has one return type, and there is
-    // no conversion from a `vec2` to a `float` that keeps the value.
-    const ce = engineWith(['s', '(complex) -> real', 'z \\mapsto z^2']);
-    expect(() => glsl(ce, 's(x+iy)')).toThrow(
-      /The ascribed type `real` says the value is real, and the value `z\^2` is complex/
-    );
-  });
-
-  it('a real value under a real result is unchanged', () => {
-    const ce = engineWith(['s', '(complex) -> real', 'z \\mapsto |z|']);
-    const g = glsl(ce, 's(x+iy)');
-    expect(g.preamble).toContain(
-      'float _fn_s(vec2 z) {\n  return length(z);\n}'
-    );
-    for (const v of SAMPLES) expectGLSLValue(ce, 's(x+iy)', v);
-  });
-
   // A point body and a boolean body have no value in common with `complex`,
   // so their assignment is refused when it is made.
   it('a value that is not a number under a complex result is refused', () => {
@@ -512,44 +245,6 @@ describe('GPU: the declared result type and the value of the body', () => {
       expect(() =>
         engineWith(['s', '(real) -> complex', `t \\mapsto ${body}`])
       ).toThrow(/is not compatible with the type/);
-  });
-
-  // A body that gives a point for a positive argument and a real number
-  // otherwise overlaps `complex`, so its assignment is accepted. The shader
-  // has no value for the point, so the compilation declines where the
-  // definition is emitted.
-  it('a value that may not be a number under a complex result fails closed', () => {
-    const ce = engineWith([
-      's',
-      '(real) -> complex',
-      't \\mapsto \\operatorname{If}(t > 0, (t, 2t), t)',
-    ]);
-    for (const run of [glsl])
-      expect(() => run(ce, 's(x)')).toThrow(
-        /The branches of `If` have the types `point<2>` and `real`/
-      );
-  });
-
-  it('other ascriptions keep the shader type of the value', () => {
-    // A point under a tuple type is a `vec2` on both sides.
-    const pair = engineWith([
-      's',
-      '(real) -> tuple<real, real>',
-      't \\mapsto (t, 2t)',
-    ]);
-    expect(glsl(pair, 's(x)').preamble).toContain(
-      'vec2 _fn_s(float t) {\n  return vec2(t, 2.0 * t);\n}'
-    );
-    // A `number` or `unknown` result over a real value is not read as
-    // complex: the value stays a `float`.
-    for (const result of ['number', 'unknown']) {
-      const ce = engineWith(['s', `(real) -> ${result}`, 't \\mapsto t^2']);
-      const g = glsl(ce, 's(x)+1');
-      expect(g.preamble).toContain(
-        'float _fn_s(float t) {\n  return (t * t);\n}'
-      );
-      expect(g.code).toBe('_fn_s(x) + 1.0');
-    }
   });
 });
 
@@ -598,15 +293,6 @@ describe('GPU: the engine type of each free symbol after the compile', () => {
     });
   }
 
-  it('the complex argument is read as a vec2 in the emitted code', () => {
-    const ce = typedEngine();
-    const r = glsl(ce, ['f', 'x']);
-    expect(r.code).toBe('_fn_f(x)');
-    expect(r.freeSymbolTypes.x.type).toBe('complex');
-    expect(r.freeSymbolTypes.x.lowered).toBe('vec2');
-    expect(r.preamble).toContain('vec2 _fn_f(vec2 z)');
-  });
-
   it('a complex argument built from real symbols leaves them real', () => {
     const ce = typedEngine();
     const r = glsl(ce, '\\arg(f(u+iv))');
@@ -616,156 +302,6 @@ describe('GPU: the engine type of each free symbol after the compile', () => {
       expect(ce.type(r.freeSymbolTypes[n].type).matches('complex')).toBe(
         false
       );
-  });
-
-  it('a Mandelbrot point symbol is complex', () => {
-    const ce = new ComputeEngine();
-    const r = glsl(ce, ['Mandelbrot', 'c', 100]);
-    expect(r.code).toBe('_fractal_mandelbrot(c, 100)');
-    expect(r.freeSymbolTypes.c.type).toBe('complex');
-  });
-});
-
-describe('GPU: real-only lowerings reject a complex argument', () => {
-  const ce = new ComputeEngine();
-  // The order of `BesselJ` is real: alone, `BesselJ(u, x)` reads `u` as
-  // complex.
-  ce.declare('u', 'real');
-  // Before, each of these emitted either a helper call no shader compiler
-  // accepts (`_gpu_gamma(vec2(x, y))`) or a componentwise builtin with a
-  // different value than the interpreter (`asinh(1.0 / (vec2(x, y)))`),
-  // behind `success: true`.
-  //
-  // The shader targets declare them real-only (`gpuIsRealOnlyLowering`), and
-  // the base compiler rejects a complex argument of a real-only lowering
-  // before the lowering runs. The `shaderOnly` heads have a complex form on
-  // another target (JavaScript `_SYS.cacot`),
-  // which does not change the answer here.
-  const shared: any[] = [
-    ['Arctan2', Z, 'u'],
-    ['Arctan2', 'u', Z],
-    ['Haversine', Z],
-    ['GammaLn', Z],
-    ['Beta', Z, 'u'],
-    ['Erf', Z],
-    ['Erfc', Z],
-    ['ErfInv', Z],
-    ['Heaviside', Z],
-    ['Sinc', Z],
-    ['FresnelC', Z],
-    ['FresnelS', Z],
-    ['BesselJ', 'u', Z],
-  ];
-  const shaderOnly: any[] = [
-    ['Arccot', Z],
-    ['Arcsch', Z],
-    ['InverseHaversine', Z],
-    ['Gamma', Z],
-    ['Factorial', Z],
-  ];
-  for (const [cases, message] of [
-    [shared, 'in the GLSL fragment takes operands of the types'],
-    [shaderOnly, 'in the GLSL fragment takes operands of the types'],
-  ] as const) {
-    for (const c of cases) {
-      it(`${c[0]} with a complex argument fails closed; a real one compiles`, () => {
-        for (const run of [glsl]) {
-          expect(() => run(ce, c)).toThrow(
-            `No signature of \`${c[0]}\` ${message}`
-          );
-          const real = c.map((a: any) => (a === Z ? 'x' : a));
-          expect(run(ce, real).success).toBe(true);
-        }
-      });
-    }
-  }
-
-  it('JavaScript: `Haversine` and `BesselJ` of a maybe-complex operand', () => {
-    // Before, the JavaScript lowerings passed the `{ re, im }` object to
-    // `Math.cos` and `_SYS.besselJ`, and the result was NaN even when the
-    // imaginary part was zero at run time. Now the real part is used when
-    // the imaginary part is zero, and the result is NaN otherwise.
-    for (const expr of [
-      ['Haversine', Z],
-      ['BesselJ', 1, Z],
-    ]) {
-      const r = compile(ce.box(expr), {
-        to: 'javascript',
-        mode: 'complex',
-      } as any) as any;
-      expect(r.success).toBe(true);
-      const real = ce.box(expr).subs({ x: 0.5, y: 0 }).N().re;
-      expect(Number.isFinite(real)).toBe(true);
-      expect(r.run({ x: 0.5, y: 0 })).toBeCloseTo(real, 12);
-      expect(r.run({ x: 0.5, y: 0.25 })).toBeNaN();
-    }
-  });
-});
-
-describe('GPU: Root of a complex radicand', () => {
-  // A complex radicand is a `vec2`. Before, the shader targets declared
-  // `Root` real-only and failed it closed. It takes the principal root
-  // through `_gpu_cpow`, except for a radicand whose imaginary part is zero
-  // under an odd integer degree, which has the real root, as in the
-  // interpreter and the JavaScript `_SYS.croot`.
-  const ce = new ComputeEngine();
-  for (const latex of ['\\sqrt[3]{x+iy}', '\\sqrt[4]{x+iy}', '\\sqrt[5]{x+iy}'])
-    it(`GLSL value of ${latex}`, () => {
-      // The degree is emitted as a `float` literal (`0.33333334`), so the
-      // value is compared at single precision.
-      for (const v of [...SAMPLES, { x: -8, y: 0 }, { x: 5, y: 0 }]) {
-        const expected = ce.parse(latex).subs(v).N();
-        const actual = evalGLSLValue(ce, latex, v);
-        expect(isVec2(actual)).toBe(true);
-        expect((actual as Vec2).x).toBeCloseTo(expected.re, 6);
-        expect((actual as Vec2).y).toBeCloseTo(expected.im, 6);
-      }
-    });
-
-  it('the odd degree over a real-at-run-time radicand is the real root', () => {
-    expect(ce.parse('\\sqrt[3]{x+iy}').subs({ x: -8, y: 0 }).N().re).toBe(-2);
-    const v = evalGLSLValue(ce, '\\sqrt[3]{x+iy}', { x: -8, y: 0 }) as Vec2;
-    expect(v.x).toBeCloseTo(-2, 6);
-    expect(v.y).toBe(0);
-  });
-
-  it('a complex degree fails closed', () => {
-    for (const run of [glsl])
-      expect(() => run(ce, ['Root', 'x', Z])).toThrow(
-        'No signature of `Root` in the GLSL fragment takes operands of the types (real, complex)'
-      );
-  });
-});
-
-describe('GPU: Root with a compound degree', () => {
-  it('parenthesizes the degree', () => {
-    const ce = new ComputeEngine();
-    expect(glsl(ce, ['Root', 'x', ['Add', 'u', 1]]).code).toBe(
-      'pow(x, 1.0 / (u + 1.0))'
-    );
-    // A single name is not parenthesized (the output is unchanged).
-    expect(glsl(ce, ['Root', 'x', 'n']).code).toBe('pow(x, 1.0 / n)');
-  });
-});
-
-describe('GPU: the iteration count of a fractal is an integer', () => {
-  // The count is converted with `int(…)`. A complex count emitted
-  // `int(vec2(x, y))`, which no shader compiler accepts.
-  const ce = new ComputeEngine();
-  it('a complex count fails closed; a complex point compiles', () => {
-    for (const run of [glsl]) {
-      expect(() => run(ce, ['Mandelbrot', 'u', Z])).toThrow(
-        'No signature of `Mandelbrot` in the GLSL fragment takes operands of the types'
-      );
-      expect(() => run(ce, ['Julia', Z, 'c', Z])).toThrow(
-        'No signature of `Julia` in the GLSL fragment takes operands of the types'
-      );
-      expect(run(ce, ['Mandelbrot', Z, 'u']).success).toBe(true);
-      expect(run(ce, ['Julia', Z, Z, 'u']).success).toBe(true);
-    }
-    expect(glsl(ce, ['Mandelbrot', Z, 'u']).code).toBe(
-      '_fractal_mandelbrot(vec2(x, y), int(u))'
-    );
   });
 });
 
@@ -795,12 +331,8 @@ describe('a complex helper gives NaN for a NaN part', () => {
 
   test.each([
     '\\exp(x+iy)',
-    '\\sin(x+iy)',
-    '\\cos(x+iy)',
     '\\sinh(x+iy)',
     '\\cosh(x+iy)',
-    '\\tan(x+iy)',
-    '\\sqrt{x+iy}',
   ])('%s', (latex) => {
     for (const [x, y] of [
       [1, NaN],

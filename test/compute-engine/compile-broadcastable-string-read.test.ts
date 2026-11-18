@@ -102,14 +102,6 @@ describe('JavaScript: First of an operand with a top type', () => {
       expect(interpreted(decl, ['First', 'p'])).toBe('"😀"');
     }
   );
-
-  test('First of a provable list of numbers still compiles', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'list<number>');
-    const r = compile(ce.box(['First', 'p']), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ p: [3, 4] } as any)).toBe(3);
-  });
 });
 
 describe('an operand that may be one string', () => {

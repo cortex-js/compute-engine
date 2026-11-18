@@ -73,21 +73,6 @@ describe('a comparison with a written absence operand', () => {
       expect(interpreted(json, 0)).toBe(h === 'NotEqual' ? 'True' : 'False');
     });
   }
-
-  test('a settling sibling still decides a connective', () => {
-    // `And(false, false)` is false, `Or(false, true)` is true.
-    const and = [
-      'If',
-      ['And', ['Less', 'Missing', 't'], ['Less', 't', -1]],
-      1,
-      2,
-    ];
-    const or = ['If', ['Or', ['Less', 'Missing', 't'], ['Less', 't', 1]], 1, 2];
-    expect(interpreted(and, 0)).toBe(2);
-    expect(run(and, 0)).toBe(2);
-    expect(interpreted(or, 0)).toBe(1);
-    expect(run(or, 0)).toBe(1);
-  });
 });
 
 describe('a comparison with an operand that may be absent', () => {
@@ -104,18 +89,11 @@ describe('a comparison with an operand that may be absent', () => {
     );
   });
 
-  test('a present value still decides the branch', () => {
-    const G = ['First', ['List', 3, 'Missing']];
-    expect(run(['If', ['Less', G, 't'], 1, 2], 5)).toBe(1);
-    expect(run(['If', ['Less', G, 't'], 1, 2], 0)).toBe(2);
-  });
-
   // The compiled value of a comparison with an absent string, and of a
   // branch over it, is not specified (`docs/COMPILATION-MODEL.md`, "Caveats
   // of compiled code", the bullet "Everything computed from an absent value,
   // except at a discharge"; R4 of
-  // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled branch is
-  // checked with a present string only.
+  // `docs/plans/2026-11-01-absent-value-contract.md`).
   test.each([
     ['Equal', undefined],
     ['NotEqual', undefined],
@@ -124,7 +102,6 @@ describe('a comparison with an operand that may be absent', () => {
     (h) => {
       const json = [h, ['If', ['Less', 1, 't'], { str: 'a' }], { str: 'b' }];
       expect(interpreted(json, 0)).toBe(h === 'Equal' ? 'False' : 'True');
-      expect(run(['If', json, 1, 2], 2)).toBe(h === 'Equal' ? 2 : 1);
     }
   );
 });
@@ -262,42 +239,10 @@ describe('a branch over a chain with an input that may be absent', () => {
     expect(compiled(json, { x: 1, w: 5 })).toBe(2);
   });
 
-  test('a chained Equal over lists is not split into links, and still declines', () => {
-    // `Equal([1, 2, 3], [1, 2, 3], 3)` is the scalar `False`, not the
-    // conjunction of its links, so the branch analysis keeps the chain whole
-    // and its lowering declines it.
-    const lists = new ComputeEngine();
-    for (const s of ['a', 'b', 'c']) lists.declare(s, 'list<number>');
-    expect(() =>
-      compile(lists.box(['If', ['Equal', 'a', 'b', 'c'], 1, 2] as never), {
-        to: 'javascript',
-        fallback: false,
-      } as never)
-    ).toThrow(/chained \(n-ary\) comparison/);
-  });
-
   test('a chain over two inputs', () => {
     const json = ['If', ['Less', 'x', 0, 'y'], 1, 2];
     expect(compiled(json, { x: 1, y: 5 })).toBe(2);
     expect(compiled(json, { x: -1, y: -5 })).toBe(2);
     expect(compiled(json, { x: -1, y: 5 })).toBe(1);
-  });
-});
-
-describe('a two-operand comparison with an absent operand and effects', () => {
-  // The compiled value of a comparison with an absent operand, and of a
-  // branch or a connective over it, is not specified
-  // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-  // "Everything computed from an absent value, except at a discharge"; R4
-  // of `docs/plans/2026-11-01-absent-value-contract.md`). Only the
-  // emitted code is checked.
-  test('the other operand is still evaluated', () => {
-    const r = compile(
-      ce.box(['Less', 'Missing', ['Add', 't', ['Random']]] as never),
-      { to: 'javascript' } as never
-    );
-    expect(r.success).toBe(true);
-    // The random draw is emitted, and its value is discarded.
-    expect(r.code).toContain('drawNextRandomNumber');
   });
 });

@@ -257,19 +257,6 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
       expect(result.run!(at) as number).toBeCloseTo(expected, 10);
     });
 
-    test(`GLSL emits a copy of R with a vec2 parameter (${route})`, () => {
-      const ce = engineWithR(route);
-      const result = compile(ce.box(row as any) as any, { to: 'glsl' });
-      // `V` has no declared type, and the body reads it whole, so it takes
-      // the type of its list argument (decision 19 of
-      // `docs/plans/2026-11-08-glsl-fragment-spec.md`).
-      expect(result.success).toBe(true);
-      expect(result.preamble).toMatch(/vec2 _fn_R_\w+\(vec2 V, float t\) \{/);
-      expect(result.code).toMatch(
-        /_fn_R_\w+\(vec2\(x, y\) \+ vec2\(-0\.57, 2\.8\), phi\)/
-      );
-    });
-
     // interval-js compiled the generic definition of `R` against the scalar
     // arm of its parameter and answered an empty interval, then failed
     // closed. It now emits a copy of `R` typed by the list argument, as
@@ -324,41 +311,5 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
     const value = result.run!({ phi: 0.5 }) as number[];
     expect(value[0]).toBeCloseTo(Math.cos(0.5) - 2 * Math.sin(0.5), 12);
     expect(value[1]).toBeCloseTo(Math.sin(0.5) + 2 * Math.cos(0.5), 12);
-  });
-
-  // The `vec2` copy declares its parameter with the element type of the
-  // argument. Only finite real elements let the GPU finiteness proof emit
-  // the built-in `sin(V)`: the built-in gives 0 for `sin(+∞)`, where the
-  // interpreter gives NaN, so a `number` element keeps the NaN guard.
-  const H_LITERAL = ['Function', ['Block', ['Sum', ['Sin', 'V']]], 'V'];
-  function engineWithH(): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('u', 'number');
-    ce.declare('x', 'real');
-    ce.declare('h', 'function');
-    ce.assign('h', ce.box(H_LITERAL as any));
-    return ce;
-  }
-
-  test('a list with a `number` element keeps the NaN guard of sin on GLSL', () => {
-    const ce = engineWithH();
-    const result = compile(ce.box(['h', ['List', 'u', 1]]) as any, {
-      to: 'glsl',
-    });
-    expect(result.success).toBe(true);
-    expect(result.preamble).toMatch(/\(vec2 V\) \{/);
-    expect(result.preamble).toMatch(/= _gpu_sin\w*\(V\);/);
-    expect(result.preamble).not.toMatch(/= sin\(V\);/);
-  });
-
-  test('a list of finite reals uses the built-in sin on GLSL', () => {
-    const ce = engineWithH();
-    const result = compile(ce.box(['h', ['List', 'x', 1]]) as any, {
-      to: 'glsl',
-    });
-    expect(result.success).toBe(true);
-    expect(result.preamble).toMatch(/\(vec2 V\) \{/);
-    expect(result.preamble).toMatch(/= sin\(V\);/);
-    expect(result.preamble).not.toMatch(/_gpu_sin/);
   });
 });

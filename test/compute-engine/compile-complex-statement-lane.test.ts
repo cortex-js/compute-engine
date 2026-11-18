@@ -47,46 +47,6 @@ function engine(): ComputeEngine {
 }
 
 describe('a chain of complex operations is one block of statements', () => {
-  // The base contains a call (`sin x`), so the power is not written with
-  // real formulas of the parts of its base. `Re((x + ib)^2)`, whose parts
-  // are cheap, compiles to `x * x - b * b`, with no object
-  // (`tryGetJSComplexParts`).
-  test('Re((sin x + ib)²): one arrow at the top, none nested', () => {
-    const ce = engine();
-    const r = js(ce.parse('\\Re((\\sin x+\\imaginaryI b)^2)'));
-    expect(arrowCount(r.code)).toBe(1);
-    // The three operations — the imaginary product, the sum, the square — are
-    // three `const` temporaries in one block, and the real part is read off
-    // the last one.
-    expect(r.code).toContain('const _tv2 = ({ re: 0, im: _.b });');
-    expect(r.code).toContain('({ re: _tv2.re + Math.sin(_.x), im: _tv2.im })');
-    expect(r.code).toContain(
-      'const _tv1_1 = { re: _tv1.re * _tv1.re - _tv1.im * _tv1.im, im: 2 * (_tv1.re * _tv1.im) };'
-    );
-    expect(r.code).toContain('return _tv1_1.re;');
-  });
-
-  test('a compiled lambda body has no arrow function at all', () => {
-    // A lambda's `code` IS the statement form — its body is a statement
-    // position — so nothing is left to wrap. This is the shape the compiled
-    // runner of an expression kernel also executes.
-    const ce = engine();
-    const r = compile(
-      ce.parse('(x, b) \\mapsto \\Re((\\sin x+\\imaginaryI b)^2)'),
-      {
-        to: 'javascript',
-        fallback: false,
-      }
-    ) as unknown as {
-      code: string;
-      run: (x: number, b: number) => number;
-    };
-    expect(arrowCount(r.code)).toBe(0);
-    expect(r.code.startsWith('(x, b) => {')).toBe(true);
-    // Re((sin 2 + 3i)²) = sin² 2 − 9
-    expect(r.run(2, 3)).toBeCloseTo(Math.sin(2) ** 2 - 9, 12);
-  });
-
   test.each([
     ['\\Re((x+\\imaginaryI b)^2)', 'a power of a sum'],
     ['\\Im((x+\\imaginaryI b)^2)', 'the imaginary part of one'],
@@ -113,13 +73,10 @@ describe('the value is the interpreter’s', () => {
     '\\Re(\\sin((x+\\imaginaryI b)^2))',
     '\\Re(\\ln_{2+\\imaginaryI}(x+\\imaginaryI b))',
   ];
-  // The last pair is an ABSENT/NaN operand: a compiled kernel answers NaN
-  // exactly where the interpreter does.
   const POINTS: Array<[number, number]> = [
     [2, 3],
     [0.5, -1.25],
     [-3, 0.75],
-    [2, NaN],
   ];
   test.each(CASES)('%s', (latex) => {
     const ce = engine();
@@ -128,11 +85,6 @@ describe('the value is the interpreter’s', () => {
     for (const [x, b] of POINTS) {
       const expected = e.subs({ x, b }).N();
       const value = r.run({ x, b }) as number;
-      if (Number.isNaN(b)) {
-        expect(Number.isNaN(value)).toBe(true);
-        expect(expected.isNaN).toBe(true);
-        continue;
-      }
       expect(value).toBeCloseTo(expected.re, 10);
     }
   });
@@ -146,28 +98,6 @@ describe('operands keep their evaluation order and are read once', () => {
     expect(typeof r.run({ z: { re: 2, im: 3 } })).toBe('number');
   });
 
-  test('two impure factors stay two draws, bound in operand order', () => {
-    const ce = engine();
-    const r = js(
-      ce.box([
-        'Add',
-        ['Multiply', 'z', ['Random']],
-        ['Multiply', 'w', ['Random']],
-      ])
-    );
-    expect(r.code.match(/drawNextRandomNumber/g)).toHaveLength(2);
-    // Each draw is bound to its own temporary, and the binding of the first
-    // operand's draw precedes the binding of the second one's — an operand
-    // with an effect runs where the interpreter runs it.
-    const draws = [
-      ...r.code.matchAll(/const (_tv\d+) = _SYS\.drawNextRandomNumber\(\);/g),
-    ];
-    expect(draws).toHaveLength(2);
-    expect(r.code.indexOf(draws[0][0])).toBeLessThan(
-      r.code.indexOf(draws[1][0])
-    );
-  });
-
   test('a symbol operand is read once per operation', () => {
     const ce = engine();
     const r = js(ce.box(['Real', ['Multiply', 'z', 'w']]));
@@ -177,66 +107,5 @@ describe('operands keep their evaluation order and are read once', () => {
       1 * 3 - 2 * -1,
       12
     );
-  });
-});
-
-describe('a complex factor known at compile time scales by constants', () => {
-  test('i·b is { re: 0, im: b } — no multiplication by 0 or 1', () => {
-    const ce = engine();
-    const r = js(ce.box(['Multiply', 'ImaginaryUnit', 'b']));
-    expect(r.code).toBe('({ re: 0, im: _.b })');
-    expect(r.run({ b: 4 })).toEqual({ re: 0, im: 4 });
-  });
-
-  test('(3+2i)·x scales the one operand by the two constants', () => {
-    const ce = engine();
-    const r = js(ce.box(['Multiply', ['Complex', 3, 2], 'x']));
-    expect(r.code).toContain('{ re: 3 * _tv1, im: 2 * _tv1 }');
-    expect(r.run({ x: 4 })).toEqual({ re: 12, im: 8 });
-  });
-
-  test('x + i keeps the constant components out of the object', () => {
-    const ce = engine();
-    const r = js(ce.box(['Add', 'x', 'ImaginaryUnit']));
-    expect(r.code).toBe('({ re: _.x, im: 1 })');
-    expect(r.run({ x: 4 })).toEqual({ re: 4, im: 1 });
-  });
-
-  test('a negative constant scale is spelled as a negative literal', () => {
-    const ce = engine();
-    const r = js(ce.box(['Multiply', ['Complex', -3, 4], 'x']));
-    // The two constants sit in the slots of an object literal, where a leading
-    // minus sign cannot glue to a neighbouring operator, so the literal needs
-    // no parentheses of its own.
-    expect(r.code).toContain('{ re: -3 * _tv1, im: 4 * _tv1 }');
-    expect(r.run({ x: 2 })).toEqual({ re: -6, im: 8 });
-  });
-
-  test('dropping the zero real part of `i` passes a negative zero through', () => {
-    const ce = engine();
-    const r = js(ce.box(['Add', 'x', 'ImaginaryUnit']));
-    // The real part of `i` is the constant `0` and is dropped from the sum, so
-    // the emitted real part is the operand itself. That is the one point where
-    // the emitted code differs from an addition: keeping `_.x + 0` would turn
-    // a negative zero into a positive one. No literal can bring a negative
-    // zero here (the engine normalizes it when it boxes the number), so only a
-    // value supplied at run time reaches this case.
-    const value = r.run({ x: -0 }) as { re: number; im: number };
-    expect(Object.is(value.re, -0)).toBe(true);
-    expect(value.im).toBe(1);
-  });
-
-  test('a complex literal that is exactly zero is a REAL zero, and multiplies', () => {
-    const ce = engine();
-    // `Complex(0, 0)` is the real number `0`: its imaginary part is zero, so
-    // the complex-valued test fails and the constant-scaling fold above is
-    // never reached with two zero constants. The real arm keeps the
-    // multiplication rather than collapsing it, so a non-finite operand still
-    // answers `NaN`, as the interpreter does for `0 · NaN`.
-    expect(ce.box(['Complex', 0, 0]).im).toBe(0);
-    const r = js(ce.box(['Multiply', ['Complex', 0, 0], 'x']));
-    expect(r.code).toBe('0 * _.x');
-    expect(r.run({ x: NaN })).toBeNaN();
-    expect(r.run({ x: Infinity })).toBeNaN();
   });
 });

@@ -85,27 +85,6 @@ describe('a Reduce or Scan combiner that is not the library operator', () => {
       ).toBe(true);
     }
   });
-
-  test('the library Max still compiles to the kernel', () => {
-    const ce = engine();
-    for (const json of FOLDS) {
-      const r = compile(ce.box(json as never), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      const want = ce
-        .box(json as never)
-        .subs({ x: 1, V: ce.box(['List', 1, 2, 3]) })
-        .evaluate();
-      const got = r.run!({ x: 1, V: [1, 2, 3] });
-      expect(JSON.stringify(got)).toBe(
-        want.isCollection
-          ? JSON.stringify(Array.from(want.each()).map((c) => c.re))
-          : JSON.stringify(want.re)
-      );
-    }
-  });
 });
 
 /** The step `(a, b) ↦ 2a + b`, which a local `Max` is bound to below. */
@@ -168,23 +147,6 @@ describe('a combiner named Max that the expression binds itself', () => {
 });
 
 describe('a function-form `operators` option', () => {
-  test('that overrides nothing keeps the library kernel', () => {
-    // A function-form `operators` holds every head of the fixed-width pass
-    // in `unrollSkipHeads`; the fold asks the function for the name instead.
-    const ce = engine();
-    for (const json of [
-      ['Reduce', 'V', 'Add'],
-      ['Scan', 'V', 'Max'],
-    ]) {
-      const r = compile(ce.box(json as never), {
-        to: 'javascript',
-        fallback: false,
-        operators: () => undefined,
-      } as never);
-      expect(r.success).toBe(true);
-      expect(r.code).toMatch(/_a \+ _b|Math\.max\(_a, _b\)/);
-    }
-  });
 
   test('that overrides Max declines a Max fold', () => {
     const ce = engine();

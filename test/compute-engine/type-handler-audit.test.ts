@@ -667,29 +667,3 @@ describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
   });
 });
 
-describe('Tycho item 137: the GLSL band of a Which over a float radicand', () => {
-  it('the raw and the folded radicand compile to the same bytes', () => {
-    const engine = new ComputeEngine();
-    engine.declare('x', 'real');
-    const glsl = engine._getCompilationTarget('glsl')!;
-    const branch = (radicand: string) =>
-      engine.parse(
-        `\\begin{cases} \\sqrt{${radicand}} & x > 0 \\\\ 0 & \\text{otherwise}\\end{cases}`
-      );
-
-    const raw = branch('1-0.2^2');
-    const folded = branch('0.96');
-    // The TYPES now differ — the raw radicand's sign is statically unknown,
-    // Both spellings now type `real` — the raw one through the
-    // computed radicand interval (2026-08-27 interval round; it typed the
-    // `complex` hedge before). What item 137 actually needs is the
-    // COMPILED band: the compiler folds the constant subtree itself, so
-    // both spellings emit the identical real scalar — byte for byte.
-    expect(raw.type.toString()).toBe('real');
-    expect(folded.type.toString()).toBe('real');
-    const rawCode = glsl.compile(raw).code;
-    const foldedCode = glsl.compile(folded).code;
-    expect(rawCode).toBeTruthy();
-    expect(rawCode).toBe(foldedCode);
-  });
-});

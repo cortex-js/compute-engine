@@ -1,30 +1,26 @@
 import type { CompileDiagnostic } from './types.js';
-import type { Expression } from '../global-types.js';
 
 /**
  * The `code` of the decline of an expression with an input (a free symbol)
- * whose static type is `unknown` or `any` (`assertAdmitted()`,
- * `compile-admission.ts`). The interpreter fallback puts the name of each
- * such input in `unsupported`.
+ * whose static type is `unknown` or `any`. The interpreter fallback puts the
+ * name of each such input in `unsupported`.
  */
 export const UNTYPED_INPUT_CODE = 'untyped-input';
 
 /**
- * The `code` of the decline of a value with no settled shape
- * (`assertAdmitted()`, `compile-admission.ts`): an `If`, a `Which` or a
- * `Match` whose branches have different shapes, or a function literal or
- * the root of the compilation whose values (the value of each `Return`, and
- * the last value) have different shapes, or a name that gets values of
- * different shape classes in one scope. A lowering uses the same code,
- * through `unsettledShapeDecline()`, for an operand whose type admits more
- * than one shape, which the code would have to tell apart at run time. The
- * same code is used for an effect that the compiled code does not reproduce
- * as the interpreter does: an assignment in a callback, in a
- * `Comprehension` or an `Integrate`, in a branch of an element-wise
- * conditional, an assignment of an enclosing loop index in a function
- * literal, and a `Return` inside a `Loop` (`UnsettledShape.reason`,
- * `compiler-types.ts`, lists them). The interpreter fallback puts the node,
- * as `toString()` writes it, in `unsupported`.
+ * The `code` of the decline of a value with no settled shape: an `If`, a
+ * `Which` or a `Match` whose branches have different shapes, or a function
+ * literal or the root of the compilation whose values (the value of each
+ * `Return`, and the last value) have different shapes, or a name that gets
+ * values of different shape classes in one scope. A lowering uses the same
+ * code for an operand whose type admits more than one shape, which the code
+ * would have to tell apart at run time. The same code is used for an effect
+ * that the compiled code does not reproduce as the interpreter does: an
+ * assignment in a callback, in a `Comprehension` or an `Integrate`, in a
+ * branch of an element-wise conditional, an assignment of an enclosing loop
+ * index in a function literal, and a `Return` inside a `Loop`. The
+ * interpreter fallback puts the node, as `toString()` writes it, in
+ * `unsupported`.
  */
 export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
 
@@ -39,55 +35,21 @@ export const UNSETTLED_SHAPE_CODE = 'unsettled-shape';
  */
 export const UNION_DISPATCH_CODE = 'union-dispatch';
 
-/** The `code` of the diagnostic of `throwStaticTypeError()`
- *  (`compile-static-type-error.ts`). */
+/** The `code` of the decline of an expression whose static type is an
+ *  error. */
 export const STATIC_TYPE_ERROR_CODE = 'static-type-error';
 
 /**
  * The `code` of the decline of a value that can be `Nothing` where compiled
  * code needs a value: an element of a collection or a coordinate of a tuple
  * whose static type has an explicit `nothing` arm (`hasNothingArm()`; `any`
- * has no such arm) (`assertNoNothingElement()`,
- * `compile-inner.ts`), the operand of `IsMissing`, `Coalesce` or
+ * has no such arm), the operand of `IsMissing`, `Coalesce` or
  * `AssertPresent`, the value of an entry of a dictionary literal, and the
  * symbol `Nothing` read as an operand. `Nothing` is the value of an empty
  * block or of a statement with no value, and compiled code has no
  * representation of it as a value.
  */
 export const POSSIBLE_NOTHING_CODE = 'possible-nothing';
-
-/**
- * The decline of `subject` (the text after "Could not compile", for example
- * "`Map`") because a value in it can be `Nothing`. `why` says which value.
- * The diagnostic has the code `'possible-nothing'` and the kind
- * `'capability'`.
- */
-export function possibleNothingDecline(
-  subject: string,
-  why: string
-): CompileDeclineError {
-  return new CompileDeclineError({
-    code: POSSIBLE_NOTHING_CODE,
-    kind: 'capability',
-    message:
-      `Could not compile ${subject}: ${why}, and compiled code has no ` +
-      `representation of \`Nothing\` as a value.`,
-  });
-}
-
-/**
- * The decline of the symbol `Nothing` read as an operand (`[1, Nothing]`,
- * `If(c, Nothing, 7)`), with the code `'possible-nothing'`. A name
- * `Nothing` that a binding or the `vars` option gives a value is a
- * variable, and does not reach this decline.
- */
-export function nothingOperandDecline(): CompileDeclineError {
-  return possibleNothingDecline(
-    '`Nothing`',
-    '`Nothing` is the value of an empty block or of a statement with no ' +
-      'value, and it is read here as an operand'
-  );
-}
 
 /**
  * A compile DECLINE carrying a structured `CompileDiagnostic` (see
@@ -108,31 +70,6 @@ export class CompileDeclineError extends Error {
     this.name = 'CompileDeclineError';
     this.diagnostic = diagnostic;
   }
-}
-
-/**
- * The decline of a lowering for an operand `node` whose static type admits
- * several shapes, which the code would have to tell apart at run time
- * (rule R3 of "Shapes are settled at compile time",
- * `docs/COMPILATION-MODEL.md`). The diagnostic has the code
- * `'unsettled-shape'` and the kind `'capability'`; its `value` is `node`,
- * as `toString()` writes it. `why` completes the message: what the
- * operand is and why its shape is not settled.
- */
-export function unsettledShapeDecline(
-  node: Expression,
-  why: string
-): CompileDeclineError {
-  const value = node.toString();
-  return new CompileDeclineError({
-    code: UNSETTLED_SHAPE_CODE,
-    kind: 'capability',
-    message:
-      `Could not compile "${value}": ${why}, so the shape of its value is ` +
-      `known only at run time. Declare one shape for it, or compile one ` +
-      `function for each shape.`,
-    value,
-  });
 }
 
 /**
@@ -200,57 +137,6 @@ export class KindDeclineError extends CompileDeclineError {
   }
 }
 
-/**
- * The decline of `mode: 'bigint'` (JavaScript target only): a node that is
- * not on the integer lane, so the compilation cannot compute it with
- * JavaScript `bigint` values. Reported as `code: 'bigint-lane'`, `kind:
- * 'capability'`: no value that was computed right before is withdrawn, the
- * expression runs on the interpreter instead.
- *
- * It is NOT a lane mismatch (`isLaneMismatchError` is `false` for it): the
- * two codes stay separate so that no route can change one decline into the
- * other.
- *
- * `node` is the node as `toString()` writes it (carried as `value` on the
- * diagnostic), `type` its static type, and `reason` says why the node is not
- * on the lane. `message`, when given, replaces the whole message: the
- * decline that is not about one node (the lane analysis is not implemented
- * yet) must not say that the node is off the lane.
- */
-export function bigintLaneError(payload: {
-  node: string;
-  type: string;
-  reason: string;
-  message?: string;
-}): CompileDeclineError {
-  return new CompileDeclineError({
-    code: 'bigint-lane',
-    kind: 'capability',
-    message:
-      payload.message ??
-      `Could not compile in mode 'bigint': \`${payload.node}\` (type \`${payload.type}\`) is not on the integer lane: ${payload.reason}.`,
-    value: payload.node,
-  });
-}
-
-/**
- * Throw when `options` has the `profile` option, in the `compile()` method
- * of a target (`JavaScriptTarget`, the shader targets). The profile is an
- * option of the function
- * `compile()` with the target `javascript` or `glsl`, which selects another
- * compiler: a target called directly would compile with its own compiler
- * and ignore the option. It is an error of the options, thrown whatever
- * `fallback` says.
- */
-export function assertNoProfileOption(options: { profile?: unknown }): void {
-  if (options.profile === undefined) return;
-  throw new Error(
-    'Invalid compilation option "profile": the option "profile" is an ' +
-      'option of the function compile() with the targets "javascript" and ' +
-      '"glsl"; the compile() method of a target does not take it'
-  );
-}
-
 /** Whether `e` is a `CompileDeclineError` (name-keyed, bundle-safe). */
 export function isCompileDeclineError(e: unknown): e is CompileDeclineError {
   return (
@@ -296,73 +182,6 @@ export function compileDiagnosticOf(
           ? e
           : 'Compilation failed'),
   };
-}
-
-/**
- * The object of "Could not compile …" in a decline message raised by a check
- * of a compiled body (the GPU targets check that a body emits as a
- * single expression, or places its `return` correctly). Such a check
- * receives a `subject` that is one of four things: a user function name
- * (`f`), which is quoted; an API entry point (`compileToSource()`), which is
- * what the compilation ran "with"; an entry point followed by the part it
- * compiles; or a phrase ("this function body"), which reads as it is.
- */
-export function compileSubject(subject: string): string {
-  if (/^[A-Za-z_][\w]*$/.test(subject)) return `\`${subject}\``;
-  if (subject.endsWith('()')) return `with \`${subject}\``;
-  // An entry point followed by the part it compiles:
-  // `compileShader() body statement "fragColor"` reads as
-  // `the body statement "fragColor" of \`compileShader()\``.
-  const part = /^(\w+\(\)) (.+)$/.exec(subject);
-  if (part !== null) return `the ${part[2]} of \`${part[1]}\``;
-  return subject;
-}
-
-/**
- * Throw the strict-mode `LaneMismatch` decline for a complex-shaped value
- * that reaches a parameter of a block-local function, which the
- * compilation shaped real. `binding` names the parameter and the function
- * (`userParamBinding()` in `compile-lanes.ts`). `value` is the argument,
- * rendered as LaTeX, or a description of the value when the argument is a
- * name that the compiler made (`an element of \`L\``).
- *
- * The body of a block-local function is compiled in the lane of the
- * parameter types of its literal. A signature declared with `Declare` (`g:
- * (complex, complex) -> complex`), if there is one, does not change that
- * lane, so the message asks for an annotation of the parameter in the
- * literal.
- */
-export function localLaneMismatch(
-  boundary: string,
-  binding: string,
-  value: Expression | string
-): never {
-  let rendered: string;
-  let phrase: string;
-  if (typeof value === 'string') {
-    rendered = value;
-    phrase = value;
-  } else {
-    try {
-      rendered = value.latex;
-    } catch {
-      rendered = value.toString();
-    }
-    phrase = `the complex-shaped value \`${rendered}\``;
-  }
-  throw new LaneMismatchError({
-    boundary,
-    binding,
-    value: rendered,
-    message:
-      `Lane mismatch at ${boundary}: ${phrase} reaches ${binding}, ` +
-      `which this compilation shaped real. The body of a block-local ` +
-      `function is compiled in the lane of the parameter types of its ` +
-      `literal; a signature declared with \`Declare\` does not change ` +
-      `that lane. Annotate the parameter in the ` +
-      `literal with a complex type (\`(a: complex) => …\`), or compile ` +
-      `with \`mode: 'complex'\`.`,
-  });
 }
 
 /**

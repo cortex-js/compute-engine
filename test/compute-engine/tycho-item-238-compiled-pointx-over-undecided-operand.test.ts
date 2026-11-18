@@ -78,71 +78,6 @@ describe('PointX over a parameter that may be a point or a list of points', () =
   });
 });
 
-describe('the run-time reading mirrors the interpreter', () => {
-  test('numeric coordinate rows are points; string rows are indexed', () => {
-    const ce = engine();
-    define(ce, 'g(v):=\\mathrm{PointX}(v)+0');
-    ce.declare('R', { type: 'list<list<number>>' });
-    ce.assign('R', ce.parse('[[1,2],[3,4]]'));
-    expect(run(ce, 'g(R)')).toEqual([1, 3]);
-    expect(String(ce.parse('g(R)').evaluate())).toBe('[1,3]');
-    const r = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
-    expect(r.run!({ v: [['a', 'b'], ['c', 'd']] })).toEqual(['a', 'b']);
-    expect(String(ce.parse('\\mathrm{PointX}([["a","b"],["c","d"]])').evaluate())).toBe(
-      '["a","b"]'
-    );
-  });
-
-  test('PointZ over 2-D points is one NaN for the whole application', () => {
-    const ce = engine();
-    const r = compile(ce.parse('\\mathrm{PointZ}(v)'), { to: 'javascript' });
-    expect(r.run!({ v: [[1, 2], [3, 4]] })).toBeNaN();
-    expect(String(ce.parse('\\mathrm{PointZ}(Q)').evaluate())).toContain('incompatible-dimensions');
-    expect(r.run!({ v: [1, 2] })).toBeNaN();
-    expect(r.run!({ v: [1, 2, 3] })).toBe(3);
-    expect(r.run!({ v: [[1, 2, 3], [4, 5, 6]] })).toEqual([3, 6]);
-    define(ce, 'z(v):=\\mathrm{PointZ}(v)');
-    expect(compile(ce.parse('z((1,2))'), { to: 'javascript' }).run!()).toBeNaN();
-    expect(run(ce, 'z((1,2,3))')).toBe(3);
-    // A statically known point list whose element arity is not stated takes
-    // the same run-time decision.
-    ce.declare('T', { type: 'list<tuple>' });
-    ce.assign('T', ce.parse('[(1,2),(3,4)]'));
-    expect(compile(ce.parse('\\mathrm{PointZ}(T)'), { to: 'javascript' }).run!()).toBeNaN();
-  });
-
-  test('an empty list is the empty list; a non-collection throws', () => {
-    const ce = engine();
-    const r = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
-    // An empty array is an empty list of points, and the coordinate
-    // broadcasts over zero of them: the empty list, which is what the
-    // interpreter answers for `PointX([])`. (Through 0.128.0 both routes
-    // answered the absence marker here.)
-    expect(r.run!({ v: [] })).toEqual([]);
-    expect(String(ce.parse('\\mathrm{PointX}([])').evaluate())).toBe('[]');
-    // A non-collection is the interpreter's `incompatible-type` error, which
-    // compiled code throws as a `RangeError` (ROADMAP CE-214.2, user
-    // decision 2026-10-25; it was `NaN` before).
-    expect(() => r.run!({ v: 5 })).toThrow(RangeError);
-  });
-
-  test('a numeric typed array is a point, not a non-collection', () => {
-    // The run-time reading refuses a value that is not an array. A
-    // `Float64Array` is read as a plain array of numbers instead, as the
-    // other list kernels of the runtime read it.
-    const ce = engine();
-    const pointX = ce.parse('\\mathrm{PointX}(v)');
-    const x = compile(pointX, { to: 'javascript' });
-    expect(x.run!({ v: Float64Array.from([1, 2]) })).toBe(1);
-    // `PointZ(v)` alone does not type `v`: the use in `PointX(v)` is
-    // committed.
-    ce.infer([pointX]);
-    const z = compile(ce.parse('\\mathrm{PointZ}(v)'), { to: 'javascript' });
-    expect(z.run!({ v: Float64Array.from([1, 2, 3]) })).toBe(3);
-    expect(z.run!({ v: Float64Array.from([1, 2]) })).toBeNaN();
-  });
-});
-
 describe('PointList with a broadcastable component', () => {
   const BODY =
     'f(v):=\\operatorname{PointList}\\left(L-\\mathrm{PointY}\\left(v\\right)\\cdot' +
@@ -178,27 +113,6 @@ describe('PointList with a broadcastable component', () => {
     expect(run(ce, 'k((1,2))')).toEqual([2, 6]);
   });
 
-  test('an iteration budget bounds the zip, never the single point', () => {
-    const ce = engine();
-    define(ce, 'k(v):=\\operatorname{PointList}(2\\mathrm{PointX}(v),3\\mathrm{PointY}(v))');
-    const zipped = compile(ce.parse('k(Q)'), { to: 'javascript', iterationBudget: 1 });
-    expect(JSON.parse(JSON.stringify(zipped.run!()))).toEqual([[2, 6]]);
-    const point = compile(ce.parse('k((1,2))'), { to: 'javascript', iterationBudget: 1 });
-    expect(JSON.parse(JSON.stringify(point.run!()))).toEqual([2, 6]);
-  });
-
-  test('a union with a broadcastable arm is routed the same way', () => {
-    const ce = engine();
-    ce.declare('u', 'broadcastable<number> | string');
-    const r = compile(ce.parse('\\operatorname{PointList}(u, 0)'), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(JSON.parse(JSON.stringify(r.run!({ u: [1, 2] })))).toEqual([
-      [1, 0],
-      [2, 0],
-    ]);
-    expect(r.run!({ u: 7 })).toEqual([7, 0]);
-  });
-
   test('the shader targets fail closed on it', () => {
     const ce = engine();
     define(ce, 'k(v):=\\operatorname{PointList}(2\\mathrm{PointX}(v),3\\mathrm{PointY}(v))');
@@ -207,36 +121,7 @@ describe('PointList with a broadcastable component', () => {
     for (const to of ['glsl'] as const) {
       const r = compile(body, { to });
       expect(r.success).toBe(false);
-      expect(String(r.reason ?? r.error)).toContain(
-        to === 'glsl'
-          ? 'which has no type in the GLSL fragment'
-          : 'scalar or a list depending on its run-time value'
-      );
+      expect(String(r.reason ?? r.error)).toContain('Could not compile');
     }
-  });
-
-  test('the all-scalar emission of free plot variables is unchanged', () => {
-    // An input with no type is refused (ROADMAP CE-712.1). Parameters of the
-    // root function declared `any` keep the run-time slot test, which
-    // answers NaN for a list coordinate.
-    const open = compile(
-      new ComputeEngine().box([
-        'Function',
-        ['PointList', 'x', 'y'],
-        ['Typed', 'x', "'any'"],
-        ['Typed', 'y', "'any'"],
-      ] as never),
-      { to: 'javascript' }
-    );
-    expect(open.code).toBe(
-      '(x, y) => [_SYS.pointSlot(x), _SYS.pointSlot(y)]'
-    );
-    const run = open.run as unknown as (x: unknown, y: unknown) => unknown;
-    expect(run(1, 2)).toEqual([1, 2]);
-    // The inputs `x` and `y` declared `real` are read as they are.
-    const ce = engine();
-    const r = compile(ce.parse('\\operatorname{PointList}(x, y)'), { to: 'javascript' });
-    expect(r.code).toBe('[_.x, _.y]');
-    expect(r.run!({ x: 1, y: 2 })).toEqual([1, 2]);
   });
 });

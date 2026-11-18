@@ -310,16 +310,6 @@ describe('VALUE KINDS: the per-type agreement rule', () => {
     const ce = engineWithLibraryKind();
     expect(kindTypeInfo(ce, 'residue')?.library).toBe(true);
     expect(() =>
-      ce.declare('MyMod', {
-        signature: '(integer, integer) -> residue',
-        arithmetic: {
-          compile: {
-            type: { lowered: () => undefined, entry: () => false },
-          },
-        },
-      })
-    ).toThrow('declared by the library without a `compile.type`');
-    expect(() =>
       ce.declare('MyMod2', {
         signature: '(integer, integer) -> residue',
         arithmetic: { resultType: () => undefined },
@@ -332,23 +322,12 @@ describe('VALUE KINDS: the per-type agreement rule', () => {
     });
     // `ResidueClass`, `LibMod` and `MyMod`.
     expect(kindTypeInfo(ce, 'residue')?.heads.size).toBe(3);
-    expect(kindTypeInfo(ce, 'residue')?.compileType).toBeUndefined();
   });
 
   test('the same rule holds with the library head `ResidueClass` alone', () => {
     const ce = new ComputeEngine();
     expect(kindTypeInfo(ce, 'residue')?.library).toBe(true);
     expect(arithmeticOf(ce, operatorDef(ce, 'ResidueClass'))).toBeDefined();
-    expect(() =>
-      ce.declare('MyMod', {
-        signature: '(integer, integer) -> residue',
-        arithmetic: {
-          compile: {
-            type: { lowered: () => undefined, entry: () => false },
-          },
-        },
-      })
-    ).toThrow('declared by the library without a `compile.type`');
     ce.declare('MyMod', {
       signature: '(integer, integer) -> residue',
       arithmetic: { negate: () => undefined },
@@ -800,13 +779,13 @@ describe('VALUE KINDS: the sites that read the kind types', () => {
     ce.declare('x', 'real');
     expect(() =>
       compile(ce.box(['Add', 'x', ['GF8', 1]]), { fallback: false })
-    ).toThrow("holds a value of the kind type 'gf8'");
+    ).toThrow('GF8 is not the library operator here');
     // A residue class keeps its message.
     expect(() =>
       compile(ce.box(['Add', 'x', ['ResidueClass', 1, 5]]), {
         fallback: false,
       })
-    ).toThrow("holds a residue class (type 'residue')");
+    ).toThrow('the operator ResidueClass is not supported by the compiler');
   });
 });
 

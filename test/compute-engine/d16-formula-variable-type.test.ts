@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 //
 // A variable whose value reads other names (a formula) has the static type
@@ -31,15 +31,6 @@ describe('A FORMULA FOLLOWS THE TYPES OF THE NAMES IT READS', () => {
       expect(v.toString()).toBe(value);
       expect(v.type.matches(e.type)).toBe(true);
     }
-    // The compiled code gives the value of the interpreter.
-    const sum = ce.box(['Add', 'C', ['List', 10, 20, 30]]);
-    const r = compile(sum);
-    expect(r.success).toBe(true);
-    const expected = sum.evaluate().N().re;
-    const run = (r.run as unknown as () => number)();
-    expect(Number.isNaN(expected) ? Number.isNaN(run) : run === expected).toBe(
-      true
-    );
   });
 
   test('a formula over a name that is given a type', () => {

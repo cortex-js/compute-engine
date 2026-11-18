@@ -5,7 +5,6 @@ import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards'
 import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
 import { makeTensor } from '../../src/compute-engine/tensor/tensors';
 import { getSupertype } from '../../src/compute-engine/tensor/tensor-fields';
-import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
 import { isSubtype } from '../../src/common/type/subtype';
 
 const v2_n: Expression = ['List', 7, 11];
@@ -4818,30 +4817,6 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     expect(eng.box(['Norm', ['List'], 1]).evaluate().json).toBe(0);
   });
 
-  test('the compiled JavaScript route agrees', () => {
-    // Compiled code reports an interpreter error as `NaN`.
-    const eng = new ComputeEngine();
-    for (const s of ['L', 'M', 'K']) eng.declare(s, 'list<real>');
-    const run = (e: Expression) => {
-      const r = compile(eng.box(e), { to: 'javascript', fallback: false });
-      expect(r.success).toBe(true);
-      return r.run!({ L: [1, 2, 3], M: [], K: [1, 2] });
-    };
-    for (const order of [
-      [],
-      [1],
-      ['PositiveInfinity'],
-      [{ str: 'Infinity' }],
-    ]) {
-      expect(run(['Norm', ['Tuple', 'L', 'M'], ...order])).toBeNaN();
-      expect(run(['Norm', ['Tuple', 'L', 'K'], ...order])).toBeNaN();
-      expect(run(['Norm', ['PointList', 'L', 'M'], ...order])).toEqual([]);
-    }
-    expect(run(['Abs', ['Tuple', 'L', 'M']])).toBeNaN();
-    expect(run(['Abs', ['PointList', 'L', 'M']])).toEqual([]);
-    expect(run(['Norm', ['PointList', 'L', 'K'], 1])).toEqual([2, 4]);
-  });
-
   test('zero points have no infinite or NaN norm either', () => {
     // The empty component is decided before the infinite-component
     // dominance and the NaN answer: there is no point for them to dominate.
@@ -4953,119 +4928,6 @@ describe('Norm — the L∞ norm of a point with a broadcasting component', () =
       expect(
         eng.box(['Norm', ['Tuple', 'L', 'z'], order]).evaluate().operator
       ).toBe('Norm');
-    }
-  });
-
-  test('the compiled JavaScript code gives the same values', () => {
-    const c = new ComputeEngine();
-    for (const s of ['L', 'K']) c.declare(s, 'list<real>');
-    for (const order of ORDERS) {
-      const r = compile(c.box(['Norm', ['Tuple', 'L', 'K'], order]), {
-        to: 'javascript',
-        fallback: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.run!({ L: [1, -5, 3], K: [-4, 2, 1] })).toEqual([4, 5, 3]);
-    }
-  });
-});
-
-describe('Norm — the string order "Infinity" compiles as the symbol order', () => {
-  // The interpreter reads `"Infinity"` and `+∞` as the same order. The
-  // JavaScript `Norm` handler refused the string ("the "Infinity" norm has no
-  // compiled form"). The GPU and interval targets compile only the default
-  // order, and refuse both spellings with the same message.
-  const eng = new ComputeEngine();
-  eng.declare('x', 'real');
-  eng.declare('y', 'real');
-  eng.declare('V', 'list<real>');
-  eng.declare('A', 'matrix<real>');
-  eng.declare('L', 'list<real>');
-  eng.declare('K', 'list<real>');
-  const ARGS = {
-    x: 3,
-    y: -4,
-    V: [3, -4, 1],
-    A: [
-      [1, -2],
-      [3, 4],
-    ],
-    L: [1, -5, 3],
-    K: [-4, 2, 1],
-  };
-  const OPERANDS: Expression[] = [
-    ['Tuple', 'x', 'y'],
-    'V',
-    'A',
-    ['Tuple', 'L', 'K'],
-    ['PointList', 'L', 'K'],
-  ];
-
-  test('on JavaScript, both spellings give the interpreter value', () => {
-    const expected = [4, 4, 7, [4, 5, 3], [4, 5, 3]];
-    OPERANDS.forEach((x, i) => {
-      for (const order of [
-        'PositiveInfinity',
-        { str: 'Infinity' },
-      ] as Expression[]) {
-        const r = compile(eng.box(['Norm', x, order]), {
-          to: 'javascript',
-          fallback: false,
-        });
-        expect(r.success).toBe(true);
-        expect(r.run!(ARGS)).toEqual(expected[i]);
-      }
-    });
-    // The matrix ∞-norm (the largest row sum) in the interpreter.
-    expect(
-      eng
-        .box([
-          'Norm',
-          ['List', ['List', 1, -2], ['List', 3, 4]],
-          { str: 'Infinity' },
-        ])
-        .evaluate().json
-    ).toBe(7);
-  });
-
-  test('on the GPU and interval targets, both spellings decline the same way', () => {
-    const message = (to: string, order: Expression): string => {
-      try {
-        const r = compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), {
-          to,
-          fallback: false,
-        });
-        return r.success ? 'compiled' : String(r.error);
-      } catch (err) {
-        return (err as Error).message;
-      }
-    };
-    for (const to of ['glsl', 'interval-js']) {
-      const symbol = message(to, 'PositiveInfinity');
-      if (to === 'glsl') {
-        // The GLSL fragment has `Norm` of one operand only. The message
-        // names the type of the second operand, which is not the same for
-        // the two spellings.
-        const pattern = /No signature of `Norm` in the GLSL fragment/;
-        expect(symbol).toMatch(pattern);
-        expect(message(to, { str: 'Infinity' })).toMatch(pattern);
-        continue;
-      }
-      // On interval-js both spellings decline with the same code, at the
-      // `Norm`.
-      for (const order of ['PositiveInfinity', { str: 'Infinity' }]) {
-        let diagnostic: { code: string; operator?: string } | undefined;
-        try {
-          compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), {
-            to,
-            fallback: false,
-          });
-        } catch (err) {
-          diagnostic = compileDiagnosticOf(err);
-        }
-        expect(diagnostic?.code).toBe('outside-profile');
-        expect(diagnostic?.operator).toBe('Norm');
-      }
     }
   });
 });

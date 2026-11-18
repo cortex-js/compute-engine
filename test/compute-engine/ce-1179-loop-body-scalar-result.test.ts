@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
@@ -27,30 +26,6 @@ describe('CE-1179: a declared scalar result after a loop', () => {
     const ce = engine('let n = 0\nfor j in 1..k { n = n + j }\nn');
     expect(ce.box(['f', 'L', 3]).type.toString()).toBe('integer');
     expect(ce.box(['f', ['List', 1, 2], 3]).type.toString()).toBe('integer');
-  });
-
-  test('a condition on the call compiles', () => {
-    const ce = new ComputeEngine();
-    const checked = executeEpsil(
-      ce,
-      `
-function f(B: list<integer>, k: integer) -> integer {
-  let n = 0
-  for j in 1..k { n = n + j }
-  n
-}
-function g(B: list<integer>, k: integer) -> integer {
-  let out = 0
-  if f(B, k) > 0 { out = 1 }
-  out
-}
-`
-    );
-    expect(checked.diagnostics).toEqual([]);
-    ce.declare('L', 'list<integer>');
-    const result = compile(ce.box(['g', 'L', 3]));
-    expect(result.success).toBe(true);
-    expect(result.run!({ L: [0] })).toBe(1);
   });
 
   test('a list value after a loop keeps its list type', () => {

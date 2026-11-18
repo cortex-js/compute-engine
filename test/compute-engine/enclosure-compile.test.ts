@@ -157,12 +157,6 @@ describe('ENCLOSURE COMPILE: x + 1 with x: enclosure', () => {
     expect(() => runtime.loadBroadcastSlice(result as never)).toThrow(message);
   });
 
-  test('the javascript target declines with the kind message', () => {
-    expect(() =>
-      compile(ce.parse('x + 1'), { to: 'javascript', fallback: false })
-    ).toThrow(KIND);
-  });
-
   test('a decline with an enclosure input throws, even with fallback', () => {
     expectThrowsWithoutWarning(
       () => compileI(ce.box(['Factorial', 'x']), true),

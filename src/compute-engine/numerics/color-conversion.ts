@@ -1,7 +1,7 @@
 /**
  * Color channel rules and sRGB conversions shared by the interpreter
  * (`library/colors.ts`) and the compiled JavaScript runtime
- * (`compilation/javascript-target.ts`).
+ * (`compilation/javascript-runtime.ts`).
  *
  * Both routes must answer the same color for the same input, so the rules
  * that decide which channel values are admitted, and the conversions that

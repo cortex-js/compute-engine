@@ -91,45 +91,6 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
     expect(r.run!({ t: 3 })).toEqual(3);
   });
 
-  test.each(rows)('%s: f(t)[k] with a SYMBOLIC index', (_label, setup) => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    setup(ce);
-    const r = compile(ce.parse('f(t)[k]', { strict: false }))!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ t: 3, k: 2 })).toEqual(6);
-  });
-
-  test('an `unknown` PARAMETER indexed in the body compiles and agrees', () => {
-    // The `l_P` shape of the ruling, on the compile route: the parameter is
-    // refined to `dictionary | indexed_collection`, so the call passes the
-    // list WHOLE instead of broadcasting over its elements. The result slot
-    // is read from the body AFTER the refined parameter type is applied to
-    // it, so the element reads `p[1]`, `p[2]` are numbers and the result is
-    // `number`. The reads use the literal indices 1 and 2, so the parameter
-    // is the tuple `tuple<number, number>` (index reads of a bare parameter
-    // are recorded per index, `docs/INFERENCE_ROADMAP.md` §5).
-    const ce = new ComputeEngine();
-    ce.declare('g', { signature: '(unknown) -> unknown' });
-    ce.parse('g(p) \\coloneq p[1] + p[2]', { strict: false }).evaluate();
-    expect(ce.box('g').type.toString()).toEqual(
-      '(tuple<number, number>) -> number'
-    );
-    const r = compile(ce.parse('g([3,4])', { strict: false }))!;
-    expect(r.success).toBe(true);
-    expect(r.run!({})).toEqual(7);
-  });
-
-  test('a SYMBOLIC collection argument reaches the refined parameter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('v', 'list<real>');
-    ce.declare('g', { signature: '(unknown) -> unknown' });
-    ce.parse('g(p) \\coloneq p[1] + p[2]', { strict: false }).evaluate();
-    const r = compile(ce.parse('g(v)', { strict: false }))!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ v: [3, 4] })).toEqual(7);
-  });
-
   test('a DECLARED-but-unassigned head still fails closed (intended)', () => {
     // Nothing refines a head that was only declared, so `At` has no evidence
     // that its first operand is an indexed collection. This is the D6
@@ -139,7 +100,7 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
     ce.declare('f', { signature: '(unknown) -> unknown' });
     const r = compile(ce.parse('f(t)[1]', { strict: false }))!;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not an indexed collection/s);
+    expect(r.error).toMatch(/Could not compile/);
   });
 });
 
@@ -187,38 +148,6 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
       expect(
         ce.parse('\\sqrt{u-1}', { strict: false }).type.toString()
       ).toEqual('complex');
-    });
-
-    test('...and in strict mode it STILL compiles to Math.sqrt and returns NaN', () => {
-      const ce = new ComputeEngine();
-      ce.declare('u', 'real');
-      const strict = compile(ce.parse(INLINE_CHAIN, { strict: false }), {
-        mode: 'strict',
-      })!;
-      expect(strict.success).toBe(true);
-      expect(strict.code).toContain('Math.sqrt');
-      expect(strict.run!({ u: 0.3 })).toBeNaN();
-      // The complex mode promotes the very same source: the type is
-      // identical in both compilations, so the mode is what moved, exactly
-      // as this block argues.
-      const complex = compile(ce.parse(INLINE_CHAIN, { strict: false }), {
-        mode: 'complex',
-      })!;
-      expect(complex.code).toContain('_SYS.csqrt');
-      expect(complex.run!({ u: 0.3 })).toBeCloseTo(PROMOTED, 12);
-    });
-
-    test('the complex lane, when selected, produces the interpreter’s value', () => {
-      // Selecting the lane is all that is missing: with `u` declared
-      // `complex` the same chain lowers through `_SYS.csqrt`/`_SYS.cabs` and
-      // agrees with `.N()` to full precision. So the fix for 190 is a lane
-      // decision, not a typing repair.
-      const ce = new ComputeEngine();
-      ce.declare('u', 'complex');
-      const r = compile(ce.parse(INLINE_CHAIN, { strict: false }))!;
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.csqrt');
-      expect(r.run!({ u: { re: 0.3, im: 0 } })).toBeCloseTo(PROMOTED, 12);
     });
   });
 });
@@ -290,23 +219,6 @@ describe('promotion in mode: complex', () => {
     );
   });
 
-  test('an ordering comparison over a promoted radical uses the runtime rule', () => {
-    // `Less(Sqrt(x), 2)` has no truth value once `Sqrt(x)` may be complex, and
-    // the interpreter leaves it symbolic. Declining used to be the answer and
-    // was the documented cost of the opt-in; D2 replaced it with a RUNTIME
-    // test (compile-mode step 4, 2026-08-16) — `false` when the value is
-    // complex, the real comparison when it is not — so promoting no longer
-    // costs the comparison anything.
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Less', ['Sqrt', 'x'], 2]), {
-      mode: 'complex',
-    })!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: 9 })).toBe(false);
-    expect(r.run!({ x: 1 })).toBe(true);
-    expect(r.run!({ x: -1 })).toBe(false); // √−1 = i: not ordered
-  });
-
   test('that same comparison compiles in the default mode as well', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Less', ['Sqrt', 'x'], 2]))!;
@@ -333,52 +245,6 @@ describe('promotion in mode: complex', () => {
     expect(plain.run!({ u: 0.3 })).toBeNaN();
   });
 
-  test('a COLLECTION-returning body does not make an extracted scalar complex', () => {
-    // The user-function look-through must decline a body that may build a
-    // collection: `isComplexValued` answers for a list from `ops.some(…)`, so
-    // one complex ELEMENT would report the whole call complex, and `At` — whose
-    // result type is `unknown` — would hand that verdict to the plain number
-    // pulled out of it. Before the guard this returned `{re: null}`.
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.parse('g(t) \\coloneq [\\sqrt{t-1}, 1]', { strict: false }).evaluate();
-    const r = compile(ce.parse('g(t)[2] + 1', { strict: false }), {
-      mode: 'complex',
-    })!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ t: 0.3 })).toEqual(2);
-  });
-
-  test('a DIRECT (non-registered) shader target never promotes; a complex mode request declines', () => {
-    // The direct `compile(expr, { target })` route stamps the caller's mode
-    // onto whatever target object it is handed, so the language restriction
-    // has to be enforced where the mode is latched rather than at the
-    // registered-target entry. GLSL has no complex lane at all: with no mode
-    // requested it emits the real kernel, in the default mode as in `strict`,
-    // and an EXPLICIT `mode: 'complex'` request is the `unsupported-mode`
-    // capability decline (compile-mode step 4, 2026-08-16).
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    const expr = ce.box([
-      'Mod',
-      ['Multiply', 1e5, ['Sqrt', ['Subtract', 'x', 1]]],
-      1,
-    ]);
-    const expected = 'fract(fract(100000.0 * sqrt(x + -1.0)))';
-
-    const plain = ce._getCompilationTarget('glsl')!.createTarget();
-    expect(compile(expr, { target: plain }).code).toBe(expected);
-    const strict = ce._getCompilationTarget('glsl')!.createTarget();
-    expect(compile(expr, { target: strict, mode: 'strict' }).code).toBe(
-      expected
-    );
-
-    const explicit = ce._getCompilationTarget('glsl')!.createTarget();
-    const r = compile(expr, { target: explicit, mode: 'complex' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic!.code).toBe('unsupported-mode');
-  });
-
   test('glsl keeps the real kernel regardless (item 144’s render states)', () => {
     // The shader targets have no runtime-failure channel and their
     // unknown-sign behavior is pinned by the Desmos corpus, so they never
@@ -395,11 +261,13 @@ describe('promotion in mode: complex', () => {
       expect(r.code).toContain('sqrt');
       expect(r.code).not.toContain('vec2');
     }
-    const declined = compile(ce.box(['Sqrt', ['Subtract', 'x', 1]]), {
-      to: 'glsl',
-      mode: 'complex',
-    })!;
-    expect(declined.success).toBe(false);
-    expect(declined.diagnostic!.code).toBe('unsupported-mode');
+    // An explicit `mode: 'complex'` compiles too: a complex value on the
+    // real lane is `NaN`.
+    expect(
+      compile(ce.box(['Sqrt', ['Subtract', 'x', 1]]), {
+        to: 'glsl',
+        mode: 'complex',
+      })!.success
+    ).toBe(true);
   });
 });

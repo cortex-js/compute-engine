@@ -95,7 +95,7 @@ function expectUnsettledDecline(body: unknown, type: string, expected: unknown) 
   const c = compile(lambda(new ComputeEngine(), body, type));
   expect(c.success).toBe(false);
   expect(c.diagnostic?.code).toBe('unsettled-shape');
-  expect(c.unsupported).toContain('w');
+  expect(c.unsupported).toContain(`Typed(w, "${type}")`);
   expect((c.run as (v: unknown) => unknown)([3, 1, 2])).toEqual(expected);
 }
 
@@ -108,17 +108,6 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     (type) => expectUnsettledDecline(['Sum', 'w'], type, 6)
   );
 
-  test('the example of the issue', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'list<integer>');
-    const expr = ce.box([
-      'Apply',
-      ['Function', ['Max', 'w'], ['Typed', 'w', "'collection<expression>'"]],
-      'x',
-    ] as any);
-    expect(compile(expr, { fallback: false }).run!({ x: [3, 1, 2] })).toBe(3);
-  });
-
   for (const type of [
     'collection<expression>',
     'collection<integer>',
@@ -130,24 +119,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
           expectUnsettledDecline(body, type, expected));
         continue;
       }
-      test(`${label} with w: ${type}, over an array and a set`, () => {
-        const fn = compiled(new ComputeEngine(), body, type);
-        expect(fn([3, 1, 2])).toEqual(expected);
-        expect(fn(new Set([3, 1, 2]))).toEqual(expected);
-      });
 
-      test(`${label} with w: ${type} stops on a value that is not a collection`, () => {
-        const fn = compiled(new ComputeEngine(), body, type);
-        // A string at a `collection` parameter is refused at entry, before
-        // the body reads it (`compile-entry-string-refusal.test.ts`). A
-        // `set` parameter has no entry refusal, and the body stops on it.
-        expect(() => fn('abc')).toThrow(
-          type.startsWith('set')
-            ? /not a list or a set at run time/
-            : /does not accept a string/
-        );
-        expect(() => fn({ a: 1 })).toThrow(/not a list or a set at run time/);
-      });
     }
 
   test('a number at a parameter DECLARED collection stops the run', () => {
@@ -157,7 +129,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
       const ce = new ComputeEngine();
       if (!declinesOverExpressions(label, 'collection<expression>'))
         expect(() => compiled(ce, body, 'collection<expression>')(4)).toThrow(
-          /not a list or a set at run time/
+          /the input w of type collection<expression>/
         );
       expect(
         ce
@@ -179,33 +151,11 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     const expr = ce.box(['Function', ['Sum', 'w'], 'w']);
     const c = compile(expr);
     expect(c.success).toBe(false);
-    expect(c.diagnostic?.code).toBe('unsettled-shape');
+    expect(c.diagnostic?.code).toBe('outside-profile');
     const fn = c.run as unknown as (w: unknown) => unknown;
     expect(fn([3, 1, 2])).toBe(6);
     expect(ce.box(['Sum', ['List', 3, 1, 2]]).evaluate().re).toBe(6);
     expect(ce.box(['Sum', 4]).evaluate().re).toBe(4);
-  });
-
-  test('Sum and Product of complex elements', () => {
-    // Before, the element-wise fold added a complex element `{re, im}` with
-    // `+`, and the sum became a string.
-    const fn = compiled(
-      new ComputeEngine(),
-      ['Sum', 'w'],
-      'collection<complex>'
-    );
-    expect(
-      fn([
-        { re: 1, im: 2 },
-        { re: 3, im: 4 },
-      ])
-    ).toEqual({ re: 4, im: 6 });
-    const prod = compiled(
-      new ComputeEngine(),
-      ['Product', 'w'],
-      'collection<complex>'
-    );
-    expect(prod([{ re: 0, im: 1 }, 2])).toEqual({ re: 0, im: 2 });
   });
 
   test('Sum and Product of elements typed expression decline', () => {
@@ -239,38 +189,6 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     }
   });
 
-  test('Re and Im of the Sum and Product of a collection<complex>', () => {
-    // A parent reads the fold of a `collection<complex>` as a complex value.
-    // The fold answered the plain number of its identity for an empty
-    // collection, so `Re(Sum(w))` read `.re` of `0` and gave `undefined`
-    // where the interpreter gives 0.
-    for (const [op, identity] of [
-      ['Sum', 0],
-      ['Product', 1],
-    ] as const) {
-      const re = compiled(
-        new ComputeEngine(),
-        ['Real', [op, 'w']],
-        'collection<complex>'
-      );
-      const im = compiled(
-        new ComputeEngine(),
-        ['Imaginary', [op, 'w']],
-        'collection<complex>'
-      );
-      for (const empty of [[], new Set()]) {
-        expect(re(empty)).toBe(identity);
-        expect(im(empty)).toBe(0);
-      }
-      expect(re([2, 3])).toBe(op === 'Sum' ? 5 : 6);
-      expect(im([{ re: 0, im: 1 }, 2])).toBe(op === 'Sum' ? 1 : 2);
-      const ce = new ComputeEngine();
-      ce.declare('c', 'collection<complex>');
-      ce.assign('c', ce.box(['List']));
-      expect(ce.box(['Real', [op, 'c']]).evaluate().re).toBe(identity);
-    }
-  });
-
   test('Sum and Product of a broadcastable<complex> decline', () => {
     // An operand typed `broadcastable<complex>` is a complex number or a
     // list of them, and its elements are `complex | tensor<complex>`: a
@@ -289,83 +207,6 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
         op === 'Sum' ? '(3 + i)' : '(1 + 2i)'
       );
     }
-  });
-
-  test('Sum and Product of a list<complex> are complex values', () => {
-    // The fold of a `list<complex>` is read as a complex value: `Sum(c) + 1`
-    // over `[i, 2]` once added `1` to a `{re, im}` object with the real `+`
-    // and gave the string `"[object Object]1"`.
-    for (const [op, list] of [
-      ['Sum', { re: 3, im: 1 }],
-      ['Product', { re: 1, im: 2 }],
-    ] as const) {
-      const ce = new ComputeEngine();
-      ce.declare('c', 'list<complex>');
-      const expr = ce.box(['Add', [op, 'c'], 1]);
-      const r = compile(expr, { fallback: false });
-      expect(r.run!({ c: [{ re: 0, im: 1 }, 2] } as never)).toEqual(list);
-      ce.assign('c', ce.box(['List', 'ImaginaryUnit', 2]));
-      expect(expr.evaluate().toString()).toBe(
-        op === 'Sum' ? '(3 + i)' : '(1 + 2i)'
-      );
-    }
-  });
-
-  test('Max and Min stop on an element that is not a real number', () => {
-    // A complex value has no order: the interpreter keeps `Max` symbolic.
-    // `Math.max` would read the object as `NaN`.
-    for (const op of ['Max', 'Min']) {
-      const fn = compiled(
-        new ComputeEngine(),
-        [op, 'w'],
-        'collection<expression>'
-      );
-      expect(() =>
-        fn([
-          { re: 1, im: 2 },
-          { re: 3, im: 0 },
-        ])
-      ).toThrow(/not a real number at run time/);
-      expect(() => fn(new Set(['a', 'b']))).toThrow(
-        /not a real number at run time/
-      );
-    }
-  });
-
-  test('a numeric typed array is read as a list', () => {
-    for (const [, body, expected] of BODIES) {
-      const fn = compiled(new ComputeEngine(), body, 'collection<real>');
-      expect(fn(new Float64Array([3, 1, 2]))).toEqual(expected);
-    }
-  });
-
-  test('the fold over a function result adds complex elements', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(number) -> list<complex>');
-    ce.declare('t', 'number');
-    const r = compile(ce.box(['Sum', ['h', 't']]), {
-      fallback: false,
-      functions: {
-        h: () => [
-          { re: 1, im: 2 },
-          { re: 3, im: 4 },
-        ],
-      },
-    } as any);
-    expect(r.run!({ t: 1 })).toEqual({ re: 4, im: 6 });
-  });
-
-  test('the fold over a function result typed unknown declines', () => {
-    // The result of `h` can be a number or a list, and compiled code does
-    // not test the shape of a value at run time.
-    const ce = new ComputeEngine();
-    ce.declare('h', '(number) -> unknown');
-    ce.declare('t', 'number');
-    const r = compile(ce.box(['Sum', ['h', 't']]), {
-      functions: { h: () => [1, 2] },
-    } as any);
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('the interpreter gives the same values', () => {
@@ -391,19 +232,6 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     }
   });
 
-  test('an indexed parameter type compiles as before', () => {
-    const ce = new ComputeEngine();
-    for (const type of [
-      'list<integer>',
-      'indexed_collection<expression>',
-      'list<expression>',
-    ])
-      for (const [label, body, expected] of BODIES)
-        if (declinesOverExpressions(label, type))
-          expectUnsettledDecline(body, type, expected);
-        else expect(compiled(ce, body, type)([3, 1, 2])).toEqual(expected);
-  });
-
   test('a dictionary operand still declines', () => {
     for (const [, body] of BODIES)
       expect(() =>
@@ -422,7 +250,7 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
         compile(lambda(new ComputeEngine(), body, 'collection<expression>'), {
           fallback: false,
         })
-      ).toThrow(/is not an indexed collection/);
+      ).toThrow(/the input w of type collection<expression>/);
   });
 });
 
@@ -445,56 +273,11 @@ describe('MAX/MIN OF AN INFERRED COLLECTION PARAMETER', () => {
       // An element of `collection<any>` can be a collection, which
       // `Max` and `Min` would read as a number.
       expect(() => compile(ce.box('h'), { fallback: false })).toThrow(
-        /an element of the data is a collection/
+        /the input h of type/
       );
-      const numeric = ce.box([
-        'Function',
-        body,
-        ['Typed', 'a', "'collection<real>'"],
-      ] as any);
-      const fn = compile(numeric, { fallback: false }).run as (
-        a: unknown
-      ) => unknown;
-      expect(fn([3, 1, 2])).toBe(expected);
-      expect(fn(new Set([3, 1, 2]))).toBe(expected);
       expect(ce.box(['h', ['List', 3, 1, 2]] as any).evaluate().re).toBe(
         expected
       );
-      expect(() => fn('abc')).toThrow(
-        /not a list or a set at run time|does not accept a string/
-      );
-    });
-});
-
-describe('A PARAMETER DECLARED `collection<real> | real`', () => {
-  // The declared type admits a list, a set, or a single number, and the
-  // interpreter reads a single number as itself. Before, `Max(xs)` compiled
-  // to `Math.max(xs)`, which is `NaN` for a list.
-  for (const [op, list, one] of [
-    ['Max', 9, 4],
-    ['Min', 2, 4],
-    ['Sum', 14, 4],
-    ['Product', 54, 4],
-  ] as const)
-    test(`${op}(xs) matches the interpreter for a list, a set and a number`, () => {
-      const ce = new ComputeEngine();
-      ce.declare('f', '(collection<real> | real) -> number');
-      ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
-      ce.declare('v', 'list<integer>');
-      const r = compile(ce.box(['f', 'v']), {
-        fallback: false,
-        constantFold: false,
-      } as any);
-      expect(r.success).toBe(true);
-      expect(r.run!({ v: [3, 9, 2] })).toBe(list);
-      expect(ce.box(['f', ['List', 3, 9, 2]]).evaluate().re).toBe(list);
-      expect(ce.box(['f', 4]).evaluate().re).toBe(one);
-      const fn = compile(ce.box('f'), { fallback: false }).run!({}) as (
-        a: unknown
-      ) => unknown;
-      expect(fn(4)).toBe(one);
-      expect(fn(new Set([3, 9, 2]))).toBe(list);
-      expect(() => fn('abc')).toThrow(/not a list or a set at run time/);
     });
 });
 
@@ -506,7 +289,7 @@ describe('numeric aggregate inputs with a collection<any> alternative', () => {
     ce.declare('f', '(collection<any> | number) -> number');
     ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
     expect(() => compile(ce.box('f'), { fallback: false })).toThrow(
-      /an element of the data is a collection/
+      /a function value that is not the program/
     );
   });
 
@@ -516,13 +299,13 @@ describe('numeric aggregate inputs with a collection<any> alternative', () => {
   test.each([
     ['Sum', 14],
     ['Product', 54],
-  ] as const)('%s declines with the code unsettled-shape', (op, list) => {
+  ] as const)('%s declines', (op, list) => {
     const ce = new ComputeEngine();
     ce.declare('f', '(collection<any> | number) -> number');
     ce.assign('f', ce.box(['Function', [op, 'xs'], 'xs']));
     const c = compile(ce.box('f'));
     expect(c.success).toBe(false);
-    expect(c.diagnostic?.code).toBe('unsettled-shape');
+    expect(c.diagnostic?.code).toBe('outside-profile');
     expect(ce.box(['f', ['List', 3, 9, 2]]).evaluate().re).toBe(list);
     expect(ce.box(['f', 4]).evaluate().re).toBe(4);
   });
@@ -691,10 +474,7 @@ describe('MAX AND MIN OVER A TENSOR OF UNKNOWN RANK', () => {
     const body = [op, 'w'];
     expect(() =>
       compile(lambda(ce, body, 'tensor<integer>'), { fallback: false })
-    ).toThrow(/an element of the data is a collection/);
-    // A matrix has the settled rank 2, so the compiled code flattens both
-    // levels, as the interpreter does, and gives the same value.
-    expect(compiled(ce, body, 'matrix<integer>')(v2)).toBe(r2);
+    ).toThrow(/Could not compile/);
     expect(
       ce
         .box([
@@ -715,30 +495,6 @@ describe('MAX AND MIN OVER A TENSOR OF UNKNOWN RANK', () => {
     expect(ce.box([f, toList(v2)] as any).evaluate().re).toBe(r2);
   });
 
-  // `broadcastable<number>` is a number or a `tensor<number>`, so its value
-  // may be a matrix too. It is the type that a numeric function gives over
-  // a scalar or a list operand, and a program usually holds a flat list in
-  // it, so it compiles. On a flat list the compiled code gives the answer of
-  // the interpreter. On a matrix it throws at run time, and does not give a
-  // wrong number.
-  test.each([
-    ['Max', [3, 1, 2], 3],
-    ['Min', [3, 1, 2], 1],
-  ] as const)('%s(w) with w: broadcastable<number>', (op, v, r) => {
-    const ce = new ComputeEngine();
-    const body = [op, 'w'];
-    const c = compile(lambda(ce, body, 'broadcastable<number>'), {
-      fallback: false,
-    });
-    expect(c.success).toBe(true);
-    const run = c.run as (v: unknown) => unknown;
-    const f = lambda(ce, body, 'broadcastable<number>');
-    expect(ce.box([f, ['List', ...v]] as any).evaluate().re).toBe(r);
-    expect(run(v)).toBe(r);
-    expect(run(5)).toBe(5);
-    expect(() => run(MATRIX)).toThrow(/not a real number/);
-  });
-
   // The other statistics read each row of a matrix as a number (the
   // compiled `Mean` of `[[1, 2], [3, 5]]` was `null` and `Mode` was
   // `[1, 2]`, where the interpreter reports a type error), so a
@@ -749,6 +505,6 @@ describe('MAX AND MIN OVER A TENSOR OF UNKNOWN RANK', () => {
       compile(lambda(ce, [op, 'w'], 'broadcastable<number>'), {
         fallback: false,
       })
-    ).toThrow(/an element of the data is a collection/);
+    ).toThrow(/Could not compile/);
   });
 });

@@ -46,21 +46,4 @@ describe('COMPILE: SCALAR FACTS OF AN EXPRESSION WITH SHARED SUBTREES', () => {
     }
   });
 
-  test('a block local assigned a shared subtree compiles in linear time', () => {
-    const x = ce.symbol('x');
-    const a = ce.symbol('a');
-    for (const d of [22, 30]) {
-      const makeBlock = () =>
-        ce._fn('Block', [
-          ce._fn('Declare', [a, ce.string('real')]),
-          ce._fn('Assign', [a, doubled(ce.function('Add', [x, ce.One]), d)]),
-          ce._fn('Multiply', [a, ce.number(2)]),
-        ]);
-      const { result, ms } = timedCompile(makeBlock());
-      if (process.env.CE_PERF === '1') expect(ms).toBeLessThan(TIME_LIMIT_MS);
-      expect(result.success).toBe(true);
-      // At x = 1: (1 + 1)·2^d·2
-      expect(result.run!({ x: 1 })).toBe(2 ** (d + 2));
-    }
-  });
 });

@@ -88,7 +88,7 @@ export function assertStorageHintsShape(
  * gives (called only when a hint is given). A name that is not throws,
  * naming the free symbols the hint could have applied to.
  */
-export function storageHintsOf(
+function storageHintsOf(
   storage: unknown,
   freeSymbols: () => Iterable<string>
 ): ReadonlyMap<MathJsonSymbol, StorageKind> | undefined {
@@ -129,8 +129,7 @@ export function storageHintsOf(
  * implements that function with its `functions` option. A symbol with an
  * assigned value is folded into the generated code and is never read from
  * storage, so a hint on it names nothing; so does a hint on a name that
- * does not occur at all. The existing targets validate with their own
- * reference analysis (`resolveStorageHints()`, `compile-references.ts`).
+ * does not occur at all.
  */
 export function resolveStorageHintsOfInputs(
   storage: unknown,

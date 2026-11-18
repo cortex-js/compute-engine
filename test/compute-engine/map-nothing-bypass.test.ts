@@ -275,7 +275,7 @@ describe('Map applies its callback to a Nothing element', () => {
       ]);
       const result = compile(mapped, { to });
       expect(result.success).toBe(false);
-      expect(result.error).toMatch(/Nothing/);
+      expect(result.error).toMatch(/the input xs of type/);
     }
   );
 

@@ -2556,9 +2556,8 @@ export function leafwardElementType(t: Readonly<Type>): Type | undefined {
  * walk stops at the first arm that is not a point of the first arm's
  * arity, so it is linear in `depth`.
  * The interpreter (`unmatchedCell()` in `library/control-structures.ts`) and
- * the compiler (`nanPointLiteral()` in `compilation/compile-absence.ts`) both
- * read a point here, so a position that a selection does not select is the
- * same `NaN` point in both.
+ * the compiler both read a point here, so a position that a selection does
+ * not select is the same `NaN` point in both.
  */
 export function pointArity(t: Readonly<Type>, depth = 0): number | undefined {
   if (depth > 8) return undefined;
@@ -2602,9 +2601,8 @@ export function nanPoint(ce: ComputeEngine, n: number): Expression {
  * list of conditions does not select holds `False` for a boolean and
  * `Rgb(NaN, NaN, NaN)` for a colour, not `Missing`. The interpreter
  * (`unmatchedCell()` in `library/control-structures.ts`) and the compiler
- * (`unmatchedCellLiteral()` in `compilation/compile-absence.ts`) both read
- * the kind here, so they give the same cell. A type with no value (`never`,
- * `nothing`) is neither.
+ * both read the kind here, so they give the same cell. A type with no value
+ * (`never`, `nothing`) is neither.
  */
 export function unmatchedCellKind(
   t: Readonly<Type>
@@ -4265,7 +4263,7 @@ export function isRecordShapedType(t: Type): boolean {
  *
  * Used by the restriction `If(c, v)` (`isOrderedCarrierType`,
  * `library/control-structures.ts`) and by the JavaScript compilation of a
- * restriction (`base-compiler.ts`), which declines such a union.
+ * restriction, which declines such a union.
  */
 export function hasTupleOrStringArm(t: Type, seen?: AliasDescent): boolean {
   // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a

@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { withScratchScope } from '../../src/compute-engine/scratch-scopes';
 
 // A serialization runs in a resolve-only region (`ce._resolveOnly()`), where a
@@ -53,19 +52,6 @@ function setup(): { ce: ComputeEngine; target: any } {
 }
 
 describe('A SERIALIZATION DOES NOT CHANGE A DERIVED SIGNATURE', () => {
-  test.each([false, true])(
-    'the compile of N(C) succeeds (LaTeX read first: %s)',
-    (readLatexFirst) => {
-      const { ce, target } = setup();
-      if (readLatexFirst) expect(target.latex).toBe('N(C)');
-      const result = compile(target, { to: 'javascript' });
-      expect(result.success).toBe(true);
-      expect(result.run?.({})).toEqual([0, -1, -2, -3, -4, -5, -6, -7, -8, -9]);
-      expect(ce.box(['F', 0]).type.toString()).toBe(
-        'list<tuple<integer, integer, number>>'
-      );
-    }
-  );
 
   test('the type of F(0) is the same after a LaTeX read', () => {
     const { ce, target } = setup();

@@ -42,14 +42,6 @@ describe('Ruling A: a folded symbol value reads the global, not the parameter', 
     expect(ce.box(['g', 2]).evaluate().re).toBe(18);
   });
 
-  test('compiled: the folded value is bound outside the emitted function', () => {
-    const ce = withG();
-    const r = compile(ce.box(['g', 2]), { to: 'javascript' });
-    // The parameter of `_fn_g` must not be the `t` the folded value reads.
-    expect(r.preamble).toContain('_.t');
-    expect(r.run!({ t: 5 })).toBe(18);
-  });
-
   test('compiled: a global `t` with a value folds to the same answer', () => {
     const ce = withG();
     ce.assign('t', 5);
@@ -61,21 +53,6 @@ describe('Ruling A: a folded symbol value reads the global, not the parameter', 
     const ce = withG();
     const r = compile(ce.box(['g', 2]), { to: 'javascript' });
     expect(r.freeSymbols).toContain('t');
-  });
-
-  test('a LEAF value is folded inline but still reads the global', () => {
-    // `a := t` is a bare symbol, so it is no shorter as a preamble local
-    // than as itself and stays inline. It must still resolve `t` where it
-    // was written — the emitted body reads `_.t`, not its parameter.
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.assign('a', ce.parse('t'));
-    ce.assign('g', ce.parse('t \\mapsto t + a'));
-    expect(ce.box(['g', 2]).evaluate().toString()).toBe('t + 2');
-    const r = compile(ce.box(['g', 2]), { to: 'javascript' });
-    expect(r.preamble).toContain('const _fn_g = (t) => _.t + t;');
-    expect(r.freeSymbols).toContain('t');
-    expect(r.run!({ t: 5 })).toBe(7);
   });
 
   test('a LEAF value under a Sum index of the same name reads the global', () => {

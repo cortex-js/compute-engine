@@ -1,6 +1,6 @@
 /**
  * The profile `'ir'` of `compile()` for the `glsl` target (experimental):
- * the result of the existing GLSL target from the slice compiler, or the
+ * the result of the `glsl` target from the slice compiler, or the
  * decline `'outside-profile'`, to which `compile()` applies `fallback`. What
  * it compiles and the fields of its result: README, "Selecting the
  * pipeline", the paragraph on GLSL.
@@ -53,13 +53,12 @@ const IR_GLSL_OPTIONS = {
   varsObjectRefs: 'no-op',
   storage: 'mapped',
   quadrature: 'no-op',
-  broadcast: 'declined',
 } as const;
 
 const TRIG_HEADS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
 
-/** `isAmplifiedTrig()` of `gpu-exact-trig.ts` (the existing target's rule,
- *  its walk by paths), with a memo per node and state: linear in the nodes
+/** Whether an operand amplifies a trigonometric value, with a memo per
+ *  node and state: linear in the nodes
  *  of a shared graph. Whether a trigonometric call is under a factor of
  *  magnitude 1000 or more on the chain of `Multiply`, `Negate`, `Add`,
  *  `Subtract`, `Abs` and numerators from `u`, or its argument has one. */
@@ -129,8 +128,8 @@ function nanOf(t: IRType): string | undefined {
 /**
  * The printed lines of a program whose loops can run more passes in all
  * than the budget (`budget()`: a run-time count as the budget, multiplied
- * down the nesting, as the existing target bounds it), with one counter of
- * every pass, `_gpu_ir_passes`, as the existing GLSL target counts them: a
+ * down the nesting), with one counter of
+ * every pass, `_gpu_ir_passes`: a
  * pass past the budget leaves its loop, and the result is NaN. Each `Sum`
  * or `Product` is also limited by its own count. Unchanged when the bound
  * is within the budget. A result that is not a number or a point declines.
@@ -165,7 +164,7 @@ function counted(
       `  return _gpu_ir_passes > ${b} ? ${nan} : _gpu_ir_result;`,
     ],
     functions: [
-      // Guarded as the existing target's counter: a host that joins two
+      // Guarded: a host that joins two
       // counted programs in one shader declares it once.
       '#ifndef _GPU_IR_PASSES_DECLARED',
       '#define _GPU_IR_PASSES_DECLARED',
@@ -176,7 +175,7 @@ function counted(
   };
 }
 
-/** The warning `float32-unsafe-argument` of the existing target, once per
+/** The warning `float32-unsafe-argument`, once per
  *  operand of a `Mod` or a `Fract` that `amplifiedTrigMemo()` flags, in
  *  `expr` and in the bodies of the user functions it calls, each node once;
  *  not in a `Mod` or a `Fract` that is closed as a whole when `fold`, which
@@ -216,7 +215,7 @@ function float32Warnings(expr: Expression, fold: boolean): CompileDiagnostic[] {
         code: 'float32-unsafe-argument',
         kind: 'correctness',
         value: u.toString(),
-        message: `The operand of \`${e.operator}\` amplifies a trigonometric value by a constant of magnitude 1000 or more, so its float32 value on glsl can have no relation to the exact value (a sine hash such as \`fract(43758.5·sin(12.9898·x))\`). The profile 'ir' has no exact form.`,
+        message: `The operand of \`${e.operator}\` amplifies a trigonometric value by a constant of magnitude 1000 or more, so its float32 value on glsl can have no relation to the exact value (a sine hash such as \`fract(43758.5·sin(12.9898·x))\`). The compiler does not give an exact form of such an operand.`,
       });
     e.ops.forEach(walk);
     const user = userBinding(e as Fn);
@@ -271,8 +270,7 @@ export function compileWithIrProfileGlsl(
       throw decline(`the vars entry of ${both} in storage on glsl`, {
         binding: both,
       });
-    // The existing target's cap (`GLSL_DEFAULT_PASS_BUDGET`, which is not
-    // imported: a cycle of modules): a `Sum` or a `Product` of more passes
+    // The default cap of the passes on GLSL: a `Sum` or a `Product` of more passes
     // is NaN (the lowering's test), and a program whose loops of constant
     // counts can run more passes in all declines (`loopPasses()`, with a
     // run-time count as one pass).
@@ -367,7 +365,7 @@ export function compileWithIrProfileGlsl(
         new RegExp(`\\b${id}\\s*\\(`).test(`${code}\n${preamble}`)
       )
         throw decline(`the input name \`${id}\` on glsl`, { binding: name });
-      // A list in storage: the type of the existing target (`float[5]`).
+      // A list in storage: its array type (`float[5]`).
       lowered[name] = typeName({ ...p.types[v], storage: undefined });
     });
     addSymbolDeps(p, options?.symbolDeps);

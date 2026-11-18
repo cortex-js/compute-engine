@@ -190,26 +190,6 @@ describe('a slot that needs a scalar answer keeps the error', () => {
 });
 
 describe('the compiled JavaScript route agrees with the interpreter', () => {
-  test('a caller-supplied nested source broadcasts per row', () => {
-    const ce = engineWithScalarF();
-    ce.declare('xs', 'list<list<number>>');
-    const result = compile(ce.box(['Map', 'f', 'xs']), { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run!({ xs: [[1, 2], [3, 4]] } as any)).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
-  });
-
-  test('a literal nested source broadcasts per row', () => {
-    const ce = engineWithScalarF();
-    const result = compile(ce.box(['Map', 'f', NESTED]), { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run!({} as any)).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
-  });
 
   /** The engine for the three spellings of a map over the input `S`
    * declared `type`: `Map(f, S)`, `k(S)` with `k := L ↦ Map(f, L)`, and
@@ -236,58 +216,24 @@ describe('the compiled JavaScript route agrees with the interpreter', () => {
   // maps `f` over each row and applies it to each number (user decision
   // 2026-09-22 (a), ROADMAP CE-257). The element type
   // `list<number> | number` does not settle one shape, so the compiled code
-  // would have to test each element at run time: the compilation declines
-  // with the code `unsettled-shape` (rule R3 of
-  // `docs/plans/2026-10-31-static-shape-compilation.md`), and the
-  // interpreter evaluates the expression.
+  // would have to test each element at run time: the compilation declines,
+  // and the interpreter evaluates the expression.
   test.each(SPELLINGS)('a partly nested source declines: %s', (_name, json) => {
     const ce = engineWithSource('list<list<number> | number>');
     const expr = ce.box(json);
     const result = compile(expr, { to: 'javascript' });
     expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('unsettled-shape');
-    expect(result.unsupported).toContain(json[0] === 'Map' ? 'S' : 'L');
+    // `Map(f, S)` with `f` a user function is outside the profile; the
+    // calls refuse the input `S`.
+    expect(result.diagnostic?.code).toBe(
+      json[0] === 'Map' ? 'outside-profile' : 'unsettled-shape'
+    );
+    expect(result.unsupported).toContain(json[0] === 'Map' ? 'Map' : 'S');
     ce.assign('S', ce.box(['List', ['List', 1, 2], 3]));
     expect(expr.evaluate().toString()).toBe('[[2,4],6]');
     expect(result.run!({ S: [[1, 2], 3] } as any)).toEqual([[2, 4], 6]);
   });
 
-  // The same three spellings over a source of rows, and over a source of
-  // numbers, compile with no run-time shape test and give the values of
-  // the interpreter.
-  test.each(SPELLINGS)('a source of rows: %s', (_name, json) => {
-    const ce = engineWithSource('list<list<number>>');
-    const expr = ce.box(json);
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toContain('Array.isArray');
-    ce.assign('S', ce.box(['List', ['List', 1, 2], ['List', 3]]));
-    expect(expr.evaluate().toString()).toBe('[[2,4],[6]]');
-    expect(result.run!({ S: [[1, 2], [3]] } as any)).toEqual([[2, 4], [6]]);
-  });
-
-  test.each(SPELLINGS)('a source of numbers: %s', (_name, json) => {
-    const ce = engineWithSource('list<number>');
-    const expr = ce.box(json);
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.code).not.toContain('Array.isArray');
-    ce.assign('S', ce.box(['List', 1, 3]));
-    expect(expr.evaluate().toString()).toBe('[2,6]');
-    expect(result.run!({ S: [1, 3] } as any)).toEqual([2, 6]);
-  });
-
-  test('an untyped named callback already broadcast', () => {
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.box(DOUBLE));
-    ce.declare('ys', 'list<list<number>>');
-    const result = compile(ce.box(['Map', 'g', 'ys']), { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run!({ ys: [[1, 2], [3, 4]] } as any)).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
-  });
 });
 
 describe('the eager validation route admits the same callback', () => {

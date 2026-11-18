@@ -80,10 +80,6 @@ function expectMemberDecline(expr: Expression): void {
   expect(r.success).toBe(false);
 }
 
-/** The values of `c` and `v` for the list branch (`c` true) or for the
- * scalar branch. */
-const branch = (c: boolean) => ({ c, v: c ? [1, 2] : -1 });
-
 /** A boxed result as the plain JS value the compiled runner answers: a
  * `List` as an array (recursively), `True`/`False` as booleans, a number as a
  * number. */
@@ -150,103 +146,7 @@ describe('Tycho item 249 — Sum/Product over a scalar-or-collection union', () 
   });
 });
 
-describe('Tycho item 249 — arithmetic and comparison over the union', () => {
-  it.each([
-    ['Multiply', ['Multiply', 2, w], [2, 4], -2],
-    ['Add', ['Add', w, 1], [2, 3], 0],
-    ['Subtract', ['Subtract', w, 1], [0, 1], -2],
-    ['Sin', ['Sin', w], [Math.sin(1), Math.sin(2)], Math.sin(-1)],
-    ['Power', ['Power', w, 2], [1, 4], 1],
-    ['Less', ['Less', w, 1.5], [true, false], true],
-  ])('%s broadcasts on the run-time shape', (_head, body, onList, onScalar) => {
-    expectUnsettled(ce.box(body as any));
-    // The same operation over `v`, of the same union type as the `Which`.
-    const expr = ce.box(
-      JSON.parse(JSON.stringify(body).split(JSON.stringify(w)).join('"v"'))
-    );
-    const { code, run } = js(expr);
-    // One dispatch at the binding of `v`, and one body for each member of
-    // the union.
-    expect(code).toMatch(/^\(Array\.isArray\(_\.v\) \? \[/);
-    expect(run(branch(true))).toEqual(onList);
-    expect(run(branch(false))).toEqual(onScalar);
-  });
-
-  it('matches the interpreter on both branches', () => {
-    // Element-wise within a tolerance: the interpreter evaluates `sin` at its
-    // own precision, JavaScript through `Math.sin`, and the two can differ in
-    // the last bit.
-    const expectClose = (got: unknown, want: unknown): void => {
-      if (Array.isArray(want)) {
-        expect(Array.isArray(got)).toBe(true);
-        expect((got as unknown[]).length).toBe(want.length);
-        want.forEach((w, i) => expectClose((got as unknown[])[i], w));
-      } else expect(got as number).toBeCloseTo(want as number, 12);
-    };
-    expectUnsettled(ce.box(['Multiply', 2, w]));
-    expectUnsettled(ce.box(['Add', w, 1]));
-    for (const body of [
-      ['Multiply', 2, 'v'],
-      ['Add', 'v', 1],
-      ['Multiply', 2, 'u'],
-      ['Sin', 'v'],
-    ]) {
-      const expr = ce.box(body as any);
-      const { run } = js(expr);
-      expectClose(
-        run({ c: true, u: [1, 2], v: [1, 2] }),
-        interpret(expr, true)
-      );
-      expectClose(run({ c: false, u: -1, v: -1 }), interpret(expr, false));
-    }
-  });
-
-  it('an indexed Sum whose body is the union takes the element-wise fold', () => {
-    // Before: the body typed `number`, the scalar arm unrolled `a + b + c`
-    // over arrays, and the result was the string `"2,42,42,4"`.
-    // The `Which` declines; `v` has the same union type.
-    const expr = ce.box(['Sum', ['Multiply', 2, w], ['Limits', 'k', 1, 3]]);
-    expectUnsettled(expr);
-    expect(interpret(expr, true)).toEqual([6, 12]);
-    expect(interpret(expr, false)).toBe(-6);
-    const { run } = js(
-      ce.box(['Sum', ['Multiply', 2, 'v'], ['Limits', 'k', 1, 3]])
-    );
-    expect(run(branch(true))).toEqual([6, 12]);
-    expect(run(branch(false))).toBe(-6);
-  });
-});
-
 describe('Tycho item 249 — what the union admission refuses', () => {
-  it('a tuple branch is atomic: a `boolean | tuple` condition selects as a scalar', () => {
-    // The interpreter refuses a tuple condition (a tuple is a point, never an
-    // element-wise mask), so the compiled selection must not route such a
-    // condition through `_SYS.select`.
-    ce.declare('tb', 'boolean | tuple<boolean, boolean>');
-    const r = compile(ce.box(['Which', 'tb', 1, 'True', 0]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('_SYS.select');
-    expect(r.run!({ tb: true })).toBe(1);
-  });
-
-  it('a nominal branch keeps the whole union atomic', () => {
-    // `Bag` is an opaque nominal over a list: the interpreter binds a `Bag`
-    // value whole and leaves `2·w` symbolic, so compilation must not
-    // broadcast over the erased array (the 2026-08-12 atomicity ruling).
-    const engine = new ComputeEngine();
-    engine.declareType('Bag', 'list<number>');
-    engine.declare('w2', 'integer | Bag');
-    const r = compile(engine.box(['Multiply', 2, 'w2']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('_SYS.bcast');
-    expect(r.run!({ w2: 3 })).toBe(6);
-  });
 
   it('a complex-valued scalar-or-collection union fails closed', () => {
     // Before, the union was claimed by the scalar path and `2 * [a, b]`

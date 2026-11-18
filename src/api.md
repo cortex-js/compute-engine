@@ -774,7 +774,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
 parses one.
 
 ####### type
@@ -1255,85 +1255,6 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### ComputeEngine.\_getCompilationTarget() {#_getcompilationtarget-1}
-
-###### \_getCompilationTarget(name)
-
-```ts
-_getCompilationTarget(name): 
-  | JavaScriptCompilationTarget<Expression>
-  | undefined
-```
-
-####### name
-
-`"javascript"`
-
-###### \_getCompilationTarget(name)
-
-```ts
-_getCompilationTarget(name): 
-  | LanguageTarget<Expression, string, unknown, number>
-  | undefined
-```
-
-####### name
-
-`string`
-
-</MemberCard>
-
-<MemberCard>
-
-##### ComputeEngine.registerCompilationTarget() {#registercompilationtarget-1}
-
-```ts
-registerCompilationTarget(name, target): void
-```
-
-Register a compilation target under `name`, so that
-`compile(expr, { to: name })` resolves it. A later registration under the
-same name replaces the earlier target. Throws when `name` is empty or the
-target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
-and `compile()`.
-
-Every engine has `javascript` and `interval-js`. Every engine also has
-`glsl` once the full package entry,
-`@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
-the program, whichever entry made the engine and in whichever order. A
-program that loads only `@cortex-js/compute-engine/core` has the two
-built-in targets: import `GLSLTarget`
-from `@cortex-js/compute-engine/compile` and register it here.
-
-####### name
-
-`string`
-
-####### target
-
-`LanguageTarget`\<[`Expression`](#expression-5)\>
-
-</MemberCard>
-
-<MemberCard>
-
-##### ComputeEngine.unregisterCompilationTarget() {#unregistercompilationtarget-1}
-
-```ts
-unregisterCompilationTarget(name): void
-```
-
-Remove the compilation target registered under `name`. A name that is
-not registered is ignored.
-
-####### name
-
-`string`
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ComputeEngine.number() {#number-2}
 
 ###### number(value, options)
@@ -1611,7 +1532,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### ComputeEngine.type() {#type-12}
+##### ComputeEngine.type() {#type-11}
 
 ```ts
 type(type): BoxedType
@@ -2082,8 +2003,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `compileShippable`: `boolean`;
-  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -2167,8 +2086,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `compileShippable`: `boolean`;
-  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -3885,102 +3802,6 @@ type AssumeResult =
 
 ## Compiling
 
-### ArithmeticCompile {#arithmeticcompile}
-
-The compiled form of a value kind (the `compile` field of an
-[ArithmeticDefinition](#arithmeticdefinition)).
-
-The hooks branch on `context.language`, like the `compile` handler of an
-operator definition. `undefined` from a hook declines: the compilation
-then fails with a diagnostic that names the kind type.
-
-<MemberCard>
-
-##### ArithmeticCompile.type? {#type-5}
-
-```ts
-type?: {
-  lowered: string | undefined;
-  add: string | undefined;
-  multiply: string | undefined;
-  apply: string | undefined;
-  entry: boolean;
-  shippable: boolean;
-  helpers: Readonly<Record<string, (...args) => unknown>>;
-  hostNames: readonly string[];
-};
-```
-
-The representation of the kind TYPE and its operations. It belongs to
-the kind type, not to one operator: the operators of one kind type that
-are declared at the same time must give the same object (or none, and
-then they use the one another operator gave).
-
-##### type.shippable?
-
-```ts
-shippable?: boolean;
-```
-
-Whether code from this lowering may be sent to a worker as text.
-Default `false`. A compilation result is shippable only when every
-kind contract it uses says `true` and lists no `hostNames`, and no
-input of the code is a value of a kind (its `entry` check is a
-function of the host, which a worker does not have).
-
-##### type.helpers?
-
-```ts
-helpers?: Readonly<Record<string, (...args) => unknown>>;
-```
-
-Functions that the code of this lowering calls by name. The engine
-copies the source of each one into the compiled code, as
-`const <name> = (<source>);`, so the code carries them to a worker
-and to a stored result. The rules are those of
-`OperatorDefinition.compileHelpers`: a helper must not read a
-variable from outside its own body, and its name is an identifier
-that does not start with `_`. Put a helper here, not in `hostNames`,
-when the code can carry it.
-
-##### type.hostNames?
-
-```ts
-hostNames?: readonly string[];
-```
-
-The functions of the host that the code of this lowering calls and
-that it does not carry (they are not in `helpers`). A worker does not
-have them, so a non-empty list makes the result not shippable,
-whatever `shippable` says.
-
-</MemberCard>
-
-<MemberCard>
-
-##### ArithmeticCompile.value()? {#value-4}
-
-```ts
-value(value, compile, context): string | undefined
-```
-
-The source of a literal value of THIS operator, in the representation of
-the kind type. An operator without it declines a literal of its own.
-
-####### value
-
-[`Expression`](#expression-5)
-
-####### compile
-
-(`expr`) => `string`
-
-####### context
-
-[`OperatorCompileContext`](#operatorcompilecontext)
-
-</MemberCard>
-
 <MemberCard>
 
 ### CompiledType {#compiledtype}
@@ -4024,9 +3845,7 @@ type OperatorCompileContext = {
 };
 ```
 
-The context passed to a custom operator [OperatorCompileHandler](#operatorcompilehandler). A
-curated, stable subset of the internal compilation target: enough to emit
-target-specific source without exposing the full internal machinery.
+The context passed to an operator [OperatorCompileHandler](#operatorcompilehandler).
 
 </MemberCard>
 
@@ -4035,19 +3854,15 @@ target-specific source without exposing the full internal machinery.
 ### OperatorCompileHandler {#operatorcompilehandler}
 
 ```ts
-type OperatorCompileHandler = (args, compile, context) => string | Expression | undefined;
+type OperatorCompileHandler = (args, compile, context) => Expression | undefined;
 ```
 
-A custom compilation handler for an operator, set on an
-`OperatorDefinition`. It mirrors a built-in compiled-function handler:
-it receives the (canonical) operands, a `compile` callback to lower a
-sub-expression to target source, and the compilation `context` (branch on
-`context.language`: `'javascript'`, `'glsl'`, `'interval-javascript'`).
-It returns one of three results:
+A compilation handler for an operator, set on an `OperatorDefinition`. It
+receives the (canonical) operands, a `compile` callback and the
+compilation `context` (branch on `context.language`), and returns:
 
-- `undefined` (or an empty string; a `null` returned from untyped
-  JavaScript is tolerated and treated the same): the target's default
-  compilation of this operator.
+- `undefined` (a `null` or an empty string from untyped JavaScript is
+  treated the same): the library's compilation of this operator.
 - an `Expression`: it is compiled in place of the node, with the
   library's definitions. A node of the expression that the handler
   created is compiled with no compile handler consulted, whatever its
@@ -4056,33 +3871,21 @@ It returns one of three results:
   object), found in the result, is compiled as usual, handlers
   consulted. Reuse the objects you were given: a copy of an operand
   (rebuilt from its JSON) is a created node, and an operator inside it no
-  longer gets its handler. A result that holds the node itself declines. The compiler `profile: 'ir'` accepts this result and the
-  `undefined` result; it declines a node whose handler returns text or
-  calls `compile`.
-- target source, as a string.
+  longer gets its handler. A result that holds the node itself declines.
+
+The compilation of the node declines when the handler returns text (a
+handler that writes code text is not supported since 0.194.0), calls the
+`compile` callback, or throws. The callback is kept so that `context`
+stays the third argument.
 
 The handler can be called more than once for one node in one
 compilation: it must be a pure function of its operands and context for
 the duration of a `compile()` call.
 
-Takes precedence over the target's built-in operator/function mapping and
-broadcast lowering, so it can override how a built-in operator compiles
-(e.g. a custom-tolerance `GCD`, or a re-mapped `Add`/`Multiply`/`Power`/
-relational operator). It does NOT override the structural / control-flow
-heads (`Sequence`, `Sum`, `Product`, `Function`, `Declare`, `Assign`,
-`Return`, `Break`, `Continue`, `Loop`, `Comprehension`, `If`, `Match`,
-`Block`), which have their own bespoke lowering; a handler declared on
-one of those heads is ignored. `Which` is the exception: its handler is
-consulted.
-
 ```ts
-ce.declare('MyGcd', {
-  signature: '(number, number) -> number',
-  compile: (args, compile, { language }) =>
-    language === 'javascript'
-      ? `_gcd(${compile(args[0])}, ${compile(args[1])})`
-      : undefined,
-});
+const def = ce.lookupDefinition('Twice');
+if (def && 'operator' in def)
+  def.operator.compile = ([x]) => ce.box(['Multiply', 2, x]);
 ```
 
 </MemberCard>
@@ -6043,19 +5846,6 @@ Default `'none'`.
 
 <MemberCard>
 
-##### ArithmeticDefinition.compile? {#compile}
-
-```ts
-compile?: ArithmeticCompile;
-```
-
-The compiled form of the kind. Absent: every target declines an
-expression that holds a value of the kind.
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ArithmeticDefinition.add()? {#add-1}
 
 ```ts
@@ -6557,7 +6347,7 @@ value and the type `unknown`.
 
 <MemberCard>
 
-##### BoxedValueDefinition.value {#value-6}
+##### BoxedValueDefinition.value {#value-5}
 
 ```ts
 value: Expression | undefined;
@@ -6661,7 +6451,7 @@ accepted and re-stamped, never checked against the declaration.
 
 <MemberCard>
 
-##### BoxedValueDefinition.type {#type-7}
+##### BoxedValueDefinition.type {#type-6}
 
 ```ts
 type: BoxedType;
@@ -7062,7 +6852,7 @@ re-parsing or textually inlining its source.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.type? {#type-8}
+##### BoxedOperatorDefinition.type? {#type-7}
 
 ```ts
 type?: OperatorTypeHandlerOnTypes;
@@ -7239,35 +7029,11 @@ key of its definition. See [OperatorDerivative](#operatorderivative).
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.compile? {#compile-1}
+##### BoxedOperatorDefinition.compile? {#compile}
 
 ```ts
 compile?: OperatorCompileHandler;
 ```
-
-</MemberCard>
-
-<MemberCard>
-
-##### BoxedOperatorDefinition.compileShippable? {#compileshippable}
-
-```ts
-compileShippable?: boolean;
-```
-
-See `OperatorDefinition.compileShippable`.
-
-</MemberCard>
-
-<MemberCard>
-
-##### BoxedOperatorDefinition.compileHelpers? {#compilehelpers}
-
-```ts
-compileHelpers?: Readonly<Record<string, (...args) => unknown>>;
-```
-
-See `OperatorDefinition.compileHelpers`.
 
 </MemberCard>
 
@@ -11923,8 +11689,6 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   evalDimension: (args, options) => Expression;
   derivative: OperatorDerivative;
   compile: OperatorCompileHandler;
-  compileShippable: boolean;
-  compileHelpers: Readonly<Record<string, (...args) => unknown>>;
   eq: (a, b, prover?) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
   collection: CollectionHandlers;
@@ -12267,175 +12031,28 @@ key is used.
 compile?: OperatorCompileHandler;
 ```
 
-A custom compilation handler for this operator: emit target-language
-source for a call to this operator. Takes precedence over the target's
-built-in operator/function mapping and its broadcast lowering, so it can
-override how a built-in operator compiles (e.g. a custom-tolerance `GCD`,
-or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
+A compilation handler for this operator: it gives an expression that
+`compile()` compiles in place of a call of this operator, or
+`undefined` to keep the library's compilation of the operator. See
+[OperatorCompileHandler](#operatorcompilehandler).
 
-It does NOT override the structural / control-flow heads, which have
-their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
-`Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-`Comprehension`, `If`, `Match`, `Block`. A handler
-declared on one of those heads is ignored.
+The handler is not asked about the structural and control-flow heads,
+which have their own lowering: `Sequence`, `Sum`, `Product`,
+`Function`, `Declare`, `Assign`, `Return`, `Break`, `Continue`,
+`Loop`, `Comprehension`, `If`, `Match`, `Block`. `Which` is the
+exception: its handler is asked.
 
-Exception: `Which` IS overridable (it has no binding structure — its
-operands are plain condition/value pairs a handler can compile through
-the callback it is given). To customize how `Which` compiles while
-keeping its stock evaluation semantics, attach the handler to the
-engine's own definition rather than re-declaring the operator (a
-re-declaration replaces the stock `evaluate`/`canonical` handlers):
+To change how an operator of the engine compiles and keep its
+evaluation, attach the handler to the definition that
+`ce.lookupDefinition()` returns. A re-declaration of the operator
+replaces its `evaluate` and `canonical` handlers and its effects.
 
 ```ts
 const def = ce.lookupDefinition('Which');
 if (def && 'operator' in def) def.operator.compile = myWhichHandler;
 ```
 
-The override is per-engine (each `ComputeEngine` builds its own
-standard-library definitions), and the decline contract applies: a
-handler returning `undefined` falls back to the built-in `Which`
-lowering, coercion and frame-protocol wrapping included.
-
-**Attaching in place is the supported route for EVERY operator the
-engine already defines, not only `Which`.** Three things follow from
-re-declaring instead, and all three are silent:
-
-- A re-declaration REPLACES the stock `evaluate`/`canonical` handlers.
-  Spreading the captured definition (`ce.declare(op, {...orig, compile})`)
-  is an attempt to carry them across by hand and is not equivalent —
-  attaching to the definition `lookupDefinition` returns keeps them by
-  construction, with nothing to carry.
-- A re-declaration also replaces the definition's EFFECTS declaration,
-  and that is what decides whether a compiled `Sum`/`Product` over a
-  body mentioning the operator keeps its NaN early exit — the
-  `if (acc !== acc) return NaN;` emitted between terms, valid because
-  NaN absorbs `+` and `*`, so once the accumulator is NaN no later
-  term can change the answer. An operator definition is GRANTED
-  purity, so a re-declaration that states no effects keeps the exit.
-  One that states any effects refuses it, since skipping terms would
-  skip the effects too — and the lever is the effect SET, not the
-  `pure` keyword: `pure` is a derived reading of `effects`, so
-  `effects: ['random']` or an effect-annotated signature loses the
-  exit exactly as `pure: false` does, while `effects: []` keeps it
-  exactly as an unspecified definition does. For this exit, carrying
-  a `compile` handler costs nothing by itself, whether it supplies
-  source or declines for the target at hand: the gate reads the
-  definition's declared effects, not who supplied the code. The one
-  shape it cannot catch is a handler emitting effectful source under
-  a definition that states no effects.
-
-  The exit this governs is the one the scalar `Sum`/`Product`
-  lowering emits through `BaseCompiler.isEmissionSkippable`. An
-  element-wise (collection-valued) body carries a separate,
-  UNCONDITIONAL latch of the same spelling, emitted so that a
-  length mismatch collapsing the fold to a scalar NaN cannot be
-  broadcast back over the next term's shape. That latch does not
-  consult the declared effects, so declaring effects does not buy
-  back the later iterations of an element-wise body.
-- Call-sharing is the one cost a handler still pays for being on a
-  re-declared definition, and the declared effects do not govern it. A
-  `compile` handler the engine did not install is a live-source
-  splice the CSE harvest cannot analyse, so every node under that
-  head is refused as a candidate and every callee body mentioning it
-  is refused with it. A self-recursive body loses the binding that
-  made its repeated self-call linear and compiles exponentially —
-  measured ×4 per two levels of `R(i,x,y) = R(i-1,x,y) +
-  0.5·S(x,y,R(i-1,x,y))`. Declaring `pure: true` on the
-  re-declaration does NOT restore sharing. Attaching in place is
-  exempt, because the definition is still the engine's own.
-
-The evaluate side is NOT symmetric with the decline contract above:
-returning `undefined` from an `evaluate` handler leaves the expression
-unevaluated rather than falling back, so a handler that means to
-delegate must call the captured original explicitly.
-
-Return `undefined` (or an empty string) to fall back to the
-default compilation (a `null` returned from untyped JavaScript is
-tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
-
-On the `javascript` target, the code may call two runtime helpers,
-which keep their names and behavior across releases:
-`_SYS.atNoWrap(base, index)` reads the element at a 1-based position
-(or the elements at a list of positions) with no wrap-around, and
-`_SYS.atMask(base, mask)` keeps the elements where a list of booleans
-is `true`, and reads any other index as `atNoWrap` does. The other
-members of `_SYS` are internal and can change in any release. The
-compile guide ("Runtime Helpers for Generated JavaScript") gives the
-details.
-
-The code a caller handler writes runs only on the thread that compiled
-it: the result is not shippable, so `broadcastAsync()` does not send
-it to the kernel pool (`reason: 'not-shippable'`). This holds also
-for a handler attached in place to a built-in definition. Set
-compileShippable when the code can run on a worker.
-
-#### OperatorDefinition.compileShippable?
-
-```ts
-compileShippable?: boolean;
-```
-
-Whether the code that the compile handler writes can run on
-a worker of the kernel pool. Default: `false`.
-
-A worker receives the compiled code as text and has none of the
-functions or global variables of the thread that compiled it. Set
-`true` only when the code calls nothing but the helpers of the
-compiled-code runtime, the operands that the handler compiled, and the
-functions given in compileHelpers. When the code calls a
-function of the compiling thread (`globalThis.myFn(…)`) and this flag
-is `true`, every cell that a worker evaluates throws, and its value is
-`NaN` (`BroadcastAsyncResult.failed` counts these cells).
-
-A compiled result is shippable only when every caller handler that
-wrote part of its code has this flag.
-
-#### OperatorDefinition.compileHelpers?
-
-```ts
-compileHelpers?: Readonly<Record<string, (...args) => unknown>>;
-```
-
-Functions that the code of the compile handler calls by name.
-The engine copies the source of each function (`fn.toString()`) into
-the code it compiles, as `const <name> = (<source>);`, so the code
-carries its helpers to a worker of the kernel pool and to a stored
-result. A helper is defined only when the handler wrote code for the
-`javascript` or `interval-javascript` target.
-
-Because only the source is copied, a helper must not read a variable
-from outside its own body (a closure variable or an import). Such a
-read throws when the compiled code runs, on every thread. A name must
-be a JavaScript identifier that does not start with `_` (the engine
-uses that prefix for its own names). Choose a name that a parameter of
-a compiled function cannot shadow, for example `myLibFloorIndex`.
-Two definitions may give a helper of the same name only with the same
-source.
-
-On the `interval-javascript` target, a compiled operand comes in one
-of two forms, and a helper must accept both: a bare enclosure
-`{ lo, hi }` (an input such as `_.x`), or the result of an interval
-function, `{ kind: 'interval', value: { lo, hi } }` (for example
-`_IA.sqrt(_.x)`, or any operand in a branch of an `If` whose
-condition narrows it). A result can also be `{ kind: 'partial',
-value: { lo, hi }, … }`, `{ kind: 'empty' }`, `{ kind: 'entire' }`
-or `{ kind: 'singular', … }`. A helper that reads only `x.lo` reads
-`undefined` from the second form, with no error. A helper can return
-either form.
-
-```ts
-ce.declare('Wrap', {
-  signature: '(number, number) -> number',
-  compileShippable: true,
-  compileHelpers: {
-    wrapIndex: (i: number, n: number) => ((i % n) + n) % n,
-  },
-  compile: (args, compile, { language }) =>
-    language === 'javascript'
-      ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
-      : undefined,
-});
-```
+The handler is attached to the definition of one engine.
 
 #### OperatorDefinition.eq?
 
@@ -13760,7 +13377,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
 parses one.
 
 ####### type
@@ -14241,85 +13858,6 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### IComputeEngine.\_getCompilationTarget() {#_getcompilationtarget}
-
-###### \_getCompilationTarget(name)
-
-```ts
-_getCompilationTarget(name): 
-  | JavaScriptCompilationTarget<Expression>
-  | undefined
-```
-
-####### name
-
-`"javascript"`
-
-###### \_getCompilationTarget(name)
-
-```ts
-_getCompilationTarget(name): 
-  | LanguageTarget<Expression, string, unknown, number>
-  | undefined
-```
-
-####### name
-
-`string`
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.registerCompilationTarget() {#registercompilationtarget}
-
-```ts
-registerCompilationTarget(name, target): void
-```
-
-Register a compilation target under `name`, so that
-`compile(expr, { to: name })` resolves it. A later registration under the
-same name replaces the earlier target. Throws when `name` is empty or the
-target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
-and `compile()`.
-
-Every engine has `javascript` and `interval-js`. Every engine also has
-`glsl` once the full package entry,
-`@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
-the program, whichever entry made the engine and in whichever order. A
-program that loads only `@cortex-js/compute-engine/core` has the two
-built-in targets: import `GLSLTarget`
-from `@cortex-js/compute-engine/compile` and register it here.
-
-####### name
-
-`string`
-
-####### target
-
-`LanguageTarget`\<[`Expression`](#expression-5)\>
-
-</MemberCard>
-
-<MemberCard>
-
-##### IComputeEngine.unregisterCompilationTarget() {#unregistercompilationtarget}
-
-```ts
-unregisterCompilationTarget(name): void
-```
-
-Remove the compilation target registered under `name`. A name that is
-not registered is ignored.
-
-####### name
-
-`string`
-
-</MemberCard>
-
-<MemberCard>
-
 ##### IComputeEngine.number() {#number-1}
 
 ###### number(value, options)
@@ -14597,7 +14135,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### IComputeEngine.type() {#type-11}
+##### IComputeEngine.type() {#type-10}
 
 ```ts
 type(type): BoxedType
@@ -15068,8 +14606,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `compileShippable`: `boolean`;
-  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -15153,8 +14689,6 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
-  `compileShippable`: `boolean`;
-  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
@@ -18093,7 +17627,7 @@ console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y:
 
 <MemberCard>
 
-##### Expression.value {#value-7}
+##### Expression.value {#value-6}
 
 ```ts
 get value(): Expression | undefined
@@ -19075,7 +18609,7 @@ singular values of a matrix.
 
 <MemberCard>
 
-##### Expression.type {#type-13}
+##### Expression.type {#type-12}
 
 ```ts
 get type(): BoxedType

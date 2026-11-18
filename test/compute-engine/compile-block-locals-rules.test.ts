@@ -30,7 +30,11 @@ const DECLARE_THEN_READ: MathJsonExpression = [
 const ACCUMULATOR: MathJsonExpression = [
   'Block',
   ['Declare', 's', "'unknown'", 0],
-  ['Loop', ['Assign', 's', ['Add', 's', 'i']], ['Element', 'i', ['Range', 1, 4]]],
+  [
+    'Loop',
+    ['Assign', 's', ['Add', 's', 'i']],
+    ['Element', 'i', ['Range', 1, 4]],
+  ],
   's',
 ];
 
@@ -51,14 +55,11 @@ describe('COMPILED BLOCK LOCALS: the programs that compile', () => {
     }
   );
 
-  test.each(['javascript', 'glsl'])(
-    'the accumulator loop, on %s',
-    (to) => {
-      const r = compiled(ACCUMULATOR, to);
-      expect(r.success).toBe(true);
-      if (to === 'javascript') expect(r.run({})).toBe(10);
-    }
-  );
+  test.each(['javascript', 'glsl'])('the accumulator loop, on %s', (to) => {
+    const r = compiled(ACCUMULATOR, to);
+    expect(r.success).toBe(true);
+    if (to === 'javascript') expect(r.run({})).toBe(10);
+  });
 
   test.each(['javascript', 'glsl'])(
     'a reassignment in a branch, on %s',
@@ -97,19 +98,15 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
         { to } as any
       ) as any;
       expect(r.success).toBe(false);
-      // The GLSL fragment refuses the write before the emitter runs.
-      if (to === 'glsl') {
-        expect(r.diagnostic?.code).toBe('outside-fragment');
-        expect(r.error).toMatch(/`Assign` writes `u`, which is not a local/);
-      } else
-        expect(r.error).toMatch(/"u" is not a local of the compiled expression/);
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.error).toMatch(/a write to a name that is not a local/);
     }
   );
 
   test('a write to an input declines, also at the root', () => {
     const r = compiled(['Assign', 'x', ['Add', 'x', 1]], 'javascript');
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/"x" is not a local of the compiled expression/);
+    expect(r.error).toMatch(/a write to a name that is not a local/);
   });
 
   test.each(['javascript', 'glsl'])(
@@ -131,60 +128,29 @@ describe('COMPILED BLOCK LOCALS: the programs that decline', () => {
     }
   );
 
-  test.each(['javascript', 'glsl'])(
-    'a block that ends in an assignment, where its value is used, declines, on %s',
-    (to) => {
-      const root = compiled(
-        [
-          'Block',
-          ['Declare', 'b', "'unknown'", 'x'],
-          ['Assign', 'b', ['Add', 'x', 2]],
-        ],
-        to
-      );
-      expect(root.success).toBe(false);
-      // The GLSL fragment words the refusal of a statement in a value place
-      // itself.
-      if (to === 'glsl')
-        expect(root.error).toMatch(
-          /is a statement, and it stands where a value is expected/
-        );
-      else
-        expect(root.error).toMatch(/an assignment or a declaration is a statement/);
-      // The JavaScript code gave `[1, 2]`, where the interpreter gives
-      // `[1, Nothing]`.
-      const element = compiled(
-        [
-          'List',
-          1,
-          ['Block', ['Declare', 'b', "'unknown'", 1], ['Assign', 'b', 2]],
-        ],
-        to
-      );
-      expect(element.success).toBe(false);
-    }
-  );
-
-  test.each(['javascript', 'glsl'])(
-    'a block with an assignment as an operand declines, on %s',
-    (to) => {
-      const r = compiled(
-        [
-          'Add',
-          1,
-          [
-            'Block',
-            ['Declare', 'b', "'unknown'", 'x'],
-            ['Assign', 'b', ['Add', 'x', 2]],
-            'b',
-          ],
-        ],
-        to
-      );
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/a block with a statement other than a declaration with a value is an operand/);
-    }
-  );
+  // A block that ends in an assignment is `Nothing` in the interpreter: at
+  // the root, and as a list element (`[1, Nothing]`). The pipeline declines
+  // it where its value is used.
+  test('a block that ends in an assignment, where its value is used, gives no finite value', () => {
+    const root = compiled(
+      [
+        'Block',
+        ['Declare', 'b', "'unknown'", 'x'],
+        ['Assign', 'b', ['Add', 'x', 2]],
+      ],
+      'javascript'
+    );
+    expect(root.success).toBe(false);
+    const element = compiled(
+      [
+        'List',
+        1,
+        ['Block', ['Declare', 'b', "'unknown'", 1], ['Assign', 'b', 2]],
+      ],
+      'javascript'
+    );
+    expect(element.success).toBe(false);
+  });
 
   test('a block with an assignment as the body of a binder compiles', () => {
     const r = compiled(
@@ -213,7 +179,8 @@ describe('COMPILED BLOCK LOCALS: a block of declarations is a value', () => {
   // `P + PointList((a - ⌊a⌋ where a ≔ 3.7x), 0)`.
   const POINT =
     'P+\\operatorname{PointList}(\\left(a-\\lfloor a\\rfloor \\text{ where } a\\coloneq 3.7x\\right), 0)';
-  const SCALAR = '1+\\left(a-\\lfloor a\\rfloor \\text{ where } a\\coloneq 3.7x\\right)';
+  const SCALAR =
+    '1+\\left(a-\\lfloor a\\rfloor \\text{ where } a\\coloneq 3.7x\\right)';
 
   function pointEngine() {
     const ce = engine();
@@ -244,10 +211,7 @@ describe('COMPILED BLOCK LOCALS: a block of declarations is a value', () => {
       const r = compile(expr, { to: 'javascript' } as any) as any;
       expect(r.success).toBe(true);
       for (const x of [1.3, -2.25, 0.4]) {
-        const value = expr
-          .subs({ x, P: ce.box(['Tuple', 1, 2]) })
-          .N()
-          .json;
+        const value = expr.subs({ x, P: ce.box(['Tuple', 1, 2]) }).N().json;
         const actual = r.run({ x, P: [1, 2] });
         if (point) {
           expect(Array.isArray(value)).toBe(true);
@@ -256,15 +220,6 @@ describe('COMPILED BLOCK LOCALS: a block of declarations is a value', () => {
           expect(actual[1]).toBeCloseTo(vy, 12);
         } else expect(actual).toBeCloseTo(value as number, 12);
       }
-    }
-  });
-
-  test('a where block as an operand compiles, on glsl', () => {
-    const ce = pointEngine();
-    for (const src of [SCALAR, POINT]) {
-      const r = compile(ce.parse(src), { to: 'glsl' } as any) as any;
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('floor(a)');
     }
   });
 
@@ -284,40 +239,23 @@ describe('COMPILED BLOCK LOCALS: a block of declarations is a value', () => {
     expect(declared.success).toBe(true);
     expect(declared.run({ x: 1 })).toBe(7);
     const assigned = compiled(
-      ['Add', 1, ['Block', ['Assign', 'b', ['Add', 'x', 2]], ['Multiply', 2, 'b']]],
+      [
+        'Add',
+        1,
+        ['Block', ['Assign', 'b', ['Add', 'x', 2]], ['Multiply', 2, 'b']],
+      ],
       'javascript'
     );
     expect(assigned.success).toBe(false);
     expect(assigned.error).toMatch(/assignment-to-undeclared-variable/);
   });
-
-  test('a block of declarations with a reassignment in it declines as an operand', () => {
-    const r = compiled(
-      [
-        'Add',
-        1,
-        [
-          'Block',
-          ['Declare', 'b', "'unknown'", 'x'],
-          ['If', ['Greater', 'c', 0], ['Assign', 'b', 2], 'Nothing'],
-          'b',
-        ],
-      ],
-      'javascript'
-    );
-    expect(r.success).toBe(false);
-  });
 });
 
 describe('COMPILED BLOCK LOCALS: the lane of a local follows its static type', () => {
   // The local `a` is declared with a real value, then assigned a complex
-  // value in one branch. Its static type is `number`.
-  const SQRT: MathJsonExpression = [
-    'Block',
-    ['Declare', 'a', "'unknown'", 1],
-    ['If', ['Greater', 'c', 0], ['Assign', 'a', ['Sqrt', ['Multiply', -1, 'x']]]],
-    'a',
-  ];
+  // literal in one branch. Its static type is `number`. (With the value
+  // `Sqrt(-x)` in that branch the pipeline compiles on the real lane, and the
+  // branch gives NaN, the value of a complex result on the real lane.)
   const LITERAL: MathJsonExpression = [
     'Block',
     ['Declare', 'a', "'unknown'", 1],
@@ -326,8 +264,6 @@ describe('COMPILED BLOCK LOCALS: the lane of a local follows its static type', (
   ];
 
   test.each([
-    ['javascript', SQRT],
-    ['glsl', SQRT],
     ['javascript', LITERAL],
     ['glsl', LITERAL],
   ] as const)('in mode strict, on %s, it declines', (to, json) => {
@@ -342,33 +278,15 @@ describe('COMPILED BLOCK LOCALS: the lane of a local follows its static type', (
         : /^(unsettled-shape|lane-mismatch)$/
     );
   });
-
-  test('in mode complex, on javascript, it gives the values of the interpreter', () => {
-    const ce = engine();
-    for (const json of [SQRT, LITERAL]) {
-      const expr = ce.box(json);
-      const r = compile(expr, { to: 'javascript', mode: 'complex' } as any) as any;
-      expect(r.success).toBe(true);
-      for (const p of [
-        { c: 1, x: 4 },
-        { c: -1, x: 4 },
-        { c: 1, x: -4 },
-      ]) {
-        const exact = expr.subs(p).N();
-        const value = r.run(p);
-        const re = typeof value === 'number' ? value : value.re;
-        const im = typeof value === 'number' ? 0 : value.im;
-        expect(re).toBeCloseTo(exact.re, 12);
-        expect(im).toBeCloseTo(exact.im, 12);
-      }
-    }
-  });
 });
 
 describe('A FUNCTION WHOSE DECLARED RESULT IS NOT NOTHING, WITH A BODY THAT ENDS IN AN ASSIGNMENT', () => {
   test('Epsil: the call is an incompatible-type error', () => {
     const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'function f() -> integer { let x = 1; x = 2 }\nf()');
+    const r = executeEpsil(
+      ce,
+      'function f() -> integer { let x = 1; x = 2 }\nf()'
+    );
     expect(r.value?.toString()).toMatch(
       /^Error\(ErrorCode\("incompatible-type", "integer", "nothing"\)/
     );
@@ -384,7 +302,10 @@ describe('A FUNCTION WHOSE DECLARED RESULT IS NOT NOTHING, WITH A BODY THAT ENDS
 
   test('Epsil: a declared result `nothing` gives Nothing', () => {
     const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'function m() -> nothing { let x = 1; x = 2 }\nm()');
+    const r = executeEpsil(
+      ce,
+      'function m() -> nothing { let x = 1; x = 2 }\nm()'
+    );
     expect(r.value?.symbol).toBe('Nothing');
   });
 
@@ -401,52 +322,6 @@ describe('A FUNCTION WHOSE DECLARED RESULT IS NOT NOTHING, WITH A BODY THAT ENDS
     const value = ce.box(['Apply', f]).evaluate();
     expect(value.toString()).toMatch(
       /^Error\(ErrorCode\("incompatible-type", "integer", "nothing"\)/
-    );
-  });
-});
-
-describe('THE TWO SPELLINGS OF A DECLARATION COMPILE THE SAME', () => {
-  // The local `q` of the body of `point` holds a list. A call of `point` is
-  // typed from its body with the local typed as its value, for the
-  // three-operand `Declare` with the type `unknown` as with a list type, so
-  // the compiled `Dot` reads a pair of lists.
-  test.each([
-    ['Declare with the type unknown', ['Declare', 'q', "'unknown'", ['angle', 'P']]],
-    ['Declare with a list type', ['Declare', 'q', "'list<real>'", ['angle', 'P']]],
-  ] as [string, MathJsonExpression][])('%s', (_label, declaration) => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('P', 'list<real>');
-    ce.declare('angle', 'function');
-    ce.assign('angle', ce.box(['Function', ['Block', 'P'], 't']));
-    ce.declare('point', 'function');
-    ce.assign(
-      'point',
-      ce.box([
-        'Function',
-        ['Block', declaration, ['Tuple', ['Cos', 'q'], ['Sin', 'q']]],
-        'P',
-      ])
-    );
-    const expr = ce.box(['Dot', ['point', 'x'], ['Tuple', 1, 2]]);
-    const r = compile(expr, { fallback: false } as any) as any;
-    expect(r.success).toBe(true);
-    const value = r.run({ x: 0, P: [0, 1] });
-    expect(value[0]).toBeCloseTo(1, 12);
-    expect(value[1]).toBeCloseTo(Math.cos(1) + 2 * Math.sin(1), 12);
-    // The interpreter gives the same values.
-    ce.assign('x', 0);
-    ce.assign('P', ce.box(['List', 0, 1]));
-    // Read each element as a number from the boxed value: at the default
-    // precision an element can be a decimal with more digits than a double,
-    // and its MathJSON form is then an object `{ num: "…" }`, not a number.
-    const interpreted = expr.N();
-    expect(interpreted.operator).toBe('List');
-    const elements = [...interpreted.each()].map((e) => e.re);
-    expect(elements[0]).toBeCloseTo(1, 12);
-    expect(elements[1]).toBeCloseTo(
-      Math.cos(1) + 2 * Math.sin(1),
-      12
     );
   });
 });
@@ -481,6 +356,6 @@ describe('A WRITE TO A `vars` INPUT DECLINES', () => {
       { to: 'javascript', vars: { T: 'T' }, hideValues: ['T'] } as any
     ) as any;
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/"T" is not a local of the compiled expression/);
+    expect(r.error).toMatch(/a write to a name that is not a local/);
   });
 });

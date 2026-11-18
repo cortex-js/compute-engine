@@ -300,7 +300,7 @@ export function deriveSubstream(
  * Lives here, in a leaf module with no engine imports, rather than in
  * `boxed-expression/utils.ts`: `stochastic-equal.ts` deliberately avoids
  * importing `utils.ts` to stay out of the `compare → stochastic-equal →
- * compile-expression → base-compiler → utils` cycle, and it is one of the two
+ * compile-expression → … → utils` cycle, and it is one of the two
  * callers.
  */
 export function mixTags(...hashes: number[]): number {

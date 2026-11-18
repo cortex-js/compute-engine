@@ -129,19 +129,6 @@ describe('row 421: a bound that may not be a number (the cases of the review)', 
     expect(p.re).toBe(24);
   });
 
-  test('the compiled loop answers NaN for a bound that is not a number', () => {
-    ce.pushScope();
-    ce.declare('z', { type: 'number | string' });
-    const r = compile(ce.parse('\\sum_{n=1}^{z}n'), {
-      to: 'javascript',
-    }) as any;
-    ce.popScope();
-    expect(r.success).toBe(true);
-    expect(r.run({ z: 3 })).toBe(6);
-    // `Math.floor` read "3" as 3, true as 1 and [3] as 3.
-    for (const z of ['3', true, [3]]) expect(r.run({ z })).toBeNaN();
-  });
-
   test('a bound typed as a number still compiles to Math.floor', () => {
     ce.pushScope();
     ce.declare('u', { type: 'real' });

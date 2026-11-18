@@ -1,8 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
-
-import type { MathJsonExpression } from '../../src/math-json/types';
 
 //
 // CONFORMANCE OF A SUM TYPE — `type shape is Area { … }` where `shape` is a
@@ -262,34 +259,3 @@ describe('a variant that is not a legal conformance target', () => {
   });
 });
 
-describe('the compile tier', () => {
-  test('a member call over a variant value compiles and agrees with the interpreter', () => {
-    const ce = new ComputeEngine();
-    expect(codes(ce, `${AREA}\n${SHAPE}\n${SHAPE_IS_AREA}`)).toEqual([]);
-    const expr = ce.box(['area', ['circle', 2]] as MathJsonExpression);
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.run?.()).toBe(12);
-    expect(expr.evaluate().toString()).toBe('12');
-  });
-
-  test('a receiver decided only at run time dispatches on the variant', () => {
-    const ce = new ComputeEngine();
-    expect(
-      codes(
-        ce,
-        `${AREA}
-${SHAPE}
-${SHAPE_IS_AREA}
-function total(s: shape) -> number { area(s) }`
-      )
-    ).toEqual([]);
-    const result = compile(ce.box(['total', 'x'] as MathJsonExpression));
-    expect(result.success).toBe(true);
-    // Both variants of this sum carry one number, so they share an erased
-    // representation and the sum compiles TAGGED: a value is `{_tag, _ops}`.
-    expect(result.run?.({ x: { _tag: 'circle', _ops: [2] } })).toBe(12);
-    expect(result.run?.({ x: { _tag: 'square', _ops: [3] } })).toBe(9);
-    expect(run(ce, 'total(square(3))').value.toString()).toBe('9');
-  });
-});

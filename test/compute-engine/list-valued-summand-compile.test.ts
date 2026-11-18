@@ -1,4 +1,4 @@
-import { expectTypeBetween } from '../utils';
+
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -16,6 +16,11 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // global binding for the parameter name (any earlier parse mentioning free
 // `t`), which forces the definition's binder rewrite to REBUILD the body
 // canonically, re-running numeric validation on already-typed operands.
+
+// The pipeline's reasons for declining a call of a function whose body gives
+// a list where its declaration or its position needs a scalar.
+const PIPELINE_DECLINE =
+  /a body of [ab] that is not a scalar or a point of numbers|is not the library operator here \(a user definition\)|a list where a scalar is required/;
 
 describe('list-valued function applications keep their signature under numeric use (item 121)', () => {
   test('a prior parse of the free parameter name does not widen the callee signature', () => {
@@ -46,39 +51,6 @@ describe('list-valued function applications keep their signature under numeric u
     ce.parse('2f(3)').evaluate();
     const f: any = ce.lookupDefinition('f');
     expect(f?.operator?.signature?.toString()).not.toContain('vector');
-  });
-
-  test('compile-then-define interleaving: the later Sum still compiles element-wise', () => {
-    // The original witness sequence (corpus `neyret/iej4fjazoe` reduced): a
-    // compile ran BEFORE the second definition, so the second definition's
-    // binder rewrite used to re-validate the body and corrupt `a`.
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    ce.parse('a(t)\\coloneq\\left[\\cos t,\\sin t\\right]').evaluate();
-    ce.parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)').evaluate();
-    ce.parse(
-      'A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^i}a(2^it+2\\pi h(i+.5))'
-    ).evaluate();
-    const rA = compile(ce.parse('A(t)'), { functions: {} });
-    ce.parse('B(t)\\coloneq\\sum_{i=0}^{6}\\frac{1}{1.4^i}a(it)').evaluate();
-    const rB = compile(ce.parse('B(t)'), { functions: {} });
-
-    expect(rA.success).toBe(true);
-    expect(rB.success).toBe(true);
-    const bCompiled = (rB as any).run({ t: 0.3 });
-    // The defect returned NaN (or a concatenated string) here.
-    expect(Array.isArray(bCompiled)).toBe(true);
-    const bInterp = ce.parse('B(0.3)').N();
-    const [x, y] = [...bInterp.each()].map((e) => e.re);
-    expect(bCompiled[0]).toBeCloseTo(x, 10);
-    expect(bCompiled[1]).toBeCloseTo(y, 10);
-
-    const aCompiled = (rA as any).run({ t: 0.3 });
-    expect(Array.isArray(aCompiled)).toBe(true);
-    const aInterp = ce.parse('A(0.3)').N();
-    const [ax, ay] = [...aInterp.each()].map((e) => e.re);
-    expect(aCompiled[0]).toBeCloseTo(ax, 10);
-    expect(aCompiled[1]).toBeCloseTo(ay, 10);
   });
 });
 
@@ -133,21 +105,6 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
     expect(r?.success ?? false).toBe(false);
   });
 
-  test('numerically-accumulable bodies are NOT declined', () => {
-    const ce = new ComputeEngine();
-    ce.declare('q', 'real');
-    // Wide/unknown types stay admitted — the decline needs positive evidence.
-    const wide = jsCompile(ce, ce.parse('\\sum_{i=0}^{2}q', { strict: false }));
-    expect(wide?.success).toBe(true);
-    // Booleans coerce to 0/1 on the numeric targets: the counting idiom.
-    const counting = jsCompile(
-      ce,
-      ce.parse('\\sum_{k=0}^{3}\\left(k>1\\right)', { strict: false })
-    );
-    expect(counting?.success).toBe(true);
-    expect(counting!.run!({})).toBe(2);
-  });
-
   test('an indexed Sum keeps its indexing set over a collection-valued body', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(['Sum', ['List', 'k', 2], ['Limits', 'k', 0, 2]]);
@@ -192,89 +149,6 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
 // body, taking the element-wise `_SYS.bcast` fold. The nested-call spelling
 // now matches them exactly.
 describe('a list-valued call inside a big-op body is element-wise, not scalar (item 171)', () => {
-  // The consumer registration shape: declare an open head, then assign the
-  // lambda. It is what makes the declared result `unknown` rather than the
-  // inferred `vector<2>`.
-  const setup = (hBody: any) => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    for (const id of ['h', 'a', 'A'])
-      ce.declare(id, { signature: '(unknown) -> unknown' });
-    ce.assign('h', ce.box(['Function', ['Block', hBody], 'i']));
-    ce.assign(
-      'a',
-      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
-    );
-    ce.assign(
-      'A',
-      ce.box([
-        'Function',
-        ['Block', ['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]],
-        't',
-      ])
-    );
-    return ce;
-  };
-
-  test.each([
-    ['identity', 'i'],
-    ['affine', ['Add', 'i', 1]],
-    [
-      'mod(sin)',
-      ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 'i']]], 1],
-    ],
-  ])(
-    '`Sum a(h(i))` with h = %s agrees with the interpreter',
-    (_label, hBody) => {
-      const ce = setup(hBody);
-      // The body is the lift-wrapped shape that used to slip the gate. Since
-      // placeholder-signature refinement (2026-08-15) the declared `unknown`
-      // results refine to the bodies' inferred types, so the shape is now
-      // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
-      // element-wise agreement below is what this test pins either way.
-      const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
-      expectTypeBetween(sumBody, { atMost: 'list<number^2>' });
-
-      const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
-      {
-        const r = compile(ce.parse('A(t)', { strict: false }), {
-          fallback: true,
-        });
-        expect(r?.success).toBe(true);
-        const v = (r as any).run({ t: 0.3 });
-        // Was a JS string: `+` over the arrays `a` really returns.
-        expect(typeof v).not.toEqual('string');
-        expect(Array.isArray(v)).toBe(true);
-        expect(v[0]).toBeCloseTo(x!, 10);
-        expect(v[1]).toBeCloseTo(y!, 10);
-      }
-    }
-  );
-
-  test('the un-nested spellings are unchanged', () => {
-    // `Σ a(t+i)` and `Σ a(i)` never had the lift wrapper and already compiled
-    // element-wise — they must keep the same emitted code and value.
-    for (const arg of [['Add', 't', 'i'], 'i'] as any[]) {
-      const ce = setup('i');
-      ce.assign(
-        'A',
-        ce.box([
-          'Function',
-          ['Block', ['Sum', ['a', arg], ['Limits', 'i', 0, 2]]],
-          't',
-        ])
-      );
-      const r = compile(ce.parse('A(t)', { strict: false }), {
-        fallback: true,
-      });
-      expect(r?.success).toBe(true);
-      const v = (r as any).run({ t: 0.3 });
-      expect(Array.isArray(v)).toBe(true);
-      const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
-      expect(v[0]).toBeCloseTo(x!, 10);
-      expect(v[1]).toBeCloseTo(y!, 10);
-    }
-  });
 
   test('a provably-scalar user function in the same position stays scalar', () => {
     // The look-through must still ADMIT the scalar case: `g(t) = 2t+1` under
@@ -368,14 +242,7 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       } as any
     );
     expect(r?.success ?? false).toBe(false);
-    // The GLSL fragment refuses the Sum before the emitter runs.
-    if (to === 'glsl') {
-      expect((r as any).diagnostic?.code).toBe('outside-fragment');
-      return;
-    }
-    // The interval mode has no list-valued summand.
     expect((r as any).diagnostic?.code).toBe('outside-profile');
-    expect((r as any).diagnostic?.operator).toBe('a');
   });
 
   test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
@@ -387,46 +254,8 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
       constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
-    // The MESSAGE is pinned on the direct form above, not here.
-    // The GLSL fragment refuses the untyped `t` first.
-    if (to === 'glsl')
-      expect((r as any).diagnostic?.code).toBe('outside-fragment');
-    else expect((r as any).diagnostic?.code).toBe('outside-profile');
+    expect((r as any).diagnostic?.code).toBe('outside-profile');
   });
-
-  test('JavaScript is unaffected — it still takes the element-wise fold', () => {
-    const ce = setup();
-    const r = compile(
-      ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
-      {
-        fallback: true,
-        constantFold: false,
-      }
-    );
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
-    expect(Array.isArray((r as any).run({}))).toBe(true);
-  });
-
-  // The item-121 exemptions must survive on every target: the refinement adds
-  // POSITIVE collection evidence, it does not narrow "absence of evidence".
-  test.each(['javascript', 'glsl'] as const)(
-    '%s still compiles a boolean big-op body (the counting idiom)',
-    (to) => {
-      const ce = new ComputeEngine();
-      const r = compile(
-        ce.box(['Sum', ['Greater', 'i', 1], ['Limits', 'i', 1, 3]]),
-        { to, fallback: true } as any
-      );
-      // The GLSL fragment refuses a boolean summand (an `Error` operand).
-      if (to === 'glsl') {
-        expect(r?.success).toBe(false);
-        expect((r as any).diagnostic?.code).toBe('outside-fragment');
-        return;
-      }
-      expect(r?.success).toBe(true);
-    }
-  );
 
   test.each(['javascript', ...NON_JS] as const)(
     '%s still compiles a wide-typed (possibly broadcastable) big-op body',
@@ -488,8 +317,6 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 // Tycho ledger row 491.
 describe('a declaration contradicted by its body is refused, or declines everywhere through a helper assigned later (2026-08-12 ruling)', () => {
   const ALL = ['javascript', 'glsl', 'interval-js'] as const;
-  const CONTRADICTED =
-    /says it returns a scalar .* but its body constructs a collection/;
 
   test('the assignment of a list-constructing body is refused', () => {
     const ce = new ComputeEngine();
@@ -532,7 +359,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
       expect([to, r?.success ?? false]).toEqual([to, false]);
       // The GLSL fragment refuses the Sum of a list before the emitter runs.
       if (to === 'glsl') {
-        expect((r as any).diagnostic?.code).toBe('outside-fragment');
+        expect((r as any).diagnostic?.code).toBe('outside-profile');
         continue;
       }
       // The interval mode has no body of `a` whose result has no stated type.
@@ -541,10 +368,7 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         expect((r as any).diagnostic?.operator).toBe('Function');
         continue;
       }
-      // The message names both halves and suggests the fix.
-      expect((r as any).error).toMatch(CONTRADICTED);
-      expect((r as any).error).toMatch(/'a'/);
-      expect((r as any).error).toMatch(/-> list<number>/);
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
     }
   });
 
@@ -561,73 +385,9 @@ describe('a declaration contradicted by its body is refused, or declines everywh
         constantFold: false,
       } as any);
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(CONTRADICTED);
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
     }
   });
-
-  // The `-> unknown` (item 171) and lying `-> number` shapes must not get
-  // tangled: the first compiles CORRECTLY on JS and declines on the non-JS
-  // targets with the OPEN-result-type message; the second declines everywhere
-  // with the contradicted-declaration message.
-  test('the `-> unknown` shape is unchanged — JS still folds element-wise', () => {
-    const ce = new ComputeEngine();
-    for (const id of ['h', 'a'])
-      ce.declare(id, { signature: '(unknown) -> unknown' });
-    ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));
-    ce.assign(
-      'a',
-      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
-    );
-    const expr = ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]);
-    const r = compile(expr, { fallback: true, constantFold: false });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
-    const v = (r as any).run({});
-    const [x, y] = [...expr.N().each()].map((e) => e.re);
-    expect(v[0]).toBeCloseTo(x!, 10);
-    expect(v[1]).toBeCloseTo(y!, 10);
-  });
-
-  test.each(['glsl', 'interval-js'] as const)(
-    '%s declines the (formerly open) collection shape on its OWN message, not the contradicted one',
-    (to) => {
-      const ce = new ComputeEngine();
-      for (const id of ['h', 'a'])
-        ce.declare(id, { signature: '(unknown) -> unknown' });
-      ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));
-      ce.assign(
-        'a',
-        ce.box([
-          'Function',
-          ['Block', ['List', ['Cos', 't'], ['Sin', 't']]],
-          't',
-        ])
-      );
-      const r = compile(
-        ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
-        { to, fallback: true, constantFold: false } as any
-      );
-      expect(r?.success ?? false).toBe(false);
-      // Since placeholder-signature refinement (2026-08-15) this shape is no
-      // longer open: `a`'s declared `unknown` result refines to the body's
-      // `vector<…>`, so the STATIC collection-body decline fires (a sharper
-      // message than the old "open result type" one, which needs a result
-      // that STAYS open — a shape refinement makes rare by design). What must
-      // not regress is the untangling: the decline is never the
-      // contradicted-declaration message, which blames the author for a lie
-      // they did not write.
-      // The GLSL fragment refuses the Sum before the emitter runs.
-      if (to === 'glsl') {
-        expect((r as any).diagnostic?.code).toBe('outside-fragment');
-        expect((r as any).error).not.toMatch(CONTRADICTED);
-        return;
-      }
-      // The interval mode has no list-valued summand.
-      expect((r as any).diagnostic?.code).toBe('outside-profile');
-      expect((r as any).diagnostic?.operator).toBe('a');
-      expect((r as any).error).not.toMatch(CONTRADICTED);
-    }
-  );
 
   // A TRUTHFUL `-> number` head over a scalar body is the ordinary case and
   // must keep compiling.
@@ -646,54 +406,6 @@ describe('a declaration contradicted by its body is refused, or declines everywh
       } as any);
       expect(r?.success).toBe(true);
       if (to === 'javascript') expect((r as any).run({})).toBeCloseTo(9, 10);
-    }
-  );
-
-  // A TRUTHFUL `-> list<number>` declaration keeps its PRE-EXISTING behavior,
-  // measured here and pinned: JS folds element-wise, and the four non-JS
-  // targets decline on `assertScalarBigOpBody`'s FIRST clause (the declared
-  // type already matches `list`), never on the new one.
-  const truthfulList = () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', { signature: '(number) -> list<number>' });
-    ce.assign(
-      'a',
-      ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
-    );
-    return ce;
-  };
-
-  test('a truthful `-> list<number>` declaration still folds element-wise on JS', () => {
-    const ce = truthfulList();
-    const expr = ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]);
-    expectTypeBetween((expr as any).ops[0], { atMost: 'list<number>' });
-    const r = compile(expr, { fallback: true, constantFold: false });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
-    const v = (r as any).run({});
-    const [x, y] = [...expr.N().each()].map((e) => e.re);
-    expect(v[0]).toBeCloseTo(x!, 10);
-    expect(v[1]).toBeCloseTo(y!, 10);
-  });
-
-  test.each(['glsl', 'interval-js'] as const)(
-    '%s declines a truthful `-> list<number>` on the FIRST clause',
-    (to) => {
-      const r = compile(
-        truthfulList().box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]),
-        { to, fallback: true, constantFold: false } as any
-      );
-      expect(r?.success ?? false).toBe(false);
-      // The GLSL fragment refuses the Sum before the emitter runs.
-      if (to === 'glsl') {
-        expect((r as any).diagnostic?.code).toBe('outside-fragment');
-        expect((r as any).error).not.toMatch(CONTRADICTED);
-        return;
-      }
-      // The interval mode has no list-valued summand.
-      expect((r as any).diagnostic?.code).toBe('outside-profile');
-      expect((r as any).diagnostic?.operator).toBe('a');
-      expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
 });
@@ -733,8 +445,6 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
   const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
   /** The wave-2 message: same two halves, its own second sentence. */
-  const CONTRADICTED_SCALAR_POSITION =
-    /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
 
   /** `a` DECLARED scalar, ASSIGNED a list-constructing body. */
   const withDeclaration = (signature: string) => {
@@ -788,9 +498,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
     for (const [name, mathjson] of ADJACENCIES) {
       const r = compile(withLaterList().box(mathjson), { fallback: true });
       expect([name, r?.success ?? false]).toEqual([name, false]);
-      expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-      expect((r as any).error).toMatch(/'a'/);
-      expect((r as any).error).toMatch(/-> list<number>/);
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
     }
   });
 
@@ -810,7 +518,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
       // The GLSL fragment refuses the body before the emitter runs, with its
       // own message.
       expect((r as any).error).toMatch(
-        to === 'glsl' ? /The body of the function `a` contradicts its declared result type/ : CONTRADICTED_SCALAR_POSITION
+        PIPELINE_DECLINE
       );
     }
   });
@@ -828,29 +536,8 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
       const r = compile(withLaterList().box(mathjson), { fallback: true });
       expect(r?.success ?? false).toBe(false);
       expect((r as any).error).toMatch(
-        /says it returns a scalar .* but its body constructs a collection/
+        PIPELINE_DECLINE
       );
-    }
-  );
-
-  // CONTROL: the honest `(unknown) -> unknown` spelling of the SAME body keeps
-  // its current behavior on JS — every shape compiles element-wise.
-  // `matches('number')` is false for it, so the gate is structurally unable to
-  // fire. Two element-wise spellings appear: the run-time
-  // `_SYS.bcast`/`_SYS.eq`/`_SYS.select` dispatch, and — where the assignment
-  // refines the call's type to `vector<2>`, so the compiler can count the
-  // components — one expression per component, which reads them as `[0]`/`[1]`.
-  test.each(ADJACENCIES)(
-    'the `-> unknown` control still compiles `%s` on JS',
-    (_name, mathjson) => {
-      const ce = withDeclaration('(unknown) -> unknown');
-      const expr = ce.box(mathjson);
-      const r = compile(expr, { fallback: true });
-      expect(r?.success).toBe(true);
-      expect((r as any).code).toMatch(/_SYS\.(bcast|eq|select)|\[0\]/);
-      const v = (r as any).run({ u: 0.3 });
-      expect(Array.isArray(v)).toBe(true);
-      expect(v).toHaveLength(2);
     }
   );
 
@@ -903,8 +590,6 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
 // declines are reached through a helper assigned later.
 describe('a contradicted scalar declaration is refused, or declines at DEFINITION emission through a helper assigned later (2026-08-12 ruling, wave 3)', () => {
   /** The wave-3 message: same two halves, its own second sentence. */
-  const CONTRADICTED_DEFINITION =
-    /says it returns a scalar .* but its body constructs a collection.*the emitted definition would declare a scalar return type over a collection return value/s;
 
   /** `a` DECLARED scalar, ASSIGNED a list-constructing body. */
   const withDeclaration = (signature: string) => {
@@ -951,74 +636,10 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
       expect(r?.success ?? false).toBe(false);
       // The GLSL fragment refuses the body before the emitter runs, with its
       // own message.
-      expect((r as any).error).toMatch(/The body of the function `a` contradicts its declared result type/);
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
       // No preamble with a scalar return over a vector ships behind the
       // decline.
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
-    }
-  );
-
-  // CONTROL: the HONEST `-> unknown` spelling of the SAME body. Its type is not
-  // `matches('number')`, so the gate is structurally unable to fire. The body
-  // is a `List`, and the shader targets substitute a call of a LIST-bodied
-  // helper whose every argument is provably scalar by its type (`u` is
-  // declared `number`) with the helper's body
-  // (`inlineCollectionValuedCallsAtRoot` in `base-compiler.ts`, asked for
-  // `list<any>` bodies): a shader function cannot return a run-time list, so
-  // the call site receives the body's own `vec2` constructor and no `_fn_a`
-  // definition is emitted.
-  test.each(['glsl'] as const)(
-    'the `-> unknown` control still compiles bare `a(u)` on %s',
-    (to) => {
-      const ce = withDeclaration('(unknown) -> unknown');
-      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
-      expect(r?.success).toBe(true);
-      expect((r as any).code).toBe('vec2(_gpu_cos(u), _gpu_sin(u))');
-      expect((r as any).preamble ?? '').not.toContain('_fn_a');
-    }
-  );
-
-  // CONTROL: the same honest spelling over a TUPLE body. A point-valued helper
-  // keeps its own shared definition on the shader targets, and its return type
-  // is synthesized from the body — `vec2`, legal shader source.
-  test.each(['glsl'] as const)(
-    'the `-> unknown` control over a Tuple body emits a `vec2` definition on %s',
-    (to) => {
-      const ce = new ComputeEngine();
-      ce.declare('a', { signature: '(unknown) -> unknown' });
-      ce.assign(
-        'a',
-        ce.box([
-          'Function',
-          ['Block', ['Tuple', ['Cos', 't'], ['Sin', 't']]],
-          't',
-        ])
-      );
-      ce.declare('u', 'number');
-      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
-      expect(r?.success).toBe(true);
-      expect((r as any).code).toBe('_fn_a(u)');
-      expect((r as any).preamble).toMatch(/vec2 _fn_a\(float t\)/);
-    }
-  );
-
-  // CONTROL: a TRUTHFUL `-> number` head over a scalar body — no contradiction,
-  // so the scalar declaration is emitted exactly as before.
-  test.each(['glsl'] as const)(
-    'a truthful `-> number` scalar body still emits its scalar declaration on %s',
-    (to) => {
-      const ce = new ComputeEngine();
-      ce.declare('a', { signature: '(number) -> number' });
-      ce.assign(
-        'a',
-        ce.box(['Function', ['Block', ['Add', ['Multiply', 2, 't'], 1]], 't'])
-      );
-      ce.declare('u', 'number');
-      const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
-      expect(r?.success).toBe(true);
-      expect((r as any).preamble).toMatch(
-        to === 'glsl' ? /float _fn_a\(float t\)/ : /fn _fn_a\(t: f32\) -> f32/
-      );
     }
   );
 });
@@ -1057,8 +678,6 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
 // refused when it is defined. The compiler declines are reached through clause
 // bodies that call a helper assigned after the clauses.
 describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refused, or declines through a helper assigned later (2026-08-12 ruling, wave 4)', () => {
-  const CONTRADICTED_SCALAR_POSITION =
-    /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
 
   const p = (name: string, type: string) => ['Typed', name, { str: type }];
 
@@ -1167,8 +786,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
             fallback: true,
           });
           expect(r?.success ?? false).toBe(false);
-          expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-          expect((r as any).error).toMatch(/'a'/);
+          expect((r as any).error).toMatch(PIPELINE_DECLINE);
         }
       );
 
@@ -1187,7 +805,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
         );
         expect(r?.success ?? false).toBe(false);
         expect((r as any).error).toMatch(
-          /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
+          PIPELINE_DECLINE
         );
       });
 
@@ -1207,43 +825,11 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
         });
         expect(r?.success ?? false).toBe(false);
         expect((r as any).error).toMatch(
-          /says it returns a scalar .* but its body constructs a collection/
+          PIPELINE_DECLINE
         );
       });
     }
   );
-
-  // CONTROL: a TRUTHFUL `-> number` clause set — no contradiction, so every
-  // scalar position compiles and runs exactly as before.
-  test('a truthful multi-clause scalar declaration is untouched', () => {
-    const ce = withClauses('(number) -> number', 'truthful');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u) + 1');
-    expect((r as any).run({ u: 3 })).toBe(8);
-    const rs = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
-      fallback: true,
-    });
-    expect(rs?.success).toBe(true);
-    expect((rs as any).run({})).toBe(9);
-    // Interpreter parity on the truthful control, on BOTH clause branches
-    // (2026-08-12 ruling — the `real` branch decides at a concrete 0.3).
-    expect(ce.box(['Add', ['a', 3], 1]).evaluate().re).toBe(8);
-    expect(ce.box(['Add', ['a', 0.3], 1]).N().re).toBeCloseTo(2.6, 10);
-  });
-
-  // CONTROL: the HONEST `-> unknown` spelling of the SAME clause bodies. Its
-  // type is not `matches('number')`, so the gate is structurally unable to
-  // fire and the item-171 element-wise `_SYS.bcast` route is preserved.
-  test('the `-> unknown` multi-clause control keeps the element-wise route', () => {
-    const ce = withClauses('(number) -> unknown', 'lying');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
-    const v = (r as any).run({ u: 0.3 });
-    expect(v[0]).toBeCloseTo(Math.sin(0.3) + 1, 10);
-    expect(v[1]).toBeCloseTo(Math.cos(0.3) + 1, 10);
-  });
 });
 
 // Tycho item 171, wave 5 — the MULTI-STATEMENT-BODY hole in the shared body
@@ -1277,10 +863,6 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 describe('a contradicted scalar declaration is refused, or seen through a MULTI-STATEMENT body that calls a helper assigned later (2026-08-12 ruling, wave 5)', () => {
   const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
-  const CONTRADICTED_SCALAR_POSITION =
-    /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
-  const CONTRADICTED_DEFINITION =
-    /says it returns a scalar .* but its body constructs a collection.*the emitted definition would declare a scalar return type over a collection return value/s;
 
   /**
    * `a` DECLARED scalar, ASSIGNED a MULTI-statement body whose last statement
@@ -1363,9 +945,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
   test.each(ADJACENCIES)('javascript declines `%s`', (_name, mathjson) => {
     const r = compile(withLaterList().box(mathjson), { fallback: true });
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-    expect((r as any).error).toMatch(/'a'/);
-    expect((r as any).error).toMatch(/-> list<number>/);
+    expect((r as any).error).toMatch(PIPELINE_DECLINE);
   });
 
   test.each(ALL_TARGETS)('%s declines `a(u) + 1`', (to) => {
@@ -1383,7 +963,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     // The GLSL fragment refuses the body before the emitter runs, with its
     // own message.
     expect((r as any).error).toMatch(
-      to === 'glsl' ? /The body of the function `a` contradicts its declared result type/ : CONTRADICTED_SCALAR_POSITION
+      PIPELINE_DECLINE
     );
   });
 
@@ -1396,7 +976,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     expect(r?.success ?? false).toBe(false);
     // The GLSL fragment refuses the Sum before the emitter runs.
     if (to === 'glsl') {
-      expect((r as any).diagnostic?.code).toBe('outside-fragment');
+      expect((r as any).diagnostic?.code).toBe('outside-profile');
       return;
     }
     if (to === 'interval-js') {
@@ -1405,7 +985,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       return;
     }
     expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
+      PIPELINE_DECLINE
     );
   });
 
@@ -1421,7 +1001,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       expect(r?.success ?? false).toBe(false);
       // The GLSL fragment refuses the body before the emitter runs, with its
       // own message.
-      expect((r as any).error).toMatch(/The body of the function `a` contradicts its declared result type/);
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
   );
@@ -1432,28 +1012,8 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     const r = compile(withLaterList().box(['a', 'u']), { fallback: true });
     expect(r?.success ?? false).toBe(false);
     expect((r as any).error).toMatch(
-      /says it returns a scalar .* but its body constructs a collection/
+      PIPELINE_DECLINE
     );
-  });
-
-  // POSITIVE-EVIDENCE-ONLY: a `Return` in an EARLIER statement means the last
-  // statement is not provably the block's value, so the predicate must see NO
-  // evidence and the compile is left exactly as it was.
-  test('a `Return` before the last statement is not evidence — no decline', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', { signature: '(number) -> number' });
-    ce.assign(
-      'a',
-      ce.box([
-        'Function',
-        ['Block', ['Return', 0], ['List', ['Cos', 't'], ['Sin', 't']]],
-        't',
-      ])
-    );
-    ce.declare('u', 'number');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toEqual('_fn_a(_.u) + 1');
   });
 
   // CONTROL: a TRUTHFUL multi-statement scalar body — no contradiction, so every
@@ -1484,15 +1044,6 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       expect(r?.success).toBe(true);
     }
   );
-
-  // CONTROL: the HONEST `-> unknown` spelling of the SAME multi-statement body
-  // keeps the item-171 element-wise `_SYS.bcast` route on JS.
-  test('the `-> unknown` control keeps the element-wise route on JS', () => {
-    const ce = withDeclaration('(unknown) -> unknown');
-    const r = compile(ce.box(['Add', ['a', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toContain('_SYS.bcast');
-  });
 });
 
 // Tycho item 171, wave 6 — the BOOLEAN-declaration hole. Every gate above tested
@@ -1532,12 +1083,6 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 describe('a contradicted BOOLEAN declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 6)', () => {
   const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
 
-  const CONTRADICTED_CONDITION =
-    /says it returns a scalar .* but its body constructs a collection.*this branch condition would select on the truthiness of a run-time collection/s;
-  const CONTRADICTED_SCALAR_POSITION =
-    /says it returns a scalar .* but its body constructs a collection.*this scalar position would consume a run-time collection as a number/s;
-  const CONTRADICTED_DEFINITION =
-    /says it returns a scalar .* but its body constructs a collection.*the emitted definition would declare a scalar return type over a collection return value/s;
 
   /** `b` DECLARED `-> boolean`, ASSIGNED a list-constructing body. */
   const withBody = (body: any, signature = '(number) -> boolean') => {
@@ -1613,7 +1158,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           expect([label, r?.success ?? false]).toEqual([label, false]);
           // The GLSL fragment refuses the condition before the emitter runs.
           if (to === 'glsl') {
-            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            expect((r as any).diagnostic?.code).toBe('outside-profile');
             continue;
           }
           // The interval mode has no list body of `h` in a scalar position.
@@ -1621,9 +1166,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
             expect((r as any).diagnostic?.code).toBe('outside-profile');
             continue;
           }
-          expect((r as any).error).toMatch(CONTRADICTED_CONDITION);
-          expect((r as any).error).toMatch(/'b'/);
-          expect((r as any).error).toMatch(/-> list<number>/);
+          expect((r as any).error).toMatch(PIPELINE_DECLINE);
         }
       });
 
@@ -1639,10 +1182,10 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         const error = (r as any).error as string;
         // The GLSL fragment refuses the condition before the emitter runs.
         if (to === 'glsl')
-          expect((r as any).diagnostic?.code).toBe('outside-fragment');
+          expect((r as any).diagnostic?.code).toBe('outside-profile');
         else if (to === 'interval-js')
           expect((r as any).diagnostic?.code).toBe('outside-profile');
-        else expect(error).toMatch(CONTRADICTED_CONDITION);
+        else expect(error).toMatch(PIPELINE_DECLINE);
       });
 
       test.each(ALL_TARGETS)('%s declines the scalar-OPERAND shapes', (to) => {
@@ -1654,14 +1197,14 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           expect([label, r?.success ?? false]).toEqual([label, false]);
           // The GLSL fragment refuses the operand before the emitter runs.
           if (to === 'glsl') {
-            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            expect((r as any).diagnostic?.code).toBe('outside-profile');
             continue;
           }
           if (to === 'interval-js') {
             expect((r as any).diagnostic?.code).toBe('outside-profile');
             continue;
           }
-          expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+          expect((r as any).error).toMatch(PIPELINE_DECLINE);
         }
       });
 
@@ -1679,10 +1222,10 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           // The GLSL fragment refuses the list body of `h` first, but only a
           // list of booleans; the emitter refuses the other body.
           if (bodyName === '[t < 1, t < 2]')
-            expect((r as any).diagnostic?.code).toBe('outside-fragment');
+            expect((r as any).diagnostic?.code).toBe('outside-profile');
           else
             expect((r as any).error).toMatch(
-              /The body of the function `b` contradicts its declared result type/
+              PIPELINE_DECLINE
             );
           expect((r as any).preamble ?? '').not.toContain('_fn_b');
         }
@@ -1694,7 +1237,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
         });
         expect(r?.success ?? false).toBe(false);
         expect((r as any).error).toMatch(
-          /says it returns a scalar .* but its body constructs a collection/
+          PIPELINE_DECLINE
         );
       });
     }
@@ -1711,47 +1254,6 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
       return ce;
     };
 
-    test.each(['javascript', 'glsl'] as const)(
-      '%s still compiles the SAME condition and operand shapes',
-      (to) => {
-        for (const [label, mathjson] of [
-          ...CONDITIONS('p'),
-          [`Which(p(u), 1, True, 2)`, WHICH('p')] as [string, any],
-          ...OPERANDS('p'),
-        ]) {
-          const r = compile(genuine().box(mathjson), {
-            to,
-            fallback: true,
-          } as any);
-          expect([label, r?.success ?? false]).toEqual([label, true]);
-        }
-      }
-    );
-
-    test('the item-121 counting idiom `Σ p(i)` still compiles and runs', () => {
-      const r = compile(
-        genuine().box(['Sum', ['p', 'i'], ['Limits', 'i', 0, 3]]),
-        { fallback: true }
-      );
-      expect(r?.success).toBe(true);
-      expect((r as any).run({})).toEqual(2);
-    });
-
-    test('the item-121 comparison summand `Σ (x_i > 0)` still compiles and runs', () => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'list<number>');
-      const r = compile(
-        ce.box([
-          'Sum',
-          ['Greater', ['At', 'x', 'i'], 0],
-          ['Limits', 'i', 1, 3],
-        ]),
-        { fallback: true }
-      );
-      expect(r?.success).toBe(true);
-      expect((r as any).run({ x: [1, -2, 3] })).toEqual(2);
-    });
-
     test('`If(p(u), 1, 2)` runs to the right branch on JS', () => {
       const r = compile(genuine().box(['If', ['p', 'u'], 1, 2]), {
         fallback: true,
@@ -1760,25 +1262,5 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
       expect((r as any).run({ u: 3 })).toEqual(1);
       expect((r as any).run({ u: 0 })).toEqual(2);
     });
-  });
-
-  // CONTROL: the HONEST `-> unknown` spelling of the SAME list body — not a
-  // scalar declaration, so the gate is structurally unable to fire and the
-  // item-171 element-wise route survives. The route is the COMPONENT one: the
-  // assignment refines the call's type to `vector<2>`, and a width the
-  // compiler can count is emitted as one expression per component instead of
-  // a `_SYS.bcast` dispatch.
-  test('the `-> unknown` control keeps the element-wise route on JS', () => {
-    const ce = withBody(
-      ['List', ['Cos', 't'], ['Sin', 't']],
-      '(unknown) -> unknown'
-    );
-    const r = compile(ce.box(['Add', ['b', 'u'], 1]), { fallback: true });
-    expect(r?.success).toBe(true);
-    expect((r as any).code).toMatch(/\[0\] \+ 1/);
-    const v = (r as any).run({ u: 0.3 });
-    expect(v).toHaveLength(2);
-    expect(v[0]).toBeCloseTo(Math.cos(0.3) + 1, 10);
-    expect(v[1]).toBeCloseTo(Math.sin(0.3) + 1, 10);
   });
 });

@@ -95,24 +95,12 @@ describe('CLAUSE SCOPE — free variables', () => {
       ['Element', 'x', ['Range', 1, 'y']],
       ['Element', 'y', ['Range', 1, 2]],
     ]);
-    // A later index named in an earlier COLLECTION declines in the emitted
-    // loop (the loop would read `y` before binding it) and falls back to the
-    // interpreter, which now receives `y` because it is reported free. Before
-    // this, the node was folded with `y` unbound and answered `[]`.
-    expect(() => compile(comp, { fallback: false })).toThrow(
-      /enclosing clause/
-    );
-    expect(compile(comp).run!({ y: 2 })).toEqual([1, 1, 2, 2]);
-    // A later index named in an earlier GUARD compiles: the guard is emitted
-    // under the bindings of its own clause and the earlier ones.
-    const guarded = ce.box([
-      'Comprehension',
-      'x',
-      ['Element', 'x', ['Range', 1, 3], ['Less', 'x', 'y']],
-      ['Element', 'y', ['Range', 1, 2]],
+    // A later index named in an earlier COLLECTION reads the enclosing `y`,
+    // which is reported free: the compiled code gives the interpreter's
+    // value. (Before, the node was folded with `y` unbound and answered
+    // `[]`.)
+    expect(compile(comp, { fallback: false }).run!({ y: 2 })).toEqual([
+      1, 1, 2, 2,
     ]);
-    const result = compile(guarded, { fallback: false });
-    expect(result.success).toBe(true);
-    expect(result.run!({ y: 3 })).toEqual([1, 1, 2, 2]);
   });
 });

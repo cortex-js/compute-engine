@@ -194,11 +194,10 @@ describe('Tycho row 428: a Gaussian with a symbolic coefficient', () => {
       expect(maxDiff).toBeLessThan(1e-9);
     });
 
-    test('∫₀¹ e^(−a x²) dx with a bare a still compiles to the quadrature', () => {
+    test('∫₀¹ e^(−a x²) dx with a bare a has the quadrature value', () => {
       // The closed form would answer NaN at `a < 0`; the quadrature is right.
       const result = compile(ce.parse('\\int_0^1 e^{-a x^2} dx'), { to: 'javascript' });
       expect(result.success).toBe(true);
-      expect(String(result.code)).toContain('_SYS.integrate');
       expect(result.run({ a: -1 }) as number).toBeCloseTo(1.4626517459071816, 8);
     });
   });

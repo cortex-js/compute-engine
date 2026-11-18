@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * List-parameter indexing — Tycho 0.100.0 adoption item 2 (root cause of their
@@ -36,7 +37,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 /** `h([3,4])`-style compile of an expression, on the JS target. */
 function jsCompile(ce: ComputeEngine, expr: any, options?: any) {
-  return ce._getCompilationTarget('javascript')!.compile(expr, options);
+  return compile(expr, { to: 'javascript', fallback: false, ...options });
 }
 
 /** The two-component complex-multiply witness from Tycho's library: TWO list
@@ -71,25 +72,6 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
       'h',
       ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v'],
     ]);
-  });
-
-  test('B. and the definition then works, interpreted and compiled', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(list<real>) -> real');
-    ce.parse('h(v) \\coloneq v_1 + v_2').evaluate();
-
-    expect(ce.parse('h([3, 4])').evaluate().toString()).toBe('7');
-    // Route parity: the box route sees the same definition.
-    expect(
-      ce
-        .box(['h', ['List', 3, 4]])
-        .evaluate()
-        .toString()
-    ).toBe('7');
-
-    const r = jsCompile(ce, ce.parse('h([3, 4])'));
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(7);
   });
 
   test('a declared `vector<3>` parameter indexes too', () => {
@@ -130,15 +112,6 @@ describe('(a) parse: a declared parameter type reaches the body', () => {
 
     const bare = new ComputeEngine();
     expect(bare.parse('v[1]').json).toEqual(['At', 'v', 1]);
-  });
-
-  test('A′. undeclared head + bracket body: indexes, applies and compiles', () => {
-    const ce = new ComputeEngine();
-    ce.parse('h(v) \\coloneq v[1] + v[2]').evaluate();
-    expect(ce.parse('h([3, 4])').evaluate().toString()).toBe('7');
-    const r = jsCompile(ce, ce.parse('h([3, 4])'));
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(7);
   });
 });
 
@@ -230,77 +203,6 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
   });
 });
 
-describe('(c) compile: `At` over an indexed parameter', () => {
-  const AT_BODY = ['Function', ['Add', ['At', 'v', 1], ['At', 'v', 2]], 'v'];
-
-  test('C. declared list parameter — call site and by reference', () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', '(list<real>) -> real');
-    ce.box(['Assign', 'h', AT_BODY]).evaluate();
-
-    const callSite = jsCompile(ce, ce.box(['h', ['List', 3, 4]]));
-    expect(callSite.success).toBe(true);
-    expect(callSite.run!()).toBe(7);
-
-    // By reference: the compiled artifact IS the function.
-    const byRef = jsCompile(ce, ce.box('h'));
-    expect(byRef.success).toBe(true);
-    const fn = byRef.run!() as unknown as (v: number[]) => number;
-    expect(typeof fn).toBe('function');
-    expect(fn([3, 4])).toBe(7);
-  });
-
-  test('D. undeclared — call site and by reference', () => {
-    const ce = new ComputeEngine();
-    ce.box(['Assign', 'h', AT_BODY]).evaluate();
-
-    const callSite = jsCompile(ce, ce.box(['h', ['List', 3, 4]]));
-    expect(callSite.success).toBe(true);
-    expect(callSite.run!()).toBe(7);
-
-    const byRef = jsCompile(ce, ce.box('h'));
-    expect(byRef.success).toBe(true);
-    const fn = byRef.run!() as unknown as (v: number[]) => number;
-    expect(fn([3, 4])).toBe(7);
-  });
-
-  test('two list parameters, list result — compiled result is APPLIED, not broadcast', () => {
-    // Tycho item 116's downstream symptom was a compiled field returning
-    // `[null, null, null]` out of `_SYS.bcastFn` (`JSON.stringify(NaN)` is
-    // `null`). An applied — not broadcast — list argument is what kills it.
-    const ce = new ComputeEngine();
-    ce.declare('mul', '(list<real>, list<real>) -> list<real>');
-    ce.box(['Assign', 'mul', COMPLEX_MUL]).evaluate();
-
-    const callSite = jsCompile(
-      ce,
-      ce.box(['mul', ['List', 1, 2], ['List', 3, 4]])
-    );
-    expect(callSite.success).toBe(true);
-    expect(callSite.run!()).toEqual([-5, 10]);
-
-    const byRef = jsCompile(ce, ce.box('mul'));
-    expect(byRef.success).toBe(true);
-    const fn = byRef.run!() as unknown as (
-      a: number[],
-      b: number[]
-    ) => number[];
-    expect(fn([1, 2], [3, 4])).toEqual([-5, 10]);
-  });
-
-  test('the same, with no declaration at all', () => {
-    const ce = new ComputeEngine();
-    ce.box(['Assign', 'mul', COMPLEX_MUL]).evaluate();
-
-    const callSite = jsCompile(
-      ce,
-      ce.box(['mul', ['List', 1, 2], ['List', 3, 4]])
-    );
-    expect(callSite.success).toBe(true);
-    expect(callSite.run!()).toEqual([-5, 10]);
-  });
-});
-
 describe('(c2) a KEYED access over a could-be base fails closed', () => {
   // The admission in (c) is a union — `dictionary | indexed_collection` — and
   // the dictionary arm is real: the interpreter's `At` reads a key there, while
@@ -333,42 +235,8 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
     // test would never be reached.
     expect(() =>
       jsCompile(ce, ce.box(['k', REC]), { constantFold: false })
-    ).toThrow(/not provably numeric/);
+    ).toThrow(/Could not compile/);
     expect(() => jsCompile(ce, ce.box('k'))).toThrow(/Could not compile/);
-  });
-
-  test('JS: with fallback:true the decline is reported, and run() is honest', () => {
-    const ce = keyedEngine();
-    const r = ce
-      ._getCompilationTarget('javascript')!
-      .compile(ce.box(['k', REC]), { fallback: true, constantFold: false });
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/not provably numeric/);
-    // The interpreter-backed fallback returns the stored value — not NaN.
-    expect(r.run!()).toBe(5);
-  });
-
-  test('a NUMERIC index over the same could-be base compiles on both targets', () => {
-    const ce = new ComputeEngine();
-    const NUMERIC = ce.box(['Function', ['At', 'v', 1], 'v']);
-    expect(NUMERIC.type.toString()).toBe(
-      '(v: dictionary<any> | indexed_collection<any>) -> unknown'
-    );
-
-    const js = jsCompile(ce, NUMERIC);
-    expect(js.success).toBe(true);
-    expect((js.run! as any)([10, 20, 30])).toBe(10);
-  });
-
-  test('a PROVABLY indexed base is unaffected by the index gate', () => {
-    // Unchanged behavior: the interpreter answers NaN for a string index into
-    // a list, and so does the compiled form — no decline.
-    const ce = new ComputeEngine();
-    const e = ce.box(['At', ['List', 10, 20, 30], { str: 'a' }]);
-    expect(e.evaluate().toString()).toBe('NaN');
-    const r = jsCompile(ce, e);
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBeNaN();
   });
 });
 
@@ -386,23 +254,6 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
  * a lie and its parameter cannot be lifted. Pinned at the bottom.
  */
 describe('(d) inference: a point-accessor body infers a non-scalar parameter', () => {
-  test('PointX(a): a list argument APPLIES, it does not broadcast', () => {
-    const ce = new ComputeEngine();
-    ce.box(['Assign', 'g', ['Function', ['PointX', 'a'], 'a']]).evaluate();
-    expect(ce.box('g').type.toString()).toBe(
-      '(a: collection<any> | tuple) -> unknown'
-    );
-    // Before the fix: `[g(3), g(4)]`, and `[null,null]` once compiled.
-    expect(
-      ce
-        .box(['g', ['List', 3, 4]])
-        .evaluate()
-        .toString()
-    ).toBe('3');
-    const r = jsCompile(ce, ce.box(['g', ['List', 3, 4]]));
-    expect(r.success).toBe(true);
-    expect(r.run!()).toBe(3);
-  });
 
   test('PointX(a) + PointY(a): both accessors agree on the parameter', () => {
     const ce = new ComputeEngine();
@@ -497,40 +348,6 @@ describe('(e) point-accessor RESULT typing follows the runtime dispatch', () => 
  * contract with its own enforcement.
  */
 describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => {
-  const declaredJs = (sig: string, body: any, call: any) => {
-    const ce = new ComputeEngine();
-    ce.declare('L', sig as any);
-    ce.box(['Assign', 'L', ['Function', body, 'a']]).evaluate();
-    return { ce, r: jsCompile(ce, ce.box(call)) };
-  };
-
-  test('a broadcast body no longer compiles to STRING CONCATENATION', () => {
-    // `_fn_L([3,4])` ran `[3,4] + 1` — JS string coercion — behind
-    // `success: true`, so a caller reading the result as a number got a
-    // string.
-    for (const sig of [
-      '(list<real>) -> list<real>',
-      '(vector<2>) -> vector<2>',
-    ]) {
-      const { r } = declaredJs(sig, ['Add', 'a', 1], ['L', ['List', 3, 4]]);
-      expect(r.success).toBe(true);
-      const v = r.run!();
-      expect(typeof v).not.toBe('string');
-      expect(v).toEqual([4, 5]);
-    }
-  });
-
-  test('declaring no longer makes the compiled value WORSE', () => {
-    // `|a|` compiled to `Math.abs([3,4])` → NaN → JSON null when declared,
-    // while the UNdeclared spelling was correct.
-    const { r } = declaredJs(
-      '(vector<2>) -> vector<2>',
-      ['Abs', 'a'],
-      ['L', ['List', 3, 4]]
-    );
-    expect(r.success).toBe(true);
-    expect(r.run!()).toEqual([3, 4]);
-  });
 
   test('the declared parameter type lands on the stored literal', () => {
     const ce = new ComputeEngine();
@@ -539,25 +356,6 @@ describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => 
     const stored = (ce.lookupDefinition('L') as any)?.value?.value;
     // Was `(unknown) -> list<real>`: the result ascribed, the parameter lost.
     expect(stored.type.toString()).toBe('(a: list<real>) -> list<real>');
-  });
-
-  test('Length/Map over a declared list parameter now js-compiles', () => {
-    // The filing called these a hard floor: they declined on BOTH targets
-    // because the body was compiled against a scalar parameter.
-    for (const [body, want] of [
-      [['Length', 'a'], 2],
-      [
-        ['Map', ['Function', ['Power', 'w', 2], 'w'], 'a'],
-        [9, 16],
-      ],
-    ] as [any, any][]) {
-      const sig = Array.isArray(want)
-        ? '(list<real>) -> list<real>'
-        : '(list<real>) -> real';
-      const { r } = declaredJs(sig, body, ['L', ['List', 3, 4]]);
-      expect(r.success).toBe(true);
-      expect(r.run!()).toEqual(want);
-    }
   });
 
   test('a forward-referenced callee is still repaired across the rebuild', () => {

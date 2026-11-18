@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { assertGroundType } from '../../src/common/type/subtype';
 import type { Type } from '../../src/common/type/types';
@@ -199,26 +198,6 @@ describe('§5 — declaration-time validation reaches the minted polytype', () =
       /generic-alias-arity/
     );
     expect(ce.type('tree<integer>').toString()).toBe('tree<integer>');
-  });
-});
-
-describe('§7 — compilation still erases the tag', () => {
-  test('a unary parameterized constructor compiles to its compiled operand', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('meters', 'T', { typeParams: ['T'] });
-    ce.declare('x', 'number');
-    const body = ce.box(['Add', ['Sin', 'x'], ['Power', 'x', 2]]);
-    expect(compile(ce.box(['meters', body]))?.code).toBe(
-      compile(body)?.code
-    );
-  });
-
-  test('a tuple-bodied parameterized constructor compiles as its Tuple', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('pair', 'tuple<T, T>', { typeParams: ['T'] });
-    expect(compile(ce.box(['pair', 1, 2]))?.code).toBe(
-      compile(ce.box(['Tuple', 1, 2]))?.code
-    );
   });
 });
 

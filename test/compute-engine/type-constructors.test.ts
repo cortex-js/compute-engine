@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
 // Phase 1 of the nominal-types design
@@ -558,27 +557,5 @@ describe('BOOTSTRAP carve-out (`mint: false`)', () => {
       '(expression<Limits>) -> limits'
     );
     expect(ce.operatorInfo('distribution')).toBeDefined();
-  });
-});
-
-describe('COMPILE erases the tag (phase 2, D11)', () => {
-  // Compilation is type erasure: a constructor application compiles exactly
-  // where the equivalent plain value compiles, to the same emission. The full
-  // equivalence contract — per target, both the compiles and the declines —
-  // lives in `type-constructors-compile.test.ts`; these two pin the shapes
-  // that phase 1 used to decline.
-  test('a nominal tuple constructor compiles like `Tuple`', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('point', 'tuple<x: number, y: number>');
-    expect(compile(ce.box(['point', 1, 2]))?.code ?? '').toBe(
-      compile(ce.box(['Tuple', 1, 2]))?.code ?? ''
-    );
-    expect(compile(ce.box(['point', 1, 2]))?.code ?? '').toBe('[1, 2]');
-  });
-
-  test('a scalar newtype compiles to its operand', () => {
-    const ce = new ComputeEngine();
-    ce.declareType('meters', 'number');
-    expect(compile(ce.box(['meters', 5]))?.code ?? '').toBe('5');
   });
 });

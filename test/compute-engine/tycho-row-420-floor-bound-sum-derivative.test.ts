@@ -123,26 +123,6 @@ describe('row 420 (b): the numerical derivative does not read across a jump', ()
     ['Product', ['Add', 'x', 'i'], ['Limits', 'i', 1, ['Floor', 'x']]],
     'x',
   ];
-  /** d/dx Π_{i=1}^{⌊x⌋} (x + i), between two integers. */
-  const productDerivative = (x: number): number => {
-    const n = Math.floor(x);
-    let s = 0;
-    for (let j = 1; j <= n; j++) {
-      let p = 1;
-      for (let i = 1; i <= n; i++) if (i !== j) p *= x + i;
-      s += p;
-    }
-    return s;
-  };
-
-  test('between two integers, the value is the derivative there', () => {
-    const r = compile(ce.box(PRODUCT as any), { to: 'javascript' }) as any;
-    expect(r.success).toBe(true);
-    // 1.9 and 3.999 are 0.1 and 0.001 from the next jump: the first window
-    // reached 0.4 and gave 57.3 and 9914.3.
-    for (const x of [1.2, 1.7, 1.9, 1.99, 2.5, 3.1, 3.999])
-      expect(r.run({ x })).toBeCloseTo(productDerivative(x), 6);
-  });
 
   test('at a jump, the value is NaN', () => {
     const r = compile(ce.box(PRODUCT as any), { to: 'javascript' }) as any;

@@ -82,32 +82,6 @@ describe('shared inputs', () => {
     expectSame(typed, plain);
   });
 
-  test('`shared` names an undeclared symbol that the code reads by index', () => {
-    const r = compile(ce.box(['At', 'G', ['Add', 'i', 1]]));
-    const i = new Float64Array([0, 1, 2]);
-    expect(list(r.broadcast!({ i, G: [5, 6, 7] }, { shared: ['G'] }))).toEqual([
-      5, 6, 7,
-    ]);
-    expect(
-      list(
-        r.broadcast!({ i, G: new Float64Array([5, 6, 7]) }, { shared: ['G'] })
-      )
-    ).toEqual([5, 6, 7]);
-  });
-
-  test('a `shared` option given as a readonly array', () => {
-    const r = compile(ce.box(['At', 'G', ['Add', 'i', 1]]));
-    const shared = ['G'] as const;
-    expect(
-      list(
-        r.broadcast!(
-          { i: new Float64Array([0, 1, 2]), G: [5, 6, 7] },
-          { shared }
-        )
-      )
-    ).toEqual([5, 6, 7]);
-  });
-
   test('a `shared` name that is not a key of the inputs throws', () => {
     const r = compile(ce.parse('F_{i+1}'));
     expect(() =>

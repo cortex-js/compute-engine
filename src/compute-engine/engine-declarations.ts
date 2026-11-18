@@ -4242,7 +4242,7 @@ export function withValuesFn<T>(
  * of its name, wherever that record is, and no name is looked up or declared.
  * The interpreter fallback of a compilation gives its inputs to the
  * definitions that the expression is bound to (`buildInterpreterFallback()`,
- * `compilation/compile-references.ts`). The checks and the restore are those
+ * `compilation/interpreter-fallback.ts`). The checks and the restore are those
  * of `withValuesFn()`.
  */
 export function withBindingValuesFn<T>(
@@ -5079,8 +5079,8 @@ export function assignValueAsOperatorDef(
       // its `false` default, a bare `ce.assign('f', ⟨annotated literal⟩)`
       // REJECTED `f([1,2,3])` with `incompatible-type` while the very same
       // literal broadcasts on the declare-then-assign VALUE route (`box.ts`
-      // gates that validation on `paramsAreScalar`) and on the COMPILED path
-      // (`userFunctionParamsAreScalar`, `base-compiler.ts`). Derive the flag
+      // gates that validation on `paramsAreScalar`) and on the COMPILED path.
+      // Derive the flag
       // the same way, so the three routes read one gate. Polytype-aware: a
       // parameter quantified at a collection bound (`T: indexed_collection`)
       // binds its argument WHOLE and keeps the flag false.

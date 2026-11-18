@@ -21,7 +21,6 @@
  *    Range(1, n, 1))` was typed `string` and gave `0` for `n = 0`.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const AP = [
   'Apply',
@@ -49,11 +48,6 @@ const FOLD = [
   ['List', 1, 0, 1],
   ['Range', 1, 'n'],
 ];
-const CALL = [
-  'Apply',
-  ['Function', ['At', 'w', 1], ['Typed', 'w', "'list<integer>'"]],
-  FOLD,
-];
 
 function engine(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -69,24 +63,6 @@ describe('issue #454: a fold whose accumulator is read by index', () => {
     expect(ce.box(FOLD as any).type.toString()).toEqual(
       'vector<integer^2> | vector<integer^3>'
     );
-  });
-
-  it('compiles at a list<integer> parameter, as the interpreter runs it', () => {
-    const ce = engine();
-    const expr = ce.box(CALL as any);
-    const compiled = compile(expr, { fallback: false });
-    for (const n of [0, 1, 3]) {
-      ce.assign('n', n);
-      expect(compiled.run!({ n })).toEqual(expr.evaluate().re);
-    }
-  });
-
-  it('compiles a scalar read of the fold result', () => {
-    const ce = engine();
-    ce.declare('acc', 'integer');
-    const expr = ce.box(['Add', 'acc', ['At', FOLD, 1]] as any);
-    const compiled = compile(expr, { fallback: false });
-    expect(compiled.run!({ acc: 10, n: 3 })).toEqual(11);
   });
 });
 

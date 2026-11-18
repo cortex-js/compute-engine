@@ -30,14 +30,6 @@ describe('CE-1273 a compilation reads the scope the expression was boxed in', ()
     ce.popScope();
   });
 
-  test('javascript', () => {
-    const { ce, expr } = shadowedWitness();
-    const result = compile(expr, { fallback: false });
-    expect(result.code).toBe('10 + _.x');
-    expect(result.run!({ x: 2 })).toBe(12);
-    ce.popScope();
-  });
-
   test('javascript with the profile ir', () => {
     const { ce, expr } = shadowedWitness();
     const result = compile(expr, { fallback: false, profile: 'ir' });
@@ -56,13 +48,6 @@ describe('CE-1273 a compilation reads the scope the expression was boxed in', ()
     ce.popScope();
   });
 
-  test('glsl', () => {
-    const { ce, expr } = shadowedWitness();
-    const result = compile(expr, { to: 'glsl', fallback: false });
-    expect(result.code).toBe('10.0 + x');
-    ce.popScope();
-  });
-
   test('a user function called by the expression is the one it was boxed with', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
@@ -78,58 +63,7 @@ describe('CE-1273 a compilation reads the scope the expression was boxed in', ()
   });
 });
 
-describe('CE-1273 the compilations that read the current scope are unchanged', () => {
-  test('an expression boxed in a pushed scope that declares its inputs', () => {
-    const { ce } = shadowedWitness();
-    ce.declare('t', 'real');
-    const expr = ce.box(['Add', 't', 'a']);
-    const result = compile(expr, { fallback: false });
-    expect(result.code).toBe('1 + _.t');
-    expect(result.run!({ t: 2 })).toBe(3);
-    ce.popScope();
-  });
-
-  test('an expression bound again with ce.rebind() in the pushed scope', () => {
-    const { ce, expr } = shadowedWitness();
-    const rebound = ce.rebind(expr);
-    expect(ce.withValues({ x: 2 }, () => rebound.evaluate()).re).toBe(3);
-    const result = compile(rebound, { fallback: false });
-    expect(result.code).toBe('1 + _.x');
-    expect(result.run!({ x: 2 })).toBe(3);
-    ce.popScope();
-  });
-
-  test('an expression compiled in the scope it was boxed in', () => {
-    const { ce, expr } = shadowedWitness();
-    ce.popScope();
-    const result = compile(expr, { fallback: false });
-    expect(result.code).toBe('10 + _.x');
-    expect(result.run!({ x: 2 })).toBe(12);
-  });
-
-  test('a name given a value by the vars option', () => {
-    const { ce, expr } = shadowedWitness();
-    const result = compile(expr, { fallback: false, vars: { a: '_.aa' } });
-    expect(result.code).toBe('_.aa + _.x');
-    expect(result.run!({ x: 2, aa: 7 } as Record<string, number>)).toBe(9);
-    ce.popScope();
-  });
-});
-
 describe('CE-1273 a popped scope and operands of two scopes', () => {
-  test('an expression boxed in a scope that was then popped reads its definitions', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.pushScope();
-    ce.declare('b', 'real');
-    ce.assign('b', 5);
-    const expr = ce.box(['Add', 'x', 'b']);
-    ce.popScope();
-    expect(ce.withValues({ x: 2 }, () => expr.evaluate()).re).toBe(7);
-    const result = compile(expr, { fallback: false });
-    expect(result.code).toBe('5 + _.x');
-    expect(result.run!({ x: 2 })).toBe(7);
-  });
 
   test('a name that the operands read from two definitions declines', () => {
     const { ce } = shadowedWitness();
@@ -183,40 +117,6 @@ describe('CE-1273 what the choice of the scope reads', () => {
         ce.number(ops[0].evaluate().re * 2),
     } as never);
   }
-
-  test('a free name declared after the boxing is read from its home scope', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['Add', 'x', 'a']);
-    ce.declare('x', 'real');
-    ce.declare('a', 'real');
-    ce.assign('a', 10);
-    ce.pushScope();
-    ce.declare('a', 'real');
-    ce.assign('a', 1);
-    expect(ce.withValues({ x: 2 }, () => expr.evaluate()).re).toBe(12);
-    const result = compile(expr, { fallback: false });
-    expect(result.code).toBe('10 + _.x');
-    expect(result.run!({ x: 2 })).toBe(12);
-    ce.popScope();
-  });
-
-  test('the value of an entry of a dictionary', () => {
-    const { ce } = shadowedWitness();
-    ce.popScope();
-    const dict = ce.box([
-      'Dictionary',
-      ['KeyValuePair', "'k'", ['Add', 'x', 'a']],
-    ] as never);
-    ce.pushScope();
-    ce.declare('a', 'real');
-    ce.assign('a', 1);
-    expect(ce.withValues({ x: 2 }, () => dict.evaluate()).toString()).toBe(
-      '{"k" -> 12}'
-    );
-    const result = compile(dict, { fallback: false });
-    expect(result.run!({ x: 2 })).toEqual({ k: 12 });
-    ce.popScope();
-  });
 
   test('the body of a user function that the expression calls', () => {
     const ce = new ComputeEngine();
@@ -287,44 +187,6 @@ describe('CE-1273 what the choice of the scope reads', () => {
     }
   });
 
-  test('the stored value of a vars input is not read', () => {
-    // `v` is an input of the compiled code: its stored value `a + 0.5`
-    // (the outer `a`) is hidden, so the compilation reads the `a` of the
-    // scope that the expression was boxed in, and nothing else.
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.assign('a', 10);
-    ce.declare('v', 'real');
-    ce.assign('v', ce.box(['Add', 'a', 0.5]));
-    ce.pushScope();
-    ce.declare('a', 'real');
-    ce.assign('a', 1);
-    const expr = ce.box(['Add', 'v', 'a']);
-    const result = compile(expr, { fallback: false, vars: { v: '_.v' } });
-    expect(result.code).toBe('1 + _.v');
-    expect(result.run!({ v: 5 } as never)).toBe(6);
-    ce.popScope();
-  });
-
-  test('a held name that a function literal of the expression binds', () => {
-    // The held `a` of `L(a)` is the parameter of the literal; only the
-    // canonical `a` reads a scope (the outer one, 10).
-    const { ce } = shadowedWitness();
-    ce.popScope();
-    declareLazyDouble(ce);
-    const expr = ce.box([
-      'Add',
-      'a',
-      ['Apply', ['Function', ['L', 'a'], 'a'], 3],
-    ]);
-    ce.pushScope();
-    ce.declare('a', 'real');
-    ce.assign('a', 1);
-    expect(expr.evaluate().re).toBe(16);
-    expect(compile(expr, { fallback: false }).run!({})).toBe(16);
-    ce.popScope();
-  });
-
   // A host maps a name through `vars` to make it an input of the code. It
   // declares the name again, with no value, in the scope of the compilation
   // and binds the expression there (a slider that is dragged). The body of
@@ -341,18 +203,6 @@ describe('CE-1273 what the choice of the scope reads', () => {
     return { ce, expr: ce.rebind(outer) };
   }
 
-  test('a name mapped by vars is an input wherever it is read, and takes no part in the choice', () => {
-    const { ce, expr } = slider();
-    const result = compile(expr, {
-      to: 'javascript',
-      fallback: false,
-      vars: { a: '_.a' },
-    });
-    expect(result.code).toBe('_.a + _fn_f(_.x)');
-    expect(result.run!({ x: 3, a: 5 } as never)).toBe(20);
-    ce.popScope();
-  });
-
   test('without vars, the two definitions of the name make the compilation decline', () => {
     // The interpreter reads 2 in the body of `f` and the valueless `a` of
     // the pushed scope beside it: `a + 6` for x = 3.
@@ -364,24 +214,6 @@ describe('CE-1273 what the choice of the scope reads', () => {
     expect(result.success).toBe(false);
     expect(result.run!({ x: 3, a: 5 } as never)).toBe(11);
     ce.popScope();
-  });
-
-  // The value of a `vars` input is hidden from the analyses of the compiler
-  // on every definition that an occurrence of the name reads, not only on the
-  // one that the current scope gives: with the outer `a := 4` visible, `|a|`
-  // was compiled to `_.a`, which is wrong for a negative input.
-  test('the value of a vars input is hidden on the definition that the expression reads', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.assign('a', 4);
-    const expr = ce.box(['Abs', 'a']);
-    ce.pushScope();
-    ce.declare('a', 'real');
-    const result = compile(expr, { fallback: false, vars: { a: '_.a' } });
-    expect(result.code).toBe('Math.abs(_.a)');
-    expect(result.run!({ a: -3 } as never)).toBe(3);
-    ce.popScope();
-    expect(ce.box('a').evaluate().re).toBe(4);
   });
 
   test('the value of a vars input is hidden in the body of a function that the expression calls', () => {

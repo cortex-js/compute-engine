@@ -1,9 +1,8 @@
 // The interpreter fallback of `compile()`: the `success: false` result of a
 // declined compilation, whose `run` evaluates the expression with the
 // interpreter. This module uses no compiler: the result of a decline of the
-// profile `ir` is built here (`interpreterFallback()`), and the existing
-// targets build theirs with the same runner (`interpreterRun()`,
-// `buildInterpreterFallback()` of `compile-references.ts`).
+// profile `ir` is built here (`interpreterFallback()`) with the runner
+// `interpreterRun()`.
 
 import type { BoxedDefinition, Expression, Scope } from '../global-types.js';
 import { isValueDef } from '../boxed-expression/utils.js';
@@ -221,7 +220,7 @@ export function inputNamesRead(
  * result as the run does, as a compiled function value is. Without it, a
  * function value is `NaN`.
  */
-export function interpreterRun(
+function interpreterRun(
   expr: Expression,
   absence: { objectNull: boolean; writtenNumeric: boolean },
   observe?: (value: Expression) => void,

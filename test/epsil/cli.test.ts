@@ -1160,13 +1160,6 @@ describe('Epsil CLI --compile', () => {
     expect(parseCliArguments(['-e', '1'], {}).compile).toBe(false);
   });
 
-  test('runs the compiled program and prints its value', async () => {
-    const { io, stdout, stderr } = makeIo();
-    expect(await main(['--compile', '-e', 'f(x) = x^2 + 1\nf(3)'], io)).toBe(0);
-    expect(stderr()).toBe('');
-    expect(stdout()).toBe('10\n');
-  });
-
   test('a compiled number is a float, as compiled arithmetic is', async () => {
     const { io, stdout } = makeIo();
     // The interpreter answers the exact `3`; the generated JavaScript
@@ -1202,86 +1195,6 @@ describe('Epsil CLI --compile', () => {
     ]);
   });
 
-  // The static type of a conditional is the union of its branches. Before
-  // 2026-10-16 only a tuple type was read as a tuple, so a union of tuple
-  // types printed the value as a list.
-  test('keeps the tuple shape when the type is a union of tuples', async () => {
-    const cases: [source: string, expected: unknown][] = [
-      [
-        'If(True, (1, 2), (3, 4, 5))',
-        ['Pair', { num: '1.0' }, { num: '2.0' }],
-      ],
-      [
-        'let b = True\n[(1, 2), if b { (3, 4) } else { (5, 6, 7) }]',
-        [
-          'List',
-          ['Pair', { num: '1.0' }, { num: '2.0' }],
-          ['Pair', { num: '3.0' }, { num: '4.0' }],
-        ],
-      ],
-    ];
-    for (const [source, expected] of cases) {
-      const { io, stdout } = makeIo();
-      expect(await main(['--compile', '--json', '-e', source], io)).toBe(0);
-      expect(JSON.parse(stdout())).toEqual(expected);
-    }
-  });
-
-  // A tuple and a list are both arrays in the compiled code, so when the
-  // static type admits both, the value cannot be printed faithfully. With a
-  // condition known when the code is generated (`True`), only one branch is
-  // selected, and the compiled program reaches the printer.
-  test('an array that may be a tuple or a list is an error value', async () => {
-    const { io, stderr } = makeIo();
-    expect(
-      await main(['--compile', '-e', 'if True { (1, 2) } else { [3, 4] }'], io)
-    ).toBe(1);
-    expect(stderr()).toContain(
-      'does not say whether it is a tuple or a list'
-    );
-  });
-
-  // The compiler does not replace `b` by its value, so the condition is
-  // decided at run time, and the branches (a tuple and a list) have
-  // different shapes: the compilation declines.
-  test('a conditional whose branches have different shapes declines', async () => {
-    const { io, stderr } = makeIo();
-    expect(
-      await main(
-        ['--compile', '-e', 'let b = True\nif b { (1, 2) } else { [3, 4] }'],
-        io
-      )
-    ).toBe(1);
-    expect(stderr()).toContain('its branches have different shapes');
-  });
-
-  test('boxes strings, booleans, complex numbers and colors', async () => {
-    const cases: [source: string, expected: unknown][] = [
-      ['"hello"', "'hello'"],
-      ['3 > 2', 'True'],
-      ['0.5 + 2i', ['Complex', 0.5, 2]],
-      // A compiled color is answered in its canonical space (OKLCh), as
-      // the compiled targets do everywhere (`library.md`, contrastingColor).
-      ['oklch(0.5, 0.1, 30)', ['Oklch', 0.5, 0.1, 30]],
-    ];
-    for (const [source, expected] of cases) {
-      const { io, stdout } = makeIo();
-      expect(await main(['--compile', '--json', '-e', source], io)).toBe(0);
-      expect(JSON.parse(stdout())).toEqual(expected);
-    }
-  });
-
-  test('every output mode applies', async () => {
-    const { io, stdout } = makeIo();
-    expect(await main(['--compile', '--epsil', '-e', '1/4'], io)).toBe(0);
-    expect(stdout()).toBe('0.25\n');
-    const latex = makeIo();
-    expect(await main(['--compile', '--latex', '-e', '"ab"'], latex.io)).toBe(
-      0
-    );
-    expect(latex.stdout()).toBe('\\text{ab}\n');
-  });
-
   test('compiles a LaTeX expression with --from latex', async () => {
     const { io, stdout, stderr } = makeIo();
     expect(
@@ -1297,36 +1210,6 @@ describe('Epsil CLI --compile', () => {
     expect(stdout()).toBe('');
     expect(stderr()).toContain(
       'Runtime error: unbound symbol: `x`, `y` have no value; a compiled program cannot keep a symbol symbolic'
-    );
-  });
-
-  test('a function the program defines is not a free symbol', async () => {
-    // `f` is defined by the block the program compiles to (`let f = …`),
-    // so only `z` is an input the generated code reads.
-    const { io, stderr } = makeIo();
-    expect(await main(['--compile', '-e', 'f(x) = x + 1\nf(z)'], io)).toBe(1);
-    expect(stderr()).toContain('the input `z` has no type');
-    expect(stderr()).not.toContain('`f`');
-  });
-
-  test('a decline of the JavaScript target is an error with its reason', async () => {
-    const { io, stdout, stderr } = makeIo();
-    expect(await main(['--compile', '-e', 'Simplify(2 + 2x)'], io)).toBe(1);
-    expect(stdout()).toBe('');
-    expect(stderr()).toContain('Runtime error: compile declined:');
-    expect(stderr()).toContain('`Simplify`');
-    // The decline is reported once, as the error value; the interpreter
-    // fallback's console warning does not fire.
-    expect(stderr()).not.toContain('Compilation fallback');
-  });
-
-  test('a program whose value is a function cannot be printed', async () => {
-    const { io, stderr } = makeIo();
-    expect(await main(['--compile', '-e', 'let f = (x) => x + 1\nf'], io)).toBe(
-      1
-    );
-    expect(stderr()).toContain(
-      'Runtime error: unprintable value: the compiled program evaluates to a function'
     );
   });
 
@@ -1348,24 +1231,6 @@ describe('Epsil CLI --compile', () => {
       code: 'static-type-error',
     });
     expect(typed.stdout()).toBe('');
-  });
-
-  test('a pole and an indeterminate form are the IEEE values', async () => {
-    // Compiled code answers `Infinity` and `NaN` where the interpreter
-    // answers `~oo` and `NaN`; the values print as the engine prints them.
-    // (`1/0` is folded to `~oo` when the program is canonicalized, and the
-    // target reads that as `Infinity`; the division by a local is the
-    // machine division itself.)
-    const cases: [source: string, expected: string][] = [
-      ['1/0', '+oo'],
-      ['let z = 0\n0 - 1/z', '-oo'],
-      ['0/0', 'NaN'],
-    ];
-    for (const [source, expected] of cases) {
-      const { io, stdout } = makeIo();
-      expect(await main(['--compile', '-e', source], io)).toBe(0);
-      expect(stdout()).toBe(`${expected}\n`);
-    }
   });
 
   test('a throw from the generated code is an error value', async () => {

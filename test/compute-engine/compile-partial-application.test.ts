@@ -23,8 +23,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagnostics';
-import type { CompileDiagnostic } from '../../src/compute-engine/compilation/types';
 
 // `0·Random()` gives the body an effect (a random draw) and adds nothing to
 // its value, which stays exact.
@@ -35,14 +33,6 @@ const ADD: MathJsonExpression = [
   ['Add', 'x', 'y', NOISE],
   'x',
   'y',
-];
-/** `(x, y, z) ↦ x + 2y + 3z + 0·Random()`. */
-const ADD3: MathJsonExpression = [
-  'Function',
-  ['Add', 'x', ['Multiply', 2, 'y'], ['Multiply', 3, 'z'], NOISE],
-  'x',
-  'y',
-  'z',
 ];
 /** `(x, y) ↦ x + y`, a pure body. */
 const PURE_ADD: MathJsonExpression = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
@@ -82,37 +72,6 @@ function evaluated(json: MathJsonExpression, u: number): number {
     .subs({ u: ce.number(u) })
     .evaluate()
     .N().re;
-}
-
-const TARGETS = ['javascript', 'interval-js', 'glsl'] as const;
-
-/**
- * Expect every target to decline `json` with `message`. A target declines by
- * throwing, or with a result whose `success` is false and whose `error` is
- * the reason. The interval mode declines `Apply` with the code
- * `outside-profile`.
- */
-function expectDeclines(json: MathJsonExpression, message: RegExp): void {
-  for (const to of TARGETS) {
-    let reason: string | undefined;
-    let diagnostic: CompileDiagnostic | undefined;
-    try {
-      const r = compile(engine().box(json), { to, fallback: false });
-      expect(r.success).toBe(false);
-      reason = (r as { error?: string }).error;
-      diagnostic = r.diagnostic;
-    } catch (e) {
-      reason = (e as Error).message;
-      diagnostic = compileDiagnosticOf(e);
-    }
-    if (to === 'interval-js') {
-      expect(diagnostic?.code).toBe('outside-profile');
-      expect(diagnostic?.operator).toBe('Apply');
-      continue;
-    }
-    // The GLSL fragment refuses the form before the emitter runs.
-    expect(reason).toMatch(to === 'glsl' ? /GLSL fragment/ : message);
-  }
 }
 
 describe('PARTIAL APPLICATION — the interpreter', () => {
@@ -202,8 +161,6 @@ describe('PARTIAL APPLICATION — the interpreter', () => {
   });
 });
 
-const REFUSAL = /a partial application or a curried call/;
-
 describe('PARTIAL APPLICATION — compiled code declines', () => {
   const ADD3_PURE: MathJsonExpression = [
     'Function',
@@ -212,44 +169,6 @@ describe('PARTIAL APPLICATION — compiled code declines', () => {
     'y',
     'z',
   ];
-
-  // Every case is a partial application, a call of one, or a block local that
-  // holds one.
-  test.each<[string, MathJsonExpression]>([
-    ['a curried call', ['Apply', ['Apply', PURE_ADD, 1], 'u']],
-    [
-      'a curried call of a body with an effect',
-      ['Apply', ['Apply', ADD, 1], 'u'],
-    ],
-    [
-      'a curried call that supplies every argument',
-      ['Apply', ['Apply', ADD3, 1], 'u', 4],
-    ],
-    [
-      'a chain of two currying steps',
-      ['Apply', ['Apply', ['Apply', ADD3_PURE, 1], 2], 'u'],
-    ],
-    [
-      'a chain over a body that writes a parameter',
-      ['Apply', ['Apply', ['Apply', F, 1], 0], 'u'],
-    ],
-    ['a partial application at the root', ['Apply', PURE_ADD, 1]],
-    ['a partial application with no argument', ['Apply', PURE_ADD]],
-    [
-      'a partial application with a variable argument',
-      ['Apply', PURE_ADD, 'u'],
-    ],
-    [
-      'a partial application held by a block local',
-      [
-        'Block',
-        ['Declare', 'g', "'unknown'", ['Apply', PURE_ADD, 1]],
-        ['g', 'u'],
-      ],
-    ],
-  ])('%s declines on every target', (_, json) => {
-    expectDeclines(json, REFUSAL);
-  });
 
   test('with `fallback: true` the result is the interpreter, with the reason', () => {
     const ce = engine();
@@ -295,13 +214,4 @@ describe('PARTIAL APPLICATION — a call with every argument compiles', () => {
     expect(value.hi).toBeGreaterThanOrEqual(2.5);
   });
 
-  test.each(['glsl'] as const)('%s', (to) => {
-    // The GLSL fragment refuses `Apply` of a function literal.
-    expect(() =>
-      compile(engine().box(['Apply', PURE_ADD, 1, 'u']), {
-        to,
-        fallback: false,
-      })
-    ).toThrow(/`Apply` is in the GLSL fragment only as the application/);
-  });
 });

@@ -15,7 +15,6 @@ import type {
   Expression,
   ExpressionInput,
   OperatorCompileHandler,
-  OperatorCompileContext,
 } from './types-expression.js';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
@@ -1160,171 +1159,30 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     derivative?: OperatorDerivative;
 
     /**
-     * A custom compilation handler for this operator: emit target-language
-     * source for a call to this operator. Takes precedence over the target's
-     * built-in operator/function mapping and its broadcast lowering, so it can
-     * override how a built-in operator compiles (e.g. a custom-tolerance `GCD`,
-     * or a re-mapped `Add`/`Multiply`/`Power`/relational operator).
+     * A compilation handler for this operator: it gives an expression that
+     * `compile()` compiles in place of a call of this operator, or
+     * `undefined` to keep the library's compilation of the operator. See
+     * {@link OperatorCompileHandler}.
      *
-     * It does NOT override the structural / control-flow heads, which have
-     * their own bespoke lowering: `Sequence`, `Sum`, `Product`, `Function`,
-     * `Declare`, `Assign`, `Return`, `Break`, `Continue`, `Loop`,
-     * `Comprehension`, `If`, `Match`, `Block`. A handler
-     * declared on one of those heads is ignored.
+     * The handler is not asked about the structural and control-flow heads,
+     * which have their own lowering: `Sequence`, `Sum`, `Product`,
+     * `Function`, `Declare`, `Assign`, `Return`, `Break`, `Continue`,
+     * `Loop`, `Comprehension`, `If`, `Match`, `Block`. `Which` is the
+     * exception: its handler is asked.
      *
-     * Exception: `Which` IS overridable (it has no binding structure — its
-     * operands are plain condition/value pairs a handler can compile through
-     * the callback it is given). To customize how `Which` compiles while
-     * keeping its stock evaluation semantics, attach the handler to the
-     * engine's own definition rather than re-declaring the operator (a
-     * re-declaration replaces the stock `evaluate`/`canonical` handlers):
+     * To change how an operator of the engine compiles and keep its
+     * evaluation, attach the handler to the definition that
+     * `ce.lookupDefinition()` returns. A re-declaration of the operator
+     * replaces its `evaluate` and `canonical` handlers and its effects.
      *
      * ```ts
      * const def = ce.lookupDefinition('Which');
      * if (def && 'operator' in def) def.operator.compile = myWhichHandler;
      * ```
      *
-     * The override is per-engine (each `ComputeEngine` builds its own
-     * standard-library definitions), and the decline contract applies: a
-     * handler returning `undefined` falls back to the built-in `Which`
-     * lowering, coercion and frame-protocol wrapping included.
-     *
-     * **Attaching in place is the supported route for EVERY operator the
-     * engine already defines, not only `Which`.** Three things follow from
-     * re-declaring instead, and all three are silent:
-     *
-     * - A re-declaration REPLACES the stock `evaluate`/`canonical` handlers.
-     *   Spreading the captured definition (`ce.declare(op, {...orig, compile})`)
-     *   is an attempt to carry them across by hand and is not equivalent —
-     *   attaching to the definition `lookupDefinition` returns keeps them by
-     *   construction, with nothing to carry.
-     * - A re-declaration also replaces the definition's EFFECTS declaration,
-     *   and that is what decides whether a compiled `Sum`/`Product` over a
-     *   body mentioning the operator keeps its NaN early exit — the
-     *   `if (acc !== acc) return NaN;` emitted between terms, valid because
-     *   NaN absorbs `+` and `*`, so once the accumulator is NaN no later
-     *   term can change the answer. An operator definition is GRANTED
-     *   purity, so a re-declaration that states no effects keeps the exit.
-     *   One that states any effects refuses it, since skipping terms would
-     *   skip the effects too — and the lever is the effect SET, not the
-     *   `pure` keyword: `pure` is a derived reading of `effects`, so
-     *   `effects: ['random']` or an effect-annotated signature loses the
-     *   exit exactly as `pure: false` does, while `effects: []` keeps it
-     *   exactly as an unspecified definition does. For this exit, carrying
-     *   a `compile` handler costs nothing by itself, whether it supplies
-     *   source or declines for the target at hand: the gate reads the
-     *   definition's declared effects, not who supplied the code. The one
-     *   shape it cannot catch is a handler emitting effectful source under
-     *   a definition that states no effects.
-     *
-     *   The exit this governs is the one the scalar `Sum`/`Product`
-     *   lowering emits through `BaseCompiler.isEmissionSkippable`. An
-     *   element-wise (collection-valued) body carries a separate,
-     *   UNCONDITIONAL latch of the same spelling, emitted so that a
-     *   length mismatch collapsing the fold to a scalar NaN cannot be
-     *   broadcast back over the next term's shape. That latch does not
-     *   consult the declared effects, so declaring effects does not buy
-     *   back the later iterations of an element-wise body.
-     * - Call-sharing is the one cost a handler still pays for being on a
-     *   re-declared definition, and the declared effects do not govern it. A
-     *   `compile` handler the engine did not install is a live-source
-     *   splice the CSE harvest cannot analyse, so every node under that
-     *   head is refused as a candidate and every callee body mentioning it
-     *   is refused with it. A self-recursive body loses the binding that
-     *   made its repeated self-call linear and compiles exponentially —
-     *   measured ×4 per two levels of `R(i,x,y) = R(i-1,x,y) +
-     *   0.5·S(x,y,R(i-1,x,y))`. Declaring `pure: true` on the
-     *   re-declaration does NOT restore sharing. Attaching in place is
-     *   exempt, because the definition is still the engine's own.
-     *
-     * The evaluate side is NOT symmetric with the decline contract above:
-     * returning `undefined` from an `evaluate` handler leaves the expression
-     * unevaluated rather than falling back, so a handler that means to
-     * delegate must call the captured original explicitly.
-     *
-     * Return `undefined` (or an empty string) to fall back to the
-     * default compilation (a `null` returned from untyped JavaScript is
-     * tolerated and treated the same). See {@link OperatorCompileHandler}.
-     *
-     * On the `javascript` target, the code may call two runtime helpers,
-     * which keep their names and behavior across releases:
-     * `_SYS.atNoWrap(base, index)` reads the element at a 1-based position
-     * (or the elements at a list of positions) with no wrap-around, and
-     * `_SYS.atMask(base, mask)` keeps the elements where a list of booleans
-     * is `true`, and reads any other index as `atNoWrap` does. The other
-     * members of `_SYS` are internal and can change in any release. The
-     * compile guide ("Runtime Helpers for Generated JavaScript") gives the
-     * details.
-     *
-     * The code a caller handler writes runs only on the thread that compiled
-     * it: the result is not shippable, so `broadcastAsync()` does not send
-     * it to the kernel pool (`reason: 'not-shippable'`). This holds also
-     * for a handler attached in place to a built-in definition. Set
-     * {@link compileShippable} when the code can run on a worker.
+     * The handler is attached to the definition of one engine.
      */
     compile?: OperatorCompileHandler;
-
-    /**
-     * Whether the code that the {@link compile} handler writes can run on
-     * a worker of the kernel pool. Default: `false`.
-     *
-     * A worker receives the compiled code as text and has none of the
-     * functions or global variables of the thread that compiled it. Set
-     * `true` only when the code calls nothing but the helpers of the
-     * compiled-code runtime, the operands that the handler compiled, and the
-     * functions given in {@link compileHelpers}. When the code calls a
-     * function of the compiling thread (`globalThis.myFn(…)`) and this flag
-     * is `true`, every cell that a worker evaluates throws, and its value is
-     * `NaN` (`BroadcastAsyncResult.failed` counts these cells).
-     *
-     * A compiled result is shippable only when every caller handler that
-     * wrote part of its code has this flag.
-     */
-    compileShippable?: boolean;
-
-    /**
-     * Functions that the code of the {@link compile} handler calls by name.
-     * The engine copies the source of each function (`fn.toString()`) into
-     * the code it compiles, as `const <name> = (<source>);`, so the code
-     * carries its helpers to a worker of the kernel pool and to a stored
-     * result. A helper is defined only when the handler wrote code for the
-     * `javascript` or `interval-javascript` target.
-     *
-     * Because only the source is copied, a helper must not read a variable
-     * from outside its own body (a closure variable or an import). Such a
-     * read throws when the compiled code runs, on every thread. A name must
-     * be a JavaScript identifier that does not start with `_` (the engine
-     * uses that prefix for its own names). Choose a name that a parameter of
-     * a compiled function cannot shadow, for example `myLibFloorIndex`.
-     * Two definitions may give a helper of the same name only with the same
-     * source.
-     *
-     * On the `interval-javascript` target, a compiled operand comes in one
-     * of two forms, and a helper must accept both: a bare enclosure
-     * `{ lo, hi }` (an input such as `_.x`), or the result of an interval
-     * function, `{ kind: 'interval', value: { lo, hi } }` (for example
-     * `_IA.sqrt(_.x)`, or any operand in a branch of an `If` whose
-     * condition narrows it). A result can also be `{ kind: 'partial',
-     * value: { lo, hi }, … }`, `{ kind: 'empty' }`, `{ kind: 'entire' }`
-     * or `{ kind: 'singular', … }`. A helper that reads only `x.lo` reads
-     * `undefined` from the second form, with no error. A helper can return
-     * either form.
-     *
-     * ```ts
-     * ce.declare('Wrap', {
-     *   signature: '(number, number) -> number',
-     *   compileShippable: true,
-     *   compileHelpers: {
-     *     wrapIndex: (i: number, n: number) => ((i % n) + n) % n,
-     *   },
-     *   compile: (args, compile, { language }) =>
-     *     language === 'javascript'
-     *       ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
-     *       : undefined,
-     * });
-     * ```
-     */
-    compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
     /**
      * Custom equality handler.
@@ -2100,83 +1958,6 @@ export interface KindFold {
 }
 
 /**
- * The compiled form of a value kind (the `compile` field of an
- * {@link ArithmeticDefinition}).
- *
- * The hooks branch on `context.language`, like the `compile` handler of an
- * operator definition. `undefined` from a hook declines: the compilation
- * then fails with a diagnostic that names the kind type.
- *
- * @category Compiling
- */
-export interface ArithmeticCompile {
-  /** The representation of the kind TYPE and its operations. It belongs to
-   * the kind type, not to one operator: the operators of one kind type that
-   * are declared at the same time must give the same object (or none, and
-   * then they use the one another operator gave). */
-  type?: {
-    /** The target representation of a free symbol of the kind's type, as
-     * `freeSymbolTypes[].lowered` reports it, or `undefined` when the
-     * target has none (the compilation then declines). */
-    lowered(context: OperatorCompileContext): string | undefined;
-    /** A sum with an operand of the kind. A number operand beside a kind
-     * value is the hook's to promote. */
-    add?(
-      args: ReadonlyArray<Expression>,
-      compile: (expr: Expression) => string,
-      context: OperatorCompileContext
-    ): string | undefined;
-    /** A product with an operand of the kind. */
-    multiply?(
-      args: ReadonlyArray<Expression>,
-      compile: (expr: Expression) => string,
-      context: OperatorCompileContext
-    ): string | undefined;
-    /** The other arithmetic operators, the comparisons, and the other
-     * operators with an operand of the kind. Not the structural and
-     * control-flow operators (`If`, `Block`, `List`, `Tuple`, `Assign`,
-     * `Hold`, a call of a user function): they treat the representation as
-     * an opaque value. */
-    apply?(
-      operator: string,
-      args: ReadonlyArray<Expression>,
-      compile: (expr: Expression) => string,
-      context: OperatorCompileContext
-    ): string | undefined;
-    /** The check, at run time, of a host value passed for a free symbol of
-     * the kind's type. */
-    entry(value: unknown, context: OperatorCompileContext): boolean;
-    /** Whether code from this lowering may be sent to a worker as text.
-     * Default `false`. A compilation result is shippable only when every
-     * kind contract it uses says `true` and lists no `hostNames`, and no
-     * input of the code is a value of a kind (its `entry` check is a
-     * function of the host, which a worker does not have). */
-    shippable?: boolean;
-    /** Functions that the code of this lowering calls by name. The engine
-     * copies the source of each one into the compiled code, as
-     * `const <name> = (<source>);`, so the code carries them to a worker
-     * and to a stored result. The rules are those of
-     * `OperatorDefinition.compileHelpers`: a helper must not read a
-     * variable from outside its own body, and its name is an identifier
-     * that does not start with `_`. Put a helper here, not in `hostNames`,
-     * when the code can carry it. */
-    helpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
-    /** The functions of the host that the code of this lowering calls and
-     * that it does not carry (they are not in `helpers`). A worker does not
-     * have them, so a non-empty list makes the result not shippable,
-     * whatever `shippable` says. */
-    hostNames?: ReadonlyArray<string>;
-  };
-  /** The source of a literal value of THIS operator, in the representation of
-   * the kind type. An operator without it declines a literal of its own. */
-  value?(
-    value: Expression,
-    compile: (expr: Expression) => string,
-    context: OperatorCompileContext
-  ): string | undefined;
-}
-
-/**
  * The arithmetic of a VALUE KIND, given by the `arithmetic` field of the
  * operator definition of the head that constructs its values.
  *
@@ -2348,10 +2129,6 @@ export interface ArithmeticDefinition {
     operator: string,
     operandTypes: ReadonlyArray<Type>
   ): Type | TypeString | undefined;
-
-  /** The compiled form of the kind. Absent: every target declines an
-   * expression that holds a value of the kind. */
-  compile?: ArithmeticCompile;
 }
 
 /**
@@ -2368,9 +2145,6 @@ export interface KindTypeRecord {
   /** The `resultType` hook of the type, or `undefined` when no head gave
    * one. */
   resultType: ArithmeticDefinition['resultType'];
-  /** The `compile.type` contract of the type, or `undefined` when no head
-   * gave one. */
-  compileType: ArithmeticCompile['type'];
   /** The heads that declare a kind of this type and are still registered
    * (the LIVE heads). A head stays registered after its scope is popped,
    * because values bound to it can still exist. */
@@ -3941,12 +3715,6 @@ export interface BoxedOperatorDefinition
   derivative?: OperatorDerivative;
 
   compile?: OperatorCompileHandler;
-
-  /** See `OperatorDefinition.compileShippable`. */
-  compileShippable?: boolean;
-
-  /** See `OperatorDefinition.compileHelpers`. */
-  compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
   /** The arithmetic of the value kind this operator constructs, as given by
    * the `arithmetic` field of its definition. See

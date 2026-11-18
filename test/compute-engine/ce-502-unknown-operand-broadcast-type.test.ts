@@ -233,21 +233,6 @@ describe('CE-502: an application over an operand of type unknown', () => {
     }
   });
 
-  test('Rank over the open form does not compile to the shape of a point', () => {
-    // The value of `2h(x)` can be a point, whose rank is 0, while the
-    // compiled run-time shape of its array is `[2]`. The compilation is
-    // refused, and the interpreter answers.
-    const ce = engine();
-    ce.declare('h', '(number) -> unknown');
-    ce.assign('h', ce.box(['Function', ['Tuple', 't', 't'], 't']));
-    for (const op of ['Rank', 'Shape']) {
-      const expr = ce.box([op, ['Multiply', 2, ['h', 'x']]]);
-      expect(() =>
-        compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/can be a tuple/);
-    }
-  });
-
   test('a compiled application over the open form runs as before', () => {
     // The compiled code checks the value at run time and maps over an array
     // at any depth, as it does for a `broadcastable<number>` operand.

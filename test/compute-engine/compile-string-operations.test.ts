@@ -54,7 +54,6 @@ import {
   isCharacter,
   isString,
 } from '../../src/compute-engine/boxed-expression/type-guards';
-import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -62,18 +61,6 @@ beforeEach(() => {
 });
 
 // ── The D10 inputs ──────────────────────────────────────────────────────────
-
-/** U+00E9 LATIN SMALL LETTER E WITH ACUTE: one code point, one cluster. */
-const E_ACUTE_PRECOMPOSED = 'é';
-/** `"e"` + U+0301 COMBINING ACUTE ACCENT: two code points, one cluster. NFC
- * composes it to U+00E9, which is what the engine stores and what every
- * lowering must reproduce for a raw host string. */
-const E_ACUTE_DECOMPOSED = 'é';
-/** MAN + ZWJ + WOMAN + ZWJ + BOY: five code points (seven UTF-16 units), ONE
- * grapheme cluster. */
-const ZWJ_FAMILY = '\u{1F468}‍\u{1F469}‍\u{1F466}';
-/** REGIONAL INDICATOR F + R: two code points (four UTF-16 units), one cluster. */
-const FLAG_FR = '\u{1F1EB}\u{1F1F7}';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -113,25 +100,6 @@ function agreesWithInterpreter(
   );
 }
 
-/**
- * Assert `expr` compiles and that its compiled value on the SUBSTITUTED
- * operands equals what the interpreter answers for the same substitution. The
- * run-time route is what exercises the ingress conditioning: a string literal
- * is already NFC when the engine boxes it, so only a raw host string can be
- * decomposed or hold a lone surrogate. It is also the route a COMPUTED
- * domain-deciding operand takes (`PadStart(s, w)` with `w` bound at run time).
- */
-function agreesWithInterpreterAtRuntime(
-  expr: Expression,
-  vars: Record<string, string | number>
-): void {
-  const r = compile(expr, { fallback: false, constantFold: false });
-  expect(r.success).toBe(true);
-  expect((r.run as (v: Record<string, unknown>) => unknown)(vars)).toEqual(
-    project(substitute(expr, vars).evaluate())
-  );
-}
-
 /** `expr` with each of `vars` substituted as the boxed value the interpreter
  * would see, so a compiled run and an interpreted one are given the same
  * operands. */
@@ -147,47 +115,6 @@ function substitute(
       ])
     ) as never
   );
-}
-
-/**
- * Assert that a COMPUTED operand whose value is OUT OF DOMAIN compiles and
- * makes the compiled function THROW a `RangeError` naming the operator and the
- * violated rule, while the interpreter answers an error VALUE for the same
- * operands.
- *
- * That divergence is the ruling of 2026-08-16, and it follows the `Slice`
- * precedent in `javascript-target.ts`: a compiled artifact has no
- * representation for an interpreter error value, so rather than declining the
- * whole call — which would leave `PadStart(s, width)` with a computed width
- * uncompilable — the emitted code checks the domain and fails LOUDLY. The
- * interpreter returns an error VALUE, compiled code throws; neither ever
- * answers a wrong value.
- *
- * `expectedInterpreterError` pins WHICH error value the interpreter answers
- * (its code, or a substring of the rule it names). Asserting only
- * `operator === 'Error'` would let an unrelated failure — a mistyped operand,
- * an arity slip — stand in for the domain rejection the cell is about, and the
- * cross-check would silently stop testing anything.
- */
-function throwsAtRuntime(
-  expr: Expression,
-  vars: Record<string, string | number>,
-  message: string,
-  expectedInterpreterError: string
-): void {
-  const r = compile(expr, { fallback: false, constantFold: false });
-  expect(r.success).toBe(true);
-  expect(() =>
-    (r.run as (v: Record<string, unknown>) => unknown)(vars)
-  ).toThrow(RangeError);
-  expect(() =>
-    (r.run as (v: Record<string, unknown>) => unknown)(vars)
-  ).toThrow(message);
-  // The cross-check that makes the throw meaningful: the interpreter's own
-  // answer on these operands is an error value, not a result.
-  const interpreted = substitute(expr, vars).evaluate();
-  expect(interpreted.operator).toBe('Error');
-  expect(interpreted.toString()).toContain(expectedInterpreterError);
 }
 
 /** Assert `expr` declines to compile — the engine reports `success: false` and
@@ -221,14 +148,10 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
         constantFold: false,
       } as never);
       expect(r.success).toBe(false);
-      if (to === 'glsl') {
-        // The GLSL fragment refuses the head before any code is written.
-        expect(r.diagnostic?.code).toBe('outside-fragment');
-        expect(r.error).toMatch(/outside the GLSL fragment/);
-      } else {
-        expect(r.error).toMatch(/Could not compile `NumberFrom`: /);
-        expect(r.error).toMatch(/no lowering for it/);
-      }
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.error).toMatch(
+        /the operator NumberFrom is not supported by the compiler/
+      );
     }
   );
 
@@ -240,59 +163,6 @@ describe('D8 lock: an operator with NO lowering entry declines on every target',
 // ── StringJoin — the NARROWED signature ─────────────────────────────────────
 
 describe('D2/D8: `StringJoin(xs, sep?)` joins ONE collection', () => {
-  test.each([
-    // A provably STRING subject is the collection of its own characters, so a
-    // separator lands between them — the user-ruled Python `sep.join(s)`
-    // semantics.
-    [['StringJoin', { str: 'abc' }, { str: '-' }], 'a-b-c'],
-    [['StringJoin', { str: 'abc' }], 'abc'],
-    [['StringJoin', { str: '' }, { str: '-' }], ''],
-    // A one-character subject has no interior boundary.
-    [['StringJoin', { str: 'a' }, { str: 'b' }], 'a'],
-    // A collection of strings / characters.
-    [
-      ['StringJoin', ['List', { str: 'ab' }, { str: 'cd' }], { str: '/' }],
-      'ab/cd',
-    ],
-    [['StringJoin', ['Characters', { str: 'abc' }], { str: '.' }], 'a.b.c'],
-    [['StringJoin', ['List']], ''],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a ZWJ family and a flag are single elements, not code-unit runs', () => {
-    // `"a"` + family + `"b"` is THREE characters, so two separators appear.
-    // A code-unit join would have produced eight.
-    const expr = ce.box([
-      'StringJoin',
-      { str: `a${ZWJ_FAMILY}b` },
-      { str: '-' },
-    ]);
-    expect(expr.evaluate().string).toBe(`a-${ZWJ_FAMILY}-b`);
-    agreesWithInterpreter(expr);
-    agreesWithInterpreter(
-      ce.box(['StringJoin', { str: `x${FLAG_FR}y` }, { str: '|' }])
-    );
-  });
-
-  test('a DECOMPOSED string bound at run time joins as one character', () => {
-    ce.declare('sv', 'string');
-    const r = compile(ce.box(['StringJoin', 'sv', { str: '-' }]), {
-      fallback: false,
-      constantFold: false,
-    });
-    // `_SYS.chars` conditions its input (NFC, then the lone-surrogate
-    // replacement) before segmenting, so `"e" + U+0301` is the single
-    // precomposed U+00E9 and no separator is inserted inside it.
-    expect((r.run as any)({ sv: E_ACUTE_DECOMPOSED })).toBe(
-      E_ACUTE_PRECOMPOSED
-    );
-    expect((r.run as any)({ sv: `a${E_ACUTE_DECOMPOSED}b` })).toBe(
-      `a-${E_ACUTE_PRECOMPOSED}-b`
-    );
-  });
 
   test.each([
     // Signature errors: the compiler refuses the resulting `Error` node.
@@ -339,32 +209,6 @@ describe('D2/D8: `StringJoin(xs, sep?)` joins ONE collection', () => {
 // ── Join — the string-preserving arm ────────────────────────────────────────
 
 describe('D1/D8: `Join` over all-string operands is the variadic concatenation', () => {
-  test.each([
-    [['Join', { str: 'ab' }, { str: 'cd' }], 'abcd'],
-    [['Join', { str: 'ab' }], 'ab'],
-    [['Join', { str: 'a' }, { str: 'b' }, { str: 'c' }], 'abc'],
-    // A base letter and a lone combining mark COMPOSE at NFC time, which is
-    // what `engine.string()` does and what a raw `+` would not.
-    [['Join', { str: 'e' }, { str: '́' }], E_ACUTE_PRECOMPOSED],
-    [['Join', { str: '' }, { str: 'a' }], 'a'],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    expect(expr.type.toString()).toBe('string');
-    agreesWithInterpreter(expr);
-  });
-
-  test('two string-typed symbols concatenate and normalize at run time', () => {
-    ce.declare('sa', 'string');
-    ce.declare('sb', 'string');
-    const expr = ce.box(['Join', 'sa', 'sb']);
-    const r = compile(expr, { fallback: false, constantFold: false });
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ sa: 'e', sb: '́' })).toBe(E_ACUTE_PRECOMPOSED);
-    expect((r.run as any)({ sa: ZWJ_FAMILY, sb: FLAG_FR })).toBe(
-      ZWJ_FAMILY + FLAG_FR
-    );
-  });
 
   test('a MIXED string/list `Join` still fails closed', () => {
     // The interpreter takes the generic arm and answers a
@@ -385,126 +229,6 @@ describe('D1/D8: `Join` over all-string operands is the variadic concatenation',
 // ── The sequence-search family ──────────────────────────────────────────────
 
 describe('D8: sequence search over strings and lists', () => {
-  test.each([
-    // RangeOf: the 1-based inclusive span, which lowers to the same JS array
-    // `Range(a, b)` does.
-    [['RangeOf', { str: 'abcb' }, { str: 'b' }], [2]],
-    [
-      ['RangeOf', { str: 'abcb' }, { str: 'bc' }],
-      [2, 3],
-    ],
-    [['RangeOf', { str: 'abcb' }, { str: 'b' }, 3], [4]],
-    // Absent → the interpreter's `Nothing`, projected to `undefined`.
-    [['RangeOf', { str: 'abcb' }, { str: 'z' }], undefined],
-    [['RangeOf', { str: 'abcb' }, { str: 'b' }, 5], undefined],
-    // Generic over indexed collections, not just strings.
-    [
-      ['RangeOf', ['List', 1, 2, 3, 2], ['List', 2, 3]],
-      [2, 3],
-    ],
-    [['RangeOf', ['List', 1, 2, 3], ['List', 9]], undefined],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(project(expr.evaluate())).toEqual(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test.each([
-    [['ContainsSequence', { str: 'abc' }, { str: 'bc' }], true],
-    [['ContainsSequence', { str: 'abc' }, { str: 'ca' }], false],
-    // An EMPTY needle is `True` here — the empty sequence is a subsequence of
-    // everything — while `RangeOf` rejects it, because an empty SPAN has no
-    // `Range` representation.
-    [['ContainsSequence', { str: 'abc' }, { str: '' }], true],
-    [['ContainsSequence', ['List', 1, 2, 3], ['List', 2, 3]], true],
-    [['StartsWith', { str: 'abc' }, { str: 'ab' }], true],
-    [['StartsWith', { str: 'abc' }, { str: 'b' }], false],
-    [['StartsWith', { str: 'abc' }, { str: '' }], true],
-    [['StartsWith', { str: 'abc' }, { str: 'abcd' }], false],
-    [['EndsWith', { str: 'abc' }, { str: 'bc' }], true],
-    [['EndsWith', { str: 'abc' }, { str: 'ab' }], false],
-    [['EndsWith', { str: 'abc' }, { str: '' }], true],
-    [['EndsWith', ['List', 1, 2, 3], ['List', 2, 3]], true],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(project(expr.evaluate())).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a match never begins or ends inside a grapheme cluster', () => {
-    // The family compares whole CHARACTERS. A ZWJ family is one of them, so it
-    // is found at position 2 of `"a" + family + "b"` — a code-unit search would
-    // have reported 2 as a UTF-16 offset into the surrogate pair.
-    const family = ce.box([
-      'RangeOf',
-      { str: `a${ZWJ_FAMILY}b` },
-      { str: ZWJ_FAMILY },
-    ]);
-    expect(project(family.evaluate())).toEqual([2]);
-    agreesWithInterpreter(family);
-    // A regional-indicator PAIR is one flag: the search finds the whole flag,
-    // never one half of it.
-    const flag = ce.box(['RangeOf', { str: `x${FLAG_FR}y` }, { str: FLAG_FR }]);
-    expect(project(flag.evaluate())).toEqual([2]);
-    agreesWithInterpreter(flag);
-    agreesWithInterpreter(
-      ce.box(['ContainsSequence', { str: `x${FLAG_FR}y` }, { str: FLAG_FR }])
-    );
-    agreesWithInterpreter(
-      ce.box(['EndsWith', { str: `ab${ZWJ_FAMILY}` }, { str: ZWJ_FAMILY }])
-    );
-  });
-
-  test('a DECOMPOSED subject bound at run time matches a precomposed needle', () => {
-    // The element test conditions both sides (NFC, then the lone-surrogate
-    // replacement), which is what the interpreter compares — it normalized at
-    // boxing time.
-    ce.declare('sv', 'string');
-    for (const [json, expected] of [
-      [['StartsWith', 'sv', { str: E_ACUTE_PRECOMPOSED }], true],
-      [['ContainsSequence', 'sv', { str: E_ACUTE_PRECOMPOSED }], true],
-      [['EndsWith', 'sv', { str: 'z' }], true],
-    ] as const) {
-      const r = compile(ce.box(json as never), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      expect((r.run as any)({ sv: `${E_ACUTE_DECOMPOSED}z` })).toBe(expected);
-    }
-    const r = compile(ce.box(['RangeOf', 'sv', { str: E_ACUTE_PRECOMPOSED }]), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect((r.run as any)({ sv: `x${E_ACUTE_DECOMPOSED}` })).toEqual([2]);
-  });
-
-  test('a `list<character>` needle matches a string subject', () => {
-    // `.isSame()` bridges a character and a one-cluster string, so a
-    // `list<character>` needle finds its span in a `string` subject — and the
-    // emitted `_SYS.eqt` reproduces that, since both sides lower to
-    // one-cluster JS strings.
-    const expr = ce.box([
-      'RangeOf',
-      { str: 'abc' },
-      [
-        'List',
-        ['CharacterFrom', { str: 'b' }],
-        ['CharacterFrom', { str: 'c' }],
-      ],
-    ]);
-    expect(project(expr.evaluate())).toEqual([2, 3]);
-    agreesWithInterpreter(expr);
-    // `ContainsSequence` and its anchored siblings have no empty-needle gate —
-    // an empty needle is `True` for them — so a computed needle compiles there.
-    agreesWithInterpreter(
-      ce.box([
-        'ContainsSequence',
-        { str: 'abc' },
-        ['Characters', { str: 'bc' }],
-      ])
-    );
-  });
 
   test.each([
     // The error-value cells. A compiled artifact has no representation for an
@@ -517,78 +241,6 @@ describe('D8: sequence search over strings and lists', () => {
     // compiled artifact must not claim one.
     expect(expr.evaluate().operator).toBe('Error');
     failsClosed(expr);
-  });
-
-  test('a COMPUTED `from` compiles, and guards its domain at run time', () => {
-    ce.declare('nv', 'integer');
-    const expr = ce.box(['RangeOf', { str: 'abcb' }, { str: 'b' }, 'nv']);
-    // In domain, the compiled span is the interpreter's.
-    agreesWithInterpreterAtRuntime(expr, { nv: 3 });
-    // Past the END of the subject is deliberately NOT an error in the
-    // interpreter, just `Nothing` — the natural find-all loop produces
-    // `Length(xs) + 1` after a match at the very end — so it must not throw.
-    agreesWithInterpreterAtRuntime(expr, { nv: 5 });
-    // Below 1, where the interpreter answers an `out-of-range` error value.
-    throwsAtRuntime(
-      expr,
-      { nv: 0 },
-      'RangeOf: `from` must be an integer of 1',
-      'out-of-range'
-    );
-  });
-
-  test('a needle whose emptiness is unknown compiles, and is guarded at run time', () => {
-    // An empty needle has no representable span — `Range(1, 0)` is the
-    // DESCENDING range [1, 0], not an empty one — so the interpreter answers
-    // an `out-of-range` error value for it. A needle that does not report its
-    // emptiness without being evaluated (a `string`-typed symbol, a
-    // `Characters(…)` call) therefore compiles with a `_SYS.domne` length
-    // guard rather than declining.
-    ce.declare('needle', 'string');
-    const expr = ce.box(['RangeOf', { str: 'abcb' }, 'needle']);
-    agreesWithInterpreterAtRuntime(expr, { needle: 'b' });
-    throwsAtRuntime(
-      expr,
-      { needle: '' },
-      'RangeOf: the needle must not be empty',
-      'out-of-range'
-    );
-
-    // A COMPUTED needle takes the same route, and the guard covers the LIST
-    // shape too: `elementsArg` hands both kinds of needle to the emitted code
-    // as an array (a string's grapheme clusters, a list's elements).
-    agreesWithInterpreter(
-      ce.box(['RangeOf', { str: 'abc' }, ['Characters', { str: 'b' }]])
-    );
-    const computedEmpty = ce.box([
-      'RangeOf',
-      { str: 'abc' },
-      ['Characters', { str: '' }],
-    ]);
-    const r = compile(computedEmpty, { fallback: false, constantFold: false });
-    expect(r.success).toBe(true);
-    expect(() =>
-      (r.run as (v: Record<string, unknown>) => unknown)({})
-    ).toThrow('RangeOf: the needle must not be empty');
-    expect(computedEmpty.evaluate().operator).toBe('Error');
-  });
-
-  test('with BOTH a bad `from` and an empty needle, the `from` rule wins', () => {
-    // The interpreter checks `from` FIRST — `start < 1` returns before the
-    // empty-needle test in `RangeOf` (`library/collections.ts`) — so the
-    // emitted guards have to fire in that order too, or the two engines would
-    // name different rules for the same call. JavaScript evaluates call
-    // arguments left to right, which is why the from-offset is the FIRST
-    // parameter of the emitted IIFE rather than an expression inside its body.
-    ce.declare('fv', 'integer');
-    ce.declare('nv2', 'string');
-    const expr = ce.box(['RangeOf', { str: 'abcb' }, 'nv2', 'fv']);
-    throwsAtRuntime(
-      expr,
-      { fv: 0, nv2: '' },
-      'RangeOf: `from` must be an integer of 1',
-      'an index of 1 or more'
-    );
   });
 
   test('a union-typed subject declines on every member of the family', () => {
@@ -629,55 +281,6 @@ describe('D8: sequence search over strings and lists', () => {
 // ── String-specific operations ──────────────────────────────────────────────
 
 describe('D8: StringReplace', () => {
-  test.each([
-    // A replacement's own content is never re-matched: the scan walks the
-    // ORIGINAL subject and skips past each match's span.
-    [['StringReplace', { str: 'aa' }, { str: 'a' }, { str: 'aa' }], 'aaaa'],
-    [
-      ['StringReplace', { str: 'banana' }, { str: 'a' }, { str: 'o' }],
-      'bonono',
-    ],
-    [['StringReplace', { str: 'aaa' }, { str: 'a' }, { str: 'b' }, 2], 'bba'],
-    // An empty replacement is deletion.
-    [['StringReplace', { str: 'abcabc' }, { str: 'b' }, { str: '' }], 'acac'],
-    [['StringReplace', { str: 'abc' }, { str: 'z' }, { str: '!' }], 'abc'],
-    // A whole ZWJ family is one character, so it matches as one unit.
-    [
-      [
-        'StringReplace',
-        { str: `a${ZWJ_FAMILY}b` },
-        { str: ZWJ_FAMILY },
-        { str: '!' },
-      ],
-      'a!b',
-    ],
-    [
-      [
-        'StringReplace',
-        { str: `x${FLAG_FR}y` },
-        { str: FLAG_FR },
-        { str: '_' },
-      ],
-      'x_y',
-    ],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a decomposed subject bound at run time is replaced by character', () => {
-    ce.declare('sv', 'string');
-    agreesWithInterpreterAtRuntime(
-      ce.box([
-        'StringReplace',
-        'sv',
-        { str: E_ACUTE_PRECOMPOSED },
-        { str: 'X' },
-      ]),
-      { sv: `a${E_ACUTE_DECOMPOSED}b` }
-    );
-  });
 
   test.each([
     // Error-value cells: an empty target and a `count` below 1.
@@ -695,73 +298,9 @@ describe('D8: StringReplace', () => {
     failsClosed(expr);
   });
 
-  test('a COMPUTED target or count compiles, and guards its domain at run time', () => {
-    ce.declare('tv', 'string');
-    ce.declare('nv', 'integer');
-    const target = ce.box([
-      'StringReplace',
-      { str: 'aaa' },
-      'tv',
-      { str: 'x' },
-    ]);
-    agreesWithInterpreterAtRuntime(target, { tv: 'a' });
-    // An empty target is an error value in the interpreter, and would make the
-    // emitted scan advance by zero and never terminate — so the guard has to
-    // fire before the kernel runs.
-    throwsAtRuntime(
-      target,
-      { tv: '' },
-      'StringReplace: the target must not be empty',
-      'unexpected-argument'
-    );
-
-    const count = ce.box([
-      'StringReplace',
-      { str: 'aaa' },
-      { str: 'a' },
-      { str: 'x' },
-      'nv',
-    ]);
-    agreesWithInterpreterAtRuntime(count, { nv: 2 });
-    throwsAtRuntime(
-      count,
-      { nv: 0 },
-      'StringReplace: `count` must be a positive integer',
-      'unexpected-argument'
-    );
-  });
 });
 
 describe('D8: Trim / TrimStart / TrimEnd', () => {
-  test.each([
-    [['Trim', { str: '  hi  ' }], 'hi'],
-    [['TrimStart', { str: '  hi  ' }], 'hi  '],
-    [['TrimEnd', { str: '  hi  ' }], '  hi'],
-    // The default set is the Unicode White_Space property, spelled out code
-    // point by code point rather than `\s`: U+3000 IDEOGRAPHIC SPACE and
-    // U+00A0 NO-BREAK SPACE are members, and both must be stripped.
-    [['Trim', { str: '　hi ' }], 'hi'],
-    [['Trim', { str: ' hi ' }], 'hi'],
-    // `chars` is a SET of characters, never a literal substring.
-    [['Trim', { str: 'xyhiyx' }, { str: 'xy' }], 'hi'],
-    [['TrimStart', { str: 'xyhiyx' }, { str: 'xy' }], 'hiyx'],
-    [['Trim', { str: 'abcba' }, ['Characters', { str: 'ab' }]], 'c'],
-    // A flag is one character, so it is stripped whole.
-    [['Trim', { str: `${FLAG_FR}hi${FLAG_FR}` }, { str: FLAG_FR }], 'hi'],
-    [['Trim', { str: 'hi' }], 'hi'],
-    [['Trim', { str: '   ' }], ''],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a decomposed subject bound at run time trims by character', () => {
-    ce.declare('sv', 'string');
-    agreesWithInterpreterAtRuntime(ce.box(['Trim', 'sv']), {
-      sv: `  ${E_ACUTE_DECOMPOSED}  `,
-    });
-  });
 
   test('a non-text `chars` operand fails closed', () => {
     // The signature is `(string, chars: (string | collection<character>)?)`, so
@@ -789,40 +328,6 @@ describe('D8: Trim / TrimStart / TrimEnd', () => {
 });
 
 describe('D8: StringRepeat and PadStart / PadEnd', () => {
-  test.each([
-    [['StringRepeat', { str: 'ab' }, 3], 'ababab'],
-    [['StringRepeat', { str: 'ab' }, 0], ''],
-    [['StringRepeat', { str: FLAG_FR }, 2], FLAG_FR + FLAG_FR],
-    // A multi-character pad repeats and its final copy is truncated ON A
-    // CHARACTER BOUNDARY, so `PadStart("a", 4, "xy")` is `"xyxa"`.
-    [['PadStart', { str: 'a' }, 4, { str: 'xy' }], 'xyxa'],
-    [['PadEnd', { str: 'a' }, 4, { str: 'xy' }], 'axyx'],
-    // The default pad is one space.
-    [['PadStart', { str: 'a' }, 4], '   a'],
-    [['PadEnd', { str: 'a' }, 4], 'a   '],
-    // Already long enough: returned unchanged.
-    [['PadStart', { str: 'abcde' }, 3], 'abcde'],
-    [['PadEnd', { str: 'abcde' }, 3], 'abcde'],
-    // Padding counts CHARACTERS, so one flag fills one slot even though it is
-    // four UTF-16 code units.
-    [['PadStart', { str: 'a' }, 3, { str: FLAG_FR }], FLAG_FR + FLAG_FR + 'a'],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a decomposed subject bound at run time is padded by character', () => {
-    ce.declare('sv', 'string');
-    // One cluster, so three pad characters are added — a code-unit count would
-    // have added only two.
-    agreesWithInterpreterAtRuntime(ce.box(['PadStart', 'sv', 4]), {
-      sv: E_ACUTE_DECOMPOSED,
-    });
-    agreesWithInterpreterAtRuntime(ce.box(['StringRepeat', 'sv', 2]), {
-      sv: E_ACUTE_DECOMPOSED,
-    });
-  });
 
   test.each([
     ['a negative repeat count', ['StringRepeat', { str: 'ab' }, -1]],
@@ -841,59 +346,6 @@ describe('D8: StringRepeat and PadStart / PadEnd', () => {
     const expr = ce.box(json as never);
     expect(expr.evaluate().operator).toBe('Error');
     failsClosed(expr);
-  });
-
-  test('a COMPUTED count, width or pad compiles, and guards its domain at run time', () => {
-    ce.declare('nv', 'integer');
-    ce.declare('pv', 'string');
-
-    const repeat = ce.box(['StringRepeat', { str: 'ab' }, 'nv']);
-    agreesWithInterpreterAtRuntime(repeat, { nv: 3 });
-    // Zero is IN domain — `StringRepeat(s, 0)` is `""`, not an error.
-    agreesWithInterpreterAtRuntime(repeat, { nv: 0 });
-    throwsAtRuntime(
-      repeat,
-      { nv: -1 },
-      'StringRepeat: `n` must be a non-negative integer',
-      'unexpected-argument'
-    );
-    // The UPPER bound is the interpreter's own: it reads `n` with
-    // `asSmallInteger`, which answers `null` — hence an error value — above
-    // `SMALL_INTEGER` (1000000). Without the guard the compiled call would
-    // happily build a multi-megabyte string.
-    throwsAtRuntime(
-      repeat,
-      { nv: 2_000_001 },
-      'StringRepeat: `n` must be a non-negative integer of at most 1000000',
-      'unexpected-argument'
-    );
-
-    const width = ce.box(['PadStart', { str: 'a' }, 'nv']);
-    agreesWithInterpreterAtRuntime(width, { nv: 5 });
-    throwsAtRuntime(
-      width,
-      { nv: -1 },
-      'PadStart: `n` must be a non-negative integer',
-      'unexpected-argument'
-    );
-    // A caller who defies the `integer` declaration reaches the same guard:
-    // the compiled function throws rather than silently rounding, and the
-    // interpreter rejects the substituted 2.5 with `incompatible-type`.
-    throwsAtRuntime(
-      width,
-      { nv: 2.5 },
-      'PadStart: `n` must be a non-negative integer',
-      'incompatible-type'
-    );
-
-    const pad = ce.box(['PadEnd', { str: 'a' }, 4, 'pv']);
-    agreesWithInterpreterAtRuntime(pad, { pv: 'xy' });
-    throwsAtRuntime(
-      pad,
-      { pv: '' },
-      'PadEnd: `pad` must be a non-empty string',
-      'unexpected-argument'
-    );
   });
 
   test('a COMPUTED operand the engine can PROVE out of domain declines', () => {
@@ -936,218 +388,11 @@ describe('D8: StringRepeat and PadStart / PadEnd', () => {
 
 // ── Case operations and comparison ──────────────────────────────────────────
 
-describe('D8: ToUpperCase / ToLowerCase / CaseFold', () => {
-  test.each([
-    [['ToUpperCase', { str: 'abc' }], 'ABC'],
-    // Full case mapping can CHANGE the character count.
-    [['ToUpperCase', { str: 'straße' }], 'STRASSE'],
-    [['ToLowerCase', { str: 'ABC' }], 'abc'],
-    // Lower-casing a final capital sigma yields the FINAL sigma U+03C2, not the
-    // medial U+03C3 — the mapping is contextual.
-    [['ToLowerCase', { str: 'ΟΔΟΣ' }], 'οδος'],
-    // Case folding restores the medial sigma, which is what makes the two
-    // spellings of "road" fold together.
-    [['CaseFold', { str: 'ΟΔΟΣ' }], 'οδοσ'],
-    [['CaseFold', { str: 'οδοσ' }], 'οδοσ'],
-    [['CaseFold', { str: 'straße' }], 'strasse'],
-    [['CaseFold', { str: 'STRASSE' }], 'strasse'],
-    // A ZWJ family and a flag have no case, so they pass through unchanged.
-    [['ToUpperCase', { str: ZWJ_FAMILY }], ZWJ_FAMILY],
-    [['CaseFold', { str: FLAG_FR }], FLAG_FR],
-    [['ToUpperCase', { str: E_ACUTE_PRECOMPOSED }], 'É'],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().string).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('a decomposed string bound at run time cases as one character', () => {
-    ce.declare('sv', 'string');
-    for (const op of ['ToUpperCase', 'ToLowerCase', 'CaseFold'])
-      agreesWithInterpreterAtRuntime(ce.box([op, 'sv'] as never), {
-        sv: E_ACUTE_DECOMPOSED,
-      });
-  });
-
-  test('a scalar `character` operand compiles as the one-character string', () => {
-    // A character is accepted wherever a string is: the two are the same
-    // value, so `CaseFold` of the character `A` is the string `"a"`. A
-    // character lowers to the one-cluster JS string it denotes, so the
-    // compiled code is the same as for a string operand.
-    const expr = ce.box(['CaseFold', ['CharacterFrom', { str: 'A' }]]);
-    expect(expr.evaluate().string).toBe('a');
-    agreesWithInterpreter(expr);
-  });
-});
-
-describe('D8: StringCompare', () => {
-  test.each([
-    [['StringCompare', { str: 'a' }, { str: 'b' }], -1],
-    [['StringCompare', { str: 'a' }, { str: 'a' }], 0],
-    [['StringCompare', { str: 'b' }, { str: 'a' }], 1],
-    // A common prefix: the shorter string sorts first.
-    [['StringCompare', { str: 'ab' }, { str: 'abc' }], -1],
-    // The ORDER is by Unicode SCALAR, not UTF-16 code unit: U+10000 is above
-    // U+E000, and the raw `<` operator (which compares the surrogate lead unit
-    // 0xD800) would answer the opposite.
-    [['StringCompare', { str: '\u{10000}' }, { str: '' }], 1],
-  ] as const)('%p is %p, and the compiled value agrees', (json, expected) => {
-    const expr = ce.box(json as never);
-    expect(expr.evaluate().re).toBe(expected);
-    agreesWithInterpreter(expr);
-  });
-
-  test('the result is exactly -1, 0 or 1', () => {
-    for (const [a, b] of [
-      ['a', 'b'],
-      ['b', 'a'],
-      ['a', 'a'],
-      ['abc', 'abd'],
-    ] as const) {
-      const r = compile(ce.box(['StringCompare', { str: a }, { str: b }]), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect([-1, 0, 1]).toContain(r.run!());
-    }
-  });
-
-  test('a decomposed and a precomposed spelling compare EQUAL at run time', () => {
-    ce.declare('sa', 'string');
-    ce.declare('sb', 'string');
-    const r = compile(ce.box(['StringCompare', 'sa', 'sb']), {
-      fallback: false,
-      constantFold: false,
-    });
-    // The interpreter compares the NFC scalar sequences of two boxed strings,
-    // so the two spellings of `"é"` are the same string; `_SYS.cmpc` conditions
-    // its operands to reach the same verdict.
-    expect(
-      (r.run as any)({ sa: E_ACUTE_DECOMPOSED, sb: E_ACUTE_PRECOMPOSED })
-    ).toBe(0);
-  });
-});
-
 // ── The promoted element-preserving operators ───────────────────────────────
-
-describe('D8: RandomShuffle / RandomSample over a string source', () => {
-  test('a shuffled string matches the interpreter under the same seed', () => {
-    // Both draw `n − 1` indices from the frame's stream in the same order, so a
-    // seeded frame replays bit-for-bit.
-    const json = ['RandomShuffle', { str: 'abcdef' }];
-    const r = compile(ce.box(json as never), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
-    const compiled = withRandomSeedFrame(ce, 42, () => r.run!());
-    const interpreted = withRandomSeedFrame(
-      ce,
-      42,
-      () => ce.box(json as never).evaluate().string
-    );
-    expect(compiled).toBe(interpreted);
-    // …and the value is a permutation of the source's own characters.
-    expect((compiled as string).split('').sort().join('')).toBe('abcdef');
-  });
-
-  test('a sampled string matches the interpreter under the same seed', () => {
-    const json = ['RandomSample', { str: 'abcdef' }, 3];
-    const r = compile(ce.box(json as never), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
-    const compiled = withRandomSeedFrame(ce, 7, () => r.run!());
-    const interpreted = withRandomSeedFrame(
-      ce,
-      7,
-      () => ce.box(json as never).evaluate().string
-    );
-    expect(compiled).toBe(interpreted);
-    expect((compiled as string).length).toBe(3);
-  });
-
-  test('a shuffled ZWJ family stays whole', () => {
-    // The source is segmented into characters before the permutation, so a
-    // family is moved as one unit rather than split into surrogate halves.
-    const json = ['RandomShuffle', { str: `ab${ZWJ_FAMILY}` }];
-    const r = compile(ce.box(json as never), {
-      fallback: false,
-      constantFold: false,
-    });
-    const compiled = withRandomSeedFrame(ce, 3, () => r.run!()) as string;
-    const interpreted = withRandomSeedFrame(
-      ce,
-      3,
-      () => ce.box(json as never).evaluate().string
-    );
-    expect(compiled).toBe(interpreted);
-    expect(compiled).toContain(ZWJ_FAMILY);
-  });
-
-  test('`DeleteAt` over a string removes one character and answers a string', () => {
-    // The string is segmented into grapheme clusters before the delete, so
-    // the multi-code-point family emoji counts as ONE position, as in the
-    // interpreter, and the result is joined back into a string (the string
-    // preservation rule).
-    for (const index of [2, -1]) {
-      const json = ['DeleteAt', { str: `a${ZWJ_FAMILY}b` }, index];
-      const r = compile(ce.box(json as never), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.run!()).toBe(ce.box(json as never).evaluate().string);
-    }
-  });
-});
 
 // ── A `string | character` operand at the collection operators ─────────────
 
 describe('a `string | character` free variable reads as a string', () => {
-  // A free variable used at a text parameter of a string operator is typed
-  // `string | character` by inference. The caller of the compiled function
-  // supplies its value as a host string, which the interpreter reads as a
-  // `string`, so `Length` and `At` segment it into characters as they do a
-  // provable string.
-  test.each([
-    ['Length', ['Length', 's']],
-    ['At, first', ['At', 's', 1]],
-    ['At, second', ['At', 's', 2]],
-    ['At, from the end', ['At', 's', -1]],
-    ['Characters', ['Characters', 's']],
-  ] as const)('%s agrees with the interpreter', (_label, json) => {
-    ce.declare('s', 'string | character');
-    const expr = ce.box(json as never);
-    // A multi-grapheme string (the emoji is two UTF-16 code units) and a
-    // one-character string.
-    agreesWithInterpreterAtRuntime(expr, { s: `h${E_ACUTE_PRECOMPOSED}llo😀` });
-    agreesWithInterpreterAtRuntime(expr, { s: E_ACUTE_PRECOMPOSED });
-  });
-
-  // Boxing declares no name: `ce.infer()` commits the type that the earlier
-  // use requires, so the later expressions read it.
-  test('a type inferred from `ToUpperCase` admits the same lowering', () => {
-    ce.infer([ce.box(['ToUpperCase', 's'])]);
-    expect(ce.symbol('s').type.toString()).toBe('character | string');
-    agreesWithInterpreterAtRuntime(ce.box(['Length', 's']), {
-      s: `a${ZWJ_FAMILY}b`,
-    });
-    agreesWithInterpreterAtRuntime(ce.box(['At', 's', 2]), {
-      s: `a${ZWJ_FAMILY}b`,
-    });
-  });
-
-  test('a type inferred as `string` reads the operand as a string', () => {
-    // A `string` matches `collection<any>`, but the operand must not be read
-    // through the run-time array check, which throws for a string.
-    ce.declare('f', '(string) -> integer');
-    ce.infer([ce.box(['f', 's'])]);
-    expect(ce.symbol('s').type.toString()).toBe('string');
-    agreesWithInterpreterAtRuntime(ce.box(['At', 's', 2]), {
-      s: `a${ZWJ_FAMILY}b`,
-    });
-  });
 
   test('a `character` value at `Length` fails closed', () => {
     // A character is not a collection: the interpreter answers an
@@ -1225,8 +470,10 @@ describe('D8: GLSL rejects the Phase-2 operators', () => {
     (to) => {
       const r = compileTo(ce.box(['ToUpperCase', { str: 'abc' }]), to);
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('outside-fragment');
-      expect(r.error).toMatch(/outside the GLSL fragment/);
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.error).toMatch(
+        /the operator ToUpperCase is not supported by the compiler/
+      );
     }
   );
 

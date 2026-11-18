@@ -45,8 +45,8 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       const result = compileTo(ce, ['Function', body, typed('t', 'any')], to);
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The interval mode names the declaration, not the parameter (CE-1431).
-      if (to !== 'interval-js') expect(result.unsupported).toEqual([name]);
+      // The pipeline names the declaration, not the parameter (CE-1431).
+      expect(result.unsupported).toContain(`Typed(${name}, "any")`);
     });
 
     test('a parameter declared value declines', () => {
@@ -58,8 +58,8 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       );
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The interval mode names the declaration, not the parameter (CE-1431).
-      if (to !== 'interval-js') expect(result.unsupported).toEqual(['t']);
+      // The pipeline names the declaration, not the parameter (CE-1431).
+      expect(result.unsupported).toContain('Typed(t, "value")');
     });
 
     test('two parameters declared any decline, and the first is named', () => {
@@ -71,8 +71,8 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       );
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      // The interval mode names the declaration, not the parameter (CE-1431).
-      if (to !== 'interval-js') expect(result.unsupported).toEqual(['p']);
+      // The pipeline names the declaration, not the parameter (CE-1431).
+      expect(result.unsupported).toContain('Typed(p, "any")');
     });
 
     test('an input declared value declines', () => {
@@ -92,13 +92,6 @@ describe('A SYMBOL DECLARED ANY OR VALUE ON THE SCALAR TARGETS', () => {
       expect(result.diagnostic?.code).toBe('untyped-input');
       expect(result.unsupported).toEqual(['u']);
     });
-
-    if (to === 'javascript')
-      test('a parameter that the body only returns compiles', () => {
-        const ce = new ComputeEngine();
-        const result = compileTo(ce, ['Function', 't', typed('t', 'any')], to);
-        expect(result.success).toBe(true);
-      });
 
     test.each(['real', 'list<real>'])(
       'a parameter declared %s compiles',

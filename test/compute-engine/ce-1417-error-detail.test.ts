@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { describeError } from '../../src/epsil/static-diagnostics';
 
@@ -50,16 +50,6 @@ describe('CE-1417 a color string that names no color', () => {
     );
     expect(warnings).toEqual([]);
   });
-
-  test.each(['nosuchcolor', 'rgb(1 2)'])(
-    'compiled Color(%p) throws, with no warning',
-    (s) => {
-      const r = compile(ce.expr(['Color', { str: s }]));
-      expect(r.success).toBe(true);
-      expect(() => r.run!({})).toThrow(/Unknown color/);
-      expect(warnings).toEqual([]);
-    }
-  );
 
   test.each([
     ['red', 'Oklch'],

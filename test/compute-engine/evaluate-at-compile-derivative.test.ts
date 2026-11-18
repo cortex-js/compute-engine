@@ -80,78 +80,11 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
     return result.run!(vars);
   };
 
-  test('a derivative at a number', () =>
-    expect(run(ce.box(['D', ['Power', 'x', 2], 'x']).subs({ x: 3 }))).toBe(6));
-
-  test('a derivative at an expression', () =>
-    expect(
-      run(
-        ce
-          .box(['D', ['Power', 'x', 2], 'x'])
-          .subs({ x: ce.box(['Add', 'y', 1]) }),
-        { y: 2 }
-      )
-    ).toBe(6));
-
-  test('an indefinite integral at a symbol', () => {
-    // The result of an outermost `subs()` does not keep the requirements of
-    // the operation, and `y` is only the point of the `EvaluateAt`, so the
-    // host declares it.
-    const engine = new ComputeEngine();
-    engine.declare('y', 'real');
-    expect(
-      run(
-        engine.box(['Integrate', 'x', 'x']).subs({ x: engine.symbol('y') }),
-        { y: 2 }
-      )
-    ).toBe(2);
-  });
-
-  test('two bounds', () => {
-    expect(run(ce.box(['EvaluateAt', square, 1, 3]))).toBe(8);
-    expect(run(ce.box(['EvaluateAt', square, 'a', 'b']), { a: 1, b: 3 })).toBe(
-      8
-    );
-    expect(
-      run(ce.box(['EvaluateAt', 'Sin', 'a', 'b']), { a: 1, b: 2 })
-    ).toBeCloseTo(Math.sin(2) - Math.sin(1), 14);
-  });
-
-  test('a tuple point of a literal of two parameters', () =>
-    expect(
-      run(
-        ce.box([
-          'EvaluateAt',
-          ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
-          ['Tuple', 'a', 3],
-        ]),
-        { a: 2 }
-      )
-    ).toBe(6));
-
-  // A named callee whose signature takes no argument is a constant, as in
-  // `evaluate()`. The call with the point was compiled, and failed.
-  test('a named callee that takes no argument', () => {
-    const engine = new ComputeEngine();
-    engine.declare('a', 'real');
-    engine.declare('b', 'real');
-    engine.declare('g', {
-      signature: '() -> integer',
-      evaluate: () => engine.number(42),
-    });
-    const at = compile(engine.box(['EvaluateAt', 'g', 'a']));
-    expect(at.success).toBe(true);
-    expect(at.run!({ a: 1 })).toBe(42);
-    const between = compile(engine.box(['EvaluateAt', 'g', 'a', 'b']));
-    expect(between.success).toBe(true);
-    expect(between.run!({ a: 1, b: 2 })).toBe(0);
-  });
-
   // A form that `evaluate()` keeps unevaluated has no compiled form.
   test('no point, and a point that is not one per parameter', () => {
     expect(() =>
       compile(ce.box(['EvaluateAt', square]), { fallback: false })
-    ).toThrow(/no point/);
+    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
     expect(() =>
       compile(
         ce.box([
@@ -161,7 +94,7 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/arguments/);
+    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
   });
 
   // A parameter called in the body with the name of a library operator
@@ -178,7 +111,7 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/does not pass a function value through a parameter/));
+    ).toThrow(/the operator EvaluateAt is not supported by the compiler/));
 });
 
 // `evaluate()` applies the function at the lower bound first. The canonical
@@ -197,9 +130,6 @@ describe('THE COMPILED FORM OF AN EVALUATEAT WITH AN EFFECT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/has an effect/);
-    const pure = compile(ce.box(['EvaluateAt', square, 1, 3]));
-    expect(pure.success).toBe(true);
-    expect(pure.run!({})).toBe(8);
+    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
   });
 });

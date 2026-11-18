@@ -1871,28 +1871,6 @@ export type ReferencesMemo = {
 type ReferenceMode = 'unknowns' | 'references';
 
 /**
- * Whether `expr` has unknowns (the same answer as `expr.unknowns.length >
- * 0`), with a memo that the caller keeps between calls. The memo holds the
- * answer of each function node already walked, so a caller that asks the
- * question of a node and then of the nodes below it walks the tree once.
- * The compiler asks it at each level of an expression that it compiles: the
- * walk of a node deep in the expression then reads the memo, instead of
- * recursing through the rest of the tree on top of the compiler's own stack
- * (ROADMAP CE-320.2).
- *
- * The memo is valid only while the values of the symbols, and the scopes
- * that bind them, do not change: the compiler keeps one for a compilation.
- */
-export function hasUnknownsWithMemo(
-  expr: Expression,
-  memo: ReferencesMemo
-): boolean {
-  const result = new Set<string>();
-  getReferences(expr, result, new Set<string>(), memo);
-  return result.size > 0;
-}
-
-/**
  * Return the applied user functions in the expression, recursively. See
  * {@link getReferences} for the shared traversal and scoping rules.
  */

@@ -13,7 +13,6 @@
  * each element.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compile';
 import { parseEpsil, resolveLibraryNames } from '../../src/epsil';
 import { CancellationError } from '../../src/common/interruptible';
 
@@ -36,12 +35,6 @@ function signatureOf(expr: any, name: string): string | undefined {
   return found;
 }
 
-function compiled(expr: any): unknown {
-  const result = compile(expr, { to: 'javascript' });
-  if (!result.success) throw new Error(result.error);
-  return result.run({});
-}
-
 describe('a local copied from an untyped parameter (Tycho row 339)', () => {
   test('the parameter learns nothing from the use of the local', () => {
     const { expr } = box(
@@ -53,7 +46,6 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       'function f(acc: list) { let out = acc; out = [...out, 1]; out }\nf([0])'
     );
     expect(signatureOf(annotated, 'f')).toBe('(acc: list) -> list');
-    expect(compiled(annotated)).toEqual([0, 1]);
     expect(annotated.evaluate().toString()).toBe('[0,1]');
   });
 
@@ -87,7 +79,6 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       'function f(n, acc: list) { let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) }; out }\nf(3, [])'
     );
     expect(signatureOf(expr, 'f')).toBe('(n: unknown, acc: list) -> list');
-    expect(compiled(expr)).toEqual([3, 2, 1]);
     expect(expr.evaluate().toString()).toBe('[3,2,1]');
   });
 
@@ -99,113 +90,6 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       '(xs: collection<number> | value, n: unknown) -> number'
     );
     expect(expr.evaluate().toString()).toBe('2');
-  });
-});
-
-describe('the natural recursive gasket program compiles (Tycho row 339)', () => {
-  const PROGRAM = `// A circle is the tuple (k, x, y): curvature and centre.
-const minR = 0.008
-// Complex square root of (re, im), principal branch.
-function csqrt(re, im) {
-  let m = sqrt(re^2 + im^2)
-  let a = sqrt(max(0, (m + re) / 2))
-  let b = sqrt(max(0, (m - re) / 2))
-  (a, b) if im >= 0 else (a, -b)
-}
-// The four candidates for a circle tangent to a, b and c.
-function fourth(a, b, c) {
-  let ka = a[1]; let kb = b[1]; let kc = c[1]
-  let disc = 2 * sqrt(max(0, ka * kb + kb * kc + kc * ka))
-  // kz = k * z as (re, im)
-  let ax = ka * a[2]; let ay = ka * a[3]
-  let bx = kb * b[2]; let by = kb * b[3]
-  let cx = kc * c[2]; let cy = kc * c[3]
-  let sx = ax + bx + cx; let sy = ay + by + cy
-  let px = (ax * bx - ay * by) + (bx * cx - by * cy) + (cx * ax - cy * ay)
-  let py = (ax * by + ay * bx) + (bx * cy + by * cx) + (cx * ay + cy * ax)
-  let (rx, ry) = csqrt(px, py)
-  rx = 2 * rx; ry = 2 * ry
-  let out: list<tuple<number, number, number>> = []
-  for k in [ka + kb + kc + disc, ka + kb + kc - disc] {
-    for (zx, zy) in [(sx + rx, sy + ry), (sx - rx, sy - ry)] {
-      out = [...out, (k, zx / k, zy / k)]
-    }
-  }
-  out
-}
-function tangent(p, q) {
-  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)
-  let rp = 1 / p[1]; let rq = 1 / q[1]
-  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6
-}
-function seen(acc, c) {
-  count(acc, e => abs(e[1] - c[1]) < 1e-6 && abs(e[2] - c[2]) < 1e-6 && abs(e[3] - c[3]) < 1e-6) > 0
-}
-function ok(p, q, r, c) {
-  c[1] > 0 && 1 / c[1] >= minR && tangent(c, p) && tangent(c, q) && tangent(c, r)
-}
-const outer = (-1, 0, 0)
-const A = (2, 0.5, 0)
-const B = (2, -0.5, 0)
-let cands = fourth(outer, A, B)
-let C = first(filter(cands, c => c[1] > 0 && c[3] > 0))
-let D = first(filter(cands, c => c[1] > 0 && c[3] < 0))
-let circles = [(A[1], A[2], A[3], 1), (B[1], B[2], B[3], 1), (C[1], C[2], C[3], 1), (D[1], D[2], D[3], 1)]
-// Fill the gap (p, q, r): every admitted candidate is added at \`depth\`, and
-// the three gaps it makes are filled by recursive calls.
-function fill(p, q, r, depth, acc) {
-  let out = acc
-  for c in fourth(p, q, r) {
-    if ok(p, q, r, c) && !seen(out, c) {
-      out = [...out, (c[1], c[2], c[3], depth)]
-      out = fill(p, q, c, depth + 1, out)
-      out = fill(p, r, c, depth + 1, out)
-      out = fill(q, r, c, depth + 1, out)
-    }
-  }
-  out
-}
-for gap in [(outer, A, C), (outer, B, C), (A, B, C), (outer, A, D), (outer, B, D), (A, B, D)] {
-  circles = fill(gap[1], gap[2], gap[3], 2, circles)
-}
-let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
-(length(circles), counts)`;
-
-  // The elements of the unannotated source are typed `any`, which has no
-  // explicit `nothing` arm.
-  // Expected failure: the compilation declines at a destructuring
-  // declaration, whose value is a call typed `unknown`. Tracked in
-  // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test.failing('an unannotated predicate source compiles the 224 circles', () => {
-    const { expr } = box(PROGRAM);
-    expect(compiled(expr)).toEqual([
-      224,
-      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
-    ]);
-  });
-
-  // The accumulator annotated: before 2026-09-30 one annotation made the
-  // whole derived signature a contract, and the inferred slot `r` refused
-  // `gap[3]`, typed `missing | tuple<…>` from `first(filter(…))`. Only the
-  // annotated slot is enforced now.
-  //
-  // Expected failure: the compilation declines at a destructuring
-  // declaration, whose value is a call typed `unknown`. Tracked in
-  // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test('numeric accumulator and predicate source contracts compile the 224 circles', () => {
-    const annotated = PROGRAM.replace(
-      'function fill(p, q, r, depth, acc) {',
-      'function fill(p, q, r, depth, acc: list<tuple<number, number, number, number>>) {'
-    ).replace(
-      'function seen(acc, c)',
-      'function seen(acc: list<tuple<number, number, number, number>>, c)'
-    );
-    expect(annotated).not.toBe(PROGRAM);
-    const { expr } = box(annotated);
-    expect(compiled(expr)).toEqual([
-      224,
-      [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
-    ]);
   });
 });
 

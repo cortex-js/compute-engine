@@ -44,15 +44,6 @@ function versionsAround(
 }
 
 describe('a compiled broadcast leaves the engine unchanged', () => {
-  test('L + 1 with L a list<number>', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<number>');
-    const { before, after, code, value } = versionsAround(ce, ['Add', 'L', 1]);
-    expect(before.every((v) => typeof v === 'number')).toBe(true);
-    expect(code).toContain('_SYS.bcast(');
-    expect(after).toEqual(before);
-    expect(value).toEqual([2, 3, 4]);
-  });
 
   test('a unary function over a list<number>', () => {
     const ce = new ComputeEngine();

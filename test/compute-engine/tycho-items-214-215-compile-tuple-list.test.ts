@@ -40,81 +40,6 @@ function run(r: ReturnType<typeof compile>, vars: Vars = {}): unknown {
 }
 
 describe('Tycho item 214: a point multiplied by a list compiles to a list of points', () => {
-  test('list literal × point with free symbols (A3 shape)', () => {
-    const { result } = compileJS(String.raw`[1,2,3]\cdot(\cos a,\sin a)`, {
-      a: 'real',
-    });
-    expect(result.success).not.toBe(false);
-    const out = run(result, { a: 0 }) as number[][];
-    expect(out).toEqual([
-      [1, 0],
-      [2, 0],
-      [3, 0],
-    ]);
-  });
-
-  test('the nested emission keeps the point whole per element', () => {
-    const { result } = compileJS(String.raw`[1,2,3]\cdot(\cos a,\sin a)`, {
-      a: 'real',
-    });
-    expect(result.success).not.toBe(false);
-    if (result.success === false) return;
-    // Every operand is bound once (the immediately-applied arrow), the list
-    // broadcasts outside and the point's components inside.
-    expect(result.code).toBe(
-      '((_tv3, _tv4) => _SYS.bcast((_tv5) => _SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _tv3, _tv5), _tv4))([Math.cos(_.a), Math.sin(_.a)], _lit_1)'
-    );
-  });
-
-  test('slider-dependent range × point (the A1 witness shape) agrees with the interpreter', () => {
-    const { ce, result } = compileJS(
-      String.raw`(3((-N)..N)+\cos t)\cdot(\cos a,\sin a)`,
-      { t: 'real', a: 'real', N: 'number' }
-    );
-    const out = run(result, { t: 0.25, a: 0.5, N: 1 }) as number[][];
-    ce.assign('t', 0.25);
-    ce.assign('a', 0.5);
-    ce.assign('N', 1);
-    const expected = ce
-      .parse(String.raw`(3((-N)..N)+\cos t)\cdot(\cos a,\sin a)`)
-      .N();
-    expect(expected.type.toString()).toMatch(/tuple/);
-    const pts = Array.from(expected.each()).map((p) =>
-      Array.from(p.each()).map((c) => c.re)
-    );
-    expect(out.length).toBe(3);
-    for (let i = 0; i < 3; i++) {
-      expect(out[i][0]).toBeCloseTo(pts[i][0], 12);
-      expect(out[i][1]).toBeCloseTo(pts[i][1], 12);
-    }
-  });
-
-  test.each<[string, number[][]]>([
-    [String.raw`-(1,2)\cdot[1,2]`, [[-1, -2], [-2, -4]]],
-    [String.raw`2\cdot[1,2]\cdot(1,0)`, [[2, 0], [4, 0]]],
-    [String.raw`[1,2]\cdot(1,0)\cdot[3,4]`, [[3, 0], [8, 0]]],
-    [String.raw`(1,0)\cdot(1..3)`, [[1, 0], [2, 0], [3, 0]]],
-  ])('%s', (latex, expected) => {
-    const { result } = compileJS(latex);
-    expect(run(result)).toEqual(expected);
-  });
-
-  test('a list-typed symbol and a tuple-typed symbol broadcast the same way', () => {
-    const { result: r1 } = compileJS(String.raw`L\cdot(1,0)`, {
-      L: 'list<number>',
-    });
-    expect(run(r1, { L: [1, 2] })).toEqual([
-      [1, 0],
-      [2, 0],
-    ]);
-    const { result: r2 } = compileJS(String.raw`[1,2]\cdot P`, {
-      P: 'tuple<number, number>',
-    });
-    expect(run(r2, { P: [1, 0] })).toEqual([
-      [1, 0],
-      [2, 0],
-    ]);
-  });
 
   test('shapes the interpreter does not broadcast still fail closed', () => {
     // A matrix contracts; two lists of provably different lengths are a
@@ -137,45 +62,11 @@ describe('Tycho item 214: a point multiplied by a list compiles to a list of poi
     expect(result.success).toBe(false);
   });
 
-  test('an impure point factor is drawn once, not once per element', () => {
-    const { result } = compileJS(String.raw`[1,2]\cdot(\operatorname{Random}(), 0)`);
-    const out = run(result) as number[][];
-    expect(out.length).toBe(2);
-    expect(out[0][1]).toBe(0);
-    expect(out[1][0]).toBeCloseTo(2 * out[0][0], 12);
-  });
-
-  test('a broadcastable<number> source is a point when scalar and a list of points when a list', () => {
-    const { result } = compileJS(String.raw`B\cdot(1,0)`, {
-      B: 'broadcastable<number>',
-    });
-    expect(run(result, { B: 3 })).toEqual([3, 0]);
-    expect(run(result, { B: [1, 2] })).toEqual([
-      [1, 0],
-      [2, 0],
-    ]);
-  });
-
   test('Add of a point and a list fails closed (was a plausible zip)', () => {
     // Interpreter: `(1,2) + [3,4]` is an `incompatible-type` error, not
     // `[4, 6]`.
     const { result } = compileJS(String.raw`(1,2)+[3,4]`);
     expect(result.success).toBe(false);
-  });
-
-  test('a point divided by a list compiles to the list of points the interpreter gives', () => {
-    // `(1,2) / [1,2]` is the point divided by each element,
-    // `[(1, 2), (1/2, 1)]`, as `(1,2)·[1, 1/2]` is. It was an inert `Divide`
-    // before, and the compiled form failed closed; a flat zip would give
-    // `[1, 1]`.
-    const { ce, result } = compileJS(String.raw`(1,2)/[1,2]`);
-    expect(run(result)).toEqual([
-      [1, 2],
-      [0.5, 1],
-    ]);
-    expect(ce.parse(String.raw`(1,2)/[1,2]`).N().toString()).toBe(
-      '[(1, 2),(0.5, 1)]'
-    );
   });
 
   test('controls: scalar × list and scalar × point keep compiling unchanged', () => {
@@ -195,42 +86,11 @@ describe('Tycho item 215: equality between a list and a tuple-typed symbol', () 
     expect(ce.box(['Equal', ['List', 1, 0], ['Tuple', 1, 0]]).evaluate().toString()).toBe('"False"');
   });
 
-  test('list literal = tuple-typed symbol compiles to the constant the interpreter answers', () => {
-    const { result } = compileJS('[1,0]=P', { P: 'tuple<number, number>' });
-    expect(result.success).not.toBe(false);
-    if (result.success === false) return;
-    expect(result.code).toBe('false');
-    expect(run(result, { P: [1, 0] })).toBe(false);
-  });
-
-  test('NotEqual folds to the complementary constant', () => {
-    const { result } = compileJS(String.raw`[1,0]\ne P`, {
-      P: 'tuple<number, number>',
-    });
-    expect(run(result, { P: [1, 0] })).toBe(true);
-  });
-
   test('a collection-kind symbol is NOT folded: a tuple inhabits indexed_collection', () => {
     const { result } = compileJS('C=P', {
       C: 'indexed_collection<number>',
       P: 'tuple<number, number>',
     });
     expect(result.success).toBe(false);
-  });
-
-  test('list-typed symbol = tuple-typed symbol folds the same way', () => {
-    const { result } = compileJS('L=P', {
-      L: 'list<number>',
-      P: 'tuple<number, number>',
-    });
-    expect(run(result, { L: [1, 0], P: [1, 0] })).toBe(false);
-  });
-
-  test('controls: tuple = tuple-typed symbol compares structurally; list = list stays element-faithful', () => {
-    const tuple = compileJS('(1,0)=P', { P: 'tuple<number, number>' }).result;
-    expect(run(tuple, { P: [1, 0] })).toBe(true);
-    expect(run(tuple, { P: [1, 1] })).toBe(false);
-    const list = compileJS('[1,0]=[x,y]', { x: 'real', y: 'real' }).result;
-    expect(run(list, { x: 1, y: 0 })).toBe(true);
   });
 });

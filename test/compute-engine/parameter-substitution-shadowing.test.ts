@@ -128,9 +128,7 @@ describe('a nested block reads the parameter', () => {
     // interpreter's value.
     const result = compile(expr);
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(
-      /its value is a function, and compiled code does not return a function from a call/
-    );
+    expect(result.error).toMatch(/Apply of a value that is not a function literal/);
     expect(result.run!({ t: 4 })).toBe(5);
     expect(expr.evaluate().subs({ t: 4 }).N().re).toBe(5);
   });

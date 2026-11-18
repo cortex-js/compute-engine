@@ -24,7 +24,7 @@ describe('CE-142.5 a sum with one bound on the compile targets', () => {
     ['\\sum_{k}^{10} k', 'sum'],
     ['\\sum^{10} k', 'sum'],
     ['\\prod_{k=1} k', 'product'],
-  ])('%s', (latex, word) => {
+  ])('%s', (latex) => {
     const expr = ce.parse(latex);
     for (const to of TARGETS) {
       const result = compile(expr, { to } as Parameters<typeof compile>[1]);
@@ -35,13 +35,8 @@ describe('CE-142.5 a sum with one bound on the compile targets', () => {
         expect(result.diagnostic?.code).toBe('possible-nothing');
         continue;
       }
-      // The GLSL fragment refuses the `Nothing` marker of the missing bound
-      // before the target reads the sum.
-      expect(String(result.error)).toContain(
-        to === 'glsl'
-          ? 'The symbol `Nothing` has the type `nothing`, which has no type in the GLSL fragment'
-          : `a ${word} with only one bound has no value`
-      );
+      // The compiler refuses the `Nothing` marker of the missing bound.
+      expect(String(result.error)).toContain('Nothing as a value');
     }
   });
 

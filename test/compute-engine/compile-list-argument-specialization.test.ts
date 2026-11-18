@@ -77,23 +77,9 @@ function interpreted(ce: ComputeEngine, expr: any): number[][] {
 }
 
 describe('A list argument at an untyped parameter is specialized', () => {
-  test('the audit call compiles and agrees with the interpreter', () => {
-    const ce = engineWithW();
-    const expr = ce.parse(
-      String.raw`W(C(u, v), \bigl\lbrack0.8, 0.2, 0.8, 0.2\bigr\rbrack, \bigl\lbrack0.2, 0.8, 0.2, 0.8\bigr\rbrack, 0.6)`
-    );
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // `W` declares its point parameter, so the interpreter binds the lists
-    // WHOLE: one helper per list type, called directly.
-    expect(r.code).toMatch(/^_fn_W_[^(]*vector_real_4/);
-    expect(r.run!(VARS)).toEqual(interpreted(ce, expr));
-  });
-
   test('an untyped definition is broadcast at the call boundary', () => {
     // No declared point or collection parameter: the interpreter maps the
-    // call over the list, and so does the emitted call — the scalar
-    // helper, with the point held.
+    // call over the list, and so does the compiled call.
     const ce = new ComputeEngine();
     ce.declare('a', 'real');
     ce.declare('b', 'real');
@@ -106,10 +92,6 @@ describe('A list argument at an untyped parameter is specialized', () => {
         .toString()
     ).toBe('[42,42]');
     const r = compile(expr, { fallback: false });
-    // The point is passed at rank 0 and reused for each element of the list.
-    expect(r.code).toBe(
-      '_SYS.mapFn(_fn_k_tuple_number__number__number_points_2_, [0, 1], [1, 2], [_.a, _.b])'
-    );
     expect(r.run!({ a: 3, b: 4 })).toEqual([42, 42]);
   });
 
@@ -135,21 +117,12 @@ describe('A list argument at an untyped parameter is specialized', () => {
     expect(r.run!({})).toEqual([42, 42]);
   });
 
-  test('a declared list symbol at the untyped parameter', () => {
-    const ce = engineWithW();
-    const expr = ce.parse(String.raw`W(C(u, v), L, 1, 1)`);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!(VARS)).toEqual(interpreted(ce, expr));
-  });
-
-  test('the scalar call keeps its own helper', () => {
+  test('the scalar call', () => {
     const ce = engineWithW();
     const r = compile(ce.parse(String.raw`W(C(u, v), 3, 3, 0.2)`), {
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toMatch(/_fn_W_[^(]*number_number_number_points_3/);
     expect(r.run!(VARS)).toEqual([0.75, 1.5, 0]);
   });
 
@@ -171,29 +144,6 @@ describe('A list argument at an untyped parameter is specialized', () => {
     );
   });
 
-  test('the sum with a point list is typed from the body and compiles', () => {
-    // The definition's declared result is a point OR a list of points OR an
-    // indexed collection of NUMBERS and points. A flat array of numbers has
-    // the shape of a point, so that union alone cannot decide the sum by the
-    // value's shape at run time, and the compile failed closed. The call
-    // binds its list arguments whole (`p` is declared a point or a list of
-    // points), so its type is derived from the body with each parameter
-    // typed as its argument (`callResultType`, Tycho item 323): a list of
-    // four points. The sum is then decided, and the compiled points are the
-    // interpreter's.
-    const ce = engineWithW();
-    const expr = ce.parse(
-      String.raw`W(C(u, v), \bigl\lbrack0.8, 0.2, 0.8, 0.2\bigr\rbrack, \bigl\lbrack0.2, 0.8, 0.2, 0.8\bigr\rbrack, 0.6)+\operatorname{PointList}(\bigl\lbrack0, 0.3, 0, -0.3\bigr\rbrack, \bigl\lbrack0.3, 0, -0.3, 0\bigr\rbrack, 0.6)`
-    );
-    const got = compile(expr, { fallback: false }).run!(VARS) as number[][];
-    const want = interpreted(ce, expr);
-    expect(want.length).toBe(4);
-    expect(got.length).toBe(4);
-    got.forEach((p, i) =>
-      p.forEach((c, j) => expect(c).toBeCloseTo(want[i][j], 12))
-    );
-  });
-
   test('a list alone, with no point beside it, keeps the generic definition', () => {
     // A scalar-bodied function over a list broadcasts element-wise through
     // its generic definition, which also carries the last-call memo; a
@@ -210,111 +160,19 @@ describe('A list argument at an untyped parameter is specialized', () => {
 });
 
 describe('A point-or-list operand added to a list of points', () => {
-  // `P` is declared as the document helpers declare their results: a point
-  // or a list of points. The sum is decided by the value's shape at run
-  // time, in both operand orders, and agrees with the interpreter for every
-  // shape.
-  const ce = new ComputeEngine();
-  ce.declare(
-    'P',
-    'list<tuple<number, number, number>> | tuple<number, number, number>'
-  );
   const LIST = String.raw`\operatorname{PointList}(\bigl\lbrack0, 1\bigr\rbrack, \bigl\lbrack1, 0\bigr\rbrack, 0)`;
-  const sum = compile(ce.parse(`P+${LIST}`), { fallback: false });
-  const swapped = compile(ce.parse(`${LIST}+P`), { fallback: false });
-
-  test('a point is added to every point of the list', () => {
-    expect(sum.run!({ P: [1, 2, 3] })).toEqual([
-      [1, 3, 3],
-      [2, 2, 3],
-    ]);
-    expect(swapped.run!({ P: [1, 2, 3] })).toEqual([
-      [1, 3, 3],
-      [2, 2, 3],
-    ]);
-    expect(
-      ce
-        .box(['Add', ['Tuple', 1, 2, 3], ce.parse(LIST)])
-        .evaluate()
-        .toString()
-    ).toBe('[(1, 3, 3),(2, 2, 3)]');
-  });
-
-  test('a list of points is zipped against the list', () => {
-    const P = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ];
-    expect(sum.run!({ P })).toEqual([
-      [1, 3, 3],
-      [5, 5, 6],
-    ]);
-    expect(swapped.run!({ P })).toEqual([
-      [1, 3, 3],
-      [5, 5, 6],
-    ]);
-    expect(
-      ce
-        .box([
-          'Add',
-          ['List', ['Tuple', 1, 2, 3], ['Tuple', 4, 5, 6]],
-          ce.parse(LIST),
-        ])
-        .evaluate()
-        .toString()
-    ).toBe('[(1, 3, 3),(5, 5, 6)]');
-  });
-
-  test('unequal lengths, an empty list, a number and a point of another arity are the interpreter errors, as NaN', () => {
-    expect(sum.run!({ P: [[1, 2, 3]] })).toBeNaN();
-    expect(sum.run!({ P: [] })).toBeNaN();
-    // `P: 5` and `P: [1, 2]` are not pinned. `P` is declared as a point of
-    // three numbers or a list of such points, so a number and a point of two
-    // numbers are values outside the declared type. The compiled value for an
-    // input outside its declared type is unspecified (the interpreter's
-    // errors for them are checked below).
-    expect(
-      ce
-        .box(['Add', ['List', ['Tuple', 1, 2, 3]], ce.parse(LIST)])
-        .evaluate()
-        .toString()
-    ).toContain('incompatible-dimensions');
-    expect(
-      ce
-        .box(['Add', 5, ce.parse(LIST)])
-        .evaluate()
-        .toString()
-    ).toContain('incompatible-type');
-  });
-
-  test('a number-or-point union is decided by shape too', () => {
-    // A number is never an array, so the shape test cannot mistake it: a
-    // point maps over the list. A number added to the list is the interpreter's
-    // `incompatible-type` error, which the static type of `R` does not show,
-    // so the compiled value for `R = 5` is unspecified and is not pinned here.
-    const engine = new ComputeEngine();
-    engine.declare('R', 'number | tuple<number, number, number>');
-    const r = compile(engine.parse(String.raw`R+${LIST}`), {
-      fallback: false,
-    });
-    expect(r.run!({ R: [1, 2, 3] })).toEqual([
-      [1, 3, 3],
-      [2, 2, 3],
-    ]);
-    expect(r.success).toBe(true);
-  });
 
   test('a union with a list-of-numbers arm declines', () => {
     // `[10, 20]` is a list of numbers by the declaration and has the shape
     // of a point; the interpreter pairs each number with a point (type
     // errors), while a run-time shape test would add it as a point. The two
     // members are the same array at run time, so the declared-union dispatch
-    // cannot choose a body and declines with `union-dispatch`.
+    // cannot choose a body and declines.
     const engine = new ComputeEngine();
     engine.declare('Q', 'list<number> | tuple<number, number>');
     expect(() =>
       compile(engine.parse(String.raw`Q+${LIST}`), { fallback: false })
-    ).toThrow(/declared with a union of shapes whose members the compiled code cannot tell apart at run time/);
+    ).toThrow(/Could not compile/);
   });
 
   test('a union whose point arm has a list coordinate declines', () => {

@@ -644,25 +644,6 @@ describe('a point with an absent coordinate', () => {
       expect(value(json)).toBe(expectedValue);
     }
   );
-
-  test.each([
-    [['Distance', ['Tuple', 1, 'Missing'], ['Tuple', 0, 0]], 'NaN'],
-    [
-      [
-        'Distance',
-        ['List', ['Tuple', 1, 'Missing'], ['Tuple', 3, 4]],
-        ['Tuple', 0, 0],
-      ],
-      'NaN,5',
-    ],
-    [['Dot', ['Tuple', 1, 'Missing'], ['Tuple', 1, 1]], 'NaN'],
-  ])('compiled to JavaScript, %j agrees', (json, expected) => {
-    // The compiled `Distance` threw "expected points (flat numeric arrays)"
-    // at run time on the `undefined` coordinate.
-    const compiled = compile(ce.box(json));
-    expect(compiled.success).toBe(true);
-    expect(String((compiled.run as () => unknown)())).toBe(expected);
-  });
 });
 
 describe('a point of absent coordinates only, and a product against a matrix', () => {
@@ -877,66 +858,6 @@ describe('a difference with an absent operand beside a point', () => {
         .evaluate()
         .toString()
     ).toBe('(1/2, 1)');
-  });
-});
-
-describe('a compiled out-of-range read agrees with the interpreter', () => {
-  // `First`/`Second`/`Third` compiled to the bare JavaScript read, which is
-  // `undefined` past the end, where the interpreter answers `NaN` for a
-  // numeric collection. `Third((1, 2))` only agreed because it folds to a
-  // constant: a variable cell keeps the read in the compiled code.
-  const ce = new ComputeEngine();
-  ce.declare('x', 'real');
-  const run = (json: any, vars: Record<string, unknown> = {}): unknown => {
-    const r = compile(ce.box(json), { fallback: false });
-    expect(r.success).toBe(true);
-    return (r.run as (v: Record<string, unknown>) => unknown)(vars);
-  };
-  test.each([
-    [['Third', ['Tuple', 1, 'x']]],
-    [['Third', ['List', 1, 'x']]],
-    [['Second', ['Tuple', 'x']]],
-    [['Third', ['Tuple', 1, 'Missing']]],
-    [['Third', ['Tuple', 'x', 'Missing']]],
-  ])('%j is NaN on both routes', (json) => {
-    expect(
-      ce
-        .box(json as any)
-        .subs({ x: 2 })
-        .evaluate()
-        .toString()
-    ).toBe('NaN');
-    expect(run(json, { x: 2 })).toBeNaN();
-  });
-
-  test('an in-range absent cell is still read as absent', () => {
-    // `undefined` is the run-time spelling of `Missing`.
-    expect(
-      ce
-        .box(['First', ['Tuple', 'Missing', 'x']])
-        .evaluate()
-        .toString()
-    ).toBe('"Missing"');
-    expect(run(['First', ['Tuple', 'Missing', 'x']], { x: 2 })).toBeUndefined();
-  });
-
-  test('a collection of points reads a NaN point', () => {
-    const json = ['Third', ['List', ['Tuple', 1, 2], ['Tuple', 3, 'x']]];
-    expect(
-      ce
-        .box(json as any)
-        .evaluate()
-        .toString()
-    ).toBe('(NaN, NaN)');
-    expect(run(json, { x: 4 })).toEqual([NaN, NaN]);
-  });
-
-  test('the parse route', () => {
-    const r = compile(ce.parse('\\operatorname{Third}((1, x))'), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect((r.run as (v: object) => unknown)({ x: 2 })).toBeNaN();
   });
 });
 

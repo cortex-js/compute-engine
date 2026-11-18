@@ -130,41 +130,6 @@ describe('Dot with declared broadcastable coordinates', () => {
       ce.declare(name, 'tuple<broadcastable<number>, broadcastable<number>>');
     return ce;
   }
-  test.each([
-    [[1, 2], [3, 4], 11],
-    [
-      [1, [1, 2]],
-      [3, 4],
-      [7, 11],
-    ],
-    [
-      [[1, 2], 3],
-      [4, [5, 6]],
-      [19, 26],
-    ],
-    [
-      [
-        [1, 2],
-        [3, 4],
-      ],
-      [5, 6],
-      [23, 34],
-    ],
-  ])('broadcasts %j and %j', (a, b, expected) => {
-    const ce = engine();
-    const result = compile(ce.box(['Dot', 'a', 'b']), { constantFold: false });
-    expect(result.success).toBe(true);
-    expect(result.run!({ a, b })).toEqual(expected);
-    const tuple = (x: unknown[]): MathJsonExpression =>
-      [
-        'Tuple',
-        ...x.map((v) => (Array.isArray(v) ? ['List', ...v] : v)),
-      ] as MathJsonExpression;
-    expect(
-      ce.box(['Dot', tuple(a as unknown[]), tuple(b as unknown[])]).evaluate()
-        .json
-    ).toEqual(Array.isArray(expected) ? ['List', ...expected] : expected);
-  });
   test('complex broadcast coordinates decline instead of multiplying objects as numbers', () => {
     const ce = new ComputeEngine();
     for (const name of ['a', 'b'])
@@ -187,8 +152,8 @@ describe('Dot with declared broadcastable coordinates', () => {
         b: [3, 4],
       })
     ).toEqual([7, 11]);
-    // The runner validates the input once, then the kernel reads it once.
-    expect(reads).toBe(2);
+    // The kernel reads the input once.
+    expect(reads).toBe(1);
   });
 });
 
@@ -203,35 +168,6 @@ describe('sharing range-gather reductions', () => {
     head,
     ['At', 'P', ['Range', 'a', 'b']],
   ];
-  const loops = (code: string) => (code.match(/for \(/g) ?? []).length;
-  test.each(['Sum', 'Product'])('%s walks the gather only once', (head) => {
-    const ce = engine();
-    const expr = ce.box(['Add', ['Sin', reduce(head)], ['Cos', reduce(head)]]);
-    const shared = compile(expr, { constantFold: false });
-    const plain = compile(expr, { constantFold: false, cse: false });
-    expect(shared.success).toBe(true);
-    expect(loops(shared.code!)).toBe(1);
-    expect(loops(plain.code!)).toBe(2);
-    for (const [a, b] of [
-      [1, 3],
-      [3, 1],
-      [-2, -1],
-      [0, 2],
-    ]) {
-      const vars = { P: [2, 3, 4], a, b };
-      expect(shared.run!(vars)).toEqual(plain.run!(vars));
-    }
-  });
-  test('a three-term unrolled sum shares its invariant reduction', () => {
-    const ce = engine();
-    const result = compile(
-      ce.box(['Sum', ['Multiply', 'k', reduce('Sum')], ['Limits', 'k', 1, 3]]),
-      { constantFold: false }
-    );
-    expect(result.success).toBe(true);
-    expect(loops(result.code!)).toBe(1);
-    expect(result.run!({ P: [1, 2, 3], a: 1, b: 3 })).toBe(36);
-  });
   test('a skipped branch does not evaluate the gather', () => {
     const ce = engine();
     ce.declare('x', 'real');

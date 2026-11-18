@@ -13341,31 +13341,6 @@ function matrixShapeOf(
 }
 
 /**
- * Whether `Power(base, exponent)` is an integer power of a matrix that is
- * not square, decided from the type of the base and from the exponent:
- * the base type is a matrix (its entries are numbers) of rank 2 with two
- * known extents that are not equal, and the exponent is an integer other
- * than the literal 1 (an integer number literal, or an expression whose type
- * is an integer).
- *
- * Such a power is the `expected-square-matrix` error: canonicalization
- * writes it as `MatrixPower(base, exponent)` when the base type is a matrix
- * (`canonicalPower()` in `arithmetic-power.ts`), and `MatrixPower` refuses a
- * matrix that is not square. The exponent 1 is excluded, because `A^1`
- * canonicalizes to `A`. The evaluation of a `Power` (`squareMatrixPower()`)
- * and its compilation (`compileExpr()` in `compilation/base-compiler.ts`)
- * use this function, so that a `Power` built before its base holds the
- * matrix does not compute the element-wise power instead.
- */
-export function isNonSquareMatrixPower(
-  baseType: BoxedType,
-  exponent: Expression
-): boolean {
-  if (matrixShapeOf(baseType) !== 'non-square') return false;
-  return integerExponentOf(exponent) === true && !exponent.isSame(1);
-}
-
-/**
  * Whether `x` is a number literal with an exact integer value. A float with
  * an integer value (`2.0`) is not one: a float exponent of a matrix is an
  * element-wise power (`isSquareMatrixPower`).
@@ -13378,8 +13353,8 @@ function isExactIntegerLiteral(x: Expression): boolean {
  * Whether `Power(base, exponent)` is the matrix power `MatrixPower(base,
  * exponent)` or the element-wise power, decided from the type of the base
  * and from the exponent. The evaluation of a `Power` (`squareMatrixPower()`)
- * and the compilation of a `Power` (`compileExpr()` in
- * `compilation/base-compiler.ts`) both use this function, so that compiled
+ * and the compilation of a `Power` (`compilation/ir/`) both use this
+ * function, so that compiled
  * code computes the same power as `evaluate()`.
  *
  * - `true`: a matrix power. The base type is a matrix (its entries are
@@ -20855,33 +20830,6 @@ async function pointListBroadcastAsync(
       options
     ),
     absence.cells
-  );
-}
-
-/**
- * Does ANY arm of `source` DECLARE a `broadcastable<T>` parameter?
- *
- * An overload set (an intersection of signatures) has no single slot plan —
- * `broadcastableParamSlots` declines it, because which arm a call binds is a
- * per-call question this function does not answer — but a gate that must FAIL
- * CLOSED still needs to know. That is the compile gate: whichever arm wins at
- * run time, emitted scalar (or leaf-descending) code for a broadcastable arm
- * is silently wrong, and silently wrong is forbidden (D6). Conservative by
- * construction: one broadcastable arm speaks for the set.
- * @internal
- */
-export function declaresBroadcastableParam(
-  source: BoxedOperatorDefinition | Type | undefined
-): boolean {
-  if (source === undefined) return false;
-  if (broadcastableParamSlots(source) !== undefined) return true;
-  const sigType = isOperatorDefinition(source)
-    ? source.signature?.type
-    : source;
-  const arms = overloadArms(sigType);
-  return (
-    arms !== undefined &&
-    arms.some((arm) => broadcastableParamSlots(arm) !== undefined)
   );
 }
 

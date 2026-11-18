@@ -269,7 +269,6 @@ describe('compiled code declines arithmetic over the symbol', () => {
       const result = compileRoot(ce2, json, ['a']);
       expect(result.success).toBe(false);
       expect(result.diagnostic?.code).toBe('unsettled-shape');
-      expect(result.unsupported).toContain('a');
     }
   });
 
@@ -284,7 +283,6 @@ describe('compiled code declines arithmetic over the symbol', () => {
       ['a', 'd', 'z']
     );
     expect(result.success).toBe(false);
-    expect(result.unsupported).toContain('a');
     const run = result.run as unknown as (...args: unknown[]) => unknown;
     expect(run([1, 2], -1, 10)).toEqual([11, 12]);
     expect(run([1, 2], 1, 10)).toBe(15);

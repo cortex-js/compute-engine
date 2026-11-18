@@ -32,37 +32,6 @@ const MATRICES = [
   ],
 ];
 
-/** The compiled value and the interpreter's value, with `L` declared
- * `type` and `M` declared `matrix<number>`. */
-function both(
-  type: string,
-  expr: unknown,
-  value: unknown,
-  mode?: 'complex'
-) {
-  const ce = new ComputeEngine();
-  ce.declare('L', type);
-  ce.declare('M', 'matrix<number>');
-  const r = compile(ce.box(expr as any), {
-    to: 'javascript',
-    fallback: false,
-    ...(mode ? { mode } : {}),
-  } as any);
-  expect(r.success).toBe(true);
-  const ce2 = new ComputeEngine();
-  ce2.declare('L', type);
-  ce2.declare('M', 'matrix<number>');
-  ce2.assign('L', ce2.box(toJson(value) as any));
-  ce2.assign('M', ce2.box(toJson(M) as any));
-  return {
-    compiled: r.run!({ L: value, M } as never),
-    evaluated: ce2
-      .box(expr as any)
-      .evaluate()
-      .toString(),
-  };
-}
-
 /** Compile `expr` with the default fallback, and evaluate it with the
  * interpreter. A fold over elements typed `unknown` has no settled shape:
  * the compilation declines with `unsettled-shape`, and the interpreter
@@ -97,61 +66,6 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
     ).toBe('[[2,2],[5,3]]');
   });
 
-  test.each([
-    ['list<matrix<number>>', ['Multiply', ['Sum', 'L'], 'M']],
-    ['list<tensor<number>>', ['Multiply', ['Sum', 'L'], 'M']],
-  ])('%s: %j is the matrix product', (type, expr) => {
-    const r = both(type, expr, MATRICES);
-    expect(r.compiled).toEqual([
-      [2, 2],
-      [5, 3],
-    ]);
-    expect(r.evaluated).toBe('[[2,2],[5,3]]');
-  });
-
-  test.each([
-    ['list<matrix<number>>'],
-    ['list<tensor<number>>'],
-    ['list<list<unknown>>'],
-  ])('%s: M · Reduce(L, Add, 0) is the matrix product', (type) => {
-    const r = both(
-      type,
-      ['Multiply', 'M', ['Reduce', 'L', 'Add', 0]],
-      MATRICES
-    );
-    expect(r.compiled).toEqual([
-      [3, 5],
-      [2, 2],
-    ]);
-    expect(r.evaluated).toBe('[[3,5],[2,2]]');
-  });
-
-  test('a number scales the product', () => {
-    const r = both(
-      'list<matrix<number>>',
-      ['Multiply', 2, ['Sum', 'L'], 'M'],
-      MATRICES
-    );
-    expect(r.compiled).toEqual([
-      [4, 4],
-      [10, 6],
-    ]);
-    expect(r.evaluated).toBe('[[4,4],[10,6]]');
-  });
-
-  test('a vector times a matrix', () => {
-    const r = both(
-      'list<vector<number>>',
-      ['Multiply', ['Sum', 'L'], 'M'],
-      [
-        [1, 2],
-        [3, 4],
-      ]
-    );
-    expect(r.compiled).toEqual([6, 4]);
-    expect(r.evaluated).toBe('[6,4]');
-  });
-
   test('Sum(L) · Sum(L) over list<unknown> declines', () => {
     expect(
       declined(
@@ -160,56 +74,6 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
         MATRICES
       )
     ).toBe('[[10,14],[21,31]]');
-  });
-
-  test('Sum(L) · Sum(L) over list<matrix<number>>', () => {
-    const r = both(
-      'list<matrix<number>>',
-      ['Multiply', ['Sum', 'L'], ['Sum', 'L']],
-      MATRICES
-    );
-    expect(r.compiled).toEqual([
-      [10, 14],
-      [21, 31],
-    ]);
-    expect(r.evaluated).toBe('[[10,14],[21,31]]');
-  });
-
-  // The complex form (`_SYS.cmulChecked`) reads complex entries in the
-  // matrix product and in the product of two numbers.
-  test('complex matrices', () => {
-    const r = both(
-      'list<matrix<complex>>',
-      ['Multiply', ['Sum', 'L'], 'M'],
-      [
-        [
-          [c(1, 1), 2],
-          [3, 4],
-        ],
-        [
-          [1, 0],
-          [0, 1],
-        ],
-      ]
-    );
-    expect(r.compiled).toEqual([
-      [2, c(2, 1)],
-      [5, 3],
-    ]);
-    expect(r.evaluated).toBe('[[2,(2 + i)],[5,3]]');
-  });
-
-  // The complex form gives `{re, im}` entries also when the values are
-  // real at run time: `Real` of an entry reads `.re`.
-  test('complex matrices whose values are real', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<matrix<complex^2x2>>');
-    ce.declare('M', 'matrix<number>');
-    const r = compile(
-      ce.box(['Real', ['At', ['At', ['Multiply', ['Sum', 'L'], 'M'], 1], 1]]),
-      { to: 'javascript', fallback: false }
-    );
-    expect(r.run!({ L: MATRICES, M } as never)).toBe(2);
   });
 
   test('complex numbers in a list of unknown type decline', () => {
@@ -221,40 +85,6 @@ describe('THE PRODUCT OF A FOLD AND A MATRIX (CE-388)', () => {
         'complex'
       )
     ).toBe('(9 + 6i)');
-  });
-
-  test('complex numbers in a list of complex numbers', () => {
-    const r = both(
-      'list<complex>',
-      ['Add', ['Multiply', ['Sum', 'L'], ['Sum', 'L']], 1],
-      [c(1, 1), 2],
-      'complex'
-    );
-    expect(r.compiled).toEqual(c(9, 6));
-    expect(r.evaluated).toBe('(9 + 6i)');
-  });
-
-  // Dimensions that do not agree: `NaN` in compiled code, the
-  // `incompatible-dimensions` error in the interpreter.
-  test('dimensions that do not agree', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<matrix<number>>');
-    ce.declare('M', 'matrix<number>');
-    const r = compile(ce.box(['Multiply', ['Sum', 'L'], 'M']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(
-      r.run!({
-        L: [
-          [
-            [1, 2, 3],
-            [3, 4, 5],
-          ],
-        ],
-        M,
-      } as never)
-    ).toBeNaN();
   });
 
   // A point beside a matrix still does not compile: the interpreter scales

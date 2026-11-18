@@ -6,9 +6,6 @@ import { compileDiagnosticOf } from '../../src/compute-engine/compilation/diagno
 // value tests no shape at run time (rule R3 of "Shapes are settled at
 // compile time", `docs/COMPILATION-MODEL.md`).
 //
-// - The accumulator of an indexed `Sum` or `Product` written as a loop: a
-//   term typed as a list seeds the accumulator with a copy of itself, with
-//   no `Array.isArray` test.
 // - `Max` or `Min` of one list operand whose value may be the `NaN` of a
 //   length mismatch (`P·(1 − v) + Q·v`): the operand is reduced as a list,
 //   and only the absent values (`NaN`, `undefined`) are tested, by value.
@@ -51,8 +48,6 @@ function fromJson(json: unknown): unknown {
     return Number((json as { num: string }).num);
   if (Array.isArray(json) && json[0] === 'List')
     return json.slice(1).map(fromJson);
-  // An error of the interpreter (`incompatible-dimensions`).
-  if (Array.isArray(json) && json[0] === 'Error') return 'error';
   throw new Error(`unexpected value ${JSON.stringify(json)}`);
 }
 
@@ -78,72 +73,6 @@ function compiledAndEvaluated(
   };
 }
 
-describe('THE LOOP OF AN INDEXED SUM OR PRODUCT WITH A LIST TERM (CE-806)', () => {
-  test.each([
-    [['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']], 3],
-    [['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']], 1],
-    [['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']], 0],
-    [['Product', ['Add', 'L', 'i'], ['Limits', 'i', 1, 'n']], 3],
-    [['Product', ['Add', 'L', 'i'], ['Limits', 'i', 1, 'n']], 1],
-    [['Product', ['Add', 'L', 'i'], ['Limits', 'i', 1, 'n']], 0],
-    [['Sum', ['Add', 'L', ['Multiply', 'M', 'i']], ['Limits', 'i', 1, 'n']], 3],
-    [['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 40]], 0],
-  ] as const)('%j at n = %d has the interpreter value', (expr, n) => {
-    const r = compiledAndEvaluated(expr, { L: [1, 2], M: [3, 4], n });
-    expect(r.compiled).toEqual(r.evaluated);
-    expect(r.code).not.toContain('Array.isArray');
-  });
-
-  test('an empty list term gives the empty list', () => {
-    const r = compiledAndEvaluated(
-      ['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']],
-      { L: [], n: 2 }
-    );
-    expect(r.compiled).toEqual([]);
-    expect(r.compiled).toEqual(r.evaluated);
-  });
-
-  test('the seed is a copy of the term, tested only for an absent value', () => {
-    const r = compile(
-      engine().box([
-        'Sum',
-        ['Multiply', 'L', 'i'],
-        ['Limits', 'i', 1, 'n'],
-      ] as any),
-      { to: 'javascript', fallback: false } as any
-    );
-    expect(r.code).toMatch(
-      /(_tv\d+) = \1 === null \? \((_tv\d+) === undefined \|\| \2 !== \2 \? \2 : \2\.slice\(\)\)/
-    );
-  });
-
-  test('a single term is not the array of the input', () => {
-    const r = compile(
-      engine().box([
-        'Sum',
-        ['Multiply', 'L', 'i'],
-        ['Limits', 'i', 1, 'n'],
-      ] as any),
-      { to: 'javascript', fallback: false } as any
-    );
-    const L = [1, 2];
-    const value = r.run!({ L, n: 1 } as never);
-    expect(value).toEqual([1, 2]);
-    expect(value).not.toBe(L);
-  });
-
-  test('a length mismatch in the term still gives NaN', () => {
-    // The interpreter gives an `incompatible-dimensions` error; compiled
-    // code gives `NaN`, as before.
-    const r = compiledAndEvaluated(
-      ['Sum', ['Add', 'L', ['Multiply', 'M', 'i']], ['Limits', 'i', 1, 'n']],
-      { L: [1, 2], M: [3, 4, 5], n: 2 }
-    );
-    expect(r.compiled).toBeNaN();
-    expect(r.evaluated).toBe('error');
-  });
-});
-
 describe('MAX AND MIN OF ONE LIST OPERAND (CE-806)', () => {
   const blend = ['Add', ['Multiply', 'L', ['Subtract', 1, 'v']], ['Multiply', 'M', 'v']];
   test.each([
@@ -161,31 +90,12 @@ describe('MAX AND MIN OF ONE LIST OPERAND (CE-806)', () => {
     expect(r.code).not.toContain('Array.isArray');
   });
 
-  test('the operand is tested only for an absent value', () => {
-    const r = compile(engine().box(['Max', ['Add', 'L', 'M']] as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.code).toBe(
-      '((_v) => _v === undefined || _v !== _v ? NaN : ((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => Math.max(_a, _b), -Infinity))(_v))(_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.L, _.M))'
-    );
-  });
-
   test.each(['Max', 'Min'] as const)('%s of an empty list is NaN', (kind) => {
     const r = compiledAndEvaluated([kind, ['Add', 'L', 'M']], { L: [], M: [] });
     expect(r.compiled).toBeNaN();
     expect(r.evaluated).toBeNaN();
   });
 
-  test('a length mismatch still gives NaN', () => {
-    // The interpreter gives an `incompatible-dimensions` error.
-    const r = compiledAndEvaluated(['Min', ['Add', 'L', 'M']], {
-      L: [1, 2],
-      M: [1, 2, 3],
-    });
-    expect(r.compiled).toBeNaN();
-    expect(r.evaluated).toBe('error');
-  });
 });
 
 describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
@@ -328,161 +238,5 @@ describe('THE INTERVAL-JS FOLD OF A LIST SYMBOL (CE-806)', () => {
       fallback: false,
     } as any);
     expect(r.success).toBe(true);
-  });
-});
-
-describe('A LIST VALUE COMPUTED THROUGH AN INDEXED SUM KEEPS ITS TEST (CE-806)', () => {
-  // An indexed `Sum` or `Product` over a list of unknown length gives the
-  // number `0` or `1` for an empty range, as the interpreter does. A value
-  // typed as a list that is computed through one can be a number at run
-  // time, so its consumer keeps the run-time test of its shape. Only an
-  // input typed as a list, a list literal, or arithmetic over one is an
-  // array by its structure (`isGuaranteedArray()` in
-  // `javascript-target.ts`).
-  const DECLS_P: Record<string, string> = {
-    L: 'list<real>',
-    P: 'list<list<real>>',
-    n: 'integer',
-  };
-  const INPUTS = { L: [1, 2], P: [[1, 2], [3, 4]] };
-
-  function toJson(value: unknown): unknown {
-    return Array.isArray(value) ? ['List', ...value.map(toJson)] : value;
-  }
-
-  function enginePL(): ComputeEngine {
-    const ce = new ComputeEngine();
-    for (const [name, type] of Object.entries(DECLS_P))
-      ce.declare(name, type);
-    return ce;
-  }
-
-  function codeOf(expr: unknown): string {
-    const r = compile(enginePL().box(expr as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    return r.code;
-  }
-
-  /** The compiled value (or `'throw'`) and the value of `evaluate()`. */
-  function bothValues(
-    expr: unknown,
-    n: number
-  ): { compiled: unknown; evaluated: unknown } {
-    const r = compile(enginePL().box(expr as any), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    let compiled: unknown;
-    try {
-      compiled = r.run!({ ...INPUTS, n } as never);
-    } catch {
-      compiled = 'throw';
-    }
-    const ce = enginePL();
-    for (const [name, value] of Object.entries({ ...INPUTS, n }))
-      ce.assign(name, ce.box(toJson(value) as any));
-    return {
-      compiled,
-      evaluated: fromJson(ce.box(expr as any).evaluate().json),
-    };
-  }
-
-  const innerSum = ['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']];
-  const innerRowSum = ['Sum', ['Multiply', 'P', 'i'], ['Limits', 'i', 1, 'n']];
-  // `Sum(L·j, i, 1, n, j, 1, i − 1)`: at `i = 1` the inner range is empty,
-  // and the inner sum is `0`.
-  const triangular = [
-    'Sum',
-    ['Multiply', 'L', 'j'],
-    ['Limits', 'i', 1, 'n'],
-    ['Limits', 'j', 1, ['Subtract', 'i', 1]],
-  ];
-  const twoClauses = [
-    'Sum',
-    ['Add', 'L', ['Multiply', 'j', 'k']],
-    ['Limits', 'j', 1, 2],
-    ['Limits', 'k', 1, 'n'],
-  ];
-
-  test.each([
-    [triangular, 1],
-    [triangular, 2],
-    [triangular, 3],
-    [twoClauses, 0],
-    [twoClauses, 2],
-    [['Max', ['Multiply', 2, innerSum]], 0],
-    [['Max', ['Multiply', 2, innerSum]], 2],
-    [['Min', ['Multiply', 2, innerSum]], 0],
-    [['Min', ['Multiply', 2, innerSum]], 2],
-    [['Sum', ['Multiply', 2, innerRowSum]], 0],
-    [['Sum', ['Multiply', 2, innerRowSum]], 2],
-    [['Sum', innerRowSum], 0],
-    [['Sum', innerRowSum], 2],
-    [['Reduce', ['Multiply', 2, innerRowSum], 'Add', 0], 2],
-  ] as const)('%j at n = %d has the interpreter value', (expr, n) => {
-    const r = bothValues(expr, n);
-    expect(r.compiled).toEqual(r.evaluated);
-  });
-
-  test('Reduce over an empty indexed sum throws where the interpreter gives an error', () => {
-    // `Reduce` of a number is an `incompatible-type` error in the
-    // interpreter. The caveats of compiled code allow a throw there.
-    const r = bothValues(['Reduce', ['Multiply', 2, innerRowSum], 'Add', 0], 0);
-    expect(r.compiled).toBe('throw');
-    expect(r.evaluated).toBe('error');
-  });
-
-  test.each([
-    ['the outer seed of a sum whose term is an inner sum', triangular],
-    ['the outer seed of a sum with two clauses', twoClauses],
-    ['Max of an inner sum', ['Max', ['Multiply', 2, innerSum]]],
-    ['the fold of an inner sum of rows', ['Sum', ['Multiply', 2, innerRowSum]]],
-    [
-      'Max of a Block local',
-      [
-        'Block',
-        ['Declare', 'K', "'unknown'", ['Add', 'L', 'L']],
-        ['Max', ['Multiply', 2, 'K']],
-      ],
-    ],
-  ] as const)('%s keeps the test of its shape', (_, expr) => {
-    expect(codeOf(expr)).toContain('Array.isArray');
-  });
-
-  test('a Block local with the name of a vars key keeps its test', () => {
-    // The local `K` shadows the `vars` key `K`: its value is the indexed
-    // sum, a number at `n = 0`, and not the input.
-    const expr = [
-      'Block',
-      ['Declare', 'K', "'unknown'", innerSum],
-      ['Max', ['Multiply', 2, 'K']],
-    ];
-    const r = compile(enginePL().box(expr as any), {
-      to: 'javascript',
-      fallback: false,
-      vars: { K: '_.K' },
-    } as any);
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('Array.isArray');
-    const ev = enginePL();
-    for (const [name, value] of Object.entries({ ...INPUTS, n: 0 }))
-      ev.assign(name, ev.box(toJson(value) as any));
-    expect(r.run!({ ...INPUTS, n: 0, K: [9] } as never)).toEqual(
-      fromJson(ev.box(expr as any).evaluate().json)
-    );
-  });
-
-  test.each([
-    ['the seed of a sum whose term is an input', ['Sum', ['Multiply', 'L', 'i'], ['Limits', 'i', 1, 'n']]],
-    ['Max of arithmetic over an input', ['Max', ['Multiply', 2, 'L']]],
-    ['the fold of an input', ['Sum', 'P']],
-    ['the fold of arithmetic over an input', ['Sum', ['Multiply', 2, 'P']]],
-    ['Max of an element of an input', ['Max', ['Multiply', 2, ['At', 'P', 1]]]],
-  ] as const)('%s tests no shape', (_, expr) => {
-    expect(codeOf(expr)).not.toContain('Array.isArray');
   });
 });

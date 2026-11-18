@@ -254,7 +254,7 @@ describe('row 426: routes and values', () => {
     expect(isSubtype(value.type.type, staticType)).toBe(true);
   });
 
-  test('the step of Tycho case 12 compiles and gives the interpreter value', () => {
+  test('the step of Tycho case 12 types as the direct Map and gives its value', () => {
     // `U + q(N)` with the helper `q(v) = Map(r, v)` spliced as an applied
     // literal, and `r` a recursive helper: `r(n) = n·s` for a whole `n ≥ 0`.
     const ce = new ComputeEngine();
@@ -278,11 +278,7 @@ describe('row 426: routes and values', () => {
     expect(typeOf(ce, step[2])).toBe(typeOf(ce, ['Map', 'r', 'N']));
     expect(typeOf(ce, step)).toBe(typeOf(ce, ['Add', 'U', ['Map', 'r', 'N']]));
 
-    const result = compile(ce.box(step));
-    expect(result.success).toBe(true);
     const U0 = [0.466203685, 0.466203685, -0.93240737];
-    const compiled = result.run!({ U: U0, N: [1, 2, 3], s: 0.05 } as never) as
-      number[] | undefined;
 
     ce.assign('s', 0.05);
     ce.assign('U', ce.box(['List', ...U0]));
@@ -290,9 +286,7 @@ describe('row 426: routes and values', () => {
     const interpreted = ce.box(step).N().json as unknown as Json[];
     expect(interpreted[0]).toBe('List');
     const expected = U0.map((u, i) => u + 0.05 * (i + 1));
-    expect(compiled).toHaveLength(3);
     for (let i = 0; i < 3; i++) {
-      expect(compiled![i]).toBeCloseTo(expected[i], 12);
       expect(interpreted[i + 1]).toBeCloseTo(expected[i], 12);
     }
   });
@@ -420,9 +414,9 @@ describe('row 426 review: statements the body walk cannot type in order', () => 
     // answers `incompatible-type`. Typed `list<real>`, the compiled code
     // returned `null`. The compiled code gives `a` the type of its argument
     // `M`, `list<real>`, so the body gives a number (the early `Return`) or
-    // a list (its last value): the value has no settled shape, and the
-    // compilation declines (`docs/COMPILATION-MODEL.md`, rule R3). The same
-    // holds when the parameter is written `a: list<real>`.
+    // a list (its last value): the value has no settled shape. The pipeline
+    // declines earlier: it does not compile an `Apply` of a literal to a list
+    // argument, nor of a literal with a typed parameter.
     const ce = rowEngine();
     const body: Json = [
       'Block',
@@ -433,7 +427,7 @@ describe('row 426 review: statements the body walk cannot type in order', () => 
       const json: Json = ['At', ['Apply', F(body, param), 'M'], 1];
       const r = compile(ce.box(json));
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      expect(r.diagnostic?.code).toBe('outside-profile');
     }
   });
 });

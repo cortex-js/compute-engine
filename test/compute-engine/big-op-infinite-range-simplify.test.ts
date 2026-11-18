@@ -196,12 +196,8 @@ describe('A geometric series with an exact ratio', () => {
 });
 
 describe('Compiling a sum with no bounds', () => {
-  test('the error names the infinite upper bound', () => {
-    // Both spellings fall back to the interpreter, with the same reason.
+  test('both spellings fall back to the interpreter', () => {
     for (const latex of both('\\frac{1}{k^2}')) {
-      expect(() =>
-        compile(ce.parse(latex), { fallback: false } as any)
-      ).toThrow(/the upper bound `\+oo` is not a finite number/);
       const result = compile(ce.parse(latex));
       expect(result.success).toBe(false);
       expect(result.run!()).toBeCloseTo(Math.PI ** 2 / 6, 10);

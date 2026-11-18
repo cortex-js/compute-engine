@@ -326,13 +326,6 @@ describe('Subtype: `Subtype(t, u)` is true iff t <: u', () => {
 });
 
 describe('compile fail-closed (plan §3.3)', () => {
-  // The shared gate lives in `BaseCompiler.compile`, so ALL built-in
-  // targets fail closed through one check. The FAILURE SHAPE differs by each
-  // target's documented contract: `javascript`/`glsl` throw
-  // from `compile()`, while `interval-js` converts the throw into its
-  // `success: false` result shape, carrying the same diagnostic in `.error`
-  // (`.code` is empty in that shape — a consumer must check `.success`).
-  const THROWING_TARGETS = ['javascript', 'glsl'] as const;
 
   // A subject the constant folder cannot evaluate away: a Subtype call with
   // a valueless string-typed symbol operand.
@@ -340,23 +333,6 @@ describe('compile fail-closed (plan §3.3)', () => {
     eng.declare('tTxt', 'string');
     return eng.box(['Subtype', 'tTxt', { str: 'number' }]);
   }
-
-  test.each(THROWING_TARGETS)('%s rejects a type value', (name) => {
-    const target = (ce as any)._getCompilationTarget(name);
-    const value = ce.box(['TypeFrom', { str: 'integer' }]).evaluate();
-    // The GLSL fragment refuses the head before any code is written.
-    expect(() => target.compile(value)).toThrow(
-      name === 'glsl' ? /outside the GLSL fragment/ : /could not compile/i
-    );
-  });
-
-  test.each(THROWING_TARGETS)('%s rejects a non-constant Subtype', (name) => {
-    const eng = new ComputeEngine();
-    const target = (eng as any)._getCompilationTarget(name);
-    expect(() => target.compile(nonConstantSubtype(eng))).toThrow(
-      name === 'glsl' ? /outside the GLSL fragment/ : /could not compile/i
-    );
-  });
 
   test('interval-js fails closed through its success-flag contract', () => {
     const target = INTERVAL_JS;
@@ -371,17 +347,6 @@ describe('compile fail-closed (plan §3.3)', () => {
     expect(String(r2.error)).toMatch(/could not compile/i);
   });
 
-  test('constant folding may legally fold a CONSTANT Subtype call', () => {
-    // The JavaScript target constant-folds through the interpreter, so a
-    // ground `Subtype` call compiles to its correct boolean — right code,
-    // not wrong code. The shared gate exempts ground calls on purpose; the
-    // fail-closed requirement is about the non-constant path, covered above.
-    const target = (ce as any)._getCompilationTarget('javascript');
-    const r = target.compile(
-      ce.box(['Subtype', { str: 'integer' }, { str: 'number' }])
-    );
-    expect(String(r.code ?? r)).toContain('true');
-  });
 });
 
 describe('MatchesType: the R9 decision regime (phase 2)', () => {
@@ -618,46 +583,6 @@ describe('Conforms: the outcome matrix (phase 2)', () => {
   });
 });
 
-describe('compile fail-closed: the phase-2 operators', () => {
-  test('non-ground MatchesType and Conforms reject on every target but the JavaScript one', () => {
-    // The shared gate lists all three comparison heads; ground calls fold.
-    // The one exemption: a `MatchesType` with a literal type compiles on the
-    // JavaScript target when the type has a faithful JS test (the compiled
-    // typed-binding route, `match-compile.test.ts`) — every other target,
-    // and a type without such a test, still fail closed.
-    const eng = new ComputeEngine();
-    eng.declare('gx', 'integer');
-    const mt = eng.box(['MatchesType', 'gx', { str: 'integer' }]);
-    // The GLSL fragment refuses the head before any code is written.
-    expect(() =>
-      (eng as any)._getCompilationTarget('glsl').compile(mt)
-    ).toThrow(/outside the GLSL fragment/);
-    const js = (eng as any)._getCompilationTarget('javascript').compile(mt);
-    expect(js.success).toBe(true);
-    expect(js.code).toContain('Number.isInteger(');
-    const r = INTERVAL_JS.compile(mt);
-    expect(r.success).toBe(false);
-    const untestable = eng.box(['MatchesType', 'gx', { str: 'list<integer>' }]);
-    expect(() =>
-      (eng as any)._getCompilationTarget('javascript').compile(untestable)
-    ).toThrow(/could not compile/i);
-    // ...and the same for `Conforms`: a SYMBOL subject is not a ground
-    // operand (the gate exempts only calls whose operands are all literal
-    // type text or settled type values), so the call must fail closed too.
-    executeEpsil(eng, 'protocol MarkerC { }');
-    const cf = eng.box(['Conforms', 'gx', { str: 'MarkerC' }]);
-    for (const name of ['javascript'])
-      expect(() =>
-        (eng as any)._getCompilationTarget(name).compile(cf)
-      ).toThrow(/could not compile/i);
-    expect(() =>
-      (eng as any)._getCompilationTarget('glsl').compile(cf)
-    ).toThrow(/outside the GLSL fragment/);
-    const rc = INTERVAL_JS.compile(cf);
-    expect(rc.success).toBe(false);
-  });
-});
-
 describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
   test('Type preserves arity errors instead of observing their type', () => {
     const missing = ce.box(['Type']).evaluate().toString();
@@ -734,21 +659,6 @@ describe('the Type flip: engine routes and fail-closed (phase 3)', () => {
     ).toBe(true);
   });
 
-  test('a ground Type call folds; its type-valued RESULT still cannot compile', () => {
-    // Constant folding evaluates `Type(3)` to a settled type value; the
-    // shared gate then rejects the folded node by its result type — a type
-    // value has no compiled representation on any target.
-    const target = (ce as any)._getCompilationTarget('javascript');
-    expect(() => target.compile(ce.box(['Type', 3]))).toThrow(
-      /could not compile/i
-    );
-    // `StringFrom` itself has no JS lowering (pre-existing — nothing to do
-    // with type values), so the through-the-value spelling also fails
-    // closed, with the ordinary no-entry rejection rather than the gate's.
-    expect(() => target.compile(ce.box(['StringFrom', ['Type', 3]]))).toThrow(
-      /could not compile/i
-    );
-  });
 });
 
 describe('phase-3 review fixes: route parity and throw containment', () => {

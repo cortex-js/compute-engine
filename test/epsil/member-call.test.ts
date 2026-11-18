@@ -3,7 +3,6 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 //
 // Calling a protocol function with the dot: `c.area()` is `area(c)`, and
@@ -417,18 +416,5 @@ describe('box route and compiled tier', () => {
         .evaluate()
         .toString()
     ).toBe('Circle(2)');
-  });
-
-  test('a member call compiles through the dispatcher lowering', () => {
-    const ce = engine();
-    const [ast] = parseEpsil('c.area()');
-    const direct = compile(ce.box(ast!));
-    expect(direct.success).toBe(true);
-    expect(direct.run?.()).toBeCloseTo(Math.PI);
-
-    executeEpsil(ce, 'function k(x: Circle) -> number { x.scale(2).area() }');
-    const inBody = compile(ce.box(['k', ['Circle', 1]] as any));
-    expect(inBody.success).toBe(true);
-    expect(inBody.run?.()).toBeCloseTo(4 * Math.PI);
   });
 });

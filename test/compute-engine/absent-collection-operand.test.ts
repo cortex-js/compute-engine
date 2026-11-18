@@ -384,26 +384,6 @@ describe('a search finds an absent value where the same marker sits', () => {
         .toString()
     ).toBe('"False"');
   });
-
-  test('compiled to JavaScript', () => {
-    const ce = engine();
-    const run = (json: unknown): unknown => {
-      const r = compile(ce.box(json as never), { to: 'javascript' } as never);
-      expect(r.success).toBe(true);
-      return r.run!({} as never);
-    };
-    // `NaN` is found by the SameValueZero element test. A written `Missing`
-    // compiles to `undefined`: against a list with no absent cell it is not
-    // found.
-    expect(run(['IndexOf', ['List', 1, 2], 'Missing'])).toBe(0);
-    expect(run(['Contains', ['List', 1, 2], 'Missing'])).toBe(false);
-    // (`Contains` over a list with a `missing` element arm is not compiled:
-    // the target requires primitive elements, and falls back.)
-    expect(run(['IndexOf', ['List', 1, 'NaN', 3], 'NaN'])).toBe(2);
-    expect(run(['Contains', ['List', 1, 'NaN'], 'NaN'])).toBe(true);
-    expect(run(['Element', 'NaN', ['List', 1, 'NaN']])).toBe(true);
-    expect(run(['IndexOf', ['List', 1, 'NaN'], 'Missing'])).toBe(0);
-  });
 });
 
 describe('Join and the set operators over an absent collection', () => {

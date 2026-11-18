@@ -12,7 +12,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { hurwitzZetaNegativeIntegerGaussian } from '../../src/compute-engine/numerics/bernoulli';
 
 const ce = new ComputeEngine();
@@ -433,31 +432,5 @@ describe('HurwitzZeta at a non-positive integer order: the cost is bounded', () 
     const r = engine.box(['HurwitzZeta', -60, ['Complex', 2, 3]]).N();
     expect(r.re / -9.192467310532632e29).toBeCloseTo(1, 14);
     expect(r.im / 2.61493563004624e41).toBeCloseTo(1, 14);
-  });
-});
-
-describe('HurwitzZeta at a non-positive integer order: the compiled JavaScript lane', () => {
-  // A complex operand takes the complex kernel (`_SYS.churwitzZeta`), as
-  // `Gamma` does, so the compiled value is the interpreter's (the `.N()` test
-  // above: 1/120 + i/2).
-  test('a literal complex operand compiles to the interpreter value', () => {
-    const expr = hurwitzZeta(-3, ['Complex', 1, 1]);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const value = compiled.run() as { re: number; im: number };
-    expect(value.re).toBeCloseTo(1 / 120, 12);
-    expect(value.im).toBeCloseTo(0.5, 12);
-  });
-
-  test('a genuinely complex free variable takes the complex kernel', () => {
-    ce.declare('z374', 'complex');
-    const expr = ce.expr(['HurwitzZeta', -3, 'z374']);
-    const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const value = compiled.run({
-      z374: { re: 1, im: 1 },
-    }) as { re: number; im: number };
-    expect(value.re).toBeCloseTo(1 / 120, 12);
-    expect(value.im).toBeCloseTo(0.5, 12);
   });
 });

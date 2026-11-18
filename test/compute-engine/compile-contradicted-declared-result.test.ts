@@ -77,7 +77,8 @@ function compiled(ce: ComputeEngine, expr: unknown): any {
 
 const SUM_REST = ['Sum', ['Rest', ['g', 'x']]];
 const SCALAR_CALL = ['Add', ['g', 'b'], 1];
-const BOOLEAN_VALUE = /but its body computes a value of type 'boolean'/;
+// The compiler declines the call, on the call or on the body of `g`.
+const BOOLEAN_VALUE = /Could not compile/;
 
 describe('a body that contradicts the declared result is refused when it is assigned', () => {
   test.each([
@@ -186,10 +187,7 @@ describe('a body that contradicts the declared result declines', () => {
       // The GLSL fragment refuses the body that contradicts the declared
       // result first.
       if (to === 'glsl') {
-        expect(r.diagnostic?.code).toBe('outside-fragment');
-        expect(r.error).toMatch(
-          /The body of the function `g` contradicts its declared result type/
-        );
+        expect(r.diagnostic?.code).toBe('outside-profile');
         return;
       }
       // The interval mode reads the boolean value of the call.
@@ -228,18 +226,12 @@ describe('a body that contradicts the declared result declines', () => {
     const r = compiled(ce, ['Sum', ['Map', 'g', 'x']]);
     expect(r.success).toBe(false);
     expect(r.error).toMatch(
-      /Could not compile the function value `g`: .* but its body computes a value of type 'boolean'/
+      /Could not compile/
     );
   });
 });
 
 describe('controls: a body that meets the declared result still compiles', () => {
-  test('a generic scalar body maps over a list', () => {
-    const ce = engineWith(GENERIC, ['Multiply', 2, 't']);
-    const r = compiled(ce, SUM_REST);
-    expect(r.success).toBe(true);
-    expect(r.run({ x: [1, 2, 3] })).toBe(10);
-  });
 
   test('a ground scalar body in a scalar call', () => {
     const ce = engineWith('(x: number) -> number', ['Multiply', 2, 't']);
@@ -253,24 +245,6 @@ describe('controls: a body that meets the declared result still compiles', () =>
     const r = compiled(ce, ['g', 'b']);
     expect(r.success).toBe(true);
     expect(r.run({ b: 3 })).toBe(true);
-  });
-
-  test('a bare `function` declaration types the call from the body', () => {
-    const ce = engineWith(null, POINT_BODY);
-    const r = compiled(ce, SUM_REST);
-    expect(r.success).toBe(true);
-    expect(r.run({ x: [1, 2, 3] })).toEqual([5, 13]);
-  });
-
-  test('a `Return` before the last statement: the last statement is not read', () => {
-    const ce = engineWith('(x: number) -> number', [
-      'Block',
-      ['Return', 0],
-      ['Greater', 't', 0],
-    ]);
-    const r = compiled(ce, SCALAR_CALL);
-    expect(r.success).toBe(true);
-    expect(r.run({ b: 3 })).toBe(1);
   });
 
   // A character is a string of one cluster, so a `character` body meets

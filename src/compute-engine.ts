@@ -79,12 +79,8 @@ export type { CancellationCause } from './common/interruptible.js';
 
 // ── Compilation targets ─────────────────────────────────────────────
 export type {
-  CompileTarget,
-  CompiledOperators,
-  CompiledFunctions,
   CompilationOptions,
   CompilationResult,
-  ExecutableTarget,
   ComplexResult,
   RunnerListInput,
   CompiledColor,
@@ -93,30 +89,11 @@ export type {
   CompiledRunner,
   ExpressionRunner,
   LambdaRunner,
-  LanguageTarget,
-  TargetSource,
-  CompiledFunction,
   CompileDiagnostic,
   CompileDiagnosticKind,
   StorageHint,
   StorageKind,
 } from './compute-engine/compilation/types.js';
-
-export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';
-export { GPUShaderTarget } from './compute-engine/compilation/gpu-target.js';
-export { GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
-
-// The engine module knows only `javascript` and `interval-js`
-// (`engine-compilation-targets.ts` says why: the `./core` entry must not
-// carry the GPU target). This full entry adds it to
-// the program-wide table of defaults, which every engine reads on each
-// lookup: every engine of the program, one made earlier from `./core`
-// included (such as the default engine the free functions cache), and every
-// engine of `./epsil` and of the CLI, has all three targets from here on.
-import { addDefaultCompilationTarget } from './compute-engine/engine-compilation-targets.js';
-import { GLSLTarget as _GLSLTarget } from './compute-engine/compilation/glsl-target.js';
-addDefaultCompilationTarget('glsl', () => new _GLSLTarget());
 
 // ── Interval types ──────────────────────────────────────────────────
 export type {
@@ -138,8 +115,6 @@ export type {
   BroadcastAsyncResult,
   BroadcastAsyncRoute,
   RunAsyncOptions,
-  ParallelLoopReport,
-  ParallelLoopReason,
 } from './compute-engine/compilation/types.js';
 
 // ── Worker pool for `result.broadcastAsync()` (`ce.workers`) ────────

@@ -35,7 +35,6 @@ import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
 import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
 import { walkInvariantApplicable } from '../boxed-expression/walk-invariant-values.js';
 import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
-import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import {
   checkArity,
   checkType,
@@ -142,7 +141,7 @@ import {
   type ApplyOptions,
 } from '../function-utils.js';
 // Dynamic import for compile to avoid circular dependency
-// (collections → compile-expression → base-compiler → library/utils → collections)
+// (collections → compile-expression → … → collections)
 import { kleeneAnd, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType } from '../../common/type/reduce.js';
@@ -193,8 +192,6 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   broadcastableIndexElementTypeOf,
   collectionElementType,
-  containsBroadcastableType,
-  openDepthScalarArms,
   indexElementType,
   functionResult,
   requiredArity,
@@ -259,7 +256,6 @@ import {
 } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
-import { sumVariantInfo } from '../sum-representation.js';
 import type {
   EvaluateHandlerOptions,
   EvaluateOptions,
@@ -741,22 +737,6 @@ function matchesSequenceAt(
   for (let k = 0; k < pattern.length; k++)
     if (!subject[offset + k].isSame(pattern[k])) return false;
   return true;
-}
-
-/**
- * True when an operand's type rules out its being a collection, so a compile
- * target may treat it as a single scalar slot.
- *
- * Deliberately conservative in one direction only: `unknown` and `value` (the
- * type of a free symbol in a compiled body) are NOT provably scalar, even
- * though they usually are at runtime. A union is scalar only if every arm is.
- */
-function isProvablyScalar(operand: Expression): boolean {
-  const nonScalar = (t: Type): boolean =>
-    typeof t !== 'string' && t.kind === 'union'
-      ? t.types.some(nonScalar)
-      : isSubtype(t, COLLECTION_SHAPE_TYPE);
-  return !nonScalar(operand.type.type);
 }
 
 /**
@@ -3442,7 +3422,7 @@ function isDeclaredValue(op: Expression): boolean {
 }
 
 /** The builtin combiners `Reduce`/`Scan` fold with natively (the JavaScript
- * target lowers exactly these — `builtinCombiner` in `javascript-target.ts`). */
+ * target lowers exactly these). */
 const BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
   'Add',
   'Multiply',
@@ -8701,20 +8681,6 @@ export function cellListType(
 const MAX_ABSENCE_MARKER_PROBE = 10;
 
 /**
- * The target languages `PointList`'s compile handler lowers (a point value with
- * scalar components). On `glsl` the handler checks the operand
- * shapes and then leaves the emission to the target's own `PointList` entry.
- * On any OTHER language the handler declines by returning
- * `undefined` — it has no opinion there, so a custom target's own `PointList`
- * mapping still applies. Used to decide whether an operand-shape decline may
- * fail closed with a specific diagnostic (Tycho item 109a) or must stay silent.
- */
-const POINT_LIST_COMPILE_LANGUAGES: ReadonlySet<string> = new Set([
-  'javascript',
-  'glsl',
-]);
-
-/**
  * The field-bearing shape behind a `Field` operand's static type: a `record`,
  * an `object` layout, a `dictionary`, or a tuple with NAMED elements —
  * reached through type
@@ -12643,138 +12609,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // No `eq` handler: a definitive structural comparison would make
     // `PointList(1,2)` unequal to the `Tuple(1,2)` it evaluates to; the
     // generic compare path evaluates both sides instead.
-    compile: (args, compile, { language, typeOf }) => {
-      // Fail closed only for a *provably non-scalar* component — one whose
-      // type (or any member of a union) is a subtype of `collection` (a list,
-      // set, tuple, map, …). Everything else — `unknown`, `value`, and every
-      // numeric type — is a scalar slot that `Tuple` compiles as
-      // `compile(component)`, so it passes here too. This matters for the
-      // load-bearing case: a per-pixel body is parsed LaTeX with *free* plot
-      // variables, which type as `unknown`; the compile model treats free
-      // unknown symbols as numeric parameters, and `Tuple(x, y)` compiles them
-      // as scalar slots, so `PointList(x, y)` must as well. A non-scalar
-      // component returns `undefined` → default compilation, which has no
-      // `PointList` lowering and reports it as uncompilable (fail closed).
-      const isProvablyNonScalar = (t: Type): boolean => {
-        // The open form (`openDepthScalarArms`) is a scalar or a list decided
-        // at run time, as a `broadcastable<T>` is (see `undecided` below).
-        if (openDepthScalarArms(t) !== undefined) return false;
-        if (typeof t !== 'string' && t.kind === 'union')
-          return t.types.some(isProvablyNonScalar);
-        // A STRING is a subtype of `collection` (its elements are its grapheme
-        // clusters) but occupies a SCALAR slot here: it lowers to one target
-        // string, exactly as `Tuple` compiles it, and the runtime `PointList`
-        // treats a string component atomically for the same reason
-        // (`isFiniteBroadcastParticipant` excludes strings).
-        if (t === 'string') return false;
-        return isSubtype(t, COLLECTION_SHAPE_TYPE);
-      };
-      const nonScalar = args.findIndex((a) =>
-        isProvablyNonScalar(typeOf?.(a) ?? a.type.type)
-      );
-      // A `broadcastable<T>` component is a scalar OR a list of `T`, decided
-      // by its value — `2·PointX(v)` inside a function literal whose
-      // parameter may be a point or a list of points. On `javascript` the
-      // target table's zip lowering (`compileJSPointList`) dispatches on the
-      // value at run time; the all-scalar emission below would replace the
-      // list with `NaN` (Tycho item 238). Decline by fall-through so that
-      // lowering is consulted. On the other languages this handler lowers, a
-      // point has scalar components only and there is no run-time dispatch to
-      // hand the value to: fail closed with the shape diagnostic, rather than
-      // splice a list into the emitted point. The same predicate decides the
-      // routing here and the run-time role in `compileJSPointList`, so a
-      // union arm or an alias cannot be routed by one and missed by the
-      // other.
-      // A coordinate accessor whose operand may be a list of points
-      // (`isAccessorOfPossibleList`) is decided at run time too, on
-      // `javascript` only: on the other languages a point has scalar
-      // components, and such an accessor keeps the scalar reading below.
-      const undecided = args.findIndex(
-        (a) =>
-          containsBroadcastableType(typeOf?.(a) ?? a.type.type) ||
-          (language === 'javascript' && isAccessorOfPossibleList(a))
-      );
-      if (nonScalar < 0 && undecided >= 0) {
-        if (language === 'javascript') return undefined;
-        if (POINT_LIST_COMPILE_LANGUAGES.has(language))
-          throw new Error(
-            `Could not compile \`PointList\`: component ${undecided + 1} (type ` +
-              `\`${args[undecided].type.toString()}\`) is a scalar or a list ` +
-              `depending on its run-time value, and a point value on target ` +
-              `'${language}' has scalar components only. Evaluate it in the ` +
-              `interpreter, or give the operand a type that settles its ` +
-              `shape.`
-          );
-        return undefined;
-      }
-      if (nonScalar >= 0) {
-        // On `javascript`, every non-all-scalar shape is lowered (or declined,
-        // with its own diagnostic) by `JAVASCRIPT_FUNCTIONS.PointList`: a list
-        // of points is an expression-level value there. Decline by
-        // fall-through so the target table is consulted.
-        if (language === 'javascript') return undefined;
-        // The decline is about the operand SHAPE, not the head: say so, rather
-        // than falling through to a generic "no lowering" (which reads as if
-        // `PointList` were unsupported on the target — Tycho item 109a). Only
-        // for the languages this handler otherwise lowers: on any other
-        // language the handler has no opinion and must fall through, so a
-        // custom target can still map `PointList` itself.
-        if (POINT_LIST_COMPILE_LANGUAGES.has(language))
-          throw new Error(
-            `Could not compile \`PointList\`: component ${nonScalar + 1} is ` +
-              `collection-valued (type \`${args[nonScalar].type.toString()}\`), ` +
-              `and a point value on target '${language}' has scalar components ` +
-              `only. A list of points is not an expression-level value here: ` +
-              `project the components (\`PointX\`/\`PointY\`) or evaluate it in ` +
-              `the interpreter.`
-          );
-        return undefined;
-      }
-      // Emit byte-identically to the equivalent `Tuple(...)`, except for the
-      // opaque-slot guard the JavaScript arm adds below. The
-      // `interval-javascript` target is not enumerated here: it lowers
-      // `PointList` itself, in the positions where it accepts a collection
-      // value — an all-scalar `PointList` at the root is the array of its
-      // coordinate intervals, and a `PointList` with a list component
-      // (`PointList(L_1, L_2)`) is the list of points that `_IA.pointList`
-      // builds at run time (`compilation/ir/lower.ts`).
-      //
-      // On `glsl`, decline by fall-through to the target table
-      // (`PointList` in `glsl-target.ts`). A shader point is
-      // a `vecN` of floats, so each component must be a shader scalar. A
-      // complex component is a `vec2(re, im)`, and the type alone does not
-      // always show it: a call of a user function whose body is complex can
-      // type `number`. Only the compiler's own shape analysis
-      // (`assertGPUScalarComponents`) sees that. Without this, `(t, h(t))`
-      // with `h(s) = s + i` emitted `vec2(t, _fn_h(t))`: GLSL accepts a
-      // constructor whose last argument is only partly used, so the shader
-      // kept the real part of `h(t)` and dropped the imaginary part.
-      if (language === 'glsl') return undefined;
-      const parts = args.map((a) => compile(a));
-      if (language === 'javascript') {
-        // An OPAQUE component — one whose type does not prove it is a number,
-        // typically the `unknown` of a free plot variable — may nevertheless
-        // hold a LIST at run time, and JavaScript is the one target where a
-        // list is an ordinary expression-level value (an array), so the list
-        // would be spliced into the point: `PointList(u, v)` with `v` bound to
-        // `[10, 20]` produced `[1, [10, 20]]`, which no consumer of a point
-        // can read. `_SYS.pointSlot` replaces such a slot with `NaN`, the same
-        // self-describing absence marker the zipped lowering of `PointList`
-        // (`compileJSPointList`, `javascript-target.ts`) already produces for
-        // exactly this situation.
-        //
-        // Admitting the opaque component STATICALLY stays load-bearing and is
-        // NOT reconsidered here: a per-pixel plot body is parsed LaTeX whose
-        // free variables type as `unknown` and are scalars at run time. This
-        // is a run-time question, so it gets a run-time answer.
-        return `[${args
-          .map((a, i) =>
-            a.type.matches('number') ? parts[i] : `_SYS.pointSlot(${parts[i]})`
-          )
-          .join(', ')}]`;
-      }
-      return undefined;
-    },
   } as OperatorDefinition,
 
   KeyValuePair: {
@@ -17071,71 +16905,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       return undefined;
     },
-    // §4.6/D16 compile lowering: positional index/swizzle for named-tuple
-    // NOMINAL operands; `At` parity for plain dictionary/record values; the
-    // dictionary payload of a record-bodied nominal has no compiled
-    // representation — decline.
-    compile: (args, compile, { language }) => {
-      const [base, field] = args;
-      if (base === undefined || !isString(field)) return undefined;
-      const name = field.string;
-      const t = base.type.type;
-      const rt = fieldBearingType(t);
-      if (rt === undefined || rt === 'none') return undefined;
-      // A MUTABLE OBJECT declines, fail-closed: objects have no compiled
-      // representation at all yet (their constructor's own compile handler
-      // declines for the same reason), and lowering a field read to a plain
-      // property access would silently produce a value with none of an
-      // object's identity or mutation semantics. The engine⇄compiled boundary
-      // for objects is a later phase.
-      if (rt.kind === 'object') return undefined;
-
-      const isNominal =
-        typeof t === 'object' && t.kind === 'reference' && t.alias !== true;
-      if (!isNominal) {
-        // Plain (or alias-typed) structural value: lower exactly as the
-        // equivalent `At` — same emissions, same declines. A named-tuple
-        // field lowers by POSITION (1-based `At`).
-        if (rt.kind === 'tuple') {
-          const i = rt.elements.findIndex((x) => x.name === name);
-          if (i < 0) return undefined;
-          return compile(
-            base.engine.function('At', [base, base.engine.number(i + 1)])
-          );
-        }
-        return compile(base.engine.function('At', [base, field]));
-      }
-
-      // Nominal named-tuple body: component access by POSITION — the nominal
-      // operand cannot route through `At` (its static gate rejects a
-      // non-collection), but its compiled representation IS the tuple's.
-      if (rt.kind === 'tuple') {
-        const i = rt.elements.findIndex((x) => x.name === name);
-        if (i < 0) return undefined;
-
-        // …unless the nominal is a variant of a TAGGED sum
-        // (`docs/plans/2026-08-12-sum-type-sugar-and-compilation.md` §B1/§B2),
-        // whose compiled representation is `{_tag, _ops}` and NOT the bare
-        // tuple: the payload lives one level down, in `_ops`. Without this the
-        // positional index below reads a property the object does not have and
-        // silently yields `undefined`.
-        const info = sumVariantInfo(base.engine, t.name);
-        if (info?.policy === 'tagged') {
-          // JS only (§B2: the tagged emission is JS-only), and only for the
-          // `tuple` shape whose slots ARE the `_ops` entries. Any other shape
-          // (a variant whose payload merely *aliases* a tuple mints a UNARY
-          // constructor, so `_ops[0]` is the whole tuple) fails closed.
-          if (language === 'javascript' && info.shape === 'tuple')
-            return `${compile(base)}._ops[${i}]`;
-          return undefined;
-        }
-
-        if (language === 'javascript') return `${compile(base)}[${i}]`;
-        if (language === 'glsl' && i < 4)
-          return `${compile(base)}.${'xyzw'[i]}`;
-      }
-      return undefined;
-    },
   },
 
   // A member call, `c.area(2)` in Epsil: a parse-level node that
@@ -17607,7 +17376,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // element of a list, or a list for a gather. `At(t, 1, 2)` with
       // `t: tuple<list<real>, real>` is `real`, and `At(L, 1, "a")` with
       // `L: list<record{a: real}>` is `real`. The compiler reads a chained
-      // access as this nested access (`compiler-core.ts`). When boxing the
+      // access as this nested access. When boxing the
       // nested read writes a type on an inferred base, or refuses a marker as
       // a base, the two types can differ; that nested read then declines.
       let current: OperandDescriptor = ops[0];
@@ -22291,37 +22060,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
       }
       return ce.function('List', elements);
-    },
-    // (Tycho item 94.) `ListFrom` is the only eager materializer that works
-    // over an arbitrary collection body, which makes it the documented escape
-    // from the lazy-view trap under `WithRandomSeed` — a frame around a lazy
-    // comprehension has already exited by the time the view materializes, so
-    // the draws escape it. That escape is only usable if it also compiles.
-    compile: (args, compile, { language }) => {
-      const parts = args.map((a) => compile(a));
-
-      // On the CPU targets the splice is decided at RUNTIME, per operand: a
-      // collection contributes its elements, anything else contributes itself.
-      // A static type gate would be wrong here — a free symbol in a compiled
-      // body types as `unknown`, and `unknown` is exactly the case that has to
-      // work.
-      if (language === 'javascript') {
-        if (args.every(isProvablyScalar)) return `[${parts.join(', ')}]`;
-        return `[${parts.join(', ')}].flatMap((_x) => Array.isArray(_x) ? _x : [_x])`;
-      }
-
-      // The GPU targets have no runtime splice: their lists are fixed-size
-      // `vecN`/array literals. An all-scalar `ListFrom` is exactly the
-      // equivalent `List`, so emit that; anything with a provably collection
-      // operand fails closed (`undefined` → reported as uncompilable).
-      if (language === 'glsl') {
-        if (!args.every(isProvablyScalar)) return undefined;
-        if (parts.length >= 2 && parts.length <= 4)
-          return `vec${parts.length}(${parts.join(', ')})`;
-        const arrayType = `float[${parts.length}]`;
-        return `${arrayType}(${parts.join(', ')})`;
-      }
-      return undefined;
     },
   },
 

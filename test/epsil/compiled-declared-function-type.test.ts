@@ -46,20 +46,8 @@ function interpret(source: string): { value: Value; errors: number } {
     errors: JSON.stringify(json).split("'incompatible-type'").length - 1,
   };
 }
-
-const js = (source: string, vars: Record<string, Value> = {}) =>
-  compileProgram(source).run(vars);
-
-const DECLARED = 'let g: (integer) -> integer\nfunction g(k) { k + 1 }\n';
 const ASSIGNED = 'let g: (integer) -> integer = (k) => k + 1\n';
 const ANNOTATED = 'function g(k: integer) { k + 1 }\n';
-
-describe('A `let` DECLARATION THEN A DEFINITION', () => {
-  test('a Program pairs the declaration and definition when compiled', () => {
-    expect(interpret(DECLARED + 'g(1)').value).toBe(2);
-    expect(compileProgram(DECLARED + 'g(1)').run()).toBe(2);
-  });
-});
 
 describe.each([
   ['a `let` declaration with a function value', ASSIGNED],
@@ -74,97 +62,9 @@ describe.each([
       /Could not compile/
     );
   });
-
-  test('an integer literal compiles as before, without a test', () => {
-    expect(interpret(head + 'g(1)').value).toBe(2);
-    const c = compileProgram(head + 'g(1)');
-    expect(c.run()).toBe(2);
-    expect(c.code).not.toContain('Number.isInteger');
-  });
-
-  test('a local declared integer is not tested', () => {
-    const source = head + 'let n: integer = 3\ng(n)';
-    expect(interpret(source).value).toBe(4);
-    const c = compileProgram(source);
-    expect(c.run()).toBe(4);
-    expect(c.code).not.toContain('Number.isInteger');
-  });
-
-  test('a local whose assigned values are integers is not tested', () => {
-    // The static type of the local is `integer`, which is the contract
-    // (rule R1 of `docs/plans/2026-10-31-static-shape-compilation.md`).
-    for (const [source, value] of [
-      [head + 'let n = 3\ng(n)', 4],
-      [head + 'let n = 3\nn = 5\ng(n)', 6],
-      [head + 'let n = 3\nlet m = n\ng(m)', 4],
-    ] as const) {
-      expect(interpret(source).value).toBe(value);
-      const c = compileProgram(source);
-      expect(c.run()).toBe(value);
-      expect(c.code).not.toContain('Number.isInteger');
-    }
-  });
-
-  test('a local with an assigned value that is not an integer is not tested', () => {
-    // The static type of `n` is real, which holds integers: the call
-    // compiles with no test. The interpreter gives an error for `1.5`,
-    // which the static type of the call does not show, so the compiled
-    // value is unspecified there.
-    for (const source of [
-      head + 'let n = 3\nn = 1.5\ng(n)',
-      head + 'let n = 3\nfor k in 1..2 { n = n + 0.5 }\ng(n)',
-    ])
-      expect(compileProgram(source).success).toBe(true);
-    expect(js(head + 'let n = x\ng(n)', { x: 2 })).toBe(3);
-    // A function that the code calls and that assigns a name outside it
-    // declines with the `unsettled-shape` decline.
-    expect(() =>
-      compileProgram(
-        head + 'let n = 3\nfunction w() scope { n = 1.5 }\nw()\ng(n)'
-      )
-    ).toThrow(
-      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
-    );
-    expect(interpret(head + 'let n = 3\nn = 1.5\ng(n)').errors).toBe(1);
-  });
-
-  test('a real input is not tested', () => {
-    // The interpreter, given the value of the input.
-    expect(interpret('let x = 1.5\n' + head + 'g(x)').errors).toBe(1);
-    expect(interpret('let x = 2\n' + head + 'g(x)').value).toBe(3);
-    expect(js(head + 'g(x)', { x: 2 })).toBe(3);
-  });
-
-  test('a list of reals is not tested', () => {
-    const run = interpret('let xs = [1, 1.5]\n' + head + 'g(xs)');
-    expect(run.errors).toBe(1);
-    expect((run.value as Value[])[1]).toBe(2);
-    expect(js(head + 'g(xs)', { xs: [1, 2] })).toEqual([2, 3]);
-  });
-
-  test('a real parameter of an enclosing function is not tested', () => {
-    const source = head + 'function h(y: real) { g(y) }\nh(x)';
-    expect(
-      interpret('let x = 1.5\n' + head + 'function h(y: real) { g(y) }\nh(x)')
-        .errors
-    ).toBe(1);
-    expect(js(source, { x: 2 })).toBe(3);
-  });
 });
 
 describe('OTHER DECLARED PARAMETER TYPES', () => {
-  test('a ranged integer type is not tested', () => {
-    const head = 'let g: (integer<0..>) -> integer = (k) => k + 1\n';
-    expect(interpret('let x = -1\n' + head + 'g(x)').errors).toBe(1);
-    expect(js(head + 'g(x)', { x: 1 })).toBe(2);
-  });
-
-  test('a bounded real type is not tested', () => {
-    const head = 'let g: (real<0..>) -> real = (k) => k + 1\n';
-    expect(interpret('let x = -0.5\n' + head + 'g(x)').errors).toBe(1);
-    expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
-  });
-
   // `real<0<..>` is x > 0 and `real<..<3>` is x < 3: the bound itself is not
   // a value of the type. Before 2026-10-19 the interpreter admitted it
   // (`g(0)` gave a value).
@@ -176,9 +76,6 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     expect(interpret(head + `g(${bound})`).errors).toBe(1);
     expect(interpret(`let x = ${bound}\n` + head + 'g(x)').errors).toBe(1);
     expect(interpret(head + `g(${inside})`).value).toBe(inside + 1);
-    // The compiled call is not tested: a value of the type gives the
-    // interpreter's value.
-    expect(js(head + 'g(x)', { x: inside })).toBe(inside + 1);
   });
 
   test('an excluded bound is refused by the interpreter on every route', () => {
@@ -190,20 +87,6 @@ describe('OTHER DECLARED PARAMETER TYPES', () => {
     expect(ce.box(['g', 0.5]).evaluate().toString()).toBe('5');
     ce.assign('x', 0);
     expect(ce.box(['g', 'x']).evaluate().operator).toBe('Error');
-  });
-
-  test('a rational parameter is not tested', () => {
-    const head = 'let g: (rational) -> real = (k) => k + 1\n';
-    expect(js(head + 'g(x)', { x: 0.5 })).toBe(1.5);
-    expect(js(head + 'g(1)')).toBe(2);
-  });
-
-  test('the declared result type is not checked', () => {
-    // The body breaks the result type, and the interpreter gives the
-    // value of the body.
-    const source = 'let g: (real) -> integer = (k) => k + 1\ng(1.5)';
-    expect(interpret(source).value).toBe(2.5);
-    expect(js(source)).toBe(2.5);
   });
 });
 

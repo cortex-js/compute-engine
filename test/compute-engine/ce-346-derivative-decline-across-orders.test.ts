@@ -22,7 +22,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import * as DerivativeModule from '../../src/compute-engine/symbolic/derivative';
 
 /** `(x + e) / (1 + x·e)`, nested `depth` times, starting from `x`. */
@@ -106,25 +105,4 @@ describe('CE-346: a derivative decline answers the higher orders', () => {
     expect(second.toString()).toBe('(x) => 0');
   });
 
-  test('a compiled sum of the first three derivatives at a point is the interpreted value', () => {
-    const ce = engineWith(6);
-    const sum = ce.box([
-      'Add',
-      ['Apply', ['Derivative', 'h', 1], 0.5],
-      ['Apply', ['Derivative', 'h', 2], 0.5],
-      ['Apply', ['Derivative', 'h', 3], 0.5],
-    ]);
-    let result: ReturnType<typeof compile> | undefined;
-    const calls = derivativeCalls(() => {
-      result = compile(sum as never);
-    });
-    expect(result!.success).toBe(true);
-    // One differentiation for the three orders: the first request finds the
-    // decline, and the other two orders use it.
-    expect(calls).toBe(1);
-    const interpreted = [1, 2, 3]
-      .map((k) => ce.box(['Apply', ['Derivative', 'h', k], 0.5]).N().re)
-      .reduce((a, b) => a + b, 0);
-    expect(Object.is(result!.run!() as number, interpreted)).toBe(true);
-  });
 });

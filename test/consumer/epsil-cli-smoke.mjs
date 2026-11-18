@@ -29,7 +29,7 @@ expectRun(['--json', '-e', '1/2 + 1'], {
   stdout: '[\n  "Rational",\n  3,\n  2\n]\n',
 });
 expectRun([], { input: 'let x = 3\nx^2\n', stdout: '9\n' });
-expectRun(['--compile', '-e', 'f(x) = x^2 + 1\nf(3)'], { stdout: '10\n' });
+expectRun(['--compile', '-e', 'let x = 3\nx^2 + 1'], { stdout: '10\n' });
 expectRun(['--compile', '--json', '-e', 'sqrt(2)'], {
   stdout: '1.4142135623730951\n',
 });

@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import { differentiate } from '../../src/compute-engine/symbolic/derivative';
 import { withRadianConvention } from '../../src/compute-engine/symbolic/angular-unit';
 import { loadIntegrationRules } from '../../src/integration-rules';
@@ -191,22 +191,6 @@ describe('ANTIDERIVATIVES IN A NON-RADIAN ANGULAR UNIT', () => {
       .evaluate();
     expect(r.has('Integrate')).toBe(false);
     expect(r.N().re).toBeCloseTo(180 / Math.PI, 10);
-  });
-
-  test('deg: the compiled closed form agrees with the interpreter', () => {
-    const ce = engine('deg');
-    const one = ce.box(['Integrate', ['Sin', 't'], ['Limits', 't', 0, 'x']]);
-    const r1 = compile(one, { to: 'javascript' } as any) as any;
-    expect(r1.success).toBe(true);
-    expect(r1.run({ x: 180 })).toBeCloseTo(360 / Math.PI, 9);
-    const two = ce.box([
-      'Integrate',
-      ['Multiply', 't', ['Sin', 't']],
-      ['Limits', 't', 0, 'x'],
-    ]);
-    const r2 = compile(two, { to: 'javascript' } as any) as any;
-    expect(r2.success).toBe(true);
-    expect(r2.run({ x: 90 })).toBeCloseTo(two.subs({ x: 90 }).N().re, 6);
   });
 
   test('deg: the Rubi integration rules follow the unit too', () => {

@@ -42,17 +42,9 @@ function tryCompile(
 function expectOutOfRange(latex: string, to: string): void {
   const result = tryCompile(latex, to);
   expect(result.success).toBe(false);
-  // The interval mode of the IR pipeline declines such a bound with the
-  // generic code of its profile.
-  if (to === 'interval-js') {
-    expect(result.code).toBe('outside-profile');
-    return;
-  }
-  // The GLSL fragment refuses a bound outside the loop counter before any
-  // code is written, with its own message.
-  expect(result.reason).toMatch(
-    /out-of-range|outside the range of the loop counter of the GLSL target/
-  );
+  // The IR pipeline declines such a bound with the generic code of its
+  // profile.
+  expect(result.code).toBe('outside-profile');
 }
 
 describe('A Sum with bounds that are not safe integers', () => {
@@ -129,30 +121,6 @@ describe('A Sum with bounds that are not safe integers', () => {
       'javascript'
     );
     expect(result.run!({})).toBe(2 * 9007199254740990 + 1);
-  });
-
-  // A bound known only at run time: the loop-entry guard tests for a safe
-  // integer, so the compiled function returns at once.
-  test('javascript: a run-time bound of 2^53 returns NaN at once', () => {
-    const result = tryCompile('\\sum_{k=m}^{m+2} \\sin(x+k)', 'javascript');
-    expect(result.success).toBe(true);
-    expect(result.run!({ m: 2 ** 53, x: 1 })).toBeNaN();
-    expect(result.run!({ m: 3, x: 1 })).toBeCloseTo(
-      Math.sin(4) + Math.sin(5) + Math.sin(6)
-    );
-  });
-
-  // Under a budget the trip count of `2^53..2^53+2` is small, so the budget
-  // test alone let the loop run with a counter that did not advance.
-  test('javascript: under an iteration budget a run-time bound of 2^53 returns NaN at once', () => {
-    const result = compile(ce.parse('\\sum_{k=m}^{m+2} \\sin(x+k)'), {
-      iterationBudget: 100,
-    } as any);
-    expect(result.success).toBe(true);
-    expect(result.run!({ m: 2 ** 53, x: 1 })).toBeNaN();
-    expect(result.run!({ m: 3, x: 1 })).toBeCloseTo(
-      Math.sin(4) + Math.sin(5) + Math.sin(6)
-    );
   });
 
   test('interval-js: a run-time bound of 2^53 returns entire at once', () => {

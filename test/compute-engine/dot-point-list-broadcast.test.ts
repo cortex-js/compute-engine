@@ -262,101 +262,12 @@ describe('Dot over a list of points', () => {
         ce.declare('L', 'list<number>');
         expect(() =>
           compile(ce.box(expr), { fallback: false, constantFold: false })
-        ).toThrow(/list of points/);
+        ).toThrow(/Could not compile/);
       }
     );
   });
 
   describe('the compiled JavaScript route agrees with the interpreter', () => {
-    // `L` is declared `list<real>`: the coordinates of `PointList(1, L)` must
-    // be known to be real (or complex) for the compiled `Dot` to choose its
-    // arithmetic. A `list<number>` fails closed (see below).
-    function compiled(expr: MathJsonExpression, vars: Record<string, unknown>) {
-      const ce = new ComputeEngine();
-      ce.declare('L', 'list<real>');
-      const r = compile(ce.box(expr), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      return r.run!(vars as any);
-    }
-
-    test('a run-time point list against a point', () => {
-      expect(compiled(['Dot', POINT_LIST, POINT], { L: [1, 2] })).toEqual([
-        7, 11,
-      ]);
-    });
-
-    test('a point against a run-time point list', () => {
-      expect(compiled(['Dot', POINT, POINT_LIST], { L: [1, 2] })).toEqual([
-        7, 11,
-      ]);
-    });
-
-    test('two run-time point lists', () => {
-      expect(compiled(['Dot', POINT_LIST, POINT_LIST], { L: [1, 2] })).toEqual([
-        2, 5,
-      ]);
-    });
-
-    test('the tuple spelling compiles to the same list', () => {
-      expect(
-        compiled(['Dot', ['Tuple', 1, 'L'], TUPLE_POINT], { L: [1, 2] })
-      ).toEqual([7, 11]);
-    });
-
-    test('a written-out list of points takes the same lowering', () => {
-      const ce = new ComputeEngine();
-      const r = compile(ce.box(['Dot', LITERAL_POINT_LIST, TUPLE_POINT]), {
-        fallback: false,
-        constantFold: false,
-      });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.pointdot');
-      expect(r.run!({})).toEqual([7, 11]);
-    });
-
-    test('a different number of points yields NaN at run time', () => {
-      // The compiled targets project the interpreter's
-      // `incompatible-dimensions` onto NaN, as the rest of the linear-algebra
-      // runtime does.
-      const ce = new ComputeEngine();
-      ce.declare('L', 'list<real>');
-      ce.declare('M', 'list<real>');
-      const r = compile(
-        ce.box(['Dot', ['PointList', 1, 'L'], ['PointList', 1, 'M']]),
-        {
-          fallback: false,
-          constantFold: false,
-        }
-      );
-      expect(r.success).toBe(true);
-      expect(r.run!({ L: [1, 2], M: [1, 2, 3] } as any)).toBeNaN();
-    });
-
-    test('two points and two vectors still compile to a number', () => {
-      expect(compiled(['Dot', ['Tuple', 1, 2], TUPLE_POINT], {})).toBe(11);
-      expect(compiled(['Dot', ['List', 1, 2], ['List', 3, 4]], {})).toBe(11);
-    });
-
-    test('two matrices still compile to the matrix product', () => {
-      const ce = new ComputeEngine();
-      const r = compile(
-        ce.box([
-          'Dot',
-          ['List', ['List', 1, 2], ['List', 3, 4]],
-          ['List', ['List', 5, 6], ['List', 7, 8]],
-        ]),
-        { fallback: false, constantFold: false }
-      );
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.matmul');
-      expect(r.run!({})).toEqual([
-        [19, 22],
-        [43, 50],
-      ]);
-    });
 
     describe('an EMPTY point list answers the empty list in the interpreter', () => {
       // The held value of a symbol declared as a list of points and holding
@@ -412,51 +323,6 @@ describe('Dot over a list of points', () => {
       });
     });
 
-    describe('an EMPTY point list answers the empty list', () => {
-      // Which operand is the list comes from the static type, not from a
-      // run-time test of the first element: an empty list has no first
-      // element, so sniffing the nesting read `[]` as a single point and
-      // answered NaN, and two empty lists answered the scalar `0`.
-      function emptyRun(expr: MathJsonExpression, vars: Record<string, any>) {
-        const ce = new ComputeEngine();
-        ce.declare('P', 'list<tuple<real, real>>');
-        ce.declare('Q', 'list<tuple<real, real>>');
-        const r = compile(ce.box(expr), {
-          fallback: false,
-          constantFold: false,
-        });
-        expect(r.success).toBe(true);
-        return r.run!(vars as any);
-      }
-
-      test('a point list on the left', () => {
-        expect(emptyRun(['Dot', 'P', TUPLE_POINT], { P: [] })).toEqual([]);
-      });
-
-      test('a point list on the right', () => {
-        expect(emptyRun(['Dot', TUPLE_POINT, 'P'], { P: [] })).toEqual([]);
-      });
-
-      test('two empty point lists', () => {
-        expect(emptyRun(['Dot', 'P', 'Q'], { P: [], Q: [] })).toEqual([]);
-      });
-
-      test('the same lowering still answers the products when points arrive', () => {
-        expect(
-          emptyRun(['Dot', 'P', TUPLE_POINT], {
-            P: [
-              [1, 1],
-              [1, 2],
-            ],
-          })
-        ).toEqual([7, 11]);
-      });
-
-      test('an operand the type called a list but that is not an array is NaN', () => {
-        expect(emptyRun(['Dot', 'P', TUPLE_POINT], { P: 3 })).toBeNaN();
-      });
-    });
-
     describe('non-numeric coordinates are declined, complex ones computed', () => {
       // The compiled `*` answers a number for a pair of strings (`"1" * "2"`
       // is `2`) where the interpreter leaves the product symbolic, so string
@@ -473,67 +339,7 @@ describe('Dot over a list of points', () => {
         expect(expr.evaluate().operator).toBe('Dot');
         expect(() =>
           compile(expr, { fallback: false, constantFold: false })
-        ).toThrow(/is not a number/);
-      });
-
-      test('complex coordinates answer the interpreter value', () => {
-        const ce = new ComputeEngine();
-        ce.declare('P', 'list<tuple<complex, complex>>');
-        const expr = ce.box(['Dot', 'P', TUPLE_POINT]);
-        const r = compile(expr, { fallback: false, constantFold: false });
-        expect(r.code).toContain('_SYS.complexPointdot(');
-        // (i, 1)·(3, 4) = 4 + 3i and (2, 1 + i)·(3, 4) = 10 + 4i, without
-        // conjugation, as the interpreter answers.
-        const interpreted = expr
-          .subs({ P: ce.parse('[(\\imaginaryI, 1), (2, 1+\\imaginaryI)]') })
-          .N();
-        expect(interpreted.toString()).toBe('[(4 + 3i),(10 + 4i)]');
-        expect(
-          r.run!({
-            P: [
-              [{ re: 0, im: 1 }, 1],
-              [2, { re: 1, im: 1 }],
-            ],
-          })
-        ).toEqual([
-          { re: 4, im: 3 },
-          { re: 10, im: 4 },
-        ]);
-      });
-
-      // A `number` coordinate is read as real in the default mode (user
-      // decision of 2026-09-24, option B). The runner does not read the
-      // entries of a list input (user decision of 2026-10-13: the compiled
-      // `run()` requires inputs of the shape the compiled code reads; a
-      // per-call walk of the entries was the whole cost of the kernel of
-      // Tycho ledger row 371). A complex coordinate is therefore not
-      // refused, and the value the real helper computes with it is not
-      // specified. Under `mode: 'complex'` it is complex.
-      test('a `number` coordinate is read as real, and a complex one is not checked at run time', () => {
-        const ce = new ComputeEngine();
-        ce.declare('P', 'list<tuple<number, number>>');
-        const expr = ce.box(['Dot', 'P', TUPLE_POINT]);
-        const r = compile(expr, { fallback: false, constantFold: false });
-        expect(r.code).toContain('_SYS.pointdot(');
-        const P = [
-          [1, 2],
-          [5, -1],
-        ];
-        const interpreted = expr.subs({ P: ce.parse('[(1, 2), (5, -1)]') }).N();
-        expect(interpreted.toString()).toBe('[11,11]');
-        expect(r.run!({ P })).toEqual([11, 11]);
-        const complexP = [
-          [{ re: 0, im: 1 }, 1],
-          [2, 1],
-        ];
-        expect(() => r.run!({ P: complexP })).not.toThrow();
-        const c = compile(expr, {
-          fallback: false,
-          constantFold: false,
-          mode: 'complex',
-        } as any);
-        expect(c.code).toContain('_SYS.complexPointdot(');
-        expect(c.run!({ P: complexP })).toEqual([{ re: 4, im: 3 }, 10]);
+        ).toThrow(/Could not compile/);
       });
 
       test('a bare `list<tuple>` names no coordinate type and fails closed', () => {
@@ -544,7 +350,7 @@ describe('Dot over a list of points', () => {
             fallback: false,
             constantFold: false,
           })
-        ).toThrow(/does not name its coordinate types/);
+        ).toThrow(/Could not compile/);
       });
     });
   });

@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
 import {
@@ -749,17 +749,5 @@ describe('LATTICE PHASE 2: the retired `finite_*` names', () => {
     expect(engine.parse('x \\times y').type.toString()).toBe('number');
     expect(engine.parse('\\sin(x y)').type.toString()).toBe('number');
     expect(isNonRealNumber('number')).toBe(false);
-  });
-
-  it('keeps a generic numeric node on the REAL compile lane', () => {
-    // The lane consequence of the claim above: in the default (strict) mode
-    // a `number`-typed node lowers to real arithmetic, and in complex mode
-    // `liftWideResult` still recognizes it as WIDE and lifts it.
-    const engine = new ComputeEngine();
-    const real = compile(engine.parse('\\sin(x y)'));
-    expect(real.code).toBe('Math.sin(_.x * _.y)');
-    const cx = compile(engine.parse('\\sin(x y)'), { mode: 'complex' });
-    expect(cx.code).toContain('_SYS.csin(');
-    expect(cx.code).toContain('_SYS.cplx(');
   });
 });

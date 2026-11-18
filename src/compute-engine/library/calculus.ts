@@ -119,10 +119,7 @@ import {
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
-import {
-  isIterationLimitCancellation,
-  throwIfCallerCancellation,
-} from '../../common/interruptible.js';
+import { isIterationLimitCancellation } from '../../common/interruptible.js';
 import { mixTags } from '../numerics/random.js';
 import {
   adaptiveQuadrature,
@@ -163,10 +160,7 @@ import {
   unstableClosedForms,
 } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
-import {
-  withRadianConvention,
-  rewriteAngularUnit,
-} from '../symbolic/angular-unit.js';
+import { withRadianConvention } from '../symbolic/angular-unit.js';
 import {
   integrateBoseMoment,
   polygammaDomainKnown,
@@ -1843,7 +1837,7 @@ function withComplexAtNaN<A extends number[]>(
  * sample that is not finite; when it does not compile, `run`'s value
  * stands. The compiled
  * `_SYS.integrate` does the same (`_SYS.finiteOr`, `compileIntegrate` in
- * `compilation/javascript-target.ts`).
+ * `compilation/javascript-runtime.ts`).
  */
 function withLogSpaceFallback<A extends number[]>(
   ce: ComputeEngine,
@@ -5553,9 +5547,6 @@ function bareFunctionSystem(
   return { params, bodies: lambdas.map((l) => l.body) };
 }
 
-/** The heads whose presence in a result means "no closed form was found". */
-const DERIVATIVE_HEADS = ['D', 'Derivative', 'ND'] as const;
-
 /**
  * Fold the raw output of the symbolic differentiator into the form the `D`
  * operator answers with.
@@ -5850,215 +5841,6 @@ function withDerivativeMemo(
   };
   DERIVATIVE_RECORDS.set(expression, slots);
   return result ?? expression;
-}
-
-/**
- * Target-agnostic compile lowering for the derivative heads (`D`,
- * `Derivative`, `ND`): the differentiation itself is a symbolic operation with
- * no runtime counterpart on any target, but its *result* is an ordinary
- * expression the normal compiler already handles. So obtain the closed form
- * and compile that instead.
- *
- * `.evaluate()`, never `.simplify()`: evaluate is what produces the closed
- * form here, and `.simplify()` inside a compile path invites the recursion
- * hazards documented in ARCHITECTURE.md.
- *
- * Only a PURE derivative node is evaluated: evaluating happens at COMPILE
- * time, so an impure body (`ND(Function(Random(), x), 1.5)` runs the numerical
- * stencil during compilation) would consume its random draws once and freeze
- * the sampled result into the emitted code. Decline instead, so the draw
- * timing and the run-time semantics are left intact.
- *
- * Purity is not enough, though: canonicalizing and evaluating can also
- * DECLARE. `devolveUnappliedOperator` (`boxed-expression/validate.ts`) turns a
- * single-uppercase-letter builtin used as a bare operand into a variable by
- * shadowing the builtin — `D` in `D(D·x², x)` is a legitimate free variable —
- * and that shadow persists in whatever scope is current. Left to the caller's
- * scope it would replace the engine's `D` *operator* definition for the
- * engine's lifetime, so every later derivative compilation would report
- * ``Unknown operator `D` ``. Compiling must not mutate the engine, so the
- * whole closed-form computation runs in a throwaway child scope; any
- * declaration it makes dies with the scope.
- *
- * The node is BUILT inside that scope, not merely evaluated there: the scope a
- * binder's `localScope` descends from is fixed when the node is canonicalized,
- * and evaluating a binder re-enters that parent (`rebindEscapingCurrentScope`).
- * A node canonicalized outside would declare outside, whatever scope is
- * current at `.evaluate()`.
- *
- * Declines (returns `undefined`, never throws) when no closed form is
- * available — the result is unchanged, or still carries a derivative head
- * (an opaque user function differentiates to `Apply(Derivative(f,1), x)`;
- * `ND` at a symbolic point stays put). Declining lets the standard
- * `noLoweringMessage` report it, and leaves the door open for a custom target
- * that does map the head — a thrown error here would pre-empt it, since a
- * per-operator handler is consulted BEFORE the target's function table.
- */
-function compileDerivative(
-  operator: (typeof DERIVATIVE_HEADS)[number],
-  args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string,
-  context?: { readonly language: string }
-): string | undefined {
-  if (args.length === 0) return undefined;
-
-  // The numeric fallback for the no-closed-form declines below (item 177).
-  // NOT used for the impure decline: an impure body's stencil would re-draw
-  // its random values at every stencil point, and the interpreted route
-  // declines it too — the two routes must fail (or fall back) together.
-  const fallback = (): string | undefined =>
-    compileNumericDerivativeFallback(operator, args, compile, context);
-
-  const ce = args[0].engine;
-  let node: Expression;
-  let value: Expression;
-  // Isolation scope — see the note above. A child of the caller's scope, so
-  // every declaration the caller made is still visible; only what this
-  // evaluation declares is confined, and discarded on the way out. The closed
-  // form outlives the scope: `compile()` below resolves its free symbols by
-  // name against the target's bindings, not against this scope.
-  ce.pushScope();
-  try {
-    node = ce.function(operator, args as Expression[]);
-    // An impure node (`ND` of a body drawing random values, say) must not be
-    // evaluated here: that would happen at compile time and bake one sample
-    // into the emitted code.
-    if (!node.isPure) return undefined;
-    value = node.evaluate();
-  } catch (e) {
-    // A caller's timeout, an abort or an iteration limit propagates; only
-    // an ordinary evaluation error falls back.
-    throwIfCallerCancellation(e, ce._deadlineFrame);
-    return fallback();
-  } finally {
-    ce.popScope();
-  }
-  if (!value.isValid) return fallback();
-  // Re-entry guard: an unchanged result would compile straight back into this
-  // handler. This is also where the differentiation growth budget surfaces:
-  // `differentiate()` declines past `MAX_DERIVATIVE_NODES` (a deeply-nested
-  // body whose derivative's term count grows exponentially), the evaluate
-  // handler then returns the node unchanged, and the numeric fallback takes
-  // over — instead of the compilation failing closed (Tycho item 177).
-  if (value.isSame(node)) return fallback();
-  // No closed form: a derivative head survived the evaluation. Head-aware:
-  // `has()` would also match a plain symbol named `D`, which is a legitimate
-  // free variable in a closed form.
-  if (DERIVATIVE_HEADS.some((h) => value.getSubexpressions(h).length > 0))
-    return fallback();
-
-  try {
-    // The closed form is a FRESH expression in the engine's angular
-    // convention (`d/dx sin x = (π/180)·cos x` in degree mode) — it never went
-    // through the entry-point rewrite, which skips the derivative heads
-    // precisely so that differentiation runs in that convention. Rewrite it
-    // here, or the radian-based `Math.cos` the target emits would disagree
-    // with `evaluate()`. Same reason `prepareUserFunctionBody` rewrites an
-    // emitted function-literal body.
-    // In parentheses: the caller writes this text as an operand, and a closed
-    // form that is a sum would otherwise regroup with the parent's operator
-    // (`1 / D(x^3 + x, x)` as `1 / 3 * (x * x) + 1`).
-    const code = compile(rewriteAngularUnit(value));
-    return code ? `(${code})` : undefined;
-  } catch (e) {
-    throwIfCallerCancellation(e, ce._deadlineFrame);
-    // The closed form contains a head this target cannot lower (`Digamma` on
-    // glsl, say). Decline rather than let the inner error escape: a
-    // per-operator handler runs BEFORE the target's function table, so
-    // throwing would pre-empt a custom target that does map that head. The
-    // trade-off is deliberate — the inner message names the offending head and
-    // is more informative than the generic decline the fallthrough produces,
-    // but contract-correctness wins. Do not "restore" the throw.
-    return fallback();
-  }
-}
-
-/**
- * Emit a NUMERIC differentiation when the symbolic closed form is
- * unavailable — the shared-budget fallback of Tycho item 177 (user-ruled
- * 2026-08-14): within the differentiation growth budget both routes use the
- * exact closed form; past it, the compiled target and the interpreter's
- * `N()` both fall back to the SAME stencil (`centeredDiffHigherOrder`,
- * numerics/numeric.ts — injected into emitted code as `_SYS.nd`), so
- * compiled-vs-interpreted parity holds by construction. Plain `evaluate()`
- * keeps its exactness contract: it returns the node symbolically unchanged
- * rather than a stencil float (see `numericDerivativeOfApply`).
- *
- * javascript target only: the other targets keep today's decline (each
- * would need its own `nd` runtime; add per-target when asked). Univariate,
- * single-order, PURE bodies only — mixed partials and impure bodies decline
- * on both routes alike.
- */
-function compileNumericDerivativeFallback(
-  operator: (typeof DERIVATIVE_HEADS)[number],
-  args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string,
-  context?: { readonly language: string }
-): string | undefined {
-  if (context?.language !== 'javascript') return undefined;
-  if (args.length === 0) return undefined;
-  const ce = args[0].engine;
-  try {
-    if (operator === 'D') {
-      // `D(body, v)` is EXPRESSION-valued: emit the stencil function applied
-      // at the (free) variable. Multi-variable / repeated-variable partials
-      // keep the symbolic-only behavior.
-      if (args.length !== 2) return undefined;
-      const v = args[1];
-      if (!isSymbol(v)) return undefined;
-      const body = args[0];
-      if (!body.isPure) return undefined;
-      const fn = ce.function('Function', [body, v]);
-      return `_SYS.nd(${compile(rewriteAngularUnit(fn))}, 1${shapeArgument(
-        fn
-      )})(${compile(v)})`;
-    }
-
-    // `Derivative(f, order?)` is FUNCTION-valued; `ND(f, x)` is a value at a
-    // point. Both need `f` as a compilable univariate function literal
-    // (resolving a symbol callee through its binding). The literal is
-    // rewritten for the angular convention explicitly — as an operand of a
-    // derivative head it was skipped by the entry-point rewrite (see the
-    // closed-form branch above); the interpreted fallback gets the same
-    // rewrite implicitly because `implicitCompile` runs the full compile
-    // entry on the literal.
-    const lit = resolveDerivativeFunctionLiteral(args[0]);
-    if (lit === undefined) return undefined;
-
-    if (operator === 'Derivative') {
-      if (args.length > 2) return undefined;
-      const order = args[1] === undefined ? 1 : Math.floor(args[1].N().re);
-      if (!Number.isFinite(order) || order < 1) return undefined;
-      return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, ${order}${shapeArgument(
-        lit
-      )})`;
-    }
-
-    // `ND` — previously compilable only when the point was numeric at
-    // compile time (the evaluate handler ran the stencil then); a runtime
-    // point now lowers to the same stencil evaluated at run time.
-    if (args.length !== 2) return undefined;
-    return `_SYS.nd(${compile(rewriteAngularUnit(lit))}, 1${shapeArgument(
-      lit
-    )})(${compile(args[1])})`;
-  } catch (e) {
-    throwIfCallerCancellation(e, ce._deadlineFrame);
-    // The body contains a head the target cannot lower — same contract as
-    // the closed-form branch: decline, never let the inner error escape.
-    return undefined;
-  }
-}
-
-/**
- * The third argument of the emitted `_SYS.nd(f, order, shape)`: the shape
- * of the function's value read from its result type
- * (`derivativeValueShape`), so the helper runs the scalar or the vector
- * stencil without probing the function; nothing when the type says
- * nothing, and the helper probes once at run time.
- */
-function shapeArgument(lit: Expression): string {
-  const shape = derivativeValueShape(functionResult(lit.type.type));
-  return shape === undefined ? '' : `, '${shape}'`;
 }
 
 /**
@@ -7189,8 +6971,6 @@ volumes
         if (padded) return undefined;
         return ce._fn('Derivative', [op, ...orders.map((n) => ce.number(n))]);
       },
-      compile: (args, compile, context) =>
-        compileDerivative('Derivative', args, compile, context),
     },
 
     //
@@ -7571,8 +7351,6 @@ volumes
               expression
             );
       },
-      compile: (args, compile, context) =>
-        compileDerivative('D', args, compile, context),
     },
 
     // Evaluate a numerical approximation of a derivative at point x
@@ -7653,8 +7431,6 @@ volumes
           throw e;
         }
       },
-      compile: (args, compile, context) =>
-        compileDerivative('ND', args, compile, context),
     },
 
     JacobianMatrix: {
@@ -10224,27 +10000,6 @@ volumes
         return Number.isFinite(value)
           ? engine.number(engine._inexactNumericValue(value + 0))
           : undefined;
-      },
-      compile: (args, compile, { language }) => {
-        if (language !== 'javascript') return undefined;
-        if (args.length !== 2) return undefined;
-        const rows = interpolatingFunctionRows(args[0]);
-        if (!rows) return undefined;
-        // Embed the dense table and interpolate inline: binary search for
-        // the step interval, then the nested (Horner-like) quartic.
-        const table = JSON.stringify(rows);
-        return (
-          `((_x)=>{const _D=${table};` +
-          `let _lo=0,_hi=_D.length-1;` +
-          `const _dir=_D[_hi][0]+_D[_hi][1]>=_D[0][0]?1:-1;` +
-          `while(_lo<_hi){const _m=(_lo+_hi)>>1;` +
-          `if(_dir*(_x-_D[_m][0]-_D[_m][1])>0)_lo=_m+1;else _hi=_m;}` +
-          `const _s=_D[_lo],_h=_s[1];` +
-          `let _t=_h===0?0:(_x-_s[0])/_h;` +
-          `_t=Math.min(1,Math.max(0,_t));const _u=1-_t;` +
-          `return _s[2]+_t*(_s[3]+_u*(_s[4]+_t*(_s[5]+_u*_s[6])));` +
-          `})(${compile(args[1])})`
-        );
       },
     },
 

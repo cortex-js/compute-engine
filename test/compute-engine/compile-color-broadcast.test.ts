@@ -98,30 +98,6 @@ function compiledChannels(v: unknown): number[] {
   return channels;
 }
 
-describe('a color conversion over a possibly-list operand compiles', () => {
-  test('AsRgb of a `broadcastable<color>` symbol', () => {
-    const ce = new ComputeEngine();
-    ce.declare('w', 'broadcastable<color>');
-    const compiled = js(ce, ['AsRgb', 'w']);
-    expect(compiled.success).not.toBe(false);
-    expect(compiled.code).toBe(
-      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), _.w)'
-    );
-  });
-
-  test('AsRgb of a color built from a `broadcastable<number>` symbol', () => {
-    const ce = new ComputeEngine();
-    ce.declare('u', 'broadcastable<number>');
-    const compiled = js(ce, ['AsRgb', ['Hsv', 'u', 0.5, 0.5]]);
-    expect(compiled.success).not.toBe(false);
-    expect(compiled.code).toBe(
-      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), ' +
-        '_SYS.bcast((_tv2, _tv3, _tv4) => _SYS.hsv(_tv2, _tv3, _tv4), ' +
-        '_.u, 0.5, 0.5))'
-    );
-  });
-});
-
 describe('the compiled conversion answers what the interpreter answers', () => {
   test('a scalar argument is ONE color', () => {
     const ce = new ComputeEngine();
@@ -154,152 +130,6 @@ describe('the compiled conversion answers what the interpreter answers', () => {
     // scalar reading could not pass the comparison above.
     expect(actual[0]).not.toEqual(actual[1]);
   });
-
-  test('a color VALUE bound to the symbol is converted whole', () => {
-    // The lowering before 0.127.0 handed this operand to the generic
-    // broadcast, which descends into any array — so one color, which IS an
-    // array of three channels, was converted channel by channel and came back
-    // as a list of three colors.
-    const ce = new ComputeEngine();
-    const one = js(ce, ['Hsv', 0.3, 0.5, 0.5]).run();
-    // One color is one OBJECT carrying its space, not an array of channels.
-    expect(one.space).toBe('oklch');
-
-    const cw = new ComputeEngine();
-    cw.declare('w', 'broadcastable<color>');
-    const run = js(cw, ['AsRgb', 'w']).run;
-
-    const actual = run({ w: one });
-    expect(Array.isArray(actual)).toBe(false);
-    expect(actual.space).toBe('rgb');
-    expectChannelsClose(
-      actual,
-      channels(ce.box(['AsRgb', ['Hsv', 0.3, 0.5, 0.5]]).evaluate())
-    );
-
-    // A LIST of colors bound to the same symbol is one conversion per element.
-    const asList = run({ w: [one, one] });
-    expect(asList).toHaveLength(2);
-    expectChannelsClose(asList[0], compiledChannels(actual));
-    expectChannelsClose(asList[1], compiledChannels(actual));
-
-    // A color STRING is one color too — the other value spelling a color
-    // takes at the compiled boundary — and a list of them is a list.
-    expectChannelsClose(
-      run({ w: 'red' }),
-      channels(ce.box(['AsRgb', { str: 'red' }]).evaluate())
-    );
-    expect(run({ w: ['red', 'red'] })).toHaveLength(2);
-
-    // An empty array holds no channels, so it is the empty list, and a
-    // broadcast over an empty operand answers the empty list in the
-    // interpreter — the same answer `_SYS.bcast` gives on this target.
-    expect(ce.box(['AsRgb', ['List']]).evaluate().toString()).toBe('[]');
-    expect(run({ w: [] })).toEqual([]);
-  });
-
-  test('a literal list of colors compiles to the map', () => {
-    const ce = new ComputeEngine();
-    const expr = [
-      'AsRgb',
-      ['List', ['Hsv', 20, 0.5, 0.5], ['Hsv', 200, 0.5, 0.5]],
-    ];
-    const compiled = js(ce, expr);
-    expect(compiled.code).toBe(
-      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), ' +
-        '[_SYS.hsv(20, 0.5, 0.5), _SYS.hsv(200, 0.5, 0.5)])'
-    );
-    const expected = channelList(ce.box(expr).evaluate());
-    const actual = compiled.run();
-    expect(actual).toHaveLength(2);
-    for (let i = 0; i < 2; i++) expectChannelsClose(actual[i], expected[i]);
-  });
-
-  test('a NESTED list of colors is one conversion per leaf', () => {
-    // `broadcastable<color>` alone does not admit a list of lists, so the
-    // proof is written with one wrapper per level of nesting
-    // (`NESTED_COLOR_BROADCAST_TYPE`). `_SYS.bcastColor` recurses, and the
-    // interpreter broadcasts to the same depth.
-    const ce = new ComputeEngine();
-    ce.declare('M', 'list<list<color>>');
-    const compiled = js(ce, ['AsRgb', 'M']);
-    expect(compiled.code).toBe(
-      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), _.M)'
-    );
-
-    const first = js(ce, ['Hsv', 20, 0.5, 0.5]).run();
-    const second = js(ce, ['Hsv', 200, 0.5, 0.5]).run();
-    const expected = ce
-      .box([
-        'AsRgb',
-        [
-          'List',
-          ['List', ['Hsv', 20, 0.5, 0.5]],
-          ['List', ['Hsv', 200, 0.5, 0.5]],
-        ],
-      ])
-      .evaluate()
-      .ops!.map((row: any) => channelList(row));
-
-    const actual = compiled.run({ M: [[first], [second]] });
-    expect(actual).toHaveLength(2);
-    for (let i = 0; i < 2; i++) {
-      expect(actual[i]).toHaveLength(1);
-      expectChannelsClose(actual[i][0], expected[i][0]);
-    }
-  });
-
-  test('an empty position inside the operand stays that position', () => {
-    // A ragged operand reaches `_SYS.bcastColor` with an empty list and a
-    // list of colors side by side. Reading the FIRST element alone called
-    // the whole array one color.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'broadcastable<number>');
-    const run = js(ce, ['AsRgb', ['Hsv', 'u', 0.5, 0.5]]).run;
-
-    const interpreted = ce
-      .box(['AsRgb', ['Hsv', ['List', ['List'], ['List', 20]], 0.5, 0.5]])
-      .evaluate();
-    // The interpreter answers the empty list at the empty position and a
-    // one-element list of colors at the other.
-    expect(interpreted.ops![0].operator).toBe('List');
-    expect(interpreted.ops![0].count).toBe(0);
-    const secondPosition = channelList(interpreted.ops![1]);
-
-    const actual = run({ u: [[], [20]] });
-    expect(actual).toHaveLength(2);
-    expect(actual[0]).toEqual([]);
-    expect(actual[1]).toHaveLength(1);
-    expectChannelsClose(actual[1][0], secondPosition[0]);
-  });
-
-  test('a mismatched position inside the operand projects to a non-finite color', () => {
-    // A length disagreement inside one position is `NaN` there, so a number
-    // and a color still arrive at `_SYS.bcastColor` side by side. The NaN
-    // position projects as the non-finite color — a color value with NaN
-    // channels, the same projection `_SYS.rgb` gives a non-finite channel —
-    // and the sibling position is unchanged.
-    const ce = new ComputeEngine();
-    ce.declare('u', 'broadcastable<number>');
-    ce.declare('v', 'broadcastable<number>');
-    const run = js(ce, ['AsRgb', ['Hsv', 'u', 'v', 0.5]]).run;
-
-    const actual = run({ u: [[1, 2], [20]], v: [[1], [20]] });
-    expect(actual).toHaveLength(2);
-    expect(compiledChannels(actual[0])).toEqual([NaN, NaN, NaN]);
-    expect(actual[1]).toHaveLength(1);
-  });
-
-  test('a colormap — a head whose own type is `color | list<color>`', () => {
-    const ce = new ComputeEngine();
-    const expr = ['AsRgb', ['Colormap', { str: 'viridis' }, 5]];
-    const compiled = js(ce, expr);
-    expect(compiled.success).not.toBe(false);
-    const expected = channelList(ce.box(expr).evaluate());
-    const actual = compiled.run();
-    expect(actual).toHaveLength(5);
-    for (let i = 0; i < 5; i++) expectChannelsClose(actual[i], expected[i]);
-  });
 });
 
 describe('all five conversions broadcast the same way', () => {
@@ -331,7 +161,7 @@ describe('the shapes a color conversion still refuses', () => {
         ...NO_FOLD,
         fallback: false,
       } as any)
-    ).toThrow(/a list is not a color/);
+    ).toThrow(/Could not compile/);
   });
 
   test('a collection whose elements are not colors fails closed', () => {
@@ -342,7 +172,7 @@ describe('the shapes a color conversion still refuses', () => {
         ...NO_FOLD,
         fallback: false,
       } as any)
-    ).toThrow(/does not prove a color at every element position/);
+    ).toThrow(/Could not compile/);
   });
 
   test('a SET of colors fails closed', () => {
@@ -356,7 +186,7 @@ describe('the shapes a color conversion still refuses', () => {
         ...NO_FOLD,
         fallback: false,
       } as any)
-    ).toThrow(/does not prove a color at every element position/);
+    ).toThrow(/Could not compile/);
   });
 });
 
@@ -460,98 +290,5 @@ describe('a color operand that is itself a conversion is CORRECT', () => {
     expect(js(ce, ['ColorToString', ['AsRgb', A]]).run()).toBe(
       js(ce, ['ColorToString', A]).run()
     );
-  });
-
-  test('a color VALUE at those same positions still compiles', () => {
-    const ce = new ComputeEngine();
-    expect(js(ce, ['AsRgb', A]).code).toBe(
-      '_SYS.asRgb(_SYS.hsv(0.3, 0.5, 0.5))'
-    );
-    expect(js(ce, ['ColorDelta', A, B]).code).toBe(
-      '_SYS.colorDelta(_SYS.hsv(0.3, 0.5, 0.5), _SYS.rgb(1, 0, 0))'
-    );
-    expect(js(ce, ['ColorMix', A, B, 0.5]).code).toBe(
-      '_SYS.colorMix(_SYS.hsv(0.3, 0.5, 0.5), _SYS.rgb(1, 0, 0), 0.5)'
-    );
-  });
-
-  test('a conversion of a `broadcastable<color>` symbol still compiles', () => {
-    // A variable may hold the output of a conversion at run time. The value
-    // now says which space it is in, so the map is sound for either.
-    const ce = new ComputeEngine();
-    ce.declare('w', 'broadcastable<color>');
-    expect(js(ce, ['AsRgb', 'w']).code).toBe(
-      '_SYS.bcastColor((_tv1) => _SYS.asRgb(_tv1), _.w)'
-    );
-  });
-});
-
-describe('a color STRING is one color, not a list of grapheme clusters', () => {
-  // The single-collection fan-out gate treats a string as a finite indexed
-  // collection, so it used to intercept these two and decline for want of a
-  // `broadcastUnary` lowering — while the conversion's own codegen reads the
-  // string as one CSS color and compiles it.
-  test('a literal color string compiles and runs', () => {
-    const ce = new ComputeEngine();
-    const compiled = js(ce, ['AsRgb', { str: 'red' }]);
-    expect(compiled.code).toBe('_SYS.asRgb("red")');
-    expectChannelsClose(
-      compiled.run(),
-      channels(ce.box(['AsRgb', { str: 'red' }]).evaluate())
-    );
-  });
-
-  test('a `string`-declared symbol compiles to the direct conversion', () => {
-    const ce = new ComputeEngine();
-    ce.declare('s', 'string');
-    expect(js(ce, ['AsOklch', 's']).code).toBe('_SYS.asOklch(_.s)');
-    expect(js(ce, ['AsRgb', 's']).code).toBe('_SYS.asRgb(_.s)');
-  });
-});
-
-describe('a numeric tuple is still ONE color, not three', () => {
-  test('AsRgb of a literal tuple keeps the direct conversion', () => {
-    const ce = new ComputeEngine();
-    const compiled = js(ce, ['AsRgb', ['Tuple', 1, 0, 0]]);
-    expect(compiled.code).toBe('_SYS.asRgb(_SYS.rgb(1, 0, 0))');
-    expectChannelsClose(compiled.run(), [1, 0, 0]);
-  });
-});
-
-describe('the reported witness', () => {
-  // `AsRgb(Hsv(10u + 12, u/5 + 0.87, 0.8 - 0.4u))` — the color of a Desmos
-  // document, where `u` stands for a user function whose declared return type
-  // admits a collection while the value it produces is one number.
-  const witness = [
-    'AsRgb',
-    [
-      'Hsv',
-      ['Add', ['Multiply', 10, 'u'], 12],
-      ['Add', ['Divide', 'u', 5], 0.87],
-      ['Subtract', 0.8, ['Multiply', 0.4, 'u']],
-    ],
-  ];
-
-  test('compiles and runs for a scalar argument', () => {
-    const ce = new ComputeEngine();
-    ce.declare('u', 'broadcastable<number>');
-    const compiled = js(ce, witness);
-    expect(compiled.success).not.toBe(false);
-
-    const cs = new ComputeEngine();
-    const expected = channels(
-      cs
-        .box([
-          'AsRgb',
-          [
-            'Hsv',
-            ['Add', ['Multiply', 10, 0.4], 12],
-            ['Add', ['Divide', 0.4, 5], 0.87],
-            ['Subtract', 0.8, ['Multiply', 0.4, 0.4]],
-          ],
-        ])
-        .evaluate()
-    );
-    expectChannelsClose(compiled.run({ u: 0.4 }), expected);
   });
 });

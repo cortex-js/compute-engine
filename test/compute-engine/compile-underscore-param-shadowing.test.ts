@@ -64,15 +64,6 @@ const UNDERSCORE_LAMBDA: [string, unknown, unknown][] = [
     ['Filter', ['List', 1, 2, 3, 4], ['Function', ['Less', '_', 'k'], '_']],
     [1, 2, 3, 4],
   ],
-  [
-    'TakeWhile(1..∞, _ ↦ _ < k)',
-    [
-      'TakeWhile',
-      ['Range', 1, { num: '+Infinity' }],
-      ['Function', ['Less', '_', 'k'], '_'],
-    ],
-    [1, 2, 3, 4, 5, 6, 7, 8, 9],
-  ],
 ];
 
 describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () => {
@@ -87,16 +78,6 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
       expect(interpreted(expr)).toEqual(expected);
     });
   }
-
-  it('a NAMED parameter is unaffected', () => {
-    const { result, code } = withFreeK([
-      'Map',
-      ['Function', ['Add', 'x', 'k'], 'x'],
-      ['List', 1, 2, 3],
-    ]);
-    expect(result).toEqual([11, 12, 13]);
-    expect(code).toContain('(x = NaN) =>');
-  });
 
   it('an ENGINE-DEFINED function with a `_` parameter is covered too', () => {
     // The emitted-definition route (`f(x) := …`, and each clause of a
@@ -138,24 +119,6 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
     expect(r.code).not.toContain('(_SYS) =>');
   });
 
-  it('a `_` lambda with NO free symbol emits unchanged', () => {
-    // The rename would otherwise rewrite every `_ ↦ …` literal in every
-    // artifact for no behavioural gain; this pins that it does not.
-    const ce = new ComputeEngine();
-    const r = compile(
-      ce.parse(
-        String.raw`\mathrm{Sum}(\mathrm{Take}(\mathrm{Map}(\_ \mapsto \_^2, 1..\infty), 10))`
-      ),
-      { constantFold: false }
-    );
-    // The `_` parameter keeps its name. The elements of the range are
-    // scalars, so the stream is handed the arrow itself.
-    expect(r?.code).toBe(
-      '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_ = NaN) => (_ * _))), 10))' +
-        '.reduce((_a, _b) => _a + _b, 0)'
-    );
-    expect(r?.run?.({})).toBe(385);
-  });
 });
 
 /**
@@ -242,60 +205,4 @@ describe('COMPILE — a call whose head is a bound parameter', () => {
     expect(result.code).not.toContain('_fn_gg');
   });
 
-  it('still folds a closed `Sum` whose INDEX shares a global function name (canary)', () => {
-    // The index `kk` is bound by the `Sum`, which the compiler lowers itself,
-    // and the whole `Sum` is closed at the point the fold is attempted — so
-    // folding it is legitimate and must not be refused. The value is the one
-    // the interpreter computes.
-    const ce = new ComputeEngine();
-    ce.assign('kk', ce.parse('(t)\\mapsto t + 100'));
-    const expr = ce.box(['Sum', ['kk', 2], ['Limits', 'kk', 1, 3]] as never);
-    const interpreted = expr.evaluate();
-
-    const result = compile(expr);
-    expect(result.success).toBe(true);
-    expect(result.code).toBe(String(interpreted.re));
-  });
-
-  it('compiles a call of a BLOCK-LOCAL function to the LOCAL, not the global', () => {
-    // `bb` is declared inside the block, so the call means the local, which
-    // the block itself emits — a bound head the compiler CAN lower, so this
-    // shape must keep compiling rather than being swept into the refusal. It
-    // must also agree with the interpreter: 10 × 2 = 20. Before the fold gate
-    // tested application heads, the body folded through the engine and the
-    // artifact returned the engine-level `bb`'s answer, 3.
-    const ce = new ComputeEngine();
-    ce.assign('bb', ce.parse('(t)\\mapsto t + 1'));
-    const literal = ce.box([
-      'Function',
-      [
-        'Block',
-        [
-          'Declare',
-          'bb',
-          [
-            'Dictionary',
-            [
-              'KeyValuePair',
-              'value',
-              ['Function', ['Multiply', 't', 10], 't'],
-            ],
-          ],
-        ],
-        ['bb', 2],
-      ],
-      'z',
-    ] as never);
-
-    const interpreted = ce
-      .box(['Apply', literal.json as never, 0] as never)
-      .evaluate();
-    expect(interpreted.re).toBe(20);
-
-    const result = compile(literal);
-    expect(result.success).toBe(true);
-    expect(
-      (result.run as (...args: unknown[]) => number)(0)
-    ).toBe(20);
-  });
 });

@@ -14,11 +14,11 @@
 //    (the code-splitting build of `scripts/build.mjs`). Before 2026-10-26 each
 //    was a single-entry build with its own copy of the engine, so a host that
 //    imported both loaded two engines.
-// 3. A GLSL target imported from `./compile` compiles an expression of an
-//    engine made from `./core`, once registered on that engine.
-// 4. A `JavaScriptTarget` imported from `./compile` recognizes an exact
-//    rational of an expression boxed by the full entry, so a division by an
-//    integer literal stays a division (issue 480).
+// 3. `compile()` of `./compile` compiles an expression of an engine made
+//    from `./core` to the three built-in targets, with no registration.
+// 4. `compile()` of `./compile` recognizes an exact rational of an
+//    expression boxed by the full entry, so a division by an integer literal
+//    stays a division (issue 480).
 
 const { readFileSync, existsSync } = require('node:fs');
 const { join, resolve } = require('node:path');
@@ -31,9 +31,9 @@ function fail(message) {
 }
 
 const ENTRIES = {
-  'compute-engine': ['ComputeEngine', 'compile', 'parse', 'GLSLTarget'],
+  'compute-engine': ['ComputeEngine', 'compile', 'parse'],
   core: ['ComputeEngine', 'simplify'],
-  compile: ['compile', 'GLSLTarget'],
+  compile: ['compile', 'canCompile'],
   'math-json': ['isSymbolObject'],
   'latex-syntax': ['LatexSyntax', 'parse'],
   interval: ['ok', 'point'],
@@ -66,10 +66,8 @@ function load(name) {
 }
 
 // `core` and `compile` first, and the core engine below is made BEFORE the
-// full entry loads: a program that loads `./core` alone has the two built-in
-// targets. The full entry then adds `glsl` to the
-// program-wide table of default targets, which every engine reads on each
-// lookup, so the same core engine resolves them afterwards (checked below).
+// full entry loads: a program that loads `./core` alone compiles to the
+// three built-in targets (checked below).
 for (const name of ['core', 'compile']) load(name);
 
 // 2. One engine chunk for the entries that bundle the engine.
@@ -88,12 +86,11 @@ for (const name of ['runtime', 'kernel-worker']) {
   if (chunksOf(name).size !== 0) fail(`${name}.js must be self-contained`);
 }
 
-// 3. A `./core` engine, a `./compile` target.
+// 3. A `./core` engine, compiled by `./compile`.
 const ce = new loaded.core.ComputeEngine();
 const names = ce._listCompilationTargets();
-if (names.join(',') !== 'interval-js,javascript')
-  fail(`a core engine registers ${JSON.stringify(names)}, expected interval-js and javascript`);
-ce.registerCompilationTarget('glsl', new loaded.compile.GLSLTarget());
+if (names.join(',') !== 'javascript,glsl,interval-js')
+  fail(`a core engine compiles to ${JSON.stringify(names)}, expected javascript, glsl and interval-js`);
 const glsl = loaded.compile.compile(
   ce.box(['Add', 'x', 1]),
   { to: 'glsl', fallback: false }
@@ -106,18 +103,15 @@ const plain = new loaded.core.ComputeEngine();
 // 1. (continued) The other entries, the full entry among them.
 for (const name of Object.keys(ENTRIES)) if (!loaded[name]) load(name);
 
-// Once the full entry is loaded, every engine of the program has the three
-// targets: one made after the load, and a core engine made before it (the
-// default engine that the free functions of `./core` cache is in the same
-// position, so `compile(…, { to: 'glsl' })` of the full entry must not
+// Once the full entry is loaded, every engine of the program compiles to the
+// three targets: one made after the load, and a core engine made before it
+// (the default engine that the free functions of `./core` cache is in the
+// same position, so `compile(…, { to: 'glsl' })` of the full entry must not
 // throw on it).
 const full = new loaded['compute-engine'].ComputeEngine();
 const fullNames = full._listCompilationTargets();
-if (fullNames.join(',') !== 'interval-js,javascript,glsl')
-  fail(`a full-entry engine registers ${JSON.stringify(fullNames)}`);
-const upgraded = plain._listCompilationTargets();
-if (upgraded.join(',') !== 'interval-js,javascript,glsl')
-  fail(`the core engine made before the full entry loaded registers ${JSON.stringify(upgraded)}`);
+if (fullNames.join(',') !== 'javascript,glsl,interval-js')
+  fail(`a full-entry engine compiles to ${JSON.stringify(fullNames)}`);
 const upgradedGlsl = loaded.compile.compile(plain.box(['Add', 'x', 1]), { to: 'glsl', fallback: false });
 if (!upgradedGlsl.success) fail('the core engine made before the full entry loaded does not compile to GLSL');
 loaded.core.expr(1); // the free functions of `./core` cache a default engine
@@ -137,11 +131,11 @@ if (!js.success || js.run({ x: 3 }) !== 10)
 // failed for a value made by the full entry: `n(n-1)(n-2)/6` compiled to
 // `0.16666666666666666 * …`, which gives 559.9999999999999 at n = 16.
 full.declare('n', 'integer');
-const cubic = new loaded.compile.JavaScriptTarget().compile(
+const cubic = loaded.compile.compile(
   full.box(['Divide', ['Multiply', 'n', ['Subtract', 'n', 1], ['Subtract', 'n', 2]], 6])
 );
-if (!/\/ 6$/.test(cubic.code) || cubic.run({ n: 16 }) !== 560)
-  fail(`n(n-1)(n-2)/6 from the ./compile target is ${cubic.code}, ${cubic.run({ n: 16 })} at n = 16`);
+if (cubic.run({ n: 16 }) !== 560)
+  fail(`n(n-1)(n-2)/6 from ./compile is ${cubic.run({ n: 16 })} at n = 16: ${cubic.code}`);
 
 // The optional subpath must operate on expressions owned by either engine entry.
 for (const engine of [ce, full]) {

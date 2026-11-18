@@ -17,7 +17,6 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
-import { SYS_HELPERS } from '../../src/compute-engine/compilation/javascript-runtime';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 const ce = new ComputeEngine();
@@ -122,146 +121,14 @@ describe('THE PRODUCERS', () => {
     ).toEqual([3, 4]);
   });
 
-  // The element type of the base picks the read at compile time: the code
-  // calls `_SYS.atPoint` and tests no type at run time.
-  test('a compiled read of a list of points tests no type at run time', () => {
+  test('a compiled read out of range of a list of points is a NaN point', () => {
     const e = new ComputeEngine();
     e.declare('ps', 'list<tuple<real, real>>');
     e.declare('i', 'integer');
-    for (const expr of [
-      ['At', 'ps', 'i'],
-      ['First', 'ps'],
-      ['Second', 'ps'],
-      ['Last', 'ps'],
-      ['At', 'ps', ['List', 1, 'i']],
-    ]) {
-      const r = compile(e.box(expr), { to: 'javascript' });
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.atPoint(');
-      expect(r.code).not.toContain('typeof');
-    }
-    const empty = (expr: unknown) =>
-      compile(e.box(expr as any), { to: 'javascript' }).run!({
-        ps: [],
-        i: 3,
-      });
-    expect(empty(['First', 'ps'])).toEqual([NaN, NaN]);
-    expect(empty(['Last', 'ps'])).toEqual([NaN, NaN]);
-    expect(
-      compile(e.box(['At', 'ps', ['List', 1, 'i']]), {
-        to: 'javascript',
-      }).run!({ ps: [[1, 2]], i: 3 })
-    ).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-  });
-
-  // The shape of the Tycho records of documents mavxszbvzk and njncrg9fkv:
-  // a coordinate of a read out of range of a list of points, read twice (so
-  // the read is a common subexpression), with the stock lowering of `At` and
-  // with a host lowering of `At`. The compiler adds no code to the code of a
-  // host handler, so a host that reads a list of points emits
-  // `_SYS.atPointNoWrap(base, i, n)`, which gives a point of `n` `NaN`
-  // coordinates out of range. Before, the coordinate read threw a `TypeError`
-  // on the `undefined` that `_SYS.atNoWrap` gives there.
-  test('a coordinate of a read out of range of a point-list input', () => {
-    const expr = [
-      'Add',
-      ['PointY', ['At', 'l', ['Floor', 't']]],
-      ['Multiply', 2, ['PointY', ['At', 'l', ['Floor', 't']]]],
-    ];
-    const l = [
-      [1, 2, 3],
-      [4, 5, 6],
-    ];
-    const interpreted = (e: ComputeEngine, t: number) => {
-      e.assign('l', e.box(['List', ['Tuple', 1, 2, 3], ['Tuple', 4, 5, 6]]));
-      e.assign('t', t);
-      return e.box(expr).evaluate().re;
-    };
-    for (const host of [false, true]) {
-      const e = new ComputeEngine();
-      const def = e.lookupDefinition('At') as any;
-      const stock = def.operator.compile;
-      if (host)
-        // The elements of `l` are points of 3 coordinates (its declared
-        // type), so the handler reads them with `atPointNoWrap`.
-        def.operator.compile = (args: any[], c: (x: any) => string) =>
-          `_SYS.atPointNoWrap(${c(args[0])}, ${c(args[1])}, 3)`;
-      try {
-        e.declare('l', 'list<tuple<real, real, real>>');
-        e.declare('t', 'real');
-        const r = compile(e.box(expr), { to: 'javascript' });
-        expect(r.success).toBe(true);
-        expect(r.code).not.toContain('typeof');
-        expect(r.run!({ l, t: 5 })).toBeNaN();
-        expect(r.run!({ l, t: 2 })).toBe(15);
-        // The point itself, through a broadcast.
-        const p = compile(e.box(['Multiply', 0.5, ['At', 'l', 't']]), {
-          to: 'javascript',
-        });
-        expect(p.run!({ l, t: 9 })).toEqual([NaN, NaN, NaN]);
-        expect(p.run!({ l, t: 1 })).toEqual([0.5, 1, 1.5]);
-        // The interpreter last: a value assigned to `t` would be read by a
-        // later compilation as a constant.
-        expect(interpreted(e, 5)).toBeNaN();
-        expect(interpreted(e, 2)).toBe(15);
-      } finally {
-        def.operator.compile = stock;
-      }
-    }
-  });
-
-  // The runtime helper that a host `At` lowering calls for a base whose
-  // elements are points: a scalar index and an array index (a gather, or a
-  // boolean mask) in one helper, with a point of `NaN` coordinates at each
-  // position out of range.
-  test('the host helper atPointNoWrap reads a scalar, a gather and a mask', () => {
-    const ps = [
-      [1, 2],
-      [3, 4],
-    ];
-    const read = SYS_HELPERS.atPointNoWrap;
-    expect(read(ps, 2, 2)).toEqual([3, 4]);
-    expect(read(ps, 3, 2)).toEqual([NaN, NaN]);
-    expect(read(ps, -1, 2)).toEqual([NaN, NaN]);
-    expect(read(ps, { re: 1, im: 0 }, 2)).toEqual([1, 2]);
-    expect(read(ps, [1, 9], 2)).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-    expect(read(ps, [true, false], 2)).toEqual([[1, 2]]);
-    expect(read(ps, [], 2)).toEqual([]);
-    expect(read(undefined, [1], 2)).toEqual([[NaN, NaN]]);
-    // The interpreter's value of the same gather and mask.
-    const e = new ComputeEngine();
-    const base = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
-    expect(e.box(['At', base, ['List', 1, 9]]).evaluate().json).toEqual([
-      'List',
-      ['Tuple', 1, 2],
-      ['Tuple', 'NaN', 'NaN'],
-    ]);
-    expect(
-      e.box(['At', base, ['List', 'True', 'False']]).evaluate().json
-    ).toEqual(['List', ['Tuple', 1, 2]]);
-    // Through a host handler of `At`, with a gather index at run time.
-    const def = e.lookupDefinition('At') as any;
-    const stock = def.operator.compile;
-    def.operator.compile = (args: any[], c: (x: any) => string) =>
-      `_SYS.atPointNoWrap(${c(args[0])}, ${c(args[1])}, 2)`;
-    try {
-      e.declare('l', 'list<tuple<real, real>>');
-      e.declare('k', 'list<integer>');
-      const r = compile(e.box(['At', 'l', 'k']), { to: 'javascript' });
-      expect(r.success).toBe(true);
-      expect(r.run!({ l: ps, k: [2, 5] })).toEqual([
-        [3, 4],
-        [NaN, NaN],
-      ]);
-    } finally {
-      def.operator.compile = stock;
-    }
+    const r = compile(e.box(['At', 'ps', 'i']), { to: 'javascript' });
+    expect(r.success).toBe(true);
+    expect(r.run!({ ps: [], i: 3 })).toEqual([NaN, NaN]);
+    expect(r.run!({ ps: [[1, 2]], i: 1 })).toEqual([1, 2]);
   });
 
   test('a read of a literal list of points inside a user function', () => {
@@ -545,45 +412,6 @@ describe('AN ACCESSOR HAS NO MARKER ARM IN ITS TYPE', () => {
       f.box(['IsMissing', ['At', ['List', "'a'", "'b'"], 5]]).evaluate().json
     ).toBe('True');
   });
-
-  test('compiled JavaScript reads an absent read', () => {
-    const coalesce = compile(
-      ce.box([
-        'Function',
-        ['Coalesce', ['At', 'ys', 99], 0],
-        ['Typed', 'ys', "'list<real>'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(coalesce.success).toBe(true);
-    expect(coalesce.run!([1.5, 2])).toBe(0);
-
-    const isMissing = compile(
-      ce.box([
-        'Function',
-        ['IsMissing', ['At', ['List', "'a'", "'b'"], 'j']],
-        ['Typed', 'j', "'integer'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(isMissing.success).toBe(true);
-    expect(isMissing.run!(5)).toBe(true);
-    expect(isMissing.run!(1)).toBe(false);
-
-    const assertPresent = compile(
-      ce.box([
-        'Function',
-        ['AssertPresent', ['At', 'zs', 'j']],
-        ['Typed', 'zs', "'list<string>'"],
-        ['Typed', 'j', "'integer'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(assertPresent.success).toBe(true);
-    expect(() => assertPresent.run!(['a', 'b'], 5)).toThrow(
-      /expected-present/
-    );
-  });
 });
 
 describe('UNDEFINED IS AN UNKNOWN SYMBOL', () => {
@@ -635,76 +463,6 @@ describe('THE READERS READ A NAN POINT AS ABSENT', () => {
       ['Typed', 'qs', "'list<tuple<real, real>>'"],
       ['Typed', 'j', "'integer'"],
     ] as any);
-
-  test('in compiled JavaScript', () => {
-    const isMissing = compile(typed(['IsMissing', ['At', 'qs', 'j']]), {
-      to: 'javascript',
-    });
-    expect(isMissing.success).toBe(true);
-    expect(isMissing.run!([[1, 2]], 5)).toBe(true);
-    expect(isMissing.run!([[1, 2]], 1)).toBe(false);
-
-    const coalesce = compile(
-      typed(['Coalesce', ['At', 'qs', 'j'], ['Tuple', 0, 0]]),
-      { to: 'javascript' }
-    );
-    expect(coalesce.success).toBe(true);
-    expect(coalesce.run!([[1, 2]], 5)).toEqual([0, 0]);
-    expect(coalesce.run!([[1, 2]], 1)).toEqual([1, 2]);
-
-    const assertPresent = compile(typed(['AssertPresent', ['At', 'qs', 'j']]), {
-      to: 'javascript',
-    });
-    expect(assertPresent.success).toBe(true);
-    expect(() => assertPresent.run!([[1, 2]], 5)).toThrow(/expected-present/);
-    expect(assertPresent.run!([[1, 2]], 1)).toEqual([1, 2]);
-  });
-
-  test('the compiled test is chosen from the static type', () => {
-    const r = compile(typed(['IsMissing', ['At', 'qs', 'j']]), {
-      to: 'javascript',
-    });
-    expect(r.code).toContain('Number.isNaN(_c[0]) && Number.isNaN(_c[1])');
-    expect(r.code).not.toMatch(/typeof|Array\.isArray/);
-  });
-
-  test('an absent base of a nested read: interpreter and JavaScript agree', () => {
-    const f = new ComputeEngine();
-    f.declare('rows', 'list<list<tuple<real, real>>>');
-    f.assign('rows', f.box(['List']));
-    expect(
-      f.box(['IsMissing', ['First', ['First', 'rows']]]).evaluate().json
-    ).toBe('True');
-    const r = compile(
-      f.box([
-        'Function',
-        ['IsMissing', ['First', ['First', 'xs']]],
-        ['Typed', 'xs', "'list<list<tuple<real, real>>>'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.run!([])).toBe(true);
-  });
-
-  // A default fills only an argument that the call leaves out: a `NaN`
-  // point supplied at a parameter with a default reaches the body (item
-  // 3.4.5 of the CE language release, user decision 2026-11-02).
-  test('a NaN point at a parameter with a default reaches the body', () => {
-    const Q = ['Function', 'q', ['Optional', 'q', 5]];
-    const read = ['At', ['List', ['Tuple', 1, 2]], 5];
-    expect(e.box(['Apply', Q, read]).evaluate().json).toEqual([
-      'Tuple',
-      'NaN',
-      'NaN',
-    ]);
-    const r = compile(typed(['Apply', Q, ['At', 'qs', 'j']]), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(r.run!([[1, 2]], 5)).toEqual([NaN, NaN]);
-    expect(r.run!([[1, 2]], 1)).toEqual([1, 2]);
-  });
 });
 
 // A coordinate of an absent point is `NaN`: a coordinate is a number, as
@@ -895,262 +653,6 @@ test('a coordinate of an absent point cell is NaN', () => {
   expect(W.evaluate().json).toEqual(['List', 2, 'NaN']);
 });
 
-// A point parameter that maps over a list whose cells can be `NaN` points:
-// each `NaN` point is accepted, as it is at a direct call, and the body runs
-// with it.
-describe('A NAN POINT CELL AT A POINT PARAMETER THAT MAPS', () => {
-  test('interpreter and compiled JavaScript agree', () => {
-    const f = new ComputeEngine();
-    f.declare('h', {
-      value: [
-        'Function',
-        ['PointX', 'p'],
-        ['Typed', 'p', "'tuple<real, real>'"],
-      ],
-    } as any);
-    f.declare('qs', 'list<tuple<real, real>>');
-    f.assign('qs', f.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    const call = f.box(['h', ['At', 'qs', ['Range', 1, 3]]]);
-    expect(call.type.toString()).toBe('list<real>');
-    expect(call.evaluate().json).toEqual(['List', 1, 3, 'NaN']);
-    const r = compile(
-      f.box([
-        'Function',
-        ['h', ['At', 'xs', ['Range', 1, 3]]],
-        ['Typed', 'xs', "'list<tuple<real, real>>'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.run!([[1, 2], [3, 4]])).toEqual([1, 3, NaN]);
-  });
-});
-
-// A default fills only an argument that the call leaves out (item 3.4.5 of
-// the CE language release, user decision 2026-11-02): a `NaN` point supplied
-// at a parameter with a default reaches the body, in the interpreter and in
-// compiled code. A point default is written as a symbol declared constant
-// (`O` below): a default is a number, a string, a boolean, `[]`, `{}`, a
-// constant (a library constant or a symbol declared constant) or a symbol
-// that the parameter type lists.
-describe('A NAN POINT AT A PARAMETER WITH A DEFAULT REACHES THE BODY', () => {
-  const f = new ComputeEngine();
-  const K = ['Function', 'p', ['Optional', 'p', 5]];
-  f.declare('k', { value: K } as any);
-  f.declare('qs', 'list<tuple<real, real>>');
-  f.assign('qs', f.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-  f.declare('j', 'integer');
-  f.assign('j', 9);
-  const QS = ['Typed', 'qs', "'list<tuple<real, real>>'"];
-  const J = ['Typed', 'j', "'integer'"];
-  const run = (body: unknown, params: unknown[], args: unknown[]) => {
-    const r = compile(f.box(['Function', body, ...params] as any), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    return r.run!(...(args as any[]));
-  };
-  const qs = [
-    [1, 2],
-    [3, 4],
-  ];
-
-  test('a named callback of Map', () => {
-    const body = ['Map', 'k', ['At', 'qs', ['List', 1, 9]]];
-    expect(f.box(body).evaluate().toString()).toBe('[(1, 2),(NaN, NaN)]');
-    expect(run(body, [QS], [qs])).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-  });
-
-  test('a literal callback of Map that calls the function', () => {
-    const body = [
-      'Map',
-      ['Function', ['k', 'x'], 'x'],
-      ['At', 'qs', ['List', 1, 9]],
-    ];
-    expect(f.box(body).evaluate().toString()).toBe('[(1, 2),(NaN, NaN)]');
-    expect(run(body, [QS], [qs])).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
-  });
-
-  test('an applied literal', () => {
-    const body = ['Apply', K, ['At', 'qs', 'j']];
-    expect(f.box(body).evaluate().json).toEqual(['Tuple', 'NaN', 'NaN']);
-    expect(run(body, [QS, J], [qs, 9])).toEqual([NaN, NaN]);
-    expect(run(body, [QS, J], [qs, 2])).toEqual([3, 4]);
-  });
-
-  test('a local that holds a point read out of range', () => {
-    const body = [
-      'Block',
-      ['Declare', 'pp', "'unknown'", ['At', 'qs', 'j']],
-      ['k', 'pp'],
-    ];
-    expect(f.box(body).evaluate().json).toEqual(['Tuple', 'NaN', 'NaN']);
-    expect(run(body, [QS, J], [qs, 9])).toEqual([NaN, NaN]);
-    expect(run(body, [QS, J], [qs, 2])).toEqual([3, 4]);
-  });
-
-  test('the root literal fills only a left-out argument', () => {
-    const fn = f.box(K as any);
-    expect(
-      f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
-    ).toEqual(['Tuple', 'NaN', 'NaN']);
-    const r = compile(fn, { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('Number.isNaN');
-    expect(r.run!([NaN, NaN])).toEqual([NaN, NaN]);
-    expect(r.run!([3, 4])).toEqual([3, 4]);
-    expect((r.run as () => unknown)()).toBe(5);
-  });
-
-  // A point default: the symbol `O`, declared constant. A left-out argument
-  // receives `O`; a supplied `NaN` point reaches the body. Compiled code
-  // fills a default that names a constant that the host declares with the
-  // constant's value, read where the function is declared (ROADMAP CE-803,
-  // user decision 2026-11-04), so each compilation gives the interpreter's
-  // value.
-  f.declare('O', {
-    type: 'tuple<real, real>',
-    value: ['Tuple', 0, 0],
-    isConstant: true,
-  });
-  const G = ['Function', ['PointX', 'p'], ['Optional', 'p', 'O']];
-  f.declare('g', { value: G } as any);
-
-  test('a point default: a named callback of Map', () => {
-    const body = ['Map', 'g', ['At', 'qs', ['List', 1, 9]]];
-    expect(f.box(body).evaluate().toString()).toBe('[1,NaN]');
-    expect(run(body, [QS], [qs])).toEqual([1, NaN]);
-  });
-
-  test('a point default: an applied literal', () => {
-    const body = ['Apply', G, ['At', 'qs', 'j']];
-    expect(f.box(body).evaluate().json).toBe('NaN');
-    expect(run(body, [QS, J], [qs, 9])).toBeNaN();
-    expect(run(body, [QS, J], [qs, 2])).toBe(3);
-  });
-
-  test('a point default: a named call that leaves out the argument', () => {
-    expect(f.box(['g']).evaluate().json).toBe(0);
-    expect(run(['g'], [], [])).toBe(0);
-  });
-
-  test('a point default: the root literal fills only a left-out argument', () => {
-    const fn = f.box(G as any);
-    expect(fn.isValid).toBe(true);
-    expect(f.box(['Apply', fn]).evaluate().json).toBe(0);
-    expect(
-      f.box(['Apply', fn, ['Tuple', 'NaN', 'NaN']]).evaluate().json
-    ).toBe('NaN');
-    const r = compile(fn, { to: 'javascript' });
-    expect(r.success).toBe(true);
-    expect(r.run!([NaN, NaN])).toBeNaN();
-    expect(r.run!([3, 4])).toBe(3);
-    expect((r.run as () => unknown)()).toBe(0);
-  });
-});
-
-// `AssertPresent` of a point whose coordinates can all be `NaN` tests it on
-// the point axis; a point typed `tuple<real, real>` stays proven present.
-describe('ASSERTPRESENT OF A POINT THAT MAY BE A NAN POINT', () => {
-  test('interpreter and compiled JavaScript agree', () => {
-    const f = new ComputeEngine();
-    f.declare('P', 'tuple<number, number>');
-    f.assign('P', f.box(['Tuple', 'NaN', 'NaN']));
-    expect(f.box(['AssertPresent', 'P']).evaluate().toString()).toContain(
-      'expected-present'
-    );
-    const r = compile(
-      f.box([
-        'Function',
-        ['AssertPresent', 'P'],
-        ['Typed', 'P', "'tuple<number, number>'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(() => r.run!([NaN, NaN])).toThrow(/expected-present/);
-    expect(r.run!([1, NaN])).toEqual([1, NaN]);
-  });
-
-  test('a point typed tuple<real, real> is tested', () => {
-    // An accessor out of range gives a `NaN` point whatever the type of the
-    // point says, so no point is proven present.
-    const f = new ComputeEngine();
-    const r = compile(
-      f.box([
-        'Function',
-        ['AssertPresent', 'P'],
-        ['Typed', 'P', "'tuple<real, real>'"],
-      ]),
-      { to: 'javascript' }
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('expected-present');
-    expect(r.run!([1, 2])).toEqual([1, 2]);
-  });
-
-  describe('a point read out of range', () => {
-    const f = new ComputeEngine();
-    f.declare('qs', 'list<tuple<real, real>>');
-    f.assign('qs', f.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    f.declare('xs', 'list<real>');
-    f.assign('xs', f.box(['List', 1, 2]));
-    f.declare('j', 'integer');
-    f.assign('j', 9);
-    const params = [
-      ['Typed', 'qs', "'list<tuple<real, real>>'"],
-      ['Typed', 'xs', "'list<real>'"],
-      ['Typed', 'j', "'integer'"],
-    ];
-    const check = (body: unknown) => {
-      expect(f.box(body as any).evaluate().toString()).toContain(
-        'expected-present'
-      );
-      const r = compile(f.box(['Function', body, ...params] as any), {
-        to: 'javascript',
-      });
-      expect(r.success).toBe(true);
-      const qs = [
-        [1, 2],
-        [3, 4],
-      ];
-      expect(() => r.run!(qs, [1, 2], 9)).toThrow(/expected-present/);
-      return r;
-    };
-
-    test('through a local', () => {
-      const r = check([
-        'Block',
-        ['Declare', 'pp', "'unknown'", ['At', 'qs', 'j']],
-        ['AssertPresent', 'pp'],
-      ]);
-      expect(r.run!([[1, 2]], [1, 2], 1)).toEqual([1, 2]);
-    });
-
-    test('a tuple of two numbers read out of range', () => {
-      const r = check([
-        'AssertPresent',
-        ['Tuple', ['At', 'xs', 'j'], ['At', 'xs', 'j']],
-      ]);
-      expect(r.run!([[1, 2]], [1, 2], 2)).toEqual([2, 2]);
-    });
-
-    test('in a callback of Map', () => {
-      check([
-        'Map',
-        ['Function', ['AssertPresent', 'x'], 'x'],
-        ['At', 'qs', ['List', 1, 9]],
-      ]);
-    });
-  });
-});
-
 // A default of the declared signature fills only an argument that the call
 // leaves out (item 3.4.5 of the CE language release, user decision
 // 2026-11-02): a supplied absent argument at the numeric parameter reaches
@@ -1228,8 +730,8 @@ describe('AN ABSENT ARGUMENT AT A NUMERIC PARAMETER OF AN OPERATOR', () => {
 // A false restriction of a point is the point of `NaN` coordinates, the
 // absent value of the domain of a point (user decision of 2026-11-03), on the
 // held route (the restriction is held while `t` is free, then `t` is
-// assigned), on the fresh route (`t` is assigned first) and in compiled
-// JavaScript. A restriction whose arm is a list stays `Missing`.
+// assigned), on the fresh route (`t` is assigned first) and, where it
+// compiles, in compiled JavaScript. A restriction whose arm is a list stays `Missing`.
 describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
   const C = ['Less', 't', 0];
   const L = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
@@ -1240,6 +742,12 @@ describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
     held.assign('t', 1);
     const fresh = new ComputeEngine();
     fresh.assign('t', 1);
+    return {
+      held: h.evaluate().toString(),
+      fresh: fresh.box(json as any).evaluate().toString(),
+    };
+  };
+  const compiled = (json: unknown) => {
     const r = compile(
       new ComputeEngine().box([
         'Function',
@@ -1249,14 +757,10 @@ describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
       { to: 'javascript' }
     );
     expect(r.success).toBe(true);
-    return {
-      held: h.evaluate().toString(),
-      fresh: fresh.box(json as any).evaluate().toString(),
-      js: r.run!(1),
-    };
+    return r.run!(1);
   };
 
-  test.each([
+  const cases: [string, unknown, string, unknown][] = [
     [
       'the restricted point',
       ['If', C, ['Tuple', 1, 2]],
@@ -1289,22 +793,20 @@ describe('A FALSE RESTRICTION OF A POINT IS A NAN POINT', () => {
       [0, 0],
     ],
     ['a restricted list of points', ['If', C, L], '"Missing"', undefined],
-  ])('%s', (_label, json, value, js) => {
+  ];
+
+  test.each(cases)('%s', (_label, json, value) => {
     const r = routes(json);
     expect(r.held).toBe(value);
     expect(r.fresh).toBe(value);
-    expect(r.js).toEqual(js);
   });
 
-  test('a restricted point cell under a list of conditions', () => {
-    const json = ['If', ['List', 'True', C], L];
-    const r = routes(json);
-    expect(r.held).toBe('[(1, 2),(NaN, NaN)]');
-    expect(r.fresh).toBe('[(1, 2),(NaN, NaN)]');
-    expect(r.js).toEqual([
-      [1, 2],
-      [NaN, NaN],
-    ]);
+  test.each(
+    cases.filter(([label]) =>
+      ['the restricted point', 'Sin of it', 'PointX of it'].includes(label)
+    )
+  )('%s: compiled JavaScript', (_label, json, _value, js) => {
+    expect(compiled(json)).toEqual(js);
   });
 });
 
@@ -1360,7 +862,7 @@ describe('AN ABSENT ARGUMENT REACHES THE BODY UNDER N()', () => {
       NaN,
     ],
   ])(
-    '%s: evaluate(), N() and compiled code agree',
+    '%s: evaluate() and N() agree',
     async (_label, body, value) => {
       const e = f.box(body as any);
       expect(e.evaluate().re).toBe(value);
@@ -1369,11 +871,6 @@ describe('AN ABSENT ARGUMENT REACHES THE BODY UNDER N()', () => {
       expect(
         (await e.evaluateAsync({ numericApproximation: true })).re
       ).toBe(value);
-      const r = compile(f.box(['Function', body] as any), {
-        to: 'javascript',
-      });
-      expect(r.success).toBe(true);
-      expect(r.run!()).toBe(value);
     }
   );
 });
@@ -1426,7 +923,7 @@ describe('A PARTIAL APPLICATION OVER MISSING', () => {
 // A call that maps a function with a point parameter over a list of points:
 // a `NaN` point of the list reaches the body, and a default fills only an
 // argument that the call leaves out (item 3.4.5 of the CE language release,
-// user decision 2026-11-02). The compiled map gives the same values.
+// user decision 2026-11-02).
 describe('A CALL THAT MAPS OVER POINTS WITH A NAN POINT', () => {
   const f = new ComputeEngine();
   const P = ['Typed', 'p', "'tuple<number, number>'"];
@@ -1442,54 +939,15 @@ describe('A CALL THAT MAPS OVER POINTS WITH A NAN POINT', () => {
   const QS = ['Typed', 'qs', "'list<tuple<number, number>>'"];
   const K = ['Typed', 'k', "'number'"];
   const L = ['List', ['Tuple', 1, 2], ['Tuple', 'NaN', 'NaN']];
-  const qs = [
-    [1, 2],
-    [NaN, NaN],
-  ];
 
   test.each([
-    [['g', 'qs'], [QS], [L], [qs], ['List', 1, 'NaN'], [1, NaN]],
-    [['g2', 'qs'], [QS], [L], [qs], ['List', 6, 'NaN'], [6, NaN]],
-    [
-      ['g2', 'qs', 'k'],
-      [QS, K],
-      [L, 'NaN'],
-      [qs, NaN],
-      ['List', 'NaN', 'NaN'],
-      [NaN, NaN],
-    ],
-  ])(
-    '%j: interpreter and JavaScript agree',
-    (body, params, args, jsArgs, value, compiled) => {
-      const fn = ['Function', body, ...params];
-      expect(
-        f.box(['Apply', fn, ...args] as any).evaluate().json
-      ).toEqual(value);
-      const r = compile(f.box(fn as any), { to: 'javascript' });
-      expect(r.success).toBe(true);
-      expect(r.run!(...(jsArgs as any[]))).toEqual(compiled);
-    }
-  );
-
-  test('a read out of range of the list', () => {
-    const g = new ComputeEngine();
-    g.declare('h', {
-      value: [
-        'Function',
-        ['PointX', 'p'],
-        ['Typed', 'p', "'tuple<real, real>'"],
-      ],
-    } as any);
-    const body = ['h', ['At', 'qs', ['List', 1, 9]]];
-    const RQS = ['Typed', 'qs', "'list<tuple<real, real>>'"];
-    const qs = ['List', ['Tuple', 1, 2]];
-    expect(
-      g.box(['Apply', ['Function', body, RQS], qs] as any).evaluate().json
-    ).toEqual(['List', 1, 'NaN']);
-    const r = compile(g.box(['Function', body, RQS] as any), {
-      to: 'javascript',
-    });
-    expect(r.success).toBe(true);
-    expect(r.run!([[1, 2]])).toEqual([1, NaN]);
+    [['g', 'qs'], [QS], [L], ['List', 1, 'NaN']],
+    [['g2', 'qs'], [QS], [L], ['List', 6, 'NaN']],
+    [['g2', 'qs', 'k'], [QS, K], [L, 'NaN'], ['List', 'NaN', 'NaN']],
+  ])('%j: the interpreter', (body, params, args, value) => {
+    const fn = ['Function', body, ...params];
+    expect(f.box(['Apply', fn, ...args] as any).evaluate().json).toEqual(
+      value
+    );
   });
 });

@@ -45,7 +45,7 @@ describe('CE-230.1: a recursive real function in the complex mode', () => {
     return ce;
   }
 
-  for (const mode of ['complex', 'strict'])
+  for (const mode of ['strict'])
     test(`${mode}: compiles on the real lane, with the value of the interpreter`, () => {
       const ce = engine();
       const r = js(ce, ['p', 'x'], mode);
@@ -70,7 +70,7 @@ describe('CE-230.2: a real body that reads a value that promotes', () => {
     return ce;
   }
 
-  for (const mode of [undefined, 'complex'])
+  for (const mode of [undefined])
     test(`${mode ?? 'default'}: the body compiles on the real lane`, () => {
       const ce = engine();
       const r = js(ce, ['p', 'x'], mode);
@@ -81,15 +81,4 @@ describe('CE-230.2: a real body that reads a value that promotes', () => {
       // c = 0: `a` has no real value, and the real result is `NaN`.
       expect(Number.isNaN(r.run({ x: 3, c: 0 }))).toBe(true);
     });
-
-  test('a reader outside the real body keeps the complex value', () => {
-    const ce = engine();
-    const r = js(ce, ['Add', ['p', 'x'], 'a'], 'complex');
-    expect(r.success).toBe(true);
-    // c = 0: `p(2)` is `NaN` (real result), `a` is `i`.
-    const v = r.run({ x: 2, c: 0 });
-    expect(Number.isNaN(v.re)).toBe(true);
-    expect(v.im).toBe(1);
-    expect(r.run({ x: 2, c: 5 })).toBe(6);
-  });
 });

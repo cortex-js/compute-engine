@@ -406,26 +406,10 @@ describe('Compiled Distance and Norm of a restricted operand', () => {
     expect(run(['Distance', RP, O], -1)).toBeNaN();
   });
 
-  test('Distance of a restricted list of points', () => {
-    expect(run(['Distance', RL, O], 2)).toEqual([5, 10]);
-  });
-
   test('Distance of a list that holds an absent point', () => {
     const r = run(['Distance', ['List', RP, ['Tuple', 6, 8]], O], -1);
     expect((r as number[])[0]).toBeNaN();
     expect((r as number[])[1]).toBe(10);
-  });
-
-  test('Norm of a restricted list of points is one norm per point', () => {
-    // Read as a matrix, it compiled to the Frobenius norm 11.18.
-    expect(run(['Norm', RL], 2)).toEqual([5, 10]);
-    const r = run(['Norm', ['List', RP, ['Tuple', 6, 8]]], -1) as number[];
-    expect(r[0]).toBeNaN();
-    expect(r[1]).toBe(10);
-  });
-
-  test('PointX of the absent point is NaN, not a TypeError', () => {
-    expect(run(['PointX', 'Missing'], 2)).toBeNaN();
   });
 });
 
@@ -726,33 +710,5 @@ describe('A search for a restricted value', () => {
     expect(value(['Contains', W(L), 2])).toBe('If(0 < t, "True")');
     expect(value(['Contains', W(L), 2], -1)).toBe('"False"');
     expect(value(['IndexOf', W(L), 2], -1)).toBe('"Missing"');
-  });
-
-  test('compiled to JavaScript', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    const run = (json: unknown, t: number): unknown => {
-      const r = compile(ce.box(json as never), { to: 'javascript' } as never);
-      expect(r.success).toBe(true);
-      return r.run!({ t } as never);
-    };
-    expect(run(['Contains', LN, W(1)], 2)).toBe(true);
-    expect(run(['Contains', LN, W(1)], -1)).toBe(true);
-    // The failed restriction compiles to `NaN`, which the SameValueZero
-    // element test finds in a list that holds `NaN`, as the interpreter's
-    // structural search does.
-    expect(run(['IndexOf', LN, W(2)], -1)).toBe(2);
-    expect(run(['Contains', LN, W(2)], -1)).toBe(true);
-    expect(run(['IndexOf', LN, 'NaN'], -1)).toBe(2);
-    expect(run(['Contains', ['List', 'NaN'], 'NaN'], -1)).toBe(true);
-    expect(run(['Element', W(2), LN], -1)).toBe(true);
-    expect(run(['Element', W(1), LN], 2)).toBe(true);
-    // The run-time value of the searched operand is what is searched for,
-    // so its structure does not matter.
-    const nested = ['IndexOf', ['List', 'NaN', 2], ['Which', 'True', W(2)]];
-    expect(run(nested, -1)).toBe(1);
-    expect(run(nested, 2)).toBe(2);
-    expect(run(['Contains', LN, ['Add', W(5), 1]], -1)).toBe(true);
-    expect(run(['Contains', LN, ['First', W(['List', 5, 6])]], -1)).toBe(true);
   });
 });

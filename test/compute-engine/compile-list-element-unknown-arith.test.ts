@@ -14,13 +14,12 @@
  * The compiler settles the shape of every call argument at compile time.
  * So the cases are of two kinds:
  *
- * - `x` declared `any`: the shape of the argument of `g(x)` is not settled,
- *   and the compilation declines with the code `unsettled-shape` and the
- *   name `x` in `unsupported`.
- * - `x` declared with a settled shape (`real`, `list<real>`,
- *   `list<list<real>>`): the compilation maps `g` over the argument with a
- *   static map, and the compiled value equals the interpreted value (`.N()`)
- *   at a number, at a list, at a nested list and at an empty list.
+ * - `x` declared `any`: the input has no type, and the compilation declines
+ *   with the code `untyped-input` and the name `x` in `unsupported`.
+ * - `x` declared `real` or `number`: the compiled value equals the
+ *   interpreted value (`.N()`). A list `x` declines: `g` over a list gives a
+ *   list of lists. The signature `(unknown) -> list` declines: the result of
+ *   `g` is not a scalar.
  *
  * The three signatures of `g` are `(unknown) -> list<unknown>`,
  * `(unknown) -> list` and no declaration (the inferred signature,
@@ -84,8 +83,15 @@ function sameValue(a: unknown, b: unknown): boolean {
  * other variables are `c = True`, `z = 0` and `a = 0`, unless `c` is given. */
 type Run = readonly [unknown, unknown, boolean?];
 
+/** The parameters among `x`, `c` and `z` that `json` reads: a parameter
+ * declared `any` is refused even when the body does not read it. */
+function readNames(json: unknown): string[] {
+  const text = JSON.stringify(json);
+  return ['x', 'c', 'z'].filter((n) => text.includes(`"${n}"`));
+}
+
 /** The compiled function of `json`, called with the values of the
- * parameters `names` (by default `x`, `c` and `z`; `c` is `true` and `z` is
+ * parameters `names` (by default those of `x`, `c` and `z` that it reads; `c` is `true` and `z` is
  * `0` when the call leaves them out). With `fallback`, a compilation that
  * declines gives the interpreter fallback.
  *
@@ -96,7 +102,7 @@ type Run = readonly [unknown, unknown, boolean?];
 function compiledFunction(
   ce: ComputeEngine,
   json: unknown,
-  names: string[] = ['x', 'c', 'z'],
+  names: string[] = readNames(json),
   fallback = false
 ): (vars: Record<string, unknown>) => unknown {
   const typed = (name: string): unknown => [
@@ -126,13 +132,23 @@ function expectUntypedRefusal(
   for (const name of names) expect(r.unsupported).toContain(name);
 }
 
-/** Expect the compilation of `json` to decline because the argument of the
- * call of `g` has a type that does not settle its shape (`x` is `any`). */
-function expectUnsettledDecline(ce: ComputeEngine, json: unknown): void {
+/** Expect the compilation of `json` to decline because the input `x` is
+ * declared `any`. With the signature `(unknown) -> list`, the result of `g`
+ * is not a scalar, and the compilation declines on `g` first. */
+function expectUnsettledDecline(
+  ce: ComputeEngine,
+  json: unknown,
+  signature: string
+): void {
   const r = compile(ce.box(json as any), { to: 'javascript' } as never);
   expect(r.success).toBe(false);
-  expect(r.diagnostic?.code).toBe('unsettled-shape');
-  expect(r.unsupported).toContain('x');
+  if (signature === '(unknown) -> list') {
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.message).toMatch(/the result of g is not a scalar/);
+  } else {
+    expect(r.diagnostic?.code).toBe('untyped-input');
+    expect(r.unsupported).toContain('x');
+  }
 }
 
 /** Expect the compilation of `(x, c, z) ↦ json` to decline because the
@@ -155,7 +171,7 @@ function expectAnyParameterDecline(
   );
   expect(r.success).toBe(false);
   expect(r.diagnostic?.code).toBe('unsettled-shape');
-  expect(r.unsupported).toContain('z');
+  expect(r.diagnostic?.message).toMatch(/the input z of type any/);
   expectAgreement(compiledAndInterpreted(ce, json, runs, true));
 }
 
@@ -240,25 +256,13 @@ const CASES: [string, unknown][] = [
 
 /** The values of `x`, by its declared type. There is no run with an empty
  * list `x`: the element is then absent, and the compiled value of an
- * operator over it is not specified. */
+ * operator over it is not specified. A list `x` declines: the call of `g`
+ * over a list gives a list of lists. */
 const X_RUNS: Record<string, ReadonlyArray<Run>> = {
   real: [
     [3, 3],
     [0.5, 0.5],
     [0.5, 0.5, false],
-  ],
-  'list<real>': [
-    [
-      [1, 2],
-      ['List', 1, 2],
-    ],
-    [[1, 2], ['List', 1, 2], false],
-  ],
-  'list<list<real>>': [
-    [
-      [[1, 2], [3]],
-      ['List', ['List', 1, 2], ['List', 3]],
-    ],
   ],
 };
 const X_TYPES = Object.keys(X_RUNS);
@@ -268,58 +272,9 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
   // settled, so the compilation declines.
   for (const signature of SIGNATURES) {
     test.each(CASES)(`${signature}, x: any declines: %s`, (_name, json) => {
-      expectUnsettledDecline(rowEngine(signature), json);
+      expectUnsettledDecline(rowEngine(signature), json, signature);
     });
   }
-
-  // `x` is declared with a settled shape: the compiled value is the
-  // interpreted value.
-  for (const signature of SIGNATURES) {
-    for (const xType of X_TYPES) {
-      test.each(CASES)(`${signature}, x: ${xType}: %s`, (name, json) => {
-        // The input `a` has no type, so the compilation is refused.
-        if (name.endsWith('a undeclared'))
-          return expectUntypedRefusal(
-            rowEngine(signature, xType),
-            json,
-            ['a']
-          );
-        // With `x: real`, the arm `z` reaches the `+` of a number, and the
-        // compilation declines (`expectAnyParameterDecline`). With a list
-        // `x`, the `+` broadcasts over the arms, and compiles.
-        if (name.endsWith('z: any') && xType === 'real')
-          return expectAnyParameterDecline(
-            rowEngine(signature, xType),
-            json,
-            X_RUNS[xType]
-          );
-        expectAgreement(
-          compiledAndInterpreted(
-            rowEngine(signature, xType),
-            json,
-            X_RUNS[xType]
-          )
-        );
-      });
-    }
-  }
-
-  test('the reported case: g(x)[1] + 1 at x = [1, 2] is [2, 3]', () => {
-    const ce = rowEngine('(unknown) -> list<unknown>');
-    // The absence marker of an accessor is implicit in its type. The
-    // element type of `g(x)` is `list<unknown> | unknown`, and so is the
-    // type of the read.
-    expect(ce.box(ELEMENT as any).type.toString()).toBe(
-      'list<unknown> | unknown'
-    );
-    // `x` is a list in one compilation and a number in the other.
-    const list = rowEngine('(unknown) -> list<unknown>', 'list<real>');
-    expect(compiledFunction(list, ['Add', ELEMENT, 1])({ x: [1, 2] })).toEqual(
-      [2, 3]
-    );
-    const scalar = rowEngine('(unknown) -> list<unknown>', 'real');
-    expect(compiledFunction(scalar, ['Add', ELEMENT, 1])({ x: 3 })).toBe(4);
-  });
 
   test('a cell function of the element is typed as a possible list', () => {
     // The typing route reads the element as a possible list too, so the
@@ -341,13 +296,16 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
   // `Block` local `y` that holds it. The local `y` is read as a possible
   // list: the compiled `y + 1` gave the string "1,21" at `x = [1, 2]` when it
   // was read as a scalar, where the interpreter gives `[2, 3]`.
+  // With the signature `(unknown) -> list`, the result of `g` is not a
+  // scalar, and every compilation declines: only the `x: any` cases run.
   for (const signature of SIGNATURES) {
     test.each(BLOCK_CASES)(
       `${signature}, x: any declines: a Block local holding the element, %s`,
       (_name, json) => {
-        expectUnsettledDecline(rowEngine(signature), json);
+        expectUnsettledDecline(rowEngine(signature), json, signature);
       }
     );
+    if (signature === '(unknown) -> list') continue;
     for (const xType of X_TYPES) {
       test.each(BLOCK_CASES)(
         `${signature}, x: ${xType}: a Block local holding the element, %s`,
@@ -382,41 +340,15 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
         ce.box(['Function', ['Add', 'z', 1], ['Typed', 'z', { str: 'any' }]]),
         { to: 'javascript', fallback: false } as never
       )
-    ).toThrow(/"z": it is declared `any` or `value`/);
-  });
-
-  test('a global with an assigned value and a free variable stay scalar code', () => {
-    // Neither is a Block local. A use infers the type `value` for `w`,
-    // whose value the host passes.
-    const ce = rowEngine('(unknown) -> list');
-    ce.assign('k', ce.box(ELEMENT as any));
-    ce.declare('h', '(value) -> number');
-    ce.infer([ce.box(['h', 'w'])]);
-    expect(ce.box('w').type.toString()).toBe('value');
-    const code = compile(ce.box(['Add', 'w', 1]), {
-      to: 'javascript',
-      fallback: false,
-    } as never).code;
-    expect(code).not.toMatch(/_SYS\.bcast/);
-    // The compiled code reads the value of `k`, `g(x)[1]`, so it calls `g`
-    // on the input `x`, declared `any`: the compilation declines.
-    expectUnsettledDecline(ce, ['Add', 'k', 1]);
-    // With `x` declared `real`, the value of `k` is compiled in place.
-    const real = rowEngine('(unknown) -> list', 'real');
-    real.assign('k', real.box(ELEMENT as any));
-    const result = compile(real.box(['Add', 'k', 1]), {
-      to: 'javascript',
-      fallback: false,
-    } as never);
-    for (const x of [3, 0.5]) {
-      real.assign('x', real.number(x));
-      expect((result.run as any)({ x })).toBe(real.box(['Add', 'k', 1]).N().re);
-    }
+    ).toThrow(/the input z of type any/);
   });
 });
 
 describe('CE-360: a number x keeps compiling to the interpreted value', () => {
+  // With the signature `(unknown) -> list`, the result of `g` is not a
+  // scalar, and the compilation declines.
   for (const signature of SIGNATURES) {
+    if (signature === '(unknown) -> list') continue;
     for (const xType of ['real', 'number']) {
       test.each([...CASES, ['Block local', BLOCK_LOCAL]])(
         `${signature}, x: ${xType}: %s`,
@@ -484,23 +416,6 @@ describe('CE-368: the absence marker of an element follows its value', () => {
     expect(expr.evaluate().toString()).toBe('"False"');
     ce.assign('b', ce.True);
     expect(expr.evaluate().toString()).toBe('"False"');
-  });
-
-  test('an absent operand beside a rotation view is absent in each cell', () => {
-    // `g(x)[5] + RotateLeft(xs)` at `x = []`: the present list gives the
-    // shape, and the absent operand gives `Missing` in each cell in the
-    // interpreter; the compiled value is `NaN` there, which the caveats of
-    // compiled code allow. The compiled `RotateLeft` may pass a rotation
-    // view, not an array, to the broadcast, which reads it as a collection.
-    const ce = rowEngine('(unknown) -> list<unknown>', 'list<real>');
-    ce.declare('xs', 'list<number>');
-    const json = ['Add', ['At', ['g', 'x'], 5], ['RotateLeft', 'xs']];
-    const expr = ce.box(json as any);
-    const run = compiledFunction(ce, json, ['x', 'xs']);
-    ce.assign('x', ce.box(['List']));
-    ce.assign('xs', ce.box(['List', 1, 2]));
-    expect(expr.evaluate().toString()).toBe('["Missing","Missing"]');
-    expect(run({ x: [], xs: [1, 2] })).toEqual([NaN, NaN]);
   });
 });
 
@@ -579,8 +494,7 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
     const any = engine('a', 'any');
     const unsettled = compile(any.box(json), { to: 'javascript' } as never);
     expect(unsettled.success).toBe(false);
-    expect(unsettled.diagnostic?.code).toBe('unsettled-shape');
-    expect(unsettled.unsupported).toContain('x');
+    expect(unsettled.diagnostic?.code).toBe('outside-profile');
     const ce = engine('a', 'string');
     expect(ce.box(json).evaluate().symbol).toBe('False');
     expect(
@@ -588,11 +502,6 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
         to: 'javascript',
       } as never).success
     ).toBe(false);
-    // With `x` assigned, the comparison is a constant: the compiler folds it
-    // with the interpreter, to `false`.
-    const folded = compile(ce.box(json), { to: 'javascript' } as never);
-    expect(folded.success).toBe(true);
-    expect(folded.run!({} as never)).toBe(false);
   });
 
   // The compiled value of a comparison with an absent operand is not
@@ -603,19 +512,5 @@ describe('CE-386: a NaN operand of a compiled Equal is a number, not an absence'
     const ce = engine(['List'], 'list<real>');
     const json = ['Equal', ['At', ['g', 'x'], 5], 1];
     expect(ce.box(json).evaluate().symbol).toBe('False');
-  });
-
-  test('an impure operand of the guarded comparison is evaluated once', () => {
-    // The guard tests each operand for absence and the comparison reads it
-    // again: an element read or a call is bound to a temporary, so
-    // `Random()` draws once, and the read of `g(x)[1]` runs once.
-    const json = ['Equal', ['At', ['g', 'x'], 1], ['Random']];
-    const code = String(compiled(json, 'real').code);
-    expect(code.match(/drawNextRandomNumber/g)).toHaveLength(1);
-    expect(code.match(/atNumeric/g)).toHaveLength(1);
-    // The same holds for a list `x`, where the element read maps `g`.
-    const listCode = String(compiled(json, 'list<real>').code);
-    expect(listCode.match(/drawNextRandomNumber/g)).toHaveLength(1);
-    expect(listCode.match(/_SYS\.at\(/g)).toHaveLength(1);
   });
 });

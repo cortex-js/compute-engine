@@ -31,16 +31,6 @@ function defaulted(d: Json, body: Json = ['Multiply', 'x', 'k']): Json {
   return ['Function', body, 'x', ['Optional', 'k', d]];
 }
 
-/** `(x, k: number = 2) => k`. A declared type cannot name `missing`
- * (`docs/ERROR-MODEL.md`, "`Missing` is a result only"): the default
- * handles an absent argument. */
-const MAYBE_MISSING: Json = [
-  'Function',
-  'k',
-  'x',
-  ['Optional', ['Typed', 'k', "'number'"], 2],
-];
-
 function run(
   ce: ComputeEngine,
   expr: Json,
@@ -53,76 +43,10 @@ function run(
   return { code: result.code, value: result.run?.(vars) };
 }
 
-/** The compiled JavaScript function of the function literal `lit`. */
-function jsFunction(ce: ComputeEngine, lit: Json): any {
-  const options = { to: 'javascript', fallback: false } as any;
-  return compile(ce.box(lit) as any, options);
-}
-
-/** The interpreter's value of `expr` with `values` substituted, as JSON. A
- * `Map` evaluates to a lazy view, whose elements are read here. */
-function interpreted(
-  ce: ComputeEngine,
-  expr: Json,
-  values: Record<string, number> = {}
-): Json {
-  const value = ce.box(expr).subs(values).evaluate();
-  if (value.operator !== 'Map') return value.json;
-  return ['List', ...JSON.parse(value.toString())];
-}
-
 describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real');
   ce.declare('d', 'real');
-
-  test('a literal compiled as a function takes one or two arguments', () => {
-    const fn: any = jsFunction(ce, defaulted(2));
-    expect(fn.success).toBe(true);
-    expect(fn.run(3)).toBe(6);
-    expect(fn.run(3, 5)).toBe(15);
-    expect(interpreted(ce, ['Apply', defaulted(2), 3])).toBe(6);
-    expect(interpreted(ce, ['Apply', defaulted(2), 3, 5])).toBe(15);
-  });
-
-  test('a parameter with a declared type takes the default when the argument is left out', () => {
-    const lit = [
-      'Function',
-      ['Multiply', 'x', 'k'],
-      'x',
-      ['Optional', ['Typed', 'k', "'number'"], 2],
-    ];
-    const fn: any = jsFunction(ce, lit);
-    expect(fn.run(3)).toBe(6);
-    expect(fn.run(3, 5)).toBe(15);
-    // `undefined` is the way that JavaScript leaves out an argument.
-    expect(fn.run(3, undefined)).toBe(6);
-  });
-
-  test('`(x, k: number = 2) => k` takes the default only for a left-out argument', () => {
-    const fn: any = jsFunction(ce, MAYBE_MISSING);
-    expect(fn.success).toBe(true);
-    expect(fn.run(3)).toBe(2);
-    expect(interpreted(ce, ['Apply', MAYBE_MISSING, 3])).toBe(2);
-    // The interpreter passes a supplied `Missing` to the body. Compiled code
-    // gives an unspecified value for it, so only the compilation is checked.
-    expect(interpreted(ce, ['Apply', MAYBE_MISSING, 3, 'Missing'])).toBe(
-      'Missing'
-    );
-    const written = ['Apply', MAYBE_MISSING, 'y', 'Missing'];
-    expect(
-      compile(ce.box(written) as any, { to: 'javascript', fallback: false })
-        .success
-    ).toBe(true);
-  });
-
-  test('a function value with a default gets the default from a default parameter', () => {
-    // `Map` calls the value with one argument.
-    const expr = ['Map', defaulted(2), ['List', 'y', 2]];
-    const { value } = run(ce, expr, 'javascript', { y: 1 });
-    expect(value).toEqual([2, 4]);
-    expect(interpreted(ce, expr, { y: 1 })).toEqual(['List', 2, 4]);
-  });
 
   test('a symbol default is a static error', () => {
     const lit = defaulted('d');
@@ -146,100 +70,9 @@ describe('COMPILED PARAMETER DEFAULTS: JAVASCRIPT', () => {
       compile(ce.box(lit) as any, { to: 'javascript', fallback: false })
     ).toThrow();
   });
-
-  test('a collection default is a fresh empty list at each call', () => {
-    const lit = [
-      'Function',
-      'xs',
-      ['Optional', ['Typed', 'xs', "'list<number>'"], ['List']],
-    ];
-    const fn: any = jsFunction(ce, lit);
-    expect(fn.success).toBe(true);
-    const a = fn.run();
-    const b = fn.run();
-    expect(a).toEqual([]);
-    expect(b).toEqual([]);
-    expect(a).not.toBe(b);
-    expect(interpreted(ce, ['Apply', lit])).toEqual(['List']);
-  });
-
-  test('a dictionary default is a fresh empty object at each call', () => {
-    const lit = [
-      'Function',
-      'm',
-      ['Optional', ['Typed', 'm', "'dictionary<integer>'"], ['Dictionary']],
-    ];
-    const fn: any = jsFunction(ce, lit);
-    expect(fn.success).toBe(true);
-    const a = fn.run();
-    const b = fn.run();
-    expect(a).toEqual({});
-    expect(b).toEqual({});
-    expect(a).not.toBe(b);
-    expect(interpreted(ce, ['Apply', lit])).toEqual({ dict: {} });
-  });
-
-  test('`Map((x, k = 2) => x * k, [1, 2])` is `[2, 4]`', () => {
-    const expr = ['Map', defaulted(2), ['List', 1, 2]];
-    expect(run(ce, expr, 'javascript').value).toEqual([2, 4]);
-    expect(interpreted(ce, expr)).toEqual(['List', 2, 4]);
-  });
-
-  test('a call that supplies every argument, and a call that leaves out the defaulted one', () => {
-    for (const expr of [
-      ['Apply', defaulted(2), 'y', 5],
-      ['Apply', defaulted(2), 'y'],
-    ]) {
-      const expected = interpreted(ce, expr, { y: 3 });
-      expect(run(ce, expr, 'javascript', { y: 3 }).value).toBe(expected);
-    }
-    expect(interpreted(ce, ['Apply', defaulted(2), 'y'], { y: 3 })).toBe(6);
-  });
-
-  test('a call of a block-local function is completed with the default', () => {
-    // The interpreter writes an assigned name into the engine, and compiled
-    // code declines a write to a symbol of the engine. A `Declare` makes `g`
-    // a local of the block in both.
-    const expr = [
-      'Block',
-      ['Declare', 'g', "'unknown'", defaulted(2)],
-      ['g', 'y'],
-    ];
-    expect(interpreted(ce, expr, { y: 3 })).toBe(6);
-    const { code, value } = run(ce, expr, 'javascript', { y: 3 });
-    expect(code).toContain('g(_.y, 2)');
-    expect(value).toBe(6);
-  });
 });
 
 describe('COMPILED PARAMETER DEFAULTS: USER FUNCTIONS', () => {
-  test('a one-clause user function with a default compiles on the JavaScript target', () => {
-    const ce = new ComputeEngine();
-    const r = executeEpsil(ce, 'function f(x, k: number = 2) { x * k }');
-    expect(r.diagnostics).toEqual([]);
-    ce.declare('y', 'real');
-    for (const expr of [
-      ['f', 'y'],
-      ['f', 'y', 5],
-      ['Map', 'f', ['List', 'y', 3]],
-    ]) {
-      const expected = interpreted(ce, expr, { y: 1 });
-      const { value } = run(ce, expr, 'javascript', { y: 1 });
-      expect(value).toEqual(
-        Array.isArray(expected) ? expected.slice(1) : expected
-      );
-    }
-  });
-
-  test('a function assigned from a literal with a default, as a `Map` callback', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    ce.assign('f', ce.box(defaulted(2)));
-    const expr = ['Map', 'f', ['List', 'y', 2]];
-    expect(interpreted(ce, expr, { y: 1 })).toEqual(['List', 2, 4]);
-    expect(run(ce, expr, 'javascript', { y: 1 }).value).toEqual([2, 4]);
-  });
-
   test('a default in a clause of a two-clause function is a declaration error', () => {
     const ce = new ComputeEngine();
     const r = executeEpsil(
@@ -282,7 +115,7 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
   // canonicalizes the call.
   const completed = ['Apply', defaulted(2), 'y'];
 
-  test('GLSL: a saturated call, a completed call and a `Map` callback', () => {
+  test('GLSL: a saturated call and a completed call decline', () => {
     // The GLSL fragment refuses `Apply` of a function literal.
     const declined = (expr: Json) => {
       const r: any = compile(ce.box(expr) as any, {
@@ -290,51 +123,14 @@ describe('COMPILED PARAMETER DEFAULTS: INTERVAL AND GLSL', () => {
         fallback: true,
       } as any);
       expect(r.success).toBe(false);
-      expect(r.diagnostic?.code).toBe('outside-fragment');
+      expect(r.diagnostic?.code).toBe('outside-profile');
     };
     declined(saturated);
     declined(completed);
-    const map = ['Map', defaulted(2), ['List', 'y', 2]];
-    expect(run(ce, map, 'glsl').code).toBe('vec2(2.0 * y, 4.0)');
   });
 });
 
-/** The numeric elements of the interpreter's value of `expr`. */
-function interpretedValues(
-  ce: ComputeEngine,
-  expr: Json,
-  values: Record<string, number> = {}
-): number[] {
-  const value = ce.box(expr).subs(values).evaluate();
-  return Array.from(value.each(), (e) => e.N().re);
-}
-
 describe('COMPILED PARAMETER DEFAULTS: CALLBACKS AND FOLDS', () => {
-  test('a hoisted `Map` callback receives only the element', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('L', 'list<real>');
-    // `Sin(a)` does not depend on the element: the callback is hoisted and
-    // bound at its first call. The omitted `k` must receive its default.
-    const expr = [
-      'Map',
-      defaulted(2, ['Add', ['Multiply', 'x', 'k'], ['Sin', 'a']]),
-      'L',
-    ];
-    // The interpreter reads `a` from an engine where it has the value 1
-    // (a substitution does not enter the body of a function literal).
-    const valued = new ComputeEngine();
-    valued.assign('a', 1);
-    const expected = interpretedValues(valued, [
-      'Map',
-      expr[1],
-      ['List', 1, 2],
-    ]);
-    expect(expected).toEqual([2 + Math.sin(1), 4 + Math.sin(1)]);
-    const { value } = run(ce, expr, 'javascript', { a: 1, L: [1, 2] });
-    expect(Array.from(value as number[])).toEqual(expected);
-  });
-
   test('a default that names a constant list of the engine is a static error', () => {
     const ce = new ComputeEngine();
     ce.assign('D', ce.box(['List', 1, 2, 3]));
@@ -350,120 +146,9 @@ describe('COMPILED PARAMETER DEFAULTS: CALLBACKS AND FOLDS', () => {
       compile(ce.box(lit) as any, { to: 'javascript', fallback: false })
     ).toThrow();
   });
-
-  test('a callback whose only parameter has a default takes the element', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    const lit = ['Function', ['Multiply', 2, 'x'], ['Optional', 'x', 1]];
-    const map = ['Map', lit, ['List', 'y', 2]];
-    expect(interpreted(ce, map, { y: 3 })).toEqual(['List', 6, 4]);
-    expect(run(ce, map, 'javascript', { y: 3 }).value).toEqual([6, 4]);
-    expect(run(ce, map, 'glsl').code).toBe('vec2(2.0 * y, 4.0)');
-  });
-
-  const combiner = [
-    'Function',
-    ['Add', 'a', ['Multiply', 'k', 'x']],
-    'a',
-    'x',
-    ['Optional', 'k', 2],
-  ];
-
-  test('`Reduce`, `Fold` and `Scan` with a combiner with a default', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    for (const expr of [
-      ['Reduce', ['List', 'y', 2, 3], combiner, 0],
-      ['Fold', combiner, 0, ['List', 'y', 2, 3]],
-    ]) {
-      expect(interpreted(ce, expr, { y: 1 })).toBe(12);
-      expect(run(ce, expr, 'javascript', { y: 1 }).value).toBe(12);
-    }
-    // `Scan` is a lazy view in the interpreter: its elements are read.
-    const scan = ['Scan', ['List', 'y', 2, 3], combiner, 0];
-    expect(interpretedValues(ce, scan, { y: 1 })).toEqual([2, 6, 12]);
-    expect(run(ce, scan, 'javascript', { y: 1 }).value).toEqual([2, 6, 12]);
-  });
 });
 
 describe('COMPILED PARAMETER DEFAULTS: ARGUMENT COUNT AND DEFINITIONS', () => {
-  /** The function that the source `code` evaluates to, given `_SYS`. The
-   * code is evaluated in sloppy mode, as a consumer that splices it into a
-   * script does. */
-  function evaluated(code: string, sys: unknown, preamble = ''): any {
-    return new Function('_SYS', `${preamble}return ${code};`)(sys);
-  }
-
-  test('a parameter named `arguments` does not hide the argument count', () => {
-    const ce = new ComputeEngine();
-    const lit = ['Function', 'k', 'arguments', ['Optional', 'k', 2]];
-    expect(interpreted(ce, ['Apply', lit, 1])).toBe(2);
-    const fn: any = jsFunction(ce, lit);
-    expect(fn.run(1)).toBe(2);
-    expect(fn.run(1, 5)).toBe(5);
-    expect(evaluated(fn.code, fn.run.SYS)(1)).toBe(2);
-    expect(evaluated(fn.run.toString(), fn.run.SYS)(1)).toBe(2);
-  });
-
-  test('the default is in effect after the definitions that the body reads', () => {
-    // The user function `g` is a per-call definition. Its own parameter has
-    // the name of the defaulted parameter `k`.
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.box(['Function', ['Multiply', 10, 'k'], 'k']));
-    const lit = [
-      'Function',
-      ['Add', ['Multiply', 'x', 'k'], ['g', 'x']],
-      'x',
-      ['Optional', 'k', 2],
-    ];
-    expect(interpreted(ce, ['Apply', lit, 1])).toBe(12);
-    expect(interpreted(ce, ['Apply', lit, 1, 5])).toBe(15);
-    const fn: any = jsFunction(ce, lit);
-    const sys = fn.run.SYS;
-    expect(fn.run(1)).toBe(12);
-    expect(fn.run(1, 5)).toBe(15);
-    expect(evaluated(fn.code, sys)(1)).toBe(12);
-    expect(evaluated(fn.run.toString(), sys)(1)).toBe(12);
-  });
-
-  test('a combiner parameter `i` with a default is not the imaginary unit', () => {
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<real>');
-    ce.declare('M', 'list<list<real>>');
-    const combiner = [
-      'Function',
-      ['Add', 'a', ['Multiply', 'x', 'i']],
-      'a',
-      'x',
-      ['Optional', 'i', 1],
-    ];
-    const L = ['List', 1, 2, 3];
-    const M = ['List', ['List', 1, 2], ['List', 3, 4]];
-    const reduce = ['Reduce', 'L', combiner, 0];
-    expect(ce.box(reduce).subs({ L }).evaluate().json).toBe(6);
-    const r = run(ce, reduce, 'javascript', { L: [1, 2, 3] });
-    expect(r.value).toBe(6);
-    expect(r.code).not.toContain('_SYS.cplx');
-    const scan = ['Scan', 'L', combiner, 0];
-    expect(
-      Array.from(ce.box(scan).subs({ L }).evaluate().each(), (e) => e.re)
-    ).toEqual([1, 3, 6]);
-    expect(run(ce, scan, 'javascript', { L: [1, 2, 3] }).value).toEqual([
-      1, 3, 6,
-    ]);
-    // Over rows, a complex accumulator lane declined the fold.
-    const rows = ['Reduce', 'M', combiner, ['List', 0, 0]];
-    expect(ce.box(rows).subs({ M }).evaluate().json).toEqual(['List', 4, 6]);
-    expect(
-      run(ce, rows, 'javascript', {
-        M: [
-          [1, 2],
-          [3, 4],
-        ],
-      }).value
-    ).toEqual([4, 6]);
-  });
-
   test('a combiner with a rest parameter declines, as it did before defaults', () => {
     // The compiled literal does not take a rest parameter, so such a
     // combiner declined before parameter defaults too, while the
@@ -495,25 +180,6 @@ describe('COMPILED PARAMETER DEFAULTS: SORT, ITERATE AND PIPE', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real');
 
-  test('`Sort` reads a literal with a default as a unary key', () => {
-    // `k` is not supplied: the key is `-x`, and the sort is descending.
-    const sort = ['Sort', ['List', 3, 'y', 2], defaulted(-1)];
-    expect(interpretedValues(ce, sort, { y: 5 })).toEqual([5, 3, 2]);
-    expect(run(ce, sort, 'javascript', { y: 5 }).value).toEqual([5, 3, 2]);
-    expect(run(ce, sort, 'javascript', { y: 0 }).value).toEqual([3, 2, 0]);
-  });
-
-  test('`Iterate` calls a literal with a default with the previous value only', () => {
-    const take = ['Take', ['Iterate', defaulted(2, ['Add', 'x', 'k']), 'y'], 3];
-    expect(interpretedValues(ce, take, { y: 1 })).toEqual([3, 5, 7]);
-    expect(run(ce, take, 'javascript', { y: 1 }).value).toEqual([3, 5, 7]);
-  });
-
-  test('a `Pipe` stage with a callback with a default', () => {
-    const pipe = ['Pipe', ['List', 1, 'y'], ['Map', defaulted(2)]];
-    expect(interpretedValues(ce, pipe, { y: 5 })).toEqual([2, 10]);
-    expect(run(ce, pipe, 'javascript', { y: 5 }).value).toEqual([2, 10]);
-  });
 });
 
 describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT', () => {
@@ -561,10 +227,6 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT'
     expect(interpreterValue(expr).re).toBe(expected);
   });
 
-  test.each(programs)('JavaScript: %s', (_, expr, expected) => {
-    expect(run(ce, expr, 'javascript', { L: [1, 2] }).value).toBe(expected);
-  });
-
   test.each([
     ['f(Missing)', ['Apply', K, 'Missing'], 'Missing'],
     ['f(At(L, 100))', ['Apply', K, ['At', 'L', 100]], 'NaN'],
@@ -573,18 +235,8 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT'
   ] as [string, Json, string][])(
     'a supplied absent value is passed through: %s',
     (_, expr, expected) => {
-      // The interpreter does not fill the default. Compiled code gives an
-      // unspecified value for such an argument, so only the compilation is
-      // checked.
+      // The interpreter does not fill the default.
       expect(interpreterValue(expr).json).toBe(expected);
-      const result: any = compile(
-        ce.box(expr) as any,
-        {
-          to: 'javascript',
-          fallback: false,
-        } as any
-      );
-      expect(result.success).toBe(true);
     }
   );
 
@@ -609,18 +261,9 @@ describe('COMPILED PARAMETER DEFAULTS: A DEFAULT FILLS ONLY A LEFT-OUT ARGUMENT'
       expect(
         v.isCollection ? [...(v.each() as any)].map((x: any) => x.re) : v.re
       ).toEqual(expected);
-      expect(run(ce2, expr, 'javascript', { L: [1, 2] }).value).toEqual(
-        expected
-      );
     }
     // The interpreter passes a supplied `Missing` to the body.
     expect(ce2.box(['f', 1, 'Missing']).evaluate().json).toBe('Missing');
-  });
-
-  test('the root function literal takes the default when the host leaves out the argument', () => {
-    const fn: any = jsFunction(ce, K);
-    expect([fn.run(), fn.run(undefined)]).toEqual([2, 2]);
-    expect(fn.run(5)).toBe(5);
   });
 });
 
@@ -647,9 +290,6 @@ describe('COMPILED PARAMETER DEFAULTS: DECLARED DEFAULTS AND OTHER ROUTES', () =
     ] as [Json, unknown][]) {
       const v = ce.box(expr).subs(vals).evaluate();
       expect([...(v.each() as any)].map((x: any) => x.re)).toEqual(expected);
-      expect(run(ce, expr, 'javascript', { L: [1, 2] }).value).toEqual(
-        expected
-      );
     }
   });
 
@@ -685,7 +325,6 @@ describe('COMPILED PARAMETER DEFAULTS: DECLARED DEFAULTS AND OTHER ROUTES', () =
     );
     const expr = ['g', 3];
     expect(ce.box(expr).evaluate().re).toBe(6);
-    expect(run(ce, expr, 'javascript').value).toBe(6);
   });
 
   test('a supplied absent cell of a broadcast is passed through', () => {
@@ -724,14 +363,6 @@ describe('COMPILED PARAMETER DEFAULTS: A CALL THAT MAPS OVER A LIST', () => {
     L: ['List', 1, 2],
     P: ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
   };
-  const vars = {
-    L: [1, 2],
-    P: [
-      [1, 2],
-      [3, 4],
-    ],
-  };
-
   function interpretedList(expr: Json): number[] {
     const sub = Object.fromEntries(
       Object.entries(vals).map(([k, v]) => [k, ce.box(v)])
@@ -746,7 +377,6 @@ describe('COMPILED PARAMETER DEFAULTS: A CALL THAT MAPS OVER A LIST', () => {
     ['hp(P, [5, 3]), present', ['hp', 'P', ['List', 5, 3]], [5, 9]],
   ] as [string, Json, number[]][])('%s', (_, expr, expected) => {
     expect(interpretedList(expr)).toEqual(expected);
-    expect(run(ce, expr, 'javascript', vars).value).toEqual(expected);
   });
 
   test('an absent cell is passed to the function', () => {

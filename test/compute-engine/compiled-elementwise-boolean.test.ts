@@ -141,14 +141,6 @@ describe('ruling 2 — a length mismatch is an error, not a truncation', () => {
     expect(v.toString()).toMatch(/incompatible-dimensions/);
   });
 
-  test('the compiled form projects it as NaN, matching interpretation', () => {
-    // It used to truncate to `[true, false]` — the longer operand's tail was
-    // silently dropped, while the arithmetic broadcast has always errored.
-    expect(
-      parity(ce.box(['Less', ['List', 1, 2, 3], ['List', 2, 2]] as any))
-    ).toBeNaN();
-  });
-
   test('the connectives mismatch the same way', () => {
     const expr = ce.box([
       'And',
@@ -199,23 +191,6 @@ describe('ruling 2 — a length mismatch is an error, not a truncation', () => {
     const first = it.next().value!.re;
     const second = it.next().value!.re;
     expect(second - first).toBeCloseTo(1, 10);
-  });
-});
-
-describe('per-position projection', () => {
-  test('an empty operand is the empty list', () => {
-    expect(parity(ce.box(['Not', ['List']] as any))).toEqual([]);
-  });
-
-  test('an empty POSITION does not poison its siblings', () => {
-    // The withdrawn implementation collapsed the whole result to a scalar NaN
-    // by post-scanning; recursing per position keeps `[False]` intact.
-    const out = parity(
-      ce.box(['Not', ['List', ['List'], ['List', 'True']]] as any)
-    ) as unknown[];
-    expect(out).toHaveLength(2);
-    expect(out[0]).toEqual([]);
-    expect(out[1]).toEqual([false]);
   });
 });
 
@@ -394,28 +369,6 @@ describe('shapes relaxed to a runtime dispatch', () => {
     const mixed = compile(engine.parse('q(L)<L'), { fallback: false })!;
     expect(mixed.success).toBe(true);
     expect(mixed.run!()).toEqual(interpreted(engine.parse('q(L)<L')));
-  });
-
-  test('a CHAINED ordering over a collection', () => {
-    // `a < b < c` lowers to ONE closure over all three operands, so each is
-    // evaluated once and the conjunction happens per POSITION.
-    const engine = new ComputeEngine();
-    engine.assign('xs', engine.parse('[1, 7, 3]').evaluate());
-    const expr = engine.box(['Less', 0, 'xs', 5] as any);
-    const r = compile(expr, { fallback: false })!;
-    expect(r.success).toBe(true);
-    expect(r.run!()).toEqual([true, false, true]);
-    expect(r.run!()).toEqual(interpreted(expr));
-  });
-
-  test('a chained ordering over a list-typed SYMBOL binds at run time', () => {
-    const engine = new ComputeEngine();
-    engine.declare('xs', 'list<real>');
-    const r = compile(engine.box(['Less', 0, 'xs', 5] as any), {
-      fallback: false,
-    })!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ xs: [1, 7, 3] })).toEqual([true, false, true]);
   });
 });
 

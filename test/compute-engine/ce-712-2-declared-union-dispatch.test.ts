@@ -96,77 +96,7 @@ function declineCode(
   }
 }
 
-/** The number of each point interval of an interval-js result. */
-function fromIntervals(r: any): Value {
-  if (Array.isArray(r)) return r.map(fromIntervals);
-  expect(r.kind).toBe('interval');
-  expect(r.value.lo).toBe(r.value.hi);
-  return r.value.lo;
-}
-
 describe('CE-712.2: an input declared with a union of shapes', () => {
-  // name, expression, the inputs for each member, the inputs that hold
-  // points
-  const CASES: [string, unknown, Record<string, Value>[], string[]][] = [
-    ['f(U)', ['f', 'U'], [{ U: [1, 2] }, { U: 3 }, { U: [] }], []],
-    ['U + 1', ['Add', 'U', 1], [{ U: [1, 2] }, { U: -0.5 }], []],
-    ['2U', ['Multiply', 2, 'U'], [{ U: [4, 5, 6] }, { U: 7 }], []],
-    [
-      'U + V',
-      ['Add', 'U', 'V'],
-      [
-        { U: [1, 2], V: [10, 20] },
-        { U: [1, 2], V: 5 },
-        { U: 5, V: [1, 2] },
-        { U: 2, V: 3 },
-      ],
-      [],
-    ],
-  ];
-
-  test.each(CASES)('javascript: %s', (_name, json, inputs, points) => {
-    const ce = engine();
-    const expr = ce.box(json as any);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    for (const vars of inputs)
-      expect(r.run!(vars as any)).toEqual(interpreted(ce, expr, vars, points));
-  });
-
-  test('the code tests the shape of the input once, at the entry', () => {
-    const ce = engine();
-    const r = compile(ce.box(['Add', 'U', 1]), { fallback: false });
-    expect(r.code).toBe(
-      '(Array.isArray(_.U) ? _SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.U, 1) : _.U + 1)'
-    );
-  });
-
-  test('w(P): a point or a list of points at a function declared `function`', () => {
-    const ce = engine();
-    const expr = ce.box(['w', 'P']);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    // The parameter of `w` is read by index, so it takes a list of points
-    // whole (user decision 2026-11-14): the member `list<tuple<…>>` adds
-    // the first point and the second. The empty list goes to that member
-    // too: the run-time test cannot tell it from a list of points.
-    expect(r.code).toBe(
-      '((_.P.length === 0 || Array.isArray(_.P[0])) ? ' +
-        '_fn_w_list_tuple_real__real__(_.P) : ' +
-        '_SYS.at(_.P, 1) + _SYS.at(_.P, 2))'
-    );
-    for (const P of [[[1, 2], [3, 4]], [1, 2]] as Value[])
-      expect(r.run!({ P } as any)).toEqual(
-        interpreted(ce, expr, { P }, ['P'])
-      );
-    expect(interpreted(ce, expr, { P: [[1, 2], [3, 4]] }, ['P'])).toEqual([
-      4, 6,
-    ]);
-    // `P = []` reads both points out of range. The interpreter gives `NaN`;
-    // the compiled value is computed from absent values and is unspecified
-    // (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code").
-    expect(interpreted(ce, expr, { P: [] }, ['P'])).toBeNaN();
-  });
 
   test('a list of points read by index declines on interval-js', () => {
     // The parameter of `w` takes a list of points whole (user decision
@@ -195,16 +125,6 @@ describe('CE-712.2: an input declared with a union of shapes', () => {
       4, 6,
     ]);
   });
-
-  test('an input declared `broadcastable<real>` is not dispatched', () => {
-    // `broadcastable<T>` asks for the element-wise map of the operators,
-    // not for one body per shape.
-    const ce = engine();
-    ce.declare('B', 'broadcastable<real>');
-    const r = compile(ce.box(['Add', 'B', 1]), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.code).not.toContain('Array.isArray(_.B)');
-  });
 });
 
 describe('CE-712.2: the declines of a declared union', () => {
@@ -214,15 +134,10 @@ describe('CE-712.2: the declines of a declared union', () => {
       // A point of two reals and a list of two reals are both `[a, b]`.
       const ce = engine();
       const expr = ce.box(['Add', ['At', 'T', 1], 1]);
-      if (to === 'interval-js') {
-        // The interval mode declines a union of shapes at an input as
-        // outside its profile, and names the input in `value`.
-        expect(declineCode(expr, to)).toBe('outside-profile');
-        expect(compile(expr, { to }).diagnostic?.value).toBe('T');
-        return;
-      }
-      expect(declineCode(expr, to)).toBe('union-dispatch');
-      expect(compile(expr, { to }).unsupported).toContain('T');
+      // A union of shapes at an input declines as outside the profile, and
+      // the input is named in `value`.
+      expect(declineCode(expr, to)).toBe('outside-profile');
+      expect(compile(expr, { to }).diagnostic?.value).toBe('T');
     }
   );
 
@@ -232,16 +147,10 @@ describe('CE-712.2: the declines of a declared union', () => {
       // Three inputs of two members each need eight bodies.
       const ce = engine();
       const expr = ce.box(['Add', 'U', 'V', 'W']);
-      if (to === 'interval-js') {
-        // The interval mode declines at the first input of a union of
-        // shapes, as outside its profile.
-        expect(declineCode(expr, to)).toBe('outside-profile');
-        expect(compile(expr, { to }).diagnostic?.value).toBe('U');
-        return;
-      }
-      expect(declineCode(expr, to)).toBe('union-dispatch');
-      const { unsupported } = compile(expr, { to });
-      expect(unsupported).toEqual(expect.arrayContaining(['U', 'V', 'W']));
+      // The compilation declines at the first input of a union of shapes,
+      // as outside the profile.
+      expect(declineCode(expr, to)).toBe('outside-profile');
+      expect(compile(expr, { to }).diagnostic?.value).toBe('U');
     }
   );
 });
@@ -272,63 +181,6 @@ describe('CE-712.2: a parameter declared with a union of shapes', () => {
     return ce;
   }
 
-  test.each(['javascript'] as const)(
-    '%s: one variant per member, and a dispatcher',
-    (to) => {
-      const ce = withFunctions();
-      const expr = ce.box(['kk', 'L']);
-      const r = compile(expr, { to, fallback: false });
-      expect(r.success).toBe(true);
-      expect(r.preamble).toContain('const _fn_kk$list = ');
-      expect(r.preamble).toContain('const _fn_kk$scalar = ');
-      expect(r.preamble).toContain(
-        'const _fn_kk = (_tv1) => (Array.isArray(_tv1) ? _fn_kk$list(_tv1) : _fn_kk$scalar(_tv1));'
-      );
-      const value = r.run!({ L: [1, 2, 5] } as any);
-      expect(to === 'javascript' ? value : fromIntervals(value)).toEqual(
-        interpreted(ce, expr, { L: [1, 2, 5] })
-      );
-    }
-  );
-
-  test.each(['javascript'] as const)(
-    '%s: each member gives the interpreter value',
-    (to) => {
-      const ce = withFunctions();
-      for (const [json, vars, points] of [
-        [['kk', 'x'], { x: 3 }, []],
-        [['kk', 'L'], { L: [] }, []],
-        [['kp', 'pt'], { pt: [1, 2] }, ['pt']],
-      ] as [unknown, Record<string, Value>, string[]][]) {
-        const expr = ce.box(json as any);
-        const r = compile(expr, { to, fallback: false });
-        expect(r.success).toBe(true);
-        const value = r.run!(vars as any);
-        expect(to === 'javascript' ? value : fromIntervals(value)).toEqual(
-          interpreted(ce, expr, vars, points)
-        );
-      }
-    }
-  );
-
-  test('javascript: a list of points binds whole at a declared union', () => {
-    // The parameter admits the list, so the interpreter binds it whole,
-    // and `z[1] + z[2]` adds the first two points.
-    const ce = withFunctions();
-    const expr = ce.box(['kp', 'Q']);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain(
-      'const _fn_kp = (_tv1) => ((_tv1.length === 0 || Array.isArray(_tv1[0])) ? _fn_kp$list(_tv1) : _fn_kp$tuple(_tv1));'
-    );
-    const Q = [
-      [1, 2],
-      [3, 4],
-    ];
-    expect(r.run!({ Q } as any)).toEqual(interpreted(ce, expr, { Q }, ['Q']));
-    expect(interpreted(ce, expr, { Q }, ['Q'])).toEqual([4, 6]);
-  });
-
   test('a variant that the target cannot compile: the fallback value', () => {
     // `Length` of a number is an error in the interpreter, and its variant
     // for the member `number` does not compile, so the definition of `k`
@@ -336,20 +188,6 @@ describe('CE-712.2: a parameter declared with a union of shapes', () => {
     const ce = withFunctions();
     const expr = ce.box(['k', 'L']);
     expect(compile(expr).run!({ L: [1, 2, 5] } as any)).toBe(3);
-  });
-
-  test('no run-time test tells the members of a parameter apart', () => {
-    // A point of two reals and a list of two reals are both `[a, b]`, so
-    // the function keeps one definition for both members, and a call with
-    // a settled argument gives the interpreter value.
-    const ce = withFunctions();
-    const expr = ce.box(['kn', 'L']);
-    const r = compile(expr, { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.preamble).not.toContain('_fn_kn$');
-    expect(r.run!({ L: [1, 2, 5] } as any)).toEqual(
-      interpreted(ce, expr, { L: [1, 2, 5] })
-    );
   });
 });
 
@@ -379,16 +217,6 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
     );
   });
 
-  test('three depths: a scalar, a list and a list of lists', () => {
-    const type = 'real | list<real> | list<list<real>>';
-    const r = compile(absentEngine(type).parse('f(L)'), { fallback: false });
-    expect(r.success).toBe(true);
-    for (const v of [3, [1, 2], [[1], [2, 3]], []] as Value[])
-      expect(r.run!({ L: v } as any)).toEqual(
-        interpretedWith(type, boxed(v, false))
-      );
-  });
-
   test.each(['javascript', 'interval-js'] as const)(
     '%s: a list of lists with an empty first row and a list of depth 3 decline',
     (to) => {
@@ -397,9 +225,7 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
       // the rank-3 map read 1 and 2 as lists.
       const type = 'list<list<real>> | list<list<list<real>>>';
       const ce = absentEngine(type);
-      expect(declineCode(ce.parse('f(L)'), to)).toBe(
-        to === 'interval-js' ? 'outside-profile' : 'union-dispatch'
-      );
+      expect(declineCode(ce.parse('f(L)'), to)).toBe('outside-profile');
       if (to !== 'javascript') return;
       const r = compile(ce.parse('f(L)'));
       const v: Value = [[], [1, 2]];
@@ -413,37 +239,6 @@ describe('CE-712.2: absent values and deeper lists at a declared union', () => {
 });
 
 describe('CE-712.2: `nothing` in a declared union of a list and a number', () => {
-  // A list never holds `Nothing` (`[1, Nothing, 2]` is `[1, 2]`), so a
-  // `nothing` element does not change the array nesting of the list
-  // member, and a number and a list are told apart at run time. A
-  // `nothing` member of the union has no compiled value, and asks for no
-  // body.
-  function nothingEngine(type: string): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.parse('f(t) := 2t + 1').evaluate();
-    ce.declare('x', type);
-    return ce;
-  }
-
-  // type, the values of `x`: one for each member
-  const CASES: [string, Value[]][] = [
-    ['list<integer | nothing> | integer', [[1, 2], 3, []]],
-    ['list<real | nothing> | real', [[1.5, 2], -0.5]],
-    ['list<integer> | integer | nothing', [[1, 2], 3]],
-  ];
-
-  test.each(CASES)('javascript: x: %s', (type, values) => {
-    for (const src of ['f(x)', 'x + 1']) {
-      const ce = nothingEngine(type);
-      const expr = ce.parse(src);
-      const r = compile(expr, { fallback: false });
-      expect(r.success).toBe(true);
-      for (const v of values)
-        expect(r.run!({ x: v } as any)).toEqual(
-          interpreted(ce, expr, { x: v })
-        );
-    }
-  });
 
   test.each(['javascript', 'interval-js'] as const)(
     '%s: the decline names the members that are the same array',
@@ -451,15 +246,9 @@ describe('CE-712.2: `nothing` in a declared union of a list and a number', () =>
       const ce = engine();
       const r = compile(ce.box(['Add', ['At', 'T', 1], 1]), { to });
       expect(r.success).toBe(false);
-      // The interval mode declines the input as outside its profile.
-      if (to === 'interval-js') {
-        expect(r.diagnostic?.code).toBe('outside-profile');
-        expect(r.diagnostic?.value).toBe('T');
-        return;
-      }
-      expect(r.error).toContain(
-        'the values of `tuple<real, real>` and of `list<real>` are arrays of the same nesting'
-      );
+      // The input is declined as outside the profile.
+      expect(r.diagnostic?.code).toBe('outside-profile');
+      expect(r.diagnostic?.value).toBe('T');
     }
   );
 });

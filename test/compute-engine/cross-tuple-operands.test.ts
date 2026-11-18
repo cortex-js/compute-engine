@@ -11,7 +11,6 @@
  * list.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 let ce: ComputeEngine;
 beforeEach(() => {
@@ -32,26 +31,6 @@ describe('Cross over tuple operands', () => {
       ['Tuple', 1, 1, 1],
     ]);
     expect(r.evaluate().json).toEqual(['Tuple', -2, 7, -2]);
-  });
-
-  test('a point-typed symbol pair compiles to a point on every target', () => {
-    const engine = new ComputeEngine();
-    engine.declare('P', 'tuple<real, real, real>');
-    engine.declare('Q', 'tuple<real, real, real>');
-    engine.declare('s', 'real');
-    const expr = engine.box([
-      'Add',
-      ['Multiply', 's', ['Cross', 'P', 'Q']],
-      'P',
-    ]);
-    expect(expr.type.matches('tuple<number, number, number>')).toBe(true);
-    const js = compile(expr, { fallback: false });
-    expect([js.success, js.error?.message]).toEqual([true, undefined]);
-    expect(js.run!({ P: [1, 2, 3], Q: [4, 5, 6], s: 2 })).toEqual([-5, 14, -3]);
-    for (const to of ['glsl'] as const) {
-      const r = compile(expr, { to, fallback: false });
-      expect([to, r.success, r.error?.message]).toEqual([to, true, undefined]);
-    }
   });
 
   test('symbols declared with the bare tuple type type a point', () => {

@@ -306,22 +306,14 @@ describe('the interval mode: the result contract', () => {
         /the vars entry of c, which is not a read of the inputs object/,
       ],
       [{ mode: 'complex' }, /the option `mode` with the value 'complex'/],
-      [{ functions: { f: () => 1 } }, /the option `functions`/],
-      [{ preamble: 'const a = 1;' }, /the option `preamble`/],
     ] as const)
       expect(declineOf(() => mode(['Add', 'x', 'c'], options)).message).toMatch(
         cause
       );
-    // `strictTypes` declines an input whose type is inferred, as on
-    // `javascript`.
-    expect(() => mode(['Add', 'x', 'c'], { strictTypes: true })).toThrow(
-      /strictTypes: declare `c`/
-    );
     // No effect.
     expect(
       mode(['Sin', 'x'], {
         entryChecks: false,
-        broadcast: true,
         iterationBudget: 10,
       }).success
     ).toBe(true);

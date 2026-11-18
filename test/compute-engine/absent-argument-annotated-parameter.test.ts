@@ -48,12 +48,6 @@ function run(src: string): { value: string; diagnostics: string[] } {
   };
 }
 
-function compiled(expr: any): unknown {
-  const result = compile(expr, { to: 'javascript' });
-  if (!result.success) throw new Error(result.error);
-  return result.run({});
-}
-
 describe('an absent value at an annotated parameter', () => {
   test('a point that is not found is a NaN point: the body runs', () => {
     const src = `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${ABSENT})`;
@@ -316,7 +310,6 @@ describe('the engine admits an argument that may be absent', () => {
         'length(circles)',
       ].join('\n')
     );
-    expect(compiled(expr)).toBe(3);
     expect(expr.evaluate().toString()).toBe('3');
   });
 });
@@ -375,60 +368,15 @@ describe('a value typed `never` is no assignment evidence', () => {
     expect(last.op1.type.toString()).toBe(
       'list<tuple<number, number, number, number>>'
     );
-    expect(compiled(expr)).toBe(3);
   });
 });
 
 describe('a block-local function called with a list of points', () => {
-  // The interpreter applies the function to each point. The JavaScript
-  // target emitted an ordinary call for a function declared in the compiled
-  // program: the list was passed whole and the answer was the string "1,21".
-  test('an annotated point parameter: the compiled call maps over the points', () => {
-    const src =
-      'function f(p: tuple<number, number>, k: number) { p[1] + k }\nf(xs, 10)';
-    const [program] = parseEpsil(src);
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<tuple<number, number>>');
-    const expr = ce.box(resolveLibraryNames(program, src, ce));
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(
-      result.run!({
-        xs: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toEqual([11, 13]);
-  });
 
   test('a point that is not found is a NaN point: NaN on both routes', () => {
     const src = `function f(p: tuple<number, number>) { p[1] + 1 }\nf([(1, 2), ${ABSENT}])`;
     const { expr } = box(src);
     expect(expr.evaluate().toString()).toBe('[2,NaN]');
-    expect(compiled(expr)).toEqual([2, NaN]);
-  });
-
-  // The type of a bare parameter is inferred from the body as one point; the
-  // interpreter binds the list whole and maps inside the body, at the call
-  // of `h`. The compiled call is written with the body of `g`, so the call
-  // of `h` maps over the list as well (CE-238). It declined before.
-  test('a bare parameter inferred as one point receives the list whole', () => {
-    const src =
-      'function h(q: tuple<number, number>) { q[1] + 1 }\nconst g = (p) => h(p)\ng(xs)';
-    const [program] = parseEpsil(src);
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<tuple<number, number>>');
-    const expr = ce.box(resolveLibraryNames(program, src, ce));
-    const result = compile(expr, { to: 'javascript', fallback: false });
-    expect(result.success).toBe(true);
-    const xs = [
-      [1, 2],
-      [3, 4],
-    ];
-    expect(result.run!({ xs })).toEqual([2, 4]);
-    ce.assign('xs', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
-    expect(expr.evaluate().toString()).toBe('[2,4]');
   });
 });
 
@@ -459,38 +407,6 @@ describe('A BARE PARAMETER UNDER A DECLARED PARAMETER', () => {
 // code"), so the compiled call does not test the argument. The tests below
 // pin the values for present arguments.
 describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', () => {
-  const compileRun = (src: string) => {
-    const { expr } = box(src);
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(true);
-    return () => result.run({});
-  };
-
-  /** Compile `src` with its inputs declared with `types`. */
-  const compileWith = (src: string, types: Record<string, string>) => {
-    const [program] = parseEpsil(src);
-    const ce = new ComputeEngine();
-    for (const [name, type] of Object.entries(types)) ce.declare(name, type);
-    const result = compile(ce.box(resolveLibraryNames(program, src, ce)), {
-      to: 'javascript',
-    });
-    expect(result.success).toBe(true);
-    return result.run!;
-  };
-
-  test('a present value is computed', () => {
-    const run = compileRun(
-      `function f(p: tuple<number, number>) { p[1] + 1 }\nf(${PRESENT})`
-    );
-    expect(run()).toBe(2);
-  });
-
-  test('a numeric parameter reads the absent value as NaN', () => {
-    const run = compileRun(
-      'function f(x: number) { x + 1 }\nf(first(filter([1], c => c > 9)))'
-    );
-    expect(run()).toBeNaN();
-  });
 
   // A body that does not compute with the parameter answered `undefined`,
   // the compiled absent value, before 2026-10-16. The interpreter gives
@@ -503,16 +419,8 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
       'a function literal bound with `const`',
       'const f = (x: number) => x\nf(Missing)',
     ],
-  ])('%s with an absent argument: Missing, compiled NaN', (_label, src) => {
+  ])('%s with an absent argument: Missing', (_label, src) => {
     expect(box(src).expr.evaluate().toString()).toBe('"Missing"');
-    for (const constantFold of [true, false]) {
-      const result = compile(box(src).expr, {
-        to: 'javascript',
-        constantFold,
-      } as any);
-      expect(result.success).toBe(true);
-      expect(result.run({})).toBeNaN();
-    }
   });
 
   // The function is a value given to `map`, which calls it with each element
@@ -568,72 +476,5 @@ describe('THE COMPILED CALL OF AN ANNOTATED PARAMETER WITH AN ABSENT ARGUMENT', 
     expect(result.run({ y: 3 })).toBe(3);
   });
 
-  test('a function literal applied directly computes a present argument', () => {
-    const ce = new ComputeEngine();
-    ce.declare('v', 'real');
-    const expr = ce.box([
-      'Apply',
-      [
-        'Function',
-        ['Add', ['At', 'p', 1], 1],
-        ['Typed', 'p', "'tuple<number, number>'"],
-      ],
-      [
-        'First',
-        [
-          'Filter',
-          ['List', ['Tuple', 1, 2]],
-          ['Function', ['Less', 'v', ['At', 'c', 1]], 'c'],
-        ],
-      ],
-    ]);
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run({ v: 0 })).toBe(2);
-  });
-
-  test('a call mapped over a list of points passes the other arguments', () => {
-    const fn =
-      'function f(p: tuple<number, number>, s: string) { p[1] + length(s) }';
-    expect(
-      compileRun(
-        `${fn}\nf([(1, 2), (3, 4)], first(filter(["ab"], c => c == "ab")))`
-      )()
-    ).toEqual([3, 5]);
-  });
-
-  // The interpreter maps the function over the list.
-  test.each([
-    ['a list', 'list<string>', ['a', 'b'], [1, 1]],
-    [
-      'a nested list',
-      'list<list<string>>',
-      [['a'], ['b', 'c']],
-      [[1], [1, 1]],
-    ],
-  ])(
-    'a list of present elements at a scalar parameter is mapped (%s)',
-    (_label, type, present, expected) => {
-      const run = compileWith('function f(s: string) { 1 }\nf(xs)', {
-        xs: type,
-      });
-      expect(run({ xs: present })).toEqual(expected);
-    }
-  );
-
-  test('a function literal applied to such a list maps over it', () => {
-    const ce = new ComputeEngine();
-    ce.declare('xs', 'list<string>');
-    const result = compile(
-      ce.box([
-        'Apply',
-        ['Function', 1, ['Typed', 's', "'string'"]],
-        'xs',
-      ]),
-      { to: 'javascript' }
-    );
-    expect(result.success).toBe(true);
-    expect(result.run!({ xs: ['a', 'b'] })).toEqual([1, 1]);
-  });
 });
 

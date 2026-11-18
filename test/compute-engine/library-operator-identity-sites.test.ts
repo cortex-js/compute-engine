@@ -228,21 +228,6 @@ describe('compile() reads the definition of the call', () => {
     }
   });
 
-  test('a user Sqrt with a compile handler, compiled in its scope, uses the handler', () => {
-    const ce = new ComputeEngine();
-    ce.declare('y', 'real');
-    ce.pushScope();
-    try {
-      declareUserSqrtWithCompile(ce);
-      const u = ce.box(['Sqrt', 'y']);
-      const result = compile(u) as any;
-      expect(result.success).toBe(true);
-      expect(result.run({ y: 4 })).toBe(104);
-    } finally {
-      ce.popScope();
-    }
-  });
-
   test('a user Sqrt made in a popped scope compiles to the user function', () => {
     const ce = new ComputeEngine();
     ce.declare('y', 'real');

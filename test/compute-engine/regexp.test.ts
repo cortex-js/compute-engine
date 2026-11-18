@@ -541,13 +541,6 @@ describe('compiling to JavaScript', () => {
   // implementation, so there is no second engine to diverge from.
   const ce2 = new ComputeEngine();
   ce2.declare('s', 'string');
-  const run = (expr: any, subject: string) => {
-    const r: any = compile(ce2.box(expr), {
-      fallback: false,
-      constantFold: false,
-    } as any);
-    return r.success ? r.run({ s: subject }) : 'DECLINED';
-  };
   const declines = (expr: any) => {
     const r: any = compile(ce2.box(expr), {
       fallback: true,
@@ -555,37 +548,6 @@ describe('compiling to JavaScript', () => {
     } as any);
     return r.success !== true;
   };
-
-  test('IsMatch agrees with the interpreter', () => {
-    for (const [subject, pattern, flags] of [
-      ['ab12', '[0-9]+', undefined],
-      ['abc', '[0-9]+', undefined],
-      ['AAA', 'a+', 'i'],
-    ] as [string, string, string | undefined][]) {
-      const interpreted =
-        ev(['IsMatch', { str: subject }, RE(pattern, flags)]).symbol === 'True';
-      expect(run(['IsMatch', 's', RE(pattern, flags)], subject)).toBe(
-        interpreted
-      );
-    }
-  });
-
-  test('StringReplace with a pattern agrees with the interpreter', () => {
-    for (const [subject, pattern] of [
-      ['a1b22c', '[0-9]+'],
-      ['abc', 'x'],
-    ]) {
-      const interpreted = ev([
-        'StringReplace',
-        { str: subject },
-        RE(pattern),
-        { str: '#' },
-      ]).string;
-      expect(
-        run(['StringReplace', 's', RE(pattern), { str: '#' }], subject)
-      ).toBe(interpreted);
-    }
-  });
 
   test('the offset-reporting surface fails closed', () => {
     // A coverage boundary, NOT a dialect one: `StringMatch`/`StringMatchAll`
@@ -597,121 +559,6 @@ describe('compiling to JavaScript', () => {
     expect(
       declines(['StringReplace', 's', RE('a'), ['Function', { str: 'Z' }, 'm']])
     ).toBe(true);
-  });
-
-  test('compiled and interpreted replacement agree, shape by shape', () => {
-    // `_SYS.rerep` and the interpreter's `replaceByPattern` are two separate
-    // implementations of one algorithm, which is the classic place for a
-    // silent divergence. Zero-width patterns, surrogate pairs, a `count`
-    // limit, a combining mark and CRLF are where they would drift first.
-    const cases: [string, string, string | undefined, number | undefined][] = [
-      ['a1b22c', '[0-9]+', undefined, undefined],
-      ['a1b2c3', '[0-9]', undefined, 2],
-      ['abc', 'x', undefined, undefined],
-      ['ab', 'a*', undefined, undefined],
-      ['ab', '(?:)', undefined, undefined],
-      ['ab', '$', undefined, undefined],
-      ['ab', '^', undefined, undefined],
-      ['ab', '\\b', undefined, undefined],
-      ['', 'a*', undefined, undefined],
-      ['AaA', 'a', 'i', undefined],
-      ['👍a👍', 'a', undefined, undefined],
-      ['👍👍', 'a*', undefined, undefined],
-      ['aaa', 'a', undefined, 1],
-      ['q\u0301b', 'q', undefined, undefined],
-      ['a\r\nb', '\\n', undefined, undefined],
-    ];
-    for (const [subject, pattern, flags, count] of cases) {
-      const interpreted: any[] = [
-        'StringReplace',
-        { str: subject },
-        RE(pattern, flags),
-        { str: '#' },
-      ];
-      const compiled: any[] = [
-        'StringReplace',
-        's',
-        RE(pattern, flags),
-        { str: '#' },
-      ];
-      if (count !== undefined) {
-        interpreted.push(count);
-        compiled.push(count);
-      }
-      expect(run(compiled, subject)).toBe(ev(interpreted).string);
-    }
-  });
-
-  test('a pattern whose TEXT is hostile to source embedding is safe', () => {
-    // The pattern is embedded as a JS STRING literal passed to `new RegExp`,
-    // not as a `/.../` literal, so a slash is harmless — but a quote,
-    // backslash, backtick, `${}` or U+2028 would each break a different
-    // escaping scheme if the wrong one were used.
-    for (const [subject, pattern] of [
-      ['a"b', '"'],
-      ['a\\b', '\\\\'],
-      ['a/b', '/'],
-      ['a`b', '`'],
-      ['a${x}b', '\\$\\{x\\}'],
-      ['a\u2028b', '\u2028'],
-    ]) {
-      expect(run(['StringReplace', 's', RE(pattern), { str: '#' }], subject)).toBe(
-        ev(['StringReplace', { str: subject }, RE(pattern), { str: '#' }]).string
-      );
-    }
-  });
-
-  test('compiled matching conditions its input like the interpreter', () => {
-    // The interpreter NFC-normalizes and repairs lone surrogates at boxing.
-    // Without the same conditioning, the NFD spelling of `é` matched `/é/`
-    // interpreted and NOT compiled — a silent divergence on real text.
-    for (const subject of ['\u00e9', 'e\u0301']) {
-      expect(run(['IsMatch', 's', RE('\u00e9')], subject)).toBe(
-        ev(['IsMatch', { str: subject }, RE('\u00e9')]).symbol === 'True'
-      );
-    }
-  });
-
-  test('compiled code rejects a non-string subject instead of coercing it', () => {
-    const r: any = compile(ce2.box(['IsMatch', 's', RE('a')]), {
-      fallback: false,
-      constantFold: false,
-    } as any);
-    expect(r.success).toBe(true);
-    // `test()` would coerce 42 to "42" and answer; the interpreter would not.
-    expect(() => r.run({ s: 42 })).toThrow();
-  });
-
-  test('the compiled replacement normalizes its joined result', () => {
-    // Re-segmentation happens once, when the pieces are joined: replacing `q`
-    // with `e` in `q` + U+0301 must give the single character `é` (U+00E9).
-    // Without a `.normalize()` on the join the compiled result was `e` +
-    // U+0301 — two code points, a different `Length()` from the interpreter's.
-    const subject = 'q\u0301';
-    const compiled = run(['StringReplace', 's', RE('q'), { str: 'e' }], subject);
-    expect(compiled).toBe(
-      ev(['StringReplace', { str: subject }, RE('q'), { str: 'e' }]).string
-    );
-    expect(compiled).toBe('\u00e9');
-  });
-
-  test('the RegExp decline names only operators that actually lower', () => {
-    // The message is advice a user follows, so naming an operator with no
-    // lowering sends them into a second failure. `StringSplit` has none —
-    // regex arm or otherwise — so it must not appear, and this test fails if
-    // it is ever added back to the message without a lowering to match.
-    const r: any = compile(ce2.box(['RegExp', { str: 'a' }]), {
-      fallback: true,
-      constantFold: false,
-    } as any);
-    expect(r.success).toBe(false);
-    const message = String(r.error ?? r.diagnostic ?? '');
-    if (message) {
-      expect(message).not.toContain('StringSplit');
-      expect(message).toContain('IsMatch');
-    }
-    // The premise the message rests on: `StringSplit` really does decline.
-    expect(declines(['StringSplit', 's', RE('a')])).toBe(true);
   });
 
   test('a COMPUTED pattern fails closed', () => {

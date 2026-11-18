@@ -809,7 +809,7 @@ export function holdsKindValue(expr: Expression): boolean {
  * a call of a kind head, a symbol whose value holds one, a symbol or a
  * callee whose type is a kind type (an absent or `NaN` arm aside). A symbol
  * or a callee typed `number | residue` does not count: it may be a number.
- * The compiler asks this question (`BaseCompiler.compile()`), and declines
+ * The compiler asks this question, and declines
  * what it cannot represent; the rules of arithmetic ask the other, and keep
  * away from what may be a kind value.
  */
@@ -817,47 +817,6 @@ export function holdsKindValueForCertain(expr: Expression): boolean {
   if (!engineHasKindValues(expr.engine)) return false;
   if (!isSymbol(expr) && !isFunction(expr)) return false;
   return holds(expr, undefined, true);
-}
-
-/**
- * The kind types that `expr` holds a value of FOR CERTAIN, for the message
- * of the compiler when it declines (`BaseCompiler.compile()`): the kind
- * types of the kind heads called in `expr`, and of the strict types of its
- * symbols. Empty when none is found by this shallow reading (a value held
- * through a symbol's value or a callee); the caller then names the kind in
- * general terms.
- */
-export function kindTypesHeldBy(expr: Expression): string[] {
-  const ce = expr.engine;
-  const kinds = kindTypeNames(ce);
-  const found = new Set<string>();
-  const visit = (e: Expression): void => {
-    if (isSymbol(e)) {
-      if (typeSaysKind(e.type.type, kinds, true))
-        for (const t of kindArmNames(e.type.type, kinds)) found.add(t);
-      return;
-    }
-    if (!isFunction(e)) return;
-    if (isKindHeadCall(e))
-      for (const t of kindArmNames(e.type.type, kinds)) found.add(t);
-    else if (calleeReturnsKind(e, true))
-      for (const t of declaredKindTypes(ce, calleeType(e))) found.add(t);
-    for (const op of e.ops) visit(op);
-  };
-  visit(expr);
-  return [...found];
-}
-
-/** The signature type of the callee of the application `expr` (see
- * `calleeReturnsKind()`). */
-function calleeType(expr: Expression): Type {
-  if (!isFunction(expr)) return 'never';
-  if (expr.operator === 'Apply' && expr.nops > 0) return expr.op1.type.type;
-  return (
-    expr.operatorDefinition?.signature.type ??
-    expr.valueDefinition?.type.type ??
-    'never'
-  );
 }
 
 /**

@@ -19,7 +19,6 @@
  *    now counts as imprecise, so the accumulator is typed from its seed.
  */
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const SEED = ['Add', 1, ['Mod', 4, 3]];
 const ADD = ['Function', ['Add', 'v', 'i'], 'v', 'i'];
@@ -155,26 +154,5 @@ describe('issue #425: a list accumulator indexed by its own element compiles', (
     // accessor.
     expect(fn.ops![1].type.toString()).toEqual('vector<integer^2>');
     expect(reduce.type.toString()).toEqual('vector<integer^2>');
-  });
-
-  it('compiles, and the compiled result matches the interpreter', () => {
-    const ce = engine();
-    const expr = ce.box(SELF_INDEXED as any);
-    const compiled = compile(expr, { fallback: false });
-    // s = [2, 0] → [p[2], 0] = [1, 0] → [p[1], 0] = [3, 0] → [p[3], 0] = [2, 0]
-    expect(compiled.run!({ a: 2, n: 3, p: [3, 1, 2] })).toEqual([2, 0]);
-    expect(compiled.run!({ a: 2, n: 2, p: [3, 1, 2] })).toEqual([3, 0]);
-    expect(compiled.run!({ a: 2, n: 0, p: [3, 1, 2] })).toEqual([2, 0]);
-
-    ce.assign('a', 2);
-    ce.assign('n', 2);
-    ce.assign('p', ce.box(['List', 3, 1, 2]));
-    expect(expr.evaluate().json).toEqual(['List', 3, 0]);
-  });
-
-  it('a literal index still compiles (unchanged)', () => {
-    const ce = engine();
-    const compiled = compile(ce.box(walk(2) as any), { fallback: false });
-    expect(compiled.run!({ a: 2, n: 3, p: [3, 1, 2] })).toEqual([1, 0]);
   });
 });

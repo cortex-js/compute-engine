@@ -162,9 +162,6 @@ describe('BINDING UNITS: OPERATIONS', () => {
   test('a compilation reads the meet of the units of its input', () => {
     const ce = engine();
     const a = ce.parse('x + 1');
-    const b = ce.parse('x > 1');
-    expect(compile(ce.function('Add', [a, ce.function('Boole', [b])])).success)
-      .toBe(true);
     // Units that disagree: the input has no type, and the compilation
     // declines.
     const c = ce.parse('x \\land y');

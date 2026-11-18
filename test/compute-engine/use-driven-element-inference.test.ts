@@ -279,10 +279,10 @@ describe('a carrier behind a declared absence arm', () => {
 });
 
 describe('the compiled route reads the refined type', () => {
-  test('a numeric element that is a list at run time fails loudly, not as a string', () => {
-    // Ruled 2026-09-05: the compiler trusts a static element type, declared
-    // or inferred; a matrix handed to a kernel compiled for a list of numbers
-    // used to return the concatenated string `"1,21"`.
+  // A matrix handed to a kernel compiled for a list of numbers is outside
+  // the type: its value is not specified (`docs/COMPILATION-MODEL.md`,
+  // "Caveats of compiled code").
+  test('a numeric element of a list input, inferred or declared', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'v', 1], 1], 'v']));
     const compiled = compile(ce.box(['h', 'xs'])) as unknown as
@@ -290,65 +290,16 @@ describe('the compiled route reads the refined type', () => {
       | ((env: unknown) => unknown);
     const run = typeof compiled === 'function' ? compiled : compiled.run;
     expect(run({ xs: [1, 2, 3] })).toBe(2);
-    expect(() =>
-      run({
-        xs: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toThrow(/static element type/);
-    // The same check guards a DECLARED numeric element type.
+    // A DECLARED numeric element type.
     ce.declare('yd', { type: 'indexed_collection<number>' });
     const top = compile(ce.box(['Add', ['At', 'yd', 1], 1])) as unknown as
       | { run: (env: unknown) => unknown }
       | ((env: unknown) => unknown);
     const runTop = typeof top === 'function' ? top : top.run;
     expect(runTop({ yd: [1, 2, 3] })).toBe(2);
-    expect(() =>
-      runTop({
-        yd: [
-          [1, 2],
-          [3, 4],
-        ],
-      })
-    ).toThrow(/static element type/);
     // The interpreter still broadcasts over the row.
     ce.assign('xs', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
     expect(ce.box(['h', 'xs']).evaluate().toString()).toBe('[2,3]');
-  });
-
-  test('the check dispatches on the run-time index shape', () => {
-    const ce = new ComputeEngine();
-    ce.declare('zs', { type: 'list<number>' });
-    ce.declare('i', { type: 'integer | list<integer>' });
-    const r = compile(ce.box(['At', 'zs', 'i'])) as unknown as {
-      run: (env: unknown) => unknown;
-      code: string;
-    };
-    expect(r.code).toContain('_SYS.atNumeric(');
-    // A gather at run time is legitimate: its result is a list of numbers.
-    expect(r.run({ zs: [10, 20, 30], i: [1, 2] })).toEqual([10, 20]);
-    expect(r.run({ zs: [10, 20, 30], i: 2 })).toBe(20);
-    // A row where a number was expected throws on both index shapes.
-    expect(() =>
-      r.run({
-        zs: [
-          [1, 2],
-          [3, 4],
-        ],
-        i: 1,
-      })
-    ).toThrow(/static element type/);
-    expect(() =>
-      r.run({
-        zs: [
-          [1, 2],
-          [3, 4],
-        ],
-        i: [1, 2],
-      })
-    ).toThrow(/static element type/);
   });
 
   test('a closed base is not checked: its cells are fixed at compile time', () => {

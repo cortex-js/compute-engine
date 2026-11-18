@@ -1,14 +1,6 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
+
 import { factorial2 } from '../../src/compute-engine/numerics/numeric';
 import { factorial2 as intervalFactorial2 } from '../../src/compute-engine/interval/elementary';
-
-// For an odd n < 0, n!! = (-1)^((|n|-1)/2) / (|n|-2)!!. The product
-// (|n|-2)!! overflows a double from |n| = 303, but its reciprocal is still a
-// representable (subnormal) double down to about |n| = 315. The reference
-// values below are computed exactly with bigints.
-
-const ce = new ComputeEngine();
 
 /** `n!!` for `n ≥ -1`, as an exact bigint. */
 function exactFactorial2(n: number): bigint {
@@ -92,18 +84,6 @@ describe('Factorial2 at an odd negative integer whose value is subnormal', () =>
   test('a huge odd negative integer ends quickly', () => {
     expect(Object.is(factorial2(-9007199254740991), -0)).toBe(true);
     expect(Object.is(factorial2(-9007199254740989), 0)).toBe(true);
-  });
-
-  test('the compiled JavaScript route gives the same value', () => {
-    const f = compile(ce.parse('x!!'), {
-      to: 'javascript',
-      fallback: false,
-    } as never);
-    expect(f.success).toBe(true);
-    const run = (x: number) => f.run!({ x } as never) as number;
-    expect(run(-303)).toBe(factorial2(-303));
-    expect(run(-303)).toBeLessThan(0);
-    expect(run(-305)).toBeGreaterThan(0);
   });
 });
 

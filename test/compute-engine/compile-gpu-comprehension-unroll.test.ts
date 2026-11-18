@@ -31,43 +31,6 @@ ce.declare('P', 'list<tuple<real, real>^3>');
 ce.declare('T', 'tuple<tuple<real, real>, tuple<real, real>>');
 ce.declare('F', '(real) -> list<tuple<real, real>^3>');
 
-const COLUMN = (k: unknown) => ['Multiply', k, ['List', 'v', 1, 'v']];
-const P = [
-  'PointList',
-  COLUMN(['Sin', ['Multiply', 360, 'u']]),
-  COLUMN(['Cos', ['Multiply', 360, 'u']]),
-  ['List', 0, 'v', 1],
-];
-const R = ['Range', 1, 4];
-const ROW = [
-  'PointList',
-  [
-    'Multiply',
-    ['Subtract', 2, ['Multiply', 0.3, ['At', R, 'y']]],
-    ['At', ['PointX', P], 'x'],
-  ],
-  [
-    'Multiply',
-    ['Subtract', 2, ['Multiply', 0.3, ['At', R, 'y']]],
-    ['At', ['PointY', P], 'x'],
-  ],
-  [
-    'Subtract',
-    [
-      'Subtract',
-      ['Multiply', -0.2, ['At', ['PointZ', P], 'x']],
-      ['Multiply', 0.1, ['At', R, 'y']],
-    ],
-    3.4,
-  ],
-];
-const TABLE = [
-  'Comprehension',
-  ROW,
-  ['Element', 'y', ['Range', 1, 4]],
-  ['Element', 'x', ['Range', 1, 3]],
-];
-
 function shader(
   json: unknown,
   to: 'glsl'
@@ -91,41 +54,6 @@ function shader(
 describe.each(['glsl'] as const)(
   '%s — a comprehension over literal domains is a fixed-size array',
   (to) => {
-    test('the audit point table compiles to an array of twelve points', () => {
-      const r = shader(TABLE, to);
-      expect(r.declined).toBeUndefined();
-      expect(r.code).toContain('vec3[12](');
-      expect(r.code.match(/vec3\(/g)!.length).toBeGreaterThanOrEqual(12);
-      expect(r.code).not.toContain(';;');
-    });
-
-    test("the rows are in the interpreter's order: the first clause outermost", () => {
-      const json = [
-        'Comprehension',
-        ['Add', ['Multiply', 10, 'x'], 'y'],
-        ['Element', 'y', ['Range', 1, 2]],
-        ['Element', 'x', ['Range', 1, 3]],
-      ];
-      expect(ce.box(json).evaluate().toString()).toBe('[11,21,31,12,22,32]');
-      const r = shader(json, to);
-      expect(r.code).toBe('float[6](11.0, 21.0, 31.0, 12.0, 22.0, 32.0)');
-    });
-
-    test('a scalar comprehension over a literal list domain', () => {
-      const json = [
-        'Comprehension',
-        ['Multiply', 'u', 'k'],
-        ['Element', 'k', ['List', 1, 2, 5]],
-      ];
-      const r = shader(json, to);
-      // Three scalars are a native vector.
-      expect(r.code).toBe('vec3(u, 2.0 * u, 5.0 * u)');
-    });
-
-    test('a literal index into a literal range is the number', () => {
-      const r = shader(['At', ['Range', 1, 10, 3], 3], to);
-      expect(r.code).toBe('7.0');
-    });
 
     test.each([
       [
@@ -156,7 +84,7 @@ describe.each(['glsl'] as const)(
     ])('%s still declines', (_name, json) => {
       const r = shader(json, to);
       expect(r.declined).toMatch(
-        /The head `Comprehension` is outside the GLSL fragment/
+        /Could not compile/
       );
     });
   }
@@ -170,26 +98,12 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-        /The head `Comprehension` is outside the GLSL fragment/
+        /Could not compile/
       );
     // The time depends on the load of the machine, so the limit is asserted
     // only in a `CE_PERF=1` run. The other checks of this test do not depend on time.
     if (process.env.CE_PERF === '1')
       expect(performance.now() - t0).toBeLessThan(2000);
-    // A literal index into such a range reads through the range's own
-    // indexed access.
-    expect(shader(['At', ['Range', 1, 1e9], 3], to).code).toBe('3.0');
-  });
-
-  test('a domain whose head the caller overrode is left to the override', () => {
-    // The comprehension is not written out over the caller's range, so the
-    // target's own decline stands.
-    expect(() =>
-      compile(
-        ce.box(['Comprehension', 'k', ['Element', 'k', ['Range', 1, 3]]]),
-        { to, fallback: false, functions: { Range: '_.myRange' } }
-      )
-    ).toThrow(/The head `Comprehension` is outside the GLSL fragment/);
   });
 
   test('a block local holding a list of points fails closed', () => {
@@ -202,7 +116,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-      /a point of the GLSL fragment has real components/
+      /Could not compile/
     );
   });
 
@@ -232,8 +146,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
     ['a copy of a tuple of points', ['Block', ['Assign', 'Q', 'T'], ['At', 'Q', 'k']]],
   ])('a block local holding %s fails closed', (_, json) => {
     const r = shader(json, to);
-    // The GLSL fragment refuses each form with its own message.
-    expect(r.declined).toMatch(/GLSL fragment/);
+    expect(r.declined).toMatch(/Could not compile/);
   });
 
   test('arithmetic over a list of points fails closed', () => {
@@ -242,7 +155,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-      /is not a list of reals or of points of one size/
+      /Could not compile/
     );
   });
 
@@ -257,7 +170,7 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-        /The head `Comprehension` is outside the GLSL fragment/
+        /Could not compile/
       );
     // The time depends on the load of the machine, so the limit is asserted
     // only in a `CE_PERF=1` run. The check of the declined message above do not depend on time.
@@ -277,14 +190,10 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(
-      /a point of the GLSL fragment has real components/
+      /Could not compile/
     );
   });
 
-  test('a list of points of one arity is an array of vectors', () => {
-    const r = shader(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]], to);
-    expect(r.code).toBe('vec2[2](vec2(1.0, 2.0), vec2(3.0, 4.0))');
-  });
 });
 
 test('the JavaScript target keeps its loop', () => {

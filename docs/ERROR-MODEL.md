@@ -626,9 +626,8 @@ History: from 2026-09-02 (compiled) and 2026-09-03 (interpreter) to
 branch take no arm — see the 2026-09-02 entry in §7. From 2026-10-20 to
 2026-10-23 `≠` kept that rule. Implementation: `evaluateCondition`
 (`library/control-structures.ts`, which now flags only the `Missing` of an
-undecided whole-collection comparison), `BaseCompiler.conditionNode`
-(`compilation/base-compiler.ts`, which reads a chain link by link), and
-`hasEmptyOperand` and `holds` (`interval/comparison.ts`). Pinned in
+undecided whole-collection comparison), and `hasEmptyOperand` and `holds`
+(`interval/comparison.ts`). Pinned in
 `test/compute-engine/condition-nan-undecided.test.ts`.
 
 #### Extension: a value with no order — user decision of 2026-10-21
@@ -760,8 +759,8 @@ the `Infinity` projection in `docs/COMPILATION-MODEL.md`. Measured
 A closed comparison (no variable) folds to the value of the interpreter on
 `javascript` and `glsl`, with or without `constantFold`
 (a comparison folds under the opt-out because its result jumps at a point;
-`closedExactJump`, `compilation/base-compiler.ts`, which reads the pole
-`ComplexInfinity` as a value with no order, not as a float). Measured
+the fold reads the pole `ComplexInfinity` as a value with no order, not as
+a float). Measured
 2026-10-21, the same code with `constantFold: true` and `constantFold:
 false`:
 
@@ -2398,8 +2397,7 @@ maps its channels onto it:
   number, the `NaN` point for a point, and the absent value of the target
   (`undefined` in JavaScript) otherwise. A cell of an element-wise
   selection that no clause selects is `false` when the cells are booleans
-  and a colour with `NaN` channels when they are colours
-  (`unmatchedCellLiteral()` in `compile-absence.ts`). Compiled code has no
+  and a colour with `NaN` channels when they are colours. Compiled code has no
   representation of `Nothing` as a value. A compilation declines, with the
   diagnostic code `possible-nothing`, when the symbol `Nothing` is read as
   an operand (`[1, Nothing]`, `If(c, Nothing, 7)`), and when a static type
@@ -2612,8 +2610,7 @@ answer and the fix landed. An entry with no FIXED date is still open.
   list). An argument whose type certainly does not match (a string or a
   boolean at a `real` parameter) is refused when the call is boxed, on all
   three routes, so the call is invalid and typed `error` before it is
-  evaluated. Pinned by `test/compute-engine/apply-literal-maps.test.ts` and
-  `typed-function-literals.test.ts`.
+  evaluated. Pinned by `test/compute-engine/typed-function-literals.test.ts`.
   On the two named routes, an assignment can later replace the function
   (`h := (u: real) ↦ 7`, or `f` declared `function` and then assigned), so
   that refusal states only what the name held when the call was boxed. The
@@ -2978,13 +2975,12 @@ document's history):
   decline it, each for a verified reason —
   `test/compute-engine/compile-elseless-if-statement.test.ts`). Ruled the
   same day, after the alignment: the compiled absent value of `Which`, `If`
-  and `When` follows ONE rule per target (`BaseCompiler.absenceKind`) —
+  and `When` follows ONE rule per target —
   the object null (`undefined`) only when every arm is
   provably not a number, `NaN` for a number and for an unknown type, since a
   bare symbol arm is a number until proven otherwise and an object null there
   would turn its arithmetic consumers into a host `TypeError`. Pinned in
-  the conformance suite and in `conditional-values.test.ts`,
-  `when-list-broadcast.test.ts`, `a2-restrictions.test.ts`.
+  the conformance suite and in `conditional-values.test.ts`.
 - **SUPERSEDED the same day — RULED 2026-09-26: searching for an absent
   value means not found.** This entry is kept as history. It was reversed
   later on 2026-09-26, before any release carried it, by rule C of §3,

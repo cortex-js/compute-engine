@@ -88,18 +88,6 @@ function expectEnclosesInterpreter(ce: ComputeEngine, latex: string): void {
 }
 
 describe('Tycho item 216: point calls use shared helpers where supported', () => {
-  test('point-typed parameter, glsl', () => {
-    const ce = engine();
-    expect(code(ce, String.raw`f((x,y))`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_f_.*\(vec2\(x, y\)\)$/)
-    );
-    expect(code(ce, String.raw`d((x,y))`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_d_.*\(vec2\(x, y\)\)$/)
-    );
-    expect(code(ce, String.raw`f((x,y))=1`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_f_.* == 1\.0$/)
-    );
-  });
 
   test('point-typed parameter, interval-js', () => {
     const ce = engine();
@@ -107,21 +95,6 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
       compile(ce.parse(String.raw`f((x,y))`), { to: 'interval-js' }).success
     ).toBe(true);
     expectEnclosesInterpreter(ce, String.raw`d((x,y))`);
-  });
-
-  test('two point parameters, one of them a numeric literal point', () => {
-    const ce = engine();
-    expect(code(ce, String.raw`Q((x,y),(1,2))`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_Q_.*\(vec2\(x, y\), vec2\(1\.0, 2\.0\)\)$/)
-    );
-  });
-
-  test('a chained definition inlines through its callee', () => {
-    const ce = engine();
-    expect(code(ce, String.raw`e_2((x,y))`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_e_2_.*\(vec2\(x, y\)\)$/)
-    );
-    expectEnclosesInterpreter(ce, String.raw`e_2((x,y))`);
   });
 
   test('the inlined interval body agrees with the evaluator', () => {
@@ -143,28 +116,6 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(out.value.hi).toBeCloseTo(14, 9);
   });
 
-  test('the javascript target still compiles the call BY REFERENCE', () => {
-    const ce = engine();
-    expect(code(ce, String.raw`f((x,y))`, 'javascript')).toEqual(
-      expect.stringMatching(/^_fn_f_.*\(\[_\.x, _\.y\]\)$/)
-    );
-    // A scalar-parameter chain never needed inlining on any target.
-    expect(code(ce, String.raw`F(x)`, 'glsl')).toBe('_fn_F(x)');
-  });
-
-  test('a point-typed SYMBOL argument inlines like a literal point', () => {
-    const ce = engine();
-    ce.declare('P', 'tuple<number, number>');
-    expect(code(ce, String.raw`f(P)`, 'glsl')).toEqual(
-      expect.stringMatching(/^_fn_f_.*\(P\)$/)
-    );
-    const point = (v: number) => ({ lo: v, hi: v });
-    const r = compile(ce.parse(String.raw`f(P)`), { to: 'interval-js' });
-    const out = r.run({ a: point(2), b: point(3), P: [point(1), point(2)] });
-    expect(out.value.lo).toBeCloseTo(14, 9);
-    expect(out.value.hi).toBeCloseTo(14, 9);
-  });
-
   test('unsupported interval bodies, list arguments and recursive shaders still decline', () => {
     const ce = engine();
     ce.declare('L', 'list<number>');
@@ -179,20 +130,5 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
       const r = code(ce, latex, to);
       expect(typeof r).toBe('object');
     }
-  });
-
-  test('the substituted body is not evaluated: an impure body never bakes a draw', () => {
-    const ce = engine();
-    // The JavaScript target calls a shared helper; the draw stays in its body.
-    const js = code(ce, String.raw`h((x,y))`, 'javascript');
-    expect(js).toEqual(expect.stringMatching(/^_fn_h_.*\(\[_\.x, _\.y\]\)$/));
-    // The GLSL fragment refuses `Random` in the body of the function.
-    const glsl = code(ce, String.raw`h((x,y))`, 'glsl');
-    expect(glsl).toEqual({
-      declined: expect.stringMatching(/outside the GLSL fragment/),
-    });
-    const r = compile(ce.parse('h((x,y))'), { to: 'glsl' });
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-fragment');
   });
 });

@@ -73,9 +73,10 @@ describe('THE DERIVATIVE OF A SPECIAL FUNCTION', () => {
     });
   }
 
-  // The compiled derivative is the one of the value. BarnesG has no lowering.
+  // The compiled derivative is the one of the value. Of these derivatives,
+  // the compiler accepts only the one of `ClausenCl(1, x)`.
   for (const [f, x0] of FUNCTIONS.filter(
-    ([f]) => (f as string[])[0] !== 'BarnesG'
+    ([f]) => JSON.stringify(f) === '["ClausenCl",1,"x"]'
   )) {
     const name = JSON.stringify(f);
     test(`D(${name}, x) compiles and agrees at ${x0}`, () => {

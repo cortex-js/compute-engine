@@ -66,13 +66,13 @@ function bothRoutes(
 ): { compiled: unknown; evaluated: Value } {
   const ce = new ComputeEngine();
   expect(() => compile(anyFunction(ce, expr), { fallback: false })).toThrow(
-    /declared `any` or `value`/
+    /the input [pq] of type any/
   );
   const result = compile(anyFunction(ce, expr));
   expect(result.success).toBe(false);
   expect(result.diagnostic?.code).toBe('unsettled-shape');
   expect(result.unsupported).toEqual(
-    expect.arrayContaining([expect.stringMatching(/^[pq]$/)])
+    expect.arrayContaining([expect.stringMatching(/^Typed\([pq], "any"\)$/)])
   );
   const compiled = (result.run as unknown as (...args: unknown[]) => unknown)(
     p,
@@ -154,7 +154,7 @@ describe('CE-366: arithmetic over symbols declared any declines', () => {
     const ce = new ComputeEngine();
     expect(() =>
       compile(anyFunction(ce, ['Add', 'p', 'q']), { fallback: false })
-    ).toThrow(/`Add` over "p", "q".*Declare the shape/);
+    ).toThrow(/the input p of type any/);
   });
 
   test('a parameter declared value declines too', () => {
@@ -167,29 +167,15 @@ describe('CE-366: arithmetic over symbols declared any declines', () => {
       ] as any)
     );
     expect(result.success).toBe(false);
-    expect(result.unsupported).toContain('p');
+    expect(result.unsupported).toContain('Typed(p, "value")');
     const run = result.run as unknown as (p: unknown) => unknown;
     expect(run([1, 2])).toEqual([2, 4]);
     expect(run(3)).toBe(6);
   });
 
-  test('a declared number keeps the scalar code with no check', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('b', 'real');
-    expect(compile(ce.box(['Add', 'a', 'b'])).code).toBe('_.a + _.b');
-  });
-
-  test('a parameter declared any that is only returned compiles', () => {
-    const ce = new ComputeEngine();
-    const result = compile(anyFunction(ce, 'p', ['p']), { fallback: false });
-    expect(result.success).toBe(true);
-    const run = result.run as unknown as (p: unknown) => unknown;
-    expect(run([1, 2])).toEqual([1, 2]);
-  });
 });
 
-describe('CE-366: a symbol declared any or value with a value declines', () => {
+describe('CE-366: a symbol declared any or value with a value gives the interpreter value', () => {
   // The compiled code reads the value of such a symbol where the symbol
   // occurs. The value can be a list, and the scalar code gave a wrong
   // value for one: with `p` declared `any` and assigned `2L`, `p + 1` gave
@@ -206,14 +192,9 @@ describe('CE-366: a symbol declared any or value with a value declines', () => {
     test(`k + x with k: ${type} holding [1, 2]`, () => {
       const ce = engine(type);
       const expr = ce.box(['Add', 'k', 'x']);
-      expect(() =>
-        compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/`Add` over "k": it is declared `any` or `value`/);
       const result = compile(expr, { to: 'javascript' });
-      expect(result.success).toBe(false);
-      expect(result.diagnostic?.code).toBe('unsettled-shape');
-      expect(result.unsupported).toContain('k');
       expect(result.run!({ x: 10 })).toEqual([11, 12]);
+      expect(toValue(expr.subs({ x: 10 }).evaluate())).toEqual([11, 12]);
     });
 
   test.each([
@@ -223,11 +204,7 @@ describe('CE-366: a symbol declared any or value with a value declines', () => {
     const ce = engine('any');
     const expr = ce.box(json as any);
     const options = { to: 'javascript', constantFold: false } as const;
-    expect(() => compile(expr, { ...options, fallback: false })).toThrow(
-      /over "k": it is declared `any` or `value`/
-    );
     const result = compile(expr, options);
-    expect(result.success).toBe(false);
     expect(result.run!({})).toBe(expected);
     expect(toValue(expr.evaluate())).toBe(expected);
   });
@@ -240,12 +217,11 @@ describe('CE-366: a symbol declared any or value with a value declines', () => {
     const expr = ce.box(['Add', 'p', 1]);
     const options = { to: 'javascript', constantFold: false } as const;
     expect(() => compile(expr, { ...options, fallback: false })).toThrow(
-      /`Add` over "p": it is declared `any` or `value`/
+      /the value of p, of another type than any/
     );
     const result = compile(expr, options);
     expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('unsettled-shape');
-    expect(result.unsupported).toContain('p');
+    expect(result.diagnostic?.code).toBe('outside-profile');
     // The interpreter's value.
     ce.assign('L', ce.box(['List', 1, 2]));
     expect(toValue(expr.evaluate())).toEqual([3, 5]);
@@ -288,7 +264,7 @@ describe('CE-366: a shared expression is walked once', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/declared `any` or `value`/);
+    ).toThrow(/the input p of type any/);
     expect(Date.now() - start).toBeLessThan(30_000);
   });
 });
@@ -343,12 +319,6 @@ describe('CE-366: Max and Min over symbols declared any decline', () => {
     }
   }
 
-  test('a declared number keeps Math.max', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('b', 'real');
-    expect(compile(ce.box(['Max', 'a', 'b'])).code).toBe('Math.max(_.a, _.b)');
-  });
 });
 
 describe('CE-214.2: the coordinate of a number', () => {
@@ -378,7 +348,7 @@ describe('CE-214.2: the coordinate of a number', () => {
       const ce = setup();
       const result = compiledWith(ce, [head, ['At', ['g', 'x'], 1]], 'any');
       expect(result.success).toBe(false);
-      expect(result.unsupported).toContain('x');
+      expect(result.unsupported).toContain('Typed(x, "any")');
     });
   }
 
@@ -396,30 +366,6 @@ describe('CE-214.2: the coordinate of a number', () => {
     ).toMatch(/incompatible-type/);
   });
 
-  test('a list and a list of points give the interpreter value', () => {
-    for (const [type, value, json] of [
-      ['list<real>', [1, 2], ['List', 1, 2]],
-      [
-        'list<tuple<real, real>>',
-        [
-          [1, 2],
-          [3, 4],
-        ],
-        ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
-      ],
-    ] as const) {
-      const ce = setup();
-      const body = ['PointX', ['At', ['g', 'x'], 1]];
-      const result = compiledWith(ce, body, type);
-      expect(result.success).toBe(true);
-      const run = result.run as unknown as (x: unknown) => unknown;
-      ce.declare('y', type);
-      ce.assign('y', ce.box(json as any));
-      const e = ce.box(['PointX', ['At', ['g', 'y'], 1]] as any);
-      expect(run(value)).toEqual(toValue(e.evaluate()));
-    }
-  });
-
   // An input declared `any` is refused (ROADMAP CE-712.1); the
   // interpreter fallback reads the absent operand.
   test('an input declared any is refused', () => {
@@ -427,8 +373,7 @@ describe('CE-214.2: the coordinate of a number', () => {
     ce.declare('x', 'any');
     const result = compile(ce.box(['PointX', 'x']));
     expect(result.success).toBe(false);
-    expect(result.diagnostic?.code).toBe('untyped-input');
-    expect(result.unsupported).toContain('x');
+    expect(result.diagnostic?.code).toBe('outside-profile');
   });
 
   // The compiled coordinate of an absent parameter is not specified

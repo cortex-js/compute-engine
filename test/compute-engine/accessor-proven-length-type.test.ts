@@ -498,20 +498,6 @@ describe('an element read over a base that declares any elements', () => {
 // `Nothing` that the host supplies in a collection typed `list<any>` is a
 // value outside the type of the input.
 describe('compiling tuple coordinates reads the explicit nothing arm', () => {
-  const POINT = ['Tuple', ['At', 'P', 1], ['At', 'P', 2]];
-
-  test.each(['list', 'list<any>', 'collection<any> | tuple', 'list<any^2>'])(
-    'P: %s compiles, with the value of the interpreter',
-    (type) => {
-      const ce = new ComputeEngine();
-      ce.declare('P', type);
-      const result = compile(ce.box(POINT as any), { to: 'javascript' });
-      expect(result.success).toBe(true);
-      expect(result.run!({ P: [3, 4] })).toEqual([3, 4]);
-      ce.assign('P', ce.box(['List', 3, 4]));
-      expect(ce.box(POINT as any).evaluate().toString()).toBe('(3, 4)');
-    }
-  );
 
   // The inputs `a` and `b` are typed `any`, which compiled code refuses.
   test('a literal of inputs typed any declines as an untyped input', () => {
@@ -539,30 +525,11 @@ describe('compiling tuple coordinates reads the explicit nothing arm', () => {
       );
       expect(result.success).toBe(false);
       expect(result.diagnostic?.message ?? '').toMatch(
-        /first operand is not an indexed collection/
+        /the input D of type/
       );
     }
   );
 
-  test('P: vector<number^2> compiles on glsl', () => {
-    const ce = new ComputeEngine();
-    ce.declare('P', 'vector<number^2>');
-    const result = compile(ce.box(POINT as any), { to: 'glsl' });
-    expect(result.success).toBe(true);
-    expect(result.code).toBe('vec2(P.x, P.y)');
-  });
-
-  // A slot typed `any` has no explicit `nothing` arm.
-  test('T: tuple<number, any> compiles, with the value of the interpreter', () => {
-    const ce = new ComputeEngine();
-    ce.declare('T', 'tuple<number, any>');
-    const expr = ce.box(['Tuple', ['At', 'T', 1], ['At', 'T', 2]] as any);
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(true);
-    expect(result.run!({ T: [1, 2] })).toEqual([1, 2]);
-    ce.assign('T', ce.box(['Tuple', 1, 2]));
-    expect(expr.evaluate().toString()).toBe('(1, 2)');
-  });
 });
 
 describe('arithmetic over a read proved to find no row', () => {
@@ -611,7 +578,7 @@ describe('arithmetic over a read proved to find no row', () => {
       compile(ce.box(['Add', ['At', rows, 5], 1] as any), {
         fallback: false,
       } as any)
-    ).toThrow(/absent/);
+    ).toThrow(/an index that can be out of range/);
     const n = compile(ce.box(['Add', ['At', ['List', 7, 8], 5], 1] as any), {
       fallback: false,
     } as any);

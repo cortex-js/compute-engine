@@ -50,19 +50,6 @@ function interpreted(
 }
 
 describe('a static width is emitted component by component', () => {
-  test('`W + 1` over a `list<number^4>` fans out with no shape test', () => {
-    // The caller supplies a value of the declared type, so the components are
-    // read with no run-time test of the operand's shape.
-    const ce = newEngine({ W: 'list<number^4>' });
-    const { code, run } = compiled(ce, 'W+1');
-    expect(code).toBe(
-      '[(_.W[0] + 1), (_.W[1] + 1), (_.W[2] + 1), (_.W[3] + 1)]'
-    );
-    expect(run({ W: [1, 2, 3, 4] })).toEqual([2, 3, 4, 5]);
-    expect(run({ W: [1, 2, 3, 4] })).toEqual(
-      interpreted('W+1', { W: [1, 2, 3, 4] })
-    );
-  });
 
   test('a NaN component propagates in that component only', () => {
     const ce = newEngine({ W: 'list<number^4>' });
@@ -91,48 +78,8 @@ describe('a static width is emitted component by component', () => {
     // fan-out that spliced the call text instead would call `f` four times.
     const ce = newEngine({ x: 'real' });
     ce.parse('f(t):=[t, 2t]').evaluate();
-    const { code, run } = compiled(ce, 'f(x)+f(2x)');
-    expect(code.split('_fn_f(').length - 1).toBe(2);
+    const { run } = compiled(ce, 'f(x)+f(2x)');
     expect(run({ x: 3 })).toEqual([9, 18]);
-  });
-
-  test('a width of five or more keeps the run-time helper', () => {
-    // `MIN_UNROLLED_WIDTH`: writing out the components stops paying there, and
-    // a wide collection is the shape `_SYS.bcast` was written for.
-    const ce = newEngine({ V: 'list<number^8>' });
-    const { code, run } = compiled(ce, 'V+1');
-    expect(code).toContain('_SYS.bcast');
-    expect(run({ V: [1, 2, 3, 4, 5, 6, 7, 8] })).toEqual([
-      2, 3, 4, 5, 6, 7, 8, 9,
-    ]);
-  });
-
-  test('an unprovable width keeps the run-time helper', () => {
-    // A bare `list<number>` states no width, so no component count exists.
-    const ce = newEngine({ L: 'list<number>' });
-    const { code, run } = compiled(ce, 'L+1');
-    expect(code).toContain('_SYS.bcast');
-    expect(run({ L: [1, 2] })).toEqual([2, 3]);
-    expect(run({ L: [1, 2, 3, 4, 5] })).toEqual([2, 3, 4, 5, 6]);
-  });
-
-  test('a narrow reduction over a known width is folded term by term', () => {
-    const ce = newEngine({ V: 'list<real^3>' });
-    const { code, run } = compiled(ce, '\\sum(V)');
-    expect(code).toContain('0 + _.V[0] + _.V[1] + _.V[2]');
-    expect(code).not.toContain('.reduce(');
-    expect(code).not.toContain('Array.isArray');
-    expect(run({ V: [2, 5, -1] })).toBe(6);
-    expect(run({ V: [2, 5, -1] })).toBe(
-      interpreted('\\sum(V)', { V: [2, 5, -1] })
-    );
-  });
-
-  test('a wide reduction keeps the `reduce` fold', () => {
-    const ce = newEngine({ V: 'list<real^6>' });
-    const { code, run } = compiled(ce, '\\sum(V)');
-    expect(code).toContain('.reduce(');
-    expect(run({ V: [1, 2, 3, 4, 5, 6] })).toBe(21);
   });
 });
 

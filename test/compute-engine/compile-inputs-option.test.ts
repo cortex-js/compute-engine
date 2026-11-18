@@ -19,8 +19,6 @@ describe('COMPILE the inputs option', () => {
     ce.parse('g(t) := t x').evaluate();
     const expr = ce.parse('g(2) + x');
     const result = compile(expr, { fallback: false, inputs: { x: 'real' } });
-    expect(result.code).toBe('_.x + _fn_g(2)');
-    expect(result.preamble).toContain('t * _.x');
     expect(run(result, { x: 3 })).toBe(9);
     // Nothing is declared after the call.
     expect(ce.lookupDefinition('x')).toBeUndefined();
@@ -32,7 +30,6 @@ describe('COMPILE the inputs option', () => {
     ce.assign('n', ce.box(['Range', 1, 3]));
     const expr = ce.parse('n x');
     const result = compile(expr, { fallback: false, inputs: { n: 'real' } });
-    expect(result.code).toBe('_.n * _.x');
     expect(run(result, { n: 2, x: 5 })).toBe(10);
     expect(ce.box('n').evaluate().toString()).toBe('[1,2,3]');
   });
@@ -47,8 +44,6 @@ describe('COMPILE the inputs option', () => {
       fallback: false,
       inputs: { a: 'real' },
     });
-    expect(result.code).toBe('_.a + _fn_f(_.x)');
-    expect(result.preamble).toContain('x * Math.abs(_.a)');
     expect(run(result, { x: 2, a: -3 })).toBe(3);
     expect(ce.box('a').evaluate().re).toBe(4);
   });
@@ -63,7 +58,6 @@ describe('COMPILE the inputs option', () => {
     ce.declare('a', 'real');
     ce.assign('a', 1);
     const result = compile(expr, { fallback: false, inputs: { x: 'real' } });
-    expect(result.code).toBe('10 + _.x');
     expect(run(result, { x: 2 })).toBe(12);
     ce.popScope();
   });

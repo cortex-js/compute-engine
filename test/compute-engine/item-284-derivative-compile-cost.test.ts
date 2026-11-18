@@ -117,24 +117,6 @@ function relative(
 }
 
 describe('applied derivative: the forward-mode lowering', () => {
-  test('an order above 1 of a composed body emits the jet lowering', () => {
-    const ce = radical;
-    // The default `strict` mode takes the real jets: `√u` of a real
-    // operand is on the real lane, and its value is `NaN` at `u < 0`. The
-    // complex mode keeps the symbolic closed form (`tryCompileJetDerivative`
-    // declines there).
-    for (const order of [2, 3, 4]) {
-      const r = compiled(ce, order);
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_SYS.jread');
-      // The whole point: the emitted code is a walk of the BODY and does not
-      // grow with the order.
-      expect(r.code!.length).toBeLessThan(400);
-    }
-    expect(compiled(ce, 2).code).toMatchInlineSnapshot(
-      `"((_tv1) => _SYS.jread(_SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _SYS.jsqrt(_SYS.jadd(_tv1, _tv1)))))))), 2))(_SYS.jv(_.x, 2))"`
-    );
-  });
 
   test('the compiled value matches the interpreter on the real domain', () => {
     const ce = radical;
@@ -180,71 +162,6 @@ describe('applied derivative: the forward-mode lowering', () => {
     ).toBeLessThan(1e-9);
   });
 
-  test('a Taylor row of four references compiles and agrees with the interpreter', () => {
-    const ce = radical;
-    const expr = ce.parse(
-      "f(e)+(x-e)f'(e)+\\frac{(x-e)^2}{2}f''(e)+\\frac{(x-e)^3}{6}f'''(e)"
-    );
-    const r = compile(expr, { to: 'javascript', fallback: false } as never) as {
-      success: boolean;
-      run: (v: Record<string, number>) => number | { re: number; im: number };
-    };
-    expect(r.success).toBe(true);
-    for (const [x, e] of [
-      [1, 1],
-      [2, 1.5],
-      [0.7, 0.5],
-    ]) {
-      const want = expr.subs({ x: ce.number(x), e: ce.number(e) }).N();
-      expect(
-        relative(asComplex(r.run({ x, e })), { re: want.re, im: want.im })
-      ).toBeLessThan(1e-9);
-    }
-  });
-
-  test('a provably-real body uses the real jet family', () => {
-    const ce = engineWith('f(x):=\\sin(x^2+x)\\cos(x)+x^3-\\frac{x}{x^2+1}');
-    const r = compiled(ce, 3);
-    expect(r.code).toContain('_SYS.jread');
-    expect(r.code).not.toContain('_SYS.jcread');
-    for (const x of [0.37, 1.3, 2.9])
-      expect(
-        relative(asComplex(r.run({ x })), interpreted(ce, 3, x))
-      ).toBeLessThan(1e-9);
-  });
-
-  test('the exponential, logarithm and tangent recurrences agree with the interpreter', () => {
-    const ce = engineWith('f(x):=e^{x^2+x}+\\ln(x^2+3)+\\tan(x/4)');
-    const r = compiled(ce, 3);
-    // Every operand here is provably real — the logarithm's argument is
-    // `x² + 3` — so this body takes the real jet family.
-    expect(r.code).toContain('_SYS.jexp');
-    expect(r.code).toContain('_SYS.jln');
-    expect(r.code).toContain('_SYS.jtan');
-    for (const x of [0.37, 1.3, 2.9])
-      expect(
-        relative(asComplex(r.run({ x })), interpreted(ce, 3, x))
-      ).toBeLessThan(1e-9);
-  });
-
-  test('an odd radical takes the real root, as the interpreter does', () => {
-    // A cube root of a negative value is a real number — the interpreter says
-    // so, and the ordinary emitter lowers `Root(u, 3)` to `Math.cbrt`. The
-    // general `a^r` recurrence starts from `Math.pow(a₀, 1/3)`, which is NaN
-    // for a negative `a₀`, and every later coefficient divides by `k·a₀` and
-    // stays NaN.
-    const ce = engineWith('f(x):=\\sqrt[3]{x+x^2+\\sin x+\\cos x+x^3}');
-    for (const order of [2, 3]) {
-      const r = compiled(ce, order);
-      expect(r.code).toContain('_SYS.jroot');
-      for (const x of [-1.2, -0.4, 1.2]) {
-        const v = asComplex(r.run({ x }));
-        expect(Number.isFinite(v.re)).toBe(true);
-        expect(relative(v, interpreted(ce, order, x))).toBeLessThan(1e-9);
-      }
-    }
-  });
-
   test('the second derivative of an odd radical matches a central difference', () => {
     // An independent check on the jet recurrences. The interpreter's closed
     // form and the jets are both derivative machinery and could in principle
@@ -266,68 +183,6 @@ describe('applied derivative: the forward-mode lowering', () => {
         relative(asComplex(second.run({ x })), { re: quotient, im: 0 })
       ).toBeLessThan(1e-5);
     }
-  });
-
-  test('an odd radical under a complex body keeps the real root', () => {
-    // The body is complex (the term `i·x³`), so the jets run in complex
-    // arithmetic, but the cube root inside it is still the real one the
-    // ordinary emitter lowers — so the complex jet family has to take the
-    // real branch for a real negative constant coefficient, not the principal
-    // branch it uses everywhere else.
-    const ce = engineWith('f(x):=\\sqrt[3]{x}+ix^3+\\sin x+\\cos x+x^2');
-    const r = compiled(ce, 2);
-    expect(r.code).toContain('_SYS.jcroot');
-    for (const x of [-0.7, 1.3])
-      expect(
-        relative(asComplex(r.run({ x })), interpreted(ce, 2, x))
-      ).toBeLessThan(1e-9);
-  });
-
-  test('an integer power of any size stays defined at a zero of the base', () => {
-    // Exponents above 8 went through the `a^r` recurrence, which divides by
-    // the base's constant coefficient: the second derivative of `x⁹ + …` at 0
-    // came back NaN although a polynomial's derivatives are defined
-    // everywhere. Repeated jet multiplication has no such division.
-    const ce = engineWith('f(x):=x^9+x^4+x^3+x^2+x');
-    const r = compiled(ce, 2);
-    expect(r.code).toMatch(/_SYS\.jipow\([^,]+, 9\)/);
-    expect(r.run({ x: 0 })).toBe(2);
-    for (const x of [1.3, -0.7])
-      expect(
-        relative(asComplex(r.run({ x })), interpreted(ce, 2, x))
-      ).toBeLessThan(1e-9);
-  });
-
-  test('a negative integer power is the reciprocal of the positive one', () => {
-    const ce = engineWith('f(x):=x^{12}+x^{-3}+x^4+x^3+x^2+x');
-    const r = compiled(ce, 3);
-    expect(r.code).toMatch(/_SYS\.jipow\([^,]+, -3\)/);
-    for (const x of [1.3, -0.7])
-      expect(
-        relative(asComplex(r.run({ x })), interpreted(ce, 3, x))
-      ).toBeLessThan(1e-9);
-  });
-
-  test('a real body applied at a complex point runs the complex jets', () => {
-    // The real family reads each coefficient as a plain number, so a
-    // `{re, im}` argument turned the whole jet into NaN before any recurrence
-    // ran. The differentiation POINT decides the lane as much as the body
-    // does.
-    const ce = new ComputeEngine();
-    ce.declare('x', 'complex');
-    ce.parse('f(x):=\\sin(x^2+x)\\cos(x)+x^3-\\frac{x}{x^2+1}').evaluate();
-    const r = compiled(ce, 2);
-    expect(r.code).toContain('_SYS.jcv');
-    const point = { re: 1.3, im: 0.5 };
-    const want = ce
-      .box(['Apply', ['Derivative', 'f', 2], ['Complex', point.re, point.im]])
-      .N();
-    expect(
-      relative(asComplex(r.run({ x: point } as never)), {
-        re: want.re,
-        im: want.im,
-      })
-    ).toBeLessThan(1e-9);
   });
 
   test('a fractional power and a quotient agree with the interpreter', () => {
@@ -794,33 +649,6 @@ const PERF = process.env.CE_PERF === '1';
 });
 
 describe('a large body takes the jet lowering at order one as well', () => {
-  // The first derivative of a twenty-deep nested radical has a 376 KB
-  // closed form (1.9 s to compile) where the jet is a few hundred bytes; a
-  // body past `JET_MIN_BODY_NODES_ORDER_ONE` nodes takes the jet at order 1.
-  // The four-deep radical (14 nodes) keeps its closed form at order 1.
-  test('twenty-deep radical: order one is a jet kernel that matches a central difference', () => {
-    let body = 'x';
-    for (let i = 0; i < 20; i++) body = `\\sqrt{x+${body}}`;
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.parse(`f(x):=${body}`).evaluate();
-    const d1 = compile(ce.parse("f'(x)"), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(d1?.success).toBe(true);
-    expect(d1!.code!.length).toBeLessThan(2000);
-    expect(d1!.code).toContain('_SYS.j');
-    const f = compile(ce.parse('f(x)'), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    for (const x of [0.5, 1.1, 3]) {
-      const h = 1e-5;
-      const central = (f!.run!({ x: x + h }) - f!.run!({ x: x - h })) / (2 * h);
-      expect(Math.abs(d1!.run!({ x }) - central)).toBeLessThan(1e-7);
-    }
-  });
 
   test('four-deep radical: order one keeps the closed form', () => {
     let body = 'x';

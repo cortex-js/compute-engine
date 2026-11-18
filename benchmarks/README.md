@@ -691,32 +691,10 @@ in `scalar-add-dispatch-2026-11-03.json` and evaluation-cache architecture §13.
 The archive includes the experiment patch; it is not an optimization in the
 current engine.
 
-## Shared-expression traversal (`shared-traversal.mjs`)
+## Shared-expression traversal
 
-Compare source checkouts with `node --import tsx benchmarks/shared-traversal.mjs
-/path/to/checkout`. Hold the box lock, check CPU activity throughout, and run
-comparators serially in alternating order. `MODE=check` validates all fixtures
-without timing claims; `ONLY` selects comma-separated full ids and rejects
-unknown ids. Defaults are seven fresh-engine trials, five warmup calls and seven
-batches of 25 calls (`RUNS` and `ITERATIONS`). Setup and validation are untimed.
-First calls use fresh engines in an already loaded process, not fresh processes.
-Warm calls reuse the expression and engine, including their applicable caches.
-The declined-type warm figure is explicitly labeled as a cached result lookup.
-Its check mode also requires a scalar sibling to reach the body derivation.
-
-The synthetic matrix varies depth (4–24), width (1–64 independent towers) and
-references per parent (1, 2, 4). It measures raw substitution, callee reachability,
-CSE harvesting and full JavaScript compilation. Declined callback-body typing is
-separate. Slider shader compilation and a compiled Map callback are small host
-controls; they do not substitute for a document corpus or GPU execution.
-Substitution is checked with a memoized arithmetic oracle over its result,
-compilation with numeric results, and shader compilation with success and emitted
-operators. Type-search and decline checks assert their expected negative answers.
-CSE checks diagnostics; end-to-end compilation supplies its numeric control.
-
-`test/compute-engine/shared-traversal-work.test.ts` bounds actual operand-array
-reads independently of elapsed time and CSE's weighted path diagnostics. Its
-mutation controls and the review's measurements and limitations are recorded in
+The harness `shared-traversal.mjs` loaded modules of the compilers that 0.194.0
+removed, and was deleted with them. Its measurements remain in
 `shared-traversal-2026-11-03.json` and
 `../docs/plans/2026-11-03-shared-traversal-review.md`.
 
@@ -828,46 +806,11 @@ the counter boundaries and removed the ignored `hideValues` option. Counts and
 source digests did not change. The archive retains the measured harness and its
 hash; timing statements are unchanged by those instrumentation fixes.
 
-## Closed constant folding (`closed-folding.mjs`)
+## Closed constant folding
 
-Use `MODE=timing node --import tsx benchmarks/closed-folding.mjs /path/to/checkout`
-for serial source compilation measurements. Hold the box lock and monitor CPU
-throughout; discard a whole process if competing work is observed. Compare
-matching source revisions and dependencies in alternating process order.
-Defaults are seven fresh-engine/expression trials, five warmups on a separate
-engine/expression, and seven warm batches of ten calls (`RUNS`, `ITERATIONS`).
-The first figure excludes process/module startup; warm calls retain applicable
-engine and expression caches. Construction, result-array allocation and numeric
-validation stay outside timers. All warm results are retained and checked.
-
-`MODE=check` (the default) checks all fixtures without timing. `ONLY` selects
-comma-separated full fixture ids, rejecting unknown ids. `MODE=work` counts
-reads of the original synthetic tower's operand arrays; `MODE=profile` also
-attributes those reads by immediate stack caller, records root cost estimates,
-folding targets and calls to `.N()` on original graph nodes, and counts function
-canonical/JSON/evaluation operations through prototype wrappers. Both restore
-instrumentation before result validation and are deliberately untimed. These
-counts cover only the outer Add nodes, excluding the base Add, number objects
-and new expression objects' operand arrays;
-function operation counts exclude number operations and other serializers.
-Uninstrumented host graphs report null reads; each record states its instrumented
-node count. The constant-parameter host retains its four-node tower instrument.
-The two-million-read instrumentation ceiling is an emergency abort, not a
-performance acceptance threshold.
-
-The closed `Add(e,e)` tower starts at `2 + sqrt(3)`, with the same operand object
-retained twice. Depths 4/8/12/13/16/24 expose the existing estimation-visit limit.
-Independent numeric results use `2^depth * (2 + Math.sqrt(3))`. Unshared copies
-at safe depths 4/8 compute the same values, with construction untimed. Every
-fixture runs with folding enabled and disabled. Host controls include a live
-slider expression on JavaScript and GLSL, a closed Map, and a shared constant
-inside/outside a function parameter binding. GLSL checks emission, not GPU
-execution. These small controls do not represent a captured document corpus.
-
-`test/compute-engine/compile-folding-work.test.ts` checks one estimator's visit
-budget, its admitted-cost control, repeated callee lookup work and invalidation
-after a definition change. It
-does not require a whole closed compilation to be linear in distinct nodes.
+The harness `closed-folding.mjs` loaded modules of the compilers that 0.194.0
+removed, and was deleted with them. Its measurements remain in
+`closed-folding-2026-11-03.json`.
 
 ## Stable batch baseline
 

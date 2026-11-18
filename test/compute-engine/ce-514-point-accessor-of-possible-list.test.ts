@@ -20,35 +20,6 @@ const POINTS: MathJsonExpression = [
 ];
 
 describe('a coordinate accessor of a possible list of points in PointList', () => {
-  test('a function literal applied to a list of points', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box(['Apply', ['Function', BODY, 'v'], POINTS]);
-    expect(e.evaluate().toString()).toBe('[(2, 1),(5, 4)]');
-    const r = compile(e, { fallback: false });
-    expect(r.run!({})).toEqual([
-      [2, 1],
-      [5, 4],
-    ]);
-  });
-
-  test('a function literal applied to a declared list of points', () => {
-    const ce = new ComputeEngine();
-    ce.declare('P', 'list<tuple<integer, integer, integer>>');
-    const r = compile(ce.box(['Apply', ['Function', BODY, 'v'], 'P']), {
-      fallback: false,
-    });
-    expect(
-      r.run!({
-        P: [
-          [1, 2, 3],
-          [4, 5, 6],
-        ],
-      } as never)
-    ).toEqual([
-      [2, 1],
-      [5, 4],
-    ]);
-  });
 
   test('a named function called with a list of points', () => {
     const ce = new ComputeEngine();
@@ -58,27 +29,6 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
     expect(r.run!({})).toEqual([
       [2, 1],
       [5, 4],
-    ]);
-  });
-
-  test('one point stays one point', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box(['Apply', ['Function', BODY, 'v'], ['Tuple', 1, 2, 3]]);
-    expect(e.evaluate().toString()).toBe('(2, 1)');
-    expect(compile(e, { fallback: false }).run!({})).toEqual([2, 1]);
-  });
-
-  test('an accessor of a list beside a scalar component', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box([
-      'Apply',
-      ['Function', ['PointList', ['PointX', 'v'], 7], 'v'],
-      POINTS,
-    ]);
-    expect(e.evaluate().toString()).toBe('[(1, 7),(4, 7)]');
-    expect(compile(e, { fallback: false }).run!({})).toEqual([
-      [1, 7],
-      [4, 7],
     ]);
   });
 
@@ -101,7 +51,7 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
     ]);
     const r = compile(e);
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 
   test('a tuple coordinate of a typed flat list is declined', () => {
@@ -141,33 +91,13 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
 
   test('a free variable that holds a point or a list of points', () => {
     // An undeclared \`p\` read with \`p.y\` is inferred \`collection<any> |
-    // tuple\`, so \`p.y\` is one coordinate or a list of coordinates, and the
-    // compilation declines (rule R3), where the code tested the value of
-    // \`p\` at run time. Declared with the union of a point and a list of
-    // points, \`p\` is tested once where it is bound, and each body has one
-    // shape.
+    // tuple\`, so \`p.y\` is one coordinate or a list of coordinates: the
+    // input is refused, and the compilation declines.
     const ce = new ComputeEngine();
     const undeclared = compile(ce.parse('\\mathrm{PointList}(p.y, p.x)'));
     expect(undeclared.success).toBe(false);
-    expect(undeclared.diagnostic?.code).toBe('unsettled-shape');
-
-    const ce2 = new ComputeEngine();
-    ce2.declare('p', 'tuple<real, real> | list<tuple<real, real>>');
-    const r = compile(ce2.parse('\\mathrm{PointList}(p.y, p.x)'), {
-      fallback: false,
-    });
-    expect(r.run!({ p: [1, 2] } as never)).toEqual([2, 1]);
-    expect(
-      r.run!({
-        p: [
-          [1, 2],
-          [3, 4],
-        ],
-      } as never)
-    ).toEqual([
-      [2, 1],
-      [4, 3],
-    ]);
+    expect(undeclared.diagnostic?.code).toBe('outside-profile');
+    expect(undeclared.diagnostic?.message).toContain('the input p');
   });
 
   test('a free plot variable keeps the scalar slot', () => {

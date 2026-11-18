@@ -1,23 +1,15 @@
 import { isFunction } from '../boxed-expression/type-guards.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
-import { entrySource } from './function-purity.js';
 import type { Expression, JSSource } from '../global-types.js';
 import type {
   CompileMode,
-  CompileTarget,
-  CompilationOptions,
+  CompileDiagnostic,
   CompilationResult,
   DefaultRunnerResult,
   StorageHint,
 } from './types.js';
-import { BaseCompiler } from './base-compiler.js';
-import { withDirectLoopPassReset } from './compile-loops.js';
-import {
-  CancellationError,
-  throwIfCallerCancellation,
-} from '../../common/interruptible.js';
+import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHintsOfInputs } from './storage-hints.js';
-import { resolveStorageHints } from './compile-references.js';
 import { interpreterFallback } from './interpreter-fallback.js';
 import {
   compileDiagnosticOf,
@@ -31,45 +23,48 @@ import {
   holdsEnclosureInputOrResult,
 } from './interval-fallback.js';
 import { compilationScope, inCallerScope } from './compile-scope.js';
-import { rawTargetCheck } from './raw-target-check.js';
-import { rewriteAngularUnit } from './angular-unit.js';
-import { rewritePartialApplications } from './partial-application.js';
-import {
-  overriddenCompilationHeads,
-  unrollFixedWidthCollections,
-} from './fixed-width-unroll.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 import {
   compileInputNames,
   symbolicInputsRead,
   withSymbolicInputs,
-  withVarsValuesHidden,
 } from './vars-inputs.js';
-import { fragmentErrorDiagnostic } from './fragment.js';
-import type { CanCompileResult } from './fragment.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
 import { compileWithIrProfileInterval } from './ir/adapter-interval.js';
-import {
-  jsProfilePublicDefault,
-  jsProfileShadowConsumer,
-  recordJsProfileAttempt,
-  recordJsProfileShadow,
-  refusalOutcome,
-} from '../js-profile-switch.js';
+import { BUILT_IN_TARGETS } from './targets.js';
 
-export type { CanCompileResult } from './fragment.js';
+/** The answer of `canCompile()`. A positive answer also carries the
+ *  `shippable` field of the result that `compile()` gives
+ *  (`CompilationResult`). */
+export type CanCompileResult =
+  | {
+      ok: true;
+      shippable?: boolean;
+    }
+  | { ok: false; diagnostic: CompileDiagnostic };
+
+/** The `outside-fragment` diagnostic of an error that the check of an
+ *  option raised, for `canCompile()`. */
+function optionErrorDiagnostic(e: unknown): CompileDiagnostic {
+  const message =
+    e instanceof Error ? e.message : `Could not compile: ${String(e)}`;
+  const diagnostic: CompileDiagnostic = {
+    code: 'outside-fragment',
+    kind: 'capability',
+    message,
+  };
+  // A decline of the compiler carries its own fields: the name and the
+  // value that it is about.
+  const inner = (e as { diagnostic?: CompileDiagnostic } | undefined)
+    ?.diagnostic;
+  if (inner?.binding !== undefined) diagnostic.binding = inner.binding;
+  if (inner?.value !== undefined) diagnostic.value = inner.value;
+  return diagnostic;
+}
 
 export type CompileExpressionOptions<T extends string = string> = {
   to?: T;
-  target?: CompileTarget<Expression>;
-  operators?:
-    | Partial<Record<MathJsonSymbol, [op: string, prec: number]>>
-    | ((op: MathJsonSymbol) => [op: string, prec: number] | undefined);
-  functions?: Record<
-    MathJsonSymbol,
-    JSSource | ((...args: unknown[]) => unknown)
-  >;
   vars?: Record<MathJsonSymbol, JSSource>;
   symbolic?: readonly MathJsonSymbol[];
   /**
@@ -92,12 +87,9 @@ export type CompileExpressionOptions<T extends string = string> = {
    * (`docs/COMPILATION-MODEL.md`). A type string that is not a type throws.
    */
   inputs?: Readonly<Record<MathJsonSymbol, string>>;
-  imports?: unknown[];
-  preamble?: string;
   fallback?: boolean;
   mode?: CompileMode;
   entryChecks?: boolean;
-  broadcast?: boolean;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
@@ -105,39 +97,31 @@ export type CompileExpressionOptions<T extends string = string> = {
   cse?: boolean;
   constantFold?: boolean;
   storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
-  strictTypes?: boolean;
+  /** Accepted for the hosts that set it: every compilation uses the
+   *  profile `ir`. */
   profile?: 'ir';
 };
 
 /**
- * Every option of `compile()` has a class in the profile `ir`
- * (`IR_OPTIONS` in `ir/adapter.ts`), and the table names no other option: a
- * new option fails this check until it is classified there.
+ * Every option of `compile()` has a class in the compiler (`IR_OPTIONS` in
+ * `ir/adapter.ts`): a new option fails this check until it is classified
+ * there.
  */
 const IR_OPTIONS_CLASSIFIED: [keyof CompileExpressionOptions] extends [
   keyof typeof IR_OPTIONS,
 ]
-  ? [keyof typeof IR_OPTIONS] extends [keyof CompileExpressionOptions]
-    ? true
-    : false
+  ? true
   : false = true;
 void IR_OPTIONS_CLASSIFIED;
 
 /**
  * Throw when the `profile` option is given with a target other than
- * `javascript`, `glsl` or `interval-js`, or with a direct target
- * (`target`). It is an error of the options, thrown whatever `fallback`
- * says, as for the other invalid options.
+ * `javascript`, `glsl` or `interval-js`. It is an error of the options,
+ * thrown whatever `fallback` says, as for the other invalid options.
  */
 function assertProfileTarget(options: CompileExpressionOptions | undefined) {
   if (options?.profile === undefined) return;
   const targets = 'the targets "javascript", "glsl" and "interval-js"';
-  if (options.target !== undefined)
-    throw new Error(
-      `Invalid compilation option "profile": the profile "${options.profile}" is ` +
-        `defined for ${targets} only, not for a direct target ` +
-        '(the `target` option)'
-    );
   const to = options.to ?? 'javascript';
   if (to !== 'javascript' && to !== 'glsl' && to !== 'interval-js')
     throw new Error(
@@ -150,7 +134,9 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
  * Compile a boxed expression.
  *
  * Returns a `CompilationResult` with the generated source code and,
- * for JS-executable targets, a `run` function.
+ * for JS-executable targets, a `run` function. The built-in targets
+ * (`javascript`, `glsl`, `interval-js`) compile with the profile `ir` only
+ * (`compileInScope()`).
  *
  * `mode` selects the arithmetic discipline (`'strict'` | `'complex'` |
  * `'bigint'`, see `CompileMode` in `compilation/types.ts`); the effective
@@ -179,9 +165,6 @@ function assertProfileTarget(options: CompileExpressionOptions | undefined) {
  * non-real operand (`Erf(2i)`) is the compile-time decline. The shader
  * targets always fail closed. (`Real`/`Imaginary`/`Argument`/`Conjugate` are
  * exempt: they consume a complex value by design.)
- *
- * With the internal shadow measure `ce._jsProfileShadow` on, a compilation
- * is also measured with the profile (`compileWithShadow()`).
  */
 export function compile<
   T extends string = 'javascript',
@@ -191,233 +174,13 @@ export function compile<
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
   const ce = expr.engine;
-  // A compiled Program owns its emitted locals, exactly as a Block does.
-  // Reuse the existing source analyses and emitter on that representation.
+  // A compiled Program owns its emitted locals, exactly as a Block does:
+  // it is compiled as that Block.
   if (isFunction(expr, 'Program')) expr = ce._fn('Block', expr.ops);
-  if (
-    jsProfilePublicDefault() &&
-    publicDepth === 0 &&
-    !ce._opensOperation(false)
-  ) {
-    const consumer = shadowConsumerOf(options);
-    if (
-      consumer === 'public' ||
-      consumer === 'glsl:public' ||
-      consumer === 'interval:public'
-    ) {
-      // A compilation that this one starts is not a public call.
-      publicDepth += 1;
-      try {
-        return (
-          compileWithPublicSwitch<T, R>(expr, options, consumer) ??
-          compileExpression<T, R>(expr, options)
-        );
-      } finally {
-        publicDepth -= 1;
-      }
-    }
-  }
-  if (ce._jsProfileShadow && shadowDepth === 0 && !ce._opensOperation(false)) {
-    const consumer = shadowConsumerOf(options);
-    if (consumer !== undefined)
-      return compileWithShadow(expr, options, consumer);
-  }
   return compileExpression(expr, options);
 }
 
-/**
- * The number of compilations with the profile of the shadow measure in
- * progress: a compilation that one of them starts is not measured.
- */
-let shadowDepth = 0;
-
-/** The number of compilations of the public switch in progress
- * (`jsProfilePublicDefault()`). */
-let publicDepth = 0;
-
-/**
- * The consumer under which the shadow measure counts a compilation with
- * `options` (`jsProfileShadowConsumer()`), or `undefined` when it is not
- * measured: a target other than `javascript` (and `glsl`, counted as
- * `glsl:public`), a direct target, a profile asked for, or a compilation of
- * `implicitCompile()` that follows an attempt of its switch. `interval-js`
- * is not measured: it always compiles with the interval mode of the profile
- * (`compileInScope()`).
- */
-function shadowConsumerOf(
-  options: CompileExpressionOptions | undefined
-): string | undefined {
-  if (options?.profile !== undefined || options?.target !== undefined)
-    return undefined;
-  const to = options?.to ?? 'javascript';
-  if (to === 'glsl') return 'glsl:public';
-  if (to !== 'javascript') return undefined;
-  return jsProfileShadowConsumer(options);
-}
-
-/**
- * The compilation of `expr` with `options`, and then, for the shadow
- * measure, a compilation of `expr` with the same options and the profile
- * `ir`, whose outcome is counted under `consumer`
- * (`recordJsProfileShadow()`) and whose result is discarded. The result,
- * or the error, is that of the first compilation. A cancellation of the
- * first compilation is thrown with no second one.
- *
- * The second compilation writes nothing that the caller reads: it has
- * `fallback: false` (no warning, no interpreter fallback), fresh sets in
- * place of `symbolDeps` and `varsObjectRefs`, and every error it throws,
- * a cancellation included, is caught and counted `failed`. A compilation
- * that it starts is not measured (`shadowDepth`).
- */
-function compileWithShadow<T extends string, R>(
-  expr: Expression,
-  options: CompileExpressionOptions<T> | undefined,
-  consumer: string
-): CompilationResult<T, R> {
-  let result: CompilationResult<T, R>;
-  try {
-    result = compileExpression<T, R>(expr, options);
-  } catch (e) {
-    // No second compilation after a cancellation, or after an `EvalError`:
-    // a Content Security Policy that blocks dynamic code would report a
-    // second violation.
-    if (!isCancellationError(e) && !(e instanceof EvalError))
-      measureProfile(expr, options, consumer, false, (e as Error)?.message);
-    throw e;
-  }
-  measureProfile(
-    expr,
-    options,
-    consumer,
-    result.success === true,
-    result.error
-  );
-  return result;
-}
-
-/** Compile `expr` with `options` and the profile, and count the outcome
- * (`compileWithShadow()`). */
-function measureProfile(
-  expr: Expression,
-  options: CompileExpressionOptions | undefined,
-  consumer: string,
-  baselineSucceeded: boolean,
-  baselineMessage?: string
-): void {
-  const ce = expr.engine;
-  // The profile lowers a node reached on several paths once where it can,
-  // and declines a program over its limit of nodes (`NODE_LIMIT` in
-  // `ir/lower.ts`), so the measure cannot hang.
-  shadowDepth += 1;
-  try {
-    const result = compileExpression(expr, {
-      ...options,
-      ...(options?.symbolDeps === undefined ? {} : { symbolDeps: new Set() }),
-      ...(options?.varsObjectRefs === undefined
-        ? {}
-        : { varsObjectRefs: new Set() }),
-      profile: 'ir',
-      fallback: false,
-    });
-    if (result.success === true)
-      recordJsProfileShadow(
-        ce,
-        consumer,
-        baselineSucceeded,
-        'admitted',
-        undefined,
-        baselineMessage
-      );
-    else {
-      const diagnostic = result.diagnostic;
-      recordJsProfileShadow(
-        ce,
-        consumer,
-        baselineSucceeded,
-        refusalOutcome(diagnostic?.code),
-        diagnostic === undefined
-          ? result.error
-          : profileMessage(diagnostic.code, diagnostic.message),
-        baselineMessage
-      );
-    }
-  } catch (e) {
-    const diagnostic = compileDiagnosticOf(e);
-    recordJsProfileShadow(
-      ce,
-      consumer,
-      baselineSucceeded,
-      isCompileDeclineError(e) ? refusalOutcome(diagnostic.code) : 'failed',
-      profileMessage(diagnostic.code, diagnostic.message),
-      baselineMessage
-    );
-  } finally {
-    shadowDepth -= 1;
-  }
-}
-
-/**
- * The compilation of `expr` with the profile `ir` for the public switch
- * (`jsProfilePublicDefault()`), counted under `consumer`, or `undefined`
- * when the profile declines: the caller then compiles as if the switch were
- * off. The attempt has `fallback: false` and fresh sets in place of
- * `symbolDeps` and `varsObjectRefs`, copied to the caller's sets when it
- * compiles. A cancellation is thrown.
- */
-function compileWithPublicSwitch<T extends string, R>(
-  expr: Expression,
-  options: CompileExpressionOptions<T> | undefined,
-  consumer: string
-): CompilationResult<T, R> | undefined {
-  const ce = expr.engine;
-  const symbolDeps =
-    options?.symbolDeps === undefined ? undefined : new Set<string>();
-  const varsObjectRefs =
-    options?.varsObjectRefs === undefined ? undefined : new Set<string>();
-  try {
-    const result = compileExpression<T, R>(expr, {
-      ...options,
-      ...(symbolDeps === undefined ? {} : { symbolDeps }),
-      ...(varsObjectRefs === undefined ? {} : { varsObjectRefs }),
-      profile: 'ir',
-      fallback: false,
-    });
-    if (result.success !== true) {
-      recordJsProfileAttempt(ce, consumer, 'failed', result.error);
-      return undefined;
-    }
-    recordJsProfileAttempt(ce, consumer, 'admitted');
-    for (const name of symbolDeps ?? []) options?.symbolDeps?.add(name);
-    for (const name of varsObjectRefs ?? []) options?.varsObjectRefs?.add(name);
-    return result;
-  } catch (e) {
-    if (isCancellationError(e) || !isCompileDeclineError(e)) throw e;
-    const diagnostic = compileDiagnosticOf(e);
-    recordJsProfileAttempt(
-      ce,
-      consumer,
-      refusalOutcome(diagnostic.code),
-      profileMessage(diagnostic.code, diagnostic.message)
-    );
-    return undefined;
-  }
-}
-
-/** The message of an outcome of the profile, with its code unless the code
- * is `outside-profile`. */
-function profileMessage(code: string, message: string): string {
-  return code === 'outside-profile' ? message : `${code}: ${message}`;
-}
-
-/** Whether `e` is a cancellation (a deadline, an abort, a limit). */
-function isCancellationError(e: unknown): boolean {
-  return (
-    e instanceof CancellationError ||
-    (e as { name?: unknown } | undefined)?.name === 'CancellationError'
-  );
-}
-
-/** The compilation of `compile()`, with no shadow measure. */
+/** The compilation of `compile()`. */
 function compileExpression<
   T extends string = 'javascript',
   R = DefaultRunnerResult<T>,
@@ -448,7 +211,6 @@ function compileExpression<
       inCallerScope(expr, () =>
         compileInScope<T, R>(expr, { ...options, inputs: undefined }, decline)
       );
-    // Not `compile()`: the shadow measure counted this compilation once.
     const result = withCompileInputs(expr, options, (bound, rest) =>
       compileExpression<T, R>(bound, rest)
     );
@@ -548,6 +310,13 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
 /**
  * `compileExpression()` in the current scope. With `decline`, the
  * compilation declines with it, after the checks of the options.
+ *
+ * The built-in names (`BUILT_IN_TARGETS`) compile with the profile `ir`,
+ * whether the option `profile` is given or not: `javascript`
+ * (`ir/adapter.ts`), `glsl` (`ir/adapter-glsl.ts`) and `interval-js`
+ * (`ir/adapter-interval.ts`). Another name is a decline that lists them.
+ * A decline falls back in the catch below, or throws with
+ * `fallback: false`.
  */
 function compileInScope<
   T extends string = 'javascript',
@@ -559,346 +328,58 @@ function compileInScope<
 ): CompilationResult<T, R> {
   assertCompilationOptionsContract(options);
   assertProfileTarget(options);
-  // (The shared per-compilation budgets — the antiderivative pool — are NOT
-  // reset here: this entry is not the only compilation route (a registered
-  // target invoked directly bypasses it), so the reset lives at the depth-0
-  // boundary of `BaseCompiler.compile`, which every route crosses.)
+  const targetName = (options?.to ?? 'javascript') as T;
 
-  // An option-contract violation, not a compilation failure: raised outside
-  // the `try` so the interpreter fallback cannot swallow it. A direct custom
-  // target does not support CSE, so an explicit `cse: true` here
-  // is a request that cannot be honored — silently stamping it off would leave
-  // the caller believing CSE ran.
-  if (options?.target !== undefined && options.cse === true)
-    throw new Error(
-      'CSE is not supported on direct custom targets in Phase 1; omit `cse` ' +
-        'or use a registered target.'
-    );
-
-  // The `storage` hints, validated on EVERY target — the same option-contract
-  // class as the CSE check above, and outside the `try` for the same reason:
-  // the hint is ignored on the non-shader targets, so an unknown storage kind
-  // or a hint naming something that is not a free symbol of `expr` would
-  // otherwise pass silently there, and an interpreter fallback must not
-  // swallow the error either. A registered target validates again in its own
-  // `compile()` (the route that bypasses this entry); the check is idempotent.
-  // An unregistered `to` has no target to analyze references with; it is
-  // skipped here and reported by the registry lookup below, as before.
-  //
-  // A DIRECT custom target refuses a non-empty hint set outright, like CSE: the
-  // gate that fails a sampler-backed symbol closed outside a positional read,
-  // and the preamble channel that delivers the texel helper, both live in the
-  // registered shader target's own `compile()`. A raw `createTarget()` target
-  // has neither, so honoring the hint there would emit a bare `S` as a value
-  // and a helper call with no declaration behind a reported success.
-  if (
-    options?.target !== undefined &&
-    options.storage !== undefined &&
-    Object.keys(options.storage).length > 0
-  )
-    throw new Error(
-      'The `storage` option is not supported on direct custom targets: the ' +
-        'sampler-backed read needs the reference gate and the helper ' +
-        'preamble a registered target provides. Omit `storage` or use a ' +
-        'registered target (`to: "glsl"`).'
-    );
-  // The profile `ir`, and `interval-js`, which always compiles with it,
-  // validate the hints with no compiler: a hinted name must be one that the
-  // run of the expression takes from its inputs
+  // The `storage` hints, validated on EVERY target, outside the `try`: an
+  // option-contract violation, not a compilation failure, which an
+  // interpreter fallback must not swallow. The hint is ignored on the
+  // non-shader targets, so an unknown storage kind or a hint naming
+  // something that is not a free symbol of `expr` would otherwise pass
+  // silently there. The hints are validated with no compiler: a hinted name
+  // must be one that the run of the expression takes from its inputs
   // (`resolveStorageHintsOfInputs()`).
-  const irProfile =
-    options?.profile === 'ir' && (options.mode as string) !== 'auto';
-  if (
-    (irProfile ||
-      (options?.target === undefined && options?.to === 'interval-js')) &&
-    options?.storage !== undefined
-  )
+  if (options?.storage !== undefined)
     resolveStorageHintsOfInputs(options.storage, expr, {
       vars: options.vars,
-      functions: options.functions,
     });
-  else if (options?.target === undefined && options?.storage !== undefined) {
-    const analysisTarget = expr.engine
-      ._getCompilationTarget(options.to ?? 'javascript')
-      ?.createTarget();
-    if (analysisTarget !== undefined)
-      resolveStorageHints(options.storage, [expr], analysisTarget, {
-        vars: options.vars,
-        functions: options.functions,
-      });
-  }
 
   try {
     if (decline !== undefined) throw decline;
-    // Determine the target to use
-    if (options?.target) {
-      // Direct target override - use BaseCompiler. Registered language
-      // targets apply the angular-unit rewrite in their own compile();
-      // this raw-target path must do it itself. `compileRoot` opens the
-      // compilation boundary: the caller's target may be one it built once
-      // and reuses, and per-compilation numbering must restart for each
-      // `compile()` call (recompile-replay determinism).
-      // The fixed-width unroll turns a collection whose width is known at
-      // compile time into straight-line scalar code; like the angular-unit
-      // rewrite it is target independent, and a raw target gets it here
-      // because it has no `compileOrThrow` of its own to apply it
-      // (`fixed-width-unroll.ts`).
-      // Caller-defined heads receive their original operands. Other
-      // applied literals infer bare parameter types from arguments they
-      // bind whole, before fixed-width collections are expanded.
-      const skipHeads = overriddenCompilationHeads(
-        options.operators,
-        options.functions
-      );
-      const unrolled = unrollFixedWidthCollections(
-        rewritePartialApplications(rewriteAngularUnit(expr), skipHeads),
-        {
-          skipHeads,
-          // The budget a DIRECT target applies is its own; the
-          // `iterationBudget` option is read by the registered-target route
-          // only.
-          iterationBudget: options.target.iterationBudget,
-          readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
-        }
-      );
-      // A target that has no lowering of `Apply` writes each application of
-      // a derivative as the closed form applied to its arguments
-      // (`CompileTarget.applyDerivatives`, the GLSL target). Its check
-      // (`rawTargetCheck()` below) types the tree of its own preparation,
-      // which has this rewrite, so the tree written here has it too. An
-      // application that the rewrite leaves is refused by the check.
-      const rewritten =
-        options.target.applyDerivatives?.(unrolled, options.target) ?? unrolled;
-      // Install a fresh naming context for generated temporaries on every call,
-      // so a target the caller reuses never carries stale numbering into the
-      // next compilation; `compileRoot`'s signature is unchanged — this is the
-      // options channel. Seeded with the names this compilation must not
-      // reuse: the expression's own symbols and any `_tv`/`_cse` token in the
-      // source the caller splices in.
-      const namingSources = [
-        options.preamble,
-        options.target.preamble,
-        ...(options.vars ? Object.values(options.vars) : []),
-        ...(options.functions
-          ? Object.values(options.functions).map((f) => {
-              // Through `entrySource`, so a `{ source, pure? }` descriptor
-              // whose source is a string still has that text scanned for the
-              // `_tv`/`_cse` identifiers this compilation must not reuse. A
-              // bare-object read would map every descriptor to `undefined` and
-              // silently drop the collision check.
-              const source = entrySource(f);
-              return typeof source === 'string' ? source : undefined;
-            })
-          : []),
-      ];
-      options.target.naming = BaseCompiler.newNamingContext(
-        rewritten,
-        namingSources
-      );
-      // A direct custom target gets no CSE: a `cseBind` attests binding syntax,
-      // not that the target's other emitters
-      // are pure and eager, and its resolver closures carry no override
-      // provenance for the emission-purity gate (G1b) to consult. Stamped per
-      // call, like the naming context, so a reused caller target never carries
-      // stale state.
-      // The option-contract check before this `try` rejects explicit
-      // `cse: true`;
-      // omitting the option keeps the silent off.
-      options.target.cse = { enabled: false, instances: [] };
-      // Stamp the caller's constant-folding choice per call, like the naming
-      // context and CSE state above, so a reused caller target never carries a
-      // previous call's setting. Stamped UNCONDITIONALLY: an omitted option
-      // must reset the field to `undefined` (= enabled, the BaseCompiler
-      // default), or a target reused after a `constantFold: false` call would
-      // silently keep folding disabled.
-      options.target.constantFold = options.constantFold;
-      // No storage hints reach a direct target (refused above when non-empty),
-      // and the field is cleared per call for the same reason as the
-      // `constantFold` stamp above: a reused caller target must not carry
-      // state from a previous call.
-      options.target.storage = undefined;
-      // The requested compile mode, stamped per call (an omitted option must
-      // reset the field, like the two above, so a reused target never keeps
-      // a previous call's mode). A requested mode the target does not offer
-      // is the `unsupported-mode` decline, raised by `BaseCompiler.compile`
-      // when it latches the mode.
-      options.target.mode = options.mode;
-      // A target object made by a language target whose emitter relies on a
-      // typing pass (the GLSL target) carries that pass
-      // (`raw-target-check.ts`). It runs on the expression as the caller
-      // wrote it, with the preparation and the pass of `canCompile()`, and a
-      // refusal declines with the diagnostic of `canCompile()`; any other
-      // error propagates (a cancellation reaches the catch below as itself).
-      // It runs after the per-call fields above are reset, so that a reused
-      // target object keeps no field of a previous call after a decline.
-      //
-      // The options are those that the raw route applies: `vars` (whose
-      // values the pass hides, as the raw route does below), the budget of
-      // the target object, no common-subexpression pass, and the
-      // constant-folding choice. `functions` and `preamble` are not passed:
-      // the raw route does not install them, so the stock lowering of each
-      // head is written, and the pass must judge that head by its own
-      // signature. `mode` is not passed: a mode that the target does not
-      // offer is the `unsupported-mode` decline of `BaseCompiler.compile`
-      // below.
-      //
-      // The pass judges the tree of its own preparation (which also writes
-      // point values and some calls of user functions in place), while the
-      // raw route writes `rewritten`, which is prepared less. The check
-      // makes the raw route decline what `compile()` with `to: 'glsl'`
-      // declines; it does not judge each emission. Its cost is one
-      // preparation and one pass in addition to the compilation.
-      const check = rawTargetCheck(options.target);
-      if (check !== undefined)
-        check(expr, {
-          vars: options.vars,
-          iterationBudget: options.target.iterationBudget,
-          cse: false,
-          constantFold: options.constantFold,
-        } as CompilationOptions<Expression>);
-      // A `vars`-mapped symbol is compiled as the valueless input of its
-      // declared type (`withVarsValuesHidden`), as on a registered target.
-      // The `vars` keys also ride on the target (`varsKeys`), so neither the
-      // constant folder nor the symbol read folds the value of a mapped
-      // symbol the hiding does not cover (one whose type was inferred from
-      // its value): it stays a live input. The keys are stamped on the
-      // caller's target object for this call only, and the previous value is
-      // restored when the call ends, because the caller can reuse the target
-      // for a compilation with other `vars`. The target is not copied: a copy
-      // made with object spread loses the methods of a class-instance target,
-      // and a hook that writes to `this` writes to the copy.
-      // The reachability memo of the constant folder (`foldReachMemo`) is
-      // replaced by an empty one for this call and restored with `varsKeys`.
-      // Its answers depend on the `vars` keys and on the engine's
-      // definitions, and both can change between two calls on the same
-      // target: an answer cached by a call without `u` among the keys would
-      // let a later call with `vars: { u }` fold a function that reads `u`.
-      const vars = options.vars;
-      const target = options.target;
-      const previousVarsKeys = target.varsKeys;
-      const previousFoldReachMemo = target.foldReachMemo;
-      target.foldReachMemo = new Map();
-      if (vars !== undefined && Object.keys(vars).length > 0)
-        target.varsKeys = new Set([
-          ...(previousVarsKeys ?? []),
-          ...Object.keys(vars),
-        ]);
-      let direct: CompilationResult<T, R>;
-      try {
-        direct = withVarsValuesHidden(expr, vars, () => {
-          const code = withDirectLoopPassReset(
-            rewritten,
-            target,
-            BaseCompiler.compileRoot(rewritten, target)
-          );
-          return BaseCompiler.withReferences(
-            {
-              target: (target.language ?? 'custom') as T,
-              success: true,
-              code,
-            } as CompilationResult<T, R>,
-            expr,
-            target,
-            vars ? new Set(Object.keys(vars)) : undefined
-          );
-        });
-      } finally {
-        target.varsKeys = previousVarsKeys;
-        target.foldReachMemo = previousFoldReachMemo;
-      }
-      return strictTypesChecked(expr, direct, options, undefined);
-    }
 
-    const targetName = (options?.to ?? 'javascript') as T;
+    // The removed mode `'auto'`, from a host that does not type-check its
+    // options: the `unsupported-mode` decline that names its replacement.
+    if (
+      (options?.mode as string) === 'auto' &&
+      (targetName === 'javascript' || targetName === 'glsl')
+    )
+      throw new CompileDeclineError({
+        code: 'unsupported-mode',
+        kind: 'capability',
+        message:
+          "Could not compile: the mode 'auto' was removed. Request " +
+          "mode: 'complex' for complex intermediate values, or omit the mode " +
+          "for 'strict', the default.",
+      });
 
-    // `interval-js` compiles with the interval mode of the profile `ir`
-    // (`ir/adapter-interval.ts`), whether the option `profile` is given or
-    // not, and reads no registered target; a decline falls back in the catch
-    // below.
     if (targetName === 'interval-js')
-      return strictTypesChecked(
+      return compileWithIrProfileInterval(
         expr,
-        compileWithIrProfileInterval(
-          expr,
-          options
-        ) as unknown as CompilationResult<T, R>,
-        options,
-        undefined
-      );
-
-    // Look up the target in the registry
-    const languageTarget = expr.engine._getCompilationTarget(targetName);
-
-    if (!languageTarget) {
-      throw new Error(
-        `Compilation target "${targetName}" is not registered. Available targets: ${expr.engine
-          ._listCompilationTargets()
-          .join(', ')}`
-      );
-    }
-
-    // Use the language target to compile. `fallback` is passed through so the
-    // target normalizes its own failures: a target whose failure returns
-    // `success: false` WITHOUT throwing (so the catch below never sees it)
-    // would otherwise give the caller a decline with no `run` at all,
-    // violating the fallback contract. The catch below remains for custom
-    // registered targets and pre-compile errors.
-    const targetOptions = {
-      fallback: options?.fallback ?? true,
-      operators: options?.operators,
-      functions: options?.functions,
-      vars: options?.vars,
-      symbolic: options?.symbolic,
-      callerLocals: options?.callerLocals,
-      imports: options?.imports,
-      preamble: options?.preamble,
-      mode: options?.mode,
-      entryChecks: options?.entryChecks,
-      broadcast: options?.broadcast,
-      iterationBudget: options?.iterationBudget,
-      quadrature: options?.quadrature,
-      symbolDeps: options?.symbolDeps,
-      varsObjectRefs: options?.varsObjectRefs,
-      cse: options?.cse,
-      constantFold: options?.constantFold,
-      storage: options?.storage,
-    };
-    // The removed mode `auto` takes the existing route, which declines it
-    // (with its fallback, as without the profile).
-    // The profile `ir` (experimental) compiles with the IR compiler
-    // (`ir/adapter.ts`); a decline falls back in the catch below. On
-    // `glsl` (`ir/adapter-glsl.ts`), a decline falls back to that target.
-    if (irProfile && targetName === 'glsl')
-      try {
-        return compileWithIrProfileGlsl(
-          expr,
-          options
-        ) as unknown as CompilationResult<T, R>;
-      } catch (e) {
-        if (!isCompileDeclineError(e) || options.fallback === false) throw e;
-        console.warn(
-          `Compilation fallback for "${expr.operator}" (target: ${targetName}, profile: ir): ${e.message}`
-        );
-        return strictTypesChecked(
-          expr,
-          languageTarget.compile(expr, targetOptions) as CompilationResult<
-            T,
-            R
-          >,
-          options,
-          languageTarget
-        );
-      }
-    if (irProfile)
+        options
+      ) as unknown as CompilationResult<T, R>;
+    if (targetName === 'glsl')
+      return compileWithIrProfileGlsl(
+        expr,
+        options
+      ) as unknown as CompilationResult<T, R>;
+    if (targetName === 'javascript')
       return compileWithIrProfile(
         expr,
         options
       ) as unknown as CompilationResult<T, R>;
-    return strictTypesChecked(
-      expr,
-      languageTarget.compile(expr, targetOptions) as CompilationResult<T, R>,
-      options,
-      languageTarget
+
+    throw new Error(
+      `Compilation target "${targetName}" is not a built-in target. ` +
+        `Available targets: ${BUILT_IN_TARGETS.join(', ')}`
     );
   } catch (e) {
     // A cancellation that is not a timeout (an abort, an iteration or
@@ -915,7 +396,6 @@ function compileInScope<
     // or result is a kind decline, whatever `fallback` says: it has no
     // interpreter fallback (`holdsEnclosureInputOrResult()`).
     if (
-      options?.target === undefined &&
       options?.to === 'interval-js' &&
       isCompileDeclineError(e) &&
       holdsEnclosureInputOrResult(expr)
@@ -923,7 +403,7 @@ function compileInScope<
       throw new KindDeclineError(compileDiagnosticOf(e, e.message));
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
-      const target = (options?.to ?? 'javascript') as T;
+      const target = targetName;
       // The fallback of `interval-js` gives an interval-shaped `run`
       // (`buildIntervalFallback()`, which warns); the generic interpreter
       // fallback below returns plain numbers, which would violate the
@@ -942,42 +422,27 @@ function compileInScope<
         ) as unknown as CompilationResult<T, R>;
       }
       console.warn(
-        `Compilation fallback for "${expr.operator}" (target: ${options?.to ?? 'javascript'}): ${error}`
+        `Compilation fallback for "${expr.operator}" (target: ${target}): ${error}`
       );
-      // A decline of the profile `ir` on JavaScript: the result is built with
-      // no compiler (`interpreterFallback()`).
-      if (irProfile && (target as string) === 'javascript')
-        return interpreterFallback(
+      // A decline: the result is built with no compiler
+      // (`interpreterFallback()`). On a target other than `javascript` it
+      // has no code; its `run` is the interpreter, as on `javascript`.
+      return {
+        ...interpreterFallback(
           expr,
           error,
           compileDiagnosticOf(e, error),
           options?.vars ? new Set(Object.keys(options.vars)) : undefined
-        ) as unknown as CompilationResult<T, R>;
-      const compileTarget =
-        options?.target ??
-        expr.engine._getCompilationTarget(target as string)?.createTarget();
-      // The fallback builds the ordinary (default-`R`) result; `R` is a
-      // caller-supplied narrowing assertion with no runtime counterpart, so
-      // it is re-applied here rather than threaded through the builder.
-      return BaseCompiler.buildInterpreterFallback(
-        expr,
-        error,
+        ),
         target,
-        compileTarget,
-        options?.vars ? new Set(Object.keys(options.vars)) : undefined,
-        compileDiagnosticOf(e, error)
-      ) as CompilationResult<T, R>;
+      } as unknown as CompilationResult<T, R>;
     }
     throw e;
   }
 }
 
 /**
- * Whether `compile(expr, options)` gives code for `expr`, without writing
- * code: `{ ok: true }`, or `{ ok: false, diagnostic }` with the code
- * `outside-fragment`, naming the first node outside the fragment of the
- * target (its head in `operator`, or the name of a free symbol without a
- * numeric type in `binding`).
+ * Whether `compile(expr, options)` gives code for `expr`.
  *
  * It takes the options of `compile()`. The answer depends on the
  * expression, the options and the declarations that the expression reaches
@@ -985,23 +450,19 @@ function compileInScope<
  * calls): a host that keeps the answer must discard it when one of those
  * declarations changes.
  *
- * Only the `glsl` target has a fragment. For another target, or a direct
- * custom target (`target` option), the answer is `ok: false`: the predicate
- * has no list of what that target compiles, and a "yes" that `compile()`
- * then contradicts would be wrong.
- *
- * **Experimental.** With the option `profile: 'ir'`, it answers for the
- * profile: `{ ok: true, shippable }` exactly when `compile()` with the
+ * It answers `{ ok: true, shippable }` exactly when `compile()` with the
  * same options gives code, with the `shippable` field of that result;
  * otherwise `{ ok: false, diagnostic }`, with the diagnostic of the decline
  * that `compile()` gives (`'outside-profile'` with the first node outside
- * the profile, or the code of another decline), or a `'compile-error'`
- * with the message of an invalid option. It runs the whole compilation,
- * emission included, so it costs as much as `compile()`.
+ * the profile, or the code of another decline), or a `'compile-error'` with
+ * the message of an invalid option. It runs the whole compilation, emission
+ * included, so it costs as much as `compile()`.
  *
- * It never throws: an invalid expression, an invalid option or an error of
- * the preparation of the tree gives `ok: false` with the message of the
- * error.
+ * For a target that is not built in, the answer is `ok: false` with the
+ * code `outside-fragment`.
+ *
+ * It never throws: an invalid expression or an invalid option gives
+ * `ok: false` with the message of the error.
  */
 export function canCompile(
   expr: Expression,
@@ -1017,9 +478,10 @@ export function canCompile(
         : result;
     } catch (e) {
       // A type string that is not a type: the predicate does not throw.
-      return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
+      return { ok: false, diagnostic: optionErrorDiagnostic(e) };
     }
-  if (options?.profile !== undefined) {
+  const name = options?.to ?? 'javascript';
+  if ((BUILT_IN_TARGETS as readonly string[]).includes(name)) {
     try {
       // The sets `symbolDeps` and `varsObjectRefs` are filled by a
       // compilation; the predicate writes nothing that the caller holds.
@@ -1036,146 +498,17 @@ export function canCompile(
   }
   try {
     assertCompilationOptionsContract(options);
-    if (!expr.isValid)
-      return {
-        ok: false,
-        diagnostic: {
-          code: 'outside-fragment',
-          kind: 'capability',
-          message: `Could not compile: the expression is not valid.`,
-          value: expr.toString(),
-        },
-      };
-    const name =
-      options?.target === undefined ? (options?.to ?? 'javascript') : undefined;
-    const languageTarget =
-      name === undefined ? undefined : expr.engine._getCompilationTarget(name);
-    const check = (
-      languageTarget as
-        | {
-            canCompile?: (
-              expr: Expression,
-              options: Record<string, unknown>
-            ) => CanCompileResult;
-          }
-        | undefined
-    )?.canCompile;
-    if (name !== 'glsl' || typeof check !== 'function')
-      return {
-        ok: false,
-        diagnostic: {
-          code: 'outside-fragment',
-          kind: 'capability',
-          message:
-            `canCompile() answers for the 'glsl' target only: the target ` +
-            `'${name ?? 'custom'}' has no fragment definition. Call compile().`,
-        },
-      };
-    // The names of `expr` are read from the scope of `compile()`
-    // (`compilationScope()`).
-    const scope = compilationScope(expr, compileInputNames(options));
-    if (isCompileDeclineError(scope))
-      return { ok: false, diagnostic: scope.diagnostic };
-    const answer = () =>
-      check.call(languageTarget, expr, {
-        functions: options?.functions,
-        vars: options?.vars,
-        callerLocals: options?.callerLocals,
-        preamble: options?.preamble,
-        mode: options?.mode,
-        iterationBudget: options?.iterationBudget,
-        cse: options?.cse,
-        constantFold: options?.constantFold,
-        storage: options?.storage,
-        strictTypes: options?.strictTypes,
-      });
-    const symbolic = options?.symbolic;
-    const hidden = (): CanCompileResult => {
-      const result = withSymbolicInputs(expr, symbolic, answer);
-      return isCompileDeclineError(result)
-        ? { ok: false, diagnostic: result.diagnostic }
-        : result;
+    return {
+      ok: false,
+      diagnostic: {
+        code: 'outside-fragment',
+        kind: 'capability',
+        message:
+          `canCompile() answers for the targets ${BUILT_IN_TARGETS.join(', ')} ` +
+          `only, not for the target '${name}'.`,
+      },
     };
-    return scope === undefined ? hidden() : expr.engine._inScope(scope, hidden);
   } catch (e) {
-    return { ok: false, diagnostic: fragmentErrorDiagnostic(e) };
+    return { ok: false, diagnostic: optionErrorDiagnostic(e) };
   }
-}
-
-/**
- * The error of the `strictTypes` option for the type report `types` of the
- * free symbols (`CompilationResult.freeSymbolTypes`): the message, and the
- * names of the free symbols whose type was inferred from their uses, not
- * declared. `undefined` when every free symbol is declared.
- */
-export function strictTypesError(
-  types: CompilationResult['freeSymbolTypes'] | undefined
-): { message: string; names: string[] } | undefined {
-  const undeclared = Object.entries(types ?? {}).filter(
-    ([, t]) => t.provenance !== 'declared'
-  );
-  if (undeclared.length === 0) return undefined;
-  const message =
-    `strictTypes: ` +
-    undeclared
-      .map(
-        ([name, t]) =>
-          `declare \`${name}\` (inferred \`${t.type}\`, would lower to ` +
-          `\`${t.lowered}\`)`
-      )
-      .join(', ') +
-    `. Every free symbol must have a declaration (\`ce.declare\`) when the ` +
-    `\`strictTypes\` option is set.`;
-  return { message, names: undeclared.map(([name]) => name) };
-}
-
-/**
- * Apply the `strictTypes` option to the result of a compilation: when it is
- * set and the compilation succeeded, every free symbol must have a
- * declaration. A free symbol whose type was inferred from its uses turns the
- * result into a decline, whose error names the symbol, the inferred type and
- * the type the code reads it as (`CompilationResult.freeSymbolTypes`).
- *
- * The decline follows the `fallback` option: it throws when `fallback` is
- * `false`, and otherwise returns the `success: false` result with an
- * interpreter-backed `run`. That result keeps the type report of the
- * compilation, which a fresh analysis could not reproduce (a shader reads a
- * colour operand as a `vec3` only because the emission recorded it).
- */
-function strictTypesChecked<T extends string, R>(
-  expr: Expression,
-  result: CompilationResult<T, R>,
-  options: CompileExpressionOptions<T> | undefined,
-  languageTarget: { createTarget(): CompileTarget<Expression> } | undefined
-): CompilationResult<T, R> {
-  if (options?.strictTypes !== true || !result.success) return result;
-  const error = strictTypesError(result.freeSymbolTypes)?.message;
-  if (error === undefined) return result;
-  const e = new Error(error);
-  if (options.fallback === false) throw e;
-  const diagnostic = compileDiagnosticOf(e, error);
-  // On interval-js, the interval fallback, which warns.
-  if ((result.target as string) === 'interval-js') {
-    const fallback = buildIntervalFallback(
-      expr,
-      error,
-      { vars: options.vars },
-      diagnostic
-    ) as unknown as CompilationResult<T, R>;
-    fallback.freeSymbolTypes = result.freeSymbolTypes;
-    return fallback;
-  }
-  console.warn(
-    `Compilation fallback for "${expr.operator}" (target: ${result.target}): ${error}`
-  );
-  const fallback = BaseCompiler.buildInterpreterFallback(
-    expr,
-    error,
-    result.target,
-    options.target ?? languageTarget?.createTarget(),
-    options.vars ? new Set(Object.keys(options.vars)) : undefined,
-    diagnostic
-  ) as CompilationResult<T, R>;
-  fallback.freeSymbolTypes = result.freeSymbolTypes;
-  return fallback;
 }

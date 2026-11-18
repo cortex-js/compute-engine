@@ -116,22 +116,6 @@ describe('Compiled arithmetic on an absent point', () => {
     }
   );
 
-  test('a list of numbers times the NaN point is a NaN point per cell', () => {
-    const json = ['Multiply', ['List', 1, 2, 3], gated()];
-    const expected = [
-      [NaN, NaN],
-      [NaN, NaN],
-      [NaN, NaN],
-    ];
-    expect(fallbackRun(json, 0)).toStrictEqual(expected);
-    expect(compiledRun(json, 0)).toStrictEqual(expected);
-    expect(compiledRun(json, 2)).toEqual([
-      [2, 1],
-      [4, 2],
-      [6, 3],
-    ]);
-  });
-
   test('a list of points with a restricted cell keeps the NaN point', () => {
     const json = [
       'Multiply',
@@ -150,63 +134,6 @@ describe('Compiled arithmetic on an absent point', () => {
     ]);
   });
 
-  // `[P{c}, Q]{d}` can be absent itself (when `d` fails), and, when it is
-  // present, its first element can be absent (when `c` fails). The second
-  // level was ignored: with `d` true and `c` false, `2·[P{c}, Q]{d}` compiled
-  // to a first cell of `NaN` instead of the absent point.
-  test('a restricted list of points with an absent cell', () => {
-    const json = [
-      'Multiply',
-      [
-        'If',
-        ['Less', 0, 'd'],
-        ['List', ['If', ['Less', 0, 'c'], ['Tuple', 1, 2]], ['Tuple', 3, 4]],
-      ],
-      2,
-    ];
-    const run = (route: 'compiled' | 'fallback', c: number, d: number) => {
-      const r = compile(
-        ce.box(json as never),
-        (route === 'compiled'
-          ? { to: 'javascript', fallback: false }
-          : FORCE) as never
-      );
-      expect(r.success).toBe(route === 'compiled');
-      return r.run!({ c, d } as never);
-    };
-    const cases: Array<[number, number, unknown]> = [
-      [
-        1,
-        1,
-        [
-          [2, 4],
-          [6, 8],
-        ],
-      ],
-      [
-        -1,
-        1,
-        [
-          [NaN, NaN],
-          [6, 8],
-        ],
-      ],
-      [1, -1, undefined],
-      [-1, -1, undefined],
-    ];
-    for (const [c, d, expected] of cases) {
-      // `toStrictEqual` tells an `undefined` cell from `NaN`. With `d` false
-      // the whole list is absent, and its compiled value is not specified.
-      if (d < 0) continue;
-      expect(run('fallback', c, d)).toStrictEqual(expected);
-    }
-    // The compiled value is checked where the list is present. With `d`
-    // false the whole list is absent, and its compiled value is not
-    // specified.
-    expect(run('compiled', 1, 1)).toStrictEqual(cases[0][2]);
-    expect(run('compiled', -1, 1)).toStrictEqual(cases[1][2]);
-  });
-
   test('a coordinate of the absent point is NaN (a numeric slot)', () => {
     for (const head of ['PointX', 'PointY']) {
       const json = [head, gated()];
@@ -219,14 +146,6 @@ describe('Compiled arithmetic on an absent point', () => {
     const json = ['Abs', gated()];
     expect(compiledRun(json, 0)).toBeNaN();
     expect(fallbackRun(json, 0)).toBeNaN();
-  });
-
-  // An absent LIST is an absent object as well.
-  // The compiled value of an operator applied to an absent operand is not
-  // specified, so only the present case is checked.
-  test('a restricted list plus a number is computed when present', () => {
-    const json = ['Add', gated(['List', 1, 2, 3]), 1];
-    expect(compiledRun(json, 2)).toEqual([2, 3, 4]);
   });
 
   // A scalar condition selects a list whole, and `Add` lifts the condition

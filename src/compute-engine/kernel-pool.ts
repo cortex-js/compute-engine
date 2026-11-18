@@ -25,9 +25,8 @@
  * value the main thread would have computed. A result whose code depends on
  * the main thread (a random draw, which follows the engine's random stream
  * and entropy handler; a function or variable given by the name of a host
- * global; a caller preamble) is not shippable and always runs inline: the
- * compile target says so (`CompileTarget.hostNames`, and the randomness
- * helpers the code names).
+ * global) is not shippable and always runs inline: the compilation says so
+ * (the host names and the randomness helpers the code names).
  *
  * `broadcastAsync()` runs a batch inline, in slices between yields to the
  * event loop (the first yield comes before the first slice, so that no cell

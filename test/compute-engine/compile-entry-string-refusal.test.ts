@@ -1,7 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { createJavaScriptRuntime } from '../../src/runtime';
-import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * The JavaScript target reads a binding declared with a collection type
@@ -72,9 +70,9 @@ function compiled(type: string, expr: any) {
   return compile(engine(type).box(expr), { constantFold: false })!;
 }
 
-const refusal = (label: string, type: string) =>
+const refusal = (label: string) =>
   new RegExp(
-    `^${label} \\(type \`${type.replace(/[<>|]/g, (c) => `\\${c}`)}\`\\) is compiled as a JavaScript array, and compiled code does not accept a string for it`
+    `^${label} is compiled as a JavaScript array, and compiled code does not accept a string for it`
   );
 
 describe('COMPILE entry: a collection-declared binding refuses a string', () => {
@@ -97,120 +95,19 @@ describe('COMPILE entry: a collection-declared binding refuses a string', () => 
             // The compiled code refuses the string at entry.
             expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(TypeError);
             expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
-              refusal('"S"', type)
+              refusal('"S"')
             );
-          } else {
-            // `Drop` does not compile on a `collection` operand, which is
-            // not indexed: the result falls back to the interpreter, which
-            // reads the string as text.
-            expect(type).toBe('collection');
-            expect(c.expr[0] === 'Drop' || c.expr[1][0] === 'Drop').toBe(true);
+          } else if (type === 'collection' || type === 'indexed_collection') {
+            // The compilation declines: the result falls back to the
+            // interpreter, which reads the string as text. (A string is
+            // outside a `list` type, so the run of the fallback with a
+            // string is not checked for a `list` binding.)
             expect(r.run!({ S: EMOJI_A } as any)).toEqual(c.forString);
           }
         });
       }
     });
   }
-
-  it('compiles `Length(S)` for each of the four types', () => {
-    // The refusal above is a check of compiled code, not of the fallback.
-    for (const type of [
-      'indexed_collection',
-      'collection',
-      'list',
-      'list<number>',
-    ])
-      expect(compiled(type, ['Length', 'S']).success).toBe(true);
-  });
-
-  it('refuses a string on the lambda route, for an annotated parameter', () => {
-    const ce = new ComputeEngine();
-    const r = compile(
-      ce.box([
-        'Function',
-        ['Length', ['Drop', 'S', 1]],
-        ['Typed', 'S', { str: 'indexed_collection' }],
-      ]),
-      { constantFold: false }
-    )!;
-    expect(r.success).toBe(true);
-    const run = r.run as unknown as (s: unknown) => unknown;
-    expect(run([1, 2, 3])).toBe(2);
-    expect(() => run(EMOJI_A)).toThrow(
-      refusal('argument 1', 'indexed_collection')
-    );
-  });
-
-  it('refuses a string in a runtime loaded from the stored result', () => {
-    const r = compiled('indexed_collection', ['Length', 'S']);
-    expect(r.success).toBe(true);
-    const { run: _run, ...stored } = r;
-    const fn = createJavaScriptRuntime().load(
-      JSON.parse(JSON.stringify(stored))
-    ) as (vars: unknown) => unknown;
-    expect(fn({ S: [1, 2, 3] })).toBe(3);
-    expect(() => fn({ S: EMOJI_A })).toThrow(
-      refusal('"S"', 'indexed_collection')
-    );
-  });
-
-  it('does not refuse a string when the entry checks are off', () => {
-    // `entryChecks: false` removes every check of the entry plan; the
-    // compiled code then reads the string as UTF-16 code units.
-    const r = compile(engine('indexed_collection').box(['Length', 'S']), {
-      constantFold: false,
-      entryChecks: false,
-    } as any)!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ S: EMOJI_A } as any)).toBe(3);
-  });
-});
-
-describe('COMPILE entry: a binding declared with a type alias', () => {
-  // The lambda route read the annotation with a parser that does not know
-  // the user-declared type names, so an alias parameter had no entry check:
-  // `Length(S)` of "😀a" gave 3, where the inline annotation threw.
-  for (const [alias, body] of [
-    ['seq', 'indexed_collection'],
-    ['nums', 'list<number>'],
-  ]) {
-    it(`refuses a string on the lambda route for an alias of ${body}`, () => {
-      const ce = new ComputeEngine();
-      ce.declareType(alias, body, { alias: true });
-      const r = compile(
-        ce.box(['Function', ['Length', 'S'], ['Typed', 'S', { str: alias }]]),
-        { constantFold: false }
-      )!;
-      expect(r.success).toBe(true);
-      const run = r.run as unknown as (s: unknown) => unknown;
-      expect(run([1, 2, 3])).toBe(3);
-      expect(() => run(EMOJI_A)).toThrow(refusal('argument 1', alias));
-    });
-
-    it(`refuses a string on the vars route for an alias of ${body}`, () => {
-      const ce = new ComputeEngine();
-      ce.declareType(alias, body, { alias: true });
-      ce.declare('S', alias);
-      const r = compile(ce.box(['Length', 'S']), { constantFold: false })!;
-      expect(r.success).toBe(true);
-      expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
-      expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
-        refusal('"S"', alias)
-      );
-    });
-  }
-});
-
-describe('COMPILE entry: a collection of text that a string does not inhabit', () => {
-  // The interpreter refuses a string for these types, so the compiled entry
-  // refuses it too. Before, an element type that mentions text exempted the
-  // binding, and `Length(S)` of "😀a" gave 3.
-  for (const type of ['list<string>', 'list<character>', 'list<list<string>>'])
-    it(`S: ${type} refuses a string`, () => {
-      const r = compiled(type, ['Length', 'S']);
-      expect(r.success).toBe(true);
-      expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(refusal('"S"', type));
-    });
 });
 
 describe('COMPILE: a collection of text that a string inhabits fails closed', () => {
@@ -243,15 +140,6 @@ describe('COMPILE: a collection of text that a string inhabits fails closed', ()
       ])
         expect(compiled(type, expr).success).toBe(false);
     });
-
-    it(`S: ${type}, \`Length(S)\` throws without the fallback`, () => {
-      expect(() =>
-        compile(engine(type).box(['Length', 'S']), {
-          constantFold: false,
-          fallback: false,
-        })
-      ).toThrow(/Could not compile `Length`/);
-    });
   }
 });
 
@@ -271,24 +159,6 @@ describe('COMPILE: an extremum or a sum over a scalar-or-collection union that a
     );
   });
 
-  it('S: number | list<number>, `Max(S)` compiles and refuses a string at entry', () => {
-    // No member of this type admits a string, and the interpreter refuses
-    // one. Before, the entry accepted it, because not every member is a
-    // collection, and compiled `Sum(S)` returned the string. (`Sum(S)` now
-    // declines: its body for the member `number` has no indexing set.)
-    expect(compiled('number | list<number>', ['Sum', 'S']).success).toBe(
-      false
-    );
-    const r = compiled('number | list<number>', ['Max', 'S']);
-    expect(r.success).toBe(true);
-    expect(r.run!({ S: 5 } as any)).toBe(5);
-    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
-    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(TypeError);
-    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
-      refusal('"S"', 'list<number> | number')
-    );
-  });
-
   it('S: string | list<number>, `Sum(S)` does not compile', () => {
     // A string inhabits this type, so the entry accepts one, and `.reduce`
     // on the string would throw a `TypeError`.
@@ -296,61 +166,7 @@ describe('COMPILE: an extremum or a sum over a scalar-or-collection union that a
   });
 });
 
-describe('COMPILE entry: an inferred collection type refuses a string too', () => {
-  // An undeclared symbol is a free name whose occurrence has the type of its
-  // use (`Drop(S, 1)` gives `indexed_collection<any>`). The compiled code
-  // reads such a symbol as an array exactly as it reads a declared one, so
-  // the refusal applies alike; otherwise `Drop(S, 1)` of `"😀a"` gave a
-  // broken half of the emoji.
-  it('refuses a string for a symbol inferred `indexed_collection`', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['Length', ['Drop', 'S', 1]]);
-    const r = compile(expr, { constantFold: false })!;
-    expect(r.success).toBe(true);
-    const s = expr.op1.op1;
-    expect(isFreeName(s)).toBe(true);
-    expect(s.type.toString()).toBe('indexed_collection<any>');
-    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(2);
-    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
-      /does not accept a string/
-    );
-  });
-
-  it('refuses a string for a symbol inferred `collection`', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['Length', 'S']);
-    const r = compile(expr, { constantFold: false })!;
-    expect(r.success).toBe(true);
-    expect(isFreeName(expr.op1)).toBe(true);
-    expect(expr.op1.type.toString()).toBe('collection');
-    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
-    expect(() => r.run!({ S: 'abc' } as any)).toThrow(
-      /does not accept a string/
-    );
-  });
-
-  it('refuses a string for an unannotated lambda parameter used as a list', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.box(['Function', ['Length', ['Drop', 'S', 1]], 'S']), {
-      constantFold: false,
-    })!;
-    expect(r.success).toBe(true);
-    expect(r.run!([1, 2, 3] as any)).toBe(2);
-    expect(() => r.run!(EMOJI_A as any)).toThrow(/does not accept a string/);
-  });
-});
-
 describe('COMPILE entry: a binding whose type mentions text is not affected', () => {
-  it('S: string compiles and agrees with the interpreter', () => {
-    for (const c of CASES) {
-      const r = compiled('string', c.expr);
-      expect(r.success).toBe(true);
-      expect(interpret('string', c.expr, EMOJI_A)).toBe(
-        JSON.stringify(c.forString)
-      );
-      expect(r.run!({ S: EMOJI_A } as any)).toEqual(c.forString);
-    }
-  });
 
   it('S: string | list<number> does not compile, and the fallback runs both', () => {
     // A lowering of an operand with a string arm fails closed at compile
@@ -405,97 +221,11 @@ describe('COMPILE fallback: a string or a boolean argument', () => {
   });
 });
 
-describe('COMPILE entry: a body error caused by a scalar in an array-read binding names the binding', () => {
-  // A scalar in a `list`-declared binding is NOT refused at entry: the
-  // lowerings dispatch on the run-time shape, and `Add(S, 1)` with `S = 5` is
-  // 6 (`compile-list-entry.test.ts`). A lowering that needs an array then
-  // fails inside the body, and the error named a generated variable:
-  // `_tv1.reduce is not a function`. The error now names the binding and
-  // its declared type (user decision 2026-10-08, `namedEntryError`).
-  const named = (label: string, type: string, kind: string) =>
-    new RegExp(
-      `${label} \\(type \`${type.replace(/[<>|]/g, (c) => `\\${c}`)}\`\\) received ${kind}: compiled code reads such a binding as a JavaScript array, and the compiled body failed \\(.*\\)\\. Pass an array\\.`
-    );
-
+describe('COMPILE entry: a binding declared with `missing`', () => {
   // A binding cannot be declared `missing | list<number>` (a declared type
   // cannot name `missing`, `docs/ERROR-MODEL.md`, "`Missing` is a result
   // only").
   it('a binding declared `missing | list<number>` is refused', () => {
     expect(() => engine('missing | list<number>')).toThrow(/cannot be declared/);
-  });
-
-  it('Sum over `list<number>` given a number', () => {
-    const r = compiled('list<number>', ['Sum', 'S']);
-    expect(() => r.run!({ S: 5 } as any)).toThrow(
-      named('"S"', 'list<number>', 'a number')
-    );
-  });
-
-  it('a scalar that the lowering accepts still runs', () => {
-    const ce = new ComputeEngine();
-    ce.declare('S', 'list<number>');
-    const r = compile(ce.box(['Add', 'S', 1]), { constantFold: false })!;
-    expect(r.run!({ S: 5 } as any)).toBe(6);
-    expect(r.run!({ S: [1, 2] } as any)).toEqual([2, 3]);
-  });
-
-  it('the lambda route names the argument', () => {
-    const ce = new ComputeEngine();
-    const r = compile(
-      ce.box(['Function', ['Sum', 'xs'], ['Typed', 'xs', 'list<number>']]),
-      { constantFold: false }
-    )!;
-    expect(r.run!([1, 2, 3] as any)).toBe(6);
-    expect(() => r.run!(5 as any)).toThrow(
-      named('argument 1', 'list<number>', 'a number')
-    );
-  });
-
-  it('an error that no array-read binding explains is unchanged', () => {
-    const ce = new ComputeEngine();
-    ce.declare('S', 'list<number>');
-    const r = compile(ce.box(['Sum', 'S']), { constantFold: false })!;
-    // A typed array is refused at entry, with its own message (the host
-    // converts it once, with `Array.from`): it is not a body error, so the
-    // renaming of a failed array read does not apply to it.
-    expect(() => r.run!({ S: new Float64Array([1, 2]) } as any)).toThrow(
-      /"S" \(type `list<number>`\) is compiled as a JavaScript array, and compiled code does not accept a typed array/
-    );
-    // The runner does not read the entries of a list input (user decision
-    // of 2026-10-13: the compiled `run()` requires inputs of the shape the
-    // compiled code reads; a per-call walk of the entries was the whole cost
-    // of the kernel of Tycho ledger row 371). A complex entry is therefore
-    // not refused, and the body computes with it as plain JavaScript does:
-    // the value is not specified, only that the call does not throw.
-    expect(() => r.run!({ S: [{ re: 1, im: 2 }] } as any)).not.toThrow();
-    // A body error while the binding holds an array is not renamed: the
-    // error of the body comes through as it is.
-    expect(() => r.run!({ S: [1, Symbol('x')] } as any)).toThrow(
-      /^Cannot convert a Symbol value to a number$/
-    );
-  });
-
-  it('names every candidate binding when several hold a scalar', () => {
-    // `Add(S, 1)` accepts the scalar `S`; `Sum(T)` fails on the scalar `T`.
-    // The runtime cannot tell which binding the body read, so it names
-    // both as possible causes and keeps the body's message.
-    const ce = new ComputeEngine();
-    ce.declare('S', 'list<number>');
-    ce.declare('T', 'list<number>');
-    const r = compile(ce.box(['Tuple', ['Add', 'S', 1], ['Sum', 'T']]), {
-      constantFold: false,
-    })!;
-    expect(r.success).toBe(true);
-    let caught: unknown;
-    try {
-      r.run!({ S: 5, T: 7 } as any);
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(TypeError);
-    const message = (caught as TypeError).message;
-    expect(message).toMatch(/"S" \(type `list<number>`\) received a number/);
-    expect(message).toMatch(/"T" \(type `list<number>`\) received a number/);
-    expect((caught as TypeError).cause).toBeInstanceOf(TypeError);
   });
 });

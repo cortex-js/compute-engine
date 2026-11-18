@@ -1,6 +1,6 @@
 /**
- * The JavaScript printer of the slice compiler, in the form of the stored
- * code of the existing compiler (`StoredJavaScript`): `preambleOnce`, the
+ * The JavaScript printer of the slice compiler, in the form of stored
+ * code (`StoredJavaScript`): `preambleOnce`, the
  * helpers and the user functions, and `code`, an expression of the inputs
  * object `_` (for a root function literal, the function
  * `(a0, a1, …, _ = {}) => …` of the parameters by position, then the inputs
@@ -17,9 +17,7 @@
  *
  * A power, a `Mod`, the functions of the folds, a draw, a random frame,
  * an integral and the count of the passes of a loop call `_SYS` (README,
- * "Loops and the runtime"). An integral is NaN when the Monte-Carlo
- * fallback of `_SYS.irIntegrate` samples an integrand that gave a value that
- * is not finite.
+ * "Loops and the runtime").
  */
 
 import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
@@ -187,7 +185,7 @@ export const JS: Syntax = deepFreeze({
     ...calls('Math.', ['trunc', 'sign', 'log10', 'log2']),
     hypot: 'Math.hypot($0, $1)',
     ...calls('Math.', ['atan', 'asin', 'acos', 'asinh', 'acosh', 'atanh']),
-    // A colour is the existing compiler's object (`CompiledColor`): a
+    // A colour is the runtime's object (`CompiledColor`): a
     // constructor gives it in OKLCh, a conversion in the space it names.
     rgb: '_SYS.rgb($0, $1, $2)',
     hsl: '_SYS.hsl($0, $1, $2)',
@@ -212,7 +210,7 @@ export const JS: Syntax = deepFreeze({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
     }),
-    // The call of the existing compiler (`compileDerivative()`).
+    // The numeric derivative of the runtime (`_SYS.nd`).
     derivative: ({ outs: [out], args: [x], params: [t] }) => ({
       open: [`const ${out} = _SYS.nd((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, 1, 'scalar')(${x});`],
@@ -414,7 +412,7 @@ export function printJavaScript(
   iterationBudget?: number
 ): JavaScriptResult {
   // With a budget, each pass of a `Loop` counts one pass of the call, as
-  // `compile()`'s `iterationBudget` (floored, as the existing compiler).
+  // `compile()`'s `iterationBudget` (floored).
   // No count where it cannot reach the budget: a bound of the passes of a
   // call at compile time (`loopPasses()`) within it, and no recursion.
   const limit = Math.floor(iterationBudget ?? Infinity);

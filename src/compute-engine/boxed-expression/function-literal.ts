@@ -476,11 +476,9 @@ export function functionLiteralParameterType(
  * annotation does not parse. An unannotated or unparseable parameter
  * therefore reads as undeclared, the safe direction.
  *
- * It reads one parameter, so that the callers that read the parameters by
- * position (the value-position coercion of an inline literal, in
- * `compilation/compile-callbacks.ts`) and `literalDeclaredParamTypes()` in
- * the same module, which reads them by name, agree on the declared type of
- * a parameter.
+ * It reads one parameter, so that a caller that reads the parameters by
+ * position and `literalDeclaredParamTypes()`, which reads them by name,
+ * agree on the declared type of a parameter.
  *
  * This is the reading the compiler uses to put a parameter of a literal in
  * the `{ re, im }` complex lane (`compilation/compile-function-literals.ts`),

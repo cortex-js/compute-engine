@@ -314,23 +314,6 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
     expect(r.code).not.toContain("kind: 'interval'");
   });
 
-  test('a caller-supplied function declines, and the interpreter evaluates', () => {
-    // A caller's own function is code the compiler never sees: it may keep
-    // or write to the interval object it is given. The interval mode does
-    // not take the `functions` option (a missing capability).
-    const latex = '\\sum_{i=1}^{20} \\frac{1}{2}\\sin(i x)';
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const r = compile(ce.parse(latex), {
-      to: 'interval-js',
-      functions: { keepsItsArgument: '((v) => v)' },
-    } as any) as IntervalRun & { diagnostic?: { code: string } };
-    warn.mockRestore();
-    expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-profile');
-    // The interpreter's sum of sines is not exactly a double: `entire`.
-    expect(r.run({ x: 0.35 })).toEqual({ kind: 'entire' });
-  });
-
   test('a bound loop index is never mistaken for a constant', () => {
     const r = compileInterval('\\sum_{n=1}^{150} \\frac{x}{n^2}');
     const v = boundOf(r.run({ x: { lo: 1, hi: 1 } }));

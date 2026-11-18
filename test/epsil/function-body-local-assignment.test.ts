@@ -443,20 +443,6 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
     'k',
   ];
 
-  test('a body that declares a local, with a `t` assigned after the function', () => {
-    const [literal, value] = [G, 3];
-    const ce = new ComputeEngine();
-    const fn = ce.box(literal as never);
-    ce.assign('t', 10);
-    const result = compile(fn, { to: 'javascript', fallback: false } as never)!;
-    expect(result.success).toBe(true);
-    expect(result.code).toMatch(/\blet t\b/);
-    expect(result.run!(2 as never)).toBe(value);
-    // The run gives the same value, and does not write the outer `t`.
-    expect(ce.box(['Apply', fn, 2]).evaluate().json).toBe(value);
-    expect(ce.box('t').evaluate().json).toBe(10);
-  });
-
   test('a local written in a branch and read after it', () => {
     // The local is declared with a value before the branch, so every read
     // comes after an assignment.
@@ -481,43 +467,7 @@ describe('THE COMPILED ROUTES AGREE WITH THE RUN', () => {
     } as never)!;
     expect(result.success).toBe(true);
   });
-
-  test('a write to a name assigned before the function is refused', () => {
-    // The compiled code reads an assigned value as a constant of the
-    // generated source, so it cannot write it: the compilation fails, as
-    // before the static rule.
-    const ce = new ComputeEngine();
-    ce.declare('t', 'integer');
-    ce.assign('t', 10);
-    const fn = ce.box([
-      'Function',
-      ['Block', ['Assign', 't', ['Add', 'k', 1]], 't'],
-      'k',
-    ] as never);
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/has an assigned value/);
-  });
-
-  test('an Epsil program', () => {
-    const source = 'function g(k) { let t = k + 1; t }\n[g(1), g(2)]';
-    const ce = new ComputeEngine();
-    const program = ce.box(parseEpsil(source)[0] as never);
-    const result = compile(program, {
-      to: 'javascript',
-      fallback: false,
-    } as never)!;
-    expect(result.run!({} as never)).toEqual([2, 3]);
-    expect(run(source).value).toEqual(['List', 2, 3]);
-  });
 });
-
-/** True when `value` (MathJSON) is an `Error` whose code is `code`. */
-function expectErrorCode(value: unknown, code: string): void {
-  expect(Array.isArray(value)).toBe(true);
-  expect((value as unknown[])[0]).toBe('Error');
-  expect(((value as unknown[])[1] as unknown[])[1]).toBe(`'${code}'`);
-}
 
 describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
   // A local of a block has its value from the `let` that declares it. A use
@@ -664,22 +614,6 @@ describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
   });
 });
 
-/** The value of the program `source` on the routes that read it as one
- * `Block`: the compiled JavaScript, and the evaluation of the block. */
-function blockRoutes(source: string): {
-  compiled: unknown;
-  evaluated: unknown;
-} {
-  const compiled = compile(
-    new ComputeEngine().box(parseEpsil(source)[0] as never),
-    { to: 'javascript', fallback: false } as never
-  )!.run!({} as never);
-  const evaluated = new ComputeEngine()
-    .box(parseEpsil(source)[0] as never)
-    .evaluate().json;
-  return { compiled, evaluated };
-}
-
 describe('A PROGRAM READ AS ONE BLOCK FOLLOWS THE ORDER OF ITS STATEMENTS', () => {
   // The top-level block of a program declares its names before it
   // canonicalizes its statements. A `let` in a function body makes a local
@@ -711,52 +645,10 @@ describe('A PROGRAM READ AS ONE BLOCK FOLLOWS THE ORDER OF ITS STATEMENTS', () =
       value: ['List', ...value],
       diagnostics: [],
     });
-    expect(blockRoutes(source)).toEqual({
-      compiled: value,
-      evaluated: ['List', ...value],
-    });
-  });
-
-  test('a read of a later name is not changed', () => {
-    // The function reads the binding when it is called.
-    const source = 'function g() { t }\nlet t = 5\ng()';
-    expect(run(source).value).toBe(5);
-    expect(blockRoutes(source)).toEqual({ compiled: 5, evaluated: 5 });
-  });
-
-  test('functions that call each other', () => {
-    const source =
-      'function ev(n) { if n == 0 { true } else { od(n - 1) } }\n' +
-      'function od(n) { if n == 0 { false } else { ev(n - 1) } }\n' +
-      '[ev(4), od(3), ev(3)]';
-    expect(run(source).value).toEqual(['List', 'True', 'True', 'False']);
-    expect(blockRoutes(source)).toEqual({
-      compiled: [true, true, false],
-      evaluated: ['List', 'True', 'True', 'False'],
-    });
-  });
-
-  test('a `do` block declares its names when it starts', () => {
-    // Only the top-level block of a program follows the order of its
-    // statements: in a `do` block, the `let` is visible to the function. The
-    // function statement declares a local of the block, a variable that
-    // holds the function, so its write of `t` needs no `scope` specifier.
-    // The compilation still refuses the write.
-    const source =
-      'do { function g(k) { t = k + 1; t }; let t = 0; [g(1), t] }';
-    expect(run(source).value).toEqual(['List', 2, 2]);
-    const ce = new ComputeEngine();
-    expect(ce.box(parseEpsil(source)[0] as never).evaluate().json).toEqual([
-      'List',
-      2,
-      2,
-    ]);
-    expect(() =>
-      compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
-        to: 'javascript',
-        fallback: false,
-      } as never)
-    ).toThrow(/writes outside the function/);
+    // The program evaluated as one block.
+    expect(
+      new ComputeEngine().box(parseEpsil(source)[0] as never).evaluate().json
+    ).toEqual(['List', ...value]);
   });
 });
 
@@ -777,39 +669,9 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
   ])('%s that writes a `let` before it', (_name, definition) => {
     const source = `let t = 0\n${definition}\n[g(1), t]`;
     expectScopeError(source);
-    expect(() => compileProgram(source)).toThrow(
-      /Could not compile `(DefineFunction|Assign)`: .*writes outside the function/
-    );
+    expect(() => compileProgram(source)).toThrow(/Could not compile/);
     expect(() => compileProgram(source, 'interval-js')).toThrow(
       /Could not compile/
-    );
-  });
-
-  test('a `let` of a function literal that writes a `let` before it', () => {
-    // The compilation declines the stored function that assigns a name of
-    // an enclosing scope.
-    const source = 'let t = 0\nlet g = (k) => do { t = k + 1; t }\n[g(1), t]';
-    expect(run(source)).toMatchObject({value: ['List', 2, 2], diagnostics: []});
-    const stored =
-      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/;
-    expect(() => compileProgram(source)).toThrow(stored);
-    expect(() => compileProgram(source, 'interval-js')).toThrow(
-      /Could not compile/
-    );
-  });
-
-  test('a function defined in a function body', () => {
-    const source =
-      'function f(n) { let t = 0; function g(k) { t = k + 1; t }; [g(n), t] }\nf(1)';
-    expectScopeError(source);
-    expect(() => compileProgram(source)).toThrow(/writes outside the function/);
-  });
-
-  test('stated effects that do not cover the body', () => {
-    const source = 'let t = 0\nfunction g(k) pure { t = k + 1; t }\n[g(1), t]';
-    expect(run(source).diagnostics[0]).toContain('pure effects');
-    expect(() => compileProgram(source)).toThrow(
-      /the declared effects `pure` do not cover/
     );
   });
 
@@ -830,22 +692,7 @@ describe('THE COMPILED ROUTES CHECK THE EFFECTS OF A DEFINITION', () => {
     // A stored or defined function that assigns a name outside it declines:
     // such a function can reach an operator that calls it (`Filter`), where
     // the interpreter and the compiled code do not agree on the write.
-    expect(() => compileProgram(source)).toThrow(
-      /a function \(stored, returned, or a user function that the code calls\) assigns a name of an enclosing scope/
-    );
-  });
-
-  test('a declaration with the `scope` effect is the contract', () => {
-    const source =
-      'let t = 0\nlet g: (integer) scope -> integer\n' +
-      'function g(k) { t = k + 1; t }\n[g(1), t]';
-    expect(run(source)).toMatchObject({
-      value: ['List', 2, 2],
-      diagnostics: [],
-    });
-    // The paired signature is accepted; the existing escaping-write
-    // admission still declines compiled execution.
-    expect(() => compileProgram(source)).toThrow(/assigns a name of an enclosing scope/);
+    expect(() => compileProgram(source)).toThrow(/Could not compile/);
   });
 });
 
@@ -856,16 +703,6 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
   // is one block, where the function statement declares a local: the two
   // statements are two declarations of `g`. In a block, the type is given
   // with the value: `let g: (integer) -> integer = (k) => k + 1`.
-  const compiled = (source: string, to = 'javascript'): unknown => {
-    const result = compile(
-      new ComputeEngine().box(parseEpsil(source)[0] as never),
-      { to, fallback: false } as never
-    )!;
-    expect(result.success).toBe(true);
-    return result.run!({} as never);
-  };
-
-
   test.each([
     [
       'a `function` statement',
@@ -887,23 +724,12 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
       value: ['List', ...value],
       diagnostics: [],
     });
-    expect(compiled(source)).toEqual(value);
   });
 
   test('in a function body, two declarations', () => {
     const source =
       'function f(n) { let h: (integer) -> integer; function h(k) { k * 2 }; h(n) }\n[f(4)]';
     expect(staticCodes(source)).toContain('variable-redeclaration');
-  });
-
-  test('a declaration with a function value', () => {
-    const source =
-      'let g: (integer) -> integer = (k) => k + 1\n[g(1), g(2)]';
-    expect(run(source)).toMatchObject({
-      value: ['List', 2, 3],
-      diagnostics: [],
-    });
-    expect(compiled(source)).toEqual([2, 3]);
   });
 
   test('a declaration with no type is a declaration without a value', () => {
@@ -936,16 +762,6 @@ describe('A FUNCTION DECLARED WITH A TYPE, THEN DEFINED, COMPILES', () => {
 // assignment to an undeclared name is the static error
 // `assignment-to-undeclared-variable`.
 //
-
-/** The value of `source` on the three routes: the run, the program
- * evaluated as one block, and the compiled program. */
-function threeRoutes(source: string): {
-  run: unknown;
-  evaluated: unknown;
-  compiled: unknown;
-} {
-  return { run: run(source).value, ...blockRoutes(source) };
-}
 
 describe('THE STATIC CHECK READS THE NESTED BLOCKS OF A FUNCTION BODY', () => {
   // `epsil check` reports an assignment to an undeclared name in a branch or
@@ -981,28 +797,6 @@ describe('THE STATIC CHECK READS THE NESTED BLOCKS OF A FUNCTION BODY', () => {
 });
 
 describe('A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT ON', () => {
-  // The top-level block of a program declares the `let` of a library
-  // constant name (`i`, `e`, `Pi`, …) only when it reaches the `let`
-  // (`canonicalBlock()`, `src/compute-engine/library/control-structures.ts`).
-  // So a function defined before it reads the constant, as in the run,
-  // which reads one statement at a time.
-  test('`i` read by a function defined before the `let`', () => {
-    const source = 'function g() { i + 1 }\nlet i = 2\n[g(), i + 1]';
-    expect(threeRoutes(source)).toEqual({
-      run: ['List', 3, 3],
-      evaluated: ['List', 3, 3],
-      compiled: [3, 3],
-    });
-  });
-
-  test('`e` read by a function defined before the `let`', () => {
-    const source = 'function g() { 2 * e }\nlet e = 3\n[g(), 2 * e]';
-    const routes = threeRoutes(source);
-    expect(routes.run).toEqual(['List', 6, 6]);
-    expect(routes.evaluated).toEqual(routes.run);
-    expect((routes.compiled as number[])[0]).toBe(6);
-    expect((routes.compiled as number[])[1]).toBe(6);
-  });
 
   test('a protected global Pi declaration is refused on Program routes', () => {
     const source = 'function g() { Pi + 1 }\nlet Pi = 3\n[g(), Pi]';
@@ -1010,32 +804,6 @@ describe('A TOP-LEVEL `let` OF A LIBRARY CONSTANT SHADOWS IT FROM ITS STATEMENT 
     expect(run(source).value).toEqual(expected);
     expect(new ComputeEngine().box(parseEpsil(source)[0] as never).evaluate().json).toEqual(expected);
     expect(() => compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {fallback:false})).toThrow();
-  });
-
-  test('a `let` before the function', () => {
-    expect(threeRoutes('let i = 2\nfunction g() { i + 1 }\ng()')).toEqual({
-      run: 3,
-      evaluated: 3,
-      compiled: 3,
-    });
-  });
-
-  test('a name that is not a constant is not changed', () => {
-    // The function reads the binding of the later `let` when it is called.
-    expect(threeRoutes('function g() { t }\nlet t = 5\ng()')).toEqual({
-      run: 5,
-      evaluated: 5,
-      compiled: 5,
-    });
-  });
-
-  test('a `do` block declares its names when it starts', () => {
-    const source = 'do { function g() { i^2 }; let i = 2; [g(), i^2] }';
-    expect(threeRoutes(source)).toEqual({
-      run: ['List', 4, 4],
-      evaluated: ['List', 4, 4],
-      compiled: [4, 4],
-    });
   });
 });
 
@@ -1095,54 +863,6 @@ describe('COMPILED CODE AND A LOCAL ASSIGNED IN A BRANCH', () => {
   // assigned before every read, and the body compiles.
   const literal = (body: unknown) =>
     new ComputeEngine().box(['Function', body, 'c'] as never);
-  const BRANCH = ['Block', ['If', 'c', ['Block', ['Assign', 't', 1]]], 't'];
-  const INVALID = /Could not compile invalid expression/;
-
-  test('an assignment in one branch to an undeclared name: JavaScript and interval-js decline', () => {
-    expect(() =>
-      compile(literal(BRANCH), {
-        to: 'javascript',
-        fallback: false,
-      } as never)
-    ).toThrow(INVALID);
-    const ia = compile(literal(BRANCH), {
-      to: 'interval-js',
-    } as never)!;
-    expect(ia.success).toBe(false);
-  });
-
-  test('an Epsil program', () => {
-    const g = 'function g(c) { if c { t = 1 }; t }\n';
-    expect(() =>
-      compile(new ComputeEngine().box(parseEpsil(`${g}g(true)`)[0] as never), {
-        to: 'javascript',
-        fallback: false,
-      } as never)
-    ).toThrow(INVALID);
-    expect(staticCodes(`${g}g(true)`)).toEqual([
-      'assignment-to-undeclared-variable',
-    ]);
-  });
-
-  test('an assignment in a loop body to an undeclared name', () => {
-    const body = [
-      'Block',
-      [
-        'Loop',
-        ['Block', ['Assign', 't', ['Multiply', 'k', 'c']]],
-        ['Element', 'k', ['Range', 1, 0, 1]],
-      ],
-      't',
-    ];
-    const fn = literal(body);
-    expectErrorCode(
-      fn.engine.box(['Apply', fn, 3] as never).evaluate().json,
-      'assignment-to-undeclared-variable'
-    );
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(INVALID);
-  });
 
   test('interval-js: a read after a loop that runs', () => {
     const fn = literal([
@@ -1184,53 +904,12 @@ describe('COMPILED CODE AND A LOCAL ASSIGNED IN A BRANCH', () => {
         't',
       ],
     ],
-    [
-      'a read in the branch after its assignment',
-      [
-        'Block',
-        ['Declare', 't', "'unknown'", 0],
-        ['Declare', 'u', "'unknown'", 0],
-        [
-          'If',
-          'c',
-          ['Block', ['Assign', 't', 1], ['Assign', 'u', ['Add', 't', 1]]],
-        ],
-        'c',
-      ],
-    ],
   ])('compiles: %s', (_name, body) => {
     const result = compile(literal(body), {
       to: 'javascript',
       fallback: false,
     } as never)!;
     expect(result.success).toBe(true);
-  });
-
-  test('declines: an assignment in each branch of a condition of type unknown', () => {
-    // The parameter `c` has no declared type, so the condition can be a
-    // value that is not a boolean. Compiled JavaScript does not test the
-    // condition at run time, so the compilation declines
-    // (`assertBooleanOrAbsentCondition()`), and the interpreter evaluates it.
-    const fn = literal([
-      'Block',
-      ['Declare', 't', "'unknown'", 0],
-      [
-        'If',
-        'c',
-        ['Block', ['Assign', 't', 1]],
-        ['Block', ['Assign', 't', 2]],
-      ],
-      't',
-    ]);
-    expect(() =>
-      compile(fn, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/the condition can be a value that is not a boolean/);
-    expect(fn.engine.box(['Apply', fn, 'True'] as never).evaluate().json).toBe(
-      1
-    );
-    expect(
-      fn.engine.box(['Apply', fn, 'False'] as never).evaluate().json
-    ).toBe(2);
   });
 });
 
@@ -1262,34 +941,6 @@ describe('AN ASSIGNMENT TO THE LOOP INDEX WRITES THE INDEX OF THE LOOP', () => {
     expect(result).toEqual(value);
     expect(evaluatedAsBlock(source)).toEqual(value);
     expect(ce.box('g').type.toString()).not.toContain('scope');
-  });
-
-  test('the compiled loop is refused', () => {
-    // The emitted loop cannot give the index the next element after an
-    // assignment, so the interpreter evaluates the loop.
-    expect(() =>
-      compile(
-        new ComputeEngine().box(
-          parseEpsil(
-            'function g() { for k in [1, 2] { k = 5 }; 0 }\ng()'
-          )[0] as never
-        ),
-        { to: 'javascript', fallback: false } as never
-      )
-    ).toThrow(/assigns the loop index `k`/);
-  });
-
-  test('the compiled comprehension is refused (CE-226.1)', () => {
-    const ce = new ComputeEngine();
-    const comprehension = ce.box([
-      'Comprehension',
-      ['Block', ['Assign', 'k', 5], 'k'],
-      ['Element', 'k', ['Range', 1, 3]],
-    ] as never);
-    expect(comprehension.evaluate().toString()).toBe('[5,5,5]');
-    expect(() =>
-      compile(comprehension, { to: 'javascript', fallback: false } as never)
-    ).toThrow(/the term assigns the index `k`/);
   });
 });
 

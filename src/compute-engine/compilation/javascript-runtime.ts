@@ -1388,8 +1388,7 @@ const colorHelpers = {
 
   // `distance` over points whose coordinates may be `{re, im}` objects: the
   // same broadcast, with `pointDistanceAny` as the scalar leg. The compiler
-  // emits it when the lane of the coordinates is not real
-  // (`BaseCompiler.linearAlgebraLane`). Its value is a real number for real
+  // emits it when the lane of the coordinates is not real. Its value is a real number for real
   // and complex coordinates alike, so it has no complex counterpart.
   distanceAny(a: unknown, b: unknown): number | number[] {
     if (!Array.isArray(a) || !Array.isArray(b))
@@ -2058,7 +2057,7 @@ function bcastColor(f: (c: unknown) => unknown, v: unknown): unknown {
 /**
  * A rotated READ of a flat array, handed to `bcast` in place of a rotated
  * COPY. `_SYS.rotv(base, shift, ±1)` is emitted only as a DIRECT operand of a
- * `_SYS.bcast` call (see `BaseCompiler.tryCompileBroadcast`), so a view never
+ * `_SYS.bcast` call, so a view never
  * escapes into a value position: the broadcast reads `base[(i + shift) mod n]`
  * inside its element loop instead of allocating and copying the whole
  * rotation first. A stencil that sums eight rotations of a 40 000-element
@@ -2481,9 +2480,8 @@ function selectWith(
 // arithmetic only. The complex form (`complexDet`, `complexMatmul`, …) lifts
 // every entry to `{re, im}` and computes with complex arithmetic, and EVERY
 // entry of its result is a `{re, im}` object, even an entry whose imaginary
-// part is zero. The compiler chooses the form from the lane of the operands
-// (`BaseCompiler.linearAlgebraLane`), and a parent expression reads the
-// result with the same answer (`BaseCompiler.isComplexValued`). So the
+// part is zero. The compiler chooses the form from the lane of the operands,
+// and a parent expression reads the result with the same answer. So the
 // choice is made when the code is compiled, and no helper tests its operands
 // for a complex entry when the code runs.
 //
@@ -4018,18 +4016,6 @@ function machineReal(v: unknown): number {
  */
 export const NESTED_QUADRATURE_BUDGET = 1 << 25;
 
-/** The nested budget in force: the constant above, unless a test made it
- *  smaller with `JavaScriptTarget.setNestedQuadratureBudgetForTesting`. The
- *  compiled code does not contain the budget: `enterIntegral` reads this
- *  variable each time an outermost integral starts. */
-let nestedQuadratureBudget = NESTED_QUADRATURE_BUDGET;
-
-/** Set the nested budget, or restore the default when called with no
- *  argument. For tests only. */
-export function setNestedQuadratureBudget(evaluations?: number): void {
-  nestedQuadratureBudget = evaluations ?? NESTED_QUADRATURE_BUDGET;
-}
-
 /** Number of `_SYS.integrate` activations currently on the call stack. Zero at
  *  every outermost entry — module state is safe here because compiled code runs
  *  synchronously on one thread. */
@@ -4060,7 +4046,7 @@ function budgetedIntegrand(f: (x: number) => number): (x: number) => number {
  * and must then run its work inside `try { … } finally { activeIntegrals--; }`.
  */
 function enterIntegral(): boolean {
-  if (activeIntegrals === 0) nestedEvalsLeft = nestedQuadratureBudget;
+  if (activeIntegrals === 0) nestedEvalsLeft = NESTED_QUADRATURE_BUDGET;
   else if (nestedEvalsLeft <= 0) {
     // A refusal answers `NaN` to an enclosing quadrature, so the counter must
     // also show exhaustion. If a nested integral used the budget to exactly
@@ -4350,8 +4336,7 @@ export const SYS_HELPERS = {
   },
   // The exact runtime realness test of a value that may be a plain number or
   // a `{re, im}` object: true when the imaginary part is exactly zero. The
-  // `complexIsReal` hook of this target (`CompileTarget.complexIsReal`); the
-  // test is exact because the transcendental kernels give an exact zero part
+  // The test is exact because the transcendental kernels give an exact zero part
   // where the value has one (`kernelResult`).
   // A value that is neither (an absent cell, `undefined`) is not real.
   cisreal: (x: unknown): boolean =>
@@ -4381,11 +4366,11 @@ export const SYS_HELPERS = {
     typeof (x as { re: unknown }).re === 'number'
       ? (x as { re: number }).re
       : x,
-  // The ELEMENT-WISE real projection (`CompileTarget.complexRealElements`):
+  // The ELEMENT-WISE real projection:
   // an array — nested arrays recursed — with every exactly-real element
   // (`cisreal`) replaced by its real part and every other element by NaN; a
   // scalar takes the same rule whole. The element-wise form of the D2/D6
-  // runtime rule (`BaseCompiler.realOperandGuard`) hands a real-only head's
+  // runtime rule hands a real-only head's
   // array operand through this, so the real lowering that follows sees plain
   // numbers and answers NaN (or `false`, for an ordering) exactly at the
   // complex positions: `⌊√L⌋` at `L = [4, -1]` is `[2, NaN]`. An absent
@@ -4524,7 +4509,7 @@ export const SYS_HELPERS = {
   // `sin(πu)`, `cos(πu)`, `tan(πu)` and `e^{iπu}` with the angle `u` in
   // half-turns, reduced exactly (`cosSinPi()`): the value at an integer or a
   // half-integer `u` has an exact zero part (`sinpi(2)` is `0`, where
-  // `Math.sin(Math.PI * 2)` is `−2.4e-16`). See `BaseCompiler.piMultiple`.
+  // `Math.sin(Math.PI * 2)` is `−2.4e-16`).
   // `tan` at a half-integer is the pole, `Infinity` on the real lane, as
   // `_SYS.tan` answers it.
   sinpi: (u: number): number => cosSinPi(u)[1],
@@ -4544,7 +4529,7 @@ export const SYS_HELPERS = {
   // `cosh(iθ) = cos θ`, `tanh(iθ) = i·tan θ`, `csch(iθ) = −i/sin θ`,
   // `sech(iθ) = 1/cos θ` and `coth(iθ) = −i·cot θ`. A zero is exact, and a
   // pole is the unsigned pole `{ re: ∞, im: ∞ }` (`complexPole`), as the
-  // interpreter's `~oo`. See `BaseCompiler.imaginaryPiMultiple`.
+  // interpreter's `~oo`.
   csinhipi: (u: number): ComplexResult =>
     halfTurnValue(u, (_c, s) => ({ re: 0, im: s })),
   ccoshipi: (u: number): ComplexResult =>
@@ -4602,9 +4587,8 @@ export const SYS_HELPERS = {
   // `x^(3/2)` and `x^(5/2)` of a base the compiler proved non-negative,
   // through the square root instead of the general power kernel: a square
   // root is exact to half an ulp and about eight times faster than
-  // `Math.pow` (see `realRadicalPower` in `javascript-target.ts`, which
-  // emits these for a base that is not a symbol or a number literal, so the
-  // base is evaluated once).
+  // `Math.pow` (the compiled code emits these for a base that is not a
+  // symbol or a number literal, so the base is evaluated once).
   pow3h: (x: number) => x * Math.sqrt(x),
   pow5h: (x: number) => x * x * Math.sqrt(x),
 
@@ -4654,8 +4638,7 @@ export const SYS_HELPERS = {
   // an absent value. `true` passes, and `false` and an absent value
   // (`undefined`, `null`, `NaN`) read as `false`, as the interpreter does
   // not select an absent condition. A condition whose static type admits
-  // another value declines at compile time
-  // (`assertBooleanOrAbsentCondition()`, `compile-conditions.ts`).
+  // another value declines at compile time.
   cond: (c: unknown): boolean => c === true,
   // Element-wise `Which`/`If` selection over a condition that may be a
   // collection at run time — see `select` and `compileJSSelection`.
@@ -5489,8 +5472,7 @@ export const SYS_HELPERS = {
   },
   // The predicate `f` of a compiled `Filter`, `Count`, `Any`, `TakeWhile`
   // or another operator that takes one, checked at each call when its static
-  // result type does not prove a boolean (`PREDICATE_RESULT_MODES` in
-  // `javascript-target.ts`). `true` and `false` pass. For `select`, an absent
+  // result type does not prove a boolean. `true` and `false` pass. For `select`, an absent
   // value (`Missing`, compiled to `undefined`) does not select the element,
   // as in the interpreter, and any other value throws. For `quantify`, an
   // absent value is `false`, and any other value throws: the interpreter
@@ -5699,9 +5681,8 @@ export const SYS_HELPERS = {
   // outermost first, and then the value. The array of each level on the way
   // to the element is copied, and the other rows stay shared with `arr`.
   // `replaceAt` checks each position by the same rule. The lowering compiles
-  // this form only when the static type shows a list at each level
-  // (`assertWrittenLevelsAreLists()` in `javascript-target.ts`), so no level
-  // is tested here.
+  // this form only when the static type shows a list at each level,
+  // so no level is tested here.
   replaceAtPath: (arr: unknown, ...rest: unknown[]): unknown[] => {
     const out = (arr as unknown[]).slice();
     let level = out;
@@ -5848,8 +5829,8 @@ export const SYS_HELPERS = {
     );
   },
   // The read `At(arr, i)` of a shared list in the `broadcast()` batch body,
-  // for an index whose static type does not prove an integer of 1 or more
-  // (`batchListRead` in `javascript-target.ts`). The batch has checked
+  // for an index whose static type does not prove an integer of 1 or more.
+  // The batch has checked
   // `arr` once, before its cell loop: a plain array whose elements are all
   // numbers, or a `Float64Array`. So the read needs no test of the array or
   // of the element, and gives the value `atNumeric` gives for the same
@@ -6650,7 +6631,7 @@ export type SysHelpers = typeof SYS_HELPERS &
   ReturnType<typeof makeLoopPassCounter> & {
     /** The functions of the profile `ir` (`IR_FUNCTIONS`). */
     ir: typeof IR_FUNCTIONS;
-    /** The integral of the profile `ir` (`integrateFinite()`). */
+    /** The integral of the profile `ir`: `integrate` with the live draw. */
     irIntegrate: (fn: (x: number) => number, a: number, b: number) => number;
     tick: (n?: number) => void;
   };
@@ -6807,8 +6788,7 @@ export function makeRandomHelpers(source: RuntimeSource): RandomSysHelpers {
     },
 
     // The same passes for a parallel loop whose domain is a `Range`, which
-    // the compiled code runs as a counted loop (`emitElementLoops()` in
-    // `compile-loops.ts`): `parallelPassesBegin()` before the loop,
+    // the compiled code runs as a counted loop: `parallelPassesBegin()` before the loop,
     // `parallelPassesFrame(state, k)` at the start of pass `k` (from 1), and
     // `parallelPassesEnd(state)` in the `finally` of the loop. With no active
     // frame, the state is `undefined`, and the loop calls nothing per pass.
@@ -7063,7 +7043,7 @@ export function makeLazyStreamHelpers(
       return out;
     },
     // The run-time loop behind a list-building user-defined recursion
-    // (`BaseCompiler.emitFunctionLiteralDefinition` emits the call). `step` is
+    // (the compiled code emits the call). `step` is
     // the function's own `Which` with each arm rewritten to report what it
     // does instead of doing it: `[0, list]` for an arm that returns a list,
     // `[1, list, nextArgs]` for an arm that prepends a list to a direct
@@ -7209,8 +7189,8 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
     im: a.re * b.im + a.im * b.re,
   }),
   // The interpreter's quotient (`complexQuotient()`): the textbook formula
-  // where its intermediate values are ordinary doubles, as the existing
-  // compiler writes it; the scaled division and the poles otherwise.
+  // where its intermediate values are ordinary doubles; the scaled
+  // division and the poles otherwise.
   cdiv: (a: Cx, b: Cx): Cx => {
     const d = b.re * b.re + b.im * b.im;
     const nr = a.re * b.re + a.im * b.im;
@@ -7253,8 +7233,8 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
  * The functions that the code of the profile `ir` calls as `_SYS.ir.<name>`
  * (`ir/print-js.ts`). They are under one member so that no name of the IR
  * meets a member of `SYS_HELPERS` of another meaning (`pow`, `fract`, `cmul`
- * and others are both). The other members that the profile calls are those
- * of the existing compiler: `drawNextRandomNumber`, `withRandomSeed`,
+ * and others are both). The other members that the profile calls are
+ * members of `_SYS` itself: `drawNextRandomNumber`, `withRandomSeed`,
  * `rangeCount`, `countLoopPass`, `resetLoopPasses`, `tick`.
  */
 export const IR_FUNCTIONS = Object.freeze({
@@ -7263,45 +7243,6 @@ export const IR_FUNCTIONS = Object.freeze({
   pow: realPow,
   mod: floorMod,
 });
-
-/**
- * The integral of the profile `ir` (`_SYS.irIntegrate`): the quadrature of
- * `SYS_HELPERS.integrate`, with its Monte-Carlo fallback over the live
- * `draw`, except that an integrand that has given a value that is not
- * finite, at a node of the quadrature or at a sample, gives NaN once the
- * fallback samples (at the first draw, or at that value). `∫₀^∞ x^100·e^−x
- * dx`, whose integrand is NaN past about x = 1,200 and whose samples are
- * finite, gave the mean of 10^7 samples, a wrong number that changed at
- * each run; `∫₀^1000 Mod(t, 1) dt`, finite everywhere, keeps its estimate.
- */
-function integrateFinite(
-  fn: (x: number) => number,
-  a: number,
-  b: number,
-  draw: () => number
-): number {
-  const stop = Symbol('not finite');
-  let notFinite = false;
-  let sampling = false;
-  const f = (x: number): number => {
-    const y = fn(x);
-    if (!Number.isFinite(y)) {
-      if (sampling) throw stop;
-      notFinite = true;
-    }
-    return y;
-  };
-  try {
-    return SYS_HELPERS.integrate(f, a, b, undefined, () => {
-      sampling = true;
-      if (notFinite) throw stop;
-      return draw();
-    });
-  } catch (e) {
-    if (e === stop) return NaN;
-    throw e;
-  }
-}
 
 /**
  * Build the `_SYS` bundle for ONE compiled function.
@@ -7348,7 +7289,7 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
     },
     integrate: (fn, a, b, initialPanels) =>
       SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),
-    irIntegrate: (fn, a, b) => integrateFinite(fn, a, b, draw),
+    irIntegrate: (fn, a, b) => SYS_HELPERS.integrate(fn, a, b, undefined, draw),
     integrateMC: (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw),
     atNumeric: ownAtNumeric(),
     atChecked: ownAtChecked(),
@@ -7493,8 +7434,7 @@ export const isComplexObject = (v: unknown): v is ComplexResult =>
  * so is not matched here; neither is a finite complex such as `3 + 4i`.
  *
  * This mirrors the `isInfinity && im !== 0` test the compiler already uses to
- * recognize `~oo` when it FOLDS a constant subtree (`tryConstantFold` in
- * base-compiler.ts), so the two routes agree on what counts as a pole.
+ * recognize `~oo` when it FOLDS a constant subtree, so the two routes agree on what counts as a pole.
  */
 export const isUnsignedPole = (v: ComplexResult): boolean =>
   v.im !== 0 &&
@@ -7530,7 +7470,7 @@ const NUMERIC_TYPED_ARRAY_BRANDS = new Set([
  * context) has a different constructor, so `instanceof DataView` would let
  * a foreign `DataView` or `BigInt64Array` through as numeric.
  */
-export const isNumericTypedArray = (v: unknown): v is ArrayLike<number> =>
+const isNumericTypedArray = (v: unknown): v is ArrayLike<number> =>
   ArrayBuffer.isView(v) &&
   NUMERIC_TYPED_ARRAY_BRANDS.has(Object.prototype.toString.call(v));
 
@@ -7579,8 +7519,7 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   The plain-array carrier is described in
  *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
  *
- * `strings` (built by `stringRefusedEntryType` in `javascript-target.ts`)
- * names the bindings that the compiled code reads as JavaScript arrays;
+ * `strings` names the bindings that the compiled code reads as JavaScript arrays;
  * `namedEntryError` reads it to name such a binding when the body fails on
  * a value that is not an array.
  *
@@ -7650,12 +7589,12 @@ export type EntryPlan =
  * The entry check of a binding of a VALUE KIND type (`gf8`, a type declared
  * by the host with a compile contract): the binding is not read as a number
  * or a collection, and the value given for it must pass `check`, the `entry`
- * of the kind's contract (`ArithmeticCompile`). `label` names the binding and
+ * of the kind's contract. `label` names the binding and
  * its type in the error. A stored plan cannot carry `check`, which is a
  * function of the host: a plan with such a binding is not stored, and a
  * runtime refuses to load code compiled with one (`restoreEntryPlan`).
  */
-export type KindEntry = {
+type KindEntry = {
   label: string;
   check: (value: unknown) => boolean;
 };
@@ -7723,62 +7662,6 @@ function liftBigintList(binding: string, x: unknown, path = ''): unknown {
     }
   }
   return out ?? x;
-}
-
-/**
- * The error that the compiled body threw, with the bindings that may
- * explain it named, or the error unchanged.
- *
- * A binding that the compiled code reads as a JavaScript array (the
- * `strings` set of the plan) is not refused at entry when it holds a scalar:
- * the lowerings dispatch on the run-time shape, and `Add(S, 1)` with
- * `S = 5` gives 6. A lowering that needs an array then fails inside the
- * body with a `TypeError` that names a generated variable
- * (`_tv1.reduce is not a function`). When such an error has the shape of a
- * failed array read (`is not a function`, `is not iterable`, `Cannot read
- * properties of`) while a binding of that set holds a present value that is
- * not an array, a typed array or a `Set`, the error is replaced by one that
- * names every such binding with its declared type and the kind of value it
- * received, and keeps the original as its `cause`, so a host can read which
- * argument was wrong. The set also holds unions with a scalar member
- * (`number | list<number>`), whose scalar is a valid value: the message
- * therefore names the bindings as the possible causes, and the body's own
- * message stays in it. Any other error, and an error while every such
- * binding holds an array, is returned as it is.
- */
-export function namedEntryError(
-  plan: EntryPlan | undefined,
-  argumentsList: unknown[],
-  error: unknown
-): unknown {
-  if (plan === undefined || !(error instanceof TypeError)) return error;
-  if (
-    !/is not a function|is not iterable|Cannot read propert/.test(error.message)
-  )
-    return error;
-  const isArrayLike = (x: unknown): boolean =>
-    Array.isArray(x) || isNumericTypedArray(x) || x instanceof Set;
-  const describe = (x: unknown): string =>
-    x === null ? 'null' : typeof x === 'object' ? 'an object' : `a ${typeof x}`;
-  const valueOf = (key: string | number): unknown => {
-    if (plan.kind === 'vars') {
-      const vars = argumentsList[0];
-      if (typeof vars !== 'object' || vars === null) return undefined;
-      return (vars as Record<string, unknown>)[key as string];
-    }
-    return argumentsList[key as number];
-  };
-  const culprits: string[] = [];
-  for (const [key, label] of plan.strings as Map<string | number, string>) {
-    const x = valueOf(key);
-    if (x === undefined || isArrayLike(x)) continue;
-    culprits.push(`${label} received ${describe(x)}`);
-  }
-  if (culprits.length === 0) return error;
-  return new TypeError(
-    `${culprits.join('; ')}: compiled code reads such a binding as a JavaScript array, and the compiled body failed (${error.message}). Pass an array.`,
-    { cause: error }
-  );
 }
 
 /**
@@ -8061,24 +7944,6 @@ export function normalizeRunResult(r: unknown): unknown {
 }
 
 /**
- * The result convention for a value whose static type holds a dictionary or
- * a record at some depth. Such a value is a plain object, and an object
- * with the keys `re` and `im` (`{re -> x, im -> 0}`) is a dictionary there,
- * not a complex number: `normalizeRunResult` would return the number `x`.
- * So an object is returned as it is, also as a cell of an array, and an
- * array is returned as it is. A FUNCTION is returned under a wrapper that
- * applies `normalizeRunResult` to what it answers, as there.
- *
- * A complex cell of such a value with a zero imaginary part is then
- * returned as `{re, im: 0}`, not as a number: the value has no other
- * representation that tells the two kinds of objects apart.
- */
-export function normalizeKeyedRunResult(r: unknown): unknown {
-  if (typeof r === 'function') return normalizeRunResult(r);
-  return r;
-}
-
-/**
  * The result convention of `normalizeRunResult` applied to an array without
  * a defensive copy. The array is walked once; when no cell has to be
  * rewritten (every cell is a number, a boolean, or a nested array or complex
@@ -8302,7 +8167,7 @@ function toFrame(
 
 /**
  * The runtime for compiled JavaScript, with no engine behind it. It is the
- * `_SYS` that `JavaScriptTarget` builds for `run()`, from the same factory,
+ * `_SYS` that `run()` uses, from the same factory,
  * over plain options instead of an engine. See {@link JavaScriptRuntimeOptions}.
  */
 export function createJavaScriptRuntime(
@@ -8599,7 +8464,7 @@ export function createSysRuntime(
  * value (an object). A batch would then give a `NaN` or a wrong number with
  * no error, so it is refused.
  */
-export function kindBroadcastError(kinds: Iterable<string>): Error {
+function kindBroadcastError(kinds: Iterable<string>): Error {
   const names = [...kinds].map((k) => `'${k}'`).join(', ');
   return new Error(
     `A value-kind result cannot be broadcast: the code reads or makes a ` +
@@ -8629,7 +8494,7 @@ export function bigintBroadcastError(): Error {
 /**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
- * that compiled the code (`ArithmeticCompile`), and stored code does not
+ * that compiled the code, and stored code does not
  * carry them, so `load()` refuses such code. The batch loaders (`batch`
  * true) refuse it whatever its `shippable` field says, with the error of
  * `broadcast()` (`kindBroadcastError()`): the batch runner writes numbers
@@ -8739,7 +8604,7 @@ function storedExpressionRunner(
  * read only by the runtime of the version that wrote it: the caller has
  * checked `runtimeVersion`.
  */
-export function loadBatchBody(
+function loadBatchBody(
   sys: SysHelpers,
   batch: StoredBatchBody | undefined
 ): BroadcastBatchBody | undefined {

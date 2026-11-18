@@ -5,7 +5,7 @@
  * other value (a special function, a quadrature, `1/3`) is not the value,
  * so the answer is `entire`; a draw differs from call to call, and is
  * `entire` too. Also: the kind decline of an `enclosure` input whatever
- * `fallback` says, and the option `strictTypes` on `interval-js`.
+ * `fallback` says.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
@@ -114,33 +114,5 @@ describe('a decline with an enclosure input on interval-js is a kind decline', (
     expect(() =>
       compile(ceE.box(['Factorial', 'y']), { to: 'interval-js', fallback })
     ).toThrow(KindDeclineError);
-  });
-});
-
-describe('strictTypes on interval-js', () => {
-  test('a declared input compiles', () => {
-    const ceS = new ComputeEngine();
-    ceS.declare('x', 'real');
-    const r = compile(ceS.parse('x^2'), {
-      to: 'interval-js',
-      strictTypes: true,
-    });
-    expect(r.success).toBe(true);
-    expect(r.run!({ x: { lo: 1, hi: 2 } })).toEqual({
-      kind: 'interval',
-      value: { lo: 1, hi: 4 },
-    });
-  });
-
-  test('an undeclared input declines', () => {
-    const ceS = new ComputeEngine();
-    const expr = ceS.box(['Add', 'x', 1]);
-    expect(() =>
-      compile(expr, { to: 'interval-js', strictTypes: true, fallback: false })
-    ).toThrow(/strictTypes/);
-    const r = compile(expr, { to: 'interval-js', strictTypes: true });
-    expect(r.success).toBe(false);
-    expect(r.freeSymbolTypes?.x?.provenance).toBe('inferred');
-    expect(r.run!({ x: 2 })).toEqual(point(3));
   });
 });

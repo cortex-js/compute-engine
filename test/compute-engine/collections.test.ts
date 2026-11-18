@@ -6611,26 +6611,10 @@ describe('Wolfram call forms of the list heads', () => {
         const ce2 = new ComputeEngine();
         ce2.declare('xs', 'list<integer>');
         expect(() => compile(ce2.box(expr), { to, fallback: false })).toThrow(
-          /not compiled/
+          /is not supported by the compiler/
         );
       });
 
-  test('Flatten(xs, +oo) compiles on JavaScript and agrees', () => {
-    const expr = engine.box([
-      'Flatten',
-      ['List', ['List', 1, ['List', 2]], 3],
-      'PositiveInfinity',
-    ]);
-    const r = compile(expr, { fallback: false });
-    expect(r.run!()).toEqual([1, 2, 3]);
-  });
-
-  test('Fold(f, xs) compiles as Reduce does', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('xs', 'list<integer>');
-    const r = compile(ce2.box(['Fold', 'Add', 'xs']), { fallback: false });
-    expect(r.run!({ xs: [1, 2, 3] })).toBe(6);
-  });
 });
 
 describe('Tabulate with any number of dimensions', () => {

@@ -17,7 +17,7 @@
  *   operator requires a number. ROADMAP CE-39.6 (user decision 2026-10-25,
  *   option (a)).
  */
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 function check(expr: Expression): { type: string; valueType: string } {
@@ -191,15 +191,6 @@ describe('CE-663: A MATRIX OPERATOR INFERS THE CELLS OF A LITERAL', () => {
     ce.declare('f', '(nums) -> number');
     ce.infer([ce.box(['f', ['List', 'p', 'q']])]);
     expect(ce.box('p').type.toString()).toBe('number');
-  });
-
-  test('Mean of a list of free symbols compiles', () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(['Mean', ['List', 'p', 'q']]);
-    const fn = compile(expr);
-    expect(fn.success).toBe(true);
-    expect(fn.run({ p: 1, q: 4 })).toBe(2.5);
-    expect(expr.subs({ p: 1, q: 4 }).evaluate().N().re).toBe(2.5);
   });
 
   test('an operator that does not require numbers does not infer', () => {

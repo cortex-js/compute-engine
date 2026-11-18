@@ -1,6 +1,5 @@
 import { Expression } from '../../src/math-json/types.ts';
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Change 2 of `docs/COLLECTIONS-MODEL.md`:
@@ -484,30 +483,6 @@ describe('Append: invalid operands decline the flatten', () => {
   });
 });
 
-describe('Append: the compile targets follow the variadic form', () => {
-  // A flattened `Append` reaches the targets with k trailing operands; a
-  // binary-only lowering would silently DROP all but the first.
-  // A SYMBOL source: a literal-list source folds into one list literal at
-  // canonicalization (`join-append-literal-fold.test.ts`), so the spread
-  // lowering would never be reached.
-  ce.declare('xs', 'list<integer>');
-  const flat: Expression = ['Append', ['Append', 'xs', 3], 4];
-
-  // `constantFold: false` on every compile below: these `Append` expressions
-  // are closed (all-literal operands), so compile-time constant folding would
-  // evaluate them and emit the folded list (`[1, 2, 3, 4]`). What is under test
-  // is the spread lowering, which only appears unfolded.
-  const NO_FOLD = { constantFold: false } as const;
-
-  test('JavaScript', () =>
-    expect(compile(ce.box(flat), NO_FOLD)?.code).toBe('[...(_.xs), 3, 4]'));
-
-  test('the binary form is unchanged', () => {
-    const binary: Expression = ['Append', 'xs', 3];
-    expect(compile(ce.box(binary), NO_FOLD)?.code).toBe('[...(_.xs), 3]');
-  });
-});
-
 describe('Append: the result type folds the appended values in', () => {
   // Pre-existing blind spot, fixed here: the binary handler was
   // `joinResultType([ops[0]])`, which ignored the appended value's type.
@@ -739,13 +714,4 @@ describe('Append: the 1-ary identity form (non-strict)', () => {
     expect(e.isEmptyCollection).toBe(false);
   });
 
-  test('it compiles to the identity, not an interpreter fallback', () => {
-    // A unary `Append` is not folded into its source literal: the identity
-    // form is what is under test here.
-    const e = looseCe.box(['Append', ['List', 1, 2]]);
-    // `constantFold: false`: the operand is a literal list, so compile-time
-    // constant folding would emit `[1, 2]` and the identity lowering under test
-    // would never run.
-    expect(compile(e, { constantFold: false })?.code).toBe('[...([1, 2])]');
-  });
 });

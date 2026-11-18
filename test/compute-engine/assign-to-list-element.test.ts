@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 const CODE = 'assignment-to-list-element';
 
@@ -198,17 +198,6 @@ describe('an assignment to a list element rebinds the list', () => {
       'j',
       5,
     ]);
-  });
-
-  test('the compilation of the block gives the new element', () => {
-    const ce = engine();
-    const expr = ce.parse(
-      'L\\coloneq [10, 20, 30]; j\\coloneq 2; L[j]\\coloneq 5; L[2]'
-    );
-    const result = compile(expr, { fallback: false } as any) as any;
-    expect(result.success).toBe(true);
-    expect(result.run()).toBe(5);
-    expect(expr.evaluate().json).toBe(5);
   });
 });
 

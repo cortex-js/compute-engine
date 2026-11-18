@@ -1,5 +1,5 @@
 import type { Expression } from '../global-types.js';
-import { rewriteAngularUnit } from './angular-unit.js';
+import { rewriteAngularUnit } from '../symbolic/angular-unit.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
 /** Resolve a derivative without changing the caller's declarations.

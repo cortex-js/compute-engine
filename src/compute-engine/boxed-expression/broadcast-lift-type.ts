@@ -536,8 +536,7 @@ export function abstractCollectionCell(
  * hides the point or the list from every shape test, and `Sin` of a
  * restricted point typed as the scalar `number`. A nominal value is atomic
  * whatever its representation, so a union with a nominal arm is not a gated
- * collection. (The compile-side twin, over an expression, is
- * `gatedCollectionArms()` in `compilation/base-compiler.ts`.)
+ * collection.
  */
 export function gatedCollectionPresentType(t: Type): Type | undefined {
   const r = resolveTypeAlias(t);

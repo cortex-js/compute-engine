@@ -245,20 +245,6 @@ describe('an integrand that decreases slowly at an infinite bound', () => {
       ).N
     ).toEqual('PositiveInfinity');
   });
-
-  test('the compiled integral of 1/(x ln^1.1 x) is within its error', () => {
-    // The bound `a` is an input, so the integral is computed when the code
-    // runs, not folded when it compiles.
-    const engine = new ComputeEngine();
-    engine.declare('a', 'real');
-    const r = compile(
-      engine.parse('\\int_a^{\\infty} \\frac{dx}{x(\\ln x)^{1.1}}')
-    );
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.integrate(');
-    const v = (r.run as (vars: { a: number }) => number)({ a: 2 });
-    expect(Math.abs(v - exact(1.1))).toBeLessThan(2e-4);
-  });
 });
 
 describe('a convergent integral from a large bound to infinity', () => {

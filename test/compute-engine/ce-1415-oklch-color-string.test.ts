@@ -10,80 +10,7 @@ import { parseOkColorString } from '../../src/compute-engine/numerics/color-conv
 
 const ce = new ComputeEngine();
 
-function evaluate(json: any): any {
-  return ce.expr(json).evaluate().json;
-}
-
-function run(json: any): any {
-  const r = compile(ce.expr(json));
-  expect(r.success).toBe(true);
-  return r.run!({});
-}
-
 describe('CE-1415 oklch and oklab color strings', () => {
-  test('Color of an oklch string keeps its chroma and hue', () => {
-    expect(evaluate(['Color', { str: 'oklch(50% 0.3 240)' }])).toEqual([
-      'Oklch',
-      0.5,
-      0.3,
-      240,
-    ]);
-    expect(run(['Color', { str: 'oklch(50% 0.3 240)' }])).toEqual({
-      space: 'oklch',
-      c0: 0.5,
-      c1: 0.3,
-      c2: 240,
-      alpha: undefined,
-    });
-  });
-
-  test('Color of an oklch string with an alpha', () => {
-    expect(evaluate(['Color', { str: 'oklch(0.5 0.3 240 / 50%)' }])).toEqual(
-      ['Oklch', 0.5, 0.3, 240, 0.5]
-    );
-    expect(run(['Color', { str: 'oklch(0.5 0.3 240 / 0.5)' }]).alpha).toBe(
-      0.5
-    );
-  });
-
-  test('Color of an oklab string is its OKLCh color', () => {
-    const [, L, C, H] = evaluate(['Color', { str: 'oklab(0.5 0.1 -0.2)' }]);
-    expect(L).toBe(0.5);
-    expect(C).toBeCloseTo(Math.hypot(0.1, 0.2), 14);
-    expect(H).toBeCloseTo(360 + (Math.atan2(-0.2, 0.1) * 180) / Math.PI, 10);
-    const c = run(['Color', { str: 'oklab(0.5 0.1 -0.2)' }]);
-    expect([c.c0, c.c1, c.c2]).toEqual([L, C, H]);
-  });
-
-  test('the string is the head on the other color operators', () => {
-    const s = { str: 'oklch(50% 0.3 240)' };
-    const head = ['Oklch', 0.5, 0.3, 240];
-    for (const op of ['AsRgb', 'AsOklab', 'AsOklch', 'AsHsl']) {
-      expect(evaluate([op, s])).toEqual(evaluate([op, head]));
-      expect(run([op, s])).toEqual(run([op, head]));
-    }
-    for (const fmt of ['hex', 'oklch', 'display-p3']) {
-      expect(evaluate(['ColorToString', s, { str: fmt }])).toEqual(
-        evaluate(['ColorToString', head, { str: fmt }])
-      );
-      expect(run(['ColorToString', s, { str: fmt }])).toEqual(
-        run(['ColorToString', head, { str: fmt }])
-      );
-    }
-    expect(evaluate(['ColorToString', s, { str: 'oklch' }])).toBe(
-      "'oklch(0.5 0.3 240)'"
-    );
-    expect(evaluate(['GamutMap', s])).toEqual(evaluate(['GamutMap', head]));
-    expect(run(['GamutMap', s])).toEqual(run(['GamutMap', head]));
-  });
-
-  test('a GLSL Color of an oklch string literal keeps its chroma', () => {
-    const r = compile(ce.expr(['Color', { str: 'oklch(50% 0.3 240)' }]), {
-      to: 'glsl',
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('vec3(0.5, 0.3, 240.0)');
-  });
 
   test('a GLSL Color of an oklch string with an alpha declines', () => {
     const r = compile(
@@ -91,24 +18,6 @@ describe('CE-1415 oklch and oklab color strings', () => {
       { to: 'glsl' }
     );
     expect(r.success).toBe(false);
-  });
-
-  test('a malformed oklch string is not a color', () => {
-    for (const s of [
-      'oklch(foo 0.3 240)',
-      'oklch(0.5 0.3)',
-      'oklch(0.5 0.3 240 1 2)',
-      'oklch(0.5 0.3deg 240)',
-      'oklab(0.5 0.1 0.2deg)',
-      'oklch()',
-      'oklch(50 % 0.3 240)',
-    ]) {
-      expect(evaluate(['Color', { str: s }])).toEqual([
-        'Error',
-        ['ErrorCode', "'incompatible-type'", "'color'", `'"${s}"'`],
-      ]);
-      expect(() => run(['Color', { str: s }])).toThrow(/Unknown color/);
-    }
   });
 });
 

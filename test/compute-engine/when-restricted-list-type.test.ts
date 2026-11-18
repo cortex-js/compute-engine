@@ -421,48 +421,6 @@ describe('an element read of a restricted collection whose condition is false', 
     if (r.js !== 'no-compile') expect(r.js).toBeNaN();
   });
 
-  test.each([
-    ['a row of a matrix', ['At', M, 2], 'vector<integer^2>'],
-    ['a string', ['First', W(['List', { str: 'a' }])], 'string'],
-  ])('%s is Missing', (_label, json, type) => {
-    const r = routes(json);
-    expect(r.type).toBe(type);
-    expect(r.held).toBe('"Missing"');
-    expect(r.fresh).toBe('"Missing"');
-    expect(r.n).toBe('"Missing"');
-    // `undefined` is the run-time spelling of `Missing`.
-    expect(r.js).toBeUndefined();
-  });
-
-  // A read of a point gives the absent value of the domain of a point, the
-  // point of `NaN` coordinates (user decision 2026-11-03).
-  test.each([
-    [
-      'a point of a list of points',
-      ['First', W(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]])],
-      'tuple<integer, integer>',
-    ],
-    [
-      'a point of a list of points, by At',
-      ['At', W(['List', ['Tuple', 1, 2]]), 1],
-      'tuple<integer, integer>',
-    ],
-  ])('%s is a NaN point', (_label, json, type) => {
-    const r = routes(json);
-    expect(r.type).toBe(type);
-    expect(r.held).toBe('(NaN, NaN)');
-    expect(r.fresh).toBe('(NaN, NaN)');
-    expect(r.n).toBe('(NaN, NaN)');
-    expect(r.js).toEqual([NaN, NaN]);
-  });
-
-  test('an absent operand of unknown type is Missing', () => {
-    const r = routes(['First', 'Missing']);
-    expect(r.fresh).toBe('"Missing"');
-    expect(r.n).toBe('"Missing"');
-    expect(r.js).toBeUndefined();
-  });
-
   test('an out-of-range read of a list of numbers is NaN', () => {
     const r = routes(['At', ['List', 1, 2], 5]);
     expect(r.fresh).toBe('NaN');

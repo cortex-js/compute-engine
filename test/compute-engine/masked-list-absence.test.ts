@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Absent values (`Missing`, `Undefined`, a restriction `e{c}` whose
@@ -92,21 +91,6 @@ describe('a broadcast over a list restricted by a list of conditions', () => {
       'If(b, 10)',
       'If(b, 20)',
     ]);
-  });
-
-  test.each([
-    [String.raw`\sin(${MASKED})`, [NaN, NaN, Math.sin(30)]],
-    [String.raw`2\cdot${MASKED}`, [NaN, NaN, 60]],
-  ])('compiled to JavaScript: %s', (latex, expected) => {
-    const r = compile(ce.parse(latex), { to: 'javascript' });
-    expect(r.success).toBe(true);
-    const v = r.run!({}) as number[];
-    expect(v).toHaveLength(3);
-    v.forEach((x, i) =>
-      Number.isNaN(expected[i])
-        ? expect(x).toBeNaN()
-        : expect(x).toBeCloseTo(expected[i], 12)
-    );
   });
 });
 

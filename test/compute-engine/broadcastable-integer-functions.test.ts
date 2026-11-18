@@ -250,38 +250,6 @@ describe('the figurate predicates stay symbolic on a symbol', () => {
   }
 });
 
-describe('compilation of a flagged operator', () => {
-  const js = (expr: Expression) =>
-    ce._getCompilationTarget('javascript')!.compile(expr);
-
-  test('a scalar operand compiles as before', () => {
-    const local = new ComputeEngine();
-    local.declare('k', 'integer');
-    const result = local
-      ._getCompilationTarget('javascript')!
-      .compile(local.box(['Fibonacci', 'k']));
-    expect(result.success).toBe(true);
-    expect(result.code).toBe('_SYS.fibonacci(_.k)');
-    expect(result.run!({ k: 10 })).toBe(55);
-  });
-
-  test('a list operand is mapped', () => {
-    const result = js(ce.box(['Fibonacci', ['List', 5, 6, 7]]));
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toEqual([5, 8, 13]);
-  });
-
-  test('a list-typed symbol is mapped at run time', () => {
-    const local = new ComputeEngine();
-    local.declare('v', 'list<integer>');
-    const result = local
-      ._getCompilationTarget('javascript')!
-      .compile(local.box(['Binomial', 'v', 2]));
-    expect(result.success).toBe(true);
-    expect(result.run!({ v: [4, 5, 6] })).toEqual([6, 10, 15]);
-  });
-});
-
 describe('operators that are deliberately not flagged', () => {
   test('Prime is the prime mark of a derivative, not the nth prime', () => {
     // `Prime(f)` is `f'`. Its signature `(T, integer?) -> T` passes a list

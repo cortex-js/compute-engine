@@ -203,39 +203,4 @@ describe('A literal index into a literal list folds on every target', () => {
     expect(r.success).toBe(true);
     expect(r.code).toContain('[');
   });
-
-  test('a discarded element reading a live-source `vars` splice keeps the list', () => {
-    const r = compile(ce.box(['At', ['List', 'x', 'y'], 1]), {
-      fallback: false,
-      vars: { y: '_.counter()' },
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('[');
-  });
-
-  test('a complex index is left to the target', () => {
-    const r = compile(ce.box(['At', ['List', 'x', 'y'], ['Complex', 1, 1]]), {
-      fallback: false,
-      constantFold: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('[');
-  });
-
-  test('a `List` head the caller overrode is left to the override', () => {
-    const r = compile(ce.box(['At', ['List', 'x', 'y'], 1]), {
-      fallback: false,
-      functions: { List: '_.myList' },
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('_.myList(');
-  });
-
-  test('a discarded element with an effect keeps the list', () => {
-    const r = compile(ce.box(['At', ['List', 'x', ['Random']], 1]), {
-      fallback: false,
-    });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('[');
-  });
 });

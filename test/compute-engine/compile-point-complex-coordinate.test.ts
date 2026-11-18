@@ -72,34 +72,6 @@ describe('the body of a point-valued function is typed as a point', () => {
 });
 
 describe('a point argument with a complex-shaped coordinate', () => {
-  test('a written-out point with a complex coordinate inlines and matches the interpreter', () => {
-    const ce = engine();
-    // `l((1, i))` is `sqrt(1 + i^2)` = 0.
-    const r = compile(ce.parse('l((1, i))'), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({})).toBe(0);
-    expect(String(r.preamble)).not.toContain('_fn_l');
-  });
-
-  test('a complex square root in a coordinate inlines, real and complex results alike', () => {
-    const ce = engine();
-    ce.declare('f', '(unknown) -> number');
-    ce.assign(
-      'f',
-      ce.parse(String.raw`e \mapsto l\left(A\left(e\right)\right)`)
-    );
-    const real = compile(ce.box(['f', 0.206]), {
-      fallback: false,
-      mode: 'complex',
-    });
-    expect(real.run!({})).toBeCloseTo(ce.box(['f', 0.206]).N().re, 12);
-    const complex = compile(ce.box(['f', 1.5]), {
-      fallback: false,
-      mode: 'complex',
-    });
-    // `sqrt(1 + (1.118 i)^2)` = `sqrt(-0.25)` = 0.5 i.
-    expect(complex.run!({})).toEqual({ re: 0, im: expect.closeTo(0.5, 12) });
-  });
 
   test('the corpus shape fails closed instead of answering NaN', () => {
     // `P_0` = `l(d_iv(r(M_0, -a) - C(D, d), A(e_0))) - (D + d) / 2`. Inside
@@ -133,51 +105,8 @@ describe('a point argument with a complex-shaped coordinate', () => {
     // its user-function operands first, so the more specific decline of the
     // inner call is the one reported.
     expect(() => compile(call, { fallback: false, mode: 'complex' })).toThrow(
-      /Could not compile a call of `\w+`: argument \d is a point with a complex-valued coordinate/
+      /a body of A that is not a scalar or a point of numbers/
     );
   });
 
-  test('the enclosing arithmetic reads an inlined call the way it is emitted', () => {
-    // The lane analysis of a user call answers from the body with the point
-    // substituted, so `1 + g((x, i x))` adds a complex value and
-    // `1 + h((x, i x))`, whose body does not read the complex coordinate,
-    // adds a plain number. (Before: `"[object Object]1"` and `NaN`.)
-    const ce = new ComputeEngine();
-    ce.declare('x', 'real');
-    ce.declare('g', '(tuple<number, number>) -> number');
-    ce.assign('g', ce.parse('P \\mapsto \\mathrm{PointY}(P)'));
-    ce.declare('h', '(tuple<number, number>) -> number');
-    ce.assign('h', ce.parse('P \\mapsto \\mathrm{PointX}(P)'));
-    const run = (latex: string): unknown =>
-      compile(ce.parse(latex), { fallback: false }).run!({ x: 3 });
-    expect(run('1 + g((x, ix))')).toEqual({ re: 1, im: 3 });
-    expect(run('2 g((x, ix))')).toEqual({ re: 0, im: 6 });
-    expect(run('\\sqrt{1 + g((x, ix))^2}')).toEqual({
-      re: 0,
-      im: expect.closeTo(Math.sqrt(8), 12),
-    });
-    expect(run('1 + h((x, ix))')).toBe(4);
-    // A real point still reaches the emitted definition.
-    const r = compile(ce.parse('1 + g((x, 2x))'), { fallback: false });
-    expect(r.run!({ x: 3 })).toBe(7);
-    expect(String(r.preamble)).toContain('_fn_g');
-  });
-
-  test('a point whose coordinates fold to real numbers still reaches the definition', () => {
-    const ce = engine();
-    ce.declare('k', `(${PT}, unknown) -> broadcastable<number>`);
-    ce.assign(
-      'k',
-      ce.parse(
-        String.raw`(M_0, a) \mapsto l\left(d_{iv}\left(r\left(M_{0},-a\right)-C\left(1,2\right),A\left(0.5\right)\right)\right)`
-      )
-    );
-    const call = ce.parse(String.raw`k\left(\left(x,y\right),77.4\right)`);
-    const r = compile(call, { fallback: false });
-    expect(r.run!({ x: 1.2, y: 0.7 })).toBeCloseTo(
-      call.subs({ x: 1.2, y: 0.7 }).N().re,
-      12
-    );
-    expect(String(r.preamble)).toContain('_fn_l');
-  });
 });

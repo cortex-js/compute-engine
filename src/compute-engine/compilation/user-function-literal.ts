@@ -68,7 +68,7 @@ export function userFunctionLiteral(
  * interpreter evaluates the call.
  * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
  */
-export function assertCapturedTypesCurrent(
+function assertCapturedTypesCurrent(
   id: string,
   literal: Expression,
   def: object | undefined

@@ -165,63 +165,6 @@ describe('CE-726: FUNCTION-VALUED ROOT ON INTERVAL-JS', () => {
     expect(d.code).toBe('outside-profile');
   });
 
-  // The caller's code runs on the compiled route, and the interpreter does
-  // not run it, so the condition is not decided at compile time: the root is
-  // kept, and declines as a function-valued `If`.
-  test.each<[string, MathJsonExpression, Record<string, unknown>]>([
-    [
-      'the `If` head',
-      [
-        'If',
-        ['Greater', 1, 0],
-        DOUBLE,
-        ['Function', ['Multiply', 3, 'x'], 'x'],
-      ],
-      { If: (_c: unknown, _a: unknown, b: unknown) => b },
-    ],
-    [
-      'a head in the condition',
-      [
-        'If',
-        ['Greater', ['Sin', 1], 0],
-        DOUBLE,
-        ['Function', ['Multiply', 3, 'x'], 'x'],
-      ],
-      { Sin: () => -1 },
-    ],
-  ])('a selection is not made when %s is overridden', (_, json, functions) => {
-    const d = declineOf(() =>
-      compile(ce.box(json), {
-        to: 'interval-js',
-        fallback: false,
-        functions: functions as never,
-      })
-    );
-    expect(d.code).toBe('outside-profile');
-  });
-
-  // The override reaches the condition through the body of the user function
-  // `g726` that it calls: the compiled condition is false, while the
-  // interpreter's is true, so no selection is made.
-  test('a selection is not made when a called function reaches an override', () => {
-    ce.declare('g726', '(real) -> boolean');
-    ce.assign('g726', ce.box(['Function', ['Greater', ['Sin', 'y'], 0], 'y']));
-    const json: MathJsonExpression = [
-      'If',
-      ['g726', 1],
-      DOUBLE,
-      ['Function', ['Multiply', 3, 'x'], 'x'],
-    ];
-    const d = declineOf(() =>
-      compile(ce.box(json), {
-        to: 'interval-js',
-        fallback: false,
-        functions: { Sin: () => '(-1)' } as never,
-      })
-    );
-    expect(d.code).toBe('outside-profile');
-  });
-
   // A function-valued `If` declines on its function values, before the
   // static type `error` of the branch is read.
   test('a branch of static type `error` declines, selected or not', () => {

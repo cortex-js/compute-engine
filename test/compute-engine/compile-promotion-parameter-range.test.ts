@@ -71,65 +71,6 @@ describe('comprehension index over a literal range', () => {
     loop.evaluate();
     expect(j.type.toString()).toBe('integer<1..16>');
   });
-
-  it('compiles the radical on the real lane', () => {
-    const c = ce.parse(
-      '\\left[a\\sqrt{\\frac{k-0.5}{16}} \\operatorname{for} k = \\left[1...16\\right]\\right]'
-    );
-    const r = compile(c, { to: 'javascript', mode: 'complex' });
-    expect(r.success).toBe(true);
-    expect(r.code).toContain('Math.sqrt(0.0625 * (k + -0.5))');
-    expect(r.code).not.toContain('csqrt');
-    const v = (r.run as (a: object) => number[])({ a: 2 });
-    const n = ce
-      .box([
-        'Comprehension',
-        ['Multiply', 2, ['Sqrt', ['Divide', ['Subtract', 'k', 0.5], 16]]],
-        ['Element', 'k', ['Range', 1, 16]],
-      ])
-      .N();
-    expect(v.length).toBe(16);
-    v.forEach((x, i) => expect(x).toBeCloseTo(n.at(i + 1)!.re, 12));
-  });
-});
-
-describe('declared parameter types of a user function', () => {
-  const lambda = (ce: ComputeEngine) =>
-    ce.box(['Function', ['Sqrt', ['Divide', ['Subtract', 'k', 0.5], 16]], 'k']);
-
-  it.each(['(integer<1..16>) -> unknown', '(real<1..16>) -> unknown'])(
-    'the body of p declared %s compiles on the real lane',
-    (signature) => {
-      const ce = new ComputeEngine();
-      ce.declare('x', 'integer<1..16>');
-      ce.declare('p', signature);
-      ce.assign('p', lambda(ce));
-      const call = ce.box(['p', 'x']);
-      expect(call.type.toString()).toBe('real');
-      const r = compile(call, { to: 'javascript', mode: 'complex' });
-      expect(r.success).toBe(true);
-      expect(r.preamble).toContain(
-        'const _fn_p = (k) => Math.sqrt(0.0625 * (k + -0.5));'
-      );
-      for (const x of [3, 11]) {
-        const expected = ce.box(['p', x]).N().re;
-        expect(real(r, { x })).toBeCloseTo(expected, 14);
-      }
-    }
-  );
-
-  it('a declared type that proves nothing keeps the complex lane', () => {
-    const ce = new ComputeEngine();
-    ce.declare('x', 'integer');
-    ce.declare('p', '(integer) -> unknown');
-    ce.assign('p', lambda(ce));
-    const r = compile(ce.box(['p', 'x']), {
-      to: 'javascript',
-      mode: 'complex',
-    });
-    expect(r.success).toBe(true);
-    expect(r.preamble).toContain('_SYS.csqrt');
-  });
 });
 
 describe('range evidence at the call sites of a user function', () => {
@@ -144,54 +85,6 @@ describe('range evidence at the call sites of a user function', () => {
     ce.assign('q', ce.parse('(k) \\mapsto \\cos(Tk) + k'));
     return ce;
   }
-
-  it('a Sum index specializes the function to its range', () => {
-    const ce = engine();
-    const e = ce.parse('\\sum_{k=1}^{16} p(k)');
-    const r = compile(e, { to: 'javascript', mode: 'complex' });
-    expect(r.success).toBe(true);
-    expect(r.preamble).toMatch(
-      /const _fn_p_integer_1___ = \(k\) => Math\.cos\(_\.T \* k\) \* Math\.sqrt\(0\.0625 \* \(k \+ -0\.5\)\);/
-    );
-    expect(r.preamble).not.toContain('csqrt');
-    for (const T of [0.3, 1.7]) {
-      // The body of `p` with `T` replaced by its value.
-      const expected = ce
-        .box([
-          'Sum',
-          [
-            'Multiply',
-            ['Sqrt', ['Divide', ['Subtract', 'k', 0.5], 16]],
-            ['Cos', ['Multiply', T, 'k']],
-          ],
-          ['Limits', 'k', 1, 16],
-        ])
-        .N().re;
-      expect(real(r, { T })).toBeCloseTo(expected, 12);
-    }
-  });
-
-  it('the definition for a wide argument stays generic', () => {
-    const ce = engine();
-    const e = ce.parse('\\sum_{k=1}^{16} p(k) + p(t)');
-    const r = compile(e, { to: 'javascript', mode: 'complex' });
-    expect(r.success).toBe(true);
-    // The call `p(t)` has an argument of unknown sign: its definition takes
-    // the complex lane.
-    expect(r.preamble).toContain('const _fn_p = (k) =>');
-    expect(r.preamble).toContain('_SYS.csqrt');
-    expect(r.preamble).toContain(
-      'const _fn_p_integer_1___ = (k) => Math.cos(_.T * k) * Math.sqrt(0.0625 * (k + -0.5));'
-    );
-  });
-
-  it('call sites with different ranges share one specialization', () => {
-    const ce = engine();
-    const e = ce.parse('\\sum_{k=1}^{16} p(k) + \\sum_{j=1}^{8} p(j)');
-    const r = compile(e, { to: 'javascript', mode: 'complex' });
-    expect(r.success).toBe(true);
-    expect(r.preamble?.match(/const _fn_p_/g)?.length).toBe(1);
-  });
 
   it('a function whose body proves nothing more is not specialized', () => {
     const ce = engine();

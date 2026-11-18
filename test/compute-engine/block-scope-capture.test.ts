@@ -657,21 +657,18 @@ describe('a lazy collection that leaves an Epsil block or function', () => {
       [2, 3],
     ],
   ])('%s', (_label, src, expected) => {
+    // The pipeline declines these programs (a function value that is not
+    // the literal of a Map, a Filter or an Apply; `DefineFunction`), and the
+    // interpreter gives the value.
     expect(run(src)).toBe(JSON.stringify(expected));
-    expect(compiled(src)).toEqual(expected);
   });
 
-  // A function defined in a program is compiled once, as a value, for the
-  // types of its parameters. With `xs` not declared, the elements of `xs`
-  // have the type `unknown`, so the value that `map` passes to `h` has no
-  // settled shape, and the compilation declines: the compiled code does
-  // not test the shape of a value at run time (rule R3 of
-  // `docs/plans/2026-10-31-static-shape-compilation.md`). The case above
-  // declares `xs`.
   test('a function body with a parameter that has no declared type', () => {
     const src = 'function f(xs) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])';
     expect(run(src)).toBe('[2,3]');
-    expect(() => compiled(src)).toThrow(/does not settle one shape/);
+    expect(() => compiled(src)).toThrow(
+      /DefineFunction is not supported by the compiler/
+    );
   });
 
   test('a reduce', () => {

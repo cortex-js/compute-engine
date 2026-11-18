@@ -1,4 +1,4 @@
-import { ComputeEngine, compile } from '../../src/compute-engine';
+import { ComputeEngine } from '../../src/compute-engine';
 
 /**
  * `Find` with no matching element gives the absent value of the domain of
@@ -88,31 +88,5 @@ describe('the absent value of the element domain', () => {
       .box(['Find', ['List', 1, 2, 3], greaterThan(5)])
       .evaluateAsync();
     expect(v.isNaN).toBe(true);
-  });
-});
-
-describe('compiled JavaScript', () => {
-  test('a number gives NaN and a point gives the point of NaN coordinates', () => {
-    ce.declare('xs', 'list<real>');
-    ce.declare('ps', 'list<tuple<real, real>>');
-    const numbers = compile(ce.box(['Find', 'xs', greaterThan(5)]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(numbers.success).toBe(true);
-    expect(numbers.run!({ xs: [1, 2] } as never)).toBeNaN();
-    expect(numbers.run!({ xs: [1, 9] } as never)).toBe(9);
-
-    const points = compile(
-      ce.box([
-        'Find',
-        'ps',
-        ['Function', ['Greater', ['First', 'x'], 5], 'x'],
-      ]),
-      { to: 'javascript', fallback: false }
-    );
-    expect(points.success).toBe(true);
-    expect(points.run!({ ps: [[1, 2]] } as never)).toEqual([NaN, NaN]);
-    expect(points.run!({ ps: [[1, 2], [7, 8]] } as never)).toEqual([7, 8]);
   });
 });

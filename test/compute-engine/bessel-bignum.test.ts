@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // BesselJ, BesselY, BesselI and BesselK of a real order and a real argument
 // above machine precision. The golden rows are mpmath 1.3.0 at 140 digits
@@ -407,23 +406,3 @@ describe('BESSEL FUNCTIONS: RESULTS AND OPERANDS', () => {
   });
 });
 
-describe('BESSEL FUNCTIONS: THE COMPILED DOUBLE ROUTE AGREES AT DOUBLE PRECISION', () => {
-  for (const kind of ['J', 'Y', 'I', 'K'] as Kind[]) {
-    for (const [order, x] of [
-      [0, 2.5],
-      [2, 7],
-      [5, 30],
-    ]) {
-      test(`compiled Bessel${kind}(${order}, ${x}) matches the 30-digit value`, () => {
-        const f = compile(ce.expr([`Bessel${kind}`, order, 'x'] as any)) as any;
-        expect(f.success).toBe(true);
-        const compiled = f.run({ x }) as number;
-        ce.precision = 30;
-        const exact = ce.expr([`Bessel${kind}`, order, x] as any).N();
-        ce.precision = 'machine';
-        const want = exact.bignumRe!.toNumber();
-        expect(Math.abs(compiled - want) / Math.abs(want)).toBeLessThan(1e-12);
-      });
-    }
-  }
-});

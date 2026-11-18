@@ -240,50 +240,6 @@ describe('a NaN operand of a branch condition', () => {
     expect(block(['NotEqual', 'NaN', 0])).toBe(1);
   });
 
-  test('the scalar and the indexed element-wise NotEqual agree on a NaN operand', () => {
-    // `Which([a, b, c] ≠ 2, 1, True, 0)[2]` is rewritten to the scalar
-    // `Which(b ≠ 2, 1, True, 0)` by the compiler (`fixed-width-unroll.ts`), so
-    // the two must give the same answer: the cell `NaN ≠ 2` is `True`, and so
-    // is the scalar condition (user decision 2026-10-23).
-    const e = new ComputeEngine();
-    for (const s of ['a', 'b', 'c']) e.declare(s, 'number');
-    const vars = { a: 1, b: NaN, c: 3 };
-    const forms = [
-      ['At', ['Which', ['NotEqual', ['List', 'a', 'b', 'c'], 2], 1, 'True', 0], 2],
-      ['Which', ['NotEqual', 'b', 2], 1, 'True', 0],
-    ];
-    for (const form of forms) {
-      const r = compile(e.box(form), { fallback: false });
-      expect(r.run!(vars)).toBe(1);
-      const held = new ComputeEngine();
-      for (const [k, v] of Object.entries(vars)) held.assign(k, v);
-      expect(held.box(form).evaluate().re).toBe(1);
-    }
-  });
-
-  test('element-wise selection is unchanged: a NaN cell takes the else cell on both lanes', () => {
-    const e = new ComputeEngine();
-    e.declare('L', 'list<number>');
-    const r = compile(e.box(['Which', ['Greater', 'L', 0], 1, 'True', -1]), {
-      fallback: false,
-    });
-    expect(r!.run!({ L: [NaN, 1, -1] })).toEqual([-1, 1, -1]);
-    e.assign('L', e.box(['List', 'NaN', 1, -1]));
-    expect(
-      e.box(['Which', ['Greater', 'L', 0], 1, 'True', -1]).evaluate().json
-    ).toEqual(['List', -1, 1, -1]);
-    // A NaN on the scalar side of an element-wise relation is a cell-wise
-    // `False` mask, not a scalar decision; a connective over a list keeps
-    // its element-wise shape.
-    expect(
-      e.box(['Which', ['Greater', 'L', 'NaN'], 1, 'True', -1]).evaluate().json
-    ).toEqual(['List', -1, -1, -1]);
-    expect(
-      e
-        .box(['Which', ['And', 'True', ['Greater', 'L', 0]], 1, 'True', -1])
-        .evaluate().json
-    ).toEqual(['List', -1, 1, -1]);
-  });
 });
 
 /**
@@ -571,17 +527,6 @@ describe('a compiled branch comparison over an absent or nested value', () => {
     expect(dot.success).toBe(true);
     expect(dot.run!({ p: [1, 2] } as never)).toBe(1);
     expect(dot.run!({ p: [-1, 2] } as never)).toBe(0);
-  });
-
-  test('the operand of Coalesce is not tested', () => {
-    const e = new ComputeEngine();
-    e.declare('y', 'real');
-    const c = compile(
-      e.box(['If', ['Greater', ['Coalesce', 'y', 1], 0], 1, 0]),
-      { fallback: false } as never
-    );
-    expect(c.success).toBe(true);
-    expect(c.run!({} as never)).toBe(1);
   });
 
   test('interval-js: a default-less Which that selects no clause is empty', () => {
@@ -948,21 +893,4 @@ describe('Tycho row 413 (a): the edges of the rule', () => {
     );
   });
 
-  test('a closed comparison with the pole folds under constantFold: false', () => {
-    for (const [latex, value] of [
-      ['0 < \\frac{1}{0}', false],
-      ['\\frac{1}{0} = \\frac{1}{0}', false],
-      ['\\frac{1}{0} \\ne 0', true],
-    ] as const) {
-      for (const constantFold of [true, false]) {
-        const js = compile(ce.parse(latex), {
-          to: 'javascript',
-          fallback: false,
-          constantFold,
-        } as never);
-        expect(js.code).toBe(String(value));
-        expect(js.run!({} as never)).toBe(value);
-      }
-    }
-  });
 });

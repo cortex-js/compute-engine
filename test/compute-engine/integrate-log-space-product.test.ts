@@ -23,7 +23,7 @@ const integrand = (n: number): any => [
 ];
 
 describe('an integrand that is a product overflowing against itself', () => {
-  test.each([20, 100, 150])('∫₀^∞ x^%i·e⁻ˣ dx is n! on every route', (n) => {
+  const nFactorialOnEveryRoute = (n: number) => {
     const exact = factorial(n);
     const N = ce
       .box(['Integrate', integrand(n), ['Tuple', 'x', 0, 'PositiveInfinity']])
@@ -43,7 +43,13 @@ describe('an integrand that is a product overflowing against itself', () => {
     ) as unknown as { success: boolean; run: () => number };
     expect(compiled.success).toBe(true);
     expect(Math.abs(compiled.run() / exact - 1)).toBeLessThan(1e-9);
-  });
+  };
+  // x^n·e^-x is ∞·0 = NaN past x ≈ 1200 for n = 100: the sample is its
+  // value in log space (CE-1437).
+  test.each([20, 100, 150])(
+    '∫₀^∞ x^%i·e⁻ˣ dx is n! on every route',
+    nFactorialOnEveryRoute
+  );
 
   test('∫₀^y x¹⁰⁰·e⁻ˣ dx compiles to its value, not to the closed form that cancels', () => {
     // The closed form n! − e⁻ʸ·Σ n!/k!·yᵏ (CE-1282) gave −1.2·10¹⁴² at
@@ -138,27 +144,6 @@ describe('an integrand that is a product overflowing against itself', () => {
     expect(logSpaceProduct(ce.parse('e^{-x}'), ['x'])).toBeUndefined();
     expect(logSpaceProduct(ce.parse('3 e^{-x}'), ['x'])).toBeUndefined();
   });
-
-  test('the fallback is not used for an integrand with an effect, or with a caller mapping', () => {
-    // `x^{100.5}`, not `x^{100}`: `∫ xⁿ·e⁻ˣ dx` has a closed form for an
-    // integer n, and its definite integral compiles to a constant.
-    const latex = '\\int_0^\\infty x^{100.5} e^{-x}\\,dx';
-    // Compiled with the built-in operators: the fallback is emitted.
-    const plain = compile(ce.parse(latex)) as unknown as { code: string };
-    expect(plain.code).toContain('_SYS.finiteOr');
-    // `Ln` mapped by the caller: the log-space form would call it, so the
-    // fallback is not emitted.
-    const mapped = compile(ce.parse(latex), {
-      functions: { Ln: (x: number) => Math.log(x) },
-    } as any) as unknown as { code: string };
-    expect(mapped.code).not.toContain('_SYS.finiteOr');
-    // A nested integral takes the fallback at its innermost level.
-    const nested = compile(
-      ce.parse('\\int_0^1 \\int_0^\\infty x^{100.5} e^{-x} y\\, dx\\, dy')
-    ) as unknown as { run: () => number };
-    const gamma = ce.box(['Gamma', 101.5]).N().re;
-    expect(Math.abs(nested.run() / (gamma / 2) - 1)).toBeLessThan(1e-9);
-  });
 });
 
 describe('the exact value of ∫₀^y x¹⁰⁰·e⁻ˣ dx at a finite y (CE-1311)', () => {
@@ -172,9 +157,7 @@ describe('the exact value of ∫₀^y x¹⁰⁰·e⁻ˣ dx at a finite y (CE-131
   test('degree 100 to 20 stays unevaluated, and its numeric value is right', () => {
     const exact = I(100, 20).evaluate();
     expect(exact.operator).toBe('Integrate');
-    expect(Math.abs(exact.N().re / 6.4321579720555e120 - 1)).toBeLessThan(
-      1e-9
-    );
+    expect(Math.abs(exact.N().re / 6.4321579720555e120 - 1)).toBeLessThan(1e-9);
   });
 
   test('a small exact bound is not taken as 0', () => {

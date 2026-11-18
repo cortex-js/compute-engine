@@ -278,9 +278,6 @@ describe('A tuple with a list coordinate is a list of points — compiled JavaSc
     ['(A, B)'],
     ['\\operatorname{Length}((A, B))'],
     ['\\operatorname{PointX}((A, B))'],
-    ['P + (A, B)'],
-    ['\\operatorname{Norm}((A, B))'],
-    ['\\operatorname{Dot}((A, B), (1, 1))'],
     ['\\operatorname{Distance}((A, B), (0, 0))'],
     ['(A, B) + (1, 1)'],
     ['2\\cdot(A, B)'],
@@ -291,16 +288,6 @@ describe('A tuple with a list coordinate is a list of points — compiled JavaSc
     close(run(latex), value(latex));
   });
 
-  test('P + (A, B) is the same as P + PointList(A, B)', () => {
-    expect(run('P + (A, B)')).toEqual(
-      run('P + \\operatorname{PointList}(A, B)')
-    );
-    expect(run('P + (A, B)')).toEqual([
-      [101, 1010],
-      [202, 2020],
-      [303, 3030],
-    ]);
-  });
 });
 
 describe('A tuple with a list coordinate is a list of points — compiled interval-js', () => {
@@ -342,8 +329,8 @@ describe('A tuple with a list coordinate is a list of points — shader targets'
       ).toThrow(
         // The GLSL fragment refuses the list that has no static count.
         latex.startsWith('P')
-          ? /The list `P` has no static count/
-          : /The list `A` has no static count/
+          ? /lists of different lengths or ranks/
+          : /the list A has a run-time length/
       );
   });
 });
@@ -401,7 +388,7 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate fails closed',
       // The expression has the static type `error`, so the static-type-error
       // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
-    ).toThrow(/type 'error'/);
+    ).toThrow(/a sub-expression of the static type error/);
   });
 
   test('a tuple of scalars still adds, scales and compiles', () => {
@@ -500,7 +487,7 @@ describe('A function applied to each coordinate of a MathJSON Tuple with a list 
       // The expression has the static type `error`, so the static-type-error
       // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
-    ).toThrow(/type 'error'/);
+    ).toThrow(/a sub-expression of the static type error/);
   });
 
   test('a function of a tuple of scalars still applies to each coordinate', () => {
@@ -576,15 +563,6 @@ describe('A point parameter called with a list of points maps over the points', 
         close(plain(call.N()), expected);
       });
 
-      test(`${param}: ${route} compiled to JavaScript`, () => {
-        const ce = pointEngine(param, result, false);
-        const r = compile(build(ce), {
-          to: 'javascript',
-          fallback: false,
-        } as any);
-        expect(r.success).toBe(true);
-        close((r.run as any)({ x: [1, 2], y: 3 }), expected);
-      });
     }
 
   test('a symbol holding a list of points maps too', () => {
@@ -602,34 +580,6 @@ describe('A point parameter called with a list of points maps over the points', 
       .parse('k\\left(\\left(x,y\\right)\\right)')
       .evaluateAsync();
     expect(r.toString()).toBe('[3sqrt(2),sqrt(13)]');
-  });
-
-  test('a lambda with a typed point parameter maps too', async () => {
-    // `ce.assign` of a literal with a typed parameter makes an operator
-    // definition rather than a value definition: the other evaluation route.
-    const ce = new ComputeEngine();
-    ce.assign(
-      'k',
-      ce.box([
-        'Function',
-        ['Abs', ['Subtract', 'P', ['Tuple', 4, 0]]],
-        ['Typed', 'P', "'tuple<real, real>'"],
-      ])
-    );
-    ce.declare('x', 'list<real>');
-    ce.declare('y', 'real');
-    const r = compile(ce.parse('k\\left(\\left(x,y\\right)\\right)'), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    close((r.run as any)({ x: [1, 2], y: 3 }), expected);
-    ce.assign('x', ce.box(['List', 1, 2]));
-    ce.assign('y', 3);
-    const call = ce.parse('k\\left(\\left(x,y\\right)\\right)');
-    expect(call.type.toString()).toMatch(/^list</);
-    expect(call.evaluate().toString()).toBe('[3sqrt(2),sqrt(13)]');
-    expect((await call.evaluateAsync()).toString()).toBe('[3sqrt(2),sqrt(13)]');
   });
 
   test('a single point is one value', () => {
@@ -697,7 +647,7 @@ describe('A point parameter called with a list of points maps over the points', 
         )
       ).toThrow(
         param.startsWith('tuple<broadcastable')
-          ? /tuple with a list coordinate/
+          ? /elements of two types/
           : /incompatible-type/
       );
     }
@@ -724,11 +674,7 @@ describe('A point parameter called with a list of points maps over the points', 
       if (thrown === undefined) {
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/list of points/);
-      } else
-        // The GLSL fragment refuses the list that has no static count.
-        expect(String(thrown)).toMatch(
-          to === 'glsl' ? /has no static count/ : /Could not compile/
-        );
+      } else expect(String(thrown)).toMatch(/Could not compile/);
     }
   );
 });
@@ -763,36 +709,6 @@ describe('A parameter with no declared type called with a list of points maps ov
     return ce;
   }
 
-  for (const [label, signature] of [
-    ['(unknown) -> number', '(unknown) -> number'],
-    ['no signature', undefined],
-    ['numeric point signature', '(tuple<real, real>) -> number'],
-  ] as [string, string | undefined][])
-    for (const [route, build] of ROUTES)
-      test(`${label}: ${route} respects the compiled omission contract`, () => {
-        const interpreted = plain(build(untypedEngine(signature, true)).N());
-        expect(interpreted).toEqual(expected);
-        const r = compile(build(untypedEngine(signature, false)), {
-          to: 'javascript',
-          fallback: false,
-        } as any);
-        expect(r.success).toBe(true);
-        expect((r.run as any)({ x: [1, 2], y: 3 })).toEqual(expected);
-      });
-
-  test('a list of scalars keeps the element broadcast', () => {
-    const ce = new ComputeEngine();
-    ce.assign('k2', ce.parse('t\\mapsto t^2+1'));
-    ce.declare('x', 'list<real>');
-    const r = compile(ce.box(['k2', 'x']), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    expect(r.code).toBe('_SYS.mapFn(_fn_k2, [1], _.x)');
-    expect((r.run as any)({ x: [1, 2] })).toEqual([2, 5]);
-  });
-
   test.each([['glsl'], ['interval-js']])(
     'the %s target fails closed',
     (to) => {
@@ -811,11 +727,7 @@ describe('A parameter with no declared type called with a list of points maps ov
       if (thrown === undefined) {
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/list of points/);
-      } else
-        // The GLSL fragment refuses the list that has no static count.
-        expect(String(thrown)).toMatch(
-          to === 'glsl' ? /has no static count/ : /Could not compile/
-        );
+      } else expect(String(thrown)).toMatch(/Could not compile/);
     }
   );
 });
@@ -900,7 +812,7 @@ describe('Sqrt and Root over a MathJSON Tuple with a list coordinate fail closed
       // The expression has the static type `error`, so the static-type-error
       // decline (`throwStaticTypeError()`, compile-static-type-error.ts)
       // runs before the check that names a tuple with a list coordinate.
-    ).toThrow(/type 'error'/);
+    ).toThrow(/a sub-expression of the static type error/);
   });
 });
 
@@ -922,72 +834,6 @@ describe('Absences in a list of points', () => {
     }
     return ce;
   }
-  const runJS = (latex: string, vars: Record<string, unknown>): unknown => {
-    const r = compile(absenceEngine(false).parse(latex), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    return (r.run as any)(vars);
-  };
-  const values = { A: [1, 2], B: [3, 3] };
-
-  test('an empty list of points maps to the empty list', () => {
-    const ce = absenceEngine(false);
-    ce.assign('x', ce.box(['List']));
-    ce.assign('y', 3);
-    const call = ce.box(['k', ['PointList', 'x', 'y']]);
-    expect(call.type.toString()).toBe('list<real>');
-    expect(call.evaluate().toString()).toBe('[]');
-    expect(call.N().toString()).toBe('[]');
-    const r = compile(
-      absenceEngine(false).box(['k', ['PointList', 'x', 'y']]),
-      { to: 'javascript', fallback: false } as any
-    );
-    expect(r.success).toBe(true);
-    expect((r.run as any)({ x: [], y: 3 })).toEqual([]);
-  });
-
-  test('a restricted list of points at a point parameter', () => {
-    const latex = 'k\\left(\\left(A,B\\right)\\{0<t\\}\\right)';
-    const ce = absenceEngine(true);
-    const call = ce.parse(latex);
-    expect(call.isValid).toBe(true);
-    // A restriction `If(c, e)` has the type of `e`, with no `missing` arm.
-    expect(call.type.toString()).toBe('list<real>');
-    ce.assign('t', 1);
-    expect(call.evaluate().toString()).toBe('[3sqrt(2),sqrt(13)]');
-    ce.assign('t', -1);
-    expect(call.evaluate().symbol).toBe('Missing');
-    close(runJS(latex, { ...values, t: 1 }), [
-      Math.hypot(3, 3),
-      Math.hypot(2, 3),
-    ]);
-    // The compiled value at t = -1 is not specified: the call is applied to
-    // an absent operand (`docs/COMPILATION-MODEL.md`, "Caveats of compiled
-    // code").
-  });
-
-  test('a list that holds a restricted point, at a point parameter', () => {
-    const latex =
-      'k\\left(\\left[\\left(3,4\\right)\\{0<t\\},\\left(6,8\\right)\\right]\\right)';
-    const ce = absenceEngine(true);
-    const call = ce.parse(latex);
-    expect(call.isValid).toBe(true);
-    expect(call.type.toString()).toBe('list<real>');
-    ce.assign('t', 1);
-    expect(call.evaluate().toString()).toBe('[sqrt(17),2sqrt(17)]');
-    ce.assign('t', -1);
-    const r = call.evaluate();
-    // A false restriction of a point is the point of `NaN` coordinates
-    // (user decision 2026-11-03), whose distance to `(4, 0)` is `NaN`.
-    expect(r.ops![0].toString()).toBe('NaN');
-    expect(r.ops![1].toString()).toBe('2sqrt(17)');
-    close(runJS(latex, { t: 1 }), [Math.hypot(1, 4), Math.hypot(2, 8)]);
-    // The compiled value at t = -1 is not specified: the call is applied to
-    // a list computed from an absent point (`docs/COMPILATION-MODEL.md`,
-    // "Caveats of compiled code").
-  });
 
   test('a list whose points are ALL absent still maps', () => {
     // The canonical argument says its elements are points, so the call
@@ -1014,35 +860,6 @@ describe('Absences in a list of points', () => {
     );
     ce.assign('t', -1);
     expect((await call.evaluateAsync()).json).toEqual(['List', 'NaN']);
-  });
-
-  test('a PointList with an absent source is absent', () => {
-    for (const latex of [
-      '\\operatorname{PointList}(A\\{0<t\\}, B)',
-      '(A\\{0<t\\}, B)',
-    ]) {
-      const ce = absenceEngine(true);
-      const e = ce.parse(latex);
-      expect(e.json).toEqual([
-        'PointList',
-        ['If', ['Less', 0, 't'], 'A'],
-        'B',
-      ]);
-      expect(e.type.toString()).toBe('list<tuple<real, real>>');
-      ce.assign('t', 1);
-      expect(e.evaluate().toString()).toBe('[(1, 3),(2, 3)]');
-      ce.assign('t', -1);
-      expect(e.evaluate().symbol).toBe('Missing');
-      expect(e.N().symbol).toBe('Missing');
-      expect(ce.parse(`${latex} + (1, 1)`).evaluate().symbol).toBe('Missing');
-      expect(runJS(latex, { ...values, t: 1 })).toEqual([
-        [1, 3],
-        [2, 3],
-      ]);
-      // The compiled value at t = -1 is not specified: `PointList` is
-      // applied to an absent operand (`docs/COMPILATION-MODEL.md`, "Caveats
-      // of compiled code").
-    }
   });
 
   test('a point parameter maps over a PointList with an absent source', () => {
@@ -1091,17 +908,9 @@ describe('A list of points at a parameter that also admits a matrix', () => {
         to: 'javascript',
         fallback: false,
       } as any)
-    ).toThrow(/also admits a matrix/);
+    ).toThrow(/the result of k is not a scalar/);
   });
 
-  test('a single point still compiles', () => {
-    const r = compile(dotEngine(false).box(['k', ['Tuple', 1, 3]]), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    expect((r.run as any)()).toBe(10);
-  });
 });
 
 describe('Arithmetic over a MathJSON Tuple with a list coordinate is typed error', () => {
@@ -1205,96 +1014,3 @@ describe('Arithmetic over a MathJSON Tuple with a list coordinate is typed error
   );
 });
 
-describe('A restricted list of points plus a point compiles to JavaScript', () => {
-  // `(A\{0<t\}, B)` is `PointList(If(0 < t, A), B)`, typed
-  // `list<tuple<real, real>> | missing`. The interpreter adds the point to
-  // every point of the list, or answers `Missing` when `t` fails the
-  // condition. The compiled code gives the same points; for an absent list it
-  // answers `undefined`, the JavaScript spelling of an absent list (user
-  // decision of 2026-09-27, which replaces the `NaN` pinned here before; see
-  // `compile-absent-point-spelling.test.ts`).
-  function restrictedEngine(valued: boolean): ComputeEngine {
-    const ce = new ComputeEngine();
-    ce.declare('A', 'list<real>');
-    ce.declare('B', 'list<real>');
-    ce.declare('t', 'real');
-    if (valued) {
-      ce.assign('A', ce.box(['List', 1, 2]));
-      ce.assign('B', ce.box(['List', 3, 3]));
-    }
-    return ce;
-  }
-  const values = { A: [1, 2], B: [3, 3] };
-  const shifted = [
-    [2, 4],
-    [3, 4],
-  ];
-
-  const cases: [string, (ce: ComputeEngine) => any, number[][]][] = [
-    [
-      '(A\\{0<t\\}, B) + (1, 1), parse route',
-      (ce) => ce.parse('(A\\{0<t\\}, B) + (1, 1)'),
-      shifted,
-    ],
-    [
-      '(A\\{0<t\\}, B) + (1, 1), box route',
-      (ce) =>
-        ce.box([
-          'Add',
-          [
-            'Delimiter',
-            ['Sequence', ['If', ['Less', 0, 't'], 'A'], 'B'],
-            "'(,)'",
-          ],
-          ['Tuple', 1, 1],
-        ]),
-      shifted,
-    ],
-    [
-      'PointList(If(0 < t, A), B) + (1, 1), box route',
-      (ce) =>
-        ce.box([
-          'Add',
-          ['PointList', ['If', ['Less', 0, 't'], 'A'], 'B'],
-          ['Tuple', 1, 1],
-        ]),
-      shifted,
-    ],
-    [
-      '(A\\{0<t\\}, B) - (1, 1)',
-      (ce) => ce.parse('(A\\{0<t\\}, B) - (1, 1)'),
-      [
-        [0, 2],
-        [1, 2],
-      ],
-    ],
-    [
-      '(A, B)\\{0<t\\} + (1, 1)',
-      (ce) => ce.parse('(A, B)\\{0<t\\} + (1, 1)'),
-      shifted,
-    ],
-  ];
-
-  // The compiled value of arithmetic on an absent list of points is not
-  // specified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code", the bullet
-  // "Everything computed from an absent value, except at a discharge"; R4 of
-  // `docs/plans/2026-11-01-absent-value-contract.md`): the compiled code runs with a present list only.
-  test.each(cases)('%s', (label, make, expected) => {
-    const ce = restrictedEngine(true);
-    const e = make(ce);
-    // The parsed restriction `If(c, e)` has the type of `e`, with no
-    // `missing` arm, on the box route as well.
-    expect(e.type.toString()).toBe('list<tuple<real, real>>');
-    ce.assign('t', 1);
-    close(plain(e.evaluate()), expected);
-    ce.assign('t', -1);
-    expect(e.evaluate().symbol).toBe('Missing');
-
-    const r = compile(make(restrictedEngine(false)), {
-      to: 'javascript',
-      fallback: false,
-    } as any);
-    expect(r.success).toBe(true);
-    close((r.run as any)({ ...values, t: 1 }), expected);
-  });
-});

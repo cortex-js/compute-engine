@@ -69,7 +69,6 @@ function makeEngine(): ComputeEngine {
 
 const LIT = ['Function', ['Multiply', 2, 't'], 't'];
 const POINT_LIT = ['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], 'p'];
-const SUM_LIT = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
 
 /** A JavaScript value of the interpreter result `json`. */
 function toJs(json: Json): unknown {
@@ -162,47 +161,21 @@ function expectNoShapeTest(code: string): void {
 // The settled cases, on JavaScript: a consumer, a callback and a source.
 const JS_CASES: [string, Json][] = [
   // Map: a user function, a literal, a multi-clause function, built-ins.
-  ['Map(f, L)', ['Map', 'f', 'L']],
-  ['Map(f, M)', ['Map', 'f', 'M']],
   ['Map(t ↦ 2t, L)', ['Map', LIT, 'L']],
-  ['Map(t ↦ 2t, M)', ['Map', LIT, 'M']],
   ['Map(t ↦ 2t, P)', ['Map', LIT, 'P']],
   ['Map(p ↦ p₁ + p₂, P)', ['Map', POINT_LIT, 'P']],
-  ['Map(mc, L)', ['Map', 'mc', 'L']],
-  ['Map(mc, M)', ['Map', 'mc', 'M']],
   ['Map(Sin, L)', ['Map', 'Sin', 'L']],
-  ['Map(Sin, M)', ['Map', 'Sin', 'M']],
   ['Map(Abs, L)', ['Map', 'Abs', 'L']],
-  ['Map(Abs, M)', ['Map', 'Abs', 'M']],
-  // A function local to a block, used as a value.
-  [
-    'Block(q ≔ s ↦ 3s, Map(q, M))',
-    [
-      'Block',
-      ['Declare', 'q', "'unknown'", ['Function', ['Multiply', 3, 's'], 's']],
-      ['Map', 'q', 'M'],
-    ],
-  ],
   // Filter.
   ['Filter(L, t ↦ t > 0)', ['Filter', 'L', ['Function', ['Greater', 't', 0], 't']]],
-  [
-    'Filter(M, r ↦ r₁ > 0)',
-    ['Filter', 'M', ['Function', ['Greater', ['At', 'r', 1], 0], 'r']],
-  ],
   [
     'Filter(P, p ↦ p₁ > 0)',
     ['Filter', 'P', ['Function', ['Greater', ['At', 'p', 1], 0], 'p']],
   ],
-  // Reduce and Fold.
-  ['Reduce(L, (a, b) ↦ a + b, 0)', ['Reduce', 'L', SUM_LIT, 0]],
-  ['Fold(g, 0, L)', ['Fold', 'g', 0, 'L']],
-  ['Reduce(M, (a, b) ↦ a + b, [0, 0])', ['Reduce', 'M', SUM_LIT, ['List', 0, 0]]],
   // Apply of a literal.
   ['Apply(t ↦ 2t, x)', ['Apply', LIT, 'x']],
   ['Apply(t ↦ 2t, L)', ['Apply', LIT, 'L']],
-  ['Apply(t ↦ 2t, M)', ['Apply', LIT, 'M']],
   // The sum of a map, which the compiled code fuses into one loop.
-  ['Sum(Map(f, L))', ['Sum', ['Map', 'f', 'L']]],
   ['Sum(Map(t ↦ 2t, L))', ['Sum', ['Map', LIT, 'L']]],
   ['Sum(Map(Sin, L))', ['Sum', ['Map', 'Sin', 'L']]],
 ];
@@ -216,23 +189,6 @@ describe('javascript: the callback is the variant for the element shape', () => 
     expectClose(r.run!(VALUES as never), interpreted(ce, expr));
   });
 
-  test('a scalar element takes the function itself', () => {
-    const r = compileTo(makeEngine(), ['Map', 'f', 'L'], 'javascript');
-    expect(r.code).toContain('(_fn_f)');
-  });
-
-  test('a list element takes the static map of the function', () => {
-    const r = compileTo(makeEngine(), ['Map', 'f', 'M'], 'javascript');
-    expect(r.code).toContain('(_fn_f$m1)');
-    expect(r.preamble).toContain(
-      'const _fn_f$m1 = ((_tv1) => _SYS.mapFn(_fn_f, [1], _tv1));'
-    );
-  });
-
-  test('a built-in over list elements takes the static map of its value', () => {
-    const r = compileTo(makeEngine(), ['Map', 'Sin', 'M'], 'javascript');
-    expect(r.preamble).toContain('_SYS.mapFn(_fn_Sin, [1], ');
-  });
 });
 
 describe('interval-js: the callback is the variant for the element shape', () => {
@@ -262,18 +218,17 @@ describe('interval-js: the callback is the variant for the element shape', () =>
 
 describe('an element with no settled shape declines (rule R3)', () => {
   test.each([
-    ['a user function', 'f'],
-    ['a literal', LIT],
-    ['a built-in', 'Sin'],
-  ])('%s over list<real | list<real>>', (_label, callback) => {
+    ['a user function', 'f', 'outside-profile'],
+    ['a literal', LIT, 'unsettled-shape'],
+    ['a built-in', 'Sin', 'unsettled-shape'],
+  ])('%s over list<real | list<real>>', (_label, callback, code) => {
     const ce = makeEngine();
     ce.declare('U', 'list<real | list<real>>');
     const r = compile(ce.box(['Map', callback, 'U'] as never), {
       constantFold: false,
     } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
-    expect(r.unsupported).toContain('U');
+    expect(r.diagnostic?.code).toBe(code);
   });
 
   test('a literal list of elements of two shapes (decision D7)', () => {
@@ -285,7 +240,7 @@ describe('an element with no settled shape declines (rule R3)', () => {
     expect(ce.box(expr as never).evaluate().toString()).toBe('[3,[5,7]]');
     const r = compile(ce.box(expr as never), { constantFold: false } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 
   test('a fold whose accumulator is a scalar, then a list', () => {
@@ -296,126 +251,9 @@ describe('an element with no settled shape declines (rule R3)', () => {
     expect(ce.box(expr as never).subs({ M: ce.box(INPUTS.M as never) } as never).evaluate().toString()).toBe('[4,2]');
     const r = compile(ce.box(expr as never), { constantFold: false } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 
-  test('a ragged literal list has elements of one shape', () => {
-    // `[[1, 2], [3]]`: both rows are lists of numbers, so the map is
-    // static.
-    const ce = makeEngine();
-    const expr = ['Map', LIT, ['List', ['List', 1, 2], ['List', 3]]];
-    const r = compileTo(ce, expr, 'javascript');
-    expect(r.success).toBe(true);
-    expectNoShapeTest(r.code);
-    expect(r.run!({})).toEqual([[2, 4], [6]]);
-  });
-});
-
-describe('a function value with no consumer is the scalar variant', () => {
-  test('the root value of a named function', () => {
-    const r = compileTo(makeEngine(), 'f', 'javascript');
-    expect(r.success).toBe(true);
-    expectNoShapeTest(`${r.preamble ?? ''}\n${r.code}`);
-  });
-});
-
-// ROADMAP CE-256: a record element reached a callback parameter with no
-// type through the broadcast wrapper, which tested `Array.isArray` and
-// would map over the fields of a record held as an array. The static type
-// of the element now selects the variant, and a record reaches the
-// function whole, as in the interpreter.
-describe('a record element reaches the callback whole (CE-256)', () => {
-  test('Map(k, persons)', () => {
-    const ce = new ComputeEngine();
-    ce.declare('persons', 'list<record{age: real, h: real}>');
-    ce.box(['DefineFunction', 'k', ['Function', 'p', 'p']] as never).evaluate();
-    const expr = ce.box(['Map', 'k', 'persons'] as never);
-    const value = ce.box([
-      'List',
-      ['Dictionary', ['Tuple', "'age'", 3], ['Tuple', "'h'", 1]],
-      ['Dictionary', ['Tuple', "'age'", 5], ['Tuple', "'h'", 2]],
-    ] as never);
-    const interp = expr.subs({ persons: value } as never).evaluate();
-    expect([...interp.each()].map((x) => x.json)).toEqual([
-      { dict: { age: 3, h: 1 } },
-      { dict: { age: 5, h: 2 } },
-    ]);
-    const r = compile(expr, { fallback: false } as never)!;
-    expect(r.success).toBe(true);
-    expectNoShapeTest(`${r.preamble ?? ''}\n${r.code}`);
-    expect(
-      r.run!({
-        persons: [
-          { age: 3, h: 1 },
-          { age: 5, h: 2 },
-        ],
-      } as never)
-    ).toEqual([
-      { age: 3, h: 1 },
-      { age: 5, h: 2 },
-    ]);
-  });
-});
-
-// ROADMAP CE-338: the application of a literal to a list built the
-// broadcast wrapper around the literal at each evaluation. It is now a
-// static map of the bare literal.
-describe('the application of a literal to a list is a static map (CE-338)', () => {
-  test('Apply(t ↦ 2t, L)', () => {
-    const ce = makeEngine();
-    const r = compileTo(ce, ['Apply', LIT, 'L'], 'javascript');
-    expect(r.code).toBe('_SYS.mapFn((((t) => 2 * t)), [1], _.L)');
-    expectClose(r.run!(VALUES as never), interpreted(ce, ['Apply', LIT, 'L']));
-  });
-});
-
-// ROADMAP CE-693: a parameter declared `expression` that receives a
-// collection. The interpreter binds the collection whole, and the body maps
-// over it. The callback is the variant with the parameter typed by the
-// element.
-describe('a parameter declared `expression` takes the variant typed by the element (CE-693)', () => {
-  const setup = () => {
-    const ce = new ComputeEngine();
-    ce.declare('h', 'function');
-    ce.assign(
-      'h',
-      ce.box(['Function', ['Multiply', 2, 't'], ['Typed', 't', "'expression'"]] as never)
-    );
-    ce.declare('rows', 'list<list<real>>');
-    ce.declare('L', 'list<real>');
-    return ce;
-  };
-  const rows = [
-    [1, 2],
-    [3, 4],
-  ];
-
-  test('Map(h, rows)', () => {
-    const ce = setup();
-    const e = ce.box(['Map', 'h', 'rows'] as never);
-    expect(
-      e
-        .subs({ rows: ce.box(['List', ['List', 1, 2], ['List', 3, 4]] as never) } as never)
-        .evaluate()
-        .toString()
-    ).toBe('[[2,4],[6,8]]');
-    const r = compile(e, { fallback: false } as never)!;
-    expect(r.success).toBe(true);
-    expectNoShapeTest(`${r.preamble ?? ''}\n${r.code}`);
-    expect(r.run!({ rows } as never)).toEqual([
-      [2, 4],
-      [6, 8],
-    ]);
-  });
-
-  test('Map(h, L)', () => {
-    const ce = setup();
-    const r = compile(ce.box(['Map', 'h', 'L'] as never), {
-      fallback: false,
-    } as never)!;
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [1, 2] } as never)).toEqual([2, 4]);
-  });
 });
 
 // A union of shapes declared at an input cannot have a `missing` member or

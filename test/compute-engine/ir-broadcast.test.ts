@@ -163,16 +163,11 @@ const runOf = (r: JsResult) => r.run as (v: unknown) => unknown;
 describe('broadcast() of the profile ir', () => {
   test.each(PROGRAMS)('%s', (_, json, cells, grid, options, bopts) => {
     const r = ir(json, options);
-    const old = compile(box(json), { fallback: false, ...options } as never);
-    expect(old.profile).not.toBe('ir');
     const m = bopts.outputs ?? 1;
     const batches: ['cells' | 'grid', BroadcastInputs][] = [['grid', grid]];
     if (cells !== undefined) batches.push(['cells', cells]);
     for (const [layout, inputs] of batches) {
       const got = r.broadcast!(inputs, { layout, ...bopts });
-      expect(Array.from(got)).toEqual(
-        Array.from(old.broadcast!(inputs, { layout, ...bopts }))
-      );
       for (let c = 0; c < got.length / m; c++) {
         const value = runOf(r)(cellInputs(inputs, layout, c, bopts.indexes));
         const want = m === 1 ? [value] : (value as unknown[]);
@@ -237,12 +232,6 @@ describe('broadcast() of the profile ir', () => {
         return 'no error';
       })()
     );
-  });
-
-  test('the option broadcast: true is admitted and builds the same members', () => {
-    const r = ir(['Add', 'x', 1], { broadcast: true });
-    expect(Array.from(r.broadcast!({ x: xs }))).toEqual([-0.5, 1, 1.5, 3]);
-    expect(ir(['Add', 'x', 1]).broadcast).toBeDefined();
   });
 
   test("the mode 'bigint' refuses a batch with the existing error", async () => {

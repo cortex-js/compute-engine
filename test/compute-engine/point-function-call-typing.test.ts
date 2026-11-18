@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Three cases of a call of a user function whose parameter is declared as a
@@ -226,12 +225,6 @@ describe('a list of points accepted by the rule for one point', () => {
     expect(ce.box(['k', 'L']).evaluate().toString()).toBe('[3,7]');
   });
 
-  test('the compiled call maps over the points', () => {
-    const ce = engineK();
-    const r = compile(ce.box(['k', 'L']));
-    expect(r.success).toBe(true);
-    expect(r.run!({ L: [[1, 2], [3, Infinity]] })).toEqual([3, Infinity]);
-  });
 });
 
 describe('CE-1069: a list of points with different tuple types', () => {

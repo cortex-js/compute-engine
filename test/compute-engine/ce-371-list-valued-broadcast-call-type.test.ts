@@ -218,21 +218,4 @@ describe('CE-371: compiled consequences', () => {
         )
       ).toBe('declined');
   });
-
-  test('h(x)[1]^2 compiles and agrees for a number and a vector element', () => {
-    // With a matrix element (`x = [[1, 2], [3, 4]]`) the interpreter gives
-    // the matrix power and the compiled code squares each entry: ROADMAP
-    // CE-216.2, which needs a compiled representation of points that is not
-    // a row. That case is not read here.
-    expect(
-      compiledAndInterpreted(
-        engine('real | list<real>'),
-        ['Power', ['At', ['h', 'x'], 1], 2],
-        [3, [1, 2]]
-      )
-    ).toEqual([
-      ['9', '9'],
-      ['[1,4]', '[1,4]'],
-    ]);
-  });
 });

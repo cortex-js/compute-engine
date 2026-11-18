@@ -1,7 +1,7 @@
 // Entry point for the `@cortex-js/compute-engine/runtime` sub-path.
 //
 // The runtime for compiled JavaScript, with no engine behind it: run the
-// `code` of a `JavaScriptTarget` compilation result anywhere (a page, a
+// `code` of a JavaScript compilation result anywhere (a page, a
 // worker, a server) with only the numerics it calls.
 
 export const version = '{{SDK_VERSION}}';

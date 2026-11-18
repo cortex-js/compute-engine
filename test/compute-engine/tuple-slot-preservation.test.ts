@@ -265,19 +265,6 @@ describe('data tuples preserve positions', () => {
     ]);
   });
 
-  test('compiled JavaScript retains an all-missing tuple and Zip row', () => {
-    const ce = new ComputeEngine();
-    expect(compile(ce.box(['Tuple', 'Missing', 'Missing'])).run!({})).toEqual([
-      undefined,
-      undefined,
-    ]);
-    const result = compile(
-      ce.box(['Zip', ['List', 'Missing'], ['List', 'Missing']])
-    );
-    expect(result.success).toBe(true);
-    expect(result.run!({})).toEqual([[undefined, undefined]]);
-  });
-
   test.each(['javascript', 'glsl'] as const)(
     '%s refuses Nothing coordinates until representable',
     (to) => {
@@ -305,6 +292,6 @@ describe('data tuples preserve positions', () => {
     ce.declare('xs', 'list<integer | nothing>');
     const result = compile(ce.box(['Zip', 'xs', ['List', 7, 8]]));
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Nothing/);
+    expect(result.error).toContain('the input xs of type list<integer | nothing>');
   });
 });

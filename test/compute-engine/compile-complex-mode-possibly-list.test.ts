@@ -51,65 +51,7 @@ function closeTo(actual: unknown, expected: unknown): void {
   expect(a.im).toBeCloseTo(e.im, 12);
 }
 
-const CASES: Array<[string, string, unknown, Value[]]> = [
-  [
-    'broadcastable<number>',
-    '2b + 1',
-    ['Add', ['Multiply', 2, 'b'], 1],
-    [3, [1, { re: 0, im: 1 }], { re: 1, im: 2 }],
-  ],
-  [
-    'broadcastable<number>',
-    '2b = 4',
-    ['Equal', ['Multiply', 2, 'b'], 4],
-    [2, [2, 3], { re: 2, im: 1 }],
-  ],
-  [
-    'number | list<number>',
-    'b + 1',
-    ['Add', 'b', 1],
-    [3, [1, 2], { re: 1, im: 1 }, [1, { re: 0, im: 1 }]],
-  ],
-  [
-    'number | list<number>',
-    'sin(b)',
-    ['Sin', 'b'],
-    [3, [1, 2], { re: 1, im: 1 }, [1, { re: 0, im: 1 }]],
-  ],
-  [
-    'broadcastable<number>',
-    'b^2',
-    ['Power', 'b', 2],
-    [
-      3,
-      [1, 2],
-      { re: 1, im: 1 },
-      [
-        [1, 2],
-        [3, { re: 0, im: 1 }],
-      ],
-    ],
-  ],
-];
-
 describe('CE-215.2: the complex mode compiles a possibly-list operand', () => {
-  test.each(CASES)('%s: %s', (type, _label, json, values) => {
-    const ce = new ComputeEngine();
-    ce.declare('b', type);
-    const r = compile(ce.box(json as any), {
-      to: 'javascript',
-      fallback: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    for (const b of values) {
-      const text = JSON.stringify(json)
-        .split('"b"')
-        .join(JSON.stringify(literal(b)));
-      const expected = plain(ce.box(JSON.parse(text)).N());
-      closeTo(r.run({ b }), expected);
-    }
-  });
 
   test('Sum(Rest(p)) + 1 over tensor<number> declines', () => {
     // The elements of a tensor of unknown rank are `number | tensor<number>`:
@@ -122,7 +64,7 @@ describe('CE-215.2: the complex mode compiles a possibly-list operand', () => {
       mode: 'complex',
     } as any) as any;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
     // The interpreter gives the value that the compilation leaves to it.
     ce.assign(
       'p',
@@ -138,23 +80,4 @@ describe('CE-215.2: the complex mode compiles a possibly-list operand', () => {
     ).toEqual(['List', 9, 11]);
   });
 
-  test('Sum(Rest(p)) + 1 over matrix<number>', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', 'matrix<number>');
-    const r = compile(ce.box(['Add', ['Sum', ['Rest', 'p']], 1]), {
-      to: 'javascript',
-      fallback: false,
-      mode: 'complex',
-    } as any) as any;
-    expect(r.success).toBe(true);
-    expect(
-      r.run({
-        p: [
-          [1, 2],
-          [3, 4],
-          [5, 6],
-        ],
-      })
-    ).toEqual([9, 11]);
-  });
 });

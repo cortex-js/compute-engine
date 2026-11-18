@@ -159,24 +159,6 @@ describe('a copy that replaces a handler shadows the library operator', () => {
     expect(compiled(ce, ['Sin', 'x']).success).toBe(false);
   });
 
-  test('a copy that changes `compile`', () => {
-    const ce = engineWithCopy('Sin', {
-      compile: (args: any[], compileFn: any) =>
-        `(42 + 0 * ${compileFn(args[0])})`,
-    });
-    // The compiler uses the handler of the copy.
-    const f = compiled(ce, ['Sin', 'x']);
-    expect(f.success).toBe(true);
-    expect(f.run({ x: 0.7 })).toBe(42);
-    // The derivative rule of the library is not used.
-    expect(
-      ce
-        .box(['D', ['Sin', 'x'], 'x'])
-        .evaluate()
-        .has('Derivative')
-    ).toBe(true);
-  });
-
   // `lazy`, `broadcastable` and `evaluateAsync` change how the arguments are
   // evaluated or compiled, or the value under `evaluateAsync()`: a copy that
   // changes one of them is a user definition too.

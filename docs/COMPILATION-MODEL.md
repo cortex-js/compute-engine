@@ -72,11 +72,10 @@ when it compiles. A difference that this list does not name is a defect.
   is the model of the shader targets, applied to every target. The host
   gets the complex value with `mode: 'complex'` or by declaring the input
   `complex`. A complex value passed at an input or a parameter declared
-  real is a value outside its declared type (next item). With the profile
-  `ir` this also holds where the static type of the node is complex:
-  `Arcsin(u)` with `u: real` at `u = 2` is `NaN` (user decision of
-  2026-11-15); the existing JavaScript compiler computes such a node on the
-  complex lane and gives `1.5708 − 1.3170i`, as the interpreter does.
+  real is a value outside its declared type (next item). This also holds
+  where the static type of the node is complex: `Arcsin(u)` with `u: real`
+  at `u = 2` is `NaN`, where the interpreter gives `1.5708 − 1.3170i` (user
+  decision of 2026-11-15).
 - **In `strict`, a value of type `number` must be real.** The type
   `number` admits a complex value, but the `strict` mode compiles a binding
   typed `number` (an input, a parameter, a `number` element of a
@@ -130,9 +129,7 @@ once, or an issue file.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
-- `javascript`, `x: real`: `Digamma(x)` at `x = +Infinity` gives `NaN`. The
-  interpreter gives `+Infinity`.
-- `plausible?` — `javascript` and `interval-js`, both compilers, `x: real`,
+- `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
   `0^0` there: `javascript` gives `NaN` and `interval-js` gives `empty` at
@@ -142,178 +139,121 @@ interpreter's value. A line is removed when the case declines or is fixed.
   base 0 is a pole (`0^-1` is `~oo` in the interpreter). The enclosure holds
   every value; the neighbouring boxes are marked (`y = [0, 2]` with
   `x = [-1, -0.5]` is `partial`).
-- `javascript` (crafted), the existing compiler, `x: real`: a user
-  operator `Inc` whose `compile` handler returns code that ends with a line
-  comment (`${x} + 1 // note`), nested in itself: `Inc(Inc(x))` compiles to
-  `_.x + 1 // note + 1 // note` and gives `1.7` at `x = 0.7`. The
-  interpreter gives `2.7`. The comment hides the code that the outer handler
-  writes after its operand; under an operator the code is put in
-  parentheses that close on the next line, so one level is right.
-- `javascript` (crafted), the existing compiler, `i: real`: a `compile`
-  handler of `At` that returns an expression of another shape than the node,
-  `List(args[1], 2)`, in `Add(At([10, 20, 30], i), 1)`: at `i = 1` the code
-  `[_.i, 2] + 1` gives the string `"1,21"`. The profile `ir` gives `[2, 3]`,
-  the value of the expression the handler returned.
-- every target (crafted), both compilers, `x: real`: a derivative or an
+- every target (crafted), `x: real`: a derivative or an
   integral whose body is reached through a user function, with a `compile`
   handler of `Sin` that returns `Cos(args[0])` and `g(u) = Sin(u)`:
   `D(g(x), x)` gives `cos(x)`, the closed form of the library's `Sin`. The
   program the handler describes, `D(Cos(x), x)`, gives `-sin(x)`. Written
-  without the function, `D(Sin(x), x)` declines in the profile `ir`.
-- `javascript` (crafted), the existing compiler, `i: real`, `x: real`,
-  `L = [1, 2, 3, 4, 5]`, `K = [100, 200, 300, 400, 500]`: a `compile`
-  handler of `At` that keeps the index `Max(Floor(args[1]), 0)` it built in
-  its first call and returns it for every later node, with a handler of
-  `Floor` that returns
-  `Ceil(args[0])`: in `At(L, Floor(i + 0.5)) + 1000·At(K, x)` the authored
-  `Floor` under the kept index is not given its handler at the second `At`.
-  At `i = 1` the code gives `100002`; the profile `ir` gives `200002`, the
-  value of the expressions the handlers returned.
-- `javascript` (crafted), the existing compiler, `L: list<real>`: a function
-  declared in a `Block` with a parameter typed as a point and an untyped
-  one, called with a list at the untyped one:
-  `Block(Declare(k, 'function', Function(At(p, 1) + x, Typed(p, 'tuple<real,
-  real>'), x)), k((1, 2), L))` at `L = [3, 4]` gives the string `"3,41"`.
-  The interpreter gives `[4, 5]`; the profile `ir` declines (a local of
-  type function).
-- `plausible?` — `javascript`, and every other target that compiles the
-  closed form, `x: real`: `Apply(Derivative(EllipticK), x)`
-  at `x = 0` gives `NaN`, the `0/0` of the closed form
-  `(E(x) − (1 − x)K(x))/(2x(1 − x))`; the interpreter gives `π/8`
-  (`symbolic/removable-points.ts`). The same holds for the derivatives of
-  `EllipticE`, `LambertW`, `PolyLog(s, x)` and `LerchPhi(x, s, a)` at 0.
-- `javascript` (crafted), `a: real`, `w(t) = a·t²`: the derivative of a user
-  function whose body reads a free name, at a site where a `Sum` index, a
-  parameter or a local has that name, reads the bound name:
-  `Sum(Apply(Derivative(w), a), Limits(a, 1, 3))` at `a = 5` gives `28`; the
-  interpreter gives `60`. The profile `ir` declines it.
-- `javascript` (crafted), `x: real`, `g` assigned `0.75` with no declared
-  type, `angularUnit = 'deg'`, the `complex` mode: in
-  `Block(Declare(t, real, x), Assign(t, Block(Declare(b0, unknown, g), Arctan(b0))), t)`
-  the existing compiler writes `57.29577951308232 * _SYS.catan(_SYS.cplx(b0))`,
-  a number times a complex object, and gives `NaN`; the interpreter gives
-  `36.86989764584402`.
-- `javascript` (crafted), `x`, `y: real`: the real kernels of
-  `BesselJ(x, y)`, `BesselY`, `BesselI`, `BesselK` do not end for an order
-  `x` of a magnitude of `2^53` or more (`x = 2^60, y = -2.5`), nor
-  `Gamma(x, y)` (`_SYS.gammaUpper`) for `x = -1e300, y = 0.3`. The
-  interpreter leaves the Bessel functions unevaluated and gives `+∞` for the
-  `Gamma`.
-- `javascript`, `x: real`, `z: complex`, both modes: an
-  intermediate double overflows and the code gives `NaN` (or `Infinity`)
+  without the function, `D(Sin(x), x)` declines.
+- `javascript`, `z: complex`, both modes: an
+  intermediate double overflows and the code gives `NaN`
   where the interpreter has a finite value:
-  - `Coth(x)` at `x = 1000` gives `NaN`; the interpreter gives `1`.
   - `Tanh(z)` at `z = 1000` gives `NaN`; the interpreter gives `1`.
   - `Cot(z)`, `Sec(z)`, `Csc(z)` at `z = 0.5 + 1000i` give `NaN`; the
     interpreter gives `0`.
   - `Sech(z)`, `Csch(z)` at `z = 1000 + 0.5i` give `NaN`; the interpreter
     gives `0`.
-  - `Arcsch(x)` at `x = 1e-309` gives `Infinity` (`Math.asinh(1 / x)`); the
-    interpreter gives `712.19194091572`.
-- `javascript` (crafted), `z: complex`, also the profile `ir`:
+- `javascript` (crafted), `z: complex`:
   the complex `Cot` kernel loses precision near 0, off the pole: `Cot(z)` at
   `z = 1e-8 + 2e-8i` gives `1.8014e7 − 3.6029e7i`; the interpreter gives
   `2e7 − 4e7i` (relative error 8e-8 at `|z|` about 1e-5, 5e-12 at 1e-3,
   below 2e-15 from 0.03 up).
-- `javascript`, also the profile `ir`, `x`, `s: real`: the closed form of a
+- `javascript`, `x`, `s: real`: the closed form of a
   definite integral is the difference of the antiderivative at its bounds in
   doubles, so its error is absolute (about one ulp of the larger term):
   `(1/(s√(2π)))·Integrate(e^(−Z²/(2s²)), Limits(Z, −∞, x))` at `s = 1` gives
   `7.0866e-16` at `x = −8` and `0` at `x = −9`; the interpreter gives
   `6.2210e-16` and `1.1286e-19`.
-- `javascript` (crafted), `x: real`, `g(u) = u + Random()`: the closed form
-  of a definite integral with a draw in a bound holds one draw, made at
-  compile time: `Integrate(t, Limits(t, 0, Random()))` and
-  `Integrate(t, Limits(t, 0, g(x)))` give the same number at every call,
-  where the interpreter draws at each evaluation. The profile `ir` draws at
-  each call; `interval-js` gives the enclosure of every draw (no closed
-  form).
-- `javascript`, profile `ir` (crafted), `x: real`: `Zeta(x)` at
+- `javascript` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
-- `javascript`, profile `ir` (crafted), `p`, `q: tuple<real, real>`:
+- `javascript` (crafted): an intermediate product overflows
+  or underflows where the value is finite. With `p`, `q: tuple<real, real>`,
   `Abs(p)` and `Distance(p, q)` are `Math.sqrt(x*x + y*y)`, which squares
   the coordinates: at `p = (3e200, 4e200)`, `q = (0, 0)` both give
   `Infinity`, and at `p = (3e-200, 4e-200)` both give `0`; the interpreter
-  gives `5e200` and `5e-200`.
-- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Power(x, y)` with a
+  gives `5e200` and `5e-200`. With `x: real`, `\frac{2x}{3}` is
+  `(2 * x) / 3`: at `x = 1e308` it gives `Infinity`; the interpreter gives
+  `6.666666666666666e307`.
+- `javascript` (crafted): `Range(0, 9999999999999/10^12)`
+  has 11 elements (the count of a bound that is not an integer is read
+  with a tolerance, as a double); the interpreter gives 10 (`0` to `9`).
+- `glsl` (crafted), `x: real`, `y: real`: `Power(x, y)` with a
   negative `x` and a `y` that is not an integer gives `NaN` (`pow()` is
   undefined there in GLSL ES 3.00), also where the interpreter has a real
   value: at `x = -8`, `y = 2/3` the interpreter gives `4`. A single-float
   exponent cannot be read as a rational of odd denominator.
-- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
+- `glsl` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
   `length(vec2(x, y))`, which squares its operands: `Hypot(1e20, 1e20)` gives
   `Infinity` and `Hypot(1e-25, 1e-25)` gives `0`.
-- `glsl`, profile `ir` (crafted): a `Which` of 126 clauses or more compiles
+- `glsl` (crafted): a `Which` of 126 clauses or more compiles
   to a shader that WebGL 2 refuses ("Expression too complex"; 124 clauses
   pass), where the interpreter has the value.
-- `glsl`, profile `ir` (crafted): a user function with a list parameter of
+- `glsl` (crafted): a user function with a list parameter of
   a stated length of 90,001 and no `storage` compiles to an array parameter
   that WebGL 2 refuses ("Size of declared private variable exceeds
   implementation-defined limit"). With `storage` the parameter is a
   `sampler2D` and the shader is valid.
-- `plausible?` — `glsl`, profile `ir`, `mode: 'complex'`, `x: real`:
+- `plausible?` — `glsl`, `mode: 'complex'`, `x: real`:
   `Power(x, 0.2)` at `x = -8` gives the principal value `1.226 + 0.891i`;
   the interpreter and the `javascript` target give the real root `-1.5157`.
-- `plausible?` — `glsl`, profile `ir`, `z: complex`: `Tanh(z)` is NaN from
+- `plausible?` — `glsl`, `z: complex`: `Tanh(z)` is NaN from
   `|Re(z)|` about 44.4 and `Tan(z)` from `|Im(z)|` about 44.4 (`cosh` of
   twice the part overflows a single float), where the value is close to
   `±1` and `±i`.
-- `plausible?` — `javascript` and `glsl`, profile `ir`, `x: real`,
+- `plausible?` — `javascript` and `glsl`, `x: real`,
   `y: real`: `Floor(x/5 + y/10)` at `x = 24`, `y = -98` gives `-6`: each
   quotient is rounded, and their sum falls just under `-5`. The interpreter
   gives `-5`. A single quotient is exact (`Floor(x/49)`); a sum of two is
   wrong at about one integer point in 10,000, and
   `Floor(j/3 + n + 1/3)` at about one in 20 (`j = -46`, `n = -16` gives
   `-32`, the interpreter `-31`).
-- `javascript` and `glsl`, profile `ir` (crafted), `x: real`:
+- `javascript` and `glsl` (crafted), `x: real`:
   `Sum(1, Limits(k, 1, Sqrt(x)^2))` at `x = 3` gives `2`: the bound is
   floored, and doubles compute `Sqrt(3)^2` just under 3. The interpreter
   gives `3`.
-- `javascript`, profile `ir` (crafted), `n: integer`: a jump function
+- `javascript` (crafted), `n: integer`: a jump function
   (`Floor`, `Ceil`, `Round`, `Sign`, a comparison) of an exact rational
   constant that no double holds takes the jump of the nearest double:
   `Floor(n + (25! − 1)/24!)` at `n = 1` gives `26`; the interpreter gives
-  `25` (`compile-jump-integer-shift.test.ts`,
-  `compile-jump-exact-operand.test.ts` pin the existing compiler's exact
-  jumps).
-- `plausible?` — `javascript`, profile `ir`, `s: real`, `P: real`: a
+  `25`.
+- `plausible?` — `javascript`, `s: real`, `P: real`: a
   comparison of a computed value that is zero in exact arithmetic follows
   its rounding: `If(Sin(2πs/P) > 0, 1, 0)` at `s = 2`, `P = −2` gives `1`
   (the sine is `2.449e-16` in doubles); the interpreter gives `0`.
-- `glsl`, profile `ir` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
+- `glsl` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
   an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
   off by π in the software renderer, and has the other sign on a GPU for
   `x = -0`. The complex lane compares its parts with 0 first.
-- `javascript` (crafted), also the profile `ir`: at the
+- `javascript` (crafted): at the
   threshold of the sRGB transfer function, `AsRgb(Rgb(0.04045, 0.04, 0.05))`
   gives `c0 = 0.040449970408` (the round trip through OKLCh crosses to the
   other branch of the transfer); the interpreter gives `0.04045`.
-- `javascript` and `glsl`, profile `ir` (crafted), `x: real`: `Log(x, b)` with
+- `javascript` and `glsl` (crafted), `x: real`: `Log(x, b)` with
   a base other than 2 and 10 is `Ln(x)/Ln(b)`: `Ceil(Log(x, 5))` at `x = 125`
-  gives `4`, as the existing compiler does; the interpreter gives `3`.
-- `plausible?` — `javascript`, profile `ir`, `k: integer`:
+  gives `4`; the interpreter gives `3`.
+- `plausible?` — `javascript`, `k: integer`:
   `Comprehension(2k, Element(k, Range(1, k)))`, whose index shadows a name
   that its own range reads, gives `[2, 4, 6]` at `k = 3`; the interpreter
   leaves the form unevaluated.
-- `javascript`, profile `ir` (crafted), `D: list<real>`:
+- `javascript` (crafted), `D: list<real>`:
   `WithRandomSeed(1, Tuple(Length(Map(Function(Random(), z), D)), Random()))`
   at `D = [1, 2, 3]` gives `[3, 0.4613875814927787]`; the interpreter gives
   `(3, 0.9834569781146947)`. Its `Map` is a lazy view and `Length` draws
   nothing, where the compiled `Map` builds every element. The result carries
   the warning `seeded-draw-order`. A `Comprehension` with an effect declines.
-- `javascript`, profile `ir` (crafted), `D: list<real>`: the root `Tuple` is
+- `javascript` (crafted), `D: list<real>`: the root `Tuple` is
   recognised by node identity, so one node `t = Tuple(D, a)`, made with
   `ce.function()`, that is both the root result and an operand in the block
   (`Block(Declare(a, real, 1), Assign(a, Length(t)), t)`) reads `Length(t)` as
   the length of its first element: at `D = [1, 2, 3]` it gives `[[1, 2, 3], 3]`
   where a tuple of two elements has length 2. `ce.box()` of JSON never shares
   nodes.
-- `javascript`, profile `ir` (crafted): `Add(Range(1, 2), List(1, 2, 3))`
+- `javascript` (crafted): `Add(Range(1, 2), List(1, 2, 3))`
   gives `[2, 4]`; the interpreter gives the error `incompatible-dimensions`.
   The length of a `Range` is a value for the compiler, and it does not
   compare a length value with a stated length.
-- `javascript` and `interval-js`, profile `ir` (crafted), `x: real`:
+- `javascript` and `interval-js` (crafted), `x: real`:
   `Block(Declare(s, 'unknown', x), Declare(t, 'real', Add(s, 1)))`, whose
   static type is `nothing`, gives `3` at `x = 2` (the point `[3, 3]` on
   `interval-js`); the interpreter gives `Nothing`.
@@ -322,30 +262,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   over `x = [0.5, 1.5]`, `n = 2` gives
   `{ kind: 'partial', value: [0, 2.2999605196919664], domainClipped: 'both' }`:
   the inner `If` is not narrowed to `x ≤ 1`, so `Ln(x - 1)` and `Arccos(x)`
-  are each read over the whole box. Every point of the box has a value, and
-  the earlier interval target gave `{ kind: 'interval' }` with the same
-  bounds.
-- `javascript`: a list whose length is random, then another draw:
-  `Function(Block(Declare(A, 'list<integer>', Comprehension(j, Element(j, Range(1, 2 + Random(Range(1, 3)))))), Declare(r, 'real', Random()), 1000·r + Length(A)), u)`
-  applied to `0.5` under the seed 1 gives `211.47662186831073`. The interpreter gives
-  `987.4569781146947`: its comprehension is a lazy view, so it draws for `r`
-  before it draws for the range.
-- `javascript`, with a `symbolDeps` capture, `seven` and `tenth` assigned
-  `7/10` and `1/10` with no declared type: `x + Mod(seven, tenth)` is not
-  folded and gives `x + _SYS.floorMod(0.7, 0.1)`, about `x + 0.0999…`;
-  without `symbolDeps` it is folded to `x + 0`. The interpreter gives `x`.
-- `javascript`, `x: real`, `strict` mode: `WithRandomSeed(3, ln(x)) + x` at
-  `x = 3` gives `{ re: NaN, im: undefined }`. The node has the type
-  `complex | signed_infinity`, so the parent
-  reads the parts of a complex value, and the handler writes the real body
-  `Math.log(x)`. The interpreter gives `4.0986…`.
-- `javascript` (crafted), `complex` mode, `x: real`, `u` with no declared
-  type, `fr` assigned `(v: real) ↦ v/(v² + 1)`: in
-  `If(Not(0.5 ≤ -1), u, fr(u)) / x` the existing compiler selects the branch
-  `u` and writes `_.u / _.x`, a real quotient: `Infinity` at `x = 0`,
-  `u = 5e-324`. With `sin(u)` in the other branch, and for `u / x`, it lifts
-  `u` (`_SYS.cplx`) and gives `{re: Infinity, im: NaN}`. The interpreter
-  gives `ComplexInfinity`.
+  are each read over the whole box. Every point of the box has a value, so
+  the exact answer is an `interval` result, not a `partial` one.
+- `javascript`, `seven` and `tenth` assigned `7/10` and `1/10` with no
+  declared type: `x + Mod(seven, tenth)` compiles to
+  `_.x + 0.09999999999999992`, the remainder of the doubles `0.7` and `0.1`.
+  The interpreter gives `x`.
 - `javascript`, `complex` mode, `t` with no declared type: `-1/(t·ln t)`,
   `1/(t·ln(t)^2)` and `sin(ln t)/t` at `t = ±Infinity` give `NaN`. The
   interpreter gives `0`.
@@ -358,10 +280,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `L = [-1, 0, 2]` gives `[NaN, 1, 1]`. `simplify()` takes the zero out of the
   root and gives `0·Sqrt(L) + 1`, so the code computes `0 * Math.sqrt(-1)`. The
   interpreter, and the compiled form that is not simplified, give `[1, 1, 1]`.
-- `javascript`, `L: list<real>`: `Arctan2(0/L, -1)`, and the simplified form of
-  `Arctan2(L - L, -1)`, at `L = [-1, 2]` give `[-π, π]`. The code computes
-  `0 * -1` or `0 / -1`, which is `-0`, and `Math.atan2(-0, -1)` is `-π`. The
-  interpreter gives `[π, π]`.
 - `plausible?` — `javascript`, `n: integer`: in
   `function g(n: integer) { sum(map((x) => sum([random() for j in 1..2]), 1..n)) }`,
   `WithRandomSeed(7, (g(m), random()))` at `m = 2` gives `[1.2722…, 0.2160…]`;
@@ -369,162 +287,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   comprehension in the function literal as one instance, so the two calls read
   one draw set (`docs/RANDOMNESS-MODEL.md` §6, "One instance, one draw set");
   the compiled code draws at each call.
-- `plausible?` — `javascript` (both profiles), `Z: complex`, `x: real`: the
+- `plausible?` — `javascript`, `Z: complex`, `x: real`: the
   entry check copies the inputs object with its own properties when it
   converts a value, so an inherited input or a getter of a class instance is
   lost. `Z + x` with the inputs `Object.create({ Z: 1.5, x: 2 })` gives
   `NaN`; the interpreter gives `3.5`. `If(B, 2Z, 3)` with `B: true` on the
   prototype and `Z: 3` gives `3`, not `6`.
-- `plausible?` — `javascript`, `b: boolean`, `u: list<real>`, a non-canonical
-  box: `ce.box(['Not', ['And', 'b', ['Greater', 'u', 0]]], { form: 'raw' })` at
-  `b = true`, `u = [1, 2, 3]` gives `true`, and the same box of
-  `['Add', 'u', 1]` gives the string `"1,2,31"`. A non-canonical box has no
-  static types, so the code uses the scalar JavaScript operators. The
-  interpreter, and the compiled `.canonical` form of the box, give
-  `[False, False, False]` for the first box.
-- `plausible?` — `javascript`, `glsl`, `x: real`, `y: real`: `Arctan2(y, -x)` at
-  `x = 0`, `y = 0`. The interpreter gives `0`. JavaScript gives `π`, because
-  `-x` is `-0` and `Math.atan2(0, -0)` is `π`. The GLSL code is
-  `atan(y, -x)`, and `atan(0.0, -0.0)` with uniform operands gave `NaN` in WebGL2
-  on ANGLE Metal on an Apple M5 Max, where `atan(0.0, 0.0)` gave `0`. That GPU is
-  the only one measured.
-- `glsl`, `L: real | list<real>`: `L + 1` compiles to `L + 1.0`, a
-  shader code for a scalar `L`, so a host that gives a list has no
-  declaration of `L` that the code accepts. The interpreter at `L = [1, 2]`
-  gives `[2, 3]`. A list input of unknown length declines (`list<real>`),
-  but a union with such a member does not: the engine gives wide unions to
-  symbols that the shader reads as scalars. The same applies to an input
-  of type `record`, which compiles to its bare name.
-- `javascript`, `L: list<real>`, `n: integer`: `Sum(Take(Sum(L·i, i, 1,
-  n), 2))` and `Sum(TakeWhile(Sum(L·i, i, 1, n), x ↦ x > 0))` at `n = 0`
-  throw (`.slice is not a function`, `findIndex is not a function`): the
-  empty indexed `Sum` is the number `0`, and the `Take` lowering reads it
-  as an array. The interpreter gives `0`.
-- A custom target whose own `var` hook resolves a symbol `C` declared with
-  the bare type `list` while `C` holds a list of numbers: an element read
-  `C[i]` is compiled as a number (`isHeldNumericListRead()` in
-  `compilation/provable-kind.ts` tests `vars` and bound names, not the
-  hook), so when the hook's value of `C` is a list of lists, an indexed
-  `Sum` over `C[i+1]x^i` adds arrays with `+` and gives a string; the
-  interpreter gives the sum of the lists.
-- `javascript`, a `Block` local declared with the bare type `list` and
-  holding a list of lists: `Block(Declare(C, 'list', [[1, 2], [3, 4]]),
-  Sum(C[i+1]·x^i, i, 0, Length(C) − 1))` compiles to a scalar loop over
-  `_SYS.at(C, i + 1) * _SYS.pow(_.x, i)` and gives `null` (also in
-  0.178.0); the interpreter gives the list `[3x + 1, 4x + 2]`.
-- `interval-js`, `x: real`, `f: (real) -> real` given with the `functions`
-  option as a host function that counts its calls in a global:
-  `If(And(x < 0, f(x) > 0), 1, 2)` at `x = 1` calls `f` once and gives
-  `[2, 2]`. The interval lowering of `And` and `Or` in a value
-  (`_IA.and`, `_IA.or`) evaluates every operand. The interpreter stops at
-  the first operand that decides the result, gives `2`, and does not call
-  `f`. The condition of an `If` statement in a `Loop` body keeps the order
-  of the interpreter.
-- `glsl`, `s: (real) -> complex` with `s := t ↦ If(t > 0, t > 1,
-  t)`, `x: real`: `s(x)` compiles with success to
-  `vec2(((0.0 < t) ? (1.0 < t) : (t)), 0.0)`. The two branches mix a
-  boolean and a float, which the shader compiler refuses. The interpreter
-  gives an `incompatible-type` error at `x = 2` and `-1` at `x = -1`.
-- `glsl`, caller code evaluated on a condition with no statement of its
-  own (crafted): with `vars: { W: 'nextValue()' }`, `canCompile()` answers
-  `{ ok: true }` and `compile()` declines for a `Loop` whose guard or later
-  clause holds `W` (`Element(i, Range(1, n), 0 < W)`), for a user function
-  whose body has `And`, `Or` or a chained comparison with `W` after the
-  first operand (`g(x) := x < 1 < W < 2`; the prepare stage writes these as
-  an `If` in the root tree only), and for such a head that the caller maps
-  through `functions`. The code would run on a condition where no
-  temporary can be placed. No program compiles to wrong code.
-- `glsl`, a shared node of caller code in a user-function body (crafted):
-  the body of a user function that the host builds with one node object of
-  caller code at two places
-  (`Add(hx, hx)` with one boxed `hx = h(x0)` and `functions: { h: 'myH' }`),
-  written in place of its call: the binding is keyed by node, so the shader
-  calls `myH` once where the interpreter calls it twice. A body that is
-  parsed or boxed from MathJSON has one node per occurrence.
-- `glsl`, `Max(L)` and `Min(L)` of a list input held as a uniform array of
-  more than 4 elements (crafted): with `L: list<real^5>`, `canCompile()`
-  answers `{ ok: true }` and `compile()` declines, because the shader code
-  has no list of the elements of a uniform array to fold over. No program
-  compiles to wrong code, and `compile()` declined it before the fragment
-  pass too. `Sum(L)` and `Product(L)` are refused by the pass.
-
-- `javascript`, `x: real | nan`: `Arcsec(x)` and `Arccsc(x)` at `x = 0.5`,
-  and `InverseHaversine(x)` at `x = 4`, compile to the real lowering
-  (`Math.acos(1 / x)`, `2 * Math.asin(Math.sqrt(x))`) and give `NaN`; the
-  interpreter gives a complex value (`Arcsec(0.5)` is `1.3170i`). With
-  `x: real` the same programs take the complex lane and agree.
-- `plausible?` — `javascript`, the default mode (`strict`), `z: real`:
-  `Gamma(s, z)` at `s = 1`, `z = -1` gives `NaN`; the interpreter gives
-  `e`, a real value. The real lowering of the upper incomplete gamma has no
-  value for `z < 0`; `mode: 'complex'` gives the interpreter's value. Since
-  the removal of `mode: 'auto'` (2026-11-03) this is the default, as it was
-  already the value of `strict`.
-- `plausible?` — `javascript`, `mode: 'complex'`, `x: real`, `b: real`,
-  `f: (real) -> unknown` with `f(t) := sin(b·t)`:
-  `Block(Declare(L, "unknown", List(f(x)^2, 1)), L[1] + 1)` at `x = 1.3`,
-  `b = 2` gives the string `"[object Object]1"`; the interpreter gives
-  `1.2657`. `f(x)^2` is typed `real<0..>` but its code is a `{re, im}`
-  object, and the list element keeps that object while `L[1] + 1` reads a
-  number. The scalar case is converted at the binding of a real local
-  (`realLaneLocalBinding` in `compile-complexness.ts`); a list local is not.
-- `plausible?` — `javascript`, `mode: 'complex'`, `y: real`, with
-  `g := x ↦ If(x > 0, Mod(x, 3), x)` (a function defined on the engine, a
-  `Block` local or an `Apply` of the literal): `g(Sqrt(y))` at `y = -16`
-  gives `NaN`; the interpreter gives `4i`. The use in `Mod` types the
-  parameter `x` as `real`, so the body reads it on the real lane, and the
-  call passes the real projection of the argument (`_SYS.crealElements`),
-  which is `NaN` for a non-real value. At `y = 16` both give `1`.
-- `plausible?` — `javascript`, `mode: 'complex'`, `y: real`: in
-  `Block(Assign(x, Sqrt(y)), Assign(f, x ↦ x + 1), f(Sqrt(y)) + x)` the
-  parameter `x` of `f` has the name of a local of the block, and the literal
-  compiles to `(x) => x + 1`, on the real lane, so at `y = 16` the result is
-  `{re: NaN, im: NaN}`; the interpreter gives `9`. An `Apply` of the literal
-  gives the same. The lowering puts each parameter in a shape frame of its
-  own when an enclosing frame names it, and that frame holds `false` for a
-  parameter that is not declared with a non-real type, also when the type
-  of the parameter is wide.
 - `javascript`: in a loop with an outer `a = 100`, `function f() { a }` and
   `let (a, b) = (k, f())`, the compiled `b` is `k`; the interpreter gives
   `b = 100` (was CE-756).
-- `javascript`: dependent `Sum` clauses with an outer `k = 3`,
-  `Sum(j + k, Limits(j, 1, k), Limits(k, 1, k))`, give 36; the interpreter
-  gives 24.
-- `javascript`, `w: real`, `y: real` at `w = y = 0`: `Take(Range(1, ∞), w/y)`
-  and `Take(Drop(Range(1, ∞), w/y), 3)` give `[]` (a lazy stream with a `NaN`
-  count); the interpreter leaves them unevaluated.
-- `javascript`, `c: boolean`, `xs: list<real>`, `w: real`, `y: real` at
-  `c = true`, `w = y = 0`: `Unique(If(c, Take(xs, w/y), xs))` gives `[]` (the
-  `If` hides the slice with no value from the guard of `Unique`); the
-  interpreter leaves it unevaluated.
-- `javascript`, the interpreter fallback of a decline: with `L: list<real>`
-  and `p: any` assigned `2L`, `compile(p + 1, { constantFold: false })`
-  declines and `run({ L: [1, 2] })` gives `null` (the fallback does not pass
-  the input `L` to the value of `p`); the interpreter gives `[3, 5]`.
-- `javascript`, `z: complex`, `v: list<real>` at `z = 1+2i`, `v = [1, 2]`:
-  `Map((p) ↦ Real(p), When(z, v > 0))` gives `[{re: 1, im: 2}, {re: 1, im: 2}]`
-  (the type of the `When` is `list<number>`, so the parameter compiles as a
-  real number and `Real(p)` as `p`); the interpreter gives `[1, 1]`. Over a
-  declared `list<complex>` the same `Map` agrees.
-- `javascript`, a `vars` entry whose caller code names `_c`: with
-  `s: string | missing`, `t: string`, `vars: { t: '_c' }` and the preamble
-  `const _c = "ok";`, `IsMissing(Coalesce(s, t))` at `s = undefined` gives
-  `true` (the `Coalesce` lowering binds its operand to `_c`, and caller code
-  is not renamed); the interpreter gives `false`.
-- `javascript`, `h: (broadcastable<integer>) -> broadcastable<integer>`,
-  `h := n ↦ n + 1`, `S: list<string>` at `S = ["a", "b"]`: `h(S)` gives
-  `["a1", "b1"]` (a collection argument at a `broadcastable<T>` parameter
-  compiles without a test of its cells); the interpreter gives an
-  `incompatible-type` error for each cell.
-- `javascript`, a `vars` entry whose code is not a primary expression: with
-  `p: real` and `vars: { p: '2+3' }`, `2p` compiles to `2 * 2+3` and gives 7
-  (the code is spliced without parentheses); the interpreter, with `p = 5`,
-  gives 10.
-- `javascript`: `Fold((acc, x = 100) ↦ If(IsMissing(x), acc, acc + x), 0,
-  [1, 2, Missing])` gives 103; the interpreter gives 3. The callback's
-  default is a JavaScript default parameter, which also fills a supplied
-  `undefined` (the compiled `Missing`), so the discharge `IsMissing(x)` in
-  the body reads 100. The same wrapper is used for the value of
-  a user function with a default passed as a callback.
 - `javascript`, `constantFold: false`, `vars: { Pi: '_.Pi' }`: with
   `f := (x, k = Pi) ↦ x + k`, `f(1)` at `Pi = 3` gives 4 (the default `Pi`
   is filled by its name, and `vars` maps the name to the input); the
@@ -532,100 +303,23 @@ interpreter's value. A line is removed when the case declines or is fixed.
   used as a default is filled by its name, so a `vars` entry or a local of
   the same name can hide it; a constant declared by the program or the host
   is filled by its value instead.
-- `javascript`: `Block(Declare(mk, "function", (a, k = 2) ↦ (x ↦ x + a +
-  k)), mk(1))` compiles, and `run()` returns a JavaScript function, where the
-  rule of function values declines a function returned from a call: the
-  call of a block-local function has the static type `unknown`, so the
-  decline of a call whose type is a function type does not see it. The
-  values agree with the interpreter: `Apply(mk(1), 5)` gives 8 in both.
-- `interval-js`, with `constantFold: false`: `PointX([Missing, []])` gives
-  one `empty` result (the empty row is skipped when the reading of the list
-  is decided, so the list is read as one point); the interpreter gives
-  `[Missing, Missing]`.
-- `interval-js`, `y: real` at `y = 3`: `Coalesce(1/(y - 3), 2)` gives the
-  interval `[2, 2]` (`_IA.coalesce` reads the `empty` result of a pole as
-  absent); the interpreter gives `~∞`.
-- `javascript`, `x: real`, `W: list<real>`, `vector` declared
-  `(real) -> list<real^2>` with the body `t ↦ W` (crafted: the body breaks
-  the declared width): `Sum(vector(x))` at `W = [1, 2, 3]` gives 3 (the sum
-  is written for two terms); the interpreter gives 6.
-- `javascript`, `B: broadcastable<number>`, `P: tuple<real, real>` at
-  `B = 1` (plausible?): `If(B < 0, P)` gives `undefined` (the condition
-  can be a list, so the run-time selection `_SYS.selectAbsent` gives
-  `undefined` for the whole value when the condition is one `false`); the
-  interpreter gives `(NaN, NaN)`, a false restriction of a point (user
-  decision of 2026-11-03). With `c: boolean | list<boolean>`, `If(c, P)`
-  agrees: the declared union compiles one body per member.
-- `javascript`, `x: real`, the option `operators: { Add: ['*', 11] }`:
-  `Min(Map(k ↦ x + k, [0, 1, 2, 3, 4, x]))` at `x = 2` gives 2, where the
-  caller's `*` applied to each element gives 0 (`2 * 0`). The interpreter
-  does not read the option and gives 2. The unroll pass (`tryUnrollMap()` in `compilation/fixed-width-unroll.ts`)
-  writes out a `Map` over a list of five or more elements, and the
-  substitution builds `x + 0` again in canonical form, as `x`, so the
-  caller's operator is lost. The same applies to the shader targets, which
-  write out a `Map` of any width. A `Map` under a `Min` or a `Max` over a
-  narrower list declines this rewrite when the caller supplies a head in it.
-- `javascript`, `u: string | list<real>` at `u = "abc"` (crafted: a union
-  of a string and a list at a collection parameter):
-  `Block(Assign(g, s ↦ Length(s)), g(u))`, and `f(u)` with `f := s ↦
-  Length(s)` defined on the engine, throw `RangeError: Length: the operand
-  is not a list or a set at run time` (the function compiled with the
-  parameter typed `string` is used only for an argument whose static type is
-  a string); the interpreter gives 3.
-- `javascript`, a `+=` inside a dictionary value of a `parallel for` body
-  (crafted, MathJSON only): `Block(Declare(s, 0), ParallelLoop(Block(
-  Dictionary(KeyValuePair('a', AddTo(s, k)))), Element(k, Range(1, 4))), s)`
-  declines ("the value of the key "a" has the type `any`"), and the
-  interpreter gives 10. `lowerParallelHeads()` (`parallel-lowering.ts`) does
-  not walk into a `Dictionary`, so the `AddTo` in it is not rewritten.
-- `glsl`, a target object of `GLSLTarget.createTarget()` passed straight to
-  `BaseCompiler.compile(expr, target)` (crafted): for `v: list<real^3>` and
-  `x: real`, `Arctan2(v, x)` gives the code `atan(v, x)`, which no shader
-  compiler accepts, where `compile()` declines. In the same way, a block
-  local that holds a list of points, a matrix, or a value whose type admits
-  a point and a list of points gives a declaration that disagrees with its
-  assignment (`Block(Assign(m, Matrix(…)), x)` gives `float m; m = mat2(…);`),
-  and so does a local whose bindings have different shapes (a scalar and a
-  point, in either order). A gather
-  with a list index (`At(v, [1, 3])`) does not check that its base is pure,
-  so an impure base can be computed more than once, or not at all when every
-  index is out of range. `BaseCompiler.compile()` runs no fragment pass, and
-  the GLSL lowerings and the declarations of block locals do not check
-  shapes. `compile()` with the target object as the `target` option runs
-  the pass first (`raw-target-check.ts`), so it declines what `compile()`
-  with `to: 'glsl'` declines; the pass types the tree of that preparation,
-  which writes point values and some calls of user functions in place,
-  while the raw route writes a tree that is prepared less, and its code is
-  not checked again.
-- `javascript`, the `complex` mode, `u` with no declared type (crafted):
-  `u + Round(0)` at `u = -0` gives `-0` with the existing compiler, which
-  writes the sum without its term `Round(0)`. The interpreter gives `0`.
-- `javascript`, `A: matrix` at `A = [[1, 2, 3], [4, 5, 6]]`
-  (crafted: a matrix that is not square): `Trace(A)` gives `6` and
-  `MatrixPower(A, 1)` gives `A`; the interpreter gives the error
-  `expected-square-matrix`.
-- `javascript` (crafted), profile `ir`: a node shared by both arms of an
+- `javascript` (crafted): a node shared by both arms of an
   `If`, nested: `e_k = If(x > k, e_(k-1) + 1, 2·e_(k-1))` over `Sin(x)` is
   copied into each arm, so the code doubles with each level (930,611
   characters at depth 12); past 50,000 nodes the compilation declines
   (CE-1199).
-- `javascript` (crafted), profile `ir`: a root function literal whose
+- `javascript` (crafted): a root function literal whose
   untyped parameter is read as a number by its type (`unknown`) but whose
   body threads a list there: `w ↦ Sum(List(w))` applied to `[3, 1, 2]`
-  gives the string `"03,1,2"`; the interpreter gives `[3, 1, 2]`, and the existing
-  compiler declines (`unsettled-shape`).
-- `javascript` (crafted), profile `ir`: a `Range` whose exact rational
+  gives the string `"03,1,2"`; the interpreter gives `[3, 1, 2]`.
+- `javascript` (crafted): a `Range` whose exact rational
   bound is within about 10^-12 of an integer is counted on the double of the
   bound: `Length(Range(0, 9999999999999/1000000000000, 1))` gives 11, where
-  `evaluate()` gives 10 (and `N()` 11); `Sum` and `Max` of it likewise. The
-  existing compiler declines.
-- `javascript`, `v: list<real>` at `v = []` (crafted):
-  `Diagonal(v)` gives `[]`; the interpreter keeps `Diagonal([])`
-  unevaluated.
+  `evaluate()` gives 10 (and `N()` 11); `Sum` and `Max` of it likewise.
 - `plausible?` — `javascript`, `y: real`, `g(t) := t^{100} e^{-t}`:
   `\int_0^y g(x)\,dx` at `y = 1500` gives `NaN` (the quadrature meets
-  `∞·0` in the integrand, and the log-space fallback `_SYS.finiteOr` is not
-  applied through a call of a user function); the interpreter's
+  `∞·0` in the integrand, and the log-space form of a sample is not
+  taken through a call of a user function); the interpreter's
   `evaluate().N()` gives about `100!`, and its `.N()` also gives `NaN`.
   With the integrand written inline, the fallback gives the value.
 - `plausible?` — `interval-js`, `x: real` over the interval `[-1, 1]`:
@@ -647,9 +341,7 @@ interpreter's value. A line is removed when the case declines or is fixed.
   rational 5/6, which the interpreter takes at the default precision
   (`215443469.00318837`), and the double nearest to it, which the
   interpreter takes at machine precision (`215443469.003189`). The code
-  encloses `x` to the power of the double (`_IA.pow(x, 0.8333…)`) and
-  misses the first; with the profile `ir` it encloses the root then the
-  power and misses the second. The same holds for every exponent whose
+  encloses the root then the power and misses the second. The same holds for every exponent whose
   denominator is even and not a power of 2 (`7/6` at `x = 10¹⁰⁰`). An odd
   denominator (`_IA.powRational`) and a power of 2 (the double is exact)
   contain both.
@@ -659,265 +351,24 @@ interpreter's value. A line is removed when the case declines or is fixed.
   it as the decimal `1/5` and gives `1e-40`; the code computes the power of
   the double (`9.999999999999948e-41`, about 5·10⁻¹⁵ below), and
   `interval-js` encloses that number (`[9.999999999999946e-41,
-  9.99999999999995e-41]`), with or without the profile `ir`. At machine
+  9.99999999999995e-41]`). At machine
   precision the interpreter gives the code's number.
 - `javascript` (crafted: a boolean mask over a base that draws), `A:
-  list<real>`, `M: list<boolean>`:
-  `WithRandomSeed(3, At(Map(k ↦ k + Random(), A), M))` at `A = [1, 2, 3]`,
-  `M = [False, True, True]` gives other draws with the existing compiler
-  than the interpreter's `[2.4706…, 3.3638…]`: the interpreter reads the
-  lazy `Map` at the kept positions only, and the code builds the whole list
-  first. With the profile `ir`, a mask or a base of a mask with an effect
-  declines, except through a parameter: with `sel(u, c) = At(u, u > c)`,
+  list<real>`: a mask or a base of a mask with an effect declines, except
+  through a parameter: with `sel(u, c) = At(u, u > c)`,
   `WithRandomSeed(3, sel(Map(k ↦ k + Random(), A), 2.5))` at
-  `A = [1, 2, 3, 4, 5]` gives `[3.7936…, 4.0769…, 5.7640…]` with both
-  compilers, and the interpreter gives `[3.3489…, 4.6413…, 5.1639…]`.
+  `A = [1, 2, 3, 4, 5]` gives `[3.7936…, 4.0769…, 5.7640…]`, and the
+  interpreter gives `[3.3489…, 4.6413…, 5.1639…]`: the interpreter reads the
+  lazy `Map` at the kept positions only, and the code builds the whole list
+  first.
 
-## The worker pool and `parallel for`: `runAsync()`
+## `parallel for` and `runAsync()`
 
-A `javascript` result called with an object of variables
-(`calling: 'expression'`) has `runAsync(inputs, options?)` and
-`willParallelize(passes?)`. `run()` does not change: it runs each
-`parallel for` in order, on the calling thread.
-
-`runAsync()` runs a second, asynchronous copy of the program. The copy is the
-code of `run()`, except at each `parallel for` that can run on the engine's
-worker pool (`ce.workers`, from `createKernelPool()`). At such a loop, the
-calling thread computes the count of passes with the code of the in-order
-loop (with its checks), splits the passes into one sub-range of consecutive
-passes for each worker, and sends each worker one call of the loop compiled
-as a function of its own. Each worker adds the terms of its passes to zero.
-When all calls are done, the calling thread adds the sums to the
-accumulators, one sub-range after the other. The statements outside these
-loops run on the calling thread, with the code of `run()`, and the calling
-thread is free only while the program waits for the workers.
-
-`runAsync()` returns a promise of the value of `run(inputs)`, except for the
-order of the additions (see "Values" below). It checks `inputs` and converts
-the value as `run()` does. An error of the program rejects the promise;
-`runAsync()` never throws. A program with no loop that can run on the pool
-has no copy, and its `runAsync()` gives `run(inputs)`. The host must not
-change the values of `inputs` until the promise settles.
-
-The options:
-
-- `signal`: an `AbortSignal` (see "Errors, failures and abort").
-- `minPasses`: the smallest count of passes that goes to the pool, a positive
-  integer. Default: 20 000, the count from which `broadcastAsync()` starts to
-  use the pool. Another value rejects the promise with a `TypeError`.
-- `onLoop(report)`: called once for each run of a loop that can run on the
-  pool, with `{ passes, route, reason }`. `route` is `'pool'` or
-  `'calling-thread'`. With `'calling-thread'`, `reason` is `'no-pool'`,
-  `'pool-unusable'` (the workers hold another runtime version),
-  `'below-threshold'`, `'too-large'` or `'pool-declined'`. A loop that runs in
-  order because of a condition of the compiler (below) never calls it.
-
-`willParallelize(passes?)` is `true` when the program has a loop that can run
-on the pool (also inside a function that it calls), the engine has a usable
-pool, and `passes`, when it is given, is at least 20 000. It does not know the
-range of a loop, does not read `minPasses`, and does not check the size limit.
-
-```js
-// let L = H
-// parallel for k in 1..n { L[k % 3 + 1] += 1 }
-// L
-const count = compile(ce.box(['Block', ['Assign', 'L', 'H'],
-  ['ParallelLoop', ['AddTo', ['At', 'L', ['Add', ['Mod', 'k', 3], 1]], 1],
-    ['Element', 'k', ['Range', 1, 'n']]],
-  'L']));
-count.willParallelize(900_000);              // ➔ true (with a pool)
-await count.runAsync({ H: [0, 0, 0], n: 900_000 }, { onLoop: console.log });
-// onLoop: { passes: 900000, route: 'pool' }
-// ➔ [300000, 300000, 300000]
-```
-
-### The loops that run in order
-
-A loop that fails one of these conditions runs in order inside `runAsync()`,
-with the code of `run()`, and does not call `onLoop`. No condition makes a
-compilation decline. `result.parallelLoops` (internal) records the reason of
-each loop (`PoolLoopReason` in `compilation/types.ts`). The examples are
-Epsil; `H` is an input `list<number>`, and
-`total(L, n) = { let s = 0; parallel for k in 1..n { s += L[k] * k }; s }` is
-a function of the engine.
-
-1. **Position** (`'position'`). The asynchronous copy can wait for the pool
-   only at a loop that is a statement of the program, or of a user function
-   that the program calls in a position that can wait (see the next section).
-   `total(H, 4) + 1`, `max(total(H, 4), 1)`,
-   `map((x) => total(H, x), [1, 2])` and `WithRandomSeed(7, total(H, 4))` run
-   their loop in order: the call is an operand, an argument or a callback.
-2. **Domain** (`'domain'`). The domain is a range that the compiler emits as
-   a counted loop, with bounds and a step that make no random draw.
-   `parallel for x in [1, 2, 3] { s += x }` runs in order: its domain is a
-   list.
-3. **Accumulators** (`'accumulator-scope'`, `'accumulator-type'`, `'mode'`).
-   Each accumulator is a local variable of the function or block that holds
-   the loop, and is a number (`s += e`) or a list of numbers with one index
-   (`L[i] += e`), not both. The program is compiled in the default mode:
-   with `mode: 'complex'`, `parallel for k in 1..3 { s += k }` runs in order.
-   The `bigint` mode declines a block of statements before this analysis.
-4. **No read of an accumulator** (`'accumulator-read'`). In the loop as
-   written, before `lowerParallelHeads()` rewrites `+=`, the name of each
-   accumulator is only the target of a `+=`.
-   `parallel for k in 1..2 { L[k] += L[k + 1] }` runs in order (the Epsil
-   checker also reports it, as `parallel-accumulator-read`).
-5. **No other write, and no jump out** (`'outer-write'`, `'jump'`). The body,
-   and each user function that it calls, assign only their own locals, and no
-   `return`, `break` or `continue` leaves the loop. The Epsil checker refuses
-   these; the compiler checks them again for MathJSON:
-   `ParallelLoop(Block(Assign(t, k), AddTo(s, k)), Element(k, Range(1, 4)))`
-   and `ParallelLoop(Block(AddTo(s, k), If(k > 2, Break())), …)` run in
-   order.
-6. **The body reads data only** (`'function-value'`, `'outer-type'`). Each
-   outer variable that the body reads has a static type that is a number, a
-   boolean, a string, or a list or tuple of these. A function value cannot go
-   to a worker: with `let h = (x) => x + 1`,
-   `parallel for k in 1..3 { s += h(k) }` runs in order.
-7. **The loop can run on a worker** (`'not-shippable'`,
-   `'function-declined'`). The loop compiled as a function of its own is
-   shippable: it makes no random draw, names no identifier of the host, and
-   calls no function of the `functions` or `operators` option. Its
-   compilation must not decline, and its code must not read the object of
-   variables of the program (a user function that reads an input of the
-   program).
-   `parallel for k in 1..3 { s += random() * 0 + k }` runs in order. A
-   function object given in `functions` is copied as source, and a `compile`
-   handler can declare itself shippable: as for `broadcastAsync()`, such a
-   function must read only its arguments and have no effect, or the value of
-   `runAsync()` is unspecified.
-8. **No pass budget** (`'iteration-budget'`). A program compiled with
-   `iterationBudget` counts its passes in one counter for the call, which a
-   worker cannot share.
-
-A program whose code reads or makes a value of a kind (`valueKinds`) gets no
-asynchronous copy: its `runAsync()` gives `run(inputs)`.
-
-At run time, a loop that passes these conditions goes to the pool when the
-engine has a usable pool (otherwise `'no-pool'` or `'pool-unusable'`), the
-count of passes is at least `minPasses` (otherwise `'below-threshold'`), and
-the private lists of the workers hold at most 16 million numbers together
-(otherwise `'too-large'`). Each worker has a private list of the length of
-each list accumulator, so the count is the sum of these lengths times the
-count of sub-ranges (the size of the pool, or the count of passes when it is
-smaller). A number accumulator does not count. In each of these cases the
-loop runs in order on the calling thread and `onLoop` receives
-`route: 'calling-thread'` with the reason.
-
-A loop that the program reaches while a random frame of the engine is
-installed runs in order and does not call `onLoop`: a wait there would leave
-the frame installed while other code runs. For example, a host function that
-starts `runAsync()` while the interpreter evaluates `WithRandomSeed(7, …)`.
-
-### The positions that can wait
-
-An `await` is valid only directly inside an `async` JavaScript function, so
-the copy makes `async` each function between the entry and a loop that waits,
-and awaits each call of such a function (`pool-async.ts`). These positions
-can wait:
-
-- a `parallel for` that is a statement of the program (a `Block`) or of the
-  body of a user function, of the engine (an Epsil `function` that
-  `executeEpsil` defines) or of the program (`function f(…) { … }` in a
-  block);
-- the same inside a nested block, the branches of an `if` statement, and the
-  body of a `for` or `while` loop, at any depth;
-- a call of a user function whose body can wait, when the call is a whole
-  statement, the value of a declaration or of an assignment
-  (`let a = f(…)`, `a = f(…)`), the last value of a body, or the whole body
-  of a function. The function can call a second function in the same
-  positions.
-
-```epsil
-let a = total(H, 4)                        // waits
-if a > 0 { a = total(H, 3) }               // waits
-for j in 1..2 { a = total(H, j) }          // waits
-```
-
-Every other position keeps the in-order loop of `run()`: an operand
-(`total(H, 4) + 1`), an argument (`max(total(H, 4), 1)`), a callback of a
-library function (`map`), the body of another `parallel for`, the argument
-of `WithRandomSeed`, two calls in one statement. The remedy is a statement
-of its own: `let t = total(H, 4)`, then `t + 1`.
-
-A user function has only its asynchronous form in the copy. So when the
-program also uses the function in a position that cannot wait, its loops run
-in order, also at its calls that could wait:
-`function g(m) { let s = 0; parallel for k in 1..m { s += k }; s }` then
-`let a = g(4); a + max(g(2), 1)` runs both loops in order (the reason is
-`'position'`). With `let a = g(4); let b = g(2); a + b`, both run on the
-pool. The same applies to a function that the copy makes `async` only because
-it awaits another one, and to the functions that it awaits.
-
-These forms of a function also keep its loops in order:
-
-- a body that the compiler substitutes into its caller (a one-statement
-  body, `compile-user-calls.ts`): the analysis finds no body block that
-  declares the accumulator (`isLocalOfEnclosing()` in `pool-loop.ts`), so
-  the loop runs in order and never calls `onLoop`;
-- a variant of a function for one shape of call, the loop form of a list
-  recursion, and a function wrapped to convert its arguments or to fill a
-  default value of a parameter
-  (`function g(m: integer, c: integer = 2) { … }`, then `g(4)`).
-
-The copy is a second emission of the whole program. When a function has a use
-that is not a waited call, or the text does not compile (an `await` inside a
-JavaScript function that is not `async`), the copy is emitted again without
-the loops concerned, or with each loop tried alone. After at most 6 emissions
-the program gets no copy, and each loop runs in order with the reason
-`'position'`.
-
-### Values
-
-`run()` adds each term to the accumulator in the order of the passes. The pool
-adds the terms of each sub-range to zero, then adds these sums to the
-accumulator in the order of the sub-ranges. The `parallel for` rules leave the
-order of the additions unspecified.
-
-- **Equal to `run()`:** an accumulator of static type `integer` (a number, or
-  a list of integers), while its value before the loop and every partial sum
-  stay within ±2^53. The statements outside the pool loops run the code of
-  `run()`, so they give its values when the accumulators are equal.
-- **Can differ from `run()`:** an accumulator of real numbers, and one of
-  integers beyond 2^53. The difference is that of another grouping of a
-  floating-point sum. It is usually in the last bits: the sum of `1/k` for
-  `k` in `1..1000000` gave `14.392726722864989` with `run()` and
-  `14.392726722865703` with `runAsync()` on 3 workers. It can be larger
-  (terms that cancel, a sum that overflows in one grouping only), and a later
-  test of the value (`if s > 2000`) can then take another branch. The grouping
-  depends on the size of the pool.
-- **The sign of zero:** an element of a list accumulator that holds `-0`
-  before the loop, and whose sum in each sub-range is exactly 0, keeps `-0`
-  (an element whose sum is 0 is not written); `run()` gives `+0` when a pass
-  adds `+0` to it. An element that no pass writes keeps its value in both
-  (`-0`, `NaN`, an infinity).
-
-The input list and a second variable that holds the list of an accumulator
-before the loop (`const before = L`) keep their values, as with `run()`: the
-sums are written in place only where the in-order loop writes in place
-(`in-place-update.ts`).
-
-### Errors, failures and abort
-
-- **An error of a pass, a worker that fails.** When a worker does not complete
-  its sub-range (an error of a pass, a worker that fails or refuses the call,
-  a pool that turns out to be unusable), the calling thread runs that
-  sub-range again with the same function, in the order of the sub-ranges, and
-  `onLoop` receives `route: 'calling-thread'`, `reason: 'pool-declined'`. A
-  sub-range that fails there too throws, and the promise rejects with the
-  error of the first such sub-range: the error of the first failing pass,
-  which `run()` throws.
-- **Limits.** Each call carries the engine's iteration limit
-  (`ce.iterationLimit`), so a pass that exceeds it on a worker fails as in
-  `run()`.
-- **Abort.** A signal that is already aborted at the call rejects the promise
-  with `signal.reason` before any statement runs. An abort while the program
-  waits for the workers rejects it with `signal.reason`: the program stops at
-  that loop. The pool drops the calls that it has not sent, and a worker that
-  still runs a sub-range is terminated and replaced after the grace period of
-  the pool. An abort while the calling thread runs statements is seen at the
-  next loop that can run on the pool, before its other checks: that loop
-  throws `signal.reason` also when its count of passes is under `minPasses`.
+A `parallel for` (`ParallelLoop`) declines on every target, so on
+`javascript` the interpreter runs it, in one thread, in the order of its
+passes. A `javascript` result called with an object of variables
+(`calling: 'expression'`) has `runAsync(inputs, options?)`, which returns a
+promise of `run(inputs)`, and `willParallelize()`, which answers `false`.
 
 ## The scope a compilation reads
 
@@ -1035,12 +486,7 @@ scope of the call, where a run gives each input its value: the bodies that
 the expression calls read that value too (with `a` holding 4 and
 `f(t) := a t`, the fallback of `f(2) + h(a)` run with `a = 3` gives `f` the
 3). `canCompile()` takes the option, and gives `ok: false` for a type
-string that is not a type, where `compile()` throws; a target called
-directly does not take it.
-
-`compileShader()` does not make this choice: it reads the current scope,
-and declines when the body of a function it emits reads a name that the
-current scope defines differently.
+string that is not a type, where `compile()` throws.
 
 The value of a `Declare` that reads the name of its own local reads the
 enclosing binding of that name, as in the interpreter: with an outer `k`,
@@ -1107,8 +553,7 @@ two lists element by element. With
 `L: list<unknown>`, `Sum(L)` declines with `unsettled-shape`, and
 `unsupported` is `["L"]`; the interpreter gives `[4, 6]` for
 `L = [[1, 2], [3, 4]]`. The host declares the element type
-(`list<list<real>>`) to compile it (`assertSettledFoldElements()`,
-`compilation/compile-admission.ts`). When the type settles the shape of the
+(`list<list<real>>`) to compile it. When the type settles the shape of the
 elements (all numbers, or all lists and points), the fold tests no shape of
 the elements at run time, and no shape of a source that is an array by its
 structure (the third exception below): with `L: list<tuple<real, real>>`,
@@ -1158,8 +603,7 @@ list:
   exception when `C` is an input whose element type is declared, or a
   symbol that holds a list of numbers: the compiled code folds the held
   list into a constant, so `C[i+1]` is a number even when `C` is declared
-  with the bare type `list` (`isHeldListArithmetic()` in
-  `compilation/provable-kind.ts`). A `C` that the host supplies through
+  with the bare type `list`. A `C` that the host supplies through
   `vars` is not folded, and keeps the test.
 - A component of a `PointList` whose type is `broadcastable<T>`, or a
   component of a type that does not settle its shape. The component is
@@ -1188,8 +632,7 @@ as a list that is computed through one can be a number at run time. With
 shape of a list only when the value is an input of the host typed as a
 list, a `List`, `Tuple` or `PointList` literal, element-wise arithmetic
 with one such operand, `Map(f, x)` over such a value, or `At(x, i)` of
-such an input or literal (`isGuaranteedArray()` in
-`compilation/javascript-target.ts`). Any other
+such an input or literal. Any other
 list value (a call, a `Block` local, a symbol with a value, an indexed
 `Sum` or `Product`) keeps the run-time test of its shape in the consumers
 above: the seed of an indexed `Sum` or `Product`, `Max` or `Min` of a list
@@ -1239,8 +682,7 @@ host.
 - A condition: compiled JavaScript does not test at run time that a
   condition of `If`, `Which` or `Boole` is a boolean. When the static type
   of the condition admits a value that is neither a boolean nor absent, the
-  compilation to JavaScript declines with `'unsettled-shape'`
-  (`assertBooleanOrAbsentCondition()`, `compilation/compile-conditions.ts`):
+  compilation to JavaScript declines with `'unsettled-shape'`:
   with `c: boolean | integer`, `If(c, 1, 2)` declines, and so does a
   condition of type `unknown` (the untyped parameter `c` of
   `(c ↦ If(c, 1, 2))(b)`). The interpreter gives an unevaluated form for
@@ -1248,7 +690,7 @@ host.
   predicate of `Filter`, `Count`, `Any`, `TakeWhile` and the other
   operators that take one, when its static type does not prove a boolean,
   goes through `_SYS.predicateResult`, which throws for a value that is not
-  a boolean (`predicateResultCheck()`, `javascript-target.ts`). The type of
+  a boolean. The type of
   a predicate literal is computed without the element type of its source,
   so it often does not prove a boolean (`c ↦ c[4] = d` over a list of
   tuples is typed `boolean | list<…>`).
@@ -1347,10 +789,8 @@ interpreter's value within the caveats above. An expression that has a sub-expre
 or whose static type is `error`, declines on every target: `"ab" + u` and,
 with `ADD = (x, y) ↦ x + y`, `ADD("ab", u)` both decline. The result of the
 decline has the token `ErrorCode` in `unsupported`, which a host reads to tell
-an error in the expression from an operator that has no lowering
-(`throwStaticTypeError()`, `compilation/compile-static-type-error.ts`; the
-token is added by `buildInterpreterFallback()`,
-`compilation/compile-references.ts`); its diagnostic has the code
+an error in the expression from an operator that has no lowering; its
+diagnostic has the code
 `'static-type-error'` and the kind `'correctness'`. The check walks into every
 operand, which includes every `If`/`Which` branch, the bodies of function
 literals and the values of a dictionary: `If(u > 1, ADD("ab", u), 1)` declines,
@@ -1364,8 +804,7 @@ followed to its global definition. Every node, a bound symbol and a call of
 a bound name included, still declines when its own static type is `error`.
 Type inference can read that type from the global definition of the name, so
 this simple version can decline where the interpreter has a value: with a
-global `G` whose body has the type `error`, `G() + u` with `G` replaced
-through `functions` declines; a symbol that a `Block` assigns, such as `v` in
+global `G` whose body has the type `error`, `G() + u` declines; a symbol that a `Block` assigns, such as `v` in
 `Block(v := 1, v + 1)`, declines in the same way when its stored value has
 the type `error`. The value of an assignment reads the outer name:
 `Block(G := Equal(G(), 1), G)` calls the global `G`. The check does not go
@@ -1385,36 +824,9 @@ Every other case is unspecified: the compiled code can give any value,
   an observation, not a guarantee. `NaN` and `±Infinity` keep their meaning
   in an input declared `real | signed_infinity | nan`.
 
-  On the shader targets, a call of `sin`, `cos`, `max`, `min` or `clamp`
-  uses the built-in when its argument is proven finite in f32 from the
-  declared types and ranges of the inputs, the declared ranged result types
-  of the user functions, the declared ranges of their parameters, the
-  values that the calls of a user function pass, the literals and the
-  operators of the expression. Otherwise it calls a helper that gives `NaN`
-  for an infinite argument, as the interpreter does. The compiler does not
-  read the body of another function to prove a call of it: the host
-  declares the range of an input (`t: real<-5.5..5.5>`) or a result type
-  with a range for a function (`(real) -> real<-1..1>`) to get the
-  built-in. That range is read as the bound of the call: `sin(1000·f(x))`
-  calls the built-in. A result type with no range (`(real) -> real`) is not
-  enough, since the body is computed in f32 and can overflow
-  (`f(u) := exp(u)`). A body whose f32 value leaves its declared range
-  gives a value outside its type, and the compiled value is then
-  unspecified. In the body of a user function, a parameter is finite for
-  certain when every call of the function in the compiled expression passes
-  a value that is proven finite at its position, or when the host declared
-  the parameter with a range (`(real<-1..1>) -> real`); an argument outside
-  that range is a value outside its type. With `x: real<-1e15..1e15>` and
-  `F(a) := sin(a)`, `F(x)` emits `sin(a)` in `_fn_F`; a second call
-  `F(exp(y))` with `y: real` makes it `_gpu_sin(a)`, since `exp(y)` can
-  overflow in f32. A bare declared `real` parameter is not enough, for the
-  same reason. With `t: real<-5.5..5.5>`,
-  Tycho's `sin(10000(51.1⌊t⌋ − 3.9))` compiles to
-  `sin(10000.0 * (51.1 * floor(t) + -0.000026879834))` on GLSL. With
-  `x: real` and `f(u) := cos(u)/2`, whose result type is `number`,
-  `sin(f(x))` compiles to `_gpu_sin(_fn_f(x))`; with `f` declared
-  `(real) -> real<-1..1>`, it compiles to `sin(_fn_f(x))`. The helper and
-  the built-in give the same value on a finite argument.
+  On GLSL a call of `sin`, `cos`, `max`, `min` or `clamp` is the built-in,
+  whose value for a non-finite or `NaN` argument the GPU decides: the
+  compiler has no NaN-safe helpers.
 - A value outside a declared range (`7` for `real<0..5>`): today the
   `javascript` target computes with the value; a GPU target can use the
   range (it can drop `|x|` for `x` in `real<0..5>`).
@@ -1463,14 +875,7 @@ A declared union of shapes
 function literal, of a user function or of the root function is not an input
 and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
 parameter is a value outside the type that the body implies (`2t` reads a
-number), so the result is unspecified. The parameter names passed to
-`compileFunction(expr, name, params)` are inputs, not the parameters of a
-root `Function` literal: the host chooses them and passes their values, so
-their types come from the engine's declarations, and a name whose type is
-`unknown` or `any` declines with `'untyped-input'`. With `i` declared `any`,
-`compileFunction(At(b, i), "f", ["b", "i"])` declines. A host that wants an
-untyped parameter compiles a root `Function` with a `Typed` parameter
-instead. A transparent alias of `unknown` or
+number), so the result is unspecified. A transparent alias of `unknown` or
 `any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
 an input declared `U` declines. A local of a block or of a function body
 (a name that it declares, or assigns first at its own level) is not an
@@ -1482,8 +887,7 @@ check runs after the code was generated: when the expression also declines
 for another reason (an operator with no lowering, a value with no settled
 shape, a timeout), that reason is the `error` and the diagnostic, and
 `unsupported` also has the names of the inputs with no type. In both cases
-the compilation declines. The check is `assertAdmitted()`
-(`compilation/compile-admission.ts`).
+the compilation declines.
 
 **A value with no settled shape declines.** The compiled code gives each
 value one shape, which its static type settles. An `If`, a `Which` or a
@@ -1720,8 +1124,7 @@ on JavaScript, and gives `3` for `x = 2` and `0` for `x = 9`, as
 the interpreter does for this block. No compiled form gives `Nothing` when
 no value is found: the initial value of the local (here `0`) takes its
 place, and `r ≔ Nothing` declines. A loop in a case of a `Match` whose value
-is used is checked in the same way. The loop check is `unsettledShapeIn()`
-(`compilation/compile-admission.ts`).
+is used is checked in the same way.
 
 **A possible `Nothing` element declines.** The interpreter keeps `Nothing`
 as an element where it appears (`[1, Block()]` is `[1, Nothing]`), and
@@ -1736,9 +1139,7 @@ operation that reads elements one by one (`Map`, `Tabulate`, `Scan`,
 aggregates such as `Sum`, `Mean` and `Max`, and the paired statistics),
 the result type of the callback of `Map`, `Tabulate` and `Scan`, the type
 of the operand of `IsMissing`, `Coalesce` or `AssertPresent`, and the type
-of the value of a dictionary entry (`assertNoNothingElement()` and
-`hasNothingArm()`, `compilation/compile-inner.ts` and
-`common/type/subtype.ts`). `any` and `unknown` have no explicit
+of the value of a dictionary entry. `any` and `unknown` have no explicit
 `nothing` arm, and do not decline here. The reason: compiled code produces
 `Nothing` only from the symbol `Nothing` read as a value, or from a
 statement read as a value (a loop, a block that ends in a declaration), and
@@ -1885,7 +1286,7 @@ target, as the interpreter answers (`~oo` has no order, user decision
 `glsl` and `interval-js` (`'false'`), and so is `0 < 1/0`. This
 applies when the other operands are pure and cannot be lists at run time;
 otherwise the comparison keeps its code, with the pole as `Infinity`
-(`constantPoleOrdering` in `base-compiler.ts`, ROADMAP CE-211). The value
+(ROADMAP CE-211). The value
 `False` was chosen because no single compiled value of the pole gives the
 interpreter's answers both in an ordering and in arithmetic: `NaN` gives
 `false` in every ordering, but `x + 1/0` would then be `NaN` where the
@@ -2010,16 +1411,12 @@ beyond `±(2^53 − 1)` (`Number.MAX_SAFE_INTEGER`) is the rounding of the value
 that produced it: `2^60 + 1` is held as `2^60`. The remainder or the common
 divisor of that double is a different number, not a less precise one:
 `Mod(2^60 + 1, 10)` on the double is `6`, and the interpreter answers `7`.
-For these operations, an operand beyond the safe integer range, or an
-infinite operand, is an error. The compiled JavaScript throws a `RangeError`
-that names the operation and the value (`Mod: Infinity is beyond the safe
-integer range of compiled code …`). The CLI's compile mode reports it as an
-error value. The operations are `Mod`, `Remainder`, `GCD` and `LCM` (the
-runtime helper `integerOperand` in `compilation/javascript-runtime.ts`). A
-`NaN` operand is not an error: it propagates as through the
-other arithmetic. `Mod` by the literal `1` is not checked, because the
-remainder by `1` of every double beyond the range is `0`, which is also the
-exact answer.
+The compiled code has no guard of any kind for such an operand: the value
+of `Mod`, `Remainder`, `GCD` or `LCM` of an integer of 2^53 or more is the
+value of the double, an unspecified value. `Mod(n!, 7)` at `n = 25` gives
+`6`, where the interpreter gives `0`. A closed node keeps the interpreter's
+value (`Mod(2^60 + 1, 3)` is `2`). The remedy for the host is the `bigint`
+mode.
 
 The `bigint` mode of the JavaScript target (`compile(expr, { mode:
 'bigint' })`, "Compile modes") is exact beyond this range. It computes every
@@ -2031,24 +1428,9 @@ and `Fibonacci` throw a `RangeError` when their result would have more than
 unevaluated. Both mean that there is no value, but the host receives a
 different answer from each.
 
-Constant folding follows the same rule. A constant subtree is folded with the
-interpreter's `.N()`, which rounds each operand to the working precision
-first, so an integer operation then reads a rounded operand as exact:
-`DigitSum(2^1000)` folded to `84` where `evaluate()` answers `1366`. When an
-operand of `Mod`, `Remainder`, `GCD`, `LCM`, or an operand at a parameter
-that the operator's signature declares `integer`, is beyond the safe integer
-range, the fold uses the value of `evaluate()` when that value is exact and
-every such operand evaluates to an exact rational. Otherwise the fold
-declines, and the structural lowering throws at run time, or declines when
-the target has no lowering for the operator (`DigitSum`, `IntegerDigits`).
-The shader and interval targets have no error channel and are not changed.
-
-Whether a constant subtree is folded at all is decided by a deterministic
-estimate of the work its evaluation can cost (`foldCostEstimate` in
-`base-compiler.ts`), never by a time limit. The estimate depends on the
-expression only, so the same input always compiles to the same code on any
-machine and under any load. A definite integral is priced at the worst case of
-the adaptive quadrature, so a nested integral declines to fold.
+A closed node (no input, no local, no effect) is evaluated once with
+`N()` and becomes a literal; a throw of `N()` means that the node is lowered
+as written (`src/compute-engine/compilation/ir/README.md`).
 
 ## Running stored JavaScript
 
@@ -2083,20 +1465,11 @@ The result and the runtime both carry `runtimeVersion`; a mismatch means the
 code was compiled by another release, and `runtime.load()` refuses it, as it
 refuses code with no `runtimeVersion`.
 
-`runtime.load()` and `runtime.loadBroadcast()` also refuse code compiled with
-the compile contract of a value kind (see "Value kinds" below): the result
-lists the kind types in `valueKinds`, and the entry plan lists the bindings
-of a kind type in `entryPlan.kinds`. Such code reads a host value for a
-symbol of a kind type through the `entry` check of the kind's contract, which
-is a function of the host that compiled the code, and stored code cannot
-carry a function. Code that reads no binding of a kind type and whose
-contracts all say `shippable: true` is accepted by the batch loaders that a
-worker of the kernel pool uses; `load()` refuses it. There is no `store()`:
-such code runs only through the `run()` of its compilation result.
-
-Functions passed in the `functions` or `imports` compile options are copied into
-the code as source (`toString()`): a closure loses its enclosing scope, and a
-function given by name must exist where the code runs.
+`runtime.load()` and `runtime.loadBroadcast()` also refuse code whose
+`valueKinds` field names a kind type (see "Value kinds" below): such code
+reads a host value for a symbol of a kind type through a check that is a
+function of the host that compiled it, and stored code cannot carry a
+function.
 
 `compilation/javascript-runtime.ts` holds the helpers and imports no engine code
 (`test/compute-engine/js-runtime.test.ts` bundles the entry point and checks
@@ -2104,8 +1477,8 @@ it). `run.SYS` is built from the same factory.
 
 ## Target boundaries
 
-The JavaScript target supports the broadest dynamic representation. GLSL,
-interval, and other targets expose narrower capabilities and must
+The JavaScript target supports the broadest dynamic representation. The
+GLSL and interval targets expose narrower capabilities and must
 decline outside them. A feature implemented for JavaScript is not implicitly a
 cross-target promise.
 
@@ -2187,223 +1560,39 @@ per-helper result-kind rules for no gain. The measurements and the decision
 are in
 `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
 
-### The GLSL fragment and `canCompile()`
+### The compiler
 
-The `glsl` target compiles a fixed list of forms, the GLSL fragment. A shader
-renders pixels in f32 on each frame and does not compute stored data, so the
-target takes a small language and checks it before it writes code. An
-expression is in the fragment when each node of its canonical, typed tree is
-in this list:
-
-- **Values.** A real scalar (`float`), an integer, a boolean, a complex
-  number (`vec2`), a point or vector of 2 to 4 real components, a color, a
-  constant list of at most 256 reals or points, and a list input. A list
-  input of at most 256 elements is a uniform array. A longer one must be
-  named in the `storage` option with the hint `'sampler2D'`, which has no
-  limit on the length; otherwise it is refused, and the diagnostic gives its
-  length, the limit and the option (`storage: { H: 'sampler2D' }`). Each free
-  symbol has one of these types, declared or inferred. A symbol of type
-  `unknown`, `any`, `expression`, `symbol`, `string`, `function` or `value`,
-  or a collection with no static count, is outside, and the diagnostic names
-  the symbol: the host repairs it with a declaration. The `vars` option is
-  spelling and is accepted, except an entry that is code where the shader
-  code would write that code twice.
-- **Heads.** Arithmetic, the elementary and special functions that the
-  shared GPU table lowers, the parts of a complex number, the operations on
-  points and vectors (`Dot`, `Cross`, `Norm`, `Normalize`, `Distance`,
-  `Reflect`, `Refract`, the components, and `Length`, which is the count of
-  the components), the colors, the comparisons and logical operators on real
-  or boolean operands, and `If` and `Which` when every branch has the same
-  type. An `If` with no else branch is a value. Where its condition fails,
-  the interpreter gives the absence value of the type of the branch, and
-  the shader code gives the same value: `If(x > 0, x)` is
-  `((0.0 < x) ? (x) : (_gpu_nan()))`, a point or a complex number has a
-  `NaN` in each lane, and a boolean branch gives `false`. A color or a
-  list of more than 4 elements has no `NaN` in the shader code, so such an
-  `If`, or a `Which` with no default clause of such a type, is refused.
-- **Aggregates and indexing.** `Sum` and `Product` over one or more integer
-  index ranges (`Limits`, or `Element(k, Range(a, b))` with a step of 1),
-  whose bounds can read an input or an outer index. Each one is a counted
-  loop. A bound of type `real` is floored, as the interpreter floors it:
-  `Sum(k, k, 1, r)` at `r = 2.5` is 3 on both. `At` with a numeric index on
-  a constant list, a list input or a point; an index that is not an integer
-  gives `NaN`, as in the interpreter (`At([10, 20, 30], 1.5)`). `Range` only as an
-  index set. `Sum` and `Product` of one list with no index set add or
-  multiply its elements, which the shader code writes one by one: the list
-  is a point, a list of 2 to 4 numbers or a list literal of at most 256
-  elements (`Sum(L)` with `L: list<real^3>` is
-  `((L.x) + (L.y) + (L.z))`). A list input held as a uniform array of more
-  than 4 elements, or in a texture, is refused there: the shader code has no
-  list of its elements.
-- **User functions.** A call of a user function whose parameters and result
-  have fragment types and whose body is in the fragment, with no recursion.
-  A parameter with no declared type takes the type of its argument at the
-  first call: with `sq(u) := u^2`, `sq(x)` for `x: real` compiles with a
-  `float` parameter and `sq(z)` for `z: complex` with a `vec2` parameter. A
-  later call with an argument of another type (`sq(x) + Re(sq(z))`) is
-  refused, and the diagnostic names the parameter and the two types. A
-  parameter whose type is a list with no length (`list<number>`, the type
-  that the engine infers from the `At` reads of
-  `d(a, b) := a[1] b[1] + a[2] b[2]`) is read the same way: an argument
-  `[x, y]` or `(x, y)` gives a `vec2` parameter. Another list parameter is
-  admitted only when each call binds it to a list input; the function is
-  then emitted once for each list.
-- **User functions called with a list.** A call with a list of 2 to 4 reals
-  has the value that the interpreter gives. When every parameter of the
-  function has a scalar type (or no type), the interpreter applies the
-  function to each element of the list, and the shader code does the same
-  with a wrapper: with `f(u) := u mod 1`, `f([-x, -y])` compiles to
-  `_fn_f_each2_1(vec2(-x, -y))`, which calls `float _fn_f(float u)` on each
-  component. The function must have a real value and no complex or colour
-  parameter, and all the mapped lists of one call must have one length; a
-  point argument is not mapped. When a parameter of the function is not
-  scalar, a list binds its parameter whole, as in the interpreter: a
-  parameter with no declared type, or a point parameter whose type the
-  engine inferred from index reads alone (`l(p) := sqrt(p[1]^2 + p[2]^2)`),
-  takes the list as a `vec2` to `vec4`. With
-  `R(V, t) := [Sum(V·[cos t, -sin t]), Sum(V·[sin t, cos t])]`,
-  `R([x, y], 0.5)` compiles to `_fn_R_vector_real_2_number(vec2(x, y), 0.5)`.
-  A point parameter that is declared, or that a call in the body requires,
-  is a contract that the interpreter checks: a list there is refused. A
-  later call with an argument of another type is refused, as for any
-  parameter with no declared type.
-- **Blocks**, as the body of a user function and at the root: `let` and
-  `const` declarations of scalar, point or complex locals, an assignment to
-  a local, a tuple assignment of locals, a `Loop` over an integer range with
-  `Break`, `If` statements and a final expression. The forms nest. Epsil's
-  `s += e` on a scalar local is in, and so is a `parallel for` over an
-  integer range whose accumulators are scalar locals: the shader runs its
-  passes in order, which gives the value of the interpreter. A list local
-  and a write to an input are outside.
-- **Compile-time work.** Constant folding, the closed-form derivative,
-  common-subexpression elimination, and the unrolling of a comprehension or
-  a `Map` over constant ranges or a constant list of at most 256 elements.
-- **A number beside a declared shader vector.** `Add` and `Subtract` take a
-  number beside a name that `compileShader()` or `compileFunction()`
-  declares with a GLSL vector type, as GLSL does: `gl_FragCoord + 1` compiles
-  to `gl_FragCoord + 1.0`. A point of the expression beside a number stays
-  refused, because the interpreter refuses `(1, 2) + 2`.
-
-Outside the fragment are, among others: random draws (`Random`,
-`WithRandomSeed`), matrices, `Match`, `Return`, `Integrate`, the symbolic
-heads (`Simplify`, `Solve`, `D` at run time), strings, dictionaries and
-records, `Map`, `Filter`, `Reduce` and the other callback forms over a
-collection with no static count, a comprehension whose range reads an input,
-function literals and function values, `Apply` other than the application of
-a derivative with a closed form, and `Range` as a value.
-
-**The predicate.** `canCompile(expr, options)`, exported from
-`@cortex-js/compute-engine/compile` beside `compile()`, tells whether
-`compile(expr, options)` gives code, without writing code. It takes the
-options of `compile()`, runs the preparation of the tree that `compile()`
-runs (constant folding, common-subexpression elimination, the unrolling) and
-then the typing pass, and answers `{ ok: true }` or
-`{ ok: false, diagnostic }`. The diagnostic has the code `outside-fragment`,
-the kind `capability`, a message, the node in `value`, and the head of the
-first node outside the fragment in `operator` (`Integrate`), or a name in
-`binding` (a free symbol with no fragment type, a parameter called with two
-types, a list input over the limit). A host counts declines by head with
-`operator`. The predicate never throws: an invalid expression, an invalid
-option or an error of the preparation gives `ok: false` with the message of
-the error. Its answer depends only on the expression, the options and the
-declarations that the expression reaches (the types of its free symbols, the
-definitions of the functions it calls), so a host can keep it until one of
-those declarations changes. Only `glsl` has a fragment: for another target
-the answer is `ok: false`, with a message that says so, except with the
-option `profile: 'ir'` (below): `canCompile()` then runs the whole
-compilation with `fallback: false` and answers `{ ok: true, shippable }`
-when it gives code, or `{ ok: false, diagnostic }` with the diagnostic of the
-decline. Its cost is the cost of `compile()`.
-
-```js
-canCompile(ce.parse('\\sin(x) + x^2'), { to: 'glsl' });
-// ➔ { ok: true }
-canCompile(ce.parse('\\int_0^x \\sin(t)\\,dt'), { to: 'glsl' }).diagnostic;
-// ➔ { code: 'outside-fragment', kind: 'capability',
-//     message: 'The head `Integrate` is outside the GLSL fragment.',
-//     value: 'int_(0)^(x)(sin(t) dt)', operator: 'Integrate' }
-```
-
-**The compile runs the pass first.** `compile()`, and `compileFunction()`,
-`compileShader()` and `compileToSource()` of the GLSL target, run the same
-pass before they write code. When the pass refuses a node, `compile()`
-declines with the diagnostic of `canCompile()` (`success: false` and the
-interpreter, or an error with `fallback: false`), and the three other entries
-throw an error with its message. When the preparation of the tree fails
-(`1 + Block(acc := x², acc + 1)`, a block with an assignment used as an
-operand), `canCompile()` gives its message with the code `outside-fragment`,
-and `compile()` gives the diagnostic of the preparation (here
-`unsettled-shape`). Emission does not decline an expression that the pass
-accepts, except in the cases of the known limitations below; any other such
-decline is a defect. A compile that succeeds keeps its warnings, such as
-`float32-unsafe-argument`. The declines of the `callerLocals` option
-(`caller-local-type`, `caller-local-source`; "Caller locals on GLSL" below)
-are found only while the code is written, so with a non-empty `callerLocals`
-`canCompile()` also writes the code, drops it, and answers such a decline.
-
-**The pass cap.** `compile()` to `glsl` counts the passes of the loops that
-the shader runs: each pass of a `Sum`, a `Product`, a `Loop` and a
-`parallel for`, also in the bodies of user functions, adds one to one count
-for each evaluation of the compiled expression. The count is of the loops in
-the emitted code: two equal sums that common-subexpression elimination
-writes once count once, and with `cse: false` both count. Over the cap, the
-loops stop and the value is `NaN` (`false` for a boolean value), so a slider
-that raises a bound past the cap gives `NaN` pixels and no new compilation.
-The cap is the `iterationBudget` option, with a default of 10,000 passes on
-this target. `Infinity` sets no cap, and the code then counts no pass. A
-finite budget is floored and kept at most 2^30, so that the counter cannot
-overflow an `int`. `NaN` or a budget of at most 0 is refused. Only
-`compile()` reads the option: `compileFunction()`, `compileShader()` and
-`compileToSource()` count no pass.
-
-```glsl
-// Sum(k·x, k, 1, n) with { to: 'glsl', iterationBudget: 100 }
-_gpu_passes = 0;
-float _tv1 = 0.0;
-for (int k = 1; k <= int(floor(n)); k++) {
-  if (++_gpu_passes > 100) break;
-  _tv1 += float(k) * x;
-}
-float _tv2 = _tv1;
-return _gpu_passes > 100 ? _gpu_nan() : _tv2;
-```
-
-The `javascript` and `interval-js` targets have no fragment: they
-take the whole language with their own declines.
-
-The list and the decisions are in `docs/plans/2026-11-08-glsl-fragment-spec.md`
-(section 2 and decisions 1 to 18); the typing pass is
-`src/compute-engine/compilation/fragment.ts` and
-`src/compute-engine/compilation/glsl-fragment.ts`, and its design is
-`docs/plans/2026-11-08-glsl-fragment-annotation-design.md`.
-
-### The `ir` profile of the JavaScript target
-
-**Experimental, and may change or be removed without notice.** With the
-option `profile: 'ir'`, `compile()` to `javascript` uses the IR compiler of
+`compile()` to `javascript`, `glsl` and `interval-js` uses the compiler of
 `src/compute-engine/compilation/ir` (its `README.md` has the contracts and,
-under "Selecting the pipeline", the options it maps or declines). A program
-or an option outside it declines with `outside-profile`, and `fallback`
-applies as for any other decline; an internal error is a
-`compile-error`. An input of type `unknown` or `any` is refused, on
-`javascript`, `glsl` and `interval-js`, with the `untyped-input` diagnostic of the
-existing JavaScript target (all such names in `value`); an input of type
-`number` is a `real`, or a `complex` in `mode: 'complex'`. It has no
-guard for an integer of 2^53 or more: its `Mod` of such an operand is the
-remainder of the double, an unspecified value, where the existing compiler
-throws a `RangeError` ("Integer operations beyond the safe integer range").
-Its code reads the runtime `_SYS` of the existing compiler, and the result
-has the fields of stored code (`runtimeVersion`, `preambleOnce`,
-`entryPlan`): `createJavaScriptRuntime().load()` and a worker of the kernel
-pool load it, and `run()` is built by the same loader. `shippable` follows
-the rule of the default route: `false` for code that draws or integrates.
-An integral calls the quadrature of the default route and its Monte-Carlo
-fallback, except that when the fallback samples an integrand that has given
-a value that is not finite, the value is `NaN`, at each run:
-`∫₀^∞ x^100·e^−x dx` (its integrand is `NaN` past about x = 1,200) is
-`NaN`, where the fallback gave a wrong number that changed at each run;
-`∫₀^1000 Mod(t, 1) dt`, finite everywhere, keeps the fallback's estimate
-(about 500, changing between runs as in the interpreter). A product with a
+under "Options and results", the options it maps or declines). A program or
+an option outside it declines with `outside-profile`, and `fallback` applies
+as for any other decline: on `javascript` the result runs the interpreter,
+on `glsl` the result has no code, and on `interval-js` it runs the interval
+fallback ("Interval results"). An internal error is a `compile-error`. The
+options `target`, `functions`, `operators`, `imports`, `preamble`,
+`strictTypes` and `broadcast` throw an error that names the option;
+`profile: 'ir'` and `callerLocals` are accepted and have no effect. An operator's
+`compile` handler returns an `Expression`, which is lowered in place of the
+node, or `undefined` to defer; a handler that returns code text declines.
+
+An input of type `unknown` or `any` is refused, on `javascript`, `glsl` and
+`interval-js`, with the `untyped-input` diagnostic (all such names in
+`value`); an input of type `number` is a `real`, or a `complex` in
+`mode: 'complex'`. There is no guard for an integer of 2^53 or more: `Mod`
+of such an operand is the remainder of the double, an unspecified value
+("Integer operations beyond the safe integer range"). The code reads the
+runtime `_SYS`, and the result has the fields of stored code
+(`runtimeVersion`, `preambleOnce`, `entryPlan`):
+`createJavaScriptRuntime().load()` and a worker of the kernel pool load it,
+and `run()` is built by the same loader. `shippable` is `false` for code
+that draws or integrates.
+
+An integral calls the quadrature of the runtime (`_SYS.integrate`) and its
+Monte-Carlo fallback. A sample that is not finite of a product with an exponential
+factor of the variable is its value in log space when that is finite, as in
+the interpreter: `∫₀^∞ x^100·e^−x dx` (its integrand is `∞·0` past about
+x = 1,200) is 100!. The fallback's estimate changes between runs, as in the
+interpreter (`∫₀^1000 Mod(t, 1) dt` is about 500). A product with a
 rational constant `p/q` whose denominator is not a power of two is
 `(p · factors) / q`, so a quotient that is an integer in exact arithmetic is
 that integer (`Floor(x/49)` at 49 is 1); on GLSL the division is a helper
@@ -2412,53 +1601,53 @@ below 2^23. A product of a matrix (a list of rank 2 or more) with another
 list, and a power of a matrix, decline: the interpreter's value is the
 matrix product or power, or element by element for some operands.
 The result of an expression has `broadcast()`, `broadcastAsync()`,
-`willUsePool()`, `runAsync()` and `willParallelize()`, with or without
-`broadcast: true`, built by the functions of the default route: each cell of
-a batch is the value of `run()` at that cell, a batch has no batch body, and
+`willUsePool()`, `runAsync()` and `willParallelize()`: each cell of a batch
+is the value of `run()` at that cell, a batch has no batch body, and
 `runAsync()` runs `run()` (no loop goes to the pool). With `mode: 'bigint'` it computes every integer as a `bigint`, with the
 helpers, the inputs, the results and the pole of "The `bigint` mode"; a
 program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
 `outside-profile`, not `bigint-lane`. A colour (`Rgb`, `Hsl`, `Hsv`,
 `Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
-colour) is the `CompiledColor` object of the default route; an alpha, a
+colour) is a `CompiledColor` object; an alpha, a
 list of colours, a colour input or string, and the other colour operators
 decline.
 
-With `to: 'glsl'`, `profile: 'ir'` (experimental too) compiles a scalar
+With `to: 'glsl'` the compiler takes a scalar
 or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
 2 to 4 numbers is a `vecN`, another length a `float[n]`) of real, integer or
 boolean inputs and of inputs that are tuples or lists of a stated length
 (`At(L, k)` with a run-time index is NaN outside the list), to
-the result of the GLSL target: `code` is an expression, or statements that
+a result with no `run`: `code` is an expression, or statements that
 end in `return`, in which an input is its bare name, or its `vars` text (a
 name, a member or an element of one, such as `u_x`, `u.P` or `u[0]`; the
 name stays in `freeSymbols`); `preamble` holds the helpers (`_gpu_ir_…`) and
 the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
-`bool`, `vecN` or `float[n]`, as the existing GLSL target reports it. The
-pass cap is the target's (`iterationBudget`, 10,000 by default), counted
+`bool`, `vecN` or `float[n]`. A shader cannot throw, so the pass cap is
+the option `iterationBudget` (10,000 by default), counted
 by loop: a `Sum` or a `Product` of more passes is `NaN`, and a program
 whose loops can run more passes in all, bounded at compile time (a constant
 count multiplied down the nesting, a run-time count as one pass), declines.
 Loops of run-time counts, nested or one after the other, compile; when they
 can run more passes in all than the cap, the code counts every pass in one
-counter and gives `NaN` past the cap, as the existing target does. It has no
-NaN-safe helpers and no exact sine hash (no `float32Bounds`): an operand
-of `Mod` or `Fract` that the existing target flags has the warning
-`float32-unsafe-argument`, also where that target emits an exact form.
+counter and gives `NaN` past the cap. It has no NaN-safe helpers and no
+exact sine hash: an operand of `Mod` or `Fract` in which a constant of
+magnitude 1000 or more amplifies a trigonometric value has the warning
+`float32-unsafe-argument`.
 A user function can return a point or a list of a stated length, and read
 an input that is a point, a list in storage or a list of at most 4
 elements; an element-wise operation over a list of more than 64 elements
 declines. A list parameter declared with no length (`list<integer>`) takes
 the stated length of the argument of the first call of its function; a call
 whose argument has another length, or no stated length, declines. With `storage: { S: 'sampler2D' }` the list input `S`
-is read from the host's texture with the addressing of the existing target
-(`_gpu_ir_texel`), by `At`, by a reduction or an element-wise operation, and
+is read from the host's texture (a single-channel float texture, one
+element per texel, row-major from texel (0, 0), read at level 0 with no
+filtering; `_gpu_ir_texel`), by `At`, by a reduction or an element-wise operation, and
 in a user function, which takes a `sampler2D` parameter; `S` as a value
-declines. `callerLocals` changes nothing: a user function takes every input
-that its body reads as a parameter.
+declines. A user function takes every input that its body reads as a
+parameter.
 A colour result (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`, `AsOklch`) is an
-OKLCh `vec3`, as on the existing target; `AsOklab` and `AsRgb` give the
+OKLCh `vec3`; `AsOklab` and `AsRgb` give the
 `vec3` of their space and are admitted only as the result of the program;
 `AsHsl`, `AsHsv` and an alpha decline. A name whose value is a colour
 constructor of three real numbers (`Hsv(270, 0.4, 0.95)`) is that
@@ -2467,7 +1656,19 @@ user function may return a colour (declared `color` or inferred); a colour
 parameter declines.
 Anything else, and the options it does
 not map (the README lists them), decline with `outside-profile`; with
-`fallback`, the existing GLSL target then compiles the expression.
+`fallback`, the result has no code.
+
+**The predicate.** `canCompile(expr, options)`, exported from
+`@cortex-js/compute-engine/compile` beside `compile()`, tells whether
+`compile(expr, options)` gives code, on each of the three targets. It runs the
+whole compilation with `fallback: false`, emission included, so it costs as
+much as `compile()`, and answers `{ ok: true, shippable }` when it gives
+code, or `{ ok: false, diagnostic }` with the diagnostic of the decline. It
+never throws: an invalid expression or an invalid option gives `ok: false`
+with the message of the error. Its answer depends only on the expression,
+the options and the declarations that the expression reaches (the types of
+its free symbols, the definitions of the functions it calls), so a host can
+keep it until one of those declarations changes.
 
 ### Interval results
 
@@ -2538,9 +1739,7 @@ the function it selects is the root (`If(1 > 0, x ↦ 2x, x ↦ 3x)` is
 the condition is not decided: it has an effect (`If(Random() > 2, x ↦ 2x,
 x ↦ 3x)`, where the interpreter draws on each call), it does not evaluate to
 `True` or `False`, or it is the `False` condition of a `When` (the
-interpreter gives no function). No selection is made, and the root declines,
-when the `functions` option maps the `If` head or a head in the condition,
-since the caller's code runs on the compiled route only. The branch that is
+interpreter gives no function). The branch that is
 not selected is still checked: when it is invalid or has a sub-expression of
 static type `error`, the root declines for it. An `If` that is the last
 statement of a block is not selected, since its condition can read a local
@@ -2563,245 +1762,6 @@ element by element. `Which(x < 0, 1)` over `x = [−1, 1]` gives
 `{ kind: 'partial', value: { lo: 1, hi: 1 }, domainClipped: 'both' }`; before
 2026-10-18 it gave an `interval` result, a value claimed over the whole cell
 (`hullValues`, `interval/comparison.ts`).
-
-### Statement order on GLSL
-
-In the GLSL fragment, a `Block` is a list of statements in two places: the
-body of a user function, and the root of the compiled expression. Its
-statements are a declaration, an assignment of a local of the function, a
-counted `Loop` over an integer range, an `If` or `Which` whose branches are
-statements, a nested `Block`, and `Break` in a loop (next section). Each one
-is written as a GLSL statement, in the order of the block.
-
-GLSL has no let-expression, so a lowering inside an expression that needs
-statements (a loop-form `Sum` or `Product`, a `Block` used as a value, the
-statement form of a conditional, the temporary of a piece of caller code) is
-hoisted into the enclosing statement list, ahead of the whole enclosing
-expression. With `x` declared `real`,
-`x + Block(Declare(b, "real", x²), b)` compiles to:
-
-```glsl
-float _tv1;
-{
-  float b;
-  b = (x * x);
-  _tv1 = b;
-}
-return x + _tv1;
-```
-
-An operand written earlier in that expression (here `x`) therefore runs
-after the hoisted statements, where the interpreter runs it first. In the
-GLSL fragment this order cannot be observed, except for code that the caller
-supplies (below): the fragment has no random draw (`Random` and
-`WithRandomSeed` are not in it), an assignment writes only a local of its
-function, and a block used as an operand may only declare names with a value
-before its last statement (the `block-value` decline of
-`compile-admission.ts`, which `canCompile()` runs too), so it writes no local
-declared outside it. `x + Block(Assign(b, x²), b)`, where the block assigns
-`b`, declines. The other impure nodes are calls of functions whose body is a
-block, which write only their own locals. Pure expressions, which every
-corpus document has at this position, are unaffected.
-
-Code that the caller supplies runs once per occurrence, in the order of the
-interpreter. Such code is a `vars` entry whose value is shader source other
-than a plain read (`nextValue()`, `vec3(u + v)`; a uniform name such as `u_x`
-or `params.x` is a plain read), a head mapped through `functions` (unless the
-entry is declared `pure: true`), and an operator's own `compile` handler. It
-can count its calls or draw a number, and the compiler does not see inside
-it. The values of the symbols that an expression reads and the bodies of the
-user functions it calls are looked through, as the shader inlines them,
-except the value of a symbol that reads an input (a plain `vars` read, a
-bound variable): with `vars: { T: 'u_T' }`, `T` emits `u_T` whatever value
-`T` has.
-
-Before a statement is compiled, each piece of caller code that the statement
-evaluates unconditionally is computed into a temporary of its shader type,
-in the order of the interpreter, and the statement reads the temporary
-(`gpuBindCallerCode()`, `gpu-caller-binding.ts`). So a form that writes an
-operand twice, or that computes part of the statement in a statement ahead
-of it, writes a read of the temporary. With
-`vars: { W: 'nextValue()', V: 'vec3(nextValue())' }`:
-
-- `W + Max(V)` is `float _tv1 = nextValue(); vec3 _tv2 = vec3(nextValue());`
-  then `return _tv1 + max(…_tv2.x, _tv2.y, _tv2.z…);`, and `Cot(W)` is
-  `float _tv1 = nextValue();` then `cos(_tv1) / sin(_tv1)`.
-- Each occurrence is one evaluation, as in the interpreter: `W + W` computes
-  `nextValue()` twice. One node object that the caller puts at several places
-  of the tree is copied before the other rewrites of the prepare stage, so
-  that each place gets its own temporary (`gpuSeparateCallerCode()`). A graph
-  whose code would then pass the size limit declines with the size message.
-- A position that is evaluated on a condition, or once per iteration, is
-  computed at the start of its branch or of each iteration: the selection
-  takes its statement form (`If(c, Max(V), 0)` computes `V` inside
-  `if (c) { … }`), and a loop body starts with its own temporaries
-  (`W + Sum(W + k, k, 1, n)` calls `nextValue()` once before the loop and once
-  per iteration). The node that holds such a position is itself computed at
-  its place in the order, so its caller code runs after the caller code
-  written before it. `And(a, b)` and `Or(a, b)` whose later operand holds
-  caller code are written `If(a, b, False)` and `If(a, True, b)`, and a
-  chained comparison whose third or later operand holds caller code,
-  `Less(a, b, c)`, is written `If(Less(a, b), Less(b, c), False)`: the
-  interpreter stops at the first pair that is false.
-- Caller code can write a variable that a plain read reads. So a part of the
-  statement that reads a `vars` key and that the interpreter evaluates
-  before a piece of caller code is read into a temporary first: with
-  `vars: { U: 'state.value' }`, `(U, Max(V))` reads `state.value` before it
-  computes `V`. A read with no caller code after it stays in place.
-- A selection whose branch holds caller code and that cannot take its
-  statement form (its branches have no one shader type, or a part of its
-  statement writes a binding that it could read) declines, and so do the
-  forms listed in the known limitations above (a `Loop` guard, `And` in the
-  body of a user function).
-- The body of a user function written as a shader function binds its own
-  caller code at its start; a body written in place of the call binds it at
-  the place of the call.
-- A piece whose value has no shader type for a temporary (a uniform array)
-  declines.
-
-A statement with no caller code compiles as before. A GLSL target object
-passed to `compile()` as the `target` option has no statement sink, so
-nothing is bound there. That route does not install the `vars` sources or
-the `functions` entries (`Cot(W)` is `cos(W) / sin(W)` with the bare name
-`W`); a `compile` handler that reaches it is written in place, and a form
-that writes its operand twice runs the handler's code twice.
-
-### `Break` on GLSL
-
-`Continue` is not in the GLSL fragment: the typing pass refuses it in every
-position, and the interpreter runs the program. A jump is a statement in
-GLSL. So `Break` compiles only as a statement of the body of a counted
-`Loop`, in a block at the root of the compiled expression or in the body of a
-user function: alone, in a nested `Block`, or as the branch of an `If` with
-no else branch or of a `Which` with one clause: `If(c, Break())`,
-`Which(c, Break())`, `If(c, Block(m ≔ k, Break()))`. With `a` a local of the
-block, `Block(a ≔ 0; Loop(Block(If(a > 3, Break()), a ≔ a + 1), k ∈ 1..8); a)`
-compiles to this code on GLSL:
-
-```glsl
-for (int k = 1; k <= 8; k++) {
-  if (++_gpu_passes > 10000) break;
-  if (3.0 < a) {
-    break;
-  }
-  a = a + 1.0;
-}
-```
-
-The first statement of the loop is the pass cap ("A limit on `Loop`
-passes", below). In a nested loop, `break` leaves the innermost `for`
-statement, as `Break` leaves the innermost `Loop` in the interpreter. The
-same loop in the body of a user function `f` is written in the GLSL
-definition of that function, `_fn_f`.
-
-Each other position declines, with a diagnostic of `canCompile()`:
-
-- An `If` with an else branch: `If(c, Break(), m ≔ 1)`, and also
-  `If(c, Break(), Nothing)`, since the fragment gives `Nothing` no type. When
-  the first branch always leaves the loop, write the else branch as the
-  statement after the `If`.
-- A `Break` with a value, `Break(f(k))`. The compiled `break` has no value, and
-  the interpreter evaluates the operand before it leaves the loop.
-- A jump in a value: `s ≔ If(c, Break(), 1)`.
-- A jump with no `Loop`. A `break` outside a loop is an error that only the
-  driver reports, after the compilation has reported success.
-- A jump in a `Sum` or `Product` body: the boxing of the expression writes an
-  `Error` node for it (`incompatible-type`).
-- A `Loop` over several `Element` clauses, with or without a `Break`: the
-  fragment has only the counted loop over one integer range.
-
-On a NaN operand, the shader and the interpreter take the same action: a
-relation is `false`, so `If(v > 4, Break())` does not jump, and `≠` is `true`,
-so `If(v ≠ 4, Break())` jumps.
-
-### Caller locals on GLSL: the `callerLocals` option
-
-A host can run the GLSL code inside a function of its own, where some inputs
-are parameters of that function: `float userFn(float x, float y) { … }`. A
-user function is emitted as a shader function at file scope (`_fn_g`), which
-does not see them. The option `callerLocals` names those symbols. A shader
-function that reads one of them, directly or through a shader function it
-calls, takes it as a trailing parameter, after its own parameters and after
-the extra parameters of an invariant-prefix variant, in the sorted order of
-the names. With `g(u) := u + x`, `h(x) := g(x) · y` and
-`callerLocals: ['x', 'y']`, `h(3)` compiles to:
-
-```glsl
-float _fn_g(float u, float _in_x) {
-  return u + _in_x;
-}
-
-float _fn_h(float x, float _in_x, float _in_y) {
-  return _in_y * _fn_g(x, _in_x);
-}
-
-_fn_h(3.0, x, y)   // the code
-```
-
-The parameter list depends only on the function and the option, so two
-compilations with the same option write the same text for the same function.
-The parameter is named `_in_` and the symbol name, with a suffix when the
-function or the functions it reaches use that name, so a parameter of the
-function spelled like the caller local (the `x` of `h`) does not hide it.
-The element-wise wrapper of a call with a list argument (`_fn_g_each3_1`)
-takes the same parameters and passes them on. A call in the code passes the
-`vars` source of the name when there is one, else the name; in
-`compileFunction()`, a declared parameter is passed by its name. A call in
-a shader function passes that function's own parameter.
-
-A binder of the same name does not reach into the body of a function, so in
-`\sum_{x=1}^{300} (x + g(x))` the `x` of `g` is the input. The loop of the
-shader declares `int x`, so the code holds the input in a temporary declared
-at its start, and passes it:
-
-```glsl
-float _tv2 = x;
-float _tv1 = 0.0;
-for (int x = 1; x <= 300; x++) {
-  _tv1 += float(x) + _fn_g(float(x), _tv2);
-}
-```
-
-A call under any binder of the same name passes the temporary, also where
-no shader variable hides the name (an unrolled `Sum`). A name that is not in
-the option (a uniform, a sampler) is read by its name, as without the option;
-absent or empty, the option changes no text. The other targets ignore it.
-
-A compilation declines when a shader function reads a caller local that has
-no GLSL value type (only scalars, booleans, complex values and 2–4 component
-vectors have one): with `storage: { H: 'sampler2D' }` and
-`callerLocals: ['H']`, a call `gh(H, x)` whose variant reads the texture `H`.
-It also declines when a caller local that a call passes has a `vars` source
-that is not a read of a variable (`vars: { x: 'next()' }`): the code would
-run once per call instead of once per read. The codes are
-`caller-local-type` and `caller-local-source`, and `canCompile()` with the
-option gives the same answer.
-
-### NaN-safe helpers on the shader targets
-
-On GLSL, `sin`, `cos`, `sign`, `min`, `max` and `clamp` call a
-NaN-safe helper (`_gpu_sin`, `_gpu_min`, …), because a GPU built-in can turn a
-NaN operand into a number. The built-in is emitted only when the operand is
-finite for certain (`gpuProvablyFinite()`,
-`src/compute-engine/compilation/gpu-finite-proof.ts`). The proof includes f32
-overflow, rounding, the flush of subnormal values to 0, and the error of the
-GPU functions. When the proof is not certain, the helper stays.
-
-The host provides the proof, and the compiler uses all of it. It reads the
-declared types and ranges of the inputs, the declared ranged result types of
-the user functions, the declared ranges of their parameters, the number
-literals and the operators of the operand. In the body of a user function, a
-parameter is also finite when every call of the function in the compiled
-expression passes a value that is proven finite at its position from these
-declarations (`gpuRecordCallSiteFacts()`), with the bound of the largest
-argument; the functions are taken callers first, so a bound passes from
-one body to the next. The `compileFunction` route runs no
-common-subexpression pass, and proves no operand. The proof does not read
-the body of a user function to prove a call of it, and does not read the
-index of a `Sum`, `Product` or loop as finite. A call
-never declines for want of a proof: it calls the helper, which gives the
-same value as the built-in on a finite argument. The caveat on the shader
-targets in "Caveats of compiled code" gives the examples.
 
 ## A limit on `Loop` passes
 
@@ -2874,8 +1834,8 @@ stored JavaScript"). `createJavaScriptRuntime()` and `createIntervalRuntime()`
 keep the limit.
 
 **Targets.** A shader cannot throw, so GLSL has a cap of its own, with a default
-of 10,000 passes and `NaN` over it ("The GLSL fragment and `canCompile()`",
-"The pass cap"); a `Loop` with no indexing set declines there.
+of 10,000 passes and `NaN` over it ("The compiler"); a `Loop` with no
+indexing set declines there.
 
 **Not covered.**
 
@@ -2911,9 +1871,8 @@ compiles the same function with the option itself gets the throw.
 
 The `mode` option selects how the compiled code computes numeric values:
 `strict`, `complex` or `bigint`. The `javascript` target offers the three
-modes, and `interval-js` offers `strict` only. `glsl` offers `strict`, and
-`complex` with the profile `ir` (an input of type `number` is a `vec2`; the
-existing GLSL target offers `strict` only). A request for a mode that the target does not offer
+modes, and `interval-js` offers `strict` only. `glsl` offers `strict` and
+`complex` (an input of type `number` is a `vec2`). A request for a mode that the target does not offer
 declines with the code `'unsupported-mode'`. The default is `strict` on
 every target. The first two modes select how the code handles complex
 values (below). The `bigint` mode selects how it computes integers ("The
@@ -2960,12 +1919,11 @@ on a decline, its diagnostic.
 
 Real-only kernels guard and project only where the model explicitly permits
 it. `Mean`, `Variance`, `StandardDeviation` and their population forms are
-the exception on JavaScript (`CompileTarget.complexLowering`): in the
+the exception on JavaScript: in the
 `complex` mode, data that may hold a complex entry takes `_SYS.cmean`, `_SYS.cvariance`
 and the like, which compute the interpreter's value (`Mean([3, 4i])` is
 `1.5 + 2i`; the variance is the real sum of `|x − mean|²` over `n − 1`)
-instead of `NaN`. Real data gives the same bits as the real lowerings. A
-caller's own lowering of these heads is used as it is. The `strict` mode
+instead of `NaN`. Real data gives the same bits as the real lowerings. The `strict` mode
 still declines such data.
 
 A `Power` whose base type does not give its rank and cannot hold a point
@@ -2985,8 +1943,7 @@ exponent an integer other than 1. An exponent that is not an integer but
 within a relative `1e-12` of a nonzero integer throws too where the base holds
 a matrix: it is most likely an exact integer computed in floating point
 (`√n·√n` at `n = 2` is `2.0000000000000004`). `Inverse` and `m^-1` of a
-non-square `matrix<…>` throw the same error. A caller's own `Power` lowering
-(`functions`, `operators`) is used as it is, with no dispatch. A list exponent is paired with
+non-square `matrix<…>` throw the same error. A list exponent is paired with
 the base level by level, as in the interpreter; when that pairing meets a
 matrix with an integer entry (`p^[1, 2]` for `p` of rank 3), the code throws,
 since it does not compute that matrix power. A point is an array at run time,
@@ -3047,87 +2004,13 @@ The rule applies only where it changes the lane of the body:
   this way: it is shared by every call site.
 - The shader targets never promote, so nothing changes there.
 
-The fold-before-shape rule: the analysis that decides whether a node is
-complex (`BaseCompiler.isComplexValued`) and the emitters that write the node
-must give the same answer, so they ask one question in one place. For a closed
-constant, that place reads the memoized constant fold first
-(`_withFoldedRealOverride` in `base-compiler.ts`): `√(5 − √5)` has a type that
-admits a complex value, but it folds to a real number, so it is read as real
-and emitted as a real literal. The fold is memoized for each target and
-expression, so the answer cannot change between analysis and emission. A
-change to how a shape is read must go into that shared question, not into one
-consumer: a consumer that reads the shape on its own wraps a plain number in
-the `{re, im}` convention, which turns a safe decline into a silent `NaN`.
-Where the compilation does not fold (`constantFold: false`, a `symbolDeps`
-capture, a target other than JavaScript), the type alone decides.
-
-A `Sum` or `Product` over a small constant range is unrolled by mapping the
-index NAME to a literal in the emitted code, so the analysis reads a body in
-which the index is still a free symbol. Each unrolled term therefore also
-hands the analysis its own index VALUES: a subtree that mentions the index and
-folds to a real constant under those values is real-emitted, which keeps a
-radical such as `√(1 − 0.025²(i − 0.5)²)` on the real kernel in every term.
-
-Three conditions hold this to the shape invariant. The clause must have a
-single indexing set with constant bounds inside the unroll limit, so the
-terms the analysis reads are the terms the emitter writes. Every term must be
-real under its own value, because the terms feed ONE accumulator, which holds
-plain numbers or `{re, im}` objects and never a mix; a clause whose terms
-disagree keeps the index-masked verdict and its uniform lowering. And the
-question is asked in one place — the target's `unrolledClauseLane` — which
-both the emitter and `isComplexValued`'s answer for the whole `Sum` read, so
-the enclosing expression expects the shape the terms produce.
-
-A subtree that does NOT mention the index is left to the ordinary
-fold-before-shape rule, because loop-invariant hoisting may compile it once
-outside any term. The whole mechanism is inert wherever the compilation does
-not fold constants (`constantFold: false`, a `symbolDeps` capture, a
-non-JavaScript target).
-
-A function whose result jumps at a point (`JUMP_FUNCTIONS` in
-`jump-functions.ts`: `Floor`, `Fract`, `Mod`, `Sign`, the comparisons, …)
-applied to closed exact operands is folded on every target except
-`interval-js`, also under `constantFold: false` and under a `symbolDeps`
-capture. The structural code computes the operands as doubles, and a double
-can be on the other side of the jump from the exact value:
-`Floor((25! − 1)/24!)` is `24`, but the double of the operand is `25.0`. The
-fold reads the exact value, as the interpreter does. A comparison folded this
-way is emitted as the target's boolean constant. Under a
-`symbolDeps` capture the fold records every symbol whose value it reads, and
-declines when the operand calls a user function. Operands with a free
-variable, operands with a float literal, and operands that are all integer
-literals in the safe integer range keep their structural code. The interval
-target is excluded because its code computes an enclosure, and the enclosure
-of such a node contains the exact value (`closedExactJump` in
-`base-compiler.ts`).
-
-A rounding function (`Floor`, `Ceil`, `Round`, `Truncate`, `Fract`) whose
-operand adds an integer-typed variable `v` (a loop index, an integer-typed
-symbol, a sum of them with integer coefficients) to closed exact terms `c`
-that no double holds exactly is compiled from a form that rounds `c` alone:
-`Floor(v + c) = v + Floor(c)`, `Ceil(v + c) = v + Ceil(c)`,
-`Fract(v + c) = Fract(c)`, `Round(v + c) = v + Round(c)` when `c` is not
-halfway between two integers, and `Truncate(v + c) = If(v ≥ −Floor(c),
-v + Floor(c), v + Ceil(c))`, since truncation is not shift-invariant across 0.
-The rounded constant is then a closed exact jump node, folded as above. So
-`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 300)` gives the interpreter's value in
-the unrolled form and in the loop form. Every other shape whose variables are
-all integer-typed declines with the `correctness` diagnostic
-`inexact-jump-operand`: a variable part that is not an integer
-(`Floor(k/3 + 1/7)`), a product (`Floor(k·π)`), a constant inside a variable
-term (`Floor(k·√2 + 1)`), a step form, and a `Round` whose constant may be a
-tie. A shape with a variable that is not integer-typed keeps its structural
-code on every target, GLSL included: `Floor(π·x)`, `Floor(x + 1/3)`,
-`Floor(x/√2)`, `Floor(y/3 + 1/7)` for a real `x` or `y`, and also
-`Floor(k + x + c)` with an integer `k` and a real `x`. There, the double of the
-constant moves the jump by about one unit in the last place, as in any float
-code. So `Floor(x + (25! − 1)/24!)` at `x = 1` gives 26 in the compiled code,
-where the interpreter gives 25: the double of `(25! − 1)/24!` is 25.0. A
-literal that a double holds exactly (`Floor(k + 1/2)`) and a rational factor
-whose numerator and denominator a double holds (`Floor(2k/3)`, emitted as a
-division and a multiplication by integers) keep their structural code, as do
-an operand with a float literal and the interval target (`jumpShiftRewrite`
-in `base-compiler.ts`).
+A function whose result jumps at a point (`Floor`, `Ceil`, `Round`,
+`Sign`, a comparison) of an exact rational constant that no double holds
+takes the jump of the nearest double: `Floor(n + (25! − 1)/24!)` at `n = 1`
+gives 26, where the interpreter gives 25 (see "Known limitations"). A
+product with a rational constant `p/q` whose denominator is not a power of
+two is `(p · factors) / q`, so a quotient that is an integer in exact
+arithmetic is that integer ("The compiler").
 
 A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
 over an operand that may be complex at run time takes the runtime rule in the
@@ -3144,10 +2027,7 @@ real lowering broadcasts or reduces over the projections. `⌊√L⌋` floors ea
 real root and answers `NaN` at a complex one; `min(√L)` is `NaN` as soon as
 one root is complex; `√L < 1` is `false` at a complex root; `L < w` at a
 complex scalar `w` is `false` at every element (the value keeps the head's
-shape). In `strict` mode nothing changes: such an operand fails closed.
-Targets provide the projection through the `complexRealElements` hook
-(`_SYS.crealElements` on JavaScript); a target
-without it keeps the compile-time decline. The `complexPromotion` option, a
+shape). In `strict` mode nothing changes: such an operand fails closed. The `complexPromotion` option, a
 compatibility alias of `mode: 'complex'` since 0.115.0, is removed with no
 warning: a call that still passes `true` is compiled in the default
 `strict` mode. The `realOnly` option, which projected a compiled unit's
@@ -3396,10 +2276,7 @@ clauses would change dispatch.
 A compiled artifact contains each user function as it was defined when
 `compile()` ran. Assigning a new definition later does not change an artifact
 that is already compiled. The public `compile()` keeps no cache: each call
-compiles again and reads the current definitions. A caller that needs a
-function it can replace after compiling passes it through the `functions`
-option and reads the live implementation from `globalThis` (see "Running
-stored JavaScript" for how such a function is copied).
+compiles again and reads the current definitions.
 
 A recursive or mutually recursive user function compiles to real recursion on
 the JavaScript target, with no depth guard: a runaway recursion throws a
@@ -3427,7 +2304,6 @@ key next to the arguments. Keys are compared by value, with `NaN` equal to
 boolean, or a result that is an object or a function, bypasses the record. The
 record lives in the definition's closure, so two artifacts never share it. A
 definition called from one place, or only from the root, is emitted unchanged.
-The rule is implemented by `memoizeSharedDefinitions` in `javascript-target.ts`.
 
 ### A string at a collection parameter
 
@@ -3442,12 +2318,9 @@ that passes one element (`Map`, `Filter`, `Count`, `Any`, `All`) over a
 collection of strings.
 
 - A function defined on the engine gets a copy with its own name
-  (`_fn_f_string`; `ensureSpecializedUserCallEmitted()` in
-  `compiler-core.ts`, `stringElementCallbackEta()` in
-  `compile-user-functions.ts`).
+  (`_fn_f_string`).
 - A block-local function is bound once in its block, so the function with
-  the parameter typed `string` is written at the use
-  (`stringTypedLocalLiteral()` in `compile-user-functions.ts`). A use that
+  the parameter typed `string` is written at the use. A use that
   gives a list keeps the binding of the block.
 
 The use of a block-local function declines when the function cannot be
@@ -3483,11 +2356,10 @@ resolves it to the closed form of `f` as a literal at the call site
 These forms decline, with a reason that names the form:
 
 - a partial application or a curried call: `Apply(f, 1)` for `f` with two
-  parameters, `Apply(Apply(f, 1), u)` (`partial-application.ts`);
+  parameters, `Apply(Apply(f, 1), u)`;
 - a function value passed as an argument to a user function or to `Apply`
   (`h(x ↦ x + u)`), and a function literal with a parameter declared with a
-  function type (`h = (g: function) ↦ g(1)`) (`assertNoFunctionValue()`,
-  `compile-function-values.ts`). The root of a compilation is the
+  function type (`h = (g: function) ↦ g(1)`). The root of a compilation is the
   exception: its parameters are the inputs of the compiled function, and
   the host passes a JavaScript function for a function-typed one, so
   `(h: (real) -> real) ↦ Map(h, [1, 2])` compiles and calls `h`;
@@ -3571,8 +2443,7 @@ writes the default's symbol at that position), a call completed at compile
 time, and the wrapper of a callback or of a function literal. The value is
 read at compile time from the definition that the default symbol was bound to
 where the function is declared, as the interpreter reads it, so a local of
-the same name or a `vars` entry does not change it
-(`compiledDefaultOperand()`, `compile-parameter-defaults.ts`). With
+the same name or a `vars` entry does not change it. With
 `ce.declare('W0', { isConstant: true, value: 5 })` and
 `f := (k = W0) ↦ k + 1`, the compiled `f()` is `f(5)` and gives 6, as the
 interpreter does. The value must be a literal that compiled code can write: a
@@ -3624,12 +2495,11 @@ retain evaluation-once and effect ordering.
 A `PointList` with list components compiles on the JavaScript target to a
 map over the shortest component, scalar components repeated in each point.
 The `iterationBudget` option is not applied to the length of the list: the
-profile `ir` builds every point, also past the budget (at `L = [1, 2, 3, 4]`
+code builds every point, also past the budget (at `L = [1, 2, 3, 4]`
 with `iterationBudget: 2`, `PointList(L, 2L)` gives four points). Compiled
 code need not cap its iterations: "Hosts that care about this can run in a
 worker to avoid blocking the main thread" (user ruling of 2026-11-16, which
-replaces the truncation of the user decision of 2026-07-31; the existing
-compiler still truncates the list to the budget).
+replaces the truncation of the user decision of 2026-07-31).
 
 A restriction `value\{conditions\}` (`If(conditions, value)`) whose
 condition is a list compiles on the JavaScript target through
@@ -3667,13 +2537,9 @@ step. The function must be pure: the interpreter computes the elements before
 a position again for each read, so the effects of a function that is not pure
 would run more often there than in the compiled stream. A finite
 collection keeps its eager array lowering. `DropWhile` over an infinite source
-declines, because the interpreter leaves it unevaluated. In
-`javascript-target.ts`, `isLazyStream` decides which operands take the lazy
-lowering and `emitLazyStream` writes it, so the two must accept exactly the
-same shapes.
+declines, because the interpreter leaves it unevaluated.
 
-`Sort` with an ordering function compiles on the JavaScript target
-(`compileJSSortWithCallback`). As in the interpreter, a function whose type
+`Sort` with an ordering function compiles on the JavaScript target. As in the interpreter, a function whose type
 says it takes one argument is a sort key, and any other function is a
 comparator. A sort key compiles when its result is a real number; a comparator
 compiles when its result is a boolean or a number, and its elements are real
@@ -3683,7 +2549,7 @@ the elements with `Array.prototype.sort`, as the interpreter does, so the two
 routes ask the same comparisons in the same order.
 
 `Pipe(x, stage)` compiles on the JavaScript target as the
-expression that it evaluates (`pipeApplication`): a call that is missing one
+expression that it evaluates: a call that is missing one
 argument receives `x` in the slot that the interpreter selects
 (`Pipe(xs, Map(f))` is `Map(f, xs)`), a function literal with one parameter is
 applied to `x`, and the name of an operator is called with `x`. A call with
@@ -3692,13 +2558,6 @@ its own slots is lifted to a function literal whose parameters are the slots
 declines, and so does a call stage whose piped value is itself a `Pipe` when
 the static type of the inner pipe does not settle the slot: the interpreter
 selects the slot from the type of the value of the inner pipe.
-
-Two analyses decide whether an operand can be an array at run time on the
-JavaScript target, and they are separate code. The comparison and connective
-lowerings ask `isPossiblyCollectionTypedJS` in `javascript-target.ts`. The
-arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
-`isBoundPossiblyCollectionTyped` in `compiler-type-facts.ts`, which reads
-the static type of the operand. A change to one does not change the other.
 
 A symbol declared `any` or `value` can hold a number or a list, and compiled
 code does not test the shape of a value at run time. The JavaScript
@@ -3786,10 +2645,9 @@ appropriate expression-instance boundary.
 `xs = ReplaceAt(xs, i, v)` on a block local gives a new list. On the
 JavaScript target, the block copies the list once, at the first update, and
 then writes that copy in place, when no other value can hold a reference to
-it (`ownedLocalUpdateChains()` in `compilation/in-place-update.ts` states the
-conditions). Otherwise each update copies the list, and in a loop that visits
+it. Otherwise each update copies the list, and in a loop that visits
 each element once the copies cost O(n²). The step of a fold can update its
-accumulator in place (`inPlaceUpdateChains()`).
+accumulator in place.
 
 When a JavaScript compilation keeps the copying form for an update
 `xs = ReplaceAt(xs, …)` (a chain of `ReplaceAt` included) in the body of a
@@ -3822,13 +2680,9 @@ literal; an untyped free input is refused by the admission of the inputs,
 which names it in `unsupported`; an untyped parameter or local is not an
 input there, and declines here). A value whose type can be `Nothing` declines:
 the interpreter keeps such an entry with the value `Nothing`, and the
-compiled object has no form for it. Each value compiles as a value operand (`compileValueOperand()`). The
-values are not operands of the node, so the shared-subexpression pass does
-not enter them, but it records each assignment in them: a subexpression is
-not shared across a write in a value (`recordDictionaryAssignments()` in
-`cse.ts`). The interval-js and GLSL targets have no dictionary value,
-and a dictionary declines on them with that reason
-(`CompileTarget.dictionary`, `_compileInner()` in `compiler-core.ts`).
+compiled object has no form for it. A subexpression is not shared across
+a write in a value. The interval-js and GLSL targets have no dictionary
+value, and a dictionary declines on them with that reason.
 
 On the JavaScript target, a result whose static type holds a dictionary or a
 record at some depth (in a union member, a tuple element or a collection
@@ -3840,7 +2694,7 @@ returned under `normalizeKeyedRunResult()`, not
 a value whose type holds both a record and a complex number, a complex
 cell with a zero imaginary part is then returned as `{re, im: 0}`, not as a
 number. A `dictionary` or `record` input or parameter has no real or complex
-entry rule (`isKeyedEntryType()` in `javascript-target.ts`).
+entry rule.
 
 ### GPU `At`
 
@@ -4015,8 +2869,7 @@ from a compiled runner into a declining expression.
 
 On the SHADER target (GLSL) a color is a bare `vec3` with no run-time
 tag and no alpha, read as OKLCh unless the compiler knows otherwise. The space
-is a COMPILE-TIME fact instead (`colorSpaceOf`,
-`compilation/color-space-fact.ts`): the constructors and the color-producing
+is a COMPILE-TIME fact instead: the constructors and the color-producing
 operators answer `oklch`, each `As*` answers the space it names, and
 `ColorToColorspace(c, "<literal>")` and `ColorFromColorspace(comps,
 "<literal>")` answer that literal space. A color operand whose fact is a named
@@ -4065,8 +2918,9 @@ A value of a value kind (a residue class, an element of a finite field, a
 kind declared by a host with the `arithmetic` field of an operator
 definition; `TYPE-SYSTEM.md`, "Value kinds and kind types") is not a number,
 and the number lowerings compute a wrong value for it with no error: `c - c`
-lowered to `0`, `c / c` to `1`. So the compile boundary declines it unless
-the kind type gives a lowering for the target.
+lowered to `0`, `c / c` to `1`. So every target declines it, except an
+enclosure on `interval-js` (below). A kind declared by a host has no
+compiled form.
 
 The boundary uses the STRICT recognition: an expression that holds a kind
 value for certain, or whose result type is a kind type for certain,
@@ -4075,8 +2929,8 @@ declines, with a message that names the kind type ("holds a residue class
 that only MAY hold a kind value (a parameter typed `number | residue`, a
 symbol of a signature that admits a kind) compiles as a number, as before.
 
-The library kinds `measurement` and `quantity` have no `compile` contract,
-and the library kind `enclosure` has one for the `interval-js` target only
+The library kinds `measurement` and `quantity` have no compiled form, and
+the library kind `enclosure` has one on the `interval-js` target only
 (see "The enclosure on `interval-js`" below). So an expression with a
 `Measurement` or a `Quantity` value, or with an `Enclosure` value on any
 other target, declines with
@@ -4086,61 +2940,18 @@ recognition does not see its quantity: `x · SpeedOfLight` declines at the
 `Quantity` call of its value, with the message "Could not compile
 `Quantity`".
 
-**The compile contract.** The `compile` field of an `ArithmeticDefinition`
-(`ArithmeticCompile`, `types-definitions.ts`; read by
-`compilation/kind-lowering.ts` and `base-compiler.ts`) has two parts:
-
-- `compile.type` belongs to the kind TYPE, because a free symbol of the
-  type has no head, and every head of the type must lower `Add`, `Multiply`
-  and the other operators to one representation. Its fields: `lowered()`,
-  the name of the representation on the target, which
-  `freeSymbolTypes[…].lowered` reports; `add()` and `multiply()`, a sum and
-  a product with an operand of the kind (a number operand beside a kind
-  value is the hook's to promote); `apply()`, the other arithmetic
-  operators, the comparisons and the other operators with an operand of the
-  kind; `entry()`, the run-time check of a host value given for a symbol of
-  the type (the JavaScript runner calls it in place of its numeric and
-  collection checks); `shippable` and `hostNames`.
-- `compile.value` belongs to the HEAD: the source of a literal value of that
-  head in the type's representation. A literal of a head without it
-  declines.
-
-Each hook receives the `OperatorCompileContext` and branches on
-`context.language`, so a target registered with
-`ce.registerCompilationTarget()` is reachable. `undefined` from any hook
-declines, with the message "Could not compile `<Operator>` with an operand
-of the kind type '<type>'". The structural and control-flow operators (`If`,
-`Block`, `List`, `Tuple`, `Assign`, `Hold`, a call of a user function) do
-not call the contract: they pass the representation through as an opaque
-value. With two kinds that have a contract among the operands, the kinds are
-asked in the order of their first occurrence and the first answer wins, as
-at evaluation.
-
-**The representation.** The value of `run()` for a kind result is returned
-as the code makes it: `normalizeRunResult()`, which reads a `{ re, im: 0 }`
-record as a number, is not applied. So on the JavaScript targets a kind type
-may not name, with `lowered()`, a value convention of the runner (`number`,
-`real`, `integer`, `complex`, `array`, `list`, `point`, `color`): the host
-would read the value as a number, a complex number or a list. Such a
-contract is refused with a message that asks for a representation of its
-own (an object with a field that names the kind). The representation must be
-faithful (the rule of "Fail closed").
-
 **The result.** `CompilationResult.valueKinds` lists the kind types whose
-representation the code reads or makes, and `StoredEntryPlan.kinds` the
-bindings of a kind type (both JavaScript only, absent when no kind is
-involved). A result is `shippable` only when every contract involved says
-`shippable: true`, lists no `hostNames`, and no input of the code is a kind
-value: a worker cannot run the host's `entry` check, and it cannot carry
-the helpers that `hostNames` would name. Such code cannot be stored and
-loaded again (see "Running stored JavaScript").
+representation the code reads or makes: `['enclosure']` on `interval-js`,
+absent otherwise. Such code is not `shippable`, and cannot be stored and
+loaded again (see "Running stored JavaScript" and "The limits kept from
+phase 1" below).
 
 **Limits.**
 
 - An expression that holds a COLLECTION of kind values (`L + L` with
   `L: list<gf8>`, a list literal of kind values) declines on every target:
-  `entry` and `lowered()` describe one value.
-- On `interval-js`, the only kind with a contract is the enclosure; the
+  the entry check of a kind describes one value.
+- On `interval-js`, the only kind with a compiled form is the enclosure; the
   runner checks the inputs of that kind (below). A residue class, a
   measurement and a quantity decline on every target.
 - A kind is never compiled through the number rules.
@@ -4153,13 +2964,12 @@ The design is `docs/plans/2026-10-26-value-kinds.md`, section 4.8.
 "Enclosures"), is the one library kind with a compiled form, on the target
 `interval-js` only: the interval mode of the IR pipeline lowers it
 (`compilation/ir/lower-enclosure.ts`; `compilation/ir/README.md`, "The
-interval mode", "Enclosures"). Its compile contract (`ENCLOSURE_COMPILE`,
-`library/enclosure-compile.ts`) has no hook that writes code; every other
-target declines with the kind message. The design is section 4.9.2 of
+interval mode", "Enclosures"). Every other target declines with the kind
+message. The design is section 4.9.2 of
 `docs/plans/2026-10-26-value-kinds.md`, "Compilation".
 
 **The representation.** An enclosure is the `{ lo, hi }` interval of the
-`_IA` runtime, and `lowered()` answers `'interval'`
+`_IA` runtime
 (`freeSymbolTypes.x` is `{ type: 'enclosure', lowered: 'interval',
 provenance: 'declared' }`). A literal `Enclosure(a, b)` with endpoints that
 are number literals or exact constants lowers to a record whose endpoints
@@ -4221,17 +3031,17 @@ interpreter leaves `Factorial` of an enclosure unevaluated.
 **The entry check of the interval runner.** For each free symbol whose type
 has an `enclosure` arm, `run()` checks the host value BEFORE it
 converts the inputs, and OUTSIDE the `try` whose `catch` answers `entire`,
-so a refused value throws. The kind's `entry` admits a record `{ lo, hi }`
+so a refused value throws. The entry check admits a record `{ lo, hi }`
 of two numbers with `lo <= hi`, `±Infinity` allowed but not the same
 infinity twice, no `NaN`; or a finite number. A UNION input is checked by
-arm: a record by the kind's `entry`, a number by the numeric arms
+arm: a record by the entry check, a number by the numeric arms
 (`NaN` admitted when an arm admits `nan` or `missing`, `±Infinity` when an
 arm admits an infinity), so `y: number | enclosure` admits `Infinity` and
 `y: enclosure | nan` admits `NaN`. `broadcast()` and `broadcastAsync()`,
 which call the compiled body without the `run()` wrapper, check every cell
 BEFORE the loop (outside the per-cell `try`): a cell whose two bounds are
 the same value is read as that number when the type has a numeric arm, any
-other cell by the kind's `entry`. One refused cell throws, or rejects the
+other cell by the entry check. One refused cell throws, or rejects the
 promise, for the whole call. Every other input keeps the pass-through of
 the runner, including a `NaN` input. (A `real | missing` input cannot be
 declared since 2026-11-02.)
@@ -4299,55 +3109,12 @@ that may be an enclosure: its body would be lowered by the rules of a real
   cannot be loaded again from its stored form: the loaders of
   `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
   `loadBroadcastSlice()`) refuse code that names a kind type, because the
-  `entry` check is a function of the host. The `run()`, `broadcast()` and
+  entry check is a function, which stored code cannot carry. The `run()`, `broadcast()` and
   `broadcastAsync()` of the result apply the checks and then run a copy
   without `valueKinds`. `shippable` is `false`, so the kernel pool is not
   used and `willUsePool()` answers `false`.
-- An input typed `list<enclosure>` declines (`entry` and `lowered()`
-  describe one value).
+- An input typed `list<enclosure>` declines (the entry check describes
+  one value).
 
 Lifting these two limits needs a serializable entry check (ROADMAP
 CE-507.12).
-
-## CSE and naming
-
-Common-subexpression elimination is region-based and must respect effects,
-bindings, evaluation order, and target representation. Compiler-internal types
-stay structurally opaque where importing boxed-expression types would create a
-module cycle. The remaining CSE design work is in the active
-`plans/2026-07-28-compile-cse-design.md`.
-
-A target can set its own admission thresholds for a shared subexpression
-(`CompileTarget.cseMinSize` and `cseMinScore`; the defaults are 4 and 8 in
-`cse.ts`). The nested harvests of user-function bodies use the same
-thresholds. The `interval-js` target sets 2 and 4, so a node of size 2 or 3 is
-bound once it occurs three times: every interval operation is an allocating
-`_IA` call, so the size of its syntax does not measure its cost.
-
-## Compiler internals
-
-A lowering that rewrites one statement into several statements must be added
-to each of the three places that compile a list of statements, because none of
-them goes through another:
-
-1. `BaseCompiler.compileBlock` (`base-compiler.ts`) compiles a `Block` that is
-   compiled as an expression.
-2. `BaseCompiler.compileLoopBody` compiles the loop bodies of the JavaScript
-   and interval targets.
-3. `BaseCompiler.compileStatementList` compiles the loop bodies of the shader
-   targets, which reach statements through the ordinary `compile` route. It
-   calls `compileBlock` with the value of the last statement unused, so the
-   last statement is not emitted as a `return`.
-
-On a target with a `declare` hook (the shader targets), the
-`Declare` case emits only the declaration, and `compileBlock` emits the initial
-value as a separate assignment. A rewrite that emits `Declare(sym, type,
-value)` from one of the other places therefore loses the value on those
-targets. Emit `Declare(sym, type)` and `Assign(sym, value)` as two statements.
-A temporary from `BaseCompiler.tempVar` must also be registered as a local of
-the statement list (`BaseCompiler.loopBodyTempTarget` does this), or it is
-emitted as a read of the caller's scope object (`_.name`).
-
-Check such a lowering on `javascript` and `glsl` by reading
-`.code`: a comparison of `run()` with the interpreter checks the JavaScript
-target only.

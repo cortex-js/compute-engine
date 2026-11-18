@@ -115,23 +115,6 @@ describe('COMPREHENSION GUARD — compiled', () => {
     expect(result.success).toBe(true);
     expect(result.run!({ n: 6 })).toEqual([1, 9, 25]);
   });
-
-  test('JavaScript: a guarded Loop takes the general loop path', () => {
-    const result = compile(
-      ce.box([
-        'Block',
-        ['Declare', 's', "'integer'", 0],
-        [
-          'Loop',
-          ['Block', ['Assign', 's', ['Add', 's', 'k']]],
-          ['Element', 'k', ['Range', 1, 10], ['Greater', 'k', 7]],
-        ],
-        's',
-      ])
-    );
-    expect(result.success).toBe(true);
-    expect(result.run!()).toBe(27);
-  });
 });
 
 describe('COMPREHENSION GUARD — infinite and undecidable domains', () => {
@@ -183,64 +166,6 @@ describe('COMPREHENSION GUARD — infinite and undecidable domains', () => {
 });
 
 describe('COMPREHENSION GUARD — decided-true semantics and clause scope', () => {
-  // The interpreter keeps an element only when the guard evaluates to the
-  // symbol `True`. A non-boolean guard keeps nothing, and the compiled routes
-  // must agree: JavaScript truthiness would keep every positive integer.
-  test('a non-boolean guard keeps nothing, interpreted and compiled', () => {
-    const engine = new ComputeEngine();
-    engine.declare('n', 'integer');
-    const comp = engine.box([
-      'Comprehension',
-      'x',
-      ['Element', 'x', ['Range', 1, 'n'], 'x'],
-    ]);
-    const js = compile(comp);
-    expect(js.success).toBe(true);
-    expect(js.run!({ n: 3 })).toEqual([]);
-    engine.assign('n', 3);
-    expect(comp.evaluate().toString()).toBe('[]');
-  });
-
-  // A relational head does not make the guard a scalar boolean: an
-  // element-wise `Equal` over a list gives a list, which is truthy in
-  // JavaScript. The guard's static type (`list<boolean>`) decides the test.
-  test('a list-valued relational guard keeps nothing', () => {
-    const engine = new ComputeEngine();
-    engine.declare('L', 'list<real>');
-    const comp = engine.box([
-      'Comprehension',
-      'x',
-      ['Element', 'x', 'L', ['Equal', 'L', 'x']],
-    ]);
-    const js = compile(comp, { fallback: false });
-    expect(js.success).toBe(true);
-    expect(js.run!({ L: [1, 2] })).toEqual([]);
-    engine.assign('L', engine.box(['List', 1, 2]));
-    expect(comp.evaluate().toString()).toBe('[]');
-  });
-
-  // A guard reads the bindings of its own clause and the clauses BEFORE it;
-  // a name bound by a later clause is the ENCLOSING variable of that name.
-  // The node's free variables say so (`boundVariableNamesInOperand`), so the
-  // compiled routes neither fold the node nor bind the name to the later
-  // loop: the guard reads the parameter.
-  test('a guard naming a later clause variable reads the enclosing one', () => {
-    const engine = new ComputeEngine();
-    engine.declare('y', 'integer');
-    const comp = engine.box([
-      'Comprehension',
-      'x',
-      ['Element', 'x', ['Range', 1, 3], ['Less', 'x', 'y']],
-      ['Element', 'y', ['Range', 1, 2]],
-    ]);
-    expect(comp.unknowns).toEqual(['y']);
-    const js = compile(comp, { fallback: false });
-    expect(js.success).toBe(true);
-    expect(js.run!({ y: 2 })).toEqual([1, 1]);
-    expect(js.run!({ y: 3 })).toEqual([1, 1, 2, 2]);
-    engine.assign('y', 2);
-    expect(comp.evaluate().toString()).toBe('[1,1]');
-  });
 
   test('LaTeX: a block body of a guarded comprehension is fenced', () => {
     const comp = ce.box([

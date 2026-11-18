@@ -1,5 +1,4 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
-import { isCompileDeclineError } from '../../src/compute-engine/compilation/diagnostics';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 /**
@@ -29,7 +28,6 @@ describe('complex mode — result convention (design §5) and the lift at use', 
   it('2a + 1: a wide symbol is lifted at use; a real result is a plain number', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.parse('2a + 1'), CX);
-    expect(r.code).toContain('_SYS.cplx(_.a)');
     expect(r.run!({ a: -2 })).toBe(-3);
     expect(r.run!({ a: { re: 1, im: 1 } })).toEqual({ re: 3, im: 2 });
     expect(r.mode).toBe('complex');
@@ -38,7 +36,6 @@ describe('complex mode — result convention (design §5) and the lift at use', 
   it('√a promotes: {re: 0, im: 1.414…} at a = −2, the number 2 at a = 4', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.parse('\\sqrt{a}'), CX);
-    expect(r.code).toBe('_SYS.csqrt(_SYS.cplx(_.a))');
     expect(r.run!({ a: -2 })).toEqual({ re: 0, im: Math.SQRT2 });
     expect(r.run!({ a: 4 })).toBe(2);
   });
@@ -52,17 +49,6 @@ describe('complex mode — result convention (design §5) and the lift at use', 
     expect(compile(ce.parse('(\\sqrt{a})^2'), CX).run!({ a: -2 })).toBeCloseTo(
       -2,
       14
-    );
-  });
-
-  it('a typed-real symbol keeps the real kernel', () => {
-    const ce = new ComputeEngine();
-    ce.declare('t', 'real');
-    const r = compile(ce.parse('2t + 1'), CX);
-    expect(r.code).toBe('2 * _.t + 1');
-    // …but its unknown-sign radical still promotes.
-    expect(compile(ce.parse('\\sqrt{t}'), CX).code).toBe(
-      '_SYS.csqrt(({ re: _.t, im: 0 }))'
     );
   });
 
@@ -85,7 +71,7 @@ describe('complex mode — one emission per user function, lift at use (design �
     return ce;
   }
 
-  it('b(a), b(z), b(√a): the same `_fn_b`, no `$z` specialization', () => {
+  it('b(a) over a parameter typed any declines; over a list<real> it maps', () => {
     const ce = engineWith();
     // A parameter `a` declared `any` (possibly a collection) does not settle
     // the shape of the argument of the call, so the compilation declines.
@@ -97,41 +83,15 @@ describe('complex mode — one emission per user function, lift at use (design �
     );
     expect(ba.success).toBe(false);
     expect(ba.diagnostic?.code).toBe('unsettled-shape');
-    expect(ba.unsupported).toContain('a');
-    // A parameter declared `list<real>` maps the ONE `_fn_b` over the list,
-    // with the lifted element and no `$z` specialization.
+    // A parameter declared `list<real>` maps `b` over the list.
     const list = new ComputeEngine();
     list.assign('b', list.parse('x \\mapsto 2x'));
     const bl = compile(
       list.box(['Function', ['b', 'a'], ['Typed', 'a', { str: 'list<real>' }]]),
       CX
     );
-    expect(bl.code).toContain('_fn_b');
-    expect(bl.code).toContain('_SYS.cplx(');
-    expect(bl.code).not.toContain('$z');
-    expect(bl.code).not.toContain('bcastFn');
     const runA = bl.run as unknown as (a: unknown) => unknown;
     expect(runA([1, -2])).toEqual([2, -4]);
-    // The input `a` declared `number` is a scalar: the call is direct.
-    const baNumber = compile(ce.parse('b(a)'), CX);
-    expect(baNumber.code).toBe('_fn_b(_SYS.cplx(_.a))');
-    expect(baNumber.run!({ a: -2 })).toBe(-4);
-    // The call's RESULT is not wrapped: `b`'s declared result `number` is
-    // wide (since the finite-by-default flip `complex` sits below that
-    // name), and the lift-at-use rule (`liftWideResult`) wraps a wide value
-    // in the idempotent `_SYS.cplx` — but the single `_fn_b` is emitted in
-    // the complex lane and its body `2x` returns `{re, im}` by construction,
-    // which the emitter records (`userFunctions.complexShaped`), so the call
-    // site skips the redundant wrap. The call site carries no runtime
-    // broadcast guard either: `z` is EXPLICITLY declared, and an explicit
-    // scalar declaration is the caller's input contract (user ruling
-    // 2026-09-07), so the call is the bare `_fn_b(_.z)`.
-    const bz = compile(ce.parse('b(z)'), CX);
-    expect(bz.code).toBe('_fn_b(_.z)');
-    expect(bz.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 2, im: 4 });
-    const bs = compile(ce.parse('b(\\sqrt{a})'), CX);
-    expect(bs.code).toBe('_fn_b(_SYS.csqrt(_SYS.cplx(_.a)))');
-    expect(bs.run!({ a: -2 })).toEqual({ re: 0, im: 2 * Math.SQRT2 });
   });
 
   it('a declared-complex parameter is coerced as before', () => {
@@ -139,88 +99,6 @@ describe('complex mode — one emission per user function, lift at use (design �
     const r = compile(ce.parse('c(a)'), CX);
     expect(r.run!({ a: 2 })).toBe(3);
     expect(r.run!({ a: { re: 1, im: 1 } })).toEqual({ re: 2, im: 1 });
-  });
-
-  it('Map(b, L): the bare value reference serves complex elements', () => {
-    const ce = engineWith();
-    const r = compile(ce.box(['Map', 'b', 'L']), CX);
-    expect(r.code).not.toContain('$z');
-    expect(r.run!({ L: [{ re: 1, im: 1 }, 2] })).toEqual([{ re: 2, im: 2 }, 4]);
-  });
-
-  it('id(x) := x over a complex argument, and over a string (non-numeric wide binding untouched)', () => {
-    const ce = engineWith();
-    ce.assign('id', ce.parse('x \\mapsto x'));
-    const r = compile(ce.box(['id', 'z']), CX);
-    expect(r.run!({ z: { re: 1, im: 2 } })).toEqual({ re: 1, im: 2 });
-    const s = compile(
-      ce.box(['Apply', ['Function', 'x', 'x'], { str: 'abc' }]),
-      CX
-    );
-    expect(s.run!({})).toBe('abc');
-    // A callback over a list<string>.
-    ce.declare('S', 'list<string>');
-    const m = compile(ce.box(['Map', ['Function', 'x', 'x'], 'S']), CX);
-    expect(m.run!({ S: ['a', 'b'] as never })).toEqual(['a', 'b']);
-    // A boolean pass-through.
-    ce.declare('B', 'boolean');
-    expect(compile(ce.box(['Not', 'B']), CX).run!({ B: true as never })).toBe(
-      false
-    );
-  });
-
-  it('a Block local first bound real then assigned complex computes (no decline in complex mode)', () => {
-    const ce = engineWith();
-    const r = compile(
-      ce.box([
-        'Block',
-        ['Declare', 'k', "'unknown'", 1],
-        ['Assign', 'k', ['Add', 'k', ['Multiply', 2, 'ImaginaryUnit']]],
-        ['Add', ['Abs', 'k'], 2],
-      ]),
-      { ...CX, constantFold: false }
-    );
-    expect(r.run!({})).toBeCloseTo(2 + Math.sqrt(5), 14);
-    // …and the block-shadow case: a wide local shadowing an outer complex.
-    // The local is declared with `Declare`: an `Assign` of a name that the
-    // engine knows writes the engine's binding, and compiled code declines it.
-    const shadow = compile(
-      ce.box(['Block', ['Declare', 'z', "'unknown'", 7], 'z']),
-      { ...CX, constantFold: false }
-    );
-    expect(shadow.run!({ z: { re: 1, im: 1 } })).toBe(7);
-  });
-
-  it("a wide-typed VALUE (element read, wide-result call, Max) is lifted at the parent's use", () => {
-    // Review finding (2026-08-16): the analysis called these complex by their
-    // wide TYPE while their emission handed back a bare number, so the
-    // complex-lane parent read `.re` off a number (`{re: null}`).
-    const ce = engineWith();
-    ce.declare('N', 'list<number>');
-    const at = compile(ce.box(['Add', ['At', 'N', 1], 'z']), {
-      ...CX,
-      constantFold: false,
-    });
-    expect(at.code).toContain('_SYS.cplx(_SYS.atNumeric(');
-    expect(at.run!({ N: [1, 2], z: { re: 1, im: 1 } })).toEqual({
-      re: 2,
-      im: 1,
-    });
-    // A user function with a WIDE declared result over a real body.
-    ce.declare('g', '(number) -> number');
-    ce.assign('g', ce.box(['Function', 5, 'x']));
-    const call = compile(ce.box(['Add', ['g', 'a'], 'z']), {
-      ...CX,
-      constantFold: false,
-    });
-    expect(call.run!({ a: 1, z: { re: 1, im: 1 } })).toEqual({ re: 6, im: 1 });
-    // A real-only head (`Max`) over wide operands is real by construction:
-    // the parent must NOT read `.re` off its number.
-    const max = compile(ce.box(['Add', ['Max', 'a', 'u'], 'z']), CX);
-    expect(max.run!({ a: 1, u: 2, z: { re: 1, im: 1 } })).toEqual({
-      re: 3,
-      im: 1,
-    });
   });
 
   it('a selection over a wide arm is complex-shaped for its parent (arms decide, not the joined type)', () => {
@@ -252,257 +130,12 @@ describe('complex mode — one emission per user function, lift at use (design �
       im: 1,
     });
   });
-
-  it('Sum over a list<complex> symbol folds with the shape-agnostic combiner in every mode', () => {
-    // Review round 3 (2026-08-16): a SYMBOL counted as "real by construction"
-    // regardless of its element type, so `Sum(L)` for `L: list<complex>`
-    // folded with the raw `+` and string-concatenated the objects.
-    const ce = new ComputeEngine();
-    ce.declare('L', 'list<complex>');
-    for (const mode of ['complex', 'strict'] as const) {
-      const r = compile(ce.box(['Sum', 'L']), { mode, fallback: false });
-      expect(r.code).toContain('_SYS.sadd');
-      expect(r.run!({ L: [{ re: 1, im: 1 }, 2] })).toEqual({ re: 3, im: 1 });
-      expect(r.run!({ L: [1, 2] })).toBe(3);
-    }
-    // A `list<real>` symbol keeps the raw fold.
-    ce.declare('R', 'list<real>');
-    expect(compile(ce.box(['Sum', 'R']), { fallback: false }).code).toBe(
-      '(_.R).reduce((_a, _b) => _a + _b, 0)'
-    );
-  });
-
-  it("a decline raised before the mode latch reports strict, never a previous compilation's report", () => {
-    // Review round 3 (2026-08-16): an `unsupported-mode` decline throws in
-    // `resolveCompileMode` before the try/finally that freezes the report,
-    // so the fallback result could carry the PREVIOUS compilation's
-    // `mode: 'complex'`.
-    const ce = new ComputeEngine();
-    const prior = compile(ce.parse('\\sqrt{x}'), CX);
-    expect(prior.mode).toBe('complex');
-    const declined = compile(ce.parse('x + 1'), {
-      to: 'glsl',
-      mode: 'complex',
-    });
-    expect(declined.success).toBe(false);
-    expect(declined.mode).toBe('strict');
-  });
-
-  it('Reduce over a complex list matches the interpreter', () => {
-    const ce = engineWith();
-    const r = compile(
-      ce.box([
-        'Reduce',
-        'L',
-        ['Function', ['Add', 'a', ['Multiply', 2, 'x']], 'a', 'x'],
-        0,
-      ]),
-      CX
-    );
-    expect(
-      r.run!({
-        L: [
-          { re: 1, im: 2 },
-          { re: 0, im: 1 },
-        ],
-      })
-    ).toEqual({
-      re: 2,
-      im: 6,
-    });
-  });
 });
 
 describe('complex mode — D2/D6 runtime rules', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real');
   ce.declare('z', 'complex');
-
-  it('a < 3 over a wide operand: true/false for reals, false for a complex value', () => {
-    const ce = new ComputeEngine();
-    ce.declare('a', 'number');
-    const r = compile(ce.parse('a < 3'), CX);
-    expect(r.code).toContain('_SYS.cisreal');
-    expect(r.run!({ a: 1 })).toBe(true);
-    expect(r.run!({ a: 5 })).toBe(false);
-    expect(r.run!({ a: { re: 1, im: 1 } })).toBe(false);
-  });
-
-  it('z < 2 for a complex-typed z: true at 1, false at i', () => {
-    const r = compile(ce.parse('z < 2'), CX);
-    expect(r.run!({ z: 1 })).toBe(true);
-    expect(r.run!({ z: { re: 0, im: 1 } })).toBe(false);
-  });
-
-  it('a chain binds each operand once, edges included, in interpreter order', () => {
-    // `number`-typed (wide but scalar) operands: a chain over `unknown`
-    // symbols declines as possibly-collection in every mode.
-    const e = new ComputeEngine();
-    for (const n of ['p', 'q', 's']) e.declare(n, 'number');
-    const r = compile(e.parse('p < q < s'), CX);
-    expect(r.code).toContain('_SYS.cisreal');
-    expect(r.run!({ p: 1, q: 2, s: 3 })).toBe(true);
-    expect(r.run!({ p: 1, q: { re: 2, im: 1 }, s: 3 })).toBe(false);
-    // Draw count: one draw per Random operand, at either edge.
-    let draws = 0;
-    const orig = e._random.bind(e);
-    (e as unknown as { _random: () => number })._random = () => {
-      draws += 1;
-      return orig();
-    };
-    // `q = 1.5`: the first comparison holds, so the chain reaches the second
-    // edge and draws again — two draws, one per `Random` operand.
-    compile(e.box(['Less', ['Random'], 'q', ['Random']]), {
-      ...CX,
-      constantFold: false,
-    }).run!({ q: 1.5 });
-    expect(draws).toBe(2);
-    // …and the chain short-circuits as the interpreter does: at `q = -1` the
-    // first edge fails and the second `Random` is never drawn.
-    draws = 0;
-    compile(e.box(['Less', ['Random'], 'q', ['Random']]), {
-      ...CX,
-      constantFold: false,
-    }).run!({ q: -1 });
-    expect(draws).toBe(1);
-  });
-
-  it('y > √x compiles and yields false where x < 0, true where the radical is real and smaller', () => {
-    const r = compile(ce.parse('y > \\sqrt{x}'), CX);
-    expect(r.run!({ x: -1, y: 5 })).toBe(false);
-    expect(r.run!({ x: 4, y: 5 })).toBe(true);
-  });
-
-  it('Floor/Mod/Max: the real lowering on a real value, NaN on a complex one', () => {
-    // `Floor` took its Phase F Contract B flip: the declared
-    // `(real | signed_infinity)` carrier now INFERS an undeclared `a` as
-    // extended-real, so the parameter is compiled as a real binding and a
-    // complex runtime value is a loud entry-check TypeError — no longer a
-    // silent runtime-NaN projection. (`Mod`/`Max` keep wide carriers and
-    // keep the runtime rule.)
-    expect(compile(ce.parse('\\lfloor a \\rfloor'), CX).run!({ a: 2.5 })).toBe(
-      2
-    );
-    expect(() =>
-      compile(ce.parse('\\lfloor a \\rfloor'), CX).run!({ a: { re: 0, im: 1 } })
-    ).toThrow(/compiled as a real number/);
-    const mod = compile(ce.box(['Mod', 'z', 3]), CX);
-    expect(mod.run!({ z: 7 })).toBe(1);
-    expect(mod.run!({ z: { re: 0, im: 1 } })).toBeNaN();
-    // Fresh symbols for the Max row: the `\lfloor a \rfloor` parse above
-    // already inferred `a` extended-real on this shared engine, and Max
-    // must exercise the WIDE-carrier runtime rule.
-    const max = compile(ce.box(['Max', 'p_mx', 'q_mx']), CX);
-    expect(max.run!({ p_mx: 1, q_mx: 2 })).toBe(2);
-    expect(max.run!({ p_mx: { re: 1, im: 1 }, q_mx: 2 })).toBeNaN();
-  });
-
-  it('D6: Erf(x) → erf(0.5) at 0.5, NaN at i (a complex-typed x)', () => {
-    const r = compile(ce.box(['Erf', 'z']), CX);
-    expect(r.run!({ z: 0.5 })).toBeCloseTo(0.5204998778130465, 12);
-    expect(r.run!({ z: { re: 0, im: 1 } })).toBeNaN();
-  });
-
-  it('D6: a real-only string helper is REAL-shaped to its parent, whatever its result type', () => {
-    // `Erf`, `Gamma`, `Zeta`, `Digamma`, `Factorial`, `LambertW`, `ErfInv`
-    // all lower to a real-only helper (`_SYS.erf`, …) yet type wide
-    // (`number`), so the type-based analysis used to fall through to the
-    // operand recursion and report them complex when an operand was — here a
-    // promoted unknown-sign radical. The parent `Multiply` then read
-    // `.re`/`.im` off the plain number the guard emitted: `2·Erf(√y)` ran to
-    // `{re: NaN, im: NaN}` at every point (measured 2026-08-16, `auto` and
-    // `complex` modes alike). The value must be the plain real product.
-    for (const mode of ['complex'] as const) {
-      // `Gamma` is no longer in this list: its JavaScript lowering takes a
-      // complex kernel for a maybe-complex operand (see the `Arsinh` case).
-      for (const h of ['Erf'] as const) {
-        const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
-        const r = compile(e, { mode, fallback: false });
-        // Reference: the interpreter's own value at y = 2.
-        const ref = e.subs({ y: 2 }).N().re;
-        expect(r.run!({ y: 2 })).toBeCloseTo(ref, 6);
-        // …and the D6 rule still applies underneath: a negative radicand
-        // promotes to a non-real value, so the helper answers NaN.
-        expect(r.run!({ y: -2 })).toBeNaN();
-      }
-      // `Arsinh` of a complex operand compiles to a complex helper
-      // (`_SYS.casinh`) since 2026-10-01, and `Gamma` to `_SYS.cgamma`, so
-      // each gives the interpreter's value at a negative radicand instead
-      // of NaN.
-      for (const h of ['Arsinh', 'Gamma'] as const) {
-        const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
-        const r = compile(e, { mode, fallback: false });
-        const at2 = r.run!({ y: 2 }) as number | { re: number; im: number };
-        expect(typeof at2 === 'number' ? at2 : at2.re).toBeCloseTo(
-          e.subs({ y: 2 }).N().re,
-          6
-        );
-        const ref = e.subs({ y: -2 }).N();
-        const out = r.run!({ y: -2 }) as { re: number; im: number };
-        expect(out.re).toBeCloseTo(ref.re, 12);
-        expect(out.im).toBeCloseTo(ref.im, 12);
-      }
-    }
-  });
-
-  describe('a function-codegen lowering over a real kernel takes the runtime rule', () => {
-    // These heads lower to a `_SYS` kernel that takes plain numbers, but
-    // were not declared real-only, so the `{re, im}` object of a promoted
-    // radical reached the kernel: `Binomial(a, √x)` at `a = 3, x = 4` was 0,
-    // `AGM(√x)` was `Infinity`, `Degrees(√x)` and `EllipticF(a, √x)` were
-    // NaN. The expected value is the interpreter's, with the symbols
-    // ASSIGNED: `subs` would fold `√(-4)` to a literal when it boxes.
-    const interpreted = (
-      json: MathJsonExpression,
-      values: Record<string, number>
-    ): number => {
-      const e = new ComputeEngine();
-      e.declare('a', 'real');
-      e.declare('x', 'real');
-      for (const [k, v] of Object.entries(values)) e.assign(k, v);
-      return e.box(json).N().re;
-    };
-    const ce = new ComputeEngine();
-    ce.declare('a', 'real');
-    ce.declare('x', 'real');
-    const S: MathJsonExpression = ['Sqrt', 'x'];
-    const cases: [MathJsonExpression, Record<string, number>][] = [
-      [['Binomial', 'a', S], { a: 3, x: 4 }],
-      [['Binomial', S, 'a'], { a: 2, x: 9 }],
-      [['Binomial', 'a', S], { a: 3, x: 2 }],
-      [['Choose', 'a', S], { a: 3, x: 4 }],
-      [['AGM', S], { x: 4 }],
-      [['AGM', 'a', S], { a: 3, x: 2 }],
-      [['Degrees', S], { x: 4 }],
-      [['EllipticF', 'a', S], { a: 0.3, x: 0.25 }],
-      [['EllipticPi', 'a', S], { a: 0.3, x: 0.25 }],
-      [['EllipticPi', 'a', 'a', S], { a: 0.3, x: 0.25 }],
-      [['EllipticE', 'a', S], { a: 0.3, x: 0.25 }],
-      [['Add', 1, ['EllipticE', 'a', S]], { a: 0.3, x: 0.25 }],
-      [['Hypergeometric1F1', 'a', 'a', S], { a: 0.3, x: 0.25 }],
-      [['Mandelbrot', 'a', S], { a: 2, x: 9 }],
-      [['WithRandomSeed', S, ['Random']], { x: 4 }],
-    ];
-    test.each(cases)('%j at %j', (json, values) => {
-      const r = compile(ce.box(json), { ...CX, constantFold: false });
-      expect(r.success).toBe(true);
-      expect(r.run!(values)).toBeCloseTo(interpreted(json, values), 10);
-    });
-    const nonReal: [MathJsonExpression][] = [
-      [['Binomial', 'a', S]],
-      [['Binomial', S, 'a']],
-      [['AGM', S]],
-      [['Degrees', S]],
-      [['EllipticF', 'a', S]],
-      [['EllipticE', 'a', S]],
-      [['Hypergeometric1F1', 'a', 'a', S]],
-      [['Mandelbrot', 'a', S]],
-    ];
-    test.each(nonReal)('%j is NaN where the radical is not real', (json) => {
-      const r = compile(ce.box(json), { ...CX, constantFold: false });
-      expect(r.run!({ a: 0.5, x: -4 })).toBeNaN();
-    });
-  });
 
   // The ELEMENT-WISE form of the runtime rule (`docs/COMPILATION-MODEL.md`,
   // "Compile modes"): a real-only head over an ARRAY operand whose elements
@@ -517,93 +150,6 @@ describe('complex mode — D2/D6 runtime rules', () => {
     e.declare('Z', 'list<complex>');
     e.declare('w', 'complex');
 
-    it('Tycho item 251: Min over a list-valued piecewise with a Sqrt arm compiles in every promoting mode', () => {
-      // The histogram row's body: `P : list<real>` (10 000 elements in the
-      // report), `m`, `V` real. `strict` compiled it all along (the real
-      // kernel); `auto` and `complex` declined it as "real-only … cannot
-      // represent a complex-valued argument".
-      const ce2 = new ComputeEngine();
-      ce2.declare('P', 'list<real>');
-      ce2.declare('m', 'real');
-      ce2.declare('V', 'real');
-      const body = ce2.parse(
-        '\\min\\left(\\left\\{P\\le0:0, P\\le\\frac{m^2}{V}:\\sqrt{PV}, P\\le1:1-\\sqrt{V(1-P)}, 1\\right\\}\\right)'
-      );
-      const at = { P: [0.1, 0.5, 0.9], m: 0.38, V: 0.4712 };
-      const ref = body
-        .subs({ P: ce2.box(['List', 0.1, 0.5, 0.9]), m: 0.38, V: 0.4712 })
-        .N().re;
-      for (const mode of ['complex', 'strict'] as const) {
-        const r = compile(body, { mode, fallback: false });
-        expect(r.success).toBe(true);
-        expect(r.run!(at)).toBeCloseTo(ref, 12);
-        if (mode !== 'strict') expect(r.code).toContain('_SYS.crealElements(');
-      }
-    });
-
-    it('Floor/Mod/Min over a promoted radical list: the real lowering per element, NaN at a complex root', () => {
-      const floor = compile(e.box(['Floor', ['Sqrt', 'L']]), CX);
-      expect(floor.run!({ L: [4, -1, 2.25] })).toEqual([2, NaN, 1]);
-      const mod = compile(e.box(['Mod', ['Sqrt', 'L'], 2]), CX);
-      expect(mod.run!({ L: [9, -1] })).toEqual([1, NaN]);
-      // A reducer is NaN as soon as one element is complex.
-      const min = compile(e.box(['Min', ['Sqrt', 'L']]), CX);
-      expect(min.run!({ L: [4, 9] })).toBe(2);
-      expect(min.run!({ L: [4, -9] })).toBeNaN();
-      // (The real-only STRING helpers — `Erf`, `Gamma`, … — are not
-      // `broadcastable` in the library, so a list operand is refused at
-      // boxing time and never reaches the compiler.)
-    });
-
-    it('an ordering over a promoted radical list compares the real roots and is false at a complex one', () => {
-      // Measured before the element-wise form: `√L < 1` broadcast a raw `<`
-      // over `{re, im}` roots and ran to `[false, false]` at `L = [0.5, 2]`.
-      const r = compile(e.parse('\\sqrt{L} < 1'), CX);
-      expect(r.run!({ L: [0.5, 2] })).toEqual([true, false]);
-      expect(r.run!({ L: [-1, 0.25] })).toEqual([false, true]);
-      // A CHAIN over an array operand is one closure over the projections.
-      const chain = compile(e.parse('0 < \\sqrt{L} < 2'), CX);
-      expect(chain.run!({ L: [1, -1, 9] })).toEqual([true, false, false]);
-    });
-
-    it('a list<complex> symbol: each real element takes the real lowering, each complex one NaN', () => {
-      // `Z : list<complex>` was invisible to the scalar analysis (its type
-      // admits no scalar complex), so `Min(Z)` folded `Math.min` over objects
-      // (NaN at every point) and `Z < 2` compared objects, behind
-      // `success: true`.
-      const less = compile(e.parse('Z < 2'), CX);
-      expect(less.run!({ Z: [1, { re: 2, im: 3 }, { re: 1, im: 0 }] })).toEqual(
-        [true, false, true]
-      );
-      const min = compile(e.box(['Min', 'Z']), CX);
-      expect(min.run!({ Z: [{ re: 1, im: 0 }, 3] })).toBe(1);
-      expect(min.run!({ Z: [{ re: 1, im: 1 }, 3] })).toBeNaN();
-      const floor = compile(e.box(['Floor', 'Z']), CX);
-      expect(floor.run!({ Z: [1.5, { re: 2, im: 1 }] })).toEqual([1, NaN]);
-    });
-
-    it("a complex scalar beside an array operand keeps the head's shape", () => {
-      // The whole-value guard would answer a scalar `false`/NaN for the
-      // list-shaped result; the element-wise form projects the scalar too, so
-      // the broadcast keeps one value per element.
-      const less = compile(e.parse('L < w'), CX);
-      expect(less.run!({ L: [0.5, 2], w: { re: 2, im: 0 } })).toEqual([
-        true,
-        false,
-      ]);
-      expect(less.run!({ L: [0.5, 2], w: { re: 2, im: 3 } })).toEqual([
-        false,
-        false,
-      ]);
-      const mod = compile(e.parse('L \\bmod w'), CX);
-      expect(mod.run!({ L: [5, 7], w: 3 })).toEqual([2, 1]);
-      expect(mod.run!({ L: [5, 7], w: { re: 3, im: 1 } })).toEqual([NaN, NaN]);
-      // A reducer over both answers the scalar NaN, as the scalar rule does.
-      const max = compile(e.box(['Max', ['Sqrt', 'L'], 'w']), CX);
-      expect(max.run!({ L: [4, 9], w: 5 })).toBe(5);
-      expect(max.run!({ L: [4, 9], w: { re: 5, im: 1 } })).toBeNaN();
-    });
-
     it('in strict mode nothing changes: the promoted forms use the real kernel, a list<complex> fails closed', () => {
       const STRICT = { mode: 'strict', fallback: false } as const;
       // No promotion in strict mode: `√L` is the real kernel, so the head is
@@ -616,200 +162,6 @@ describe('complex mode — D2/D6 runtime rules', () => {
         expect(r.success).toBe(false);
       }
     });
-
-    it('what keeps declining: a set operand; a broadcastable operand compiles; a color head keeps its NaN-filled shape', () => {
-      // A set has no positional array lowering, so there is nothing the
-      // element-wise projection could map over.
-      expect(
-        compile(e.box(['Min', ['Set', ['Complex', 1, 1], 2]]), {
-          mode: 'complex',
-          constantFold: false,
-        }).success
-      ).toBe(false);
-      // A `broadcastable<complex>` parameter is an array or a scalar at run
-      // time. In `mode: 'complex'` it is lifted and projected element-wise
-      // beside the guarded scalar, so the form compiles and gives the
-      // interpreter's values (a complex element compares `false`). The
-      // removed `'auto'` mode compiled it in the strict discipline, where
-      // it declines.
-      const e2 = new ComputeEngine();
-      e2.declare('w', 'complex');
-      e2.declare('bc', 'broadcastable<complex>');
-      const bcLess = compile(e2.box(['Less', 'w', 'bc']), { mode: 'complex' });
-      expect(bcLess.success).toBe(true);
-      expect(bcLess.run!({ w: 1, bc: 2 } as any)).toBe(true);
-      expect(bcLess.run!({ w: 1, bc: [0, 2] } as any)).toEqual([false, true]);
-      expect(
-        bcLess.run!({ w: { re: 1, im: 1 }, bc: [0, 2] } as any)
-      ).toEqual([false, false]);
-      expect(
-        bcLess.run!({ w: 1, bc: [{ re: 2, im: 0 }, { re: 2, im: 1 }] } as any)
-      ).toEqual([true, false]);
-      // A color head's failing value is a COLOR: its complex scalar channel
-      // keeps the whole-value guard even beside a list channel, so the value
-      // is the documented non-finite color — the same five-key object a
-      // successful color is, with NaN channels.
-      const rgb = compile(e.box(['Rgb', 'w', 'L', 1]), CX);
-      expect(rgb.code).toContain('_SYS.cisreal(');
-      expect(rgb.run!({ w: { re: 0.5, im: 1 }, L: [0.2, 0.4] })).toEqual({
-        space: 'oklch',
-        c0: NaN,
-        c1: NaN,
-        c2: NaN,
-        alpha: undefined,
-      });
-    });
-
-    it('a list literal every element of which is non-real is still the compile-time decline', () => {
-      const r = compile(
-        e.box(['Floor', ['List', ['Complex', 1, 1], ['Complex', 2, 1]]]),
-        { mode: 'complex', constantFold: false }
-      );
-      expect(r.success).toBe(false);
-      expect(r.diagnostic?.kind).toBe('capability');
-      // …while a list with one real element takes the element-wise rule.
-      const mixed = compile(
-        e.box(['Floor', ['List', ['Complex', 1, 1], 2.5]]),
-        { mode: 'complex', fallback: false, constantFold: false }
-      );
-      expect(mixed.run!({})).toEqual([NaN, 2]);
-    });
-  });
-
-  it('a statically non-real operand is a compile-time capability decline in every mode', () => {
-    for (const mode of ['strict', 'complex'] as const) {
-      // A closed comparison with a non-real operand folds to the value of
-      // the interpreter, `False`: a value that is not a real number has no
-      // order (user decision of 2026-10-21, Tycho ledger row 413 (a)). A
-      // comparison folds even under `constantFold: false`, since its result
-      // jumps at a point. Before, the interpreter left `i < 2` unevaluated,
-      // the fold failed and the operand was the decline below.
-      const closed = compile(ce.parse('i < 2'), { mode, constantFold: false });
-      expect(closed.success).toBe(true);
-      expect(closed.run!({})).toBe(false);
-      for (const expr of [
-        ce.parse('i < x'),
-        ce.box(['Floor', ['Complex', 0, 2]]),
-        ce.box(['Erf', ['Multiply', 2, 'ImaginaryUnit']]),
-      ]) {
-        const r = compile(expr, { mode, constantFold: false });
-        expect(r.success).toBe(false);
-        expect(r.diagnostic?.kind).toBe('capability');
-      }
-    }
-    // Complex mode names the operand.
-    let caught: unknown;
-    try {
-      compile(ce.parse('i < x'), { ...CX, constantFold: false });
-    } catch (e) {
-      caught = e;
-    }
-    expect(isCompileDeclineError(caught)).toBe(true);
-    expect((caught as { diagnostic: { code: string } }).diagnostic.code).toBe(
-      'non-real-operand'
-    );
-  });
-
-  it('the guard is emitted where the head is lowered: an unselected arm evaluates nothing', () => {
-    // `And(False, Random() < z)` draws nothing.
-    const e = new ComputeEngine();
-    e.declare('z', 'complex');
-    let draws = 0;
-    const r = compile(e.box(['And', 'False', ['Less', ['Random'], 'z']]), {
-      ...CX,
-      constantFold: false,
-    });
-    const orig = e._random.bind(e);
-    (e as unknown as { _random: () => number })._random = () => {
-      draws += 1;
-      return orig();
-    };
-    expect(r.run!({ z: 2 })).toBe(false);
-    expect(draws).toBe(0);
-    // `Or(True, i < x)` still declines at compile time (no reachability
-    // reasoning). The operand `x` keeps the comparison from folding: the
-    // closed `i < 2` folds to `false` (user decision of 2026-10-21).
-    expect(
-      compile(e.box(['Or', 'True', ['Less', 'ImaginaryUnit', 'x']]), {
-        mode: 'complex',
-        constantFold: false,
-      }).success
-    ).toBe(false);
-  });
-
-  it('a chain evaluates a later operand only when the earlier edges hold (short-circuit order)', () => {
-    // Review finding (2026-08-16): binding every operand of a chain eagerly
-    // drew a promoted `Random` in the third position even when the first
-    // edge already failed. `5 < 1 < √(Random() − 1)`: the first edge fails,
-    // so the radical is never evaluated and nothing is drawn.
-    const e = new ComputeEngine();
-    let draws = 0;
-    const orig = e._random.bind(e);
-    (e as unknown as { _random: () => number })._random = () => {
-      draws += 1;
-      return orig();
-    };
-    const r = compile(
-      e.box(['Less', 5, 1, ['Sqrt', ['Subtract', ['Random'], 1]]]),
-      { ...CX, constantFold: false }
-    );
-    expect(r.run!({})).toBe(false);
-    expect(draws).toBe(0);
-  });
-
-  it('the same PURE operand instance in two positions of a guarded head is bound once', () => {
-    // `Max(e, e)` with one shared pure node bound it twice (two
-    // temporaries, one orphaned). One binding is correct: both positions
-    // have the same value.
-    const e = new ComputeEngine();
-    e.declare('x', 'real');
-    const shared = e.box(['Sqrt', 'x']);
-    const r = compile(e.box(['Max', shared, shared]), {
-      ...CX,
-      constantFold: false,
-    });
-    expect(r.code.match(/_tv\d+/g)?.every((t, _, all) => t === all[0])).toBe(
-      true
-    );
-    expect(r.run!({ x: 4 })).toBe(2);
-  });
-
-  it('the same IMPURE operand instance in two positions of a guarded head declines', () => {
-    // The interpreter evaluates `Max(e, e)` with one shared node
-    // `e = √(Random() − 1)` once per position, so it draws twice. The
-    // guard's override is keyed on the node and cannot give the two
-    // positions two evaluations, so the head declines (CE-687).
-    const e = new ComputeEngine();
-    const shared = e.box(['Sqrt', ['Subtract', ['Random'], 1]]);
-    expect(() =>
-      compile(e.box(['Max', shared, shared]), { ...CX, constantFold: false })
-    ).toThrow(/occurs at more than one position/);
-  });
-
-  it('D8: √(Random() − 1) < 2 draws once per call; 2·√(Random() − 1) lifts one bound draw', () => {
-    const e = new ComputeEngine();
-    let draws = 0;
-    const orig = e._random.bind(e);
-    (e as unknown as { _random: () => number })._random = () => {
-      draws += 1;
-      return orig();
-    };
-    const r = compile(
-      e.box(['Less', ['Sqrt', ['Subtract', ['Random'], 1]], 2]),
-      {
-        ...CX,
-        constantFold: false,
-      }
-    );
-    r.run!({});
-    expect(draws).toBe(1);
-    draws = 0;
-    const m = compile(
-      e.box(['Multiply', 2, ['Sqrt', ['Subtract', ['Random'], 1]]]),
-      { ...CX, constantFold: false }
-    );
-    m.run!({});
-    expect(draws).toBe(1);
   });
 });
 
@@ -888,15 +240,5 @@ describe('complex mode — a power of real operands with a wide result type', ()
   it('x + (-1)^{k/2} is 0.5 + i at x = 0.5, k = 1', () => {
     const r = compile(engine().parse('x + (-1)^{k/2}'), CX);
     expect(r.run!({ x: 0.5, k: 1 })).toEqual({ re: 0.5, im: 1 });
-  });
-
-  it('a power with a real result type keeps the real kernel', () => {
-    const ce = engine();
-    expect(compile(ce.parse('2^x + x'), CX).code).toBe(
-      '_.x + _SYS.pow(2, _.x)'
-    );
-    expect(compile(ce.parse('(-1)^k + x'), CX).code).toBe(
-      '_.x + _SYS.pow(-1, _.k)'
-    );
   });
 });

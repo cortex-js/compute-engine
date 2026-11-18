@@ -98,20 +98,6 @@ describe('CE-213: a power whose exponent reads an assigned symbol', () => {
     expect(r.run({ y: 4, k: 4 })).toBe(4 ** 2);
   });
 
-  test('an exponent that calls a caller-overridden function is not replaced', () => {
-    // The engine evaluation of `f(k)` applies the engine body `t/2`, which
-    // gives `1/2`; the compiled code must call the caller's `f` instead.
-    const ce = new ComputeEngine();
-    ce.assign('k', 1);
-    ce.declare('f', 'function');
-    ce.assign('f', ce.parse('t \\mapsto t/2'));
-    const r = js(ce, ['Power', 'x', ['f', 'k']], {
-      functions: { f: (t: number) => 2 * t },
-    });
-    expect(r.success).toBe(true);
-    expect(r.run({ x: 3 })).toBe(9);
-  });
-
   test('a parameter of a lambda is not replaced by the value of the engine symbol', () => {
     const ce = new ComputeEngine();
     ce.assign('k', 1);

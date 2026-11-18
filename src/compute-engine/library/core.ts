@@ -1296,9 +1296,8 @@ export function pipeStageAsCall(
  * `Apply(p ↦ p[1] + p[2], [5, 7])` read `5[1]` and `7[1]` and was two
  * `incompatible-type` errors instead of `12` (issue #448).
  *
- * The shader targets use the same test for an `Apply` they compile
- * (`gpuAppliedBody` in `compilation/gpu-applied-derivative.ts`), so that the
- * compiled code and the interpreter give a result of the same shape.
+ * The shader targets use the same test for an `Apply` they compile, so that
+ * the compiled code and the interpreter give a result of the same shape.
  */
 export function literalParamsMap(sig: Type): boolean {
   if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
@@ -3424,7 +3423,7 @@ function analyzeRandomDomain(
     // distribution exists on it. Reading `isEmptyCollection` here worked only
     // while that handler wrongly called `[1, 1]` empty. This is the same test
     // the compiled path applies (`domainInterval` in
-    // `compilation/javascript-target.ts` checks `!(hi > lo)`), so interpreter
+    // `compilation/javascript-runtime.ts` checks `!(hi > lo)`), so interpreter
     // and compiler agree.
     if (!(int.start < int.end))
       return randomDomainError(ce, 'a non-empty Interval', domain);
@@ -9770,102 +9769,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
         // Fallback: return unevaluated symbolic form
         return ce._fn('EvaluateAt', [...ops]);
-      },
-      // The compiled form is the application that the value denotes:
-      // `EvaluateAt(f, a)` is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
-      // `Apply(f, b) − Apply(f, a)`, with the points counted and spread as
-      // `evaluate` above counts and spreads them. `subs()` of the variable of
-      // a `D` gives such a form (`D(x^2, x)` with `x` replaced by `y + 1`),
-      // and the `Apply` of a literal whose body is a `D` compiles the closed
-      // form of the derivative. A form that `evaluate` keeps unevaluated (no
-      // point, points that are not as many as the parameters, two bounds of
-      // a function of several variables or of a body with an `Integrate`)
-      // has no compiled form, and the compilation fails with the reason.
-      compile: (args, compile) => {
-        const [callee, lower, upper] = args;
-        const refuse = (reason: string): never => {
-          throw new Error(`Could not compile \`EvaluateAt\`: ${reason}.`);
-        };
-        if (callee === undefined || lower === undefined)
-          return refuse('there is no point at which to evaluate the function');
-        if (args.length > 3)
-          return refuse('a list of more than two points is not a point');
-        const ce = callee.engine;
-        // An expression whose parameters wait for the value of the point
-        // (`evaluateAtWaitsForPoint()`): the compiled point has as many
-        // coordinates as its type gives (a tuple type), else one.
-        // A named callee can be unbound, as in `evaluate`: its canonical form
-        // gives the definition that the counts are read from.
-        let f = isSymbol(callee) ? callee.canonical : callee;
-        if (!isSymbol(callee) && !isFunction(callee, 'Function')) {
-          const all = canonicalFunctionLiteral(callee);
-          if (isFunction(all, 'Function')) {
-            const type = lower.type.type;
-            const coordinates =
-              upper === undefined &&
-              typeof type === 'object' &&
-              type.kind === 'tuple'
-                ? type.elements.length
-                : 1;
-            f =
-              evaluateAtCallee(
-                ce,
-                callee,
-                upper === undefined ? 1 : 2,
-                coordinates,
-                all
-              ) ?? all;
-          }
-        }
-        const call = (points: ReadonlyArray<Expression>): Expression =>
-          ce.function('Apply', [f, ...points]);
-        const arity = calleeArity(f);
-        // A callee that takes no argument is a constant (see
-        // `constantCallee` in `evaluate`).
-        if (
-          isFunction(f, 'Function')
-            ? isConstantLiteral(f)
-            : arity !== undefined && arity.max === 0
-        )
-          return compile(
-            upper === undefined
-              ? call([])
-              : ce.function('Subtract', [call([]), call([])])
-          );
-        if (upper !== undefined) {
-          if (!acceptsCount(arity, 1))
-            return refuse(
-              'the bounds of a difference are for a function of one variable'
-            );
-          if (f.has('Integrate'))
-            return refuse(
-              'the function holds an integral, and its value at the bounds is not known'
-            );
-          // `evaluate` applies the function at the lower bound first, then at
-          // the upper one. The canonical form of the difference can put the
-          // two applications in the other order, so a function with an
-          // effect (a counter, a random draw) would not give the same value
-          // when compiled. Only a pure application is compiled.
-          const atUpper = call([upper]);
-          const atLower = call([lower]);
-          if (!atUpper.isPure || !atLower.isPure)
-            return refuse(
-              'the function has an effect, and the order of its applications at the two bounds is not kept'
-            );
-          return compile(ce.function('Subtract', [atUpper, atLower]));
-        }
-        if (
-          arity !== undefined &&
-          (isFunction(f, 'Function') ? arity.slots > 1 : arity.min > 1) &&
-          isFunction(lower, 'Tuple') &&
-          acceptsCount(arity, lower.nops)
-        )
-          return compile(call(lower.ops));
-        if (!acceptsCount(arity, 1))
-          return refuse(
-            'the function takes another number of arguments than the point has coordinates'
-          );
-        return compile(call([lower]));
       },
     },
 

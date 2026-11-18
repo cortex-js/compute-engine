@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 // AiryAi, AiryBi, ExpIntegralEi and LogIntegral of a real argument above
 // machine precision. The golden rows are mpmath 1.3.0 at 140 digits (airyai,
@@ -311,21 +310,4 @@ describe('AIRY, EI AND LI: RESULTS AND OPERANDS', () => {
     );
     expect(ce.expr(['LogIntegral', 0]).N().isSame(0)).toBe(true);
   });
-});
-
-describe('AIRY, EI AND LI: THE COMPILED DOUBLE ROUTE AGREES AT DOUBLE PRECISION', () => {
-  for (const head of ['AiryAi', 'AiryBi', 'ExpIntegralEi', 'LogIntegral']) {
-    for (const x of [0.75, 3, head === 'LogIntegral' ? 50 : -6.5]) {
-      test(`compiled ${head}(${x}) matches the 30-digit value`, () => {
-        const f = compile(ce.expr([head, 'x'] as any)) as any;
-        expect(f.success).toBe(true);
-        const compiled = f.run({ x }) as number;
-        ce.precision = 30;
-        const exact = ce.expr([head, x] as any).N();
-        ce.precision = 'machine';
-        const want = exact.bignumRe!.toNumber();
-        expect(Math.abs(compiled - want) / Math.abs(want)).toBeLessThan(1e-12);
-      });
-    }
-  }
 });

@@ -4,11 +4,7 @@
 // forward call reference resolves to now.
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import {
-  isFreeCallHead,
-  readBinding,
-} from '../../src/compute-engine/boxed-expression/type-guards';
+import { isFreeCallHead } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine';
 
 function engine(): ComputeEngine {
@@ -39,44 +35,6 @@ describe('binding units, rule 7 sites', () => {
       "'g'",
       "'real'",
     ]);
-  });
-
-  test('a self-call boxed before the assignment reads the function it calls', () => {
-    const ce = engine();
-    ce.declare('D', 'real');
-    ce.assign(
-      'F',
-      ce.box([
-        'Function',
-        [
-          'Block',
-          [
-            'Which',
-            ['Equal', 'n', ['Add', 'D', -1]],
-            ['List', 'n'],
-            'True',
-            ['Join', ['List', 'n'], ['F', ['Add', 'n', 1]]],
-          ],
-        ],
-        'n',
-      ])
-    );
-    // The call in the stored literal is bound to a forward call reference;
-    // `readBinding()` gives the operator definition that `F` holds now.
-    const def = ce.lookupDefinition('F');
-    expect(def !== undefined && 'operator' in def).toBe(true);
-    const literal = (def as { operator: { _lambdaLiteral?: Expression } })
-      .operator._lambdaLiteral!;
-    const selfCall = callOf(literal.op1, 'F')!;
-    const read = readBinding(selfCall);
-    expect(read !== undefined && 'operator' in read && read.operator).toBe(
-      (def as { operator: unknown }).operator
-    );
-    // The list-recursion recognizer sees the self-call.
-    const r = compile(ce.box(['F', 0]), { to: 'javascript', fallback: false });
-    expect(r.success).toBe(true);
-    expect(String(r.preamble)).toContain('_SYS.listRecursion("F"');
-    expect((r.run!({ D: 4 }) as number[][]).length).toBe(4);
   });
 
   test('a telescoping sum over a free call head telescopes', () => {

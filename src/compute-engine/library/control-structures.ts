@@ -2975,19 +2975,6 @@ function mergeMaskShapes(
 }
 
 /**
- * 1 when some condition of an element-wise conditional whose conditions have
- * the types `conds` is provably a mask and every condition that may be a
- * mask is provably flat (`elementwiseConditionShape`), and `undefined`
- * otherwise. The compiler reads it to compile a restriction by a flat mask
- * as a restriction.
- */
-export function elementwiseMaskRank(
-  conds: ReadonlyArray<Type | undefined>
-): 1 | undefined {
-  return elementwiseConditionShape(conds)?.rank;
-}
-
-/**
  * The shape of an element-wise conditional, from the TYPES of its conditions
  * (`conditionShape`): `undefined` when no condition is provably a mask (the
  * scalar typing, or the typing of a condition that is only possibly a mask,
@@ -5221,7 +5208,7 @@ const UNBINDABLE_NAMES: ReadonlySet<string> = new Set([
  *
  * A generic definition is a function declaration in this sense. The
  * compiler moves it to the front of the statement list as it moves the
- * others (`withDefineFunctionDeclares()`, `base-compiler.ts`), and the hoist
+ * others, and the hoist
  * of function names in `canonicalBlock()` makes its name a local of the
  * block. But the interpreter installs it only when its statement runs
  * (`isHoistedFunctionDefinition()`).

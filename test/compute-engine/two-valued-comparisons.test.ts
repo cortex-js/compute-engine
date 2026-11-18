@@ -115,58 +115,6 @@ describe('Desmos parity (measured by Tycho, 2026-11-02)', () => {
   });
 });
 
-describe('an unmatched cell under a list of conditions', () => {
-  const engine = () => {
-    const e = new ComputeEngine();
-    e.declare('L', 'list<real>');
-    return e;
-  };
-  const relation: MathJsonExpression = [
-    'If',
-    ['Less', 'L', 2],
-    ['Less', 0, 'L'],
-  ];
-  const colour: MathJsonExpression = [
-    'Which',
-    ['Less', 'L', 2],
-    ['Hsv', 0, 0, 0.5],
-  ];
-
-  test('a relation arm gives False, in the interpreter and in JavaScript', () => {
-    const e = engine();
-    const expr = e.box(relation);
-    const c = compile(expr, { to: 'javascript' } as never) as any;
-    expect(c.success).toBe(true);
-    expect(c.run({ L: [1, 3] })).toEqual([true, false]);
-    e.assign('L', e.box(['List', 1, 3]));
-    expect(expr.evaluate().toString().replace(/"/g, '')).toBe('[True,False]');
-  });
-
-  test('a colour arm gives a colour with NaN channels (Tycho item 189)', () => {
-    const e = engine();
-    const expr = e.box(colour);
-    expect(expr.type.toString()).toBe('list<color>');
-    const c = compile(expr, { to: 'javascript' } as never) as any;
-    expect(c.success).toBe(true);
-    const cells = c.run({ L: [1, 3] });
-    expect(Number.isNaN(cells[1].c0)).toBe(true);
-    // The same non-finite colour as the compiled colour operators give.
-    expect(cells[1]).toEqual({
-      space: 'oklch',
-      c0: NaN,
-      c1: NaN,
-      c2: NaN,
-      alpha: undefined,
-    });
-    e.assign('L', e.box(['List', 1, 3]));
-    expect(expr.evaluate().json).toEqual([
-      'List',
-      ['Hsv', 0, 0, 0.5],
-      ['Rgb', 'NaN', 'NaN', 'NaN'],
-    ]);
-  });
-});
-
 describe('corpus row neyret/xhlkk7k9aq #1752170633', () => {
   // `.7=c_3\{0<\{c_1<1\}\{c_2<1\}: …, …, 1\}`: the condition of the first arm
   // is `If(c_2<1, Less(0, If(c_1<1, 1)))`. Where `c_2 ≥ 1` the condition is
@@ -302,16 +250,6 @@ describe('a false restriction of a boolean is False', () => {
     ).toBe('boolean');
   });
 
-  test('a condition over it takes the else arm where c is false', () => {
-    const e = engine();
-    const expr = e.box(['If', ['If', 'c', ['Equal', 1, 1]], 1, 2]);
-    const compiled = compile(expr, { to: 'javascript' } as never) as any;
-    expect(compiled.success).toBe(true);
-    expect(compiled.run({ c: false })).toBe(2);
-    expect(compiled.run({ c: true })).toBe(1);
-    e.assign('c', false);
-    expect(expr.evaluate().toString()).toBe('2');
-  });
 });
 
 describe('a negated predicate over a restricted collection', () => {

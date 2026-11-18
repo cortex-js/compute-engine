@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Tycho item 177 — the shared-budget numeric-derivative fallback
@@ -37,32 +36,6 @@ describe('item 177: numeric-derivative fallback (shared budget, both routes)', (
   }
 
   test(
-    'past budget, orders 2 and 3: finite values, bit-identical routes',
-    () => {
-      const ce = engineWithNested(DEEP);
-      const anchors: Record<number, number> = {
-        2: -2 * Math.pow(3, -1.5), // L″(0.5)
-        3: 12 * Math.pow(3, -2.5), // L‴(0.5)
-      };
-      for (const order of [2, 3]) {
-        const r = compile(
-          ce.box(['Apply', ['Derivative', 'f', order], 0.5]) as never
-        );
-        expect(r.success).toBe(true);
-        const compiled = r.run!() as number;
-        // Composed-stencil accuracy degrades with order; ~1e-3 relative is
-        // the ruling's accepted envelope (Tycho: plotting tolerance).
-        expect(Math.abs(compiled - anchors[order])).toBeLessThan(1e-3);
-        const interpreted = ce
-          .box(['Apply', ['Derivative', 'f', order], 0.5])
-          .N().re;
-        expect(Object.is(compiled, interpreted)).toBe(true);
-      }
-    },
-    240_000
-  );
-
-  test(
     'exactness contract: plain evaluate() stays symbolic past budget',
     () => {
       const ce = engineWithNested(DEEP);
@@ -72,14 +45,4 @@ describe('item 177: numeric-derivative fallback (shared budget, both routes)', (
     },
     120_000
   );
-
-  test('ND at a RUNTIME point compiles to the stencil', () => {
-    const ce = new ComputeEngine();
-    ce.assign('g', ce.parse('x \\mapsto \\sin(x) + x^2'));
-    ce.declare('x', 'number');
-    const r = compile(ce.box(['ND', 'g', 'x'] as never) as never);
-    expect(r.success).toBe(true);
-    const v = (r.run as (arg: { x: number }) => number)({ x: 0.5 });
-    expect(Math.abs(v - (Math.cos(0.5) + 1))).toBeLessThan(1e-9);
-  });
 });

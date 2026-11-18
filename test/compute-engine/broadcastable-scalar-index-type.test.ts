@@ -389,27 +389,6 @@ describe('the element type readers', () => {
 });
 
 describe('compiled JavaScript', () => {
-  test('an index past the end of one point is NaN, as interpreted', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', POINT);
-    const e = ce.box(['At', 'p', 3]);
-    const r = compile(e, { fallback: false });
-    expect(r.success).toBe(true);
-    // The marker is read from the value: it was `undefined` (`Missing`).
-    expect(r.run!({ p: [3, 4] } as any)).toBeNaN();
-    expect(r.run!({ p: [[3, 4], [6, 8]] } as any)).toBeUndefined();
-    ce.assign('p', ce.box(['Tuple', 3, 4]));
-    expect(e.evaluate().isNaN).toBe(true);
-  });
-
-  test('an index into one point or a list of points', () => {
-    const ce = new ComputeEngine();
-    ce.declare('p', POINT);
-    const r = compile(ce.box(['At', 'p', 1]), { fallback: false });
-    expect(r.success).toBe(true);
-    expect(r.run!({ p: [3, 4] } as any)).toBe(3);
-    expect(r.run!({ p: [[3, 4], [6, 8]] } as any)).toEqual([3, 4]);
-  });
 
   test.each([[['At', 'p', 1]], [['First', 'p']], [['Last', 'p']]])(
     '%j of an operand that may be one string fails closed',

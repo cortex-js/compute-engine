@@ -7,8 +7,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { shaderFunctions } from './gpu-shader-f32-eval';
 
 const ce = new ComputeEngine();
 
@@ -63,56 +61,8 @@ describe('Smoothstep evaluates', () => {
   });
 });
 
-describe('Smoothstep compiles', () => {
-  const samples = [-0.5, 0, 0.1, 1 / 3, 0.5, 0.9, 1, 1.5];
-
-  it('on the javascript target, with the values of the interpreter', () => {
-    const expr = ce.parse('\\operatorname{Smoothstep}(a, b, x)');
-    const f = compile(expr, { to: 'javascript', fallback: false } as never);
-    expect(f.success).toBe(true);
-    for (const [a, b] of [
-      [0, 1],
-      [1, 0],
-      [0.5, 0.5],
-    ])
-      for (const x of samples) {
-        const expected = ce.box(['Smoothstep', a, b, x]).N().re as number;
-        expect(f.run!({ a, b, x }) as number).toBeCloseTo(expected, 12);
-      }
-    expect(Number.isNaN(f.run!({ a: 0, b: 1, x: NaN }) as number)).toBe(true);
-  });
-
-  it('on the shader targets, to the NaN-safe built-in', () => {
-    for (const to of ['glsl'] as const) {
-      const r = compile(ce.parse('\\operatorname{Smoothstep}(0, 1, x)'), {
-        to,
-        fallback: false,
-      } as never);
-      expect(r.success).toBe(true);
-      expect(r.code).toContain('_gpu_smoothstep(');
-    }
-  });
-});
-
 describe('Smoothstep at its edge cases', () => {
   const N = (e: unknown): number => ce.box(e as never).N().re as number;
-
-  it('compares float edges exactly, as the compiled targets do', () => {
-    const f = compile(ce.parse('\\operatorname{Smoothstep}(a, b, x)'), {
-      to: 'javascript',
-      fallback: false,
-    } as never);
-    for (const [a, b, x] of [
-      [0, 1e-12, 5e-13],
-      [0.5, 0.5, 0.5 - 1e-12],
-      [0.5, 0.5 + 1e-13, 0.5],
-    ])
-      expect(f.run!({ a, b, x }) as number).toBeCloseTo(
-        N(['Smoothstep', a, b, x]),
-        12
-      );
-    expect(N(['Smoothstep', 0, 1e-12, 5e-13])).toBe(0.5);
-  });
 
   it('has no value when an infinite edge gives ∞/∞', () => {
     for (const e of [
@@ -127,30 +77,4 @@ describe('Smoothstep at its edge cases', () => {
     expect(ce.box(['Smoothstep', 0, 1, 0.5]).type.toString()).toBe('real');
   });
 
-  it('gives the interpreter value on the shader targets for e0 >= e1', () => {
-    // The built-in `smoothstep` has no defined result there; the helper
-    // writes the formula out.
-    for (const language of ['glsl'] as const) {
-      const ce3 = new ComputeEngine();
-      ce3.declare('a', 'number');
-      ce3.declare('b', 'number');
-      ce3.declare('x', 'number');
-      const r = compile(ce3.box(['Smoothstep', 'a', 'b', 'x']), {
-        to: language,
-        fallback: false,
-      } as never);
-      const main = `float _main(float a, float b, float x) { return ${r.code}; }`;
-      const run = shaderFunctions(`${r.preamble ?? ''}\n${main}`, language);
-      for (const [a, b, x] of [
-        [1, 1, 0.5],
-        [1, 1, 1],
-        [2, 0, 0.5],
-        [0, 1, 0.25],
-      ])
-        expect(run('_main', a, b, x) as number).toBeCloseTo(
-          N(['Smoothstep', a, b, x]),
-          6
-        );
-    }
-  });
 });

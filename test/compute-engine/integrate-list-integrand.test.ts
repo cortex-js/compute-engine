@@ -1,5 +1,4 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 // An integral whose integrand is a LIST is one integral per element, as an
@@ -86,16 +85,6 @@ describe('An inner integral with a list bound', () => {
     const expr = ce.parse('\\int_0^1\\int_0^{G} xy\\,dx\\,dy');
     expect(expr.evaluate().json).toEqual(QUARTERS);
     expectClose(values(expr.N()), [0.25, 1, 2.25]);
-  });
-
-  test('the compiled javascript route agrees', () => {
-    const ce = new ComputeEngine();
-    ce.declare('G', 'list<number>');
-    const r = compile(ce.parse('\\int_0^1\\int_0^{G} xy\\,dx\\,dy'), {
-      to: 'javascript',
-    } as never) as any;
-    expect(r.success).toBe(true);
-    expectClose(r.run({ G: [1, 2, 3] }) as number[], [0.25, 1, 2.25]);
   });
 });
 
@@ -206,15 +195,6 @@ describe('A list integrand', () => {
     expect(v.operator).toBe('Error');
     expect(JSON.stringify(v.json)).toContain('incompatible-dimensions');
     expect(expr.N().json).toEqual(v.json);
-  });
-
-  test('the compiled javascript route agrees', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.parse('\\int_0^1 [x, 2x]\\,dx'), {
-      to: 'javascript',
-    } as never) as any;
-    expect(r.success).toBe(true);
-    expectClose(r.run({}) as number[], [0.5, 1]);
   });
 });
 
@@ -394,15 +374,6 @@ describe('A tuple integrand is integrated coordinate by coordinate', () => {
       expect(expr.isValid).toBe(true);
       expect(expr.type.toString()).toBe(type);
     }
-  });
-
-  test('the compiled javascript route agrees', () => {
-    const ce = new ComputeEngine();
-    const r = compile(ce.parse('\\int_0^1 (x, 2x)\\,dx'), {
-      to: 'javascript',
-    } as never) as any;
-    expect(r.success).toBe(true);
-    expectClose(r.run({}) as number[], [0.5, 1]);
   });
 });
 

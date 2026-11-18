@@ -17,7 +17,7 @@ import {
 /**
  * Whether the `vars` text `text` is a read of the vars object (`_.name` or
  * `_[...]`), which code that runs on a worker can make: any other text names
- * an identifier of the host (`CompileTarget.hostNames`).
+ * an identifier of the host.
  */
 export function readsVarsObject(text: unknown): boolean {
   return (
@@ -312,27 +312,6 @@ export function withSymbolicInputs<T>(
   const hidden: Record<string, unknown> = {};
   for (const name of names) hidden[name] = true;
   return withVarsValuesHidden(expr, hidden, fn);
-}
-
-/**
- * Run `fn` (the compilation of one target) with the inputs that its options
- * name read as inputs: the names of `vars` (`withVarsValuesHidden()`) and
- * the names of `symbolic` (`withSymbolicInputs()`). A name of `symbolic`
- * whose value cannot be left out throws its `CompileDeclineError`.
- */
-export function withInputValuesHidden<T>(
-  expr: Expression,
-  options: {
-    vars?: Readonly<Record<string, unknown>>;
-    symbolic?: readonly string[];
-  },
-  fn: () => T
-): T {
-  const result = withSymbolicInputs(expr, options.symbolic, () =>
-    withVarsValuesHidden(expr, options.vars, fn)
-  );
-  if (result instanceof CompileDeclineError) throw result;
-  return result;
 }
 
 /**

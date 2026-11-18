@@ -1,6 +1,6 @@
 /**
- * Facts about the static type of a binding or of a result that both the
- * pipeline (`ir/`) and the existing compilers read.
+ * Facts about the static type of a binding or of a result that the
+ * compiler (`ir/`) reads.
  */
 
 import type { Type } from '../../common/type/types.js';

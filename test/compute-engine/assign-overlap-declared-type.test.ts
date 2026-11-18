@@ -162,16 +162,6 @@ describe('a store accepts a value whose type overlaps the declared type', () => 
     expect(ce.box('k').evaluate().toString()).toMatch(/incompatible-type/);
   });
 
-  test('compiled code reads the symbol as a value of the declared type', () => {
-    const ce = engine();
-    ce.declare('P', POINT);
-    ce.assign('P', ce.parse('(-\\sqrt{1-a^2}, a)'));
-    const js = ce._getCompilationTarget('javascript')!;
-    const result = js.compile(ce.parse('P_1 + 1'));
-    expect(result.success).toBe(true);
-    expect(result.run!({ a: 0.5 })).toBeCloseTo(1 - Math.sqrt(0.75), 12);
-  });
-
   test('a value on the complex lane declines', () => {
     // `r := z` is admitted on overlap: a complex value can be real. Code
     // compiled for the real `r` would read the `{re, im}` representation of
@@ -182,7 +172,7 @@ describe('a store accepts a value whose type overlaps the declared type', () => 
     ce.declare('r', 'real');
     ce.assign('r', ce.box('z'));
     expect(() => compile(ce.parse('r + 1'), { fallback: false })).toThrow(
-      /^Could not compile the symbol 'r'/
+      /the value of r, of another type than real/
     );
     const result = compile(ce.parse('r + 1'));
     expect(result.success).toBe(false);
@@ -199,7 +189,7 @@ describe('a store accepts a value whose type overlaps the declared type', () => 
     const zs = [ce.box(['Complex', 2, 0])];
     for (const expr of [['Add', ['At', 'L', 1], 1], ['Sum', 'L']]) {
       expect(() => compile(ce.box(expr), { fallback: false })).toThrow(
-        /^Could not compile the symbol 'L'/
+        /the input zs of type list<complex>/
       );
     }
     const at = compile(ce.box(['Add', ['At', 'L', 1], 1]));
@@ -214,7 +204,7 @@ describe('a store accepts a value whose type overlaps the declared type', () => 
     ce.assign('P2', ce.box('w'));
     const first = ce.box(['Add', ['At', 'P2', 1], 1]);
     expect(() => compile(first, { fallback: false })).toThrow(
-      /^Could not compile the symbol 'P2'/
+      /the input w of type tuple<complex, real>/
     );
     const result = compile(first);
     expect(result.success).toBe(false);
@@ -344,19 +334,4 @@ describe('every read of a value admitted on overlap is tested', () => {
     ).toMatch(/incompatible-type/);
   });
 
-  test('GLSL code reads the components at the real lane', () => {
-    const ce = engine();
-    ce.declare('P', POINT);
-    ce.assign('P', ce.parse('(-\\sqrt{1-a^2}, a)'));
-    const glsl = ce._getCompilationTarget('glsl')!;
-    // The value of `P` is typed `tuple<complex, real>`, but the code reads
-    // `P` at its declared type: each component is a `float`, not a `vec2`
-    // that holds a complex number.
-    expect(glsl.compile(ce.parse('P + (1, 1)')).code).toBe(
-      'vec2(-sqrt(-(a * a) + 1.0), a) + vec2(1.0, 1.0)'
-    );
-    expect(glsl.compile(ce.parse('P_1 + 1')).code).toBe(
-      '(vec2(-sqrt(-(a * a) + 1.0), a)).x + 1.0'
-    );
-  });
 });

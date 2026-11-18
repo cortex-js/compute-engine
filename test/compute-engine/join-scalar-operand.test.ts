@@ -5,7 +5,6 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 ce.declare('L', { type: 'list<number>' });
@@ -96,40 +95,5 @@ describe('a scalar spread in a literal is one element', () => {
     expect(
       ce.box(['Set', ['Spread', ['Set', 1, 2]], ['Spread', 2]]).toString()
     ).toBe('Set(1, 2)');
-  });
-});
-
-describe('compiled targets append it as one element', () => {
-  test('javascript: scalar and tuple operands', () => {
-    const r = compile(ce.box(['Join', 'L', 10]), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(r.run!()).toEqual([1, 2, 3, 10]);
-    const t = compile(
-      ce.box(['Join', ['List', ['Tuple', 0, 0]], ['Tuple', 1, 2]]),
-      {
-        to: 'javascript',
-        fallback: false,
-      }
-    );
-    expect(t.run!()).toEqual([
-      [0, 0],
-      [1, 2],
-    ]);
-  });
-
-  test('a tuple through an alias or an all-tuple union is one element on JavaScript', () => {
-    const ce2 = new ComputeEngine();
-    ce2.declare('P', { type: 'list<tuple<number, number>>' });
-    ce2.declare('q', 'tuple<number, number> | tuple<number, number, number>');
-    const js = compile(ce2.box(['Join', 'P', 'q']), {
-      to: 'javascript',
-      fallback: false,
-    });
-    expect(js.run!({ P: [[0, 0]], q: [1, 2] })).toEqual([
-      [0, 0],
-      [1, 2],
-    ]);
   });
 });

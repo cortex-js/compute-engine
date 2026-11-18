@@ -37,7 +37,7 @@
 import type { Expression } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
-import { rewriteAngularUnit } from './angular-unit.js';
+import { rewriteAngularUnit } from '../symbolic/angular-unit.js';
 
 /**
  * Bodies at or below this many nodes keep the symbolic route. Their closed
@@ -96,76 +96,6 @@ export function prefersJetDerivative(
   if (body === undefined) return false;
   const min = order < 2 ? JET_MIN_BODY_NODES_ORDER_ONE : JET_MIN_BODY_NODES;
   return nodeCount(body, min + 1) > min;
-}
-
-/**
- * Whether `args` — the operands of an `Apply` — is a derivative application
- * this lowering claims, and with which literal and order.
- *
- * Declines a shape that is not a single-order derivative applied to one
- * argument, a callee that does not resolve to a pure univariate user function
- * literal, and an order or body small enough that the symbolic closed form is
- * the better code. It also declines under the complex discipline: there the
- * value shape of every operand is decided by the discipline, while this
- * lowering picks real or complex jet arithmetic from the body alone, so it
- * steps aside and lets the closed form be compiled the ordinary way.
- *
- * `literalOf` resolves a function SYMBOL to the literal it is defined by; the
- * caller supplies it because the resolution lives in the compiler.
- */
-export function jetDerivativeTarget(
-  args: ReadonlyArray<Expression>,
-  literalOf: (id: string) => Expression | undefined,
-  complexMode: boolean
-): { literal: Expression; order: number } | undefined {
-  if (args.length !== 2) return undefined;
-  const callee = args[0];
-  if (!isFunction(callee, 'Derivative') || callee.ops.length > 2)
-    return undefined;
-  if (complexMode) return undefined;
-  const order = callee.ops.length === 2 ? Math.floor(callee.ops[1].N().re) : 1;
-  if (!Number.isFinite(order)) return undefined;
-
-  const head = callee.ops[0];
-  let literal: Expression | undefined;
-  if (isFunction(head, 'Function')) literal = head;
-  else if (isSymbol(head)) literal = literalOf(head.symbol);
-  if (literal === undefined || !literal.isPure) return undefined;
-  if (!prefersJetDerivative(literal, order)) return undefined;
-  return { literal, order };
-}
-
-/**
- * Whether the closed form of a multi-index derivative
- * `Derivative(f, k₁, …, kₙ)` is expected to grow past a useful size. The
- * measure is the one `jetDerivativeTarget` uses for a derivative of a
- * function of one argument (`prefersJetDerivative`): the size of the body of
- * `f` and the order, here the total order `k₁ + … + kₙ`. It is computed from
- * the body BEFORE any differentiation, because the differentiation itself is
- * the cost to avoid: the mixed derivative of order 3 of a four-deep nested
- * radical in two variables takes more than 20 seconds to compute.
- *
- * Only a callee that resolves to a function literal is measured (`literalOf`
- * resolves a function SYMBOL). A library operator has no body, and its
- * derivative keeps the closed form, as for one argument.
- */
-export function multiIndexDerivativeTooLarge(
-  callee: Expression | undefined,
-  literalOf: (id: string) => Expression | undefined
-): boolean {
-  if (!isFunction(callee, 'Derivative') || callee.ops.length <= 2) return false;
-  const head = callee.ops[0];
-  let literal: Expression | undefined;
-  if (isFunction(head, 'Function')) literal = head;
-  else if (isSymbol(head)) literal = literalOf(head.symbol);
-  if (literal === undefined) return false;
-  let order = 0;
-  for (const k of callee.ops.slice(1)) {
-    const v = Math.floor(k.N().re);
-    if (!Number.isFinite(v)) return false;
-    order += v;
-  }
-  return prefersJetDerivative(literal, order);
 }
 
 /** `Block(e)` wrappers a function-literal body carries are transparent here. */

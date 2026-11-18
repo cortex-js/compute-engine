@@ -19,8 +19,7 @@ import { isSubtype } from '../../common/type/subtype.js';
  * code, which takes the empty value from the static type:
  * `Norm(Product(i·[x, y, z], i, 1, n))` at `n = 0` would be `1` and not `√3`.
  * Compiled code gives the identity in every element when the body is a
- * vector with number elements whose width it can count
- * (`vectorBodyWidth()` in `compilation/javascript-target.ts`). That test
+ * vector with number elements whose width it can count. That test
  * reads the body, not the type of the `Sum`, so the two tests are not the
  * same function, but a body of the static type `vector<real^n>` passes both.
  */
