@@ -561,3 +561,128 @@ describe('FresnelS and FresnelC on interval-js', () => {
     }
   });
 });
+
+describe('Heaviside and Remainder on interval-js', () => {
+  const ce = engine(true);
+  ce.declare('n', 'integer');
+  ce.declare('m', 'integer');
+  const compiled = (json: unknown) =>
+    compile(
+      ce.box(json as never) as never,
+      {
+        to: 'interval-js',
+        fallback: false,
+      } as never
+    ) as {
+      code: string;
+      run: (x: Record<string, { lo: number; hi: number }>) => Result;
+    };
+  const box = (lo: number, hi = lo) => ({ lo, hi });
+
+  test('the kernels', () => {
+    expect(compiled(['Heaviside', 'x']).code).toBe('_IA.heaviside(_.x)');
+    expect(compiled(['Remainder', 'n', 'm']).code).toBe(
+      '_IA.remainder(_.n, _.m)'
+    );
+  });
+
+  test('Heaviside is 1/2 at 0, and a jump at 0 over a box that holds 0', () => {
+    const h = compiled(['Heaviside', 'x']);
+    expect(h.run({ x: box(0) })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.5, hi: 0.5 },
+    });
+    expect(h.run({ x: box(-1, 1) })).toEqual({
+      kind: 'singular',
+      at: 0,
+      value: { lo: 0, hi: 1 },
+    });
+    expect(h.run({ x: box(0, 2) })).toMatchObject({
+      kind: 'singular',
+      value: { lo: 0.5, hi: 1 },
+    });
+    expect(h.run({ x: box(-2, -1) })).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 0 },
+    });
+  });
+
+  test('Remainder of integers: a tie of the quotient rounds toward +∞, a jump where the quotient crosses a half-integer', () => {
+    const r = compiled(['Remainder', 'n', 'm']);
+    // Remainder(5, 2) and Remainder(-5, 2) are -1, Remainder(5, -2) is 1.
+    for (const [n, m, v] of [
+      [5, 2, -1],
+      [-5, 2, -1],
+      [5, -2, 1],
+      [7, 3, 1],
+      [-7, 3, -1],
+    ]) {
+      expect(ce.box(['Remainder', n, m] as never).evaluate().re).toBe(v);
+      expect([n, m, r.run({ n: box(n), m: box(m) })]).toEqual([
+        n,
+        m,
+        { kind: 'interval', value: { lo: v, hi: v } },
+      ]);
+    }
+    // The location of the jump is the quotient's, as for `Floor(2x)`.
+    expect(r.run({ n: box(0, 3), m: box(2) })).toMatchObject({
+      kind: 'singular',
+      at: 0.5,
+      continuity: 'right',
+    });
+    // A divisor 0 has no remainder (NaN): `empty`.
+    expect(r.run({ n: box(1, 3), m: box(0) })).toEqual({ kind: 'empty' });
+  });
+
+  /** The remainder of `a` by `b` in BigInt, the quotient rounded to the
+   *  nearest integer with a tie toward +∞. */
+  const exactRemainder = (a: number, b: number): number => {
+    const [x, y] = [BigInt(a), BigInt(b)];
+    const m = y < 0n ? -y : y;
+    let r = x % y;
+    const h = 2n * (r < 0n ? -r : r);
+    if (h > m || (h === m && r > 0n === y > 0n)) r -= r > 0n ? m : -m;
+    return Number(r);
+  };
+
+  test('Remainder of a dividend between 2^52 and 2^53 is exact', () => {
+    const r = compiled(['Remainder', 'n', 'm']);
+    // `a / 3` rounds to a half-integer in doubles.
+    for (const n of [7316119179121483, 7316119179121486, 7316119179121489]) {
+      expect(ce.box(['Remainder', n, 3] as never).evaluate().re).toBe(1);
+      expect([n, r.run({ n: box(n), m: box(3) })]).toEqual([
+        n,
+        { kind: 'interval', value: { lo: 1, hi: 1 } },
+      ]);
+    }
+  });
+
+  test('Remainder of random integers with |a| in [2^52, 2^53]: the point, and a box of a few integers', () => {
+    // A seeded generator (an LCG): `a` takes every bit.
+    let s = 98765;
+    const rnd = () => (s = (s * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const misses: string[] = [];
+    for (let i = 0; i < 20000; i++) {
+      const a =
+        (2 ** 52 +
+          Math.floor(rnd() * 2 ** 26) * 2 ** 26 +
+          Math.floor(rnd() * 2 ** 26)) *
+        (rnd() < 0.5 ? -1 : 1);
+      const b = (Math.floor(rnd() * 1000) + 2) * (rnd() < 0.3 ? -1 : 1);
+      const v = exactRemainder(a, b);
+      const k = IA.remainder(box(a), box(b)) as Result;
+      if (k.kind !== 'interval' || k.value?.lo !== v || k.value?.hi !== v)
+        misses.push(`${a} ${b}: ${JSON.stringify(k)}, exact ${v}`);
+      const w = 1 + (i % 5);
+      const kb = IA.remainder(box(a, a + w), box(b)) as Result;
+      for (let t = 0; t <= w; t++) {
+        const u = exactRemainder(a + t, b);
+        if (kb.value === undefined || u < kb.value.lo || u > kb.value.hi)
+          misses.push(
+            `[${a}, ${a + w}] ${b} at ${a + t}: ${JSON.stringify(kb)}, exact ${u}`
+          );
+      }
+    }
+    expect(misses.slice(0, 5)).toEqual([]);
+  });
+});

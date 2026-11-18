@@ -213,7 +213,13 @@
   `Arcsch`, `Haversine`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial` of a
   real, `Factorial2`, `Zeta`, `Binomial` and `LCM` of integers, `Heaviside`,
   `Remainder`, `Smoothstep`, `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`,
-  `Trigamma` and `BesselJ` of an integer order. `compile(Equal(x))`
+  `Trigamma` and `BesselJ` of an integer order. On `interval-js`, `Heaviside`
+  and `Remainder` of integers compile with the kernels of the interval
+  library: over `[-1, 1]`, `Heaviside(x)` is `singular` at 0 with the value
+  `[0, 1]`, and at the point 0 it is 1/2. `Remainder`, `GCD` and `LCM` of
+  reals decline there (the kernels are not sound for operands that are not
+  integers); the other special functions have no interval kernel and decline.
+  `compile(Equal(x))`
   declines on every target; it threw `internal error: Cannot read properties
   of undefined`.
 - **`N()` of a definite integral with a complex bound gives the value of its

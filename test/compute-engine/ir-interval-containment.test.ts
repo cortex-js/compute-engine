@@ -203,6 +203,11 @@ const CASES: Case[] = [
   C(['Binomial', x, y], [0, 2, -1]), C(['Binomial', x, 2.5], [0, 3, -1]), C(['Choose', x, 2], [0, 1]),
   C(['Choose', 'n', 'm']), C(['GCD', 'n', 0]), C(['GCD', ['Floor', x], ['Floor', y]], [0, -1]),
   C(['LCM', 'n', 0]), C(['LCM', ['Floor', x], ['Floor', y]], [0, -1]),
+  // Heaviside (1/2 at 0) and Remainder of integers (the quotient rounded to
+  // the nearest integer, a tie toward +∞)
+  C(['Heaviside', x], [0]), C(['Heaviside', ['Subtract', x, 1]], [1]),
+  C(['Remainder', 'n', 'm']), C(['Remainder', 'n', 3]), C(['Remainder', 'n', -2]),
+  C(['Remainder', ['Floor', x], 2], [1, -1, 3]), C(['Remainder', ['Floor', x], ['Floor', y]], [0, -1, 2]),
   // Tycho's Fourier series, on both engines
   FOURIER,
 ];

@@ -24,7 +24,6 @@ import {
   div,
   subUnrounded,
   mulUnrounded,
-  divUnrounded,
 } from './arithmetic.js';
 import {
   outward,
@@ -1354,14 +1353,42 @@ function remainderRaw(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): IntervalResult {
-  // The UNROUNDED arithmetic kernels, so the three operations of the
-  // composition are not each stepped outward before this routine's own export
-  // steps its answer. `round` performs no rounding of its own, so the exported
-  // form of it is used as it is — and it is the source of this routine's
-  // discontinuities, which the unrounded kernels still propagate.
+  // Two integer points: the remainder of the doubles, exact. `x % y` is exact
+  // in IEEE arithmetic, and the step to the nearest quotient adds or subtracts
+  // `|y|` from a value of at most `|y|` in magnitude, also exact. The formula
+  // below would round `a / b` first: for `a` above 2^52 the quotient can round
+  // to a half-integer and `round` take the wrong integer
+  // (`Remainder(7316119179121483, 3)` is 1, not -2).
+  const uA = unwrapOrPropagate(a);
+  const uB = unwrapOrPropagate(b);
+  if (Array.isArray(uA) && Array.isArray(uB)) {
+    const [x, y] = [uA[0], uB[0]];
+    if (
+      x.lo === x.hi &&
+      y.lo === y.hi &&
+      Number.isInteger(x.lo) &&
+      Number.isInteger(y.lo) &&
+      y.lo !== 0
+    ) {
+      let r = x.lo % y.lo;
+      const h = 2 * Math.abs(r);
+      const m = Math.abs(y.lo);
+      // A tie (`a / b` a half-integer) rounds the quotient toward +∞: the
+      // remainder is then the one of the sign opposite to `b`.
+      if (h > m || (h === m && r / y.lo > 0)) r -= Math.sign(r) * m;
+      return ok({ lo: r + 0, hi: r + 0 });
+    }
+  }
+  // The UNROUNDED multiplication and subtraction, so that they are not each
+  // stepped outward before this routine's own export steps its answer. The
+  // quotient is the OUTWARD one: `round` of a quotient that rounded across a
+  // half-integer takes the wrong integer, which no later step covers, while
+  // `round` of an enclosure of the quotient encloses the rounded quotient.
+  // `round` performs no rounding of its own, and it is the source of this
+  // routine's discontinuities, which the unrounded kernels still propagate.
   return subUnrounded(
     a,
-    mulUnrounded(b, round(divUnrounded(a, b), 'toward-positive-infinity'))
+    mulUnrounded(b, round(div(a, b), 'toward-positive-infinity'))
   );
 }
 

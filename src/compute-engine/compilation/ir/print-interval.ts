@@ -38,7 +38,6 @@ import {
 import {
   arith,
   deepFreeze,
-  I,
   list,
   OPERATORS,
   R,
@@ -57,12 +56,13 @@ const UNARY = ['sqrt', 'square', 'abs', 'exp', 'ln', 'log10', 'log2', 'sin',
   'asin', 'acos', 'atan', 'acot', 'asec', 'acsc', 'asinh', 'acosh', 'atanh',
   'coth', 'acoth', 'asech', 'acsch', 'floor', 'ceil', 'round', 'trunc',
   'fract', 'sign', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
-  'factorial2', 'not', 'sinc'];
+  'factorial2', 'not', 'sinc', 'heaviside'];
 
 // prettier-ignore
 const BINARY: Record<string, string> = { add: 'add', sub: 'sub', mul: 'mul',
   div: 'div', mod: 'mod', max: 'max', min: 'min', emax: 'max', emin: 'min',
-  hypot: 'hypot', atan2: 'atan2', binomial: 'binomial', gcd: 'gcd',
+  hypot: 'hypot', atan2: 'atan2', binomial: 'binomial',
+  rbinomial: 'binomial', 'remainder.int': 'remainder', gcd: 'gcd',
   lcm: 'lcm', lt: 'less', le: 'lessEqual', gt: 'greater',
   ge: 'greaterEqual', eq: 'equal', ne: 'notEqual', and: 'and', or: 'or' };
 
@@ -235,17 +235,6 @@ export const JS_INTERVAL: Syntax = Object.freeze({
 /** The rows of the mode: `OPERATORS`, and the rows of the operations that
  *  only the mode has (README, "The interval mode"). */
 export const INTERVAL_ROWS: readonly OperatorRow[] = deepFreeze([
-  ...['Binomial', 'Choose'].map((head) =>
-    row(
-      head,
-      2,
-      [
-        [[I, I], I, 'binomial'],
-        [[R, R], R, 'binomial.real'],
-      ],
-      list
-    )
-  ),
   ...OPERATORS,
   row(undefined, 1, arith('square', 1), {}),
   // A power by a float literal that the lowering reads at compile time,

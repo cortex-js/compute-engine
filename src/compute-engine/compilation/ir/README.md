@@ -674,13 +674,26 @@ kernel, and the operand by one ulp, so that the result holds the interpreter's
 value at the decimal it reads; exact at 0 and ±∞), `Factorial`, `Factorial2`,
 `Chop` (`_IA.chop(x, tol)`, which reads the tolerance as a number:
 of a constant tolerance only, `Chop(x)` at the engine's tolerance at compile
-time; another tolerance declines), `Binomial` and `Choose` (also of real
-operands, `binomial.real`, a row of the mode), `GCD`, `LCM`, the comparisons,
+time; another tolerance declines), `Heaviside` (`_IA.heaviside`, 1/2 at 0, a
+jump at 0), `Remainder` of integers (`remainder.int`, `_IA.remainder`, the
+quotient rounded to the nearest integer with a tie toward +∞, as the
+interpreter's; a jump located at the half-integer of the quotient `a/b`, not of
+`a`, as `Floor(2x)` locates its jump at an integer of `2x`; of reals it
+declines: the kernel's three-ulp step after `a - b·round(a/b)` does not cover
+the cancellation, and `Remainder(-19.599995613098145, 0.7)` misses by about
+10^6 ulps; an undeclared input beside an integer operand, `x` in
+`Remainder(x, 3)`, is inferred `integer` and takes the integer operation, so a
+box of reals that a host gives it is outside its type and the result is
+unspecified: a host that declares `x` as `real` gets the decline), `Binomial` and `Choose` (also of real operands,
+`rbinomial`, `_IA.binomial`), `GCD` and `LCM` of integers (of reals they
+decline: `_IA.gcd` and `_IA.lcm` round their operands to integers, where the
+interpreter's `GCD(7.5, 2)` is 0.5), the comparisons,
 `And`, `Or`, `Not` (Kleene logic on verdicts), `If`, `Which`, a `Block` with
 locals, user functions, `Sum` and `Product` with `Limits`, `Random()` and
 `WithRandomSeed` of a number seed, a root function literal, and the lists below,
-and integrals (below). `Haversine`, `Zeta` and the complex and colour
-operations have no spelling and decline (a cause of the mode
+and integrals (below). `Haversine`, `Zeta`, the other special functions of the
+library (`Smoothstep`, `Beta`, `BesselJ`, ...: no interval kernel) and the
+complex and colour operations have no spelling and decline (a cause of the mode
 ends with "on interval-js"). A `Loop` is lowered as on JavaScript ("Loops and
 the runtime"): its carried values are intervals, a local assigned in an
 undecided `If` of a pass holds the hull of both arms (the earlier interval
