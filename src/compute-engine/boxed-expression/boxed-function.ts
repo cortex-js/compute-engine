@@ -13139,7 +13139,8 @@ function readsMatrixPowerBase(base: Expression): boolean {
 }
 
 /** True when `squareMatrixPower(ce, ops, …, written)` evaluates the base
- * `ops[0]`. */
+ * `ops[0]`, and the base is typed as a matrix, so that the value read is
+ * used: a vector base is read by the broadcast only. */
 function matrixPowerReadsBaseValue(
   ops: ReadonlyArray<Expression>,
   written: Expression | undefined
@@ -13147,7 +13148,9 @@ function matrixPowerReadsBaseValue(
   return (
     ops.length === 2 &&
     matrixPowerExponentKind(ops[1], written) !== undefined &&
-    readsMatrixPowerBase(ops[0])
+    readsMatrixPowerBase(ops[0]) &&
+    ops[0].type.type !== 'never' &&
+    ops[0].type.matches('matrix')
   );
 }
 

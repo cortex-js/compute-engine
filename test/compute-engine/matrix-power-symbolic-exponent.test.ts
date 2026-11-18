@@ -98,6 +98,22 @@ describe('POWER OF A MATRIX WITH A SYMBOLIC EXPONENT', () => {
     expect(calls).toBe(1);
   });
 
+  test('evaluateAsync of the power of a vector symbol calls an entry once', async () => {
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('g', {
+      signature: '() -> integer',
+      pure: false,
+      evaluateAsync: async () => ce.number(++calls + 2),
+    } as any);
+    ce.assign('V', ce.box(['List', ['g'], 2]));
+    calls = 0;
+    expect(json(await ce.box(['Power', 'V', 2]).evaluateAsync())).toBe(
+      '["List",9,4]'
+    );
+    expect(calls).toBe(1);
+  });
+
   test('A compound exponent that is never an integer stays a power (a known limitation)', () => {
     const ce = new ComputeEngine();
     ce.declare('k', 'integer');
