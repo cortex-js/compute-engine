@@ -24,11 +24,8 @@ describe('the helper bundle of a compiled function', () => {
       'resetLoopPasses',
       'integrate',
       'integrateMC',
-      'atNumeric',
-      'atChecked',
     ])
       expect(Object.prototype.hasOwnProperty.call(sys, name)).toBe(true);
-    expect(sys.atNumeric).not.toBe(SYS_HELPERS.atNumeric);
     expect(sys.binomial).toBe(SYS_HELPERS.binomial);
   });
 });

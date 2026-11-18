@@ -558,7 +558,7 @@ declines for another reason, `unsupported` also names such inputs: with `u`
 undeclared, `u := If(x < 0, u, 0)` gives `["Assign", "u"]`. An input with no
 declared type has the type that the compiled expression requires of it
 (below). A declared union of
-shapes (`real | list<real>`) is a type, and compiles (R4). "An input with no
+shapes (`real | list<real>`) is a type, and declines (R4). "An input with no
 type declines", under "Fail closed", gives the details.
 
 **R2. The static type of an argument selects the code of a call.** The
@@ -574,9 +574,7 @@ parameter (`compilation/ir/README.md`, "User functions"). With
 - with `P: tuple<real, real>`, `f(P)` gives `[2·P[0], 2·P[1]]`.
 
 No test of a shape runs in these calls. A parameter or an input that the
-host declares with a union of shapes is a request for a test: the rule
-admits one test where the value is bound, with one body for each member of
-the union. The compiler of `compile()` does not emit it: an input declared
+host declares with a union of shapes declines (R4): an input declared
 `real | tuple<real, real>` or `real | list<real>` declines with
 `outside-profile`. A union of tuples of one length is read as one tuple
 (`compilation/ir/README.md`, "Tuples").
@@ -627,9 +625,8 @@ read:
 `Min(P·(1 − v) + Q·v)` with `P, Q: list<real>` gives `1` at `P = [1, 2]`,
 `Q = [3, 0]`, `v = 0.5`.
 
-**R4. A declared union at an input follows R2.** The rule admits one test
-of the shape where such an input is bound, and one body for each member.
-The compiler of `compile()` emits no such test: with
+**R4. A declared union of shapes at an input or a parameter declines.**
+Compiled code has no test of a shape: with
 `y: real | tuple<real, real>` and `f := t ↦ 2t`, `f(y)` declines with
 `outside-profile` ("the input y of type real | tuple<real, real>"), and so
 does `Sum(U)` with `U: real | list<real>`. The host compiles one function
@@ -828,7 +825,8 @@ name of the library that an expression reads as a variable (`N` in `N + 1`)
 has no type until it is declared, so `compile(ce.parse('N + 1'))` declines.
 
 A declared union of shapes
-(`real | list<real>`) is a type, and is not refused. A parameter of a
+(`real | list<real>`) is a type: it is not named in `unsupported`, and the
+compilation declines (R4). A parameter of a
 function literal, of a user function or of the root function is not an input
 and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
 parameter is a value outside the type that the body implies (`2t` reads a
@@ -1115,13 +1113,13 @@ checks, which existed only for the unspecified cases, are removed (R6 in
 "Shapes are settled at compile time"); the decision and the survey of these
 checks are in `docs/plans/2026-10-31-compiled-code-contract-for-errors.md`.
 
-One value carve-out is ruled (pole-encoding ruling, 2026-08-28): where the
-interpreter answers the projective infinity `~oo` — a division pole, a Gamma
-or Factorial pole, an embedded `~oo` constant — a float-only target answers
-the IEEE `Infinity` instead of declining. The projection keeps the infinite
-magnitude and drops the direction `~oo` never had; it is what the bare
-division instruction already answers at a runtime pole, so folded and
-runtime spellings of the same pole agree. `NaN` remains reserved for the
+One value carve-out is ruled (pole-encoding ruling): where the interpreter
+answers the projective infinity `~oo` at run time — a division pole, a Gamma
+or Factorial pole — a float-only target answers the IEEE `Infinity`. The
+projection keeps the infinite magnitude and drops the direction `~oo` never
+had. A pole that the compiler finds at compile time (an embedded `~oo`
+constant, a constant `1/0`) declines: `x + 1/0`, `x = 1/0` and `x < 1/0`
+decline. `NaN` remains reserved for the
 genuinely indeterminate (`0/0`, `0 · ∞`) and for NaN propagation under
 Contract B's `propagate` policy.
 
@@ -1225,18 +1223,12 @@ same real part, and the imaginary part of the compiled answer is finite, so
 `Number.isFinite(result.re)` is `false` for both. Code that must treat such
 a result as `+∞` tests the real part, not the imaginary part.
 
-### Folds over rows of unequal length give `NaN` (user decision 2026-10-17)
+### Lists of two run-time lengths
 
-This is a named exception to the rule of `docs/ERROR-MODEL.md` §6 that a
-compiled expression does not answer `NaN` where the interpreter answers an
-error: a compiled `Sum(v)`, `Product(v)`, `Reduce(v, Add)` or
-`Scan(v, Add)` over `v: list<list<real>>` may combine the rows element by
-element and give `NaN` where two rows have unequal lengths, and the
-interpreter gives `Error("incompatible-dimensions", …)`. The compiler of
-`compile()` does not use the exception: an input of type
-`list<list<real>>` declines with `outside-profile`, so the interpreter
-evaluates these folds. Two lists of run-time lengths that differ under an
-element-wise operation give an unspecified result: with
+An input of type `list<list<real>>` declines with `outside-profile`, so the
+interpreter evaluates a fold over rows of unequal length. Two lists of
+run-time lengths that differ under an element-wise operation give an
+unspecified result: with
 `L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
 `[2, 4]` on `javascript`.
 

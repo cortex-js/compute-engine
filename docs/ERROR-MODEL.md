@@ -2435,8 +2435,7 @@ different" class the rule prohibits, and the compiled-lane conformance
 probes belong in the §7 sweep. The exceptions that the user accepted are
 named in `docs/COMPILATION-MODEL.md`: the `Infinity` spelling of `~oo` on a
 real target, with the sign tests it changes (`Heaviside`, `Sign`, `Floor`,
-comparisons, a point divided by zero), and the `NaN` of a compiled fold over
-rows of unequal length.
+comparisons, a point divided by zero).
 
 ## 7. Conformance snapshot and open questions
 

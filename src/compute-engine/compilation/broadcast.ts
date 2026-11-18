@@ -120,9 +120,7 @@ export type { BroadcastInputs, BroadcastOptions } from './types.js';
  * The batch body of a `javascript` result, ready to run (ROADMAP CE-410):
  * the function of a `StoredBatchBody` and its parameters.
  *
- * The ordinary body reads each input from the vars object, and reads a
- * shared list with `_SYS.atNumeric`, which tests the array, the index and
- * the element at every read. The batch body takes its inputs as arguments,
+ * The ordinary body reads each input from the vars object. The batch body takes its inputs as arguments,
  * and reads a shared list marked `direct` with no test of the array: the
  * batch checks such a list once, before the cell loop (a `Float64Array`, or
  * a plain array whose elements are all numbers, at least `minLength` long).

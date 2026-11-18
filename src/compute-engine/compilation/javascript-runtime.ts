@@ -1085,53 +1085,6 @@ export const SYS_HELPERS = {
     if (i === 0 || idx < 0 || idx >= n) return NaN;
     return arr[idx] as number;
   },
-  // `at` for a base whose STATIC element type is numeric and whose value
-  // comes from outside the kernel (a `run()` argument, a function
-  // parameter). Every consumer of the read was compiled for a number, so a
-  // row where a number was expected — a matrix handed to a kernel compiled
-  // for a list of numbers — would make the scalar `+` concatenate strings.
-  // The check dispatches on the run-time index shape: a scalar read must not
-  // yield an array, and a gather or mask must not yield a list with an array
-  // in it. Throw with the remedy: declare the collection with its nested
-  // element type, or evaluate with the interpreter, which broadcasts.
-  atNumeric: (
-    arr: unknown,
-    i: number | unknown[],
-    elementType: string
-  ): number | unknown[] => {
-    const v = SYS_HELPERS.at(arr, i);
-    const nested = Array.isArray(i)
-      ? Array.isArray(v) && v.some((x) => Array.isArray(x))
-      : Array.isArray(v);
-    if (!nested) return v;
-    throw new Error(
-      `Could not compile \`At\`: the element read is a list at run time, but its static element ` +
-        `type is \`${elementType}\`, so the compiled code treats it as a ` +
-        `number. Declare the collection with its nested element type ` +
-        `(for example \`list<list<number>>\` or \`matrix\`), or evaluate ` +
-        `with the interpreter.`
-    );
-  },
-  // The read `At(arr, i)` of a shared list in the `broadcast()` batch body,
-  // for an index whose static type does not prove an integer of 1 or more.
-  // The batch has checked
-  // `arr` once, before its cell loop: a plain array whose elements are all
-  // numbers, or a `Float64Array`. So the read needs no test of the array or
-  // of the element, and gives the value `atNumeric` gives for the same
-  // index: the index rules of `at` (a complex index is read through its real
-  // part, a negative index counts from the end, zero, a fraction, `NaN` and
-  // an index out of range read `NaN`). An index that is an array at run time
-  // (a gather) is read by `at`, on a plain copy of a typed array.
-  atChecked: (arr: ArrayLike<number>, i: unknown): number | unknown[] => {
-    if (Array.isArray(i))
-      return SYS_HELPERS.at(Array.isArray(arr) ? arr : Array.from(arr), i);
-    const iv = typeof i === 'number' ? i : indexValue(i);
-    if (!Number.isInteger(iv)) return NaN;
-    const n = arr.length;
-    const idx = iv > 0 ? iv - 1 : n + iv;
-    if (iv === 0 || idx < 0 || idx >= n) return NaN;
-    return arr[idx];
-  },
   // Definite integral via deterministic adaptive Gauss–Kronrod (GK15) — near
   // machine precision on smooth integrands, µs-scale. On non-convergence
   // (pathological integrand), fall back to the Monte-Carlo estimator — but only
@@ -2080,131 +2033,8 @@ export function makeSysHelpers(source: RuntimeSource): SysHelpers {
       SYS_HELPERS.integrate(fn, a, b, initialPanels, draw),
     irIntegrate: (fn, a, b) => SYS_HELPERS.integrate(fn, a, b, undefined, draw),
     integrateMC: (fn, a, b) => SYS_HELPERS.integrateMC(fn, a, b, draw),
-    atNumeric: ownAtNumeric(),
-    atChecked: ownAtChecked(),
   };
   return Object.setPrototypeOf(own, SYS_HELPERS) as SysHelpers;
-}
-
-/**
- * The helpers of `sys` with an `atNumeric` and an `atChecked` of their own:
- * the helpers of one compiled function loaded from stored code (see
- * `ownAtNumeric` and `ownAtChecked`).
- */
-function withOwnAtNumeric(sys: SysHelpers): SysHelpers {
-  const own = Object.create(sys) as SysHelpers;
-  own.atNumeric = ownAtNumeric();
-  own.atChecked = ownAtChecked();
-  return own;
-}
-
-/** A number in the source of each `ownAtChecked` function, so that no two of
- * them have the same source. */
-let atCheckedSerial = 0;
-
-/**
- * A new `atChecked` function (see `SYS_HELPERS.atChecked`) for the helpers of
- * one compiled function, for the same reason as `ownAtNumeric`: V8 keeps one
- * set of type feedback per function source, so a helper shared by every
- * compiled function sees plain arrays and `Float64Array`s from all of them,
- * and its reads go through one polymorphic cache. The fast case, an integer
- * index in `1..length`, returns the element with no other work; every other
- * index calls `SYS_HELPERS.atChecked`, which gives the same value. A
- * `broadcast()` kernel that read a shared list twice per cell through the
- * shared helper took about 2.1 ms per 250 000 cells (measured 2026-10-24,
- * ROADMAP CE-410).
- *
- * When the host refuses `new Function` (a content security policy), the
- * shared `SYS_HELPERS.atChecked` is returned.
- */
-function ownAtChecked(): SysHelpers['atChecked'] {
-  const source = `"use strict";
-// atChecked ${atCheckedSerial++}
-return function atChecked(arr, i) {
-  if (typeof i === "number" && i >= 1 && i <= arr.length && Number.isInteger(i))
-    return arr[i - 1];
-  return slow.full(arr, i);
-};`;
-  try {
-    return new Function('slow', source)({
-      full: SYS_HELPERS.atChecked,
-    }) as SysHelpers['atChecked'];
-  } catch {
-    return SYS_HELPERS.atChecked;
-  }
-}
-
-/** A number in the source of each `ownAtNumeric` function, so that no two of
- * them have the same source. */
-let atNumericSerial = 0;
-
-/**
- * A new `atNumeric` function (see `SYS_HELPERS.atNumeric`) for the helpers
- * of one compiled function, with a fast case: a number element at a scalar
- * integer index in `1..length` of an array is returned with no other work.
- * Every other read (a negative, zero, fractional or out-of-range index, a
- * gather or mask index, a base that is not an array, an element that is not
- * a number) calls `SYS_HELPERS.atNumeric`, which gives the same value as
- * before. The values are the values of `SYS_HELPERS.atNumeric` for every
- * argument, with one exception given below.
- *
- * Why a new function for each compiled function, made by `new Function`
- * from a source that differs each time (`atNumericSerial`): V8 keeps one set
- * of type feedback per function source, and inlines the helper into the
- * compiled body with that feedback. When the full form has never been
- * called through this copy, V8 compiles the fast case alone, and the number
- * read stays an unboxed float. After one call of the full form (an index out
- * of range, for example), each read returns a boxed number, which costs about
- * 2 ns more per read. With one shared helper, one such read in any compiled
- * function made every other one pay that cost, and the element reads of all
- * of them went through one polymorphic cache. A `broadcast()` kernel that
- * reads a shared list twice per cell spent 2.2 ms per 250 000 cells with the
- * shared helper and 1.1 ms with its own copy (measured 2026-10-24, ROADMAP
- * CE-410).
- *
- * The fast case tests `arr.constructor === Array`, not `Array.isArray(arr)`:
- * V8 does not reduce `Array.isArray` of a value read from the vars object to
- * a type check, and the call it keeps cost about 4 ns per read. The element
- * test is `typeof e === "number"`, for the same reason. The exception: an
- * object that is not an array but has `Array` as its `constructor` (made with
- * `Object.create(Array.prototype)`, for example) and an own `length` is read
- * as an array, where `SYS_HELPERS.atNumeric` gives `NaN`. Neither the engine
- * nor a JSON value makes such an object. A subclass of `Array`, an array of
- * another realm and a typed array have another `constructor` and take the
- * full form.
- *
- * The full form is reached through a property of an object (`slow.full`),
- * not through a variable: V8 then compiles no call to it until the call has
- * run, which keeps the fast case unboxed.
- *
- * When the host refuses `new Function` (a content security policy), the
- * shared `SYS_HELPERS.atNumeric` is returned.
- */
-function ownAtNumeric(): SysHelpers['atNumeric'] {
-  const source = `"use strict";
-// atNumeric ${atNumericSerial++}
-return function atNumeric(arr, i, elementType) {
-  if (
-    arr !== undefined &&
-    arr !== null &&
-    arr.constructor === Array &&
-    typeof i === "number" &&
-    i >= 1 &&
-    i <= arr.length &&
-    Number.isInteger(i)
-  ) {
-    const e = arr[i - 1];
-    if (typeof e === "number") return e;
-  }
-  return slow.full(arr, i, elementType);
-};`;
-  try {
-    return new Function('slow', source)({
-      full: SYS_HELPERS.atNumeric,
-    }) as SysHelpers['atNumeric'];
-  } catch {
-    return SYS_HELPERS.atNumeric;
-  }
 }
 
 export const isComplexObject = (v: unknown): v is ComplexResult =>
@@ -3328,9 +3158,7 @@ function storedExpressionRunner(
   const perCall = split ? stored.preamblePerCall : stored.preamble;
   const previous = setReconstructionDigits(digits);
   try {
-    // The batch loaders give each kernel its own `atNumeric` (see
-    // `ownAtNumeric`), as each compiled function has on the main thread.
-    const own = withOwnAtNumeric(sys);
+    const own = sys;
     const fn = twoStageRunner(
       own,
       stored.preambleOnce ?? '',

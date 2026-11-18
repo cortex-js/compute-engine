@@ -75,9 +75,8 @@ nightly run, tell the user; do not take over that investigation unless asked.
   `unsupported`. A value with no settled shape declines: an `If` whose branches
   differ in shape, a local that is assigned values of two shapes in one scope, a
   call whose result shape depends on a run-time value. A declared union of
-  shapes at an input or a parameter compiles with one dispatch at that binding
-  and one body per member: the host pays that dispatch, and avoids it by
-  declaring one shape or by compiling one function per shape. The host supplies
+  shapes at an input or a parameter declines too (`outside-profile`): the host
+  declares one shape or compiles one function per shape. The host supplies
   every input with a value of its declared type; otherwise the result is
   undefined and can differ between targets. The rule is in
   `docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time" (R1 to R6).
