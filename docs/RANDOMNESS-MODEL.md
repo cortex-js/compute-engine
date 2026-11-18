@@ -285,10 +285,10 @@ Worked vectors (`beginParallelLoop` and `parallelPassFrame`, `numerics/random.ts
 | seed `42` | 0 | `(0xBC9A5701, 0x1D9BFDA6)` | 2 | `(0xA189BD03, 0x517DFBF9)` | `0.9950572333920026` |
 | seed `"cell-a7"` | 5 | `(0xC91C5DFD, 0x44A48E57)` | 1 | `(0x98FBAC7B, 0xEC7C13FC)` | |
 
-The interpreter (`parallelPassValues()`, `library/control-structures.ts`) and
-the compiled JavaScript (`_SYS.parallelPasses()`, `javascript-runtime.ts`)
-apply these steps in the same order, so their direct draws are equal. A shader
-kernel computes step 4 from the base words with two PCG3D calls.
+The interpreter (`parallelPassValues()`, `library/control-structures.ts`)
+applies these steps. Compiled code has no pass frames: a `ParallelLoop`
+declines on every target, so the interpreter runs it
+(`docs/COMPILATION-MODEL.md`, "`parallel for` and `runAsync()`").
 
 ## 4. The stream — PCG3D
 
@@ -643,11 +643,12 @@ compiled code reach it through it — one representation, not two kept in
 agreement.
 
 - `makeSysHelpers(source)` (`compilation/javascript-runtime.ts`) builds each
-  compiled artifact's `_SYS` bundle over a `RuntimeSource`: the live draw, the
-  frame slot, the iteration limit and the deadline. The engine passes its own
-  (`ce._liveRandom`, `ce._randomFrame`, `ce.iterationLimit`,
-  `ce._deadlineFrame`); `createJavaScriptRuntime` (`@cortex-js/compute-engine/runtime`)
-  passes plain options, so the same helpers run with no engine.
+  compiled artifact's `_SYS` bundle over a `RuntimeSource`: the live draw,
+  the framed draw, the frame slot and the deadline. The engine passes its own
+  (`engineRuntimeSource(ce)`: `ce._liveRandom()`, `ce._random()`,
+  `ce._randomFrame`, `ce._deadlineFrame`); `createJavaScriptRuntime`
+  (`@cortex-js/compute-engine/runtime`) passes plain options, so the same
+  helpers run with no engine.
 - `_SYS.drawNextRandomNumber()` is `nextFrameDraw` on the active frame, the
   *same* primitive `ce._random()` uses. It resolves the frame **at call time**,
   advances that frame's counter, and returns `hash(seed, n)`; with no frame it
@@ -682,11 +683,13 @@ Three rules the implementation must keep:
   Emitting a bare `Math.random()` because no frame happened to be active at
   compile time turns dynamic scope into lexical scope silently — it passes every
   other test and fails only the compile-once/call-framed-and-unframed probe.
-- **Codegen may not reorder, batch, or elide draws.** Compiled bodies must
-  consume indices in the same order and count as the interpreter, or the shared
-  counter desynchronizes. Eliminating a repeated `Random()` as a common
-  subexpression would be a correctness bug; `pure: false` on the random
-  operators is what prevents it.
+- **Codegen may not batch or elide draws.** Eliminating a repeated
+  `Random()` as a common subexpression would be a correctness bug;
+  `pure: false` on the random operators is what prevents it. A
+  `WithRandomSeed` frame whose body has one draw site evaluated once gives
+  the interpreter's draws bit for bit. Any other frame compiles in the
+  compiler's order, deterministically, and the result carries the warning
+  `seeded-draw-order` (`compilation/ir/README.md`, "Effects").
 - **A call made outside any evaluation sees an empty slot** and draws live; two
   engines never share frames; nested compiled-calling-compiled artifacts of one
   engine share that engine's frame, which is what dynamic scoping requires.
@@ -699,22 +702,14 @@ hide a difference.
 
 ### Domains compile to descriptors
 
-A `Random`/`RandomChoice`/`RandomSample` domain lowers to a **descriptor**,
-never to a compiled collection: a literal `Interval`/`Range` folds to inline
-closed-form arithmetic, and a symbolic one builds a runtime `_SYS.domain*`
-object. Compiling the domain as a collection would route a `Range` through the
-JS `Range` handler, which materializes via `Array.from` — a million-element
-allocation to draw three. `RandomSample` uses the same **sparse Fisher-Yates**
-over the index space as the interpreter, so the two agree by construction.
-
-Compiled code cannot raise the interpreter's structured errors, so a descriptor
-that degenerates at runtime throws a plain `Error` naming the operator — never a
-silent `NaN` and never a draw from a reversed range. The descriptor throws
-exactly where the interpreter errors: a zero or sign-mismatched **explicit**
-step, non-finite bounds, an unbounded or empty `Interval`. Note that
-`Range(1, 0)` is *not* such a case — a two-operand `Range` infers a
-**descending** step, so it is the two-element range `[1, 0]` and both engines
-legitimately draw from it.
+The one domain that compiles is the interval of `RandomChoice(Interval(0, 1),
+n)` (either end open or closed): the code is
+`_SYS.randomChoice(_SYS.domainInterval('RandomChoice', 0, 1), n)`, whose
+draws, count and order are the interpreter's. `Random` of a domain,
+`RandomChoice` of another domain and `RandomSample` decline
+(`compilation/ir/README.md`, "Lists"). A count that is not one in 0..10^6
+after `Math.round()` throws a plain `Error` naming the operator, where the
+interpreter gives an error.
 
 ### The interval target encloses every draw
 
@@ -771,7 +766,7 @@ draw in it (§5). Nothing errors; every value below the edit simply changes.
 | the frame slot | `src/compute-engine/engine-runtime-state.ts`; `ce._randomFrame`, `ce._random()` in `src/compute-engine/index.ts` |
 | `WithRandomSeed`, `Random`, `RandomChoice`, tombstones | `src/compute-engine/library/core.ts` |
 | `beginParallelLoop`, `parallelPassFrame` (pass frames) | `src/compute-engine/numerics/random.ts` |
-| the pass frames of `ParallelLoop` / `ParallelComprehension` | `parallelPassValues()` in `src/compute-engine/library/control-structures.ts`; `_SYS.parallelPasses()` in `src/compute-engine/compilation/javascript-runtime.ts` |
+| the pass frames of `ParallelLoop` / `ParallelComprehension` | `parallelPassValues()` in `src/compute-engine/library/control-structures.ts` |
 | `RandomShuffle` | `src/compute-engine/library/collections.ts` |
 | `RandomSample` | `src/compute-engine/library/statistics.ts` |
 | shared `k` validation | `src/compute-engine/library/random-utils.ts` |

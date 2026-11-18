@@ -1620,7 +1620,7 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   (`x > n` with `n` free) still keeps a quantifier inert, because evidence may
   still arrive. A predicate that answers `True` on the marker selects it
   (`Filter(xs, IsMissing)`), which is how the markers are located. The
-  implementation is `selectionVerdict` and `evaluateQuantifier` in
+  implementation is `selectionVerdict` and `quantifierWalk` in
   `src/compute-engine/library/collections.ts`. Before this rule `Count` threw
   and `Filter` returned its error message as a value on an absent cell.
 - **E. An absent collection makes the whole result absent** (ruled
@@ -1633,15 +1633,10 @@ which `NaN` equals nothing and `Missing` compared with anything is `Missing`.
   the same `incompatible-type` error as `Length(5)`, and `Join([1], NaN)`
   lifts the scalar to `[1, NaN]`.
 
-On the compiled routes, rule C holds through SameValueZero element tests
-(`includes`, and `_SYS.eqt` on JavaScript). Two refusals keep them faithful: a
-needle that may be a COMPUTED absence (its type has a `missing` arm, and it is
-not the written symbol) is not compiled on JavaScript, because an unselected
-numeric `Which` lowers to `NaN` there and would be found where `NaN` sits. For
-rule D, `Any` and `All` over a collection whose element type has a `missing`
-arm are not compiled on JavaScript, because `some`/`every` cannot answer
-`Missing`; the selecting operators need no refusal, since "not decidedly true"
-is "not selected" on both routes.
+On the compiled routes, `Contains`, `IndexOf` and `Any` have no lowering and
+decline, so the interpreter applies rules C and D to them
+(`src/compute-engine/compilation/ir/README.md`, "Lists", lists the list
+operators that compile).
 
 **A collection whose elements may be absent is admitted where a collection of
 present values is expected** (user decision of 2026-10-07). A dictionary lookup
@@ -1756,9 +1751,9 @@ runtime `NaN` into a boxing-time `incompatible-type` `Error` under the
 current checker (verified 2026-08-24: with `f` declared
 `(real) -> number`, `f(NaN)` boxes as `f(Error(incompatible-type))`). The
 declared result type must likewise stay wide enough to admit failure
-values. So `Heaviside` declares `(number) -> number`, and the sharp truth
-lives only in the per-operator type handler (`realOnlyStepType` answers
-`rational<0..1>` for a proven-real argument, wide `number` otherwise).
+values. So `Heaviside` declared `(number) -> number`, and the sharp truth
+lived only in a hand-written per-operator type handler, which answered
+`rational<0..1>` for a proven-real argument and wide `number` otherwise.
 
 The cost, and it is real: **the public signature is nearly
 information-free.** The most valuable facts about the operator — its
@@ -2112,9 +2107,10 @@ argument type excludes `NaN`. (Per the 2026-09-01 ruling above, only a
 DECLARED partiality puts `marker(S)` into the type; an omitted one does
 not.) This needs the `nan`
 singleton of §5 to be expressible — `rational<0..1> | nan` says vastly
-more than a collapse to bare `number`. `realOnlyStepType` is a
-hand-written special case of this derivation; under B it and its class
-become the framework default read off the declaration.
+more than a collapse to bare `number`. Under B the type of `Heaviside` is
+read off its declaration, `(real | signed_infinity) -> rational<0..1>`, by
+the generic derivation, with no hand-written type handler
+(`library/arithmetic.ts`).
 
 **The derived behavior table.** For each argument of a declared
 `(D) -> S`, the first matching row wins — and the `NaN` row runs
@@ -2398,8 +2394,8 @@ maps its channels onto it:
   gives for an operator over an absent operand, it describes the interpreter
   and the compiled code as they are, not a promise of the compiled value.
 - The compiled targets have only the IEEE `NaN`, so every form with no
-  value compiles to the target's `NaN` (`NaN` in JavaScript, `_gpu_nan()` in
-  the shaders). This agrees with the interpreter,
+  value compiles to the target's `NaN` (`NaN` in JavaScript,
+  `uintBitsToFloat(0x7fc00000u)` in GLSL). This agrees with the interpreter,
   which also answers `NaN` (§1), so it is not a divergence. `Indeterminate`
   is an input spelling of `NaN` and reaches no target as a symbol.
 - The non-values of compiled code are one per domain: `NaN` for a
@@ -2422,13 +2418,11 @@ maps its channels onto it:
   `Map(u ↦ If(c, Nothing, 7), xs)` declines at the symbol `Nothing`, and
   no analysis of a callback body shows that it cannot return `Nothing`.
 - Compiled code does not test a value against its own static type at run
-  time (rule R5 of `docs/COMPILATION-MODEL.md`). On JavaScript, a
-  condition of `If`, `Which` or `Boole` whose static type admits a value
-  that is neither a boolean nor absent (`boolean | integer`, `unknown`)
-  declines with the code `unsettled-shape`, and an absent condition reads
-  as `false`. The result of a predicate (`Filter`, `Count`, `Any`,
-  `TakeWhile`, …) whose static type does not prove a boolean is still
-  checked at each call (`_SYS.predicateResult`).
+  time (rule R5 of `docs/COMPILATION-MODEL.md`). A condition of `If` or
+  `Which` whose static type admits a value that is not a boolean
+  (`boolean | integer`) declines, and a predicate whose result is not a
+  boolean declines or is an error of the canonical form: no run-time check
+  of a condition or of a predicate result remains.
 
 An earlier revision of this document proposed that compiled code "sheds
 the Error channel" and leaves residual failures to target semantics; that

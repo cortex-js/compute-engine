@@ -210,12 +210,14 @@ Corollary rules for the strict regime:
   participant.
   `strictLengths = true` is the default parameter; `PointList`
   (`library/collections.ts`) is the only opt-out.
-- Compiled lowering: `_SYS.bcast` on the JavaScript target mirrors the
-  interpreter per POSITION — an empty position answers the empty list and a
-  mismatched one projects to NaN, neither poisoning a sibling. A call of a
-  user function over a list argument maps the function with `_SYS.mapFn`,
-  over the number of list levels that the static type of the argument
-  gives.
+- Compiled lowering: an element-wise operation over lists is a loop that
+  fills an array (`src/compute-engine/compilation/ir/README.md`, "Lists").
+  Two lists of different stated lengths decline (the interpreter gives
+  `incompatible-dimensions`); lists whose run-time lengths differ give an
+  unspecified result. A call of a user function over a list argument maps
+  the body over the list when the interpreter maps it, as the static types
+  of the arguments decide at compile time (`ir/README.md`, "User
+  functions").
 - Compiled pairing site (2026-07-31): the JavaScript `PointList` zip lowering
   emits shortest-zip via `Math.min` over the source lengths — the pairing-regime
   contract carried into compiled code. Design:

@@ -786,10 +786,11 @@ common path — `assume()` mutates the bound definition in place.
 **`forget()` and provenance.** `forget(symbol)` removes every stored fact that
 references the symbol and resets any value the symbol received **from an
 assumption** — `declare()` / `assign()` values are left intact. To tell the two
-apart, assume-installed value bindings are tracked in a per-scope provenance set
-(`context.assumptionBindings`); `forget()` (no argument) clears all facts and
-undoes exactly those bindings, so a symbol assigned only via `assume(x = …)`
-evaluates back to itself, while a user `assign()` survives.
+apart, the values that `assume(x = …)` puts in force are kept in a per-context
+overlay keyed by definition (`context.assumedValues`), not on the definition;
+`forget()` (no argument) clears all facts and the overlay, so a symbol assigned
+only via `assume(x = …)` evaluates back to itself, while a user `assign()`
+survives.
 
 **Free functions.** `free-functions.ts` exports top-level `parse`, `simplify`,
 `evaluate`, `N`, `expand`, `factor`, `solve`, `assign`, etc., backed by a
@@ -898,7 +899,7 @@ fall back to floating or arbitrary precision when needed.
 numeric value correct to the working precision. It does NOT promise that every
 intermediate step is a float: a handler may compute exactly and approximate only
 its result, and several already do (`HurwitzZeta` at a negative integer order
-and `DivisorSum` return `numericApproximation ? exact.N() : exact`).
+returns `numericApproximation ? exact.N() : exact`).
 Canonicalization also folds exact arithmetic before `.N()` runs, so
 `((1/3)·3).N()` is `1` and `((25! − 1) − 25!).N()` is `-1`.
 
@@ -1027,11 +1028,13 @@ for two different tolerances:
      `reduceHalfTurns`), so a large multiple is exact too: in the interpreter by
      `circularOfExactAngle` (machine precision), `applyAngle`/`exactLargeAngle`
      (above it, and for an angle with a rational term), `exactEulerN`
-     (`boxed-expression/arithmetic-power.ts`) and `hyperbolicOfImaginaryAngle`;
-     in compiled code by `cosSinPi()` (`numerics/numeric-complex.ts`) through
-     `_SYS.sinpi`/`cospi`/`tanpi`/ `cexppi` and `_gpu_cossinpi`, for an angle
-     `π·u` and an exponent `a + iπu` written with the symbol `Pi`. So
-     `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every precision. Only these
+     (`boxed-expression/arithmetic-power.ts`) and `hyperbolicOfImaginaryAngle`.
+     So `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every precision.
+     Compiled code has no such reduction: `sin(πx)` is the machine sine of the
+     double `π·x` (`Math.sin`, or `sin` in GLSL), `1.2246467991473532e-16` at
+     `x = 1`, and `e^{iπx}` at `x = 1` is `−1 + 1.2246467991473532e-16 i`. A
+     closed node is evaluated by the interpreter when the code is generated,
+     so a compiled `sin(π)` is `0`. Only these
      functions are covered: another kernel at an exact argument can still leave
      roundoff in a part whose value is `0` (`erf(i).N()` has a real part of
      `2.2·10⁻¹⁶`; ROADMAP).
