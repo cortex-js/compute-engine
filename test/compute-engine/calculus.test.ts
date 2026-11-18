@@ -1927,10 +1927,26 @@ describe('LIMIT', () => {
       expect(threeArg).toEqual(twoArg);
     });
 
-    test('a symbolic (non-free) point is still read as the direction form', () => {
-      // `a` is not free in `1/x`, so this is Limit(function, point=a, dir=1),
-      // not the Wolfram (expr, var, point) form.
+    test('a symbol in second position is the variable, also when the expression does not contain it', () => {
+      // CE-1433: `a` is not in `1/x`, and `Limit(1/x, a, 1)` is still the
+      // limit as a → 1, of a constant in `a`.
       expect(engine.box(['Limit', ['Divide', 1, 'x'], 'a', 1]).json).toEqual([
+        'Limit',
+        ['Function', ['Block', ['Divide', 1, 'x']], 'a'],
+        1,
+      ]);
+    });
+
+    test('a function literal keeps a symbolic point with a direction', () => {
+      // The form that `\lim_{x \to a^+}` makes.
+      expect(
+        engine.box([
+          'Limit',
+          ['Function', ['Divide', 1, 'x'], 'x'],
+          'a',
+          1,
+        ]).json
+      ).toEqual([
         'Limit',
         ['Function', ['Block', ['Divide', 1, 'x']], 'x'],
         'a',

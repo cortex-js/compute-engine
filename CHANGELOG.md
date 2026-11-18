@@ -71,6 +71,17 @@
 
 ### Resolved Issues
 
+- **A limit written with its variable and its point is correct when the
+  formula is in a symbol.** With `G := sin(x)`, `Limit(G + 0, x, 0)` was `x`
+  and `Limit(G, x, 0)` stayed unevaluated; both are now `0`. In Epsil,
+  `let G = sin(x); limit(G + 0, x, 0)` prints `0`. `Limit(f, x, a)` with a
+  symbol `x` is now the limit as `x` approaches `a` also when `f` does not
+  contain `x`, so `Limit(1/x, a, 1)` is `1/x`, the limit of a constant as
+  `a → 1`. It was the limit of `1/x` as `x → a` from above. For a symbolic
+  point with a direction, write the variable: `Limit(1/x, x, a, 1)`. A
+  constant in second position is still the point (`Limit(1/x, Pi, 1)` is
+  `1/π`), and so is a symbol after a function name (`Limit(Sin, a, 1)`).
+
 - **A quantity with a complex value keeps its imaginary part when it is
   converted to another unit.** `UnitConvert(Quantity(1 + i, m), in)` was
   `39.37007874015748 in`; it is now

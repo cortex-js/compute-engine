@@ -54,6 +54,60 @@ describe('A symbol that holds a formula in the variable', () => {
     expect(ce.parse('\\lim_{x\\to 0} G').evaluate().toString()).toBe('0');
   });
 
+  // CE-1433: `Limit(f, x, a)` names its variable also when `f` does not
+  // contain `x` by syntax. Before, `x` was read as the point and `0` as the
+  // direction.
+  test('Limit with its variable and its point reads the value', () => {
+    const ce = engineWithG();
+    expect(ce.box(['Limit', 'G', 'x', 0]).evaluate().toString()).toBe('0');
+    expect(
+      ce.box(['Limit', ['Add', 'G', 0], 'x', 0]).evaluate().toString()
+    ).toBe('0');
+    expect(
+      ce.box(['Limit', ['Divide', 'G', 'x'], 'x', 0]).evaluate().toString()
+    ).toBe('1');
+    expect(
+      executeEpsil(
+        new ComputeEngine(),
+        'let G = sin(x); limit(G + 0, x, 0)'
+      ).value.toString()
+    ).toBe('0');
+    expect(
+      executeEpsil(
+        new ComputeEngine(),
+        'let G = sin(x); limit(G, x, 0)'
+      ).value.toString()
+    ).toBe('0');
+  });
+
+  test('Limit with a variable that the expression does not read', () => {
+    const ce = new ComputeEngine();
+    // The limit of a constant in `x` is that constant.
+    expect(ce.box(['Limit', 'u', 'x', 0]).evaluate().toString()).toBe('u');
+    // A symbol of type `any` can be a number: `x` is its variable.
+    ce.declare('h', 'any');
+    expect(ce.box(['Limit', 'h', 'x', 0]).json).toEqual([
+      'Limit',
+      ['Function', ['Block', 'h'], 'x'],
+      0,
+    ]);
+    // A constant is never the variable: `Pi` is the point.
+    expect(
+      ce.box(['Limit', ['Divide', 1, 'x'], 'Pi', 1]).evaluate().toString()
+    ).toBe('1 / pi');
+    expect(
+      ce.box(['Limit', ['Divide', 'Pi', 'x'], 'Pi', 1]).evaluate().toString()
+    ).toBe('1');
+    // A symbol that names a function keeps the implicit form: the second
+    // operand is the point.
+    expect(ce.box(['Limit', 'Sin', 'a', 1]).json).toEqual([
+      'Limit',
+      'Sin',
+      'a',
+      1,
+    ]);
+  });
+
   test('Series reads the value', () => {
     const ce = engineWithG();
     expect(

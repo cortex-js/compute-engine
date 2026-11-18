@@ -396,7 +396,13 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
     };
     const cases: [string, any, number][] = [
       ['Limit(√x, a)', ['Limit', ['Sqrt', 'x'], 'a'], Math.sqrt(3)],
-      ['Limit(√x, a, 1)', ['Limit', ['Sqrt', 'x'], 'a', 1], Math.sqrt(3)],
+      // With a symbol in second position, `Limit(√x, a, 1)` names its
+      // variable `a` (CE-1433): the point with a direction is not a symbol.
+      [
+        'Limit(√x, 2a, 1)',
+        ['Limit', ['Sqrt', 'x'], ['Multiply', 2, 'a'], 1],
+        Math.sqrt(6),
+      ],
       ['NLimit(√x, a)', ['NLimit', ['Sqrt', 'x'], 'a'], Math.sqrt(3)],
       // A parenthesized operand is the expression it holds.
       ['Limit((√x), a)', ['Limit', ['Delimiter', ['Sqrt', 'x']], 'a'], Math.sqrt(3)],

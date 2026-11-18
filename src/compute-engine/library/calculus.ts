@@ -6355,6 +6355,23 @@ function functionLiteralOf(
 }
 
 /**
+ * Whether the first operand `f` of `Limit(f, x, a)` is a bare symbol that
+ * names a function: an operator (`Sin`, a function defined by `g(t) := …`)
+ * or a symbol of function type (`ce.declare('g', 'function')`). Such an
+ * operand has its own parameter, so `x` is the limit point, not the variable.
+ * A symbol that holds a formula (`G := sin(x)`) or has no value does not
+ * name a function.
+ */
+function limitOperandNamesFunction(
+  ce: ComputeEngine,
+  f: Expression
+): boolean {
+  if (!isSymbol(f)) return false;
+  if (isOperatorDef(ce.lookupDefinition(f.symbol))) return true;
+  return f.type.matches('function');
+}
+
+/**
  * The function literal of the first operand of the implicit form of `Limit`
  * and `NLimit`: `Limit(expr, point)` and `Limit(expr, point, direction)`,
  * where the variable is not written. `NIntegrate(expr, a, b)` and
@@ -10303,25 +10320,41 @@ volumes
         }
         const [f, x, dir] = ops;
         // Wolfram-style form `Limit(expr, var, point[, direction])`: when the
-        // middle operand is a symbol that is a free variable of the
-        // expression, bind it explicitly as the expansion variable and treat
-        // the third operand as the point. This canonicalizes to the same
-        // internal representation as the 2-arg form `Limit(expr, point)`
-        // (which infers the variable). A first operand that is already a
-        // `Function` literal is NOT this form: its variable is bound in the
-        // literal, so a symbol in second position is a (symbolic) limit
-        // point — e.g. `Limit(Function(1/(x-a), x), a, 1)` from
-        // `\lim_{x \to a^+}` — not the expansion variable.
+        // middle operand is a symbol, bind it explicitly as the expansion
+        // variable and treat the third operand as the point. This
+        // canonicalizes to the same internal representation as the 2-arg form
+        // `Limit(expr, point)` (which infers the variable). A first operand
+        // that is already a `Function` literal is NOT this form: its variable
+        // is bound in the literal, so a symbol in second position is a
+        // (symbolic) limit point — e.g. `Limit(Function(1/(x-a), x), a, 1)`
+        // from `\lim_{x \to a^+}` — not the expansion variable.
         if (
           (ops.length === 3 || ops.length === 4) &&
           f &&
           isSymbol(x) &&
           !isFunction(f, 'Function')
         ) {
-          // Syntactic occurrence (`.has`), not `.unknowns`: the middle operand
-          // is the bound expansion variable, so it counts even when it also
-          // carries a global value (`x := 5`), which drops it from `.unknowns`.
-          if (f.canonical.has(x.symbol)) {
+          // The expression need not contain the variable by syntax: with
+          // `G := sin(x)`, `Limit(G + 0, x, 0)` is the limit as x → 0, and
+          // the evaluate handler reads the value of `G` (`formulaValueOf`).
+          // A bare symbol that names a function (`Limit(Sin, a, 1)`) keeps
+          // the implicit form: its variable is the parameter of the function,
+          // so the symbol in second position is the point. A symbol that
+          // contains the variable (`Limit(x, x, 0)`) is this form. An
+          // operand that cannot be a number (`Limit("s", x, 1)`) keeps the
+          // implicit form too, whose signature check refuses it. A constant
+          // (`Pi`, `ExponentialE`) is never a variable: `Limit(1/x, Pi, 1)`
+          // is the limit at the point π from above.
+          const body = f.canonical;
+          const type = body.type;
+          if (
+            !x.canonical.isConstant &&
+            (body.has(x.symbol) ||
+              (!limitOperandNamesFunction(engine, body) &&
+                (type.isUnknown ||
+                  type.matches('number') ||
+                  engine.type('number').matches(type))))
+          ) {
             const fn = canonicalFunctionLiteralArguments(engine, [f, x], {
               liftedBody: true,
             });
