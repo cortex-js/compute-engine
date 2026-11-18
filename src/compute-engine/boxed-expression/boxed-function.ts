@@ -13077,7 +13077,10 @@ async function finishMatrixPowerAsync(
   options: Partial<EvaluateOptions> | undefined
 ): Promise<Expression> {
   if (evaluate === true) return result.evaluateAsync(options);
-  if (evaluate === false || !isFunction(result)) return result;
+  // The base of a symbol or a call was read with `evaluate()`, which leaves
+  // an entry with only an asynchronous handler as it is: it is evaluated
+  // again here, as a literal base is.
+  if (!isFunction(result, 'Power')) return result;
   return result.engine._fn('Power', [
     await result.op1.evaluateAsync(operandOptions(options)),
     result.op2,

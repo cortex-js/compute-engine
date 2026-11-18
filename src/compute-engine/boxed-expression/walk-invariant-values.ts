@@ -4,7 +4,7 @@ import { staticViewDiverges } from '../static-typing-view.js';
 import { boundVariableNames, readsActivationHalf } from './binders.js';
 import { hiddenValuesKey } from './hidden-values.js';
 import { beginStoreGuard } from './store-guard.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isDictionary, isFunction, isSymbol } from './type-guards.js';
 
 /**
  * The values of the sub-expressions of a callback that do not depend on the
@@ -28,10 +28,11 @@ import { isFunction, isSymbol } from './type-guards.js';
  * - the body of the callback is pure, so that a call changes no state other
  *   than its own parameters and locals;
  * - it is a function expression and it is pure;
- * - none of its symbols is a name that a node of the callback binds (a
- *   parameter, a local of a block, the variable of a binder), and none reads
- *   an activation (a parameter or a local of an enclosing call), so that its
- *   names read the same definitions at each element.
+ * - none of its symbols, call heads and dictionary values included, is a
+ *   name that a node of the callback binds (a parameter, a local of a
+ *   block, the variable of a binder), and none reads an activation (a
+ *   parameter or a local of an enclosing call), so that its names read the
+ *   same definitions at each element.
  *
  * Only a value that is a collection is kept: this is the case that costs a
  * time that grows with the length of the collection at each element.
@@ -52,11 +53,16 @@ import { isFunction, isSymbol } from './type-guards.js';
  *
  * A value computed while host code that does not state its purity ran (the
  * store guard, `store-guard.ts`) is not kept.
+ *
+ * The purity of a node can change when a callable that it calls is defined
+ * again (`ce._callableVersion`): the invariant nodes are then found again,
+ * also between two calls of a walk.
  */
 
 type Walk = {
-  /** The invariant nodes of the callback. */
-  readonly nodes: ReadonlySet<Expression>;
+  /** The invariant nodes of the callback, found at `callableVersion`. */
+  nodes: ReadonlySet<Expression>;
+  callableVersion: number;
   /** The values kept, for each invariant node evaluated in this walk. */
   readonly values: Map<Expression, Kept>;
   /** The invariant nodes whose value in this walk is not a collection: they
@@ -119,8 +125,12 @@ function keptStillValid(ce: Expression['engine'], kept: Kept): boolean {
 /** The walk whose callback is running, or `undefined`. */
 let active: Walk | undefined;
 
-/** The invariant nodes of each function literal, computed once. */
-const INVARIANT_NODES = new WeakMap<Expression, ReadonlySet<Expression>>();
+/** The invariant nodes of each function literal, with the callable
+ * version they were found at. */
+const INVARIANT_NODES = new WeakMap<
+  Expression,
+  { callableVersion: number; nodes: ReadonlySet<Expression> }
+>();
 
 /**
  * `f`, the application of the callback `fn` (`applicable(fn)`), wrapped so
@@ -138,17 +148,12 @@ export function walkInvariantApplicable<O>(
   if (cacheOff('walkinvariant')) return f;
   const fns = Array.isArray(fn) ? fn : [fn as Expression];
   if (fns.length === 0) return f;
-  let nodes = invariantNodes(fns[0]);
-  if (fns.length > 1) {
-    const all = new Set(nodes);
-    for (const other of fns.slice(1))
-      for (const node of invariantNodes(other)) all.add(node);
-    nodes = all;
-  }
+  const nodes = invariantNodesOf(fns);
   if (nodes.size === 0) return f;
   const ce = fns[0].engine;
   const walk: Walk = {
     nodes,
+    callableVersion: ce._callableVersion,
     values: new Map(),
     skipped: new Set(),
     computing: new Set(),
@@ -164,6 +169,10 @@ export function walkInvariantApplicable<O>(
     ) {
       walk.values.clear();
       walk.skipped.clear();
+      if (walk.callableVersion !== ce._callableVersion) {
+        walk.nodes = invariantNodesOf(fns);
+        walk.callableVersion = ce._callableVersion;
+      }
     }
     const saved = active;
     active = walk;
@@ -219,14 +228,28 @@ export function walkInvariantValue(
   return value;
 }
 
+/** The invariant nodes of the callbacks `fns`. */
+function invariantNodesOf(
+  fns: ReadonlyArray<Expression>
+): ReadonlySet<Expression> {
+  const nodes = invariantNodes(fns[0]);
+  if (fns.length === 1) return nodes;
+  const all = new Set(nodes);
+  for (const other of fns.slice(1))
+    for (const node of invariantNodes(other)) all.add(node);
+  return all;
+}
+
 /** The invariant nodes of the function literal `fn` (see the head of this
  * module), the nodes inside an invariant node too. Empty when `fn` is not
  * a function literal with a body, or when its body is not pure. */
 function invariantNodes(fn: Expression): ReadonlySet<Expression> {
-  let nodes = INVARIANT_NODES.get(fn);
-  if (nodes !== undefined) return nodes;
-  nodes = computeInvariantNodes(fn);
-  INVARIANT_NODES.set(fn, nodes);
+  const callableVersion = fn.engine._callableVersion;
+  const known = INVARIANT_NODES.get(fn);
+  if (known !== undefined && known.callableVersion === callableVersion)
+    return known.nodes;
+  const nodes = computeInvariantNodes(fn);
+  INVARIANT_NODES.set(fn, { callableVersion, nodes });
   return nodes;
 }
 
@@ -246,20 +269,27 @@ function computeInvariantNodes(fn: Expression): ReadonlySet<Expression> {
   collectBound(fn);
 
   const closed = new Map<Expression, boolean>();
+  // A name, or a call head (`g()` with `g` a parameter that holds a
+  // function), that reads the same definition at each element.
+  const isFreeName = (
+    name: string,
+    def: Expression['valueDefinition']
+  ): boolean =>
+    !bound.has(name) && (def === undefined || !readsActivationHalf(def));
   const isClosed = (expr: Expression): boolean => {
     const known = closed.get(expr);
     if (known !== undefined) return known;
     let result: boolean;
     if (isSymbol(expr)) {
-      const def = expr.valueDefinition;
-      result =
-        !bound.has(expr.symbol) &&
-        (def === undefined || !readsActivationHalf(def));
+      result = isFreeName(expr.symbol, expr.valueDefinition);
     } else if (isFunction(expr)) {
       result =
         expr.operator !== 'Function' &&
         expr.localScope === undefined &&
+        isFreeName(expr.operator, expr.valueDefinition) &&
         expr.ops.every(isClosed);
+    } else if (isDictionary(expr)) {
+      result = expr.values.every(isClosed);
     } else result = true;
     closed.set(expr, result);
     return result;

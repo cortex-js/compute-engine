@@ -69,6 +69,18 @@ describe('POWER OF A MATRIX WITH A SYMBOLIC EXPONENT', () => {
     );
   });
 
+  test('evaluateAsync evaluates such an entry of the value of a symbol base', async () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', {
+      signature: '() -> integer',
+      evaluateAsync: async () => ce.number(9),
+    } as any);
+    ce.assign('B', ce.box(['List', ['List', ['g'], 2], ['List', 3, 4]]));
+    expect(json(await ce.box(['Power', 'B', 'n']).evaluateAsync())).toBe(
+      '["Power",["List",["List",9,2],["List",3,4]],"n"]'
+    );
+  });
+
   test('A compound exponent that is never an integer stays a power (a known limitation)', () => {
     const ce = new ComputeEngine();
     ce.declare('k', 'integer');

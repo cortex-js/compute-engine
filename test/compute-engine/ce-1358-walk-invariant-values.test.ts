@@ -233,6 +233,50 @@ describe('CE-1358 THE INVARIANT LIST OF A CALLBACK IS EVALUATED ONCE PER WALK', 
     expect(calls()).toBe(before + 1);
   });
 
+  test('A dictionary value that reads the parameter is evaluated at each element', () => {
+    const ce = new ComputeEngine();
+    const m = ce
+      .box([
+        'Map',
+        [
+          'Function',
+          ['Values', ['Dictionary', ['Tuple', { str: 'a' }, 'j']]],
+          'j',
+        ],
+        ['List', 1, 2, 3],
+      ])
+      .evaluate();
+    expect(values(m)).toEqual([[1], [2], [3]].map((x) => ['List', ...x]));
+  });
+
+  test('A callable defined again is read again by the next walk and the next element', () => {
+    const ce = new ComputeEngine();
+    let ticks = 0;
+    ce.declare('Tick', {
+      signature: '() -> integer',
+      pure: false,
+      evaluate: () => ce.number(++ticks),
+    });
+    ce.declare('g', 'function');
+    ce.assign('g', ce.box(['Function', ['List', 1, 2]]));
+    const expr = ce.box([
+      'Map',
+      ['Function', ['Add', ['At', ['g'], 1], 'j'], 'j'],
+      ['Range', 1, 3],
+    ]);
+    expect(values(expr.evaluate())).toEqual([2, 3, 4]);
+    // `g()` is no longer pure: each element calls it
+    ce.assign('g', ce.box(['Function', ['List', ['Tick'], 0]]));
+    expect(values(expr.evaluate())).toEqual([2, 4, 6]);
+    // Defined again between two elements of a walk
+    ce.assign('g', ce.box(['Function', ['List', 1, 2]]));
+    const it = expr.evaluate().each();
+    expect(it.next().value?.json).toBe(2);
+    ce.assign('g', ce.box(['Function', ['List', ['Tick'], 0]]));
+    expect(it.next().value?.json).toBe(6);
+    expect(it.next().value?.json).toBe(8);
+  });
+
   test('The values are the same with each read of the lazy result', () => {
     const { ce } = engine();
     ce.assign('L', list(ce, [3, -1, 4]));
