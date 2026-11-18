@@ -218,9 +218,9 @@ describe('A SUM OF TEMPERATURES WITH NO OFFSET IS UNCHANGED', () => {
     ).toBe('20 K');
   });
 
-  test('a temperature and a length are not added', () => {
+  test('a temperature and a length have no sum', () => {
     expect(
       evaluate(['Add', ['Quantity', 10, 'degC'], ['Quantity', 10, 'm']])
-    ).toBe('10 degC + 10 m');
+    ).toBe('Error(ErrorCode("incompatible-type", "degC", "m"))');
   });
 });

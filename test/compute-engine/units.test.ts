@@ -1080,12 +1080,14 @@ describe('INTEGRATION', () => {
     expect(parsed.latex).toBe(latex);
   });
 
-  test('Incompatible add remains unevaluated', () => {
-    // Adding m + s cannot be combined; the engine returns an unevaluated Add
+  test('Incompatible add is an error', () => {
+    // A length and a time have no sum (CE-1414)
     const expr = engine
       .expr(['Add', ['Quantity', 5, 'm'], ['Quantity', 3, 's']])
       .evaluate();
-    expect(expr.operator).toBe('Add');
+    expect(expr.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "m", "s"))'
+    );
   });
 
   test('Logarithmic unit parse', () => {

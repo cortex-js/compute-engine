@@ -94,10 +94,35 @@ describe('THE `add` HOOK: ONE FOLD PER DIMENSION', () => {
     expect(evalType(['Add', 'x', Q(2, 'm'), Q(3, 'm')])).toBe('quantity');
   });
 
-  test('two dimensions give two folds', () => {
-    expect(evalStr(['Add', Q(2, 'm'), Q(3, 'm'), Q(4, 's'), Q(5, 's')])).toBe(
-      '5 m + 9 s'
+  test('two dimensions beside another operand give two folds', () => {
+    expect(
+      evalStr(['Add', 'x', Q(2, 'm'), Q(3, 'm'), Q(4, 's'), Q(5, 's')])
+    ).toBe('x + 5 m + 9 s');
+  });
+
+  // CE-1414
+  test('a sum of quantities of two dimensions is an error', () => {
+    const sum = (...xs: Json[]): string => evalStr(['Add', ...xs]);
+    const err = 'Error(ErrorCode("incompatible-type", "m", "s"))';
+    expect(sum(Q(5, 'm'), Q(3, 's'))).toBe(err);
+    expect(sum(Q(2, 'm'), Q(3, 'm'), Q(4, 's'))).toBe(err);
+    expect(sum(Q(2, 'm'), Q(3, 'm'), Q(4, 's'), Q(5, 's'))).toBe(err);
+    expect(str(box(['Add', Q(5, 'm'), Q(3, 's')]).N())).toBe(err);
+    expect(evalStr(['Subtract', Q(20, 'degC'), Q(5, 'm')])).toBe(
+      'Error(ErrorCode("incompatible-type", "degC", "m"))'
     );
+    expect(evalStr(['Add', ['Divide', Q(6, 'm'), 2], Q(1, 's')])).toBe(err);
+    // A dimensionless unit has a known dimension
+    expect(sum(Q(2, 'percent'), Q(3, 'm'))).toMatch(/incompatible-type/);
+    // Another operand can hold a value that makes the sum valid
+    expect(sum('x', Q(2, 'm'), Q(3, 's'))).toBe('x + 2 m + 3 s');
+    expect(sum(Q(2, 'm'), 3, Q(3, 's'))).toBe('2 m + 3 s + 3');
+    // An operand whose value is an exact 0 is no such operand
+    const ce0 = new ComputeEngine();
+    ce0.assign('x', 0);
+    expect(
+      ce0.box(['Add', 'x', Q(2, 'm'), Q(3, 's')]).evaluate().toString()
+    ).toBe(err);
   });
 
   test('a quantity and a number are not added', () => {

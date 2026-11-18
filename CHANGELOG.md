@@ -47,6 +47,15 @@
 
 ### Behavior Changes
 
+- **A sum of quantities of two dimensions is an error.** `5 m + 3 s` was
+  left unevaluated; it now evaluates to an `incompatible-type` error that
+  names the two units (`Error(ErrorCode("incompatible-type", "m", "s"))`),
+  the error of `UnitConvert(3 s, m)`. In Epsil, `quantity(5, m) +
+  quantity(3, s)` is this error. `2 m + 3 m + 4 s` is the same error (it was
+  `5 m + 4 s`). A sum with an operand that is not a quantity, or a quantity
+  whose unit has no known dimension, stays unevaluated: `x + 2 m + 3 s` and
+  `2 m + 3` are unchanged.
+
 - **`D`, `Integrate`, `Limit` and `Series` read the value of a symbol that
   holds a formula in their variable.** With `G := sin(x)`, `D(G, x)` was `0`;
   it is now `cos(x)`. `D(2G, x)` is `2cos(x)`, `Integrate(G, x)` was `G·x`

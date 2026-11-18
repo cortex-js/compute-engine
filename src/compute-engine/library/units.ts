@@ -711,7 +711,7 @@ function convertQuantity(
  * its payload is the target unit and the unit of the quantity, so the
  * message reads "expected `m`, got `h`".
  */
-function incompatibleUnits(
+export function incompatibleUnits(
   ce: ComputeEngine,
   from: Expression,
   to: Expression

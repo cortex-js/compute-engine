@@ -57,6 +57,7 @@ import {
   cancelledUnitValue,
   canonicalUnit,
   decodedUnit,
+  incompatibleUnits,
   unitOperand,
 } from './units.js';
 import { isMeasurement } from './measurement-arithmetic.js';
@@ -247,7 +248,10 @@ function dimensionKey(q: Expression): string | undefined {
  * (`Negate(5 degC)`, `sumTerm()`) is a term of its group. The other
  * operands are not folded: the
  * dispatch sums them as one sub-sum beside the quantities, so
- * `x + 2 m + 3 m` is `x + 5 m`, and `2 m + 3 m + 4 s + 5 s` is `5 m + 9 s`.
+ * `x + 2 m + 3 m` is `x + 5 m`, and `x + 2 m + 3 m + 4 s` is
+ * `x + 5 m + 4 s`. When every operand is a quantity with a known dimension
+ * and there are two dimensions, the one fold of every operand is an
+ * `incompatible-type` error: `2 m + 3 m + 4 s` has no value.
  *
  * The sum of a group is the sum of `quantityAdd()`: in the unit with the
  * largest scale (`2 m + 30 cm` is `2.3 m`), and in kelvin for a
@@ -269,6 +273,27 @@ function quantityAddFolds(
     if (group === undefined) groups.set(key, [i]);
     else group.push(i);
   });
+  // Quantities of two dimensions have no sum (`5 m + 3 s`): the sum is the
+  // `incompatible-type` error of a conversion from the unit of the first
+  // quantity of the second group to the unit of the first quantity of the
+  // first group. Only when every operand is a quantity whose unit has a
+  // known dimension: another operand (`x`, a number) can hold a value that
+  // makes the sum valid, so `x + 2 m + 3 s` stays a sum. An exact 0 (the
+  // value of `x` at 0) is not such an operand: the dispatch drops it.
+  let grouped = 0;
+  for (const indices of groups.values()) grouped += indices.length;
+  const zeros = ops.evaluated.filter(
+    (x) => isNumber(x) && x.isExact && x.isSame(0)
+  ).length;
+  if (groups.size > 1 && grouped + zeros === terms.length) {
+    const [a, b] = [...groups.values()].map((g) => terms[g[0]]!.quantity);
+    return [
+      {
+        value: incompatibleUnits(ce, b.op2, a.op2),
+        operands: terms.map((_, i) => i),
+      },
+    ];
+  }
   const folds: KindFold[] = [];
   for (const indices of groups.values()) {
     if (indices.length < 2) continue;
