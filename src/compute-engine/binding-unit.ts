@@ -65,16 +65,15 @@ export class UnitEnvironment {
   /** The number of writes that changed an entry. */
   private _counter = 0;
 
-  /** While a journal is open: for each write, a function that puts back the
-   * entry or the record of the uses as it was before that write, true when
-   * the write was on a type entry (not on the record of the uses), and the
-   * map and the name that it wrote (`journaledEntry()`). */
+  /** While a journal is open, keep the location and previous value of each
+   * write. An undefined value means a new entry. The type flag distinguishes
+   * changes to type evidence from changes to scalar-use metadata. */
   private _journal:
     | {
-        undo: () => void;
+        entries: Map<string, BoxedType | boolean> | Set<string>;
+        name: string;
+        previous: BoxedType | boolean | undefined;
         type: boolean;
-        entries?: Map<string, unknown>;
-        name?: string;
       }[]
     | undefined = undefined;
 
@@ -393,8 +392,10 @@ export class UnitEnvironment {
     if (journal === undefined || journal.length <= mark) return false;
     let typeChanged = false;
     for (let i = journal.length - 1; i >= mark; i--) {
-      journal[i].undo();
-      if (journal[i].type) typeChanged = true;
+      const { entries, name, previous, type } = journal[i];
+      if (entries instanceof Set || previous === undefined) entries.delete(name);
+      else entries.set(name, previous);
+      if (type) typeChanged = true;
     }
     journal.length = mark;
     this._counter += 1;
@@ -403,23 +404,12 @@ export class UnitEnvironment {
 
   /** While a journal is open, record the value of `name` in `entries` before
    * a write. `type` is true for a write on a type entry. */
-  private _journalWrite<T>(
-    entries: Map<string, T>,
+  private _journalWrite(
+    entries: Map<string, BoxedType | boolean>,
     name: string,
     type: boolean
   ): void {
-    if (this._journal === undefined) return;
-    const had = entries.has(name);
-    const previous = entries.get(name);
-    this._journal.push({
-      undo: () => {
-        if (had) entries.set(name, previous as T);
-        else entries.delete(name);
-      },
-      type,
-      entries,
-      name,
-    });
+    this._journal?.push({ entries, name, previous: entries.get(name), type });
   }
 
   /** True when the open journal holds a write on the type entry for `name`
@@ -483,10 +473,12 @@ export class UnitEnvironment {
     if (names.has(name)) return;
     names.add(name);
     this._counter += 1;
-    if (this._journal !== undefined) {
-      const added = names;
-      this._journal.push({ undo: () => added.delete(name), type: true });
-    }
+    this._journal?.push({
+      entries: names,
+      name,
+      previous: undefined,
+      type: true,
+    });
   }
 
   /** The record of the uses of `name` in the scope `scope` (see
