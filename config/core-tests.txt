@@ -21,7 +21,7 @@ test/compute-engine/type-variables.test.ts
 test/common/types.test.ts
 test/compute-engine/latex-syntax/parsing.test.ts
 test/compute-engine/latex-syntax/operators.test.ts
-test/compute-engine/compile.test.ts
+test/compute-engine/ir-profile.test.ts
 test/compute-engine/interval-arithmetic.test.ts
 test/epsil/execute.test.ts
 test/epsil/declare-type.test.ts
