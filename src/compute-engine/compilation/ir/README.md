@@ -188,13 +188,13 @@ change the code, and the inputs object is not read for that name
 
 `Power` is on the real lane, except the power of a scalar on the integer lane by
 a literal integer exponent `>= 1` (`n^2` of an integer `n` is `integer<0..>`,
-CE-1484; a base on the integer lane whose engine type is `number`, the local
-`c` of `let c = n^2`, too): it is the product by squaring on the
-integer lane (`n^5` is `(n·n)·(n·n)·n`), exact below 2^53 (2^24 on GLSL) as
-`Multiply`, and past it under the rule below for an integer value of 2^53 or
-more. `n^m` stays real (a rational at `m < 0`). On JavaScript the real power
-calls the engine's real-power function (`realPow` of `javascript-runtime.ts`,
-through `_SYS.ir.pow`), which the fold also uses: a negative base with a rational exponent of odd denominator
+CE-1484; a base on the integer lane whose engine type is `number`, the local `c`
+of `let c = n^2`, too): it is the product by squaring on the integer lane (`n^5`
+is `(n·n)·(n·n)·n`), exact below 2^53 (2^24 on GLSL) as `Multiply`, and past it
+under the rule below for an integer value of 2^53 or more. `n^m` stays real (a
+rational at `m < 0`). On JavaScript the real power calls the engine's real-power
+function (`realPow` of `javascript-runtime.ts`, through `_SYS.ir.pow`), which
+the fold also uses: a negative base with a rational exponent of odd denominator
 gives the interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time
 exponent. On GLSL it is `_gpu_ir_pow`: the exact product for an integer exponent
 from 1 to 16, the sign of an integer exponent of a negative base, NaN for a
@@ -366,21 +366,21 @@ a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
 except for a list local that its block writes in place ("Lists"), which can also
 be declared with a list type (`Declare(L, 'list<real>', …)`).
 
-A destructuring `Declare`, whose name is a pattern (`Declare(Tuple(a, b),
-{value: p})`, `let (a, b) = p`), binds its names as the interpreter does
-(`destructure()`): a `Tuple` value of the length of a `Tuple` pattern binds
-each element to the pattern at its position (`Tuple(Tuple(a, b), c)` of
-`Tuple(Tuple(1, 2), 3)`); another value must be a point of the length of the
-pattern (a tuple value, "Tuples") and binds a name to the element at each
-index, a scalar; `_` binds nothing. Every element is lowered, in order, before
-a name is bound, so an element that reads a name of the pattern reads its
-binding from before the statement. Each name is then a local as above, of no
-stated type. The interpreter gives an `incompatible-type` error for a value of
-another length, a list and a scalar: those decline, and so do a nested pattern
-over a point, a name twice in the pattern, a stated type (the interpreter
-checks it against every element), a list or a point that the block then
-writes, and every pattern in the interval mode. On GLSL a point is a `vecN`, so
-the declaration of a point compiles.
+A destructuring `Declare`, whose name is a pattern
+(`Declare(Tuple(a, b), {value: p})`, `let (a, b) = p`), binds its names as the
+interpreter does (`destructure()`): a `Tuple` value of the length of a `Tuple`
+pattern binds each element to the pattern at its position
+(`Tuple(Tuple(a, b), c)` of `Tuple(Tuple(1, 2), 3)`); another value must be a
+point of the length of the pattern (a tuple value, "Tuples") and binds a name to
+the element at each index, a scalar; `_` binds nothing. Every element is
+lowered, in order, before a name is bound, so an element that reads a name of
+the pattern reads its binding from before the statement. Each name is then a
+local as above, of no stated type. The interpreter gives an `incompatible-type`
+error for a value of another length, a list and a scalar: those decline, and so
+do a nested pattern over a point, a name twice in the pattern, a stated type
+(the interpreter checks it against every element), a list or a point that the
+block then writes, and every pattern in the interval mode. On GLSL a point is a
+`vecN`, so the declaration of a point compiles.
 
 A root `Tuple`, or the last operand of a root `Block` that is one, whose
 elements are tuples or are not of one shape (`Tuple(H)` of a list of run-time
@@ -1260,80 +1260,78 @@ lowering memo never shares a read; the SSA value of `L` does not change, and a
 `Loop` or an `if` carries nothing for it. `inPlace()` checks the scope of the
 local (the statements after the declaration) before the copy: no function
 literal reads `L` ("read in a function literal (a capture)": the function can
-run after a later write, which compiled code would show). `At(L, i)` is
-`getat` and `Length(L)` the length of the array, which no write changes. Any
-other read of `L` (`M = L`, `f(L)`, `List(L)`, `Sum(L)`, `Tuple(L, s)`, an
-argument of `Apply`) is a `copy` of the array at the read (`symbol()`,
-CE-1485): the interpreter's lists are values, so no later write changes what
-was read, and the code shares no array of a written local. The value of the
-block, its last statement `L` or `Typed(L, …)`, is the array itself, after
-every write (`whole`). A copy is effectful, so an operation that declines an
-operand with an effect (`Reverse(L)`, a lazy `Comprehension` body) declines
-such a read. Any other write (`Assign(L, Append(L, v))`, a whole list, a declaration
-of `L` again in the scope) declines with "a write to a constant … or to a list
-local", as before. A written value whose lane is not a sub-lane of the element
-lane declines, with one exception; the element lane is the declared one
-(`Declare(L, 'list<real>', …)`) or that of the value. The exception (CE-1480):
-a real written to a list local of integers of no declared type
+run after a later write, which compiled code would show). `At(L, i)` is `getat`
+and `Length(L)` the length of the array, which no write changes. Any other read
+of `L` (`M = L`, `f(L)`, `List(L)`, `Sum(L)`, `Tuple(L, s)`, an argument of
+`Apply`) is a `copy` of the array at the read (`symbol()`, CE-1485): the
+interpreter's lists are values, so no later write changes what was read, and the
+code shares no array of a written local. The value of the block, its last
+statement `L` or `Typed(L, …)`, is the array itself, after every write
+(`whole`). A copy is effectful, so an operation that declines an operand with an
+effect (`Reverse(L)`, a lazy `Comprehension` body) declines such a read. Any
+other write (`Assign(L, Append(L, v))`, a whole list, a declaration of `L` again
+in the scope) declines with "a write to a constant … or to a list local", as
+before. A written value whose lane is not a sub-lane of the element lane
+declines, with one exception; the element lane is the declared one
+(`Declare(L, 'list<real>', …)`) or that of the value. The exception (CE-1480): a
+real written to a list local of integers of no declared type
 (`ReplaceAt(L, 1, 0.5)` of `L = [0 for k in 1..n]`), which the interpreter
 widens to a list of reals. `listWrite()` then throws `WidenList`, and `lower()`
-lowers the program again with that local on the real lane from its
-declaration (the copy is on the real lane): its elements before the write are
-the same numbers, so every read gives the interpreter's value, and a read that
-needs an integer declines as for any real. A declared `list<integer>` (the
-interpreter gives an `incompatible-type` error), a complex and a boolean value
-still decline. The declaration also copies a constant (`let L = C` of a
-`const C = [1, 2, 3]`, shared through `preambleOnce`), which no write
-changes. A write in a `Sum`, a
-`Product`, a `Map` or a `Filter` body to a list local declared outside it
-declines, as for a scalar local. GLSL, the interval mode and the `bigint` mode
-decline such a local. In a random frame these operations are no draw sites
-(`LIST_LOCAL_OPS`, `seededWarnings()`); a call of a function that writes a list
-local is `effectful` and counts as one (a warning `seeded-draw-order` that a
-frame around such a call can give where its draws are in order).
+lowers the program again with that local on the real lane from its declaration
+(the copy is on the real lane): its elements before the write are the same
+numbers, so every read gives the interpreter's value, and a read that needs an
+integer declines as for any real. A declared `list<integer>` (the interpreter
+gives an `incompatible-type` error), a complex and a boolean value still
+decline. The declaration also copies a constant (`let L = C` of a
+`const C = [1, 2, 3]`, shared through `preambleOnce`), which no write changes. A
+write in a `Sum`, a `Product`, a `Map` or a `Filter` body to a list local
+declared outside it declines, as for a scalar local. GLSL, the interval mode and
+the `bigint` mode decline such a local. In a random frame these operations are
+no draw sites (`LIST_LOCAL_OPS`, `seededWarnings()`); a call of a function that
+writes a list local is `effectful` and counts as one (a warning
+`seeded-draw-order` that a frame around such a call can give where its draws are
+in order).
 
 `ReplaceAt(L, i, v)` as a value (`replaceAt()`; CE-1487), not the right side of
 the write of a list local: of a flat list of reals, integers or booleans and a
 scalar `v` of the same kind, the build whose element at `wix(n, i)` is `v` and
 whose other elements are those of `L` (an integer list and a real `v` give a
-list of reals, as the interpreter's). It is pure: `L` is not changed. A
-constant index of a list of stated length is a constant; one that is 0 or out
-of range declines (the interpreter leaves `ReplaceAt` unevaluated). An index
-known at run time is `wix` (it throws `out-of-range` for an index that is 0,
-out of range or not an integer, where the interpreter gives an unevaluated form
-or an error), on JavaScript only: GLSL, the interval mode and the `bigint` mode
-decline it. On GLSL, which builds no list, a constant index of a list of a
-constant length is the list of its elements. A boolean value in a list of
-numbers, or the reverse, and a complex value decline; so do several indexes
-(`ReplaceAt(M, i, j, v)`).
+list of reals, as the interpreter's). It is pure: `L` is not changed. A constant
+index of a list of stated length is a constant; one that is 0 or out of range
+declines (the interpreter leaves `ReplaceAt` unevaluated). An index known at run
+time is `wix` (it throws `out-of-range` for an index that is 0, out of range or
+not an integer, where the interpreter gives an unevaluated form or an error), on
+JavaScript only: GLSL, the interval mode and the `bigint` mode decline it. On
+GLSL, which builds no list, a constant index of a list of a constant length is
+the list of its elements. A boolean value in a list of numbers, or the reverse,
+and a complex value decline; so do several indexes (`ReplaceAt(M, i, j, v)`).
 
-A list local written whole (JavaScript; CE-1481): a `Block` local whose value
-is a list, each write of which in its scope is `Assign(L, value)`
-(`rebuiltOnly()`: no `ReplaceAt(L, …)` value, no `AddTo`, no parallel
-assignment, no write in a function literal, no declaration again), is a
-`local` binding with `whole` (`wholeLocal()`): a list of reals, integers or
-booleans of rank 1, or a list of points of reals or integers (marked a tuple
-on its inner axis), of the declared type or of the type of its value; a
-declared `List()` is an empty build of that type (a stated length is at least
-1). Each write is a new SSA value, as for a scalar local (`fitWhole()`): the
-same rank, the same lengths after the first and the same tuple mark, of a
-sub-lane, and any first length; another value declines ("a value of type …
-written to a list local of type …"). A real list written to a list of
-integers of no declared type throws `WidenList`, as above, and the local is on
-the real lane from its declaration. No array is written, so the local has no
-alias rule and no copy: `M = L` and `f(L)` read the value. A `Loop` carries
-two values for such a local, its length (an integer) and the list whose type
-names it (the verifier reads the initial value, the yield and the result of
-the list at the length carried before it); `branch()` joins two lengths of
-such a local's list of points as it joins flat lists (a length result before
-the list), and a random frame (`seededFrame()`) gives the length of a list
-made in it as a result before the lists. The gasket's `fillGap` and
-`generations` (`out = [...out, (…)]`, `out = fillGap(…, out)`,
+A list local written whole (JavaScript; CE-1481): a `Block` local whose value is
+a list, each write of which in its scope is `Assign(L, value)` (`rebuiltOnly()`:
+no `ReplaceAt(L, …)` value, no `AddTo`, no parallel assignment, no write in a
+function literal, no declaration again), is a `local` binding with `whole`
+(`wholeLocal()`): a list of reals, integers or booleans of rank 1, or a list of
+points of reals or integers (marked a tuple on its inner axis), of the declared
+type or of the type of its value; a declared `List()` is an empty build of that
+type (a stated length is at least 1). Each write is a new SSA value, as for a
+scalar local (`fitWhole()`): the same rank, the same lengths after the first and
+the same tuple mark, of a sub-lane, and any first length; another value declines
+("a value of type … written to a list local of type …"). A real list written to
+a list of integers of no declared type throws `WidenList`, as above, and the
+local is on the real lane from its declaration. No array is written, so the
+local has no alias rule and no copy: `M = L` and `f(L)` read the value. A `Loop`
+carries two values for such a local, its length (an integer) and the list whose
+type names it (the verifier reads the initial value, the yield and the result of
+the list at the length carried before it); `branch()` joins two lengths of such
+a local's list of points as it joins flat lists (a length result before the
+list), and a random frame (`seededFrame()`) gives the length of a list made in
+it as a result before the lists. The gasket's `fillGap` and `generations`
+(`out = [...out, (…)]`, `out = fillGap(…, out)`,
 `out = [...take(out, i), c, ...drop(out, i)]`) compile this way. A local with
-both a whole write and a write in place declines with the cause of the
-paragraph above; so do a point written whole and an empty list of no stated
-type (no lane). GLSL (no run-time length), the interval mode and the `bigint`
-mode decline such a local.
+both a whole write and a write in place declines with the cause of the paragraph
+above; so do a point written whole and an empty list of no stated type (no
+lane). GLSL (no run-time length), the interval mode and the `bigint` mode
+decline such a local.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
@@ -1341,20 +1339,20 @@ of `L` by `cond`, then a build of `body` over the elements kept. The
 interpreter's list is lazy: it evaluates the condition and the body of an
 element only when the element is read (`Length` reads none), so a condition or a
 body with an effect declines (`Length(Comprehension(Random(), Element(z, D)))`
-draws nothing in the interpreter). A call of a user function that has no
-effect, also of a recursive one (`may-fail`), is not one: the instructions of
-the function's body, among them its recursive call, whose effect is not known
-while the body is lowered, are not counted as the caller's (`Builder.define()`),
-so `Comprehension(r(i), Element(i, Range(0, 5)))` of
+draws nothing in the interpreter). A call of a user function that has no effect,
+also of a recursive one (`may-fail`), is not one: the instructions of the
+function's body, among them its recursive call, whose effect is not known while
+the body is lowered, are not counted as the caller's (`Builder.define()`), so
+`Comprehension(r(i), Element(i, Range(0, 5)))` of
 `r(k) := Which(k ≤ 0, 0, True, s + r(k − 1))` compiles. The compiled elements
 are computed eagerly, as those of any `may-fail` body: an element that the
-interpreter does not read is computed too (`At(Comprehension(r(i), Element(i,
-Range(0, 300))), 2)` computes `r(300)`, past the interpreter's recursion limit),
-and one past the JavaScript stack throws a `RangeError`. A call of a function in
-a `Comprehension` of its own body declines: the effect of that call is not known
-there. Two clauses or more, `Element(i, L)` each,
-are the interpreter's flat list over the Cartesian product, the last index the
-fastest
+interpreter does not read is computed too
+(`At(Comprehension(r(i), Element(i, Range(0, 300))), 2)` computes `r(300)`, past
+the interpreter's recursion limit), and one past the JavaScript stack throws a
+`RangeError`. A call of a function in a `Comprehension` of its own body
+declines: the effect of that call is not known there. Two clauses or more,
+`Element(i, L)` each, are the interpreter's flat list over the Cartesian
+product, the last index the fastest
 (`Comprehension(10k + j, Element(k, Range(1, 2)), Element(j, Range(1, 3)))` is
 `[11, 12, 13, 21, 22, 23]`): one build over the product of the lengths, whose
 index `k` gives the index of clause `j` as `Floor(k / s_j) mod n_j`, with `s_j`
@@ -1639,24 +1637,24 @@ list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4` (`bvec2`,
 tuple of lists is a list of rows (`Tuple(L)` of a list of stated length); a
 tuple of tuples declines, except as the element of a `Loop` over a literal
 `List` of `Tuple`s of one length (`for gap in [(A, B, C), (B, C, D)]`, `A` to
-`D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an index
-into one list per position, a list of points where the parts are tuples
-(`[A, B]`, `[B, C]`, `[C, D]`), and `At` of the element at a constant index (1
-to 3, or −3 to −1) is the part at that index (`gap[1]` is `A`, then `B`); a
-`Tuple` pattern binds each name to a part (`for (p, q, r) in …`). Any other
-read of the element (`Length(gap)`, `f(gap)`, `gap[k]`) declines, and so does
-an effect in the list (the interpreter reads it element by element).
-`PointList` with no list component is the tuple of its
-components; with list components it is the list of the tuples of their elements
-at each index, a scalar component in every tuple, as long as the shortest
-component, as in the interpreter: a stated length, one length value
-(`PointList(D, Map(f, D))`), or the `Min` of the lengths at run time
-(`PointList(A1, A2, A3)` of three inputs of type `list<real>`). `Zip(A, B, …)`
-of lists of numbers is that value, as in the interpreter (a list of tuples as
-long as the shortest list), and is lowered as `PointList`; a list with an effect
-declines (the interpreter reads the lists up to the shortest). A list of tuples,
-a build of tuples (`Comprehension(Tuple(f(k), g(k)), Element(k, R))`) and the
-element of a list of tuples are tuples at their axis.
+`D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an index into
+one list per position, a list of points where the parts are tuples (`[A, B]`,
+`[B, C]`, `[C, D]`), and `At` of the element at a constant index (1 to 3, or −3
+to −1) is the part at that index (`gap[1]` is `A`, then `B`); a `Tuple` pattern
+binds each name to a part (`for (p, q, r) in …`). Any other read of the element
+(`Length(gap)`, `f(gap)`, `gap[k]`) declines, and so does an effect in the list
+(the interpreter reads it element by element). `PointList` with no list
+component is the tuple of its components; with list components it is the list of
+the tuples of their elements at each index, a scalar component in every tuple,
+as long as the shortest component, as in the interpreter: a stated length, one
+length value (`PointList(D, Map(f, D))`), or the `Min` of the lengths at run
+time (`PointList(A1, A2, A3)` of three inputs of type `list<real>`).
+`Zip(A, B, …)` of lists of numbers is that value, as in the interpreter (a list
+of tuples as long as the shortest list), and is lowered as `PointList`; a list
+with an effect declines (the interpreter reads the lists up to the shortest). A
+list of tuples, a build of tuples
+(`Comprehension(Tuple(f(k), g(k)), Element(k, R))`) and the element of a list of
+tuples are tuples at their axis.
 
 The lowering keeps the set of the values that are tuples (`Lowering.tuples`,
 with the axis of the tuple in the shape), and an operator reads a tuple only
@@ -1694,12 +1692,12 @@ over the points of any list of points of such a length (a `PointList` or a
 literal `List` of points), the list of its values at each one
 (`Abs(PointList(x - List(1/2, 1), y))` is the `vec2` of the two distances, and
 `dce` removes the points); a list of points as the result, a component of a
-run-time length and more than 64 points decline (CE-1474).
-Any other reader declines a tuple operand: `Equal(Tuple(1, 2), List(1, 2))` is
-`False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
-`Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
-one is a tuple and the other a list. The positions that hold a value (the root,
-an element of a `List` or a `Tuple`, the result of a `Block`, an arm of `If` or
+run-time length and more than 64 points decline (CE-1474). Any other reader
+declines a tuple operand: `Equal(Tuple(1, 2), List(1, 2))` is `False`, a
+comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`, `Loop` and
+`Comprehension` over a tuple, and the arms of a conditional of which one is a
+tuple and the other a list. The positions that hold a value (the root, an
+element of a `List` or a `Tuple`, the result of a `Block`, an arm of `If` or
 `Which`, a build body, a random frame) keep it. The missing arm of an `If` whose
 arm is a tuple of numbers is the tuple of NaN of its length, as the interpreter
 gives (`If(t ≤ W, Tuple(Cos(t), Sin(t)))` at `t > W` is `(NaN, NaN)`); a list
@@ -1987,43 +1985,42 @@ is no bound and no counter.
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
 counted loop per clause over the source of `L` (an input list, a list, a
 `Range`), a later clause lowered in the body of the one before, so it reads its
-index. An index that is a pattern (`Element(Tuple(p, q), P1)`, `for (p, q) in
-P1` of a list of points) binds its names to each element as a destructuring
-`Declare` binds them to a point ("The contracts"); an element that is not a
-point of the length of the pattern declines (a list of points is JavaScript
-only). The locals declared outside the loop that the body writes are its carried
-values. A `Break` or a `Continue` (with no operand) is a statement of the body:
-a statement of a `Block`, or of an arm of an `If` or a `Which` that is one. A
-`Break` sets a boolean carried value, false before the loop, which is the `exit`
-of the `loop` instruction of every clause: the printer stops the loop when it is
-true (`loopOpen()` receives the flag's name: `!done` in the `for` condition on
-JavaScript and GLSL, `!_IA.decided(done)` in the interval mode; on JavaScript
-the block of passes then charges the deadline count with the passes it ran, the
-breaking one included), so a `Break` ends every clause, as in the interpreter. A
-`Continue` sets a flag of the pass, false at its start (a `Break` also sets it;
-with no `Continue`, the flag is the one of the `Break`). The statements of a
-`Block` that follow a statement that set the flag, or may have set it, are
-lowered in the arm of an `if` where it is false: after a `Break` the rest of the
-pass computes nothing, and every carried value keeps its value at the break. No
-instruction jumps. The passes run on such a loop as on any other: the iteration
-budget counts the passes that run (an early exit runs fewer). The guard of the
-JavaScript loop before its first pass is 2^53 passes for a loop with a `Break`
-(an open search over `Range(1, 1e12)` ends at its `Break`), 2^32 for another. A
-loop that never reaches its `Break` and has no budget runs until the host's
-deadline (`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes").
+index. An index that is a pattern (`Element(Tuple(p, q), P1)`,
+`for (p, q) in P1` of a list of points) binds its names to each element as a
+destructuring `Declare` binds them to a point ("The contracts"); an element that
+is not a point of the length of the pattern declines (a list of points is
+JavaScript only). The locals declared outside the loop that the body writes are
+its carried values. A `Break` or a `Continue` (with no operand) is a statement
+of the body: a statement of a `Block`, or of an arm of an `If` or a `Which` that
+is one. A `Break` sets a boolean carried value, false before the loop, which is
+the `exit` of the `loop` instruction of every clause: the printer stops the loop
+when it is true (`loopOpen()` receives the flag's name: `!done` in the `for`
+condition on JavaScript and GLSL, `!_IA.decided(done)` in the interval mode; on
+JavaScript the block of passes then charges the deadline count with the passes
+it ran, the breaking one included), so a `Break` ends every clause, as in the
+interpreter. A `Continue` sets a flag of the pass, false at its start (a `Break`
+also sets it; with no `Continue`, the flag is the one of the `Break`). The
+statements of a `Block` that follow a statement that set the flag, or may have
+set it, are lowered in the arm of an `if` where it is false: after a `Break` the
+rest of the pass computes nothing, and every carried value keeps its value at
+the break. No instruction jumps. The passes run on such a loop as on any other:
+the iteration budget counts the passes that run (an early exit runs fewer). The
+guard of the JavaScript loop before its first pass is 2^53 passes for a loop
+with a `Break` (an open search over `Range(1, 1e12)` ends at its `Break`), 2^32
+for another. A loop that never reaches its `Break` and has no budget runs until
+the host's deadline (`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes").
 `Loop(body)`, with no `Element` clause, is on JavaScript one counted loop of
 2^53 passes whose `exit` is the flag of a `Break`, made also when the body has
 no `Break` (so its guard is the one of 2^53): a `Break` ends it, and with an
 `iterationBudget` its passes count, so `Loop(k := k + 1)` throws the
 `CancellationError` of the budget, as the interpreter throws at
 `ce.iterationLimit`; with no budget it has no count, and it runs until its
-`Break` or the host's deadline. GLSL and the interval mode decline it: the
-bound of its passes is not a constant within the budget. A `Break` or a
-`Continue` that is not such a statement (`If(c, Break(), 1)` read as a value,
-one outside a `Loop`, or in a function literal in the body), a `Break` with a
-value, a `Return`, a write to the index and a `Loop` whose value is read
-decline. `Repeat(v, n)` is the list of `n` copies of
-`v`, not a loop (see "Lists").
+`Break` or the host's deadline. GLSL and the interval mode decline it: the bound
+of its passes is not a constant within the budget. A `Break` or a `Continue`
+that is not such a statement (`If(c, Break(), 1)` read as a value, one outside a
+`Loop`, or in a function literal in the body), a `Break` with a value, a
+`Return`, a write to the index and a `Loop` whose value is read decline.
+`Repeat(v, n)` is the list of `n` copies of `v`, not a loop (see "Lists").
 
 `AddTo(s, e)` of a local `s` is `Assign(s, Add(s, e))`, with the lane rules of
 `Assign`, on every target; `AddTo(At(L, i), e)` writes a list local in place
@@ -2149,14 +2146,14 @@ result of no stated type (none, `unknown`, `number`, `any`, `value`, a
 `list<…> | number | tuple` for `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type of
 the body. An assignment narrows a declared `unknown` result to the type of the
 body, `value` for `Dot(p(u, v), PointList(u, v))` with `u, v` of no stated type
-(CE-1497). The result is a scalar, or a point (a tuple of real or integer numbers,
-`Function(Block(PointList(x, y)), x, y)`), and the result of a call is then a
-tuple; a result that is a tuple of such elements or of real or integer scalars
-(`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`) takes a
-point body of that length; a list body declines, except with no result at all (a
-function value declared with the bare type `function`): its list body is taken
-as for `list<unknown>` below, with the same conditions. A result that is a list
-of elements of no stated type (`list<unknown>`, `list<unknown^3>`,
+(CE-1497). The result is a scalar, or a point (a tuple of real or integer
+numbers, `Function(Block(PointList(x, y)), x, y)`), and the result of a call is
+then a tuple; a result that is a tuple of such elements or of real or integer
+scalars (`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`)
+takes a point body of that length; a list body declines, except with no result
+at all (a function value declared with the bare type `function`): its list body
+is taken as for `list<unknown>` below, with the same conditions. A result that
+is a list of elements of no stated type (`list<unknown>`, `list<unknown^3>`,
 `list<tuple<unknown, unknown>^9>`, as the engine infers it for parameters of no
 stated type: `v(a, b) := [a, b]`) is the shape of the body, lowered with the
 parameter types of the first call: a flat list of numbers or booleans, or a list
@@ -2189,26 +2186,26 @@ stated type (user decision 2026-10-24); every other list binds whole. The
 profile maps a flat list at a scalar parameter, and a list of points at a
 parameter declared as a point that the interpreter maps (`pointsMapAt()`,
 CE-1477), one point per call, the other arguments bound whole in each cell
-(`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42` of
-`k((1, 2), [3, 4])` is `[42, 42]`, and `g(B)` of a list of points `B` with
+(`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42` of `k((1, 2), [3, 4])`
+is `[42, 42]`, and `g(B)` of a list of points `B` with
 `g := (p: tuple<real, real>) ↦ p[1] + p[2]`, declared `function` or not, is
 `[3, 7]` at `B = [(1, 2), (3, 4)]`. A list that the interpreter maps where the
 parameter is a list or took a point or a list of points at the first call
-declines, as does a list of points or a nested list that the interpreter maps
-to the leaves (`g(B)` with `g := x ↦ 2x`), and a list of points at a parameter
+declines, as does a list of points or a nested list that the interpreter maps to
+the leaves (`g(B)` with `g := x ↦ 2x`), and a list of points at a parameter
 declared `broadcastable<tuple<real, real>>`. A tuple at a parameter annotated as
-a scalar declines (the
-interpreter maps the function over its components: `g((3, −4))` with
-`g := (p: real) ↦ |p|` is `(3, 4)`), also beside a mapped list. When the
-interpreter binds the arguments whole, a flat list of numbers of a stated length
-as the first argument is a list of that length, and a later call with another
-length declines: `R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]]` of
-`R([−0.57, 2.8], φ)`. Otherwise, when the lowered argument of the first call is
-not a point, a parameter of no declared type is a real, and one of a type that
-is not a scalar declines. A recursive function whose result is not declared (no
-type, `number`, `any`, `value`) has a real scalar result: a call of it made while its
-body is lowered has a real result (`UserFunction.guess`), and the body must then
-be a real or an integer scalar, which is widened; a complex or a boolean body
+a scalar declines (the interpreter maps the function over its components:
+`g((3, −4))` with `g := (p: real) ↦ |p|` is `(3, 4)`), also beside a mapped
+list. When the interpreter binds the arguments whole, a flat list of numbers of
+a stated length as the first argument is a list of that length, and a later call
+with another length declines:
+`R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]]` of `R([−0.57, 2.8], φ)`.
+Otherwise, when the lowered argument of the first call is not a point, a
+parameter of no declared type is a real, and one of a type that is not a scalar
+declines. A recursive function whose result is not declared (no type, `number`,
+`any`, `value`) has a real scalar result: a call of it made while its body is
+lowered has a real result (`UserFunction.guess`), and the body must then be a
+real or an integer scalar, which is widened; a complex or a boolean body
 declines with the cause of that call, and a node that reads the call as another
 type declines with its own cause (`If(n = 0, List(1, 2), 2·l(n − 1))`: arms of
 two types). No other result is tried. In a cycle of calls, each function called
@@ -2239,27 +2236,27 @@ before or after the call (`J(n, x) := Which(n = 0, x, True, I(x, J(n − 1, x)))
 where `I` reads `a`). Declined: a function that reads an input on a cycle of
 calls through another function (`P(j) = If(j > 0, Q(j - 1), n)` and
 `Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a parameter of the
-function whose body has the call (`h(x) := k(x)`), or has a value; an input of
-a list of a run-time length or of booleans; a name with a value read in the
-body whose binding where the call is compiled is not the body's (see the values
-of free names above); another `vars` name. A call where the name is a local or
-the variable of a binder (CE-1479) passes the input, which the body reads: with
+function whose body has the call (`h(x) := k(x)`), or has a value; an input of a
+list of a run-time length or of booleans; a name with a value read in the body
+whose binding where the call is compiled is not the body's (see the values of
+free names above); another `vars` name. A call where the name is a local or the
+variable of a binder (CE-1479) passes the input, which the body reads: with
 `k(v) := v + x`, `Sum(x + k(1), Limits(x, 1, 3))` is `(1 + 2 + 3) + 3·(1 + x)`,
 39 at x = 10, as the interpreter gives it. The binding that the body reads
 (`UserFunction.defs`) must be a binding of the name in the scope of the
 compilation or in a scope around it (`onScopeChain()`), as the input's is (the
 `inputs` option declares the input in a scope of its own, which hides that
 binding); a local or a variable of the expression is in a scope inside it, so a
-function whose body reads one would decline there. No program reaches that
-case with a local binding today (a `DefineFunction(q, …)` in the body of the
-`Sum`, whose `q` reads the index, already declines as "a function definition
-that is not the binding of its calls"); the check guards a `vars` capture, of
-no binding, and stays as a defense. `Apply(Function(body, p1, …), a1, …)`
-with one parameter per argument, each a name or a typed name
-(`Typed(H, 'list<real>')`), is the body with each parameter bound to its argument, the arguments lowered once, in order, before
-the body (as a `Block` of locals); a parameter shadows an input or a local of
-its name, and an argument reads the names outside. A literal whose signature is
-scalar (`literalParamsMap()`, the test of the interpreter's
+function whose body reads one would decline there. No program reaches that case
+with a local binding today (a `DefineFunction(q, …)` in the body of the `Sum`,
+whose `q` reads the index, already declines as "a function definition that is
+not the binding of its calls"); the check guards a `vars` capture, of no
+binding, and stays as a defense. `Apply(Function(body, p1, …), a1, …)` with one
+parameter per argument, each a name or a typed name (`Typed(H, 'list<real>')`),
+is the body with each parameter bound to its argument, the arguments lowered
+once, in order, before the body (as a `Block` of locals); a parameter shadows an
+input or a local of its name, and an argument reads the names outside. A literal
+whose signature is scalar (`literalParamsMap()`, the test of the interpreter's
 `applyLiteralMaps()`: every parameter scalar, or a tuple) maps over its flat
 list arguments of numbers, as the interpreter's `applyLiteralMapped()` in
 `library/core.ts`: one cell per index, the lists zipped, each scalar argument
@@ -2289,14 +2286,14 @@ lane, the same tuple mark, a stated length where the type states one), so
 `Apply(((H: list<real>), (n: integer)) ↦ H[1] + n, L, 5)` is `7` at
 `L = [2, 3, 4]`. A list of reals at a list parameter of integers (not of tuples)
 is bound whole on its own lane, since the interpreter checks no element
-(CE-1483): `Apply((H: list<integer>) ↦ H[1], L)` is `2.5` at
-`L = [2.5, 3, 4]`, also when the type of `L` admits NaN or an infinity; so is
-a list of reals at `list<real<0..1>>`. A parameter declared a scalar takes a
-scalar of its lane, or, when the signature is scalar, each element of a flat
-list that the literal maps over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`).
-The engine type of a scalar argument need not prove the parameter's type: a
-value outside it is unspecified in compiled code (user decision 2026-11-19,
-CE-1503; "Caveats of compiled code" in `docs/COMPILATION-MODEL.md`), so
+(CE-1483): `Apply((H: list<integer>) ↦ H[1], L)` is `2.5` at `L = [2.5, 3, 4]`,
+also when the type of `L` admits NaN or an infinity; so is a list of reals at
+`list<real<0..1>>`. A parameter declared a scalar takes a scalar of its lane,
+or, when the signature is scalar, each element of a flat list that the literal
+maps over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`). The engine type of a
+scalar argument need not prove the parameter's type: a value outside it is
+unspecified in compiled code (user decision 2026-11-19, CE-1503; "Caveats of
+compiled code" in `docs/COMPILATION-MODEL.md`), so
 `a: real | signed_infinity | nan` binds at `p: real` and a value of the real
 lane at `k: integer` keeps its lane (an untyped local, CE-1485), where the
 interpreter checks the value at the call. A call of a named function still
@@ -2384,27 +2381,27 @@ interpreter's `pointListParamSlots()`), is mapped the same way, one point per
 call (CE-1477): the arguments of each call of such a function are lowered before
 the function, a list of points at such a parameter is zipped with the other
 lists of points there and with the flat lists at scalar parameters (of one
-length, as above), and a point or a scalar elsewhere is bound whole. An
-argument of such a call whose static type at the call settles no shape
-(`unknown`), at a slot where the call maps, declines with `unsettled-shape`, and
-so does one beside a flat list that a call maps over: the interpreter pairs it
-with the points or zips it with the list when it is a list and binds it whole
-otherwise. An occurrence that the engine narrows at the call (`t` at a `real`
-slot) is read by its narrowed type: a list passed to an untyped parameter of a
-function literal is a value outside the type that the body implies, and the
-result is unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). A result
-that is a point makes the call a list of points: with
+length, as above), and a point or a scalar elsewhere is bound whole. An argument
+of such a call whose static type at the call settles no shape (`unknown`), at a
+slot where the call maps, declines with `unsettled-shape`, and so does one
+beside a flat list that a call maps over: the interpreter pairs it with the
+points or zips it with the list when it is a list and binds it whole otherwise.
+An occurrence that the engine narrows at the call (`t` at a `real` slot) is read
+by its narrowed type: a list passed to an untyped parameter of a function
+literal is a value outside the type that the body implies, and the result is
+unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). A result that is a
+point makes the call a list of points: with
 `f := (p: tuple<number, number>) ↦ (p[1] + 1, p[2])` declared
 `(tuple<number, number>) -> tuple<number, number>`, `f(P)` is `[(2, 2), (4, 4)]`
 at `P = [(1, 2), (3, 4)]`, and so is a flat list mapped at a scalar parameter
 (`f((1, 2), L)` of `f := (p: tuple<real, real>, t: real) ↦ (p[1] + t, p[2])`).
-On GLSL a list of points of a constant length is written out (a `PointList` or
-a literal `List` of points, "Tuples"): `f` of it compiles when the result of
-`f` is a scalar, and a list of points as the result declines. A tuple argument
-for a scalar parameter declines
-(a tuple is atomic). A declared result `complex` of a real body is the body
-converted to the complex lane. A declared result `color` takes a body on the
-colour lane ("The colour lane"); a parameter `color` declines.
+On GLSL a list of points of a constant length is written out (a `PointList` or a
+literal `List` of points, "Tuples"): `f` of it compiles when the result of `f`
+is a scalar, and a list of points as the result declines. A tuple argument for a
+scalar parameter declines (a tuple is atomic). A declared result `complex` of a
+real body is the body converted to the complex lane. A declared result `color`
+takes a body on the colour lane ("The colour lane"); a parameter `color`
+declines.
 
 A parameter declared a list of reals or integers
 (`(list<integer>, integer) -> integer`) is a list: of a stated length, which the
@@ -2480,31 +2477,30 @@ A scalar parameter of no stated type, or of type `unknown` or `number`, takes
 the lane of its argument, not always `real` (CE-1476): a call whose argument
 there is complex calls a function of a complex parameter, any other call a
 function of a real parameter (an integer argument is widened), so a binding is
-lowered once per lane of such parameters (`laneKey()`), in `mode: 'complex'`
-on every target that has the complex lane; the strict mode (the default)
-declines a complex argument there (a `LaneMismatch`,
-`compile-mode-strict.test.ts`). With `f(w) := w^2`,
-`Arg(f(x + i·y)) + f(x)` calls `f` of a complex `w` and `f` of a real `w`; the
-arguments of each call of such a function are lowered before the function is
-chosen. A real call keeps the value of the real lane: `Sqrt(w)` at `w = -1` is
-`i` in `mode: 'complex'` and NaN in the default mode, as `Sqrt(x)` is. A
-parameter declared `real` (or `integer`) declines a complex argument. A
+lowered once per lane of such parameters (`laneKey()`), in `mode: 'complex'` on
+every target that has the complex lane; the strict mode (the default) declines a
+complex argument there (a `LaneMismatch`, `compile-mode-strict.test.ts`). With
+`f(w) := w^2`, `Arg(f(x + i·y)) + f(x)` calls `f` of a complex `w` and `f` of a
+real `w`; the arguments of each call of such a function are lowered before the
+function is chosen. A real call keeps the value of the real lane: `Sqrt(w)` at
+`w = -1` is `i` in `mode: 'complex'` and NaN in the default mode, as `Sqrt(x)`
+is. A parameter declared `real` (or `integer`) declines a complex argument. A
 recursive call of another lane calls the function of that lane, which, for a
 function with no declared result (a real result, above), declines with its
 complex body. A parameter declared a list of integers (not of tuples) takes a
-list of reals on the real lane (CE-1483), as an `Apply` of a literal does
-above: the interpreter binds the list whole and checks no element, and a
-parameter of an IR function has the lane of its argument, so the function of a
-list of reals, its parameter on the real lane, is another version of the
-binding (`laneKey()`; the `bigint` mode declines a list of reals), and the
-arguments of each call of a function with such a parameter are lowered before
-the function is chosen. With `function g(H: list<integer>) -> real { H[1] }`,
-`g(L)` of `L: list<real>` and `f(n) = g([n, 1])` at n = 2.5 are `2.5`;
-`g(L) + g(M)` with `M: list<integer>` calls two functions. A result `integer`,
-declared or inferred by the engine (`function g(H: list<integer>) { H[1] }` is
-typed `(list<integer>) -> integer`), declines a real body ("a body of g that
-is not integer"), where the interpreter gives `2.5`; a recursive call that
-returns to the lane that called it declines as above.
+list of reals on the real lane (CE-1483), as an `Apply` of a literal does above:
+the interpreter binds the list whole and checks no element, and a parameter of
+an IR function has the lane of its argument, so the function of a list of reals,
+its parameter on the real lane, is another version of the binding (`laneKey()`;
+the `bigint` mode declines a list of reals), and the arguments of each call of a
+function with such a parameter are lowered before the function is chosen. With
+`function g(H: list<integer>) -> real { H[1] }`, `g(L)` of `L: list<real>` and
+`f(n) = g([n, 1])` at n = 2.5 are `2.5`; `g(L) + g(M)` with `M: list<integer>`
+calls two functions. A result `integer`, declared or inferred by the engine
+(`function g(H: list<integer>) { H[1] }` is typed `(list<integer>) -> integer`),
+declines a real body ("a body of g that is not integer"), where the interpreter
+gives `2.5`; a recursive call that returns to the lane that called it declines
+as above.
 
 The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's
@@ -2515,30 +2511,30 @@ and complex modes) also a call of a function that its caller calls twice or more
 and a call whose result is a list of a constant length of at most 16 elements
 (the pass option `unrollBuilds`; "Lists", the short lists), under the conditions
 below and the budget of the rule `'repeated'`. The rule `'repeated'` does not
-copy a function that calls a function twice or more (in the current round of
-the passes or an earlier one, `budget.grown`): its callee is copied into it,
-and its callers call it, so a chain of functions each calling the next several
-times grows with the call counts, not their product; other call graphs (a
-function reached by single calls along two paths) are bounded only by
-`INLINE_BUDGET`. With `f(a) := Sin(a)`, `g(b) := f(b) + … + f(b + 4)` and
+copy a function that calls a function twice or more (in the current round of the
+passes or an earlier one, `budget.grown`): its callee is copied into it, and its
+callers call it, so a chain of functions each calling the next several times
+grows with the call counts, not their product; other call graphs (a function
+reached by single calls along two paths) are bounded only by `INLINE_BUDGET`.
+With `f(a) := Sin(a)`, `g(b) := f(b) + … + f(b + 4)` and
 `h(c) := g(c) + … + g(c + 4)`, `h(x)` holds a call of `g` at each term and `g`
-the 5 copies of `f`, where copies of `g` were 21 `Math.sin(` sites (CE-1475).
-A sum written out takes its calls out of the loop that the rule `'loop'` copies: with that rule
-`showcase/voronoi-diagram` #0 of Tycho's corpus is a call of `n(x, y, k)` at
-each term, 6.8 times slower than its loop (38 µs a call against 5.6), and 4.4 µs
-with the rule `'repeated'`. In Tycho's `voronoi-diagram`, `n(x, y, k)` is called
-at each pass of the loops of `Z`, `v`, `u` and `H`, and its copy leaves a call
-`F(x, y)` of no index, which `invariants` moves before the loop (from about 40
-µs a call to about 6). The callee qualifies when it is not effectful and not on
-a cycle of calls (nor, by the rule `'repeated'`, its caller, whose `if` runs one
-arm in the interval mode, a rule kept on JavaScript), its body holds no `loop`
-and no region instruction (a function that loops stays a call, which
-`invariants` can move), it has at most `INLINE_SIZE` instructions, nested
-regions included, and one result of the lane of the call's result, each list
-argument has the lane of its parameter, and, when an argument is a constant,
-neither its body nor the body of a function that it calls holds an `At` (a
-constant index out of range declines on GLSL, where the call gives NaN:
-`la(A, 5)` of `la := Function(At(L, j), L, j)` and `A: list<real^3>`, and
+the 5 copies of `f`, where copies of `g` were 21 `Math.sin(` sites (CE-1475). A
+sum written out takes its calls out of the loop that the rule `'loop'` copies:
+with that rule `showcase/voronoi-diagram` #0 of Tycho's corpus is a call of
+`n(x, y, k)` at each term, 6.8 times slower than its loop (38 µs a call against
+5.6), and 4.4 µs with the rule `'repeated'`. In Tycho's `voronoi-diagram`,
+`n(x, y, k)` is called at each pass of the loops of `Z`, `v`, `u` and `H`, and
+its copy leaves a call `F(x, y)` of no index, which `invariants` moves before
+the loop (from about 40 µs a call to about 6). The callee qualifies when it is
+not effectful and not on a cycle of calls (nor, by the rule `'repeated'`, its
+caller, whose `if` runs one arm in the interval mode, a rule kept on
+JavaScript), its body holds no `loop` and no region instruction (a function that
+loops stays a call, which `invariants` can move), it has at most `INLINE_SIZE`
+instructions, nested regions included, and one result of the lane of the call's
+result, each list argument has the lane of its parameter, and, when an argument
+is a constant, neither its body nor the body of a function that it calls holds
+an `At` (a constant index out of range declines on GLSL, where the call gives
+NaN: `la(A, 5)` of `la := Function(At(L, j), L, j)` and `A: list<real^3>`, and
 `nx(A, 4)` of `nx := Function(la(L, j + 1), L, j)`). A scalar integer argument
 of a real parameter is admitted: each operation of the copy is the one the
 callee selected (`Mod` of a real parameter stays the real `mod` on GLSL), and
@@ -2554,17 +2550,16 @@ at most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and 4,000 by
 the rule `'repeated'` (where the sums written out multiply the sites: a function
 read at the 16 terms of each of four sums needs about 1,900); past it, calls
 stay, so a chain of functions each calling the previous three times in a loop
-stops there.
-A copied call of a function that runs a `Loop` can be moved out of the loop by
-`invariants`, so a program that threw `iteration-limit-exceeded` can give its
-value ("Effects" says it for a direct call): `hh := Function(k·LL(p), p, k)`,
-whose `LL` runs a `Loop` of 100 passes (`s := s + p·i`), gives 9090 for
-`Sum(hh(x, k), Limits(k, 1, 3))` at x = 0.3 under a budget of 150, where it
-threw. After the passes, a function that no call reaches from the entry (its
-calls were copied, or removed with a value that nothing reads) leaves the
-program and is not printed, also when the pass is off; `symbolDeps` still names
-it (`captures`). The `bigint` mode does not run the pass (it serves
-`invariants`, which is off there).
+stops there. A copied call of a function that runs a `Loop` can be moved out of
+the loop by `invariants`, so a program that threw `iteration-limit-exceeded` can
+give its value ("Effects" says it for a direct call):
+`hh := Function(k·LL(p), p, k)`, whose `LL` runs a `Loop` of 100 passes
+(`s := s + p·i`), gives 9090 for `Sum(hh(x, k), Limits(k, 1, 3))` at x = 0.3
+under a budget of 150, where it threw. After the passes, a function that no call
+reaches from the entry (its calls were copied, or removed with a value that
+nothing reads) leaves the program and is not printed, also when the pass is off;
+`symbolDeps` still names it (`captures`). The `bigint` mode does not run the
+pass (it serves `invariants`, which is off there).
 
 A statement `DefineFunction(f, Function(…))` of the compiled program (Epsil's
 `f(x) = x^2 + 1` at the top level of a `Program`) writes nothing: its canonical
