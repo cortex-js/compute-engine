@@ -2645,8 +2645,11 @@ function lowerOnce(
    *  Under a local or an index of that name (the variable of a `Sum` that
    *  the call is in), the input of the outer frame, when `def` is a
    *  binding of the name on the scope chain of the compilation
-   *  (`onScopeChain()`), which the local is not (CE-1479); a parameter of
-   *  that name, another binding (a `vars` name) or a name with a value
+   *  (`onScopeChain()`), which the local is not (CE-1479). Under a
+   *  parameter of that name of the function whose body has the call, on
+   *  the same condition, an input of that function that the parameter does
+   *  not hide (`capture()`, CE-1502). A positional input of that name at
+   *  the entry, another binding (a `vars` name) or a name with a value
    *  declines. */
   const free = (
     e: Fn,
@@ -2657,14 +2660,34 @@ function lowerOnce(
     let known = lookup(name)?.binding;
     if (known !== undefined && known.role !== 'input') {
       const outer = frames[0].names.get(name);
+      const param =
+        outer !== undefined &&
+        outer.role !== 'input' &&
+        cx.inFunction !== undefined;
       if (
         !onScopeChain(name, def) ||
-        (outer !== undefined && outer.role !== 'input')
+        (outer !== undefined && outer.role !== 'input' && !param)
       )
         decline(
           e,
           `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
         );
+      if (param) {
+        if (held(name)?.value !== undefined)
+          decline(
+            e,
+            `a call of ${e.operator}, which reads the input ${name}, where ${name} has a value`
+          );
+        note(name, t);
+        return fns.capture(
+          e,
+          name,
+          t,
+          readAs(t, held(name)?.definition),
+          def,
+          true
+        );
+      }
       known = outer;
     }
     note(name, t);

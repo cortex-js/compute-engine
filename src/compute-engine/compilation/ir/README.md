@@ -2235,14 +2235,20 @@ function's input parameters, which `define()` adds to each such call
 before or after the call (`J(n, x) := Which(n = 0, x, True, I(x, J(n − 1, x)))`,
 where `I` reads `a`). Declined: a function that reads an input on a cycle of
 calls through another function (`P(j) = If(j > 0, Q(j - 1), n)` and
-`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a parameter of the
-function whose body has the call (`h(x) := k(x)`), or has a value; an input of a
-list of a run-time length or of booleans; a name with a value read in the body
-whose binding where the call is compiled is not the body's (see the values of
-free names above); another `vars` name. A call where the name is a local or the
-variable of a binder (CE-1479) passes the input, which the body reads: with
+`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name has a value; an input
+of a list of a run-time length or of booleans; a name with a value read in the
+body whose binding where the call is compiled is not the body's (see the values
+of free names above); another `vars` name. A call where the name is a local or
+the variable of a binder (CE-1479) passes the input, which the body reads: with
 `k(v) := v + x`, `Sum(x + k(1), Limits(x, 1, 3))` is `(1 + 2 + 3) + 3·(1 + x)`,
-39 at x = 10, as the interpreter gives it. The binding that the body reads
+39 at x = 10, as the interpreter gives it. A call where the name is a parameter
+of the function whose body has the call (CE-1502) passes the input too: that
+function takes the input as a parameter after its own, which its parameter of
+the same name does not hide (`UserFunction.hidden`, not a name of the body's
+frame), and each call of it passes the input. With
+`u(x, y) := k(0)^2 + y^2`, `u(x, y)` is 104 at x = 10, y = 2, as the
+interpreter gives it, and `h(x) := k(x)` gives `h(2) = 12`. The binding that
+the body reads
 (`UserFunction.defs`) must be a binding of the name in the scope of the
 compilation or in a scope around it (`onScopeChain()`), as the input's is (the
 `inputs` option declares the input in a scope of its own, which hides that

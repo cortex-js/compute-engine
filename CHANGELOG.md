@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`compile()` compiles a call of a function of an input inside a function
+  whose parameter has the name of that input again** (CE-1502). With
+  `x, y: real`, `k(v) := v + x` and `u(x, y) := k(0)^2 + y^2`, `u(x, y)`
+  declined in 0.194.1 ("a call of k, which reads the input x, where x is a
+  local or a parameter"). At x = 10, y = 2 it now gives 104 on JavaScript and
+  in the interval mode, as the interpreter does: `k` reads the input `x`, not
+  the parameter `x` of `u`. GLSL compiles it too. The same holds through a
+  chain of such functions (`h(x) := k(x)` called in `n(x) := x·h(x)`).
+
 ## 0.194.1 _2026-11-19_
 
 ### New Features

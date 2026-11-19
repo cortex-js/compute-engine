@@ -424,6 +424,10 @@ type UserFunction = {
   /** The binding that the body reads for each of `inputs`: the
    *  definition of the occurrence, or none for a `vars` name. */
   defs: (BoxedValueDefinition | undefined)[];
+  /** Each input of `inputs` that a parameter of the same name hides, by
+   *  its name: a call in the body of a function that reads the input
+   *  passes it (`free()` of `lower.ts`, CE-1502). */
+  hidden: Map<string, V>;
   called: boolean;
   self: V[][];
   /** The first call of the function made while its body is lowered, when
@@ -615,6 +619,7 @@ export function functionLowering(
       ir,
       inputs: [],
       defs: [],
+      hidden: new Map(),
       called: false,
       self: [],
       declared: list && { lane: list.lane, shape: list.shape, tuple },
@@ -1116,15 +1121,20 @@ export function functionLowering(
 
   /** The input `name` of the engine type `t` that the body of the function
    *  being lowered reads, as the type `read` (`readAs()` of `lower.ts`), in
-   *  the binding `def`: a parameter after its own, which each call passes. */
+   *  the binding `def`: a parameter after its own, which each call passes.
+   *  `hidden`: a parameter of the function has the name, so the input is
+   *  not a name of the body's frame (`UserFunction.hidden`). */
   const capture = (
     e: Expression,
     name: string,
     t: Type,
     read = t,
-    def?: BoxedValueDefinition
+    def?: BoxedValueDefinition,
+    hidden = false
   ): V => {
     const fn = pending.get(cx.inFunction!)!;
+    const known = hidden ? fn.hidden.get(name) : undefined;
+    if (known !== undefined) return known;
     if (fn.called)
       decline(
         e,
@@ -1148,7 +1158,8 @@ export function functionLowering(
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.inputs.push(t);
     fn.defs.push(def);
-    cx.frames[0].names.set(name, { v, role: 'input' });
+    if (hidden) fn.hidden.set(name, v);
+    else cx.frames[0].names.set(name, { v, role: 'input' });
     return v;
   };
 

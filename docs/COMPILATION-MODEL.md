@@ -163,6 +163,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   and `Filter` do in the interpreter); the interpreter's `Iterate` applies
   the literal's (`[6, 1, 6]`). CE-1461.
 
+- `javascript` and `interval-js` (crafted): an input declared again in a
+  nested scope. With `x: real`, `k(v) := v + x`, then in a pushed scope
+  `x: real` again and `g(v) := v + 1000x`, `k(0) + g(0)` with
+  `inputs: { x: 'real' }` at `x = 10` gives `10010`; the interpreter gives
+  `x + 10000` (the outer `x`, which `k` reads, has no value). The compiled
+  code passes one input per name; so does a call inside a function whose
+  parameter is `x` (`u(x) := k(0) + g(0) + 100x`, CE-1502).
+
 - `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
