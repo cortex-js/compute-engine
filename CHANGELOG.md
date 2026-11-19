@@ -38,6 +38,13 @@
 
   The Epsil extension for VS Code offers the same signature help.
 
+- **A debug hook of `executeEpsilAsync()` gives the call depth of the
+  statement** (CE-1544): `at.callDepth` is the number of function calls in
+  progress, 0 at the top level. Compare call depths to step over or out of a
+  call. `at.depth` counts every evaluation context, and an `if` branch or a
+  loop body adds one without a call, so a step over based on `depth`, as the
+  documentation said before, skipped the statements of a branch.
+
 ### Resolved Issues
 
 - **A sum of inexact imaginary numbers that cancel is `0`** (CE-1326).

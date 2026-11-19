@@ -4164,6 +4164,7 @@ function debugStatementOf(
     statement: op,
     range: op.sourceOffsets!,
     depth: contexts.length,
+    callDepth: callFrameCount(contexts),
     inScope: <T>(fn: () => T): T =>
       runWithEvaluationEffects(ce, handlers, fn, contexts, precisionWindow),
   };

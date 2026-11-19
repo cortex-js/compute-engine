@@ -238,8 +238,10 @@ the run waits until the promise settles. This is how a debugger pauses, in a
 browser as well as in Node, with no worker and no shared memory.
 
 `at.range` is the `[start, end]` offsets of the statement in the source,
-`at.depth` is the depth of its evaluation context (a call makes it larger:
-compare depths to step over or out of a call), and `at.inScope(fn)` runs `fn`
+`at.callDepth` is the number of function calls in progress (0 at the top
+level: compare call depths to step over or out of a call), `at.depth` is the
+number of its evaluation contexts (a loop body, a block or an `if` branch
+adds one, so it is not the measure for stepping), and `at.inScope(fn)` runs `fn`
 in the context of the statement: there, `ce.context.lexicalScope` holds its
 variables, and an expression that `fn` evaluates reads their values.
 
@@ -257,13 +259,13 @@ const result = await executeEpsilAsync(ce, source, {
       if (text !== "a + 1") return;
       // Read the variables of the paused statement
       const a = at.inScope(() => ce.box("a").evaluate().toString());
-      console.log(`paused at "${text}", depth ${at.depth}, a = ${a}`);
+      console.log(`paused at "${text}", call depth ${at.callDepth}, a = ${a}`);
       // The run waits until this promise settles
       await new Promise((resume) => setTimeout(resume, 100));
     },
   },
 });
-// ➔ paused at "a + 1", depth 3, a = 40
+// ➔ paused at "a + 1", call depth 1, a = 40
 result.value.toString();
 // ➔ "41"
 ```

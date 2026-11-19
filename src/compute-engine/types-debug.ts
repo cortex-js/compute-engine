@@ -15,12 +15,18 @@ export interface EpsilDebugStatement {
   readonly range: readonly [start: number, end: number];
 
   /** The depth of the evaluation context of the statement: the number of
-   * contexts on its context stack. A call adds one or more contexts, and so
-   * does a nested scope (a loop, a block). A debugger compares two depths to
-   * step over a call (stop at the next statement whose depth is the same or
-   * smaller) or out of one (stop at the next statement whose depth is
-   * smaller). */
+   * contexts on its context stack. A call adds a context, and so does a
+   * nested scope (a loop body, a block, a branch of `if`): the statement of
+   * an `if` branch is deeper than the `if`, although no call was made. Use
+   * `callDepth` to step. */
   readonly depth: number;
+
+  /** The number of function calls in progress at the statement: the
+   * contexts named `"call"` on its context stack, 0 at the top level. A
+   * debugger compares two call depths to step over a call (stop at the next
+   * statement whose call depth is the same or smaller) or out of one (stop
+   * at the next statement whose call depth is smaller). */
+  readonly callDepth: number;
 
   /** Run `fn` in the evaluation context of the statement, and return its
    * value. During `fn`, `ce.context` and `ce.contextStack` are those of the

@@ -238,6 +238,35 @@ describe('Pausing', () => {
     expect(depths['let a = n']).toBeGreaterThan(depths['f(1)']);
     expect(depths['a']).toBe(depths['let a = n']);
   });
+
+  test('the call depth counts calls, not blocks or loop bodies', async () => {
+    const ce = new ComputeEngine();
+    const source =
+      'function f(n) {\n  n + 1\n}\nlet a = 1\nif a > 0 {\n  a = 2\n}\nfor i in 1..2 {\n  a += f(i)\n}\na';
+    const seen: Array<[string, number, number]> = [];
+    await executeEpsilAsync(ce, source, {
+      debug: {
+        beforeStatement: (at) => {
+          seen.push([
+            source.slice(at.range[0], at.range[1]).split('\n')[0],
+            at.depth,
+            at.callDepth,
+          ]);
+        },
+      },
+    });
+    const callDepth = (text: string) =>
+      seen.find(([t]) => t === text)?.[2];
+    const depth = (text: string) => seen.find(([t]) => t === text)?.[1];
+    // A branch and a loop body are deeper contexts, but not calls
+    expect(depth('a = 2')).toBeGreaterThan(depth('if a > 0 {')!);
+    expect(callDepth('if a > 0 {')).toBe(0);
+    expect(callDepth('a = 2')).toBe(0);
+    expect(callDepth('a += f(i)')).toBe(0);
+    // A statement of the body of `f` is one call deep
+    expect(callDepth('n + 1')).toBe(1);
+    expect(callDepth('a')).toBe(0);
+  });
 });
 
 describe('`afterStatement`', () => {
