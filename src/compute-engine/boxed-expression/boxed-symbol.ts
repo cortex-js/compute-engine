@@ -1715,7 +1715,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
       if (def.value.isConstant) return false;
 
-      if (def.value._fixedInitializationType || isDeclaredLocal(def.value)) return false;
+      if (def.value._fixedInitializationType || isDeclaredLocal(def.value))
+        return false;
 
       // A block local declared `any` keeps its declared type: a use does
       // not narrow it (`isDeclaredLocal()`). Its assigned value can be any
@@ -2769,8 +2770,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const def = this.valueDefinition;
     if (!def?._requiresInitialization) return undefined;
     const binding = this._contextBinding();
-    if (!binding || !('value' in binding) || binding.value !== def ||
-        binding.value.storedValue !== undefined) return undefined;
+    if (
+      !binding ||
+      !('value' in binding) ||
+      binding.value !== def ||
+      binding.value.storedValue !== undefined
+    )
+      return undefined;
     return this.engine.error(['read-before-initialization', this._id]);
   }
 

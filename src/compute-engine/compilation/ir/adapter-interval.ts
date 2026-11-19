@@ -106,8 +106,7 @@ function kindEntries(
     entries.push({
       name,
       label: `"${name}" (type \`${declaredTypeText(t)}\`)`,
-      value: (v) =>
-        typeof v === 'number' ? asNumber(v) : isEnclosureEntry(v),
+      value: (v) => (typeof v === 'number' ? asNumber(v) : isEnclosureEntry(v)),
       cell: (lo, hi) =>
         numeric && (lo === hi || (Number.isNaN(lo) && Number.isNaN(hi)))
           ? asNumber(lo)
@@ -290,7 +289,8 @@ function compileInterval(
     let slice: ReturnType<typeof runtime.loadBroadcastSlice> | undefined;
     const stored = { ...result, valueKinds: undefined };
     const check = (cells: BroadcastInputs, o?: BroadcastOptions) => {
-      if (entries.length > 0) checkKindCells(entries, cells, o, booleans, lists);
+      if (entries.length > 0)
+        checkKindCells(entries, cells, o, booleans, lists);
     };
     result.broadcast = (cells, o) => {
       check(cells, o);

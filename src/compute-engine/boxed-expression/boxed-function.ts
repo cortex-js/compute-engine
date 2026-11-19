@@ -18493,8 +18493,14 @@ function applyFunctionLiteralWith(
   evaluatedOps?: Expression[],
   awaitBody = false
 ): Expression | Promise<Expression> {
-  if (value === undefined && def._requiresInitialization && def.storedValue === undefined) {
-    const binding = callableBindingInContext(expr.engine, expr.operator, { value: def });
+  if (
+    value === undefined &&
+    def._requiresInitialization &&
+    def.storedValue === undefined
+  ) {
+    const binding = callableBindingInContext(expr.engine, expr.operator, {
+      value: def,
+    });
     if (binding && isValueDef(binding) && binding.value === def)
       return expr.engine.error(['read-before-initialization', expr.operator]);
   }

@@ -1663,10 +1663,7 @@ export function lower(
         if ([x, y].some((v) => isSubLane(type(v).lane, 'integer')))
           return apply(e, 'Boole', [equal]);
         const nan = (v: V) => apply(e, ofOp('isnan'), [v]);
-        const same = apply(e, 'Or', [
-          equal,
-          apply(e, 'And', [nan(x), nan(y)]),
-        ]);
+        const same = apply(e, 'Or', [equal, apply(e, 'And', [nan(x), nan(y)])]);
         return apply(e, 'Boole', [same]);
       }
       case 'Pipe': {
@@ -3291,7 +3288,13 @@ export function lower(
         try {
           if (trial(() => integral(e)) === undefined) return v;
           const nan = apply(e, ofOp('isnan'), [v]);
-          return branch(e, nan, () => integral(e), () => v, true)!;
+          return branch(
+            e,
+            nan,
+            () => integral(e),
+            () => v,
+            true
+          )!;
         } finally {
           quadratureOnly.delete(e);
         }

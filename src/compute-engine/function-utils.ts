@@ -83,7 +83,10 @@ import {
   shareLazyViewRecord,
   wasCanonicalizedIn,
 } from './boxed-expression/lazy-view-context.js';
-import { isAssignedLocal, markLocalBinding } from './boxed-expression/declared-local.js';
+import {
+  isAssignedLocal,
+  markLocalBinding,
+} from './boxed-expression/declared-local.js';
 import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
@@ -1538,7 +1541,8 @@ export function canonicalFunctionLiteralArguments(
     if (functionLiteralParameterType(param) !== undefined) continue;
     for (const name of functionLiteralParameterNames(param)) {
       const binding = blockScope.bindings.get(name);
-      if (!binding || !('value' in binding) || !isAssignedLocal(binding.value)) continue;
+      if (!binding || !('value' in binding) || !isAssignedLocal(binding.value))
+        continue;
       const value = binding.value;
       // A use describes the incoming argument, not every later value of a
       // written parameter. Without assignment inference its contract is unknown.
@@ -1546,7 +1550,11 @@ export function canonicalFunctionLiteralArguments(
       value._fixedInitializationType = true;
       value.inferredType = false;
       closing.requirements.delete(value);
-      ce._noteStateEvent({ kind: 'inference', valueType: true, widening: true });
+      ce._noteStateEvent({
+        kind: 'inference',
+        valueType: true,
+        widening: true,
+      });
     }
   }
   block = ce._withClosingLiteral(parameterDefs, closing, () =>

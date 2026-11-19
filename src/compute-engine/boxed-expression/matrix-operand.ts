@@ -7,8 +7,11 @@ import { isFunction, isSymbol } from './type-guards.js';
 
 /** An unknown source contract cannot acquire a scalar type from its use. */
 function isFixedUnknownSymbol(x: Expression): boolean {
-  return isSymbol(x) && x.type.type === 'unknown' &&
-    x.valueDefinition?._fixedInitializationType === true;
+  return (
+    isSymbol(x) &&
+    x.type.type === 'unknown' &&
+    x.valueDefinition?._fixedInitializationType === true
+  );
 }
 
 /**

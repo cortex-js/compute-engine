@@ -3305,8 +3305,10 @@ export function describeError(error: MathJsonExpression): string {
       break;
     }
     case 'read-before-initialization':
-      detail = payload.length === 0 ? 'a local is read before initialization'
-        : `\`${payload[0]}\` is read before it has been given a value`;
+      detail =
+        payload.length === 0
+          ? 'a local is read before initialization'
+          : `\`${payload[0]}\` is read before it has been given a value`;
       break;
     case 'read-before-declaration':
       // Payload: [name]. A statement of a block uses a local of the block

@@ -138,8 +138,7 @@ function explicitProductText(
   const imText = `${im} * i`;
   const re = ce.box(json[1]);
   if (re.isSame(0)) return imText;
-  if (imText.startsWith('-'))
-    return `(${serialize(re)} - ${imText.slice(1)})`;
+  if (imText.startsWith('-')) return `(${serialize(re)} - ${imText.slice(1)})`;
   return `(${serialize(re)} + ${imText})`;
 }
 

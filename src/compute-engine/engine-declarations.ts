@@ -3433,10 +3433,14 @@ function assignNamedValue(
   }
 
   const def = ce.lookupDefinition(id);
-  if (isValueDef(def) && def.value._fixedInitializationType &&
-      !hasFunctionSignature(def.value.type.type)) {
+  if (
+    isValueDef(def) &&
+    def.value._fixedInitializationType &&
+    !hasFunctionSignature(def.value.type.type)
+  ) {
     const value = ce.expr(arg2 as ExpressionInput).canonical;
-    if (assertAssignable(ce, id, value) === 'overlap') noteOverlapAdmitted(value);
+    if (assertAssignable(ce, id, value) === 'overlap')
+      noteOverlapAdmitted(value);
     ce._setSymbolValue(id, value);
     return ce;
   }
@@ -3481,7 +3485,9 @@ function assignNamedValue(
       // new literal refines. The type the definition reports is the
       // skeleton refined from the PREVIOUS value, so refining from it would
       // find no placeholder left, and a re-assignment could not re-refine.
-      const skeleton = def.value._fixedInitializationType ? undefined : def.value._signatureSkeleton;
+      const skeleton = def.value._fixedInitializationType
+        ? undefined
+        : def.value._signatureSkeleton;
       const declaredType0 =
         skeleton !== undefined ? ce.type(skeleton) : def.value.type;
       // The result the body has with the DECLARED parameter types, when the
@@ -3498,7 +3504,8 @@ function assignNamedValue(
         typedResult === undefined
           ? t
           : ce.type(withSignatureResult(t.type, typedResult));
-      let declaredType = def.value._fixedInitializationType ? declaredType0
+      let declaredType = def.value._fixedInitializationType
+        ? declaredType0
         : refineDeclaredType(ce, declaredType0, withTypedResult(literal.type));
 
       // A generic declaration DOES take a function-literal body (the
@@ -4851,8 +4858,11 @@ export function assertAssignable(
   const def = ce.lookupDefinition(id);
   if (def === undefined || !isValueDef(def)) return;
   if (def.value.isConstant) throw new ConstantAssignmentError(id);
-  const v = def.value._fixedInitializationType && !hasFunctionSignature(def.value.type.type)
-    ? value : assignValueAsValue(ce, value);
+  const v =
+    def.value._fixedInitializationType &&
+    !hasFunctionSignature(def.value.type.type)
+      ? value
+      : assignValueAsValue(ce, value);
   if (v === undefined) return;
   if (
     !def.value.isConstant &&

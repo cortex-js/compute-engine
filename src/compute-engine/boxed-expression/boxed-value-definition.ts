@@ -1755,7 +1755,14 @@ export class _BoxedValueDefinition
   }
 
   private _writeType(t: Type | TypeString | BoxedType): void {
-    if (this._isConstant && !(this._blockLocal && !this._fixedInitializationType && this._value === undefined))
+    if (
+      this._isConstant &&
+      !(
+        this._blockLocal &&
+        !this._fixedInitializationType &&
+        this._value === undefined
+      )
+    )
       throw new Error(
         `The type of the constant "${this.name}" cannot be changed`
       );
@@ -2373,10 +2380,7 @@ function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
  * is kept.
  *
  */
-export function widenLocalType(
-  ce: ComputeEngine,
-  t: Type
-): Type {
+export function widenLocalType(ce: ComputeEngine, t: Type): Type {
   if (t === 'never') return 'unknown';
   if (typeof t === 'object') {
     if (t.kind === 'list') {
@@ -2402,7 +2406,8 @@ export function widenLocalType(
           type: widenLocalType(ce, e.type),
         })),
       };
-    if (t.kind === 'union') return { ...t, types: t.types.map((x) => widenLocalType(ce, x)) };
+    if (t.kind === 'union')
+      return { ...t, types: t.types.map((x) => widenLocalType(ce, x)) };
     if (t.kind === 'signature') return 'function';
   }
   const bt = ce.type(t);

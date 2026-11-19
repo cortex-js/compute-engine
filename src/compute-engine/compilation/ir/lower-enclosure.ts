@@ -299,15 +299,17 @@ function provablyPositiveBase(b: Expression): boolean {
  * an enclosure (`Program.valueKinds`). A node that the kind does not define
  * declines with the message of the kind.
  */
-export function enclosureLowering(
-  cx: Lowering,
-  use: () => void
-): (e: Fn) => V {
+export function enclosureLowering(cx: Lowering, use: () => void): (e: Fn) => V {
   const { b } = cx;
   let node: Fn;
 
-  const no = (why = 'an operation that the interpreter leaves unevaluated'): never =>
-    decline(node, `${node.operator} with an operand or a result of ${KIND}: ${why}`);
+  const no = (
+    why = 'an operation that the interpreter leaves unevaluated'
+  ): never =>
+    decline(
+      node,
+      `${node.operator} with an operand or a result of ${KIND}: ${why}`
+    );
 
   const op = (name: string, args: V[]): V =>
     cx.apply(node, rowOfOp(cx.rows, name)!.row, args);
@@ -478,9 +480,7 @@ export function enclosureLowering(
     // An exponent read at run time (`x^n` with `n: integer`): `powInterval`
     // takes a point exponent as a point.
     const y = operand(e, true);
-    return y === undefined
-      ? undefined
-      : enclose(op('enc.powInterval', [x, y]));
+    return y === undefined ? undefined : enclose(op('enc.powInterval', [x, y]));
   };
 
   const power = (base: Expression, exponent: Expression): V | undefined => {
@@ -497,9 +497,7 @@ export function enclosureLowering(
     // else the interpreter leaves the call unevaluated.
     if (!provablyPositiveBase(base)) return undefined;
     const x = operand(base, true);
-    return x === undefined
-      ? undefined
-      : enclose(op('enc.powInterval', [x, y]));
+    return x === undefined ? undefined : enclose(op('enc.powInterval', [x, y]));
   };
 
   /** `x` to the exponent of the form `form` (`Sqrt`, `Square`). */
@@ -748,9 +746,7 @@ export function enclosureLowering(
         if (vs === undefined) return undefined;
         const factor = angle('out');
         const y = op('enc.atan2', vs);
-        return enclose(
-          factor === undefined ? y : op('enc.mul', [y, factor])
-        );
+        return enclose(factor === undefined ? y : op('enc.mul', [y, factor]));
       }
       case 'Max':
       case 'Min':

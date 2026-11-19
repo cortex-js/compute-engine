@@ -178,7 +178,11 @@ import {
   isStatementArm,
 } from '../boxed-expression/conditional-value.js';
 import { isValueDef } from '../boxed-expression/utils.js';
-import { initializeLocalContract, widenAssignedType, widenLocalType } from '../boxed-expression/boxed-value-definition.js';
+import {
+  initializeLocalContract,
+  widenAssignedType,
+  widenLocalType,
+} from '../boxed-expression/boxed-value-definition.js';
 import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
@@ -4261,9 +4265,13 @@ export function staticDeclarations(
             : isString(typeOp)
               ? typeOp.string
               : sym(typeOp);
-        const attributesType = isDictionary(op.ops[1]) || isFunction(op.ops[1], 'Dictionary');
-        const authoredType = attributesType || valueOp === undefined ||
-          isDictionary(valueOp) || isFunction(valueOp, 'Dictionary');
+        const attributesType =
+          isDictionary(op.ops[1]) || isFunction(op.ops[1], 'Dictionary');
+        const authoredType =
+          attributesType ||
+          valueOp === undefined ||
+          isDictionary(valueOp) ||
+          isFunction(valueOp, 'Dictionary');
         if (source !== undefined && (source !== 'unknown' || authoredType)) {
           try {
             const parsed = parseType(source, ce._typeResolver);
@@ -4281,7 +4289,10 @@ export function staticDeclarations(
         } else if (valueOp !== undefined) {
           // Closed literals can be typed before lexical names are bound.
           // Other initializers are typed once their declaration is reached.
-          const literalType = program && isFunction(valueOp, 'Function') ? 'function' : closedLiteralType(ce, valueOp);
+          const literalType =
+            program && isFunction(valueOp, 'Function')
+              ? 'function'
+              : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
         }
@@ -4667,8 +4678,12 @@ function canonicalSequence(
     if (program && existing !== undefined)
       previousBindings!.set(name, existing);
     const knownType = declaredTypes.get(name);
-    const persistentType = knownType !== undefined && !explicitlyDeclared.has(name) && !declaredConstants.has(name)
-      ? widenLocalType(ce, knownType) : knownType;
+    const persistentType =
+      knownType !== undefined &&
+      !explicitlyDeclared.has(name) &&
+      !declaredConstants.has(name)
+        ? widenLocalType(ce, knownType)
+        : knownType;
     const hoisted = ce._declareSymbolValue(
       name,
       {
@@ -4692,9 +4707,12 @@ function canonicalSequence(
         )._declaredByStatement = true;
       markCallableHome(hoisted, scope);
       const declaration = firstDeclarations.get(name);
-      const declared = declaration === undefined ? undefined : typedStatement(declaration);
-      hoisted.value._requiresInitialization = isFunction(declared, 'Declare') &&
-        !declareHasValue(declared.ops) && !functions.has(name);
+      const declared =
+        declaration === undefined ? undefined : typedStatement(declaration);
+      hoisted.value._requiresInitialization =
+        isFunction(declared, 'Declare') &&
+        !declareHasValue(declared.ops) &&
+        !functions.has(name);
       markDeclaredLocal(hoisted.value);
       if (explicitlyDeclared.has(name)) {
         hoisted.value._fixedInitializationType = true;
@@ -4736,13 +4754,15 @@ function canonicalSequence(
       (name) => !UNBINDABLE_NAMES.has(name)
     )
   );
-  if (program && scope !== undefined) for (const name of hoistedNames) {
-    const binding = scope.bindings.get(name);
-    if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
-  }
+  if (program && scope !== undefined)
+    for (const name of hoistedNames) {
+      const binding = scope.bindings.get(name);
+      if (binding !== undefined) ce._setShadowedParameterDef(name, binding);
+    }
   const laterInitializers = new Map<Expression, string>();
   const mentions = (expr: Expression, name: string): boolean =>
-    sym(expr) === name || (isFunction(expr) &&
+    sym(expr) === name ||
+    (isFunction(expr) &&
       (expr.operator === name || expr.ops.some((x) => mentions(x, name))));
   // A runtime call may read or initialize the reserved slot through a
   // capture. Deferred initialization never follows callees or callback values.
@@ -4750,20 +4770,38 @@ function canonicalSequence(
     if (!isFunction(expr)) return false;
     if (!resolvesToSystemBinding(ce, expr.operator)) return true;
     if (expr.operator === 'Function') return false;
-    if (!['Declare', 'Assign', 'List', 'Tuple', 'Dictionary', 'KeyValuePair'].includes(expr.operator))
+    if (
+      ![
+        'Declare',
+        'Assign',
+        'List',
+        'Tuple',
+        'Dictionary',
+        'KeyValuePair',
+      ].includes(expr.operator)
+    )
       return true;
     return expr.ops.some(mayCall);
   };
   for (let i = 0; i < source.length; i++) {
     const declaration = typedStatement(source[i]);
-    if (refused.has(source[i]) || !isFunction(declaration, 'Declare') ||
-        declareHasValue(declaration.ops) || !isSymbol(declaration.op1)) continue;
+    if (
+      refused.has(source[i]) ||
+      !isFunction(declaration, 'Declare') ||
+      declareHasValue(declaration.ops) ||
+      !isSymbol(declaration.op1)
+    )
+      continue;
     const name = declaration.op1.symbol;
     if (explicitlyDeclared.has(name) || functions.has(name)) continue;
     for (const candidate of source.slice(i + 1)) {
       const statement = typedStatement(candidate);
-      if (isFunction(statement, 'Assign') && sym(statement.op1) === name &&
-          !mentions(statement.op2, name) && !mayCall(statement.op2)) {
+      if (
+        isFunction(statement, 'Assign') &&
+        sym(statement.op1) === name &&
+        !mentions(statement.op2, name) &&
+        !mayCall(statement.op2)
+      ) {
         laterInitializers.set(candidate, name);
         break;
       }
@@ -4777,59 +4815,82 @@ function canonicalSequence(
     // We canonicalize the statements in the local scope. A refused
     // re-declaration stands as its error value.
     statements = ce._inScope(scope, () =>
-        ops.map((op) => {
-          const refusal = refused.get(op);
-          if (refusal !== undefined && isFunction(refusal)) {
-            const result = ce._fn(refusal.operator, refusal.ops, {
-              metadata: { sourceOffsets: op.sourceOffsets },
-            });
-            completed?.set(op, result);
-            return result;
-          }
-          // A bare `N` or `D` statement is a value: when it still names the
-          // library operator (no local of the block or parameter of the
-          // literal binds it), it is a variable, as in `x + N`.
-          // The repair runs here, once the scope of the block and its locals
-          // exist, so that a local `N` stays the local.
-          const declaration = typedStatement(op);
-          if (isFunction(declaration, 'Declare') && !declareHasValue(declaration.ops) &&
-              isSymbol(declaration.op1) && !initializedLater.has(declaration.op1.symbol))
-            initializeLocalContract(ce, declaration.op1.symbol, 'unknown', declaredConstants.has(declaration.op1.symbol));
-          const initializes = laterInitializers.get(op);
-          let prepared = op;
-          if (initializes !== undefined && isFunction(op, 'Assign')) {
-            const value = op.op2.canonical;
-            initializeLocalContract(ce, initializes, value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown');
-            prepared = ce._fn('Assign', [op.op1, value], { canonical: false, metadata: { sourceOffsets: op.sourceOffsets } });
-          }
-          const statement = early?.get(op) ?? canonicalizeStatement(prepared);
-          if (program && (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))) {
-            const names = isFunction(statement.op1, 'Tuple') ? tuplePatternNames(statement.op1) : isSymbol(statement.op1) ? [statement.op1.symbol] : [];
-            const writes = new Map<string, BoxedDefinition>();
-            for (const name of names) {
-              const binding = ce.lookupDefinition(name);
-              if (binding !== undefined) writes.set(name, binding);
-            }
-            PROGRAM_WRITES.set(statement, writes);
-            if (isFunction(statement, 'Declare')) {
-              PROGRAM_WRITES.set(statement.op1, writes);
-              noteProgramDeclarationPrevious(
-                statement.op1,
-                new Map(
-                  [...writes.keys()].map((name) => [
-                    name,
-                    previousBindings!.get(name),
-                  ])
-                )
-              );
-            }
-          }
-          const result = isSymbol(statement)
-            ? canonicalValueOperand(ce, statement)
-            : statement;
+      ops.map((op) => {
+        const refusal = refused.get(op);
+        if (refusal !== undefined && isFunction(refusal)) {
+          const result = ce._fn(refusal.operator, refusal.ops, {
+            metadata: { sourceOffsets: op.sourceOffsets },
+          });
           completed?.set(op, result);
           return result;
-        })
+        }
+        // A bare `N` or `D` statement is a value: when it still names the
+        // library operator (no local of the block or parameter of the
+        // literal binds it), it is a variable, as in `x + N`.
+        // The repair runs here, once the scope of the block and its locals
+        // exist, so that a local `N` stays the local.
+        const declaration = typedStatement(op);
+        if (
+          isFunction(declaration, 'Declare') &&
+          !declareHasValue(declaration.ops) &&
+          isSymbol(declaration.op1) &&
+          !initializedLater.has(declaration.op1.symbol)
+        )
+          initializeLocalContract(
+            ce,
+            declaration.op1.symbol,
+            'unknown',
+            declaredConstants.has(declaration.op1.symbol)
+          );
+        const initializes = laterInitializers.get(op);
+        let prepared = op;
+        if (initializes !== undefined && isFunction(op, 'Assign')) {
+          const value = op.op2.canonical;
+          initializeLocalContract(
+            ce,
+            initializes,
+            value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown'
+          );
+          prepared = ce._fn('Assign', [op.op1, value], {
+            canonical: false,
+            metadata: { sourceOffsets: op.sourceOffsets },
+          });
+        }
+        const statement = early?.get(op) ?? canonicalizeStatement(prepared);
+        if (
+          program &&
+          (isFunction(statement, 'Declare') || isFunction(statement, 'Assign'))
+        ) {
+          const names = isFunction(statement.op1, 'Tuple')
+            ? tuplePatternNames(statement.op1)
+            : isSymbol(statement.op1)
+              ? [statement.op1.symbol]
+              : [];
+          const writes = new Map<string, BoxedDefinition>();
+          for (const name of names) {
+            const binding = ce.lookupDefinition(name);
+            if (binding !== undefined) writes.set(name, binding);
+          }
+          PROGRAM_WRITES.set(statement, writes);
+          if (isFunction(statement, 'Declare')) {
+            PROGRAM_WRITES.set(statement.op1, writes);
+            noteProgramDeclarationPrevious(
+              statement.op1,
+              new Map(
+                [...writes.keys()].map((name) => [
+                  name,
+                  previousBindings!.get(name),
+                ])
+              )
+            );
+          }
+        }
+        const result = isSymbol(statement)
+          ? canonicalValueOperand(ce, statement)
+          : statement;
+        completed?.set(op, result);
+        return result;
+      })
     );
   } finally {
     exitBody();
@@ -4841,8 +4902,19 @@ function canonicalSequence(
 
   for (const name of hoistedNames) {
     const binding = scope?.bindings.get(name);
-    if (binding !== undefined && isValueDef(binding) && !binding.value._fixedInitializationType)
-      ce._inScope(scope, () => initializeLocalContract(ce, name, 'unknown', declaredConstants.has(name)));
+    if (
+      binding !== undefined &&
+      isValueDef(binding) &&
+      !binding.value._fixedInitializationType
+    )
+      ce._inScope(scope, () =>
+        initializeLocalContract(
+          ce,
+          name,
+          'unknown',
+          declaredConstants.has(name)
+        )
+      );
   }
   const result = ce._fn(head, statements, program ? undefined : { scope });
   if (program) noteProgramSourceOrder(result, order);

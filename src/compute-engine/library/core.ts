@@ -4299,7 +4299,8 @@ function localAssignmentMismatch(
   const open = (t: BoxedType): boolean =>
     /\b(any|unknown|never|nothing|missing|error)\b/.test(t.toString());
   if (open(valueType) || open(local.type)) return undefined;
-  const declared = isDeclaredLocal(local) || local._fixedInitializationType === true;
+  const declared =
+    isDeclaredLocal(local) || local._fixedInitializationType === true;
   const target = declared
     ? local.type.type
     : widenLocalType(ce, local.type.type);
@@ -5448,17 +5449,28 @@ function anonymousApplicationType(
 ): Type {
   const { engine } = context;
   const t = fn.type;
-  const curried = curriedSignature(t, args.map((arg) => {
-    const structure = arg.structureOf?.();
-    return { operator: structure?.kind === 'application' ? structure.head : '' };
-  }));
+  const curried = curriedSignature(
+    t,
+    args.map((arg) => {
+      const structure = arg.structureOf?.();
+      return {
+        operator: structure?.kind === 'application' ? structure.head : '',
+      };
+    })
+  );
   if (curried !== undefined) {
     if (args.some((arg) => arg.type === 'error')) return 'error';
     // Partial application can map to residual functions. Keep no single
     // callable claim when the existing mapping rules do not settle that.
-    const slots = typeof t === 'object' && t.kind === 'signature' ? t.args : undefined;
-    if (applyLiteralMapType(fn, args, context) !== undefined ||
-        args.some((arg, i) => inferredArgumentMaps(slots?.[i]?.type, arg.type) === undefined))
+    const slots =
+      typeof t === 'object' && t.kind === 'signature' ? t.args : undefined;
+    if (
+      applyLiteralMapType(fn, args, context) !== undefined ||
+      args.some(
+        (arg, i) =>
+          inferredArgumentMaps(slots?.[i]?.type, arg.type) === undefined
+      )
+    )
       return 'unknown';
     return curried;
   }
@@ -7981,9 +7993,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // A write can be the parameter's first reference. Resolve its
           // binding before recording the write, as a read of the name does.
           const parameter = ce._isFunctionLiteralParameter(name)
-            ? ce.symbol(name).valueDefinition : undefined;
+            ? ce.symbol(name).valueDefinition
+            : undefined;
           const def = ce.lookupDefinition(name);
-          const target = parameter ?? (def !== undefined && isValueDef(def) ? def.value : undefined);
+          const target =
+            parameter ??
+            (def !== undefined && isValueDef(def) ? def.value : undefined);
           if (target !== undefined) markAssignedLocal(target);
         }
         // A function value is checked against the type of the local BEFORE
@@ -8195,10 +8210,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const local = isSymbol(symbolExpr)
           ? ce.context.lexicalScope.bindings.get(symbolExpr.symbol)
           : undefined;
-        if (!declareHasValue(args) && !(local && isValueDef(local) && local.value._blockLocal)) {
-          const signature = isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
+        if (
+          !declareHasValue(args) &&
+          !(local && isValueDef(local) && local.value._blockLocal)
+        ) {
+          const signature =
+            isSymbol(symbolExpr) && declaresFunctionType(ce, args[1]);
           if (!signature || !pairedNames?.has(sym(symbolExpr) ?? ''))
-            return ce.error(['declaration-without-value', sym(symbolExpr) ?? 'Nothing']);
+            return ce.error([
+              'declaration-without-value',
+              sym(symbolExpr) ?? 'Nothing',
+            ]);
         }
 
         // A local declared with a function literal and no type is typed as
@@ -8214,17 +8236,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           value: Expression | undefined,
           constant = false
         ): void => {
-          const declaresType = typeOp !== undefined &&
+          const declaresType =
+            typeOp !== undefined &&
             !(isString(typeOp) && typeOp.string === 'unknown') &&
             !isSymbol(typeOp, 'unknown');
           if (declaresType || value === undefined) return;
-          const type = value.isValid ? (initializationType(value) ?? 'unknown') : 'unknown';
+          const type = value.isValid
+            ? (initializationType(value) ?? 'unknown')
+            : 'unknown';
           if (isSymbol(symbolExpr))
             initializeLocalContract(ce, symbolExpr.symbol, type, constant);
           else if (isFunction(symbolExpr, 'Tuple')) {
             const leaves = tuplePatternLeafTypes(symbolExpr, type);
             for (const name of tuplePatternNames(symbolExpr))
-              initializeLocalContract(ce, name, leaves?.get(name) ?? 'unknown', constant);
+              initializeLocalContract(
+                ce,
+                name,
+                leaves?.get(name) ?? 'unknown',
+                constant
+              );
           }
         };
 
@@ -8295,7 +8325,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 4) {
           const attributes = initialValue(args[3]);
           const initializer = initialValue(args[2]);
-          recordInitializerContract(args[1], initializer, hasConstantAttribute(attributes));
+          recordInitializerContract(
+            args[1],
+            initializer,
+            hasConstantAttribute(attributes)
+          );
           markConstantLocal(ce, symbolExpr, attributes);
           noteDeclaration(
             isDictionary(attributes) ? attributes : undefined,
@@ -14399,8 +14433,16 @@ function* assignSteps(
   // host `ce.assign` keeps throwing.
   try {
     const binding = ce.lookupDefinition(symbolName);
-    if (binding !== undefined && isValueDef(binding) && binding.value._programVariable &&
-        (binding.value._fixedInitializationType || !(isFunction(val, 'Function') && containsSignatureArm(binding.value.type.type)))) {
+    if (
+      binding !== undefined &&
+      isValueDef(binding) &&
+      binding.value._programVariable &&
+      (binding.value._fixedInitializationType ||
+        !(
+          isFunction(val, 'Function') &&
+          containsSignatureArm(binding.value.type.type)
+        ))
+    ) {
       const local = binding.value;
       if (local.isConstant || isDeclaredLocal(local)) {
         if (assertAssignable(ce, symbolName, val) === 'overlap')

@@ -509,9 +509,7 @@ function withFormulaValues(
   read: FormulaRead = { visiting: new Map(), cycleAt: Infinity }
 ): Expression {
   return rewriteWithBinders(expr, (s, shadowed) =>
-    shadowed?.has(s.symbol)
-      ? s
-      : (formulaValueOf(ce, s, variables, read) ?? s)
+    shadowed?.has(s.symbol) ? s : (formulaValueOf(ce, s, variables, read) ?? s)
   );
 }
 
@@ -6144,10 +6142,7 @@ function functionLiteralOf(
  * A symbol that holds a formula (`G := sin(x)`) or has no value does not
  * name a function.
  */
-function limitOperandNamesFunction(
-  ce: ComputeEngine,
-  f: Expression
-): boolean {
+function limitOperandNamesFunction(ce: ComputeEngine, f: Expression): boolean {
   if (!isSymbol(f)) return false;
   if (isOperatorDef(ce.lookupDefinition(f.symbol))) return true;
   return f.type.matches('function');
@@ -10159,8 +10154,7 @@ volumes
           if (varName !== undefined) {
             const lifted = liftIntegrand(f);
             const body = withFormulaValues(engine, lifted, [varName]);
-            if (body !== lifted)
-              f = engine.function('Function', [body, f.op2]);
+            if (body !== lifted) f = engine.function('Function', [body, f.op2]);
           }
         }
 
