@@ -254,8 +254,11 @@
   type, or of type `unknown` or `number`, takes the lane of its argument: a
   call with a real argument calls a compiled function of a real parameter,
   and a call with a complex argument a function of a complex parameter, in
-  `mode: 'complex'` and on GLSL; the default (strict) mode declines a complex
-  argument there, as in 0.194.0. A parameter declared `real` still declines a
+  `mode: 'complex'`, on JavaScript and on GLSL; the default (strict) mode
+  declines a complex argument there ("an argument of f that is not real"),
+  as in 0.194.0. A host that compiles a complex shader that calls such a
+  function (a domain colouring of `f(z) + 1`) passes `mode: 'complex'` to a
+  `glsl` compilation. A parameter declared `real` still declines a
   complex argument.
 
 - **`compile()` compiles a `let` and a `for` loop that name the parts of a
