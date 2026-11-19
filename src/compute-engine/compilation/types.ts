@@ -513,9 +513,11 @@ export type FreeSymbolType = {
    *
    * - `glsl`: the shader type the host must give the uniform: `float`,
    *   `bool`, `vec2` for a complex value or a two-component point, `vec3`
-   *   for a colour or a three-component point, `vec4`, a matrix (`mat2`,
-   *   `mat3x2`) or an array (`float[5]`; for a list of tuples of 2 to 4
-   *   real numbers an array of points, `vec2[3]`).
+   *   for a colour or a three-component point, `vec4`, or an array
+   *   (`float[5]`; for a list of tuples of 2 to 4 real numbers an array of
+   *   points, `vec2[3]`). A matrix of 2 to 4 columns is the array of its
+   *   rows (`vec2[3]` for 3 rows of 2 numbers, `M[0]` its first row); no
+   *   `matN` is emitted.
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
    *   numbers of a fixed width), `color`, `array` (a list), or `function`.
@@ -1197,6 +1199,13 @@ export type CompilationResult<
    * compiled it. Absent when no value kind is involved.
    */
   valueKinds?: string[];
+
+  /**
+   * JavaScript only. `true` when the code reads or returns a string: such
+   * code has no batch form, and `broadcast()`, `broadcastAsync()` and the
+   * batch loaders of the runtime throw. Absent otherwise.
+   */
+  strings?: boolean;
 
   /**
    * JavaScript only. The significant digits `run()` reads the float exponent

@@ -8,7 +8,8 @@
  * the builtin undefined there; `_gpu_ir_pow`). The driver may reorder and
  * round: no bits are promised. A boolean is `bool`; a list is a vector of
  * 2 to 4 elements, `vec3`, or an array, `float[5]` (GLSL ES 3.00 has no
- * array of arrays, and the target declines a nested list). A loop counts
+ * array of arrays, and the target declines a nested list other than an
+ * array of vectors, `vec2[3]`: a list of points). A loop counts
  * with an `int`. The target has no element-wise operations: the
  * `scalarize` pass runs first.
  */
@@ -27,15 +28,32 @@ import {
 
 const NAN = 'uintBitsToFloat(0x7fc00000u)';
 
+/** A list of rank 2 of constant lengths whose rows have 2 to 4 elements:
+ *  an array of vectors (`vec2[3]`, a list of points;
+ *  `Profile.vectorArrays`). */
+export function isVectorArray(t: IRType): boolean {
+  const [n, k] = t.shape;
+  return (
+    t.shape.length === 2 &&
+    typeof n === 'number' &&
+    typeof k === 'number' &&
+    k >= 2 &&
+    k <= 4
+  );
+}
+
 /** `float`, `bool`; a list of 2 to 4 elements is a vector (`vec2`,
- *  `bvec3`: a point of the host), another list an array (`float[5]`); a
- *  list in storage the kind of the storage (`sampler2D`). */
+ *  `bvec3`: a point of the host), another list an array (`float[5]`), a
+ *  list of such vectors an array of vectors (`vec2[3]`); a list in storage
+ *  the kind of the storage (`sampler2D`). */
 export function typeName(t: IRType): string {
   if (t.storage !== undefined) return t.storage;
   if (t.lane === 'color' && t.shape.length === 0) return 'vec3';
   if (t.lane === 'complex' && t.shape.length === 0) return 'vec2';
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
   const n = t.shape[0];
+  if (isVectorArray(t))
+    return `${t.lane === 'boolean' ? 'b' : ''}vec${t.shape[1]}[${n}]`;
   if (t.shape.length > 1 || typeof n === 'object')
     throw new Error(
       `slice GLSL printer: no type for ${JSON.stringify(t.shape)}`
@@ -120,6 +138,28 @@ const COMPLEX: Record<string, [binary: boolean, ...body: string[]]> = {
   cosh: [false, 'return vec2(cosh(a.x) * cos(a.y), sinh(a.x) * sin(a.y));'],
   tanh: [false, 'return vec2(sinh(2.0 * a.x), sin(2.0 * a.y)) / (cosh(2.0 * a.x) + cos(2.0 * a.y));'],
 };
+
+/** The helpers of the gamut mapping of a colour (CE-1535), each after the
+ *  helpers it calls, then `last`. */
+const GAMUT_HELPERS = (last: string): string[] => [
+  '_gpu_ir_lab',
+  '_gpu_ir_lab_srgb',
+  '_gpu_ir_srgb_lab',
+  '_gpu_ir_srgb_lin',
+  '_gpu_ir_lin_srgb',
+  '_gpu_ir_p3',
+  '_gpu_ir_p3_srgb',
+  '_gpu_ir_gamut_map',
+  last,
+];
+
+/** The helpers of the APCA contrast of two colours (CE-1535). */
+const APCA_HELPERS = [
+  '_gpu_ir_lab',
+  '_gpu_ir_lab_srgb',
+  '_gpu_ir_apca_y',
+  '_gpu_ir_apca',
+];
 
 /** `At`: the element read by `read` of its index from 0 in range, NaN
  *  outside. */
@@ -396,6 +436,49 @@ export const GLSL: Syntax = deepFreeze({
       text: '_gpu_ir_lab_srgb(_gpu_ir_lab($0))',
       helpers: ['_gpu_ir_lab', '_gpu_ir_lab_srgb'],
     },
+    // CE-1535: the other colour operators of the interpreter, on the OKLCh
+    // `vec3`. `ashsv` and `ashsl` are, like `asrgb`, the program's result
+    // only (`resultOnly`).
+    'ashsv': { text: '_gpu_ir_hsv_of($0)', helpers: GAMUT_HELPERS('_gpu_ir_hsv_of') },
+    'ashsl': { text: '_gpu_ir_hsl_of($0)', helpers: GAMUT_HELPERS('_gpu_ir_hsl_of') },
+    'colormix': { text: '_gpu_ir_mix($0, $1, $2)', helpers: ['_gpu_ir_mix'] },
+    'colordelta': {
+      text: 'distance(_gpu_ir_lab($0), _gpu_ir_lab($1))',
+      helpers: ['_gpu_ir_lab'],
+    },
+    'colorcontrast': {
+      text: '_gpu_ir_apca(_gpu_ir_apca_y($0), _gpu_ir_apca_y($1))',
+      helpers: APCA_HELPERS,
+    },
+    'contrastingcolor': {
+      text: '_gpu_ir_contrasting($0, $1, $2)',
+      helpers: [...APCA_HELPERS, '_gpu_ir_contrasting'],
+    },
+    // White or black, as the `Rgb` colour of the interpreter, in OKLCh.
+    'contrastingcolor.bw': {
+      text: '_gpu_ir_contrasting($0, vec3(1.0, 0.0, 0.0), vec3(0.0))',
+      helpers: [...APCA_HELPERS, '_gpu_ir_contrasting'],
+    },
+    'gamutmap': {
+      text: '_gpu_ir_lch(_gpu_ir_srgb_lab(_gpu_ir_gamut_map($0, false)))',
+      helpers: GAMUT_HELPERS('_gpu_ir_lch'),
+    },
+    'gamutmap.p3': {
+      text: '_gpu_ir_lch(_gpu_ir_srgb_lab(_gpu_ir_p3_srgb(_gpu_ir_gamut_map($0, true))))',
+      helpers: GAMUT_HELPERS('_gpu_ir_lch'),
+    },
+    // `AsHsv(Hsv(…))`, `AsHsl(Hsl(…))`: the channels as the interpreter
+    // reads them (the hue reduced into [0, 360), the others clamped).
+    'ashsv.own': 'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
+    'ashsl.own': 'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
+    'colorchannel.oklch': '$0[int($1)]',
+    'colorchannel.oklab': { text: '_gpu_ir_lab($0)[int($1)]', helpers: ['_gpu_ir_lab'] },
+    'colorchannel.rgb': {
+      text: '_gpu_ir_lab_srgb(_gpu_ir_lab($0))[int($1)]',
+      helpers: ['_gpu_ir_lab', '_gpu_ir_lab_srgb'],
+    },
+    'colorchannel.hsv': { text: '_gpu_ir_hsv_of($0)[int($1)]', helpers: GAMUT_HELPERS('_gpu_ir_hsv_of') },
+    'colorchannel.hsl': { text: '_gpu_ir_hsl_of($0)[int($1)]', helpers: GAMUT_HELPERS('_gpu_ir_hsl_of') },
   },
   helpers: {
     // The real power: an exact product for an integer exponent from 1 to 16
@@ -986,6 +1069,120 @@ export const GLSL: Syntax = deepFreeze({
     v = 0.5 - _gpu_ir_fresnel_fg(x).y / (3.14159265 * x);
   } else v = 0.5;
   return x_in < 0.0 ? -v : v;
+}`,
+    // CE-1535: the colour operators of the interpreter
+    // (`numerics/color-conversion.ts`, `@arnog/colors`) on an OKLCh colour.
+    // The sign-extended sRGB transfer function and its inverse.
+    _gpu_ir_srgb_lin: `vec3 _gpu_ir_srgb_lin(vec3 c) {
+  vec3 a = abs(c);
+  return sign(c) * mix(pow((a + 0.055) / 1.055, vec3(2.4)), a / 12.92, lessThanEqual(a, vec3(0.04045)));
+}`,
+    _gpu_ir_lin_srgb: `vec3 _gpu_ir_lin_srgb(vec3 l) {
+  vec3 a = abs(l);
+  return sign(l) * mix(1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, 12.92 * a, lessThanEqual(a, vec3(0.0031308)));
+}`,
+    // Extended sRGB to Display-P3 and back, both gamma-encoded (the
+    // matrices `LINEAR_SRGB_TO_LINEAR_P3` and `LINEAR_P3_TO_LINEAR_SRGB`).
+    _gpu_ir_p3: `vec3 _gpu_ir_p3(vec3 c) {
+  return _gpu_ir_lin_srgb(mat3(0.8224619687, 0.03319419885, 0.01708263072, 0.1775380313, 0.9668058011, 0.07239744066, 0.0, 0.0, 0.9105199286) * _gpu_ir_srgb_lin(c));
+}`,
+    _gpu_ir_p3_srgb: `vec3 _gpu_ir_p3_srgb(vec3 c) {
+  return _gpu_ir_lin_srgb(mat3(1.224940176, -0.04205695471, -0.01963755459, -0.2249401763, 1.042056955, -0.07863604555, 0.0, 0.0, 1.0982736) * _gpu_ir_srgb_lin(c));
+}`,
+    // The CSS Color 4 gamut mapping of `gamutMapOklch`: the gamma-encoded
+    // coordinates, each in [0, 1], of the OKLCh colour `c` in sRGB, or in
+    // Display-P3 with `p3`. The chroma is searched at constant lightness
+    // and hue until the clip of the channels is within ΔE_OK 0.02.
+    _gpu_ir_gamut_map: `vec3 _gpu_ir_gamut_map(vec3 c, bool p3) {
+  if (any(isnan(c)) || any(isinf(c))) return vec3(${NAN});
+  float L = c.x, C = c.y, H = c.z;
+  if (L >= 1.0) return vec3(1.0);
+  if (L <= 0.0) return vec3(0.0);
+  if (C < 0.0) {
+    C = -C;
+    H += 180.0;
+  }
+  vec3 s = _gpu_ir_lab_srgb(_gpu_ir_lab(vec3(L, C, H)));
+  vec3 g = p3 ? _gpu_ir_p3(s) : s;
+  vec3 clipped = clamp(g, 0.0, 1.0);
+  if (all(greaterThanEqual(g, vec3(-1e-6))) && all(lessThanEqual(g, vec3(1.000001)))) return clipped;
+  if (distance(_gpu_ir_srgb_lab(p3 ? _gpu_ir_p3_srgb(clipped) : clipped), _gpu_ir_lab(vec3(L, C, H))) < 0.02) return clipped;
+  float lo = 0.0, hi = C;
+  bool inside = true;
+  for (int i = 0; i < 64 && hi - lo > 0.0001; i++) {
+    float m = (lo + hi) / 2.0;
+    s = _gpu_ir_lab_srgb(_gpu_ir_lab(vec3(L, m, H)));
+    g = p3 ? _gpu_ir_p3(s) : s;
+    if (inside && all(greaterThanEqual(g, vec3(-1e-6))) && all(lessThanEqual(g, vec3(1.000001)))) {
+      lo = m;
+      continue;
+    }
+    clipped = clamp(g, 0.0, 1.0);
+    float e = distance(_gpu_ir_srgb_lab(p3 ? _gpu_ir_p3_srgb(clipped) : clipped), _gpu_ir_lab(vec3(L, m, H)));
+    if (e < 0.02) {
+      if (0.02 - e < 0.0001) return clipped;
+      inside = false;
+      lo = m;
+    } else hi = m;
+  }
+  return clipped;
+}`,
+    // HSV and HSL of a colour mapped into the sRGB gamut (`rgb255ToHsv`,
+    // `rgb255ToHsl`): a colour whose channels differ by at most 1e-6 (the
+    // single-float error of a grey through OKLCh) is achromatic, of hue 0.
+    _gpu_ir_hsv_of: `vec3 _gpu_ir_hsv_of(vec3 c) {
+  vec3 s = _gpu_ir_gamut_map(c, false);
+  float mx = max(max(s.x, s.y), s.z), d = mx - min(min(s.x, s.y), s.z);
+  if (!(d > 1e-6)) return vec3(0.0, 0.0, mx);
+  float h = 60.0 * (mx == s.x ? mod((s.y - s.z) / d, 6.0) : mx == s.y ? (s.z - s.x) / d + 2.0 : (s.x - s.y) / d + 4.0);
+  return vec3(h >= 360.0 ? 0.0 : h, mx == 0.0 ? 0.0 : d / mx, mx);
+}`,
+    _gpu_ir_hsl_of: `vec3 _gpu_ir_hsl_of(vec3 c) {
+  vec3 s = _gpu_ir_gamut_map(c, false);
+  float mx = max(max(s.x, s.y), s.z), mn = min(min(s.x, s.y), s.z), d = mx - mn, l = (mx + mn) / 2.0;
+  if (!(d > 1e-6)) return vec3(0.0, 0.0, l);
+  float h = 60.0 * (mx == s.x ? mod((s.y - s.z) / d, 6.0) : mx == s.y ? (s.z - s.x) / d + 2.0 : (s.x - s.y) / d + 4.0);
+  return vec3(h >= 360.0 ? 0.0 : h, l > 0.5 ? d / (2.0 - mx - mn) : d / (mx + mn), l);
+}`,
+    // `lerpOklchColor`: the mix in OKLCh at the ratio clamped into [0, 1],
+    // the hue by the shorter arc, the hue of the other colour when one is
+    // achromatic (chroma below 1e-6).
+    _gpu_ir_mix: `vec3 _gpu_ir_mix(vec3 a, vec3 b, float t) {
+  t = clamp(t, 0.0, 1.0);
+  float h;
+  if (a.y < 1e-6) h = b.y < 1e-6 ? a.z : b.z;
+  else if (b.y < 1e-6) h = a.z;
+  else {
+    float d = b.z - a.z;
+    if (d > 180.0) d -= 360.0;
+    if (d < -180.0) d += 360.0;
+    h = a.z + d * t;
+    if (h < 0.0) h += 360.0;
+    if (h >= 360.0) h -= 360.0;
+  }
+  return vec3(mix(a.x, b.x, t), mix(a.y, b.y, t), h);
+}`,
+    // `apca` of `@arnog/colors`: the luminance of a colour, of its
+    // extended sRGB channels, with the soft clamp near black; the contrast
+    // of a background and a foreground luminance.
+    _gpu_ir_apca_y: `float _gpu_ir_apca_y(vec3 c) {
+  vec3 s = _gpu_ir_lab_srgb(_gpu_ir_lab(c));
+  float y = dot(sign(s) * pow(abs(s), vec3(2.4)), vec3(0.2126729, 0.7151522, 0.072175));
+  return y >= 0.022 ? y : y + pow(0.022 - y, 1.414);
+}`,
+    _gpu_ir_apca: `float _gpu_ir_apca(float bg, float fg) {
+  if (isnan(bg) || isnan(fg)) return ${NAN};
+  float c = 0.0;
+  if (!(abs(bg - fg) < 0.0005))
+    c = bg > fg ? (pow(bg, 0.56) - pow(fg, 0.57)) * 1.14 : (pow(bg, 0.65) - pow(fg, 0.62)) * 1.14;
+  if (abs(c) < 0.1) return 0.0;
+  return c > 0.0 ? c - 0.027 : c + 0.027;
+}`,
+    // The candidate of the larger absolute contrast against `bg`, the
+    // first one at a tie (`ContrastingColor`).
+    _gpu_ir_contrasting: `vec3 _gpu_ir_contrasting(vec3 bg, vec3 a, vec3 b) {
+  float y = _gpu_ir_apca_y(bg);
+  return abs(_gpu_ir_apca(_gpu_ir_apca_y(a), y)) >= abs(_gpu_ir_apca(_gpu_ir_apca_y(b), y)) ? a : b;
 }`,
     // The colour conversions of the interpreter (`@arnog/colors`): OKLab to
     // OKLCh (hue in degrees, in [0, 360)) and back; extended sRGB (a

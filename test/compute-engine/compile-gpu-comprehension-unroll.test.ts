@@ -149,14 +149,20 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
     expect(r.declined).toMatch(/Could not compile/);
   });
 
-  test('arithmetic over a list of points fails closed', () => {
-    const r = shader(
-      ['Multiply', 'u', ['List', ['List', 1, 2], ['List', 3, 4]]],
-      to
-    );
-    expect(r.declined).toMatch(
-      /Could not compile/
-    );
+  test('arithmetic over a list of points compiles on glsl as an array of vectors', () => {
+    const json = ['Multiply', 'u', ['List', ['List', 1, 2], ['List', 3, 4]]];
+    expect(shader(json, to).code).toContain('vec2[2]');
+    // The javascript value is the interpreter's (CE-1538).
+    const js = compile(ce.box(json), { fallback: false, constantFold: false });
+    expect(js.run!({ u: 2 })).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    expect(ce.box(json).subs({ u: 2 }).evaluate().json).toEqual([
+      'List',
+      ['List', 2, 4],
+      ['List', 6, 8],
+    ]);
   });
 
   test('an infinite literal range is declined without being walked', () => {

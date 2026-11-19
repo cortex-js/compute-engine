@@ -493,7 +493,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       const expr = ce.box([head, T, T] as any);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/not a number, a symbol or a function/);
+      expect(r.error).toMatch(/elements of two types/);
       expect(expr.evaluate().toString()).toBe(expected);
     }
   });
@@ -611,7 +611,7 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
     for (const head of ['Equal', 'NotEqual'] as const) {
       const r = compile(ce.box([head, 'nq', { str: 'a' }] as any));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/not a number, a symbol or a function/);
+      expect(r.error).toMatch(/Equal of real, string/);
     }
   });
 
@@ -745,7 +745,7 @@ describe('tier 2: StringJoin', () => {
     const r = compile(ce.box(json as any));
     expect(r.success).toBe(false);
     if (ownGate)
-      expect(r.error).toMatch(/StringJoin is not supported by the compiler/);
+      expect(r.error).toMatch(/Set is not supported by the compiler/);
   });
 
   test('the removed variadic form is a signature ERROR in the interpreter (the fallback answer)', () => {
@@ -783,7 +783,7 @@ describe('a wide index-slot union is not string evidence', () => {
       const r = compile(ce.box(json as any));
       expect(r.success).toBe(false);
       expect(r.error).toMatch(
-        /not a number, a symbol or a function|the input (sn|wq) of type/
+        /Less of string, integer|the input (sn|wq) of type/
       );
     }
     // The broadcast-route gate is untouched.

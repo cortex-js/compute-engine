@@ -465,6 +465,37 @@ interpreter's value. A line is removed when the case declines or is fixed.
   consumes no draw index of the frame, where the interpreted loop consumes
   one (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), so a
   later draw of the interpreter in that frame differs.
+- `javascript` (crafted: a count that is NaN), `x: real`:
+  `Linspace(0, 1, x)` at `x = NaN` (or `Linspace(0, 1, NaN)`) gives the 50
+  elements of the default count; the interpreter leaves it unevaluated.
+  CE-1531.
+- `javascript` (crafted), `A: matrix<real^2x2>`: `RowReduce(A)` at
+  `A = [[1e11, 1], [1, 0]]` gives `[[1, 0], [0, 0]]`: the second pivot,
+  `-1e-11`, is under the tolerance `1e-10` of the numeric row reduction.
+  The interpreter reduces an exact matrix in rationals and gives
+  `[[1, 0], [0, 1]]`.
+- `javascript` (crafted), `H: matrix<real^11x11>`: `Inverse(H)` of the
+  Hilbert matrix of order 11 (`H[i][j] = 1/(i + j - 1)`) gives a matrix of
+  NaN: its elimination in doubles is not told apart from that of a
+  singular matrix. The interpreter gives the exact inverse (`121` at
+  `(1, 1)`).
+- `javascript` (crafted), `P: list<list<real^2>>`: `Diagonal(P)` at
+  `P = []` gives `[]`; the interpreter leaves `Diagonal(List())`
+  unevaluated.
+- `glsl` (crafted: the hue of a grey or a near-grey), `x: real`: in single
+  floats the chroma of a grey through OKLCh is rounding error, and its hue
+  is arbitrary: `ColorToColorspace(Rgb(x, x, x), "oklch")` at `x = 0.5` has
+  the hue 30.2, where the interpreter gives 89.876 (of a chroma of
+  2.2·10⁻⁸). `AsHsv`, `AsHsl` and `ColorToColorspace` to `hsv` or `hsl` read
+  a colour whose sRGB channels differ by at most 1e-6 as grey (the
+  interpreter: 1e-9): `ColorToColorspace(Rgb(0.5, 0.5, 0.5000005), "hsv")`
+  is `(0, 0, 0.5000006)`, where the interpreter gives `(240, 1.0·10⁻⁶, 0.5000005)`.
+- `javascript`, `glsl` (plausible?: a conversion of a name or of a
+  conditional whose value is a constructor of its own space): only a
+  conversion written on the constructor keeps its channels (`AsHsv(Hsv(h,
+  1, 0))` is `(h, 1, 0)`). With `C = Hsv(270, 1, 0)`, `AsHsv(C)` gives
+  `(0, 0, 0)` through OKLCh, where the interpreter gives `(270, 1, 0)`; and
+  so does `AsHsv(If(x > 0, Hsv(270, 1, 0), Rgb(1, 0, 0)))` at `x = 1`.
 
 ## `parallel for` and `runAsync()`
 
@@ -1394,7 +1425,10 @@ interpreter evaluates a fold over rows of unequal length. Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with
 `L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
-`[2, 4]` on `javascript`.
+`[2, 4]` on `javascript`. The same holds for lists of points of run-time
+lengths (`P, Q: list<tuple<real, real>>`): `P + Q` at lengths that differ
+gives a list as long as `P` on `javascript`, or throws a `TypeError` when `Q`
+is the shorter list.
 
 A second value carve-out is ruled (compiled-equality ruling, 2026-09-09):
 compiled `Equal` and `NotEqual` on numeric operands are EXACT, the IEEE 754
@@ -1640,7 +1674,14 @@ that integer (`Floor(x/49)` at 49 is 1); on GLSL the division is a helper
 that gives an integer or a half-integer quotient exactly for a dividend
 below 2^23. A product of a matrix (a list of rank 2 or more) with another
 list, and a power of a matrix, decline: the interpreter's value is the
-matrix product or power, or element by element for some operands.
+matrix product or power, or element by element for some operands. The
+matrix operators (`MatrixMultiply`, `MatrixPower`, `Determinant`,
+`Inverse`, `Transpose`, `Trace`, `RowReduce`, ...) compile on JavaScript
+for a matrix whose rows have a stated length (`matrix<real^2x3>`,
+`list<list<real^3>>`, a literal), and `Cross` also on GLSL and
+`interval-js` (`ir/README.md`, "Matrices"): `A^2` of
+`A: matrix<real^2x2>`, whose canonical form is `MatrixPower(A, 2)`,
+compiles.
 The result of an expression has `broadcast()`, `broadcastAsync()`,
 `willUsePool()`, `runAsync()` and `willParallelize()`: each cell of a batch
 is the value of `run()` at that cell, a batch has no batch body, and
@@ -1650,9 +1691,10 @@ program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
 `outside-profile`, not `bigint-lane`. A colour (`Rgb`, `Hsl`, `Hsv`,
 `Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
-colour) is a `CompiledColor` object; an alpha, a
-list of colours, a colour input or string, and the other colour operators
-decline.
+colour) is a `CompiledColor` object, and so is the value of the other
+colour operators (`ColorMix`, `ColorContrast`, …: `compilation/ir/README.md`,
+"The colour lane"); an alpha, a list of colours, a colour input or string,
+`ColorToString` and `ColorFromColorspace` decline.
 
 With `to: 'glsl'` the compiler takes a scalar
 or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
@@ -1689,9 +1731,11 @@ in a user function, which takes a `sampler2D` parameter; `S` as a value
 declines. A user function takes every input that its body reads as a
 parameter.
 A colour result (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`, `AsOklch`) is an
-OKLCh `vec3`; `AsOklab` and `AsRgb` give the
+OKLCh `vec3`; `AsOklab`, `AsRgb`, `AsHsv` and `AsHsl` give the
 `vec3` of their space and are admitted only as the result of the program;
-`AsHsl`, `AsHsv` and an alpha decline. A name whose value is a colour
+an alpha declines. `ColorMix`, `ColorContrast`, `ColorDelta`,
+`ContrastingColor`, `GamutMap`, `ColorToColorspace` and `Color` of a string
+literal compile (`compilation/ir/README.md`, "The colour lane"). A name whose value is a colour
 constructor of three real numbers (`Hsv(270, 0.4, 0.95)`) is that
 constructor of literals, on both targets, as a name that holds a number. A
 user function may return a colour (declared `color` or inferred); a colour
@@ -2144,10 +2188,12 @@ declines there ("a recursive function (…) on glsl").
 
 A string is a collection of its characters, so a parameter that the body
 reads as a collection has a collection type: in `s ↦ Length(s)`, `s` is a
-`collection`. Compiled code has no string value: an input of type `string`
-and a string literal decline (`outside-profile`), so `g(t)` with
-`g := s ↦ Length(s)` and `t: string`, and `g("abc")`, run on the
-interpreter.
+`collection`. Compiled code on JavaScript holds a scalar string (an input of
+type `string`, a literal, the text operators: "The string lane" of
+`src/compute-engine/compilation/ir/README.md`), but no list of strings and no
+collection read of one, so `g(t)` with `g := s ↦ Length(s)` and `t: string`,
+and `g("abc")`, decline (`outside-profile`) and run on the interpreter;
+`Length(t)` compiles. Every other target declines a string.
 
 ### Function values
 
@@ -2428,11 +2474,13 @@ operands are constants is computed once, when the code is loaded, and every
 call shares the object (`compilation/ir/README.md`, "The colour lane").
 
 The other color operators (`ColorMix`, `ColorContrast`, `ColorDelta`,
-`ColorFromColorspace`, `ColorToColorspace`, …) decline, and so do an
-alpha (a fourth operand), a color input, a color string, a tuple of
-components at a color position (`AsRgb((x, 0.5, 0.2))`: "its value on a
-tuple is not its value on a list"), arithmetic on a color and the `bigint`
-mode. A list of colors is an array of color objects on JavaScript, and
+`ContrastingColor`, `GamutMap`, `Colormap`, `ColorToColorspace`, and `Color`
+of a string literal) call the interpreter's kernels
+(`compilation/ir/README.md`, "The colour lane"). `ColorToString` and
+`ColorFromColorspace` decline, and so do an alpha (a fourth operand), a color
+input, a color string, a tuple of components other than three real numbers
+at a color position (`AsRgb((x, 0.5, 0.2, 1))`), arithmetic on a color and
+the `bigint` mode. A list of colors is an array of color objects on JavaScript, and
 declines on GLSL.
 
 A color value whose `space` is not one of the five spellings is not a color:
@@ -2452,7 +2500,9 @@ Both routes read the channels of a color by one rule, `readColorChannels` in
 - `Hsv`/`Hsl` describe only the sRGB gamut. Their saturation, value and
   lightness are clamped into `[0, 1]`, an infinite one included (`+∞` reads as 1
   and `−∞` as 0), and the hue is reduced modulo 360. A conversion of an extended
-  `Rgb` color to `Hsv`/`Hsl` first clips each channel into `[0, 1]`.
+  `Rgb` color to `Hsv`/`Hsl` first maps it into the sRGB gamut with the CSS
+  Color 4 gamut mapping (`srgbGamutChannels`): the OKLCh chroma is reduced at
+  constant lightness and hue, and a color inside the gamut is not changed.
 - A color with a `NaN` channel, or with an infinite channel that is not clamped
   (an sRGB channel, a hue, an OKLab/OKLCh channel), is `incompatible-type` on
   the interpreter. On the JavaScript target it is the same object with `NaN`
@@ -2481,7 +2531,8 @@ and `Hsl` convert to sRGB first with `_gpu_ir_hsv` and `_gpu_ir_hsl`.
 as the result of the program (`AsOklab(Rgb(x, 0.5, 0.2))` is
 `_gpu_ir_lab(_gpu_ir_lch(_gpu_ir_srgb_lab(vec3(x, 0.5, 0.2))))`), since a
 `vec3` does not carry its space; elsewhere they decline. `AsHsl` and `AsHsv`
-decline on GLSL. The space is not a type: there is no `color<space>` in the
+(`_gpu_ir_hsl_of`, `_gpu_ir_hsv_of`) are admitted in the same way, and
+`Colormap` declines on GLSL. The space is not a type: there is no `color<space>` in the
 type lattice.
 
 ## Sums and objects

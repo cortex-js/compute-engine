@@ -30,14 +30,19 @@ const MODES = ['strict', 'complex'] as const;
  * `mode`, to be refused because the input `x` has no type. The compiled code
  * must know the shape of each input from its type, so an untyped free input
  * is refused; the compiled code no longer reads it as one scalar. The
- * compiler can decline another operand first (`Trace`, or the argument of
- * `g` in the complex mode): the code is then `outside-profile`. */
-function expectRefused(expr: any, mode: string): void {
+ * compiler can decline another operand first (the argument of `g` in the
+ * complex mode): the code is then `outside-profile`, or `code` when given
+ * (`Trace` of a call whose shape the type does not settle). */
+function expectRefused(
+  expr: any,
+  mode: string,
+  code = 'outside-profile'
+): void {
   const r = compile(expr, { to: 'javascript', mode } as any);
   expect(r.success).toBe(false);
   if (r.diagnostic?.code === 'untyped-input')
     expect(r.unsupported).toContain('x');
-  else expect(r.diagnostic?.code).toBe('outside-profile');
+  else expect(r.diagnostic?.code).toBe(code);
 }
 
 function listEngine(): ComputeEngine {
@@ -76,7 +81,7 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
     test(`${mode}: Trace(m(x)) + 1, m := t ↦ [[t, 1], [2, 3]]`, () => {
       const ce = listEngine();
       const expr = ce.box(['Add', ['Trace', ['m', 'x']], 1]);
-      expectRefused(expr, mode);
+      expectRefused(expr, mode, 'unsettled-shape');
       expect(expr.subs({ x: 2 }).N().re).toBe(6);
     });
 

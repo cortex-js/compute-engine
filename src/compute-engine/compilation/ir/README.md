@@ -25,6 +25,7 @@ list literal.
 | `lower.ts`                     | The one walk: the head's binding, the constructs, scopes and arms                            | Optimize; spell                          |
 | `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators |                                          |
 | `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects                   |                                          |
+| `lower-matrices.ts`            | The matrix operators ("Matrices"): builds of the elements, or a kernel of the runtime        |                                          |
 | `lower-context.ts`             | The types the three lowering files share; `Decline`                                          |                                          |
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                               | Know a target                            |
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace               |                                          |
@@ -258,16 +259,18 @@ below about -171 is a known limitation, `docs/COMPILATION-MODEL.md`); a pole is
 ±∞ and a value that is not real is NaN (`Root(-4, 2)`, `Arcsin(2)`). So are the
 library's special functions and steps (`Heaviside`, `Remainder`, `Beta`, the
 Bessel, Airy, elliptic, hypergeometric and zeta families, `LambertW`,
-`Fibonacci`, `IsPrime`, ...): a pole where the interpreter gives `~oo` is +∞
-(`Digamma(0)`). An order or a branch that the library types `integer` is on the
-integer lane: `BesselJ(ν, x)` of a real `ν` declines (the kernels are real for
-an integer order only). A head of two forms has a row per arity (`AGM(x)` and
-`AGM(a, b)`, `EllipticE(m)` and `EllipticE(φ, m)`; `rowOfHead()` takes the count
-of operands). A row whose value of real operands can be complex
-(`CosIntegral(-1)`, `EllipticK(2)`) has `leaves`: in `mode: 'complex'` it takes
-its complex signature, the interpreter's continued kernel (`InverseHaversine`,
-`EllipticK`, `EllipticE(m)`, `Hypergeometric2F1`, `HurwitzZeta`, `LerchPhi`,
-`PolyLog`, `LambertW(x)`), and the others decline. `Log(x, 10)` is the row
+`Fibonacci`, `IsPrime`, `HarmonicNumber(n)` and `HarmonicNumber(n, r)`, the
+generalized `Zeta(s, a)`, the upper incomplete `Gamma(s, z)`, ...): a pole where
+the interpreter gives `~oo` is +∞ (`Digamma(0)`, `HarmonicNumber(-1)`). An order
+or a branch that the library types `integer` is on the integer lane:
+`BesselJ(ν, x)` of a real `ν` declines (the kernels are real for an integer
+order only). A head of two forms has a row per arity (`AGM(x)` and `AGM(a, b)`,
+`EllipticE(m)` and `EllipticE(φ, m)`; `rowOfHead()` takes the count of
+operands). A row whose value of real operands can be complex (`CosIntegral(-1)`,
+`EllipticK(2)`) has `leaves`: in `mode: 'complex'` it takes its complex
+signature, the interpreter's continued kernel (`InverseHaversine`, `EllipticK`,
+`EllipticE(m)`, `Hypergeometric2F1`, `HurwitzZeta`, `LerchPhi`, `PolyLog`,
+`LambertW(x)`, `Gamma(s, z)`), and the others decline. `Log(x, 10)` is the row
 `Log`, a real `Log(x, 2)` the operation `log2` (both exact at a power of the
 base, as the interpreter: `Floor(Log(1000, 10))` is 3), and `Log(x, b)` of
 another base `Ln(x) / Ln(b)`. On GLSL the inverse trigonometric and hyperbolic
@@ -408,16 +411,17 @@ arms of a conditional, a list, a local and an accumulator insert), so the lane
 of every value is settled at compile time and no code tests a value. The rows
 `Add`, `Subtract`, `Negate`, `Multiply`, `Divide`, `Power`, `Root`, `Sqrt`,
 `Exp`, `Ln`, `Log`, the trigonometric and hyperbolic rows, `Abs` (real), `Real`,
-`Imaginary`, `Conjugate`, `Argument` (real), `Equal` and `NotEqual` have a
-complex signature; another row (a comparison, `Floor`, `Mod`, `Max`, ...)
-declines a complex operand. The JavaScript code calls `COMPLEX_FUNCTIONS`
-(`_SYS.ir`), which the fold calls too: the engine's machine complex functions
-(`SYS_HELPERS` of the runtime), and the ring operations part by part. The result
-of `compile()` follows the result convention of every stored kernel
-(`normalizeRunResult()`), in both modes: a complex value of imaginary part
-exactly 0 is returned as the number, at the root and in the cells of a list;
-another complex value is a `{re, im}` object. A program whose root is real
-returns a number.
+`Imaginary`, `Conjugate`, `Argument` (real), `Equal`, `NotEqual`, `Gamma` (the
+interpreter's complex kernel off the real axis) and `Sign` (`z/|z|`, 0 at 0)
+have a complex signature, and `Norm` of a complex scalar is its `Abs`; another
+row (a comparison, `Floor`, `Mod`, `Max`, ...) declines a complex operand. The
+JavaScript code calls `COMPLEX_FUNCTIONS` (`_SYS.ir`), which the fold calls too:
+the engine's machine complex functions (`SYS_HELPERS` of the runtime), and the
+ring operations part by part. The result of `compile()` follows the result
+convention of every stored kernel (`normalizeRunResult()`), in both modes: a
+complex value of imaginary part exactly 0 is returned as the number, at the root
+and in the cells of a list; another complex value is a `{re, im}` object. A
+program whose root is real returns a number.
 
 The complex quotient (`cdiv`) is the interpreter's `complexQuotient()`: the
 textbook formula `(a·conj(b)) / |b|²` where its intermediate values are ordinary
@@ -468,9 +472,9 @@ Inputs in the complex mode: an input of type `number` is complex
 `integer` stays real. The strict mode reads such an input as a real.
 
 Declined: `Max`, `Min`, `Floor` and the other integer rows of a complex, a
-comparison other than `Equal` and `NotEqual`, the real functions (`Gamma`,
-`Erf`, `Zeta`, ...) of a complex, a complex `Max` or `Min` reduction, and
-`ComplexInfinity` as a literal; a real pole (`Gamma(-2)`) stays a real infinity.
+comparison other than `Equal` and `NotEqual`, the real functions (`Erf`, `Zeta`,
+...) of a complex, a complex `Max` or `Min` reduction, and `ComplexInfinity` as
+a literal; a real pole (`Gamma(-2)`) stays a real infinity.
 
 On GLSL a complex value is a `vec2` (re, im): a scalar input declared `complex`
 is a `vec2` parameter (`freeSymbolTypes[name].lowered` is `vec2`), a complex
@@ -520,11 +524,12 @@ object carries. On GLSL a colour is an OKLCh `vec3`: `Oklch(l, c, h)` is
 `_gpu_ir_lch` and `_gpu_ir_srgb_lab` (the interpreter's formulas: extended sRGB,
 with the sign kept through the transfer function, no clamp and no gamut
 mapping), and `AsOklch` is its operand. A `vec3` has no tag of its space, so
-`AsOklab` (`_gpu_ir_lab`) and `AsRgb` (`_gpu_ir_lab_srgb(_gpu_ir_lab(…))`),
-which give the channels of their space, are admitted only as the result of the
-program (`Profile.resultOnly`), and only when the result position of the
-expression (the root, or the last operand of a root `Block`) is that `AsOklab`
-or `AsRgb` itself, so that a host reads the space from the expression
+`AsOklab` (`_gpu_ir_lab`), `AsRgb` (`_gpu_ir_lab_srgb(_gpu_ir_lab(…))`), `AsHsv`
+and `AsHsl` (`_gpu_ir_hsv_of`, `_gpu_ir_hsl_of`), which give the channels of
+their space, are admitted only as the result of the program
+(`Profile.resultOnly`), and only when the result position of the expression
+(the root, or the last operand of a root `Block`) is that conversion itself,
+so that a host reads the space from the expression
 (`compileWithIrProfileGlsl()`): `AsOklab(Which(…, Oklch(…), …, Rgb(…)))`,
 Tycho's form, and `Block(…, AsOklab(c))` compile; `AsOklab(AsRgb(c))`, a
 conversion in an arm of an `If` or a `Which`, and a local that holds
@@ -532,8 +537,16 @@ conversion in an arm of an `If` or a `Which`, and a local that holds
 GLSL, and so does a conversion in the body of a user function. `Hsv` and `Hsl`
 convert their channels to sRGB with `_gpu_ir_hsv` and `_gpu_ir_hsl` (the hue in
 degrees, wrapped; the other two channels clamped into [0, 1], as the interpreter
-reads them), then as `Rgb`. `AsHsl` and `AsHsv` have no GLSL spelling and
-decline there. No space is tracked at compile time and no code tests one.
+reads them), then as `Rgb`. `AsHsv` and `AsHsl` map the colour into the sRGB
+gamut first, as the interpreter does (`_gpu_ir_gamut_map`), and read a colour
+whose sRGB channels differ by at most 1e-6 as achromatic (hue 0), where the
+interpreter's tolerance is 1e-9: in single floats a grey through OKLCh has
+channels about 1e-7 apart. A conversion of a constructor of its own space,
+`AsHsv(Hsv(h, s, v))` and `AsHsl(Hsl(h, s, l))`, is the constructor's channels
+as the interpreter reads them (`ashsv.own`, `ashsl.own`: the hue reduced into
+[0, 360), the others clamped), on both targets, since the round trip through
+OKLCh loses the hue and the saturation at black, at white (HSL) and at a
+saturation of 0. No space is tracked at compile time and no code tests one.
 
 The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a fourth
 operand (alpha) declines on both targets (GLSL has no alpha channel, and a row
@@ -578,18 +591,100 @@ function may return a colour, declared (`(real) -> color`, also through
 JavaScript, a `vec3` on GLSL. Declined: a list of colours on GLSL, a colour
 input, a colour string, a tuple of components other than three real numbers
 (`AsRgb((r, g, b, a))`), a list of tuples, a parameter of a user function that
-is a colour, arithmetic on a colour (an `error` of the canonical form), every
-other colour operator (`ColorContrast`, …), and `mode: 'bigint'`.
-`ColorMix(a, b, t)` compiles on JavaScript only (`_SYS.colorMix`, the
-interpreter's mix in OKLCh, `lerpOklchColor` of `numerics/color-conversion.ts`):
-the ratio is clamped into [0, 1], `ColorMix(a, b)` mixes at 0.5, a tuple of
-three numbers in place of a colour is its sRGB colour, as for a conversion, and
-the result is in OKLCh; it declines on GLSL. The colour of non-finite channels
+is a colour, arithmetic on a colour (an `error` of the canonical form),
+`ColorToString` (its value is a string, and the IR has no string value),
+`ColorFromColorspace`, and `mode: 'bigint'`.
+
+The other colour operators call the interpreter's kernels on JavaScript
+(`_SYS.colorMix`, …: `lerpOklchColor`, `gamutMapOklch`, `colormapColor` of
+`numerics/color-conversion.ts`, `apca` and `oklabDeltaE` of `@arnog/colors`)
+and their port in `print-glsl.ts` on GLSL (CE-1468, CE-1535). In each, a tuple
+of three numbers in place of a colour is its sRGB colour, as for a conversion,
+and a string operand that names a space, a gamut or a palette is a literal,
+read at compile time (any other declines):
+
+- `ColorMix(a, b, t)`: the mix in OKLCh; the ratio is clamped into [0, 1],
+  `ColorMix(a, b)` mixes at 0.5, and the result is in OKLCh.
+- `ColorContrast(bg, fg)` (APCA, of the extended sRGB channels) and
+  `ColorDelta(a, b)` (ΔE_OK) are real numbers.
+- `ContrastingColor(bg, fg1, fg2)` is the candidate of the larger absolute
+  APCA contrast, `fg1` at a tie: on JavaScript the candidate's object, in its
+  own space (the interpreter answers the head it was written with).
+  `ContrastingColor(bg)` is white or black, an sRGB object on JavaScript as
+  the interpreter's `Rgb`. Two operands decline (the interpreter ignores the
+  second).
+- `GamutMap(c)`, `GamutMap(c, "srgb")` and `GamutMap(c, "display-p3")`: the
+  CSS Color 4 gamut mapping; on JavaScript a colour in OKLCh or OKLab is mapped
+  from its OKLCh channels and any other from its sRGB channels, as the
+  interpreter, and the result is in sRGB (extended sRGB for Display-P3). On
+  GLSL the chroma search of `_gpu_ir_gamut_map` is that of `gamutMapOklch`
+  on the OKLCh `vec3`, at most 64 steps.
+- `ColorToColorspace(c, space)` is the tuple of the three channels of `c` in
+  `rgb`, `hsl`, `hsv`, `oklab` (also `lab`) or `oklch` (the case is ignored):
+  the conversion of that space, then `colorchannel.<space>` of each channel
+  index. A colour with an alpha has four elements in the interpreter; no
+  compiled colour has one.
+- `Color(s)` of a string literal is the interpreter's colour of the string
+  (`colorStringToOklch()`), computed at compile time and lowered as `Oklch` of
+  its channels; a colour string with an alpha, a string that names no colour
+  and an operand that is not a literal decline.
+- `Colormap(name, t)` (JavaScript only: GLSL has no palette table): the
+  interpreter's value is a list of colours when `t` is an integer of 2 or
+  more, so it compiles only when its shape is settled at compile time (R1 of
+  `docs/COMPILATION-MODEL.md`): `t` is a literal that is not such an integer,
+  or its static type is a range below 2. `Colormap("viridis", t)` with
+  `t: real<0..1>` compiles; with `t: real` it declines (`unsettled-shape`),
+  and the remedy is the declaration. `Colormap(name)` (the palette, a list)
+  declines.
+
+A colour that is not finite (a `NaN` channel), or a ratio or a position that is
+not finite, is an error of the interpreter; on JavaScript these operators give
+the `NaN` colour or `NaN`. The colour of non-finite channels
 follows the JavaScript runtime (its `NaN` colour); on GLSL no fidelity is owed
 there. The hue of a colour whose two chromatic components are 0 is 0 on both
 targets, as in the interpreter (`_gpu_ir_lch` does not call `atan(0, 0)`, which
 GLSL leaves undefined). A colour result has `broadcastOutputs` and `broadcast()`
 (one number per cell, `NaN`).
+
+## The string lane
+
+The lane `string` holds a text, on JavaScript only (CE-1530, phase 1): a
+JavaScript string, conditioned as the engine boxes a string (NFC, then a lone
+surrogate replaced with U+FFFD). It never widens: a value that is a string on
+one arm and a number on another declines. A string literal is a constant
+(`JSON.stringify`); an input of type `string` (or `character`), also a positional
+one and a parameter or the result of a user function, is read once, at the
+start of the entry, by the operation `text.in` (`_SYS.ct`: the conditioning,
+and a `TypeError` for a value that is not a string); its `lowered` is `string`.
+A `Block` local of no stated type, or `unknown`, holds a string, also one that a
+`Loop` assigns; a local declared `string` declines. The operators are rows of
+`operators.ts` that do not thread, each a helper of `text-runtime.ts` that
+computes as the interpreter, over grapheme clusters, and conditions its result:
+`Length` of an operand of static type `string` (`text.length`), `ToUpperCase`,
+`ToLowerCase`, `CaseFold`, `Trim`, `TrimStart`, `TrimEnd` (with a string of the
+characters to strip, or none), `StringRepeat`, `PadStart`, `PadEnd`,
+`StringReplace` of a string target or of a literal `RegExp(source, flags)` (one
+constant: the flags of the host, `u` added as the interpreter adds it, `/`, the
+source), `StartsWith`, `EndsWith`, `StringCompare`, `String` of strings (of
+none, one, or several: their texts joined) and `StringJoin(s, sep)` of a string
+`s` (its characters joined by `sep`). An operand that the interpreter answers
+with an error value (a count below 0, or 1 for the count of `StringReplace`, or
+above 1,000,000; an empty pad or target) declines when it is a literal or when
+the engine proves it out of the domain (`TEXT_DOMAINS` of `lower-strings.ts`,
+which also lowers `StringReplace` of a pattern; the spellings are in
+`print-js-text.ts`); another is checked by the helper, which throws a
+`RangeError` that names the operator (such rows are `may-fail`). A node of a text row is never evaluated at compile
+time (`isTextRow()` makes `facts().slice` false): `N()` gives the decimal text
+of a number (`String(1/3)`), the interpreter its exact text. No pass has a case of its own for the lane. Declined: a string on GLSL,
+in the interval mode and in the bigint mode; a list of strings
+(`Profile.scalarLanes` on JavaScript: phase 2), with `Characters`,
+`GraphemeClusters`, `StringJoin` of a list, `At` and `Equal` of strings; a
+string of a `vars` name; `String` of a number (its text follows the engine's
+formatting options); a function as the replacement of `StringReplace`; a `RegExp` that is not the
+library operator. Code that reads or gives a string has `strings: true` and
+`shippable: false`: `broadcast()`, `broadcastAsync()` and the batch loaders of
+the runtime (`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`)
+throw a `TypeError` (a batch is of numbers).
 
 ## The `bigint` mode
 
@@ -732,13 +827,14 @@ is `_IA.powReal`; a power by the exact constant 2 is `_IA.square`, the operation
 `square` that the lowering makes; a float literal exponent below), `Root`
 (`_IA.nthRootInterval`), `Sqrt`, `Abs`, `Exp`, `Ln`, `Log` of base 10 and 2, the
 trigonometric and hyperbolic functions and their inverses (also the reciprocal
-ones), `Arctan2`, `Hypot`, `Degrees` (the product by an enclosure of π, then the
-quotient by 180), `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`,
-`Max`, `Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Sinc`, `FresnelC` and
-`FresnelS` (`_IA.fresnelC`, `_IA.fresnelS`: each computed value is widened by
-4·10⁻¹⁵ relative, more than three times the measured error of the double kernel,
-and the operand by one ulp, so that the result holds the interpreter's value at
-the decimal it reads; exact at 0 and ±∞), `Factorial`, `Factorial2`, `Chop`
+ones), `Arctan2`, `Argument` of a real (`Arctan2(0, x)`: the mode has no complex
+lane), `Hypot`, `Degrees` (the product by an enclosure of π, then the quotient
+by 180), `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Sign`, `Mod`, `Max`,
+`Min`, `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Sinc`, `FresnelC` and `FresnelS`
+(`_IA.fresnelC`, `_IA.fresnelS`: each computed value is widened by 4·10⁻¹⁵
+relative, more than three times the measured error of the double kernel, and the
+operand by one ulp, so that the result holds the interpreter's value at the
+decimal it reads; exact at 0 and ±∞), `Factorial`, `Factorial2`, `Chop`
 (`_IA.chop(x, tol)`, which reads the tolerance as a number: of a constant
 tolerance only, `Chop(x)` at the engine's tolerance at compile time; another
 tolerance declines), `Heaviside` (`_IA.heaviside`, 1/2 at 0, a jump at 0),
@@ -1247,15 +1343,19 @@ one that happens to be a constant (the count of `Range(1, 2)`). When the lengths
 differ, the result is unspecified: with `D` and `E` of two lengths, `D + E` is
 an error of the interpreter that the static type (`list<real>`) does not show,
 and the compiled value is a list as long as `D`, NaN where `E` has no element;
-`Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`. Lists of rank 2 or more whose
-lengths are not one length value decline (`Q + R` of two inputs of type
-`list<list<real^2>>`). A `Multiply` of a list of rank 2 or more (a matrix) with
-another list, and a `Power` of such a base, decline: the interpreter's value is
+`Range(1, 2) + List(1, 2, 3)` gives `[2, 4]`. Lists of rank 2 or more read
+their outer length the same way, and their inner lengths must be the same
+(`P + Q` of two inputs of type `list<tuple<real, real>>`, CE-1537); when the
+outer lengths differ, the JavaScript code gives a list as long as the first
+list, or throws a `TypeError` when a later list is shorter. A `Multiply` of
+a list of rank 2 or more (a matrix) with another list, and a `Power` of such a
+base, decline: the interpreter's value is
 the matrix product or power (`M·N`, `M·L`, `M^s` at an integer `s`), measured
 for every pair of a scalar, a list, a matrix, a vector and a point; `M^N` and
-`M^0.5`, element by element in the interpreter, decline too (the simple rule). A
-matrix times scalars, and the other operations of two matrices of one shape, are
-element by element, as in the interpreter. The operands of a `Range` are reals
+`M^0.5`, element by element in the interpreter, decline too (the simple rule).
+A list of points is not a matrix: `P^2` is the power of each coordinate
+(CE-1539). A matrix times scalars, and the other operations of two matrices of
+one shape, are element by element, as in the interpreter. The operands of a `Range` are reals
 or integers: its elements are `lo + k·step` for `k` from 0, of the count of
 `rangeCount`, the interpreter's (`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`,
 `Range(-h, h)` at `h = 2.5` is `[-2.5, -1.5, …, 2.5]`), integers when the first
@@ -1550,8 +1650,8 @@ call) declines. The first condition reached must be a list: a scalar condition
 before it selects its arm whole when it holds, a value of another shape (its
 static type is a union), and declines. Arms are all numbers or booleans (with a
 clause `True`: without one, the interpreter gives `Missing`) and flat lists of
-them, or all points of numbers and lists of points (on GLSL a list of points is
-a list of rank 2 and declines). Stated lengths that differ decline (the
+them, or all points of numbers and lists of points (on GLSL a list of points of
+a constant length is an array of vectors, below; another declines). Stated lengths that differ decline (the
 canonical form already gives `incompatible-dimensions` for most); lists of two
 run-time lengths are an error of the interpreter (`incompatible-dimensions` for
 `Which` and for `If` with an `else`), so the value is unspecified: a list as
@@ -1582,8 +1682,11 @@ interpreter's value for every length, also 0:
   the indices they keep (`Take(L, -2)` the last two, `Take(L, 7)` of three
   elements all three, `Drop(L, 5)` none, a rotation modulo the length), of a
   list of numbers, of points, or of the elements of a tuple (the interpreter's
-  value is a list). A count `m` of `Take` and `Drop` that is not an integer
-  declines (the interpreter rounds it). A real count of a rotation (a slider of
+  value is a list). A real count `m` of `Take` and `Drop` is rounded as the
+  interpreter's `toInteger()` (`Math.round`, the operation `count.round`:
+  `Take(L, 2.5)` keeps 3 elements, `Take(L, -2.5)` the last 2; an infinite
+  count keeps all or none); GLSL and the interval mode decline a real count
+  known at run time. A real count of a rotation (a slider of
   Tycho, `RotateLeft(S, N)` of `N: real`) is tested at run time on JavaScript
   (`count.int`, the helper `_count`): a rotation whose elements are read throws
   where the count is not a safe integer (the interpreter gives
@@ -1658,15 +1761,85 @@ interpreter's value for every length, also 0:
   from 0 of the products of their elements (of two stated lengths that differ it
   declines); of a list of points and a point, or of two lists of points pair by
   pair, the list of those sums, as the interpreter broadcasts. `Norm(x)` of a
-  real scalar is `Abs(x)`; of a point or a list of points, `Abs` (the Euclidean
-  norm); of a list of real numbers, of the order 2 (by default) the square root
-  of the sum of the squares (the interpreter's sum of squares; it scales a
-  vector whose squares would overflow or underflow, which the compiled code does
-  not: a known limitation), of the order 1 the sum of the absolute values, of
-  the order `Infinity` their `Max` from 0. Another order (an order that is not a
-  positive number also for a scalar), a matrix and complex elements decline.
+  real or a complex scalar is `Abs(x)`; of a point or a list of points, `Abs`
+  (the Euclidean norm); of a list of real numbers, of the order 2 (by default)
+  the square root of the sum of the squares (the interpreter's sum of squares;
+  it scales a vector whose squares would overflow or underflow, which the
+  compiled code does not: a known limitation), of the order 1 the sum of the
+  absolute values, of the order `Infinity` their `Max` from 0. Another order (an
+  order that is not a positive number also for a scalar), a matrix and complex
+  elements decline.
 
-In the interval mode every list operator above compiles except `Median`, `Sort`,
+The list operators of CE-1531, on JavaScript (`more()` of `lower-lists.ts`),
+are built the same way, with the interpreter's value for every length, also 0:
+
+- `Append(L, x1, …)` is the build of the elements of `L`, then the `x`s: each
+  is one element, a number or a boolean of a list of the same kind, or a point
+  of a list of points of its dimension (a list or another tuple declines: the
+  interpreter appends it as one element).
+- `DeleteAt(L, i)` and `Insert(L, i, x)` read `i` as `At` does (from 1, from
+  the end when negative; for `Insert` among the `n + 1` positions, so `-1`
+  appends). A constant index of a stated length is a constant, one that is 0,
+  out of range or not an integer declines; an index known at run time is
+  `wix`, which throws where the interpreter leaves the form unevaluated or gives
+  an error (JavaScript only). Of a flat list of numbers or booleans.
+- `Slice(L, s, e)` is the interpreter's `computeSliceBounds()`: real indices
+  rounded (`count.round`), an index below 1 counted from the end, then at least
+  1, the end at most the length (`Slice(L, 2, 0)` is from the second to the
+  last, `Slice(L, 0, 2)` empty). `Slice(L, r)` of a span declines.
+- `Linspace(a, b, c)` is the build of `c` elements (`linspace.count`: the
+  floor, at least 0, 50 when it is not finite; 50 by default, and
+  `Linspace(b)` is `Linspace(1, b)`), the element `k` of the interpreter's
+  `linspaceSample()` (`linspace`, the helper `_linspace`).
+- `Chunk(L, k)` and `Partition(L, m)` compile when every row has one length:
+  a stated length and a constant count that the rows divide. `Partition(L, m,
+  step)` of a constant `m` and a constant `step` (one known at run time can be
+  below 1, where the interpreter leaves the form unevaluated) is the complete windows, `Max(Floor((n − m)/step) +
+  1, 0)` rows of `m` elements. A list of lists whose rows can have two lengths
+  (`Chunk(L, 2)` of `L: list<real>`, a short last chunk, `Partition(L, p)` of a
+  predicate) has no shape in the compiled code and declines.
+- `TakeWhile(L, p)` and `DropWhile(L, p)` split `L` at the first index of a
+  `filter` of the indices where `p` fails, or at the length. `CountIf(L, p)` is
+  the count of the `filter` of the indices where `p` holds, `IndexWhere` its
+  first index plus 1 or 0, `Find` the element there or NaN (of real numbers
+  only), `Position` the indices plus 1. As for `Any`, the compiled code tests
+  every element, and a predicate or a list with an effect declines.
+- `FlatMap(L, f)` of a scalar value is `Map`; of a list of a constant length
+  `m`, the build of the `n·m` elements of the rows in order. A row of a length
+  known at run time and a tuple decline.
+- `Scan(L, f)` and `Scan(L, f, x0)` (an `x0` with an effect declines, as for
+  `Reduce`: the interpreter evaluates it only when it reads an element) are
+  the region `iterate` over the length of
+  `L`: the element `k` is `f(acc, L[k])`, and without `x0` the first element is
+  `L[0]`. `Reduce(L, f, x0)` of a function literal or a user function of two
+  parameters is a counted loop of `f(acc, L[k])` from `x0`. Real numbers only;
+  an integer start keeps the integer lane when every step gives an integer (a
+  trial lowering, not emitted, as for `Iterate`).
+- `Tabulate(f, n1, …, nd)` (also `Table` of one index from 1) is the nested
+  builds of `f(i1, …, id)` at the indices from 1; a count below 1 is empty, a
+  real count is tested at run time (`count.int`), the inner counts must be
+  constants, and a body with an effect declines.
+- `Element(x, L)` is `Contains(L, x)`. `StartsWith`, `EndsWith` and
+  `ContainsSequence` of two lists of real numbers test the elements of the
+  needle with `same()` (NaN matches NaN) at the offset 0, `n − m`, or each
+  offset of a `filter`, under the operands rule of `Contains`.
+- `Identity(x)` is `x`; `ApplyWhole(f, x1, …)` binds each parameter of a
+  function literal of untyped parameters to its argument whole, and of a library
+  operator is the call `f(x1, …)`.
+- `RandomSample(L, k)` (a draw, so a node that holds one is never closed nor
+  evaluated at compile time) is the region `sample`, `_SYS.randomSample(n, k)`, the
+  indices that the interpreter's sparse Fisher-Yates draws (`k` draws, in
+  order; a count that is not in `0..n` after `Math.round()` throws, where the
+  interpreter gives an error), then the build of the elements at them. One draw
+  site.
+
+GLSL compiles those of a constant index and a stated length that write a short
+list out (`DeleteAt(L, 2)`, `Slice(L, 2, 0)` of `L: list<real^6>`); the interval
+mode declines all of them but `Identity` and `ApplyWhole` (`<head> on
+interval-js`).
+
+In the interval mode every list operator of the first list above compiles
+except `Median`, `Sort`,
 `Ordering`, `Unique`, `Any`, `All`, `Contains` and `IndexOf`, which decline with
 `<head> on interval-js` (the operations `sort`, `ordering` and `median`, and an
 equality test of two elements, have no spelling of the mode). The indices of a
@@ -1745,14 +1918,20 @@ declines); of a list of points, the list of those coordinates, and of a literal
 `List` of points (the library's, as `Max(List(…))` reads one) the list of the
 coordinate of each point, with no list of points (so on GLSL too:
 `PointX(List(p1, …, p9))` is a `float[9]`); of a list of numbers, they decline.
-GLSL has no list of points (a list of rank 2) and no build: there `PointList` of
+GLSL has no list of rank 2 other than an array of vectors and no build: there `PointList` of
 list components of a constant length of 1 to 64 (`SCALARIZE_LIMIT`) is written
 out as a `Map` is ("Lists"), a tuple per index, and each reader above is a `Map`
 over the points of any list of points of such a length (a `PointList` or a
 literal `List` of points), the list of its values at each one
 (`Abs(PointList(x - List(1/2, 1), y))` is the `vec2` of the two distances, and
-`dce` removes the points); a list of points as the result, a component of a
-run-time length and more than 64 points decline (CE-1474). Any other reader
+`dce` removes the points); a component of a run-time length and more than 64
+points decline (CE-1474). A list of points that is a value of the shader (the
+result, a local, an arm, a `List` of calls that each give a point) is an array
+of vectors when its length is a constant and its points have 2 to 4
+coordinates (`Profile.vectorArrays`): `List(R(x, y), R(x + 1, y))` of a
+function `R` whose value is a point is `vec2[2](_fn_ir_u0_R(x, y), …)`, as in
+0.193.0 (CE-1538); this holds for any list of rank 2 of such lengths, a matrix
+of 2 to 4 columns too (`vec2[3]`). Any other reader
 declines a tuple operand: `Equal(Tuple(1, 2), List(1, 2))` is `False`, a
 comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`, `Loop` and
 `Comprehension` over a tuple, and the arms of a conditional of which one is a
@@ -1780,13 +1959,89 @@ points: `list<tuple<real, real>>`, `list<tuple<integer, real, real>^6>`,
 extended-real elements `nan | real | signed_infinity` as for a scalar) is a list
 of rank 2 marked a tuple on its inner axis, the value that `PointList` of lists
 makes, of a stated or a run-time length: on JavaScript an array of arrays
-(`P: [[1, 2], [3, 4]]`); GLSL declines it (a list of rank 2). The entry check
+(`P: [[1, 2], [3, 4]]`); on GLSL a stated length with points of 2 to 4
+coordinates is an array of vectors (`vec2[3]`), and another declines (a list of
+rank 2). The entry check
 reads the outer value only, as for any list input: a string and a typed array
 throw; a row of another length, or a value that is not an array, gives an
 unspecified result. `At` of it with a constant index in range of a stated length
 is a point; on JavaScript another index is `atp`, a point of NaN out of range as
 the interpreter's tuple of NaN, and GLSL and the interval mode decline it. A
 list of tuples of other elements, or of tuples of two lengths, declines.
+
+## Matrices
+
+A matrix is a list of rank 2 of real or integer numbers whose rows have a stated
+length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a build
+makes no list of lists of a run-time length, so an input of type
+`list<list<real>>`, whose rows can have two lengths, is refused, as before
+(`docs/COMPILATION-MODEL.md`). The matrix operators (`lower-matrices.ts`) settle
+the shape of their value from the shapes of their operands; a tuple, a list of
+tuples, complex and boolean elements, a rank above 2 and another number of
+operands decline. On JavaScript:
+
+- `Matrix(m)` is `m` (`Vector(a, b, c)` is the column `Matrix` of its canonical
+  form). `Rank(m)` is the number of axes, a constant (0 for a scalar);
+  `Shape(m)` the tuple of the lengths (a run-time length is its value; a scalar
+  declines, the empty tuple). Both decline a matrix whose number of rows is
+  known at run time only: the interpreter's empty list of rows has rank 1 and
+  the shape `(0)`. `Flatten(m)` is the build of the elements row by row (a list
+  is itself, a scalar the list of it). `Reshape(m, Tuple(d1, …, dk))` of
+  constant positive integers is the nested build of the elements row by row,
+  cycled from the first when there are fewer, as the interpreter's; another
+  shape (an input, a `List`) declines.
+- `Transpose(m)` and `ConjugateTranspose(m)` (of reals) are the build of the
+  columns; the number of rows must be stated (it is the length of the rows of
+  the result), so `Transpose(P)` of `P: list<list<real^2>>` declines. A scalar
+  and a list are themselves, as in the interpreter.
+- `Trace(m)` is the sum from 0 of the diagonal of a square matrix (a scalar is
+  itself). `Diagonal(m)` of a matrix is the build of its `Min(rows, columns)`
+  diagonal elements; of a list of a stated length `n`, the `n × n` matrix with
+  the list on its diagonal and 0 elsewhere.
+- `MatrixMultiply(a, b)` of matrices and lists is the matrix product, the
+  product of a matrix and a list on either side, or the inner product of two
+  lists: builds whose elements are sums from 0 of the products in the order of
+  the inner index. Two stated inner lengths that differ decline (the
+  interpreter's `incompatible-dimensions`); lengths of a run-time value that
+  differ give an unspecified value (a throw when a row is missing).
+- `Determinant`, `Inverse`, `MatrixPower` and `RowReduce` are the rows `mdet`,
+  `minverse`, `mpower` and `mrowreduce`, the kernels `_SYS.matrixDeterminant`,
+  `matrixInverse`, `matrixPower` and `matrixRowReduce` of `matrix-runtime.ts`:
+  the interpreter's numeric kernels for the determinant, the power and the row
+  echelon form, in the same order of operations, so their value is the value of
+  `.N()`. The inverse is not the interpreter's numeric `inverse()`, which tests
+  a pivot for an exact 0: `matrixInverse` (`3 × 3` and above) eliminates with
+  partial pivoting, makes 0 an entry of at most `1024ε` of its running bound
+  (the sum of the magnitudes of the terms that made it), and gives a matrix of
+  NaN for a pivot of 0; for `2 × 2` the determinant is 0 at most `1024ε` of the
+  larger of its two products. So an exactly singular integer matrix whose
+  elimination leaves a rounding residue (`[[3, 2, 1], [1, 1, 1], [4, 3, 2]]`) is
+  NaN, where the interpreter's `evaluate()` leaves `Inverse` unevaluated and its
+  `.N()` gives entries of about 1e15; a regular matrix as ill-conditioned as the
+  Hilbert matrix of order 11 is NaN too (a known limitation). The interpreter's
+  `evaluate()` of an exact matrix computes in rationals; the compiled value is
+  within the precision of a double of it, except where a value of the kernel is
+  discontinuous: a singular matrix (above) and `RowReduce`, whose tolerance
+  `1e-10` makes 0 a pivot of an exact matrix (a known limitation). The first
+  three read a square matrix: both lengths stated and equal; a matrix that is
+  not square (the interpreter's `expected-square-matrix`) and one whose number
+  of rows is known at run time only decline. `Determinant` of a `1 × 1` matrix
+  is its element; otherwise `mdet` reads the elements row by row (`Flatten`) and
+  the order, so that its result is a real scalar (`real-element`). `Inverse` of
+  a singular matrix and `MatrixPower` past `MAX_MATRIX_POWER_EXPONENT` are a
+  matrix of NaN, where the interpreter leaves them unevaluated. `MatrixPower`
+  takes an exponent on the integer lane (the interpreter's power of a real
+  exponent is a root of the matrix at a half-integer): `A^2`, whose canonical
+  form is `MatrixPower(A, 2)`, compiles. `RowReduce` reads any matrix, with the
+  pivot tolerance `1e-10` of the interpreter's `rref()` and its `ce.chop()` at
+  the engine's tolerance at the compilation.
+- `Cross(u, v)` of two lists of three numbers, or of two 3-tuples (a tuple, as
+  the interpreter's), is the list of the three differences of products; a list
+  and a tuple decline. It compiles on GLSL (a `vec3`) and in the interval mode
+  too.
+
+GLSL declines a list of rank 2, and the interval mode declines every matrix
+operator but `Matrix` and `Cross`; the kernels have no spelling there.
 
 ## The discharges
 
@@ -1963,8 +2218,9 @@ a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful
 function) gives the interpreter's draws bit for bit: its draws start at index 0
 on entry of the frame. Any other frame compiles, in the compiler's order,
 deterministically, and the result carries a warning `seeded-draw-order` that
-names the frame and why. A draw site is a `Random()`, a `RandomShuffle` or a
-`RandomChoice` (an effectful operation, or an effectful region row). A draw is
+names the frame and why. A draw site is a `Random()`, a `RandomShuffle`, a
+`RandomChoice` or a `RandomSample` (an effectful operation, or an effectful
+region row). A draw is
 the engine's own (`makeRandomHelpers()` over the engine's frame slot): a
 compiled draw reads the frame it runs in. A list of run-time length made in a
 frame (`WithRandomSeed(s, RandomChoice(…, n))`) has its length as a result of
@@ -2108,7 +2364,7 @@ assigns with `Assign` a name declared outside it (`outerWrite()`; `AddTo` is the
 accumulator: `parallel-outer-write`), when it has a `Break` or a `Continue` of
 its own (`jumps()`, which stops at an inner `Loop` or `ParallelLoop`:
 `parallel-exit`), and when the program has a draw (`draw`, `shuffle`), a
-`choice` or a `seeded` region in any function (`draws()`, checked in
+`choice`, a `sample` or a `seeded` region in any function (`draws()`, checked in
 `program()`): inside a frame the interpreter runs each pass in a random frame of
 its own (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which
 compiled code does not have. GLSL and the interval mode decline it. The `loop`
@@ -2398,7 +2654,18 @@ for bit, at the value of the name `x` outside (`D` binds `x`). Its body is pure,
 of a real scalar value; one with an effect (a draw, a write, a `vars` read)
 declines, and so do GLSL and the interval mode. The region is `may-fail`, as
 `integrate`: `cse` merges it only with an equal visible region, and it moves out
-of a loop only as a whole. Otherwise the node declines: with no closed form
+of a loop only as a whole. `ND(f, x)` of a function literal of one parameter is
+the same region, the parameter bound at the point: the interpreter's `ND` runs
+the same stencil (`stencilDerivativeAt()`). `EvaluateAt(f, a)` of a function
+literal of one parameter is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
+`Apply(f, b) - Apply(f, a)`, on every target; at two bounds a function with an
+effect declines (the interpreter applies `f` at `a` first). A `Limit` compiles
+only when it is closed (it reads no input, local, parameter, index or `vars`
+name, and its body is pure): it is the number that `N()` gives at compile time,
+also with a direction. Another `Limit` declines, and so does every `Limit` in
+the interval mode: the interpreter computes a symbolic limit at each point
+first, which no kernel of the runtime reproduces (the numeric limit is NaN at a
+jump near the point: CE-1232). Otherwise the node declines: with no closed form
 (`Apply(Derivative(g), a)` has no stencil, and neither has `D(f, (x, 2))`),
 under an angular unit other than radians, when the node or the result has more
 than `CLOSED_SIZE` nodes counted on every path, and when the result reads a name

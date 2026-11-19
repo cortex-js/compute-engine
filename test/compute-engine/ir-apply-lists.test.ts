@@ -292,7 +292,6 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     ['a Range of a run-time length', ['Sum', ['Map', W, ['Range', 1, 'n']]], /rangecount/],
     ['a Comprehension of two clauses', ['Sum', ['Comprehension', ['Multiply', 'k', 'j'], ['Element', 'k', 'L'], ['Element', 'j', 'L']]], /the region build/],
     ['a list of more than 64 elements', ['Sum', ['Map', W, ['List', ...Array.from({ length: 65 }, (_, i) => ['Add', 'x', i])]]], /the region build/],
-    ['a body of a point', ['Map', ['Function', ['Tuple', 'k', 'k'], 'k'], 'L'], /a list of rank 2/],
     ['a draw', ['Map', ['Function', ['Add', 'k', ['Random']], 'k'], 'L'], /Random/],
   ])('%s declines', (_, json, cause) => {
     expect(failure(() => glsl(json))).toMatch(cause);

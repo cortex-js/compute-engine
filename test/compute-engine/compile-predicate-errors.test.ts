@@ -182,7 +182,7 @@ describe('index callbacks', () => {
   // before it can reach the compiler at all. Passing one here would test the
   // compiler against an expression the interpreter never accepts.
   for (const [name, dims] of [
-    ['Tabulate', [3]],
+    ['Tabulate', [2]],
     ['Tabulate 2-D', [2, 2]],
   ] as const) {
     const params = (type: string) =>
@@ -193,17 +193,23 @@ describe('index callbacks', () => {
             ['Typed', 'j', type],
           ];
     // A BOUNDED index annotation is narrower than the `integer` the lowering
-    // provides: the interpreter reports the out-of-range index as an Error
-    // element (`Tabulate((i: integer<1..2>) ↦ 2i, 3)` → `[2, 4, Error(…)]`),
-    // which the compiled index loop cannot reproduce.
-    it(`${name} declines an index parameter annotated narrower than integer`, () => {
+    // provides. An index outside it is an argument value outside the
+    // declared type of the parameter that it binds, whose compiled value is
+    // unspecified (`docs/COMPILATION-MODEL.md`, "Caveats of compiled code",
+    // CE-1503): the interpreter reports it as an Error element
+    // (`Tabulate((i: integer<1..2>) ↦ 2i, 3)` → `[2, 4, Error(…)]`). The
+    // program compiles; at counts whose every index fits the annotation, its
+    // value is the interpreter's.
+    it(`${name} compiles an index parameter annotated narrower than integer`, () => {
       const ce = new ComputeEngine();
       const expr = ce.box([
         'Tabulate',
         ['Function', ['Multiply', 2, 'i'], ...params("'integer<1..2>'")],
         ...dims,
       ] as any);
-      expect(() => js(expr)).toThrow(/Could not compile/);
+      const plain = (v: any): unknown =>
+        v.isCollection ? [...v.each()].map(plain) : v.re;
+      expect(js(expr).run!()).toEqual(plain(expr.evaluate()));
     });
   }
 });

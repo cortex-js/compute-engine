@@ -211,10 +211,11 @@ describe('a nested conversion is CORRECT, not declined', () => {
     const ce = new ComputeEngine();
     const nested = runColor(ce, ['AsHsv', ['AsRgb', A]]);
     expect(nested.space).toBe('hsv');
-    expect(nested).toEqual(runColor(ce, ['AsHsv', A]));
-    // Against the interpreter, with a hue that survives the 8-bit sRGB step.
-    // A hue of 0.3 degrees does not: both compiled routes answer 0 for it,
-    // which is the documented third-digit difference between the routes.
+    // The direct conversion is the constructor's own channels (CE-1535); the
+    // nested one goes through sRGB and agrees within its rounding.
+    const direct = runColor(ce, ['AsHsv', A]);
+    for (const k of ['c0', 'c1', 'c2'] as const)
+      expect(nested[k]).toBeCloseTo(direct[k], 9);
     expectMatchesInterpreter(ce, ['AsHsv', ['AsRgb', ['Hsv', 200, 0.5, 0.5]]]);
   });
 });

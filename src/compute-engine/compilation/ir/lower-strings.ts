@@ -1,0 +1,98 @@
+/**
+ * The lowering of the text operators that is their own (README, "The
+ * string lane"; CE-1530): the operands out of their domain, which decline,
+ * `String` of an operand that is not text, which declines, and
+ * `StringReplace` of a literal pattern. The other text operators are rows
+ * of `operators.ts`, applied by the walk of `lower.ts`.
+ */
+
+import type { Expression } from '../../global-types.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+} from '../../boxed-expression/type-guards.js';
+import { SMALL_INTEGER } from '../../numerics/numeric.js';
+import { isSubtype } from '../../../common/type/subtype.js';
+import { isLibraryOperator } from '../../library-shadowing.js';
+import { decline, type Fn } from './lower-context.js';
+import type { V } from './ir.js';
+import type { OperatorRow } from './operators.js';
+
+/** A row of a string operand or result. A node of one is never evaluated
+ *  at compile time (`closedValue()` of `lower.ts`): `N()` gives the
+ *  decimal text of a number (`String(1/3)`), where the interpreter gives
+ *  its exact text. */
+export const isTextRow = (r: OperatorRow | undefined): boolean =>
+  r?.signatures.some(([a, out]) => out === 'string' || a.includes('string')) ===
+  true;
+
+/** The operands of a text operator whose value out of a domain is an error
+ *  value of the interpreter: a count of at least that many (and at most
+ *  `SMALL_INTEGER`), or a string that is not empty. A literal out of it,
+ *  or an operand that the engine proves out of it, declines (a known-bad
+ *  call does not compile, user ruling 2026-08-16); the helper throws for
+ *  another (`text-runtime.ts`). */
+// prettier-ignore
+const TEXT_DOMAINS: Readonly<Record<string, [number, number | 'text'][]>> = {
+  StringRepeat: [[1, 0]],
+  PadStart: [[1, 0], [2, 'text']],
+  PadEnd: [[1, 0], [2, 'text']],
+  StringReplace: [[1, 'text'], [3, 1]],
+};
+
+/** Decline `e` when an operand of its text operator is out of its domain
+ *  (`TEXT_DOMAINS`). */
+export function checkTextDomains(e: Fn): void {
+  // The text of a number follows the formatting options of the engine.
+  if (
+    e.operator === 'String' &&
+    !e.ops.every(
+      (x) =>
+        isSubtype(x.type.type, 'string') || isSubtype(x.type.type, 'character')
+    )
+  )
+    decline(e, 'String of an operand that is not a string');
+  for (const [i, d] of TEXT_DOMAINS[e.operator] ?? []) {
+    const x = e.ops[i];
+    if (
+      x !== undefined &&
+      (d === 'text'
+        ? x.isEmptyCollection === true
+        : isNumber(x)
+          ? !(Number.isInteger(x.re) && x.im === 0) ||
+            x.re < d ||
+            x.re > SMALL_INTEGER
+          : (d > 0 ? x.isPositive : x.isNonNegative) === false)
+    )
+      decline(e, `${e.operator} of an operand out of its domain`);
+  }
+}
+
+/** `StringReplace(s, RegExp(source, flags), r, count?)` of a literal
+ *  pattern: the row `text.rerep` of one string constant, its host flags
+ *  (`u` added, as `hostFlags()` of `library/regexp.ts`), `/`, its source;
+ *  `undefined` for a target that is not a `RegExp`. */
+export function patternReplace(
+  e: Fn,
+  cx: {
+    text: (s: string) => V;
+    scalar: (x: Expression) => V;
+    apply: (op: string, args: V[]) => V;
+  }
+): V | undefined {
+  const re = e.ops[1];
+  if (!isFunction(re, 'RegExp') || e.nops < 3) return undefined;
+  if (!isLibraryOperator(re as never, 'RegExp'))
+    decline(e, 'StringReplace of a RegExp that is not the library operator');
+  const [src, flags] = re.ops;
+  const f =
+    flags === undefined ? '' : isString(flags) ? flags.string : undefined;
+  if (!isString(src) || f === undefined || re.nops > 2)
+    decline(e, 'StringReplace of a pattern that is not a literal');
+  const pattern = cx.text(`${/[uv]/.test(f) ? f : `${f}u`}/${src.string}`);
+  return cx.apply(
+    `text.rerep${e.nops === 4 ? '.count' : ''}`,
+    e.ops.map((x, i) => (i === 1 ? pattern : cx.scalar(x)))
+  );
+}

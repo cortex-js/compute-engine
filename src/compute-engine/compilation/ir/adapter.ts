@@ -27,6 +27,7 @@ import {
   normalizeRunResult,
   setReconstructionDigits,
   storeEntryPlan,
+  stringBroadcastError,
   twoStageRunner,
   type EntryPlan,
 } from '../javascript-runtime.js';
@@ -257,7 +258,7 @@ export function inputReport(
  *  convention of the runner (`FreeSymbolType.lowered`) for the IR type of
  *  the entry parameter of the name, or the lane of its `vars` read
  *  (`reads`): `number` (`interval` on interval-js), `boolean`, `complex`,
- *  `color`, `point` for a tuple, `array` for another list. */
+ *  `color`, `string`, `point` for a tuple, `array` for another list. */
 export function runnerLowered(
   p: Program,
   reads: ReadonlyMap<string, Lane>,
@@ -439,6 +440,8 @@ function compileIr(
   // The list inputs that a batch shares between its cells, also with the
   // checks off (`plan.lists` is what the check reads).
   const shared: Key[] = [];
+  // A string input, or a string result: no batch (a batch is of numbers).
+  let strings = entry.results.some((t) => t.lane === 'string');
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
@@ -451,6 +454,8 @@ function compileIr(
       plan.strings.set(key, literal ? `argument ${i + 1}` : `"${name}"`);
       if (bigint && t.lane === 'integer') plan.bigintLists.push(key);
     } else if (t.lane === 'complex') plan.complex.push(key);
+    // A string is checked by its read (`text.in`).
+    else if (t.lane === 'string') strings = true;
     else if (bigint && t.lane === 'integer') {
       if (checks) plan.bigints.push(key);
     } else if (checks) {
@@ -490,10 +495,13 @@ function compileIr(
     message: w.message,
   }));
   // A name of `vars` is read as the host's text, which a worker has only
-  // when it reads the inputs object.
+  // when it reads the inputs object. Code of a string input or result has
+  // no batch, on a worker or not.
   const code = [slice.preambleOnce, slice.code].join('\n');
   const shippable =
-    Object.values(vars).every(readsVarsObject) && isShippableCode(code);
+    !strings &&
+    Object.values(vars).every(readsVarsObject) &&
+    isShippableCode(code);
   const once = slice.preambleOnce;
   const reads = hostReads(p, Object.keys(vars));
   const report = inputReport(
@@ -525,6 +533,7 @@ function compileIr(
     freeSymbolTypes: report.freeSymbolTypes,
     unsupported: [],
     mode,
+    ...(strings ? { strings } : {}),
     profile: 'ir',
     shippable,
     ...(warnings.length > 0 ? { warnings } : {}),
@@ -539,6 +548,7 @@ function compileIr(
   if (outputs > 1) result.broadcastOutputs = outputs;
   const inFrame = <T>(g: () => T): T => {
     if (bigint) throw bigintBroadcastError();
+    if (strings) throw stringBroadcastError();
     const previous = setReconstructionDigits(result.reconstructionDigits);
     try {
       return g();
@@ -574,8 +584,11 @@ function compileIr(
   };
   result.broadcastAsync = bigint
     ? () => Promise.reject(bigintBroadcastError())
-    : makeBroadcastAsync(asyncSpec);
-  result.willUsePool = bigint ? () => false : makeWillUsePool(asyncSpec);
+    : strings
+      ? () => Promise.reject(stringBroadcastError())
+      : makeBroadcastAsync(asyncSpec);
+  result.willUsePool =
+    bigint || strings ? () => false : makeWillUsePool(asyncSpec);
   // The pool loops (`outline()`): each worker program as a stored lambda,
   // which a worker loads, and as a function over the engine's runtime, for
   // a sub-range that the calling thread runs again. The asynchronous text

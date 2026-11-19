@@ -175,15 +175,15 @@ describe('IR profile: an input with no type', () => {
 
   test('a decline of the lowering is reported, before or after the input with no type', () => {
     for (const json of [
-      ['List', 'w', ['HarmonicNumber', 'x']],
-      ['List', ['HarmonicNumber', 'x'], 'w'],
+      ['List', 'w', ['LogGamma', 'x']],
+      ['List', ['LogGamma', 'x'], 'w'],
     ])
       for (const to of ['javascript', 'glsl'])
         expect(
           compiled(json, { to, profile: 'ir', fallback: false }).diagnostic
         ).toMatchObject({
           code: 'outside-profile',
-          operator: 'HarmonicNumber',
+          operator: 'LogGamma',
         });
   });
 
@@ -201,8 +201,8 @@ describe('IR profile: an input with no type', () => {
         unsupported(['Assign', 'u', ['If', ['Less', 'x', 0], 'u', 0]])
       ).toEqual(['Assign', 'u']);
       expect(
-        unsupported(['Add', ['Flatten', ['List', 'x', 'w']], 'v'])
-      ).toEqual(['Flatten', 'w']);
+        unsupported(['Add', ['Total', ['List', 'x', 'w']], 'v'])
+      ).toEqual(['Total', 'w']);
     }
   );
 

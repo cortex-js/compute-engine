@@ -397,13 +397,14 @@ describe('IR profile, batch G14: the witnesses', () => {
       { symbolic: ['C4'] }
     );
   });
-  // prettier-ignore
-  test.each([
-    ['generations, a local list of tuples grown in a Loop', ['Block', ['Declare', 'G', ['Dictionary', ['KeyValuePair', { str: 'value' }, ['generations', 'C4', 1, 1]], ['KeyValuePair', { str: 'constant' }, 'True']]], ['Tuple', 'G']], /the operator Append is not supported/],
-  ])('%s declines, with the cause', (_, json, cause) => {
-    const d = failure(() => js(json, { symbolic: ['C4'] }));
-    expect(d?.code).toBe('outside-profile');
-    expect(d?.message).toMatch(cause);
+  // `Append` of a point to a list of points (CE-1531).
+  test('generations, a local list of tuples grown in a Loop', () => {
+    // prettier-ignore
+    check(
+      ['Block', ['Declare', 'G', ['Dictionary', ['KeyValuePair', { str: 'value' }, ['generations', 'C4', 1, 1]], ['KeyValuePair', { str: 'constant' }, 'True']]], ['Tuple', 'G']],
+      [{ C4: [] }, { C4: [[1, 2, 3, 4]] }, { C4: rows(3, (k) => [k, -k, 0.5 * k, 2]) }],
+      { symbolic: ['C4'] }
+    );
   });
 });
 
@@ -521,10 +522,8 @@ describe('IR profile, batch G14: declines', () => {
   // prettier-ignore
   test.each([
     ['Length on GLSL', ['Length', 'P'], 'glsl', /a list of rank 2 on glsl/],
-    ['At of a stated length on GLSL', ['PointX', ['At', 'S', 2]], 'glsl', /a list of rank 2 on glsl/],
-    ['a parameter declared a list of points on GLSL', ['fs', 'S'], 'glsl', /a list of rank 2 on glsl/],
-    ['a parameter of a run-time length on GLSL', ['fp', 'S'], 'glsl', /a list of rank 2 on glsl/],
-    ['an untyped parameter on GLSL', ['gu', 'S'], 'glsl', /a list of rank 2 on glsl/],
+    // A stated length compiles on GLSL, an array of vectors (CE-1538,
+    // `ir-glsl-point-arrays.test.ts`).
     ['an untyped parameter of a run-time length on GLSL', ['gu', 'P'], 'glsl', /a list of rank 2 on glsl|run-time length/],
     ['Sum of a list of points (a point)', ['Sum', 'P'], 'javascript', /a term that is not a number/],
     ['a list of points scaled by a list of another length', ['Multiply', 'P', 'D'], 'javascript', /another shape/],

@@ -101,7 +101,7 @@ describe('A FOLD WHOSE ELEMENT SHAPE THE TYPE DOES NOT SETTLE (CE-805)', () => {
       ['Scan', 'L', 'Add'],
       'list<unknown>',
       '[[1,2],[4,6],[9,12]]',
-      'outside-profile',
+      'unsettled-shape',
     ],
   ] as const)('%j with L: %s declines', (expr, type, value, code) => {
     const ce = new ComputeEngine();

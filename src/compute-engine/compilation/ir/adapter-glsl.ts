@@ -319,7 +319,8 @@ export function compileWithIrProfileGlsl(
       });
     p.functions.forEach((f) => walk(f.body));
     // A colour result in another space than OKLCh (`asoklab`, `asrgb`,
-    // which `admits()` allows only as the result of the entry) must be the
+    // `ashsv`, `ashsl`, which `admits()` allows only as the result of the
+    // entry) must be the
     // result position of the expression itself (the root, or the last
     // operand of a root `Block`), so that a host reads the space from the
     // expression: a local that holds `AsOklab(c)` and is the result
@@ -328,13 +329,16 @@ export function compileWithIrProfileGlsl(
     while (isFunction(last, 'Block') && last.nops > 0) last = last.ops.at(-1)!;
     const at = isFunction(last) ? last.operator : '';
     const yielded = def.get(entry.body.yields[0]);
+    const space = yielded?.k === 'op' ? yielded.op.replace(/\.own$/, '') : '';
     if (
-      yielded?.k === 'op' &&
-      ['asoklab', 'asrgb'].includes(yielded.op) &&
-      yielded.op !== { AsOklab: 'asoklab', AsRgb: 'asrgb' }[at]
+      ['asoklab', 'asrgb', 'ashsv', 'ashsl'].includes(space) &&
+      space !==
+        { AsOklab: 'asoklab', AsRgb: 'asrgb', AsHsv: 'ashsv', AsHsl: 'ashsl' }[
+          at
+        ]
     )
       throw decline(
-        'a colour in OKLab or sRGB that is not the result position of the expression on glsl (an AsOklab or an AsRgb there)'
+        'a colour in OKLab, sRGB, HSV or HSL that is not the result position of the expression on glsl (an AsOklab, an AsRgb, an AsHsv or an AsHsl there)'
       );
     if (!(loopPasses(p, 1, def) <= budget))
       throw decline(

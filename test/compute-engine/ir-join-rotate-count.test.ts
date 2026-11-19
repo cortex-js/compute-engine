@@ -157,10 +157,13 @@ describe('CE-1465: a rotation of a real count', () => {
     );
   });
 
-  test('a real count of Take and Drop still declines', () => {
+  // The interpreter rounds a real count of `Take` and `Drop` (`toInteger()`,
+  // `Math.round`: 2.5 is 3, -2.5 is -2), CE-1531.
+  test('a real count of Take and Drop is rounded', () => {
     for (const h of ['Take', 'Drop'])
-      expect(failure(() => js([h, 'S', 'N']))).toMatch(
-        /a count that is not an integer/
+      check(
+        [h, 'S', 'N'],
+        [2.4, 2.5, -2.5, -1.5, 0.4, 7.5, -9].map((N) => ({ S, N }))
       );
   });
 });

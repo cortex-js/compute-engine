@@ -9,8 +9,8 @@
  *
  * - Compiles with `fallback: false`: Tycho's witness `|(x - [1/2, 1], y)|`
  *   and its `\min(|(x-[1/2,1], y, z+2)|)`.
- * - Declines: a list of points as the result, a component of a run-time
- *   length.
+ * - Declines: a component of a run-time length. A list of points as the
+ *   result is an array of vectors (`ir-glsl-point-arrays.test.ts`).
  * - The values: the JavaScript compile against the interpreter, and the
  *   shader in WebGL2 (the headless Chromium of
  *   `scripts/glsl-check/glsl-driver.ts`) against the interpreter within
@@ -85,8 +85,8 @@ describe('IR on GLSL: a list of points of a stated length (CE-1474)', () => {
   });
 
   test.each([
-    // A list of points is not a value of the shader.
-    [['PointList', ['Subtract', 'x', HALF_ONE], 'y'], /a list of rank 2/],
+    // A list of points as the result is an array of vectors
+    // (`ir-glsl-point-arrays.test.ts`, CE-1538).
     // A component of a run-time length.
     [['Abs', ['PointList', 'D', 'y']], /D has a run-time length/],
     // Past 64 points (`SCALARIZE_LIMIT`), the build of the points stays.

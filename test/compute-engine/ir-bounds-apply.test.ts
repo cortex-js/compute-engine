@@ -380,14 +380,14 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
       check(json, points);
       expect(glsl(json)).toMatchObject({ success: true });
     }
-    // A list of points: JavaScript; GLSL has no list of points.
+    // A list of points: on GLSL an array of vectors (CE-1538).
     const point = [
       'Apply',
       fn(['Tuple', ['Cos', 'z'], ['Sin', 'z']], 'z'),
       'L',
     ];
     check(point, points);
-    expect(failure(() => glsl(point))?.message).toMatch(/a list of rank 2/);
+    expect(glsl(point)).toMatchObject({ success: true });
   });
 
   // prettier-ignore

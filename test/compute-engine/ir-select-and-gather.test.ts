@@ -269,17 +269,15 @@ describe('If and Which of a list condition on GLSL and in the interval mode', ()
     expect(
       failure(() => interval(['Which', ['Less', 3, 'L3'], 1, 'True', 0]))
     ).toMatch(/a selection at each position in the interval mode/);
-    // A list of points is a list of rank 2, which GLSL has not.
+    // A list of points is an array of vectors (CE-1538).
     expect(
-      failure(() =>
-        glsl([
-          'Which',
-          ['Less', 3, 'L3'],
-          ['Tuple', 1, 2],
-          'True',
-          ['Tuple', 3, 4],
-        ])
-      )
-    ).toMatch(/a list of rank 2 on glsl/);
+      glsl([
+        'Which',
+        ['Less', 3, 'L3'],
+        ['Tuple', 1, 2],
+        'True',
+        ['Tuple', 3, 4],
+      ])
+    ).toMatchObject({ success: true });
   });
 });

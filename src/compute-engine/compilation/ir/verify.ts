@@ -92,7 +92,11 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
     const scope = new Set(visible);
     const define = (v: V) => {
       const t = type(v);
-      if (!['real', 'integer', 'boolean', 'complex', 'color'].includes(t.lane))
+      if (
+        !['real', 'integer', 'boolean', 'complex', 'color', 'string'].includes(
+          t.lane
+        )
+      )
         fail(`v${v}: lane ${t.lane}`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
@@ -139,7 +143,12 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
                   (lane === 'real' ||
                     !Number.isFinite(value) ||
                     Number.isInteger(value)));
-        if (!ok)
+        const text =
+          t.shape.length === 0 &&
+          t.lane === 'string' &&
+          lane === 'string' &&
+          typeof value === 'string';
+        if (!ok && !text)
           fail(`const v${i.out}: ${String(value)} is not a ${typeToString(t)}`);
         if (typeof value === 'number') constants.set(i.out, value);
         return;

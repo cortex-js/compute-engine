@@ -655,7 +655,7 @@ export const PROGRAMS: Json[] = [
  */
 // prettier-ignore
 export const DECLINES: Record<string, Json> = {
-  'not supported by the compiler': ['HarmonicNumber', 'x'],
+  'not supported by the compiler': ['LogGamma', 'x'],
   'Less of complex': ['If', ['Less', 'Z', 1], 1, 2],
   'bound that is not a real number': ['Sum', 'k', ['Limits', 'k', 1, 'Z']],
   'different lengths': ['Add', 'L', ['List', 1, 2]],

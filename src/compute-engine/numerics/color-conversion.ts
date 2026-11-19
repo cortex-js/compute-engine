@@ -22,6 +22,11 @@ import {
   isNamedColor,
   isValidColor,
   oklchToOklab,
+  parseColor,
+  rgbToOklch,
+  SEQUENTIAL_PALETTES,
+  CATEGORICAL_PALETTES,
+  DIVERGING_PALETTES,
 } from '@arnog/colors';
 import type { OklchColor } from '@arnog/colors';
 
@@ -78,6 +83,69 @@ export function lerpOklchColor(
   const alphaA = a.alpha ?? 1;
   const alphaB = b.alpha ?? 1;
   return { L, C, H, alpha: normalizeAlpha(alphaA + (alphaB - alphaA) * t) };
+}
+
+/** The OKLCh color of a packed `0xRRGGBBAA` sRGB integer. Its alpha is
+ * absent when the color is opaque. */
+export function packedToOklchColor(color: number): OklchColor {
+  const c = rgbToOklch({
+    r: (color >>> 24) & 0xff,
+    g: (color >>> 16) & 0xff,
+    b: (color >>> 8) & 0xff,
+  });
+  const alpha = normalizeAlpha((color & 0xff) / 255);
+  return alpha !== undefined ? { ...c, alpha } : c;
+}
+
+/** The palettes of `Colormap`, by name. */
+export const COLORMAP_PALETTES: Readonly<Record<string, readonly string[]>> =
+  {
+    ...SEQUENTIAL_PALETTES,
+    ...CATEGORICAL_PALETTES,
+    ...DIVERGING_PALETTES,
+  };
+
+/** The names of the palettes of `Colormap`, in one order: a compiled
+ * `Colormap` names its palette by its index here. */
+export const COLORMAP_NAMES: readonly string[] = Object.keys(COLORMAP_PALETTES);
+
+/**
+ * The color of the gradient `palette` (not empty) at the position `t`,
+ * clamped into [0, 1]: a stop, or the interpolation in OKLCh of the two
+ * stops around `t`, with the routine `ColorMix` uses. The library's
+ * `interpolateOklch()` returns a gamut-clipped sRGB color instead.
+ */
+export function samplePaletteOklch(
+  palette: readonly string[],
+  t: number
+): OklchColor {
+  t = Math.max(0, Math.min(1, t));
+  const n = palette.length;
+  const stop = (i: number) => packedToOklchColor(parseColor(palette[i]));
+  if (n === 1) return stop(0);
+  const pos = t * (n - 1);
+  const i = Math.floor(pos);
+  const frac = pos - i;
+  if (i >= n - 1) return stop(n - 1);
+  if (frac < 1e-9) return stop(i);
+  return lerpOklchColor(stop(i), stop(i + 1), frac);
+}
+
+/**
+ * The color of `Colormap(name, t)` at a finite position `t` that is not an
+ * integer of 2 or more (which gives a list of colors): the nearest color
+ * of a categorical palette, at the index `round(t × (length − 1))`, or the
+ * interpolated color of a gradient (`samplePaletteOklch`); `t` is clamped
+ * into [0, 1]. `undefined` for a name that is not a palette.
+ */
+export function colormapColor(name: string, t: number): OklchColor | undefined {
+  if (!Object.hasOwn(COLORMAP_PALETTES, name)) return undefined;
+  const palette = COLORMAP_PALETTES[name];
+  if (palette.length === 0) return undefined;
+  if (!Object.hasOwn(CATEGORICAL_PALETTES, name))
+    return samplePaletteOklch(palette, t);
+  const i = Math.round(Math.max(0, Math.min(1, t)) * (palette.length - 1));
+  return packedToOklchColor(parseColor(palette[i]));
 }
 
 /** The five color spaces, spelled in lowercase. */

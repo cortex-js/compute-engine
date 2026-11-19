@@ -432,7 +432,7 @@ const DECLINES: [label: string, json: Json, cause: RegExp, options?: object][] =
   ['Log', ['Log', 'z'], /Log \(the operation clog10\)/],
   ['Csc', ['Csc', 'z'], /Csc \(the operation ccsc\)/],
   ['Sech', ['Sech', 'z'], /Sech \(the operation csech\)/],
-  ['Gamma of a complex', ['Gamma', 'z'], /Gamma of complex/],
+  ['Gamma of a complex', ['Gamma', 'z'], /Gamma \(the operation cgamma\) on glsl/],
   ['a comparison of complex values', ['Less', 'z', 'w'], /Less of complex/],
   ['a list of complex values', ['List', 'z', 'w'], /a list of complex numbers on glsl/],
   ['a tuple of complex values', ['Tuple', 'z', ['Exp', 'z']], /a list of complex numbers on glsl/],

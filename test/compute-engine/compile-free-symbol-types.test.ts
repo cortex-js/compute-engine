@@ -56,10 +56,21 @@ describe('freeSymbolTypes', () => {
       lowered: 'vec2',
       provenance: 'declared',
     });
-    // GLSL gives a matrix no type.
-    expect(() => run(ce, 'glsl', ['Multiply', 'M', 2])).toThrow(
-      /a list of rank 2 on glsl/
-    );
+    // A matrix compiles on glsl as an array of vectors, one per row
+    // (CE-1538); the javascript value is the interpreter's.
+    expect(run(ce, 'glsl', ['Multiply', 'M', 2]).success).toBe(true);
+    const M = [
+      [1, 2],
+      [3, 4],
+    ];
+    expect(run(ce, 'javascript', ['Multiply', 'M', 2]).run({ M })).toEqual([
+      [2, 4],
+      [6, 8],
+    ]);
+    expect(
+      ce.box(['Multiply', ['List', ['List', 1, 2], ['List', 3, 4]], 2]).evaluate()
+        .json
+    ).toEqual(['List', ['List', 2, 4], ['List', 6, 8]]);
     expect(run(ce, 'glsl', ['At', 'L', 2]).freeSymbolTypes.L.lowered).toBe(
       'float[5]'
     );

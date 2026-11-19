@@ -14,6 +14,7 @@ import {
 import type { Expression } from '../../global-types.js';
 import { requiredArity } from '../../../common/type/utils.js';
 import {
+  elementIndex,
   elementType,
   isSubLane,
   lengthValues,
@@ -137,7 +138,54 @@ const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
   IndexOf: [2],
   Dot: [2],
   Norm: [1, 2],
+  DeleteAt: [2],
+  Insert: [3],
+  Slice: [3],
+  Linspace: [1, 2, 3],
+  Chunk: [2],
+  Partition: [2, 3],
+  TakeWhile: [2],
+  DropWhile: [2],
+  FlatMap: [2],
+  Scan: [2, 3],
+  Element: [2],
+  Identity: [1],
+  CountIf: [2],
+  Find: [2],
+  IndexWhere: [2],
+  Position: [2],
+  RandomSample: [2],
+  StartsWith: [2],
+  EndsWith: [2],
+  ContainsSequence: [2],
 });
+
+/** The list operators of CE-1531 (`more()`). */
+const MORE: ReadonlySet<string> = new Set([
+  'Append',
+  'DeleteAt',
+  'Insert',
+  'Slice',
+  'Linspace',
+  'Chunk',
+  'Partition',
+  'TakeWhile',
+  'DropWhile',
+  'FlatMap',
+  'Scan',
+  'Tabulate',
+  'Element',
+  'Identity',
+  'CountIf',
+  'Find',
+  'IndexWhere',
+  'Position',
+  'RandomSample',
+  'ApplyWhole',
+  'StartsWith',
+  'EndsWith',
+  'ContainsSequence',
+]);
 
 /** The variances and the standard deviations (`variance()`). */
 const VARIANCES: readonly string[] = [
@@ -537,6 +585,13 @@ export function listLowering(cx: Lowering) {
     const red = REDUCTIONS.get(e.operator)!;
     if (red.indexed && e.nops === 2 && isFunction(e.ops[1], 'Limits'))
       return aggregate(e, r);
+    // `Sum(body, Element(k, L))` ranges over the elements of `L`: the
+    // `Element` is a clause, not the boolean of a membership.
+    if (e.ops.slice(1).some((x) => isFunction(x, 'Element')))
+      decline(
+        e,
+        `${e.operator} over the elements of a list (an Element clause)`
+      );
     // A literal list of scalars is read as its elements, with no array:
     // `Max(List(x, y))` is `Max(x, y)`, and `Sum(List(x, y))` is `Sum(x, y)`,
     // whose fold from the identity is the loop's. Only the library's `List`.
@@ -973,6 +1028,9 @@ export function listLowering(cx: Lowering) {
           : isNumber(o) && o.im === 0
             ? o.re
             : NaN;
+    // Of a complex scalar, its modulus, as the interpreter's for every order.
+    if (t.lane === 'complex' && t.shape.length === 0 && p > 0)
+      return cx.apply(e, 'Abs', [x]);
     if (!isSubLane(t.lane, 'real'))
       decline(e, 'Norm of a value that is not real');
     // An order that is not a positive number (a symbol, 0, -1) has no
@@ -1058,6 +1116,9 @@ export function listLowering(cx: Lowering) {
    *  index kept plus 1, or 0. A list with an effect declines (the
    *  interpreter stops at the first match). */
   const search = (e: Fn): V => {
+    // `Element(v, L)` is `Contains(L, v)`.
+    const [l, needle] =
+      e.operator === 'Element' ? [e.ops[1], e.ops[0]] : [e.ops[0], e.ops[1]];
     // The interpreter compares exact values (`1/3` is not its double, and
     // `3·0.1` in a `Range` is `0.3`): the doubles compare as it does for
     // integers, and for inputs and float literals.
@@ -1078,16 +1139,15 @@ export function listLowering(cx: Lowering) {
           ? x.isExact !== true || x.type.matches('integer')
           : isFunction(x, 'List') && x.ops.every(doubles);
     const integers =
-      e.ops[0].type.matches('list<integer>') &&
-      e.ops[1].type.matches('integer');
-    if (!integers && !(doubles(e.ops[0]) && doubles(e.ops[1])))
+      l.type.matches('list<integer>') && needle.type.matches('integer');
+    if (!integers && !(doubles(l) && doubles(needle)))
       decline(
         e,
         `${e.operator} of a value that the interpreter may hold exactly`
       );
     const effects = b.effects;
-    const s = source(e.ops[0]);
-    const v = cx.scalar(e.ops[1]);
+    const s = source(l);
+    const v = cx.scalar(needle);
     const real = (x: V) =>
       isSubLane(type(x).lane, 'real') && type(x).shape.length === 0;
     if (!real(v)) decline(e, `${e.operator} of other than real numbers`);
@@ -1110,7 +1170,7 @@ export function listLowering(cx: Lowering) {
       );
     const n = listSource(kept).length;
     const found = cx.apply(e, 'Less', [integer(0), n]);
-    if (e.operator === 'Contains') return found;
+    if (e.operator !== 'IndexOf') return found;
     return cx.branch(
       e,
       found,
@@ -1450,6 +1510,758 @@ export function listLowering(cx: Lowering) {
     return h.endsWith('Deviation') ? cx.apply(e, 'Sqrt', [v]) : v;
   };
 
+  /** The integer of the count or index `x`: an integer, or a real rounded
+   *  as the interpreter's `toInteger()` (`Math.round`; `count.round` at run
+   *  time). */
+  const rounded = (x: Expression): V => {
+    const v = cx.scalar(x);
+    if (type(v).lane === 'integer') return v;
+    if (type(v).lane !== 'real')
+      decline(x, 'a count that is not a real number');
+    const c = cx.constant(v);
+    if (c !== undefined && Number.isFinite(c)) return integer(Math.round(c));
+    return cx.apply(x, op('count.round'), [v]);
+  };
+
+  /** `then()` where `x head y` holds, `otherwise()` elsewhere: chosen at
+   *  compile time when `x` and `y` are constants. */
+  const when = (
+    e: Fn,
+    head: 'Less' | 'LessEqual' | 'Equal',
+    x: V,
+    y: V,
+    then: () => V,
+    otherwise: () => V
+  ): V => {
+    const [p, q] = [cx.constant(x), cx.constant(y)];
+    if (p !== undefined && q !== undefined)
+      return (head === 'Less' ? p < q : head === 'LessEqual' ? p <= q : p === q)
+        ? then()
+        : otherwise();
+    return cx.branch(e, cx.apply(e, head, [x, y]), then, otherwise, true)!;
+  };
+
+  /** The function literal of `n` parameters of distinct names that `g` is
+   *  (a literal, a user function or a library operator of that arity,
+   *  `operatorLiteral()`): its parameter names, its body and the literal. */
+  const literalOf = (e: Fn, g: Expression, n: number) => {
+    const f = operatorLiteral(g, cx.rows, n);
+    const names = isFunction(f, 'Function')
+      ? f.ops.slice(1).map(parameterName)
+      : [];
+    if (
+      !isFunction(f, 'Function') ||
+      names.length !== n ||
+      names.includes(undefined) ||
+      new Set(names).size !== n
+    )
+      decline(
+        e,
+        `${e.operator} of a function that is not a literal of ${n === 1 ? 'one parameter' : `${n} parameters of distinct names`}`
+      );
+    return { names: names as string[], body: f.ops[0], site: f };
+  };
+
+  /** The value of `body` with each name of `names` bound to the value of
+   *  the same position in `values`. */
+  const applied = (names: string[], values: V[], body: Expression): V =>
+    cx.withFrame(true, (frame) => {
+      names.forEach((n, j) =>
+        frame.names.set(n, { v: values[j], role: 'index' })
+      );
+      return cx.value(body)!;
+    });
+
+  /** The element of `s` at 0, lowered in a region that is not emitted
+   *  (its type and its tuple mark). */
+  const elementOf = (s: Source): V => {
+    const before = b.effects;
+    const r = b.region([], () => [s.at(integer(0))]);
+    b.effects = before;
+    return r.yields[0];
+  };
+
+  /** The flat list of numbers `l` as a source whose elements are real or
+   *  integer scalars, not a tuple; `what` names the operator. */
+  const numbers = (e: Fn, l: Expression): Source => {
+    const s = source(l);
+    const x = elementOf(s);
+    if (type(x).shape.length > 0 || !isSubLane(type(x).lane, 'real'))
+      decline(e, `${e.operator} of a list of other than real numbers`);
+    return s;
+  };
+
+  /** The index from 0 of the index `x` (from 1, from the end when
+   *  negative) of a list of `n` elements: a constant for constants (one
+   *  that is 0, not an integer or out of range declines: the interpreter
+   *  gives no list), `wix` at run time on JavaScript, which throws where
+   *  the interpreter gives no list. */
+  const position = (e: Fn, n: V, x: Expression): V => {
+    const i = cx.scalar(x);
+    if (!isSubLane(type(i).lane, 'real'))
+      decline(x, 'an index that is not a number');
+    const [m, c] = [cx.constant(n), cx.constant(i)];
+    if (c !== undefined && (c === 0 || !Number.isInteger(c)))
+      decline(
+        e,
+        `the index ${c} of ${e.operator} (the interpreter gives no list)`
+      );
+    if (m !== undefined && c !== undefined) {
+      const at = elementIndex(m, c);
+      if (at === undefined)
+        decline(
+          e,
+          `the index ${c} of ${e.operator} of a list of ${m} elements (the interpreter leaves it unevaluated)`
+        );
+      return integer(at);
+    }
+    if (!cx.runtimeLengths || cx.interval)
+      decline(e, `${e.operator} at an index known at run time`);
+    return cx.apply(e, op('wix'), [n, i]);
+  };
+
+  /** The indices from 0 of the elements of `s` where the predicate `g`
+   *  holds (with `negate`, where it fails). The interpreter stops at the
+   *  first element that decides, so a predicate with an effect declines. */
+  const where = (e: Fn, s: Source, g: Expression, negate = false): V => {
+    const { names, body, site } = literalOf(e, g, 1);
+    const effects = b.effects;
+    const kept = over(
+      e,
+      { length: s.length, at: (k) => k },
+      '',
+      (_x, k) => {
+        const p = applied(names, [s.at(k)], body);
+        if (type(p).lane !== 'boolean' || type(p).shape.length > 0)
+          decline(site, 'a predicate that is not a boolean');
+        return negate ? cx.apply(e, 'Not', [p]) : p;
+      },
+      true,
+      site
+    );
+    if (b.effects > effects)
+      decline(
+        e,
+        `${e.operator} with an effect (the interpreter stops at the first element that decides)`
+      );
+    return kept;
+  };
+
+  /** The first element of the list `l`, read where it has one. */
+  const head = (l: V): V => b.op('elem', [l, integer(0)], elementType(type(l)));
+
+  /** The list of the elements of the flat list `s` (of numbers or
+   *  booleans) and of the scalars `xs` after them (`Append`). */
+  const appended = (e: Fn, s: Source, xs: V[]): V => {
+    const n = s.length;
+    const at = (k: V, j: number): V => {
+      if (j === xs.length) return xs[j - 1];
+      const end = int(e, 'Add', n, integer(j));
+      return when(
+        e,
+        'Less',
+        k,
+        end,
+        () => (j === 0 ? s.at(k) : xs[j - 1]),
+        () => at(k, j + 1)
+      );
+    };
+    return built(e, int(e, 'Add', n, integer(xs.length)), (k) => at(k, 0));
+  };
+
+  /** The list `s` as rows of `size` elements, the row `i` from the element
+   *  `i·step`, `count` rows (`Chunk`, `Partition`). */
+  const windows = (e: Fn, s: Source, count: V, size: number, step: V): V =>
+    over(
+      e,
+      { length: count, at: (i) => i },
+      '',
+      (_x, i) => {
+        const start = cx.apply(e, 'Multiply', [i, step]);
+        return reindexed(e, s, integer(size), (j) => int(e, 'Add', start, j));
+      },
+      false,
+      e
+    );
+
+  /** A run of passes over the first `n` indices from `x0` (the region
+   *  `iterate`): the element `k` is `step(k, acc)`, `acc` the element
+   *  before, or `x0` at the first pass. Real numbers only; an integer `x0`
+   *  keeps the integer lane when every step gives an integer (a trial
+   *  lowering, not emitted). */
+  const scanned = (e: Fn, n: V, x0: V, step: (k: V, acc: V) => V): V => {
+    const real = (v: V) =>
+      type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
+    if (!real(x0))
+      decline(e, `${e.operator} from a value that is not a real number`);
+    const pass = (lane: Lane): [V[], () => V[]] => {
+      const [k, acc] = [
+        b.newValue(scalarType('integer')),
+        b.newValue(scalarType(lane)),
+      ];
+      const yields = () => {
+        const y = step(k, acc);
+        if (!real(y))
+          decline(
+            e,
+            `${e.operator} of a function whose value is not a real number`
+          );
+        return [y];
+      };
+      return [[k, acc], yields];
+    };
+    let lane = type(x0).lane;
+    if (lane === 'integer') {
+      const before = b.effects;
+      const [ps, yields] = pass(lane);
+      const r = b.region(ps, yields);
+      b.effects = before;
+      if (type(r.yields[0]).lane !== 'integer') lane = 'real';
+    }
+    const [ps, yields] = pass(lane);
+    const [out] = cx.region('iterate', [n, x0], ps, yields, e);
+    if (lane === 'integer' && type(out).lane !== 'integer')
+      decline(e, 'an accumulator that changes lane');
+    return out;
+  };
+
+  /** `Reduce(L, f, init)` of a function `f` of two parameters (a literal
+   *  or a user function): the left fold from `init`, `f(acc, x)` for each
+   *  element `x` in order, as the interpreter's. Real numbers only; an
+   *  integer `init` keeps the integer lane when every step gives an
+   *  integer. */
+  const reduceBy = (e: Fn): V => {
+    if (cx.interval) decline(e, 'Reduce by a function on interval-js');
+    const { names, body } = literalOf(e, e.ops[1], 2);
+    const effects = b.effects;
+    const s = source(e.ops[0]);
+    const init = cx.scalar(e.ops[2]);
+    if (b.effects > effects)
+      decline(e, 'Reduce of a list or an initial value with an effect');
+    const real = (v: V) =>
+      type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
+    if (!real(init))
+      decline(e, 'Reduce from a value that is not a real number');
+    const pass = (lane: Lane) => {
+      const [k, acc] = [
+        b.newValue(scalarType('integer')),
+        b.newValue(scalarType(lane)),
+      ];
+      return b.region([k, acc], () => {
+        const y = applied(names, [acc, s.at(k)], body);
+        if (!real(y))
+          decline(e, 'Reduce by a function whose value is not a real number');
+        return [y];
+      });
+    };
+    let lane = type(init).lane;
+    if (lane === 'integer') {
+      const before = b.effects;
+      const r = pass(lane);
+      b.effects = before;
+      if (type(r.yields[0]).lane !== 'integer') lane = 'real';
+    }
+    const body2 = pass(lane);
+    if (type(body2.yields[0]).lane !== lane)
+      decline(e, 'an accumulator that changes lane');
+    const out = b.newValue(scalarType(lane));
+    const last = cx.apply(e, 'Subtract', [s.length, integer(1)]);
+    b.emit({
+      k: 'loop',
+      outs: [out],
+      lo: integer(0),
+      hi: last,
+      init: [cx.widen(init, lane)],
+      body: body2,
+    });
+    if (b.effects > effects) decline(e, 'Reduce by a function with an effect');
+    return out;
+  };
+
+  /** `StartsWith`, `EndsWith` and `ContainsSequence` of two lists of real
+   *  numbers: a test of each element of the needle against the element of
+   *  the list at an offset (`same()`: equal, or both NaN), at the offset 0,
+   *  `n - m`, or each offset from 0 to `n - m`. The interpreter compares
+   *  exact values, so the operands are those of `search()`. */
+  const sequence = (e: Fn): V => {
+    const [l, p] = e.ops;
+    const input = (name: string): boolean => {
+      for (let i = cx.frames.length - 1; i >= 0; i--) {
+        const binding = cx.frames[i].names.get(name);
+        if (binding !== undefined) return binding.role === 'input';
+      }
+      return true;
+    };
+    const doubles = (x: Expression): boolean =>
+      isSymbol(x)
+        ? x.isConstant !== true && x.value === undefined && input(x.symbol)
+        : isNumber(x)
+          ? x.isExact !== true || x.type.matches('integer')
+          : isFunction(x, 'List') && x.ops.every(doubles);
+    const integers =
+      l.type.matches('list<integer>') && p.type.matches('list<integer>');
+    if (!integers && !(doubles(l) && doubles(p)))
+      decline(
+        e,
+        `${e.operator} of a value that the interpreter may hold exactly`
+      );
+    const effects = b.effects;
+    const [s, t] = [numbers(e, l), numbers(e, p)];
+    if (b.effects > effects)
+      decline(e, `${e.operator} of a list with an effect`);
+    const [n, m] = [s.length, t.length];
+    const and = rowOfHead(cx.rows, 'And')!;
+    // Every element of the needle is the element of the list at `o` after
+    // it.
+    const at = (o: V): V =>
+      accumulate(
+        e,
+        and,
+        b.constant(true, 'boolean'),
+        integer(0),
+        int(e, 'Subtract', m, integer(1)),
+        (j) => same(e, s.at(int(e, 'Add', o, j)), t.at(j))
+      );
+    const no = () => b.constant(false, 'boolean');
+    if (e.operator === 'StartsWith')
+      return when(e, 'LessEqual', m, n, () => at(integer(0)), no);
+    if (e.operator === 'EndsWith')
+      return when(e, 'LessEqual', m, n, () => at(int(e, 'Subtract', n, m)), no);
+    const offsets = int(
+      e,
+      'Max',
+      int(e, 'Add', int(e, 'Subtract', n, m), integer(1)),
+      integer(0)
+    );
+    const kept = over(
+      e,
+      { length: offsets, at: (o) => o },
+      '',
+      (o) => at(o),
+      true,
+      e
+    );
+    return cx.apply(e, 'Less', [integer(0), listSource(kept).length]);
+  };
+
+  /** The list operators of CE-1531 (`README.md`, "Lists", the list
+   *  operators): `undefined` for another head. */
+  const more = (e: Fn): V | undefined => {
+    const h = e.operator;
+    const [zero, one] = [integer(0), integer(1)];
+    if (!MORE.has(h)) return undefined;
+    if (h === 'Identity') return cx.value(e.ops[0])!;
+    // The interval mode reads a list through enclosures, which the
+    // compilation of these operators does not hold (an equality test, a
+    // count or an index computed from elements): they decline there.
+    if (cx.interval && h !== 'ApplyWhole') decline(e, `${h} on interval-js`);
+    if (h === 'Element') return search(e);
+    if (h === 'StartsWith' || h === 'EndsWith' || h === 'ContainsSequence')
+      return sequence(e);
+    if (h === 'Linspace') {
+      // `Linspace(b)` is `Linspace(1, b)`; the count is 50 by default.
+      const real = (x: Expression) => {
+        const v = cx.scalar(x);
+        if (!isSubLane(type(v).lane, 'real'))
+          decline(x, 'an operand of Linspace that is not a real number');
+        return v;
+      };
+      const [a, z] =
+        e.nops === 1 ? [one, real(e.ops[0])] : [real(e.ops[0]), real(e.ops[1])];
+      let n = integer(50);
+      if (e.nops === 3) {
+        const c = real(e.ops[2]);
+        const k = cx.constant(c);
+        n =
+          k !== undefined
+            ? integer(Number.isFinite(k) ? Math.max(0, Math.floor(k)) : 50)
+            : cx.apply(e, op('linspace.count'), [c]);
+      }
+      const d = int(e, 'Max', int(e, 'Subtract', n, one), one);
+      return built(e, n, (k) => cx.apply(e, op('linspace'), [a, z, k, d]));
+    }
+    if (h === 'Tabulate') {
+      // `Tabulate(f, n1, …, nd)`: the nested lists of `f(i1, …, id)` at
+      // the indices from 1; a count below 1 is an empty list. A real count
+      // is tested at run time (the interpreter's value is an error where it
+      // is not an integer).
+      if (e.nops < 2) decline(e, 'Tabulate with no count');
+      const { names, body } = literalOf(e, e.ops[0], e.nops - 1);
+      const lengths = e.ops
+        .slice(1)
+        .map((x) => int(e, 'Max', count(x, true), zero));
+      const effects = b.effects;
+      const nest = (j: number, at: V[]): V =>
+        j === lengths.length
+          ? applied(
+              names,
+              at.map((k) => int(e, 'Add', k, one)),
+              body
+            )
+          : over(
+              e,
+              { length: lengths[j], at: (k) => k },
+              '',
+              (_x, k) => nest(j + 1, [...at, k]),
+              false,
+              e
+            );
+      const v = nest(0, []);
+      if (b.effects > effects)
+        decline(
+          e,
+          'Tabulate with an effect (the interpreter evaluates its elements lazily)'
+        );
+      return v;
+    }
+    if (h === 'ApplyWhole') {
+      // The function applied to its arguments, each bound whole (no
+      // element of a list is mapped over).
+      const [g, ...args] = e.ops;
+      if (isFunction(g, 'Function')) {
+        const names = g.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : ''));
+        if (names.length !== args.length || names.includes(''))
+          decline(
+            e,
+            'ApplyWhole of a function literal that is not of one untyped parameter per argument'
+          );
+        const values = args.map((a) => cx.value(a)!);
+        return applied(names, values, g.ops[0]);
+      }
+      if (
+        isSymbol(g) &&
+        userBinding({
+          operator: g.symbol,
+          operatorDefinition: g.operatorDefinition,
+          valueDefinition: g.valueDefinition,
+          engine: g.engine,
+        } as never) === undefined &&
+        isLibraryOperator(
+          {
+            operator: g.symbol,
+            operatorDefinition: g.operatorDefinition,
+            valueDefinition: g.valueDefinition,
+            engine: g.engine,
+          } as never,
+          g.symbol
+        )
+      )
+        return cx.value(g.engine.function(g.symbol, args))!;
+      decline(
+        e,
+        'ApplyWhole of a value that is not a function literal or a library operator'
+      );
+    }
+    // The operators of a list.
+    const effects = b.effects;
+    const s =
+      h === 'Append' ||
+      h === 'DeleteAt' ||
+      h === 'Insert' ||
+      h === 'Slice' ||
+      h === 'Chunk' ||
+      h === 'Partition' ||
+      h === 'TakeWhile' ||
+      h === 'DropWhile' ||
+      h === 'FlatMap' ||
+      h === 'Scan' ||
+      h === 'CountIf' ||
+      h === 'Find' ||
+      h === 'IndexWhere' ||
+      h === 'Position' ||
+      h === 'RandomSample'
+        ? source(e.ops[0])
+        : undefined;
+    if (s === undefined) return undefined;
+    // The interpreter's list is lazy: it reads the elements it needs only.
+    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    const n = s.length;
+    const flat = () => {
+      const x = elementOf(s);
+      if (
+        type(x).shape.length > 0 ||
+        !(isSubLane(type(x).lane, 'real') || type(x).lane === 'boolean')
+      )
+        decline(e, `${h} of a list of other than numbers or booleans`);
+      return x;
+    };
+    if (h === 'Append') {
+      // Each operand after the list is one element: a list or a tuple
+      // operand is an element of its own (a list of lists), which declines.
+      if (e.nops < 2) decline(e, 'Append with no element');
+      // A list of points and points of the same number of coordinates.
+      const first = elementOf(s);
+      if (cx.tuples.get(first) === 0) {
+        const xs = e.ops.slice(1).map((x) => {
+          const v = cx.value(x)!;
+          if (
+            cx.tuples.get(v) !== 0 ||
+            type(v).shape.length !== 1 ||
+            type(v).shape[0] !== type(first).shape[0] ||
+            !isSubLane(type(v).lane, 'real')
+          )
+            decline(
+              x,
+              'an element of Append of a list of points that is not a point of real numbers of the same dimension'
+            );
+          return v;
+        });
+        return appended(e, s, xs);
+      }
+      const lane = type(flat()).lane;
+      const xs = e.ops.slice(1).map((x) => {
+        const v = cx.value(x)!;
+        if (
+          type(v).shape.length > 0 ||
+          (type(v).lane === 'boolean') !== (lane === 'boolean') ||
+          !(isSubLane(type(v).lane, 'real') || type(v).lane === 'boolean')
+        )
+          decline(
+            x,
+            'an element of Append that is not a number of a list of numbers or a boolean of a list of booleans'
+          );
+        return v;
+      });
+      return appended(e, s, xs);
+    }
+    if (h === 'DeleteAt') {
+      flat();
+      const j = position(e, n, e.ops[1]);
+      return reindexed(e, s, int(e, 'Subtract', n, one), (k) =>
+        when(
+          e,
+          'Less',
+          k,
+          j,
+          () => k,
+          () => int(e, 'Add', k, one)
+        )
+      );
+    }
+    if (h === 'Insert') {
+      // The index is one of the `n + 1` positions of the new element.
+      const lane = type(flat()).lane;
+      const n1 = int(e, 'Add', n, one);
+      const j = position(e, n1, e.ops[1]);
+      const x = cx.scalar(e.ops[2]);
+      if (
+        (type(x).lane === 'boolean') !== (lane === 'boolean') ||
+        !(isSubLane(type(x).lane, 'real') || type(x).lane === 'boolean')
+      )
+        decline(
+          e.ops[2],
+          'an element of Insert that is not a number of a list of numbers or a boolean of a list of booleans'
+        );
+      return built(e, n1, (k) =>
+        when(
+          e,
+          'Less',
+          k,
+          j,
+          () => s.at(k),
+          () =>
+            when(
+              e,
+              'Equal',
+              k,
+              j,
+              () => x,
+              () => s.at(int(e, 'Subtract', k, one))
+            )
+        )
+      );
+    }
+    if (h === 'Slice') {
+      // The interpreter's `computeSliceBounds()`: an index below 1 is
+      // counted from the end, then at least 1; the end at most the length.
+      const [a, z] = [rounded(e.ops[1]), rounded(e.ops[2])];
+      const fromEnd = (x: V) =>
+        when(
+          e,
+          'Less',
+          x,
+          one,
+          () => int(e, 'Add', int(e, 'Add', n, one), x),
+          () => x
+        );
+      const start = int(e, 'Max', fromEnd(a), one);
+      const end = int(e, 'Min', int(e, 'Max', fromEnd(z), one), n);
+      const length = int(
+        e,
+        'Max',
+        int(e, 'Add', int(e, 'Subtract', end, start), one),
+        zero
+      );
+      const first = int(e, 'Subtract', start, one);
+      return reindexed(e, s, length, (k) => int(e, 'Add', first, k));
+    }
+    if (h === 'Chunk' || h === 'Partition') {
+      // Rows of one length only: a list of lists whose rows can have two
+      // lengths (the last chunk of a length that the size does not divide,
+      // the two groups of a predicate) has no shape in the compiled code.
+      const ragged = () =>
+        decline(
+          e,
+          `${h} whose rows can have different lengths (a list of lists of different lengths)`
+        );
+      const k = e.ops[1];
+      if (h === 'Partition' && !k.type.matches('number')) ragged();
+      const c = cx.constant(count(k));
+      if (c === undefined) ragged();
+      // The interpreter leaves a count below 1 unevaluated.
+      if (c! < 1) decline(e, `${h} of a count below 1`);
+      if (h === 'Partition' && e.nops === 3) {
+        // Sliding windows of `c` elements, `step` apart, complete only.
+        // A step known at run time can be below 1, where the interpreter
+        // leaves the form unevaluated: it declines.
+        const step = count(e.ops[2]);
+        const t = cx.constant(step);
+        if (t === undefined)
+          decline(e, `${h} of a step that is not a constant`);
+        if (t < 1) decline(e, `${h} of a step below 1`);
+        const rows = int(
+          e,
+          'Max',
+          int(
+            e,
+            'Add',
+            cx.apply(e, 'Floor', [
+              cx.apply(e, 'Divide', [int(e, 'Subtract', n, integer(c!)), step]),
+            ]),
+            one
+          ),
+          zero
+        );
+        return windows(e, s, rows, c!, step);
+      }
+      const m = cx.constant(n);
+      if (m === undefined) ragged();
+      const size = h === 'Chunk' ? Math.ceil(m! / c!) : c!;
+      const rows = h === 'Chunk' ? c! : Math.ceil(m! / c!);
+      if (size * rows !== m || size === 0) ragged();
+      return windows(e, s, integer(rows), size, integer(size));
+    }
+    if (h === 'TakeWhile' || h === 'DropWhile') {
+      // The first index where the predicate fails, or the length.
+      const failed = where(e, s, e.ops[1], true);
+      const stop = when(
+        e,
+        'Less',
+        zero,
+        listSource(failed).length,
+        () => head(failed),
+        () => n
+      );
+      return h === 'TakeWhile'
+        ? reindexed(e, s, stop, (k) => k)
+        : reindexed(e, s, int(e, 'Subtract', n, stop), (k) =>
+            int(e, 'Add', stop, k)
+          );
+    }
+    if (h === 'CountIf') return listSource(where(e, s, e.ops[1])).length;
+    if (h === 'IndexWhere' || h === 'Find') {
+      if (h === 'Find') {
+        const x = elementOf(s);
+        if (type(x).shape.length > 0 || !isSubLane(type(x).lane, 'real'))
+          decline(e, 'Find in a list of other than real numbers');
+      }
+      const kept = where(e, s, e.ops[1]);
+      return when(
+        e,
+        'Less',
+        zero,
+        listSource(kept).length,
+        () =>
+          h === 'Find' ? s.at(head(kept)) : int(e, 'Add', head(kept), one),
+        () => (h === 'Find' ? b.constant(NaN, 'real') : zero)
+      );
+    }
+    if (h === 'Position') {
+      const kept = where(e, s, e.ops[1]);
+      const ks = listSource(kept);
+      return over(
+        e,
+        { length: ks.length, at: (k) => k },
+        '',
+        (_x, k) => int(e, 'Add', ks.at(k), one),
+        false,
+        e
+      );
+    }
+    if (h === 'FlatMap') {
+      // `f` of each element; a list value is spliced (one level), a scalar
+      // kept: the build of the values, then the elements of the rows in
+      // order. A row of a length known at run time declines (`over()`).
+      const { names, body, site } = literalOf(e, e.ops[1], 1);
+      const before = b.effects;
+      const rows = over(e, s, names[0], body, false, site);
+      if (b.effects > before)
+        decline(
+          e,
+          'FlatMap with an effect (the interpreter evaluates its elements lazily)'
+        );
+      const t = type(rows);
+      if (cx.tuples.has(rows))
+        decline(e, 'FlatMap of a function whose value is a tuple');
+      if (t.shape.length === 1) return rows;
+      const m = t.shape[1];
+      if (t.shape.length !== 2 || typeof m !== 'number')
+        decline(
+          e,
+          'FlatMap of a function whose value is not a list of numbers'
+        );
+      const r = listSource(rows);
+      const total = cx.constant(n);
+      const length =
+        total !== undefined
+          ? integer(total * m)
+          : cx.apply(e, 'Multiply', [n, integer(m)]);
+      return built(e, length, (k) => {
+        const i = cx.apply(e, 'Floor', [
+          cx.apply(e, 'Divide', [k, integer(m)]),
+        ]);
+        const row = r.at(i);
+        return listSource(row).at(cx.apply(e, 'Mod', [k, integer(m)]));
+      });
+    }
+    if (h === 'Scan') {
+      // The fold after each element, `f(acc, x)`; with no initial value
+      // the first element is the first fold.
+      const { names, body } = literalOf(e, e.ops[1], 2);
+      flat();
+      // The interpreter evaluates the initial value only when it reads an
+      // element: an initial value with an effect declines, as a body.
+      const before = b.effects;
+      const init = e.nops === 3 ? cx.scalar(e.ops[2]) : undefined;
+      const v = scanned(e, n, init ?? zero, (k, acc) => {
+        const step = () => applied(names, [acc, s.at(k)], body);
+        return init !== undefined
+          ? step()
+          : when(e, 'Equal', k, zero, () => s.at(k), step);
+      });
+      if (b.effects > before)
+        decline(
+          e,
+          'Scan with an effect (the interpreter evaluates its elements lazily)'
+        );
+      return v;
+    }
+    if (h === 'RandomSample') {
+      // The `k` elements at the indices drawn as the interpreter draws
+      // them (`_SYS.randomSample`).
+      flat();
+      const k = cx.scalar(e.ops[1]);
+      if (!isSubLane(type(k).lane, 'real'))
+        decline(e.ops[1], 'a count that is not a real number');
+      if (!cx.runtimeLengths || cx.interval)
+        decline(e, 'RandomSample on a target with no draw of a list');
+      const [c, ix] = cx.region('sample', [n, k], [], () => [], e);
+      const at = listSource(ix);
+      return reindexed(e, s, c, (j) => at.at(j));
+    }
+    return undefined;
+  };
+
   /** The heads of a list that `lower.ts` hands over (`README.md`,
    *  "Lists", the list operators). */
   const collection = (e: Fn): V => {
@@ -1529,6 +2341,8 @@ export function listLowering(cx: Lowering) {
     if (h === 'Count' && e.nops === 2)
       return listSource(build(e, e.ops[0], e.ops[1], true)).length;
     if (h === 'Take' && isIterate(e.ops[0])) return iterateTake(e);
+    const other = more(e);
+    if (other !== undefined) return other;
     const effects = b.effects;
     const s = source(e.ops[0], false, true);
     const n = s.length;
@@ -1550,7 +2364,7 @@ export function listLowering(cx: Lowering) {
     if (h === 'Take' || h === 'Drop') {
       // `Take(L, m)` keeps the first `m` elements, the last `-m` for a
       // negative `m`; `Drop(L, m)` keeps the others; at most the length.
-      const m = count(e.ops[1]);
+      const m = rounded(e.ops[1]);
       const c = cx.constant(m);
       const size =
         c === undefined ? cx.apply(e, 'Abs', [m]) : integer(Math.abs(c));
@@ -1591,6 +2405,7 @@ export function listLowering(cx: Lowering) {
 
   return {
     collection,
+    reduceBy,
     source,
     listSource,
     built,

@@ -284,6 +284,8 @@ describe('A tuple with a list coordinate is a list of points — compiled JavaSc
     ['(\\cos A, \\sin A)'],
     ['(A, 0)'],
     ['(A, [7, 8])'],
+    // Two lists of points of run-time lengths (CE-1537).
+    ['P + (A, B)'],
   ])('%s agrees with the interpreter', (latex) => {
     close(run(latex), value(latex));
   });
@@ -329,7 +331,7 @@ describe('A tuple with a list coordinate is a list of points — shader targets'
       ).toThrow(
         // The GLSL fragment refuses the list that has no static count.
         latex.startsWith('P')
-          ? /lists of different lengths or ranks/
+          ? /a parameter: a list of rank 2 on glsl/
           : /the list A has a run-time length/
       );
   });

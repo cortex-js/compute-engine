@@ -488,15 +488,10 @@ describe('CE-1477 on GLSL', () => {
       ['f', ['PointList', ['Subtract', 'x', ['List', 0.5, 1]], 'y']],
     ],
     ['Min of f of a literal list of points', ['Min', ['f', XY_GLSL]]],
+    // An array of vectors (CE-1538).
+    ['a list of points as the result', ['g', XY_GLSL]],
   ])('%s compiles', (_, json) => {
     expect(glsl(json).success).toBe(true);
-  });
-
-  test.each<[string, Json]>([
-    // GLSL has no list of points as a result (CE-1474).
-    ['a list of points as the result', ['g', XY_GLSL]],
-  ])('%s declines', (_, json) => {
-    expect(() => glsl(json)).toThrow(/Could not compile/);
   });
 
   test('a list of points of a run-time length declines', () => {

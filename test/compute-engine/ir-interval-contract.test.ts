@@ -356,7 +356,7 @@ describe('the interval mode: the declines', () => {
   test('a string seed: the lowering has no string', () => {
     const e = declineOf(() => mode(['WithRandomSeed', "'abc'", ['Random']]));
     expect(e.diagnostic.code).toBe('outside-profile');
-    expect(e.message).toMatch(/"abc": not a number/);
+    expect(e.message).toMatch(/"abc": a string: text compiles on javascript only/);
   });
 
   test('a vars text that is not a read of the inputs object', () => {

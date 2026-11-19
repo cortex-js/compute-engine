@@ -129,6 +129,7 @@ export const R: Lane = 'real';
 export const I: Lane = 'integer';
 const B: Lane = 'boolean';
 const K: Lane = 'color';
+const S: Lane = 'string';
 
 type Options = Partial<Omit<OperatorRow, 'arity' | 'signatures'>>;
 
@@ -232,7 +233,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Round',        1,          [[[R], I, 'round']],           { fold: roundHalfAway, settings: ['roundingTies'] }),
   row('Mod',          2,          arith('mod', 2),               { fold: floorMod }),
   row('Truncate',     1,          [[[R], I, 'trunc']],           { fold: Math.trunc }),
-  row('Sign',         1,          [[[R], I, 'sign']],            { fold: Math.sign }),
+  row('Sign',         1,          [[[R], I, 'sign'], [[C], C, 'csign']], { fold: Math.sign }),
   row('Fract',        1,          [[[R], R, 'fract']],           { fold: F.fract }),
   row('Log',          1,          rc('log10', 1, 'clog10'),      { fold: Math.log10, ...cut }),
   // The real `Log(x, 2)`, which the lowering makes.
@@ -260,7 +261,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('FresnelS',     1,          [[[R], R, 'fresnels']],        { fold: F.fresnels }),
   // In radians under every angular unit, as the interpreter's.
   row('Sinc',         1,          [[[R], R, 'sinc']],            { fold: F.sinc }),
-  row('Gamma',        1,          [[[R], R, 'gamma']],           { fold: F.gamma }),
+  row('Gamma',        1,          rc('gamma', 1),                { fold: F.gamma }),
   row('GammaLn',      1,          [[[R], R, 'gammaln']],         { fold: F.gammaln }),
   // An integer operand first: GLSL spells `factorial.int` only.
   row('Factorial',    1,          [[[I], I, 'factorial.int'], [[R], R, 'factorial']], { fold: F.factorial }),
@@ -272,6 +273,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('LCM',          'variadic', [[[I], I, 'lcm'], [[R], R, 'rlcm']], { ...list, fold: F.lcm }),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
   row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
+  // `Zeta(s, a)`: the generalized zeta of Wolfram's convention.
+  row('Zeta',         2,          [[[R, R], R, 'zetagen']],      { fold: F.zetagen }),
   // `Chop(x, tol)`; `Chop(x)` takes the engine's tolerance (`lower.ts`).
   row('Chop',         2,          [[[R, R], R, 'chop']],         { fold: F.chop }),
   // The special functions and steps of the library: of real operands, the
@@ -290,6 +293,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Beta',         2,          [[[R, R], R, 'beta']],         { fold: F.beta }),
   row('BetaRegularized', 3,       [[[R, R, R], R, 'betareg']],   { fold: F.betareg }),
   row('GammaRegularized', 2,      [[[R, R], R, 'gammareg']],     { fold: F.gammareg }),
+  // `Gamma(s, z)`, the upper incomplete gamma.
+  row('Gamma',        2,          rc('gammaupper', 2),           { fold: F.gammaupper, ...domain }),
+  row('HarmonicNumber', 1,        [[[R], R, 'harmonic']],        { fold: F.harmonic }),
+  row('HarmonicNumber', 2,        [[[R, R], R, 'harmonic2']],    { fold: F.harmonic2, ...domain }),
   row('Digamma',      1,          [[[R], R, 'digamma']],         { fold: F.digamma }),
   row('Trigamma',     1,          [[[R], R, 'trigamma']],        { fold: F.trigamma }),
   row('PolyGamma',    2,          [[[I, R], R, 'polygamma']],    { fold: F.polygamma, ...domain }),
@@ -382,6 +389,15 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // A real count of a rotation as an integer, which fails where it is not
   // one (the interpreter gives `incompatible-type`); JavaScript only.
   row(undefined,      1,          [[[R], I, 'count.int']],       { ...list, effect: 'may-fail' }),
+  // A real count or index of `Take`, `Drop`, `Slice` and `Tabulate`
+  // rounded as the interpreter's `toInteger()` (`Math.round`); JavaScript
+  // only.
+  row(undefined,      1,          [[[R], I, 'count.round']],     { ...list, fold: Math.round }),
+  // The count of `Linspace` (its floor, at least 0, 50 when it is not
+  // finite) and its element `k` from 0 of `d + 1` (the interpreter's
+  // `linspaceSample()`); JavaScript only.
+  row(undefined,      1,          [[[R], I, 'linspace.count']],  { ...list, fold: (c: number) => (Number.isFinite(c) ? Math.max(0, Math.floor(c)) : 50) }),
+  row(undefined,      4,          [[[R, R, I, I], R, 'linspace']], list),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
   // A shuffled copy of a list of numbers (`lower.ts` declines another
@@ -395,6 +411,14 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[['list'], R, 'sort']],       list),
   row(undefined,      1,          [[['list'], I, 'ordering']],   list),
   row(undefined,      1,          [[['list'], 'real-element', 'median']], list),
+  // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
+  // whose shape the lowering settles (`lower-matrices.ts`): the determinant
+  // of the entries of an `n × n` matrix row by row and `n`; the inverse;
+  // the power by an integer; the reduced row echelon form at a tolerance.
+  row(undefined,      2,          [[['list', I], 'real-element', 'mdet']], list),
+  row(undefined,      1,          [[['list'], R, 'minverse']],   list),
+  row(undefined,      2,          [[['list', I], R, 'mpower']],  list),
+  row(undefined,      2,          [[['list', R], R, 'mrowreduce']], list),
   // The number of elements of `Range(a, b, step)`: the engine's `rangeCount`
   // (of reals: `Range(1, 3.5)` is `[1, 2, 3]`); 0 for a count that is NaN
   // (a bound with no value), as the JavaScript spelling.
@@ -415,6 +439,62 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('AsOklch',      1,          [[[K], K, 'asoklch']],         {}),
   // `ColorMix(a, b)` is lowered with the ratio 0.5. No GLSL spelling.
   row('ColorMix',     3,          [[[K, K, R], K, 'colormix']],  {}),
+  // CE-1535 (README, "The colour lane"). `ContrastingColor(bg)` is white or
+  // black. The lowering makes the other rows of a string operand:
+  // `GamutMap(c, "display-p3")` is `gamutmap.p3` (after `gamutmap`, the row
+  // of the head); `Colormap(name, t)` reads the palette by its index in
+  // `COLORMAP_NAMES`; `ColorToColorspace(c, space)` is the tuple of the
+  // three channels `colorchannel.<space>` (the channel index an integer).
+  row('ColorContrast',    2,      [[[K, K], R, 'colorcontrast']], {}),
+  row('ColorDelta',       2,      [[[K, K], R, 'colordelta']],   {}),
+  row('ContrastingColor', 3,      [[[K, K, K], K, 'contrastingcolor']], {}),
+  row('ContrastingColor', 1,      [[[K], K, 'contrastingcolor.bw']], {}),
+  row('GamutMap',         1,      [[[K], K, 'gamutmap']],        {}),
+  row('GamutMap',         1,      [[[K], K, 'gamutmap.p3']],     {}),
+  row('Colormap',         2,      [[[I, R], K, 'colormap']],     {}),
+  // `AsHsv(Hsv(h, s, v))` and `AsHsl(Hsl(h, s, l))`: the constructor's own
+  // channels, as the interpreter answers them (no round trip through OKLCh,
+  // which loses the hue and the saturation at black and at grey).
+  row('AsHsv',            3,      [[[R, R, R], K, 'ashsv.own']], {}),
+  row('AsHsl',            3,      [[[R, R, R], K, 'ashsl.own']], {}),
+  ...['rgb', 'hsl', 'hsv', 'oklab', 'oklch'].map((s) =>
+    row('ColorToColorspace', 2,   [[[K, I], R, `colorchannel.${s}`]], {})),
+  // Strings (README, "The string lane"; JavaScript only): the read of a
+  // string input, which throws on another value, and the text operators.
+  // A row that throws where the interpreter gives an error value (a count
+  // out of range, an empty pad or target) may fail.
+  row(undefined,      1,          [[[S], S, 'text.in']],         { ...list, effect: 'may-fail' }),
+  row(undefined,      1,          [[[S], I, 'text.length']],     list),
+  row('ToUpperCase',  1,          [[[S], S, 'text.upper']],      list),
+  row('ToLowerCase',  1,          [[[S], S, 'text.lower']],      list),
+  row('CaseFold',     1,          [[[S], S, 'text.fold']],       list),
+  row('Trim',         1,          [[[S], S, 'text.trim']],       list),
+  row('Trim',         2,          [[[S, S], S, 'text.trim.set']], list),
+  row('TrimStart',    1,          [[[S], S, 'text.trimstart']],  list),
+  row('TrimStart',    2,          [[[S, S], S, 'text.trimstart.set']], list),
+  row('TrimEnd',      1,          [[[S], S, 'text.trimend']],    list),
+  row('TrimEnd',      2,          [[[S, S], S, 'text.trimend.set']], list),
+  row('StringRepeat', 2,          [[[S, I], S, 'text.repeat']],  { ...list, effect: 'may-fail' }),
+  row('PadStart',     2,          [[[S, I], S, 'text.padstart']], { ...list, effect: 'may-fail' }),
+  row('PadStart',     3,          [[[S, I, S], S, 'text.padstart.with']], { ...list, effect: 'may-fail' }),
+  row('PadEnd',       2,          [[[S, I], S, 'text.padend']],  { ...list, effect: 'may-fail' }),
+  row('PadEnd',       3,          [[[S, I, S], S, 'text.padend.with']], { ...list, effect: 'may-fail' }),
+  row('StringReplace', 3,         [[[S, S, S], S, 'text.replace']], { ...list, effect: 'may-fail' }),
+  row('StringReplace', 4,         [[[S, S, S, I], S, 'text.replace.count']], { ...list, effect: 'may-fail' }),
+  // Of a literal pattern (`lower.ts`): the flags and the source in one string.
+  row(undefined,      3,          [[[S, S, S], S, 'text.rerep']], { ...list, effect: 'may-fail' }),
+  row(undefined,      4,          [[[S, S, S, I], S, 'text.rerep.count']], { ...list, effect: 'may-fail' }),
+  row('StartsWith',   2,          [[[S, S], B, 'text.startswith']], list),
+  row('EndsWith',     2,          [[[S, S], B, 'text.endswith']], list),
+  row('StringCompare', 2,         [[[S, S], I, 'text.compare']], list),
+  // `String` of strings: their texts joined (of two or more: a left fold;
+  // `rowOfHead()` takes this row for a count with no row of its own).
+  row('String',       'variadic', [[[S], S, 'text.concat']],     list),
+  row('String',       0,          [[[], S, 'text.empty']],       list),
+  row('String',       1,          [[[S], S, 'text.string']],     list),
+  // `StringJoin` of a string: its characters, joined.
+  row('StringJoin',   1,          [[[S], S, 'text.string']],     list),
+  row('StringJoin',   2,          [[[S, S], S, 'text.join']],    list),
 ].map((r) => deepFreeze(r)));
 
 /**
@@ -498,6 +578,22 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
         ? [
             { lane: I, shape: [] },
             { lane: R, shape: [{ v: count }] },
+          ]
+        : undefined,
+  },
+  // `RandomSample(L, k)` of a list of `n` elements: the indices from 0 of
+  // the `k` elements drawn as the interpreter draws them (its body is
+  // empty); the results are the count and the list.
+  {
+    op: 'sample',
+    effect: 'effectful',
+    args: [I, R],
+    params: [],
+    results: (_, ys, [count]) =>
+      ys.length === 0
+        ? [
+            { lane: I, shape: [] },
+            { lane: I, shape: [{ v: count }] },
           ]
         : undefined,
   },
@@ -705,12 +801,13 @@ export function resultType(
     return { ...elementType(types[args.indexOf('list')]), lane: R };
   const lists = types.filter((t) => t.shape.length > 0);
   const shape = lists[0]?.shape ?? [];
-  // Rank 1: a run-time length fits any length, and the result has the
-  // shape of the first list (two lengths are an error of the interpreter
-  // that the static type does not show).
+  // The outer axis: a run-time length fits any length, and the result has
+  // the shape of the first list (two lengths are an error of the
+  // interpreter that the static type does not show). The inner axes (a
+  // list of points) are the same.
   const fits = ([n, ...rest]: readonly Length[]) =>
-    rest.length === 0 &&
-    shape.length === 1 &&
+    shape.length === rest.length + 1 &&
+    sameShape(rest, shape.slice(1)) &&
     (typeof n !== 'number' || typeof shape[0] !== 'number' || n === shape[0]);
   if (!lists.every((t) => sameShape(t.shape, shape) || fits(t.shape)))
     return undefined;

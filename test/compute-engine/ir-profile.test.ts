@@ -206,22 +206,22 @@ describe('the option selects the IR compiler', () => {
 
 describe('a decline', () => {
   test('falls back to the interpreter with the diagnostic', () => {
-    const r = quiet(() => compile(box(['HarmonicNumber', 'x']), IR));
+    const r = quiet(() => compile(box(['LogGamma', 'x']), IR));
     expect(r.success).toBe(false);
     expect(r.diagnostic).toMatchObject({
       code: 'outside-profile',
       kind: 'capability',
-      operator: 'HarmonicNumber',
-      value: 'HarmonicNumber(x)',
+      operator: 'LogGamma',
+      value: 'LogGamma(x)',
     });
-    // The interpreter's `HarmonicNumber(3)`, 11/6.
-    expect(r.run!({ x: 3 })).toBeCloseTo(11 / 6, 12);
+    // The interpreter's `LogGamma(3)`, ln 2.
+    expect(r.run!({ x: 3 })).toBeCloseTo(Math.LN2, 12);
   });
   test('with fallback: false is thrown', () => {
-    const o = outcome(box(['HarmonicNumber', 'x']));
+    const o = outcome(box(['LogGamma', 'x']));
     expect('diagnostic' in o && o.diagnostic.code).toBe('outside-profile');
     expect('message' in o && o.message).toMatch(
-      /^Could not compile: HarmonicNumber\(x\)/
+      /^Could not compile: LogGamma\(x\)/
     );
   });
 
@@ -480,7 +480,7 @@ describe('an internal error', () => {
       {
         rows: [
           {
-            head: 'HarmonicNumber',
+            head: 'LogGamma',
             arity: 1,
             signatures: [[['real'], 'real', 'broken']],
             threads: false,
@@ -494,15 +494,15 @@ describe('an internal error', () => {
 
   test('is a compile-error and falls back', () => {
     const r = broken(() =>
-      quiet(() => compile(box(['HarmonicNumber', 'x']), IR))
+      quiet(() => compile(box(['LogGamma', 'x']), IR))
     );
     expect(r.success).toBe(false);
     expect(r.diagnostic?.code).toBe('compile-error');
     expect(r.diagnostic?.message).toMatch(/internal error/);
-    expect(r.run!({ x: 3 })).toBeCloseTo(11 / 6, 12);
+    expect(r.run!({ x: 3 })).toBeCloseTo(Math.LN2, 12);
   });
   test('with fallback: false is thrown as a compile-error', () => {
-    const o = broken(() => outcome(box(['HarmonicNumber', 'x'])));
+    const o = broken(() => outcome(box(['LogGamma', 'x'])));
     expect('diagnostic' in o && o.diagnostic.code).toBe('compile-error');
   });
 });
@@ -548,12 +548,12 @@ describe('a row whose head is the name of an IR operation', () => {
 
 describe('a cancellation', () => {
   // A row whose fold is cancelled: `Length(L)` is the constant 3, so the
-  // `fold` pass folds `HarmonicNumber(3)` with the row.
+  // `fold` pass folds `LogGamma(3)` with the row.
   test('propagates, with fallback', () => {
     const cancelled = {
       rows: [
         {
-          head: 'HarmonicNumber',
+          head: 'LogGamma',
           arity: 1,
           signatures: [[['real'], 'real', 'si']],
           threads: false,
@@ -568,7 +568,7 @@ describe('a cancellation', () => {
     let error: unknown;
     try {
       _withIrProfileTestExtension(cancelled, () =>
-        quiet(() => compile(box(['HarmonicNumber', ['Length', 'L']]), IR))
+        quiet(() => compile(box(['LogGamma', ['Length', 'L']]), IR))
       );
     } catch (e) {
       error = e;
@@ -815,7 +815,7 @@ describe('the compilations of the engine', () => {
     // A decline: no compiled function, the caller interprets.
     const declined = implicitCompile(
       engine,
-      engine.box(['Function', ['HarmonicNumber', 'u'], 'u']),
+      engine.box(['Function', ['LogGamma', 'u'], 'u']),
       'nd'
     );
     expect(declined).toBeUndefined();
@@ -1992,7 +1992,7 @@ describe('a user function of no stated result whose body is a list: the shape of
   });
 
   test('GLSL: as for a result list<unknown>', () => {
-    // A list of points declines on GLSL, as for `list<unknown>`.
+    // A list of points is an array of vectors on GLSL (CE-1538).
     const glsl = [
       ['two', 'x', 'y'],
       R,
@@ -2000,11 +2000,8 @@ describe('a user function of no stated result whose body is a list: the shape of
       ['b', 'x'],
       ...scalars,
     ];
-    for (const json of glsl.filter((j) => !JSON.stringify(j).includes('"V"')))
+    for (const json of glsl)
       expect([json, message(json, { to: 'glsl' })]).toEqual([json, 'compiled']);
-    expect(
-      message(['Sum', ['PointX', ['V', 'x', 'y']]], { to: 'glsl' })
-    ).toMatch(/a list of rank 2 on glsl/);
   });
 
   // prettier-ignore

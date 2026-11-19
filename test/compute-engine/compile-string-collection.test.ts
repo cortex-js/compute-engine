@@ -210,7 +210,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
     // source no shader driver accepts, behind `success: true`.
     const r = compile(ce.box({ str: 'a' }), { to, constantFold: false });
     expect(r.success).toBe(false);
-    expect(r.error ?? '').toMatch(/"a": not a number, a symbol or a function/);
+    expect(r.error ?? '').toMatch(/"a": a string: text compiles on javascript only/);
   });
 
   test.each(['glsl'] as const)(
@@ -227,7 +227,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       ]) {
         const r = compile(ce.box(src as never), { to, constantFold: false });
         expect(r.success).toBe(false);
-        expect(r.error ?? '').toMatch(/"a": not a number, a symbol or a function/);
+        expect(r.error ?? '').toMatch(/"a": a string: text compiles on javascript only/);
       }
     }
   );
@@ -248,7 +248,7 @@ describe('D13: GLSL rejects strings and characters, as before', () => {
       ]) {
         const r = compile(ce.box(src as never), { to, constantFold: false });
         expect(r.success).toBe(false);
-        expect(r.error ?? '').toMatch(/the input sv of type string/);
+        expect(r.error ?? '').toMatch(/"sv": a string: text compiles on javascript only/);
       }
     }
   );

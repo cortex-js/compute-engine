@@ -40,10 +40,10 @@ import {
 import type { Program } from '../../src/compute-engine/compilation/ir/ir';
 import { foldSeed } from '../../src/compute-engine/numerics/random';
 import type { Expression } from '../../src/compute-engine/global-types';
-import { digamma } from '../../src/compute-engine/numerics/special-functions';
+import { lnAbsGamma } from '../../src/compute-engine/numerics/special-functions';
 
-/** The harmonic number `H(x) = ψ(x + 1) + γ`. */
-const harmonic = (x: number): number => digamma(x + 1) + 0.5772156649015329;
+/** The interpreter's `LogGamma` of a positive real, `ln Γ(x)`. */
+const logGamma = (x: number): number => lnAbsGamma(x);
 import {
   agrees,
   interpret,
@@ -514,9 +514,10 @@ describe('IR slice: determinism and inputs', () => {
       [1, Math.sin(1) + 1],
       [Math.sin(2) + 1, Math.sin(3) + 1],
     ]);
+    // On GLSL, an array of vectors (`vec2[2]`, CE-1538).
     expect(() =>
       compileSlice(engine.box(['Sin', 'Q'] as never), { target: 'glsl' })
-    ).toThrow(Decline);
+    ).not.toThrow();
   });
   test('Sin(2B + B) for a list of 2,000 is small', () => {
     const engine = new ComputeEngine();
@@ -581,13 +582,13 @@ describe('IR slice: declines', () => {
 });
 
 describe('IR slice: effects', () => {
-  // A test row, for these compilations only: `HarmonicNumber` as an effectful
+  // A test row, for these compilations only: `LogGamma` as an effectful
   // operation that records its operand.
   const log: number[] = [];
   const TICK: Extension = {
     rows: [
       {
-        head: 'HarmonicNumber',
+        head: 'LogGamma',
         arity: 1,
         signatures: [[['real'], 'real', 'tick']],
         threads: false,
@@ -607,37 +608,34 @@ describe('IR slice: effects', () => {
   beforeEach(() => (log.length = 0));
 
   test('not merged', () => {
-    tick(['List', ['HarmonicNumber', 'x'], ['HarmonicNumber', 'x']]).run({
+    tick(['List', ['LogGamma', 'x'], ['LogGamma', 'x']]).run({
       x: 1,
     });
     expect(log).toEqual([1, 1]);
   });
   test('not removed', () => {
-    expect(tick(['Block', ['HarmonicNumber', 'x'], 7]).run({ x: 2 })).toBe(7);
+    expect(tick(['Block', ['LogGamma', 'x'], 7]).run({ x: 2 })).toBe(7);
     expect(log).toEqual([2]);
   });
   test('not reordered', () => {
-    tick([
-      'List',
-      ['HarmonicNumber', 'x'],
-      ['HarmonicNumber', 'y'],
-      ['HarmonicNumber', 'x'],
-    ]).run({
-      x: 1,
-      y: 2,
-    });
+    tick(['List', ['LogGamma', 'x'], ['LogGamma', 'y'], ['LogGamma', 'x']]).run(
+      {
+        x: 1,
+        y: 2,
+      }
+    );
     expect(log).toEqual([1, 2, 1]);
   });
   test('not folded, closed or not', () => {
-    expect(tick(['Add', ['HarmonicNumber', 2], 1]).run({})).toBe(3);
+    expect(tick(['Add', ['LogGamma', 2], 1]).run({})).toBe(3);
     expect(log).toEqual([2]);
   });
   test('the table is not changed by a compilation', () => {
-    expect(OPERATORS.some((r) => r.head === 'HarmonicNumber')).toBe(false);
+    expect(OPERATORS.some((r) => r.head === 'LogGamma')).toBe(false);
     expect(Object.isFrozen(OPERATORS) && Object.isFrozen(JS.ops)).toBe(true);
   });
   test('a shared node with an effect is evaluated at each occurrence', () => {
-    const e = ce.box(['HarmonicNumber', 'x'] as never);
+    const e = ce.box(['LogGamma', 'x'] as never);
     const program = ce.function('Add', [e, e]);
     expect(
       compileSlice(program, { target: 'javascript', extend: TICK }).run({
@@ -647,7 +645,7 @@ describe('IR slice: effects', () => {
     expect(log).toEqual([3, 3]);
   });
   test('the right operand of Or is evaluated only when needed', () => {
-    const r = tick(['Or', 'p', ['Greater', ['HarmonicNumber', 'x'], 0]]);
+    const r = tick(['Or', 'p', ['Greater', ['LogGamma', 'x'], 0]]);
     expect(r.run({ p: true, x: 5 })).toBe(true);
     expect(log).toEqual([]);
     expect(r.run({ p: false, x: 5 })).toBe(true);
@@ -740,24 +738,20 @@ describe('IR slice: the memo of the lowering', () => {
 });
 
 describe('IR slice: an operator is one row', () => {
-  test('HarmonicNumber: one row and one spelling per printer', () => {
+  test('LogGamma: one row and one spelling per printer', () => {
     // The kernel of the interpreter, which the spelling reads.
-    (globalThis as { __si?: (x: number) => number }).__si = harmonic;
+    (globalThis as { __si?: (x: number) => number }).__si = logGamma;
     const rows: Extension['rows'] = [
       {
-        head: 'HarmonicNumber',
+        head: 'LogGamma',
         arity: 1,
         signatures: [[['real'], 'real', 'si']],
         threads: true,
         effect: 'pure',
-        fold: harmonic,
+        fold: logGamma,
       },
     ];
-    const expr = ce.box([
-      'Add',
-      ['HarmonicNumber', 'x'],
-      ['HarmonicNumber', 'L'],
-    ] as never);
+    const expr = ce.box(['Add', ['LogGamma', 'x'], ['LogGamma', 'L']] as never);
     const point = { x: 0.3, L: [1, 2, 0.5] };
     for (const passes of [false, true])
       expect(
@@ -1496,10 +1490,10 @@ describe('IR slice: runtime', () => {
     ).toThrow(/`WithRandomSeed`: expected a finite real number .*got NaN/);
   });
   test('a decline keeps its node and head; a target refusal its head', () => {
-    const d = declineOf(() => js(['HarmonicNumber', 'x']));
+    const d = declineOf(() => js(['LogGamma', 'x']));
     expect([d.head, d.cause]).toEqual([
-      'HarmonicNumber',
-      'the operator HarmonicNumber is not supported by the compiler',
+      'LogGamma',
+      'the operator LogGamma is not supported by the compiler',
     ]);
     const g = declineOf(() =>
       compileSlice(ce.box(['Random'] as never), { target: 'glsl' })
@@ -1507,9 +1501,9 @@ describe('IR slice: runtime', () => {
     expect(g.head).toBe('Random');
   });
   test('a closed sub-expression of a head out of the slice is not evaluated', () => {
-    expect(
-      declineOf(() => js(['Add', 'x', ['HarmonicNumber', 3]])).cause
-    ).toMatch(/HarmonicNumber/);
+    expect(declineOf(() => js(['Add', 'x', ['LogGamma', 3]])).cause).toMatch(
+      /LogGamma/
+    );
   });
 });
 

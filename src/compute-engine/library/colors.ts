@@ -9,9 +9,7 @@ import {
   oklabToOklch,
   hsvToRgb,
   rgbToOklab,
-  SEQUENTIAL_PALETTES,
   CATEGORICAL_PALETTES,
-  DIVERGING_PALETTES,
 } from '@arnog/colors';
 import type { OklchColor, RgbColor } from '@arnog/colors';
 import {
@@ -38,6 +36,10 @@ import {
   parseOkColorString,
   normalizeAlpha,
   lerpOklchColor,
+  packedToOklchColor,
+  COLORMAP_PALETTES,
+  samplePaletteOklch,
+  colormapColor,
 } from '../numerics/color-conversion.js';
 import type {
   ColorChannelSpace,
@@ -208,56 +210,20 @@ export function colorStringToOklch(s: string): OklchColor | null {
 }
 
 /** Convert a 0xRRGGBBAA packed integer to an `OklchColor`. */
-function colorNumberToOklchColor(color: number): OklchColor {
-  const c = rgbToOklch({
-    r: (color >>> 24) & 0xff,
-    g: (color >>> 16) & 0xff,
-    b: (color >>> 8) & 0xff,
-  });
-  const alpha = normalizeAlpha((color & 0xff) / 255);
-  return alpha !== undefined ? { ...c, alpha } : c;
-}
+const colorNumberToOklchColor = packedToOklchColor;
 
 /** Convert a 0xRRGGBBAA packed integer to an Oklch boxed expression. */
 function colorNumberToOklch(ce: any, color: number): any {
   return oklchToExpr(ce, colorNumberToOklchColor(color));
 }
 
-const ALL_PALETTES: Record<string, readonly string[]> = {
-  ...SEQUENTIAL_PALETTES,
-  ...CATEGORICAL_PALETTES,
-  ...DIVERGING_PALETTES,
-};
+const ALL_PALETTES = COLORMAP_PALETTES;
 
 /** Sample a palette at position t in [0,1], returning an Oklch expression. */
 function samplePalette(ce: any, palette: readonly string[], t: number): any {
-  t = Math.max(0, Math.min(1, t));
-
-  const n = palette.length;
-  if (n === 0) return ce.error('expected-value');
-  if (n === 1) return colorNumberToOklch(ce, parseColor(palette[0]));
-
-  const pos = t * (n - 1);
-  const i = Math.floor(pos);
-  const frac = pos - i;
-
-  if (i >= n - 1) return colorNumberToOklch(ce, parseColor(palette[n - 1]));
-
-  if (frac < 1e-9) return colorNumberToOklch(ce, parseColor(palette[i]));
-
-  // Interpolate the two stops directly in OKLCh, with the same routine
-  // `ColorMix` uses. The library's `interpolateOklch()` returns a
-  // gamut-clipped sRGB color instead, so it answered a slightly different
-  // color than `ColorMix` on the same pair of stops, and a different one
-  // again from the compiled runtime, which also interpolates the OKLCh stops.
-  return oklchToExpr(
-    ce,
-    lerpOklchColor(
-      colorNumberToOklchColor(parseColor(palette[i])),
-      colorNumberToOklchColor(parseColor(palette[i + 1])),
-      frac
-    )
-  );
+  if (palette.length === 0) return ce.error('expected-value');
+  // The kernel the compiled runtime also calls (`samplePaletteOklch`).
+  return oklchToExpr(ce, samplePaletteOklch(palette, t));
 }
 
 /** Heads recognized as color values. */
@@ -796,13 +762,10 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
       }
 
       // Variant 3: real in [0,1] -> the color at that position: the nearest
-      // category of a categorical palette, an interpolated color of a gradient
-      if (categorical) {
-        const t = Math.max(0, Math.min(1, val));
-        const i = Math.round(t * (palette.length - 1));
-        return colorNumberToOklch(ce, parseColor(palette[i]));
-      }
-      return samplePalette(ce, palette, val);
+      // category of a categorical palette, an interpolated color of a
+      // gradient (`colormapColor`, which the compiled runtime also calls)
+      const color = colormapColor(name, val);
+      return color ? oklchToExpr(ce, color) : ce.error('expected-value');
     },
   },
 

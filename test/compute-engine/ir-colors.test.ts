@@ -149,7 +149,8 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
   ["Tycho's witness", WITNESS, [{ n: 7, x: 0.5 }, { n: 7, x: 2 }, { n: 1, x: 0.5 }, { n: 3, x: 0.25 }, { n: 0, x: 0.3 }]],
 ];
 
-// The operators that JavaScript compiles and GLSL declines.
+// The operators tested on JavaScript only here (GLSL compiles some of them
+// since CE-1535: `ir-colors-operators.test.ts`).
 // prettier-ignore
 const JS_ONLY: [label: string, json: Json, points: object[]][] = [
   ['AsHsl', ['AsHsl', ['Rgb', 'x', 0.4, 0.6]], [{ x: 0.3 }]],
@@ -356,8 +357,6 @@ function shader(r: ReturnType<typeof glsl>, k: number): string {
 
 // prettier-ignore
 const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], cause: RegExp][] = [
-  ['AsHsl on GLSL', ['AsHsl', ['Rgb', 'x', 0.4, 0.6]], ['glsl'], /AsHsl/],
-  ['AsHsv on GLSL', ['AsHsv', ['Rgb', 'x', 0.4, 0.6]], ['glsl'], /AsHsv/],
   ['a conversion read by a colour operator on GLSL', ['AsOklab', ['AsRgb', ['Oklch', 'x', 0.1, 250]]], ['glsl'], /AsRgb other than as the result/],
   ['a local that holds a conversion and is the result, on GLSL', ['Block', ['Declare', 'k', { str: 'unknown' }, ['AsOklab', ['Oklch', 'x', 0.1, 250]]], 'k'], ['glsl'], /not the result position of the expression/],
   ['a local declared color', ['Block', ['Declare', 'k', { str: 'color' }, ['Oklch', 'x', 0.1, 250]], ['AsOklab', 'k']], ['javascript', 'glsl'], /a local of type color/],
@@ -372,9 +371,8 @@ const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], 
   ['a colour input', ['AsOklab', 'c'], ['javascript', 'glsl'], /./],
   ['a colour parameter of a user function', ['AsOklab', ['fk', ['fc', 'x']]], ['javascript', 'glsl'], /the parameter q of fk is not a scalar \(color\)/],
   ['a Which with no True clause', ['Which', ['Less', 'x', 0], ['Rgb', 'x', 0, 0], ['Less', 'x', 1], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /arms of two types/],
-  ['ColorMix on GLSL', ['ColorMix', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250], 0.5], ['glsl'], /ColorMix \(the operation colormix\) on glsl/],
   ['ColorMix of a tuple with an alpha', ['ColorMix', ['Tuple', 1, 0, 0, 0.5], ['Rgb', 'x', 0, 0], 0.5], ['javascript', 'glsl'], /ColorMix of a tuple that is not three real numbers/],
-  ['an operator of colours not in the slice', ['ColorContrast', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /ColorContrast/],
+  ['an operator of colours not in the slice', ['ColorToString', ['Rgb', 'x', 0, 0]], ['javascript', 'glsl'], /ColorToString/],
 ];
 
 describe('IR profile, colours: the declines', () => {

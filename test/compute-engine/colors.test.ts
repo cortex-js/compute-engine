@@ -797,7 +797,7 @@ describe('GPU compile: typed color heads', () => {
       expect(compiled.success).toBe(false);
       expect(compiled.diagnostic?.code).toBe('outside-profile');
       expect(compiled.error).toMatch(
-        /the operator Color is not supported by the compiler/
+        /Color of a colour string with an alpha/
       );
     }
   });

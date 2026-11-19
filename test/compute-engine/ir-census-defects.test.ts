@@ -162,14 +162,11 @@ describe('IR profile, batch G13: a product or a power of matrices (D1)', () => {
       );
   });
 
+  // `MatrixPower` compiles on JavaScript for a square matrix of a stated
+  // size (CE-1529, `ir/lower-matrices.ts`).
   test('a power of a matrix by a number is MatrixPower in the canonical form', () => {
-    for (const json of [
-      ['Power', 'p', 2],
-      ['Power', 'B', 2],
-    ])
-      expect(failure(() => js(json))?.message).toMatch(
-        /MatrixPower is not supported by the compiler/
-      );
+    check(['Power', 'p', 2], [{ p: M }, { p: N }]);
+    check(['Power', 'B', 2], [{}]);
   });
 
   test('a structural Power of a literal matrix declines or is the matrix power', () => {

@@ -57,14 +57,23 @@ import { parameterName, type listLowering } from './lower-lists.js';
  * with no declared type (`unknown`) or of type `number` is `wide`: a real,
  * or a complex in `mode: 'complex'`. `any`, a list element of type
  * `unknown` or `any`, and an inner list of run-time length have no IR
- * type.
+ * type. With `strings`, a scalar `string` or `character` is a string (a
+ * list of them is not: phase 2 of CE-1530).
  */
 export function inputType(
   t: Type,
-  wide: 'real' | 'complex' = 'real'
+  wide: 'real' | 'complex' = 'real',
+  strings = false
 ): { lane: Lane; shape: (number | 'run-time')[] } | undefined {
   const lane = (t: Type, element: boolean): Lane | undefined => {
     t = present(t);
+    if (
+      strings &&
+      !element &&
+      t !== 'never' &&
+      (isSubtype(t, 'string') || isSubtype(t, 'character'))
+    )
+      return 'string';
     // A complex list entry declines (below).
     if (t === 'number' || (t === 'unknown' && !element))
       return !element ? wide : wide === 'complex' ? undefined : 'real';
@@ -178,7 +187,7 @@ function extendedReal(t: Type): boolean {
 
 /** The scalar IR type of `t`, or a decline that names `what`. */
 export function scalarOf(node: Expression, t: Type, what: string): IRType {
-  const ir = inputType(t);
+  const ir = inputType(t, 'real', true);
   if (ir === undefined || ir.shape.length > 0)
     decline(
       node,
@@ -278,7 +287,7 @@ function signatureTypes(e: Fn, literal: Fn) {
     const t =
       typeof d === 'object' && d.kind === 'broadcastable' ? d.elements : d;
     const list = tupleOrInputType(t);
-    const s = inputType(t);
+    const s = inputType(t, 'real', true);
     const scalar = s?.shape.length === 0;
     return list !== undefined &&
       (list.shape.length === 1 || tupleAxis(t) === 1) &&

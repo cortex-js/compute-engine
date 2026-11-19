@@ -47,6 +47,109 @@
 
 ### Resolved Issues
 
+- **Operators that compiled in 0.193.0 compile again** (CE-1533). On
+  JavaScript: `HarmonicNumber(n)` and `HarmonicNumber(n, r)`, the generalized
+  `Zeta(s, a)`, the upper incomplete `Gamma(s, z)` (complex in
+  `mode: 'complex'`), `Gamma`, `Sign` and `Norm` of a complex, `ND(f, x)` of a
+  function literal, and `EvaluateAt(f, a)` and `EvaluateAt(f, a, b)` of a
+  function literal of one parameter (also on GLSL and in the interval mode).
+  In the interval mode, `Argument` of a real. Each gives the interpreter's
+  value. A `Limit` compiles when it reads no input: it is its value at compile
+  time (`Limit(t ↦ sin(t)/t, 0)` is `1`). A `Limit` at a point or of a body
+  that reads an input still declines: the interpreter computes a symbolic
+  limit at each point first, and the numeric limit of 0.193.0 gave `NaN` at a
+  jump near the point (CE-1232).
+
+- **List operations compile to JavaScript again** (CE-1531). 0.193.0 compiled
+  them, and 0.194.0 declined them: `Append`, `DeleteAt`, `Insert`, `Slice`,
+  `Linspace`, `TakeWhile`, `DropWhile`, `FlatMap`, `Scan`, `Tabulate` (and
+  `Table`), `Reduce` by a function literal from an initial value, `Element`
+  of a list, `Identity`, `CountIf`, `Find`, `IndexWhere`, `Position`,
+  `RandomSample`, `ApplyWhole`, and `StartsWith`, `EndsWith` and
+  `ContainsSequence` of lists. A real count of `Take` and `Drop` is rounded,
+  as the interpreter rounds it. `Chunk` and `Partition` compile when every
+  chunk has the same length (a list of a stated length that the chunks
+  divide, or the windows of `Partition(L, n, step)`); a result whose chunks
+  can have different lengths still declines. Each compiled value is the
+  interpreter's; where the interpreter gives no list (an index out of range),
+  the compiled code throws.
+
+- **Matrix operators compile to JavaScript again** (CE-1529). 0.193.0
+  compiled them and 0.194.0 declined them. `Matrix`, `Vector`, `Transpose`,
+  `ConjugateTranspose`, `Trace`, `Diagonal`, `Determinant`, `Inverse`,
+  `MatrixPower` (also `A^2` of a matrix `A`), `MatrixMultiply`, `RowReduce`,
+  `Rank`, `Shape`, `Flatten`, `Reshape` and `Cross` compile for a matrix whose
+  rows have a stated length, such as an input declared `matrix<real^3x3>` or
+  `list<list<real^2>>`, or a literal. `Cross` of two 3-tuples or two lists of
+  three numbers also compiles to GLSL and to `interval-js`. The values are the
+  interpreter's numeric values (`.N()`); `Inverse` of a singular matrix is a
+  matrix of `NaN`. An input declared `list<list<real>>`, whose rows can have
+  different lengths, is still refused, and so are a matrix that must be
+  square and is not, a `MatrixPower` by a real exponent, and a `Transpose` of
+  a matrix whose number of rows is known only at run time.
+
+- **The sum, the difference and the power of lists of points compile again**
+  (CE-1537, CE-1539). Since 0.194.0, with `P, Q: list<tuple<real, real>>`,
+  `compile()` declined `P + Q` and `P - Q` ("lists of different lengths or
+  ranks") and `P^2` ("Power of a matrix"), so these were computed by the
+  interpreter. They compile to JavaScript and `interval-js`, point by point,
+  with the interpreter's value; as for two `list<real>`, two lists of
+  different lengths give an unspecified value. The power of a matrix is the
+  matrix power on JavaScript (CE-1529) and declines on `interval-js`, which
+  gave the power of each element of a matrix input (`A^2` at
+  `[[1, 2], [3, 4]]` was `[[1, 4], [9, 16]]`, where the interpreter gives the
+  matrix power `[[7, 10], [15, 22]]`).
+
+- **A list of points compiles to GLSL again** (CE-1538). A list of points of
+  a constant length, such as `[R(x, y), R(x + 1, y), R(x, y + 1)]` where `R`
+  returns a point, is an array of vectors in GLSL (`vec2[3](…)`), as in
+  0.193.0. Since 0.194.0, such a list as the result of an expression, a
+  local or the arm of a conditional declined with "a list of rank 2 on
+  glsl". An input declared a list of points of a stated length
+  (`list<tuple<real, real>^3>`) is a `vec2[3]` uniform again. A list of rows
+  of 2 to 4 numbers, such as a matrix of 2 columns, is also an array of
+  vectors, one per row: a `matrix<real^(3x2)>` input is a `vec2[3]` uniform
+  of its rows, not the column-major `mat3x2` uniform of 0.193.0.
+
+- **The colour operators compile to JavaScript and to GLSL again**
+  (CE-1535). They compiled in 0.193.0 and declined in 0.194.0. On
+  JavaScript, `Color` of a string literal, `ColorContrast`, `ColorDelta`,
+  `ContrastingColor`, `GamutMap`, `ColorToColorspace` and `Colormap` give the
+  interpreter's value; on GLSL, `ColorMix`, `ColorContrast`, `ColorDelta`,
+  `ContrastingColor`, `GamutMap`, `ColorToColorspace`, `Color`, and `AsHsv`
+  and `AsHsl` as the result of the program compile. A colour space, a gamut
+  or a palette must be a string literal.
+
+  `Colormap(name, t)` is a list of colours when `t` is an integer of 2 or
+  more, so it compiles only when the type of `t` is a range below 2:
+
+  ```ts
+  ce.declare("t", "real<0..1>");
+  compile(ce.box(["Colormap", "'viridis'", "t"])).run({ t: 0.3 });
+  // ➔ { space: "oklch", c0: 0.4777…, c1: 0.0883…, c2: 251.35…, alpha: undefined }
+  ```
+
+  `ColorToString` still declines: its value is a string.
+
+- **Text operators compile again on JavaScript.** Since 0.194.0, `compile()`
+  declined a string input, a string literal and every text operator, so
+  `ToUpperCase(s)` or `PadStart(s, n, "0")` ran on the interpreter. A scalar
+  string now compiles on the `javascript` target, with the interpreter's
+  value: `Length` of a string, `ToUpperCase`, `ToLowerCase`, `CaseFold`,
+  `Trim`, `TrimStart`, `TrimEnd`, `StringRepeat`, `PadStart`, `PadEnd`,
+  `StringReplace` (also of a literal `RegExp`), `StartsWith`, `EndsWith`,
+  `StringCompare`, `String` of strings and `StringJoin` of a string. A string
+  input is read as the engine reads one (NFC, a lone surrogate replaced with
+  U+FFFD), and a value that is not a string throws a `TypeError`. A count or
+  a pad that the interpreter answers with an error value throws a
+  `RangeError`. Such code reports `strings: true` and `shippable: false`,
+  and `broadcast()`, `broadcastAsync()` and the batch loaders of the runtime
+  throw for it. `String` of a number still declines: its text follows the
+  formatting options of the engine.
+  Lists of strings, `Characters`, `GraphemeClusters`, `StringJoin` of a list,
+  and `At` and `Equal` of strings still decline, as do strings on `glsl`,
+  `interval-js` and in the `bigint` mode.
+
 - **A sum of inexact imaginary numbers that cancel is `0`** (CE-1326).
   `2.5i - 2.5i` threw a `TypeError` when it was evaluated. Imaginary numbers
   that cancel leave no term, as in `x + 2.5i - 2.5i`, which is `x`, so the

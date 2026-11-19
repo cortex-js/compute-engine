@@ -181,7 +181,7 @@ const DECLINES: [label: string, json: Json, to: string, cause: string][] = [
   ['Rest of a run-time length on interval-js', ['Rest', 'L'], 'interval-js', 'not one number'],
   ['Take of a run-time length on interval-js', ['Take', 'L', 2], 'interval-js', 'not one number'],
   ['Take of a run-time count on interval-js', ['Take', 'L3', 'n'], 'interval-js', 'not one number'],
-  ['a real count of Take', ['Take', 'L', 'x'], 'javascript', 'a count that is not an integer'],
+  ['a real count of Take on GLSL', ['Take', 'L3', 'x'], 'glsl', 'count.round'],
   ['Dot of two lengths', ['Dot', ['Tuple', 1, 2], ['Tuple', 3, 4, 5]], 'javascript', 'Dot of vectors of two lengths'],
   ['Norm of order 3', ['Norm', 'L', 3], 'javascript', 'an order other than 1, 2 and Infinity'],
   ['Sort by a chain operator', ['Sort', 'L', 'Greater'], 'javascript', 'Sort by a function that is not a literal of one or two parameters'],

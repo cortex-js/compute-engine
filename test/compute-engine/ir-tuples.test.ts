@@ -949,10 +949,28 @@ describe('the causes of the third corpus run', () => {
     ])
       check(json, [p]);
   });
-  test('lists of rank 2 of two run-time lengths decline', () => {
-    expect(declined(['Add', 'Qr', 'Rr'])).toMatch(/different lengths/);
+  test('lists of rank 2 of two run-time lengths and one inner length', () => {
+    // The outer length is read as at rank 1 (CE-1537): the result has the
+    // length of the first list, unspecified when the lengths differ.
+    const r = ir(['Add', 'Qr', 'Rr']);
     expect(
-      declined(['Add', ['PointList', 'D', 'D'], ['PointList', 'A', 'A']])
-    ).toMatch(/different lengths/);
+      (r.run as (v: unknown) => unknown)({
+        Qr: [
+          [1, 2],
+          [3, 4],
+        ],
+        Rr: [
+          [10, 20],
+          [30, 40],
+        ],
+      })
+    ).toEqual([
+      [11, 22],
+      [33, 44],
+    ]);
+    check(
+      ['Add', ['PointList', 'D', 'D'], ['PointList', 'A', 'A']],
+      [{ D: [0.5, -1, 2], A: [3, 1, -4] }]
+    );
   });
 });

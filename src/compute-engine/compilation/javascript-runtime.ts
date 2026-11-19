@@ -16,9 +16,16 @@ import {
   oklabToOklch,
   oklchToOklab,
   hsvToRgb,
+  apca,
+  oklabDeltaE,
 } from '@arnog/colors';
 import type { HexColor } from '@arnog/colors';
 import {
+  gamutMapOklch,
+  gamutMapSrgb,
+  gamutToSrgb,
+  colormapColor,
+  COLORMAP_NAMES,
   readColorChannels,
   hslToRgb255,
   oklabToRgb255,
@@ -43,6 +50,8 @@ import {
   polygamma,
   zeta,
   hurwitzZeta,
+  zetaGeneralized,
+  incompleteGammaUpper,
   lambertW,
   besselJ,
   besselY,
@@ -120,6 +129,8 @@ import {
   ellipticKComplex,
   ellipticEComplex,
   hypergeometric2F1Complex,
+  gamma as complexGamma,
+  incompleteGammaUpperComplex,
 } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
@@ -142,6 +153,8 @@ import {
 } from '../../common/interruptible.js';
 import { CapabilityDeniedError } from '../effects-registry.js';
 import { BIGINT_HELPERS } from './bigint-runtime.js';
+import { MATRIX_HELPERS } from './matrix-runtime.js';
+import { TEXT_HELPERS } from './text-runtime.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
@@ -761,6 +774,102 @@ const colorHelpers = {
     );
     return mkColor('oklch', c.L, c.C, c.H, c.alpha);
   },
+  // `ColorContrast(bg, fg)`: the APCA contrast of `@arnog/colors`, of the
+  // two colours in extended sRGB, as the interpreter.
+  colorContrast(bg: unknown, fg: unknown): number {
+    return apca(toRgb255(bg), toRgb255(fg));
+  },
+  // `ColorDelta(a, b)`: ΔE_OK, the distance of the two colours in OKLab.
+  colorDelta(a: unknown, b: unknown): number {
+    return oklabDeltaE(oklchToOklab(toOklch(a)), oklchToOklab(toOklch(b)));
+  },
+  // `ContrastingColor(bg, fg1, fg2)`: the candidate of the larger absolute
+  // APCA contrast against `bg`, the candidate first in `apca` (it is not
+  // symmetric), `fg1` at a tie, as the interpreter. The candidate is
+  // answered as it is, the same colour as the interpreter's (which keeps the
+  // head it was written with). A colour of non-finite channels (an error of
+  // the interpreter) gives the `NaN` colour.
+  contrastingColor(bg: unknown, fg1: unknown, fg2: unknown): CompiledColor {
+    const [b, c1, c2] = [bg, fg1, fg2].map(toRgb255);
+    if (![b, c1, c2].every((c) => finiteChannels(c.r, c.g, c.b)))
+      return nonFiniteColor(undefined);
+    return Math.abs(apca(c1, b)) >= Math.abs(apca(c2, b))
+      ? asCompiledColor(fg1)
+      : asCompiledColor(fg2);
+  },
+  // `ContrastingColor(bg)`: white or black, as the `Rgb` colour the
+  // interpreter answers.
+  contrastingColorBW(bg: unknown): CompiledColor {
+    const b = toRgb255(bg);
+    if (!finiteChannels(b.r, b.g, b.b)) return nonFiniteColor(undefined, 'rgb');
+    const white = { r: 255, g: 255, b: 255 };
+    const black = { r: 0, g: 0, b: 0 };
+    const k = Math.abs(apca(white, b)) >= Math.abs(apca(black, b)) ? 1 : 0;
+    return mkColor('rgb', k, k, k, undefined);
+  },
+  // `GamutMap(c)` and `GamutMap(c, "display-p3")`: the CSS Color 4 gamut
+  // mapping, as the interpreter (`gamutMapColor`): a colour held in OKLCh or
+  // OKLab is mapped from its OKLCh channels, any other from its extended
+  // sRGB channels. The result is in sRGB (extended sRGB for Display-P3).
+  gamutMap(input: unknown, p3: boolean): CompiledColor {
+    const gamut = p3 ? 'display-p3' : 'srgb';
+    const c = asCompiledColor(input);
+    let mapped: [number, number, number];
+    let alpha: number | undefined;
+    if (c.space === 'oklch' || c.space === 'oklab') {
+      const lch = toOklch(c);
+      mapped = gamutMapOklch(lch.L, lch.C, lch.H, gamut);
+      alpha = lch.alpha;
+    } else {
+      const rgb = toRgb255(c);
+      mapped = gamutMapSrgb(rgb.r / 255, rgb.g / 255, rgb.b / 255, gamut);
+      alpha = rgb.alpha;
+    }
+    const [r, g, b] = gamutToSrgb(mapped, gamut);
+    return mkColor('rgb', r, g, b, alpha);
+  },
+  // `Colormap(name, t)` of a position `t` that is not an integer of 2 or
+  // more (the lowering proves it): the interpreter's colour
+  // (`colormapColor`), the palette named by its index in `COLORMAP_NAMES`.
+  // A position that is not finite (an error of the interpreter) gives the
+  // `NaN` colour.
+  colormap(palette: number, t: number): CompiledColor {
+    const c = Number.isFinite(t)
+      ? colormapColor(COLORMAP_NAMES[palette], t)
+      : undefined;
+    if (c === undefined) return nonFiniteColor(undefined);
+    return mkColor('oklch', c.L, c.C, c.H, c.alpha);
+  },
+  // `AsHsv(Hsv(h, s, v))` and `AsHsl(Hsl(h, s, l))`: the constructor's own
+  // channels as the interpreter reads them (`readColorChannels`: the hue
+  // reduced into [0, 360), the others clamped into [0, 1]), with no round
+  // trip through OKLCh, which loses the hue and the saturation at black and
+  // at grey.
+  hsvChannels(h: number, s: number, v: number): CompiledColor {
+    const ch = readColorChannels('hsv', h, s, v);
+    if (ch === undefined) return nonFiniteColor(undefined, 'hsv');
+    return mkColor('hsv', ch[0], ch[1], ch[2], undefined);
+  },
+  hslChannels(h: number, s: number, l: number): CompiledColor {
+    const ch = readColorChannels('hsl', h, s, l);
+    if (ch === undefined) return nonFiniteColor(undefined, 'hsl');
+    return mkColor('hsl', ch[0], ch[1], ch[2], undefined);
+  },
+  // The channel `k` (0, 1 or 2) of a colour in the space `space`: an
+  // element of `ColorToColorspace(c, space)`, as the interpreter.
+  colorChannel(input: unknown, space: string, k: number): number {
+    const c =
+      space === 'rgb'
+        ? colorHelpers.asRgb(input)
+        : space === 'hsl'
+          ? colorHelpers.asHsl(input)
+          : space === 'hsv'
+            ? colorHelpers.asHsv(input)
+            : space === 'oklab'
+              ? colorHelpers.asOklab(input)
+              : colorHelpers.asOklch(input);
+    return k === 0 ? c.c0 : k === 1 ? c.c1 : c.c2;
+  },
 };
 
 /**
@@ -955,6 +1064,8 @@ export const SYS_HELPERS = {
   // `bigint` values and throw a `NonFiniteValue` at a pole
   // (`bigint-runtime.ts`). Only the code of the bigint emitter calls them.
   ...BIGINT_HELPERS,
+  // The helpers of the string lane (`text-runtime.ts`).
+  ...TEXT_HELPERS,
   // The element count of an arithmetic `Range`, shared with the interpreter
   // (`numerics/range-count.ts`), so the compiled length agrees with the
   // interpreter's `count`.
@@ -1261,6 +1372,9 @@ export const SYS_HELPERS = {
   // poles and infinite points (see `binomial()` in
   // `numerics/special-functions.ts`).
   binomial,
+  // The determinant, inverse, power and row echelon form of a matrix of
+  // numbers (`matrix-runtime.ts`).
+  ...MATRIX_HELPERS,
   // Complex helpers
   csin: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sin()),
   ccos: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).cos()),
@@ -1496,6 +1610,7 @@ export type RandomSysHelpers = {
   ) => RandomDomainDescriptor;
   randomChoice: (d: RandomDomainDescriptor, k: unknown) => unknown[];
   shuffle: (xs: unknown[]) => unknown[];
+  randomSample: (n: number, k: unknown) => number[];
 };
 
 /** The `_SYS` bundle injected into a compiled JavaScript function. */
@@ -1681,6 +1796,31 @@ export function makeRandomHelpers(source: RuntimeSource): RandomSysHelpers {
       }
       return l;
     },
+
+    // `RandomSample(xs, k)` of a list of `n` elements: the indices from 0 of
+    // the `k` elements, drawn WITHOUT replacement by the sparse Fisher-Yates
+    // of the interpreter (`library/statistics.ts`): `k` draws, in order. A
+    // count past `n` is an error there.
+    randomSample: (n: number, k: unknown): number[] => {
+      const m = count('RandomSample', k);
+      if (m > n)
+        throw new Error(
+          `Could not compile \`RandomSample\`: expected a count in 0..${n}, got ${m}`
+        );
+      const swapped = new Map<number, number>();
+      const at = (i: number): number => swapped.get(i) ?? i;
+      const out: number[] = new Array(m);
+      for (let i = 0; i < m; i++) {
+        if ((i & 0x3ff) === 0) checkDeadline(source.deadline());
+        const j = i + Math.floor(draw() * (n - i));
+        const vi = at(i);
+        const vj = at(j);
+        swapped.set(i, vj);
+        swapped.set(j, vi);
+        out[i] = vj;
+      }
+      return out;
+    },
   };
 }
 
@@ -1833,6 +1973,15 @@ export const REAL_FUNCTIONS = Object.freeze({
   hyp2f1: (a: number, b: number, c: number, z: number): number =>
     hypergeometric2F1(a, b, c, z),
   hurwitzzeta: (s: number, a: number): number => hurwitzZeta(s, a),
+  // `Zeta(s, a)`, the generalized zeta of Wolfram's convention, as the
+  // interpreter's `evaluateGeneralizedZeta`: real for real operands, and
+  // a pole at s = 1.
+  zetagen: (s: number, a: number): number => zetaGeneralized(s, a),
+  // `Gamma(s, z)`, the upper incomplete gamma (`realGammaUpper()`).
+  gammaupper: (s: number, z: number): number => realGammaUpper(s, z),
+  // `HarmonicNumber(n)` and `HarmonicNumber(n, r)` (`harmonicNumber()`).
+  harmonic: (n: number): number => harmonicNumber(n),
+  harmonic2: (n: number, r: number): number => harmonicNumber(n, r),
   lerchphi: (z: number, s: number, a: number): number => lerchPhiReal(z, s, a),
   polylog: (s: number, z: number): number => polylogOrderReal(s, z),
   dirichleteta: (s: number): number => dirichletEtaReal(s),
@@ -1867,6 +2016,136 @@ function ieeeRemainder(x: number, y: number): number {
   return Math.abs(r) > h || (Math.abs(r) === h && r / y > 0)
     ? r - Math.sign(r) * Math.abs(y)
     : r;
+}
+
+/**
+ * The interpreter's `Gamma(s, z)` of reals, the upper incomplete gamma: the
+ * real kernel for `z > 0`; at `z = 0`, `Gamma(s)` (+∞ at a non-positive
+ * integer `s`, the interpreter's `~oo`); for `z < 0`, the complex kernel's
+ * value where it is real (`s` a positive integer), NaN where it is not.
+ */
+function realGammaUpper(s: number, z: number): number {
+  if (Number.isNaN(s) || Number.isNaN(z)) return NaN;
+  if (z === 0) return Number.isInteger(s) && s <= 0 ? Infinity : gamma(s);
+  if (z > 0) return incompleteGammaUpper(s, z);
+  const c = incompleteGammaUpperComplex(new Complex(s, 0), new Complex(z, 0));
+  return c.im === 0 ? c.re : NaN;
+}
+
+const EULER_GAMMA = 0.5772156649015329;
+
+/**
+ * The interpreter's `HarmonicNumber(n)` (`r = 1`) and `HarmonicNumber(n, r)`
+ * of reals (`evaluateHarmonicNumber()`): 0 at `n = 0`; at a negative integer
+ * `n` a pole (+∞) for `r > 0`, and NaN otherwise (the interpreter leaves it
+ * unevaluated); at `n = +∞`, +∞ for `HarmonicNumber(n)` and `ζ(r)` for
+ * `r > 1`. Otherwise `ψ(n + 1) + γ` for `r = 1`, its Taylor series
+ * `Σ (−1)^k ζ(k) n^(k−1)` (k ≥ 2) for `|n| < 0.1`, where the sum cancels;
+ * the sum of `k^(−r)` for an integer `n` from 1 to 1000; else
+ * `ζ(r) − ζ(r, n + 1)`.
+ */
+function harmonicNumber(n: number, r?: number): number {
+  if (Number.isNaN(n) || (r !== undefined && Number.isNaN(r))) return NaN;
+  if (n === Infinity) return r === undefined ? Infinity : r > 1 ? zeta(r) : NaN;
+  if (n === -Infinity || (r !== undefined && !Number.isFinite(r))) return NaN;
+  if (Number.isInteger(n) && n < 0)
+    return r === undefined || r > 0 ? Infinity : NaN;
+  if (n === 0) return 0;
+  if (r === undefined || r === 1) {
+    if (Math.abs(n) >= 0.1) return digamma(n + 1) + EULER_GAMMA;
+    let sum = 0;
+    let p = 1;
+    // `ζ(k) < 2` and `|n| < 0.1`: the terms past the 23rd are below 1e-22.
+    for (let k = 2; k <= 24; k++, p *= -n) sum += zeta(k) * p;
+    return sum * n;
+  }
+  if (Number.isInteger(n) && n <= 1000) {
+    let sum = 0;
+    for (let k = n; k >= 1; k--) sum += Math.pow(k, -r);
+    return sum;
+  }
+  // ζ(r) − ζ(r, n + 1) cancels near n = 0 and near r = 1 (each is about
+  // 1/(r − 1)).
+  // Each series gives `undefined` when it does not converge (a large `r`).
+  const series =
+    Math.abs(n) < 0.1 && r > -5
+      ? harmonicNearZero(n, r)
+      : n > -1 && r > -5 && Math.abs(r - 1) < 0.5
+        ? harmonicSeries(n, r)
+        : undefined;
+  return series ?? zeta(r) - hurwitzZeta(r, n + 1);
+}
+
+/**
+ * The generalized harmonic number for `|n| < 0.1`, by the binomial series of
+ * `(k + n)^(−r)`: `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)`. At an integer
+ * `r ≤ 0` the term of `ζ(1)` is its limit, `n^j / j`, and the later terms
+ * are 0 (a polynomial: `HarmonicNumber(n, 0)` is `n`).
+ */
+function harmonicNearZero(n: number, r: number): number | undefined {
+  let sum = 0;
+  let c = 1;
+  let p = 1;
+  let peak = 0;
+  for (let j = 1; j <= 100; j++) {
+    p *= -n;
+    if (r + j === 1) return sum + Math.pow(n, j) / j;
+    c *= (r + j - 1) / j;
+    const t = c * p * zeta(r + j);
+    peak = Math.max(peak, Math.abs(t));
+    sum -= t;
+    // Past `r + j = 2`, `ζ(r + j) < 2`; where the ratio of two terms,
+    // `|n|·(r + j)/(j + 1)`, is below 1/2 and falls, the rest is below the
+    // last term.
+    if (
+      r + j > 2 &&
+      (Math.abs(n) * (r + j)) / (j + 1) < 0.5 &&
+      Math.abs(c * p) <= 1e-17 * Math.abs(sum)
+    )
+      // Terms much larger than the sum cancel: their rounding is in it.
+      return peak <= 10 * Math.abs(sum) ? sum : undefined;
+  }
+  // Not converged: the terms of a large `r` grow before they fall.
+  return undefined;
+}
+
+/** The Bernoulli numbers `B₂`, `B₄`, … `B₁₂`, each over `(2j)!`. */
+const BERNOULLI_OVER_FACTORIAL = [
+  1 / 6 / 2,
+  -1 / 30 / 24,
+  1 / 42 / 720,
+  -1 / 30 / 40320,
+  5 / 66 / 3628800,
+  -691 / 2730 / 479001600,
+];
+
+/**
+ * `Σ_{k ≥ 1} k^(−r) − (k + n)^(−r)`, the generalized harmonic number, for
+ * `n > −1`: the terms below `k = 20`, then the Euler–Maclaurin sum of the
+ * rest, whose integral `(20^(1−r) − (20 + n)^(1−r)) / (r − 1)` is written
+ * with `expm1` and `log1p`, so that no term cancels at `r = 1`.
+ */
+function harmonicSeries(n: number, r: number): number | undefined {
+  const M = 20;
+  let sum = 0;
+  for (let k = M - 1; k >= 1; k--) sum += Math.pow(k, -r) - Math.pow(k + n, -r);
+  const l = Math.log1p(n / M);
+  const u = (1 - r) * l;
+  const integral = Math.pow(M, 1 - r) * (u === 0 ? l : (l * Math.expm1(u)) / u);
+  let tail = integral + (Math.pow(M, -r) - Math.pow(M + n, -r)) / 2;
+  // f^(m)(M) = (−1)^m (r)_m (M^(−r−m) − (M + n)^(−r−m)), for m = 2j − 1.
+  let rising = r;
+  let last = 0;
+  for (let j = 1; j <= BERNOULLI_OVER_FACTORIAL.length; j++) {
+    const m = 2 * j - 1;
+    if (j > 1) rising *= (r + m - 2) * (r + m - 1);
+    const d = -rising * (Math.pow(M, -r - m) - Math.pow(M + n, -r - m));
+    last = BERNOULLI_OVER_FACTORIAL[j - 1] * d;
+    tail -= last;
+  }
+  // The error of the asymptotic sum is about its last term.
+  const value = sum + tail;
+  return Math.abs(last) <= 1e-16 * Math.abs(value) ? value : undefined;
 }
 
 /**
@@ -1974,6 +2253,26 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
   // The special functions continued into the complex plane, the
   // interpreter's kernels (`continuedKernel`).
   cinvhav: (z: Cx): Cx => SYS_HELPERS.cinvhav(z),
+  // `Gamma(z)` of a complex: the real kernel on the real axis (a pole is
+  // +∞), the interpreter's complex kernel (Lanczos with the reflection
+  // formula) elsewhere.
+  cgamma: (z: Cx): Cx =>
+    continuedKernel([z], REAL_FUNCTIONS.gamma, (z) => complexGamma(z)),
+  // `Gamma(s, z)`: complex for `z < 0` unless `s` is a positive integer
+  // (`Γ(0, −1)` is `−1.895 − πi`).
+  cgammaupper: (s: Cx, z: Cx): Cx =>
+    continuedKernel([s, z], realGammaUpper, incompleteGammaUpperComplex),
+  // The interpreter's `Sign` of a complex, `z/|z|`, and 0 at 0. The parts
+  // are scaled by the larger one first, so that a modulus near the top of
+  // the doubles does not overflow.
+  csign: (z: Cx): Cx => {
+    if (Number.isNaN(z.re) || Number.isNaN(z.im)) return { re: NaN, im: 0 };
+    if (z.im === 0) return { re: Math.sign(z.re) + 0, im: 0 };
+    const s = Math.max(Math.abs(z.re), Math.abs(z.im));
+    const [a, b] = [z.re / s, z.im / s];
+    const m = Math.hypot(a, b);
+    return { re: a / m + 0, im: b / m };
+  },
   churwitzzeta: (s: Cx, a: Cx): Cx => SYS_HELPERS.churwitzZeta(s, a),
   clerchphi: (z: Cx, s: Cx, a: Cx): Cx => SYS_HELPERS.clerchPhi(z, s, a),
   cpolylog: (s: Cx, z: Cx): Cx => SYS_HELPERS.cpolyLog(s, z),
@@ -2662,6 +2961,9 @@ export type StoredJavaScript = {
    * takes and returns JavaScript `bigint` values. Absent on code stored
    * before the field existed. */
   mode?: 'strict' | 'complex' | 'bigint';
+  /** The `strings` field of the compilation result: the code reads or
+   * returns a string, so the batch loaders refuse it. */
+  strings?: boolean;
   /** The count of values per cell that `loadBroadcast()` and
    * `loadBroadcastSlice()` write when the `outputs` option is absent: the
    * arity of a tuple-of-numbers expression. Absent means 1. */
@@ -3008,6 +3310,7 @@ export function createSysRuntime(
               ? undefined
               : structuredClone(stored.entryPlan),
           mode: stored.mode,
+          strings: stored.strings,
           broadcastOutputs: stored.broadcastOutputs,
           batch:
             stored.batch === undefined
@@ -3102,6 +3405,14 @@ export function bigintBroadcastError(): Error {
   );
 }
 
+/** The error of a batch of code that reads or returns a string: the batch
+ *  runner reads and writes numbers only. */
+export function stringBroadcastError(): Error {
+  return new TypeError(
+    'Code that reads or returns a string cannot be broadcast: the batch runner reads and writes numbers only. Call `run()` for each value.'
+  );
+}
+
 /**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
@@ -3149,6 +3460,7 @@ function storedExpressionRunner(
   // `loadBroadcastAsync()` calls `loadBroadcastSlice()`, and thus this
   // function, before it gives any task to a worker.
   if (stored.mode === 'bigint') throw bigintBroadcastError();
+  if (stored.strings === true) throw stringBroadcastError();
   if (stored.calling === 'lambda')
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'

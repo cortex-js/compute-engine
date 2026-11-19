@@ -491,15 +491,15 @@ describe('IR profile, batch G9: the declines', () => {
   test('a colour name of another value declines with the cause on GLSL', () => {
     const e = new ComputeEngine();
     e.declare('Cm', {
-      type: 'color',
-      value: e.box(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 0.5]),
+      type: 'color | list<color>',
+      value: e.box(['Colormap', { str: 'viridis' }, 0.3]),
     });
     const d = failure(() =>
       compile(e.box(['AsOklab', 'Cm']), { ...IR, to: 'glsl' })
     );
     expect(d?.code).toBe('outside-profile');
-    expect(d?.message).toMatch(/ColorMix \(the operation colormix\) on glsl/);
-    // JavaScript compiles `ColorMix` (CE-1468): the interpreter's colour.
+    expect(d?.message).toMatch(/Colormap \(the operation colormap\) on glsl/);
+    // JavaScript compiles `Colormap` (CE-1535): the interpreter's colour.
     const v = compile(e.box(['AsOklab', 'Cm']), IR).run!() as unknown as {
       c0: number;
       c1: number;

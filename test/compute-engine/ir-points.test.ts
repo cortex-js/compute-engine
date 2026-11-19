@@ -451,11 +451,15 @@ describe('IR profile, batch G11: arithmetic on points', () => {
     ['nrm of an empty tuple', ['nrm', ['Tuple']], ['javascript', 'glsl'], /Tuple\(\): an empty list/],
     ['a mutual recursion on GLSL', ['ev', 'P', 5], ['glsl'], /a recursive function/],
     ['a recursive call, a result tuple<unknown, unknown>', ['PointX', ['Xr', 'x', 'y']], ['javascript'], /a recursive call of Xr, a function with a list or tuple result/],
-    ['a point plus a list of points on GLSL', ['Add', 'P', ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']]], ['glsl'], /a list of rank 2/],
-    ['PointList of lists on GLSL', ['PointList', 'L2', 'L2'], ['glsl'], /a list of rank 2/],
+    // A point plus a list of points and `PointList` of lists compile on
+    // GLSL, an array of vectors (CE-1538, `ir-glsl-point-arrays.test.ts`).
     // `PointX` of a `PointList` of a stated length compiles on GLSL
     // (CE-1474, `ir-glsl-point-lists.test.ts`).
-    ['a list of points of two lengths', ['Add', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']], 'P'], ['javascript'], /lists of different lengths|another shape/],
+    // Two lists of points of two stated lengths beside a point
+    // (`Add(List((1, 2)), List((1, 2), (u, v)), P)`) compile since CE-1537:
+    // the sum with the point is a list whose length is a value, which fits
+    // any length, as at rank 1 (`README.md`, "Lists"); the value is
+    // unspecified (the interpreter gives an error).
   ])('%s declines, with the cause', (_, json, targets, cause) => {
     for (const to of targets) {
       const d = failure(() => compile(box(json), { ...IR, to } as never));

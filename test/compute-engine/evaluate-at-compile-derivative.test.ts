@@ -84,7 +84,9 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
   test('no point, and a point that is not one per parameter', () => {
     expect(() =>
       compile(ce.box(['EvaluateAt', square]), { fallback: false })
-    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
+    ).toThrow(
+      /EvaluateAt of a value that is not a function literal of one parameter/
+    );
     expect(() =>
       compile(
         ce.box([
@@ -94,7 +96,9 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
+    ).toThrow(
+      /EvaluateAt of a value that is not a function literal of one parameter/
+    );
   });
 
   // A parameter called in the body with the name of a library operator
@@ -111,7 +115,9 @@ describe('THE COMPILED FORM OF AN EVALUATEAT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/the operator EvaluateAt is not supported by the compiler/));
+    ).toThrow(
+      /EvaluateAt of a value that is not a function literal of one parameter/
+    ));
 });
 
 // `evaluate()` applies the function at the lower bound first. The canonical
@@ -130,6 +136,8 @@ describe('THE COMPILED FORM OF AN EVALUATEAT WITH AN EFFECT', () => {
         ]),
         { fallback: false }
       )
-    ).toThrow(/the operator EvaluateAt is not supported by the compiler/);
+    ).toThrow(
+      /EvaluateAt of a value that is not a function literal of one parameter/
+    );
   });
 });

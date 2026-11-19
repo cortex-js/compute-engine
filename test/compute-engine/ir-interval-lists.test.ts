@@ -592,7 +592,7 @@ describe('the interval mode, lists: declines', () => {
   test.each([
     [['Range', 0.5, x], /a Range of a real operand on interval-js/],
     [['At', 'Q', ['Floor', x]], /an index that can be out of range/],
-    [['Linspace', 0, 1, 5], /the operator Linspace is not supported by the compiler/],
+    [['Linspace', 0, 1, 5], /Linspace on interval-js/],
     [['RandomChoice', 'L', 2], /RandomChoice of another domain than Interval\(0, 1\)/],
     // Two clauses whose counts are both run-time values: the length of the
     // list has no bound below 2^53.

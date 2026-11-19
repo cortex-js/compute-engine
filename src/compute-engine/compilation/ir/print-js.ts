@@ -57,6 +57,7 @@ import {
   type Printed,
   type Syntax,
 } from './print.js';
+import { TEXT } from './print-js-text.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -224,11 +225,18 @@ export const JS: Syntax = deepFreeze({
       ])
     ),
     'count.int': { text: '_count($0)', helpers: ['_count'] },
+    'count.round': 'Math.round($0)',
+    'linspace.count': { text: '_lincount($0)', helpers: ['_lincount'] },
+    'linspace': { text: '_linspace($0, $1, $2, $3)', helpers: ['_linspace'] },
     'draw': '_SYS.drawNextRandomNumber()',
     'shuffle': '_SYS.shuffle($0)',
     'sort': { text: '_sort($0)', helpers: ['_sort'] },
     'ordering': { text: '_ordering($0)', helpers: ['_ordering'] },
     'median': { text: '_median($0)', helpers: ['_median'] },
+    'mdet': '_SYS.matrixDeterminant($0, $1)',
+    'minverse': '_SYS.matrixInverse($0)',
+    'mpower': '_SYS.matrixPower($0, $1)',
+    'mrowreduce': '_SYS.matrixRowReduce($0, $1)',
     'binomial': '_SYS.binomial($0, $1)',
     // A count that is NaN (a bound with no value) is an empty list.
     'rangecount': '(_SYS.rangeCount($0, $1, $2) || 0)',
@@ -249,6 +257,21 @@ export const JS: Syntax = deepFreeze({
     'asoklab': '_SYS.asOklab($0)',
     'asoklch': '_SYS.asOklch($0)',
     'colormix': '_SYS.colorMix($0, $1, $2)',
+    'colorcontrast': '_SYS.colorContrast($0, $1)',
+    'colordelta': '_SYS.colorDelta($0, $1)',
+    'contrastingcolor': '_SYS.contrastingColor($0, $1, $2)',
+    'contrastingcolor.bw': '_SYS.contrastingColorBW($0)',
+    'gamutmap': '_SYS.gamutMap($0, false)',
+    'gamutmap.p3': '_SYS.gamutMap($0, true)',
+    'colormap': '_SYS.colormap($0, $1)',
+    'ashsv.own': '_SYS.hsvChannels($0, $1, $2)',
+    'ashsl.own': '_SYS.hslChannels($0, $1, $2)',
+    ...Object.fromEntries(
+      ['rgb', 'hsl', 'hsv', 'oklab', 'oklch'].map((s) => [
+        `colorchannel.${s}`,
+        `_SYS.colorChannel($0, '${s}', $1)`,
+      ])
+    ),
     // The functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS`, by name.
     ...Object.fromEntries(
       Object.entries({ ...REAL_FUNCTIONS, ...COMPLEX_FUNCTIONS }).map(
@@ -259,6 +282,7 @@ export const JS: Syntax = deepFreeze({
       )
     ),
     ...OTHER_LANES,
+    ...TEXT,
   },
   regions: {
     ...builds(NUMBERS, (out) => `${out}.length`),
@@ -293,6 +317,14 @@ export const JS: Syntax = deepFreeze({
     choice: ({ outs: [c, out], args: [n] }) => ({
       open: [
         `const ${out} = _SYS.randomChoice(_SYS.domainInterval('RandomChoice', 0, 1), ${n});`,
+        `const ${c} = ${out}.length;`,
+      ],
+      close: () => [],
+    }),
+    // The indices of `RandomSample(L, k)`, drawn as the interpreter draws.
+    sample: ({ outs: [c, out], args: [n, k] }) => ({
+      open: [
+        `const ${out} = _SYS.randomSample(${n}, ${k});`,
         `const ${c} = ${out}.length;`,
       ],
       close: () => [],
@@ -339,14 +371,22 @@ export const JS: Syntax = deepFreeze({
     // and unevaluated past the safe integers (`1e20`): both throw.
     _count:
       "const _count = (x) => { if (!Number.isSafeInteger(x)) throw new Error('incompatible-type: a count that is not an integer'); return x; };",
+    // The count of `Linspace` and its element `k` from 0 of `d + 1`, the
+    // interpreter's `linspaceSample()` (`library/collections.ts`).
+    _lincount:
+      'const _lincount = (c) => (Number.isFinite(c) ? Math.max(0, Math.floor(c)) : 50);',
+    _linspace:
+      'const _linspace = (a, b, k, d) => { const s = b - a; if (Number.isFinite(s)) { const t = s / d; return Number.isInteger(t) && Number.isInteger(a) && Math.abs(s) <= Number.MAX_SAFE_INTEGER ? a + k * t : a + (s * k) / d; } const u = k / d; return a * (1 - u) + b * u; };',
   },
   // A `bigint` literal is made in the bigint mode only (`JS_BIGINT`).
   constant: ({ value: x }) =>
-    typeof x === 'object'
-      ? `({ re: ${number(x.re)}, im: ${number(x.im)} })`
-      : typeof x === 'boolean'
-        ? String(x)
-        : number(x as number),
+    typeof x === 'string'
+      ? JSON.stringify(x)
+      : typeof x === 'object'
+        ? `({ re: ${number(x.re)}, im: ${number(x.im)} })`
+        : typeof x === 'boolean'
+          ? String(x)
+          : number(x as number),
   input: (name) =>
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,

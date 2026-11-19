@@ -32,7 +32,12 @@ import {
   printJavaScript,
   type JavaScriptResult,
 } from './print-js.js';
-import { GLSL, printGlsl, type GlslResult } from './print-glsl.js';
+import {
+  GLSL,
+  isVectorArray,
+  printGlsl,
+  type GlslResult,
+} from './print-glsl.js';
 import {
   INTERVAL_ROWS,
   dropClosedForms,
@@ -90,8 +95,13 @@ export type Profile = {
   /** Element-wise operations on lists; without, `scalarize` runs first. */
   readonly elementwise: boolean;
   /** The lanes of which no list is held: on GLSL, a list of colours or of
-   *  complex numbers (a `vec3` or a `vec2` has no array of its own here). */
+   *  complex numbers (a `vec3` or a `vec2` has no array of its own here);
+   *  on JavaScript, a list of strings. */
   readonly scalarLanes: readonly Lane[];
+  /** A list of rank 2 is held when its two lengths are constants and its
+   *  rows have 2 to 4 elements: on GLSL an array of vectors (`vec2[3]`, a
+   *  list of points). */
+  readonly vectorArrays?: boolean;
   /** The operations whose value is admitted only as the result of the
    *  entry: on GLSL a colour is an OKLCh `vec3` with no tag of its space,
    *  so a conversion to another space is the program's result only. */
@@ -102,14 +112,15 @@ export type Profile = {
 
 export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color'],
+    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'string'],
     rank: Infinity,
     runtimeLengths: true,
     draws: true,
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: [],
+    // A list of strings is phase 2 of CE-1530.
+    scalarLanes: ['string'],
     syntax: JS,
   },
   glsl: {
@@ -121,7 +132,8 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     recursion: false,
     elementwise: false,
     scalarLanes: ['color', 'complex'],
-    resultOnly: ['asoklab', 'asrgb'],
+    vectorArrays: true,
+    resultOnly: ['asoklab', 'asrgb', 'ashsv', 'ashsl', 'ashsv.own', 'ashsl.own'],
     syntax: GLSL,
   },
 });
@@ -148,9 +160,12 @@ export function admits(
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {
-        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : 'complex numbers'}`,
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : 'complex numbers'}`,
       };
-    if (t.shape.length > profile.rank)
+    if (
+      t.shape.length > profile.rank &&
+      !(profile.vectorArrays === true && isVectorArray(t))
+    )
       return { cause: `${what}: a list of rank ${t.shape.length}` };
     const n = lengthValues(t)[0];
     if (n !== undefined && !profile.runtimeLengths) {

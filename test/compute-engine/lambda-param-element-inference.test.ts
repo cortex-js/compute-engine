@@ -253,11 +253,15 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     expect(expr.evaluate().toString()).toBe('1');
   });
 
-  test('a NARROWING annotation still declines to compile', () => {
-    // The fail-closed gate is untouched: an annotation the source's element
-    // type does not provably satisfy cannot be enforced by the emitted code.
+  test('a NARROWING annotation compiles', () => {
+    // The emitted code does not enforce an annotation that the source's
+    // element type does not provably satisfy: an element outside it is an
+    // argument value outside the declared type of the parameter that it
+    // binds, whose compiled value is unspecified (`docs/COMPILATION-MODEL.md`,
+    // "Caveats of compiled code", CE-1503). Where every element fits the
+    // annotation, the value is the interpreter's.
     const ce = new ComputeEngine();
-    executeEpsil(ce, 'let ds: list<real> = [1.5,2.5]');
+    executeEpsil(ce, 'let ds: list<real> = [1, 2, 3]');
     const expr = ce.box([
       'CountIf',
       'ds',
@@ -267,9 +271,8 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
         ['Typed', 'n', { str: 'integer' }],
       ],
     ]);
-    expect(() => compile(expr, { fallback: false })).toThrow(
-      /Could not compile/
-    );
+    const compiled = compile(expr, { fallback: false });
+    expect(compiled.run!({ ds: [1, 2, 3] })).toBe(expr.evaluate().re);
   });
 });
 

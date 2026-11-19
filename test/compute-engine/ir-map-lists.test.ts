@@ -268,7 +268,7 @@ describe('IR profile, batch G26: ListFrom', () => {
   test.each([
     ['a scalar (the interpreter: a list of one element)', ['ListFrom', 'x'], /ListFrom of other than one list/],
     ['a tuple (the interpreter: the list of its elements)', ['ListFrom', ['Tuple', 'x', 1]], /ListFrom of other than one list/],
-    ['a string (the interpreter: a list of characters)', ['ListFrom', "'ab'"], /not a number, a symbol or a function/],
+    ['a string (the interpreter: a list of characters)', ['ListFrom', "'ab'"], /ListFrom of other than one list/],
     ['two lists (the interpreter: their concatenation)', ['ListFrom', 'A', 'B'], /ListFrom of other than one list/],
   ])('of %s declines', (_, json, cause) => {
     expect(failure(() => js(json))).toMatch(cause);

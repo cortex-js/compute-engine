@@ -471,9 +471,7 @@ describe('D8: GLSL rejects the Phase-2 operators', () => {
       const r = compileTo(ce.box(['ToUpperCase', { str: 'abc' }]), to);
       expect(r.success).toBe(false);
       expect(r.diagnostic?.code).toBe('outside-profile');
-      expect(r.error).toMatch(
-        /the operator ToUpperCase is not supported by the compiler/
-      );
+      expect(r.error).toMatch(/text compiles on javascript only/);
     }
   );
 

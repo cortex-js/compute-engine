@@ -76,6 +76,11 @@ import {
   shadowsLibraryName,
 } from '../../library-shadowing.js';
 import { literalParamsMap, pipeStageAsCall } from '../../library/core.js';
+import { colorStringToOklch } from '../../library/colors.js';
+import {
+  COLORMAP_NAMES,
+  readColorGamut,
+} from '../../numerics/color-conversion.js';
 import {
   Builder,
   elementIndex,
@@ -139,6 +144,11 @@ import {
 } from './lower-lists.js';
 import { SCALARIZE_LIMIT } from './passes.js';
 import {
+  checkTextDomains,
+  isTextRow,
+  patternReplace,
+} from './lower-strings.js';
+import {
   CONTROL_FLOW_HEADS,
   MAX_FOLD_EXPANDED_NODES,
   OVERRIDABLE_CONTROL_FLOW_HEADS,
@@ -166,6 +176,7 @@ import {
   isEnclosureCollection,
   isEnclosureNode,
 } from './lower-enclosure.js';
+import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 
 export { Decline } from './lower-context.js';
 
@@ -220,6 +231,33 @@ const CONSTRUCTS = new Set([
   'IndexOf',
   'Dot',
   'Norm',
+  // The list operators of CE-1531 (`lists.collection()`); not
+  // `Element`, a clause of a `Comprehension` too, nor `RandomSample`, a
+  // draw: a node that holds one is not closed, and is not evaluated at
+  // compile time.
+  'Append',
+  'DeleteAt',
+  'Insert',
+  'Slice',
+  'Linspace',
+  'Chunk',
+  'Partition',
+  'TakeWhile',
+  'DropWhile',
+  'FlatMap',
+  'Scan',
+  'Tabulate',
+  'Identity',
+  'CountIf',
+  'Find',
+  'IndexWhere',
+  'Position',
+  'ApplyWhole',
+  'StartsWith',
+  'EndsWith',
+  'ContainsSequence',
+  // The matrix operators (`matrices.matrix()`).
+  ...MATRIX_HEADS,
 ]);
 /** The heads of a body of draws over literals that a held value folds
  *  under a number as the seed (`seededConstant()`; CE-1524, option (a)). */
@@ -249,6 +287,21 @@ const COLOR_CONVERSIONS = new Set([
   'AsOklab',
   'AsOklch',
 ]);
+/** The number of leading operands of a colour operator that are colours,
+ *  which a tuple of three numbers can stand for (`extractRgb()` of
+ *  `library/colors.ts`). */
+const COLOR_OPERANDS: ReadonlyMap<string, number> = new Map([
+  ...[...COLOR_CONVERSIONS].map((h): [string, number] => [h, 1]),
+  ['ColorMix', 2],
+  ['ColorContrast', 2],
+  ['ColorDelta', 2],
+  ['ContrastingColor', 3],
+  ['GamutMap', 1],
+  ['ColorToColorspace', 1],
+]);
+/** The colour operands of the row `r` (`COLOR_OPERANDS`). */
+const colorOperands = (r: OperatorRow): number =>
+  COLOR_OPERANDS.get(r.head ?? '') ?? 0;
 const LOOPS = new Set([
   'Map',
   'Filter',
@@ -259,6 +312,9 @@ const LOOPS = new Set([
   'Comprehension',
   'Repeat',
   'Iterate',
+  'Scan',
+  'Tabulate',
+  'FlatMap',
 ]);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
@@ -792,6 +848,7 @@ function lowerOnce(
       slice:
         library &&
         answer === undefined &&
+        !isTextRow(rowOfHead(rows, h)) &&
         (CONSTRUCTS.has(h) ||
           REDUCTIONS.has(h) ||
           (rowOfHead(rows, h)?.effect ?? 'effectful') !== 'effectful'),
@@ -873,13 +930,10 @@ function lowerOnce(
     // A colour conversion reads a tuple of three numbers as the sRGB colour
     // of its channels (`extractRgb()` of `library/colors.ts`):
     // `AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`, and so does each of
-    // the two colours of `ColorMix`. A tuple of four carries an alpha, which
-    // `Rgb` here does not, and declines below.
-    const colors = COLOR_CONVERSIONS.has(r.head ?? '')
-      ? 1
-      : r.head === 'ColorMix'
-        ? 2
-        : 0;
+    // the colours of `ColorMix` and the other colour operators
+    // (`COLOR_OPERANDS`). A tuple of four carries an alpha, which `Rgb` here
+    // does not, and declines below.
+    const colors = colorOperands(r);
     const channels = (v: V, i: number) =>
       i < colors &&
       tuples.get(v) === 0 &&
@@ -904,13 +958,14 @@ function lowerOnce(
     // A product of a list of rank 2 or more with another list, and a power
     // of such a list, are the matrix product and power of the interpreter
     // (`M·N`, `M·L`, `M^s` at an integer `s`), not element by element.
-    // A list of points is not a matrix: its product is point by point.
+    // A list of points is not a matrix: its product and its power are
+    // point by point.
     const rank = (v: V) => type(v).shape.length;
     if (
       (r.head === 'Multiply' &&
         args.some((v) => rank(v) > 1 && tuples.get(v) !== 1) &&
         args.filter((v) => rank(v) > 0).length > 1) ||
-      (r.head === 'Power' && rank(args[0]) > 1)
+      (r.head === 'Power' && rank(args[0]) > 1 && tuples.get(args[0]) !== 1)
     )
       decline(
         node,
@@ -937,10 +992,7 @@ function lowerOnce(
       // A tuple operand: only a row whose value on a tuple is its value on
       // the list of the same elements (`TUPLE_RULES`).
       const tuple = given.find((v) => tuples.has(v));
-      if (
-        tuple !== undefined &&
-        (COLOR_CONVERSIONS.has(r.head ?? '') || r.head === 'ColorMix')
-      )
+      if (tuple !== undefined && colorOperands(r) > 0)
         decline(
           node,
           tuples.get(tuple) === 1
@@ -1175,6 +1227,8 @@ function lowerOnce(
         `a ${lane} value: the bigint mode computes integers and booleans only`,
         BIGINT_LANE
       );
+    if (lane === 'string' && (!options.javascript || bigint))
+      decline(e, 'a string: text compiles on javascript only');
     if (shared && v !== undefined && b.effects === effects) {
       const reads = [...facts(e).names].map((n): [string, V | undefined] => [
         n,
@@ -1205,6 +1259,7 @@ function lowerOnce(
         decline(e, 'a complex number with an infinite part')
       );
     if (isSymbol(e)) return symbol(e, want);
+    if (isString(e)) return b.constant(e.string, 'string');
     if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
     // An invalid sub-expression (`Sin(Tuple(w))` of a vector `w`): the
     // interpreter has no value for it.
@@ -1256,6 +1311,7 @@ function lowerOnce(
     // the kind, before a closed node is evaluated.
     if (interval && isEnclosureCollection(e.type.type)) decline(e, COLLECTION);
     if (interval && isEnclosureNode(e)) return enclosures(e);
+    checkTextDomains(e);
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
     switch (e.operator) {
@@ -1543,6 +1599,14 @@ function lowerOnce(
           };
           return power(m);
         }
+        // A matrix base (rank 2 or more, not a list of points) takes no
+        // shortcut of the interval mode: the row declines it (the
+        // interpreter's value is the matrix power).
+        if (interval && e.nops === 2) {
+          const x = value(e.ops[0])!;
+          if (type(x).shape.length > 1 && tuples.get(x) !== 1)
+            return apply(e, 'Power', [x, value(e.ops[1])!]);
+        }
         const exponent = literalNumber(e.ops[1]);
         const nv = exponent?.numericValue;
         const float =
@@ -1619,6 +1683,124 @@ function lowerOnce(
           b.constant(0.5, 'real'),
         ]);
       }
+      case 'AsHsv':
+      case 'AsHsl': {
+        // A conversion of a constructor of its own space is the
+        // constructor's channels (`ashsv.own`), as the interpreter answers
+        // it: `AsHsv(Hsv(h, 1, 0))` keeps `h`, which OKLCh loses at black.
+        const own = e.operator.slice(2);
+        const c = e.ops[0];
+        if (
+          e.nops !== 1 ||
+          !isFunction(c, own) ||
+          c.nops !== 3 ||
+          !isLibraryOperator(c as never, own) ||
+          hasOwnLowering(own, c.operatorDefinition)
+        )
+          break;
+        return apply(
+          e,
+          ofOp(`${e.operator.toLowerCase()}.own`),
+          c.ops.map((op) => value(op)!)
+        );
+      }
+      case 'Color': {
+        // `Color` of a string literal: the interpreter's colour of the
+        // string (`colorStringToOklch()`), computed here, as the `Oklch` of
+        // its three channels. A colour with an alpha declines (no row has
+        // one), and so does any other operand (no string is a value here).
+        const c =
+          e.nops === 1 && isString(e.ops[0])
+            ? colorStringToOklch(e.ops[0].string)
+            : null;
+        if (c === null)
+          decline(e, 'Color of an operand that is not a literal colour string');
+        if (c.alpha !== undefined)
+          decline(e, 'Color of a colour string with an alpha');
+        return apply(
+          e,
+          'Oklch',
+          [c.L, c.C, c.H].map((x) => b.constant(x, 'real'))
+        );
+      }
+      case 'GamutMap': {
+        // The gamut is a string literal: `srgb` is `GamutMap(c)`.
+        if (e.nops !== 2) break;
+        const gamut = isString(e.ops[1])
+          ? readColorGamut(e.ops[1].string)
+          : undefined;
+        if (gamut === undefined)
+          decline(
+            e,
+            'GamutMap of a gamut that is not the literal "srgb" or "display-p3"'
+          );
+        const c = value(e.ops[0])!;
+        return gamut === 'srgb'
+          ? apply(e, 'GamutMap', [c])
+          : apply(e, ofOp('gamutmap.p3'), [c]);
+      }
+      case 'Colormap': {
+        // `Colormap(name, t)` of a palette named by a string literal. Its
+        // value is a list of colours when `t` is an integer of 2 or more,
+        // so it compiles only when the position is a literal that is not
+        // one, or when its static type is a range below 2 (`real<0..1>`):
+        // the shape is settled at compile time (R1 of
+        // docs/COMPILATION-MODEL.md).
+        const name =
+          e.nops === 2 && isString(e.ops[0]) ? e.ops[0].string : undefined;
+        const k = name === undefined ? -1 : COLORMAP_NAMES.indexOf(name);
+        if (k < 0)
+          decline(
+            e,
+            'Colormap of a name that is not a literal palette name, or with no position'
+          );
+        const t = e.ops[1];
+        const range = t.type.type;
+        if (
+          !(isNumber(t)
+            ? !(Number.isInteger(t.re) && t.re >= 2)
+            : typeof range === 'object' &&
+              range.kind === 'numeric' &&
+              range.upper !== undefined &&
+              range.upper < 2)
+        )
+          decline(
+            e,
+            'Colormap of a position that can be an integer of 2 or more (a list of colours): declare its type as a range below 2, such as real<0..1>',
+            UNSETTLED_SHAPE
+          );
+        return apply(e, ofOp('colormap'), [
+          b.constant(k, 'integer'),
+          value(t)!,
+        ]);
+      }
+      case 'ColorToColorspace': {
+        // The tuple of the three channels of the colour in the space named
+        // by a string literal (`lab` is `oklab`), as the interpreter.
+        const name =
+          e.nops === 2 && isString(e.ops[1])
+            ? e.ops[1].string.toLowerCase()
+            : undefined;
+        const space = name === 'lab' ? 'oklab' : name;
+        if (
+          space === undefined ||
+          !['rgb', 'hsl', 'hsv', 'oklab', 'oklch'].includes(space)
+        )
+          decline(
+            e,
+            'ColorToColorspace of a space that is not a literal colour space name'
+          );
+        const c = value(e.ops[0])!;
+        return tuple(
+          e,
+          [0, 1, 2].map((k) =>
+            apply(e, ofOp(`colorchannel.${space}`), [
+              c,
+              b.constant(k, 'integer'),
+            ])
+          )
+        );
+      }
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
         // power of the base, as the interpreter: `Floor(Log(1000, 10))` is
@@ -1639,6 +1821,16 @@ function lowerOnce(
           'Divide',
           [x, base].map((v) => apply(e, 'Ln', [v]))
         );
+      }
+      case 'StringReplace': {
+        // Of a literal pattern (`lower-strings.ts`).
+        const v = patternReplace(e, {
+          text: (s) => b.constant(s, 'string'),
+          scalar,
+          apply: (op, args) => apply(e, ofOp(op), args),
+        });
+        if (v !== undefined) return v;
+        break;
       }
       case 'Chop': {
         // `Chop(x)` is `Chop(x, tol)` at the engine's tolerance at the
@@ -1663,6 +1855,12 @@ function lowerOnce(
         if (e.nops === 1 && owned?.binding.role === 'list') {
           const n = type(owned.binding.v).shape[0];
           return typeof n === 'number' ? b.constant(n, 'integer') : n.v;
+        }
+        // Of a string (its static type): the number of its characters.
+        if (e.nops === 1 && isSubtype(e.ops[0].type.type, 'string')) {
+          const s = scalar(e.ops[0]);
+          if (type(s).lane !== 'string') decline(e, 'Length of a non-string');
+          return apply(e, ofOp('text.length'), [s]);
         }
         return lists.source(e.ops[0], false, true).length;
       }
@@ -1690,7 +1888,50 @@ function lowerOnce(
       case 'IndexOf':
       case 'Dot':
       case 'Norm':
+      case 'Append':
+      case 'DeleteAt':
+      case 'Insert':
+      case 'Slice':
+      case 'Linspace':
+      case 'Chunk':
+      case 'Partition':
+      case 'TakeWhile':
+      case 'DropWhile':
+      case 'FlatMap':
+      case 'Scan':
+      case 'Tabulate':
+      case 'Element':
+      case 'Identity':
+      case 'CountIf':
+      case 'Find':
+      case 'IndexWhere':
+      case 'Position':
+      case 'RandomSample':
+      case 'ApplyWhole':
+      case 'ContainsSequence':
         return lists.collection(e);
+      case 'StartsWith':
+      case 'EndsWith':
+        // Of strings: the rows of the string lane (CE-1530); of lists, the
+        // list operators (CE-1531).
+        if (isSubtype(e.ops[0].type.type, 'string')) break;
+        return lists.collection(e);
+      case 'Matrix':
+      case 'Transpose':
+      case 'ConjugateTranspose':
+      case 'Trace':
+      case 'Diagonal':
+      case 'Determinant':
+      case 'Inverse':
+      case 'MatrixPower':
+      case 'MatrixMultiply':
+      case 'RowReduce':
+      case 'Rank':
+      case 'Shape':
+      case 'Flatten':
+      case 'Reshape':
+      case 'Cross':
+        return matrices.matrix(e);
       case 'Range': {
         const effects = b.effects;
         const s = lists.source(e);
@@ -1781,6 +2022,9 @@ function lowerOnce(
           isSymbol(head) && !shadowsLibraryName(ce as never, head.symbol)
             ? rowOfHead(rows, head.symbol)
             : undefined;
+        // A function literal or a user function of two parameters: the
+        // left fold by it (`lists.reduceBy()`).
+        if (e.nops === 3 && r === undefined) return lists.reduceBy(e);
         // A left fold, as the interpreter's: `Subtract` and `Divide` too.
         if (e.nops !== 3 || (r?.arity !== 'variadic' && r?.arity !== 2))
           decline(
@@ -1876,6 +2120,106 @@ function lowerOnce(
         if (b.effects !== effects) decline(e, 'a derivative with an effect');
         return out;
       }
+      case 'ND': {
+        // `ND(f, x)` of a function literal of one parameter whose body is a
+        // pure real number: the stencil of `D` with no closed form
+        // (`_SYS.nd`), which the interpreter's `ND` runs too
+        // (`stencilDerivativeAt()`). JavaScript only.
+        const [f, x] = e.ops;
+        if (!options.javascript)
+          decline(e, 'ND on another target than javascript');
+        if (!isFunction(f, 'Function') || e.nops !== 2)
+          decline(
+            e,
+            'ND of a value that is not a function literal of one parameter'
+          );
+        const name = f.nops === 2 ? parameterName(f.ops[1]) : undefined;
+        if (name === undefined)
+          decline(
+            e,
+            'ND of a value that is not a function literal of one parameter'
+          );
+        if (f.ops[0].isPure !== true)
+          decline(e, 'ND of a function with an effect');
+        const point = scalar(x);
+        if (!isSubLane(type(point).lane, 'real'))
+          decline(e, 'the point of a derivative is not real');
+        const effects = b.effects;
+        const [out] = region(
+          'derivative',
+          [point],
+          ...realBody(e, name, f.ops[0], 'a derivative'),
+          e
+        );
+        if (b.effects !== effects) decline(e, 'a derivative with an effect');
+        return out;
+      }
+      case 'Limit': {
+        // A closed limit only: its value at compile time, the interpreter's
+        // (`N()`). Another limit declines: the interpreter computes a
+        // symbolic limit at each point first, which no kernel of the
+        // runtime reproduces (the numeric limit is NaN at a jump near the
+        // point, CE-1232). The interval mode declines: the double of `N()`
+        // need not enclose the limit.
+        if (interval) decline(e, 'a limit in the interval mode');
+        const params = isFunction(e.ops[0], 'Function')
+          ? e.ops[0].ops.slice(1).map((p) => parameterName(p))
+          : [];
+        const free = [...facts(e).names].filter((n) => !params.includes(n));
+        if (
+          e.unknowns.length > 0 ||
+          e.isPure !== true ||
+          free.some((n) => lookup(n) !== undefined || options.vars?.includes(n))
+        )
+          decline(
+            e,
+            'a limit that is not closed (only the value of a closed limit is compiled)'
+          );
+        if (ce.angularUnit !== 'rad' || facts(e).size > CLOSED_SIZE)
+          decline(e, `a limit in radians of at most ${CLOSED_SIZE} nodes`);
+        const c = closedForm(e, () => {
+          const v = e.N();
+          return isNumber(v) && v.im === 0 && !v.isNaN ? v : undefined;
+        });
+        if (c === undefined)
+          decline(e, 'a limit with no real value at compile time');
+        return value(c, want);
+      }
+      case 'EvaluateAt': {
+        // `EvaluateAt(f, a)` is `Apply(f, a)` and `EvaluateAt(f, a, b)` is
+        // `Apply(f, b) - Apply(f, a)`, of a function literal of one
+        // parameter, as the interpreter applies it. With an effect, the
+        // interpreter applies `f` at `a` first, which the compiled
+        // difference does not promise: it declines.
+        const [f, ...points] = e.ops;
+        if (
+          !isFunction(f, 'Function') ||
+          f.nops !== 2 ||
+          points.length < 1 ||
+          points.length > 2 ||
+          (points.length === 2 && e.isPure !== true)
+        )
+          decline(
+            e,
+            'EvaluateAt of a value that is not a function literal of one parameter, of no point or more than two, or of an effect at two bounds'
+          );
+        const at = (p: Expression) => ce._fn('Apply', [f, p]);
+        return value(
+          points.length === 1
+            ? at(points[0])
+            : ce._fn('Subtract', [at(points[1]), at(points[0])]),
+          want
+        );
+      }
+      // The interval mode has no complex lane: `Argument` of a real is
+      // `Arctan2(0, x)`, 0 for `x >= 0` and π for `x < 0`, as the
+      // interpreter's.
+      case 'Argument':
+        if (!interval || e.nops !== 1) break;
+        return apply(e, 'Arctan2', [
+          b.constant(0, 'integer'),
+          value(e.ops[0])!,
+        ]);
       case 'Apply': {
         // `Apply(Function(body, p1, …), a1, …)`: the body with each
         // parameter bound to its argument, each argument evaluated once, in
@@ -2330,6 +2674,7 @@ function lowerOnce(
     }
     if (isSymbol(n, 'True') || isSymbol(n, 'False'))
       return b.constant(isSymbol(n, 'True'), 'boolean');
+    if (isString(n)) return b.constant(n.string, 'string');
     // A value that is not an integer (a pole, `Mod(5, 0)`) is lowered as
     // written: its helper throws the pole where the node is evaluated.
     if (!isNumber(n) || (bigint && n.isInteger !== true)) return undefined;
@@ -2857,7 +3202,14 @@ function lowerOnce(
    *  `unknown`: such an input is refused at the end (`program()`). */
   const inputIR = (t: Type) =>
     (interval ? enclosureInput(t) : undefined) ??
+    textInput(t) ??
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
+
+  /** A scalar string input (read once by `text.in`, `input()`). */
+  const textInput = (t: Type) => {
+    const x = inputType(t, cx.wide, true);
+    return x?.lane === 'string' ? x : undefined;
+  };
 
   /** The type that the interval mode reads an input as, whose binding
    *  `def` declares no type: `real` when the inferred type `t` is a number
@@ -2908,7 +3260,7 @@ function lowerOnce(
       given(name, t);
     }
     const ir = positional
-      ? tupleOrInputType(t, cx.wide)
+      ? (textInput(t) ?? tupleOrInputType(t, cx.wide))
       : inputIR(readAs(t, def));
     if (ir === undefined && interval && isEnclosureCollection(t))
       decline(e, COLLECTION);
@@ -2929,7 +3281,12 @@ function lowerOnce(
       if (positional) b.positional += 1;
       return { v: length };
     });
-    const v = b.param(name, { lane: ir.lane, shape });
+    const param = b.param(name, { lane: ir.lane, shape });
+    // A string is read once, as the engine boxes it (`text.in`).
+    const v =
+      ir.lane === 'string'
+        ? b.entryOp('text.in', [param], scalarType('string'))
+        : param;
     // The sign that the range of the declared type proves (`real<0..5>`,
     // `integer<1..>`), not the interval mode, whose enclosure of an input is
     // the host's.
@@ -5051,7 +5408,8 @@ function lowerOnce(
     r.body.some(
       (i) =>
         (i.k === 'op' && (i.op === 'draw' || i.op === 'shuffle')) ||
-        (i.k === 'region' && (i.op === 'seeded' || i.op === 'choice')) ||
+        (i.k === 'region' &&
+          (i.op === 'seeded' || i.op === 'choice' || i.op === 'sample')) ||
         regionsOf(i).some(draws)
     );
 
@@ -5096,6 +5454,7 @@ function lowerOnce(
     tuples,
   };
   const lists = listLowering(cx);
+  const matrices = matrixLowering(cx, lists);
   const fns = functionLowering(cx, lists);
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;

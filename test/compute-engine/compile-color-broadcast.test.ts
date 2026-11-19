@@ -217,12 +217,12 @@ describe('a color operand that is itself a conversion is CORRECT', () => {
     const ce = new ComputeEngine();
     const nested = js(ce, ['AsHsv', ['AsRgb', A]]).run();
     expect(nested.space).toBe('hsv');
-    // The same color as the direct conversion. The HUE does not come back as
-    // the 0.3 degrees it was written with: `toRgb255` rounds to 8-bit sRGB
-    // channels, and a hue that small is inside one 8-bit step, so both routes
-    // answer 0. That is the documented third-digit difference between the
-    // routes, and it is the same on the direct conversion.
-    expect(nested).toEqual(js(ce, ['AsHsv', A]).run());
+    // The same color as the direct conversion, which is the constructor's
+    // own channels (CE-1535), within the rounding of the round trip through
+    // sRGB.
+    const direct = js(ce, ['AsHsv', A]).run();
+    for (const k of ['c0', 'c1', 'c2'])
+      expect(nested[k]).toBeCloseTo(direct[k], 9);
     // With a hue that survives the 8-bit step, the nested conversion agrees
     // with the interpreter channel for channel.
     const C = ['Hsv', 200, 0.5, 0.5];

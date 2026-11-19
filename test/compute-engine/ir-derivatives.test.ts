@@ -647,10 +647,10 @@ describe('IR profile, batch G22: a coordinate of a literal list of points', () =
     check(['PointZ', ['List', ['Tuple', 'x', 1, 'y'], ['Tuple', 2, 'y', 3]]]);
   });
 
-  test('a list of points that is not literal: GLSL still declines', () => {
+  test('a list of points that is not literal: on GLSL an array of vectors (CE-1538)', () => {
     // prettier-ignore
     expect(js(['PointX', 'L']).run!({ L: [[1, 2], [3, 4], [5, 6]] } as never)).toEqual([1, 3, 5]);
-    expect(failure(() => glsl(['PointX', 'L']))).toMatch(/rank 2/);
+    expect(glsl(['PointX', 'L']).success).toBe(true);
   });
 
   test('each point is lowered once: a draw in a point runs once', () => {

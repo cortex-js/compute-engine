@@ -3,9 +3,9 @@
  *
  * A program is a list of functions; the entry function's parameters are the
  * inputs. Every value is defined once and has one type: a scalar lane
- * (`real`, `integer`, `boolean`, `complex`, `color`) and a shape (the lengths of the nested
- * lists around the scalars: `[]` for a scalar, `[3]` for a list of three).
- * A length is a number, or an integer VALUE of the program that holds a
+ * (`real`, `integer`, `boolean`, `complex`, `color`, `string`) and a shape
+ * (the lengths of the nested lists around the scalars: `[]` for a scalar,
+ * `[3]` for a list of three). A length is a number, or an integer VALUE of the program that holds a
  * length known only at run time (`{ v }`): the length parameter of an input,
  * the length operand of a build, the count of a filter. Two lists have one
  * length when their lengths are the same value; the length value dominates
@@ -25,7 +25,8 @@
 
 import type { Type } from '../../../common/type/types.js';
 
-export type Lane = 'real' | 'integer' | 'boolean' | 'complex' | 'color';
+export type Lane =
+  'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string';
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };
@@ -58,10 +59,11 @@ export type Literal =
       readonly plain?: boolean;
     }
   | { readonly lane: 'boolean'; readonly value: boolean }
-  | { readonly lane: 'complex'; readonly value: Cx };
+  | { readonly lane: 'complex'; readonly value: Cx }
+  | { readonly lane: 'string'; readonly value: string };
 
 /** The value of a constant. */
-export type Constant = number | bigint | boolean | Cx;
+export type Constant = number | bigint | boolean | Cx | string;
 
 /** The key of a constant: equal keys are one value (`-0` is not `0`, a
  *  literal marked `inexact` is not the double). */
@@ -77,9 +79,11 @@ export function literalKey({
   const n = (x: number | bigint | boolean) =>
     Object.is(x, -0) ? '-0' : String(x);
   const key =
-    typeof value === 'object'
-      ? `c ${lane} ${n(value.re)} ${n(value.im)}`
-      : `c ${lane} ${n(value)}`;
+    typeof value === 'string'
+      ? `c string ${JSON.stringify(value)}`
+      : typeof value === 'object'
+        ? `c ${lane} ${n(value.re)} ${n(value.im)}`
+        : `c ${lane} ${n(value)}`;
   return inexact === undefined ? key : `${key} ~${inexact}`;
 }
 
@@ -530,6 +534,17 @@ export class Builder {
     this.paramNames.push(name);
     this.lengthOf.push(lengthOf);
     return v;
+  }
+
+  /** The operation `op` in the entry body, before the instruction being
+   *  made: the read of an input (`text.in`), which every later read uses.
+   *  Not counted in `effects` and `impure`. */
+  entryOp(op: string, args: V[], type: IRType): V {
+    const out = this.newValue(type);
+    const i: Instr & { k: 'op' } = { k: 'op', out, op, args };
+    this.defs.set(out, i);
+    this.open[0].body.push(i);
+    return out;
   }
 
   /** The value of `key` made by `make()` once while its region is open. */
