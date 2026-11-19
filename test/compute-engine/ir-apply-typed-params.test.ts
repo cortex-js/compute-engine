@@ -76,6 +76,9 @@ describe('Apply of a function literal with typed parameters', () => {
     ['a list parameter and an untyped scalar parameter', ['Apply', ['Function', ['Add', ['At', 'H', 1], 'n'], typed('H', 'list<real>'), 'n'], 'L', 5], '7', 7],
     ['a list parameter and a real input', ['Apply', ['Function', ['Add', ['At', 'H', 1], 'k'], typed('H', 'list<real>'), typed('k', 'real')], 'L', 'x'], '2.5', 2.5],
     ['a body that reads a local outside', ['Block', ['Declare', 'q', "'real'", 10], ['Apply', ['Function', ['Add', ['At', 'H', 1], 'q'], typed('H', 'list<real>')], 'L']], '12', 12],
+    // The interpreter does not check the elements of a list against the
+    // type of its parameter (CE-1483): the list keeps its lane.
+    ['a list of reals at a list<integer> parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<integer>')], 'L'], '2.5', 2.5, { L: [2.5, 3, 4] }],
     ['a tuple parameter binds the point whole', ['Apply', ['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], typed('p', 'tuple<real, real>')], ['Tuple', 1, 'x']], '1.5', 1.5],
     // (b) A typed scalar parameter of a scalar signature maps over a list.
     ['a real parameter over a list', ['Apply', ['Function', ['Multiply', 2, 'k'], typed('k', 'real')], 'L'], '[4,6,8]', [4, 6, 8]],
@@ -96,7 +99,6 @@ describe('Apply of a function literal with typed parameters', () => {
   // parameter: it reads the list whole.
   // prettier-ignore
   test.each<[string, Json, string, RegExp, string?]>([
-    ['a list of reals at a list<integer> parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<integer>')], 'L'], '2.5', /not list<integer>, the type of its parameter H/],
     ['a list of no stated length at a list<real^3> parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<real^3>')], 'L'], '2.5', /not vector<real\^3>, the type of its parameter H/],
     ['a real at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'x'], 'Error(ErrorCode("incompatible-type", "integer", "0.5"), 0.5)', /not integer, the type of its parameter k/],
     ['a list of reals mapped at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'L'], '[Error(ErrorCode("incompatible-type", "integer", "2.5"), 2.5, "while applying the function literal element-wise over 3 elements (element 1)"),4,5]', /not integer at each element, the type of its parameter k/],

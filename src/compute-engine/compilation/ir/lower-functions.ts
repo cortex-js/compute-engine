@@ -310,6 +310,7 @@ function signatureTypes(e: Fn, literal: Fn) {
   // Where the interpreter maps a call over a list argument: the signature
   // of the binding, or of the literal for a name declared `function`.
   const mapsAt = listMapsAt(signature ?? literal.type.type);
+  const pointsAt = pointsMapAt(signature ?? literal.type.type);
   // A colour result is on the colour lane; a colour parameter declines.
   const result: IRType | undefined =
     open || list !== undefined || points !== undefined || shaped
@@ -328,6 +329,7 @@ function signatureTypes(e: Fn, literal: Fn) {
     points,
     shaped,
     mapsAt,
+    pointsAt,
   };
 }
 
@@ -351,6 +353,27 @@ function listMapsAt(sig: Type): (i: number, points: boolean) => boolean {
     if (!slot.mappable || slot.elements === undefined) return false;
     if (!isPointParameterType(slot.elements)) return true;
     return points && !isIndexReadTuple(slot.elements);
+  };
+}
+
+/** Whether the interpreter maps a call of a user function of the signature
+ *  `sig` over a list of points at the parameter `i`, one point per call
+ *  (`pointListParamSlots()`): a parameter declared as a point, not an
+ *  indexed one, in a signature with no parameter `broadcastable<T>` and
+ *  not all scalar (`listMapsAt()`). */
+function pointsMapAt(sig: Type): (i: number) => boolean {
+  if (broadcastableParamSlots(sig) !== undefined || paramsAreScalar(sig))
+    return () => false;
+  const plan = pointListParamSlots(sig);
+  if (plan === undefined) return () => false;
+  return (i) => {
+    const slot = plan.at(i);
+    return (
+      slot.mappable &&
+      slot.elements !== undefined &&
+      isPointParameterType(slot.elements) &&
+      !isIndexReadTuple(slot.elements)
+    );
   };
 }
 
@@ -713,17 +736,48 @@ export function functionLowering(
         sig = signatureTypes(e, binding.literal);
         signatures.set(binding.key, sig);
       }
+      // A parameter declared as a point maps a list of points
+      // (`pointsMapAt()`): its arguments are lowered first to tell.
+      const pointsAt = sig.params.some((_, i) => sig.pointsAt(i));
       if (
         early === undefined &&
-        sig.params.some(
-          (p) =>
-            ('open' in p && p.open) ||
-            (!functions.has(binding.key) &&
-              ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
-                ('point' in p && p.point !== undefined)))
-        )
+        (pointsAt ||
+          sig.params.some(
+            (p) =>
+              ('open' in p && p.open) ||
+              (!functions.has(binding.key) &&
+                ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
+                  ('point' in p && p.point !== undefined)))
+          ))
       )
         early = e.ops.map((op) => cx.value(op)!);
+      // A list of points there: the call maps, one point per call, each
+      // other argument as at any mapped call (`mapOver()`).
+      const lowered = early;
+      if (
+        given === undefined &&
+        pointsAt &&
+        lowered !== undefined &&
+        lowered.some((v, i) => sig.pointsAt(i) && cx.tuples.get(v) === 1)
+      )
+        return mapOver(
+          e,
+          binding,
+          [...(functions.get(binding.key)?.values() ?? [])].some((f) =>
+            lowering.has(f)
+          ),
+          lowered,
+          (i) => {
+            const v = lowered[i];
+            const t = type(v);
+            if (sig.pointsAt(i) && cx.tuples.get(v) === 1) return 'points';
+            return t.shape.length > 0 &&
+              !cx.tuples.has(v) &&
+              sig.mapsAt(i, false)
+              ? 'list'
+              : undefined;
+          }
+        );
       // An argument can hold the first call of the same function.
       fn =
         functions.get(binding.key)?.get(laneKey(sig, early)) ??
@@ -840,7 +894,12 @@ export function functionLowering(
         );
       return [...length, v];
     });
-    if (mapped) return mapOver(e, binding, fn, values);
+    if (mapped)
+      return mapOver(e, binding, lowering.has(fn), values, (i) =>
+        type(values[i]).shape.length > 0 && fn.params[i].shape.length === 0
+          ? 'list'
+          : undefined
+      );
     // A call of a function whose body is being lowered (on a cycle of
     // calls) with no declared result assumes a real scalar, which
     // `define()` checks against the body; a declared list or tuple result
@@ -920,26 +979,29 @@ export function functionLowering(
     return out;
   };
 
-  /** The call `e` of `fn` of the arguments `args`, some of them lists for
-   *  its scalar parameters: as the interpreter maps it, a build of the
-   *  calls of the elements at each index, zipped, and of the scalars and
-   *  of the arguments of a list or point parameter, bound whole. The
-   *  lists are flat and of one length (lists of different lengths give
-   *  `incompatible-dimensions`), and the result of `fn` is a scalar. */
+  /** The call `e` of the arguments `args`, some of them lists that the
+   *  call maps over (`maps`): a flat list for a scalar parameter
+   *  (`'list'`), a list of points for a point parameter (`'points'`). As
+   *  the interpreter maps it, a build of the calls of the elements at each
+   *  index, zipped, and of the other arguments, bound whole. The lists
+   *  are of one length (lists of different lengths give
+   *  `incompatible-dimensions`), and the result of the function is a
+   *  scalar or a point. `recursive`: a call of a function being lowered. */
   const mapOver = (
     e: Fn,
     binding: { key: object; literal: Fn } | undefined,
-    fn: UserFunction,
-    args: V[]
+    recursive: boolean,
+    args: V[],
+    maps: (i: number) => 'list' | 'points' | undefined
   ): V => {
-    if (lowering.has(fn))
+    if (recursive)
       decline(e, `a list argument of a recursive call of ${e.operator}`);
     const lengths = new Set<string | number>();
     const sources = args.map((v, i) => {
       const t = type(v);
-      if (t.shape.length === 0 || fn.params[i].shape.length > 0)
-        return undefined;
-      if (t.shape.length > 1 || cx.tuples.has(v))
+      const how = maps(i);
+      if (how === undefined) return undefined;
+      if (how === 'list' && (t.shape.length > 1 || cx.tuples.has(v)))
         decline(
           e,
           `a list argument of ${e.operator} that is not a flat list (the interpreter maps the function to the leaves of a nested list)`
@@ -965,10 +1027,10 @@ export function functionLowering(
           binding,
           args.map((v, i) => sources[i]?.at(k) ?? v)
         );
-        if (type(out).shape.length > 0)
+        if (type(out).shape.length > 0 && cx.tuples.get(out) !== 0)
           decline(
             e,
-            `a list argument of ${e.operator}, whose result is not a scalar (the interpreter gives a list of lists)`
+            `a list argument of ${e.operator}, whose result is not a scalar or a point (the interpreter gives a list of lists)`
           );
         return out;
       },

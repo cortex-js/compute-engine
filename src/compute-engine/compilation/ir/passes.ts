@@ -148,7 +148,10 @@ export function runPasses(
     run('scalarize', (q, r) =>
       scalarize(q, r, options.scalarize ? SCALARIZE_LIMIT : short)
     );
-  const budget = { left: options.inline ? INLINE_BUDGET[options.inline] : 0 };
+  const budget = {
+    left: options.inline ? INLINE_BUDGET[options.inline] : 0,
+    grown: new Set<string>(),
+  };
   for (let round = 0; round < 8; round++) {
     let changed = false;
     const lists = options.fold === 'lists';
@@ -619,7 +622,7 @@ const inline = (
   p: Program,
   rows: readonly OperatorRow[],
   where: 'loop' | 'repeated',
-  budget: { left: number },
+  budget: { left: number; grown: Set<string> },
   short = 0
 ): ReturnType<Pass> => {
   const fx = effects(p, rows);
@@ -630,9 +633,18 @@ const inline = (
   type Site = { fn: string; loop: boolean };
   const sites = new Map<Instr, Site>();
   const counts = new Map<string, number>();
+  // By the rule 'repeated', the functions that call a callee twice or more,
+  // in this round or an earlier one (`budget.grown`, kept across the rounds
+  // since a copy removes the calls), marked as each call is counted, so a
+  // copy made later in the round counts too: such a function is not copied
+  // by that rule, so that a chain of functions each calling the next several
+  // times grows with the call counts, not their product.
   const site = (i: Instr & { k: 'call' }, s: Site) => {
     sites.set(i, s);
-    counts.set(`${s.fn} ${i.fn}`, (counts.get(`${s.fn} ${i.fn}`) ?? 0) + 1);
+    const key = `${s.fn} ${i.fn}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (where === 'repeated' && !cyclic.has(i.fn) && counts.get(key)! > 1)
+      budget.grown.add(s.fn);
   };
   const walk = (fn: string, r: Region, loop: boolean): void =>
     r.body.forEach((i) => {
@@ -679,7 +691,9 @@ const inline = (
       ) ||
       !(
         s.loop ||
-        (where === 'repeated' && counts.get(`${s.fn} ${i.fn}`)! > 1) ||
+        (where === 'repeated' &&
+          counts.get(`${s.fn} ${i.fn}`)! > 1 &&
+          !budget.grown.has(i.fn)) ||
         shortList(p.types[i.outs[0]], short)
       )
     )

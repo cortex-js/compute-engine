@@ -59,7 +59,7 @@ const CASES: Case[] = [
     expr: ['g', 'B'],
     inputs: { B },
     interpreted: '[3,7]',
-    js: undefined,
+    js: [3, 7],
     glsl: false,
   },
   {
@@ -69,7 +69,7 @@ const CASES: Case[] = [
     expr: ['g', 'B'],
     inputs: { B },
     interpreted: '[3,7]',
-    js: undefined,
+    js: [3, 7],
     glsl: false,
   },
   {
@@ -79,7 +79,7 @@ const CASES: Case[] = [
     expr: ['Apply', 'g', 'B'],
     inputs: { B },
     interpreted: '[3,7]',
-    js: undefined,
+    js: [3, 7],
     glsl: false,
   },
   {
@@ -93,7 +93,7 @@ const CASES: Case[] = [
     ],
     inputs: { B },
     interpreted: '17',
-    js: undefined,
+    js: 17,
     glsl: false,
   },
   {
@@ -112,7 +112,7 @@ const CASES: Case[] = [
     expr: ['h', 'B', ['Tuple', 10, 20]],
     inputs: { B },
     interpreted: '[21,23]',
-    js: undefined,
+    js: [21, 23],
     glsl: false,
   },
   {
@@ -493,8 +493,12 @@ describe('CE-1422: A CALL OF A USER FUNCTION MAPS OR BINDS AS THE INTERPRETER', 
     }
   });
 
-  test('the decline of a list of points at a point parameter names the case', () => {
-    const c = CASES[0];
+  test('the decline of a list of points that the interpreter maps to its numbers names the case', () => {
+    const c = CASES.find(
+      (c) =>
+        c.name ===
+        'a name declared `function` with an untyped parameter, a list of points'
+    )!;
     expect(() =>
       compile(engine(c).box(c.expr as never), {
         profile: 'ir',

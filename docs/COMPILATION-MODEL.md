@@ -2197,16 +2197,21 @@ booleans of rank 1 can be written with `L = ReplaceAt(L, i, v)` and
 array in place, with these rules:
 
 - The local owns its array: the declaration copies its value, so an input
-  (`let L = H`) is not changed.
+  (`let L = H`) or a constant (`let L = C`) is not changed.
 - Every other occurrence of `L` in its scope is `At(L, i)`, `Length(L)` or
   the value of the block (its last statement, also `Typed(L, …)`). Any other
   read (`let M = L`, `f(L)`, `[L, M]`, `L` in a function literal) declines:
   the interpreter's lists are values (`let M = L; L[1] += 5; M` is the old
   list), and compiled code shares no array.
 - The element type is the declared type of the local (`let L: list<real> =
-  …`) or the type of its value. A written value of another lane declines
-  (`replaceAt(L, 1, 0.5)` of a list of integers: the interpreter widens the
-  list to reals).
+  …`) or the type of its value. A real written to a list of integers of no
+  declared type (`let L = [0 for k in 1..n]`, then `L[k] = 0.5`) puts the
+  list on reals from its declaration, as the interpreter widens it; the
+  elements before the write are the same numbers. A written value of
+  another lane declines: a real for a declared `list<integer>` (the
+  interpreter gives an `incompatible-type` error), a complex number or a
+  boolean for a list of integers.
+- A list of tuples (of points) written in place declines.
 - A negative index counts from the end, as in the interpreter. An index out
   of range, 0 or not an integer throws `out-of-range` at run time, where the
   interpreter gives an error; a constant index out of a stated length

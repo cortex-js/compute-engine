@@ -1260,9 +1260,19 @@ the interpreter's lists are values, and the code shares no array of a written
 local. Any other write (`Assign(L, Append(L, v))`, a whole list, a declaration
 of `L` again in the scope) declines with "a write to a constant … or to a list
 local", as before. A written value whose lane is not a sub-lane of the element
-lane declines (`ReplaceAt(L, 1, 0.5)` of a list of integers: the interpreter
-widens the list); the element lane is the declared one
-(`Declare(L, 'list<real>', …)`) or that of the value. A write in a `Sum`, a
+lane declines, with one exception; the element lane is the declared one
+(`Declare(L, 'list<real>', …)`) or that of the value. The exception (CE-1480):
+a real written to a list local of integers of no declared type
+(`ReplaceAt(L, 1, 0.5)` of `L = [0 for k in 1..n]`), which the interpreter
+widens to a list of reals. `listWrite()` then throws `WidenList`, and `lower()`
+lowers the program again with that local on the real lane from its
+declaration (the copy is on the real lane): its elements before the write are
+the same numbers, so every read gives the interpreter's value, and a read that
+needs an integer declines as for any real. A declared `list<integer>` (the
+interpreter gives an `incompatible-type` error), a complex and a boolean value
+still decline. The declaration also copies a constant (`let L = C` of a
+`const C = [1, 2, 3]`, shared through `preambleOnce`), which no write
+changes. A write in a `Sum`, a
 `Product`, a `Map` or a `Filter` body to a list local declared outside it
 declines, as for a scalar local. GLSL, the interval mode and the `bigint` mode
 decline such a local. In a random frame these operations are no draw sites
@@ -2102,14 +2112,18 @@ declines); it maps a list at every parameter when all are scalar
 (`pointListParamSlots()`), a list of points at that parameter (not at an indexed
 one, `p ↦ p[1] + p[2]`) and any list at a parameter of a scalar type or of no
 stated type (user decision 2026-10-24); every other list binds whole. The
-profile maps a flat list at a scalar parameter, the other arguments bound whole
-in each cell (`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42` of
-`k((1, 2), [3, 4])` is `[42, 42]`. A list that the interpreter maps where the
+profile maps a flat list at a scalar parameter, and a list of points at a
+parameter declared as a point that the interpreter maps (`pointsMapAt()`,
+CE-1477), one point per call, the other arguments bound whole in each cell
+(`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42` of
+`k((1, 2), [3, 4])` is `[42, 42]`, and `g(B)` of a list of points `B` with
+`g := (p: tuple<real, real>) ↦ p[1] + p[2]`, declared `function` or not, is
+`[3, 7]` at `B = [(1, 2), (3, 4)]`. A list that the interpreter maps where the
 parameter is a list or took a point or a list of points at the first call
 declines, as does a list of points or a nested list that the interpreter maps
-(to the points, or to the leaves): `g(B)` of a list of points `B` with
-`g := (p: tuple<real, real>) ↦ p[1] + p[2]`, declared `function` or not, and
-with `g := x ↦ 2x`. A tuple at a parameter annotated as a scalar declines (the
+to the leaves (`g(B)` with `g := x ↦ 2x`), and a list of points at a parameter
+declared `broadcastable<tuple<real, real>>`. A tuple at a parameter annotated as
+a scalar declines (the
 interpreter maps the function over its components: `g((3, −4))` with
 `g := (p: real) ↦ |p|` is `(3, 4)`), also beside a mapped list. When the
 interpreter binds the arguments whole, a flat list of numbers of a stated length
@@ -2199,11 +2213,16 @@ parameter declared a list or a tuple of numbers binds its argument whole, as the
 interpreter does, and the argument must have that type (a list of the declared
 lane, the same tuple mark, a stated length where the type states one), so
 `Apply(((H: list<real>), (n: integer)) ↦ H[1] + n, L, 5)` is `7` at
-`L = [2, 3, 4]`; a parameter declared a scalar takes a scalar of its lane, or,
-when the signature is scalar, each element of a flat list that the literal maps
-over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`). Another argument declines (`L`
-of `list<real>` at a parameter `list<integer>` or `list<real^3>`, which the
-interpreter reads whole with no check; a real at `integer`, an
+`L = [2, 3, 4]`. A list of reals at a list parameter of integers (not of tuples)
+is bound whole on its own lane, since the interpreter checks no element
+(CE-1483): `Apply((H: list<integer>) ↦ H[1], L)` is `2.5` at
+`L = [2.5, 3, 4]`, also when the type of `L` admits NaN or an infinity; so is
+a list of reals at `list<real<0..1>>`. A parameter declared a scalar takes a
+scalar of its lane, or, when the signature is scalar, each element of a flat
+list that the literal maps over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`).
+Another argument declines (`L` of no stated length at a parameter
+`list<real^3>`, which the interpreter reads whole with no check; a tuple at a
+tuple parameter whose type it does not prove, and a real at `integer`, an
 `incompatible-type` error), and so does a declared type that is not a scalar, a
 list or a tuple of numbers (a union, `real | list<real>`). A list at an untyped
 parameter still declines unless the literal maps over it. A parameter with a
@@ -2276,8 +2295,25 @@ The lists must be flat and have one length: equal stated lengths, or one
 run-time length value (`h(D, D)`); lists of two lengths (the interpreter gives
 `incompatible-dimensions`) or of lengths that are not proved equal (`h(D, G)`)
 decline, as do a nested list (the interpreter maps to the leaves), a list of
-points, a function whose result is not a scalar (a list of lists), and a list
-argument of a recursive call. A tuple argument for a scalar parameter declines
+points at a scalar parameter, a function whose result is not a scalar or a point
+(a list of lists), and a list argument of a recursive call. A list of points at
+a parameter declared as a point (a tuple type, not one that only the index reads
+of the body inferred, `isIndexReadTuple()`), in a signature that is not all
+scalar and has no parameter `broadcastable<T>` (`pointsMapAt()`, the test of the
+interpreter's `pointListParamSlots()`), is mapped the same way, one point per
+call (CE-1477): the arguments of each call of such a function are lowered before
+the function, a list of points at such a parameter is zipped with the other
+lists of points there and with the flat lists at scalar parameters (of one
+length, as above), and a point or a scalar elsewhere is bound whole. A result
+that is a point makes the call a list of points: with
+`f := (p: tuple<number, number>) ↦ (p[1] + 1, p[2])` declared
+`(tuple<number, number>) -> tuple<number, number>`, `f(P)` is `[(2, 2), (4, 4)]`
+at `P = [(1, 2), (3, 4)]`, and so is a flat list mapped at a scalar parameter
+(`f((1, 2), L)` of `f := (p: tuple<real, real>, t: real) ↦ (p[1] + t, p[2])`).
+On GLSL a list of points of a constant length is written out (a `PointList` or
+a literal `List` of points, "Tuples"): `f` of it compiles when the result of
+`f` is a scalar, and a list of points as the result declines. A tuple argument
+for a scalar parameter declines
 (a tuple is atomic). A declared result `complex` of a real body is the body
 converted to the complex lane. A declared result `color` takes a body on the
 colour lane ("The colour lane"); a parameter `color` declines.
@@ -2375,8 +2411,16 @@ and complex modes) also a call of a function that its caller calls twice or more
 (the pass option `inline`, `'loop'` or `'repeated'`, set in `sliceProgram()`),
 and a call whose result is a list of a constant length of at most 16 elements
 (the pass option `unrollBuilds`; "Lists", the short lists), under the conditions
-below and the budget of the rule `'repeated'`. A sum written out takes its calls
-out of the loop that the rule `'loop'` copies: with that rule
+below and the budget of the rule `'repeated'`. The rule `'repeated'` does not
+copy a function that calls a function twice or more (in the current round of
+the passes or an earlier one, `budget.grown`): its callee is copied into it,
+and its callers call it, so a chain of functions each calling the next several
+times grows with the call counts, not their product; other call graphs (a
+function reached by single calls along two paths) are bounded only by
+`INLINE_BUDGET`. With `f(a) := Sin(a)`, `g(b) := f(b) + … + f(b + 4)` and
+`h(c) := g(c) + … + g(c + 4)`, `h(x)` holds a call of `g` at each term and `g`
+the 5 copies of `f`, where copies of `g` were 21 `Math.sin(` sites (CE-1475).
+A sum written out takes its calls out of the loop that the rule `'loop'` copies: with that rule
 `showcase/voronoi-diagram` #0 of Tycho's corpus is a call of `n(x, y, k)` at
 each term, 6.8 times slower than its loop (38 µs a call against 5.6), and 4.4 µs
 with the rule `'repeated'`. In Tycho's `voronoi-diagram`, `n(x, y, k)` is called
@@ -2406,7 +2450,8 @@ another lane than the call's result (`id(k)` of an integer index for a real
 at most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and 4,000 by
 the rule `'repeated'` (where the sums written out multiply the sites: a function
 read at the 16 terms of each of four sums needs about 1,900); past it, calls
-stay, so a chain of functions each calling the previous three times stops there.
+stay, so a chain of functions each calling the previous three times in a loop
+stops there.
 A copied call of a function that runs a `Loop` can be moved out of the loop by
 `invariants`, so a program that threw `iteration-limit-exceeded` can give its
 value ("Effects" says it for a direct call): `hh := Function(k·LL(p), p, k)`,

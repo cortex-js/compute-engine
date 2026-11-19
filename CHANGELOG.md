@@ -12,7 +12,7 @@
     an integer or out of range throws `out-of-range` when the code runs, where
     the interpreter gives an error. A list local that the code reads other
     than with `L[i]` or `length(L)` (`let M = L`, `f(L)`), and a written value
-    of another type (`replaceAt(L, 1, 0.5)` of a list of integers), decline.
+    of another type (a complex number in a list of reals), decline.
   - `s += e` (`AddTo(s, e)`) is `s = s + e`, and `(a, b) := (b, a + b)`
     computes both values before it writes either name, on every target that
     compiles an assignment.
@@ -27,6 +27,34 @@
   compiles and runs in about 130 ms; the interpreter took more than 30 s.
 
 ### Resolved Issues
+
+- **`compile()` compiles a function of a point called with a list of points
+  again** (CE-1477). With `P: list<tuple<real, real>>` and `f` declared
+  `(tuple<number, number>) -> tuple<number, number>`,
+  `f := p ↦ (p[1] + 1, p[2])`, `f(P)` declined in 0.194.0 ("a list argument of
+  f that the parameter 1, a list or a point, would take whole"). It now gives
+  `[(2, 2), (4, 4)]` at `P = [(1, 2), (3, 4)]` on JavaScript and in the
+  interval mode, as the interpreter does: the function is called once per
+  point. Two lists of points of one length, or a list of points and a list of
+  numbers of its length, are zipped; a point or a number beside them is passed
+  to each call. On GLSL, a function with a number result compiles over a
+  `PointList` or a literal list of points of a constant length. Lists of
+  different lengths, lists whose lengths are known only when the code runs
+  and are not the same value, and a function whose result is a list still
+  decline. A function of numbers called with a list of numbers can now also
+  return a point: `g(L)` with `g := u ↦ (u, 2u)` is `[(1, 2), (2, 4)]` at
+  `L = [1, 2]`.
+
+- **On JavaScript, the compiled code of a chain of functions grows with the
+  call counts, not their product** (CE-1475). With `f(a) := Sin(a)`,
+  `g(b) := f(b) + f(b + 1) + … + f(b + 4)` and
+  `h(c) := g(c) + g(c + 1) + … + g(c + 4)`, the code of `h(x)` held 21
+  `Math.sin(` sites and 761 characters in 0.194.0; it now holds 5 (the copies
+  of `f` in `g`, which `h` calls) and 409 characters, with the same value. A
+  chain of 10 functions, each calling the previous three times, went from
+  10,729 characters to 1,455. A function that calls another function twice or
+  more is no longer copied at its calls outside a loop; a call in a loop is
+  still copied.
 
 - **`compile()` compiles a call of a function of an input inside a sum whose
   index has the name of that input again** (CE-1479). With `x: real` and
@@ -50,6 +78,32 @@
   a list of numbers give the list of their values at each point. A list of
   points as the result, and a component of a run-time length, still decline
   on GLSL.
+
+- **`compile()` compiles a list of integers that the program fills with
+  reals** (CE-1480). `let points = [0.0 for j in 1..2*n]` followed by
+  `points[2*k - 1] = x` with a real `x` declined since 0.194.0 with "a real
+  value written to a list of integer elements" (`0.0` is the integer 0), so
+  the preludes of Tycho's barnsley-fern, koch-snowflake and galton-board
+  showcases, and the `grayscott` step of turing-patterns, ran on the
+  interpreter. The interpreter
+  widens the list to reals; the compiled code now holds the list as reals
+  from its declaration, and gives the interpreter's values:
+  `let L = [0, 0, 3]; L[1] += 0.5; L` is `[0.5, 0, 3]`. A list declared
+  `list<integer>` still declines (the interpreter gives an
+  `incompatible-type` error), and so does a complex number or a boolean
+  written to a list of integers.
+
+- **`compile()` binds a list of reals at a parameter `list<integer>` of a
+  function literal** (CE-1483). `Apply((H: list<integer>) ↦ H[1], L)`
+  declined since 0.194.0 with "an argument of Apply that is not
+  list<integer>" when `L` is a list of reals, also of the type
+  `list<nan | real | signed_infinity>` of a Tycho row, so the action of the
+  buddhabrot showcase ran on the interpreter and passed its deadline. The
+  interpreter binds the list whole and checks no element: at `L = [2.5, 3, 4]`
+  both now give `2.5`, and the buddhabrot action compiles again (90,001 cells
+  after 5,000 samples). A tuple whose type does not prove the parameter's, and
+  a real at a parameter `integer`, still decline: the interpreter gives an
+  `incompatible-type` error.
 
 - **`compile()` compiles a list of the calls of a recursive function again**
   (CE-1472). With `r` declared `(real) -> real` and

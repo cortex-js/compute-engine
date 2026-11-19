@@ -600,6 +600,82 @@ describe('IR profile, batch G21: robustness', () => {
   }, 60_000);
 });
 
+describe('CE-1475: the copies of the rule repeated grow with the call counts', () => {
+  // A function that calls a callee twice or more is not copied by the rule
+  // 'repeated' (JavaScript, where sums are written out): its callee is
+  // copied into it, and its callers call it.
+  const repeated = (json: Json, inline: boolean) =>
+    compileSlice(box(json), {
+      target: 'javascript',
+      passes: { ...ALL_PASSES, inline: inline && 'loop' },
+    } as never);
+  /** The compiled text of `json`, with its functions; its values are those
+   *  of the compilation without the pass, bit for bit, and the
+   *  interpreter's. */
+  function text(json: Json, interpreter = true): string {
+    const [on, off] = [repeated(json, true), repeated(json, false)];
+    for (const p of [{ x: 0.3 }, { x: -1.2 }]) {
+      const a = on.run(p);
+      expect([json, p, a]).toEqual([json, p, off.run(p)]);
+      if (interpreter) expect(agree(a, interpreted(json, p))).toBe(true);
+    }
+    const r = js(json);
+    expect(r).toMatchObject({ success: true, profile: 'ir' });
+    expect(r.run!({ x: 0.3 } as never)).toBe(on.run({ x: 0.3 }));
+    return `${r.code}\n${(r as { preamble?: string }).preamble ?? ''}`;
+  }
+  const sines = (s: string) => count(s, /Math\.sin\(/g);
+
+  test('the witness: f is copied into g, and h calls g', () => {
+    define('rf', ['Function', ['Sin', 'a'], 'a']);
+    // prettier-ignore
+    define('rg', ['Function', ['Add', ...[0, 1, 2, 3, 4].map((m) => ['rf', ['Add', 'b', m]])], 'b']);
+    // prettier-ignore
+    define('rh', ['Function', ['Add', ...[0, 1, 2, 3, 4].map((m) => ['rg', ['Add', 'c', m]])], 'c']);
+    const s = text(['rh', 'x']);
+    expect(sines(s)).toBe(5);
+    expect(count(s, /u\d+_rg\(/g)).toBe(5);
+    expect(count(s, /u\d+_rf\(/g)).toBe(0);
+  });
+
+  test('125 composed calls: one function of five copies', () => {
+    // Tycho's `f(f(f(f(f(x)))))`, three levels deep.
+    // prettier-ignore
+    define('rc0', ['Function', ['Add', ['Sin', 'a'], ['Square', ['Sin', 'a']]], 'a']);
+    for (let i = 1; i <= 3; i++) {
+      let body: Json = 'a';
+      for (let j = 0; j < 5; j++) body = [`rc${i - 1}`, body];
+      define(`rc${i}`, ['Function', body, 'a']);
+    }
+    let expected = 0.3;
+    for (let i = 0; i < 125; i++) {
+      const b = Math.sin(expected);
+      expected = b + b * b;
+    }
+    expect(sines(text(['rc3', 'x']))).toBe(5);
+    const v = js(['rc3', 'x']).run!({ x: 0.3 } as never);
+    expect(agree(v, expected, 1e-10)).toBe(true);
+  });
+
+  test('a chain of functions each calling the previous three times grows by a constant', () => {
+    define('rd0', ['Function', ['Sin', 'q'], 'q']);
+    const lengths: number[] = [];
+    for (let i = 1; i <= 10; i++) {
+      // prettier-ignore
+      define(`rd${i}`, ['Function', ['Add', ...[0, 1, 2].map((m) => [`rd${i - 1}`, ['Add', 'q', m]])], 'q']);
+      const s = text([`rd${i}`, 'x'], i <= 4);
+      // `rd0` copied into `rd1`; each other function calls the previous one.
+      expect(sines(s)).toBe(3);
+      lengths.push(s.length);
+    }
+    // Each level adds one function of three calls: the steps are the same
+    // to a few digits of the names, where copies would triple them.
+    const steps = lengths.slice(2).map((n, k) => n - lengths[k + 1]);
+    expect(Math.max(...steps) - Math.min(...steps)).toBeLessThanOrEqual(10);
+    expect(lengths[9]).toBeLessThan(3000);
+  });
+});
+
 //
 // WebGL2
 //

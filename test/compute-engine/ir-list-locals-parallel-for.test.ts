@@ -143,16 +143,32 @@ describe('A list local written in place (4.1)', () => {
     throwsAt(add, { n: 4 });
   });
 
-  test('a real written to a list of integers declines: the interpreter widens the list', () => {
-    expect(declines(replace('1', 'n + 0.5'), { n: 1 })).toMatch(
-      /a real value written to a list of integer elements/
-    );
+  test('a real written to a list declared list<integer> declines', () =>
+    // The interpreter gives an `incompatible-type` error. A list of no
+    // declared type is widened (CE-1480, `ir-list-local-widening.test.ts`).
+    expect(
+      declines(
+        'function f(n: integer) { let L: list<integer> = [0, 0, n]; L[1] += 0.5; L }',
+        { n: 1 }
+      )
+    ).toMatch(/a real value written to a list of integer elements/));
+
+  test('a widened list at a declared integer result declines', () => {
+    // The interpreter does not check the declared result and gives the
+    // reals ([0.5, 0, 3] and 0.5); the compiled body is real, which the
+    // declared result refuses.
     expect(
       declines(
         'function f(n: integer) -> list<integer> { let L = [0, 0, n]; L[1] += 0.5; L }',
-        { n: 1 }
+        { n: 3 }
       )
-    ).toMatch(/a real value written to a list of integer elements/);
+    ).toMatch(/a body of f that is not list<integer>/);
+    expect(
+      declines(
+        'function f(n: integer) -> integer { let L = [0, 0, n]; L[1] += 0.5; L[1] }',
+        { n: 3 }
+      )
+    ).toMatch(/a body of f that is not integer/);
   });
 
   test('a list local declared list<real> takes a real', () =>
@@ -539,6 +555,33 @@ describe('The buddhabrot step (CE-1462)', () => {
     // The samples continue where the grid stopped.
     expect(code.run({ H: once, n: 500 })).toEqual(handStep(once, 500));
     expect(once[90000]).toBe(2000);
+  });
+
+  test('the action body: the step literal applied to a row of reals (CE-1483)', () => {
+    // Tycho's action `H → step(H, 5000)`: `Apply` of the literal of `step`
+    // to the row `H`, of a Desmos-style type. The interpreter binds the list
+    // whole, with no check of its elements against `list<integer>`.
+    // The canonical literal of `step` (the names of the Epsil library mapped
+    // to operators, as in the MathJSON that Tycho passes).
+    const defining = new ComputeEngine();
+    executeEpsil(defining, STEP);
+    const literal = (
+      defining.box(['step', 'H', 1] as never).operatorDefinition as unknown as {
+        _lambdaLiteral: Expression;
+      }
+    )._lambdaLiteral.json;
+    const ce = new ComputeEngine();
+    ce.declare('H', 'list<nan | real | signed_infinity>');
+    const code = compile(ce.box(['Apply', literal, 'H', 5000] as never), {
+      to: 'javascript',
+      symbolic: ['H'],
+      fallback: false,
+    } as never) as unknown as Result;
+    expect(code.success).toBe(true);
+    const H = new Array(90001).fill(0);
+    const out = code.run({ H }) as number[];
+    expect(out).toEqual(handStep(H, 5000));
+    expect([out.length, out[90000]]).toEqual([90001, 5000]);
   });
 
   test('a variant whose cells do not depend on an orbit gives the interpreter’s value', () =>

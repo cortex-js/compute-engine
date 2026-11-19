@@ -317,10 +317,47 @@ type Misuse = 'write' | 'read' | undefined;
 const worse = (a: Misuse, b: Misuse): Misuse =>
   a === 'write' || b === 'write' ? 'write' : (a ?? b);
 
+/** The decline of a real written to a list local written in place whose
+ *  integer lane comes from its value (`listWrite()`): `lower()` lowers the
+ *  program again with the local of the declaration `declaration` on the
+ *  real lane, as the interpreter widens the list. */
+class WidenList extends Decline {
+  constructor(
+    d: Decline,
+    readonly declaration: Expression
+  ) {
+    super(d.node, d.cause, d.head, d.reason);
+  }
+}
+
 export function lower(
   root: Expression,
   rows: readonly OperatorRow[],
   options: LowerOptions = {}
+): Program {
+  // Each retry widens one more declaration; past `MAX_WIDENED` (a bound on
+  // the retries, each a whole lowering) the program declines.
+  const MAX_WIDENED = 16;
+  const wide = new Set<Expression>();
+  for (;;) {
+    try {
+      return lowerOnce(root, rows, options, wide);
+    } catch (error) {
+      if (!(error instanceof WidenList)) throw error;
+      if (wide.has(error.declaration) || wide.size >= MAX_WIDENED)
+        throw new Decline(error.node, error.cause, error.head, error.reason);
+      wide.add(error.declaration);
+    }
+  }
+}
+
+/** `lower()` with the list locals of the declarations `wide` on the real
+ *  lane. */
+function lowerOnce(
+  root: Expression,
+  rows: readonly OperatorRow[],
+  options: LowerOptions,
+  wide: ReadonlySet<Expression>
 ): Program {
   const ce = root.engine;
   const bigint = options.mode === 'bigint';
@@ -1753,6 +1790,21 @@ export function lower(
               lane: d.lane,
               shape: d.shape.map((m) => (m === 'run-time' ? n : m)),
             } as IRType;
+            // A list parameter (not of tuples) binds a list argument whole,
+            // and the interpreter does not check its elements (a `list<real>`
+            // argument at a `list<integer>` parameter: CE-1483): a list of
+            // reals keeps its own lane, every read gives the interpreter's
+            // number. A tuple argument is an `incompatible-type` error.
+            if (
+              d.tuple === undefined &&
+              !tuples.has(raw) &&
+              n !== undefined &&
+              t.shape.length === d.shape.length &&
+              isSubLane(t.lane, 'real') &&
+              isSubLane(d.lane, 'real') &&
+              isSubType(t, { ...want, lane: t.lane } as IRType, constant)
+            )
+              return isSubLane(t.lane, d.lane) ? v : raw;
             if (
               tuples.get(raw) !== d.tuple ||
               n === undefined ||
@@ -3611,7 +3663,11 @@ export function lower(
         v = f();
       } catch (error) {
         // A user function whose lowering began stays registered.
-        if (!(error instanceof Decline) || (!any && fns.begun() !== begun))
+        if (
+          !(error instanceof Decline) ||
+          error instanceof WidenList ||
+          (!any && fns.begun() !== begun)
+        )
           throw error;
         quadrature = outer;
       }
@@ -3965,6 +4021,10 @@ export function lower(
     return v;
   };
 
+  /** The array of each list local of integer elements whose lane comes from
+   *  its value, and its declaration (`listLocal()`). */
+  const widenable = new Map<V, Expression>();
+
   /** A write of the element `index` of the list local `owned`, in place:
    *  the value `value()` (`add`: plus the element), evaluated after the
    *  index. An index that is 0, not an integer or out of range fails at
@@ -4005,12 +4065,29 @@ export function lower(
     const x = add
       ? apply(e, 'Add', [b.op('get', [l, k], element), value()])
       : value();
-    if (type(x).shape.length > 0 || !isSubLane(type(x).lane, t.lane))
-      decline(
-        e,
-        `a ${type(x).lane} value written to a list of ${t.lane} elements (the interpreter changes the type of the list)`,
-        type(x).shape.length === 0 ? LANE_MISMATCH : undefined
-      );
+    if (type(x).shape.length > 0 || !isSubLane(type(x).lane, t.lane)) {
+      const mismatch = () =>
+        decline(
+          e,
+          `a ${type(x).lane} value written to a list of ${t.lane} elements (the interpreter changes the type of the list)`,
+          type(x).shape.length === 0 ? LANE_MISMATCH : undefined
+        );
+      // A real written to a list of integers of no declared type: the
+      // interpreter widens the list to reals, and the lowering again puts
+      // the local on the real lane from its declaration (`WidenList`).
+      const s = widenable.get(l);
+      if (
+        s !== undefined &&
+        type(x).shape.length === 0 &&
+        type(x).lane === 'real'
+      )
+        try {
+          mismatch();
+        } catch (d) {
+          throw new WidenList(d as Decline, s);
+        }
+      mismatch();
+    }
     b.op(t.lane === 'boolean' ? 'set.bool' : 'set', [l, k, x], element);
     return undefined;
   };
@@ -4062,7 +4139,8 @@ export function lower(
           `a value of type ${typeToString(t, -1)} for a list local of type ${typeName}`
         );
       lane = listType.lane;
-    }
+    } else if (lane === 'integer' && typeName === 'unknown' && wide.has(s))
+      lane = 'real';
     if (misuse === 'read')
       decline(
         s,
@@ -4074,7 +4152,10 @@ export function lower(
         : lane === 'boolean'
           ? 'copy.bool'
           : 'copy';
-    return { v: b.op(op, [v], { lane, shape: t.shape }), lane, role: 'list' };
+    const copy = b.op(op, [v], { lane, shape: t.shape });
+    if (listType === undefined && typeName === 'unknown' && lane === 'integer')
+      widenable.set(copy, s);
+    return { v: copy, lane, role: 'list' };
   };
 
   /** The worst use of the list local `name` in `x` (a `write` is worse than
