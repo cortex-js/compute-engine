@@ -157,6 +157,18 @@ describe('an index-read tuple at a longer tuple slot after a union slot', () => 
     expect(isIndexReadTuple(r!)).toBe(false);
   });
 
+  test('a longer slot that index reads typed: the union keeps its list (CE-1489)', () => {
+    // The slot proves no shape, so `list<real>` stays possible: the union
+    // is not extended.
+    const union = indexReadTupleAtCollectionSlot(
+      reads('unknown', 'number'),
+      parseType('indexed_collection<integer> | list<real>')
+    )!;
+    expect(
+      indexReadTupleExtension(union, reads('number', 'number', 'number'))
+    ).toBeUndefined();
+  });
+
   test('a longer tuple whose components conflict: the rule does not apply', () => {
     const union = indexReadTupleAtCollectionSlot(
       reads('unknown', 'number'),

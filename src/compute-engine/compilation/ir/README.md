@@ -1637,7 +1637,16 @@ JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`). On GLSL a
 list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4` (`bvec2`,
 ... for booleans; `vec2(cos(t), sin(t))`), and another length a `float[n]`. A
 tuple of lists is a list of rows (`Tuple(L)` of a list of stated length); a
-tuple of tuples declines. `PointList` with no list component is the tuple of its
+tuple of tuples declines, except as the element of a `Loop` over a literal
+`List` of `Tuple`s of one length (`for gap in [(A, B, C), (B, C, D)]`, `A` to
+`D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an index
+into one list per position, a list of points where the parts are tuples
+(`[A, B]`, `[B, C]`, `[C, D]`), and `At` of the element at a constant index (1
+to 3, or −3 to −1) is the part at that index (`gap[1]` is `A`, then `B`); a
+`Tuple` pattern binds each name to a part (`for (p, q, r) in …`). Any other
+read of the element (`Length(gap)`, `f(gap)`, `gap[k]`) declines, and so does
+an effect in the list (the interpreter reads it element by element).
+`PointList` with no list component is the tuple of its
 components; with list components it is the list of the tuples of their elements
 at each index, a scalar component in every tuple, as long as the shortest
 component, as in the interpreter: a stated length, one length value

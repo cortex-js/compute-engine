@@ -222,7 +222,9 @@ export function decline(
  *  which a write keeps, and the tuple mark of a list of points; `lane` is
  *  the lane of its elements; `widen`, the declaration of a list of integers
  *  of no stated type, which a real list written to it widens
- *  (`README.md`, "Lists"). */
+ *  (`README.md`, "Lists"). `parts`: an `index` that is a tuple of tuples,
+ *  the element of a `Loop` over a literal list of them (`loop()`), read
+ *  only by `At` of a constant index; `v` is the index of the loop. */
 export type Binding = {
   v: V;
   lane?: Lane;
@@ -233,6 +235,7 @@ export type Binding = {
     readonly points: boolean;
     readonly widen?: Expression;
   };
+  parts?: readonly V[];
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };

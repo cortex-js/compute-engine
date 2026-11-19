@@ -29,6 +29,29 @@
 
 ### Resolved Issues
 
+- **`compile()` compiles a loop over a list of tuples of tuples** (CE-1488).
+  `for gap in [(OuterCircle, RightCircle, TopCircle), …] { … gap[1] … }`, each
+  gap a tuple of three circles and each circle a tuple of three numbers,
+  declined in 0.194.0 ("a tuple of tuples"), and compiled in 0.193.0. On
+  JavaScript, a loop over a literal list of tuples of one length now compiles
+  when the body reads the element at a constant index (`gap[1]`, `gap[-1]`) or
+  binds it to a pattern (`for (p, q, r) in …`), and gives the interpreter's
+  value. Another read of the element, such as `Length(gap)` or `f(gap)`,
+  declines. The loop over the gaps of the Apollonian gasket showcase now
+  compiles.
+
+- **A parameter read at one index and passed to a function that reads more
+  indices takes the longer tuple** (CE-1489). With
+  `function touches(p, q) { … p[1] … p[3] … }` and
+  `function isNewCircle(p, c) { 1 / c[1] >= 0.008 && touches(c, p) }`, the
+  parameter `c` was typed `tuple<number>` from the read `c[1]`, and compiling
+  a call of `isNewCircle` declined ("c: an argument of touches that is not
+  tuple<real, real, real>"). With the call written before the read, `c` was
+  typed `tuple<number, number, number>`. `c` is now that tuple in either
+  order. As for every type that index reads give, the length is not a
+  contract: the interpreter still accepts a longer tuple or a list. The
+  circles of the Apollonian gasket showcase (`fillGap`) now compile.
+
 - **`compile()` treats an integer to a literal power as an integer**
   (CE-1484). With `n: integer`, `g(c: integer) -> integer { c % 7 }` and
   `g(n^2)`, the compilation declined ("an argument of g that is not

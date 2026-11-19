@@ -333,6 +333,71 @@ describe('an index-read tuple does not fix the length', () => {
     const { fn } = literal(['Block', ['g', 'p'], ['Floor', ['At', 'p', 3]]]);
     expect(fn.isValid).toBe(false);
   });
+
+  // CE-1489: the slot of a function whose body reads its parameter by index
+  // requires a longer tuple than the reads of the caller made. The parameter
+  // of the caller takes that tuple, whether the reads or the call come
+  // first, and the tuple keeps the index-read mark: the call does not prove
+  // the length. (A shorter slot after a longer one adds nothing: CE-1493.)
+  test('a call of a function whose slot index reads made, in either order', () => {
+    for (const body of [
+      ['Block', ['Add', ['At', 'c', 1], 1], ['t', 'c']],
+      ['Block', ['t', 'c'], ['Add', ['At', 'c', 1], 1]],
+    ] as MathJsonExpression[]) {
+      const ce = new ComputeEngine();
+      ce.assign(
+        't',
+        ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 3]], 'p'])
+      );
+      const fn = ce.box(['Function', body, 'c']);
+      expect(fn.isValid).toBe(true);
+      expect(fn.type.toString()).toBe(
+        '(c: tuple<number, unknown, number>) -> number'
+      );
+      // A free symbol at the slot learns one element type, as it does at a
+      // slot that index reads made.
+      ce.assign('h', fn);
+      expect(ce.box(['h', 'zs']).op1.type.toString()).toBe(
+        'indexed_collection<number>'
+      );
+    }
+  });
+
+  test('Epsil: a parameter read at index 1, then passed to a function that reads three', () => {
+    const ce = new ComputeEngine();
+    const source = `function touches(p, q) {
+  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)
+  let rp = 1 / p[1]; let rq = 1 / q[1]
+  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6
+}
+function isNewCircle(p, c) {
+  c[1] > 0 && 1 / c[1] >= 0.008 && touches(c, p)
+}`;
+    const r = executeEpsil(ce, source);
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    expect(ce.box('isNewCircle').type.toString()).toBe(
+      '(p: tuple<number, number, number>, c: tuple<number, number, number>) -> boolean'
+    );
+    // The compiled call gives the interpreter's value.
+    for (const [c, want] of [
+      [[6, 1 / 3, 0.5333333333333333], false],
+      [[2, 0.5, 0], true],
+      [[-1, 0, 0], false],
+    ] as const) {
+      const call = ce.box([
+        'isNewCircle',
+        ['Tuple', -1, 0, 0],
+        ['Tuple', ...c],
+      ] as MathJsonExpression);
+      expect(call.evaluate().json).toBe(want ? 'True' : 'False');
+      const compiled = compile(call, {
+        to: 'javascript',
+        fallback: false,
+      } as never) as unknown as { success: boolean; run: () => unknown };
+      expect(compiled.success).toBe(true);
+      expect(compiled.run()).toBe(want);
+    }
+  });
 });
 
 // The types of the free arguments are read on their occurrences: in Epsil, in

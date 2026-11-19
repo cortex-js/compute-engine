@@ -1261,6 +1261,20 @@ function lowerOnce(
         if (e.nops !== 2) decline(e, 'At with an index for each level');
         // A read of a list local written in place: in order with its writes.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
+        // An element of a tuple of tuples (`loop()`): a constant index.
+        const parts = owned?.binding.parts;
+        if (parts !== undefined) {
+          const j = e.ops[1].re;
+          if (!isNumber(e.ops[1]) || !Number.isInteger(j))
+            decline(
+              e,
+              'At of a tuple of tuples at an index that is not a constant'
+            );
+          const x = parts[j > 0 ? j - 1 : parts.length + j];
+          if (x === undefined)
+            decline(e, 'At of a tuple of tuples at an index out of range');
+          return x;
+        }
         if (owned?.binding.role === 'list') {
           const l = owned.binding.v;
           const i = scalar(e.ops[1]);
@@ -2555,6 +2569,7 @@ function lowerOnce(
     // its block, after its last write.
     if (known?.binding.role === 'list' && known.binding !== whole)
       return listCopy(known.binding.v, known.binding.lane!);
+    if (known?.binding.parts) decline(e, 'a tuple of tuples');
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
@@ -3655,6 +3670,40 @@ function lowerOnce(
       return result;
     });
 
+  /** The list `l` of a `Loop` clause when it is a literal `List` of
+   *  `Tuple`s of one length of which a part is a tuple (a tuple of tuples,
+   *  `for gap in [(A, B, C), …]`): the list of the parts at each position
+   *  (a list of points for the tuples), on JavaScript; otherwise
+   *  `undefined`. */
+  const tupleColumns = (l: Expression): V[] | undefined => {
+    // A literal `List` and `Tuple` rows of the library (a user definition
+    // or a host handler takes the normal path).
+    if (!options.javascript || interval || !literalList(cx, l)) return;
+    const rows = l.ops;
+    const m = isFunction(rows[0], 'Tuple') ? rows[0].nops : 0;
+    if (
+      m === 0 ||
+      !rows.every(
+        (r) => isFunction(r, 'Tuple') && r.nops === m && isLibrary(r)
+      ) ||
+      !rows.some((r) => (r as Fn).ops.some((x) => x.type.matches('tuple')))
+    )
+      return undefined;
+    // The interpreter reads the elements in order, row by row: they are
+    // lowered in that order (a write of a local in an element reads as the
+    // interpreter's), then read by column; an effect declines.
+    const effects = b.effects;
+    const cells = rows.map((r) => (r as Fn).ops.map((x) => value(x)!));
+    if (b.effects > effects)
+      decline(l, 'a list of tuples of tuples with an effect');
+    return Array.from({ length: m }, (_, j) =>
+      list(
+        l,
+        cells.map((c) => c[j])
+      )
+    );
+  };
+
   /** `Loop(body, Element(i, L), …)`, a statement whose value is
    *  `Nothing`: a counted loop per clause (a later clause is lowered in the
    *  body of the one before it, so it reads its index), whose carried
@@ -3741,6 +3790,37 @@ function lowerOnce(
       const index = c.ops[0];
       if (!isSymbol(index) && !isFunction(index, 'Tuple'))
         decline(c, 'a Loop index that is not a name or a Tuple of names');
+      const columns = tupleColumns(c.ops[1]);
+      if (columns !== undefined) {
+        // A literal list of tuples of tuples: the loop runs over an index
+        // into a list per position of the tuples, and binds the element to
+        // the parts at that index (`At` of a constant index reads one).
+        const ss = columns.map((l) => lists.listSource(l));
+        const hi = b.constant((c.ops[1] as Fn).nops - 1, 'integer');
+        return counted(b.constant(0, 'integer'), hi, (k) =>
+          withFrame(false, (frame) => {
+            const parts = ss.map((s) => s.at(k));
+            if (isSymbol(index))
+              frame.names.set(index.symbol, { v: k, role: 'index', parts });
+            else {
+              if (index.nops !== parts.length)
+                decline(
+                  c,
+                  `a pattern of ${index.nops} names for a tuple of ${parts.length} elements`
+                );
+              const names = patternNames(index);
+              const twice = names.find((n, i) => names.indexOf(n) !== i);
+              if (twice !== undefined)
+                decline(c, `a pattern that names ${twice} twice`);
+              index.ops.forEach((q, j) => {
+                for (const [n, v] of destructure(c, q, parts[j]))
+                  frame.names.set(n, { v, role: 'index' });
+              });
+            }
+            clause(j + 1);
+          })
+        );
+      }
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
       const hi = apply(c, 'Subtract', [s.length, b.constant(1, 'integer')]);

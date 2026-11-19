@@ -197,7 +197,10 @@ import {
   rewriteWithBinders,
 } from './binders.js';
 import { namedLiteralSignatureType } from './effects-inference.js';
-import { isIndexReadTuple } from './index-read-tuple.js';
+import {
+  indexReadTupleExtension,
+  isIndexReadTuple,
+} from './index-read-tuple.js';
 import { isLibraryDefinition } from './implicit-variable-rule.js';
 import {
   isProvisionalCaptureOpen,
@@ -4836,8 +4839,21 @@ function narrowArgsFromInferredSignature(
       const arg = args[i];
       if (!isSymbol(arg)) continue;
       if (!hasInferredType(arg)) continue;
-      if (arg.type.type !== 'unknown') continue;
       const paramType = sigArgs[i].type;
+      if (arg.type.type !== 'unknown') {
+        // A parameter typed by its index reads at a slot that requires a
+        // longer tuple (`c[1] > 0` then `touches(c, p)`, whose body reads
+        // `p[1]` to `p[3]`) takes that tuple, as at a call that is validated
+        // (`indexReadTupleExtension()`). Without it, the parameter kept the
+        // shorter tuple when the read came first, and the longer one when
+        // the call came first (CE-1489).
+        const extended =
+          resolvedValueDefinition(arg)?.value === undefined
+            ? indexReadTupleExtension(arg.type.type, paramType)
+            : undefined;
+        if (extended !== undefined) arg._infer(() => extended, 'replace');
+        continue;
+      }
       if (!isCollectionOnlyType(paramType)) continue;
       const argType =
         !isBare(i) || arg.engine._isShadowedParameter(arg.symbol)
