@@ -922,14 +922,17 @@ function evaluateForAll(
   const body = args[1];
 
   // Symbolic simplification: check if body is constant (doesn't depend on the variable)
+  // A finite domain with no value makes `∀` true whatever the body.
   const canonicalBody = body.canonical;
   if (sym(canonicalBody) === 'True') return ce.True;
-  if (sym(canonicalBody) === 'False') return ce.False;
+  if (sym(canonicalBody) === 'False')
+    return hasEmptyFiniteDomain(condition, ce) ? ce.True : ce.False;
 
   // Check if body doesn't contain the quantified variable
   const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
+    if (hasEmptyFiniteDomain(condition, ce)) return ce.True;
     // Body doesn't depend on x, so ∀x. P ≡ P. A quantifier is two-valued:
     // an absent body (`Missing`) is `False`, as the body of
     // a quantifier over a finite domain is (user decision 2026-11-02,
@@ -992,14 +995,17 @@ function evaluateExists(
   const body = args[1];
 
   // Symbolic simplification: check if body is constant (doesn't depend on the variable)
+  // A finite domain with no value makes `∃` false whatever the body.
   const canonicalBody = body.canonical;
-  if (sym(canonicalBody) === 'True') return ce.True;
+  if (sym(canonicalBody) === 'True')
+    return hasEmptyFiniteDomain(condition, ce) ? ce.False : ce.True;
   if (sym(canonicalBody) === 'False') return ce.False;
 
   // Check if body doesn't contain the quantified variable
   const condOp1 = isFunction(condition) ? condition.op1 : undefined;
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
+    if (hasEmptyFiniteDomain(condition, ce)) return ce.False;
     // Body doesn't depend on x, so ∃x. P ≡ P. An absent body is `False`,
     // as for `ForAll` above.
     const value = canonicalBody.evaluate(evalOptions);
@@ -1033,6 +1039,16 @@ function evaluateExists(
   if (sym(bodyEval) === 'False') return ce.False;
 
   return undefined;
+}
+
+/** True when the condition of a quantifier gives a finite domain with no
+ * value (`Element(x, Set())`). */
+function hasEmptyFiniteDomain(
+  condition: Expression,
+  ce: ComputeEngine
+): boolean {
+  const domain = extractFiniteDomainWithReason(condition, ce, 'reals');
+  return domain.status === 'success' && domain.values.length === 0;
 }
 
 /**

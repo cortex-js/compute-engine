@@ -1318,3 +1318,29 @@ describe('Boolean identities beside an unknown', () => {
     expect(box(['Implies', 'A', 'B'])).toBe('Implies(A, B)');
   });
 });
+
+describe('A quantifier over an empty finite domain', () => {
+  test.each([
+    // A body that does not read the variable
+    [['Exists', ['Element', 'y', ['Set']], ['Greater', 1, 0]], 'False'],
+    [['ForAll', ['Element', 'y', ['Set']], ['Less', 1, 0]], 'True'],
+    [['Exists', ['Element', 'y', ['Set']], ['Greater', 'z', 0]], 'False'],
+    // An inner quantifier, evaluated for each value of the outer variable
+    [
+      [
+        'Exists',
+        ['Element', 'x', ['Set', 1]],
+        ['Exists', ['Element', 'y', ['Set']], ['Greater', 'x', 0]],
+      ],
+      'False',
+    ],
+    [
+      [
+        'ForAll',
+        ['Element', 'x', ['Set', 1]],
+        ['ForAll', ['Element', 'y', ['Set']], ['Less', 'x', 0]],
+      ],
+      'True',
+    ],
+  ])('%j', (expr, expected) => expect(box(expr)).toBe(`"${expected}"`));
+});
