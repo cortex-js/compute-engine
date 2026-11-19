@@ -49,6 +49,10 @@
 
 ### Resolved Issues
 
+- **Assigning a caller of three mutually recursive functions completes**
+  (CE-1515). The provisional signature shortcut applies only to functions
+  that call themselves directly.
+
 - **`runAsync()` runs a `parallel for` on the engine's worker pool again**
   (CE-1462). 0.193.0 did, and 0.194.0 ran every such loop on one thread. A
   loop whose passes only add to numbers (`s += e`) and to the elements of a

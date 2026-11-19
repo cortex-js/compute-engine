@@ -1384,11 +1384,15 @@ export class _BoxedValueDefinition
     // [R(i − 1)])`), the signature and the body types stay the same from
     // one cache generation to the next (`census-head-new-declines.test.ts`).
     const previous = this._signatureMemo;
-    const derivedBefore =
+    const sameLiteral =
       previous !== undefined &&
       previous.skeleton === skeleton &&
-      previous.value === v &&
-      callsItselfDirectly(v, this.name);
+      previous.value === v;
+    const typeInFlight = (v as { _isTypeInFlight?: () => boolean })
+      ._isTypeInFlight?.();
+    const directRecursion =
+      (sameLiteral || typeInFlight) && callsItselfDirectly(v, this.name);
+    const derivedBefore = sameLiteral && directRecursion;
     const hypothesis =
       derivedBefore &&
       previous.definitions === this._definitionsKey() &&
@@ -1401,8 +1405,10 @@ export class _BoxedValueDefinition
     // starts. Its type cell still holds the signature from an earlier pass.
     // Use the same checked recursion hypothesis as the body, or its declared
     // skeleton on the first pass. Leave the completed signature to the caller
-    // that can read the literal after its type computation returns.
-    if ((v as { _isTypeInFlight?: () => boolean })._isTypeInFlight?.()) {
+    // that can read the literal after its type computation returns. Limit
+    // this to direct self-calls. A mutually recursive body uses the usual
+    // literal type computation, including its reentrant cache read.
+    if (typeInFlight && directRecursion) {
       noteReentrantSignatureRead();
       return hypothesis === undefined
         ? recorded
@@ -2329,8 +2335,13 @@ function sameDefinitions(
  * such a pair keeps the derivation it had without them. */
 function callsItselfDirectly(v: Expression, name: string): boolean {
   if (!isFunction(v, 'Function')) return false;
-  const visit = (e: Expression): boolean =>
-    (isFunction(e) && (e.operator === name || e.ops.some(visit))) || false;
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (!isFunction(e) || seen.has(e)) return false;
+    if (e.operator === name) return true;
+    seen.add(e);
+    return e.ops.some(visit);
+  };
   return visit(v.ops[0]);
 }
 

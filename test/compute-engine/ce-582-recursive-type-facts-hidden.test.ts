@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { MathJsonExpression } from '../../src/math-json/types';
 import { typeToString } from '../../src/common/type/serialize';
 
 //
@@ -107,6 +108,123 @@ describe('CE-582: the reproduction', () => {
     // the same answer.
     const hiddenType = hidden(ce, () => ce.box(['F', 'm']).type.toString());
     expect(ce.box(['F', 'm']).type.toString()).toBe(hiddenType);
+  });
+
+  test.each([
+    { selfCall: false, result: 8 },
+    { selfCall: true, result: 11 },
+  ])(
+    'CE-1515: typing a mutual cycle ends with a direct self-call set to $selfCall',
+    ({ selfCall, result }) => {
+      const ce = new ComputeEngine();
+      const heads = ['a_2', 'b_2', 'c_2'] as const;
+      for (const name of [...heads, 'd_2']) ce.declare(name, 'function');
+      const call = (name: string): MathJsonExpression => [
+        name,
+        ['Subtract', 'n', 1],
+      ];
+      const steps: Record<(typeof heads)[number], MathJsonExpression> = {
+        a_2: ['Add', call('c_2'), call('b_2')],
+        b_2: selfCall
+          ? ['Add', call('c_2'), call('b_2'), ['Square', 'n']]
+          : ['Add', call('c_2'), ['Square', 'n']],
+        c_2: call('a_2'),
+      };
+      for (const name of heads)
+        ce.assign(name, [
+          'Function',
+          ['If', ['LessEqual', 'n', 0], 1, steps[name]],
+          'n',
+        ]);
+      ce.assign('d_2', ['Function', ['Add', ['a_2', 3], ['Square', 'x']], 'x']);
+      const caller = ce.box(['d_2', 1]);
+      expect(caller.type.toString()).toBe('number');
+      expect(caller.evaluate().re).toBe(result);
+      expect(caller.N().re).toBe(result);
+    }
+  );
+
+  test('CE-1515: a mutual scalar and vector result survives repeated type reads', () => {
+    const ce = new ComputeEngine();
+    for (const name of ['F', 'G']) ce.declare(name, 'function');
+    const dec = ['Subtract', 'n', 1];
+    ce.assign('F', [
+      'Function',
+      ['If', ['LessEqual', 'n', 0], 1, ['G', dec]],
+      'n',
+    ]);
+    ce.assign('G', [
+      'Function',
+      ['If', ['LessEqual', 'n', 0], ['List', 1, 2], ['F', dec]],
+      'n',
+    ]);
+    ce.declare('zz', 'real');
+    void ce.lookupDefinition('F')!.value!.storedValue!.type;
+    for (let i = 0; i < 2; i++) {
+      const f = ce.box(['F', 1]);
+      const g = ce.box(['G', 2]);
+      for (const call of [f, g]) {
+        expect([
+          'integer | vector<integer^2>',
+          'number | vector<integer^2>',
+        ]).toContain(call.type.toString());
+        expect(call.evaluate().json).toEqual(['List', 1, 2]);
+      }
+    }
+  });
+
+  test('CE-1515: reading the second head first preserves fractional result elements', () => {
+    const ce = new ComputeEngine();
+    const heads = ['a_2', 'b_2', 'c_2'] as const;
+    for (const head of heads) ce.declare(head, 'function');
+    const call = (head: string): MathJsonExpression => [
+      head,
+      ['Subtract', 'n', 1],
+    ];
+    const bodies: Record<(typeof heads)[number], MathJsonExpression> = {
+      a_2: ['Add', call('c_2'), call('b_2')],
+      b_2: ['Add', call('c_2'), ['Square', 'n']],
+      c_2: call('a_2'),
+    };
+    for (const head of heads)
+      ce.assign(head, [
+        'Function',
+        [
+          'Which',
+          ['LessEqual', 'n', 0],
+          head === 'c_2' ? ['List', 1, 2] : 1,
+          'True',
+          bodies[head],
+        ],
+        'n',
+      ]);
+    ce.assign('d_2', ['Function', ['Add', ['a_2', 3], ['Square', 'x']], 'x']);
+
+    const readingOrder = ['b_2', 'a_2', 'c_2'];
+    const types = readingOrder.map((head) => ce.box([head, 'm']).type);
+    const value = ce.box(['c_2', 3.5]).evaluate();
+    expect(value.ops?.map((entry) => entry.re)).toEqual([5.25, 6.25]);
+    expect(value.type.matches(types[2])).toBe(true);
+  });
+
+  test('an object elsewhere leaves the recursive mixed result precise', () => {
+    const ce = new ComputeEngine();
+    ce._object('Pt', { a: 1 });
+    ce.declare('x', 'real');
+    ce.declare('F', 'function');
+    ce.assume(ce.parse('x > 0'));
+    ce.assign(
+      'F',
+      ce.box([
+        'Function',
+        ['If', ['Equal', 'n', 0], ['List', 1, 2], ['Multiply', 2, R]],
+        'n',
+      ] as MathJsonExpression)
+    );
+    const call = ce.box(['F', 'm']);
+    const expected = 'number | vector<2>';
+    expect(hidden(ce, () => call.type.toString())).toBe(expected);
+    expect(call.type.toString()).toBe(expected);
   });
 
   test('a list result read with the assumptions hidden is cached and fact-free', () => {
