@@ -6481,11 +6481,7 @@ accepted and re-stamped, never checked against the declaration.
 type: BoxedType;
 ```
 
-The type known in the CURRENT state: declaredType narrowed by
-everything the assumptions in force prove about this definition. Reading
-it is what makes a fact visible; nothing derived from it may be STORED
-(see declaredType). Writing it reports a `type-write` state
-event, so cached results that read this type are computed again.
+The static type of the definition. Assigning it writes its contract.
 
 </MemberCard>
 
@@ -18683,15 +18679,13 @@ set type(type:
   | BoxedType): void
 ```
 
-The type of the value of this expression.
+The static type of this expression. A symbol reads the declared or
+inferred type of its binding. A function call has its result type,
+and a function value has its signature.
 
-If a symbol the type of the value of the symbol.
-
-If a function expression, the type of the value of the function
-(the result type).
-
-If a symbol with a `"function"` type (a function literal), returns the
-signature.
+To test a proposition under the current assumptions, use `ce.verify()`.
+For example, a symbol declared `real` keeps that type when an
+assumption establishes that it belongs to the integers.
 
 If not valid, return `"error"`.
 

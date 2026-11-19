@@ -1,5 +1,5 @@
 {
-  "version": "0.194.1",
+  "version": "0.194.2",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
     "brb": "node scripts/issues-ui.mjs --open",
