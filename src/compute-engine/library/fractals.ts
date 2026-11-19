@@ -1,24 +1,6 @@
 import type { SymbolDefinitions, Expression } from '../global-types.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
-import { smoothEscape } from '../numerics/fractal-smooth.js';
-
-/** Smooth escape-time value for any z0 → z^2 + c iteration in [0, 1]. */
-function juliaEscape(
-  zx: number,
-  zy: number,
-  cx: number,
-  cy: number,
-  maxN: number
-): number {
-  for (let i = 0; i < maxN; i++) {
-    const newZx = zx * zx - zy * zy + cx;
-    zy = 2 * zx * zy + cy;
-    zx = newZx;
-    const mag2 = zx * zx + zy * zy;
-    if (mag2 > 4) return smoothEscape(zx, zy, cx, cy, i, maxN);
-  }
-  return 1.0;
-}
+import { escapeTime } from '../numerics/fractal-smooth.js';
 
 /** Extract finite real and imaginary parts from a boxed numeric value. */
 function getComplexParts(
@@ -51,7 +33,7 @@ export const FRACTALS_LIBRARY: SymbolDefinitions[] = [
         const cp = getComplexParts(c);
         const n = getMaxIter(maxIter);
         if (cp === undefined || n === undefined) return undefined;
-        return ce.number(juliaEscape(0, 0, cp.cx, cp.cy, n));
+        return ce.number(escapeTime(0, 0, cp.cx, cp.cy, n));
       },
     },
 
@@ -67,7 +49,7 @@ export const FRACTALS_LIBRARY: SymbolDefinitions[] = [
         const n = getMaxIter(maxIter);
         if (zp === undefined || cp === undefined || n === undefined)
           return undefined;
-        return ce.number(juliaEscape(zp.cx, zp.cy, cp.cx, cp.cy, n));
+        return ce.number(escapeTime(zp.cx, zp.cy, cp.cx, cp.cy, n));
       },
     },
   },

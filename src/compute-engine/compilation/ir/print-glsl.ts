@@ -364,6 +364,14 @@ export const GLSL: Syntax = deepFreeze({
     'cconj': '($0 * vec2(1.0, -1.0))',
     'cabs': 'length($0)',
     'carg': { text: '_gpu_ir_carg($0)', helpers: ['_gpu_ir_carg'] },
+    'mandelbrot': {
+      text: '_gpu_ir_julia(vec2(0.0), $0, $1)',
+      helpers: ['_gpu_ir_fractal_smooth', '_gpu_ir_julia'],
+    },
+    'julia': {
+      text: '_gpu_ir_julia($0, $1, $2)',
+      helpers: ['_gpu_ir_fractal_smooth', '_gpu_ir_julia'],
+    },
     'ceq': '($0 == $1)',
     'cne': '($0 != $1)',
     // A helper that calls `_gpu_ir_carg` lists it first, so that it is
@@ -1015,6 +1023,34 @@ export const GLSL: Syntax = deepFreeze({
   vec3 l = mat3(4.0767416621, -1.2684380046, -0.0041960863, -3.3077115913, 2.6097574011, -0.7034186147, 0.2309699292, -0.3413193965, 1.707614701) * (m * m * m);
   vec3 a = abs(l);
   return sign(l) * mix(1.055 * pow(a, vec3(1.0 / 2.4)) - 0.055, 12.92 * a, lessThanEqual(a, vec3(0.0031308)));
+}`,
+    // The smooth escape time of `z -> z^2 + c` from `z`, as `escapeTime()`
+    // of `numerics/fractal-smooth.ts`: the escape test `|z|^2 > 4`, then at
+    // most 16 more iterations for the smoothing, until `|z|^2 > 65536`. NaN
+    // for a point that is not finite or a count that is not positive, where
+    // the interpreter gives the call unevaluated; the count is rounded, as
+    // the interpreter rounds it.
+    _gpu_ir_fractal_smooth: `float _gpu_ir_fractal_smooth(vec2 z, vec2 c, int i, int n) {
+  vec2 w = z;
+  int k = i;
+  for (int extra = 0; extra < 16 && dot(w, w) <= 65536.0; extra++) {
+    w = vec2(w.x * w.x - w.y * w.y + c.x, 2.0 * w.x * w.y + c.y);
+    k++;
+  }
+  if (!(dot(w, w) > 65536.0)) {
+    w = z;
+    k = i;
+  }
+  return clamp((float(k) - log2(log2(dot(w, w))) + 4.0) / float(n), 0.0, 1.0);
+}`,
+    _gpu_ir_julia: `float _gpu_ir_julia(vec2 z, vec2 c, float count) {
+  if (any(isinf(vec4(z, c))) || any(isnan(vec4(z, c))) || !(count > 0.0) || isinf(count)) return ${NAN};
+  int n = int(round(count));
+  for (int i = 0; i < n; i++) {
+    z = vec2(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y);
+    if (dot(z, z) > 4.0) return _gpu_ir_fractal_smooth(z, c, i, n);
+  }
+  return 1.0;
 }`,
     // The argument of a complex, in (-π, π]: on an axis it is written,
     // since a renderer's `atan(y, x)` with a zero part computed as -0 is

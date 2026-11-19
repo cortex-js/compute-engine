@@ -65,7 +65,7 @@ describe('IR slice: GLSL text', () => {
         'trigamma', 'besselj'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS).filter((f) => !['cplx', 'cadd', 'csub', 'cneg', 'cmul', 'cdiv',
         'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'ccot', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
-        'cconj', 'cabs', 'carg', 'ceq', 'cne'].includes(f))]);
+        'cconj', 'cabs', 'carg', 'ceq', 'cne', 'mandelbrot', 'julia'].includes(f))]);
     const bigintOnly = new Set<string>();
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {

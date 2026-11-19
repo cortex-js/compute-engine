@@ -222,6 +222,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Imaginary',    1,          [[[C], R, 'cim']],             {}),
   row('Conjugate',    1,          [[[C], C, 'cconj']],           {}),
   row('Argument',     1,          [[[C], R, 'carg']],            inverse),
+  // The smooth escape time of a point (`library/fractals.ts`).
+  row('Mandelbrot',   2,          [[[C, I], R, 'mandelbrot']],   {}),
+  row('Julia',        3,          [[[C, C, I], R, 'julia']],     {}),
   // The conversion of a real to the complex lane, which the lowering adds.
   row(undefined,      1,          [[[R], C, 'cplx']],            {}),
   row('Floor',        1,          [[[R], I, 'floor']],           { fold: Math.floor }),

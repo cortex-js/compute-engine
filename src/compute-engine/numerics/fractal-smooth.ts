@@ -16,8 +16,8 @@
  * counts, and at `c = -2.0000000001` it is 3. Only a deep zoom near `c = -2` or
  * near a repelling fixed point reaches this edge.
  *
- * The GLSL form of this function is `_fractal_smooth` in
- * `compilation/gpu-preambles.ts`.
+ * The GLSL form of this function is `_gpu_ir_fractal_smooth` in
+ * `compilation/ir/print-glsl.ts`.
  */
 export function smoothEscape(
   zx: number,
@@ -44,4 +44,28 @@ export function smoothEscape(
       ? (k - Math.log2(Math.log2(m)) + 4.0) / maxN
       : (i - Math.log2(Math.log2(mag2)) + 4.0) / maxN;
   return Math.max(0, Math.min(1, smooth));
+}
+
+/**
+ * The smooth escape-time value of `z -> z^2 + c` from `z0 = (zx, zy)`, in
+ * [0, 1]: 1 for an orbit that stays within the escape radius for `maxN`
+ * iterations. `Mandelbrot(c, n)` starts at `z0 = 0`, `Julia(z, c, n)` at `z`.
+ * The interpreter (`library/fractals.ts`) and compiled code
+ * (`_SYS.ir.mandelbrot`, `_SYS.ir.julia`) both call it.
+ */
+export function escapeTime(
+  zx: number,
+  zy: number,
+  cx: number,
+  cy: number,
+  maxN: number
+): number {
+  for (let i = 0; i < maxN; i++) {
+    const newZx = zx * zx - zy * zy + cx;
+    zy = 2 * zx * zy + cy;
+    zx = newZx;
+    const mag2 = zx * zx + zy * zy;
+    if (mag2 > 4) return smoothEscape(zx, zy, cx, cy, i, maxN);
+  }
+  return 1.0;
 }

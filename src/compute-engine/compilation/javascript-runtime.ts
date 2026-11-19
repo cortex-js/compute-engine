@@ -89,6 +89,7 @@ import {
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { escapeTime } from '../numerics/fractal-smooth.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import {
   arcothReal,
@@ -1905,6 +1906,21 @@ const IR_KERNELS = ['cneg', 'csqrt', 'cexp', 'cln', 'clog10', 'csin', 'ccos', 'c
 
 type Cx = ComplexResult;
 
+/** `escapeTime()` from `(zx, zy)`, NaN for a point that is not finite or a
+ *  count that is not positive (`library/fractals.ts`). */
+function fractal(zx: number, zy: number, c: Cx, n: number): number {
+  if (
+    !Number.isFinite(zx) ||
+    !Number.isFinite(zy) ||
+    !Number.isFinite(c.re) ||
+    !Number.isFinite(c.im) ||
+    !Number.isFinite(n) ||
+    !(n > 0)
+  )
+    return NaN;
+  return escapeTime(zx, zy, c.re, c.im, Math.round(n));
+}
+
 /**
  * The complex functions of the profile `ir`, by the name of their IR
  * operation (`_SYS.ir.<name>`); the fold computes them: the machine complex
@@ -1966,6 +1982,12 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
   chyp2f1: (a: Cx, b: Cx, c: Cx, z: Cx): Cx =>
     SYS_HELPERS.chypergeometric2F1(a, b, c, z),
   clambertw: (z: Cx): Cx => SYS_HELPERS.clambertW(z),
+  // The smooth escape time of `z -> z^2 + c` (`Mandelbrot(c, n)`,
+  // `Julia(z, c, n)`), the interpreter's function. NaN where the
+  // interpreter gives the call unevaluated: a point that is not finite, or a
+  // count that is not positive.
+  mandelbrot: (c: Cx, n: number): number => fractal(0, 0, c, n),
+  julia: (z: Cx, c: Cx, n: number): number => fractal(z.re, z.im, c, n),
   cre: (z: Cx): number => z.re,
   cim: (z: Cx): number => z.im,
   ceq: (a: Cx, b: Cx): boolean => a.re === b.re && a.im === b.im,
