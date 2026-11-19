@@ -416,14 +416,29 @@ interpreter's value. A line is removed when the case declines or is fixed.
   decides: `Any(L, a ↦ AssertPresent(At(M, a)) > 0)` at `L = [1, 5]`,
   `M = [1]` throws `expected-present`; the interpreter gives `True`. A
   predicate or a list with an effect declines.
+- `javascript` (crafted: compiled code run inside a random frame of the
+  interpreter): a compiled `parallel for` (whose program has no draw)
+  consumes no draw index of the frame, where the interpreted loop consumes
+  one (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), so a
+  later draw of the interpreter in that frame differs.
 
 ## `parallel for` and `runAsync()`
 
-A `parallel for` (`ParallelLoop`) declines on every target, so on
-`javascript` the interpreter runs it, in one thread, in the order of its
-passes. A `javascript` result called with an object of variables
-(`calling: 'expression'`) has `runAsync(inputs, options?)`, which returns a
-promise of `run(inputs)`, and `willParallelize()`, which answers `false`.
+On `javascript` a `parallel for` (`ParallelLoop(body, Element(x, coll))`)
+compiles as the `Loop` of the same operands: its passes run in order, on one
+thread, as the interpreter runs them, so its values are the interpreter's,
+also where a pass reads an accumulator (`parallel for k in 1..3 { s += k;
+t += s }` gives `[6, 10]`). It declines when the body assigns a variable
+declared outside the loop other than with `AddTo` (`s = s + k`:
+`parallel-outer-write`), when the body has a `Break` or a `Continue` of the
+loop itself (`parallel-exit`; those of an inner `Loop` compile), and when the
+program draws or has a `WithRandomSeed` frame: inside a frame the
+interpreter runs each pass in a random frame of its own, which compiled code
+does not have. GLSL and the interval mode decline it. A `javascript` result
+called with an object of variables (`calling: 'expression'`) has
+`runAsync(inputs, options?)`, which returns a promise of `run(inputs)`, and
+`willParallelize()`, which answers `false`: no worker pool runs the
+passes.
 
 ## The scope a compilation reads
 
@@ -2153,11 +2168,32 @@ appropriate expression-instance boundary.
 
 ### List updates
 
-A block local cannot hold a list that the block changes: a local declared
-with a list type (`Declare(xs, "list<real>", …)`) declines, and an `Assign`
-to a local of no stated type whose value is a list declines ("a write to a
-constant … or to a list local"). So `xs = ReplaceAt(xs, i, v)` in a block or
-in a `Loop` runs on the interpreter.
+On `javascript` a block local whose value is a list of reals, integers or
+booleans of rank 1 can be written with `L = ReplaceAt(L, i, v)` and
+`L[i] += e` (`AddTo(At(L, i), e)`). The code writes the element of the
+array in place, with these rules:
+
+- The local owns its array: the declaration copies its value, so an input
+  (`let L = H`) is not changed.
+- Every other occurrence of `L` in its scope is `At(L, i)`, `Length(L)` or
+  the value of the block (its last statement, also `Typed(L, …)`). Any other
+  read (`let M = L`, `f(L)`, `[L, M]`, `L` in a function literal) declines:
+  the interpreter's lists are values (`let M = L; L[1] += 5; M` is the old
+  list), and compiled code shares no array.
+- The element type is the declared type of the local (`let L: list<real> =
+  …`) or the type of its value. A written value of another lane declines
+  (`replaceAt(L, 1, 0.5)` of a list of integers: the interpreter widens the
+  list to reals).
+- A negative index counts from the end, as in the interpreter. An index out
+  of range, 0 or not an integer throws `out-of-range` at run time, where the
+  interpreter gives an error; a constant index out of a stated length
+  declines.
+- `L[i] += e` evaluates `i` once, before `e`.
+
+Every other write to a list local declines: `xs = Append(xs, v)` and any
+other write of a whole list ("a write to a constant … or to a list local"),
+and a write in a `Sum` or a `Product` body to a list local declared outside
+it. GLSL and the interval mode decline a list local that its block writes.
 
 ### Dictionary literals
 

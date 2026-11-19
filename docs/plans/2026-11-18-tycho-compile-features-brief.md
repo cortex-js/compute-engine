@@ -101,8 +101,6 @@ with `source: tycho` and the Tycho program that needs it
 ## Other sessions
 
 - `tycho-desk`: Tycho's side; the source of the requests.
-- `ce-interval`: owns the interval mode (`print-interval.ts`,
-  `interval/`); ask before changing interval spellings.
 - The binding workstream is active, worked on by Codex: the `Program`
   operator is delivered as a proof of concept, and a `Document` operator,
   a unit of binding, is in progress. Outside such a unit the values of

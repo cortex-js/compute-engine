@@ -1,3 +1,75 @@
+## [Unreleased]
+
+### New Features
+
+- **On JavaScript, `compile()` compiles a list local that its block changes
+  element by element, `AddTo`, the parallel assignment and `parallel for`**
+  (CE-1462). Before, each of these declined and the interpreter ran the
+  program:
+  - `let L = H; L[c] += 1` and `L = replaceAt(L, i, v)` write the element of
+    the list in place. The declaration copies the value, so the input `H` is
+    not changed. A negative index counts from the end; an index that is 0, not
+    an integer or out of range throws `out-of-range` when the code runs, where
+    the interpreter gives an error. A list local that the code reads other
+    than with `L[i]` or `length(L)` (`let M = L`, `f(L)`), and a written value
+    of another type (`replaceAt(L, 1, 0.5)` of a list of integers), decline.
+  - `s += e` (`AddTo(s, e)`) is `s = s + e`, and `(a, b) := (b, a + b)`
+    computes both values before it writes either name, on every target that
+    compiles an assignment.
+  - `parallel for k in 1..n { … }` (`ParallelLoop`) runs its passes in order,
+    on one thread, with the interpreter's values. It declines when its body
+    assigns a variable declared outside it other than with `+=`, when it has a
+    `break` or a `continue` of its own, and when the program draws a random
+    number or sets a random seed. `runAsync()` still runs the code on one
+    thread.
+
+  A step that counts 1,200,000 escape-time orbits into a list of 90,001 cells
+  compiles and runs in about 130 ms; the interpreter took more than 30 s.
+
+### Resolved Issues
+
+- **`compile()` compiles `Apply` of a function literal whose parameters are
+  typed** (CE-1469). `Apply(Function(Add(At(H, 1), n), Typed(H, 'list<real>'),
+  Typed(n, 'integer')), L, 5)` declined in 0.194.0 ("Apply of a value that is
+  not a function literal of one untyped parameter per argument"); at
+  `L = [2, 3, 4]` it is now `7`, as in the interpreter. A parameter declared a
+  list or a tuple takes its argument whole, and a parameter declared a scalar
+  maps over a list argument where the interpreter maps it
+  (`Apply(Function(Multiply(2, k), Typed(k, 'real')), L)` is `[4, 6, 8]`). An
+  argument whose type does not fit the declared type, and a declared union
+  type, still decline.
+
+- **`compile()` compiles `RotateLeft` and `RotateRight` of a count of type
+  `real` again** (CE-1465). `RotateLeft(S, N)` with `N` declared `real`
+  declined with "a count that is not an integer" since 0.194.0. The compiled
+  code now tests the count when it runs: at `N = 2` it gives `[3, 4, 1, 2]`
+  for `S = [1, 2, 3, 4]`, and at `N = 2.4`, where `evaluate()` gives an
+  `incompatible-type` error, it throws. On GLSL and `interval-js` such a
+  count still declines; a count declared `integer` compiles as before.
+
+- **`compile()` compiles `Join` of lists again** (CE-1466). `Join(L, M)` of two
+  lists declined with "the operator Join is not supported by the compiler"
+  since 0.194.0; it now gives `[1, 2, 3]` for `L = [1, 2]` and `M = [3]`, also
+  with more operands and with a scalar operand (`Join(L, x)`). `Join` of a
+  tuple, a set or a string, and of lists of numbers and booleans, declines, as
+  does `Join` on GLSL.
+
+- **`compile()` compiles `At` of a list of points with a list of indexes, and
+  `If` and `Which` of a list condition** (CE-1464). Both declined in 0.194.0
+  ("a list where a scalar is required"). With `P = [(1, 2), (3, 4), (5, 6)]`
+  and `L = [3, 1]`, `At(P, L)` is now `[(5, 6), (1, 2)]`, as in the
+  interpreter, with a point of NaN for an index out of range. With
+  `L = [2, 5]`, `Which(Less(3, L), 1, True, 0)` is now `[0, 1]`: the selection
+  is made at each position, a list arm gives its element at that position, and
+  a position where no condition holds is NaN (a point of NaN for point arms);
+  `If(c, a, b)` of a list condition `c` is `Which(c, a, True, b)`; an `If` of a
+  list condition with no `else` and a list arm still declines (the
+  interpreter restricts the arm to the mask). On GLSL the
+  selection compiles for lists of numbers of a stated length. A selection whose
+  arms or later conditions are not pure (an effect, a write, an operation that
+  can throw), or whose first condition is a scalar,
+  still falls back to the interpreter, as does the interval mode.
+
 ## 0.194.0 _2026-11-18_
 
 ### Breaking Changes
