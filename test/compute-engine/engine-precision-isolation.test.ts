@@ -504,3 +504,20 @@ describe('STAGE 3: the engine does not use BigDecimal.precision', () => {
     }
   );
 });
+
+describe('isSame OF NUMBERS OF TWO ENGINES', () => {
+  // An exact number is rounded at the higher precision of the pair, in both
+  // orders: rounding it at the precision of the left operand made
+  // `x.isSame(y)` true and `y.isSame(x)` false.
+  const a = new ComputeEngine({ precision: 21 });
+  const b = new ComputeEngine({ precision: 50 });
+  const third = a.number([1, 3]);
+  test.each([
+    ['21 digits of 1/3', '0.' + '3'.repeat(21), false],
+    ['50 digits of 1/3', '0.' + '3'.repeat(50), true],
+  ])('1/3 at precision 21 and %s at precision 50', (_, digits, same) => {
+    const x = b.number(digits);
+    expect(third.isSame(x)).toBe(same);
+    expect(x.isSame(third)).toBe(same);
+  });
+});

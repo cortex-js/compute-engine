@@ -581,11 +581,15 @@ export function same(
     const aNaN = typeof av === 'number' ? Number.isNaN(av) : av.isNaN;
     const bNaN = typeof bv === 'number' ? Number.isNaN(bv) : bv.isNaN;
     if (aNaN || bNaN) return aNaN && bNaN;
+    // An exact operand is rounded at this precision. The pair reads one
+    // precision whatever its order, so that `isSame` stays symmetric for two
+    // numbers of engines with different precisions.
+    const prec = Math.max(a.engine.precision, b.engine.precision);
     if (typeof av === 'number') {
       if (typeof bv === 'number') return av === bv;
-      return bv.eq(av, b.engine.precision);
+      return bv.eq(av, prec);
     }
-    return av.eq(bv, a.engine.precision);
+    return av.eq(bv, prec);
   }
 
   //
