@@ -1,6 +1,6 @@
 # Completion for Epsil sources (CE-1521)
 
-Status: draft, for the board's approval.
+Status: approved 2026-11-19: (a) the hole technique; the VS Code provider ships with step 1.
 
 ## Goal
 
