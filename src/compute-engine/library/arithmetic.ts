@@ -1129,6 +1129,80 @@ function exactRemainder(
 }
 
 /**
+ * The remainder `a − b·k` of two doubles, `k` the quotient `a/b` rounded to
+ * the nearest integer with a tie toward `+∞`, computed exactly: `a % b` is
+ * exact in IEEE arithmetic, and the step to the nearest quotient subtracts
+ * `b` from a value of the same sign and at least `|b|/2` in magnitude, also
+ * exact. `a − b·Math.round(a/b)` rounds the quotient and the product, and
+ * `a` and `b·k` cancel: `Remainder(-825977087020874.5, 0.7)` was `0`. A
+ * non-finite operand or a zero divisor keeps that formula (its `NaN`).
+ */
+function floatRemainder(a: number, b: number): number {
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0)
+    return a - b * Math.round(a / b);
+  let r = a % b;
+  const h = 2 * Math.abs(r);
+  const m = Math.abs(b);
+  // A tie (`a/b` a half-integer) rounds the quotient toward `+∞`: the
+  // remainder is then the one of the sign opposite to `b`.
+  if (h > m || (h === m && r / b > 0)) r -= Math.sign(r) * m;
+  return r;
+}
+
+/**
+ * The remainder of two big decimals, as `floatRemainder()` but with
+ * `bigint` arithmetic on the significands, rounded once to `prec` digits.
+ * `a.div(b, prec)` rounded the quotient first, so a quotient with more
+ * digits than the precision lost the low ones:
+ * `Remainder(1000000000000000000000000000001.5, 0.7)` was `-999999998.5`.
+ *
+ * With `a = sa·10^ea`, `b = sb·10^eb` and `e = min(ea, eb)`, the remainder
+ * in units of `10^e` is the residue of `sa·10^(ea − e)` modulo
+ * `m = |sb|·10^(eb − e)`, moved to `(−m/2, m/2]` (a tie toward `+∞` takes
+ * the residue of the sign opposite to `b`, as in `integerRemainder()`). No
+ * power of ten with more digits than the operands is formed: a dividend
+ * below a tenth of the divisor is its own remainder, and the power for a
+ * dividend far above the divisor is taken modulo `m`
+ * (`Remainder(1e1000000000, 0.7)`).
+ */
+function bigRemainder(a: BigDecimal, b: BigDecimal, prec: number): BigDecimal {
+  if (!a.isFinite() || !b.isFinite() || b.isZero())
+    return a.sub(b.mul(a.div(b, prec).add(0.5, prec).floor()), prec);
+  if (a.isZero()) return a;
+  const digits = (x: bigint) => (x < 0n ? -x : x).toString().length;
+  const [sa, ea, sb, eb] = [
+    a.significand,
+    a.exponent,
+    b.significand,
+    b.exponent,
+  ];
+  // `|a| < 10^(digits(sa) + ea)` and `|b| ≥ 10^(digits(sb) − 1 + eb)`.
+  if (digits(sa) + ea <= digits(sb) + eb - 2) return a.toPrecision(prec);
+  const mod = (x: bigint, n: bigint) => ((x % n) + n) % n;
+  const powMod = (base: bigint, exp: number, n: bigint): bigint => {
+    let [result, x, k] = [1n % n, mod(base, n), exp];
+    while (k > 0) {
+      if (k % 2 === 1) result = (result * x) % n;
+      x = (x * x) % n;
+      k = Math.floor(k / 2);
+    }
+    return result;
+  };
+  let m: bigint;
+  let t: bigint;
+  if (ea >= eb) {
+    m = sb < 0n ? -sb : sb;
+    t = mod(mod(sa, m) * powMod(10n, ea - eb, m), m);
+  } else {
+    // Here `eb − ea < digits(sa) + 2`: the power is no longer than `sa`.
+    m = (sb < 0n ? -sb : sb) * 10n ** BigInt(eb - ea);
+    t = mod(sa, m);
+  }
+  const r = 2n * t > m || (2n * t === m && sb > 0n) ? t - m : t;
+  return new BigDecimal(`${r}e${Math.min(ea, eb)}`).toPrecision(prec);
+}
+
+/**
  * `Remainder(a, m)` for an exact integer expression `a` and an exact integer
  * literal `m` that is not zero, reduced in ℤ/|m|ℤ without forming the value
  * of `a` (`reduceModulo()`), or `undefined`. The exact value of `2^(3^20)`
@@ -13551,20 +13625,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const exact = exactRemainder(a, b);
           if (exact !== undefined) return exact.evaluate();
         }
-        return apply2(
-          a,
-          b,
-          (a, b) => a - b * Math.round(a / b),
-          // `BigDecimal.round()` rounds ties away from zero, which disagrees
-          // with `Math.round`'s ties-toward-+Infinity at half-integer
-          // quotients (e.g. Remainder(-5, 2): machine lane rounds -2.5 to
-          // -2, bignum `.round()` would round it to -3, flipping the result
-          // sign). `floor(x + 0.5)` reproduces `Math.round`'s tie-breaking
-          // exactly, keeping both lanes in agreement.
-          (a, b) => {
-            const prec = engine.precision;
-            return a.sub(b.mul(a.div(b, prec).add(0.5, prec).floor()), prec);
-          }
+        // Both lanes compute the remainder of their operands exactly, with
+        // a tie of the quotient toward `+∞` (`floatRemainder()`,
+        // `bigRemainder()`). An exact operand beside a float one is its value
+        // at the working precision, as in every float lane.
+        return apply2(a, b, floatRemainder, (a, b) =>
+          bigRemainder(a, b, engine.precision)
         );
       },
     },

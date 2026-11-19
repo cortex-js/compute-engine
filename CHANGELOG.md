@@ -234,6 +234,18 @@
   the type handler read the sign of `Floor(g(1))`, which evaluated `g(1)`.
   The sign of such an operand is now the sign of its type.
 
+- **`Remainder` of floats is the exact remainder of its operands** (CE-1447).
+  Both float lanes rounded the quotient before they multiplied it back, and
+  the dividend and the product cancel. The lane of doubles gave
+  `Remainder(-825977087020874.5, 0.7)` = `0` at machine precision; it is
+  `0.0476…`, the remainder of the doubles. The lane of big decimals gave
+  `Remainder(-825977087020874, 0.7)` = `2` at machine precision (an exact
+  integer beside a float takes it); it is `-0.1`, the remainder by the
+  decimal `0.7`. At the default precision
+  `Remainder(1000000000000000000000000000001.5, 0.7)` was `-999999998.5`;
+  it is `-0.3`. The remainder is now computed exactly (from `a % b` for
+  doubles, with integers for big decimals) and rounded once.
+
 - **The interval `Remainder` of two reals holds the remainder** (CE-1448).
   `IntervalArithmetic.remainder` computed `a − b·round(a/b)` in plain
   doubles and widened the answer by 3 ulps, which does not cover the

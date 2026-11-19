@@ -242,12 +242,15 @@ const TOLERANCE: Record<string, (m: Miss) => boolean> = {
     Math.abs(m.point.x - 1.8) <= ce.tolerance,
 };
 
-/** The programs whose reference is wrong: the interpreter's `Choose` of a
- *  double near 1 is wrong from the 15th digit (CE-1346), and the mode
- *  encloses the exact value. A miss is excused within 1e-5 of 1 and below
- *  1e-14 of the value only. The machine engine's `Remainder(x, 0.7)` at
- *  `x = -0.35` (the quotient is exactly -1/2) rounds the tie away from +∞
- *  and gives 0.35 (CE-1449); the mode gives the documented -0.35. */
+/** The programs whose reference is not the value of the doubles: the
+ *  interpreter's `Choose` of a double near 1 is wrong from the 15th digit
+ *  (CE-1346), and the mode encloses the exact value. A miss is excused
+ *  within 1e-5 of 1 and below 1e-14 of the value only. At `x = -0.35` the
+ *  reference of `Remainder(x, 0.7)` reads the exact rational of `x` beside
+ *  the decimal of the double 0.7 at the working precision, as every float
+ *  lane does (21 digits: -0.349999999999999977796), so the quotient is not
+ *  the tie -1/2 of the doubles and the reference is 0.35; the mode gives
+ *  the remainder of the doubles, -0.35 (CE-1449). */
 const INTERPRETER_DEFECTS: Record<string, (m: Miss) => boolean> = {
   [`machine ${JSON.stringify(['Remainder', x, 0.7])}`]: (m) =>
     m.point.x === -0.35 && m.v === 0.35,
