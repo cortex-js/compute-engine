@@ -1276,7 +1276,18 @@ of `L` by `cond`, then a build of `body` over the elements kept. The
 interpreter's list is lazy: it evaluates the condition and the body of an
 element only when the element is read (`Length` reads none), so a condition or a
 body with an effect declines (`Length(Comprehension(Random(), Element(z, D)))`
-draws nothing in the interpreter). Two clauses or more, `Element(i, L)` each,
+draws nothing in the interpreter). A call of a user function that has no
+effect, also of a recursive one (`may-fail`), is not one: the instructions of
+the function's body, among them its recursive call, whose effect is not known
+while the body is lowered, are not counted as the caller's (`Builder.define()`),
+so `Comprehension(r(i), Element(i, Range(0, 5)))` of
+`r(k) := Which(k ≤ 0, 0, True, s + r(k − 1))` compiles. The compiled elements
+are computed eagerly, as those of any `may-fail` body: an element that the
+interpreter does not read is computed too (`At(Comprehension(r(i), Element(i,
+Range(0, 300))), 2)` computes `r(300)`, past the interpreter's recursion limit),
+and one past the JavaScript stack throws a `RangeError`. A call of a function in
+a `Comprehension` of its own body declines: the effect of that call is not known
+there. Two clauses or more, `Element(i, L)` each,
 are the interpreter's flat list over the Cartesian product, the last index the
 fastest
 (`Comprehension(10k + j, Element(k, Range(1, 2)), Element(j, Range(1, 3)))` is

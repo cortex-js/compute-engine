@@ -28,6 +28,17 @@
 
 ### Resolved Issues
 
+- **`compile()` compiles a list of the calls of a recursive function again**
+  (CE-1472). With `r` declared `(real) -> real` and
+  `r(k) := Which(k <= 0, 0, True, s + r(k - 1))`,
+  `Comprehension(r(i), Element(i, Range(0, 5)))` declined in 0.194.0 with "a
+  Comprehension with an effect", although `r` has no effect. On JavaScript it
+  now gives `[0, 2, 4, 6, 8, 10]` at `s = 2`, as in the interpreter; so does a
+  list of the points of a recursive point function
+  (`Comprehension(P(i, P_0), Element(i, Range(0, 40)))`). A function that draws
+  a random number still declines in a `Comprehension`, and so does a call of a
+  function in a `Comprehension` of its own body.
+
 - **`compile()` compiles `StandardDeviation` and `Variance` again**
   (CE-1473). `StandardDeviation(L)` declined with "the operator
   StandardDeviation is not supported by the compiler" since 0.194.0; at

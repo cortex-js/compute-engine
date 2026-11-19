@@ -251,6 +251,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   that WebGL 2 refuses ("Size of declared private variable exceeds
   implementation-defined limit"). With `storage` the parameter is a
   `sampler2D` and the shader is valid.
+- `plausible?` — `javascript`, `s: integer`, `r` a recursive function of
+  depth `i` (`r(i) := Which(i <= 0, 0, True, r(i - 1) + s)`): a
+  `Comprehension` computes every element, where the interpreter computes
+  only the elements read. `At(Comprehension(r(i), Element(i, Range(0,
+  100000))), 2)` at `s = 2` throws a `RangeError` (the recursion of the
+  last elements overflows the stack); the interpreter gives `2`.
 - `plausible?` — `glsl`, `mode: 'complex'`, `x: real`:
   `Power(x, 0.2)` at `x = -8` gives the principal value `1.226 + 0.891i`;
   the interpreter and the `javascript` target give the real root `-1.5157`.

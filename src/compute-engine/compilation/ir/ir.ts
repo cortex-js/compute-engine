@@ -470,14 +470,18 @@ export class Builder {
   }
 
   /** The function `fn`, whose body `f` makes with no other region open (a
-   *  value of the caller is not visible in it). */
+   *  value of the caller is not visible in it). The instructions of the
+   *  body are not counted in `effects` and `impure`: they are not the
+   *  caller's, which counts the call by the function's effect. */
   define(fn: IRFunction, f: () => V[]): void {
-    const open = this.open;
+    const [open, effects, impure] = [this.open, this.effects, this.impure];
     this.open = [fn.body];
     try {
       fn.body.yields = f();
     } finally {
       this.open = open;
+      this.effects = effects;
+      this.impure = impure;
     }
     this.functions.push(fn);
   }
