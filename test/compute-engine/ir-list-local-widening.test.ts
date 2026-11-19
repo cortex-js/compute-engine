@@ -273,7 +273,7 @@ describe('A list argument of Apply bound whole (CE-1483)', () => {
     }
   });
 
-  test('a tuple argument and a scalar of another type decline', () => {
+  test('a tuple argument of another type declines', () => {
     // The interpreter gives an `incompatible-type` error for both; the
     // canonical form already has it for the tuple of a stated type.
     expect(
@@ -302,14 +302,9 @@ describe('A list argument of Apply bound whole (CE-1483)', () => {
         )
       )
     ).toMatch(/an argument of Apply that is not/);
-    ce.declare('x', 'real');
-    expect(
-      failure(() =>
-        compile(ce.box(['Apply', literal('integer', 'H'), 'x'] as never), {
-          fallback: false,
-        } as never)
-      )
-    ).toMatch(/an argument of Apply that is not integer/);
+    // A real scalar at an integer parameter binds: a value outside the
+    // parameter's type is unspecified (user decision 2026-11-19, CE-1503;
+    // `ir-apply-typed-params.test.ts`).
   });
 });
 

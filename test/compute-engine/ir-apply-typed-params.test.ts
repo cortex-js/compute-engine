@@ -3,8 +3,10 @@
  * of `src/compute-engine/compilation/ir/`, "User functions"). A parameter
  * declared a list or a tuple binds its argument whole, as the interpreter
  * does; a list argument at a typed scalar parameter of a scalar signature is
- * mapped over, as the interpreter maps it; an argument whose type does not
- * fit the parameter's type declines. A list argument at an untyped parameter
+ * mapped over, as the interpreter maps it; a scalar argument of the
+ * parameter's lane, or a real at an integer parameter, binds even when its
+ * type does not prove the parameter's (CE-1503); an argument of another
+ * shape declines. A list argument at an untyped parameter
  * still declines: the interpreter may map the function over it.
  *
  * Each case states the interpreter's value, which the test checks, and the
@@ -84,6 +86,15 @@ describe('Apply of a function literal with typed parameters', () => {
     ['a real parameter over a list', ['Apply', ['Function', ['Multiply', 2, 'k'], typed('k', 'real')], 'L'], '[4,6,8]', [4, 6, 8]],
     ['a real parameter over a list, an integer beside it', ['Apply', ['Function', ['Add', 'k', 'n'], typed('k', 'real'), typed('n', 'integer')], 'L', 5], '[7,8,9]', [7, 8, 9]],
     ['a real parameter over a literal list', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'real')], ['List', 1, 'x']], '[2,1.5]', [2, 1.5]],
+    // (d) An argument whose engine type does not prove the parameter's type
+    // binds: a value outside the parameter's type is unspecified in
+    // compiled code (user decision 2026-11-19, CE-1503). Inside it, the
+    // compiled value is the interpreter's.
+    ['a real at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'x'], '3', 3, { x: 2 }],
+    ['a list of reals mapped at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'L'], '[3,4,5]', [3, 4, 5]],
+    ['a real at a real<0..1> parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'real<0..1>')], 'x'], '1.5', 1.5],
+    ['a list mapped at a real<0..1> parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'real<0..1>')], 'L'], '[1.25,1.5]', [1.25, 1.5], { L: [0.25, 0.5] }],
+    ['a list of extended reals mapped at a real parameter', ['Apply', ['Function', ['If', ['Greater', 'k', 0], 1, 2], typed('k', 'real')], 'E'], '[1,2]', [1, 2], { E: [2, -1] }],
   ])('%s', (_, json, interpreted, value, inputs = INPUTS) => {
     const ce = engine();
     const e = ce.box(json as never);
@@ -94,18 +105,13 @@ describe('Apply of a function literal with typed parameters', () => {
     expect(run({ ...INPUTS, ...inputs })).toEqual(value);
   });
 
-  // (c) An argument whose type does not fit the parameter's type declines.
-  // The interpreter does not check a list against the type of its
-  // parameter: it reads the list whole.
+  // (c) An argument whose shape does not fit the parameter's declines. An
+  // argument whose engine type does not prove the parameter's scalar type
+  // compiles (see (d)); the interpreter does not check a list against the
+  // type of its parameter: it reads the list whole.
   // prettier-ignore
   test.each<[string, Json, string, RegExp, string?]>([
     ['a list of no stated length at a list<real^3> parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<real^3>')], 'L'], '2.5', /not vector<real\^3>, the type of its parameter H/],
-    ['a real at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'x'], 'Error(ErrorCode("incompatible-type", "integer", "0.5"), 0.5)', /not integer, the type of its parameter k/],
-    ['a list of reals mapped at an integer parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'integer')], 'L'], '[Error(ErrorCode("incompatible-type", "integer", "2.5"), 2.5, "while applying the function literal element-wise over 3 elements (element 1)"),4,5]', /not integer at each element, the type of its parameter k/],
-    // A declared range: the engine type of the argument does not prove it.
-    ['a real at a real<0..1> parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'real<0..1>')], 'x'], '1.5', /not real<0..1>, the type of its parameter k/],
-    ['a list mapped at a real<0..1> parameter', ['Apply', ['Function', ['Add', 'k', 1], typed('k', 'real<0..1>')], 'L'], '[Error(ErrorCode("incompatible-type", "real<0..1>", "2.5"), 2.5, "while applying the function literal element-wise over 3 elements (element 1)"),Error(ErrorCode("incompatible-type", "real<0..1>", "3"), 3, "while applying the function literal element-wise over 3 elements (element 2)"),Error(ErrorCode("incompatible-type", "real<0..1>", "4"), 4, "while applying the function literal element-wise over 3 elements (element 3)")]', /not real<0..1> at each element, the type of its parameter k/],
-    ['a list of extended reals mapped at a real parameter', ['Apply', ['Function', ['If', ['Greater', 'k', 0], 1, 2], typed('k', 'real')], 'E'], '[Error(ErrorCode("incompatible-type", "real", "+oo"), +oo, "while applying the function literal element-wise over 2 elements (element 1)"),1]', /not real at each element, the type of its parameter k/],
     // The canonical form gives the error, of the static type `error`.
     ['a point at a list parameter', ['Apply', ['Function', ['At', 'H', 1], typed('H', 'list<real>')], ['Tuple', 'x', 1]], 'Apply((H) => At(H, 1), Error(ErrorCode("incompatible-type", "list<real>", "tuple<real, integer>"), (0.5, 1)))', /static type error/],
     ['a union type', ['Apply', ['Function', ['Add', ['At', 'H', 1], 'k'], typed('H', 'list<real>'), typed('k', 'real | list<real>')], 'L', 1], '3.5', /a parameter of Apply whose type is not a scalar, a list or a tuple of numbers/],

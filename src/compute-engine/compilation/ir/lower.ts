@@ -1820,9 +1820,9 @@ function lowerOnce(
           const raw = value(a)!;
           const v = d === undefined ? raw : widen(raw, d.lane);
           const t = type(raw);
-          // The engine type of the argument must prove the declared type,
-          // with its constraints (`real<0..1>`, the positions of a tuple):
-          // the interpreter gives an `incompatible-type` error otherwise.
+          // An argument at a list or a tuple parameter must have its
+          // declared shape (the positions of a tuple, a stated length); a
+          // scalar argument, its lane (below).
           const notDeclared = (at: string) =>
             decline(
               a,
@@ -1867,20 +1867,20 @@ function lowerOnce(
               a,
               'a list or a tuple argument of Apply (the interpreter may map the function over it)'
             );
-          // A typed scalar parameter takes an element of its lane. A scalar
-          // argument must have the declared type, and a list mapped over the
-          // parameter a list of elements of the declared type: the lane of
-          // an element does not prove it (`real | infinity` has the lane
-          // `real`, and `real` holds finite values only).
-          if (
-            d !== undefined &&
-            (!isSubLane(t.lane, d.lane) ||
-              !isSubtype(
-                a.type.type,
-                t.shape.length > 0 ? { kind: 'list', elements: d.t } : d.t
-              ))
-          )
+          // A typed scalar parameter takes a scalar, or each element of a
+          // list mapped over it, of its lane. The engine type of the
+          // argument need not prove the declared type: an argument value
+          // outside the type of its parameter is unspecified in compiled
+          // code (user decision 2026-11-19, CE-1503; `docs/COMPILATION-MODEL.md`,
+          // "Caveats of compiled code"), so `a: real | signed_infinity | nan`
+          // binds at `p: real` (CE-1498). A value of the real lane binds at
+          // an `integer` parameter with its own lane (an untyped local, of
+          // the engine type `number`, CE-1485): every integer value gives
+          // the interpreter's number (`mode: 'bigint'` has no real value).
+          if (d !== undefined && !isSubLane(t.lane, d.lane)) {
+            if (t.lane === 'real' && d.lane === 'integer') return raw;
             notDeclared(t.shape.length > 0 ? ' at each element' : '');
+          }
           return v;
         });
         // The arguments are lowered once: their effects run once. Lists of

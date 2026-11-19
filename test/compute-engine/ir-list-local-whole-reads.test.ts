@@ -246,24 +246,19 @@ describe('A whole read of a list local written in place (CE-1485)', () => {
     );
   });
 
-  test('a local of type number at an integer parameter declines (R5)', () => {
-    // As in Tycho's body: `p` of no stated type is a `number`; the
-    // interpreter tests it at the call, compiled code does not.
-    const ce = new ComputeEngine();
-    ce.declare('B', 'list<nan | real | signed_infinity>');
-    expect(
-      failure(() =>
-        compile(
-          ce.box(
-            othello(
-              ['Assign', 'R', ['ReplaceAt', 'R', 1, 9]],
-              ['Typed', 'q', "'integer'"]
-            ) as never
-          ),
-          { to: 'javascript', fallback: false }
-        )
-      )
-    ).toMatch(/an argument of Apply that is not integer/);
+  test('a local of type number at an integer parameter binds (CE-1485)', () => {
+    // As in Tycho's body: `p` of no stated type is a `number`. The
+    // interpreter tests it at the call; compiled code does not, and a value
+    // outside the parameter's type is unspecified (user decision
+    // 2026-11-19, CE-1503). At integer boards the values agree.
+    agreesJson(
+      othello(
+        ['Assign', 'R', ['ReplaceAt', 'R', 1, 9]],
+        ['Typed', 'q', "'integer'"]
+      ),
+      { B: 'list<nan | real | signed_infinity>' },
+      [{ B: [0, 0, 0, 1] }, { B: [1, 2, 0, 2] }, { B: [0, 0, 3, 0] }]
+    );
   });
 
   test('the prelude block: the local in the Tuple of its block', () => {

@@ -695,11 +695,14 @@ host.
   declines. With `x: real`, `Block(Declare(p, "real"); p ≔ (x, 2); p)`
   declines with `'unsettled-shape'`. With `h` declared `(number) -> number`
   and `h := t ↦ [t, t]`, every call of `h` declines; the interpreter gives
-  an `incompatible-type` error for `h(3)`. An argument whose static type
-  does not prove the type of its parameter declines too: with `g` declared
+  an `incompatible-type` error for `h(3)`. An argument is not such a value:
+  an argument value outside its parameter's type is unspecified (see
+  "Caveats of compiled code"), so `Apply((t: integer) ↦ 2t, y)` with
+  `y: real` compiles and gives 4 at `y = 2`. A call of a named function still
+  declines an argument of another lane: with `g` declared
   `(integer) -> integer`, `g := t ↦ 2t` and `y: real`, `g(y)` declines with
-  `outside-profile` ("an argument of g that is not integer"), and the
-  interpreter gives an `incompatible-type` error at `y = 2.5`.
+  `outside-profile` ("an argument of g that is not integer"), since the
+  compiled function has an integer parameter.
 - A condition: compiled code does not test at run time that a condition
   of `If` or `Which` is a boolean. A condition whose static type admits
   another value declines: with `c: boolean | integer`, `If(c, 1, 2)`

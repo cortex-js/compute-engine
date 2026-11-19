@@ -29,6 +29,18 @@
 
 ### Resolved Issues
 
+- **`compile()` binds an argument at a typed parameter of a function literal
+  when its type does not prove the parameter's** (CE-1485, CE-1498). With `a`
+  declared `real | signed_infinity | nan`, `Apply((p: real) ↦ 2p, a)` declined
+  in 0.194.0 ("an argument of Apply that is not real"); it now gives 6 at
+  a = 3, as the interpreter does. A local of no stated type (of the type
+  `number`) at an `integer` parameter binds the same way, so Tycho's Othello
+  action compiles. The interpreter checks the value at the call; compiled
+  code does not: an argument value outside its parameter's declared type
+  gives an unspecified result, a new caveat of compiled code
+  (`docs/COMPILATION-MODEL.md`). A complex argument at a real parameter still
+  declines.
+
 - **A compiled expression boxed in a scope reads the names of that scope**
   (CE-1500). With `a = 1` in the document, `a = 10` in a scope `s`, and
   `ce.expr(['Add', ['PointX', 'P'], 'a'], { scope: s })` with `P = (3, 4)`,

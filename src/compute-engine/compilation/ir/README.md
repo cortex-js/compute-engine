@@ -2294,11 +2294,17 @@ is bound whole on its own lane, since the interpreter checks no element
 a list of reals at `list<real<0..1>>`. A parameter declared a scalar takes a
 scalar of its lane, or, when the signature is scalar, each element of a flat
 list that the literal maps over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`).
-Another argument declines (`L` of no stated length at a parameter
-`list<real^3>`, which the interpreter reads whole with no check; a tuple at a
-tuple parameter whose type it does not prove, and a real at `integer`, an
-`incompatible-type` error), and so does a declared type that is not a scalar, a
-list or a tuple of numbers (a union, `real | list<real>`). A list at an untyped
+The engine type of a scalar argument need not prove the parameter's type: a
+value outside it is unspecified in compiled code (user decision 2026-11-19,
+CE-1503; "Caveats of compiled code" in `docs/COMPILATION-MODEL.md`), so
+`a: real | signed_infinity | nan` binds at `p: real` and a value of the real
+lane at `k: integer` keeps its lane (an untyped local, CE-1485), where the
+interpreter checks the value at the call. A call of a named function still
+declines an argument of another lane. Another argument declines (`L` of no
+stated length at a parameter `list<real^3>`, which the interpreter reads whole
+with no check; a tuple at a tuple parameter whose type it does not prove; a
+complex at `real`), and so does a declared type that is not a scalar, a list or
+a tuple of numbers (a union, `real | list<real>`). A list at an untyped
 parameter still declines unless the literal maps over it. A parameter with a
 default and another count of arguments decline too; `Apply(g, x)` of a name is
 the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is the
