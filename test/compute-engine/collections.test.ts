@@ -2076,6 +2076,158 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
       ).toBe('1e-100');
     });
 
+    // CE-1435: a seed, a first element or a step that underflowed to the
+    // double 0 made the fold 0 where the plain `Multiply` gives `1e-100`
+    // (the seed and the first element with the JIT off or an element that
+    // is not real, a step on both paths).
+    describe.each(['off', 'auto'] as const)(
+      'an underflowed seed, element or step, ce.jit = %s',
+      (jit) => {
+        let previous: typeof m.jit;
+        beforeAll(() => {
+          previous = m.jit;
+          m.jit = jit;
+        });
+        afterAll(() => {
+          m.jit = previous;
+        });
+        test.each([
+          [
+            [
+              'Reduce',
+              ['List', ['Power', 10, 300]],
+              'Multiply',
+              ['Power', 10, -400],
+            ],
+            '1e-100',
+          ],
+          [
+            [
+              'Reduce',
+              ['List', ['Power', 10, -400], ['Power', 10, 300]],
+              'Multiply',
+            ],
+            '1e-100',
+          ],
+          [
+            [
+              'Reduce',
+              ['List', ['Power', 10, -400], ['Power', 10, 300]],
+              ['Function', ['Multiply', 'a', 'b'], 'a', 'b'],
+            ],
+            '1e-100',
+          ],
+          [
+            [
+              'Reduce',
+              [
+                'List',
+                ['Power', 10, -400],
+                ['Complex', 0, 1],
+                ['Power', 10, 300],
+              ],
+              'Multiply',
+            ],
+            '1e-100i',
+          ],
+          // A step that underflows: 10^-200 · 10^-200 is the double 0.
+          [
+            [
+              'Reduce',
+              [
+                'List',
+                ['Power', 10, -200],
+                ['Power', 10, -200],
+                ['Power', 10, 300],
+              ],
+              'Multiply',
+            ],
+            '1e-100',
+          ],
+          [
+            [
+              'Reduce',
+              ['List', ['Power', 10, -200], ['Power', 10, 300]],
+              ['Function', ['Multiply', 'a', 'b'], 'a', 'b'],
+              ['Power', 10, -200],
+            ],
+            '1e-100',
+          ],
+          // Integer seed and elements, but a reducer that does not keep
+          // integers integral: 1 · 10^-400 is the double 0.
+          [
+            [
+              'Reduce',
+              ['List', -400, 300],
+              ['Function', ['Multiply', 'a', ['Power', 10, 'k']], 'a', 'k'],
+              1,
+            ],
+            '1e-100',
+          ],
+          // A true zero is not an underflow.
+          [['Reduce', ['List', 0, ['Power', 10, 300]], 'Multiply'], '0'],
+          [['Reduce', ['List', 1, -1], 'Add'], '0'],
+          [['Reduce', ['List', 0, 5], 'Multiply'], '0'],
+          [['Reduce', ['List', 0.5, -0.5], 'Add'], '0'],
+        ] as [Expression, string][])('%j.N() is %s', async (expr, result) => {
+          expect(m.box(expr).N().toString()).toBe(result);
+          expect(
+            (
+              await m.box(expr).evaluateAsync({ numericApproximation: true })
+            ).toString()
+          ).toBe(result);
+        });
+      }
+    );
+
+    // A user binding of `Add` or `Negate` is not the library operator, so a
+    // fold with it is not known to keep integers integral, and its 0 is
+    // recomputed exactly.
+    test.each(['off', 'auto'] as const)(
+      'a shadowed reducer does not keep an underflowed 0, ce.jit = %s',
+      async (jit) => {
+        const cases: [(ce: ComputeEngine) => void, Expression][] = [
+          [
+            (ce) =>
+              ce.assign(
+                'Add',
+                ce.box([
+                  'Function',
+                  ['Multiply', 'a', ['Power', 10, 'k']],
+                  'a',
+                  'k',
+                ])
+              ),
+            ['Reduce', ['List', -400, 300], 'Add', 1],
+          ],
+          [
+            (ce) =>
+              ce.assign(
+                'Negate',
+                ce.box(['Function', ['Power', 10, 'x'], 'x'])
+              ),
+            [
+              'Reduce',
+              ['List', -400, 300],
+              ['Function', ['Multiply', 'a', ['Negate', 'k']], 'a', 'k'],
+              1,
+            ],
+          ],
+        ];
+        for (const [shadow, expr] of cases) {
+          const ce = new ComputeEngine({ precision: 'machine' });
+          ce.jit = jit;
+          shadow(ce);
+          expect(ce.box(expr).N().toString()).toBe('1e-100');
+          expect(
+            (
+              await ce.box(expr).evaluateAsync({ numericApproximation: true })
+            ).toString()
+          ).toBe('1e-100');
+        }
+      }
+    );
+
     test('an element is evaluated once when the fast path hands over a step', () => {
       // The reducer's result is complex, so the fast path redoes the step
       // through the interpreted reducer: it receives the evaluated element,

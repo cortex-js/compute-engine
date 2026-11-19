@@ -652,9 +652,20 @@ function boundGapError(
   };
   // The deepest probe first: a peak whose largest value is at the bound
   // makes it miss, and on a smooth integrand it is the only probe that is
-  // computed (one sample for each bound of the integral).
+  // computed (one sample for each bound of the integral). When the four
+  // nodes are 0, every probe is computed: a peak whose value underflows at
+  // the bound and at the nodes is seen only by the probes between them.
+  // For `x²⁵·e⁻ˣ` on `[0, 10⁷]`, the nearest node is at 2680, where `e⁻ˣ`
+  // is 0, and the deepest probe at `2e-15`, where `x²⁵` is 0: the
+  // quadrature gave `0`, converged, for `25! ≈ 1.55e25`. The probe at 9.5
+  // sees the peak.
   const deepest = measure(levels[levels.length - 1]);
-  if (Number.isFinite(deepest.miss) && !deepest.large) return 0;
+  if (
+    Number.isFinite(deepest.miss) &&
+    !deepest.large &&
+    !nodes.every((v) => v === 0)
+  )
+    return 0;
 
   const distances: number[] = [];
   const misses: number[] = [];

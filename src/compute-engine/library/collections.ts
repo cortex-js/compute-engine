@@ -11032,14 +11032,99 @@ function isScalarSlot(op: Expression): boolean {
 // Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
 
 /**
+ * What a fold under `Reduce` records for {@link withExactFoldFallback}: its
+ * reducer, and whether its seed or an element was not known to be an
+ * integer.
+ */
+type FoldTrace = { reducer: Expression; nonInteger: boolean };
+
+/** The operators of a reducer that keeps integers integral. */
+const INTEGRAL_REDUCERS = new Set(['Add', 'Subtract', 'Multiply']);
+
+/**
+ * True when `fn`, applied to integers, gives an integer whose double is 0
+ * only when its value is 0: `Add`, `Subtract` or `Multiply`, or a function
+ * literal whose body applies only those operators and `Negate` to its
+ * parameters and to integer literals. A sum of doubles that are integers is
+ * 0 only when it is exactly 0, and a product of nonzero integers is never 0.
+ * Any other reducer can round a nonzero value to 0, even from integers:
+ * `(a, k) ↦ a · 10^k` gives the double 0 for `1 · 10^-400`.
+ *
+ * Each operator is recognized by its definition (`isLibraryOperator()`): a
+ * user binding of `Add` or `Negate` is another function.
+ */
+function reducerKeepsIntegers(fn: Expression): boolean {
+  if (isSymbol(fn)) {
+    if (!INTEGRAL_REDUCERS.has(fn.symbol)) return false;
+    // The symbol names the library operator when it is bound to it, as a
+    // call of that name would be.
+    return isLibraryOperator({
+      operator: fn.symbol,
+      operatorDefinition: fn.operatorDefinition,
+      valueDefinition: fn.valueDefinition,
+      engine: fn.engine,
+    });
+  }
+  if (!isFunction(fn, 'Function')) return false;
+  const [body, ...params] = fn.ops;
+  const names = new Set<string>();
+  for (const p of params) {
+    // A parameter with a type (`Typed(k, "integer")`) names `k`.
+    const name = isFunction(p, 'Typed') ? p.op1 : p;
+    if (!isSymbol(name)) return false;
+    names.add(name.symbol);
+  }
+  const integral = (e: Expression): boolean => {
+    if (isNumber(e)) return e.isInteger === true;
+    if (isSymbol(e)) return names.has(e.symbol);
+    if (!isFunction(e)) return false;
+    if (e.operator === 'Block')
+      return e.nops === 1 && isLibraryOperator(e) && integral(e.ops[0]);
+    return (
+      (INTEGRAL_REDUCERS.has(e.operator) || e.operator === 'Negate') &&
+      isLibraryOperator(e) &&
+      e.ops.every(integral)
+    );
+  };
+  return body !== undefined && integral(body);
+}
+
+/**
+ * The value of a fold that {@link withExactFoldFallback} tests: the fold
+ * itself, or NaN for a 0 that can be an underflow, so that the exact fold
+ * decides (`numericFromExactValue` recomputes a value that is not finite).
+ *
+ * At machine precision a double of 0 can be a value that underflowed: the
+ * seed `10^-400` is the double 0, and so is the step `10^-200 · 10^-200`, so
+ * `Reduce([10^-200, 10^-200, 10^300], Multiply).N()` was 0 where
+ * `Multiply(10^-200, 10^-200, 10^300).N()` is `1e-100`. A fold of integers
+ * with a reducer that keeps them integral (`reducerKeepsIntegers`) is 0 only
+ * when its value is 0: its 0 is kept, and a long fold of integers is not
+ * folded twice (`Reduce(1..10^5, (a, k) ↦ a · (k - k), 1).N()` takes 16 ms
+ * with the compiled fold; its exact fold takes about 2 s).
+ */
+function foldValueToRecover(
+  ce: ComputeEngine,
+  folded: Expression,
+  trace: FoldTrace | undefined
+): Expression {
+  if (trace === undefined || !isNumber(folded) || !folded.isSame(0))
+    return folded;
+  if (!trace.nonInteger && reducerKeepsIntegers(trace.reducer)) return folded;
+  return ce.NaN;
+}
+
+/**
  * The result of a fold under `Reduce`. At machine precision, a fold of
  * doubles can overflow where the exact fold does not: `Product([10^400, 0])`
  * gives `∞ · 0 = NaN`, but the exact product is 0. When the numeric fold is NaN
- * or infinite, the float of the exact fold is the result.
+ * or infinite, or a 0 that can be an underflow (`foldValueToRecover`), the
+ * float of the exact fold is the result.
  */
 function withExactFoldFallback(
   options: EvaluateHandlerOptions,
-  folded: Expression | undefined
+  folded: Expression | undefined,
+  trace?: FoldTrace
 ): Expression | undefined {
   if (!options.numericApproximation || folded === undefined) return folded;
   // A value of a kind is the answer as it is: a measurement is a numeric
@@ -11048,7 +11133,11 @@ function withExactFoldFallback(
   // was the bare `0.3734`).
   if (isKindValue(folded)) return folded;
   return (
-    numericFromExactValue(options.engine, options.expression, folded) ?? folded
+    numericFromExactValue(
+      options.engine,
+      options.expression,
+      foldValueToRecover(options.engine, folded, trace)
+    ) ?? folded
   );
 }
 
@@ -11057,7 +11146,8 @@ function withExactFoldFallback(
  * with the signal, registry and context stack of this evaluation. */
 async function withExactFoldFallbackAsync(
   options: EvaluateHandlerOptions,
-  folded: Expression | undefined
+  folded: Expression | undefined,
+  trace?: FoldTrace
 ): Promise<Expression | undefined> {
   if (!options.numericApproximation || folded === undefined) return folded;
   // See `withExactFoldFallback`: a value of a kind is kept.
@@ -11066,7 +11156,7 @@ async function withExactFoldFallbackAsync(
     (await numericFromExactValueAsync(
       options.engine,
       options.expression,
-      folded,
+      foldValueToRecover(options.engine, folded, trace),
       awaitedOperandOptions(options)
     )) ?? folded
   );
@@ -11214,7 +11304,9 @@ const reduceEvaluate = <R>(
   drive: (fold: Generator<any, Expression | undefined, any>) => R,
   // How the reducer is applied: `undefined` on the synchronous route, and
   // `asyncCallbackRoute()` on the asynchronous one (see `CallbackRoute`).
-  route: CallbackRoute = undefined
+  route: CallbackRoute = undefined,
+  // Filled for `withExactFoldFallback` (see `foldValueToRecover`).
+  trace?: FoldTrace
 ): Expression | undefined | R => {
   const { engine: ce, numericApproximation } = options;
   // `Reduce` holds its operands, but a source that is not a collection value
@@ -11312,6 +11404,14 @@ const reduceEvaluate = <R>(
   const settled = (r: Expression): Expression =>
     settledAccumulator(ce, r, numericApproximation === true);
 
+  // Records a seed or an element that is not known to be an integer (see
+  // `foldValueToRecover`).
+  const noteValue = (v: number | Expression): void => {
+    if (trace === undefined || trace.nonInteger) return;
+    if (typeof v === 'number' ? !Number.isInteger(v) : v.isInteger !== true)
+      trace.nonInteger = true;
+  };
+
   // The compiled fast path folds with JS numbers, so it always yields a
   // float. Under exact evaluation that violates the Evaluate-vs-N
   // exactness contract (e.g. `a + 1/k` over a Range would collapse the
@@ -11399,13 +11499,16 @@ const reduceEvaluate = <R>(
               // The seed takes the same reading as an element: an underflowed
               // seed (`10^-400`) is NaN, so that the exact fold recovers it.
               const { value, re } = machineStep(ce, initial!, yield* seed());
+              noteValue(re);
               accumulator = Number.isFinite(re) ? re : value;
             }
             if (first && !hasInitial) {
               const { value, re } = machineStep(ce, item);
+              noteValue(re);
               accumulator = Number.isFinite(re) ? re : value;
             } else if (typeof accumulator === 'number') {
               const { value, re } = machineStep(ce, item);
+              noteValue(re);
               const next: unknown = Number.isFinite(re)
                 ? compiled.run!(accumulator, re)
                 : undefined;
@@ -11413,7 +11516,10 @@ const reduceEvaluate = <R>(
                 typeof next === 'number' && Number.isFinite(next)
                   ? next
                   : yield* stepInterp(ce.number(accumulator), value);
-            } else accumulator = yield* stepInterp(accumulator, item);
+            } else {
+              noteValue(item);
+              accumulator = yield* stepInterp(accumulator, item);
+            }
             first = false;
             yield;
           }
@@ -11462,6 +11568,7 @@ const reduceEvaluate = <R>(
         // give the fold of the collection.
         const walk = new MeasuredWalk(() => collection.each());
         for (const x of walk) {
+          noteValue(x);
           acc = acc === undefined ? settled(numeric(x)) : yield* step(acc, x);
           yield acc;
         }
@@ -11487,6 +11594,8 @@ const reduceEvaluate = <R>(
       // give the fold of the collection.
       const walk = new MeasuredWalk(() => collection.each());
       for (const x of walk) {
+        if (acc === undefined) noteValue(initial!);
+        noteValue(x);
         acc = yield* step(acc ?? (yield* seed()), x);
         walked += 1;
         yield acc;
@@ -15191,11 +15300,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         engine._typeResolver
       ),
 
-    evaluate: (ops, options) =>
-      withExactFoldFallback(
+    evaluate: (ops, options) => {
+      const trace: FoldTrace = { reducer: ops[1], nonInteger: false };
+      const folded = reduceEvaluate(
+        ops,
         options,
-        reduceEvaluate(ops, options, (fold) => runWalk(fold, options.engine))
-      ),
+        (fold) => runWalk(fold, options.engine),
+        undefined,
+        trace
+      );
+      return withExactFoldFallback(options, folded, trace);
+    },
     // The same fold, suspended between time slices, with the reducer
     // awaited (`asyncCallbackRoute`).
     // A `FlatMap` source with no known finiteness is listed here, with
@@ -15206,12 +15321,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // so it runs inside the effects, the context stack and the precision
     // window of this evaluation (`runWithEvaluationEffects`).
     evaluateAsync: async (ops, options) => {
+      const trace: FoldTrace = { reducer: ops[1], nonInteger: false };
       const fold = (source: Expression) =>
         reduceEvaluate(
           [source, ...ops.slice(1)],
           options,
           (walk) => runWalkAsync(walk, options),
-          asyncCallbackRoute(options)
+          asyncCallbackRoute(options),
+          trace
         );
       const pending = listedFlatMapViewAsync(
         ops[0],
@@ -15219,7 +15336,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         { operator: 'Reduce', index: 1 }
       );
       if (pending === undefined)
-        return withExactFoldFallbackAsync(options, await fold(ops[0]));
+        return withExactFoldFallbackAsync(options, await fold(ops[0]), trace);
       const listed = await pending;
       if (listed !== undefined && !isFunction(listed, 'List')) {
         if (!isInfiniteListing(listed)) return listed;
@@ -15233,7 +15350,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           () => fold(source),
           options._contextStack,
           options._precisionWindow
-        )
+        ),
+        trace
       );
     },
   },

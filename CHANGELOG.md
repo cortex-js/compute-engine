@@ -21,6 +21,33 @@
 
 ### Resolved Issues
 
+- **A sum of inexact imaginary numbers that cancel is `0`** (CE-1326).
+  `2.5i - 2.5i` threw a `TypeError` when it was evaluated. Imaginary numbers
+  that cancel leave no term, as in `x + 2.5i - 2.5i`, which is `x`, so the
+  sum is now `0`.
+
+- **The numeric value of an integral of a peak that underflows next to a
+  bound is no longer 0** (CE-1312). The value of `∫₀^{10⁷} x²⁵·e⁻ˣ dx`, by
+  `N()` and in compiled code, was `0`; it is now `25! ≈ 1.551121e25`. When the
+  integrand is 0 at the nodes next to a bound of the integral, the quadrature
+  now reads it at each probe between them and the bound.
+
+- **`HurwitzZeta(s, a)` and `Zeta(s, a)` end at a very large order `s`**
+  (CE-1228). `ce.box(['HurwitzZeta', 1e300, 2]).N()` did not end, and now
+  gives `0`, the value 2^(−10³⁰⁰) + 3^(−10³⁰⁰) + … rounded; at `a = 1` the
+  value is `1`. A compiled `HurwitzZeta(x, y)` at that point did not end
+  either, and now returns `0`.
+
+- **`Reduce` at machine precision keeps a value that underflows the double
+  range** (CE-1435). `Reduce([10^-200, 10^-200, 10^300], Multiply).N()` gave
+  `0`, and so did `Reduce([10^-400, 10^300], Multiply).N()` with
+  `ce.jit = 'off'` or when an element is not real; they give `1e-100`, the
+  value of the plain `Multiply`. A pure fold at machine precision whose value
+  is 0 is computed again exactly, unless its seed and its elements are
+  integers and its reducer is `Add`, `Subtract`, `Multiply`, or a function
+  that applies only these operators and `Negate` to its parameters and to
+  integers.
+
 - **`Mandelbrot` and `Julia` compile again on JavaScript and GLSL.** Since
   0.194.0, `compile()` declined them ("the operator Mandelbrot is not supported
   by the compiler"), so a field such as `Mandelbrot(x + y·i, 256)` was computed

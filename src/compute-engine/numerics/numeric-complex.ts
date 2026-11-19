@@ -2297,7 +2297,11 @@ function hurwitzEMComplex(
     // after this one add up to at most
     //   e^(max(0, Im(s)·arg(x + i·Im a)))·(x^(−Re s) + x^(1−Re s)/(Re s − 1)),
     // since |a + j| ≥ Re(a + j) and arg(a + j) keeps its sign and decreases
-    // in size. Once that is below 1e−17 of the sum, the sum is the value.
+    // in size. Once that is below 1e−17 of the sum, or below half the
+    // smallest subnormal (a rest that cannot change any double), the sum is
+    // the value. The comparison is in logarithms: at s = 1e300, a = 2 the
+    // first term underflows to 0, and 1e−17 of a sum of 0, or of a sum near
+    // the bottom of the double range, is 0, which no rest is below.
     if (s.re > 16) {
       // A sum past the range of a double stays there (at s = 1e9, a = 0.5,
       // the first term is already +∞) when the terms cannot cancel: for a
@@ -2314,7 +2318,14 @@ function hurwitzEMComplex(
           Math.max(0, s.im * Math.atan2(a.im, x)) -
           s.re * Math.log(x) +
           Math.log1p(x / (s.re - 1));
-        if (logRest < Math.log(1e-17 * sum.abs())) return sum;
+        if (
+          logRest <
+          Math.max(
+            Math.log(sum.abs()) - 17 * Math.LN10,
+            Math.log(Number.MIN_VALUE) - Math.LN2
+          )
+        )
+          return sum;
       }
     }
   }

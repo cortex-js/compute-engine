@@ -406,6 +406,13 @@ export function canonicalAdd(
     }
   }
 
+  // Every operand was an inexact pure-imaginary literal and their parts
+  // cancel (`2.5i - 2.5i`). Cancelled imaginary literals leave no term, as in
+  // `x + 2.5i - 2.5i` → `x`, so the sum is the empty sum `0`. Without this,
+  // the result was an `Add` with no operand, which `add()` and `addN()`
+  // cannot handle.
+  if (xs.length === 0) return ce.Zero;
+
   if (xs.length === 1) return lone(xs[0]);
 
   // Commutative: sort
