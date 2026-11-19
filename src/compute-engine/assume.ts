@@ -779,7 +779,12 @@ function assumeEquality(proposition: Expression): AssumeResult {
     // Only a complete set of roots can refute the equation. Each root
     // must be compatible with an explicit declaration and with the facts
     // about the symbol, including a range assumed for an undeclared name.
-    if (isValueDef(def) && sols.length > 0 && !stats.undecided && !stats.partial) {
+    if (
+      isValueDef(def) &&
+      sols.length > 0 &&
+      !stats.undecided &&
+      !stats.partial
+    ) {
       const target = def.value;
       const possible = sols.some(
         (root) =>

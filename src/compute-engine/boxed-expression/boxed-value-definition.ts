@@ -1388,8 +1388,9 @@ export class _BoxedValueDefinition
       previous !== undefined &&
       previous.skeleton === skeleton &&
       previous.value === v;
-    const typeInFlight = (v as { _isTypeInFlight?: () => boolean })
-      ._isTypeInFlight?.();
+    const typeInFlight = (
+      v as { _isTypeInFlight?: () => boolean }
+    )._isTypeInFlight?.();
     const directRecursion =
       (sameLiteral || typeInFlight) && callsItselfDirectly(v, this.name);
     const derivedBefore = sameLiteral && directRecursion;

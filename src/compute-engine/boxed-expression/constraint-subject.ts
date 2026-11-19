@@ -19,7 +19,10 @@ import {
 import type { Type } from '../../common/type/types.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { inStaticTypingView, withoutStaticTypingView } from '../static-typing-view.js';
+import {
+  inStaticTypingView,
+  withoutStaticTypingView,
+} from '../static-typing-view.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
 import { restrictionParts } from './conditional-value.js';

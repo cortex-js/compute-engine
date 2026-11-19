@@ -2913,7 +2913,8 @@ function lowerOnce(
     // The sign that the range of the declared type proves (`real<0..5>`,
     // `integer<1..>`), not the interval mode, whose enclosure of an input is
     // the host's.
-    const declared = def !== undefined && !def.inferredType ? def.type.type : undefined;
+    const declared =
+      def !== undefined && !def.inferredType ? def.type.type : undefined;
     if (
       !interval &&
       shape.length === 0 &&
@@ -3973,46 +3974,52 @@ function lowerOnce(
         // the parts at that index (`At` of a constant index reads one).
         const ss = columns.map((l) => lists.listSource(l));
         const hi = b.constant((c.ops[1] as Fn).nops - 1, 'integer');
-        return counted(b.constant(0, 'integer'), hi, (k) =>
-          withFrame(false, (frame) => {
-            const parts = ss.map((s) => s.at(k));
-            if (isSymbol(index))
-              frame.names.set(index.symbol, { v: k, role: 'index', parts });
-            else {
-              if (index.nops !== parts.length)
-                decline(
-                  c,
-                  `a pattern of ${index.nops} names for a tuple of ${parts.length} elements`
-                );
-              const names = patternNames(index);
-              const twice = names.find((n, i) => names.indexOf(n) !== i);
-              if (twice !== undefined)
-                decline(c, `a pattern that names ${twice} twice`);
-              index.ops.forEach((q, j) => {
-                for (const [n, v] of destructure(c, q, parts[j]))
-                  frame.names.set(n, { v, role: 'index' });
-              });
-            }
-            clause(j + 1);
-          }),
+        return counted(
+          b.constant(0, 'integer'),
+          hi,
+          (k) =>
+            withFrame(false, (frame) => {
+              const parts = ss.map((s) => s.at(k));
+              if (isSymbol(index))
+                frame.names.set(index.symbol, { v: k, role: 'index', parts });
+              else {
+                if (index.nops !== parts.length)
+                  decline(
+                    c,
+                    `a pattern of ${index.nops} names for a tuple of ${parts.length} elements`
+                  );
+                const names = patternNames(index);
+                const twice = names.find((n, i) => names.indexOf(n) !== i);
+                if (twice !== undefined)
+                  decline(c, `a pattern that names ${twice} twice`);
+                index.ops.forEach((q, j) => {
+                  for (const [n, v] of destructure(c, q, parts[j]))
+                    frame.names.set(n, { v, role: 'index' });
+                });
+              }
+              clause(j + 1);
+            }),
           parallel && j === 1
         );
       }
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
       const hi = apply(c, 'Subtract', [s.length, b.constant(1, 'integer')]);
-      counted(lo, hi, (k) =>
-        withFrame(false, (frame) => {
-          // `for (p, q) in L` of a list of points binds each name to an
-          // element of the point (`destructure()`).
-          const x = s.at(k);
-          if (isSymbol(index))
-            frame.names.set(index.symbol, { v: x, role: 'index' });
-          else
-            for (const [n, v] of destructure(c, index, x))
-              frame.names.set(n, { v, role: 'index' });
-          clause(j + 1);
-        }),
+      counted(
+        lo,
+        hi,
+        (k) =>
+          withFrame(false, (frame) => {
+            // `for (p, q) in L` of a list of points binds each name to an
+            // element of the point (`destructure()`).
+            const x = s.at(k);
+            if (isSymbol(index))
+              frame.names.set(index.symbol, { v: x, role: 'index' });
+            else
+              for (const [n, v] of destructure(c, index, x))
+                frame.names.set(n, { v, role: 'index' });
+            clause(j + 1);
+          }),
         parallel && j === 1
       );
     };

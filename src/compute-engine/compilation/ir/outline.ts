@@ -123,7 +123,7 @@ export function outline(
         .filter((f) => marked.get(f.name)!.length > 0)
         .map((f) => f.name)
     );
-    for (let changed = true; changed; ) {
+    for (let changed = true; changed;) {
       changed = false;
       for (const f of p.functions)
         if (
@@ -426,9 +426,7 @@ export function outline(
       const matched = new Set<Instr>();
       const mentions = (i: Instr): boolean =>
         argsOf(i).includes(l) ||
-        regionsOf(i).some(
-          (r) => r.yields.includes(l) || r.body.some(mentions)
-        );
+        regionsOf(i).some((r) => r.yields.includes(l) || r.body.some(mentions));
       const check = (r: Region): boolean => {
         if (r.yields.includes(l)) return false;
         for (let s = 0; s < r.body.length; s++) {

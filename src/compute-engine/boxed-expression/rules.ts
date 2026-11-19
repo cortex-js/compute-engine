@@ -189,7 +189,8 @@ export const CONDITIONS = {
   // A `broadcastable<boolean>` expression (a comparison whose operand may be
   // a collection or a scalar) may be a boolean, so it matches too
   // (`isBooleanOrBroadcastableBooleanType`).
-  boolean: (x: Expression) => isBooleanOrBroadcastableBooleanType(typeWithFacts(x).type),
+  boolean: (x: Expression) =>
+    isBooleanOrBroadcastableBooleanType(typeWithFacts(x).type),
   string: (x: Expression) => isString(x),
   number: (x: Expression) => isNumber(x),
   symbol: (x: Expression) => isSymbol(x),

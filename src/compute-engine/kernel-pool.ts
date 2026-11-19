@@ -902,7 +902,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
     // of the deadline is armed only when the task is sent (`armDeadline()`).
     // A task that runs on the worker at its deadline is the watchdog's. A
     // call task is rejected with the error of its deadline.
-    const deadline = task.type === 'cells' ? task.slice.deadline : task.deadline;
+    const deadline =
+      task.type === 'cells' ? task.slice.deadline : task.deadline;
     if (deadline !== undefined) {
       // One millisecond after the deadline, so that `deadlinePassed()` is
       // true for every kind of task when the timer fires.

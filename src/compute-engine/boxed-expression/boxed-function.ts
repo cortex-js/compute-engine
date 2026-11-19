@@ -15025,10 +15025,7 @@ function lambdaBroadcastType(
     openPointOperandAt(i) &&
     ops.every(
       (x, j) =>
-        j === i ||
-        !mappable(j) ||
-        !x.participates ||
-        openPointOperandAt(j)
+        j === i || !mappable(j) || !x.participates || openPointOperandAt(j)
     );
   const participates = (i: number) =>
     mappable(i) &&

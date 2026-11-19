@@ -4121,9 +4121,7 @@ export async function evaluateStatementsAsync(
       ) {
         const at = debugStatementOf(ce, op, stack, effects, precisionWindow);
         const value = result;
-        await invokeDebugHookAsync(() =>
-          debugHooks.afterStatement!(at, value)
-        );
+        await invokeDebugHookAsync(() => debugHooks.afterStatement!(at, value));
       }
     } finally {
       if (program && isTimeoutCancellation(failure))

@@ -84,11 +84,7 @@ export type RunState = {
     lists: ArrayLike<number>[]
   ) => Promise<unknown[][]> | undefined;
   addNumber: (acc: number, sums: unknown[][], j: number) => number;
-  addList: (
-    list: number[],
-    sums: unknown[][],
-    j: number
-  ) => ArrayLike<number>;
+  addList: (list: number[], sums: unknown[][], j: number) => ArrayLike<number>;
 };
 
 /** `acc` plus result `j` of each sub-range, in the order of the
@@ -126,10 +122,7 @@ export function numbersOf(v: unknown): number {
 }
 
 /** Check `minPasses` as `runAsync()` and `willParallelize()` do. */
-function checkMinPasses(
-  where: string,
-  minPasses: number | undefined
-): number {
+function checkMinPasses(where: string, minPasses: number | undefined): number {
   const n = minPasses ?? DEFAULT_MIN_PASSES;
   if (!Number.isInteger(n) || n < 1)
     throw new TypeError(
@@ -367,7 +360,9 @@ export function makeRunAsync(
               (s, p) =>
                 (s.ok
                   ? s.v
-                  : asProgram(() => record.run(...argsOf(ranges[p])))) as unknown[]
+                  : asProgram(() =>
+                      record.run(...argsOf(ranges[p]))
+                    )) as unknown[]
             );
           } finally {
             signal?.removeEventListener('abort', onAbort);

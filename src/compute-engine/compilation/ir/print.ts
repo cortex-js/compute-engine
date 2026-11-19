@@ -372,9 +372,7 @@ export function printProgram(
     if (p.signs?.get(v) === 'positive') return true;
     const i = index.def.get(v);
     return (
-      i?.k === 'const' &&
-      typeof i.value.value === 'number' &&
-      i.value.value > 0
+      i?.k === 'const' && typeof i.value.value === 'number' && i.value.value > 0
     );
   };
 
@@ -647,10 +645,7 @@ export function printProgram(
     const ys = f.body.yields;
     const waiting = wait !== undefined;
     if (f.tuple === true && syntax.retTuple !== undefined)
-      return [
-        ...body(f.body, 1, waiting),
-        '  ' + syntax.retTuple(ys.map(use)),
-      ];
+      return [...body(f.body, 1, waiting), '  ' + syntax.retTuple(ys.map(use))];
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
     return [...body(f.body, 1, waiting), `  return ${use(ys[0])};`];

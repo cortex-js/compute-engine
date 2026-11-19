@@ -82,25 +82,24 @@ that the canonical form makes of it (`exactRational()`, `literalNumber()`,
 CE-1499): as a literal, and where the walk reads an operand as a number (the
 single quotient of a product: `Floor(Rational(1, 49)·x)` at 49 is 1, also
 through a local declared with it; a literal exponent; a negative exponent's
-divisor). No node is rebuilt, so each call
-keeps the definition it was boxed with. `Rational` of other operands (`1.0`,
-which the canonical form divides as a float), a user's `Rational` and one with
-a host handler decline. Then a sub-expression that
-the slice would lower and that has no free name, no name bound by the walk, no
-effectful operation and no loop is evaluated once with `N()` and becomes a
-literal (`Mod(1, 1/10)` is exactly 0). A closed `Mode(List(1, 2, 4))` is not
-folded, because `Mode` is not in the slice. A sub-expression whose static type
-is `error` declines (`Sin(Tuple(w))` of a vector `w`, `2·Tuple(L, L)`). A throw
-of `N()` means "not folded": the node is lowered as written, except a
-`CancellationError`, which propagates. A row that depends on an engine setting
-declines when the setting is not the default, except the angular unit: under
-`'deg'`, `'grad'` or `'turn'` the lowering multiplies each operand of a direct
-trigonometric row (`Sin`, `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Haversine`) by the
-radians of one unit, and the result of an inverse row (`Arcsin`, ..., `Arctan2`,
-`Argument`, `Degrees`) by the units of one radian, on both lanes and both
-targets, as the interpreter converts them (`ANGLE_FACTORS`, the row field
-`angle`). Like every engine setting, the compiled code holds the factor of the
-unit at the time of the compilation.
+divisor). No node is rebuilt, so each call keeps the definition it was boxed
+with. `Rational` of other operands (`1.0`, which the canonical form divides as a
+float), a user's `Rational` and one with a host handler decline. Then a
+sub-expression that the slice would lower and that has no free name, no name
+bound by the walk, no effectful operation and no loop is evaluated once with
+`N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed
+`Mode(List(1, 2, 4))` is not folded, because `Mode` is not in the slice. A
+sub-expression whose static type is `error` declines (`Sin(Tuple(w))` of a
+vector `w`, `2·Tuple(L, L)`). A throw of `N()` means "not folded": the node is
+lowered as written, except a `CancellationError`, which propagates. A row that
+depends on an engine setting declines when the setting is not the default,
+except the angular unit: under `'deg'`, `'grad'` or `'turn'` the lowering
+multiplies each operand of a direct trigonometric row (`Sin`, `Cos`, `Tan`,
+`Cot`, `Sec`, `Csc`, `Haversine`) by the radians of one unit, and the result of
+an inverse row (`Arcsin`, ..., `Arctan2`, `Argument`, `Degrees`) by the units of
+one radian, on both lanes and both targets, as the interpreter converts them
+(`ANGLE_FACTORS`, the row field `angle`). Like every engine setting, the
+compiled code holds the factor of the unit at the time of the compilation.
 
 `closedValue()` gives a number only. A `Range` lowered as a list value (an
 operand of an element-wise row, an argument, the value of a name, an element of
@@ -446,24 +445,23 @@ value by what cannot change after the compilation: an exponent on the integer
 lane (`x^2`, `x^n`), or a base or radicand that is a nonnegative constant, an
 input whose declared type is ranged at or above 0 (`k: real<0..5>`), or a value
 of `Abs`, `Exp`, an even power, or a sum or a product of such values
-(`Sqrt(x^2 + 1)`). `Sqrt(x)` at `x = -4` for `x: real` is then
-`{re: 0, im: 2}`.
+(`Sqrt(x^2 + 1)`). `Sqrt(x)` at `x = -4` for `x: real` is then `{re: 0, im: 2}`.
 
 Declared ranges. The range of the declared type of an input proves its sign:
 `>= 0` for `real<0..5>` or `integer<0..>`, `> 0` for `real<1..9>` or
 `real<0<..>` (`Program.signs`, set in `input()`). An inferred type is not read,
 and an assumption does not change a type (`assume(s >= 0)` leaves `s: real`), so
 neither proves a sign. A value outside its declared type gives an unspecified
-result. The sign removes `Abs` of such an input (or of a sum or product of
-them, `nonnegative()`), takes the real function in the complex mode (above),
-compiles an integer power in the bigint mode whose exponent is such an input
-(`Power(n, m)` for `m: integer<0..10>`, which declines for `m: integer`),
-spells a power of it with the builtin `pow()` on GLSL (`pow.nonnegative`), and
-drops the domain guard of `ln`, `log10` and `log2` on GLSL for an input `> 0`
-(`ln.positive`; `Ln(k)` for `k: real<0..5>` keeps it, since `Ln(0)` is a
-pole). The interval mode reads no range: the enclosure of an input is the
-host's. Not done: a bound carried through arithmetic (`Abs(x - 1)` for
-`x: real<1..9>` keeps its `abs`).
+result. The sign removes `Abs` of such an input (or of a sum or product of them,
+`nonnegative()`), takes the real function in the complex mode (above), compiles
+an integer power in the bigint mode whose exponent is such an input
+(`Power(n, m)` for `m: integer<0..10>`, which declines for `m: integer`), spells
+a power of it with the builtin `pow()` on GLSL (`pow.nonnegative`), and drops
+the domain guard of `ln`, `log10` and `log2` on GLSL for an input `> 0`
+(`ln.positive`; `Ln(k)` for `k: real<0..5>` keeps it, since `Ln(0)` is a pole).
+The interval mode reads no range: the enclosure of an input is the host's. Not
+done: a bound carried through arithmetic (`Abs(x - 1)` for `x: real<1..9>` keeps
+its `abs`).
 
 Inputs in the complex mode: an input of type `number` is complex
 (`CompileMode`), so a comparison of it declines; an input declared `real` or
@@ -495,11 +493,11 @@ signed zero, or on overflow of an intermediate such as `|b|^2` in a division).
 parameter or the result of a user function hold a complex `vec2`. The other
 complex rows decline with the operation they lack
 (`Arcsin (the operation casin) on glsl`): the inverse trigonometric and
-hyperbolic functions, `Root`, `Log`, `Sec`, `Csc`, `Coth`, `Sech`,
-`Csch`; and so does a list or a tuple of complex numbers
-(`a list of complex numbers`, `Profile.scalarLanes`), also an input one or the
-result of a user function. `mode: 'complex'` is admitted: an input of type
-`number` is then a `vec2`, and the result's `mode` is `'complex'`.
+hyperbolic functions, `Root`, `Log`, `Sec`, `Csc`, `Coth`, `Sech`, `Csch`; and
+so does a list or a tuple of complex numbers (`a list of complex numbers`,
+`Profile.scalarLanes`), also an input one or the result of a user function.
+`mode: 'complex'` is admitted: an input of type `number` is then a `vec2`, and
+the result's `mode` is `'complex'`.
 
 Ill-conditioned points (docs/plans/2026-11-12-js-route-course-correction.md,
 rule 1): near a branch point, a pole or a cancellation the lane gives the
@@ -553,45 +551,45 @@ colour of its channels, as the interpreter does (`AsOklab((1, 0, 0))` is
 `AsOklab(Rgb(1, 0, 0))`). Every other tuple operand declines: a tuple of four
 (its alpha) or of two numbers, a tuple of colours (`AsOklab(Tuple(Cv, Cr))`, an
 error of the interpreter), a list of tuples, and a tuple operand of a
-constructor (`Hsv(Tuple(1, 2), 0, 0.5)`). On JavaScript a list of colours is
-an array of the objects, also as the result of the program (`List(Cv, Cr)` of
-two colour names), and `Length` reads it; an `At` of it that the passes do not
-make an element (an index that is not a constant in range of a stated length
-after `fold`) declines in `admits()` (the interpreter gives `Missing` out of
-range), and a `Sum` of it declines (an `incompatible-type` error of the
-interpreter). On GLSL a list of
-colours declines (`admits()`); `At` of a constant index of an operation of a
-stated length is the colour of that element (`At(Hsv(0, 0, L), 2)` of
-`L: list<real^3>`), since the `scalarize` and `fold` passes leave no list. On
-JavaScript a colour operation whose operands are constants, or such colours or
-lists of constants, reads no input and has no effect: it is computed once, when
-the code is loaded, in `preambleOnce` (`onceLists()` of `print-js.ts`), by the
-same member of `_SYS`, and every call shares the object (`AsOklab(C)` of a name
-`C = Hsv(270, 0.4, 0.95)`, a constant arm of a `Which`); one that reads an
-input, a local, an index or a draw is computed at each call. GLSL writes the
-operation of constants in the shader text; the interval mode has no colour. A
-conditional between colours joins on the lane (`If`, `Which` with a `True`
-clause; with none, its value can be `Missing` and it declines), and a `Block`
-local, also one that a `Loop` assigns, holds a colour (a local declared with the
-type `color` declines; one of no stated type, or `unknown`, holds it). A name
-whose value is a constructor of three numbers is that colour (see the values of
-free names above). A user function may return a colour, declared
-(`(real) -> color`, also through `Typed(…, 'color')` in the body) or inferred
-from the body: an object on JavaScript, a `vec3` on GLSL. Declined: a list of
-colours on GLSL, a colour input, a colour string, a tuple of components other
-than three real numbers (`AsRgb((r, g, b, a))`), a list of tuples, a
-parameter of a user function that is a colour, arithmetic on a colour (an
-`error` of the canonical form), every other colour operator (`ColorContrast`,
-…), and `mode: 'bigint'`. `ColorMix(a, b, t)` compiles on JavaScript only
-(`_SYS.colorMix`, the interpreter's mix in OKLCh, `lerpOklchColor` of
-`numerics/color-conversion.ts`): the ratio is clamped into [0, 1], `ColorMix(a,
-b)` mixes at 0.5, a tuple of three numbers in place of a colour is its sRGB
-colour, as for a conversion, and the result is in OKLCh; it declines on GLSL. The colour of non-finite channels
+constructor (`Hsv(Tuple(1, 2), 0, 0.5)`). On JavaScript a list of colours is an
+array of the objects, also as the result of the program (`List(Cv, Cr)` of two
+colour names), and `Length` reads it; an `At` of it that the passes do not make
+an element (an index that is not a constant in range of a stated length after
+`fold`) declines in `admits()` (the interpreter gives `Missing` out of range),
+and a `Sum` of it declines (an `incompatible-type` error of the interpreter). On
+GLSL a list of colours declines (`admits()`); `At` of a constant index of an
+operation of a stated length is the colour of that element
+(`At(Hsv(0, 0, L), 2)` of `L: list<real^3>`), since the `scalarize` and `fold`
+passes leave no list. On JavaScript a colour operation whose operands are
+constants, or such colours or lists of constants, reads no input and has no
+effect: it is computed once, when the code is loaded, in `preambleOnce`
+(`onceLists()` of `print-js.ts`), by the same member of `_SYS`, and every call
+shares the object (`AsOklab(C)` of a name `C = Hsv(270, 0.4, 0.95)`, a constant
+arm of a `Which`); one that reads an input, a local, an index or a draw is
+computed at each call. GLSL writes the operation of constants in the shader
+text; the interval mode has no colour. A conditional between colours joins on
+the lane (`If`, `Which` with a `True` clause; with none, its value can be
+`Missing` and it declines), and a `Block` local, also one that a `Loop` assigns,
+holds a colour (a local declared with the type `color` declines; one of no
+stated type, or `unknown`, holds it). A name whose value is a constructor of
+three numbers is that colour (see the values of free names above). A user
+function may return a colour, declared (`(real) -> color`, also through
+`Typed(…, 'color')` in the body) or inferred from the body: an object on
+JavaScript, a `vec3` on GLSL. Declined: a list of colours on GLSL, a colour
+input, a colour string, a tuple of components other than three real numbers
+(`AsRgb((r, g, b, a))`), a list of tuples, a parameter of a user function that
+is a colour, arithmetic on a colour (an `error` of the canonical form), every
+other colour operator (`ColorContrast`, …), and `mode: 'bigint'`.
+`ColorMix(a, b, t)` compiles on JavaScript only (`_SYS.colorMix`, the
+interpreter's mix in OKLCh, `lerpOklchColor` of `numerics/color-conversion.ts`):
+the ratio is clamped into [0, 1], `ColorMix(a, b)` mixes at 0.5, a tuple of
+three numbers in place of a colour is its sRGB colour, as for a conversion, and
+the result is in OKLCh; it declines on GLSL. The colour of non-finite channels
 follows the JavaScript runtime (its `NaN` colour); on GLSL no fidelity is owed
-there. The hue of a colour whose two chromatic components
-are 0 is 0 on both targets, as in the interpreter (`_gpu_ir_lch` does not call
-`atan(0, 0)`, which GLSL leaves undefined). A colour result has
-`broadcastOutputs` and `broadcast()` (one number per cell, `NaN`).
+there. The hue of a colour whose two chromatic components are 0 is 0 on both
+targets, as in the interpreter (`_gpu_ir_lch` does not call `atan(0, 0)`, which
+GLSL leaves undefined). A colour result has `broadcastOutputs` and `broadcast()`
+(one number per cell, `NaN`).
 
 ## The `bigint` mode
 
@@ -1265,28 +1263,27 @@ element and the step are. GLSL has no spelling of a run-time count.
 
 A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers (not a
 tuple) adds or multiplies the terms element by element, as the interpreter does
-(CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is
-`[6.75, 7.5]`, and `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two
-lists `C` and `U` is the sum, for each element of `C`, of the indexes where `U`
-holds it. A sum written out (above) folds the list terms from the identity with
-the element-wise operation; the loop (`accumulate()`) carries a list
-accumulator of the length of the term, the identity in each element before the
-first pass. The length of the term must be a value made before the loop (a
-number, the length of an input, of a list computed outside the sum): a length
-computed in each term (`Sum(Range(1, i), …)`, or a `Range(1, u)` lowered in the
-term) declines, since the accumulator has one length. As for any element-wise
-operation, terms of two lengths are an error of the interpreter
-(`incompatible-dimensions`) and the compiled value is unspecified. Over a range
-with no term, the interpreter's value is a list of the identity only when the
-static type of the sum states the length (`emptyBigOpValue()`): the loop then
-gives that list. When the static type states no length and the bounds are not
-two constants with at least one term, the shape of the value depends on the
-bounds at run time, and the sum declines: `Sum(X + i, Limits(i, 1, N))` with
-`X: list<real>` (the interpreter gives `0` at `N = 0`); with
-`L: list<real^2>` it compiles and gives `[0, 0]` there. Past the
-`iterationBudget` a list sum is a list of NaN. A list of a run-time length
-declines on GLSL, and a selection at each position (`Which` of a list
-condition) declines in the interval mode, as elsewhere.
+(CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is `[6.75, 7.5]`,
+and `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two lists `C` and
+`U` is the sum, for each element of `C`, of the indexes where `U` holds it. A
+sum written out (above) folds the list terms from the identity with the
+element-wise operation; the loop (`accumulate()`) carries a list accumulator of
+the length of the term, the identity in each element before the first pass. The
+length of the term must be a value made before the loop (a number, the length of
+an input, of a list computed outside the sum): a length computed in each term
+(`Sum(Range(1, i), …)`, or a `Range(1, u)` lowered in the term) declines, since
+the accumulator has one length. As for any element-wise operation, terms of two
+lengths are an error of the interpreter (`incompatible-dimensions`) and the
+compiled value is unspecified. Over a range with no term, the interpreter's
+value is a list of the identity only when the static type of the sum states the
+length (`emptyBigOpValue()`): the loop then gives that list. When the static
+type states no length and the bounds are not two constants with at least one
+term, the shape of the value depends on the bounds at run time, and the sum
+declines: `Sum(X + i, Limits(i, 1, N))` with `X: list<real>` (the interpreter
+gives `0` at `N = 0`); with `L: list<real^2>` it compiles and gives `[0, 0]`
+there. Past the `iterationBudget` a list sum is a list of NaN. A list of a
+run-time length declines on GLSL, and a selection at each position (`Which` of a
+list condition) declines in the interval mode, as elsewhere.
 
 A JavaScript result is read-only, as the contract of `run()` states
 (`docs/COMPILATION-MODEL.md`, "inputs of the shape the compiled code reads,
@@ -2300,20 +2297,19 @@ function's input parameters, which `define()` adds to each such call
 before or after the call (`J(n, x) := Which(n = 0, x, True, I(x, J(n − 1, x)))`,
 where `I` reads `a`). Declined: a function that reads an input on a cycle of
 calls through another function (`P(j) = If(j > 0, Q(j - 1), n)` and
-`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name has a value; an input
-of a list of a run-time length or of booleans; a name with a value read in the
-body whose binding where the call is compiled is not the body's (see the values
-of free names above); another `vars` name. A call where the name is a local or
-the variable of a binder (CE-1479) passes the input, which the body reads: with
+`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name has a value; an input of
+a list of a run-time length or of booleans; a name with a value read in the body
+whose binding where the call is compiled is not the body's (see the values of
+free names above); another `vars` name. A call where the name is a local or the
+variable of a binder (CE-1479) passes the input, which the body reads: with
 `k(v) := v + x`, `Sum(x + k(1), Limits(x, 1, 3))` is `(1 + 2 + 3) + 3·(1 + x)`,
 39 at x = 10, as the interpreter gives it. A call where the name is a parameter
 of the function whose body has the call (CE-1502) passes the input too: that
 function takes the input as a parameter after its own, which its parameter of
 the same name does not hide (`UserFunction.hidden`, not a name of the body's
-frame), and each call of it passes the input. With
-`u(x, y) := k(0)^2 + y^2`, `u(x, y)` is 104 at x = 10, y = 2, as the
-interpreter gives it, and `h(x) := k(x)` gives `h(2) = 12`. The binding that
-the body reads
+frame), and each call of it passes the input. With `u(x, y) := k(0)^2 + y^2`,
+`u(x, y)` is 104 at x = 10, y = 2, as the interpreter gives it, and
+`h(x) := k(x)` gives `h(2) = 12`. The binding that the body reads
 (`UserFunction.defs`) must be a binding of the name in the scope of the
 compilation or in a scope around it (`onScopeChain()`), as the input's is (the
 `inputs` option declares the input in a scope of its own, which hides that
@@ -2800,8 +2796,8 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   mode a batch is refused with an error.
 
   `runAsync()` (`run-async.ts`; design note
-  `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`, section 6) sends
-  a `parallel for` to the worker pool. After the passes, `outline()`
+  `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`, section 6) sends a
+  `parallel for` to the worker pool. After the passes, `outline()`
   (`outline.ts`) reads the program, in the default mode with no
   `iterationBudget` and for an expression; it changes nothing, so `run()` and
   `code` are those of a program with no pool. It takes a loop marked `parallel`
@@ -2820,25 +2816,25 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   of pass `i` being `lo + i`), each scalar accumulator from `-0` and each list
   accumulator a new `Float64Array` of `-0` (the region row `zeros`), and which
   returns the partial sums, then the partial arrays (`tuple`). It is printed by
-  `printJavaScript()` with no passes, so a worker runs the IR of `run()`'s
-  pass; a loop whose worker program is not shippable (`isShippableCode()`) or
-  reads a name of `vars` runs in order. A function waits when it holds such a
-  loop or a waiting call of a function that waits (a fixed point); with the
-  entry waiting, `printProgram()` prints the asynchronous text (`Wait`): each
-  function that the entry reaches through waiting calls as
-  `async <name>$async`, whose waiting calls are awaited, and each pool loop as
+  `printJavaScript()` with no passes, so a worker runs the IR of `run()`'s pass;
+  a loop whose worker program is not shippable (`isShippableCode()`) or reads a
+  name of `vars` runs in order. A function waits when it holds such a loop or a
+  waiting call of a function that waits (a fixed point); with the entry waiting,
+  `printProgram()` prints the asynchronous text (`Wait`): each function that the
+  entry reaches through waiting calls as `async <name>$async`, whose waiting
+  calls are awaited, and each pool loop as
   `_run.loop(id, lo, hi, [values], [lists])`, then the loop of `run()` when it
   gives `undefined`, else the wait and `_run.addNumber()` / `_run.addList()`.
   Every wait is `_run.r(await _run.s(p).then(_run.ok, _run.fail))`, and every
-  `async` function ends with `_run.d()` in a `finally`: the caller's digits
-  and deadline frame are current whenever the program does not run. The text
-  is built over the same `preambleOnce` at the first call of `runAsync()`. The
+  `async` function ends with `_run.d()` in a `finally`: the caller's digits and
+  deadline frame are current whenever the program does not run. The text is
+  built over the same `preambleOnce` at the first call of `runAsync()`. The
   driver (`_run.loop`) checks the pool, a step budget, `minPasses` and the size
   of the private lists, splits the passes into one sub-range per worker, sends
-  each with the deadline of the frame current at the call, runs a sub-range
-  that a worker did not complete again on the calling thread, and reports the
-  route to `onLoop`. `willParallelize()` is true when the program has a pool
-  loop and the pool is usable.
+  each with the deadline of the frame current at the call, runs a sub-range that
+  a worker did not complete again on the calling thread, and reports the route
+  to `onLoop`. `willParallelize()` is true when the program has a pool loop and
+  the pool is usable.
 
 `compile(expr, { to: 'glsl' })` (`adapter-glsl.ts`) takes a scalar result (real,
 integer, boolean, or complex, a `vec2`: "The complex lane") or a list of stated

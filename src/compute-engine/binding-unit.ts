@@ -393,7 +393,8 @@ export class UnitEnvironment {
     let typeChanged = false;
     for (let i = journal.length - 1; i >= mark; i--) {
       const { entries, name, previous, type } = journal[i];
-      if (entries instanceof Set || previous === undefined) entries.delete(name);
+      if (entries instanceof Set || previous === undefined)
+        entries.delete(name);
       else entries.set(name, previous);
       if (type) typeChanged = true;
     }
