@@ -1042,7 +1042,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     Permutations: {
       description:
-        'Return all permutations of length k (default full length) of a collection.',
+        'Return all permutations of length k (default full length) of a collection. `Permutations(n)` for a non-negative integer n is the permutations of `Range(1, n)`, as lists, and `Permutations(n, k)` its arrangements of length k.',
       keywords: ['nPr'],
       // The LEADING arm is the string rule: an arrangement of a string's own
       // characters is itself a string, so `Permutations("ab")` is
@@ -1052,8 +1052,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `string`: an `unknown`- or `any`-typed operand refutes no arm, so a
       // ground `string` parameter would win most-specific-wins on every
       // untyped operand.
+      // The integer arm is the permutations of `Range(1, n)`; it is bounded
+      // below by 0 so that a negative `n` stays a type error.
       signature:
-        '((S, integer?) -> list<string> where S: string) & ((collection, integer?) -> list<list>)',
+        '((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)',
       // A lazy indexed collection (like `CartesianProduct`/`PowerSet`): the
       // result has `P(n, k)` elements — factorially many — so it is NEVER
       // materialized up front. `.count` is the closed form `n·(n-1)···(n-k+1)`
@@ -1061,7 +1063,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // first `i` ARRANGEMENTS (after reading the — typically small — base
       // collection once). Binding an unread `Permutations` is O(1).
       collection: {
-        isEnumerable: enumerableFromSource,
+        isEnumerable: (expr) =>
+          isFunction(expr) && isNumber(expr.op1)
+            ? permutationBase(expr).isEnumerableCollection
+            : enumerableFromSource(expr),
         isLazy: () => true,
         count: (expr) => permutationsCount(expr),
         isEmpty: (expr) => {
@@ -1077,11 +1082,10 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         // infinite collection that yields nothing.
         isFinite: (expr) => {
           if (!isFunction(expr)) return undefined;
-          const k = expr.ops[1]
-            ? toIntegerOperand(expr.ops[1])
-            : expr.op1.count;
+          const base = permutationBase(expr);
+          const k = expr.ops[1] ? toIntegerOperand(expr.ops[1]) : base.count;
           if (k === 0) return true;
-          const f = expr.op1.isFiniteCollection;
+          const f = base.isFiniteCollection;
           return f === false ? undefined : f;
         },
         iterator: permutationsIterator,
@@ -1232,6 +1236,18 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         iterator: integerPartitionsIterator,
         at: (expr, index) => integerPartitionsAt(expr, index),
         atBigint: (expr, index) => integerPartitionsAt(expr, index),
+        // The position of a partition comes from the same table as `at`, in
+        // the same order. A partition that is not one of the collection has
+        // no position (0), and the partitions are distinct, so it occurs once.
+        indexOf: (expr, target) => integerPartitionsIndexOf(expr, target),
+        contains: (expr, target) => {
+          const i = integerPartitionsIndexOf(expr, target);
+          return i === undefined ? undefined : i !== 0;
+        },
+        countOf: (expr, target) => {
+          const i = integerPartitionsIndexOf(expr, target);
+          return i === undefined ? undefined : i === 0 ? 0 : 1;
+        },
       },
     },
 
@@ -1475,6 +1491,32 @@ function log2FallingFactorial(n: number | bigint, k: number): number {
 }
 
 /**
+ * The collection a `Permutations` arranges: its first operand, with a text
+ * source resolved (see `resolveTextSource`), or `Range(1, n)` when that operand
+ * is a non-negative integer literal `n` (`Permutations(3)` is
+ * `Permutations(Range(1, 3))`). A `Combinations` keeps its operand.
+ */
+function permutationBase(expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  const base = expr.op1;
+  if (
+    expr.operator === 'Permutations' &&
+    isNumber(base) &&
+    base.isInteger === true
+  ) {
+    const n = toIntegerOperand(base);
+    if (n !== null && n >= 0 && Number.isSafeInteger(n)) {
+      const ce = expr.engine;
+      // `Range(1, 0)` counts down, so zero is the empty list.
+      return n === 0
+        ? ce._fn('List', [])
+        : ce._fn('Range', [ce.One, ce.number(n)]);
+    }
+  }
+  return resolveTextSource(base);
+}
+
+/**
  * The number of length-`k` permutations of an `n`-element collection,
  * `P(n, k) = n·(n-1)···(n-k+1)`, WITHOUT enumerating them. `k` defaults to the
  * collection size. Returns `1` for `k = 0` (the empty arrangement); `undefined`
@@ -1485,7 +1527,7 @@ function log2FallingFactorial(n: number | bigint, k: number): number {
  */
 function permutationsCount(expr: Expression): number | bigint | undefined {
   if (!isFunction(expr)) return undefined;
-  const n = expr.op1.count;
+  const n = permutationBase(expr).count;
   if (n === undefined) return undefined;
   const kExpr = expr.ops[1];
   const k = kExpr ? toIntegerOperand(kExpr) : n;
@@ -1564,7 +1606,7 @@ function* permutationsIterator(
   // symbol holding a string, or a string-valued application, is not a string
   // literal and `innerRun` would emit LISTS of characters. Resolve once, here
   // (see `resolveTextSource` in `library/collections.ts`).
-  const xs = resolveTextSource(expr.op1);
+  const xs = permutationBase(expr);
   const ce = expr.engine;
   const kExpr = expr.ops[1];
   // P(n, 0) = 1: the single empty arrangement — yield it without touching the
@@ -2143,6 +2185,71 @@ function integerPartitionsAt(
 }
 
 /**
+ * The 1-based position of `target` in the walk of `integerPartitionsIterator`,
+ * read from the table of `at` with no walk: at each part, the partitions that
+ * start with a larger allowed size come first, so their number is added up.
+ *
+ * `0` when `target` is not one of the partitions: it is not a `List` of exact
+ * integers, its parts are not allowed or do not fall in non-increasing order,
+ * they do not sum to `n`, their number is not admitted, or it is past the
+ * limit of the fourth operand. `undefined` when there is no table (the work is
+ * over `MAX_PARTITION_WORK`).
+ */
+function integerPartitionsIndexOf(
+  expr: Expression,
+  target: Expression
+): number | bigint | undefined {
+  const spec = partitionSpec(expr);
+  if (spec === undefined) return undefined;
+  if (!isFunction(target, 'List')) return 0;
+  const chosen: number[] = [];
+  for (const x of target.ops) {
+    if (!isNumber(x) || x.isInteger !== true) return 0;
+    const v = toIntegerOperand(x);
+    if (v === null || v < 1) return 0;
+    chosen.push(v);
+  }
+  if (spec.n < 0) return 0;
+  if (spec.n === 0) {
+    if (chosen.length !== 0 || !admitsPartCount(spec, 0)) return 0;
+    return spec.limit === 0 ? 0 : 1;
+  }
+  const table = partitionTable(expr);
+  if (table === undefined) {
+    // No table. Without an allowed part there is no partition at all.
+    return smallestPart(spec) === 0 ? 0 : undefined;
+  }
+  const { sizes, width: C, cells, tracked } = table;
+  const n = spec.n;
+  const cell = (i: number, c: number, r: number) =>
+    c >= C ? 0n : cells[(i * C + c) * (n + 1) + r];
+  let rank = 0n;
+  let r = n;
+  let i = 0;
+  let c = 0;
+  for (const s of chosen) {
+    if (s > r) return 0;
+    let j = i;
+    while (j < sizes.length && sizes[j] > s) {
+      // Partitions that take the larger size `sizes[j]` here come first.
+      if (sizes[j] <= r) rank += cell(j, tracked ? c + 1 : 0, r - sizes[j]);
+      j += 1;
+    }
+    // `s` must be an allowed size, not used after a smaller one.
+    if (j >= sizes.length || sizes[j] !== s) return 0;
+    // No way to finish from here: the number of parts is not admitted.
+    if (cell(j, tracked ? c + 1 : 0, r - s) === 0n) return 0;
+    r -= s;
+    i = j;
+    c += 1;
+  }
+  if (r !== 0) return 0;
+  const position = rank + 1n;
+  if (spec.limit !== undefined && position > BigInt(spec.limit)) return 0;
+  return normalizeCount(position);
+}
+
+/**
  * The source of a `Permutations` or a `Combinations`, read once by the facets
  * that compute an element from its position (`at`, `atBigint`) or a position
  * from an element (`indexOf`, `contains`, `countOf`).
@@ -2174,7 +2281,7 @@ function arrangementSource(
   defaultLength: boolean
 ): ArrangementSource | undefined {
   if (!isFunction(expr)) return undefined;
-  const xs = resolveTextSource(expr.op1);
+  const xs = permutationBase(expr);
   const ce = expr.engine;
   const kExpr = expr.ops[1];
   let k: number | null = null;
