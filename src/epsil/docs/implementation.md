@@ -273,6 +273,14 @@ When a hook throws, or its promise rejects, the run stops and the promise of
 run. An abort of `signal` while a hook's promise is pending takes effect only
 when the promise settles.
 
+A Pause button sets a flag that `beforeStatement` reads. The click, or the
+message to a worker, is handled only when the run yields to the event loop,
+and the run yields only inside a loop (every 16 ms of loop work): awaiting a
+hook that returns at once does not yield. For a run of plain statements or of
+recursive calls to see the flag, the hook yields itself: when 16 ms have
+passed since its last yield, it awaits
+`new Promise((resume) => setTimeout(resume, 0))` before it reads the flag.
+
 A time limit keeps running while the run waits: a `withTimeLimit()` span
 around the call, `statementTimeLimitMs`, and the engine's time limit. A pause
 longer than the limit ends the run with a timeout, so run a program that a

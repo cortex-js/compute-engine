@@ -56,6 +56,13 @@ export interface EpsilDebugStatement {
  * with that error: this is how a debugger ends a run. An abort of the
  * `signal` of the run takes effect only when the pending promise settles.
  *
+ * The run yields to the event loop only inside a loop (every 16 ms of loop
+ * work): awaiting a hook that returns at once does not yield, so a timer, a
+ * click or a message is not handled during a run of plain statements or of
+ * recursive calls. A debugger whose Pause button sets a flag that
+ * `beforeStatement` reads makes the hook yield (`await` a `setTimeout(0)`)
+ * when 16 ms have passed since its last yield.
+ *
  * A time limit keeps running while the run waits: a `withTimeLimit()` span
  * around the run, `statementTimeLimitMs`, and the engine's time limit. A
  * pause longer than the limit ends the run with a timeout. A debugger runs
