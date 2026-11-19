@@ -13,7 +13,9 @@ import { isLiteralParamName } from '../math-json/symbols.js';
 import {
   budgetCauseOf,
   CancellationError,
+  frameOnClock,
   isTimeoutCancellation,
+  makePauseClock,
   type CancellationCause,
 } from '../common/interruptible.js';
 
@@ -241,8 +243,27 @@ export async function executeEpsilAsync(
   // if any), and the frame the engine has outside the run: when the call
   // starts, then when the run resumes after each wait (the host may have
   // closed the span since).
-  const runFrame = ce._deadlineFrame;
-  let outsideFrame = runFrame;
+  const hostFrame = ce._deadlineFrame;
+  // A debug run has a pause clock of its own (`PauseClock`): the frame of the
+  // run is the host's frame on that clock (a frame with no deadline when
+  // there is no span), so that a time limit of the run, and of each span
+  // inside it, counts running time only. A frame made outside the run keeps
+  // the `Date.now()` clock.
+  const debugRun =
+    options?.debug === undefined
+      ? undefined
+      : (() => {
+          const clock = makePauseClock();
+          return {
+            clock,
+            frame: frameOnClock(
+              hostFrame ?? { at: Infinity, spans: [] },
+              clock
+            ),
+          };
+        })();
+  const runFrame = debugRun?.frame ?? hostFrame;
+  let outsideFrame = hostFrame;
   // The program environment of the run
   // (rule 10 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
   // `executeEpsil()`). It is put in place for each synchronous part of the
@@ -258,11 +279,16 @@ export async function executeEpsilAsync(
   // The debug hooks are installed for the whole run, waits included, and the
   // hooks of an enclosing run are put back when it ends.
   const enclosingDebugHooks = ce._epsilDebugHooks;
-  if (options?.debug !== undefined) ce._epsilDebugHooks = options.debug;
+  const enclosingDebugRun = ce._epsilDebugRun;
+  if (options?.debug !== undefined) {
+    ce._epsilDebugHooks = options.debug;
+    ce._epsilDebugRun = debugRun;
+  }
   // The frame outside the run is put back on every exit, an exception
   // included: the span around the call has closed, and its frame must not
   // stay on the engine.
   try {
+    ce._deadlineFrame = runFrame;
     const steps = executeEpsilRun(ce, source, options);
     // The parts of the run between two statements are synchronous; each ends
     // when the generator yields the next statement to evaluate.
@@ -309,6 +335,7 @@ export async function executeEpsilAsync(
   } finally {
     ce._deadlineFrame = outsideFrame;
     ce._epsilDebugHooks = enclosingDebugHooks;
+    ce._epsilDebugRun = enclosingDebugRun;
   }
 }
 

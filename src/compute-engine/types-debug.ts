@@ -1,4 +1,5 @@
 import type { Expression } from './types-expression.js';
+import type { PauseClock } from '../common/interruptible.js';
 
 /**
  * A statement at which a debugger can pause a run of `executeEpsilAsync()`
@@ -69,11 +70,16 @@ export interface EpsilDebugStatement {
  * `beforeStatement` reads makes the hook yield (`await` a `setTimeout(0)`)
  * when 16 ms have passed since its last yield.
  *
- * A time limit keeps running while the run waits: a `withTimeLimit()` span
- * around the run, `statementTimeLimitMs`, and the engine's time limit. A
- * pause longer than the limit ends the run with a timeout. A debugger runs
- * the program without a time limit, and stops it with the hooks or the
- * `signal`.
+ * A time limit counts running time only: the time while a promise that a
+ * hook returned is pending does not count against a `withTimeLimit()` span
+ * around the run or against `statementTimeLimitMs`. The synchronous part of
+ * a hook is running time, as is a hook that returns no promise, and a watch
+ * that runs in `inScope()` during a pause. A watch also keeps the time limit
+ * of a span around the call of `inScope()`. Pauses that overlap count once. So a
+ * debugger keeps the time limit of a normal run: a pause of any length does
+ * not end the run, and an endless loop still ends with a timeout. The paused
+ * time belongs to the run: a pause does not extend the time limit of other
+ * work, on this engine or on another.
  *
  * While the run waits, other evaluations can run on the engine. The hooks
  * are installed on the engine for the duration of the run, and a statement
@@ -93,4 +99,13 @@ export interface EpsilDebugHooks {
     at: EpsilDebugStatement,
     value: Expression
   ) => void | PromiseLike<void>;
+}
+
+/**
+ * A debug run of `executeEpsilAsync()` (`IComputeEngine._epsilDebugRun`):
+ * its pause clock. The deadline frames of the run are on it.
+ * @internal
+ */
+export interface EpsilDebugRun {
+  readonly clock: PauseClock;
 }

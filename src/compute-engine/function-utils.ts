@@ -14,6 +14,9 @@ import {
   checkDeadline,
   budgetCauseOf,
   isTimeoutCancellation,
+  withPauseSuspended,
+  type DeadlineFrame,
+  type PauseClock,
 } from '../common/interruptible.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
@@ -192,6 +195,8 @@ import {
   beginAsyncStatement,
   beginTopLevelEvaluation,
   copyContextStack,
+  deadlineFrameOf,
+  mergeDeadlineFrames,
 } from './boxed-expression/evaluation-epoch.js';
 import {
   isInferredTypedParameter,
@@ -4045,7 +4050,10 @@ export async function evaluateStatementsAsync(
       op.sourceOffsets !== undefined
     ) {
       const at = debugStatementOf(ce, op, stack, effects, precisionWindow);
-      await invokeDebugHookAsync(() => debugHooks.beforeStatement!(at));
+      await invokeDebugHookAsync(
+        () => debugHooks.beforeStatement!(at),
+        debugClockOf(ce, stack)
+      );
     }
     // `effects` is the host capability registry the enclosing asynchronous
     // evaluation captured, and `contextStack` its evaluation-context stack
@@ -4063,8 +4071,26 @@ export async function evaluateStatementsAsync(
         'DeclareConformance',
         'DefineFunction',
       ].includes(op.operator);
+    // In a debug run, the deadline check and the statement span are made
+    // on the frame of the statement, which is on the pause clock of the run.
+    // After an `await`, the frame on the engine is the frame outside the run,
+    // and a span made on it would count the pauses of the run.
+    const ownFrame =
+      debugClockOf(ce, stack) === undefined
+        ? undefined
+        : statementFrameOf(ce, stack);
+    const inOwnFrame = <T>(fn: () => T): T => {
+      if (ownFrame === undefined) return fn();
+      const outside = ce._deadlineFrame;
+      ce._deadlineFrame = ownFrame;
+      try {
+        return fn();
+      } finally {
+        ce._deadlineFrame = outside;
+      }
+    };
     try {
-      if (program) checkDeadline(ce._deadlineFrame);
+      if (program) inOwnFrame(() => checkDeadline(ce._deadlineFrame));
       if (signal?.aborted)
         throw new CancellationError({ cause: signal.reason });
       const evaluate = () =>
@@ -4075,18 +4101,23 @@ export async function evaluateStatementsAsync(
           _contextStack: stack,
           _precisionWindow: precisionWindow,
         });
-      result = await (program && ce._epsilStatementTimeLimitMs !== undefined
-        ? (() => {
-            let pending!: Promise<Expression>;
-            ce.withTimeLimit(
-              { ms: ce._epsilStatementTimeLimitMs!, label: 'epsil:statement' },
-              () => {
-                pending = evaluate();
-              }
-            );
-            return pending;
-          })()
-        : evaluate());
+      result = await inOwnFrame(() =>
+        program && ce._epsilStatementTimeLimitMs !== undefined
+          ? (() => {
+              let pending!: Promise<Expression>;
+              ce.withTimeLimit(
+                {
+                  ms: ce._epsilStatementTimeLimitMs!,
+                  label: 'epsil:statement',
+                },
+                () => {
+                  pending = evaluate();
+                }
+              );
+              return pending;
+            })()
+          : evaluate()
+      );
     } catch (error) {
       if (!program || signal?.aborted || isDebugHookFailure(error)) throw error;
       failure = error;
@@ -4121,7 +4152,10 @@ export async function evaluateStatementsAsync(
       ) {
         const at = debugStatementOf(ce, op, stack, effects, precisionWindow);
         const value = result;
-        await invokeDebugHookAsync(() => debugHooks.afterStatement!(at, value));
+        await invokeDebugHookAsync(
+          () => debugHooks.afterStatement!(at, value),
+          debugClockOf(ce, stack)
+        );
       }
     } finally {
       if (program && isTimeoutCancellation(failure))
@@ -4160,14 +4194,60 @@ function debugStatementOf(
   const contexts = stack ?? ce._evalContextStack;
   // The same fallback as `evaluateAsync()` (`abstract-boxed-expression.ts`).
   const handlers = effects ?? ce._evaluationEffects ?? ce.effects;
+  // A watch runs with the deadline frame of the statement, merged with the
+  // frame around the call of `inScope()`, and the time it runs is running
+  // time of the run of the statement, during a pause too
+  // (`withPauseSuspended()`).
+  const frame = statementFrameOf(ce, stack);
+  const clock = debugClockOf(ce, stack);
   return {
     statement: op,
     range: op.sourceOffsets!,
     depth: contexts.length,
     callDepth: callFrameCount(contexts),
     inScope: <T>(fn: () => T): T =>
-      runWithEvaluationEffects(ce, handlers, fn, contexts, precisionWindow),
+      withPauseSuspended(clock, () => {
+        const outside = ce._deadlineFrame;
+        ce._deadlineFrame = mergeDeadlineFrames(outside, frame);
+        try {
+          return runWithEvaluationEffects(
+            ce,
+            handlers,
+            fn,
+            contexts,
+            precisionWindow
+          );
+        } finally {
+          ce._deadlineFrame = outside;
+        }
+      }),
   };
+}
+
+/** The deadline frame of a statement of an asynchronous statement list:
+ * the frame of its context stack `stack`, or else the frame on the engine.
+ * After an `await`, the frame on the engine can be the frame outside the
+ * run of the statement. */
+function statementFrameOf(
+  ce: ComputeEngine,
+  stack: EvaluateOptions['_contextStack'] | undefined
+): DeadlineFrame | undefined {
+  return deadlineFrameOf(stack) ?? ce._deadlineFrame;
+}
+
+/** The pause clock to which the pauses of the debug hooks at a statement
+ * go (`PauseClock`): the clock of the debug run on the engine, when the
+ * frame of the statement is on it, and none otherwise. A statement of
+ * another evaluation that runs on the engine during a pause calls the same
+ * hooks, but its pauses do not stop the clock of the run. */
+function debugClockOf(
+  ce: ComputeEngine,
+  stack: EvaluateOptions['_contextStack'] | undefined
+): PauseClock | undefined {
+  const clock = ce._epsilDebugRun?.clock;
+  return clock !== undefined && statementFrameOf(ce, stack)?.paused === clock
+    ? clock
+    : undefined;
 }
 
 /**

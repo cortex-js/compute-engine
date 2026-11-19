@@ -25,7 +25,10 @@
  * at the same time, and a synchronous evaluation that runs while an
  * asynchronous one is pending, each read their own number.
  */
-import type { DeadlineFrame } from '../../common/interruptible.js';
+import {
+  frameWallDeadline,
+  type DeadlineFrame,
+} from '../../common/interruptible.js';
 import type { UnitEnvironment } from '../binding-unit.js';
 
 const currentEpoch = new WeakMap<object, number>();
@@ -109,21 +112,32 @@ export function mergeDeadlineFrames(
   if (outer === undefined) return inner;
   const outerBudgets = outer.budgets ?? [];
   const innerBudgets = inner.budgets ?? [];
+  // Deadlines are compared on the `Date.now()` clock. A frame of a debug run
+  // is on the pause clock of the run (`PauseClock`), and a later pause moves
+  // its `Date.now()` deadline: a frame on one clock does not cover a frame
+  // on another, and the merged frame of two frames on different clocks is on
+  // `Date.now()`, with the earlier deadline now. It never ends later than
+  // either frame.
+  const sameClock = outer.paused === inner.paused;
   const covers = (a: DeadlineFrame, b: DeadlineFrame) =>
-    a.at <= b.at &&
+    (sameClock || a.paused === undefined) &&
+    frameWallDeadline(a) <= frameWallDeadline(b) &&
     (b.budgets ?? []).every((x) => (a.budgets ?? []).includes(x)) &&
     b.spans.every((x) => a.spans.includes(x));
   if (covers(outer, inner)) return outer;
   if (covers(inner, outer)) return inner;
-  const owner = inner.at < outer.at ? inner.owner : outer.owner;
+  const first =
+    frameWallDeadline(inner) < frameWallDeadline(outer) ? inner : outer;
+  const owner = first.owner;
   const frame: DeadlineFrame = {
-    at: Math.min(outer.at, inner.at),
+    at: sameClock ? first.at : frameWallDeadline(first),
     spans: [
       ...outer.spans,
       ...inner.spans.filter((x) => !outer.spans.includes(x)),
     ],
   };
   if (owner !== undefined) frame.owner = owner;
+  if (sameClock && first.paused !== undefined) frame.paused = first.paused;
   const budgets = [
     ...outerBudgets,
     ...innerBudgets.filter((x) => !outerBudgets.includes(x)),

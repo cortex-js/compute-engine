@@ -28,7 +28,9 @@ export type CancellationCause =
  * frame is immutable: entering a span creates a new frame; exiting restores
  * the saved previous frame object.
  *
- *  - `at`: absolute ms timestamp beyond which execution should not proceed.
+ *  - `at`: ms timestamp beyond which execution should not proceed, on the
+ *    clock of the frame (`frameNow()`): `Date.now()`, minus the paused time
+ *    of `paused` when the frame belongs to a debug run.
  *  - `owner`: label of the span whose deadline is the EFFECTIVE one (i.e. the
  *    span that owns `at`). `undefined` for an unlabelled span.
  *  - `spans`: labels of all active spans, outermost first. Unlabelled spans
@@ -41,6 +43,13 @@ export interface DeadlineFrame {
   owner?: string;
   spans: string[];
   budgets?: StepBudget[];
+  /**
+   * The pause clock of the debug run that the frame belongs to (see
+   * `PauseClock`). The frame's clock is `Date.now()` minus the paused time
+   * of the run, so the time a debugger keeps the run paused does not count
+   * against `at`. Absent: the clock is `Date.now()`.
+   */
+  paused?: PauseClock;
   /**
    * Scratch counter for a strided deadline check (`checkDeadlineEvery`, and
    * the canonicalization walk in `boxed-expression/box.ts`). Several walks
@@ -102,11 +111,107 @@ export interface StepBudget {
   readonly host?: true;
 }
 
+/**
+ * The paused time of one debug run of `executeEpsilAsync()`: the time while
+ * at least one promise that a debug hook returned is pending
+ * (`invokeDebugHookAsync()`). The deadline frames of the run refer to it, so
+ * a time limit of the run counts running time only. Frames made outside the
+ * run (another evaluation on the same engine, another engine) keep the
+ * `Date.now()` clock.
+ *
+ *  - `totalMs`: the paused time of the intervals that have ended.
+ *  - `active`: the number of pending hook promises. Overlapping pauses are
+ *    one interval, so they count once.
+ *  - `activeSince`: the `Date.now()` time when the current interval began.
+ *  - `suspended`: the number of watches running (`EpsilDebugStatement
+ *    .inScope()`). While it is not 0, the clock runs: the time of a watch is
+ *    running time.
+ */
+export interface PauseClock {
+  totalMs: number;
+  active: number;
+  activeSince: number;
+  suspended: number;
+}
+
+export function makePauseClock(): PauseClock {
+  return { totalMs: 0, active: 0, activeSince: 0, suspended: 0 };
+}
+
+/** The paused time of `clock`, in ms, the current interval included. */
+export function pausedTime(clock: PauseClock | undefined): number {
+  if (clock === undefined) return 0;
+  return clock.active > 0 && clock.suspended === 0
+    ? clock.totalMs + Date.now() - clock.activeSince
+    : clock.totalMs;
+}
+
+/** End the current interval of `clock`, if one is running. */
+function creditPause(clock: PauseClock): void {
+  if (clock.active > 0 && clock.suspended === 0)
+    clock.totalMs += Date.now() - clock.activeSince;
+}
+
+/** A hook promise of the run of `clock` is pending. `start` is the
+ * `Date.now()` time when the hook returned it. */
+export function beginPause(clock: PauseClock, start: number): void {
+  if (clock.active === 0) clock.activeSince = start;
+  clock.active += 1;
+}
+
+/** A hook promise of the run of `clock` has settled. */
+export function endPause(clock: PauseClock): void {
+  if (clock.active === 1) creditPause(clock);
+  clock.active -= 1;
+}
+
+/** Run `fn` with the clock of `clock` running, during a pause too: the time
+ * of a watch is running time, so a time limit of the watch expires. */
+export function withPauseSuspended<T>(
+  clock: PauseClock | undefined,
+  fn: () => T
+): T {
+  if (clock === undefined) return fn();
+  creditPause(clock);
+  clock.suspended += 1;
+  try {
+    return fn();
+  } finally {
+    clock.suspended -= 1;
+    if (clock.suspended === 0) clock.activeSince = Date.now();
+  }
+}
+
+/** The current time on the clock of `frame`: `Date.now()` minus the paused
+ * time of its run. Compare it with `frame.at`. */
+export function frameNow(frame: DeadlineFrame): number {
+  return Date.now() - pausedTime(frame.paused);
+}
+
+/** The deadline of `frame` as a `Date.now()` time, for code that compares it
+ * with `Date.now()` (a worker, a compiled loop). It is exact until the next
+ * pause of its run. */
+export function frameWallDeadline(frame: DeadlineFrame): number {
+  return frame.at + pausedTime(frame.paused);
+}
+
+/** A copy of `frame` on the clock of `clock`, with the same deadline now. */
+export function frameOnClock(
+  frame: DeadlineFrame,
+  clock: PauseClock
+): DeadlineFrame {
+  return {
+    ...frame,
+    at: frameWallDeadline(frame) - pausedTime(clock),
+    paused: clock,
+  };
+}
+
 /** Has the time of `frame` passed, or has one of its step budgets been
  * spent? Reads the budgets without counting a step. */
 export function frameExpired(frame: DeadlineFrame | undefined): boolean {
   if (frame === undefined) return false;
-  if (Date.now() >= frame.at) return true;
+  if (frameNow(frame) >= frame.at) return true;
   return frame.budgets?.some((b) => b.left < 0) ?? false;
 }
 
@@ -239,8 +344,11 @@ export function checkDeadline(
   ruleStep = false
 ): void {
   if (deadline === undefined) return;
-  const at = typeof deadline === 'number' ? deadline : deadline.at;
-  if (Date.now() >= at) {
+  const expired =
+    typeof deadline === 'number'
+      ? Date.now() >= deadline
+      : frameNow(deadline) >= deadline.at;
+  if (expired) {
     if (typeof deadline === 'number')
       throw new CancellationError({
         cause: 'timeout',
@@ -412,8 +520,10 @@ export async function runAsync<T>(
   signal?: AbortSignal,
   attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
 ): Promise<Exclude<T, PromiseLike<unknown>>> {
-  // eslint-disable-next-line no-restricted-globals
-  const startTime = performance.now();
+  // The time limit is read on `Date.now()`, the clock of the deadline frames.
+  const startTime = Date.now();
+  // The time a debugger keeps the run paused does not count (`PauseClock`).
+  const pausedAtStart = pausedMs(attribution);
 
   // The value handed back to the generator by the next `gen.next(...)`: the
   // settled value of a thenable it yielded (see below), `undefined` otherwise.
@@ -450,8 +560,10 @@ export async function runAsync<T>(
           });
 
         // Check overall time limit
-        // eslint-disable-next-line no-restricted-globals
-        if (performance.now() - startTime >= timeLimitMs)
+        if (
+          Date.now() - startTime - (pausedMs(attribution) - pausedAtStart) >=
+          timeLimitMs
+        )
           throw new CancellationError({
             value,
             cause: 'timeout',
@@ -474,6 +586,14 @@ export async function runAsync<T>(
 // settled value back to the generator), and a generator run by the
 // synchronous driver never yields one, so a thenable is never the value.
 
+/** The paused time of the debug run of `attribution`, when it is a deadline
+ * frame of one (see `PauseClock`), and `0` otherwise. */
+function pausedMs(
+  attribution: DeadlineFrame | { owner?: string; spans?: string[] } | undefined
+): number {
+  return pausedTime((attribution as DeadlineFrame | undefined)?.paused);
+}
+
 /** Whether `x` is a thenable — a promise, or an object with a `then` method. */
 export function isThenable(x: unknown): x is PromiseLike<unknown> {
   return (
@@ -489,6 +609,7 @@ export function run<T>(
   attribution?: DeadlineFrame | { owner?: string; spans?: string[] }
 ): Exclude<T, PromiseLike<unknown>> {
   const startTime = Date.now();
+  const pausedAtStart = pausedMs(attribution);
 
   // A throw between two steps closes the generator (`closeGenerator()`).
   try {
@@ -497,8 +618,10 @@ export function run<T>(
 
       if (done) return value; // Return the result if generator is done
 
-      // Check for timeout
-      const elapsedTime = Date.now() - startTime;
+      // Check for timeout. The time a debugger keeps the run paused does not
+      // count (`PauseClock`).
+      const elapsedTime =
+        Date.now() - startTime - (pausedMs(attribution) - pausedAtStart);
       if (elapsedTime >= timeLimitMs) {
         throw new CancellationError({
           value,

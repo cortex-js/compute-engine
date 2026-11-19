@@ -1,3 +1,5 @@
+import { beginPause, endPause, type PauseClock } from './interruptible.js';
+
 /**
  * Debugger statement hook.
  *
@@ -16,8 +18,8 @@
  *    a dedicated worker). It is NOT part of the public engine API.
  *
  * The statement is an `Expression`; the type here is `unknown` so this
- * module has zero imports (it sits in `common/`, below the engine layers).
- * Consumers cast.
+ * module imports nothing from the engine layers (it sits in `common/`, below
+ * them). Consumers cast.
  *
  * Re-entrancy is the CONSUMER's concern: evaluating an expression from
  * inside the hook (a watch, a debug-console entry) re-enters
@@ -75,14 +77,35 @@ export function invokeDebugHook(fn: () => void): void {
 }
 /** As `invokeDebugHook()`, for a hook that can return a promise (the hooks
  * of `executeEpsilAsync()`, `ExecuteEpsilAsyncOptions.debug`): a throw and a
- * rejection are both hook failures. */
+ * rejection are both hook failures.
+ *
+ * When the hook returns a promise, the run is paused from the return of the
+ * hook until the promise settles, and `clock` (the `PauseClock` of the run,
+ * `common/interruptible.ts`) leaves that time out of the time limits of the
+ * run. A hook that returns no promise is running time. */
 export async function invokeDebugHookAsync(
-  fn: () => void | PromiseLike<void>
+  fn: () => void | PromiseLike<void>,
+  clock?: PauseClock
 ): Promise<void> {
+  let paused = false;
   try {
-    await fn();
+    const result = fn();
+    if (
+      clock !== undefined &&
+      result !== null &&
+      result !== undefined &&
+      typeof (result as { then?: unknown }).then === 'function'
+    ) {
+      // From the time the hook returned its promise: the synchronous part
+      // of the hook (a watch it evaluates) is running time.
+      beginPause(clock, Date.now());
+      paused = true;
+    }
+    await result;
   } catch (error) {
     throw hookFailure(error);
+  } finally {
+    if (paused) endPause(clock!);
   }
 }
 function hookFailure(error: unknown): object {

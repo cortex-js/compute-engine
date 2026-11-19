@@ -283,10 +283,16 @@ recursive calls to see the flag, the hook yields itself: when 16 ms have
 passed since its last yield, it awaits
 `new Promise((resume) => setTimeout(resume, 0))` before it reads the flag.
 
-A time limit keeps running while the run waits: a `withTimeLimit()` span
-around the call, `statementTimeLimitMs`, and the engine's time limit. A pause
-longer than the limit ends the run with a timeout, so run a program that a
-debugger follows without a time limit.
+A time limit counts running time only: the time while a promise that a hook
+returned is pending does not count against a `withTimeLimit()` span around
+the call or against `statementTimeLimitMs`. The synchronous part of a hook is
+running time, as is a hook that returns no promise, and a watch that runs in
+`at.inScope()` during a pause. A watch also keeps the time limit of a span
+around the call of `at.inScope()`. Pauses that overlap count once. So a program
+that a debugger follows keeps the time limit of a normal run: a pause of any
+length does not end the run, and an endless loop still ends with a timeout.
+The paused time belongs to the run, so a pause does not extend the time limit
+of other work, on the same engine or on another.
 
 A statement that the engine evaluates on the synchronous route calls no hook.
 This is the case of a statement of a function that a lazy collection applies

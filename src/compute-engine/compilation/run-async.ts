@@ -1,6 +1,7 @@
 import { callPool, isKernelPool, type StoredResult } from '../kernel-pool.js';
 import {
   CancellationError,
+  frameWallDeadline,
   type DeadlineFrame,
 } from '../../common/interruptible.js';
 import { setReconstructionDigits } from './javascript-runtime.js';
@@ -223,7 +224,9 @@ export function makeRunAsync(
       }
     };
     const deadline =
-      frame !== undefined && Number.isFinite(frame.at) ? frame.at : undefined;
+      frame !== undefined && Number.isFinite(frame.at)
+        ? frameWallDeadline(frame)
+        : undefined;
 
     const state: RunState = {
       s: (p) => {

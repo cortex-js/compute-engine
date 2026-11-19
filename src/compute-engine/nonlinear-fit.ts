@@ -19,6 +19,7 @@
 import {
   CancellationError,
   checkDeadline,
+  frameWallDeadline,
   isTimeoutCancellation,
   type DeadlineFrame,
 } from '../common/interruptible.js';
@@ -3075,7 +3076,7 @@ async function solveSetupAsync(
   // it runs with the evaluation's registry and context stack (`inStep`),
   // for a model that is interpreted.
   const executor = new PoolFitExecutor(search.kernel, pool, wire, {
-    deadline: frame?.at,
+    deadline: frame === undefined ? undefined : frameWallDeadline(frame),
     iterationLimit: ce.iterationLimit,
     signal,
     pacer,

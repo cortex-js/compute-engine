@@ -2,6 +2,8 @@ import {
   CancellationError,
   DEFAULT_ITERATION_LIMIT,
   frameExpired,
+  frameNow,
+  frameWallDeadline,
   type DeadlineFrame,
 } from '../common/interruptible.js';
 import type { RandomSeedFrame } from './numerics/random.js';
@@ -182,12 +184,14 @@ export class EngineRuntimeState {
   }
 
   /**
-   * Compatibility accessor: the absolute ms timestamp of the effective
-   * deadline. Reading returns `frame?.at`; writing a bare number wraps it into
-   * a fresh (unlabelled) frame, and `undefined` clears the deadline.
+   * Compatibility accessor: the effective deadline as a `Date.now()` time
+   * (`frameWallDeadline()`, exact until the next pause of a debug run).
+   * Writing a bare number wraps it into a fresh (unlabelled) frame, and
+   * `undefined` clears the deadline.
    */
   get deadline(): number | undefined {
-    return this._deadlineFrame?.at;
+    const frame = this._deadlineFrame;
+    return frame === undefined ? undefined : frameWallDeadline(frame);
   }
 
   set deadline(value: number | undefined) {
@@ -217,7 +221,7 @@ export class EngineRuntimeState {
     // A spent step budget leaves no time either: a loop driven by this value
     // (`run(gen, ce._timeRemaining)`) must stop as `checkDeadline` would.
     if (frameExpired(this._deadlineFrame)) return 0;
-    return this._deadlineFrame.at - Date.now();
+    return this._deadlineFrame.at - frameNow(this._deadlineFrame);
   }
 
   get isVerifying(): boolean {

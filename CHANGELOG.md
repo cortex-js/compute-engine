@@ -2,6 +2,29 @@
 
 ### New Features
 
+- **A debug run of `executeEpsilAsync()` keeps its time limit** (CE-1545). The
+  limit counts running time only: the time while the promise that a debug
+  hook returned is pending does not count against a `withTimeLimit()` span
+  around the run or against `statementTimeLimitMs`. In 0.194.2 the limit kept
+  running during a pause, so a debugged run had none. A pause of any length
+  now does not end the run, and an endless loop still ends with a timeout:
+
+  ```ts
+  const sleep = (ms) => new Promise((resume) => setTimeout(resume, ms));
+  let run;
+  ce.withTimeLimit(300, () => {
+    run = executeEpsilAsync(ce, "let a = 1\na + 41", {
+      debug: { beforeStatement: () => sleep(600) },
+    });
+  });
+  (await run).value; // ➔ 42 (0.194.2: Error("Timeout exceeded (0ms)", "timeout"))
+  ```
+
+  A watch that runs in `at.inScope()` during a pause is running time, and
+  pauses that overlap count once. The paused time belongs to the run: a pause
+  does not extend the time limit of other work, on the same engine or on
+  another.
+
 - **`epsilCompletions()` gives the completion items at an offset of an Epsil
   source.** The items are the likely values of the type expected at the offset,
   the names of the source visible there (with their type or signature), the

@@ -16,8 +16,14 @@ import { dropSpacingOperands } from './latex-syntax/drop-spacing-operands.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
 
 import type { OneOf } from '../common/one-of.js';
-import type { DeadlineFrame } from '../common/interruptible.js';
-import type { EpsilDebugHooks } from './types-debug.js';
+import {
+  frameNow,
+  frameWallDeadline,
+  pausedTime,
+  type DeadlineFrame,
+  type PauseClock,
+} from '../common/interruptible.js';
+import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
 import { hidePrivateProperties } from '../common/utils.js';
 
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
@@ -702,6 +708,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** See `IComputeEngine._epsilDebugHooks`. @internal */
   _epsilDebugHooks: EpsilDebugHooks | undefined = undefined;
+
+  /** See `IComputeEngine._epsilDebugRun`. @internal */
+  _epsilDebugRun: EpsilDebugRun | undefined = undefined;
   _epsilStatementResultHook:
     | ((
         statement: Expression,
@@ -2095,7 +2104,7 @@ export class ComputeEngine implements IComputeEngine {
     const frame = this._runtimeState.deadlineFrame;
     return frame === undefined
       ? Number.POSITIVE_INFINITY
-      : frame.at - Date.now();
+      : frame.at - frameNow(frame);
   }
 
   /** See `IComputeEngine.stepBudgetSpent`. The frame lists the budget of
@@ -2146,12 +2155,19 @@ export class ComputeEngine implements IComputeEngine {
       label?: string;
       ruleSteps?: boolean;
       host?: true;
+      clock?: PauseClock;
     },
     fn: () => T
   ): T {
     const { ms, steps, label, ruleSteps, host } = limit;
     const prevFrame = this._runtimeState.deadlineFrame;
-    const own = ms === undefined ? Infinity : Date.now() + ms;
+    // A span inside a debug run is on the pause clock of the run
+    // (`PauseClock`), which it inherits from the enclosing frame: the time a
+    // debugger keeps the run paused does not count. Any other span is on
+    // `Date.now()`.
+    const paused = limit.clock ?? prevFrame?.paused;
+    const own =
+      ms === undefined ? Infinity : Date.now() - pausedTime(paused) + ms;
     const spans = [
       ...(prevFrame?.spans ?? []),
       ...(label !== undefined ? [label] : []),
@@ -2173,10 +2189,14 @@ export class ComputeEngine implements IComputeEngine {
     // Nesting stays `min()`: if an enclosing span's deadline is already at or
     // before our own, it remains the effective one (and keeps its owner);
     // otherwise this span's deadline wins.
-    const frame: DeadlineFrame =
-      prevFrame !== undefined && prevFrame.at <= own
-        ? { at: prevFrame.at, owner: prevFrame.owner, spans }
-        : { at: own, owner: label, spans };
+    const keepPrev =
+      prevFrame !== undefined &&
+      frameWallDeadline(prevFrame) <= own + pausedTime(paused);
+    const frame: DeadlineFrame = keepPrev
+      ? { at: prevFrame.at, owner: prevFrame.owner, spans }
+      : { at: own, owner: label, spans };
+    const framePaused = keepPrev ? prevFrame.paused : paused;
+    if (framePaused !== undefined) frame.paused = framePaused;
     if (budgets !== undefined) frame.budgets = budgets;
 
     this._runtimeState.deadlineFrame = frame;

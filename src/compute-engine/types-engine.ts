@@ -15,7 +15,7 @@ import type {
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import type { StateEvent } from './engine-configuration-lifecycle.js';
-import type { DeadlineFrame } from '../common/interruptible.js';
+import type { DeadlineFrame, PauseClock } from '../common/interruptible.js';
 import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type { CacheStatsControl } from '../common/cache-stats.js';
 export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
@@ -39,7 +39,7 @@ import type {
 } from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { UnitEnvironment } from './binding-unit.js';
-import type { EpsilDebugHooks } from './types-debug.js';
+import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -1040,6 +1040,13 @@ export interface IComputeEngine {
    * @internal */
   _epsilDebugHooks: EpsilDebugHooks | undefined;
 
+  /** The debug run of `executeEpsilAsync()` in progress on the engine, set
+   * with `_epsilDebugHooks` for the duration of the run. Its pause clock
+   * gets the pauses of the hooks at a statement whose deadline frame is on
+   * that clock (`evaluateStatementsAsync`).
+   * @internal */
+  _epsilDebugRun: EpsilDebugRun | undefined;
+
   /** Called with each statement and its value, after the statement
    * evaluated: a statement of a statement list (a `Block` body, a function
    * body, an `if` branch, a loop body) that carries `sourceOffsets`, that
@@ -1751,6 +1758,9 @@ export interface IComputeEngine {
       ruleSteps?: boolean;
       /** Set by `withStepBudget` only: see `StepBudget.host`. */
       host?: true;
+      /** The pause clock of the span (`PauseClock`); by default the clock of
+       * the enclosing frame. */
+      clock?: PauseClock;
     },
     fn: () => T
   ): T;
