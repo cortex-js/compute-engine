@@ -89,8 +89,10 @@ export function formatValue(
   return epsilValueText(result.value);
 }
 
-/** The Epsil words of the constants that the engine's textual form quotes. */
+/** The Epsil words of the constants that the engine's textual form quotes.
+ * A null prototype, so that a symbol named `constructor` is not found. */
 const LITERAL_WORDS: Readonly<Record<string, string>> = {
+  __proto__: null as never,
   True: 'true',
   False: 'false',
   Nothing: 'nothing',
@@ -171,7 +173,8 @@ export function epsilValueText(value: Expression): string {
     const spelling = {
       isBound: (name: string) => engine.lookupDefinition(name) !== undefined,
     };
-    const symbols: Record<string, string> = {};
+    // A null prototype, so that a symbol named `__proto__` is a key.
+    const symbols: Record<string, string> = Object.create(null);
     // Every place that `toAsciiMath` prints a symbol from: the operands of a
     // function, the values of a dictionary and the slots of an object. The
     // set of visited nodes stops the walk at a cycle of objects.

@@ -216,6 +216,14 @@ describe('Epsil CLI value output', () => {
   });
 });
 
+describe('Epsil CLI value text of a symbol named after an object member', () => {
+  test.each(['constructor', 'toString', 'valueOf'])('%s', (name) => {
+    const session = makeEpsilSession(0);
+    const value = session.evaluate('true').value.engine.symbol(name);
+    expect(epsilValueText(value)).toBe(name);
+  });
+});
+
 describe('Epsil CLI LaTeX', () => {
   test('parses the LaTeX input and output options', () => {
     expect(parseCliArguments(['--latex'], {})).toMatchObject({
