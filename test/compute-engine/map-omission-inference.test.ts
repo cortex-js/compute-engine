@@ -87,13 +87,11 @@ describe('compiled Map declines a result type with a `nothing` arm', () => {
     ce.declare('callbacks', 'list<function>');
     // The `h` in the body of `Invoke` is its parameter, a function value
     // that this call does not lower. The compilation declines, and does not
-    // call the global `h`: it does not compile a `Map` of a function that
-    // is not a literal.
+    // call the global `h`: the `Map` is the call `Invoke(c)` of each
+    // element, and a list of functions is no input of compiled code.
     const result = compile(ce.box(['Map', 'Invoke', 'callbacks']));
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(
-      /Map of a function that is not a literal of one parameter/
-    );
+    expect(result.error).toMatch(/the input callbacks of type list<function>/);
   });
 
   test('a loop callback cannot borrow the contract of a shadowed parameter', () => {

@@ -70,7 +70,7 @@ import {
   isShadowedSymbol,
   shadowsLibraryName,
 } from '../../library-shadowing.js';
-import { literalParamsMap } from '../../library/core.js';
+import { literalParamsMap, pipeStageAsCall } from '../../library/core.js';
 import {
   Builder,
   isSubLane,
@@ -114,6 +114,7 @@ import {
   TUPLE_RULES,
   UNSETTLED_SHAPE,
   UntypedInputs,
+  userBinding,
   type Binding,
   type Fn,
   type Frame,
@@ -146,7 +147,6 @@ import {
   inputType,
   tupleAxis,
   tupleOrInputType,
-  userBinding,
 } from './lower-functions.js';
 import {
   COLLECTION,
@@ -199,6 +199,10 @@ const CONSTRUCTS = new Set([
   'Sort',
   'Ordering',
   'Unique',
+  'Any',
+  'All',
+  'Contains',
+  'IndexOf',
   'Dot',
   'Norm',
 ]);
@@ -1359,6 +1363,10 @@ export function lower(
       case 'Sort':
       case 'Ordering':
       case 'Unique':
+      case 'Any':
+      case 'All':
+      case 'Contains':
+      case 'IndexOf':
       case 'Dot':
       case 'Norm':
         return lists.collection(e);
@@ -1627,6 +1635,43 @@ export function lower(
           );
           return value(f.ops[0], want);
         });
+      }
+      // `KroneckerDelta(a, b)` of two numbers is `Boole(a = b)`, and
+      // `KroneckerDelta(n)` is `Boole(n = 0)`: the interpreter's 1 when the
+      // values are the same, 0 when their difference is a nonzero constant.
+      // A list declines (the interpreter does not thread it), and so do
+      // three operands or more.
+      case 'KroneckerDelta': {
+        if (e.nops > 2) break;
+        const [x, y] = [
+          scalar(e.ops[0]),
+          e.nops === 2 ? scalar(e.ops[1]) : b.constant(0, 'integer'),
+        ];
+        // Two NaN operands are the same, as `isSame()` reads them; an
+        // integer is never NaN.
+        const equal = apply(e, 'Equal', [x, y]);
+        if ([x, y].some((v) => isSubLane(type(v).lane, 'integer')))
+          return apply(e, 'Boole', [equal]);
+        const nan = (v: V) => apply(e, ofOp('isnan'), [v]);
+        const same = apply(e, 'Or', [
+          equal,
+          apply(e, 'And', [nan(x), nan(y)]),
+        ]);
+        return apply(e, 'Boole', [same]);
+      }
+      case 'Pipe': {
+        // `Pipe(x, f)` is `f(x)`, the call that the interpreter evaluates
+        // (`pipeStep()` of `library/core.ts`): a stage that takes the topic
+        // as an implicit argument (`Take(10)`) is that completed call; a
+        // unary function literal is `Apply(f, x)`; a name is the call of
+        // that name. Any other stage declines.
+        const call = pipeCall(e);
+        if (call === undefined)
+          decline(
+            e,
+            'Pipe of a stage that is not a function literal, a name or a call missing one argument'
+          );
+        return value(call, want);
       }
       // The discharges (`absent()`).
       case 'IsMissing':
@@ -2691,6 +2736,21 @@ export function lower(
     if (t.shape.length === 0 && t.lane === 'boolean' && options.javascript)
       return apply(node, ofOp('isundef'), [v]);
     return b.constant(false, 'boolean');
+  };
+
+  /** The call that `Pipe(x, f)` evaluates, or `undefined` for a stage that
+   *  is not a canonical function literal of one parameter, a name or a call
+   *  that takes the topic as an implicit argument. */
+  const pipeCall = (e: Fn): Expression | undefined => {
+    if (e.nops !== 2) return undefined;
+    const [topic, stage] = [e.ops[0].canonical, e.ops[1]];
+    if (isFunction(stage, 'Function'))
+      return stage.isCanonical && stage.nops === 2
+        ? ce.function('Apply', [stage, topic])
+        : undefined;
+    if (isSymbol(stage)) return ce.function(stage.symbol, [topic]);
+    const completed = pipeStageAsCall(ce as never, topic, stage);
+    return completed?.topicAt !== undefined ? completed.call : undefined;
   };
 
   /** `Coalesce(a, b, …)`: the first operand that is not absent, or the

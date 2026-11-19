@@ -298,6 +298,15 @@ ns). A zero has no sign there (`Mod(-3, 1)` is 0, as the interpreter gives,
 where the remainder gave -0), and the fold of the row is the same function, so a
 constant `Mod(c, 1)` of a negative integer `c` prints `0` where it printed `-0`.
 
+`Boole(b)` is the row `boole`, 1 or 0 on the integer lane (`b ? 1 : 0`; on
+GLSL `1.0` or `0.0`, in the bigint mode `1n` or `0n`), and threads over a
+list of booleans as the interpreter's. `KroneckerDelta(a, b)` of two
+scalars is `Boole(Equal(a, b))` and `KroneckerDelta(n)` is
+`Boole(Equal(n, 0))`: the interpreter's 1 for the same value and 0 for a
+difference that is a nonzero constant. A list operand (which the
+interpreter does not thread) and three operands or more decline; the
+interval mode has no spelling of `boole`.
+
 Inputs: a union whose every member is a real type (ranged or not), `nan` or an
 infinity (`nan | real | signed_infinity`) is a real, also as the element of a
 list: a double holds each of its values (a `NaN` or infinite value gives an
@@ -1345,11 +1354,44 @@ above, with the interpreter's value for every length, also 0:
   `Ordering(L)` of one list of real or integer numbers are the operations
   `median`, `sort` and `ordering`, the JavaScript helpers `_median` (the
   interpreter's `median()`, NaN when an element is NaN), `_sort` and
-  `_ordering` (NaN last, stable, as the interpreter's); `Sort` with an
-  order, of a tuple or of several operands declines. `Unique(L)` is a
+  `_ordering` (NaN last, stable, as the interpreter's); `Sort` of a tuple
+  or of several operands declines. `Sort(L, f)` of a function of one
+  parameter (a literal, a user function, a library operator of one
+  operand) sorts by the key: the elements of `L` in the order of
+  `Ordering(Map(f, L))`, each key computed once, in order, as the
+  interpreter's; a key that is not a real number declines. Of a function of
+  two parameters (a comparator, also `Subtract` or a user function of two
+  parameters) it is the region `sortby`: the indices sorted by
+  `Array.prototype.sort` with the comparison the region yields, -1 where
+  the comparator gives `True` or a negative number, 0 for 0 and NaN, 1
+  otherwise, and a NaN element last whatever the comparator, so the
+  permutation is the interpreter's (`sortedIndicesWalk()`), also for a
+  comparator that is not an order (`(a, b) ↦ |a| ≤ |b|`). The choice
+  between a key and a comparator is the interpreter's: a key when the value
+  of `f` requires one argument (a user function by the parameters of its
+  literal, a library operator by its signature), a comparator otherwise, so
+  `Sort(L, Floor)` (whose second parameter is optional) is a comparator, and
+  declines, since `Floor` does not take two arguments in the compiled code. Elements that are not real numbers, a comparator
+  with an effect and a variadic library operator (`Max`) decline;
+  JavaScript only. `Unique(L)` is a
   `filter` of the elements that no earlier element equals (NaN equals NaN,
   as in the interpreter): a loop over the elements before, quadratic in the
   length. GLSL has none of these four operations.
+- `Any(L, p)` and `All(L, p)` (`p` a literal of one parameter, a user
+  function or a library operator of one operand), and `Any(L)` and `All(L)`
+  of a list of booleans, are the count of a `filter` of `L` by `p` (by its
+  elements), compared with 0 or with the length: an empty list is `False`
+  and `True`. `Contains(L, v)` and `IndexOf(L, v)` of a list of real or
+  integer numbers and a real `v` are a `filter` of the indices whose
+  element is the same double as `v` (equal, or both NaN; `-0` is `0`):
+  `Contains` is a count above 0, `IndexOf` the first index kept plus 1, or
+  0. The interpreter compares exact values (`1/3` is not its double, `3·0.1`
+  of a `Range` is `0.3`), so the search compiles only where the doubles are
+  its values: a list of integers and an integer, or inputs, float literals
+  and lists of them; another operand declines. The interpreter stops at the first element that decides, so a
+  list or a predicate with an effect declines; the compiled code tests
+  every element (a predicate that fails after the deciding element is a
+  known limitation). GLSL (a filter) and the interval mode decline them.
 - `Dot(u, v)` of two lists of real numbers or points of one length is the
   sum from 0 of the products of their elements (of two stated lengths that
   differ it declines); of a list of points and a point, or of two lists of
@@ -1364,9 +1406,10 @@ above, with the interpreter's value for every length, also 0:
   positive number also for a scalar), a matrix and complex elements decline.
 
 In the interval mode every list operator above compiles except `Median`,
-`Sort`, `Ordering` and `Unique`, which decline with `<head> on interval-js`
-(the operations `sort`, `ordering` and `median`, and an equality test of
-two elements, have no spelling of the mode). The indices of a build that
+`Sort`, `Ordering`, `Unique`, `Any`, `All`, `Contains` and `IndexOf`, which
+decline with `<head> on interval-js` (the operations `sort`, `ordering` and
+`median`, and an equality test of two elements, have no spelling of the
+mode). The indices of a build that
 reorders a list are machine integers (`_IA.number` of the count), and a
 built list needs one length, so `Rest`, `Most`, `Take` and `Drop` compile
 for an input of a stated length (`list<real^3>`) and a constant count only;
@@ -1994,8 +2037,21 @@ or the root is the literal `(p1, …, pn) ↦ Op(p1, …, pn)`, as the interpret
 applies it (`operatorLiteral()`): at the arity of its row, or for a variadic row
 the number of lists of the `Map`, 1 for a `Filter` and 2 for the root (the
 combiner of the `Reduce` of the engine: `Reduce(L, Max, 0)` compiles `Max` as
-`Math.max(a0, a1)`). A user function, a shadowed name and a `chain` row (`Less`)
-decline as before. A list argument of a call of a function whose parameters are
+`Math.max(a0, a1)`). A name of a user function whose literal has as many
+parameters as the `Map` has lists (1 for a `Filter`, a `Count`, `Any`, `All`
+and a sort key, 2 for a comparator of `Sort`) is the literal
+`(p1, …, pn) ↦ f(p1, …, pn)`, the call that the interpreter makes, when
+that call resolves to the same definition (`operatorLiteral()`); of another
+arity, at the root, as the combiner of a `Reduce`, a shadowed name and a
+`chain` row (`Less`) decline as before. `Pipe(x, f)` is the call that the
+interpreter evaluates (`pipeStep()` of `library/core.ts`), lowered in its
+place: of a canonical function literal of one parameter (also Epsil's
+shorthand `x |> _ + 1`) `Apply(f, x)`, which maps over a list as above; of a
+name `f(x)` (`x |> Sin`, a user function); of a call that takes the topic as
+an implicit argument (`L |> Take(2)`, `L |> Map(g)`) the completed call of
+`pipeStageAsCall()`. A chain `Pipe(Pipe(x, f), g)` lowers the inner pipe as
+the topic. Any other stage declines (a composition, a call with a free slot
+`_`). A list argument of a call of a function whose parameters are
 all scalars (`paramsAreScalar()`, the interpreter's test: an untyped parameter
 is a scalar, a variadic signature is not) is mapped as the interpreter maps it
 (`mapOver()`): the arguments are lowered once, in order, then a build over the

@@ -223,12 +223,9 @@ describe('the compiled JavaScript route agrees with the interpreter', () => {
     const expr = ce.box(json);
     const result = compile(expr, { to: 'javascript' });
     expect(result.success).toBe(false);
-    // `Map(f, S)` with `f` a user function is outside the profile; the
-    // calls refuse the input `S`.
-    expect(result.diagnostic?.code).toBe(
-      json[0] === 'Map' ? 'outside-profile' : 'unsettled-shape'
-    );
-    expect(result.unsupported).toContain(json[0] === 'Map' ? 'Map' : 'S');
+    // The calls of `f` (also those of `Map(f, S)`) refuse the input `S`.
+    expect(result.diagnostic?.code).toBe('unsettled-shape');
+    expect(result.unsupported).toContain('S');
     ce.assign('S', ce.box(['List', ['List', 1, 2], 3]));
     expect(expr.evaluate().toString()).toBe('[[2,4],6]');
     expect(result.run!({ S: [[1, 2], 3] } as any)).toEqual([[2, 4], 6]);

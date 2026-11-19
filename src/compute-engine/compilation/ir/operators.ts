@@ -342,6 +342,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('And',          'variadic', [[[B], B, 'and']],             { fold: (a: boolean, b: boolean) => a && b }),
   row('Or',           'variadic', [[[B], B, 'or']],              { fold: (a: boolean, b: boolean) => a || b }),
   row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a }),
+  // The Iverson bracket, 1 or 0; it threads over a list of booleans, as
+  // the interpreter's. `KroneckerDelta(a, b)` is `Boole(Equal(a, b))`
+  // (`lower.ts`).
+  row('Boole',        1,          [[[B], I, 'boole']],           { fold: (a: boolean) => (a ? 1 : 0) }),
   // The interpreter's `At`: from 1, from the end when negative, NaN for an
   // index that is 0, not an integer, or out of range.
   row('At',           2,          [[['list', R], 'element', 'at']], list),
@@ -484,6 +488,19 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     args: [R, R],
     params: [R],
     results: real,
+  },
+  // The indices from 0 to `n - 1` sorted by the comparison that the region
+  // yields (-1, 0 or 1) for the indices of its two parameters: the
+  // interpreter's `Array.prototype.sort` of `Sort(L, (a, b) ↦ …)`.
+  {
+    op: 'sortby',
+    effect: 'may-fail',
+    args: [I],
+    params: [I, I],
+    results: ([n], ys) =>
+      ys.length === 1 && ys[0].lane === I && ys[0].shape.length === 0
+        ? [listOf(ys[0], { v: n })]
+        : undefined,
   },
   // The numeric derivative at `x` of the region's yield at its parameter:
   // the stencil of the runtime (`_SYS.nd`).

@@ -299,6 +299,7 @@ export const GLSL: Syntax = deepFreeze({
     'eq': '($0 == $1)',
     'ne': '($0 != $1)',
     ...LOGIC,
+    'boole': '($0 ? 1.0 : 0.0)',
     'elem': '$0[int($1)]',
     'isnan': 'isnan($0)',
     // `At`: from 1, from the end when negative, NaN for an index that is 0,

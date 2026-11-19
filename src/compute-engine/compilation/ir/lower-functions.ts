@@ -48,6 +48,7 @@ import {
 import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
 import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
+import { userBinding } from './lower-context.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
@@ -228,19 +229,6 @@ function openList(t: Type): { length?: number; point?: number } | undefined {
   if ((point === undefined && x !== 'any' && x !== 'unknown') || d.length !== 1)
     return undefined;
   return { length: d[0] > 0 ? d[0] : undefined, point };
-}
-
-/** The definition that the head of the call `e` resolves to, when it is a
- *  user function with a function literal, and the literal. */
-export function userBinding(e: Fn): { key: object; literal: Fn } | undefined {
-  const od = e.operatorDefinition as
-    { _isLambda?: boolean; _lambdaLiteral?: Expression } | undefined;
-  const key = od?._isLambda ? od : (e.valueDefinition as object | undefined);
-  const value = od?._isLambda
-    ? od._lambdaLiteral
-    : (e.valueDefinition?.value as Expression | undefined);
-  if (key === undefined || !isFunction(value, 'Function')) return undefined;
-  return { key, literal: value as Fn };
 }
 
 /** The parameter names of a function literal, and its signature's types. */

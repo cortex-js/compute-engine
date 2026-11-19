@@ -320,3 +320,16 @@ export type Lowering = {
    *  declines such an operand (`README.md`, "Tuples"). */
   readonly tuples: Map<V, number>;
 };
+
+/** The definition that the head of the call `e` resolves to, when it is a
+ *  user function with a function literal, and the literal. */
+export function userBinding(e: Fn): { key: object; literal: Fn } | undefined {
+  const od = e.operatorDefinition as
+    { _isLambda?: boolean; _lambdaLiteral?: Expression } | undefined;
+  const key = od?._isLambda ? od : (e.valueDefinition as object | undefined);
+  const value = od?._isLambda
+    ? od._lambdaLiteral
+    : (e.valueDefinition?.value as Expression | undefined);
+  if (key === undefined || !isFunction(value, 'Function')) return undefined;
+  return { key, literal: value as Fn };
+}

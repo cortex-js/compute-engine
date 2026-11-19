@@ -404,6 +404,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   are positive; otherwise it divides Γ values, which overflow single
   precision: `Beta(-0.5, 35.2)` is `-Infinity` and `Beta(-0.5, 40)` is
   `NaN`, where the interpreter gives `-20.8068` and `-22.2090`.
+- `javascript` (crafted: a predicate that fails after the element that
+  decides), `L`, `M: list<real>`: `Any`, `All`, `Contains` and `IndexOf`
+  test every element, where the interpreter stops at the first element that
+  decides: `Any(L, a ↦ AssertPresent(At(M, a)) > 0)` at `L = [1, 5]`,
+  `M = [1]` throws `expected-present`; the interpreter gives `True`. A
+  predicate or a list with an effect declines.
 
 ## `parallel for` and `runAsync()`
 

@@ -180,9 +180,8 @@ describe('call-head inference follows lexical bindings', () => {
       const result = compile(map);
       expect(ce.box(['ListFrom', map]).evaluate().json).toEqual(['List', 7, 7]);
       // The compilation reads the `h` of the scope the expression was boxed
-      // in (CE-1273). A bare `h` is a function value that is not a literal:
-      // `Map` of it declines, and the fallback gives the interpreter value.
-      expect(result.success).toBe(!bare);
+      // in (CE-1273). A bare `h` is the call `h(x)` of each element.
+      expect(result.success).toBe(true);
       expect((result.run as (v: object) => unknown)({})).toEqual([7, 7]);
     }
   );
@@ -393,8 +392,8 @@ describe('call-head inference follows lexical bindings', () => {
       const result = compile(map);
       // A popped scope keeps its definitions for the expressions boxed in
       // it, for a compilation as for an evaluation (CE-1273). `Map` of a
-      // bare `h` declines, and the fallback gives the interpreter value.
-      expect(result.success).toBe(!bare);
+      // bare `h` is the call `h(x)` of each element.
+      expect(result.success).toBe(true);
       expect((result.run as (v: object) => unknown)({})).toEqual([7, 7]);
     }
   );

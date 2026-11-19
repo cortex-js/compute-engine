@@ -663,7 +663,7 @@ export const DECLINES: Record<string, Json> = {
   'declared result type': ['rec3', 'n'],
   'not a flat list': ['g', ['List', ['List', 1, 'x'], ['List', 3, 4]]],
   'Range of an operand that is not a real': ['Range', 'Z', 5],
-  'not a literal': ['Map', 'g', 'D'],
+  'not a literal': ['Map', ['If', 'p', 'g', 'h2'], 'D'],
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
   'symbol with a value that is not': ['Add', 'GoldenRatio', 1],
   'LogGamma': ['LogGamma', 'x'],

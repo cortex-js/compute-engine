@@ -8,8 +8,7 @@
 
 import type { Expression } from '../../global-types.js';
 import type { CompilationResult, CompileDiagnostic } from '../types.js';
-import type { Fn } from './lower-context.js';
-import { userBinding } from './lower-functions.js';
+import { type Fn, userBinding } from './lower-context.js';
 import { gpuIsReservedWord } from '../gpu-reserved.js';
 import { gpuExactConstant } from '../gpu-exact-constant.js';
 import {

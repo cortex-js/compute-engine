@@ -12,6 +12,7 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
+import { requiredArity } from '../../../common/type/utils.js';
 import {
   elementType,
   isSubLane,
@@ -38,6 +39,7 @@ import {
   type Fn,
   type Lowering,
   type Source,
+  userBinding,
 } from './lower-context.js';
 import { SCALARIZE_LIMIT } from './passes.js';
 
@@ -50,10 +52,12 @@ export function parameterName(p: Expression): string | undefined {
 
 /** The function literal `(p1, …, pn) ↦ Op(p1, …, pn)` of a symbol `f` that
  *  names the library operator `Op` of a row, which the interpreter applies
- *  as the call `Op(a1, …, an)`; `f` itself otherwise (a user function, a
- *  shadowed name, a parameter, a name of `vars`). A row of a fixed arity
- *  takes `n` of that arity, a variadic row any `n` (2 when `n` is not
- *  given: the combiner of a `Reduce`); a `chain` row, none. */
+ *  as the call `Op(a1, …, an)`, and `(p1, …, pn) ↦ f(p1, …, pn)` of a user
+ *  function of `n` parameters; `f` itself otherwise (a user function of
+ *  another arity or with no `n`, a shadowed name, a parameter, a name of
+ *  `vars`). A row of a fixed arity takes `n` of that arity, a variadic row
+ *  any `n` (2 when `n` is not given: the combiner of a `Reduce`); a `chain`
+ *  row, none. */
 export function operatorLiteral(
   f: Expression,
   rows: readonly OperatorRow[],
@@ -68,6 +72,20 @@ export function operatorLiteral(
     valueDefinition: f.valueDefinition,
     engine: f.engine,
   };
+  // A user function of `n` parameters (a `Map`, a `Filter`, a quantifier):
+  // the interpreter applies it as the call `f(a1, …, an)`. The call is
+  // boxed here, so its head must resolve to the definition of `f`.
+  const user = userBinding(node as never);
+  if (user !== undefined) {
+    const ps = Array.from({ length: n ?? 0 }, (_, i) => `_p${i + 1}`);
+    if (
+      n === undefined ||
+      user.literal.nops - 1 !== n ||
+      userBinding(f.engine.box([name, ...ps]) as never)?.key !== user.key
+    )
+      return f;
+    return f.engine.box(['Function', [name, ...ps], ...ps]);
+  }
   const arity = rowOfHead(rows, name)?.arity;
   const k = arity === 'variadic' ? (n ?? 2) : arity;
   if (
@@ -99,9 +117,13 @@ const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
   RotateLeft: [1, 2],
   RotateRight: [1, 2],
   Median: [1],
-  Sort: [1],
+  Sort: [1, 2],
   Ordering: [1],
   Unique: [1],
+  Any: [1, 2],
+  All: [1, 2],
+  Contains: [2],
+  IndexOf: [2],
   Dot: [2],
   Norm: [1, 2],
 });
@@ -886,6 +908,254 @@ export function listLowering(cx: Lowering) {
     ]);
   };
 
+  /** `x` and `y` are the same double: equal, or both NaN (`isSame()` of
+   *  the interpreter, for values that it holds as doubles). */
+  const same = (e: Fn, x: V, y: V): V =>
+    cx.apply(e, 'Or', [
+      cx.apply(e, 'Equal', [x, y]),
+      cx.apply(e, 'And', [
+        cx.apply(e, op('isnan'), [x]),
+        cx.apply(e, op('isnan'), [y]),
+      ]),
+    ]);
+
+  /** `Any(L, p)` and `All(L, p)`, and of a list of booleans `Any(L)` and
+   *  `All(L)`: the count of a filter of `L` by `p` (by its elements with no
+   *  `p`), compared with 0 or with the length. The interpreter stops at the
+   *  first element that decides, so an effect in the list or in `p`
+   *  declines. */
+  const quantifier = (e: Fn): V => {
+    const effects = b.effects;
+    const s = source(e.ops[0]);
+    let kept: V;
+    if (e.nops === 1) kept = over(e, s, '', (x) => x, true, e);
+    else {
+      const f = operatorLiteral(e.ops[1], cx.rows, 1);
+      const param = isFunction(f, 'Function')
+        ? parameterName(f.ops[1])
+        : undefined;
+      if (!isFunction(f, 'Function') || f.nops !== 2 || param === undefined)
+        decline(
+          e,
+          `${e.operator} of a function that is not a literal of one parameter`
+        );
+      kept = over(e, s, param, f.ops[0], true, f);
+    }
+    if (b.effects > effects)
+      decline(
+        e,
+        `${e.operator} with an effect (the interpreter stops at the first element that decides)`
+      );
+    const n = listSource(kept).length;
+    return e.operator === 'Any'
+      ? cx.apply(e, 'Less', [integer(0), n])
+      : cx.apply(e, 'Equal', [n, s.length]);
+  };
+
+  /** `Contains(L, v)` and `IndexOf(L, v)` of a list of real numbers and a
+   *  real number: a filter of the indices from 0 whose element is the same
+   *  as `v` (`same()`); `Contains` is a count above 0, `IndexOf` the first
+   *  index kept plus 1, or 0. A list with an effect declines (the
+   *  interpreter stops at the first match). */
+  const search = (e: Fn): V => {
+    // The interpreter compares exact values (`1/3` is not its double, and
+    // `3·0.1` in a `Range` is `0.3`): the doubles compare as it does for
+    // integers, and for inputs and float literals.
+    // An input: a name with no binding yet (an input is bound where it is
+    // first read), or bound as an input; a local or a parameter can hold an
+    // exact value (`Declare(q, real, 1/3)`).
+    const input = (name: string): boolean => {
+      for (let i = cx.frames.length - 1; i >= 0; i--) {
+        const binding = cx.frames[i].names.get(name);
+        if (binding !== undefined) return binding.role === 'input';
+      }
+      return true;
+    };
+    const doubles = (x: Expression): boolean =>
+      isSymbol(x)
+        ? x.isConstant !== true && x.value === undefined && input(x.symbol)
+        : isNumber(x)
+          ? x.isExact !== true || x.type.matches('integer')
+          : isFunction(x, 'List') && x.ops.every(doubles);
+    const integers =
+      e.ops[0].type.matches('list<integer>') &&
+      e.ops[1].type.matches('integer');
+    if (!integers && !(doubles(e.ops[0]) && doubles(e.ops[1])))
+      decline(
+        e,
+        `${e.operator} of a value that the interpreter may hold exactly`
+      );
+    const effects = b.effects;
+    const s = source(e.ops[0]);
+    const v = cx.scalar(e.ops[1]);
+    const real = (x: V) =>
+      isSubLane(type(x).lane, 'real') && type(x).shape.length === 0;
+    if (!real(v)) decline(e, `${e.operator} of other than real numbers`);
+    const kept = over(
+      e,
+      { length: s.length, at: (k) => k },
+      '',
+      (_x, k) => {
+        const x = s.at(k);
+        if (!real(x)) decline(e, `${e.operator} of other than real numbers`);
+        return same(e, x, v);
+      },
+      true,
+      e
+    );
+    if (b.effects > effects)
+      decline(
+        e,
+        `${e.operator} of a list with an effect (the interpreter stops at the first match)`
+      );
+    const n = listSource(kept).length;
+    const found = cx.apply(e, 'Less', [integer(0), n]);
+    if (e.operator === 'Contains') return found;
+    return cx.branch(
+      e,
+      found,
+      () =>
+        cx.apply(e, 'Add', [
+          b.op('elem', [kept, integer(0)], elementType(type(kept))),
+          integer(1),
+        ]),
+      () => integer(0),
+      true
+    )!;
+  };
+
+  /** `Sort(L, f)`. Of a function of one parameter, a sort key: the
+   *  elements of `L` in the order of `Ordering(Map(f, L))`, the
+   *  interpreter's sort by the keys, computed once per element in order
+   *  (NaN last, stable); a key that is not a real number declines. Of a
+   *  function of two parameters, a comparator: the region `sortby`, which
+   *  sorts the indices with `Array.prototype.sort` as the interpreter does
+   *  (`sortedIndicesWalk()`), by -1 where the comparator gives `True` or a
+   *  negative number, 0 for 0 or NaN, 1 otherwise, NaN elements last
+   *  whatever the comparator; elements that are not real numbers, and a
+   *  comparator with an effect, decline. */
+  const sortBy = (e: Fn): V => {
+    const g = e.ops[1];
+    // The interpreter sorts by a key when the value of `g` requires one
+    // argument, and calls `g(a, b)` as a comparator otherwise
+    // (`sortedIndicesWalk()`): a user function by the parameters of its
+    // literal, a library operator by its signature (`Floor`, whose second
+    // parameter is optional, is a comparator there).
+    if (isSymbol(g) && rowOfHead(cx.rows, g.symbol)?.arity === 'variadic')
+      decline(e, 'Sort by a variadic operator');
+    const user = isSymbol(g)
+      ? userBinding({
+          operator: g.symbol,
+          operatorDefinition: g.operatorDefinition,
+          valueDefinition: g.valueDefinition,
+          engine: g.engine,
+        } as never)
+      : undefined;
+    const n =
+      (user !== undefined
+        ? user.literal.nops - 1
+        : requiredArity(g.type.type)) === 1
+        ? 1
+        : 2;
+    const f = operatorLiteral(g, cx.rows, n);
+    const params = isFunction(f, 'Function')
+      ? f.ops.slice(1).map(parameterName)
+      : [];
+    if (
+      !isFunction(f, 'Function') ||
+      params.length !== n ||
+      params.includes(undefined) ||
+      new Set(params).size !== params.length
+    )
+      decline(
+        e,
+        'Sort by a function that is not a literal of one or two parameters of distinct names'
+      );
+    const s = source(e.ops[0]);
+    const at = (order: V) => (k: V) =>
+      b.op('elem', [order, k], elementType(type(order)));
+    if (params.length === 1) {
+      const keys = over(e, s, params[0]!, f.ops[0], false, f);
+      const t = type(keys);
+      if (
+        t.shape.length !== 1 ||
+        cx.tuples.has(keys) ||
+        !isSubLane(t.lane, 'real')
+      )
+        decline(e, 'Sort by a key that is not a real number');
+      const order = cx.apply(e, op('ordering'), [keys]);
+      return reindexed(e, s, s.length, (k) =>
+        cx.apply(e, 'Subtract', [at(order)(k), integer(1)])
+      );
+    }
+    const [i, j] = [
+      b.newValue(scalarType('integer')),
+      b.newValue(scalarType('integer')),
+    ];
+    const body = (f as Fn).ops[0];
+    const sign = (c: V, then: () => V, otherwise: () => V) =>
+      cx.branch(e, c, then, otherwise, true)!;
+    const nan = (v: V) => cx.apply(e, op('isnan'), [v]);
+    const effects = b.effects;
+    const [order] = cx.region(
+      'sortby',
+      [s.length],
+      [i, j],
+      () =>
+        cx.withFrame(true, (frame) => {
+          const [x, y] = [s.at(i), s.at(j)];
+          for (const v of [x, y])
+            if (type(v).shape.length > 0 || !isSubLane(type(v).lane, 'real'))
+              decline(
+                e,
+                'Sort by a comparator of elements that are not real numbers'
+              );
+          frame.names.set(params[0]!, { v: x, role: 'index' });
+          frame.names.set(params[1]!, { v: y, role: 'index' });
+          const compare = (): V => {
+            const r = cx.scalar(body);
+            if (type(r).lane === 'boolean')
+              return sign(
+                r,
+                () => integer(-1),
+                () => integer(1)
+              );
+            if (!isSubLane(type(r).lane, 'real'))
+              decline(
+                e,
+                'Sort by a comparator that is not a boolean or a real number'
+              );
+            const above = () =>
+              sign(
+                cx.apply(e, 'Greater', [r, integer(0)]),
+                () => integer(1),
+                () => integer(0)
+              );
+            return sign(
+              cx.apply(e, 'Less', [r, integer(0)]),
+              () => integer(-1),
+              above
+            );
+          };
+          return [
+            sign(
+              nan(x),
+              () =>
+                sign(
+                  nan(y),
+                  () => integer(0),
+                  () => integer(1)
+                ),
+              () => sign(nan(y), () => integer(-1), compare)
+            ),
+          ];
+        }),
+      e
+    );
+    if (b.effects > effects) decline(e, 'Sort by a comparator with an effect');
+    return reindexed(e, s, s.length, at(order));
+  };
+
   /** The heads of a list that `lower.ts` hands over (`README.md`,
    *  "Lists", the list operators). */
   const collection = (e: Fn): V => {
@@ -896,9 +1166,24 @@ export function listLowering(cx: Lowering) {
       decline(e, `${h} of ${e.nops} operands is not supported by the compiler`);
     if (h === 'Dot') return dot(e);
     if (h === 'Norm') return norm(e);
-    if (cx.interval && ['Median', 'Sort', 'Ordering', 'Unique'].includes(h))
+    if (
+      cx.interval &&
+      [
+        'Median',
+        'Sort',
+        'Ordering',
+        'Unique',
+        'Any',
+        'All',
+        'Contains',
+        'IndexOf',
+      ].includes(h)
+    )
       decline(e, `${h} on interval-js`);
+    if (h === 'Any' || h === 'All') return quantifier(e);
+    if (h === 'Contains' || h === 'IndexOf') return search(e);
     if (h === 'Median') return cx.apply(e, op('median'), [reals(e)]);
+    if (h === 'Sort' && e.nops === 2) return sortBy(e);
     if (h === 'Sort') {
       const l = reals(e);
       const lane = type(l).lane === 'integer' ? 'sort.int' : 'sort';

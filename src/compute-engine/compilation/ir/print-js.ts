@@ -183,6 +183,7 @@ export const JS: Syntax = deepFreeze({
     eq: '($0 === $1)',
     ne: '($0 !== $1)',
     ...LOGIC,
+    boole: '($0 ? 1 : 0)',
     elem: '$0[$1]',
     at: { text: '_at($0, $1)', helpers: ['_at'] },
     atu: { text: '_atu($0, $1)', helpers: ['_atu'] },
@@ -235,6 +236,13 @@ export const JS: Syntax = deepFreeze({
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
+    }),
+    // The indices sorted by a comparison, as the interpreter sorts them.
+    sortby: ({ outs: [out], args: [n], params: [i, j] }) => ({
+      open: [
+        `const ${out} = Array.from({ length: ${n} }, (_, k) => k).sort((${i}, ${j}) => {`,
+      ],
+      close: ([y]) => [`  return ${y};`, '});'],
     }),
     // The numeric derivative of the runtime (`_SYS.nd`).
     derivative: ({ outs: [out], args: [x], params: [t] }) => ({
@@ -347,6 +355,7 @@ export const JS_BIGINT: Syntax = deepFreeze({
     'eq': JS.ops.eq,
     'ne': JS.ops.ne,
     ...LOGIC,
+    'boole': '($0 ? 1n : 0n)',
     'elem': '$0[Number($1)]',
     'at': '_SYS.bat($0, $1)',
     'rangecount': '_SYS.brangeCount($0, $1, $2)',

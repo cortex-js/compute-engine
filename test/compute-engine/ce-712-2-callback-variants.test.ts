@@ -218,7 +218,7 @@ describe('interval-js: the callback is the variant for the element shape', () =>
 
 describe('an element with no settled shape declines (rule R3)', () => {
   test.each([
-    ['a user function', 'f', 'outside-profile'],
+    ['a user function', 'f', 'unsettled-shape'],
     ['a literal', LIT, 'unsettled-shape'],
     ['a built-in', 'Sin', 'unsettled-shape'],
   ])('%s over list<real | list<real>>', (_label, callback, code) => {
@@ -240,7 +240,7 @@ describe('an element with no settled shape declines (rule R3)', () => {
     expect(ce.box(expr as never).evaluate().toString()).toBe('[3,[5,7]]');
     const r = compile(ce.box(expr as never), { constantFold: false } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
   test('a fold whose accumulator is a scalar, then a list', () => {

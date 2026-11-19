@@ -398,7 +398,7 @@ describe('keyed / fixed-arity AGGREGATES fail closed, on an honest gate', () => 
       ]);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/IndexOf is not supported by the compiler/);
+      expect(r.error).toMatch(/IndexOf of a value that the interpreter may hold exactly/);
       expect(expr.evaluate().re).toBe(2);
     });
   });

@@ -210,12 +210,10 @@ describe('A complex point at an untyped parameter', () => {
 describe('A point at a parameter inferred as `collection<any> | value`', () => {
   const DECLINED = new Set([
     'gm(P)',
-    'Map(gm, P)',
     'Reduce(P, (a, v) ↦ a + gm(v), 0)',
     'Reduce(P, gh, (0, 0))',
     'Reduce(P, gacc, 0)',
     'Map(gd, P)',
-    'Map(gm, P3)',
     'Map(gm, LL)',
     'g := p ↦ Max(p) + 1; g(q)',
     'g := p ↦ Max(p) + 1; g(P[1])',
@@ -352,7 +350,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
   test('Map(gm, Q) (strict) declines', () =>
     expect(() =>
       compile(ce.box(['Map', 'gm', 'Q']), { fallback: false, mode: 'strict' })
-    ).toThrow(/Map of a function that is not a literal of one parameter/));
+    ).toThrow(/the input Q of type/));
 
   // The point may be absent, and a shader has no test of an absent value.
   for (const to of ['glsl'] as const)
@@ -365,7 +363,7 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
         })
       ).toThrow());
 
-  // `Map` of a function defined on the engine declines on these targets.
+  // GLSL has no list of points.
   for (const to of ['glsl'] as const)
     test(`Map(gm, P) on ${to} declines`, () =>
       expect(() =>
@@ -375,17 +373,15 @@ describe('A point at a parameter inferred as `collection<any> | value`', () => {
           mode: to === 'glsl' ? 'strict' : 'complex',
         })
       ).toThrow());
-  test('Map(gm, P) on interval-js does not compile', () => {
-    let r: ReturnType<typeof compile> | undefined;
-    try {
-      r = compile(ce.box(['Map', 'gm', 'P']), {
-        to: 'interval-js',
-        fallback: false,
-      });
-    } catch {
-      r = undefined;
-    }
-    expect(r?.success ?? false).toBe(false);
+  test('Map(gm, P) on interval-js is the point enclosure of each call', () => {
+    const r = compile(ce.box(['Map', 'gm', 'P']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(r.run!(INPUTS as never)).toEqual([
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
+      { kind: 'interval', value: { lo: 5, hi: 5 } },
+    ]);
   });
 
 });

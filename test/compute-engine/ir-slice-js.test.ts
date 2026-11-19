@@ -1106,10 +1106,11 @@ describe('IR slice: user functions', () => {
       'real'
     );
   });
-  test('a function value is not compiled', () => {
-    expect(declineOf(() => js(['Map', 'g', 'D'])).message).toMatch(
-      /not a literal/
-    );
+  test('a named function of a Map is the call of it, a function value is not compiled', () => {
+    expect(js(['Map', 'g', 'D']).run({ D: [1, -2.5] })).toEqual([2, -5]);
+    expect(
+      declineOf(() => js(['Map', ['If', 'p', 'g', 'h2'], 'D'])).message
+    ).toMatch(/not a literal/);
   });
 });
 

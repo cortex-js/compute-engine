@@ -141,6 +141,16 @@
 
 ### Improvements
 
+- **`Pipe`, `Boole`, `KroneckerDelta`, `Any`, `All`, `Contains`, `IndexOf`
+  and `Sort` with a function compile to JavaScript.** They declined and fell
+  back to the interpreter. `Pipe` also compiles to GLSL and in the interval
+  mode: `x |> Sin`, `L |> Take(2)` and Epsil's `x |> _ + 1` are the calls the
+  interpreter evaluates. A named user function is accepted as the function
+  of `Map`, `Filter`, `Count`, `Any`, `All` and `Sort` (a function literal
+  was required). `Contains` and `IndexOf` compile where the compared values
+  are doubles in the interpreter too (integers, inputs, float literals); a
+  value the interpreter holds exactly, such as `1/3` or `π`, declines.
+
 - **`IsMissing`, `Coalesce` and `AssertPresent` compile on `javascript` and
   `interval-js`, and `IsMissing` and `Coalesce` on `glsl`.** They declined
   before. Each gives the interpreter's value for an absent operand:
