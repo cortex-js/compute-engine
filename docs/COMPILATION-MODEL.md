@@ -825,6 +825,14 @@ Every other case is unspecified: the compiled code can give any value,
   `Sum(p, k = 1..u)` with `p: boolean` can give `2`.
 - An input value outside its declared type: `"ab"`, `true`, `[1, 2]` or
   `{re, im}` for an input declared `real`.
+- An argument value outside the declared type of the parameter that it
+  binds (user decision 2026-11-19, CE-1503). The interpreter checks the
+  argument at the binding; the compiled code does not. With `E:
+  list<nan | real>`, `((H: list<real>) ↦ Length(H))(E)` at `E = [NaN]`
+  gives `1` on `javascript`, where the interpreter gives
+  `Error(incompatible-type, list<real>, vector<nan^1>)`. The host keeps the
+  arguments within the parameters' types if it needs the interpreter's
+  value.
 - A non-finite value for an input declared `real` (`real` holds only finite
   values). Today the `javascript` target computes with the IEEE value, as it
   would for an input declared `real | signed_infinity | nan`, and a GPU
