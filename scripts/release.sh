@@ -87,7 +87,7 @@ fail() {
 # The files that steps 2 and 3 write. The documentation list is the output of
 # scripts/doc.sh.
 VERSION_FILES="package.json package-lock.json CHANGELOG.md vscode-epsil/package.json vscode-epsil/package-lock.json"
-DOC_FILES="src/api.md src/epsil/docs/errors.md src/epsil/docs/library.md src/epsil/docs/reference"
+DOC_FILES="src/api.md src/epsil/docs/errors.md src/epsil/docs/library.md src/epsil/docs/reference src/epsil/docs/search-symbols.json"
 
 # Step 1: checks that change nothing.
 if [ -n "$(git diff --cached --name-only)" ]; then
