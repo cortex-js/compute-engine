@@ -440,11 +440,11 @@ await scenario('fixit diagnostic', undefined, async (c) => {
 
 // ── Representation views (the `epsil/view` request) ────────────────────
 await scenario('representation views', undefined, async (c) => {
-  // The trig argument is the variable `x`, not a constant: the compiler folds
-  // any constant subtree at compile time, so `Sin(Pi / 6)` would reach the
-  // compiled views as the literal `0.5` and the checks below could not see
-  // whether each target lowers `Sin` to its own spelling.
-  await c.open(URI, 'let x = 42\nx + Sin(x / 6)');
+  // The trig argument is the free input `x`, not a constant or a `let`: the
+  // compiler folds every value it knows at compile time, a `let` included, so
+  // `Sin(c / 6)` would reach the compiled views as a literal and the checks
+  // below could not see whether each target lowers `Sin` to its own spelling.
+  await c.open(URI, 'let c = 42\nc + Sin(x / 6)');
 
   const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
   check(
@@ -464,7 +464,7 @@ await scenario('representation views', undefined, async (c) => {
   check(
     'the canonical view lists one entry per statement',
     canonical?.content.startsWith('// Canonical MathJSON') === true &&
-      canonical.content.includes('["Declare","x"') &&
+      canonical.content.includes('["Declare","c"') &&
       canonical.content.includes('"Sin"'),
     JSON.stringify(canonical)
   );
@@ -472,8 +472,7 @@ await scenario('representation views', undefined, async (c) => {
   const js = await c.request('epsil/view', { uri: URI, view: 'javascript' });
   check(
     'the JavaScript view shows the compiled program',
-    js?.content.includes('let x = 42') === true &&
-      js.content.includes('Math.sin'),
+    js?.content.includes('Math.sin((_.x / 6))') === true,
     JSON.stringify(js)
   );
 
@@ -481,7 +480,7 @@ await scenario('representation views', undefined, async (c) => {
   check(
     'the GLSL view shows the compiled program',
     glsl?.content.startsWith('// Compiled to GLSL') === true &&
-      glsl.content.includes('float x;'),
+      glsl.content.includes('sin(_gpu_ir_quot(x, 6.0))'),
     JSON.stringify(glsl)
   );
 
