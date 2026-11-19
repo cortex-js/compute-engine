@@ -208,14 +208,17 @@ export function decline(
   );
 }
 
-/** The binding of a name. `lane` is the declared lane of a local. A
- *  `constant` is a local that no `Assign` writes. `exact` is the number
- *  literal of a local that no `Assign` of its block writes. */
+/** The binding of a name. `lane` is the declared lane of a local (of a
+ *  `list` local, of its elements). A `constant` is a local that no `Assign`
+ *  writes. A `list` is a list local that its block writes in place: `v` is
+ *  the array that it owns, which its writes change (`README.md`, "Lists").
+ *  `exact` is the number literal of a local that no `Assign` of its block
+ *  writes. */
 export type Binding = {
   v: V;
   lane?: Lane;
   exact?: Expression;
-  role: 'input' | 'local' | 'constant' | 'index';
+  role: 'input' | 'local' | 'constant' | 'index' | 'list';
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };

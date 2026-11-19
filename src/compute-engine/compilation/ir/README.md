@@ -356,7 +356,9 @@ attribute `constant` (`Declare(K, {value: 240, constant: True})`) makes a local
 that an `Assign` does not write: such an `Assign` declines, as the interpreter
 refuses it. Another attribute declines. A local of no stated type whose value is
 a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
-`Assign` to it declines, and so does a list value for a local of a stated type.
+`Assign` to it declines, and so does a list value for a local of a stated type,
+except for a list local that its block writes in place ("Lists"), which can also
+be declared with a list type (`Declare(L, 'list<real>', …)`).
 
 A root `Tuple`, or the last operand of a root `Block` that is one, whose
 elements are tuples or are not of one shape (`Tuple(H)` of a list of run-time
@@ -1214,9 +1216,43 @@ of constants is computed once there too (`2·List(1, 2, 3)`, `Range(1, 10)/40`),
 with the lists it reads, also with `constantFold: false`; not in the `bigint`
 mode, whose catch of a pole is in the entry. No code writes to an input or to
 such a list: an operation builds a new array, a write to an element is an error
-of the canonical form and a write to a list local declines. GLSL and the
-interval mode compute no list once this way; the interval mode's `run()` copies
-its inputs and its result.
+of the canonical form, and a list local that its block writes owns a copy (next
+paragraph). GLSL and the interval mode compute no list once this way; the
+interval mode's `run()` copies its inputs and its result.
+
+A list local written in place (JavaScript; CE-1462): a `Block` local whose value
+is a list of reals, integers or booleans of rank 1 and that the block writes
+with `Assign(L, ReplaceAt(L, i, v))` or `AddTo(At(L, i), e)` (`L[i] += e`) has
+the binding role `list`. Its declaration copies the value (`copy`,
+`$0.slice()`), so the local owns its array, also when the value is an input
+(`let L = H`) or a list computed once. Its writes change that array: `wix` is
+the index from 0 of the index `i` of a list of `n` elements (from the end when
+negative; it throws `out-of-range` for an index that is 0, not an integer or out
+of range, where the interpreter gives an error; a constant index in a list of
+stated length is a constant, and one out of range declines), `get` reads the
+element there and `set` writes it; `AddTo` evaluates `i`, then `e`, then writes
+the sum. `At(L, i)` is `getat` (`_at`, of booleans `getatu`), not `at`. The
+copy, the reads and the writes are `effectful` ("Effects"): no pass merges,
+moves or removes them, so no read of the array crosses a write of it, and the
+lowering memo never shares a read; the SSA value of `L` does not change, and a
+`Loop` or an `if` carries nothing for it. `inPlace()` checks the scope of the
+local (the statements after the declaration) before the copy: each occurrence of
+`L` is `At(L, i)`, `Length(L)`, the target of one of the two writes, or the
+value of the block (its last statement, also `Typed(L, …)`). Any other read
+(`M = L`, `f(L)`, `List(L)`, `L` in a function literal) declines ("an alias"):
+the interpreter's lists are values, and the code shares no array of a written
+local. Any other write (`Assign(L, Append(L, v))`, a whole list, a declaration
+of `L` again in the scope) declines with "a write to a constant … or to a list
+local", as before. A written value whose lane is not a sub-lane of the element
+lane declines (`ReplaceAt(L, 1, 0.5)` of a list of integers: the interpreter
+widens the list); the element lane is the declared one
+(`Declare(L, 'list<real>', …)`) or that of the value. A write in a `Sum`, a
+`Product`, a `Map` or a `Filter` body to a list local declared outside it
+declines, as for a scalar local. GLSL, the interval mode and the `bigint` mode
+decline such a local. In a random frame these operations are no draw sites
+(`LIST_LOCAL_OPS`, `seededWarnings()`); a call of a function that writes a list
+local is `effectful` and counts as one (a warning `seeded-draw-order` that a
+frame around such a call can give where its draws are in order).
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
@@ -1238,7 +1274,11 @@ each element of the clauses before it).
 `ListJoin(L1, …, Ln)` of lists and scalars (a scalar is an element) is a build
 over the sum of the lengths, whose element at `k` is read from the first list
 whose end is after `k` (a chain of `n − 1` tests per element); its lists are of
-numbers, or all of points. On GLSL it declines (a build).
+numbers, or all of points. On GLSL it declines (a build). `Join` of operands
+whose static types are lists is the same build (`Join(L, M)`, `Join(L, x)`,
+whose scalar the canonical form puts in a `List`); an operand of another type
+declines, since the interpreter's `Join` appends a tuple as one element, and of
+sets is a set, of strings a string.
 
 `Repeat(v, n)` is a build of `n` copies of `v`. A pure value is lowered once
 before the build. The interpreter evaluates a value that is not pure once per
@@ -1303,12 +1343,15 @@ one list (a list of numbers, of points, of colours; a `Range`, a `Map`, a
 `Filter`, a `Zip`, a call) is `L`: every list of the slice is listed. Of a
 scalar, a tuple, a string or several operands (a list of one element, of the
 elements, of the characters, the concatenation, in the interpreter) it declines.
-`At(L, I)` of a list of numbers `L` and a list of numbers `I` (not a tuple) is
-the build of `At(L, i)` over `I`, each index under the rule of `At`, as the
-interpreter's (`At([10, 20, 30], [1, -1, 0, 2.5])` is `[10, 30, NaN, NaN]`); of
-a list of points, booleans or lists it declines. `At(L, M)` of a flat list `M`
-on the boolean lane (a mask) and a list of numbers or of points `L` is a
-`filter` over the `Min` of the two lengths (as for `Map` of several lists),
+`At(L, I)` of a list of numbers or of points `L` and a list of numbers `I` (not
+a tuple) is the build of `At(L, i)` over `I`, each index under the rule of `At`,
+as the interpreter's and as `Map(i ↦ At(L, i), I)`
+(`At([10, 20, 30], [1, -1, 0, 2.5])` is `[10, 30, NaN, NaN]`; of points, a point
+of NaN out of range, on JavaScript only); of a list of booleans (an index out of
+range would put `undefined` in a list of booleans) or of lists it declines, and
+so does an `At` of two index operands, one of them a list. `At(L, M)` of a flat
+list `M` on the boolean lane (a mask) and a list of numbers or of points `L` is
+a `filter` over the `Min` of the two lengths (as for `Map` of several lists),
 keeping `L[k]` where `M[k]`, as the interpreter's: a mask shorter than `L` keeps
 nothing past its end, and a longer one is read only as far as `L` goes
 (`At([1, 2, 3, 4, 5], [True, False, True])` is `[1, 3]`). A list of 0 and 1 is a
@@ -1337,6 +1380,35 @@ undecided over the box gives the whole range, as for `Filter`.
 operand threads over a list (`At(L, Clamp(Floor(I), 0, +∞))` is the floored
 index of each element of `I`, NaN below 1).
 
+`If` and `Which` of a condition whose static type is a list of booleans
+(`Which(3 < L, 1, True, 0)`) are the interpreter's selection at each position
+(`numpy.select`, `select()` of `lower.ts`): a build over the length of the first
+condition whose element is the first arm whose condition holds there, a list arm
+read at the position and a scalar or a point (a condition or an arm) the same at
+every position, NaN (a point of NaN) where no condition holds and there is no
+clause `True` (`Which([2, 5] > 3, 1)` is `[NaN, 1]`); `If(c, a, b)` is
+`Which(c, a, True, b)`, as in the interpreter. An `If` of a list condition with
+no `else` is that selection for a scalar or a point arm (`If(3 < L, 1)` is
+`[NaN, 1, 1]` at `L = [2, 5, 7]`), and declines for a list arm: the interpreter
+restricts that arm to the mask, to the shorter of the two lengths
+(`If(3 < L, K)` is `[1, 2]` at `L = [5, 5, 5]`, `K = [1, 2]`), which is not a
+selection. The conditions, the arms and the default are lowered once, before the
+build, all of them: the interpreter evaluates an arm and a later condition only
+where the selection reaches it, so one that is not pure (an effect, a write to a
+name, an operation that can throw such as `AssertPresent`, a loop, a recursive
+call) declines. The first condition reached must be a list: a scalar condition
+before it selects its arm whole when it holds, a value of another shape (its
+static type is a union), and declines. Arms are all numbers or booleans (with a
+clause `True`: without one, the interpreter gives `Missing`) and flat lists of
+them, or all points of numbers and lists of points (on GLSL a list of points is
+a list of rank 2 and declines). Stated lengths that differ decline (the
+canonical form already gives `incompatible-dimensions` for most); lists of two
+run-time lengths are an error of the interpreter (`incompatible-dimensions` for
+`Which` and for `If` with an `else`), so the value is unspecified: a list as
+long as the first condition, never an arm whole (CE-1238). On GLSL a stated
+length writes the selection out (`vec3` of three conditionals); a run-time
+length declines. The interval mode declines it.
+
 `RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
 `RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region
 `choice`, `_SYS.randomChoice`, whose results are the count and the list: the
@@ -1360,9 +1432,16 @@ interpreter's value for every length, also 0:
   the indices they keep (`Take(L, -2)` the last two, `Take(L, 7)` of three
   elements all three, `Drop(L, 5)` none, a rotation modulo the length), of a
   list of numbers, of points, or of the elements of a tuple (the interpreter's
-  value is a list). A count `m` that is not an integer declines (the interpreter
-  rounds it for `Take` and `Drop`, and refuses it for a rotation), and so does a
-  list with an effect (the interpreter reads the elements it keeps only). A
+  value is a list). A count `m` of `Take` and `Drop` that is not an integer
+  declines (the interpreter rounds it). A real count of a rotation (a slider of
+  Tycho, `RotateLeft(S, N)` of `N: real`) is tested at run time on JavaScript
+  (`count.int`, the helper `_count`): a rotation whose elements are read throws
+  where the count is not a safe integer (the interpreter gives
+  `incompatible-type` at 2.4, and leaves the rotation unevaluated at 1e20); the
+  test is an effect `may-fail`, so `Length(RotateLeft(S, N))` reads the length
+  and tests nothing. The count is reduced modulo the length before the build, as
+  in the interpreter. GLSL and the interval mode decline a real count. A list
+  with an effect declines (the interpreter reads the elements it keeps only). A
   constant length and constant indices write a short list out, so GLSL compiles
   them for an input of a stated length (`Reverse(L)` of `L: list<real^4>` is a
   `vec4`); a run-time length declines there, and a run-time count of a rotation
@@ -1807,6 +1886,29 @@ value, a `Return`, a `Loop` with no `Element` clause, a write to the index and a
 `Loop` whose value is read decline. `Repeat(v, n)` is the list of `n` copies of
 `v`, not a loop (see "Lists").
 
+`AddTo(s, e)` of a local `s` is `Assign(s, Add(s, e))`, with the lane rules of
+`Assign`, on every target; `AddTo(At(L, i), e)` writes a list local in place
+("Lists"). `Assign(Tuple(a_1, …, a_n), Tuple(e_1, …, e_n))` of locals (the Epsil
+`(a, b) := (u, v)`) lowers every `e_i`, then writes every `a_i`, on every
+target; a name written twice, a target that is not a local, a value that is not
+a `Tuple` of the same length, a lane change (a real value for an integer local)
+and a read of its value decline. `facts()` counts the targets of both as writes,
+so a `Loop` carries them.
+
+`ParallelLoop(body, Element(x, coll), …)` (the Epsil `parallel for`) on
+JavaScript is the `Loop` of the same operands (`parallelLoop()`): the passes run
+in order on one thread, as the interpreter runs them, so a read of an
+accumulator in a pass gives the interpreter's value. It declines when the body
+assigns with `Assign` a name declared outside it (`outerWrite()`; `AddTo` is the
+accumulator: `parallel-outer-write`), when it has a `Break` or a `Continue` of
+its own (`jumps()`, which stops at an inner `Loop` or `ParallelLoop`:
+`parallel-exit`), and when the program has a draw (`draw`, `shuffle`), a
+`choice` or a `seeded` region in any function (`draws()`, checked in
+`program()`): inside a frame the interpreter runs each pass in a random frame of
+its own (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which
+compiled code does not have. GLSL and the interval mode decline it. No worker
+runs the passes: `runAsync()` resolves to `run()`.
+
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,
 or a body in the name of the `Limits`) are the region `integrate`: the integrand
@@ -1996,16 +2098,17 @@ parameter, or has a value; an input of a list of a run-time length or of
 booleans; a name with a value read in the body whose binding where the call is
 compiled is not the body's (see the values of free names above); another `vars`
 name. `Apply(Function(body, p1, …), a1, …)` with one parameter per argument,
-each a name, is the body with each parameter bound to its argument, the
-arguments lowered once, in order, before the body (as a `Block` of locals); a
-parameter shadows an input or a local of its name, and an argument reads the
-names outside. A literal whose signature is scalar (`literalParamsMap()`, the
-test of the interpreter's `applyLiteralMaps()`: every parameter scalar, or a
-tuple) maps over its flat list arguments of numbers, as the interpreter's
-`applyLiteralMapped()` in `library/core.ts`: one cell per index, the lists
-zipped, each scalar argument bound whole in every cell, the arguments evaluated
-once, in order, before the cells, and the body once per cell, in order. So one
-parameter is `Map(literal, list)`
+each a name or a typed name (`Typed(H, 'list<real>')`), is the body with each
+parameter bound to its argument, the arguments lowered once, in order, before
+the body (as a `Block` of locals); a parameter shadows an input or a local of
+its name, and an argument reads the names outside. A literal whose signature is
+scalar (`literalParamsMap()`, the test of the interpreter's
+`applyLiteralMaps()`: every parameter scalar, or a tuple) maps over its flat
+list arguments of numbers, as the interpreter's `applyLiteralMapped()` in
+`library/core.ts`: one cell per index, the lists zipped, each scalar argument
+bound whole in every cell, the arguments evaluated once, in order, before the
+cells, and the body once per cell, in order. So one parameter is
+`Map(literal, list)`
 (`Apply(k ↦ Which(k = m, 10^9, True, k), List(x^2, (x - 1)^2))`), and
 `Apply((a, b) ↦ Max(0, a - b), P, t)` is `[0, 1, 4]` at `P = [-1, 2, 5]`,
 `t = 1` (each element, not the maximum of the list);
@@ -2022,8 +2125,21 @@ list or tuple argument declines: a nested list (the interpreter maps to the
 leaves), a tuple and a list of points (atomic), a list of booleans or of complex
 numbers, and a literal whose signature takes a collection
 (`(a, b) ↦ Length(a) + b`, which binds every argument whole). A typed parameter
-and another count of arguments decline too; `Apply(g, x)` of a name is the call
-`g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is the
+has the type that it declares, which settles the shape of its argument: a
+parameter declared a list or a tuple of numbers binds its argument whole, as the
+interpreter does, and the argument must have that type (a list of the declared
+lane, the same tuple mark, a stated length where the type states one), so
+`Apply(((H: list<real>), (n: integer)) ↦ H[1] + n, L, 5)` is `7` at
+`L = [2, 3, 4]`; a parameter declared a scalar takes a scalar of its lane, or,
+when the signature is scalar, each element of a flat list that the literal maps
+over (`Apply((k: real) ↦ 2k, L)` is `[4, 6, 8]`). Another argument declines (`L`
+of `list<real>` at a parameter `list<integer>` or `list<real^3>`, which the
+interpreter reads whole with no check; a real at `integer`, an
+`incompatible-type` error), and so does a declared type that is not a scalar, a
+list or a tuple of numbers (a union, `real | list<real>`). A list at an untyped
+parameter still declines unless the literal maps over it. A parameter with a
+default and another count of arguments decline too; `Apply(g, x)` of a name is
+the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is the
 application of the function literal that the engine gives for the derivative at
 compile time, and `D(f, x, …)` the expression it gives
 (`derivativeClosedForm()`; `closedForm()` of `lower.ts`): `D(Abs(x), x)` is
@@ -2136,17 +2252,18 @@ sub-lane, and the result of a call is a tuple; a result declared a list of such
 tuples (`(…) -> list<tuple<real, real>>`) has a body that is a list of points of
 that tuple length, and the result of a call is a list of points (JavaScript). A
 local declared a list of tuples (`Declare(out, 'list<tuple<…>>', [])`, which a
-`Loop` grows) declines, as does any write to a list local. A body of another
-lane (`tuple<integer, integer>` of a real body), a tuple body for a list result
-or the reverse, and complex elements (`tuple<complex, complex>`) decline. A
-run-time length of the result is a value of the body: the call has two results,
-the length and then the list, and the JavaScript code reads the length of the
-returned array (`.length`); the function returns one value, as any other. The
-verifier checks that the type of the list result names the length result of the
-same call. A result that can be a parameter (`same(L) := L`) is the parameter.
-Declined: a recursive call of a function with a list result (its type is the
-body's), a list of lists, and on GLSL a result of a run-time length; one of a
-stated length is a `vecN` or a `float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
+`Loop` grows) declines, as does a write to a list local other than in place
+("Lists"). A body of another lane (`tuple<integer, integer>` of a real body), a
+tuple body for a list result or the reverse, and complex elements
+(`tuple<complex, complex>`) decline. A run-time length of the result is a value
+of the body: the call has two results, the length and then the list, and the
+JavaScript code reads the length of the returned array (`.length`); the function
+returns one value, as any other. The verifier checks that the type of the list
+result names the length result of the same call. A result that can be a
+parameter (`same(L) := L`) is the parameter. Declined: a recursive call of a
+function with a list result (its type is the body's), a list of lists, and on
+GLSL a result of a run-time length; one of a stated length is a `vecN` or a
+`float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
 
 The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's
@@ -2365,8 +2482,8 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   the value of `run()` at that cell; a list input is shared by the cells, also
   with `entryChecks: false`. There is no batch body (CE-410) and no asynchronous
   copy (`parallelCode`): `runAsync()` runs `run()`, and `willParallelize()` is
-  false. A `ParallelLoop` declines, so the interpreter runs it. In the `bigint`
-  mode a batch is refused with an error.
+  false. A `ParallelLoop` compiles as a `Loop` whose passes run in order ("Loops
+  and the runtime"). In the `bigint` mode a batch is refused with an error.
 
 `compile(expr, { to: 'glsl' })` (`adapter-glsl.ts`) takes a scalar result (real,
 integer, boolean, or complex, a `vec2`: "The complex lane") or a list of stated

@@ -304,7 +304,7 @@ describe('a binder that captures nothing is kept', () => {
 
 describe('the interpreter and the compiled code agree', () => {
   const RETURNS_A_FUNCTION =
-    /Apply of a value that is not a function literal of one untyped parameter per argument/;
+    /Apply of a value that is not a function literal of one parameter per argument/;
 
   test('F(x)(y) at x = 2, y = 3', () => {
     const ce = new ComputeEngine();

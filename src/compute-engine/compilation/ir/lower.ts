@@ -73,10 +73,14 @@ import {
 import { literalParamsMap, pipeStageAsCall } from '../../library/core.js';
 import {
   Builder,
+  elementIndex,
+  elementType,
   isSubLane,
+  isSubType,
   joinType,
   widensTo,
   lengthValues,
+  regionsOf,
   sameShape,
   scalarType,
   typeToString,
@@ -213,6 +217,7 @@ const LOOPS = new Set([
   'Reduce',
   'Range',
   'Loop',
+  'ParallelLoop',
   'Comprehension',
   'Repeat',
   'Iterate',
@@ -298,6 +303,12 @@ export type LowerOptions = {
  *  lane `lane`: an effectful operation, spelled as the host's text. */
 export const hostVarOp = (k: number, lane: Lane) => `host${k}.${lane}`;
 
+/** A use of a list local written in place that it cannot have
+ *  (`inPlace()` of `lower()`). */
+type Misuse = 'write' | 'read' | undefined;
+const worse = (a: Misuse, b: Misuse): Misuse =>
+  a === 'write' || b === 'write' ? 'write' : (a ?? b);
+
 export function lower(
   root: Expression,
   rows: readonly OperatorRow[],
@@ -313,7 +324,14 @@ export function lower(
         ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
         : i.k === 'call'
           ? fns.effect(i.fn) === 'effectful'
-          : i.k === 'region' && regionRow(i.op)?.effect === 'effectful'
+          : i.k === 'region' && regionRow(i.op)?.effect === 'effectful',
+    (i) =>
+      i.k === 'op'
+        ? rowOfOp(rows, i.op)?.row.effect !== 'pure'
+        : i.k === 'call'
+          ? fns.effect(i.fn) !== 'pure'
+          : i.k === 'loop' ||
+            (i.k === 'region' && regionRow(i.op)?.effect !== 'pure')
   );
   const frames: Frame[] = [{ names: new Map(), loop: false }];
   // The memo of `value()`, keyed by the structural id of a node (`idOf()`),
@@ -655,6 +673,13 @@ export function lower(
       answered: answer !== undefined,
     };
     if (h === 'Assign' && isSymbol(e.ops[0])) info.writes.add(e.ops[0].symbol);
+    // `(a, b) := …` writes each name; `AddTo(s, e)` writes `s`, and
+    // `AddTo(At(L, i), e)` writes `L`.
+    if (h === 'Assign' && isFunction(e.ops[0], 'Tuple'))
+      for (const x of e.ops[0].ops) if (isSymbol(x)) info.writes.add(x.symbol);
+    const sum = h === 'AddTo' ? e.ops[0] : undefined;
+    const target = isFunction(sum, 'At') ? sum.ops[0] : sum;
+    if (isSymbol(target)) info.writes.add(target.symbol);
     // A handler's answer is read in place of the node (its names, its loops).
     for (const op of typeof answer === 'object' ? [...e.ops, answer] : e.ops) {
       const t = facts(op);
@@ -1040,6 +1065,17 @@ export function lower(
     if (closed !== undefined) return closed;
     switch (e.operator) {
       case 'If':
+        // `If(c, a, b)` of a list condition is `Which(c, a, True, b)`, as
+        // in the interpreter: a selection at each position.
+        // With no `else`, the interpreter restricts a list arm to the mask
+        // (`evaluateRestriction()`: the shorter of the two lengths), not a
+        // selection: it declines. A scalar or a point arm is selected at
+        // each position, NaN where the condition does not hold.
+        if (mask(e.ops[0])) {
+          if (e.nops < 3 && e.ops[1].type.matches('list'))
+            decline(e, 'an If of a list condition with no else and a list arm');
+          return select(e, [[e.ops[0], e.ops[1]]], e.ops[2]);
+        }
         // The missing arm of a boolean is `False`, as in the interpreter
         // (`maskedValue()`); of a number NaN (`conditional()`).
         return conditional(
@@ -1055,6 +1091,12 @@ export function lower(
           clauses.push([e.ops[i], e.ops[i + 1]]);
         // A last clause `True` is the arm taken when no other is.
         const last = clauses[clauses.length - 1];
+        // A list condition before a clause `True`: a selection at each
+        // position (`select()`); the clauses after `True` are not read.
+        const dflt = clauses.findIndex(([c]) => isSymbol(c, 'True'));
+        const reached = dflt < 0 ? clauses : clauses.slice(0, dflt);
+        if (reached.some(([c]) => mask(c)))
+          return select(e, reached, dflt < 0 ? undefined : clauses[dflt][1]);
         if (last !== undefined && isSymbol(last[0], 'True'))
           return conditional(e, clauses.slice(0, -1), last[1], want);
         return conditional(e, clauses, undefined, want);
@@ -1109,6 +1151,8 @@ export function lower(
       }
       case 'ListJoin':
         return lists.join(e);
+      case 'Join':
+        return lists.joinLists(e);
       case 'RandomChoice': {
         // Of the unit interval only: the interpreter's draws are its own
         // (`_SYS.randomChoice`), `lo + u·(hi − lo)` of each draw `u`.
@@ -1143,6 +1187,19 @@ export function lower(
       }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
+        // A read of a list local written in place: in order with its writes.
+        const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
+        if (owned?.binding.role === 'list') {
+          const l = owned.binding.v;
+          const i = scalar(e.ops[1]);
+          if (!isSubLane(type(i).lane, 'real'))
+            decline(e.ops[1], 'an index that is not a number');
+          return b.op(
+            type(l).lane === 'boolean' ? 'getatu' : 'getat',
+            [l, i],
+            elementType(type(l))
+          );
+        }
         // An element of an `Iterate`: the elements up to the index.
         if (lists.isIterate(e.ops[0])) {
           const i = scalar(e.ops[1]);
@@ -1168,9 +1225,12 @@ export function lower(
             decline(e, 'a mask or a base of a mask with an effect');
           return lists.mask(e, l, i);
         }
+        // Of a list of points, each `At` is the point or a point of NaN
+        // (`at()`), as `Map(k ↦ At(P, k), I)` is. A list of booleans
+        // declines: an index out of range would put `undefined` in it.
         if (
           flat(i) &&
-          flat(l) &&
+          (flat(l) || points) &&
           isSubLane(t.lane, 'real') &&
           isSubLane(type(i).lane, 'real')
         )
@@ -1178,7 +1238,7 @@ export function lower(
             e,
             lists.listSource(i),
             '',
-            (x) => apply(e, 'At', [l, x]),
+            (x) => at(e, l, x),
             false,
             e
           );
@@ -1513,9 +1573,13 @@ export function lower(
         return seededFrame(e, seed, () => value(e.ops[1], want), want);
       }
       case 'Assign':
-        return assign(e);
+        return assign(e, want);
+      case 'AddTo':
+        return addTo(e, want);
       case 'Loop':
         return loop(e, want);
+      case 'ParallelLoop':
+        return parallelLoop(e, want);
       case 'Break':
       case 'Continue': {
         const skip = lookup(SKIP);
@@ -1582,8 +1646,14 @@ export function lower(
             f = closedForm(g, () => derivativeClosedForm('Derivative', g.ops));
           if (f === g || f === undefined) decline(g, NO_CLOSED_FORM);
         }
+        // A parameter is a name, or a name with a declared type
+        // (`Typed(H, 'list<real>')`).
         const names = isFunction(f, 'Function')
-          ? f.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : ''))
+          ? f.ops
+              .slice(1)
+              .map((p) =>
+                isFunction(p, 'Optional') ? '' : (parameterName(p) ?? '')
+              )
           : [];
         if (
           !isFunction(f, 'Function') ||
@@ -1592,35 +1662,102 @@ export function lower(
         )
           decline(
             e,
-            'Apply of a value that is not a function literal of one untyped parameter per argument'
+            'Apply of a value that is not a function literal of one parameter per argument'
           );
+        // The IR type of each typed parameter, from the literal's signature:
+        // a scalar, or a list or a tuple of numbers. A union (`real |
+        // list<real>`) and another type decline.
+        const sig = f.type.type;
+        const declared = f.ops.slice(1).map((p, i) => {
+          if (!isFunction(p, 'Typed')) return undefined;
+          const t =
+            typeof sig === 'object' && sig.kind === 'signature'
+              ? sig.args?.[i]?.type
+              : undefined;
+          const ir = t === undefined ? undefined : tupleOrInputType(t, cx.wide);
+          if (t === undefined || ir === undefined)
+            decline(
+              p,
+              `a parameter of Apply whose type is not a scalar, a list or a tuple of numbers${t === undefined ? '' : ` (${engineTypeToString(t)})`}`,
+              t !== undefined && hasUnsettledShape(t)
+                ? UNSETTLED_SHAPE
+                : undefined
+            );
+          return { ...ir, tuple: tupleAxis(t), t };
+        });
         // A list argument of a literal whose signature is scalar is mapped
         // over, the interpreter's route (`applyLiteralMaps()`) for flat lists
         // of numbers: `Map(f, list)` of one parameter, and of several the
-        // lists zipped and each scalar bound whole in every cell. Another
+        // lists zipped and each scalar bound whole in every cell. A
+        // parameter declared a list or a tuple binds its argument whole, as
+        // the interpreter does: the argument must have that type. Another
         // list or tuple argument declines: the interpreter maps a nested list
         // to its leaves, a tuple is atomic, and a signature that takes a
         // collection binds the argument whole.
-        const maps = literalParamsMap(f.type.type);
-        const values = args.map((a) => {
-          const v = value(a)!;
-          const t = type(v);
+        const maps = literalParamsMap(sig);
+        const whole = declared.map((d) => (d?.shape.length ?? 0) > 0);
+        const values = args.map((a, i) => {
+          const d = declared[i];
+          // The checks read the argument before it is widened to the lane
+          // of its parameter, so a widening cannot hide a mismatch.
+          const raw = value(a)!;
+          const v = d === undefined ? raw : widen(raw, d.lane);
+          const t = type(raw);
+          // The engine type of the argument must prove the declared type,
+          // with its constraints (`real<0..1>`, the positions of a tuple):
+          // the interpreter gives an `incompatible-type` error otherwise.
+          const notDeclared = (at: string) =>
+            decline(
+              a,
+              `an argument of Apply that is not ${engineTypeToString(d!.t)}${at}, the type of its parameter ${names[i]}`
+            );
+          if (d !== undefined && whole[i]) {
+            const n = t.shape[0];
+            const want: IRType = {
+              lane: d.lane,
+              shape: d.shape.map((m) => (m === 'run-time' ? n : m)),
+            } as IRType;
+            if (
+              tuples.get(raw) !== d.tuple ||
+              n === undefined ||
+              !isSubType(t, want, constant) ||
+              !isSubtype(a.type.type, d.t)
+            )
+              notDeclared('');
+            return v;
+          }
           const flat =
             t.shape.length === 1 &&
-            !tuples.has(v) &&
+            !tuples.has(raw) &&
             (t.lane === 'real' || t.lane === 'integer');
           if (t.shape.length > 0 && !(maps && flat))
             decline(
               a,
               'a list or a tuple argument of Apply (the interpreter may map the function over it)'
             );
+          // A typed scalar parameter takes an element of its lane. A scalar
+          // argument must have the declared type, and a list mapped over the
+          // parameter a list of elements of the declared type: the lane of
+          // an element does not prove it (`real | infinity` has the lane
+          // `real`, and `real` holds finite values only).
+          if (
+            d !== undefined &&
+            (!isSubLane(t.lane, d.lane) ||
+              !isSubtype(
+                a.type.type,
+                t.shape.length > 0 ? { kind: 'list', elements: d.t } : d.t
+              ))
+          )
+            notDeclared(t.shape.length > 0 ? ' at each element' : '');
           return v;
         });
         // The arguments are lowered once: their effects run once. Lists of
         // different lengths are `incompatible-dimensions` for the
         // interpreter (`applyLiteralMapped()`): of stated lengths, a decline.
-        const sources = values.map((v) =>
-          type(v).shape.length > 0 ? lists.listSource(v) : undefined
+        const sources = values.map((v, i) =>
+          type(v).shape.length > 0 && !whole[i]
+            ? lists.listSource(v)
+            : undefined
         );
         const mapped = sources.filter((s) => s !== undefined);
         if (new Set(mapped.flatMap((s) => constant(s.length) ?? [])).size > 1)
@@ -2639,6 +2776,135 @@ export function lower(
     return want ? outs[outs.length - 1] : undefined;
   };
 
+  /** `c` is a list of booleans by its static type: a condition of an `If`
+   *  or a `Which` that selects at each position. */
+  const mask = (c: Expression) => c.type.matches('list<boolean>');
+
+  /** `If` and `Which` of a list condition: the interpreter's selection at
+   *  each position (`numpy.select`), a build over the length of the first
+   *  condition whose element is the first arm whose condition is true
+   *  there, a list arm read at the position and a scalar or a point (a
+   *  condition, an arm) the same at every position; NaN, or a point of NaN,
+   *  where none is, with no `otherwise`. The conditions and the arms are
+   *  lowered once, before the build: the interpreter evaluates an arm (and
+   *  a later condition) only where it is reached, so one that is not pure
+   *  (an effect, a write to a name, an operation that can throw such as
+   *  `AssertPresent`, a loop, a recursive call) declines. The first condition is a
+   *  list: before it, a scalar condition that holds selects its arm whole,
+   *  a value of another shape. Stated lengths that differ decline (the
+   *  interpreter gives `incompatible-dimensions`); run-time lengths that
+   *  differ give an unspecified value, as for an element-wise operation. */
+  const select = (
+    node: Expression,
+    clauses: [Expression, Expression][],
+    otherwise: Expression | undefined
+  ): V => {
+    if (interval)
+      decline(node, 'a selection at each position in the interval mode');
+    const first = value(clauses[0][0])!;
+    const lazy = [
+      ...clauses.slice(1).map(([c]) => c),
+      ...clauses.map(([, a]) => a),
+      ...(otherwise === undefined ? [] : [otherwise]),
+    ];
+    if (lazy.some((x) => facts(x).writes.size > 0))
+      decline(node, 'a selection at each position that writes a name');
+    const impure = b.impure;
+    const conds = [first, ...clauses.slice(1).map(([c]) => value(c)!)];
+    const arms = clauses.map(([, a]) => value(a)!);
+    const rest = otherwise === undefined ? undefined : value(otherwise)!;
+    if (b.impure > impure)
+      decline(
+        node,
+        'a selection at each position whose arms or later conditions are not pure'
+      );
+    // A scalar, a flat list, a point, a list of points, or none of them.
+    const kind = (v: V) => {
+      const [axis, n] = [tuples.get(v), type(v).shape.length];
+      if (axis === undefined) return ['scalar', 'list'][n];
+      if (axis === 0 && n === 1) return 'point';
+      if (axis === 1 && n === 2) return 'points';
+      return undefined;
+    };
+    const listed = (v: V) => kind(v) === 'list' || kind(v) === 'points';
+    if (kind(conds[0]) !== 'list')
+      decline(clauses[0][0], 'a scalar condition before a list condition');
+    conds.forEach((c, j) => {
+      if (
+        (kind(c) !== 'scalar' && kind(c) !== 'list') ||
+        type(c).lane !== 'boolean'
+      )
+        decline(
+          clauses[j][0],
+          'a condition that is not a boolean or a list of booleans'
+        );
+    });
+    // The arms are all numbers or booleans, or all points of numbers, as
+    // the interpreter requires.
+    const values = rest === undefined ? arms : [...arms, rest];
+    const pointed = (v: V) => kind(v) === 'point' || kind(v) === 'points';
+    for (const v of values)
+      if (
+        kind(v) === undefined ||
+        pointed(v) !== pointed(values[0]) ||
+        !(
+          isSubLane(type(v).lane, 'real') ||
+          (type(v).lane === 'boolean' && !pointed(v))
+        )
+      )
+        decline(
+          node,
+          'a selection at each position of values that are not all numbers or booleans, or all points of numbers'
+        );
+    if (rest === undefined && values.some((v) => type(v).lane === 'boolean'))
+      decline(
+        node,
+        'a selection at each position of booleans with no default (the interpreter gives Missing)'
+      );
+    const stated = new Set(
+      [...conds, ...values].flatMap((v) => {
+        if (!listed(v)) return [];
+        const n = type(v).shape[0];
+        const k = typeof n === 'number' ? n : constant(n.v);
+        return k === undefined ? [] : [k];
+      })
+    );
+    if (stated.size > 1)
+      decline(node, 'lists of two lengths in a selection at each position');
+    // Where no condition holds: NaN, or a point of NaN coordinates.
+    const absent = (): V => {
+      if (!pointed(values[0])) return b.constant(NaN, 'real');
+      const t = type(values[0]).shape;
+      const n = t[kind(values[0]) === 'point' ? 0 : 1];
+      if (typeof n !== 'number')
+        decline(node, 'a point whose length is not one number');
+      const nan = Array.from({ length: n }, () => b.constant(NaN, 'real'));
+      const p = b.list(nan, { lane: 'real', shape: [n] });
+      tuples.set(p, 0);
+      return p;
+    };
+    const cell = (v: V, k: V) => (listed(v) ? lists.listSource(v).at(k) : v);
+    const pick = (j: number, k: V): V => {
+      if (j === clauses.length)
+        return rest === undefined ? absent() : cell(rest, k);
+      return branch(
+        node,
+        cell(conds[j], k),
+        () => cell(arms[j], k),
+        () => pick(j + 1, k),
+        true
+      )!;
+    };
+    return lists.over(
+      node as Fn,
+      lists.listSource(conds[0]),
+      '',
+      (_x, k) => pick(0, k),
+      false,
+      node
+    );
+  };
+
   /** `If` and `Which`: a chain of conditionals whose last arm is
    *  `otherwise` (absent: NaN, the value of a selection that takes no
    *  arm; for an `If` whose arm is a tuple of numbers, the tuple of NaN:
@@ -2919,15 +3185,53 @@ export function lower(
             : isSymbol(declared)
               ? declared.symbol
               : 'unknown';
-          if (
-            !['real', 'integer', 'boolean', 'complex', 'unknown'].includes(
-              typeName
-            )
-          )
+          // A list local that the block writes is written in place
+          // (`listLocal()`); its declared type can be a list type.
+          const written = e.ops
+            .slice(i + 1)
+            .some((x) => facts(x).writes.has(name.symbol));
+          const scalarLocal = [
+            'real',
+            'integer',
+            'boolean',
+            'complex',
+            'unknown',
+          ].includes(typeName);
+          const listType =
+            written && !scalarLocal
+              ? inputType(ce.type(typeName).type)
+              : undefined;
+          if (!scalarLocal && listType === undefined)
             decline(s, `a local of type ${typeName}`);
           // A list (or a tuple) local of no stated type is its value, a
           // local that no `Assign` writes (`assign()` declines one).
           const v = cx.value(value)!;
+          if (written && type(v).shape.length > 0) {
+            // The interpreter refuses a write to a constant, and to a local
+            // whose type it infers from its value as a type that is not a
+            // list (`let L = 1..3` is a `range`).
+            if (isSymbol(constant, 'True'))
+              decline(s, 'a write to a constant list local');
+            if (
+              listType === undefined &&
+              (!value.type.matches('list') || value.type.matches('range'))
+            )
+              decline(
+                s,
+                `a list local written in place whose value is of type ${value.type.toString()}`
+              );
+            const owned = listLocal(s, e.ops.slice(i + 1), name.symbol, v, [
+              typeName,
+              listType,
+            ]);
+            frame.names.set(name.symbol, owned);
+            return void (result = owned.v);
+          }
+          if (listType !== undefined)
+            decline(
+              s,
+              `a value that is not a list for a local of type ${typeName}`
+            );
           if (type(v).shape.length > 0) {
             if (typeName !== 'unknown')
               decline(
@@ -3086,7 +3390,12 @@ export function lower(
    *  shared node is visited once. */
   const jumped = new WeakMap<Expression, number>();
   const jumps = (x: Expression): number => {
-    if (!isFunction(x) || x.operator === 'Loop') return 0;
+    if (
+      !isFunction(x) ||
+      x.operator === 'Loop' ||
+      x.operator === 'ParallelLoop'
+    )
+      return 0;
     let k = jumped.get(x);
     if (k !== undefined) return k;
     k = x.operator === 'Break' ? 1 : x.operator === 'Continue' ? 2 : 0;
@@ -3396,8 +3705,9 @@ export function lower(
     ];
   };
 
-  const assign = (e: Fn): V => {
-    const name = e.ops[0];
+  /** The binding of the local that `e` writes as `name`: a local declared
+   *  in the walk (not a constant), outside no loop frame around `e`. */
+  const writable = (e: Fn, name: Expression): Binding => {
     if (!isSymbol(name)) decline(e, 'a write that is not to a name');
     const known = lookup(name.symbol);
     if (known?.binding.role === 'constant')
@@ -3409,10 +3719,330 @@ export function lower(
       decline(e, 'a write to a name that is not a local');
     if (known.outer)
       decline(e, 'a write in a loop to a local declared outside it');
-    const v = local(e, scalar(e.ops[1]), known.binding.lane!);
-    known.binding.v = v;
+    return known.binding;
+  };
+
+  const assign = (e: Fn, want: boolean): V | undefined => {
+    const name = e.ops[0];
+    if (isFunction(name, 'Tuple')) return parallelAssign(e, name, want);
+    const owned = isSymbol(name) ? lookup(name.symbol) : undefined;
+    if (owned?.binding.role === 'list') {
+      // `Assign(L, ReplaceAt(L, i, v))`, the only write of `L` that
+      // `inPlace()` admits besides `AddTo`.
+      const r = e.ops[1];
+      if (!isFunction(r, 'ReplaceAt') || r.nops !== 3 || !isSymbol(r.ops[0]))
+        decline(e, 'a write to a list local other than ReplaceAt');
+      return listWrite(e, owned, r.ops[1], () => scalar(r.ops[2]), false, want);
+    }
+    const binding = writable(e, name);
+    const v = local(e, scalar(e.ops[1]), binding.lane!);
+    binding.v = v;
     return v;
   };
+
+  /** `Assign(Tuple(a_1, …, a_n), Tuple(e_1, …, e_n))` of locals: every
+   *  `e_i` is evaluated, then every `a_i` is written. */
+  const parallelAssign = (e: Fn, names: Fn, want: boolean): undefined => {
+    const values = e.ops[1];
+    if (!isFunction(values, 'Tuple') || values.nops !== names.nops)
+      decline(
+        e,
+        'a parallel assignment whose value is not a Tuple of the same length'
+      );
+    const seen = names.ops.map((x) => (isSymbol(x) ? x.symbol : ''));
+    if (new Set(seen).size !== seen.length)
+      decline(e, 'a parallel assignment that writes a name twice');
+    const bindings = names.ops.map((x) => writable(e, x));
+    const vs = values.ops.map((x, k) => local(e, scalar(x), bindings[k].lane!));
+    bindings.forEach((x, k) => (x.v = vs[k]));
+    if (want) decline(e, 'the value of a parallel assignment');
+    return undefined;
+  };
+
+  /** `AddTo(s, e)` of a local `s` is `Assign(s, Add(s, e))`; `AddTo(At(L,
+   *  i), e)` of a list local written in place adds `e` to its element `i`,
+   *  `i` evaluated once, before `e`. */
+  const addTo = (e: Fn, want: boolean): V | undefined => {
+    if (e.nops !== 2) decline(e, `AddTo with ${e.nops} operands`);
+    const [target, increment] = e.ops;
+    if (isFunction(target, 'At')) {
+      const owned = isSymbol(target.ops[0])
+        ? lookup(target.ops[0].symbol)
+        : undefined;
+      if (owned?.binding.role !== 'list' || target.nops !== 2)
+        decline(
+          e,
+          'AddTo of an element of a list that is not a list local written in place'
+        );
+      return listWrite(
+        e,
+        owned,
+        target.ops[1],
+        () => scalar(increment),
+        true,
+        want
+      );
+    }
+    const binding = writable(e, target);
+    const before = binding.v;
+    const v = local(
+      e,
+      apply(e, 'Add', [before, scalar(increment)]),
+      binding.lane!
+    );
+    binding.v = v;
+    return v;
+  };
+
+  /** A write of the element `index` of the list local `owned`, in place:
+   *  the value `value()` (`add`: plus the element), evaluated after the
+   *  index. An index that is 0, not an integer or out of range fails at
+   *  run time (`wix`); a constant one out of a stated length declines. */
+  const listWrite = (
+    e: Fn,
+    owned: { binding: Binding; outer: boolean },
+    index: Expression,
+    value: () => V,
+    add: boolean,
+    want: boolean
+  ): undefined => {
+    if (want) decline(e, 'the value of a write to a list local');
+    if (owned.outer)
+      decline(e, 'a write in a loop to a local declared outside it');
+    const l = owned.binding.v;
+    const t = type(l);
+    const i = scalar(index);
+    if (!isSubLane(type(i).lane, 'real'))
+      decline(index, 'an index that is not a number');
+    const [n, c] = [t.shape[0], constant(i)];
+    let k: V;
+    if (c !== undefined && typeof n === 'number') {
+      const at = elementIndex(n, c);
+      if (at === undefined)
+        decline(
+          e,
+          `the index ${c} of a write to a list of ${n} elements (the interpreter gives an error)`
+        );
+      k = b.constant(at, 'integer');
+    } else
+      k = b.op(
+        'wix',
+        [typeof n === 'number' ? b.constant(n, 'integer') : n.v, i],
+        scalarType('integer')
+      );
+    const element = elementType(t);
+    const x = add
+      ? apply(e, 'Add', [b.op('get', [l, k], element), value()])
+      : value();
+    if (type(x).shape.length > 0 || !isSubLane(type(x).lane, t.lane))
+      decline(
+        e,
+        `a ${type(x).lane} value written to a list of ${t.lane} elements (the interpreter changes the type of the list)`,
+        type(x).shape.length === 0 ? LANE_MISMATCH : undefined
+      );
+    b.op(t.lane === 'boolean' ? 'set.bool' : 'set', [l, k, x], element);
+    return undefined;
+  };
+
+  /** The binding of the list local `name` of the value `v`, which the
+   *  statements of its scope (`scope`, in its block after the declaration)
+   *  write in place: a copy of `v` that the local owns, of the lane that
+   *  its declared type (`typeName`, `listType`) or `v` gives. JavaScript
+   *  only. */
+  const listLocal = (
+    s: Fn,
+    scope: readonly Expression[],
+    name: string,
+    v: V,
+    [typeName, listType]: [string, ReturnType<typeof inputType>]
+  ): Binding => {
+    const misuse = scope.reduce<Misuse>(
+      (m, x, k) => worse(m, inPlace(x, name, k === scope.length - 1)),
+      undefined
+    );
+    if (misuse === 'write')
+      decline(
+        s,
+        'a write to a constant (the interpreter refuses it) or to a list local other than ReplaceAt or AddTo of an element'
+      );
+    if (!options.javascript || bigint)
+      decline(s, 'a list local that its block writes (JavaScript only)');
+    const t = type(v);
+    if (
+      t.shape.length !== 1 ||
+      tuples.has(v) ||
+      !(isSubLane(t.lane, 'real') || t.lane === 'boolean')
+    )
+      decline(
+        s,
+        'a list local written in place that is not a list of reals, integers or booleans'
+      );
+    let lane = t.lane;
+    if (listType !== undefined) {
+      const [m, n] = [listType.shape[0], t.shape[0]];
+      if (
+        listType.shape.length !== 1 ||
+        !['real', 'integer', 'boolean'].includes(listType.lane) ||
+        !isSubLane(t.lane, listType.lane) ||
+        (typeof m === 'number' && typeof n === 'number' && m !== n)
+      )
+        decline(
+          s,
+          `a value of type ${typeToString(t, -1)} for a list local of type ${typeName}`
+        );
+      lane = listType.lane;
+    }
+    if (misuse === 'read')
+      decline(
+        s,
+        `the list local ${name}, written in place, read other than by At or Length (an alias)`
+      );
+    const op =
+      lane === 'integer'
+        ? 'copy.int'
+        : lane === 'boolean'
+          ? 'copy.bool'
+          : 'copy';
+    return { v: b.op(op, [v], { lane, shape: t.shape }), lane, role: 'list' };
+  };
+
+  /** The worst use of the list local `name` in `x` (a `write` is worse than
+   *  a `read`), or `undefined` when each occurrence is `At(name, i)`,
+   *  `Length(name)`, the target of `Assign(name, ReplaceAt(name, i, v))` or
+   *  of `AddTo(At(name, i), e)`, or (`last`: `x` is the last statement of
+   *  the block) `x` itself, or `Typed(name, …)`. A `read` is any other read
+   *  of the array, which another value could then share (an alias, a
+   *  capture), a `write` any other write. */
+  const inPlace = (x: Expression, name: string, last = false): Misuse => {
+    if (isSymbol(x)) return x.symbol === name && !last ? 'read' : undefined;
+    const all = (ys: readonly Expression[]) =>
+      ys.reduce<Misuse>((m, y) => worse(m, inPlace(y, name)), undefined);
+    if (isDictionary(x)) return all(x.values);
+    if (!isFunction(x)) return undefined;
+    const own = (y: Expression | undefined) => isSymbol(y, name);
+    switch (x.operator) {
+      case 'Typed':
+        if (last && own(x.ops[0])) return undefined;
+        break;
+      case 'At':
+        // The interpreter reads the list before the index, so a write to
+        // it in the index is not seen by the read.
+        if (x.nops === 2 && own(x.ops[0]))
+          return facts(x.ops[1]).writes.has(name)
+            ? 'write'
+            : inPlace(x.ops[1], name);
+        break;
+      case 'Length':
+        if (x.nops === 1 && own(x.ops[0])) return undefined;
+        break;
+      case 'Assign': {
+        const t = x.ops[0];
+        const r = x.ops[1];
+        if (
+          own(t) &&
+          isFunction(r, 'ReplaceAt') &&
+          r.nops === 3 &&
+          own(r.ops[0])
+        )
+          // The interpreter reads the list before the index and the value:
+          // a write to it there would be lost, not made in place.
+          return r.ops.slice(1).some((y) => facts(y).writes.has(name))
+            ? 'write'
+            : all(r.ops.slice(1));
+        if (own(t) || (isFunction(t, 'Tuple') && t.ops.some(own)))
+          return 'write';
+        break;
+      }
+      case 'AddTo': {
+        const t = x.ops[0];
+        if (isFunction(t, 'At') && t.nops === 2 && own(t.ops[0])) {
+          // The interpreter reads the list before the added value
+          // (`addToSteps()`), so a write to it there is lost. It sees a write
+          // in the index; that one declines too, a crafted case.
+          const ys = [t.ops[1], ...x.ops.slice(1)];
+          return ys.some((y) => facts(y).writes.has(name)) ? 'write' : all(ys);
+        }
+        if (own(t)) return 'write';
+        break;
+      }
+      case 'Declare':
+        if (own(x.ops[0])) return 'write';
+        break;
+      case 'Function':
+        // A capture: the function can read the array after a write.
+        return worse(all(x.ops), mentions(x, name) ? 'read' : undefined);
+    }
+    return all(x.ops);
+  };
+  const mentions = (x: Expression, name: string): boolean =>
+    isSymbol(x, name) ||
+    (isDictionary(x) && x.values.some((y) => mentions(y, name))) ||
+    (isFunction(x) && x.ops.some((y) => mentions(y, name)));
+
+  /** `ParallelLoop(body, Element(x, coll), …)`: the `Loop` of the same
+   *  operands, whose passes run in order, as the interpreter runs them. It
+   *  declines a body that assigns a name declared outside it other than
+   *  with `AddTo`, a `Break` or a `Continue` of the loop, and (`program()`)
+   *  a program with a draw or a random frame: the interpreter runs each
+   *  pass in a frame of its own, which compiled code does not have. */
+  let parallel: Fn | undefined;
+  const parallelLoop = (e: Fn, want: boolean): undefined => {
+    if (!options.javascript) decline(e, 'a parallel for (JavaScript only)');
+    const outer = outerWrite(e.ops[0], new Set());
+    if (outer !== undefined)
+      decline(
+        e,
+        `a parallel for whose body assigns ${outer}, declared outside it (parallel-outer-write): only AddTo adds to such a variable`
+      );
+    if (jumps(e.ops[0]) !== 0)
+      decline(e, 'a Break or a Continue of a parallel for (parallel-exit)');
+    parallel ??= e;
+    return loop(e, want);
+  };
+
+  /** A name declared outside `x` that `x` writes with `Assign`: a name of
+   *  `inner`, a local of a `Block`, an index of a clause and a parameter
+   *  of a function literal in `x` are declared inside. */
+  const outerWrite = (
+    x: Expression,
+    inner: ReadonlySet<string>
+  ): string | undefined => {
+    if (!isFunction(x)) return undefined;
+    const names = new Set(inner);
+    if (x.operator === 'Function')
+      for (const p of x.ops.slice(1)) {
+        const n = parameterName(p);
+        if (n !== undefined) names.add(n);
+      }
+    for (const c of x.ops)
+      if (isFunction(c, 'Element') && isSymbol(c.ops[0]))
+        names.add(c.ops[0].symbol);
+    if (x.operator === 'Assign') {
+      const t = x.ops[0];
+      for (const n of isFunction(t, 'Tuple') ? t.ops : [t])
+        if (isSymbol(n) && !names.has(n.symbol)) return n.symbol;
+    }
+    for (const op of x.ops) {
+      if (
+        x.operator === 'Block' &&
+        isFunction(op, 'Declare') &&
+        isSymbol(op.ops[0])
+      )
+        names.add(op.ops[0].symbol);
+      const w = outerWrite(op, names);
+      if (w !== undefined) return w;
+    }
+    return undefined;
+  };
+
+  /** Whether the region `r` draws or holds a random frame. */
+  const draws = (r: Region): boolean =>
+    r.body.some(
+      (i) =>
+        (i.k === 'op' && (i.op === 'draw' || i.op === 'shuffle')) ||
+        (i.k === 'region' && (i.op === 'seeded' || i.op === 'choice')) ||
+        regionsOf(i).some(draws)
+    );
 
   const cx: Lowering = {
     b,
@@ -3465,6 +4095,11 @@ export function lower(
    *  is thrown as it is. */
   const program = (f: () => V | V[]): Program => {
     const p = b.program(f);
+    if (parallel !== undefined && p.functions.some((g) => draws(g.body)))
+      decline(
+        parallel,
+        'a parallel for in a program that draws or has a random frame: the interpreter runs each pass in a random frame of its own'
+      );
     const names = [...seen].filter((name) => !typed.has(name));
     if (names.length > 0) throw new UntypedInputs(names);
     return {

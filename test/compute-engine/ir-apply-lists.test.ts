@@ -253,7 +253,6 @@ describe('IR profile, batch G18: Apply of a literal over a list (CE-1344)', () =
     ['a list of points (a point is atomic: a list of errors)', ['Apply', ['Function', ['Add', 'k', 1], 'k'], ['List', ['Tuple', 1, 'x'], ['Tuple', 3, 4]]], /a list or a tuple argument of Apply/],
     ['a literal whose parameter is a collection by its signature (bound whole: 2)', ['Apply', ['Function', ['Length', 'k'], 'k'], ['List', 1, 'x']], /a list or a tuple argument of Apply/],
     ['a list of booleans (maps: [False, True])', ['Apply', ['Function', ['Not', 'k'], 'k'], ['List', 'True', ['Less', 'x', 0]]], /a list or a tuple argument of Apply/],
-    ['a typed parameter (maps: [2, 1.3]; every typed parameter of an Apply declines)', ['Apply', ['Function', ['Add', 'k', 1], ['Typed', 'k', "'real'"]], ['List', 1, 'x']], /one untyped parameter per argument/],
   ])('%s declines', (_, json, cause) => {
     expect(failure(() => js(json))).toMatch(cause);
   });

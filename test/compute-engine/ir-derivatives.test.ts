@@ -610,7 +610,7 @@ describe('IR profile, batch G22: the review’s fixes', () => {
     );
   });
 
-  test('Apply(Derivative(ft), x) of a typed parameter: the literal of the derivative keeps the type, a decline', () => {
+  test('Apply(Derivative(ft), x) of a typed parameter: the literal of the derivative keeps the type', () => {
     engine.declare('ft', 'function');
     engine.assign(
       'ft',
@@ -620,9 +620,13 @@ describe('IR profile, batch G22: the review’s fixes', () => {
         ['Typed', 't', "'real'"],
       ] as never)
     );
-    expect(fails(['Apply', ['Derivative', 'ft'], 'x'])).toMatch(
-      /untyped parameter per argument/
+    const [applied, value] = run(
+      ['Apply', ['Derivative', 'ft'], 'x'],
+      {},
+      { x: 0.7 }
     );
+    expect(agree(applied, value, 1e-9)).toBe(true);
+    expect(agree(applied, 3 * 0.7 ** 2, 1e-9)).toBe(true);
     const [got, want] = run(['D', ['ft', 'x'], 'x'], {}, { x: 0.7 });
     expect(agree(got, want, 1e-9)).toBe(true);
   });

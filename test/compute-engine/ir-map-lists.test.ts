@@ -388,8 +388,8 @@ describe('IR profile, batch G26: the forms of CE-1365 and CE-1366', () => {
     }
   });
 
-  test('At of a list of indexes into a list of points or of booleans declines', () => {
-    expect(failure(() => js(['At', ['List', ['Tuple', 1, 2]], 'I']))).toMatch(
+  test('At of a list of indexes into a list of booleans declines (of points: ir-select-and-gather.test.ts)', () => {
+    expect(failure(() => js(['At', ['List', 'True', 'False'], 'I']))).toMatch(
       /a list where a scalar is required/
     );
   });

@@ -46,6 +46,7 @@ import { plain } from './plain.js';
 import { effects, effectTrace, sameTrace } from './effects.js';
 import {
   deepFreeze,
+  LIST_LOCAL_OPS,
   OPERATORS,
   regionRow,
   rowOfOp,
@@ -271,9 +272,10 @@ function seededWarnings(p: Program, rows: readonly OperatorRow[]): Warning[] {
       }
       if (i.k === 'call' && fx.of(i) === 'effectful')
         why.push(`a call of ${i.fn}`);
-      // A draw, or a region that draws by itself (`choice`).
+      // A draw, or a region that draws by itself (`choice`); not a write
+      // of a list local.
       if (
-        (i.k === 'op' ||
+        ((i.k === 'op' && !LIST_LOCAL_OPS.includes(i.op.split('.')[0])) ||
           (i.k === 'region' && regionRow(i.op)?.effect === 'effectful')) &&
         fx.of(i) === 'effectful'
       ) {

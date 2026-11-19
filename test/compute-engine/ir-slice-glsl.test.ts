@@ -52,12 +52,13 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, the conversions to HSL and HSV, and a sort, an ordering and a median)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, the conversions to HSL and HSV, a sort, an ordering and a median, the run-time test of a real count of a rotation, and the operations of a list local written in place)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'ashsl', 'ashsv', 'atu', 'atp',
       'sort', 'sort.int', 'ordering', 'median',
       'rbinomial', 'rgcd', 'rlcm', 'fibonacci.int',
-      'isundef', 'present.int', 'present', 'cpresent', 'present.bool',
+      'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
+      'copy', 'copy.int', 'copy.bool', 'wix', 'get', 'set', 'set.bool', 'getat', 'getatu',
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',
         'acot', 'asec', 'acsc', 'hav', 'acoth', 'asech', 'acsch', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
         'factorial2', 'zeta', 'lcm', 'heaviside', 'remainder', 'smoothstep', 'invhav', 'erfinv', 'beta', 'digamma',

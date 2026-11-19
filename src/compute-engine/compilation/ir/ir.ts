@@ -410,6 +410,9 @@ export class Builder {
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
   effects = 0;
+  /** The number of instructions emitted so far that are not pure (that can
+   *  throw, not terminate or have an effect). */
+  impure = 0;
   /** The number of positional parameters of the entry. */
   positional = 0;
   /** The entry is a root function literal. */
@@ -417,7 +420,8 @@ export class Builder {
 
   constructor(
     private readonly pure: (op: string) => boolean,
-    private readonly effectful: (i: Instr) => boolean
+    private readonly effectful: (i: Instr) => boolean,
+    private readonly notPure: (i: Instr) => boolean = () => false
   ) {}
 
   newValue(type: IRType): V {
@@ -492,6 +496,7 @@ export class Builder {
 
   emit(i: Instr): void {
     if (this.effectful(i)) this.effects++;
+    if (this.notPure(i)) this.impure++;
     if (i.k === 'op') this.defs.set(i.out, i);
     this.current().body.push(i);
   }

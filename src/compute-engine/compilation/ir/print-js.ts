@@ -188,6 +188,13 @@ export const JS: Syntax = deepFreeze({
     at: { text: '_at($0, $1)', helpers: ['_at'] },
     atu: { text: '_atu($0, $1)', helpers: ['_atu'] },
     atp: { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
+    // A list local written in place (`operators.ts`).
+    copy: '$0.slice()',
+    wix: { text: '_wix($0, $1)', helpers: ['_wix'] },
+    get: '$0[$1]',
+    set: '($0[$1] = $2)',
+    getat: { text: '_at($0, $1)', helpers: ['_at'] },
+    getatu: { text: '_atu($0, $1)', helpers: ['_atu'] },
     isnan: 'Number.isNaN($0)',
     isundef: '($0 === undefined)',
     ...Object.fromEntries(
@@ -196,6 +203,7 @@ export const JS: Syntax = deepFreeze({
         { text: '_present($0, $1)', helpers: ['_present'] },
       ])
     ),
+    'count.int': { text: '_count($0)', helpers: ['_count'] },
     draw: '_SYS.drawNextRandomNumber()',
     shuffle: '_SYS.shuffle($0)',
     sort: { text: '_sort($0)', helpers: ['_sort'] },
@@ -280,6 +288,10 @@ export const JS: Syntax = deepFreeze({
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
     _at: 'const _at = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : NaN; };',
     _atu: 'const _atu = (l, i) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : undefined; };',
+    // The index from 0 of the write `ReplaceAt(L, i, v)` or `AddTo(At(L,
+    // i), e)` in a list of `n` elements; the interpreter's value of an
+    // index that is 0, not an integer or out of range is an error.
+    _wix: 'const _wix = (n, i) => { const k = i > 0 ? i - 1 : n + i; if (Number.isInteger(i) && i !== 0 && k >= 0 && k < n) return k; throw new Error(`out-of-range: the index ${i} of a write to a list of ${n} elements`); };',
     _atp: 'const _atp = (l, i, n) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : new Array(n).fill(NaN); };',
     // A sorted copy, NaN last, as the interpreter's `Sort`; the indices
     // from 1 of that order, stable, as its `Ordering`.
@@ -295,6 +307,11 @@ export const JS: Syntax = deepFreeze({
     // `expected-present`.
     _present:
       "const _present = (m, x) => { if (m) throw new Error('expected-present: AssertPresent of an absent value'); return x; };",
+    // A real count of `RotateLeft` or `RotateRight`: the interpreter's
+    // value is the error `incompatible-type` where it is not an integer,
+    // and unevaluated past the safe integers (`1e20`): both throw.
+    _count:
+      "const _count = (x) => { if (!Number.isSafeInteger(x)) throw new Error('incompatible-type: a count that is not an integer'); return x; };",
   },
   // A `bigint` literal is made in the bigint mode only (`JS_BIGINT`).
   constant: ({ value: x }) =>

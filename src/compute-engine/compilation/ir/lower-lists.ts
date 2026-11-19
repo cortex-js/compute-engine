@@ -754,6 +754,17 @@ export function listLowering(cx: Lowering) {
     return built(e, ends[ends.length - 1], (k) => at(k, 0));
   };
 
+  /** `Join(L1, …, Ln)` of lists: the list of `ListJoin`, which declines
+   *  lists of two lanes and a tuple (that `Join` appends as one element). A
+   *  scalar operand is a `List` of it after canonicalization. Of a set the
+   *  interpreter's `Join` is a set, and of strings a string: an operand
+   *  whose static type is not a list declines. */
+  const joinLists = (e: Fn): V => {
+    if (e.nops === 0 || !e.ops.every((x) => x.type.matches('list')))
+      decline(e, 'Join of other than lists');
+    return join(e);
+  };
+
   /** The integer `head` (`Add`, `Subtract`, `Min`, `Max`, `Mod`) of the
    *  integers `x` and `y`: a constant when both are (a constant length and
    *  constant indices write a short list out, and GLSL reads no other). */
@@ -784,13 +795,16 @@ export function listLowering(cx: Lowering) {
     over(e, { length, at: (k) => s.at(index(k)) }, '', (x) => x, false, e);
 
   /** The count of `Take`, `Drop`, `RotateLeft` and `RotateRight`: an
-   *  integer (the interpreter rounds a real count of `Take` and `Drop` and
-   *  refuses one of a rotation; a real count declines). */
-  const count = (x: Expression): V => {
+   *  integer (the interpreter rounds a real count of `Take` and `Drop`,
+   *  which declines). A real count of a rotation (`rotation`) is tested at
+   *  run time, and fails where it is not an integer: the interpreter's
+   *  value is an error there. */
+  const count = (x: Expression, rotation = false): V => {
     const v = cx.scalar(x);
-    if (type(v).lane !== 'integer')
+    if (type(v).lane === 'integer') return v;
+    if (!rotation || type(v).lane !== 'real')
       decline(x, 'a count that is not an integer');
-    return v;
+    return cx.apply(x, op('count.int'), [v]);
   };
 
   /** The value of a real list `x` for `Median` and `Sort`: one list of
@@ -1427,8 +1441,9 @@ export function listLowering(cx: Lowering) {
     if (h === 'RotateLeft' || h === 'RotateRight') {
       // The element at `k` is the element at `k + m`, modulo the length
       // (`RotateLeft(L)` is `RotateLeft(L, 1)`; a negative `m` rotates the
-      // other way).
-      const m = e.nops === 2 ? count(e.ops[1]) : one;
+      // other way). The count is reduced modulo the length first, as the
+      // interpreter does, so `k + m` stays exact for a count near 2^53.
+      const m = int(e, 'Mod', e.nops === 2 ? count(e.ops[1], true) : one, n);
       return reindexed(e, s, n, (k) =>
         int(e, 'Mod', int(e, h === 'RotateLeft' ? 'Add' : 'Subtract', k, m), n)
       );
@@ -1450,6 +1465,7 @@ export function listLowering(cx: Lowering) {
     over,
     comprehension,
     join,
+    joinLists,
     isIterate,
     iterateTo,
   };

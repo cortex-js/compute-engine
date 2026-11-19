@@ -356,6 +356,19 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('At',           3,          [[['list', R, I], 'element', 'atp']], list),
   // An element from 0, at an index in range where the lowering puts it.
   row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
+  // A list local written in place (`lower.ts`, `README.md`, "Lists"): the
+  // array that the local owns, a copy of its value (`copy`); the index from
+  // 0 of an index from 1 or from the end of a list of `n` elements, which
+  // fails for an index that is 0, not an integer or out of range (`wix`);
+  // a read at such an index (`get`), a write there, whose value is the
+  // element written (`set`), and the read of `At` (`getat`). The copy, the
+  // reads and the writes are effectful: they keep their place and order,
+  // so no read moves across a write of its array.
+  row(undefined,      1,          [[['list'], R, 'copy'], [['list'], I, 'copy.int'], [['list'], B, 'copy.bool']], { ...list, effect: 'effectful' }),
+  row(undefined,      2,          [[[I, R], I, 'wix']],          { ...list, effect: 'may-fail' }),
+  row(undefined,      2,          [[['list', I], 'element', 'get']], { ...list, effect: 'effectful' }),
+  row(undefined,      3,          [[['list', I, R], 'element', 'set'], [['list', I, B], 'element', 'set.bool']], { ...list, effect: 'effectful' }),
+  row(undefined,      2,          [[['list', R], 'element', 'getat'], [['list', R], 'element', 'getatu']], { ...list, effect: 'effectful' }),
   // The discharges (`absent()` of `lower.ts`): the test of an absent
   // number (NaN) and, on JavaScript, of an absent boolean (`undefined`);
   // `AssertPresent` of the test and the value, which fails where the test
@@ -363,6 +376,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[[R], B, 'isnan']],           { ...list, fold: Number.isNaN }),
   row(undefined,      1,          [[[B], B, 'isundef']],         list),
   row(undefined,      2,          [[[B, I], I, 'present.int'], [[B, R], R, 'present'], [[B, C], C, 'cpresent'], [[B, B], B, 'present.bool']], { ...list, effect: 'may-fail' }),
+  // A real count of a rotation as an integer, which fails where it is not
+  // one (the interpreter gives `incompatible-type`); JavaScript only.
+  row(undefined,      1,          [[[R], I, 'count.int']],       { ...list, effect: 'may-fail' }),
   // A draw of the active `WithRandomSeed` frame, or a live draw outside one.
   row('Random',       0,          [[[], R, 'draw']],             { ...list, effect: 'effectful' }),
   // A shuffled copy of a list of numbers (`lower.ts` declines another
@@ -525,6 +541,17 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     params: [R],
     results: real,
   },
+]);
+
+/** The effectful operations of a list local written in place: they change
+ *  an array that the function owns, and draw nothing (`seededWarnings()` of
+ *  `index.ts`). */
+export const LIST_LOCAL_OPS: readonly string[] = Object.freeze([
+  'copy',
+  'get',
+  'set',
+  'getat',
+  'getatu',
 ]);
 
 /** The reductions, by head: the row that accumulates from its identity,

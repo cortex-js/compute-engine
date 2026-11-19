@@ -393,7 +393,7 @@ describe('IR profile, batch G12: real bounds, real Ranges and Apply', () => {
   // prettier-ignore
   test.each([
     ['Apply of a wrong number of arguments', ['Apply', fn(['Subtract', 'p', 'q'], 'p', 'q'), 'x'], /Apply of a value that is not a function literal/],
-    ['Apply of a typed parameter', ['Apply', fn(['Add', 'z', 1], ['Typed', 'z', "'integer'"]), 'x'], /Apply of a value that is not a function literal/],
+    ['Apply of a real at an integer parameter', ['Apply', fn(['Add', 'z', 1], ['Typed', 'z', "'integer'"]), 'x'], /an argument of Apply that is not integer, the type of its parameter z/],
     ['a complex bound', ['Sum', 'k', ['Limits', 'k', 1, 'Z']], /a bound that is not a real number/],
     ['a complex Range', ['Range', 'Z', 5], /a Range of an operand that is not a real number/],
     ['Apply of a tuple', ['Apply', fn(['Add', 'z', 1], 'z'), ['Tuple', 'x', 'y']], /may map the function over it/],
