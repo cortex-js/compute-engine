@@ -231,7 +231,7 @@ describe('IR profile, complex lane on GLSL: the text', () => {
     // The argument is a helper, also in `Ln` and `Power`, defined first.
     expect(glsl(['Argument', 'z']).code).toBe('_gpu_ir_carg(z)');
     expect(glsl(['Ln', 'z']).preamble).toMatch(
-      /^float _gpu_ir_carg\(vec2 a\) \{[^]*\nvec2 _gpu_ir_cln\(vec2 a\) \{/
+      /^(float _gpu_ir_chypot\(float x, float y\) \{[^]*\n)?float _gpu_ir_carg\(vec2 a\) \{[^]*\nvec2 _gpu_ir_cln\(vec2 a\) \{/
     );
     // The largest float is not written above itself (`3.4028235e+38`).
     expect(glsl(['Subtract', 3.4028235e38, 'x']).code).toMatch(
@@ -425,13 +425,8 @@ function uniforms(
 
 // prettier-ignore
 const DECLINES: [label: string, json: Json, cause: RegExp, options?: object][] = [
-  ['Arcsin', ['Arcsin', 'z'], /Arcsin \(the operation casin\) on glsl/],
-  ['Arctan', ['Arctan', 'z'], /Arctan \(the operation catan\)/],
-  ['Arsinh', ['Arsinh', 'z'], /Arsinh \(the operation casinh\)/],
-  ['Root', ['Root', 'z', 3], /Root \(the operation croot\)/],
-  ['Log', ['Log', 'z'], /Log \(the operation clog10\)/],
-  ['Csc', ['Csc', 'z'], /Csc \(the operation ccsc\)/],
-  ['Sech', ['Sech', 'z'], /Sech \(the operation csech\)/],
+  ['Arccot', ['Arccot', 'z'], /Arccot \(the operation cacot\) on glsl/],
+  ['Arcsch', ['Arcsch', 'z'], /Arcsch \(the operation cacsch\)/],
   ['Gamma of a complex', ['Gamma', 'z'], /Gamma \(the operation cgamma\) on glsl/],
   ['a comparison of complex values', ['Less', 'z', 'w'], /Less of complex/],
   ['a list of complex values', ['List', 'z', 'w'], /a list of complex numbers on glsl/],

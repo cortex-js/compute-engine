@@ -478,9 +478,9 @@ describe('IR slice: the complex mode', () => {
   });
   test('GLSL declines a complex row with no GLSL form, and a list of complex numbers', () => {
     const d = declineOf(() =>
-      compileSlice(box(['Arcsin', 'Z']), { target: 'glsl' })
+      compileSlice(box(['Arccot', 'Z']), { target: 'glsl' })
     );
-    expect(d.cause).toMatch(/the operation casin\) on glsl/);
+    expect(d.cause).toMatch(/the operation cacot\) on glsl/);
     const l = declineOf(() =>
       compileSlice(box(['List', 'Z', 'W']), { target: 'glsl' })
     );

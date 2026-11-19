@@ -15,6 +15,7 @@
  */
 
 import { entryOf, type IRType, type Program } from './ir.js';
+import { GLSL_ZETA_HELPERS } from './glsl-zeta-helpers.js';
 import { deepFreeze, type OperatorRow } from './operators.js';
 import {
   ARITHMETIC,
@@ -120,23 +121,38 @@ const COMPLEX: Record<string, [binary: boolean, ...body: string[]]> = {
     'vec2 w = vec2(b.x * l.x - b.y * l.y, b.x * l.y + b.y * l.x);',
     'return exp(w.x) * vec2(cos(w.y), sin(w.y));'],
   exp: [false, 'return exp(a.x) * vec2(cos(a.y), sin(a.y));'],
-  ln: [false, 'return vec2(log(length(a)), _gpu_ir_carg(a));'],
-  // The form with no cancellation of `|a| - |re a|`.
-  sqrt: [false,
-    'float t = sqrt(0.5 * (length(a) + abs(a.x)));',
-    'if (a.x >= 0.0) return vec2(t, 0.5 * a.y / t);',
-    'return vec2(0.5 * abs(a.y) / t, a.y < 0.0 ? -t : t);'],
   sin: [false, 'return vec2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y));'],
   cos: [false, 'return vec2(cos(a.x) * cosh(a.y), -sin(a.x) * sinh(a.y));'],
-  tan: [false, 'return vec2(sin(2.0 * a.x), sinh(2.0 * a.y)) / (cos(2.0 * a.x) + cosh(2.0 * a.y));'],
-  // `cos(a)·conj(sin(a)) / |sin(a)|^2`, with `|sin(a)|^2 = sin²x + sinh²y`:
-  // no cancellation near a pole, as `cosh 2y - cos 2x` would have.
-  cot: [false,
+  // `tan`, `sec` and the hyperbolic `tanh`, `sech` (and `cot`, `csc`,
+  // `csch`, `coth` of `COMPLEX_HELPERS`): a quotient by a sum of squares,
+  // `|cos(a)|^2 = cos²x + sinh²y` and the like: no cancellation
+  // near a pole (`cos 2x + cosh 2y` had it, CE-1506). Past an imaginary
+  // part (a real part for the hyperbolic ones) of 20, where `sinh²`
+  // overflows from 44, the first term of the expansion in `e^-|y|`, exact
+  // to float precision there.
+  tan: [false,
+    'if (abs(a.y) > 20.0) return vec2(4.0 * sin(a.x) * cos(a.x) * exp(-2.0 * abs(a.y)), sign(a.y));',
+    // Next to 0, a + a³/3: a renderer's `sin` is 0 below about 1e-8.
+    'vec2 a2 = vec2(a.x * a.x - a.y * a.y, 2.0 * a.x * a.y);',
+    'if (abs(a.x) + abs(a.y) < 0.01) return a + vec2(a2.x * a.x - a2.y * a.y, a2.x * a.y + a2.y * a.x) / 3.0;',
     'float s = sin(a.x), c = cos(a.x), sh = sinh(a.y), ch = cosh(a.y);',
-    'return vec2(s * c, -sh * ch) / (s * s + sh * sh);'],
+    'return vec2(s * c, sh * ch) / (c * c + sh * sh);'],
+  sec: [false,
+    'if (abs(a.y) > 20.0) return 2.0 * exp(-abs(a.y)) * vec2(cos(a.x), sign(a.y) * sin(a.x));',
+    'float s = sin(a.x), c = cos(a.x), sh = sinh(a.y), ch = cosh(a.y);',
+    'return vec2(c * ch, s * sh) / (c * c + sh * sh);'],
   sinh: [false, 'return vec2(sinh(a.x) * cos(a.y), cosh(a.x) * sin(a.y));'],
   cosh: [false, 'return vec2(cosh(a.x) * cos(a.y), sinh(a.x) * sin(a.y));'],
-  tanh: [false, 'return vec2(sinh(2.0 * a.x), sin(2.0 * a.y)) / (cosh(2.0 * a.x) + cos(2.0 * a.y));'],
+  tanh: [false,
+    'if (abs(a.x) > 20.0) return vec2(sign(a.x), 4.0 * sin(a.y) * cos(a.y) * exp(-2.0 * abs(a.x)));',
+    'vec2 a2 = vec2(a.x * a.x - a.y * a.y, 2.0 * a.x * a.y);',
+    'if (abs(a.x) + abs(a.y) < 0.01) return a - vec2(a2.x * a.x - a2.y * a.y, a2.x * a.y + a2.y * a.x) / 3.0;',
+    'float sh = sinh(a.x), ch = cosh(a.x), s = sin(a.y), c = cos(a.y);',
+    'return vec2(sh * ch, s * c) / (sh * sh + c * c);'],
+  sech: [false,
+    'if (abs(a.x) > 20.0) return 2.0 * exp(-abs(a.x)) * vec2(cos(a.y), -sign(a.x) * sin(a.y));',
+    'float sh = sinh(a.x), ch = cosh(a.x), s = sin(a.y), c = cos(a.y);',
+    'return vec2(ch * c, -sh * s) / (sh * sh + c * c);'],
 };
 
 /** The helpers of the gamut mapping of a colour (CE-1535), each after the
@@ -160,6 +176,314 @@ const APCA_HELPERS = [
   '_gpu_ir_apca_y',
   '_gpu_ir_apca',
 ];
+
+/** The complex helpers that call other helpers (`helpersOf()` finds them
+ *  in the text): the inverse trigonometric and hyperbolic functions of a
+ *  `vec2`, ported from the deleted GPU target (`gpu-complex-functions.ts`
+ *  of 384222963), with the formulas of W. Kahan, "Branch Cuts for Complex
+ *  Elementary Functions" (1987), as the interpreter's `complexAsin()` and
+ *  the others of `numerics/numeric-complex.ts`: a product of two square
+ *  roots in place of `√(1 - z²)`, so no cancellation, and no overflow below
+ *  |z| = 1e37 (above, the value at z/16, whose logarithmic part differs by
+ *  ln 16). A shader cannot rely on the sign of a zero: a third operand `s`
+ *  (±1) is the sign of a zero part, chosen so that the side of each cut is
+ *  the interpreter's (`asin 2` is `π/2 - 1.317i`, `acosh(-2)` is
+ *  `1.317 + πi`, `atan 2i` is `π/2 + 0.549i`). A two-operand `atan(y, x)`
+ *  is `_gpu_ir_carg(vec2(x, y))`, written on an axis. Also `Log` of base
+ *  10 and `Root`. */
+// prettier-ignore
+const COMPLEX_HELPERS: Record<string, string> = {
+  // √(x² + y²) with no overflow of x².
+  _gpu_ir_chypot: `float _gpu_ir_chypot(float x, float y) {
+  float ax = abs(x);
+  float ay = abs(y);
+  float m = max(ax, ay);
+  if (m == 0.0) return 0.0;
+  float n = min(ax, ay) / m;
+  return m * sqrt(1.0 + n * n);
+}`,
+  // ln(1 + x) for x > -0.25: 2 atanh(x / (2 + x)) by its series below 0.5
+  // (the builtin `log` has an absolute error of 2^-21 on [0.5, 2]).
+  _gpu_ir_clog1p: `float _gpu_ir_clog1p(float x) {
+  if (x >= 0.5) return log(1.0 + x);
+  float s = x / (2.0 + x);
+  float t = s * s;
+  return 2.0 * s * (1.0 + t * (0.3333333333333333 + t * (0.2 + t * (0.14285714285714285 + t * (0.1111111111111111 + t * 0.09090909090909091)))));
+}`,
+  // asinh of a real, for a small and a large value.
+  _gpu_ir_casinhr: `float _gpu_ir_casinhr(float v) {
+  float a = abs(v);
+  float r = a > 1.0e9 ? log(a) + 0.6931471805599453 : _gpu_ir_clog1p(a + a * a / (1.0 + sqrt(1.0 + a * a)));
+  return v < 0.0 ? -r : r;
+}`,
+  // The sign of y, with s as the sign of a zero.
+  _gpu_ir_czsign: `float _gpu_ir_czsign(float y, float s) {
+  return (y < 0.0 || (y == 0.0 && s < 0.0)) ? -1.0 : 1.0;
+}`,
+  // The principal √(x + iy), with s as the sign of a zero y.
+  _gpu_ir_csqrts: `vec2 _gpu_ir_csqrts(float x, float y, float s) {
+  if (x == 0.0 && y == 0.0) return vec2(0.0);
+  float h = _gpu_ir_chypot(x, y);
+  if (x >= 0.0) {
+    float t = sqrt(0.5 * x + 0.5 * h);
+    return vec2(t, y / (2.0 * t));
+  }
+  float t = sqrt(0.5 * h - 0.5 * x);
+  return vec2(abs(y) / (2.0 * t), _gpu_ir_czsign(y, s) * t);
+}`,
+  // asin(x + iy), with s the sign of a zero y. Re: atan2(x, Re(√(1 - z)
+  // √(1 + z))); Im: asinh(Im(conj(√(1 - z)) √(1 + z))).
+  _gpu_ir_casin_core: `vec2 _gpu_ir_casin_core(float x0, float y0, float s) {
+  float x = x0;
+  float y = y0;
+  float k = 0.0;
+  if (max(abs(x), abs(y)) > 1.0e37) {
+    x = x * 0.0625;
+    y = y * 0.0625;
+    k = 2.772588722239781;
+  }
+  vec2 a = _gpu_ir_csqrts(1.0 - x, -y, -s);
+  vec2 b = _gpu_ir_csqrts(1.0 + x, y, s);
+  float im = _gpu_ir_casinhr(a.x * b.y - a.y * b.x);
+  return vec2(_gpu_ir_carg(vec2(a.x * b.x - a.y * b.y, x)), im < 0.0 ? im - k : im + k);
+}`,
+  _gpu_ir_casin: `vec2 _gpu_ir_casin(vec2 z) {
+  return _gpu_ir_casin_core(z.x, z.y, z.x > 0.0 ? -1.0 : 1.0);
+}`,
+  // Re: 2 atan2(Re √(1 - z), Re √(1 + z)); Im: asinh(Im(conj(√(1 + z))
+  // √(1 - z))).
+  _gpu_ir_cacos: `vec2 _gpu_ir_cacos(vec2 z) {
+  float x = z.x;
+  float y = z.y;
+  float k = 0.0;
+  if (max(abs(x), abs(y)) > 1.0e37) {
+    x = x * 0.0625;
+    y = y * 0.0625;
+    k = 2.772588722239781;
+  }
+  float s = z.x > 0.0 ? -1.0 : 1.0;
+  vec2 a = _gpu_ir_csqrts(1.0 - x, -y, -s);
+  vec2 b = _gpu_ir_csqrts(1.0 + x, y, s);
+  float im = _gpu_ir_casinhr(b.x * a.y - b.y * a.x);
+  return vec2(2.0 * _gpu_ir_carg(vec2(b.x, a.x)), im < 0.0 ? im - k : im + k);
+}`,
+  // atanh(x + iy), with s the sign of a zero y. Re: ln(1 + 4|x| /
+  // |1 - |x| - iy|²) / 4, with the sign of x; Im: atan2(2y, (1 - x)(1 + x)
+  // - y²) / 2. Above |z| = 1e18, 1/z (|z|/4 in place of |z|); next to ±1,
+  // a difference of two logarithms.
+  _gpu_ir_catanh_core: `vec2 _gpu_ir_catanh_core(float x, float y, float s) {
+  if (_gpu_ir_chypot(x, y) > 1.0e18) {
+    float h4 = _gpu_ir_chypot(0.25 * x, 0.25 * y);
+    float q = y / 8.0 / h4 / h4;
+    return vec2(x / 16.0 / h4 / h4, q == 0.0 ? _gpu_ir_czsign(y, s) * 1.5707963267948966 : 0.5 * _gpu_ir_carg(vec2(-1.0, q)));
+  }
+  float ax = abs(x);
+  float u = 1.0 - ax;
+  float d = u * u + y * y;
+  float re = d < 1.0e-30 ? 0.5 * (log(_gpu_ir_chypot(1.0 + ax, y)) - log(_gpu_ir_chypot(u, y))) : 0.25 * _gpu_ir_clog1p(4.0 * ax / d);
+  float m = u * (1.0 + ax) - y * y;
+  float im = 2.0 * y == 0.0 ? (m < 0.0 ? _gpu_ir_czsign(y, s) * 1.5707963267948966 : 0.0) : 0.5 * _gpu_ir_carg(vec2(m, 2.0 * y));
+  return vec2(x < 0.0 ? -re : re, im);
+}`,
+  _gpu_ir_catanh: `vec2 _gpu_ir_catanh(vec2 z) {
+  return _gpu_ir_catanh_core(z.x, z.y, z.x > 0.0 ? -1.0 : 1.0);
+}`,
+  // atan z = -i atanh(iz); the poles ±i are (∞, ∞), the interpreter's
+  // unsigned infinity.
+  _gpu_ir_catan: `vec2 _gpu_ir_catan(vec2 z) {
+  if (z.x == 0.0 && abs(z.y) == 1.0) return vec2(uintBitsToFloat(0x7f800000u));
+  vec2 r = _gpu_ir_catanh_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
+  return vec2(r.y, -r.x);
+}`,
+  // asinh z = -i asin(iz).
+  _gpu_ir_casinh: `vec2 _gpu_ir_casinh(vec2 z) {
+  vec2 r = _gpu_ir_casin_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
+  return vec2(r.y, -r.x);
+}`,
+  // Re: asinh(Re(conj(√(z - 1)) √(z + 1))); Im: 2 atan2(Im √(z - 1),
+  // Re √(z + 1)); a zero y is the side above the cut.
+  _gpu_ir_cacosh: `vec2 _gpu_ir_cacosh(vec2 z) {
+  float x = z.x;
+  float y = z.y;
+  float k = 0.0;
+  if (max(abs(x), abs(y)) > 1.0e37) {
+    x = x * 0.0625;
+    y = y * 0.0625;
+    k = 2.772588722239781;
+  }
+  vec2 a = _gpu_ir_csqrts(x - 1.0, y, 1.0);
+  vec2 b = _gpu_ir_csqrts(x + 1.0, y, 1.0);
+  return vec2(_gpu_ir_casinhr(a.x * b.x + a.y * b.y) + k, 2.0 * _gpu_ir_carg(vec2(b.x, a.y)));
+}`,
+  // 1/z by Smith's method, with no |z|².
+  _gpu_ir_cinv: `vec2 _gpu_ir_cinv(vec2 z) {
+  if (abs(z.x) >= abs(z.y)) {
+    float r = z.y / z.x;
+    float d = z.x + z.y * r;
+    return vec2(1.0 / d, -r / d);
+  }
+  float r = z.x / z.y;
+  float d = z.x * r + z.y;
+  return vec2(r / d, -1.0 / d);
+}`,
+  // The inverse reciprocal functions: arccsc z = asin(1/z), arcsec z =
+  // acos(1/z), arsech z = acosh(1/z), arcoth z = atanh(1/z), with
+  // 1 ± 1/z computed as (z ± 1)/z for |z| <= 2 (no cancellation next to
+  // ±1), as the interpreter's `complexAcsc()` and the others. Below
+  // |z| = 1e-18 the first term of the expansion at 1/z = ∞, with
+  // ln(2/|z|) (`_gpu_ir_cln2z`, z scaled by 2^64 so that a subnormal |z|
+  // keeps its digits).
+  _gpu_ir_cln2z: `float _gpu_ir_cln2z(vec2 z) {
+  return 45.054566736396445 - log(_gpu_ir_chypot(z.x * 18446744073709551616.0, z.y * 18446744073709551616.0));
+}`,
+  // 1 + t/z, for t = ±1.
+  _gpu_ir_cinvpm: `vec2 _gpu_ir_cinvpm(vec2 z, float t) {
+  vec2 w = _gpu_ir_cinv(z);
+  if (_gpu_ir_chypot(z.x, z.y) > 2.0) return vec2(1.0 + t * w.x, t * w.y);
+  float nx = z.x + t;
+  return vec2(nx * w.x - z.y * w.y, nx * w.y + z.y * w.x);
+}`,
+  _gpu_ir_cacsc: `vec2 _gpu_ir_cacsc(vec2 z) {
+  float s = z.y == 0.0 ? (z.x > 0.0 ? -1.0 : 1.0) : (z.y > 0.0 ? -1.0 : 1.0);
+  if (_gpu_ir_chypot(z.x, z.y) < 1.0e-18 && (z.x != 0.0 || z.y != 0.0)) return vec2(_gpu_ir_carg(vec2(abs(z.y), z.x)), s * _gpu_ir_cln2z(z));
+  vec2 w = _gpu_ir_cinv(z);
+  vec2 p = _gpu_ir_cinvpm(z, -1.0);
+  vec2 q = _gpu_ir_cinvpm(z, 1.0);
+  vec2 a = _gpu_ir_csqrts(p.x, p.y, -s);
+  vec2 b = _gpu_ir_csqrts(q.x, q.y, s);
+  return vec2(_gpu_ir_carg(vec2(a.x * b.x - a.y * b.y, w.x)), _gpu_ir_casinhr(a.x * b.y - a.y * b.x));
+}`,
+  _gpu_ir_casec: `vec2 _gpu_ir_casec(vec2 z) {
+  float s = z.y == 0.0 ? (z.x > 0.0 ? -1.0 : 1.0) : (z.y > 0.0 ? -1.0 : 1.0);
+  if (_gpu_ir_chypot(z.x, z.y) < 1.0e-18 && (z.x != 0.0 || z.y != 0.0)) return vec2(_gpu_ir_carg(vec2(z.x, abs(z.y))), -s * _gpu_ir_cln2z(z));
+  vec2 p = _gpu_ir_cinvpm(z, -1.0);
+  vec2 q = _gpu_ir_cinvpm(z, 1.0);
+  vec2 a = _gpu_ir_csqrts(p.x, p.y, -s);
+  vec2 b = _gpu_ir_csqrts(q.x, q.y, s);
+  return vec2(2.0 * _gpu_ir_carg(vec2(b.x, a.x)), _gpu_ir_casinhr(b.x * a.y - b.y * a.x));
+}`,
+  // arsech 0 is +∞, as in the interpreter.
+  _gpu_ir_casech: `vec2 _gpu_ir_casech(vec2 z) {
+  if (z.x == 0.0 && z.y == 0.0) return vec2(uintBitsToFloat(0x7f800000u), 0.0);
+  if (_gpu_ir_chypot(z.x, z.y) < 1.0e-18) return vec2(_gpu_ir_cln2z(z), z.y == 0.0 && z.x < 0.0 ? 3.141592653589793 : -_gpu_ir_carg(z));
+  float s = z.y > 0.0 ? -1.0 : 1.0;
+  vec2 p = _gpu_ir_cinvpm(z, -1.0);
+  vec2 q = _gpu_ir_cinvpm(z, 1.0);
+  vec2 a = _gpu_ir_csqrts(-p.x, -p.y, s);
+  vec2 b = _gpu_ir_csqrts(q.x, q.y, s);
+  return vec2(_gpu_ir_casinhr(a.x * b.x + a.y * b.y), 2.0 * _gpu_ir_carg(vec2(b.x, a.y)));
+}`,
+  // arcoth z = ln((z + 1)/(z - 1)) / 2, as `_gpu_ir_catanh_core`; a real z
+  // in (-1, 1) has the imaginary part -π/2 for z > 0, π/2 otherwise.
+  _gpu_ir_cacoth: `vec2 _gpu_ir_cacoth(vec2 z) {
+  float x = z.x;
+  float y = z.y;
+  if (_gpu_ir_chypot(x, y) > 1.0e18) {
+    float h4 = _gpu_ir_chypot(0.25 * x, 0.25 * y);
+    return vec2(x / 16.0 / h4 / h4, -y / 16.0 / h4 / h4);
+  }
+  float ax = abs(x);
+  float u = 1.0 - ax;
+  float d = u * u + y * y;
+  float re = d < 1.0e-30 ? 0.5 * (log(_gpu_ir_chypot(1.0 + ax, y)) - log(_gpu_ir_chypot(u, y))) : 0.25 * _gpu_ir_clog1p(4.0 * ax / d);
+  float m = (ax - 1.0) * (ax + 1.0) + y * y;
+  float im = 2.0 * y == 0.0 ? (m < 0.0 ? (x > 0.0 ? -1.5707963267948966 : 1.5707963267948966) : 0.0) : 0.5 * _gpu_ir_carg(vec2(m, -2.0 * y));
+  return vec2(x < 0.0 ? -re : re, im);
+}`,
+  // `Ln` and `Sqrt`, with the modulus by `_gpu_ir_chypot` (no overflow or
+  // underflow of |a|²); `Sqrt` in the form with no cancellation of
+  // `|a| - |re a|`.
+  _gpu_ir_cln: `vec2 _gpu_ir_cln(vec2 a) {
+  return vec2(log(_gpu_ir_chypot(a.x, a.y)), _gpu_ir_carg(a));
+}`,
+  _gpu_ir_csqrt: `vec2 _gpu_ir_csqrt(vec2 a) {
+  float t = sqrt(0.5 * _gpu_ir_chypot(a.x, a.y) + 0.5 * abs(a.x));
+  if (a.x >= 0.0) return vec2(t, 0.5 * a.y / t);
+  return vec2(0.5 * abs(a.y) / t, a.y < 0.0 ? -t : t);
+}`,
+  // `cot`, `csc`, `csch` and `coth` (see `COMPLEX.tan`); `cot` is
+  // `cos(a)·conj(sin(a)) / |sin(a)|^2`. Next to 0, `1/a` and the
+  // next term of the Laurent series (error below 1e-9 under |a| = 0.01):
+  // a renderer's `sin` and `sinh` are 0 below about 1e-8 (SwiftShader), so
+  // `Csc(Sec(z))` was NaN where `Sec(z)` is small.
+  _gpu_ir_ccot: `vec2 _gpu_ir_ccot(vec2 a) {
+  if (abs(a.y) > 20.0) return vec2(4.0 * sin(a.x) * cos(a.x) * exp(-2.0 * abs(a.y)), -sign(a.y));
+  if (abs(a.x) + abs(a.y) < 0.01) return _gpu_ir_cinv(a) - a / 3.0;
+  float s = sin(a.x), c = cos(a.x), sh = sinh(a.y), ch = cosh(a.y);
+  return vec2(s * c, -sh * ch) / (s * s + sh * sh);
+}`,
+  _gpu_ir_ccsc: `vec2 _gpu_ir_ccsc(vec2 a) {
+  if (abs(a.y) > 20.0) return 2.0 * exp(-abs(a.y)) * vec2(sin(a.x), -sign(a.y) * cos(a.x));
+  if (abs(a.x) + abs(a.y) < 0.01) return _gpu_ir_cinv(a) + a / 6.0;
+  float s = sin(a.x), c = cos(a.x), sh = sinh(a.y), ch = cosh(a.y);
+  return vec2(s * ch, -c * sh) / (s * s + sh * sh);
+}`,
+  _gpu_ir_ccsch: `vec2 _gpu_ir_ccsch(vec2 a) {
+  if (abs(a.x) > 20.0) return 2.0 * exp(-abs(a.x)) * vec2(sign(a.x) * cos(a.y), -sin(a.y));
+  if (abs(a.x) + abs(a.y) < 0.01) return _gpu_ir_cinv(a) - a / 6.0;
+  float sh = sinh(a.x), ch = cosh(a.x), s = sin(a.y), c = cos(a.y);
+  return vec2(sh * c, -ch * s) / (sh * sh + s * s);
+}`,
+  _gpu_ir_ccoth: `vec2 _gpu_ir_ccoth(vec2 a) {
+  if (abs(a.x) > 20.0) return vec2(sign(a.x), -4.0 * sin(a.y) * cos(a.y) * exp(-2.0 * abs(a.x)));
+  if (abs(a.x) + abs(a.y) < 0.01) return _gpu_ir_cinv(a) + a / 3.0;
+  float sh = sinh(a.x), ch = cosh(a.x), s = sin(a.y), c = cos(a.y);
+  return vec2(sh * ch, -s * c) / (sh * sh + s * s);
+}`,
+  // `Log(a)` of base 10: the modulus by `_gpu_ir_chypot`, with no overflow
+  // of |a|².
+  _gpu_ir_clog10: `vec2 _gpu_ir_clog10(vec2 a) {
+  return vec2(log(_gpu_ir_chypot(a.x, a.y)), _gpu_ir_carg(a)) * 0.4342944819032518;
+}`,
+  // `Root(a, b)`: the real root of a real radicand for an odd integer
+  // index, as the interpreter (`Root(-8, 3)` is -2); otherwise the
+  // principal exp(ln(a) / b), with the modulus by `_gpu_ir_chypot`; 0 at
+  // a = 0 for an exponent 1/b of positive real part.
+  _gpu_ir_croot: `vec2 _gpu_ir_croot(vec2 a, vec2 b) {
+  if (a.y == 0.0 && b.y == 0.0 && b.x == floor(b.x) && mod(b.x, 2.0) == 1.0) return vec2(_gpu_ir_root(a.x, b.x), 0.0);
+  vec2 e = _gpu_ir_cinv(b);
+  if (a.x == 0.0 && a.y == 0.0) return e.x > 0.0 ? vec2(0.0) : vec2(${NAN});
+  vec2 l = vec2(log(_gpu_ir_chypot(a.x, a.y)), _gpu_ir_carg(a));
+  vec2 w = vec2(e.x * l.x - e.y * l.y, e.x * l.y + e.y * l.x);
+  return exp(w.x) * vec2(cos(w.y), sin(w.y));
+}`,
+};
+
+/** The helpers that a helper calls, by name, which `helpersOf()` does not
+ *  find in `COMPLEX_HELPERS` or `GLSL_ZETA_HELPERS`. */
+const CALLED: Record<string, string[]> = {
+  _gpu_ir_carg: ['_gpu_ir_carg'],
+  _gpu_ir_root: ['_gpu_ir_root'],
+  _gpu_ir_gamma: ['_gpu_ir_sincospi', '_gpu_ir_gamma'],
+  _gpu_ir_gammaln: ['_gpu_ir_sincospi', '_gpu_ir_gammaln'],
+  _gpu_ir_digamma: ['_gpu_ir_sincospi', '_gpu_ir_digamma'],
+  _gpu_ir_trigamma: ['_gpu_ir_sincospi', '_gpu_ir_trigamma'],
+};
+
+/** The helper `name` of `COMPLEX_HELPERS` or `GLSL_ZETA_HELPERS`, after
+ *  the helpers that it calls (found in its text, less its comments), each
+ *  before its first call. */
+function helpersOf(name: string, out: string[] = []): string[] {
+  const text = COMPLEX_HELPERS[name] ?? GLSL_ZETA_HELPERS[name];
+  if (text === undefined) {
+    const known = CALLED[name];
+    if (known === undefined)
+      throw new Error(`slice GLSL printer: no helper ${name}`);
+    for (const h of known) if (!out.includes(h)) out.push(h);
+    return out;
+  }
+  const code = text.replace(/\/\/[^\n]*/g, '');
+  for (const [, h] of code.matchAll(/\b(_gpu_ir_\w+)\(/g))
+    if (h !== name && !out.includes(h)) helpersOf(h, out);
+  if (!out.includes(name)) out.push(name);
+  return out;
+}
+
+/** The spelling of a call of the helper `name` with `n` operands. */
+const helperCall = (name: string, n: number) => ({
+  text: `${name}(${Array.from({ length: n }, (_, k) => `$${k}`).join(', ')})`,
+  helpers: helpersOf(name),
+});
 
 /** `At`: the element read by `read` of its index from 0 in range, NaN
  *  outside. */
@@ -430,6 +754,36 @@ export const GLSL: Syntax = deepFreeze({
         },
       ])
     ),
+    // The inverse trigonometric and hyperbolic functions, `Log` and `Root`
+    // of a complex (`COMPLEX_HELPERS`).
+    ...Object.fromEntries(
+      [
+        'asin',
+        'acos',
+        'atan',
+        'asinh',
+        'acosh',
+        'atanh',
+        'acsc',
+        'asec',
+        'asech',
+        'acoth',
+      ].map((f) => [`c${f}`, helperCall(`_gpu_ir_c${f}`, 1)])
+    ),
+    'cln': helperCall('_gpu_ir_cln', 1),
+    'csqrt': helperCall('_gpu_ir_csqrt', 1),
+    'ccot': helperCall('_gpu_ir_ccot', 1),
+    'ccsc': helperCall('_gpu_ir_ccsc', 1),
+    'ccsch': helperCall('_gpu_ir_ccsch', 1),
+    'ccoth': helperCall('_gpu_ir_ccoth', 1),
+    'clog10': helperCall('_gpu_ir_clog10', 1),
+    'croot': helperCall('_gpu_ir_croot', 2),
+    // The zeta family of real operands (`GLSL_ZETA_HELPERS`).
+    'polygamma': helperCall('_gpu_ir_polygamma', 2),
+    'hurwitzzeta': helperCall('_gpu_ir_hurwitz_zeta', 2),
+    'zetagen': helperCall('_gpu_ir_zeta_generalized', 2),
+    'lerchphi': helperCall('_gpu_ir_lerch_phi', 3),
+    'polylog': helperCall('_gpu_ir_poly_log', 2),
     'asoklch': '$0',
     'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
     'asrgb': {
@@ -1272,6 +1626,15 @@ export const GLSL: Syntax = deepFreeze({
           ...body.map((s) => `  ${s}`),
           '}',
         ].join('\n'),
+      ])
+    ),
+    ...COMPLEX_HELPERS,
+    // With no comment: the adapter refuses an input name that the code
+    // calls, and a comment can read as a call (`x (x+1)`).
+    ...Object.fromEntries(
+      Object.entries(GLSL_ZETA_HELPERS).map(([h, text]) => [
+        h,
+        text.replace(/\s*\/\/[^\n]*/g, ''),
       ])
     ),
     // The element `k` (from 0) of a list in a sampler (README, `storage`).

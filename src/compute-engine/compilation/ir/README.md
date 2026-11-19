@@ -294,9 +294,15 @@ form (`Erf`, `Gamma`, `GammaLn`, `Zeta`, `Beta`, `Digamma`, `Trigamma`,
 and hyperbolic functions, `Haversine`, ...) are helpers `_gpu_ir_*` ported from
 the earlier GPU target, within single-float precision of the interpreter; their
 reflections and phases use `_gpu_ir_sincospi` and `_gpu_ir_log1p`, since a
-renderer's `sin`, `cos` and `log` near 1 can be wrong by 1e-4 (SwiftShader). The
-others decline on GLSL (`PolyGamma`: the earlier helper is NaN where its terms
-cancel). `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on
+renderer's `sin`, `cos` and `log` near 1 can be wrong by 1e-4 (SwiftShader).
+`PolyGamma` of an integer order, `HurwitzZeta`, `Zeta(s, a)` (Wolfram's
+generalized zeta; on JavaScript `zetaGeneralized()`), `LerchPhi` and `PolyLog` of real operands are the
+earlier GPU target's helpers (`glsl-zeta-helpers.ts`, with their methods and
+measured accuracy in its source at 384222963), NaN where the value is complex
+and where their terms cancel or their error estimates exceed 3e-5 of the value:
+`PolyGamma(2, -0.5)` (the terms of both signs at a negative half-integer for an
+even order), `LerchPhi(-1, -1, 0.5)` (next to a zero), and an order of
+`PolyGamma` above 24. The others decline on GLSL. `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on
 `int`s. `Hypot` is `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the
 builtin is wrong for a large negative argument); `Sinh`, `Cosh`, `Tanh`,
 `Arctan` and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are
@@ -493,11 +499,24 @@ product, as `_gpu_ir_pow` on the real lane, so `z^2 + c` at `z = 0` is `c`),
 (`_gpu_ir_cmul`, …), written only when used: the textbook formulas of the
 principal branch, with no guard (no fidelity at a pole, a branch point or cut, a
 signed zero, or on overflow of an intermediate such as `|b|^2` in a division).
+`Tan`, `Cot`, `Sec`, `Csc`, `Tanh`, `Sech`, `Csch` and `Coth` divide by a sum of
+squares (`|cos z|² = cos²x + sinh²y`), with no cancellation next to a pole, and
+take the first term of their expansion in `e^-|y|` past a part of 20, and
+their (Laurent) series below |z| = 0.01, where a renderer's `sin` is 0 (`Tan`,
+`Tanh`, `Cot`, `Csc`, `Csch`, `Coth`). Next to a real pole the value is that of the renderer's
+`sin` and `cos`, and NaN on the float nearest the pole (SwiftShader's
+`cos(1.5707964)` is 0: `Tan` and `Sec` there, `Csch` and `Coth` at the float
+nearest iπ). `Ln` and `Sqrt` take the modulus with no overflow or underflow of
+|z|² (`Sqrt(1e20 + i)` is 1e10); `Power` does not. The inverse trigonometric and hyperbolic functions (`Arcsin`,
+`Arccos`, `Arctan`, `Arsinh`, `Arcosh`, `Artanh`, `Arccsc`, `Arcsec`, `Arsech`,
+`Arcoth`), ported from the earlier GPU target, are Kahan's formulas, as the
+interpreter's, with no cancellation and the interpreter's side of each cut on
+an axis; `Log` of base 10 and `Root` take the modulus with no overflow, and
+`Root` of a real radicand and an odd integer index is the real root.
 `If`, `Which`, a local, a loop's carried value, a `Sum` or a `Product`, and a
 parameter or the result of a user function hold a complex `vec2`. The other
 complex rows decline with the operation they lack
-(`Arcsin (the operation casin) on glsl`): the inverse trigonometric and
-hyperbolic functions, `Root`, `Log`, `Sec`, `Csc`, `Coth`, `Sech`, `Csch`; and
+(`Arccot (the operation cacot) on glsl`): `Arccot`, `Arcsch`; and
 so does a list or a tuple of complex numbers (`a list of complex numbers`,
 `Profile.scalarLanes`), also an input one or the result of a user function.
 `mode: 'complex'` is admitted: an input of type `number` is then a `vec2`, and

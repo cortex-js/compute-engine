@@ -70,6 +70,19 @@
 
 ### Resolved Issues
 
+- **The functions of a complex number and the zeta family compile to GLSL
+  again** (CE-1534). Since 0.194.0, a shader of `Csc(Sec(x + iy))` (a domain
+  colouring) declined ("Sec (the operation csec) on glsl"), in the strict and
+  in the complex mode. `Sec`, `Csc`, `Sech`, `Csch`, `Coth`, the inverse
+  trigonometric and hyperbolic functions (`Arcsin`, `Arccos`, `Arctan`,
+  `Arsinh`, `Arcosh`, `Artanh`, `Arccsc`, `Arcsec`, `Arsech`, `Arcoth`), `Log`
+  and `Root` of a complex number now compile on `glsl`, and so do `PolyGamma`,
+  `HurwitzZeta`, `Zeta(s, a)`, `LerchPhi` and `PolyLog` of real numbers
+  (`Zeta(s, a)` on `javascript`: CE-1533). The shader of `Tan(z)` and `Tanh(z)` of a complex `z` gave an infinity next to a
+  pole, such as `Tan(π/2 - 0.0001 + 0.0001i)`, where the value is about
+  `5000 + 5000i` (CE-1506); it now gives that value. `Arccot` and `Arcsch` of a
+  complex number still decline on `glsl`.
+
 - **Operators that compiled in 0.193.0 compile again** (CE-1533). On
   JavaScript: `HarmonicNumber(n)` and `HarmonicNumber(n, r)`, the generalized
   `Zeta(s, a)`, the upper incomplete `Gamma(s, z)` (complex in

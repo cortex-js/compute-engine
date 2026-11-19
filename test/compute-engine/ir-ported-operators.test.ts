@@ -401,11 +401,16 @@ describe('a target with no spelling declines', () => {
   test.each([
     ['HarmonicNumber on GLSL', ['HarmonicNumber', 'x'], 'glsl', /the operation harmonic/],
     ['HarmonicNumber in the interval mode', ['HarmonicNumber', 'x'], 'interval-js', /the operation harmonic/],
-    ['Zeta of two operands on GLSL', ['Zeta', 'x', 'y'], 'glsl', /the operation zetagen/],
     ['Gamma of two operands on GLSL', ['Gamma', 'x', 'y'], 'glsl', /the operation gammaupper/],
     ['Sign of a complex on GLSL', ['Sign', 'w'], 'glsl', /the operation csign/],
     ['ND on GLSL', ['ND', ['Function', ['Sin', 't'], 't'], 'x'], 'glsl', /ND on another target than javascript/],
   ])('%s', (_, json, to, cause) => {
     expect(decline(json, { to })).toMatch(cause);
+  });
+
+  // `Zeta(s, a)` has a GLSL spelling since CE-1534
+  // (`ce-1534-glsl-complex-and-zeta.test.ts` checks its values).
+  test('Zeta of two operands compiles on GLSL', () => {
+    expect(decline(['Zeta', 'x', 'y'], { to: 'glsl' })).toBeUndefined();
   });
 });
