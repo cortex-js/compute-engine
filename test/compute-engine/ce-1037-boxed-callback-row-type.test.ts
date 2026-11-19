@@ -77,6 +77,18 @@ describe('A FOLD OVER ROWS WITH A LITERAL BOXED BEFORE THE CALL (CE-1037)', () =
     );
   });
 
+  test.each(['evaluate', 'N'] as const)(
+    'Map keeps the row shape when its callback is passed through %s',
+    (method) => {
+      const f = ce.box(['Function', ['Divide', 'x', 'x'], 'x']);
+      const call = ce.function('Map', [f[method](), ce.box(M as any)]);
+      const result = ce.box(['ListFrom', call]).evaluate();
+      expect(result.json).toEqual(['List', ['List', 1, 1], ['List', 1, 1]]);
+      expect(call.type.toString()).toBe('matrix<2x2>');
+      expect(result.type.matches(call.type)).toBe(true);
+    }
+  );
+
   test('a name of the scope where the literal was boxed keeps its binding', () => {
     const engine = new ComputeEngine();
     engine.declare('offset', 'integer');

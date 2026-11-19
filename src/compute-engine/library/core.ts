@@ -9501,7 +9501,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // reads the parameters and locals of this run, also after the run
         // ends (`captureNestedLocals`). A function value evaluates to
         // itself, and so does a literal with no activation in progress.
-        return captureAtCreation(engine, expression);
+        return captureAtCreation(engine, expression) ?? expression;
       },
     },
 
