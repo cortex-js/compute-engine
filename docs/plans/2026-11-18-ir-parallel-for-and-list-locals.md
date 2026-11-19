@@ -218,7 +218,9 @@ declines, as an operator.
 
 0.193.0 ran a `parallel for` on the worker pool (`runAsync()`, the CE-1163
 spec), so its absence is a regression, and it follows sections 4.1 to 4.4
-directly, under CE-1462. **Status:** design, not approved; no code.
+directly, under CE-1462. **Status:** implemented 2026-11-19 (`ir/outline.ts`,
+`run-async.ts`, the asynchronous mode of `print.ts`); the amendments of the
+implementation are in 6.9.
 
 `run()` does not change: its text, `code`, `preambleOnce` and `shippable`
 are those of 4.4. A pool loop exists only in a second, asynchronous text that
@@ -619,6 +621,62 @@ issue's answer. Then CE-1462 closes.
 | C4 | `onLoop` | Ruled: restored with 0.193.0's shape, plus `'step-budget'` (6.4). | Not restored; tests spy on the pool. |
 | C5 | The asynchronous text on a stored result | Recommended: not stored (6.5). | Store it (a new field of the stored result), so a loader can run the pool. |
 | C6 | The default `minPasses` | Recommended: 20,000, as 0.193.0. | Measure the first passes and decide from the time, as 0.193.0's D2 alternative. |
+
+### 6.9 Amendments made in the implementation
+
+- The marked loop is the `loop` of the first `Element` clause of a
+  `ParallelLoop`; the loops of its other clauses are inner loops of its body.
+- `zeros` is a region row (one integer operand, the length; its region has no
+  parameter and yields the fill value `-0`), not an operation: the result of
+  an operation row cannot have the length of its operand. JavaScript spells
+  it `new Float64Array(n).fill(-0)`; it is effectful, so no pass merges two.
+- The worker program keeps the value numbering of the program (a copy of its
+  `types` with the new values appended) and shares the body region of the
+  loop and the called functions instead of copying them: it runs no pass, so
+  nothing changes them, and each value is still defined once in it.
+- A constant that is the length of a passed list is passed, not copied: the
+  type of a parameter names it, and a parameter's lengths must be visible
+  before the body. The passed values are ordered scalars first, for the same
+  reason.
+- A passed value of the lane `color` or `complex` (an object that structured
+  clone does not keep) sends the loop to in-order.
+- `_run.loop(id, lo, hi, [values], [lists])` takes the arrays of the list
+  accumulators too, for their lengths in the limit of private numbers; a list
+  that is passed counts the product of its lengths, read down its first
+  elements (every axis).
+- A count past the guard of `run()`'s loop (also `NaN`) gives `undefined`
+  with no `onLoop` call: the loop of `run()` then throws.
+- The restore of the caller's state at the end of each `async` function is
+  `_run.d()` in a `finally`.
+- The frame's `CancellationError` is built as `checkDeadline(frame)` builds it
+  (`cause: 'timeout'`, the frame's `owner` as attribution, its `spans`),
+  without charging a step, one object per run of a loop: a task rejected with
+  that object is a deadline answer.
+- `runCall()` takes `deadline` and `deadlineError` as two optional trailing
+  parameters, so its other callers do not change; the worker answers a
+  timeout as a deadline stop only when the call carried a deadline.
+- The key of a loop in `cse` includes `parallel`, so a `for` and a
+  `parallel for` of the same body are no longer merged, and the text of
+  `run()` changes for such a program: a merged loop that kept
+  `parallel: true` would give the sequential real sum of the `for` the
+  grouping of the pool.
+- The outliner builds worker programs only for the loops of the functions
+  that the entry reaches (computed again when a loop is refused), and the
+  worker program's `run` on the calling thread is built at its first rerun.
+- The worker restores its previous deadline after a `call`, so a kernel
+  loaded later (whose once-only definitions tick) does not see an expired
+  one.
+- 6.7, "Accumulator labels": a swap `if c { (s, t) := (t, s) }` in a
+  `parallel for` is a parallel assignment of names declared outside it,
+  which 4.4 declines (`parallel-outer-write`), so the test swaps the yields
+  of the `if` in the IR of a loop that the outliner admits, and checks that
+  it then runs in order. The inner loop that reads an outer accumulator is
+  `let t = 0; for m in 1..2 { t = s + m }`.
+- 6.7, "An empty range": `1..0` is the range `[1, 0]` of two passes, so the
+  test of an empty domain is a list domain of no element.
+- 6.7, the timings of 0.193.0 and of this version are both measured from
+  source with the `tsx` loader (main thread and workers), not from a build:
+  one loader for both.
 
 ## 6a. Not in this version
 

@@ -1234,12 +1234,14 @@ and it stays an identifier everywhere else. The statement lowers to
 `["ParallelLoop", body, ["Element", "x", "xs"]]`, and the comprehension to
 `["ParallelComprehension", body, …clauses]`.
 
-**On one thread.** In version 0.194.0, the passes of a `parallel for` and of
-a parallel comprehension run in order, on one thread. A program that holds
-one does not compile, on any target: `compile()` declines, and `run()`
-evaluates the program with the interpreter, as `executeEpsil()` does. A later
-release will run these loops on the worker pool again; a program that follows
-the rules above will then need no change.
+**On the worker pool.** The interpreter runs the passes of a `parallel for`
+and of a parallel comprehension in order, on one thread. Compiled to
+JavaScript, a `parallel for` runs in order in `run()` too, and `runAsync()`
+sends it to the engine's worker pool when its passes only add to numbers
+(`s += e`) and to the elements of a list declared outside the loop
+(`L[i] += e`), with no other read of them: each worker runs a range of the
+passes, and the partial sums are added in order. A parallel comprehension
+does not compile.
 
 ```epsil-live
 function count(H: list<integer>, n: integer) -> list<integer> {

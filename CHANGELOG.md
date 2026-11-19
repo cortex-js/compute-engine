@@ -49,6 +49,49 @@
 
 ### Resolved Issues
 
+- **`runAsync()` runs a `parallel for` on the engine's worker pool again**
+  (CE-1462). 0.193.0 did, and 0.194.0 ran every such loop on one thread. A
+  loop whose passes only add to numbers (`s += e`) and to the elements of a
+  list declared outside it (`L[i] += e`), and read neither otherwise, at a
+  statement of the program or of a function it calls outside a callback or a
+  comprehension, is split into one
+  sub-range of passes per worker of `ce.workers`; the calling thread adds the
+  partial sums in the order of the sub-ranges. Integer accumulators give the
+  value of `run()`; real ones can differ by the grouping of the sum. Every
+  other loop runs in order, and `run()` does not change. `onLoop` reports the
+  route of each run (`route: 'pool'` or `'calling-thread'` with a reason,
+  now also `'step-budget'` inside `ce.withStepBudget()`), and
+  `willParallelize(passes?, minPasses?)` answers whether a loop would go to
+  the pool. A worker stops at the deadline of the frame current at the call
+  of `runAsync()` (`ce.withTimeLimit()`), which rejects the promise with that
+  frame's `CancellationError`; an error of a pass is the error that `run()`
+  gives. The buddhabrot step of 1,200,000 orbits runs in about 16 ms on 8
+  workers, against 127 ms with `run()` (0.193.0: 41 ms on 8 workers).
+
+- **Writing a sum, a product, a quotient or a sine of a list whose length is
+  computed from another list no longer computes that other list** (CE-1364).
+  `ce.box(["Add", 1, ["Range", 1, ["Length", "C"]]])` evaluated the value of
+  `C` five times, and `Sin` of a `Map` over that `Range` ten times, before
+  anything was evaluated; a list built by a long recursion froze the document
+  when the expression was created. Boxing now evaluates `C` no times. The
+  values are unchanged.
+
+- **The elements of a `Map` whose function holds a sum or a product over its
+  own index are numbers again** (CE-1316). `Max(Map(j ↦ Sum(k, Limits(k, 1,
+  3)), [10, 20]))` evaluated to `Max(3k, 3k)` and
+  `Min(Map(j ↦ Product(k, Limits(k, 1, 3)), [10, 20]))` to `Min(k^3, k^3)`:
+  the index `k` was read as a free name. They now evaluate to `6`, as the
+  direct application `(j ↦ Sum(k, Limits(k, 1, 3)))(10)` does. The `Map`
+  itself evaluated to `[3k, 3k]` and is now `[6, 6]`.
+
+- **A call of a function over a value that may be a number, a point or a list
+  has the same type as a call over a value of unknown type** (CE-545). With
+  `T(a) := a + 1` and `y` declared
+  `number | tuple | list<number | tuple | list<any>>` (the type of `2h(1)`
+  when `h` returns `unknown`), `T(y)` was typed `any`, while `T(h(1))` was
+  typed `number | tuple | list<number | tuple | list<any>>`. Both are now
+  typed `number | tuple | list<number | tuple | list<any>>`.
+
 - **`compile()` compiles `ColorMix` on JavaScript and `Cot` of a complex
   argument on GLSL again** (CE-1468). Both compiled in 0.193.0 and declined in
   0.194.0. `AsOklab(ColorMix(Rgb(1, 0, 0), Rgb(0, 0, 1), x))` at x = 0.25 gives

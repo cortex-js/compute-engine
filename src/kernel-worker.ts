@@ -32,10 +32,11 @@
 //
 // It also runs a stored `javascript` lambda once with positional arguments
 // (`call`): the task of a `parallel for` loop that `runAsync()` splits over
-// the pool (design: `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`,
-// section 4). A kernel compiled as a lambda (`calling: 'lambda'`) is rebuilt
+// the pool (design: `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`,
+// section 6). A kernel compiled as a lambda (`calling: 'lambda'`) is rebuilt
 // with `createJavaScriptRuntime().load()`, and has no batch form: a `run` task
-// on it fails. An error that the lambda throws fails the task, not the worker.
+// on it fails. An error that the lambda throws fails the task, not the worker;
+// a timeout at the deadline of the call is answered as a deadline stop.
 //
 // The file is built self-contained (no chunk imports) so that a host can copy
 // it next to its own files and start it with
@@ -405,15 +406,28 @@ port.on((m) => {
         return;
       }
       let value: unknown;
+      // The deadline before the call, set again after it: the preamble of a
+      // kernel loaded later ticks it, and an expired one would refuse it.
+      const previous = jsRuntime.deadline;
       try {
-        // The runtime state the compiled code's helpers read, as for `run`.
-        // A call has no deadline.
+        // The runtime state the compiled code's helpers read, as for `run`:
+        // the deadline of the caller's frame, which the loops of the code
+        // check as they tick.
         jsRuntime.iterationLimit = m.iterationLimit ?? defaultIterationLimit;
-        jsRuntime.deadline = undefined;
+        jsRuntime.deadline = m.deadline;
         value = call(...m.args);
       } catch (e) {
-        port.post({ type: 'error', job: m.job, message: messageOf(e) });
+        port.post({
+          type: 'error',
+          job: m.job,
+          message: messageOf(e),
+          ...(m.deadline !== undefined && isTimeoutCancellation(e)
+            ? { kind: 'deadline' as const }
+            : {}),
+        });
         return;
+      } finally {
+        jsRuntime.deadline = previous;
       }
       // A value that structured clone cannot copy (a function, for example)
       // makes `postMessage()` throw: the task then fails, and the worker

@@ -376,6 +376,13 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
 
   if (!isFunction(body)) return undefined;
 
+  // A body that owns a scope binds names (`Sum`, `Product`, `D`, `Integrate`,
+  // a `Block` nested in the body). The lowered path rebuilds the application with
+  // `ce._fn(op, args)`, a new node without that scope, so a bound name read
+  // as a free one: `Max(Map(j ↦ Sum(k, Limits(k, 1, 3)), [10, 20]))` was
+  // `Max(3k, 3k)` (CE-1316). The general path keeps the node.
+  if (body.localScope !== undefined) return undefined;
+
   // A body whose head is a parameter (`w => w(1)` mapped over a list of
   // functions) applies the ELEMENT, so it is not an operator application. The
   // lowered path would evaluate `ce._fn('w', …)` in the ambient scope, where

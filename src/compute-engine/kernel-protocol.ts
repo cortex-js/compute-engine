@@ -28,14 +28,17 @@
  * (`call-result`). It is the task of a `parallel for` loop that
  * `runAsync()` gives to the pool: each worker runs the loop over one
  * sub-range of its passes (design:
- * `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`, section 4). The
- * arguments and the value are numbers, booleans, strings, nested plain
+ * `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`, section 6).
+ * The arguments and the value are numbers, booleans, strings, nested plain
  * arrays of these, and `Float64Array`s. The arguments are copied, so the
  * caller keeps them. A `Float64Array` of the value, at the top level or as
  * an element of a top-level array, is transferred. The compiled function
  * does not read the cancel flag: the worker reads it only before the call
  * starts, and an aborted call that has started runs to its end, or until
- * the pool terminates the worker after the grace period.
+ * the pool terminates the worker after the grace period. A call can carry
+ * the deadline of its caller's frame: the compiled code checks it as it
+ * runs, and a call stopped there is answered with an `error` of
+ * `kind: 'deadline'`.
  */
 
 import type { FitScanProblemOf } from './fit-scan.js';
@@ -171,6 +174,10 @@ export type MainToWorkerMessage =
       job: number;
       id: number;
       args: unknown[];
+      /** The `Date.now()` time of the caller's deadline frame: the
+       * compiled code throws a timeout past it, and the worker answers with
+       * an `error` of `kind: 'deadline'`. */
+      deadline?: number;
       /** The engine's iteration limit at the time of the call, for the
        * lazy-stream helpers of the compiled-code runtime. */
       iterationLimit?: number;
@@ -214,5 +221,11 @@ export type WorkerToMainMessage =
   /** The value that the lambda of a `call` task returned. */
   | { type: 'call-result'; job: number; value: unknown }
   /** A failure to load a kernel or a fit problem (`id`) or to run a task
-   * (`job`). */
-  | { type: 'error'; job?: number; id?: number; message: string };
+   * (`job`). `kind: 'deadline'`: a `call` task stopped at its deadline. */
+  | {
+      type: 'error';
+      job?: number;
+      id?: number;
+      message: string;
+      kind?: 'deadline';
+    };

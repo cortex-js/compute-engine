@@ -490,12 +490,18 @@ export function inferNumericArgs(
     // The use requires a number, whatever the operands are when it is boxed.
     const inferredType: Type = 'number';
     for (const x of ops)
-      if (isFiniteIndexedCollection(x)) {
+      if (x.isLazyCollection) {
         // `.each()` on a lazy collection materializes every element, so never
-        // walk one merely to perform inference. Eager literals already store
-        // their cells and still need the walk: a contained inferred function
-        // call may have a result signature to narrow.
-        if (x.isLazyCollection) continue;
+        // walk one merely to perform inference. A lazy operand is never
+        // walked or narrowed. The test comes before
+        // `isFiniteIndexedCollection()`: the finiteness of a lazy view can
+        // evaluate its source (the count of `Range(1, Length(L))` evaluates
+        // `L`), and the answer would be thrown away.
+        continue;
+      } else if (isFiniteIndexedCollection(x)) {
+        // Eager literals already store their cells and still need the walk:
+        // a contained inferred function call may have a result signature to
+        // narrow.
         // A nested collection is consumed by nested broadcast rather than as
         // a scalar cell; do not push scalar numeric inference into it.
         for (const y of x.each())
@@ -552,8 +558,11 @@ export function inferGenericBoundArgs(
     ops.forEach((x, i) => {
       const bound = boundAt(i);
       if (bound === undefined) return;
-      if (isFiniteIndexedCollection(x)) {
-        if (x.isLazyCollection) return;
+      if (x.isLazyCollection) {
+        // Never walked or narrowed. Tested first, as in `inferNumericArgs`:
+        // the finiteness of a lazy view can evaluate its source.
+        return;
+      } else if (isFiniteIndexedCollection(x)) {
         for (const y of x.each())
           if (!excludedFromScalarInference(y)) y._infer(() => bound);
       } else if (!excludedFromScalarInference(x)) {

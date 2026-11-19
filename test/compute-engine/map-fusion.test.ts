@@ -1334,3 +1334,59 @@ describe('Map fusion: an annotated spine is REVALIDATED, not re-derived', () => 
     expect(drainRe(m)).toEqual([4, 6, 8]);
   });
 });
+
+describe('Map fusion: a body that binds names is not lowered (CE-1316)', () => {
+  // The lowered path rebuilds the application of the body with a new node,
+  // without the scope of a binder: the index of a `Sum` or a `Product` was
+  // read as a free name, and `Max(Map(j ↦ Sum(k, Limits(k, 1, 3)), L))` was
+  // `Max(3k, 3k)`. Each value is compared with the direct application.
+  const ce = new ComputeEngine();
+  const SUM = ['Sum', 'k', ['Limits', 'k', 1, 3]];
+  const PRODUCT = ['Product', 'k', ['Limits', 'k', 1, 3]];
+
+  test.each([
+    ['Max', SUM],
+    ['Max', PRODUCT],
+    ['Min', PRODUCT],
+  ] as const)('%s of a mapped %j', (reducer, body) => {
+    const direct = ce
+      .box(['Apply', ['Function', body, 'j'], 10] as any)
+      .evaluate();
+    expect(direct.toString()).toBe('6');
+    const mapped = ce.box([
+      reducer,
+      ['Map', ['Function', body, 'j'], ['List', 10, 20]],
+    ] as any);
+    expect(mapped.evaluate().toString()).toBe(direct.toString());
+    expect(mapped.N().toString()).toBe(direct.toString());
+  });
+
+  test('the elements and an indexed read', () => {
+    const map = ce.box([
+      'Map',
+      ['Function', SUM, 'j'],
+      ['List', 10, 20],
+    ] as any);
+    expect(lowerMapSpine(map)).toBeUndefined();
+    expect(map.evaluate().toString()).toBe('[6,6]');
+    expect(map.at(1)?.toString()).toBe('6');
+  });
+
+  // The inner level of a fused spine: `lowerMapSpine` lowers a `Map` source
+  // too. Both elements were `3k + 1`.
+  test.each([
+    ['a sum', SUM],
+    ['N of a sum', ['N', SUM]],
+  ] as const)('the inner level of a spine: %s', (_, body) => {
+    const direct = ce
+      .box(['Apply', ['Function', ['Add', body, 1], 'j'], 2] as any)
+      .evaluate();
+    expect(direct.toString()).toBe('7');
+    const map = ce.box([
+      'Map',
+      ['Function', ['Add', 'x', 1], 'x'],
+      ['Map', ['Function', body, 'j'], ['Range', 1, 150]],
+    ] as any);
+    expect(map.evaluate().at(2)?.toString()).toBe(direct.toString());
+  });
+});

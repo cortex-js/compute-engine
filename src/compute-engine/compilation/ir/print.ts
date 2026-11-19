@@ -104,13 +104,16 @@ export type Syntax = {
   /** The lines that open a counted loop of the index `k` from `lo` to `hi`,
    *  each bound evaluated once. `passes`: a pass of a `Loop`, which the
    *  iteration budget counts. `done`: the name of the flag of the loop's
-   *  `exit`; no pass runs once it is true. */
+   *  `exit`; no pass runs once it is true. `window`: the texts of the first
+   *  and the end pass count of the loop's `window` (JavaScript only); `hi`
+   *  is then not read. */
   loopOpen(
     k: string,
     lo: string,
     hi: string,
     passes: boolean,
-    done?: string
+    done?: string,
+    window?: readonly [string, string]
   ): string[];
   /** The return of the array of `values` (an entry `tuple`). Absent: the
    *  target declines such an entry. */
@@ -246,13 +249,29 @@ const fuses = (
   threads(rows, p, i) &&
   sameShape(p.types[outsOf(i)[0]].shape, p.types[outsOf(user)[0]].shape);
 
+/** The asynchronous text of a JavaScript program (`runAsync()`; README,
+ *  "Batches and `runAsync()`"): its pool loops, each with its id and the
+ *  values that its driver call passes (`PoolLoop` of `outline.ts`), and the
+ *  functions that wait, the entry included. */
+export type Wait = {
+  readonly loops: ReadonlyMap<
+    Instr,
+    { id: number; passed: readonly V[]; lists: readonly V[] }
+  >;
+  readonly waits: ReadonlySet<string>;
+};
+
 /** `once`: the values that the target computes once, out of the
- *  functions, each bound to its name (`Printed.once`). */
+ *  functions, each bound to its name (`Printed.once`). `wait`: print the
+ *  asynchronous text instead, whose `functions` are the `async` copies
+ *  `<name>$async` of the functions that wait (each restores the caller's
+ *  state when it ends, `_run.d()`), and whose entry body awaits. */
 export function printProgram(
   p: Program,
   syntax: Syntax,
   rows: readonly OperatorRow[],
-  once?: ReadonlySet<V>
+  once?: ReadonlySet<V>,
+  wait?: Wait
 ): Printed {
   const index = useIndex(p);
   const fx = effects(p, rows);
@@ -430,14 +449,33 @@ export function printProgram(
       );
     });
 
-  const body = (r: Region, depth: number): string[] => {
+  /** The wait of the promise `p` in the asynchronous text: the caller's
+   *  state is set when the program leaves the thread (`_run.s`), and the
+   *  program's when it continues, with the value or the rejection
+   *  (`_run.r`). */
+  const awaited = (promise: string) =>
+    `_run.r(await _run.s(${promise}).then(_run.ok, _run.fail))`;
+  /** The text of the call `i`: at a waiting position of the asynchronous
+   *  text, the wait of the `async` copy of a function that waits. */
+  const callText = (i: Instr & { k: 'call' }, waiting: boolean): string =>
+    waiting && wait?.waits.has(i.fn) === true
+      ? awaited(syntax.call(`${i.fn}$async`, i.args.map(use)))
+      : text(i);
+
+  /** `waiting`: the asynchronous text (`wait`), at a waiting position. */
+  const body = (r: Region, depth: number, waiting = false): string[] => {
     const lines: string[] = [];
     // The indentation stops at 16 levels: the text of a nest of depth d
     // would otherwise grow as d^2.
     const line = (s: string, d = depth) =>
       lines.push('  '.repeat(Math.min(d, 16)) + s);
-    const nested = (inner: Region, targets: string[], carried: boolean) => {
-      lines.push(...body(inner, depth + 1));
+    const nested = (
+      inner: Region,
+      targets: string[],
+      carried: boolean,
+      innerWaiting = waiting
+    ) => {
+      lines.push(...body(inner, depth + 1, innerWaiting));
       // A loop body's yield can read a carried variable that an earlier
       // assignment wrote: with more than one, each value is read first.
       if (!carried || targets.length === 1) {
@@ -529,17 +567,41 @@ export function printProgram(
           names.set(i.body.params[j + 1], name(v));
           line(syntax.declare(type(v), name(v), use(i.init[j]), true));
         });
+        // A pool loop of the asynchronous text: the driver runs it on the
+        // pool, or gives `undefined` and the loop runs in order (README,
+        // "Batches and `runAsync()`").
+        const pooled = waiting ? wait?.loops.get(i) : undefined;
+        const k = name(i.body.params[0]);
+        if (pooled !== undefined)
+          line(
+            `const ${k}_p = _run.loop(${pooled.id}, ${use(i.lo)}, ${use(i.hi)}, [${pooled.passed.map(use).join(', ')}], [${pooled.lists.map(use).join(', ')}]);`
+          );
+        if (pooled !== undefined) line(`if (${k}_p === undefined) {`);
         syntax
           .loopOpen(
             name(i.body.params[0]),
             use(i.lo),
             use(i.hi),
             i.passes === true,
-            i.exit === undefined ? undefined : name(i.outs[i.exit])
+            i.exit === undefined ? undefined : name(i.outs[i.exit]),
+            i.window === undefined
+              ? undefined
+              : [use(i.window[0]), use(i.window[1])]
           )
           .forEach((s) => line(s));
-        nested(i.body, i.outs.map(name), true);
+        nested(i.body, i.outs.map(name), true, waiting && !i.parallel);
         line('}');
+        if (pooled !== undefined) {
+          line('} else {');
+          line(`  const ${k}_s = ${awaited(`${k}_p`)};`);
+          i.outs.forEach((v, j) =>
+            line(`  ${name(v)} = _run.addNumber(${name(v)}, ${k}_s, ${j});`)
+          );
+          pooled.lists.forEach((l, m) =>
+            line(`  _run.addList(${use(l)}, ${k}_s, ${i.outs.length + m});`)
+          );
+          line('}');
+        }
       } else if (i.k === 'region') {
         const [inner] = i.regions;
         const s = syntax.regions[i.op]({
@@ -560,7 +622,7 @@ export function printProgram(
       } else if (i.k === 'call' && i.outs.length === 2) {
         // The list, then its length (`lower-functions.ts`).
         const [n, list] = i.outs.map(name);
-        line(syntax.declare(type(i.outs[1]), list, text(i)));
+        line(syntax.declare(type(i.outs[1]), list, callText(i, waiting)));
         line(syntax.declare(type(i.outs[0]), n, syntax.length(list)));
       } else if (i.k === 'call' && i.outs.length !== 1) {
         throw new Error('slice printer: a call with several results');
@@ -568,7 +630,13 @@ export function printProgram(
         const out = outsOf(i)[0];
         if (once?.has(out)) onceText.set(out, [name(out), text(i)]);
         else if (!inlined.has(out))
-          line(syntax.declare(type(out), name(out), text(i)));
+          line(
+            syntax.declare(
+              type(out),
+              name(out),
+              i.k === 'call' ? callText(i, waiting) : text(i)
+            )
+          );
       }
     }
     return lines;
@@ -577,22 +645,37 @@ export function printProgram(
   const returned = (f: IRFunction): string[] => {
     decided = cyclic?.has(f.name) ?? false;
     const ys = f.body.yields;
+    const waiting = wait !== undefined;
     if (f.tuple === true && syntax.retTuple !== undefined)
-      return [...body(f.body, 1), '  ' + syntax.retTuple(ys.map(use))];
+      return [
+        ...body(f.body, 1, waiting),
+        '  ' + syntax.retTuple(ys.map(use)),
+      ];
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
-    return [...body(f.body, 1), `  return ${use(ys[0])};`];
+    return [...body(f.body, 1, waiting), `  return ${use(ys[0])};`];
   };
   // The entry first: `order` follows `p.functions`, whose first is the entry.
   const main = returned(entry);
   const functions = p.functions
-    .filter((f) => f.name !== p.entry)
+    .filter(
+      (f) =>
+        f.name !== p.entry && (wait === undefined || wait.waits.has(f.name))
+    )
     .map((f) => {
       const params = f.body.params.map((v) => ({
         name: name(v),
         type: type(v),
       }));
-      return syntax.fn(f.name, params, f.results[0], returned(f));
+      if (wait === undefined)
+        return syntax.fn(f.name, params, f.results[0], returned(f));
+      return [
+        `const ${f.name}$async = async (${params.map((x) => x.name).join(', ')}) => {`,
+        'try {',
+        ...returned(f),
+        '} finally { _run.d(); }',
+        '};',
+      ].join('\n');
     });
   return {
     body: main,

@@ -115,6 +115,8 @@ export type {
   BroadcastAsyncResult,
   BroadcastAsyncRoute,
   RunAsyncOptions,
+  ParallelLoopReport,
+  ParallelLoopReason,
 } from './compute-engine/compilation/types.js';
 
 // ── Worker pool for `result.broadcastAsync()` (`ce.workers`) ────────

@@ -60,12 +60,16 @@
  * worker is sent the kernel once (`load`), then each call with its
  * positional arguments (`call`), and it answers with the value of the
  * lambda. `runAsync()` runs the sub-ranges of a `parallel for` loop this way
- * (design: `docs/plans/2026-11-08-ce1163-run-async-parallel-for.md`, section
- * 4). The arguments are copied; a `Float64Array` of the value, at the top
- * level or as an element of a top-level array, is transferred. An abort
+ * (design: `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`,
+ * section 6). The arguments are copied; a `Float64Array` of the value, at the
+ * top level or as an element of a top-level array, is transferred. An abort
  * rejects the call at once with the signal's reason. The compiled function
  * does not read the cancel flag, so a worker that runs an aborted call is
  * terminated and replaced after the grace period, unless it answers first.
+ * A call with a deadline is settled at it as a cells task is: rejected with
+ * the caller's error of the deadline when it still waits, when the worker
+ * answers with a deadline stop, or when the watchdog replaces a worker that
+ * has not answered within the grace period after it.
  * `runCall` is not part of the public `KernelPool` interface either;
  * `callPool()` reaches it.
  */
@@ -182,25 +186,33 @@ interface FitSliceTask {
 }
 
 /** A task queued for a worker: one call of a stored `javascript` lambda
- * (`runCall`). It has no deadline. Unlike the other tasks, an abort rejects
- * it, with the signal's reason (`settleAborted()`). */
+ * (`runCall`). Unlike the other tasks, it has no partial value: an abort
+ * rejects it with the signal's reason, and its deadline with
+ * `deadlineError()` (`settleAborted()`). */
 interface CallTask {
   type: 'call';
   stored: StoredResult;
   args: unknown[];
   iterationLimit: number | undefined;
   signal: AbortSignal | undefined;
+  /** The `Date.now()` time after which the call stops. */
+  deadline: number | undefined;
+  /** The error of a call stopped at its deadline (the caller's frame). */
+  deadlineError: () => unknown;
   resolve: (value: unknown) => void;
   reject: (e: unknown) => void;
 }
 
 type QueuedTask = Task | FitSliceTask | CallTask;
 
-/** Settle `task` as the abort of its signal does: a cells or fit task
- * resolves with no cells or points done, a call task rejects with the
- * signal's reason. */
+/** Settle `task` as the abort of its signal, or its deadline, does: a cells
+ * or fit task resolves with no cells or points done, a call task rejects
+ * with the signal's reason or the error of its deadline. */
 function settleAborted(task: QueuedTask): void {
-  if (task.type === 'call') task.reject(task.signal?.reason);
+  if (task.type === 'call')
+    task.reject(
+      task.signal?.aborted ? task.signal.reason : task.deadlineError()
+    );
   else task.resolve({ out: new Float64Array(0), done: 0 });
 }
 
@@ -278,12 +290,12 @@ function wireSharedElement(element: unknown): unknown {
 
 /** Whether the deadline of `task` has passed, with the comparison the
  * worker makes before its first cell or point: the cell loop stops when
- * `Date.now()` is after the deadline, the fit loop when it reaches it. */
+ * `Date.now()` is after the deadline, the fit loop and the compiled code of
+ * a call (`checkDeadline()`) when it reaches it. */
 function deadlinePassed(task: QueuedTask): boolean {
-  if (task.type === 'call') return false;
-  const deadline = task.type === 'fit' ? task.deadline : task.slice.deadline;
+  const deadline = task.type === 'cells' ? task.slice.deadline : task.deadline;
   if (deadline === undefined) return false;
-  return task.type === 'fit' ? Date.now() >= deadline : Date.now() > deadline;
+  return task.type === 'cells' ? Date.now() > deadline : Date.now() >= deadline;
 }
 
 /**
@@ -475,16 +487,20 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
 
   /** The watchdog of `running` fired: if the worker still runs that task,
    * settle the task with no cells done (its deadline passed and the worker
-   * did not answer), and replace the worker. A call task has no deadline:
-   * its watchdog is armed only by an abort, which settled it already; if it
-   * was not settled, it is rejected, since it has no partial value. */
+   * did not answer), and replace the worker. A call task has no partial
+   * value: it is rejected with the error of its deadline when that has
+   * passed, and otherwise as a worker that does not answer. */
   private overrun(slot: Slot, running: NonNullable<Slot['running']>): void {
     if (slot.dead || slot.running !== running) return;
     if (!running.settled) {
       running.settled = true;
       const task = running.task;
       if (task.type === 'call')
-        task.reject(new Error('The kernel worker did not answer'));
+        task.reject(
+          deadlinePassed(task)
+            ? task.deadlineError()
+            : new Error('The kernel worker did not answer')
+        );
       else task.resolve({ out: new Float64Array(0), done: 0 });
     }
     this.replace(slot);
@@ -504,8 +520,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
     // A waiting task whose deadline has passed is settled here, so that a
     // batch whose deadline has passed does not create a new worker.
     const waiting = slot.queue.splice(0).filter((task) => {
-      if (task.type === 'call' || !deadlinePassed(task)) return true;
-      task.resolve({ out: new Float64Array(0), done: 0 });
+      if (!deadlinePassed(task)) return true;
+      settleAborted(task);
       return false;
     });
     // The running task was settled: `fail()` then rejects nothing.
@@ -601,7 +617,12 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
           const running = slot.running;
           if (!running || running.job !== m.job) return;
           this.endRunning(slot);
-          if (!running.settled) running.task.reject(new Error(m.message));
+          if (!running.settled) {
+            const task = running.task;
+            if (m.kind === 'deadline' && task.type === 'call')
+              task.reject(task.deadlineError());
+            else task.reject(new Error(m.message));
+          }
           void this.pump(slot);
           return;
         }
@@ -778,12 +799,23 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
    * worker runs it (the worker is not told to stop: it is terminated and
    * replaced after the grace period, unless it answers first, as for a
    * batch task that does not read the cancel flag).
+   *
+   * `deadline` is the `Date.now()` time of the caller's deadline frame: the
+   * worker's compiled code throws a timeout at it, as the calling thread's
+   * does. The promise then rejects with `deadlineError()`: when the call
+   * still waits at the deadline (also before it is sent), when the worker
+   * answers with a deadline stop, and when the worker has not answered
+   * within the grace period after the deadline (it is then terminated and
+   * replaced).
    */
   runCall(
     stored: StoredResult,
     args: unknown[],
     iterationLimit: number | undefined,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    deadline?: number,
+    deadlineError: () => unknown = () =>
+      new Error('The deadline of the call passed')
   ): Promise<unknown> {
     if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.unusable !== undefined)
@@ -797,6 +829,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
         args,
         iterationLimit,
         signal,
+        deadline,
+        deadlineError,
         resolve,
         reject,
       })
@@ -867,16 +901,11 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
     // and fails only when it gets a message) never settles: the watchdog
     // of the deadline is armed only when the task is sent (`armDeadline()`).
     // A task that runs on the worker at its deadline is the watchdog's. A
-    // call task has no deadline (the second test narrows its type).
-    const deadline =
-      task.type === 'call'
-        ? undefined
-        : task.type === 'fit'
-          ? task.deadline
-          : task.slice.deadline;
-    if (deadline !== undefined && task.type !== 'call') {
+    // call task is rejected with the error of its deadline.
+    const deadline = task.type === 'cells' ? task.slice.deadline : task.deadline;
+    if (deadline !== undefined) {
       // One millisecond after the deadline, so that `deadlinePassed()` is
-      // true for both kinds of task when the timer fires.
+      // true for every kind of task when the timer fires.
       const delay = Math.max(0, deadline + 1 - Date.now());
       if (delay <= MAX_TIMER_DELAY) {
         const timer = setTimeout(() => {
@@ -884,7 +913,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
           const q = holder.queue.indexOf(task);
           if (q < 0) return;
           holder.queue.splice(q, 1);
-          task.resolve({ out: new Float64Array(0), done: 0 });
+          settleAborted(task);
           void this.pump(holder);
         }, delay);
         cleanups.push(() => clearTimeout(timer));
@@ -1043,11 +1072,12 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
 
   /** Send a call task to the slot's worker, whose kernel `id` is loaded or
    * on its way. The arguments are copied by structured clone, not
-   * transferred. A call has no deadline: its watchdog is armed only by an
-   * abort (`cancelRunning()`). */
+   * transferred. Its watchdog is armed by its deadline (`armDeadline()`)
+   * and by an abort (`cancelRunning()`). */
   private sendCall(slot: Slot, id: number, task: CallTask): void {
     const job = this.nextJob++;
     slot.running = { job, task };
+    this.armDeadline(slot, task.deadline);
     // A message that cannot be sent (an argument that structured clone
     // cannot copy) gets no reply: the task is rejected here, and the caller
     // makes the call itself.
@@ -1059,6 +1089,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
           job,
           id,
           args: task.args,
+          ...(task.deadline !== undefined ? { deadline: task.deadline } : {}),
           iterationLimit: task.iterationLimit,
           ...(slot.cancel !== undefined ? { cancel: slot.cancel } : {}),
         },
@@ -1283,7 +1314,9 @@ export interface CallPool {
     stored: StoredResult,
     args: unknown[],
     iterationLimit: number | undefined,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    deadline?: number,
+    deadlineError?: () => unknown
   ): Promise<unknown>;
 }
 

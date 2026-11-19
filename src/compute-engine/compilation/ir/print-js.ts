@@ -97,10 +97,17 @@ const BIGINTS: Ints = {
  *  passes of the block to the deadline count of the runtime
  *  (`_SYS.tick(passes)`, on the deadline frame), so no pass makes a call. A
  *  block left by a throw is not counted. `done`: the flag of an exit; both
- *  loops stop when it is true, and the block charges the passes it ran. */
-const blocks = (z: Ints, i: string, n: string, done?: string): string => {
+ *  loops stop when it is true, and the block charges the passes it ran.
+ *  `from`: the first pass of a window (no `done`), 0 by default. */
+const blocks = (
+  z: Ints,
+  i: string,
+  n: string,
+  done?: string,
+  from?: string
+): string => {
   if (done === undefined)
-    return `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}; ${i}_b < ${n}; _SYS.tick(${z.toNumber(`${i}_e - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (let ${i} = ${i}_b; ${i} < ${i}_e; ${i}++) {`;
+    return `for (let ${i}_b = ${from ?? z.zero}, ${i}_e = ${z.min(from === undefined ? z.c(1024) : `${from} + ${z.c(1024)}`, n)}; ${i}_b < ${n}; _SYS.tick(${z.toNumber(`${i}_e - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (let ${i} = ${i}_b; ${i} < ${i}_e; ${i}++) {`;
   return `for (let ${i}_b = ${z.zero}, ${i}_e = ${z.min(z.c(1024), n)}, ${i} = ${z.zero}; ${i}_b < ${n} && !${done}; _SYS.tick(${z.toNumber(`${i} - ${i}_b`)}), ${i}_b = ${i}_e, ${i}_e = ${z.min(`${i}_b + ${z.c(1024)}`, n)}) for (${i} = ${i}_b; ${i} < ${i}_e && !${done}; ${i}++) {`;
 };
 
@@ -110,12 +117,20 @@ const blocks = (z: Ints, i: string, n: string, done?: string): string => {
  *  `k++` would not advance (from 2^53). */
 const loopOpen =
   (z: Ints): Syntax['loopOpen'] =>
-  (k, lo, hi, _passes, done) => [
-    `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
-    guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
-    blocks(z, `${k}_i`, `${k}_n`, done),
-    `  const ${k} = ${k}_lo + ${k}_i;`,
-  ];
+  (k, lo, hi, _passes, done, window) =>
+    window === undefined
+      ? [
+          `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
+          guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
+          blocks(z, `${k}_i`, `${k}_n`, done),
+          `  const ${k} = ${k}_lo + ${k}_i;`,
+        ]
+      : // The passes `i0 <= i < i1` of the count, each index as above.
+        [
+          `const ${k}_lo = ${lo};`,
+          blocks(z, `${k}_i`, window[1], undefined, window[0]),
+          `  const ${k} = ${k}_lo + ${k}_i;`,
+        ];
 
 const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
@@ -284,6 +299,12 @@ export const JS: Syntax = deepFreeze({
       ],
       close: (ys) => [...ys.map((y, j) => `  ${outs[j]} = ${y};`), '});'],
     }),
+    // The private list of a list accumulator in a worker program: a
+    // `Float64Array`, which the pool transfers.
+    zeros: ({ outs: [out], args: [n] }) => ({
+      open: [],
+      close: ([y]) => [`const ${out} = new Float64Array(${n}).fill(${y});`],
+    }),
   },
   helpers: {
     _round: 'const _round = (x) => (x < 0 ? -Math.round(-x) : Math.round(x));',
@@ -427,6 +448,12 @@ export type JavaScriptResult = {
    *  and then the inputs object (a root function literal). */
   readonly run: (...args: any[]) => number | boolean | unknown[];
   readonly printed: Printed;
+  /** The asynchronous text of `runAsync()` when the program has pool
+   *  loops (`outline()`): the per-call code of a runner of the parameters
+   *  `_` (the inputs object) and `_run` (the state of the call,
+   *  `run-async.ts`) over `preambleOnce`, which gives the promise of the
+   *  value. */
+  readonly asyncCode?: string;
 };
 
 /** The runtime `_SYS` of the code: over the engine `ce` (its draws, its
@@ -485,12 +512,28 @@ function onceLists(
   return once;
 }
 
+/** The pool loops of a program, as the printer reads them (the `Outline`
+ *  of `outline.ts`): each loop with the values its driver call passes, and
+ *  the functions that wait. */
+export type PoolText = {
+  readonly loops: readonly {
+    readonly loop: Instr;
+    readonly passed: readonly V[];
+    readonly lists: readonly V[];
+  }[];
+  readonly waits: ReadonlySet<string>;
+};
+
+/** `pool`: the pool loops of `p` (`outline()`), whose asynchronous text it
+ *  prints too (`asyncCode`). `lazy`: `run` is built at its first call. */
 export function printJavaScript(
   p: Program,
   rows: readonly OperatorRow[],
   ce?: ComputeEngine,
   syntax: Syntax = JS,
-  iterationBudget?: number
+  iterationBudget?: number,
+  pool?: PoolText,
+  lazy = false
 ): JavaScriptResult {
   // With a budget, each pass of a `Loop` counts one pass of the call, as
   // `compile()`'s `iterationBudget` (floored).
@@ -503,22 +546,46 @@ export function printJavaScript(
       loopPasses(p, limit, useIndex(p).def, Infinity) <= limit)
       ? undefined
       : limit;
+  // Not under an `entry` wrapper (the bigint mode): a value computed once
+  // is outside its catch of a pole.
+  const once = onceLists(p, rows, syntax.entry === undefined);
   const printed = printProgram(
     p,
     budget === undefined
       ? syntax
       : {
           ...syntax,
-          loopOpen: (k, lo, hi, passes, done) => [
-            ...syntax.loopOpen(k, lo, hi, passes, done),
+          loopOpen: (k, lo, hi, passes, done, window) => [
+            ...syntax.loopOpen(k, lo, hi, passes, done, window),
             ...(passes ? [`  _SYS.countLoopPass(${budget});`] : []),
           ],
         },
     rows,
-    // Not under an `entry` wrapper (the bigint mode): a value computed once
-    // is outside its catch of a pole.
-    onceLists(p, rows, syntax.entry === undefined)
+    once
   );
+  // The asynchronous text: the `async` copies of the functions that wait,
+  // and the entry, each of which restores the caller's state when it ends.
+  let asyncCode: string | undefined;
+  if (pool !== undefined) {
+    const loops = new Map(
+      pool.loops.map((x, id) => [
+        x.loop,
+        { id, passed: x.passed, lists: x.lists },
+      ])
+    );
+    const a = printProgram(p, syntax, rows, once, {
+      loops,
+      waits: pool.waits,
+    });
+    asyncCode = [
+      ...a.functions,
+      'return (async () => {',
+      'try {',
+      ...a.body,
+      '} finally { _run.d(); }',
+      '})();',
+    ].join('\n');
+  }
   const entry = entryOf(p);
   const n = argumentIndex(entry, entry.positional ?? 0);
   const params =
@@ -543,20 +610,33 @@ export function printJavaScript(
     ? `(${params}) => {\n${body}\n}`
     : `(() => {\n${body}\n})()`;
   // The construction of `load()` of `createJavaScriptRuntime()`.
-  let run: JavaScriptResult['run'];
-  try {
-    const sys = runtimeOf(ce);
-    run = (
-      literal
-        ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()
-        : twoStageRunner(sys, preambleOnce, ['_'], `return ${code};`)
-    ) as JavaScriptResult['run'];
-  } catch (e) {
-    // A deadline that expires while the values computed once are computed.
-    if (isCancellationError(e)) throw e;
-    throw new Error(
-      `slice: the JavaScript printer made code that does not parse (${String(e)}), for the inputs ${entry.paramNames.join(', ')}:\n${preambleOnce}\n${code}`
-    );
-  }
-  return { code, preambleOnce, run, printed };
+  const make = (): JavaScriptResult['run'] => {
+    try {
+      const sys = runtimeOf(ce);
+      return (
+        literal
+          ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()
+          : twoStageRunner(sys, preambleOnce, ['_'], `return ${code};`)
+      ) as JavaScriptResult['run'];
+    } catch (e) {
+      // A deadline that expires while the values computed once are computed.
+      if (isCancellationError(e)) throw e;
+      throw new Error(
+        `slice: the JavaScript printer made code that does not parse (${String(e)}), for the inputs ${entry.paramNames.join(', ')}:\n${preambleOnce}\n${code}`
+      );
+    }
+  };
+  // `lazy`: built at the first call (a worker program, which the calling
+  // thread runs only for a sub-range that the pool did not complete).
+  let built: JavaScriptResult['run'] | undefined = lazy ? undefined : make();
+  const run: JavaScriptResult['run'] = lazy
+    ? (...args) => (built ??= make())(...args)
+    : built!;
+  return {
+    code,
+    preambleOnce,
+    run,
+    printed,
+    ...(asyncCode === undefined ? {} : { asyncCode }),
+  };
 }

@@ -42,6 +42,7 @@ import {
 } from './print-interval.js';
 import { spellingOf, type Spelling, type Syntax } from './print.js';
 import { narrow } from './narrow.js';
+import { outline, type Outline } from './outline.js';
 import { plain } from './plain.js';
 import { effects, effectTrace, sameTrace } from './effects.js';
 import {
@@ -648,7 +649,12 @@ export function compileSlice(
     target: 'javascript';
     mode?: Exclude<SliceOptions['mode'], 'interval'>;
   }
-): JavaScriptResult & { warnings: Warning[]; program: Program };
+): JavaScriptResult & {
+  warnings: Warning[];
+  program: Program;
+  /** The loops that `runAsync()` can send to the worker pool (`outline()`). */
+  pool?: Outline;
+};
 export function compileSlice(
   expr: Expression,
   options: SliceOptions & { target: 'glsl' }
@@ -664,6 +670,17 @@ export function compileSlice(
   const held = options.storage && holdStorage(p, options.storage);
   if (held) throw new Decline('program', `${held} on ${options.target}`);
   const { rows, syntax } = tables(options);
+  // The `parallel for` loops that `runAsync()` can send to the worker pool:
+  // JavaScript in the default mode, with no `iterationBudget` (one count of
+  // passes for a call, which workers cannot share), for an expression (a
+  // root function literal has no `runAsync()`). `run()` does not change.
+  const pool =
+    options.target === 'javascript' &&
+    (options.mode ?? 'strict') === 'strict' &&
+    options.iterationBudget === undefined &&
+    entryOf(p).literal !== true
+      ? outline(p, rows, syntax, expr.engine as never)
+      : undefined;
   const printed =
     options.mode === 'interval'
       ? printInterval(
@@ -679,7 +696,8 @@ export function compileSlice(
             rows,
             expr.engine as never,
             syntax,
-            options.iterationBudget
+            options.iterationBudget,
+            pool
           )
         : printGlsl(
             p,
@@ -700,5 +718,10 @@ export function compileSlice(
     throw new SliceInternalError(
       'slice printer: the order of the effectful instructions'
     );
-  return { ...printed, warnings: p.warnings, program: p };
+  return {
+    ...printed,
+    warnings: p.warnings,
+    program: p,
+    ...(pool === undefined ? {} : { pool }),
+  };
 }

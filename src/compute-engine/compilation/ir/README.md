@@ -30,6 +30,7 @@ list literal.
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace               |                                          |
 | `verify.ts`                    | Definitions, dominance (of values and lengths), types from the tables, calls                 | Re-derive a type rule                    |
 | `passes.ts`                    | `scalarize`, `fold`, `strength`, `hoist`, `inline`, `cse`, `invariants`, `dce`               | Change the effect trace                  |
+| `outline.ts`                   | The pool loops of `runAsync()`: their accumulators, worker programs, the functions that wait | Change the program                       |
 | `print.ts`                     | The shared statement printer and the inline policy                                           | Decide anything that depends on a target |
 | `print-js.ts`, `print-glsl.ts` | A `Syntax`: spellings, types, statement forms; the stored code, `run()`                      | Analyse the program                      |
 | `index.ts`                     | The target profiles and their one check (`admits()`); the frame warnings                     |                                          |
@@ -2104,8 +2105,10 @@ its own (`jumps()`, which stops at an inner `Loop` or `ParallelLoop`:
 `choice` or a `seeded` region in any function (`draws()`, checked in
 `program()`): inside a frame the interpreter runs each pass in a random frame of
 its own (`docs/RANDOMNESS-MODEL.md`, "Pass frames of a parallel loop"), which
-compiled code does not have. GLSL and the interval mode decline it. No worker
-runs the passes: `runAsync()` resolves to `run()`.
+compiled code does not have. GLSL and the interval mode decline it. The `loop`
+of its first clause is marked `parallel`, which every pass keeps (`cse` keys
+it); `runAsync()` can send such a loop to the worker pool ("Batches and
+`runAsync()`").
 
 `Integrate(f, Limits(t, a, b))` and `NIntegrate(f, a, b)` of real bounds
 (infinite ones too) and a real integrand (a function literal of one parameter,
@@ -2793,10 +2796,49 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   `makeRunAsync()`, `makeWillParallelize()`) over the raw call of the code, its
   entry plan and the result as stored code, which a worker loads. Each cell is
   the value of `run()` at that cell; a list input is shared by the cells, also
-  with `entryChecks: false`. There is no batch body (CE-410) and no asynchronous
-  copy (`parallelCode`): `runAsync()` runs `run()`, and `willParallelize()` is
-  false. A `ParallelLoop` compiles as a `Loop` whose passes run in order ("Loops
-  and the runtime"). In the `bigint` mode a batch is refused with an error.
+  with `entryChecks: false`. There is no batch body (CE-410). In the `bigint`
+  mode a batch is refused with an error.
+
+  `runAsync()` (`run-async.ts`; design note
+  `docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`, section 6) sends
+  a `parallel for` to the worker pool. After the passes, `outline()`
+  (`outline.ts`) reads the program, in the default mode with no
+  `iterationBudget` and for an expression; it changes nothing, so `run()` and
+  `code` are those of a program with no pool. It takes a loop marked `parallel`
+  at a waiting position (its enclosing regions, up to its function's body, are
+  `if` arms and bodies of loops that are not marked) whose accumulators it
+  admits: each carried value a real or an integer to which the body only adds
+  (each value of the body has at most one root, the carried parameter from which
+  it accumulates through `add`, an `if` whose two arms yield that root, or an
+  inner loop whose body yields its own parameter there; any other read of a
+  value with a root fails), and each array defined outside the loop that the
+  body writes a real or integer list whose only uses are triples
+  `set(L, k, add(get(L, k), e))` of one index in one region. Its worker program
+  is a root function literal of `i0`, `i1`, `lo` and the values that the body
+  reads from outside (a constant is copied), whose body is the same `loop` with
+  a `window: [i0, i1]` (the passes `i0 <= i < i1` of `run()`'s count, the index
+  of pass `i` being `lo + i`), each scalar accumulator from `-0` and each list
+  accumulator a new `Float64Array` of `-0` (the region row `zeros`), and which
+  returns the partial sums, then the partial arrays (`tuple`). It is printed by
+  `printJavaScript()` with no passes, so a worker runs the IR of `run()`'s
+  pass; a loop whose worker program is not shippable (`isShippableCode()`) or
+  reads a name of `vars` runs in order. A function waits when it holds such a
+  loop or a waiting call of a function that waits (a fixed point); with the
+  entry waiting, `printProgram()` prints the asynchronous text (`Wait`): each
+  function that the entry reaches through waiting calls as
+  `async <name>$async`, whose waiting calls are awaited, and each pool loop as
+  `_run.loop(id, lo, hi, [values], [lists])`, then the loop of `run()` when it
+  gives `undefined`, else the wait and `_run.addNumber()` / `_run.addList()`.
+  Every wait is `_run.r(await _run.s(p).then(_run.ok, _run.fail))`, and every
+  `async` function ends with `_run.d()` in a `finally`: the caller's digits
+  and deadline frame are current whenever the program does not run. The text
+  is built over the same `preambleOnce` at the first call of `runAsync()`. The
+  driver (`_run.loop`) checks the pool, a step budget, `minPasses` and the size
+  of the private lists, splits the passes into one sub-range per worker, sends
+  each with the deadline of the frame current at the call, runs a sub-range
+  that a worker did not complete again on the calling thread, and reports the
+  route to `onLoop`. `willParallelize()` is true when the program has a pool
+  loop and the pool is usable.
 
 `compile(expr, { to: 'glsl' })` (`adapter-glsl.ts`) takes a scalar result (real,
 integer, boolean, or complex, a `vec2`: "The complex lane") or a list of stated

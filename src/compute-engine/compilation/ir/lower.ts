@@ -3874,7 +3874,7 @@ function lowerOnce(
    *  under which `block()` skips the rest of the pass. `Loop(body)`, with
    *  no clause, is one counted loop of 2^53 passes whose `exit` is `DONE`
    *  (JavaScript only): a `Break` or the `iterationBudget` ends it. */
-  const loop = (e: Fn, want: boolean): undefined => {
+  const loop = (e: Fn, want: boolean, parallel = false): undefined => {
     if (want) decline(e, 'the value of a Loop (Nothing)');
     const bare = e.nops === 1;
     if (bare && (interval || !options.javascript))
@@ -3905,8 +3905,14 @@ function lowerOnce(
       return [typeof n === 'number' ? b.constant(n, 'integer') : n.v, x.v];
     };
     /** A counted loop from `lo` to `hi` whose pass runs `pass(k)` of its
-     *  index `k`, the carried values bound to the parameters. */
-    const counted = (lo: V, hi: V, pass: (k: V) => void): void => {
+     *  index `k`, the carried values bound to the parameters. `mark`: the
+     *  loop of the first clause of a `ParallelLoop` (`parallel`). */
+    const counted = (
+      lo: V,
+      hi: V,
+      pass: (k: V) => void,
+      mark = false
+    ): void => {
       const init = carried.flatMap((x) =>
         x.whole ? carry(x) : [widen(x.v, x.lane!)]
       );
@@ -3933,7 +3939,17 @@ function lowerOnce(
             b.newValue(mapLengths(type(v), (n) => outs[params.indexOf(n)]))
           )
         );
-      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true, ...exit });
+      b.emit({
+        k: 'loop',
+        outs,
+        lo,
+        hi,
+        init,
+        body,
+        passes: true,
+        ...exit,
+        ...(mark ? { parallel: true } : {}),
+      });
       carried.forEach((x, i) => (x.v = outs[slot[i]]));
     };
     const clause = (j: number): void => {
@@ -3978,7 +3994,8 @@ function lowerOnce(
               });
             }
             clause(j + 1);
-          })
+          }),
+          parallel && j === 1
         );
       }
       const s = lists.source(c.ops[1]);
@@ -3995,7 +4012,8 @@ function lowerOnce(
             for (const [n, v] of destructure(c, index, x))
               frame.names.set(n, { v, role: 'index' });
           clause(j + 1);
-        })
+        }),
+        parallel && j === 1
       );
     };
     if (bare)
@@ -4875,7 +4893,7 @@ function lowerOnce(
     if (jumps(e.ops[0]) !== 0)
       decline(e, 'a Break or a Continue of a parallel for (parallel-exit)');
     parallel ??= e;
-    return loop(e, want);
+    return loop(e, want, true);
   };
 
   /** A name declared outside `x` that `x` writes with `Assign`: a name of

@@ -478,11 +478,87 @@ declared outside the loop other than with `AddTo` (`s = s + k`:
 loop itself (`parallel-exit`; those of an inner `Loop` compile), and when the
 program draws or has a `WithRandomSeed` frame: inside a frame the
 interpreter runs each pass in a random frame of its own, which compiled code
-does not have. GLSL and the interval mode decline it. A `javascript` result
-called with an object of variables (`calling: 'expression'`) has
-`runAsync(inputs, options?)`, which returns a promise of `run(inputs)`, and
-`willParallelize()`, which answers `false`: no worker pool runs the
-passes.
+does not have. GLSL and the interval mode decline it.
+
+A `javascript` result called with an object of variables
+(`calling: 'expression'`) has `runAsync(inputs, options?)`, a promise of the
+value of `run(inputs)` that sends a `parallel for` to the engine's worker
+pool (`ce.workers`) when it can (design note
+`docs/plans/2026-11-18-ir-parallel-for-and-list-locals.md`, section 6).
+`run()` and its text do not change: `runAsync()` runs a second,
+asynchronous text of the same IR, which awaits at such a loop.
+
+- **Which loops.** The compiler reads the IR after its passes. A loop goes
+  to the pool when each value that it carries is a number to which the
+  passes only add (`s += e`, also under an `if`, in an inner `for`, or twice
+  in a pass), each list that it writes is a list of numbers declared outside
+  the loop to whose elements it only adds (`L[i] += e`, the in-place list
+  local of "List updates"), and no pass reads an accumulator otherwise
+  (`t += s`, `L[i] += L[j]`, `M = L`); when it has at least one
+  accumulator; when the loop is at a statement of the program, or of a user
+  function that the program calls outside a callback, a comprehension or
+  another `parallel for`, also inside an `if` or the body of a `for` (not
+  itself inside one of those); when its body reads no name of the `vars`
+  option (a worker has no inputs object) and computes no numeric integral,
+  which samples the engine's random stream (`isShippableCode()`); and in the
+  default mode, with no `iterationBudget`.
+  Every other loop runs in order, with the code of `run()`. No condition
+  makes a compilation decline.
+- **At run time.** The loop goes to the pool when the pool is usable, the
+  call is not inside `ce.withStepBudget()` (a worker cannot charge the
+  caller's steps), the count of passes is at least `minPasses` (default
+  20 000), and the private lists of all workers (each list accumulator, and
+  each list that the passes read, once per sub-range) hold at most 16 million
+  numbers. Otherwise it runs in order, and `onLoop` reports the reason
+  (`'no-pool'`, `'pool-unusable'`, `'step-budget'`, `'below-threshold'`,
+  `'too-large'`).
+- **The merge.** The passes are split into one sub-range of consecutive
+  passes per worker. Each worker runs a program of the IR of the loop body
+  from `-0` (the identity of `+`, so a cell that no pass writes adds
+  nothing), and the calling thread adds the partial sums to the
+  accumulators in the order of the sub-ranges. An integer accumulator whose
+  values stay within 2^53 has the value of `run()`; a real one can differ
+  from it by the grouping of the sum (a different order of summation, a
+  caveat above), and for one pool size has the same bits at every run.
+- **Errors.** An error of a pass on a worker, a failed worker or a pool that
+  turns out unusable sends the sub-range back to the calling thread, which
+  runs it again in the order of the sub-ranges, so the error is the one
+  `run()` throws (`onLoop` reports `'pool-declined'`). A deadline frame
+  current at the call (`ce.withTimeLimit()`) bounds the workers too: the
+  promise then rejects with that frame's `CancellationError` (its
+  attribution and spans), and no sub-range runs again. A `signal` already
+  aborted rejects before any statement runs; an abort during a wait rejects
+  at once (the queued sub-ranges are dropped, and a running worker is
+  replaced after the pool's grace period); an abort while statements run is
+  seen at the next pool loop.
+- **State.** The program keeps its reconstruction digits and its deadline
+  frame across each wait, and the caller's are current whenever the
+  program does not run, also after the promise settles. `onLoop` runs with
+  the caller's.
+- **Inputs.** The host must not change `inputs`, or an array that it holds,
+  until the promise settles: the program reads them after a wait, and the
+  value is otherwise unspecified.
+
+`willParallelize(passes?, minPasses?)` answers whether `runAsync()` would
+send a loop of this program to the pool now: the program has a pool loop,
+the pool is usable, no step budget is current, and `passes`, when given, is
+at least `minPasses`. A stored result loaded with
+`createJavaScriptRuntime()` has no asynchronous text: its `runAsync()` is
+`run()`.
+
+```js
+const ce = new ComputeEngine({ workers: createKernelPool({ create }) });
+executeEpsil(ce, `function f(n: integer) -> integer {
+  let s: integer = 0
+  parallel for k in 1..n { s += k * k }
+  s
+}`);
+ce.declare('n', 'integer');
+const code = compile(ce.box(['f', 'n']));
+await code.runAsync({ n: 100000 }, { onLoop: (r) => console.log(r) });
+// { passes: 100000, route: 'pool' }
+// → 333338333350000, the value of code.run({ n: 100000 })
+```
 
 ## The scope a compilation reads
 

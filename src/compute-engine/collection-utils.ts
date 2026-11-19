@@ -2173,8 +2173,11 @@ export function couldBeUnkeyedCollectionOperand(op: Expression): boolean {
   // (`typeCouldBeUnkeyedCollection`) already excludes `string` for the same
   // reason; this is the value half of the same rule.
   if (isTextAtom(op)) return false;
+  // The type is read first: the finiteness of a lazy view can evaluate its
+  // source (the count of `Range(1, Length(L))` evaluates `L`), and a view
+  // whose type admits a collection does not need it.
   return (
-    isFiniteIndexedCollection(op) || typeCouldBeUnkeyedCollection(op.type.type)
+    typeCouldBeUnkeyedCollection(op.type.type) || isFiniteIndexedCollection(op)
   );
 }
 

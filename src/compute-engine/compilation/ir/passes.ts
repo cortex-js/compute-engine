@@ -566,7 +566,7 @@ const cse: Pass = (p, rows) => {
               : x.k === 'call'
                 ? `call ${x.fn}`
                 : x.k === 'loop'
-                  ? `loop ${x.passes} ${x.exit}`
+                  ? `loop ${x.passes} ${x.exit} ${x.parallel}`
                   : x.k;
       parts.push(`(${head}`, ...argsOf(x).map(name));
       for (const r of regionsOf(x)) {

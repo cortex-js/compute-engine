@@ -938,21 +938,72 @@ export type BroadcastAsyncReason =
   | 'below-threshold'
   | 'pool-declined';
 
+/**
+ * Why `runAsync()` ran a `parallel for` on the calling thread and not on the
+ * engine's worker pool:
+ * - `'no-pool'`: the engine has no pool (`ce.workers` is not set, or is not
+ *   a pool from `createKernelPool()`).
+ * - `'pool-unusable'`: the workers of the pool run another version of the
+ *   compiled-code runtime than this engine.
+ * - `'step-budget'`: the call runs inside `ce.withStepBudget()`, whose steps
+ *   the workers cannot charge.
+ * - `'below-threshold'`: the loop has fewer passes than
+ *   `RunAsyncOptions.minPasses`.
+ * - `'too-large'`: the private lists of the workers (one copy of each list
+ *   accumulator and of each list that the passes read, for each sub-range)
+ *   would hold more than 16 million numbers together.
+ * - `'pool-declined'`: the loop went to the pool, and a worker refused or
+ *   failed a sub-range of the passes (or a pass threw there): the calling
+ *   thread ran that sub-range again.
+ */
+export type ParallelLoopReason =
+  | 'no-pool'
+  | 'pool-unusable'
+  | 'step-budget'
+  | 'below-threshold'
+  | 'too-large'
+  | 'pool-declined';
+
+/**
+ * What `RunAsyncOptions.onLoop` receives for each run of a `parallel for`
+ * that can run on the pool: the count of passes of this run, where the
+ * passes ran, and with `route: 'calling-thread'`, why the pool did not run
+ * them all.
+ */
+export interface ParallelLoopReport {
+  passes: number;
+  route: 'pool' | 'calling-thread';
+  reason?: ParallelLoopReason;
+}
+
 /** The options of `runAsync()` (see `CompilationResult.runAsync`). */
 export interface RunAsyncOptions {
   /**
-   * A signal that is already aborted when `runAsync()` is called rejects
-   * the promise with `signal.reason`, and the program does not run. The
-   * program runs as `run()` does, in one step, so a later abort has no
-   * effect on it.
+   * Stops the run. A signal that is already aborted rejects the promise
+   * with `signal.reason` before any statement runs. An abort while the
+   * program waits for the workers rejects the promise with `signal.reason`:
+   * the queued sub-ranges are dropped, and a worker that still runs one is
+   * terminated and replaced after the grace period of the pool. An abort
+   * while the calling thread runs statements is seen at the next loop that
+   * can run on the pool.
    */
   signal?: AbortSignal;
   /**
-   * The smallest count of passes of a `parallel for` that a later release
-   * sends to the worker pool. In this release it is only checked: a value
-   * that is not a positive integer rejects the promise with a `TypeError`.
+   * The smallest count of passes of a `parallel for` that goes to the
+   * pool. A positive integer, default 20 000; another value rejects the
+   * promise with a `TypeError`.
    */
   minPasses?: number;
+  /**
+   * Called once for each run of a `parallel for` that can run on the pool,
+   * when its route is known: `'pool'` when every sub-range was answered by
+   * a worker, `'calling-thread'` with the reason when a condition at run
+   * time kept the loop in order or a sub-range ran again on the calling
+   * thread. A loop that the compiler keeps in order never calls it. It
+   * runs with the caller's state (precision digits, deadline frame); a
+   * throw from it rejects the promise.
+   */
+  onLoop?: (report: ParallelLoopReport) => void;
 }
 
 export interface BroadcastAsyncResult {
@@ -1406,14 +1457,48 @@ export type CompilationResult<
   willUsePool?: (cells: number) => boolean;
 
   /**
-   * Run the program as `run(inputs)` does, asynchronously: the promise
-   * resolves to the value of `run(inputs)`, and an error of the program
-   * rejects it; the call never throws. Present on a `javascript` result
-   * called with a vars object (`calling: 'expression'`).
+   * Run the program as `run(inputs)` does, and send each `parallel for`
+   * that can run on the engine's worker pool (`ce.workers`) to the pool: the
+   * passes of the loop are split into one sub-range of consecutive passes
+   * for each worker, each worker adds the terms of its passes to zero, and
+   * the calling thread adds these partial sums to the accumulators, in the
+   * order of the sub-ranges. Present on a `javascript` result called with a
+   * vars object (`calling: 'expression'`).
    *
-   * In this release every `parallel for` runs in order on the calling
-   * thread, as in `run()`: no loop goes to the worker pool. A later release
-   * sends such loops to the pool (`ce.workers`).
+   * The promise resolves to the value of `run(inputs)`, except that the
+   * terms of an accumulator are added in another grouping: an accumulator
+   * of integers whose values and partial sums stay within ±2^53 has the
+   * value of `run()`; one of real numbers can differ from it, usually in the
+   * last bits, by an amount that depends on the count of workers (for one
+   * pool size, every run gives the same bits). The inputs are checked and
+   * the value converted as `run()` does; an error of the program rejects the
+   * promise (an error of a pass on a worker is the error that `run()` gives,
+   * since the calling thread runs that sub-range again), and the call never
+   * throws.
+   *
+   * A loop can run on the pool when the compiler finds, after its passes:
+   * each value that the loop carries a number to which the passes only add
+   * (`+=`, also under an `if`, in an inner `for`, or more than once in a
+   * pass), and each list that they write a list of numbers declared outside
+   * the loop to whose elements they only add (`L[i] += e`), with no other
+   * read of these accumulators; the loop at a statement of the program, or
+   * of a user function that the program calls outside a callback, a
+   * comprehension or another `parallel for` (also inside an `if` or a
+   * `for`); a body that reads no name of the `vars` option and
+   * computes no numeric integral; the default mode and no
+   * `iterationBudget`. Every other loop runs in order, as `run()` runs it.
+   * At run time, the loop goes to the pool when the pool is usable, the call
+   * is not inside `ce.withStepBudget()`, the count of passes is at least
+   * `options.minPasses`, and the private lists of all workers together hold
+   * at most 16 million numbers. A worker stops at the deadline of the frame
+   * that is current at the call (`ce.withTimeLimit()`), and the promise then
+   * rejects with that frame's `CancellationError`.
+   *
+   * The calling thread is free only while the program waits for the
+   * workers. The host must not change `inputs`, or an array that it holds,
+   * until the promise settles: the program reads them after a wait, and
+   * the value is otherwise unspecified. A program with no loop that can run
+   * on the pool runs `run(inputs)`.
    */
   runAsync?: (
     inputs?: Record<string, unknown>,
@@ -1422,10 +1507,15 @@ export type CompilationResult<
 
   /**
    * Whether `runAsync()` would send a `parallel for` of this program to the
-   * pool now: `false` in this release (see `runAsync`). Present where
-   * `runAsync` is.
+   * pool now: the program has a loop that can run on the pool (also inside
+   * a function that it calls), the engine has a usable pool (`ce.workers`),
+   * the call is not inside `ce.withStepBudget()`, and `passes`, when it is
+   * given, is at least `minPasses` (default 20 000; a value that is not a
+   * positive integer throws a `TypeError`). It does not check the size limit
+   * of the private lists, the signal or the deadline, and a worker can still
+   * fail later. Present where `runAsync` is.
    */
-  willParallelize?: (passes?: number) => boolean;
+  willParallelize?: (passes?: number, minPasses?: number) => boolean;
 } & (T extends ExecutableTarget
   ? { calling: 'expression' | 'lambda'; run: CompiledRunner<R, V> }
   : // eslint-disable-next-line @typescript-eslint/no-empty-object-type

@@ -27,6 +27,7 @@ import {
   normalizeRunResult,
   setReconstructionDigits,
   storeEntryPlan,
+  twoStageRunner,
   type EntryPlan,
 } from '../javascript-runtime.js';
 import { CompileDeclineError, throwUntypedInputs } from '../diagnostics.js';
@@ -42,6 +43,7 @@ import {
   makeRunAsync,
   makeWillParallelize,
   type RunAsyncSpec,
+  type RunState,
 } from '../run-async.js';
 import { broadcastStrideOfType, declaredTypeText } from '../type-facts.js';
 import { readsVarsObject } from '../vars-inputs.js';
@@ -50,7 +52,8 @@ import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
-import type { JavaScriptResult } from './print-js.js';
+import { runtimeOf, type JavaScriptResult } from './print-js.js';
+import type { Outline } from './outline.js';
 import {
   argumentIndex,
   entryOf,
@@ -388,7 +391,11 @@ function compileIr(
       setReconstructionDigits(previous);
     }
   };
-  let slice: JavaScriptResult & { warnings: Warning[]; program: Program };
+  let slice: JavaScriptResult & {
+    warnings: Warning[];
+    program: Program;
+    pool?: Outline;
+  };
   try {
     slice = inDigits(() =>
       compileSlice(expr, {
@@ -569,8 +576,51 @@ function compileIr(
     ? () => Promise.reject(bigintBroadcastError())
     : makeBroadcastAsync(asyncSpec);
   result.willUsePool = bigint ? () => false : makeWillUsePool(asyncSpec);
+  // The pool loops (`outline()`): each worker program as a stored lambda,
+  // which a worker loads, and as a function over the engine's runtime, for
+  // a sub-range that the calling thread runs again. The asynchronous text
+  // is built over the same once-only definitions at the first call.
+  const pool = slice.pool;
+  const asyncCode = slice.asyncCode;
   const runAsyncSpec: RunAsyncSpec = {
     run: run as (inputs: unknown) => unknown,
+    loops: (pool?.loops ?? []).map(({ printed }) => {
+      const own = printed.preambleOnce;
+      return {
+        stored: {
+          runtimeVersion: RUNTIME_VERSION,
+          code:
+            own !== ''
+              ? `(() => {\n${own}\nreturn ${printed.code};\n})()`
+              : printed.code,
+          ...(own !== '' ? { callCode: printed.code, preambleOnce: own } : {}),
+          preamble: own,
+          calling: 'lambda',
+          reconstructionDigits,
+        },
+        run: printed.run as (...args: unknown[]) => unknown,
+      };
+    }),
+    ...(asyncCode === undefined
+      ? {}
+      : {
+          body: () =>
+            inDigits(
+              () =>
+                twoStageRunner(
+                  runtimeOf(engine as never),
+                  once,
+                  ['_', '_run'],
+                  asyncCode
+                ) as (vars: unknown, state: RunState) => Promise<unknown>
+            ),
+        }),
+    check: unchecked
+      ? (vars) => vars
+      : (vars) => checkEntry(entryPlan, [vars])[0],
+    finish: normalizeRunResult,
+    digits: reconstructionDigits,
+    engine,
   };
   result.runAsync = makeRunAsync(runAsyncSpec);
   result.willParallelize = makeWillParallelize(runAsyncSpec);

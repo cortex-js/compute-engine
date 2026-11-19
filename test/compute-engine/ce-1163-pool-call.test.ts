@@ -273,6 +273,107 @@ describe('the call task of the kernel pool', () => {
     expect(log.results[0].worker).toBe(1);
   }, 120_000);
 
+  // CE-1462 (design note 2026-11-18, sections 6.4 and 6.6): a call carries
+  // the deadline of its caller's frame, and is settled at it with the
+  // caller's error.
+  describe('the deadline of a call', () => {
+    /** A lambda that ticks the runtime's deadline for `ms` milliseconds,
+     * as a compiled loop does every 1024 passes. */
+    const TICKING = storedLambda(
+      '(ms) => { const t = Date.now() + ms; while (Date.now() < t) _SYS.tick(1024); return ms; }'
+    );
+    const frameError = () => {
+      const e = new Error('the frame expired');
+      e.name = 'FrameError';
+      return e;
+    };
+
+    test('a call that ends before its deadline gives its value', async () => {
+      const { pool, calls } = watchedPool({ size: 1 });
+      await pool.prewarm();
+      expect(
+        await calls.runCall(
+          TICKING,
+          [20],
+          undefined,
+          undefined,
+          Date.now() + 30_000,
+          frameError
+        )
+      ).toBe(20);
+    }, 60_000);
+
+    test('a running call that passes its deadline answers with a deadline stop, and the worker stays', async () => {
+      const { pool, calls, log } = watchedPool({ size: 1 });
+      await pool.prewarm();
+      const e = frameError();
+      const t0 = Date.now();
+      await expect(
+        calls.runCall(TICKING, [60_000], undefined, undefined, t0 + 200, () => e)
+      ).rejects.toBe(e);
+      expect(Date.now() - t0).toBeLessThan(30_000);
+      expect(log.terminated).toBe(0);
+      expect(log.results.length).toBe(0);
+      // The worker takes the next call.
+      expect(await calls.runCall(TICKING, [1], undefined, undefined)).toBe(1);
+    }, 60_000);
+
+    test('the deadline of a call does not stay: a kernel loaded after it, whose preamble ticks, loads', async () => {
+      const { pool, calls } = watchedPool({ size: 1 });
+      await pool.prewarm();
+      const e = frameError();
+      await expect(
+        calls.runCall(
+          TICKING,
+          [60_000],
+          undefined,
+          undefined,
+          Date.now() + 50,
+          () => e
+        )
+      ).rejects.toBe(e);
+      // Its once-only definitions tick the runtime's deadline when the worker
+      // loads it.
+      const ticks = {
+        ...storedLambda('(x) => x + 1'),
+        preambleOnce: '_SYS.tick(4096);',
+      };
+      expect(await calls.runCall(ticks, [1], undefined, undefined)).toBe(2);
+    }, 60_000);
+
+    test('a queued call whose deadline passes is rejected and not sent', async () => {
+      const { pool, calls, log } = watchedPool({ size: 1 });
+      await pool.prewarm();
+      const first = calls.runCall(BUSY, [400], undefined, undefined);
+      const e = frameError();
+      const second = calls.runCall(
+        TICKING,
+        [1],
+        undefined,
+        undefined,
+        Date.now() + 100,
+        () => e
+      );
+      await expect(second).rejects.toBe(e);
+      expect(await first).toBe(400);
+      expect(log.calls.length).toBe(1);
+    }, 60_000);
+
+    test('a worker that does not check the deadline is replaced after the grace period, and the call is rejected with the error of its deadline', async () => {
+      const { pool, calls, log } = watchedPool({ size: 1, cancelGrace: 100 });
+      await pool.prewarm();
+      const e = frameError();
+      const t0 = Date.now();
+      await expect(
+        calls.runCall(BUSY, [600_000], undefined, undefined, t0 + 100, () => e)
+      ).rejects.toBe(e);
+      expect(Date.now() - t0).toBeLessThan(30_000);
+      expect(await calls.runCall(BUSY, [3], undefined, undefined)).toBe(3);
+      expect(log.terminated).toBe(1);
+      expect(log.created).toBe(2);
+    }, 120_000);
+  });
+
   test('a pool whose workers hold another runtime version rejects the call', async () => {
     const pool = createKernelPool({
       create: () => {

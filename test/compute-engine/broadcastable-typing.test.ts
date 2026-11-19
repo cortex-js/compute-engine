@@ -380,7 +380,11 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     expect(arg.type.toString()).toBe(
       'list<list<any> | number | tuple> | number | tuple'
     );
-    expect(ce.box(['g', arg]).type.toString()).toBe('any');
+    // The argument has the open form, the type of a call over an operand of
+    // type `unknown`, and the call over it is typed as such a call (CE-545).
+    expect(ce.box(['g', arg]).type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
   });
 
   test('numeric-tuple argument of an inferred-signature lambda types a tuple', () => {
@@ -463,20 +467,23 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
       'list<list<any> | number | tuple> | number | tuple'
     );
 
+    // The call over an operand of the open form is typed as a call over an
+    // operand of type `unknown`: with the open form (CE-545).
     const p1 = ce.box(['m', p0]);
-    expect(p1.type.toString()).toBe('any');
+    expect(p1.type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
 
-    // `At(m(2h(1)), 1)` is valid. The call is typed `any`: its argument can
-    // be a point, and the body of `m` decides the shape of a call over a
-    // point (ROADMAP CE-502).
+    // `At(m(2h(1)), 1)` is valid. The element read is typed `any`: the call
+    // can be a point, whose element can be any value (ROADMAP CE-502).
     const at = ce.box(['At', ['m', p0], 1]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
     expect(at.type.toString()).toBe('any');
 
-    // Chaining stays single-layer broadcastable (idempotent).
+    // Chaining keeps the open form (idempotent).
     expect(ce.box(['m', p1]).type.toString()).toBe(
-      'broadcastable<dictionary<any> | indexed_collection<any> | number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 });

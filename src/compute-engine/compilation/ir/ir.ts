@@ -98,7 +98,11 @@ export type Instr =
   | { k: 'if'; outs: V[]; cond: V; then: Region; else: Region }
   /** `passes`: each pass is a pass of a `Loop`, which the iteration
    *  budget counts. `exit`: the position of a boolean carried value (the
-   *  `Break` flag of a `Loop`); no pass runs once it is true. */
+   *  `Break` flag of a `Loop`); no pass runs once it is true. `parallel`:
+   *  the loop of a `ParallelLoop`, which `runAsync()` can send to the
+   *  worker pool (`outline.ts`). `window`: the loop runs only the passes
+   *  `i0 <= i < i1` of its count, the index of pass `i` being `lo + i`, and
+   *  `hi` is not read (the loop of a worker program, `outline.ts`). */
   | {
       k: 'loop';
       outs: V[];
@@ -108,6 +112,8 @@ export type Instr =
       body: Region;
       passes?: boolean;
       exit?: number;
+      parallel?: boolean;
+      window?: [V, V];
     }
   | { k: 'call'; outs: V[]; fn: string; args: V[] }
   /** The region row `op`; `site` is the source text, for a warning.
@@ -201,7 +207,7 @@ export function argsOf(i: Instr): V[] {
     case 'if':
       return [i.cond];
     case 'loop':
-      return [i.lo, i.hi, ...i.init];
+      return [i.lo, i.hi, ...i.init, ...(i.window ?? [])];
     default:
       return i.args;
   }
@@ -220,6 +226,7 @@ export function mapDirectArgs(i: Instr, f: (v: V) => V): void {
     i.lo = f(i.lo);
     i.hi = f(i.hi);
     i.init = i.init.map(f);
+    if (i.window !== undefined) i.window = [f(i.window[0]), f(i.window[1])];
   } else if (i.k !== 'const') i.args = i.args.map(f);
 }
 

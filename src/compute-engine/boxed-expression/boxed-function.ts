@@ -14983,9 +14983,57 @@ function lambdaBroadcastType(
     );
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
+  // An operand typed with the open form `R | tuple | list<R | tuple |
+  // list<any>>` (`isOpenPointForm`), the type of a call over an operand of
+  // type `unknown`, can hold the same values as such an operand: a number, a
+  // point, or a list of any depth. The call over it is typed as a call over
+  // an operand of type `unknown`: the operand is not mapped here, and the
+  // rule for an operand whose shape the type does not show answers below
+  // (`openTriggerBroadcastType`). Typed arm by arm, the `tuple` arm gave
+  // `any` for a body that does not compute component by component, so
+  // `T(y)` with `T := a ↦ a + 1` was typed `any`, while `T(g(2))` with
+  // `g(2)` typed `unknown` was typed with the open form (user decision
+  // 2026-11-06, CE-545). As for a tuple operand above, this applies only
+  // when the function has a value (`literal`) and the parameter reaches its
+  // body. It applies only to a number result `R`: that rule keeps the
+  // `tuple` arm only for such a result, and over a point another body can
+  // give a point or a collection of points, which the answer does not hold
+  // (`a ↦ (2a, 3a)` at `(1, 2)` is `((2, 4), (3, 6))`, and
+  // `a ↦ If(c, 2a, False)` is `(2, 4)` there). Another result keeps the
+  // typing arm by arm, which answers `any`. A body that gives a known type for the `tuple` arm
+  // (`componentwiseTupleCallType`) keeps the typing arm by arm, which is
+  // narrower: with `S := (a, b) ↦ Max(a, b)`, `S(1, y)` is
+  // `number | list<number | tuple | list<any>>`. It applies only when no
+  // other operand is a collection that the call maps: with a list beside
+  // it, the call over an operand of type `unknown` is typed with the shape
+  // of that list (`vector<2>` for `U(g(2), [1, 2])` with
+  // `U := (a, b) ↦ a + b`), which does not hold the value when the operand
+  // is a list of lists, and the typing arm by arm answers.
+  const openPointOperandAt = (i: number): boolean =>
+    operandTypes === undefined &&
+    literal !== undefined &&
+    ops[i].possiblyCollectionTyped &&
+    isSubtype(perElementResult, 'number') &&
+    bindsAtScalarSlot(i) &&
+    parameterReachesBody(literal, i) &&
+    isOpenPointForm(typeAt(i)) &&
+    componentwiseTupleCallType(
+      literal,
+      ops.map((_x, j) => (j === i ? 'tuple' : typeAt(j)))
+    ) === undefined;
+  const openPointAt = (i: number): boolean =>
+    openPointOperandAt(i) &&
+    ops.every(
+      (x, j) =>
+        j === i ||
+        !mappable(j) ||
+        !x.participates ||
+        openPointOperandAt(j)
+    );
   const participates = (i: number) =>
     mappable(i) &&
     wholeAt?.[i] !== true &&
+    !openPointAt(i) &&
     (operandTypes?.[i] !== undefined || ops[i].participates);
   const mapped = ops.filter((_x, i) => participates(i));
   const mappedTypes = ops.flatMap((_x, i) =>
@@ -16433,6 +16481,23 @@ function hasUnsplitTupleArm(t0: Type): boolean {
     numberOrTupleArms(t) === undefined &&
     !isNumericTupleArgumentType(t)
   );
+}
+
+/**
+ * True when `t0` is the open form `R | tuple | list<R | tuple | list<any>>`
+ * (`openDepthScalarArms`) with a numeric `R` and a bare `tuple` arm at the
+ * top level: the type
+ * of an element-wise application over an operand of type `unknown`
+ * (`openTriggerBroadcastType`), whose `tuple` arm stands for a point (user
+ * decision 2026-10-27). A tuple arm with known components
+ * (`tuple<real, real>`) is not read here: the typing arm by arm types it
+ * from the body (`componentwiseTupleCallType`).
+ */
+function isOpenPointForm(t0: Type): boolean {
+  const scalar = openDepthScalarArms(t0);
+  if (scalar === undefined || !isSubtype(scalar, 'number')) return false;
+  const flat = unfoldedUnionArms(t0);
+  return flat !== undefined && flat.some((arm) => arm === 'tuple');
 }
 
 /**

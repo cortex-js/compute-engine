@@ -543,6 +543,23 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
     params: [R],
     results: real,
   },
+  // A new array of `n` elements, each the region's one yield, a real or an
+  // integer (`-0`): the private list of a list accumulator in a worker
+  // program (`outline.ts`). A region row, not an operation: its result has
+  // the length of its operand. Effectful: each is its own array, which the
+  // program writes.
+  {
+    op: 'zeros',
+    effect: 'effectful',
+    args: [I],
+    params: [],
+    results: ([n], ys) =>
+      ys.length === 1 &&
+      ys[0].shape.length === 0 &&
+      (ys[0].lane === R || ys[0].lane === I)
+        ? [listOf(ys[0], { v: n })]
+        : undefined,
+  },
 ]);
 
 /** The effectful operations of a list local written in place: they change
