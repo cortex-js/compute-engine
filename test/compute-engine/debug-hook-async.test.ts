@@ -4,7 +4,10 @@
 // scope, the depth, and ending a run from a hook.
 
 import { ComputeEngine } from '../../src/compute-engine';
-import { executeEpsilAsync } from '../../src/epsil/execute-epsil';
+import {
+  executeEpsil,
+  executeEpsilAsync,
+} from '../../src/epsil/execute-epsil';
 import type {
   EpsilDebugHooks,
   EpsilDebugStatement,
@@ -86,15 +89,74 @@ describe('Statements that call the hooks', () => {
     ]);
   });
 
-  test('the body of a `parallel for` calls no hook, and gives the same value', async () => {
-    // A documented limitation: the passes run in order on the synchronous
-    // route, each with its own random frame.
-    const { texts, value } = await statementsOf(
-      'let s = 0\nparallel for k in 1..4 {\n  let t = k * k\n  s += t\n}\ns'
+  test('each pass of a `parallel for` body, in order, with the same value', async () => {
+    const source =
+      'let s = 0\nparallel for k in 1..4 {\n  let t = k * k\n  s += t\n}\ns';
+    const ce = new ComputeEngine();
+    const passes: string[] = [];
+    const r = await executeEpsilAsync(ce, source, {
+      debug: {
+        beforeStatement: (at) => {
+          if (source.slice(at.range[0], at.range[1]) === 's += t')
+            passes.push(at.inScope(() => String(ce.box('t').evaluate())));
+        },
+      },
+    });
+    expect(String(r.value)).toBe('30');
+    // The interpreter runs the passes in order, debugger or not.
+    expect(passes).toEqual(['1', '4', '9', '16']);
+  });
+
+  test('a `parallel for` pauses, and the run goes on after the pause', async () => {
+    const source =
+      'let s = 0\nparallel for k in 1..3 {\n  s += k\n}\ns';
+    let paused = 0;
+    const r = await executeEpsilAsync(new ComputeEngine(), source, {
+      debug: {
+        beforeStatement: (at) => {
+          if (source.slice(at.range[0], at.range[1]) !== 's += k') return;
+          paused += 1;
+          return new Promise<void>((resume) => setTimeout(resume, 1));
+        },
+      },
+    });
+    expect(paused).toBe(3);
+    expect(String(r.value)).toBe('6');
+  });
+
+  test('a seeded `parallel for` gives the same draws on every route', async () => {
+    // A pass frame exists only inside `withRandomSeed`, which evaluates its
+    // body synchronously: the body calls no hook there.
+    const source =
+      'withRandomSeed(7, do {\n  let s = 0\n  parallel for k in 1..5 {\n    s += random(1..100) * k\n  }\n  s\n})';
+    const sync = String(executeEpsil(new ComputeEngine(), source).value);
+    const plain = String(
+      (await executeEpsilAsync(new ComputeEngine(), source)).value
     );
-    expect(value).toBe('30');
-    expect(texts).not.toContain('let t = k * k');
-    expect(texts).not.toContain('s += t');
+    const { texts, value } = await statementsOf(source);
+    expect(plain).toBe(sync);
+    expect(value).toBe(sync);
+    expect(texts.some((t) => t.startsWith('s += random'))).toBe(false);
+  });
+
+  test('a hook that throws in a pass of a `parallel for` leaves the engine usable', async () => {
+    const ce = new ComputeEngine();
+    const stop = new Error('debugger: terminate');
+    const source = 'let s = 0\nparallel for k in 1..4 {\n  s += k\n}\ns';
+    let passes = 0;
+    await expect(
+      executeEpsilAsync(ce, source, {
+        debug: {
+          beforeStatement: (at) => {
+            if (source.slice(at.range[0], at.range[1]) !== 's += k') return;
+            passes += 1;
+            if (passes === 2) throw stop;
+          },
+        },
+      })
+    ).rejects.toBe(stop);
+    expect(ce._epsilDebugHooks).toBeUndefined();
+    expect(String((await executeEpsilAsync(ce, '1 + 2')).value)).toBe('3');
   });
 
   test('a debugged run gives the same value as a run without hooks', async () => {

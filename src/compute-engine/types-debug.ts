@@ -45,8 +45,8 @@ export interface EpsilDebugStatement {
  * `filter`, `takeWhile`, `any`, `all` or `count`), and of a function that an
  * operator calls while it evaluates its operands on the synchronous route (a
  * function called in the domain of a `for`, `for x in g(3)`), and of the body
- * of a `parallel for`, which runs its passes in order on the synchronous
- * route, each with its own random frame installed in the engine. It is also the
+ * of a loop inside `withRandomSeed`, which evaluates its body on the
+ * synchronous route. It is also the
  * case of a statement that runs after the run ends, when the host reads the
  * elements of a lazy collection that the program returned.
  *

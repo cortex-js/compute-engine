@@ -36,8 +36,8 @@
 
   A hook that throws ends the run. A statement of a function that a lazy
   collection applies (a function given to `map` or `filter`), or that is
-  called in the domain of a `for`, calls no hook, and neither does a statement
-  of the body of a `parallel for`. A time limit keeps running
+  called in the domain of a `for`, calls no hook. The passes of a
+  `parallel for` call the hooks and run in order. A time limit keeps running
   while the run waits, so a debugged run has none.
 
 ### Resolved Issues

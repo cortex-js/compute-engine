@@ -231,7 +231,9 @@ The `debug` option of `executeEpsilAsync()` gives a debugger two hooks:
 `beforeStatement(at)` and `afterStatement(at, value)`. They are called for
 each statement of the source that the run evaluates on the asynchronous
 route: a top-level statement, and a statement of a function body, of a loop
-body, of a branch of `if` or of a `do` block. When a hook returns a promise,
+body (`for`, `while` and `parallel for`), of a branch of `if` or of a `do`
+block. The interpreter runs the passes of a `parallel for` in order, on the
+calling thread, debugger or not. When a hook returns a promise,
 the run waits until the promise settles. This is how a debugger pauses, in a
 browser as well as in Node, with no worker and no shared memory.
 
@@ -280,16 +282,17 @@ A statement that the engine evaluates on the synchronous route calls no hook.
 This is the case of a statement of a function that a lazy collection applies
 when it produces an element: a function given to `map`, `filter`,
 `takeWhile`, `any`, `all` or `count`, for example, and of a function called
-in the domain of a `for` (`for x in g(3)`). The body of a `parallel for` calls
-no hook either: the interpreter runs its passes in order, each with its own
-random frame, on the synchronous route. A breakpoint in such a body or
-function does not stop the run. It is also the case of a statement that runs
+in the domain of a `for` (`for x in g(3)`), and of a loop body inside
+`withRandomSeed`, which evaluates its body on the synchronous route. A
+breakpoint in such a body or function does not stop the run. It is also the case of a statement that runs
 after the run ends, when the host reads the elements of a lazy collection
 that the program returned.
 
 The hooks are installed on the engine for the duration of the run, and a loop
-body is then evaluated on the asynchronous route, which is slower. Give a run
-that a debugger follows an engine of its own.
+body is then evaluated on the asynchronous route, which is slower: 200,000
+passes of `for i in 1..200000 { s += i * i }` took 1.4 to 1.5 times as long
+as with `executeEpsil`, with a hook that does little work. Give a run that a
+debugger follows an engine of its own.
 
 ### Serialization
 

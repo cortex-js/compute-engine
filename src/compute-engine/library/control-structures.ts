@@ -883,10 +883,16 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, options) =>
         canonicalLoopLike('ParallelLoop', ops, options),
       // The interpreter runs the passes in order, as `Loop` does, each in
-      // its own random frame. There is no `evaluateAsync`: a pass frame is
-      // installed in the engine's frame slot while the pass runs, and an
-      // asynchronous run could let another evaluation see it, so the loop
-      // runs synchronously, as `WithRandomSeed` does.
+      // its own random frame. A pass frame is installed in the engine's
+      // frame slot while the pass runs, and an asynchronous run could let
+      // another evaluation see it, so the loop runs synchronously, as
+      // `WithRandomSeed` does, also on the asynchronous route. The one
+      // exception is a run that a debugger follows (`ce._epsilDebugHooks`):
+      // the body is then awaited, as for `Loop`, so that the debugger can
+      // pause a pass. No pass frame is installed across those awaits: a pass
+      // frame exists only inside a `WithRandomSeed` frame, and
+      // `WithRandomSeed` evaluates its body synchronously, so a loop inside
+      // it never reaches the awaited branch.
       //
       // A read of an accumulator in a pass gives an unspecified value. The
       // interpreter does not check such a read: it gives the value that the
@@ -900,6 +906,39 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           ce._timeRemaining,
           ce._deadlineFrame
         ),
+      evaluateAsync: async (
+        ops,
+        { engine: ce, signal, effects, _contextStack, _precisionWindow }
+      ) => {
+        // Without a debugger, the synchronous loop, run before the first
+        // `await`, so that no other evaluation runs while a pass frame is
+        // installed.
+        if (ce._epsilDebugHooks === undefined)
+          return run(
+            runLoop(ops[0], ops.slice(1), ce, true),
+            ce._timeRemaining,
+            ce._deadlineFrame
+          );
+        return runAsync(
+          withEvaluationEffects(
+            ce,
+            effects,
+            runLoop(ops[0], ops.slice(1), ce, true, (body) =>
+              body.evaluateAsync({
+                signal,
+                _effects: effects,
+                _contextStack,
+                _precisionWindow,
+              })
+            ),
+            _contextStack,
+            _precisionWindow
+          ),
+          ce._timeRemaining,
+          signal,
+          ce._deadlineFrame
+        );
+      },
     },
 
     ParallelComprehension: {
@@ -6096,7 +6135,8 @@ interface LoopState {
    * write in the domain is not made a second time when the comprehension
    * is evaluated again. */
   firstDomain?: Expression;
-  /** For a `Loop` on the asynchronous route: evaluates the body with
+  /** For a `Loop` or a `ParallelLoop` on the asynchronous route, during a run
+   * that a debugger follows: evaluates the body with
    * `evaluateAsync()`. The walk yields the promise, and its driver
    * (`runAsync`) gives back the value. Each statement of the body then runs
    * on the asynchronous route, where a debugger can pause it
@@ -7498,7 +7538,8 @@ function* runNestedElements(
  * The value of `body`, evaluated with `awaitBody` (`LoopState.awaitBody`).
  * The step yields the promise to the driver of the walk, `runAsync`, which
  * awaits it and gives the value back to the next step. Only the
- * asynchronous `Loop` sets `awaitBody`, and `runAsync` is its only driver,
+ * asynchronous `Loop` and `ParallelLoop` set `awaitBody`, during a run that a
+ * debugger follows, and `runAsync` is then the only driver,
  * so the walk's other consumers never see the promise: the yield type of
  * the walk stays `Expression`.
  */
