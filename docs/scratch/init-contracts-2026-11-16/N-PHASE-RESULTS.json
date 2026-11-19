@@ -1,0 +1,1013 @@
+{
+  "timing": {
+    "baseline/program/N/current": [
+      52.9706420898437,
+      52.841634277343786,
+      56.25720214843754
+    ],
+    "baseline/collection/N/candidate": [
+      1574.6437500000002,
+      1548.5416600000008,
+      1518.5541599999988
+    ],
+    "baseline/collection/evaluate/current": [
+      1520.0579199999993,
+      1523.6712499999976,
+      1382.03125
+    ],
+    "baseline/collection/N/current": [
+      1636.0745799999995,
+      1537.7316599999995,
+      1516.0120800000004
+    ],
+    "baseline/program/evaluate/candidate": [
+      49.51153564453126,
+      50.52994775390607,
+      49.019877441406344
+    ],
+    "experiment/collection/N/candidate": [
+      1521.2320899999986,
+      1392.0504100000016,
+      1431.0683299999982
+    ],
+    "experiment/collection/N/experiment": [
+      1422.9116699999986,
+      1442.040420000003,
+      1494.2729199999985
+    ],
+    "baseline/program/evaluate/current": [
+      52.13441943359376,
+      51.21765136718748,
+      48.251119140624965
+    ],
+    "baseline/program/N/candidate": [
+      51.688659667968764,
+      51.769632812500134,
+      53.45674658203126
+    ],
+    "experiment/collection/evaluate/candidate": [
+      1442.404160000001,
+      1379.3512499999997,
+      1581.7566599999964
+    ],
+    "experiment/collection/evaluate/experiment": [
+      1426.4195800000016,
+      1396.3175,
+      1505.547919999999
+    ],
+    "baseline/collection/evaluate/candidate": [
+      1445.8816699999988,
+      1518.0449999999973,
+      1385.4720899999984
+    ]
+  },
+  "profiling": {
+    "collection/N/allocation/candidate": [
+      {
+        "total": 3150403.204,
+        "work": 3149878.148,
+        "derived": 1591285.608,
+        "fnType": 1608885.184,
+        "wrapper": 11986.972,
+        "multiply": 75286.292,
+        "lookup": 45258.896,
+        "assignment": 101894.384,
+        "write": 61180.048,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- assignFn <- ComputeEngine.assign"
+        }
+      },
+      {
+        "total": 3160758.432,
+        "work": 3159921.66,
+        "derived": 1594210.22,
+        "fnType": 1611334.476,
+        "multiply": 76364.716,
+        "wrapper": 11691.324,
+        "lookup": 44701.716,
+        "assignment": 104878.268,
+        "write": 63216.92,
+        "contract": 16.692,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- assignFn <- ComputeEngine.assign",
+          "contract": "_BoxedValueDefinition.declaredType <- BoxedSymbol.type <- LambdaCallOperandOfExpression.type <- typeAt <- <callback>"
+        }
+      }
+    ],
+    "collection/N/allocation/current": [
+      {
+        "total": 3130162.316,
+        "work": 3129784.848,
+        "derived": 1553671.776,
+        "fnType": 1572161.932,
+        "wrapper": 11659.94,
+        "lookup": 113748.704,
+        "multiply": 37597.168,
+        "assignment": 109898.98,
+        "write": 61060.364,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "multiply": "type <- <callback> <- asComputation <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assignNamedValue <- assignFn <- ComputeEngine.assign <- assignSteps"
+        }
+      },
+      {
+        "total": 3125383.968,
+        "work": 3124809.76,
+        "fnType": 1577188.02,
+        "derived": 1559849.368,
+        "wrapper": 12349.424,
+        "multiply": 36971.668,
+        "lookup": 114974.448,
+        "assignment": 109472.52,
+        "write": 60651.388,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assignNamedValue <- assignFn <- ComputeEngine.assign <- assignSteps"
+        }
+      }
+    ],
+    "collection/N/cpu/candidate": [
+      {
+        "total": 1891.5977777777778,
+        "inspector": 55.22277777777778,
+        "work": 1.5944444444444446,
+        "derived": 783.7222222222222,
+        "fnType": 804.2127777777778,
+        "lookup": 65.65611111111112,
+        "multiply": 28.087222222222223,
+        "write": 26.124444444444446,
+        "assignment": 48.47666666666667,
+        "collect": 34.74777777777778,
+        "wrapper": 10.106666666666667,
+        "contract": 10.602222222222222,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- <callback> <- whileDefining",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects"
+        }
+      },
+      {
+        "total": 1748.785,
+        "inspector": 52.227222222222224,
+        "work": 1.3505555555555555,
+        "derived": 724.34,
+        "fnType": 742.5161111111111,
+        "lookup": 69.35222222222222,
+        "write": 24.62,
+        "assignment": 45.645,
+        "wrapper": 7.937222222222222,
+        "collect": 35.99722222222222,
+        "contract": 10.323888888888888,
+        "multiply": 27.464444444444446,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- <callback> <- whileDefining",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType"
+        }
+      }
+    ],
+    "collection/N/cpu/current": [
+      {
+        "total": 1825.3355555555556,
+        "inspector": 46.83722222222222,
+        "work": 1.0788888888888888,
+        "derived": 755.4561111111111,
+        "fnType": 777.1444444444444,
+        "lookup": 87.37,
+        "assignment": 51.64833333333333,
+        "contract": 14.636111111111111,
+        "multiply": 8.27,
+        "write": 25.217222222222222,
+        "collect": 36.303333333333335,
+        "wrapper": 8.625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "write": "assertAssignableValueDef <- assignNamedValue <- <callback> <- whileDefining <- assignFn",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>"
+        }
+      },
+      {
+        "total": 1719.9222222222222,
+        "inspector": 51.24888888888889,
+        "work": 1.4333333333333333,
+        "derived": 714.8061111111111,
+        "fnType": 734.4066666666666,
+        "lookup": 81.44055555555556,
+        "write": 21.98111111111111,
+        "assignment": 46.84388888888889,
+        "contract": 16.375,
+        "wrapper": 8.051111111111112,
+        "multiply": 5.959444444444444,
+        "collect": 34.76777777777778,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "write": "assertAssignableValueDef <- assignNamedValue <- <callback> <- whileDefining <- assignFn",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType"
+        }
+      }
+    ],
+    "collection/evaluate/allocation/candidate": [
+      {
+        "total": 3155115.472,
+        "work": 3154374.364,
+        "derived": 1593013.528,
+        "fnType": 1611005.988,
+        "multiply": 75945.98,
+        "lookup": 44360.344,
+        "write": 63482.292,
+        "assignment": 104029.308,
+        "wrapper": 12568.908,
+        "inspector": 16.752,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "multiply": "type <- <callback> <- asComputation <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- assignFn <- ComputeEngine.assign",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- boundCallType <- type"
+        }
+      },
+      {
+        "total": 3168127.892,
+        "work": 3167766.932,
+        "fnType": 1616366.984,
+        "derived": 1598747.572,
+        "wrapper": 11413.272,
+        "multiply": 76352.348,
+        "lookup": 45931.908,
+        "assignment": 106486.52,
+        "write": 62786.68,
+        "contract": 16.392,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- assignFn <- ComputeEngine.assign",
+          "contract": "_BoxedValueDefinition.declaredType <- structureOfExpression <- type <- <callback> <- guardedTypeHandlerCall"
+        }
+      }
+    ],
+    "collection/evaluate/allocation/current": [
+      {
+        "total": 3131235.772,
+        "work": 3130776.408,
+        "fnType": 1583667.632,
+        "derived": 1565427.012,
+        "wrapper": 12168.604,
+        "multiply": 37496.892,
+        "lookup": 117337.064,
+        "assignment": 106419.6,
+        "write": 59530.948,
+        "inspector": 16.4,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- boundCallType <- type",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assignNamedValue <- assignFn <- ComputeEngine.assign <- assignSteps"
+        }
+      },
+      {
+        "total": 3122295.48,
+        "work": 3121868.904,
+        "fnType": 1570902.564,
+        "derived": 1552946.424,
+        "wrapper": 12150.904,
+        "multiply": 39286.952,
+        "lookup": 114574.48,
+        "assignment": 107233.236,
+        "write": 59729.288,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.compute <- cachedValue <- BoxedFunction.type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- boundCallType <- type",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "write": "assertAssignableValueDef <- assignNamedValue <- assignFn <- ComputeEngine.assign <- assignSteps"
+        }
+      }
+    ],
+    "collection/evaluate/cpu/candidate": [
+      {
+        "total": 1731.0405555555556,
+        "inspector": 60.35722222222222,
+        "work": 1.423888888888889,
+        "derived": 722.3533333333334,
+        "fnType": 738.995,
+        "lookup": 65.00777777777778,
+        "multiply": 24.390555555555554,
+        "contract": 10.276111111111112,
+        "collect": 36.01222222222222,
+        "write": 26.785,
+        "assignment": 46.44888888888889,
+        "wrapper": 7.308888888888889,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- <callback> <- whileDefining",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>"
+        }
+      },
+      {
+        "total": 1712.6827777777778,
+        "inspector": 50.83277777777778,
+        "work": 1.3466666666666667,
+        "derived": 719.4622222222222,
+        "fnType": 736.0611111111111,
+        "lookup": 68.10833333333333,
+        "wrapper": 8.587222222222222,
+        "write": 24.626666666666665,
+        "assignment": 46.725,
+        "collect": 32.14055555555556,
+        "multiply": 28.593333333333334,
+        "contract": 10.223888888888888,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "write": "assertAssignableValueDef <- assertAssignable <- assignNamedValue <- <callback> <- whileDefining",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects"
+        }
+      }
+    ],
+    "collection/evaluate/cpu/current": [
+      {
+        "total": 1721.6677777777777,
+        "inspector": 51.623333333333335,
+        "work": 1.3516666666666666,
+        "derived": 707.915,
+        "fnType": 728.6638888888889,
+        "lookup": 80.10277777777777,
+        "collect": 36.25388888888889,
+        "assignment": 49.05722222222222,
+        "write": 21.982222222222223,
+        "wrapper": 8.313888888888888,
+        "contract": 17.037777777777777,
+        "multiply": 6.026111111111111,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "write": "assertAssignableValueDef <- assignNamedValue <- <callback> <- whileDefining <- assignFn",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType"
+        }
+      },
+      {
+        "total": 1702.973888888889,
+        "inspector": 43.590555555555554,
+        "work": 1.2866666666666666,
+        "derived": 724.8344444444444,
+        "fnType": 745.0433333333333,
+        "lookup": 75.45444444444445,
+        "assignment": 49.038333333333334,
+        "write": 23.394444444444446,
+        "wrapper": 8.508333333333333,
+        "contract": 15.726111111111111,
+        "collect": 30.84,
+        "multiply": 7.571666666666666,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "write": "assertAssignableValueDef <- assignNamedValue <- <callback> <- whileDefining <- assignFn",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedType.forResult <- type <- <callback>",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- valueBindingEffects <- latentEffectsOf <- applicationEffects",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType"
+        }
+      }
+    ],
+    "program/N/allocation/candidate": [
+      {
+        "total": 140152.1484375,
+        "work": 140152.1484375,
+        "fnType": 40178.46484375,
+        "derived": 38447.9921875,
+        "multiply": 2771.369140625,
+        "wrapper": 657.279296875,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue"
+        }
+      },
+      {
+        "total": 139527.734375,
+        "work": 139519.72265625,
+        "fnType": 41039.36328125,
+        "derived": 39125.072265625,
+        "multiply": 2779.396484375,
+        "wrapper": 584.9296875,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue"
+        }
+      }
+    ],
+    "program/N/allocation/current": [
+      {
+        "total": 139657.54296875,
+        "work": 139657.54296875,
+        "fnType": 40868.48046875,
+        "derived": 39098.181640625,
+        "multiply": 2627.126953125,
+        "wrapper": 849.27734375,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue"
+        }
+      },
+      {
+        "total": 139897.966796875,
+        "work": 139897.966796875,
+        "derived": 39948.390625,
+        "fnType": 41766.66796875,
+        "multiply": 2827.51953125,
+        "wrapper": 1033.486328125,
+        "contract": 8.201171875,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "contract": "_BoxedValueDefinition.declaredType <- BoxedSymbol.type <- applySiteResultType <- boundCallType <- type"
+        }
+      }
+    ],
+    "program/N/cpu/candidate": [
+      {
+        "total": 87.340087890625,
+        "inspector": 21.452880859375,
+        "work": 60.565673828125,
+        "derived": 15.16064453125,
+        "fnType": 16.28759765625,
+        "multiply": 0.625,
+        "collect": 2.894775390625,
+        "lookup": 4.962890625,
+        "wrapper": 0.5302734375,
+        "contract": 0.6240234375,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- ExpressionOperandView.type <- isNumericScalarOperandView"
+        }
+      },
+      {
+        "total": 90.544189453125,
+        "inspector": 22.72998046875,
+        "work": 61.829833984375,
+        "derived": 15.099365234375,
+        "fnType": 16.067138671875,
+        "lookup": 3.64208984375,
+        "multiply": 0.631591796875,
+        "contract": 0.41015625,
+        "collect": 3.17333984375,
+        "wrapper": 0.50634765625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- <callback> <- boundCallType",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute"
+        }
+      }
+    ],
+    "program/N/cpu/current": [
+      {
+        "total": 87.293212890625,
+        "inspector": 22.595458984375,
+        "work": 59.663818359375,
+        "collect": 2.615234375,
+        "derived": 15.213623046875,
+        "fnType": 16.1865234375,
+        "lookup": 4.33935546875,
+        "wrapper": 0.470947265625,
+        "multiply": 0.660400390625,
+        "contract": 0.342041015625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- withMatrixProductNaNCells <- maybeAbsorb"
+        }
+      },
+      {
+        "total": 88.085693359375,
+        "inspector": 22.30712890625,
+        "work": 60.630126953125,
+        "derived": 14.435791015625,
+        "fnType": 15.34375,
+        "lookup": 4.128173828125,
+        "multiply": 0.56298828125,
+        "collect": 2.571533203125,
+        "contract": 0.187744140625,
+        "wrapper": 0.467041015625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- <callback> <- boundCallType",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute"
+        }
+      }
+    ],
+    "program/evaluate/allocation/candidate": [
+      {
+        "total": 132922.62109375,
+        "work": 132922.62109375,
+        "fnType": 40466.26171875,
+        "derived": 38591.966796875,
+        "multiply": 2851.408203125,
+        "wrapper": 681.14453125,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue"
+        }
+      },
+      {
+        "total": 131898.193359375,
+        "work": 131889.826171875,
+        "derived": 38538.11328125,
+        "fnType": 40252.23828125,
+        "multiply": 2571.220703125,
+        "wrapper": 641.013671875,
+        "inspector": 8.3671875,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue"
+        }
+      }
+    ],
+    "program/evaluate/allocation/current": [
+      {
+        "total": 134260.44921875,
+        "work": 134260.44921875,
+        "derived": 39572.65234375,
+        "fnType": 41495.06640625,
+        "multiply": 2998.578125,
+        "wrapper": 264.35546875,
+        "contract": 8.015625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- _BoxedOperatorDefinition.<callback> <- _BoxedOperatorDefinition._setSignature <- _BoxedOperatorDefinition._update <- _BoxedOperatorDefinition.constructor",
+          "contract": "_BoxedValueDefinition.declaredType <- BoxedSymbol.type <- withMatrixProductNaNCells <- maybeAbsorb <- boundCallType"
+        }
+      },
+      {
+        "total": 133298.408203125,
+        "work": 133298.408203125,
+        "derived": 39797.90625,
+        "fnType": 41688.12109375,
+        "multiply": 2963.798828125,
+        "wrapper": 208.359375,
+        "contract": 8.0859375,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- BoxedFunction.compute <- cachedValue",
+          "multiply": "type <- <callback> <- guardedTypeHandlerCall <- boundCallType <- type",
+          "wrapper": "BoxedType.constructor <- _BoxedOperatorDefinition.<callback> <- _BoxedOperatorDefinition._setSignature <- _BoxedOperatorDefinition._update <- _BoxedOperatorDefinition.constructor",
+          "contract": "_BoxedValueDefinition.declaredType <- BoxedSymbol.type <- applySiteResultType <- boundCallType <- type"
+        }
+      }
+    ],
+    "program/evaluate/cpu/candidate": [
+      {
+        "total": 86.624267578125,
+        "inspector": 25.052490234375,
+        "work": 56.919189453125,
+        "derived": 15.301513671875,
+        "fnType": 16.346435546875,
+        "lookup": 4.382080078125,
+        "collect": 2.776611328125,
+        "multiply": 0.78173828125,
+        "contract": 0.626220703125,
+        "wrapper": 0.53369140625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- <callback> <- <callback>",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute"
+        }
+      },
+      {
+        "total": 84.254150390625,
+        "inspector": 21.680908203125,
+        "work": 57.43310546875,
+        "derived": 14.958984375,
+        "fnType": 16.109130859375,
+        "lookup": 4.303466796875,
+        "collect": 2.643310546875,
+        "multiply": 0.779052734375,
+        "wrapper": 0.4365234375,
+        "contract": 0.509033203125,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- ExpressionOperandDescriptor.constructor <- describe"
+        }
+      }
+    ],
+    "program/evaluate/cpu/current": [
+      {
+        "total": 84.41162109375,
+        "inspector": 21.190673828125,
+        "work": 57.827392578125,
+        "derived": 15.180908203125,
+        "fnType": 16.436279296875,
+        "lookup": 4.182861328125,
+        "multiply": 0.553955078125,
+        "collect": 2.74072265625,
+        "wrapper": 0.60107421875,
+        "contract": 0.498291015625,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- inferredCollectionParameterType <- <callback>"
+        }
+      },
+      {
+        "total": 83.627685546875,
+        "inspector": 21.471435546875,
+        "work": 57.025390625,
+        "derived": 15.285888671875,
+        "fnType": 16.312744140625,
+        "lookup": 3.945556640625,
+        "collect": 2.62109375,
+        "wrapper": 0.187255859375,
+        "multiply": 0.539794921875,
+        "contract": 0.250732421875,
+        "topPaths": {
+          "derived": "boundCallType <- type <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "wrapper": "BoxedType.constructor <- BoxedType.from <- BoxedFunction.computeType <- withStaticTypingView <- BoxedFunction.compute",
+          "multiply": "type <- <callback> <- asComputation <- guardedTypeHandlerCall <- boundCallType",
+          "contract": "_BoxedValueDefinition.declaredType <- _BoxedValueDefinition.type <- BoxedSymbol.type <- <callback> <- boundCallType"
+        }
+      }
+    ]
+  },
+  "deopt": {
+    "deopt-program-candidate-evaluate": {
+      "Insufficient type feedback for generic named access": 1,
+      "wrong map": 4,
+      "prepare for on stack replacement (OSR)": 1
+    },
+    "deopt-program-candidate-N": {
+      "Insufficient type feedback for generic named access": 1,
+      "wrong map": 4,
+      "prepare for on stack replacement (OSR)": 1
+    },
+    "deopt-program-current-evaluate": {
+      "Insufficient type feedback for generic named access": 1,
+      "wrong map": 5,
+      "prepare for on stack replacement (OSR)": 1
+    },
+    "deopt-program-current-N": {
+      "Insufficient type feedback for generic named access": 1,
+      "wrong map": 5,
+      "prepare for on stack replacement (OSR)": 1
+    },
+    "deopt-collection-candidate-N": {
+      "wrong map": 231,
+      "(unknown)": 30
+    },
+    "deopt-collection-candidate-evaluate": {
+      "wrong map": 225,
+      "(unknown)": 21
+    },
+    "deopt-collection-current-evaluate": {
+      "wrong map": 228,
+      "(unknown)": 31
+    },
+    "deopt-collection-current-N": {
+      "wrong map": 241,
+      "(unknown)": 31
+    }
+  },
+  "work": {
+    "count-collection-candidate-evaluate": {
+      "boundCallType": 153,
+      "contractOrdinary": 272,
+      "boxedTypeConstruct": 45,
+      "contractFixed": 2198,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    },
+    "count-collection-current-evaluate": {
+      "boundCallType": 153,
+      "contractOrdinary": 1174,
+      "boxedTypeConstruct": 45,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    },
+    "count-program-candidate-evaluate": {
+      "boundCallType": 3,
+      "contractOrdinary": 18,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3,
+      "contractFixed": 1
+    },
+    "count-collection-current-N": {
+      "boundCallType": 153,
+      "contractOrdinary": 1174,
+      "boxedTypeConstruct": 45,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    },
+    "count-program-current-evaluate": {
+      "boundCallType": 3,
+      "contractOrdinary": 19,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3
+    },
+    "count-program-experiment-N": {
+      "boundCallType": 3,
+      "contractOrdinary": 18,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3,
+      "contractFixed": 2
+    },
+    "count-program-current-N": {
+      "boundCallType": 3,
+      "contractOrdinary": 21,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3
+    },
+    "count-program-candidate-N": {
+      "boundCallType": 3,
+      "contractOrdinary": 18,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3,
+      "contractFixed": 3
+    },
+    "count-collection-candidate-N": {
+      "boundCallType": 153,
+      "contractOrdinary": 272,
+      "boxedTypeConstruct": 45,
+      "contractFixed": 2198,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    },
+    "count-collection-experiment-evaluate": {
+      "boundCallType": 153,
+      "contractOrdinary": 272,
+      "boxedTypeConstruct": 45,
+      "contractFixed": 1700,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    },
+    "count-program-experiment-evaluate": {
+      "boundCallType": 3,
+      "contractOrdinary": 18,
+      "multiplyTypeNonempty": 1,
+      "boxedTypeConstruct": 3,
+      "contractFixed": 1
+    },
+    "count-collection-experiment-N": {
+      "boundCallType": 153,
+      "contractOrdinary": 272,
+      "boxedTypeConstruct": 45,
+      "contractFixed": 1700,
+      "multiplyTypeNonempty": 28,
+      "admitValueDef": 16
+    }
+  },
+  "plot": {
+    "candidate": [
+      {
+        "prepMs": 9.441875000000039,
+        "execMs": 25.060291000000007,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      },
+      {
+        "prepMs": 11.285209000000009,
+        "execMs": 26.203416000000004,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      },
+      {
+        "prepMs": 9.194541999999956,
+        "execMs": 24.29983299999998,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      }
+    ],
+    "current": [
+      {
+        "prepMs": 9.21550000000002,
+        "execMs": 24.518916999999988,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      },
+      {
+        "prepMs": 9.668583999999953,
+        "execMs": 25.541416000000027,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      },
+      {
+        "prepMs": 9.837458999999967,
+        "execMs": 25.32983399999995,
+        "evaluations": 131104,
+        "maxAbsError": 0
+      }
+    ],
+    "currentAudit": {
+      "route": "interval-js",
+      "compileBand": "interval-js",
+      "field": "createPointEvaluator",
+      "routes": [
+        {
+          "target": "javascript",
+          "success": true,
+          "runs": 0
+        },
+        {
+          "target": "interval-js",
+          "success": true,
+          "runs": 131105
+        }
+      ],
+      "before": [
+        0,
+        1
+      ],
+      "frames": 32,
+      "points": 4097,
+      "evaluations": 131104,
+      "prepMs": 9.894040999999959,
+      "execMs": 24.233374999999967,
+      "maxAbsError": 0,
+      "precision": 15,
+      "series": [
+        {
+          "type": "line",
+          "fn": "\\sin(x)"
+        }
+      ]
+    },
+    "candidateAudit": {
+      "route": "interval-js",
+      "compileBand": "interval-js",
+      "field": "createPointEvaluator",
+      "routes": [
+        {
+          "target": "javascript",
+          "success": true,
+          "runs": 0
+        },
+        {
+          "target": "interval-js",
+          "success": true,
+          "runs": 131105
+        }
+      ],
+      "before": [
+        0,
+        1
+      ],
+      "frames": 32,
+      "points": 4097,
+      "evaluations": 131104,
+      "prepMs": 9.49591700000002,
+      "execMs": 24.63987499999996,
+      "maxAbsError": 0,
+      "precision": 15,
+      "series": [
+        {
+          "type": "line",
+          "fn": "\\sin(x)"
+        }
+      ]
+    }
+  },
+  "multiply": {
+    "current": {
+      "boundCallType": 153,
+      "contractOrdinary": 1174,
+      "boxedTypeConstruct": 45,
+      "multiplyTypeNonempty": 28,
+      "scalarProductType: return inputs=[{\"kind\":\"numeric\",\"type\":\"rational\",\"lower\":0.5,\"upper\":0.5},\"number\"]": 4,
+      "scalarProductType: return inputs=[\"number\",\"number\"]": 21,
+      "scalarProductType: return inputs=[{\"kind\":\"value\",\"value\":2},\"number\"]": 3,
+      "admitValueDef": 16
+    },
+    "candidate": {
+      "boundCallType": 153,
+      "contractOrdinary": 272,
+      "boxedTypeConstruct": 45,
+      "contractFixed": 2198,
+      "multiplyTypeNonempty": 28,
+      "scalarProductType: return inputs=[{\"kind\":\"numeric\",\"type\":\"rational\",\"lower\":0.5,\"upper\":0.5},\"number\"]": 4,
+      "scalarProductType: continue inputs=[\"unknown\",\"unknown\"]": 3,
+      "scalarProductType: return inputs=[{\"kind\":\"value\",\"value\":2},\"number\"]": 3,
+      "scalarProductType: continue inputs=[\"unknown\",\"number\"]": 6,
+      "scalarProductType: return inputs=[\"number\",\"number\"]": 12,
+      "admitValueDef": 16
+    }
+  },
+  "sourceIdentity": {
+    "current/build": 78,
+    "current/source": 734,
+    "current/hostSource": 3564,
+    "candidate/build": 78,
+    "candidate/source": 733,
+    "candidate/hostSource": 3564
+  },
+  "timingMonitors": {
+    "collection-N-timing-current-0": false,
+    "program-N-timing-current-3": true,
+    "plot-point-candidate-timing-1": true,
+    "collection-N-timing-candidate-4": true,
+    "collection-N-timing-candidate-3": false,
+    "collection-evaluate-timing-current-20": true,
+    "collection-N-timing-candidate-2": false,
+    "program-N-timing-current-2": true,
+    "collection-N-timing-current-1": true,
+    "plot-point-candidate-timing-0": true,
+    "collection-evaluate-timing-current-21": false,
+    "program-N-timing-candidate-1": false,
+    "program-evaluate-timing-candidate-22": true,
+    "collection-N-timing-experiment-10": false,
+    "plot-point-current-timing-0": true,
+    "program-evaluate-timing-current-2": false,
+    "collection-evaluate-timing-experiment-9": false,
+    "collection-evaluate-timing-candidate-30": false,
+    "collection-N-timing-experiment-9": false,
+    "program-evaluate-timing-candidate-3": false,
+    "program-evaluate-timing-candidate-4": true,
+    "collection-evaluate-timing-current-2": false,
+    "collection-N-timing-candidate-8": true,
+    "collection-evaluate-timing-candidate-1": false,
+    "collection-evaluate-timing-candidate-6": false,
+    "plot-point-current-timing-1": true,
+    "collection-N-timing-experiment-11": true,
+    "program-evaluate-timing-current-4": true,
+    "collection-evaluate-timing-experiment-8": false,
+    "program-evaluate-timing-current-3": true,
+    "program-N-timing-candidate-0": true,
+    "collection-evaluate-timing-current-3": true,
+    "collection-evaluate-timing-current-4": false,
+    "program-evaluate-timing-candidate-2": false,
+    "collection-N-timing-experiment-32": true,
+    "collection-evaluate-timing-candidate-7": true,
+    "collection-evaluate-timing-candidate-0": false,
+    "collection-N-timing-experiment-8": false,
+    "collection-evaluate-timing-candidate-31": true,
+    "collection-evaluate-timing-experiment-10": true,
+    "program-evaluate-timing-current-1": false,
+    "program-evaluate-timing-candidate-21": false,
+    "collection-evaluate-timing-candidate-10": true,
+    "program-N-timing-candidate-2": false,
+    "collection-evaluate-timing-candidate-2": false,
+    "collection-N-timing-experiment-30": false,
+    "program-evaluate-timing-candidate-0": false,
+    "collection-evaluate-timing-current-1": false,
+    "program-evaluate-timing-candidate-20": true,
+    "program-N-timing-candidate-3": true,
+    "collection-evaluate-timing-candidate-11": false,
+    "program-N-timing-candidate-4": true,
+    "program-evaluate-timing-current-0": true,
+    "collection-evaluate-timing-experiment-11": true,
+    "plot-point-current-timing-2": true,
+    "collection-evaluate-timing-candidate-4": true,
+    "collection-evaluate-timing-candidate-3": true,
+    "collection-evaluate-timing-current-0": false,
+    "program-evaluate-timing-candidate-1": false,
+    "collection-evaluate-timing-candidate-20": true,
+    "collection-N-timing-experiment-31": false,
+    "collection-evaluate-timing-candidate-9": false,
+    "collection-N-timing-candidate-7": true,
+    "collection-N-timing-candidate-0": true,
+    "plot-point-candidate-timing-2": false,
+    "collection-N-timing-current-3": true,
+    "collection-N-timing-experiment-6": true,
+    "program-N-timing-current-0": true,
+    "collection-evaluate-timing-experiment-6": true,
+    "plot-point-candidate-timing-3": true,
+    "program-N-timing-current-1": false,
+    "collection-N-timing-experiment-7": false,
+    "collection-N-timing-current-2": true,
+    "collection-evaluate-timing-candidate-8": false,
+    "collection-N-timing-candidate-1": true,
+    "collection-N-timing-candidate-6": true,
+    "collection-evaluate-timing-experiment-7": false,
+    "collection-evaluate-timing-current-22": true
+  },
+  "environment": "{\"node\":\"v26.13.0\",\"v8\":\"14.6.202.34-node.40\",\"arch\":\"arm64\",\"platform\":\"darwin\"}"
+}
