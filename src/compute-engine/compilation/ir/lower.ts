@@ -621,10 +621,10 @@ function lowerOnce(
   };
 
   /** `v` is proved `>= 0` by what cannot change after the compilation: a
-   *  constant, an operation whose value is nonnegative (`abs`, `exp`, an
-   *  even power), a sum or a product of such values. Not the type of an
-   *  input: an assumption narrows it (`assume(s >= 0)` makes the type of
-   *  `s` `real<0..>`) and `forget()` widens it again.
+   *  constant, an input whose declared type is ranged at or above 0
+   *  (`b.signs`; an assumption does not change a type), an operation whose
+   *  value is nonnegative (`abs`, `exp`, an even power), a sum or a product
+   *  of such values.
    *
    *  `enclosed` (the interval mode): the printed enclosure of `v` has a
    *  lower end `>= 0`, not only its value. An integer constant `>= 0`, a
@@ -638,6 +638,7 @@ function lowerOnce(
     const c = constant(v);
     if (c !== undefined)
       return enclosed && type(v).lane !== 'integer' ? c >= 2 ** -1022 : c >= 0;
+    if (!enclosed && b.signs.has(v)) return true;
     const i = b.defs.get(v);
     if (i === undefined || depth > 16) return false;
     const op = i.op.split('.')[0];
@@ -837,6 +838,18 @@ function lowerOnce(
     const n = args.length;
     if (typeof r.arity === 'number' ? n !== r.arity : n < 2)
       decline(node, `${r.head} with ${n} operands`);
+    // `Abs` of a real proved `>= 0` (`nonnegative()`, also by the declared
+    // range of an input) is its operand. Not in the interval mode, where a
+    // value `>= 0` can have an enclosure that reaches below 0.
+    if (
+      r.head === 'Abs' &&
+      !interval &&
+      n === 1 &&
+      type(args[0]).shape.length === 0 &&
+      (type(args[0]).lane === 'real' || type(args[0]).lane === 'integer') &&
+      nonnegative(args[0])
+    )
+      return args[0];
     // A colour conversion reads a tuple of three numbers as the sRGB colour
     // of its channels (`extractRgb()` of `library/colors.ts`):
     // `AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`, and so does each of
@@ -2897,6 +2910,25 @@ function lowerOnce(
       return { v: length };
     });
     const v = b.param(name, { lane: ir.lane, shape });
+    // The sign that the range of the declared type proves (`real<0..5>`,
+    // `integer<1..>`), not the interval mode, whose enclosure of an input is
+    // the host's.
+    const declared = def !== undefined && !def.inferredType ? def.type.type : undefined;
+    if (
+      !interval &&
+      shape.length === 0 &&
+      (ir.lane === 'real' || ir.lane === 'integer') &&
+      typeof declared === 'object' &&
+      declared.kind === 'numeric' &&
+      declared.lower !== undefined &&
+      declared.lower >= 0
+    )
+      b.signs.set(
+        v,
+        declared.lower > 0 || declared.lowerOpen === true
+          ? 'positive'
+          : 'nonnegative'
+      );
     const axis = tupleAxis(t);
     if (axis !== undefined) tuples.set(v, axis);
     if (positional) b.positional += 1;

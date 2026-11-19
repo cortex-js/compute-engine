@@ -870,9 +870,12 @@ Every other case is unspecified: the compiled code can give any value,
   On GLSL a call of `sin`, `cos`, `max`, `min` or `clamp` is the built-in,
   whose value for a non-finite or `NaN` argument the GPU decides: the
   compiler has no NaN-safe helpers.
-- A value outside a declared range (`7` for `real<0..5>`): today the
-  `javascript` target computes with the value; a GPU target can use the
-  range (it can drop `|x|` for `x` in `real<0..5>`).
+- A value outside a declared range (`7` or `-2` for `real<0..5>`): every
+  target may use the range. `javascript` and GLSL drop `|x|` for `x` in
+  `real<0..5>`
+  (`Abs(x)` at `x = -2` gives -2), takes the real function of it in the
+  complex mode, and GLSL drops the domain guard of a logarithm of an input
+  declared `real<1..9>`.
 - An input left out: with `x: real`, `x > 0` gives `false` on `javascript`
   for `run({})` (see R5 in "Shapes are settled at compile time", and
   `docs/ERROR-MODEL.md`, "An unsupplied variable").

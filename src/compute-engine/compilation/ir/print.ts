@@ -314,7 +314,7 @@ export function printProgram(
    *  such values (a `pow` of its base), a `max` of one, or a value of
    *  `guarded`. */
   const nonnegative = (v: V, depth = 0): boolean => {
-    if (guarded.has(v)) return true;
+    if (guarded.has(v) || p.signs?.has(v)) return true;
     const i = index.def.get(v);
     if (i?.k === 'const')
       return typeof i.value.value === 'number' && i.value.value >= 0;
@@ -346,23 +346,40 @@ export function printProgram(
       : [];
   };
 
+  /** Whether the real value `v` is `> 0`: a constant `> 0`, or an input
+   *  whose declared type excludes 0 and below (`p.signs`). Not an `exp`,
+   *  which underflows to 0. */
+  const positive = (v: V): boolean => {
+    if (p.signs?.get(v) === 'positive') return true;
+    const i = index.def.get(v);
+    return (
+      i?.k === 'const' &&
+      typeof i.value.value === 'number' &&
+      i.value.value > 0
+    );
+  };
+
   /** The text of `op` applied to the texts of `operands`; `$#k` is the
    *  length of the list operand `k` of `i`. An operation whose operand 0 is
-   *  `nonnegative()` is spelled `<op>.nonnegative` when the target has that
-   *  spelling. */
+   *  `positive()` is spelled `<op>.positive`, one whose operand 0 is
+   *  `nonnegative()` `<op>.nonnegative`, when the target has that spelling. */
   const spell = (
     op: string,
     operands: (k: number) => string,
     i?: Instr & { k: 'op' }
   ): string => {
-    const refined = `${op}.nonnegative`;
+    const refined = [
+      [`${op}.positive`, positive],
+      [`${op}.nonnegative`, nonnegative],
+    ] as const;
     const spelling = spellingOf(
       syntax,
-      i !== undefined &&
-        syntax.ops[refined] !== undefined &&
-        nonnegative(i.args[0])
-        ? refined
-        : op
+      (i !== undefined &&
+        refined.find(
+          ([name, proves]) =>
+            syntax.ops[name] !== undefined && proves(i.args[0])
+        )?.[0]) ||
+        op
     );
     if (spelling === undefined)
       throw new Error(`slice printer: no spelling for the operation ${op}`);

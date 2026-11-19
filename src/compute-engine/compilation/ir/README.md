@@ -210,7 +210,8 @@ exponent. On GLSL it is `_gpu_ir_pow`: the exact product for an integer exponent
 from 1 to 16, the sign of an integer exponent of a negative base, NaN for a
 non-integer one and for a NaN operand (GLSL ES 3.00 leaves `pow()` undefined for
 a negative base). A power of a base known `>= 0` (a constant, `Abs`, `Sqrt`, a
-square, or a value that an enclosing `If` condition bounds below by a constant
+square, an input of a declared range at or above 0 (see "Declared ranges"
+below), or a value that an enclosing `If` condition bounds below by a constant
 `>= 0`) is the builtin `pow()`, exact to a few ulps, so an integer power is not
 always the exact product (`10^3` is 999.99994). A real literal at or above 2^53
 is a real. An integer value of 2^53 or more is a double and its low digits are
@@ -441,11 +442,27 @@ takes the signature of its operands' lanes: a real operation outside its real
 domain is NaN (`Sqrt(x)` at `x = -4` for `x: real`). In `mode: 'complex'` a row
 with `leaves` takes its complex signature unless an operand proves the real
 value by what cannot change after the compilation: an exponent on the integer
-lane (`x^2`, `x^n`), or a base or radicand that is a nonnegative constant, or a
-value of `Abs`, `Exp`, an even power, or a sum or a product of such values
-(`Sqrt(x^2 + 1)`). The type of an input is not read: an assumption narrows it
-(`assume(s >= 0)` makes it `real<0..>`) and `forget()` widens it again after the
-compilation. `Sqrt(x)` at `x = -4` is then `{re: 0, im: 2}`.
+lane (`x^2`, `x^n`), or a base or radicand that is a nonnegative constant, an
+input whose declared type is ranged at or above 0 (`k: real<0..5>`), or a value
+of `Abs`, `Exp`, an even power, or a sum or a product of such values
+(`Sqrt(x^2 + 1)`). `Sqrt(x)` at `x = -4` for `x: real` is then
+`{re: 0, im: 2}`.
+
+Declared ranges. The range of the declared type of an input proves its sign:
+`>= 0` for `real<0..5>` or `integer<0..>`, `> 0` for `real<1..9>` or
+`real<0<..>` (`Program.signs`, set in `input()`). An inferred type is not read,
+and an assumption does not change a type (`assume(s >= 0)` leaves `s: real`), so
+neither proves a sign. A value outside its declared type gives an unspecified
+result. The sign removes `Abs` of such an input (or of a sum or product of
+them, `nonnegative()`), takes the real function in the complex mode (above),
+compiles an integer power in the bigint mode whose exponent is such an input
+(`Power(n, m)` for `m: integer<0..10>`, which declines for `m: integer`),
+spells a power of it with the builtin `pow()` on GLSL (`pow.nonnegative`), and
+drops the domain guard of `ln`, `log10` and `log2` on GLSL for an input `> 0`
+(`ln.positive`; `Ln(k)` for `k: real<0..5>` keeps it, since `Ln(0)` is a
+pole). The interval mode reads no range: the enclosure of an input is the
+host's. Not done: a bound carried through arithmetic (`Abs(x - 1)` for
+`x: real<1..9>` keeps its `abs`).
 
 Inputs in the complex mode: an input of type `number` is complex
 (`CompileMode`), so a comparison of it declines; an input declared `real` or

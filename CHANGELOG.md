@@ -39,6 +39,13 @@
   called in the domain of a `for`, calls no hook. The passes of a
   `parallel for` call the hooks and run in order. A time limit keeps running
   while the run waits, so a debugged run has none.
+- **`compile()` uses the range of the declared type of an input** (CE-1505).
+  With `k: real<0..5>` and `x: real<1..9>`, `Abs(k)` compiles to `k`; in
+  `mode: 'complex'`, `Sqrt(k)` is the real square root instead of complex
+  arithmetic; and on GLSL, `Ln(x)` is the builtin `log(x)` with no domain
+  guard. A value outside the declared range gives an unspecified result
+  (`Abs(k)` at `k = -2` gives -2). An assumption (`assume(k >= 0)`) does not
+  change a type, so it does not change the code.
 
 ### Resolved Issues
 

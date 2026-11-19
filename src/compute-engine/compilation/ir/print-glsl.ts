@@ -144,6 +144,10 @@ export const GLSL: Syntax = deepFreeze({
     'ln': `($0 > 0.0 ? log($0) : ${NAN})`,
     'log10': `($0 > 0.0 ? log($0) * 0.4342944819032518 : ${NAN})`,
     'log2': `($0 > 0.0 ? log2($0) : ${NAN})`,
+    // An operand `> 0` (`print.ts`, `positive()`): the builtin.
+    'ln.positive': 'log($0)',
+    'log10.positive': '(log($0) * 0.4342944819032518)',
+    'log2.positive': 'log2($0)',
     ...calls('', ['sin', 'cos', 'tan']),
     'cot': '(1.0 / tan($0))',
     'sec': '(1.0 / cos($0))',

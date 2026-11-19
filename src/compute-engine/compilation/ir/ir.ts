@@ -167,7 +167,15 @@ export type Program = {
   /** The value kind types that the program reads or makes (the interval
    *  mode: `['enclosure']`, `lower-enclosure.ts`). */
   readonly valueKinds?: readonly string[];
+  /** The sign of each input that the range of its declared type bounds
+   *  below by 0 (`real<0..5>`, `integer<1..>`): `positive` when the bound
+   *  excludes 0. A value outside its declared type gives an unspecified
+   *  result, so the printers may read it (`print.ts`, `nonnegative()`). */
+  readonly signs?: ReadonlyMap<V, Sign>;
 };
+
+/** A sign that the declared type of an input proves. */
+export type Sign = 'positive' | 'nonnegative';
 
 export const scalarType = (lane: Lane): IRType => ({ lane, shape: [] });
 
@@ -403,6 +411,8 @@ export class Builder {
   readonly captures = new Set<string>();
   /** The instruction of each `op` value. */
   readonly defs = new Map<V, Instr & { k: 'op' }>();
+  /** The sign of each input that its declared type proves (`Program`). */
+  readonly signs = new Map<V, Sign>();
   readonly functions: IRFunction[] = [];
   private open: Region[] = [];
   private readonly paramNames: string[] = [];
@@ -466,6 +476,7 @@ export class Builder {
       functions: [main, ...this.functions],
       entry: 'main',
       captures: [...this.captures],
+      ...(this.signs.size > 0 ? { signs: this.signs } : {}),
     };
   }
 
