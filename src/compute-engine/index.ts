@@ -17,6 +17,7 @@ import { isValidPrimitiveType } from '../common/type/primitive.js';
 
 import type { OneOf } from '../common/one-of.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
+import type { EpsilDebugHooks } from './types-debug.js';
 import { hidePrivateProperties } from '../common/utils.js';
 
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
@@ -698,6 +699,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** See `IComputeEngine._epsilStatementResultHook`. @internal */
   _epsilStatementTimeLimitMs: number | undefined = undefined;
+
+  /** See `IComputeEngine._epsilDebugHooks`. @internal */
+  _epsilDebugHooks: EpsilDebugHooks | undefined = undefined;
   _epsilStatementResultHook:
     | ((
         statement: Expression,

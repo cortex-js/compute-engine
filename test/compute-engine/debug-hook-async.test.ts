@@ -1,0 +1,224 @@
+// The debug hooks of `executeEpsilAsync()` (`ExecuteEpsilAsyncOptions.debug`,
+// `EpsilDebugHooks` in `src/compute-engine/types-debug.ts`): which
+// statements call them, pausing on a pending promise, reading the paused
+// scope, the depth, and ending a run from a hook.
+
+import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsilAsync } from '../../src/epsil/execute-epsil';
+import type {
+  EpsilDebugHooks,
+  EpsilDebugStatement,
+} from '../../src/compute-engine/types-debug';
+
+/** Run `source` and return the text of each statement that called
+ * `beforeStatement`, in order, with the value of the run. */
+async function statementsOf(
+  source: string
+): Promise<{ texts: string[]; value: string }> {
+  const ce = new ComputeEngine();
+  const texts: string[] = [];
+  const result = await executeEpsilAsync(ce, source, {
+    debug: {
+      beforeStatement: (at) =>
+        void texts.push(source.slice(at.range[0], at.range[1])),
+    },
+  });
+  return { texts, value: String(result.value) };
+}
+
+describe('Statements that call the hooks', () => {
+  test('top-level statements and function bodies', async () => {
+    const { texts, value } = await statementsOf(
+      'function f(n) {\n  let a = n * 2\n  a + 1\n}\nf(3)'
+    );
+    expect(value).toBe('7');
+    expect(texts).toContain('f(3)');
+    expect(texts).toContain('let a = n * 2');
+    expect(texts).toContain('a + 1');
+    // The body runs after the call that applies it.
+    expect(texts.indexOf('f(3)')).toBeLessThan(texts.indexOf('a + 1'));
+  });
+
+  test('each pass of a `for` body', async () => {
+    const { texts, value } = await statementsOf(
+      'let s = 0\nfor i in 1..3 {\n  s += i\n}\ns'
+    );
+    expect(value).toBe('6');
+    expect(texts.filter((t) => t === 's += i')).toHaveLength(3);
+  });
+
+  test('each pass of a `while` body', async () => {
+    const { texts, value } = await statementsOf(
+      'let i = 0\nwhile i < 4 {\n  i += 1\n}\ni'
+    );
+    expect(value).toBe('4');
+    expect(texts.filter((t) => t === 'i += 1')).toHaveLength(4);
+  });
+
+  test('the branch of an `if` that runs', async () => {
+    const { texts } = await statementsOf(
+      'function g(x) {\n  if x > 0 {\n    let y = 1\n    y\n  } else {\n    let z = 2\n    z\n  }\n}\ng(5)'
+    );
+    expect(texts).toContain('let y = 1');
+    expect(texts).not.toContain('let z = 2');
+  });
+
+  test('a function that a lazy collection applies calls no hook', async () => {
+    // A documented limitation: `map` applies `sq` on the synchronous route.
+    const { texts, value } = await statementsOf(
+      'function sq(k) {\n  let t = k * k\n  t\n}\nsum(map(sq, 1..3))'
+    );
+    expect(value).toBe('14');
+    expect(texts).not.toContain('let t = k * k');
+  });
+
+  test('a `while` with an undecided condition ends with an error, as without hooks', async () => {
+    // The body runs on the asynchronous route during a debugged run, and the
+    // guard of the `while` must still refuse the undecided `i <= n`.
+    const source = 'let i = 1\nwhile i <= n {\n  i = i + 1\n}\ni';
+    const ce = new ComputeEngine();
+    const r = await executeEpsilAsync(ce, source, {
+      debug: { beforeStatement: () => {} },
+    });
+    expect(String(r.value)).toBe('1');
+    expect(r.diagnostics.map((d) => String(d.message))).toEqual([
+      expect.stringContaining('incompatible-type'),
+    ]);
+  });
+
+  test('a debugged run gives the same value as a run without hooks', async () => {
+    const source =
+      'let s = 0\nfor i in 1..5 {\n  for j in 1..i {\n    if (i + j) % 2 == 0 { s += j }\n  }\n}\ns';
+    const plain = await executeEpsilAsync(new ComputeEngine(), source);
+    const { value } = await statementsOf(source);
+    expect(value).toBe(String(plain.value));
+  });
+});
+
+describe('Pausing', () => {
+  test('the run waits while the promise of a hook is pending', async () => {
+    const ce = new ComputeEngine();
+    const source = 'let a = 1\nlet b = a + 1\nb * 10';
+    let resume!: () => void;
+    let paused: EpsilDebugStatement | undefined;
+    let run!: Promise<{ value: unknown }>;
+    const pausedOnce = new Promise<void>((resolveStop) => {
+      const hooks: EpsilDebugHooks = {
+        beforeStatement: (at) => {
+          if (source.slice(at.range[0], at.range[1]) !== 'let b = a + 1')
+            return;
+          paused = at;
+          resolveStop();
+          return new Promise<void>((r) => (resume = r));
+        },
+      };
+      run = executeEpsilAsync(ce, source, { debug: hooks });
+    });
+    let finished = false;
+    void run.then(() => (finished = true));
+    await pausedOnce;
+    // Several turns of the event loop: the run stays paused.
+    for (let k = 0; k < 5; k++) await new Promise((r) => setTimeout(r, 0));
+    expect(finished).toBe(false);
+    // The paused scope: `a` has its value, `b` has none yet.
+    expect(paused!.inScope(() => String(ce.box('a').evaluate()))).toBe('1');
+    resume();
+    expect(String((await run).value)).toBe('20');
+  });
+
+  test('`inScope` reads the locals of a paused function body', async () => {
+    const ce = new ComputeEngine();
+    const source = 'function f(n) {\n  let a = n * 2\n  a + 1\n}\nf(21)';
+    const seen: string[] = [];
+    await executeEpsilAsync(ce, source, {
+      debug: {
+        beforeStatement: async (at) => {
+          if (source.slice(at.range[0], at.range[1]) !== 'a + 1') return;
+          // Let other work run first, so that the engine's own context is
+          // not the paused one when `inScope` is called.
+          await new Promise((r) => setTimeout(r, 0));
+          seen.push(
+            at.inScope(() => String(ce.box(['Add', 'a', 'n']).evaluate()))
+          );
+          seen.push(
+            at.inScope(() =>
+              String(ce.context.lexicalScope.bindings.has('a'))
+            )
+          );
+        },
+      },
+    });
+    expect(seen).toEqual(['63', 'true']);
+  });
+
+  test('the depth of a function body is larger than that of its call', async () => {
+    const ce = new ComputeEngine();
+    const source = 'function f(n) {\n  let a = n\n  a\n}\nf(1)';
+    const depths: Record<string, number> = {};
+    await executeEpsilAsync(ce, source, {
+      debug: {
+        beforeStatement: (at) => {
+          depths[source.slice(at.range[0], at.range[1])] = at.depth;
+        },
+      },
+    });
+    expect(depths['let a = n']).toBeGreaterThan(depths['f(1)']);
+    expect(depths['a']).toBe(depths['let a = n']);
+  });
+});
+
+describe('`afterStatement`', () => {
+  test('receives the value of each statement', async () => {
+    const ce = new ComputeEngine();
+    const source = 'function h(x) {\n  let e = x * 3\n  e + 1\n}\nh(2)';
+    const values: Record<string, string> = {};
+    await executeEpsilAsync(ce, source, {
+      debug: {
+        afterStatement: (at, value) => {
+          values[source.slice(at.range[0], at.range[1])] = String(value);
+        },
+      },
+    });
+    expect(values['e + 1']).toBe('7');
+    expect(values['h(2)']).toBe('7');
+  });
+});
+
+describe('Ending a run from a hook', () => {
+  test('a rejected hook promise rejects the run with that error', async () => {
+    const ce = new ComputeEngine();
+    const stop = new Error('debugger: terminate');
+    const source = 'function f(n) {\n  let a = n\n  a\n}\nf(1)\n42';
+    await expect(
+      executeEpsilAsync(ce, source, {
+        debug: {
+          beforeStatement: (at) =>
+            source.slice(at.range[0], at.range[1]) === 'a'
+              ? Promise.reject(stop)
+              : undefined,
+        },
+      })
+    ).rejects.toBe(stop);
+    // The hooks are removed from the engine when the run ends.
+    expect(ce._epsilDebugHooks).toBeUndefined();
+  });
+
+  test('a hook that throws in a loop body ends the run', async () => {
+    const ce = new ComputeEngine();
+    const stop = new Error('debugger: terminate');
+    const source = 'let s = 0\nfor i in 1..10 {\n  s += i\n}\ns';
+    let passes = 0;
+    await expect(
+      executeEpsilAsync(ce, source, {
+        debug: {
+          beforeStatement: (at) => {
+            if (source.slice(at.range[0], at.range[1]) !== 's += i') return;
+            passes += 1;
+            if (passes === 3) throw stop;
+          },
+        },
+      })
+    ).rejects.toBe(stop);
+    expect(passes).toBe(3);
+  });
+});

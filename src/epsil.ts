@@ -33,6 +33,10 @@ export type {
   ExecuteEpsilAsyncOptions,
   ExecuteEpsilResult,
 } from './epsil/execute-epsil.js';
+export type {
+  EpsilDebugHooks,
+  EpsilDebugStatement,
+} from './compute-engine/types-debug.js';
 export type { CancellationCause } from './common/interruptible.js';
 
 export const version = '{{SDK_VERSION}}';

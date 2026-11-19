@@ -712,9 +712,15 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           options.expression,
           evaluateIf(ops, options)
         ),
+      // The guard of a `while` is checked on both routes: a loop body runs on
+      // the asynchronous route during a run that a debugger follows.
       evaluateAsync: async (ops, options) =>
         surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
-        evaluateIfAsync(ops, options),
+        whileGuardResult(
+          options.engine,
+          options.expression,
+          await evaluateIfAsync(ops, options)
+        ),
       // A held single-branch `If(c, L)` over a collection `L` (the restriction
       // `L\{c\}` with an undecided condition) presents as the collection of
       // its restricted cells `If(c, elem)`, so `isCollection`, `count` and
@@ -764,14 +770,33 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         { engine: ce, signal, effects, _contextStack, _precisionWindow }
       ) =>
         runAsync(
-          // The loop body is evaluated synchronously, and `runAsync`
-          // suspends this handler between time slices: every step must run
-          // with the host capability registry and the context stack (the
-          // scope of the loop index) this evaluation captured.
+          // `runAsync` suspends this handler between time slices: every step
+          // must run with the host capability registry and the context stack
+          // (the scope of the loop index) this evaluation captured. The body
+          // is evaluated synchronously, except during a run that a debugger
+          // follows (`ce._epsilDebugHooks`): it is then evaluated with
+          // `evaluateAsync()`, with the same registry and stack, so that each
+          // statement of the body runs on the asynchronous route, where the
+          // debugger can pause it. Awaiting the body gives the same values,
+          // but makes the loop slower, so it is done only then.
           withEvaluationEffects(
             ce,
             effects,
-            runLoop(ops[0], ops.slice(1), ce),
+            runLoop(
+              ops[0],
+              ops.slice(1),
+              ce,
+              false,
+              ce._epsilDebugHooks === undefined
+                ? undefined
+                : (body) =>
+                    body.evaluateAsync({
+                      signal,
+                      _effects: effects,
+                      _contextStack,
+                      _precisionWindow,
+                    })
+            ),
             _contextStack,
             _precisionWindow
           ),
@@ -6071,6 +6096,13 @@ interface LoopState {
    * write in the domain is not made a second time when the comprehension
    * is evaluated again. */
   firstDomain?: Expression;
+  /** For a `Loop` on the asynchronous route: evaluates the body with
+   * `evaluateAsync()`. The walk yields the promise, and its driver
+   * (`runAsync`) gives back the value. Each statement of the body then runs
+   * on the asynchronous route, where a debugger can pause it
+   * (`ExecuteEpsilAsyncOptions.debug`). Unset, the walk evaluates the body
+   * with `evaluate()`. */
+  awaitBody?: (body: Expression) => PromiseLike<Expression>;
 }
 
 /**
@@ -6186,7 +6218,9 @@ function* runLoop(
   elements: ReadonlyArray<Expression>,
   ce: ComputeEngine,
   /** For a `ParallelLoop`: the elements of the first clause are passes. */
-  parallel?: boolean
+  parallel?: boolean,
+  /** See `LoopState.awaitBody`. */
+  awaitBody?: (body: Expression) => PromiseLike<Expression>
 ): Generator<Expression> {
   body ??= ce.Nothing;
   // A parallel loop with an empty body still walks its domain and consumes
@@ -6207,7 +6241,10 @@ function* runLoop(
     try {
       let i = 0;
       while (true) {
-        const result = body.evaluate();
+        const result =
+          awaitBody === undefined
+            ? body.evaluate()
+            : yield* awaitedBodyValue(awaitBody, body);
         if (isFunction(result, 'Break'))
           return result.ops.length > 0 ? result.op1 : ce.Nothing;
         if (result.operator === 'Return') return result;
@@ -6233,6 +6270,7 @@ function* runLoop(
     stopped: false,
     count: 0,
     parallel,
+    awaitBody,
   };
   yield* runNestedElements(body, elements, ce, state, (result) => {
     if (isFunction(result, 'Break')) {
@@ -7457,6 +7495,21 @@ function* runNestedElements(
 }
 
 /**
+ * The value of `body`, evaluated with `awaitBody` (`LoopState.awaitBody`).
+ * The step yields the promise to the driver of the walk, `runAsync`, which
+ * awaits it and gives the value back to the next step. Only the
+ * asynchronous `Loop` sets `awaitBody`, and `runAsync` is its only driver,
+ * so the walk's other consumers never see the promise: the yield type of
+ * the walk stays `Expression`.
+ */
+function* awaitedBodyValue(
+  awaitBody: (body: Expression) => PromiseLike<Expression>,
+  body: Expression
+): Generator<Expression, Expression, unknown> {
+  return (yield awaitBody(body) as unknown as Expression) as Expression;
+}
+
+/**
  * Recursive nested iteration over Element clauses. At each leaf, the body is
  * evaluated and handed to `onLeaf`, which may stop the walk by setting
  * `state.stopped`. `yield`s once per body evaluation for interruptibility.
@@ -7472,7 +7525,10 @@ function* runNested(
   if (state.stopped) return;
 
   if (index === elements.length) {
-    const result = body.evaluate();
+    const result =
+      state.awaitBody === undefined
+        ? body.evaluate()
+        : yield* awaitedBodyValue(state.awaitBody, body);
     state.count += 1;
     if (state.count > ce.iterationLimit)
       throw new CancellationError({ cause: 'iteration-limit-exceeded' });

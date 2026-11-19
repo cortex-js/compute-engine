@@ -4,8 +4,10 @@ import {
   debugStatementHook,
   debugStatementResultHook,
   invokeDebugHook,
+  invokeDebugHookAsync,
   isDebugHookFailure,
 } from '../common/debug-hook.js';
+import type { EpsilDebugStatement } from './types-debug.js';
 import {
   isThenable,
   CancellationError,
@@ -4034,6 +4036,17 @@ export async function evaluateStatementsAsync(
         : contextStack;
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       invokeDebugHook(() => debugStatementHook!(op));
+    // The hooks of a debugger that follows a run of `executeEpsilAsync()`
+    // (`ExecuteEpsilAsyncOptions.debug`): the run waits while a debugger
+    // pauses.
+    const debugHooks = ce._epsilDebugHooks;
+    if (
+      debugHooks?.beforeStatement !== undefined &&
+      op.sourceOffsets !== undefined
+    ) {
+      const at = debugStatementOf(ce, op, stack, effects, precisionWindow);
+      await invokeDebugHookAsync(() => debugHooks.beforeStatement!(at));
+    }
     // `effects` is the host capability registry the enclosing asynchronous
     // evaluation captured, and `contextStack` its evaluation-context stack
     // (which holds the block scope); each statement must run with the same
@@ -4101,6 +4114,17 @@ export async function evaluateStatementsAsync(
           program ? i : undefined,
           failure
         );
+      const debugHooks = ce._epsilDebugHooks;
+      if (
+        debugHooks?.afterStatement !== undefined &&
+        op.sourceOffsets !== undefined
+      ) {
+        const at = debugStatementOf(ce, op, stack, effects, precisionWindow);
+        const value = result;
+        await invokeDebugHookAsync(() =>
+          debugHooks.afterStatement!(at, value)
+        );
+      }
     } finally {
       if (program && isTimeoutCancellation(failure))
         ce._deadlineFrame = reportingFrame;
@@ -4116,6 +4140,35 @@ export async function evaluateStatementsAsync(
       break;
   }
   return statementListValue(ce, ops, result);
+}
+
+/**
+ * The statement `op` of an asynchronous statement list, as the debug hooks
+ * of `executeEpsilAsync()` receive it (`EpsilDebugStatement`). `stack`,
+ * `effects` and `precisionWindow` are those of the evaluation of `op`:
+ * `inScope()` puts them in place, because when the hook runs, after an
+ * `await`, the engine can hold those of another evaluation.
+ */
+function debugStatementOf(
+  ce: ComputeEngine,
+  op: Expression,
+  stack: EvaluateOptions['_contextStack'] | undefined,
+  effects: EffectHandlers | undefined,
+  precisionWindow: EvaluateOptions['_precisionWindow'] | undefined
+): EpsilDebugStatement {
+  // Read once, when the statement is reached: `depth` and `inScope()` use
+  // the same stack, and a later `inScope()` does not read the engine's state
+  // of another evaluation.
+  const contexts = stack ?? ce._evalContextStack;
+  // The same fallback as `evaluateAsync()` (`abstract-boxed-expression.ts`).
+  const handlers = effects ?? ce._evaluationEffects ?? ce.effects;
+  return {
+    statement: op,
+    range: op.sourceOffsets!,
+    depth: contexts.length,
+    inScope: <T>(fn: () => T): T =>
+      runWithEvaluationEffects(ce, handlers, fn, contexts, precisionWindow),
+  };
 }
 
 /**

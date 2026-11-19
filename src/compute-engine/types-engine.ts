@@ -39,6 +39,7 @@ import type {
 } from './types-effects.js';
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { UnitEnvironment } from './binding-unit.js';
+import type { EpsilDebugHooks } from './types-debug.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -1028,6 +1029,16 @@ export interface IComputeEngine {
   /** Independent Epsil time limit per Program statement, in milliseconds.
    * @internal */
   _epsilStatementTimeLimitMs: number | undefined;
+
+  /** The debug hooks of the run of `executeEpsilAsync()` in progress on this
+   * engine (`ExecuteEpsilAsyncOptions.debug`), or `undefined`. Read by
+   * `evaluateStatementsAsync` (`function-utils.ts`), which calls them, and by
+   * the asynchronous handler of `Loop`, which then evaluates the loop body
+   * with `evaluateAsync()` so that the statements of the body call them. A
+   * field of the engine, not a module variable, for the reason given at
+   * `_epsilStatementResultHook`.
+   * @internal */
+  _epsilDebugHooks: EpsilDebugHooks | undefined;
 
   /** Called with each statement and its value, after the statement
    * evaluated: a statement of a statement list (a `Block` body, a function

@@ -11,6 +11,34 @@
   static contract. The square root of a declared strictly positive finite
   real now retains that positive bound in its result type.
 
+### New Features
+
+- **`executeEpsilAsync()` accepts debug hooks, so a debugger can pause an
+  Epsil program in a browser.** The `debug` option takes
+  `beforeStatement(at)` and `afterStatement(at, value)` (`EpsilDebugHooks`).
+  They are called for each top-level statement and each statement of a
+  function body, a loop body, an `if` branch or a `do` block. When a hook
+  returns a promise, the run waits until it settles. `at.range` locates the
+  statement in the source, `at.depth` serves to step over or out of a call,
+  and `at.inScope(fn)` reads the variables of the paused statement:
+
+  ```ts
+  await executeEpsilAsync(ce, "function f(n) {\n  let a = n * 2\n  a + 1\n}\nf(20)", {
+    debug: {
+      beforeStatement: async (at) => {
+        // at the statement `a + 1`:
+        at.inScope(() => ce.box("a").evaluate()); // ➔ 40
+        await resumed; // the run waits here
+      },
+    },
+  });
+  ```
+
+  A hook that throws ends the run. A statement of a function that a lazy
+  collection applies (a function given to `map` or `filter`), or that is
+  called in the domain of a `for`, calls no hook. A time limit keeps running
+  while the run waits, so a debugged run has none.
+
 ### Resolved Issues
 
 - **`compile()` compiles a call of a function of an input inside a function

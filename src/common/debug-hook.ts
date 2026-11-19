@@ -23,6 +23,11 @@
  * inside the hook (a watch, a debug-console entry) re-enters
  * `evaluateStatements`, so the consumer must suppress its own hook for the
  * duration or it will pause recursively.
+ *
+ * A host that cannot block a thread (a browser page) uses the asynchronous
+ * hooks of `executeEpsilAsync()` instead (`ExecuteEpsilAsyncOptions.debug`,
+ * `EpsilDebugHooks` in `compute-engine/types-debug.ts`): a hook returns a
+ * promise, and the run waits until it settles.
  */
 export type DebugStatementHook = (statement: unknown) => void;
 
@@ -65,14 +70,28 @@ export function invokeDebugHook(fn: () => void): void {
   try {
     fn();
   } catch (error) {
-    const failure =
-      error !== null &&
-      (typeof error === 'object' || typeof error === 'function')
-        ? error
-        : new Error('Debugger hook threw', { cause: error });
-    HOOK_FAILURES.add(failure);
-    throw failure;
+    throw hookFailure(error);
   }
+}
+/** As `invokeDebugHook()`, for a hook that can return a promise (the hooks
+ * of `executeEpsilAsync()`, `ExecuteEpsilAsyncOptions.debug`): a throw and a
+ * rejection are both hook failures. */
+export async function invokeDebugHookAsync(
+  fn: () => void | PromiseLike<void>
+): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    throw hookFailure(error);
+  }
+}
+function hookFailure(error: unknown): object {
+  const failure =
+    error !== null && (typeof error === 'object' || typeof error === 'function')
+      ? error
+      : new Error('Debugger hook threw', { cause: error });
+  HOOK_FAILURES.add(failure);
+  return failure;
 }
 export function isDebugHookFailure(error: unknown): boolean {
   return (

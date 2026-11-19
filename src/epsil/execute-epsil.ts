@@ -22,6 +22,7 @@ import {
 // imports `epsil`). The engine is injected at call time, mirroring the
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
 import type { Expression, ComputeEngine } from '../compute-engine.js';
+import type { EpsilDebugHooks } from '../compute-engine/types-debug.js';
 
 import {
   DiagnosticNote,
@@ -87,6 +88,11 @@ export interface ExecuteEpsilAsyncOptions extends ExecuteEpsilOptions {
    * does. The signal is given to the `evaluateAsync()` of each statement
    * and read again between two statements. */
   signal?: AbortSignal;
+  /** Hooks with which a debugger follows the run: they are called before
+   * and after each statement of the source that the run evaluates on the
+   * asynchronous route, and the run waits while a hook's promise is
+   * pending. See `EpsilDebugHooks` for the statements that call them. */
+  debug?: EpsilDebugHooks;
 }
 
 export interface ExecuteEpsilResult {
@@ -249,6 +255,10 @@ export async function executeEpsilAsync(
   );
   const inProgram = <T>(fn: () => T): T =>
     ce._boxingState.withOperation(program, fn);
+  // The debug hooks are installed for the whole run, waits included, and the
+  // hooks of an enclosing run are put back when it ends.
+  const enclosingDebugHooks = ce._epsilDebugHooks;
+  if (options?.debug !== undefined) ce._epsilDebugHooks = options.debug;
   // The frame outside the run is put back on every exit, an exception
   // included: the span around the call has closed, and its frame must not
   // stay on the engine.
@@ -298,6 +308,7 @@ export async function executeEpsilAsync(
     return step.value;
   } finally {
     ce._deadlineFrame = outsideFrame;
+    ce._epsilDebugHooks = enclosingDebugHooks;
   }
 }
 

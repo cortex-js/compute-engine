@@ -225,6 +225,70 @@ taken as part of it (a declaration counted as a statement of the program, an
 error reported in its diagnostics). Use another engine for work that must
 run at the same time.
 
+### Debugging
+
+The `debug` option of `executeEpsilAsync()` gives a debugger two hooks:
+`beforeStatement(at)` and `afterStatement(at, value)`. They are called for
+each statement of the source that the run evaluates on the asynchronous
+route: a top-level statement, and a statement of a function body, of a loop
+body, of a branch of `if` or of a `do` block. When a hook returns a promise,
+the run waits until the promise settles. This is how a debugger pauses, in a
+browser as well as in Node, with no worker and no shared memory.
+
+`at.range` is the `[start, end]` offsets of the statement in the source,
+`at.depth` is the depth of its evaluation context (a call makes it larger:
+compare depths to step over or out of a call), and `at.inScope(fn)` runs `fn`
+in the context of the statement: there, `ce.context.lexicalScope` holds its
+variables, and an expression that `fn` evaluates reads their values.
+
+```ts
+const source = `function f(n) {
+  let a = n * 2
+  a + 1
+}
+f(20)`;
+
+const result = await executeEpsilAsync(ce, source, {
+  debug: {
+    beforeStatement: async (at) => {
+      const text = source.slice(at.range[0], at.range[1]);
+      if (text !== "a + 1") return;
+      // Read the variables of the paused statement
+      const a = at.inScope(() => ce.box("a").evaluate().toString());
+      console.log(`paused at "${text}", depth ${at.depth}, a = ${a}`);
+      // The run waits until this promise settles
+      await new Promise((resume) => setTimeout(resume, 100));
+    },
+  },
+});
+// ➔ paused at "a + 1", depth 3, a = 40
+result.value.toString();
+// ➔ "41"
+```
+
+When a hook throws, or its promise rejects, the run stops and the promise of
+`executeEpsilAsync()` rejects with that error: this is how a debugger ends a
+run. An abort of `signal` while a hook's promise is pending takes effect only
+when the promise settles.
+
+A time limit keeps running while the run waits: a `withTimeLimit()` span
+around the call, `statementTimeLimitMs`, and the engine's time limit. A pause
+longer than the limit ends the run with a timeout, so run a program that a
+debugger follows without a time limit.
+
+A statement that the engine evaluates on the synchronous route calls no hook.
+This is the case of a statement of a function that a lazy collection applies
+when it produces an element: a function given to `map`, `filter`,
+`takeWhile`, `any`, `all` or `count`, for example, and of a function called
+in the domain of a `for` (`for x in g(3)`). A breakpoint in such a function
+does not stop the run. It is also the case of a statement that runs
+after the run ends, when the host reads the elements of a lazy collection
+that the program returned.
+
+The hooks are installed on the engine for the duration of the run, and a loop
+body is then evaluated on the asynchronous route, which is slower. Give a run
+that a debugger follows an engine of its own.
+
 ### Serialization
 
 `serializeEpsil(expression, options?)` converts MathJSON back to Epsil:
