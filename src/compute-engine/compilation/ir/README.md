@@ -2401,7 +2401,20 @@ chosen. A real call keeps the value of the real lane: `Sqrt(w)` at `w = -1` is
 parameter declared `real` (or `integer`) declines a complex argument. A
 recursive call of another lane calls the function of that lane, which, for a
 function with no declared result (a real result, above), declines with its
-complex body.
+complex body. A parameter declared a list of integers (not of tuples) takes a
+list of reals on the real lane (CE-1483), as an `Apply` of a literal does
+above: the interpreter binds the list whole and checks no element, and a
+parameter of an IR function has the lane of its argument, so the function of a
+list of reals, its parameter on the real lane, is another version of the
+binding (`laneKey()`; the `bigint` mode declines a list of reals), and the
+arguments of each call of a function with such a parameter are lowered before
+the function is chosen. With `function g(H: list<integer>) -> real { H[1] }`,
+`g(L)` of `L: list<real>` and `f(n) = g([n, 1])` at n = 2.5 are `2.5`;
+`g(L) + g(M)` with `M: list<integer>` calls two functions. A result `integer`,
+declared or inferred by the engine (`function g(H: list<integer>) { H[1] }` is
+typed `(list<integer>) -> integer`), declines a real body ("a body of g that
+is not integer"), where the interpreter gives `2.5`; a recursive call that
+returns to the lane that called it declines as above.
 
 The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's

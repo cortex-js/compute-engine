@@ -94,16 +94,24 @@
   written to a list of integers.
 
 - **`compile()` binds a list of reals at a parameter `list<integer>` of a
-  function literal** (CE-1483). `Apply((H: list<integer>) ↦ H[1], L)`
+  function literal or of a named function** (CE-1483).
+  `Apply((H: list<integer>) ↦ H[1], L)`
   declined since 0.194.0 with "an argument of Apply that is not
   list<integer>" when `L` is a list of reals, also of the type
   `list<nan | real | signed_infinity>` of a Tycho row, so the action of the
   buddhabrot showcase ran on the interpreter and passed its deadline. The
   interpreter binds the list whole and checks no element: at `L = [2.5, 3, 4]`
   both now give `2.5`, and the buddhabrot action compiles again (90,001 cells
-  after 5,000 samples). A tuple whose type does not prove the parameter's, and
-  a real at a parameter `integer`, still decline: the interpreter gives an
-  `incompatible-type` error.
+  after 5,000 samples). A named function does the same: with
+  `function g(H: list<integer>) -> real { H[1] }`, `g(L)` and
+  `f(n) = g([n, 1])` at `n = 2.5` give `2.5`, as in the interpreter (they
+  declined with "an argument of g that is not list<integer>"); a call with a
+  list of reals and a call with a list of integers call two versions of `g`.
+  A tuple whose type does not prove the parameter's, and a real at a
+  parameter `integer`, still decline: the interpreter gives an
+  `incompatible-type` error. So does a function whose result is `integer`,
+  declared or inferred (`function g(H: list<integer>) { H[1] }`), with a list
+  of reals, where the interpreter gives `2.5`.
 
 - **`compile()` compiles a list of the calls of a recursive function again**
   (CE-1472). With `r` declared `(real) -> real` and

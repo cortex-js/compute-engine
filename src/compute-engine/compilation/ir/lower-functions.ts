@@ -283,7 +283,13 @@ function signatureTypes(e: Fn, literal: Fn) {
     return list !== undefined &&
       (list.shape.length === 1 || tupleAxis(t) === 1) &&
       (list.lane === 'real' || list.lane === 'integer')
-      ? { ...list, tuple: tupleAxis(t) }
+      ? {
+          ...list,
+          tuple: tupleAxis(t),
+          // A list of integers (not of tuples): the lane of a list of
+          // reals that it binds whole (`laneKey()`, CE-1483).
+          whole: list.lane === 'integer' && tupleAxis(t) === undefined,
+        }
       : {
           lane: scalar ? s!.lane : 'real',
           shape: [],
@@ -448,11 +454,30 @@ export function functionLowering(
     v !== undefined &&
     type(v).shape.length === 0 &&
     type(v).lane === 'complex';
+  /** A list parameter of integers (not of tuples) that takes the real lane
+   *  of the list of reals `v`, which the interpreter binds whole with no
+   *  check of its elements (CE-1483). */
+  const realListAt = (
+    p: ReturnType<typeof signatureTypes>['params'][number],
+    v: V | undefined
+  ) =>
+    'whole' in p &&
+    p.whole &&
+    v !== undefined &&
+    !cx.tuples.has(v) &&
+    type(v).shape.length === 1 &&
+    type(v).lane === 'real';
   /** The lanes of the open parameters at a call of the arguments `args`:
    *  one IR function per key, so that a call with a real and a call with a
-   *  complex argument each call a function of the lane of its argument. */
+   *  complex argument each call a function of the lane of its argument,
+   *  and so do a call with a list of reals and a call with a list of
+   *  integers at a list parameter of integers. */
   const laneKey = (sig: ReturnType<typeof signatureTypes>, args?: V[]) =>
-    sig.params.map((p, i) => (complexAt(p, args?.[i]) ? 'c' : 'r')).join('');
+    sig.params
+      .map((p, i) =>
+        complexAt(p, args?.[i]) ? 'c' : realListAt(p, args?.[i]) ? 'l' : 'r'
+      )
+      .join('');
   /** The functions being lowered, by the name of their head: a call of
    *  that name in the body is the recursive call (its node can be bound
    *  before the definition is). */
@@ -490,8 +515,13 @@ export function functionLowering(
   ): UserFunction => {
     begun += 1;
     const { names, result, list, tuple, r, open, points, shaped } = sig;
-    const params = sig.params.map((p, i) => {
-      if (complexAt(p, args?.[i])) return { ...p, lane: 'complex' as const };
+    const params = sig.params.map((declared, i) => {
+      if (complexAt(declared, args?.[i]))
+        return { ...declared, lane: 'complex' as const };
+      // A list of reals at a list parameter of integers: on the real lane.
+      const p = realListAt(declared, args?.[i])
+        ? { ...declared, lane: 'real' as const }
+        : declared;
       const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
       if (
         !cx.runtimeLengths &&
@@ -745,6 +775,7 @@ export function functionLowering(
           sig.params.some(
             (p) =>
               ('open' in p && p.open) ||
+              ('whole' in p && p.whole) ||
               (!functions.has(binding.key) &&
                 ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
                   ('point' in p && p.point !== undefined)))

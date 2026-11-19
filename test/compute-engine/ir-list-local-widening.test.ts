@@ -314,3 +314,163 @@ describe('A list argument of Apply bound whole (CE-1483)', () => {
     ).toMatch(/an argument of Apply that is not integer/);
   });
 });
+
+describe('A list of reals at a list<integer> parameter of a named function (CE-1483)', () => {
+  /** The compiled code of `call` after the Epsil program `source`, with
+   *  inputs of the types `types`, and the interpreter's value of `call`
+   *  with the values `inputs` substituted. */
+  const run = (
+    source: string,
+    call: unknown,
+    types: Record<string, string>,
+    inputs: Record<string, number | number[]>
+  ) => {
+    const ce = new ComputeEngine();
+    for (const [k, t] of Object.entries(types)) ce.declare(k, t as never);
+    const r = executeEpsil(ce, source);
+    expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    const e = ce.box(call as never);
+    const compiled = () =>
+      compile(e, {
+        to: 'javascript',
+        fallback: false,
+      } as never) as unknown as Result & { code: string };
+    const want = () =>
+      read(
+        e
+          .subs(
+            Object.fromEntries(
+              Object.entries(inputs).map(([k, v]) => [
+                k,
+                ce.box((Array.isArray(v) ? ['List', ...v] : v) as never),
+              ])
+            )
+          )
+          .evaluate()
+          .N()
+      );
+    return { compiled, want };
+  };
+  const agree = (...args: Parameters<typeof run>) => {
+    const p = run(...args);
+    const code = p.compiled();
+    // An input, so that the compilation lowers the call (a literal list
+    // would fold the expression to a constant).
+    for (const k of Object.keys(args[3])) expect(code.code).toMatch(`_.${k}`);
+    expect(code.run(args[3])).toEqual(p.want());
+  };
+  const real = { L: 'list<real>' };
+
+  test('the function of a list of reals is on the real lane', () => {
+    // The interpreter checks no element: 2.5, not an error.
+    agree('function g(H: list<integer>) -> real { H[1] }', ['g', 'L'], real, {
+      L: [2.5, 1],
+    });
+    agree(
+      'function g(H: list<integer>) -> real { H[1] }\nfunction f(n) { g([n, 1]) }',
+      ['f', 'x'],
+      { x: 'real' },
+      { x: 2.5 }
+    );
+    agree(
+      'function g(H: list<integer>) -> real { H[1] }',
+      ['g', 'L'],
+      { L: 'list<nan | real | signed_infinity>' },
+      { L: [2.5, 1] }
+    );
+    agree(
+      'function g(H: list<integer^2>) -> real { H[1] + H[2] }',
+      ['g', 'L'],
+      { L: 'list<real^2>' },
+      { L: [2.5, 1] }
+    );
+    agree(
+      'function g(H: list<integer>) -> real { H[1] % 2 }',
+      ['g', 'L'],
+      real,
+      {
+        L: [3.5, 1],
+      }
+    );
+    agree(
+      'function g(H: list<integer>) -> real { let s = 0; for k in 1..Length(H) { s = s + H[k] }; s }',
+      ['g', 'L'],
+      real,
+      { L: [2.5, 1, 0.25] }
+    );
+    agree(
+      'function g(H: list<integer>) -> list<real> { H }',
+      ['g', 'L'],
+      real,
+      {
+        L: [2.5, 1],
+      }
+    );
+  });
+
+  test('a list of reals and a list of integers call two functions', () => {
+    const inputs = { L: [2.5, 1], M: [3, 4, 5] };
+    const p = run(
+      'function g(H: list<integer>) -> real { H[1] * Length(H) }',
+      ['Add', ['g', 'L'], ['g', 'M']],
+      { L: 'list<real>', M: 'list<integer>' },
+      inputs
+    );
+    const code = p.compiled();
+    expect(code.code).toMatch(/u0_g\(/);
+    expect(code.code).toMatch(/u1_g\(/);
+    expect(code.run(inputs)).toBe(14);
+    expect(p.want()).toBe(14);
+    // A recursive call of the other lane, which does not call back: 3.
+    agree(
+      'function g(H: list<integer>, k: integer) -> real { if k <= 0 { H[1] } else { g([H[1] + 0.5, 1], k - 1) } }',
+      ['g', 'M', 'k'],
+      { M: 'list<integer>', k: 'integer' },
+      { M: [2, 1], k: 2 }
+    );
+  });
+
+  test.each(['javascript', 'glsl'])(
+    'two functions on %s, each of the lengths of its first call',
+    (to) => {
+      const ce = new ComputeEngine();
+      ce.declare('L', 'list<real^2>');
+      ce.declare('M', 'list<integer^2>');
+      executeEpsil(
+        ce,
+        'function g(H: list<integer^2>) -> real { H[1] + H[2] }'
+      );
+      const r = compile(ce.box(['Add', ['g', 'L'], ['g', 'M']] as never), {
+        to,
+        fallback: false,
+      } as never) as unknown as Result & { code: string };
+      expect(r.code).toMatch(/u0_g\(/);
+      expect(r.code).toMatch(/u1_g\(/);
+      if (to === 'javascript')
+        expect(r.run({ L: [2.5, 1], M: [3, 4] })).toBe(10.5);
+    }
+  );
+
+  test('an integer result of a real body and a cycle between the lanes decline', () => {
+    // The result `integer`, declared or inferred by Epsil from the
+    // parameter, does not hold the real body (the interpreter gives 2.5).
+    for (const source of [
+      'function g(H: list<integer>) -> integer { H[1] }',
+      'function g(H: list<integer>) { H[1] }',
+    ])
+      expect(
+        failure(() => run(source, ['g', 'L'], real, { L: [2.5, 1] }).compiled())
+      ).toMatch(/a body of g that is not integer/);
+    // The interpreter gives 2.5.
+    expect(
+      failure(() =>
+        run(
+          'function g(H: list<integer>, k: integer) -> real { if k <= 0 { H[1] } else { if k % 2 == 0 { g([2, k], k - 1) } else { g([H[1] + 0.5, 1], k - 1) } } }',
+          ['g', 'L', 'k'],
+          { L: 'list<real>', k: 'integer' },
+          { L: [2.5, 1], k: 3 }
+        ).compiled()
+      )
+    ).toMatch(/a recursive call of g between the lanes of its parameters/);
+  });
+});
