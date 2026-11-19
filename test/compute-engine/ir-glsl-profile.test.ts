@@ -1139,6 +1139,7 @@ const CALLER: [label: string, json: Json, options: object, points: PointValue[]]
   ['a callerLocals name with a vars text', ['gx', 'y'], { callerLocals: ['x'], vars: { x: 'g_x' } }, [{ x: 0.5, y: 2 }]],
   ['a point callerLocals name', ['gp', 'y'], { callerLocals: ['P'] }, [{ y: 2, P: [3, -4] }]],
   ['a point callerLocals name in a point result', ['gpm', 'y'], { callerLocals: ['P'] }, [{ y: 2, P: [3, -4] }]],
+  ['the name under a binder of the same name', ['Sum', ['Add', 'x', ['gx', 'x']], ['Limits', 'x', 1, 3]], { callerLocals: ['x'] }, [{ x: 0.5 }, { x: -2 }]],
 ];
 
 describe('IR profile on GLSL: callerLocals', () => {
@@ -1152,15 +1153,13 @@ describe('IR profile on GLSL: callerLocals', () => {
     );
   });
 
-  test('declined: the name under a binder of the same name', () => {
-    const d = declined(
-      ['Sum', ['Add', 'x', ['gx', 'x']], ['Limits', 'x', 1, 3]],
-      { callerLocals: ['x'] }
-    );
-    expect(d?.code).toBe('outside-profile');
-    expect(d?.message).toMatch(
-      /a call of gx, which reads the input x, where x is a local or a parameter/
-    );
+  test('the name under a binder of the same name: the call passes the input', () => {
+    // The body of gx reads the input x, not the index of the Sum (CE-1479):
+    // the call, copied into the loop, adds the index to the input.
+    const r = glsl(['Sum', ['Add', 'x', ['gx', 'x']], ['Limits', 'x', 1, 3]], {
+      callerLocals: ['x'],
+    });
+    expect(r.code).toMatch(/\((\w+) \+ \(\1 \+ x\)\)/);
   });
 });
 

@@ -4,7 +4,11 @@
  * `lower-lists.ts` and `lower-functions.ts` call (`Lowering`).
  */
 
-import type { Expression, FunctionInterface } from '../../global-types.js';
+import type {
+  BoxedValueDefinition,
+  Expression,
+  FunctionInterface,
+} from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
 import type { CompileDiagnosticKind } from '../types.js';
 import {
@@ -280,8 +284,8 @@ export type Lowering = {
    *  answers for it: one that defers keeps the library's). */
   isLibrary(e: Fn): boolean;
   /** The input `name` of the engine type `t`, which a function that the
-   *  call `e` calls reads, read at the call. */
-  free(e: Fn, name: string, t: Type): V;
+   *  call `e` calls reads in the binding `def`, read at the call. */
+  free(e: Fn, name: string, t: Type, def?: BoxedValueDefinition): V;
   /** `v` where a value of `lane` is read (a real converted to complex). */
   widen(v: V, lane: Lane): V;
   /** The lane of an input of type `number`, `unknown` or none: complex in

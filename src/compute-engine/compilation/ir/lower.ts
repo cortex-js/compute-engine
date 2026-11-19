@@ -43,7 +43,11 @@ import { typeToString as engineTypeToString } from '../../../common/type/seriali
 import type { Type } from '../../../common/type/types.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typesOverlap } from '../../../common/type/reduce.js';
-import type { BoxedValueDefinition, Expression } from '../../global-types.js';
+import type {
+  BoxedValueDefinition,
+  Expression,
+  Scope,
+} from '../../global-types.js';
 import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
 import { ExactNumericValue } from '../../numeric-value/exact-numeric-value.js';
@@ -890,7 +894,9 @@ export function lower(
   const numbers = (v: V) => !tuples.has(v) && type(v).shape.length === 1;
 
   /** `f` of `given` point by point: a build over the lists of points among
-   *  them (of one shape), which reads their element at each index, and so
+   *  them (of one shape; on a target without run-time lengths, GLSL, the
+   *  list written out through `lists.over()`, a `Map`), which reads their
+   *  element at each index, and so
    *  under `Multiply` and `Divide` the element of a list of numbers of their
    *  length; a point and a scalar are read as they are. */
   const eachPoint = (
@@ -918,17 +924,27 @@ export function lower(
           `${head} of a list of points and a value of another shape`
         );
     }
+    const point = (k: V) =>
+      f(
+        given.map((v) =>
+          tuples.get(v) === 1 || numbers(v) ? lists.listSource(v).at(k) : v
+        )
+      );
+    const length = lists.listSource(first).length;
+    // A target with no run-time length (GLSL) writes out a list of points
+    // of a constant length, as a `Map` over it: the result is the list of
+    // the values at each point, and the list of points is left to `dce`.
+    if (options.runtimeLengths === false && isFunction(node))
+      return lists.over(
+        node,
+        { length, at: (k) => k },
+        '',
+        (_x, k) => point(k),
+        false,
+        node
+      );
     const k = b.newValue(scalarType('integer'));
-    const at = (v: V) => lists.listSource(v).at(k);
-    return region(
-      'build',
-      [lists.listSource(first).length],
-      [k],
-      () => [
-        f(given.map((v) => (tuples.get(v) === 1 || numbers(v) ? at(v) : v))),
-      ],
-      node
-    )[0];
+    return region('build', [length], [k], () => [point(k)], node)[0];
   };
 
   /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
@@ -2274,6 +2290,24 @@ export function lower(
       : undefined;
   };
 
+  /** Whether `def` is the binding of `name` in the scope of the
+   *  compilation or in a scope that encloses it (a definition that the
+   *  scope of the `inputs` option hides): a binding that the entry reads as
+   *  its input of that name, never a local or a variable of a binder of the
+   *  expression, whose scopes are inside it. */
+  const onScopeChain = (
+    name: string,
+    def: BoxedValueDefinition | undefined
+  ): boolean => {
+    if (def === undefined) return false;
+    for (let s: Scope | null = ce.context.lexicalScope; s; s = s.parent) {
+      const binding = s.bindings.get(name);
+      if (binding !== undefined && 'value' in binding && binding.value === def)
+        return true;
+    }
+    return false;
+  };
+
   /** The value that the name of `e` holds, when its binding here is the one
    *  that the occurrence reads (always, at the entry). */
   const own = (e: Expression & { symbol: string }) => {
@@ -2497,23 +2531,41 @@ export function lower(
       e,
       name,
       e.type.type,
-      readAs(e.type.type, resolvedValueDefinition(e))
+      readAs(e.type.type, resolvedValueDefinition(e)),
+      resolvedValueDefinition(e)
     );
   };
 
   /** The input `name` of the type `t`, which a function that `e` calls
-   *  reads: its binding when it is an input here, or a new input (of the
-   *  entry, or of the function whose body has the call). A local, a
-   *  parameter or a name with a value of that name here declines. */
-  const free = (e: Fn, name: string, t: Type): V => {
-    const known = lookup(name);
-    if (known !== undefined && known.binding.role !== 'input')
-      decline(
-        e,
-        `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
-      );
+   *  reads in the binding `def`: its binding when it is an input here, or a
+   *  new input (of the entry, or of the function whose body has the call).
+   *  Under a local or an index of that name (the variable of a `Sum` that
+   *  the call is in), the input of the outer frame, when `def` is a
+   *  binding of the name on the scope chain of the compilation
+   *  (`onScopeChain()`), which the local is not (CE-1479); a parameter of
+   *  that name, another binding (a `vars` name) or a name with a value
+   *  declines. */
+  const free = (
+    e: Fn,
+    name: string,
+    t: Type,
+    def?: BoxedValueDefinition
+  ): V => {
+    let known = lookup(name)?.binding;
+    if (known !== undefined && known.role !== 'input') {
+      const outer = frames[0].names.get(name);
+      if (
+        !onScopeChain(name, def) ||
+        (outer !== undefined && outer.role !== 'input')
+      )
+        decline(
+          e,
+          `a call of ${e.operator}, which reads the input ${name}, where ${name} is a local or a parameter`
+        );
+      known = outer;
+    }
     note(name, t);
-    if (known !== undefined) return known.binding.v;
+    if (known !== undefined) return known.v;
     const k = options.vars?.indexOf(name) ?? -1;
     // A `vars` name (`symbol()`): its text, read here at the entry.
     if (k >= 0) {
@@ -2533,7 +2585,7 @@ export function lower(
     // parameter.
     return cx.inFunction === undefined
       ? input(e, name, held(name)?.definition.type.type ?? t)
-      : fns.capture(e, name, t, readAs(t, held(name)?.definition));
+      : fns.capture(e, name, t, readAs(t, held(name)?.definition), def);
   };
 
   /** The IR type of an input of the engine type `t`; a tuple is the list of
@@ -3125,7 +3177,8 @@ export function lower(
   /** `PointList`: the tuple of its components when none is a list;
    *  otherwise the list of the tuples of the elements of its list
    *  components at each index (a scalar is in every tuple), as long as the
-   *  shortest component: the `Min` of the lengths. */
+   *  shortest component: the `Min` of the lengths (on a target without
+   *  run-time lengths, GLSL, written out through `lists.over()`, a `Map`). */
   const pointList = (e: Fn): V => {
     const parts = e.ops.map((op) => value(op)!);
     if (parts.some((v) => tuples.has(v) || type(v).shape.length > 1))
@@ -3138,14 +3191,19 @@ export function lower(
       ...new Set(n.flatMap((x) => (typeof x === 'number' ? [] : [x.v]))),
     ];
     const length = lengths.reduce((m, x) => apply(e, 'Min', [m, x]));
-    return lists.built(e, length, (k) =>
+    const at = (k: V) =>
       tuple(
         e,
         parts.map((v) =>
           type(v).shape.length === 0 ? v : lists.listSource(v).at(k)
         )
-      )
-    );
+      );
+    // A target with no run-time length (GLSL) writes out a list of points
+    // of a constant length as a `Map` over it, the tuple at each index: a
+    // reader of the points (`Abs`, `PointX`) then reads each one.
+    if (options.runtimeLengths === false)
+      return lists.over(e, { length, at }, '', (x) => x, false, e);
+    return lists.built(e, length, at);
   };
 
   const local = (s: Expression, v: V, lane: Lane): V => {

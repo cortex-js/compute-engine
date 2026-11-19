@@ -13,7 +13,7 @@
 import type { ListType, TupleType, Type } from '../../../common/type/types.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
-import type { Expression } from '../../global-types.js';
+import type { BoxedValueDefinition, Expression } from '../../global-types.js';
 import {
   freeBinding,
   isFreeCallHead,
@@ -384,6 +384,9 @@ type UserFunction = {
   mapsAt: (i: number, points: boolean) => boolean;
   ir: IRFunction;
   inputs: Type[];
+  /** The binding that the body reads for each of `inputs`: the
+   *  definition of the occurrence, or none for a `vars` name. */
+  defs: (BoxedValueDefinition | undefined)[];
   called: boolean;
   self: V[][];
   /** The first call of the function made while its body is lowered, when
@@ -547,6 +550,7 @@ export function functionLowering(
       mapsAt: sig.mapsAt,
       ir,
       inputs: [],
+      defs: [],
       called: false,
       self: [],
       declared: list && { lane: list.lane, shape: list.shape, tuple },
@@ -879,7 +883,10 @@ export function functionLowering(
     const inputs = (self ? [] : fn.inputs).map((t, j) => {
       const k = fn.own + j;
       const p = type(fn.ir.body.params[k]);
-      const v = cx.widen(cx.free(e, fn.ir.paramNames[k], t), p.lane);
+      const v = cx.widen(
+        cx.free(e, fn.ir.paramNames[k], t, fn.defs[j]),
+        p.lane
+      );
       if (!isSubType(type(v), p))
         decline(
           e,
@@ -971,9 +978,15 @@ export function functionLowering(
   };
 
   /** The input `name` of the engine type `t` that the body of the function
-   *  being lowered reads, as the type `read` (`readAs()` of `lower.ts`): a
-   *  parameter after its own, which each call passes. */
-  const capture = (e: Expression, name: string, t: Type, read = t): V => {
+   *  being lowered reads, as the type `read` (`readAs()` of `lower.ts`), in
+   *  the binding `def`: a parameter after its own, which each call passes. */
+  const capture = (
+    e: Expression,
+    name: string,
+    t: Type,
+    read = t,
+    def?: BoxedValueDefinition
+  ): V => {
     const fn = pending.get(cx.inFunction!)!;
     if (fn.called)
       decline(
@@ -997,6 +1010,7 @@ export function functionLowering(
     const v = param(fn.ir, name, ir as IRType);
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.inputs.push(t);
+    fn.defs.push(def);
     cx.frames[0].names.set(name, { v, role: 'input' });
     return v;
   };

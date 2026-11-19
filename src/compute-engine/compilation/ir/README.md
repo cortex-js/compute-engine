@@ -1599,7 +1599,7 @@ squares of its elements on both targets (`sqrt((u * u) + (v * v))`; no guard
 against the overflow of a square); of a tuple of complex numbers it declines.
 `Distance(a, b)` of two tuples is `Abs(a + -b)`; of tuples of two lengths, or of
 a list of numbers, it declines. A list of points is read point by point, by a
-build over it (JavaScript; GLSL has no list of points): under `Abs` and
+build over it (on GLSL, by the points written out, below): under `Abs` and
 `PointX`, and under `Add` with a point, which the interpreter adds to each point
 of the list (`P + List(Tuple(1, 2), Tuple(3, 4))`), so `Distance(P, L)` of a
 list `L` of points is the list of the distances, and `Distance(L, M)` of two
@@ -1613,6 +1613,14 @@ declines); of a list of points, the list of those coordinates, and of a literal
 `List` of points (the library's, as `Max(List(…))` reads one) the list of the
 coordinate of each point, with no list of points (so on GLSL too:
 `PointX(List(p1, …, p9))` is a `float[9]`); of a list of numbers, they decline.
+GLSL has no list of points (a list of rank 2) and no build: there `PointList` of
+list components of a constant length of 1 to 64 (`SCALARIZE_LIMIT`) is written
+out as a `Map` is ("Lists"), a tuple per index, and each reader above is a `Map`
+over the points of any list of points of such a length (a `PointList` or a
+literal `List` of points), the list of its values at each one
+(`Abs(PointList(x - List(1/2, 1), y))` is the `vec2` of the two distances, and
+`dce` removes the points); a list of points as the result, a component of a
+run-time length and more than 64 points decline (CE-1474).
 Any other reader declines a tuple operand: `Equal(Tuple(1, 2), List(1, 2))` is
 `False`, a comparison of a tuple stays unevaluated, `Map`, `Filter`, `Reduce`,
 `Loop` and `Comprehension` over a tuple, and the arms of a conditional of which
@@ -2142,13 +2150,25 @@ function's input parameters, which `define()` adds to each such call
 before or after the call (`J(n, x) := Which(n = 0, x, True, I(x, J(n − 1, x)))`,
 where `I` reads `a`). Declined: a function that reads an input on a cycle of
 calls through another function (`P(j) = If(j > 0, Q(j - 1), n)` and
-`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a local or a
-parameter, or has a value; an input of a list of a run-time length or of
-booleans; a name with a value read in the body whose binding where the call is
-compiled is not the body's (see the values of free names above); another `vars`
-name. `Apply(Function(body, p1, …), a1, …)` with one parameter per argument,
-each a name or a typed name (`Typed(H, 'list<real>')`), is the body with each
-parameter bound to its argument, the arguments lowered once, in order, before
+`Q(j) = If(j > 0, P(j - 1), 1)`); a call where the name is a parameter of the
+function whose body has the call (`h(x) := k(x)`), or has a value; an input of
+a list of a run-time length or of booleans; a name with a value read in the
+body whose binding where the call is compiled is not the body's (see the values
+of free names above); another `vars` name. A call where the name is a local or
+the variable of a binder (CE-1479) passes the input, which the body reads: with
+`k(v) := v + x`, `Sum(x + k(1), Limits(x, 1, 3))` is `(1 + 2 + 3) + 3·(1 + x)`,
+39 at x = 10, as the interpreter gives it. The binding that the body reads
+(`UserFunction.defs`) must be a binding of the name in the scope of the
+compilation or in a scope around it (`onScopeChain()`), as the input's is (the
+`inputs` option declares the input in a scope of its own, which hides that
+binding); a local or a variable of the expression is in a scope inside it, so a
+function whose body reads one would decline there. No program reaches that
+case with a local binding today (a `DefineFunction(q, …)` in the body of the
+`Sum`, whose `q` reads the index, already declines as "a function definition
+that is not the binding of its calls"); the check guards a `vars` capture, of
+no binding, and stays as a defense. `Apply(Function(body, p1, …), a1, …)`
+with one parameter per argument, each a name or a typed name
+(`Typed(H, 'list<real>')`), is the body with each parameter bound to its argument, the arguments lowered once, in order, before
 the body (as a `Block` of locals); a parameter shadows an input or a local of
 its name, and an argument reads the names outside. A literal whose signature is
 scalar (`literalParamsMap()`, the test of the interpreter's

@@ -28,6 +28,29 @@
 
 ### Resolved Issues
 
+- **`compile()` compiles a call of a function of an input inside a sum whose
+  index has the name of that input again** (CE-1479). With `x: real` and
+  `k(v) := v + x`, `Sum(x + k(1), Limits(x, 1, 3))` declined in 0.194.0 ("a
+  call of k, which reads the input x, where x is a local or a parameter"). At
+  x = 10 it now gives 39 on JavaScript and in the interval mode, as the
+  interpreter does: `k` reads the input `x`, not the index of the sum. GLSL
+  compiles it too. The same holds under a block local of that name. A call
+  where a parameter of the calling function has that name still declines.
+
+- **On GLSL, `compile()` compiles the distances to a short list of points
+  again** (CE-1474). With `x, y: real`, `Abs(PointList(x - [1/2, 1], y))`
+  declined on `glsl` in 0.194.0 ("the region build (a Map, a Filter or a
+  Range)"), so the plot was drawn on the CPU. It is now the `vec2` of the two
+  distances, `[0.728…, 0.990…]` at x = 0.3, y = 0.7, as in the interpreter;
+  `Min(Abs(PointList(x - [1/2, 1], y, z + 2)))` compiles too. On GLSL, a
+  `PointList` whose list components have a constant length of 1 to 64 is
+  written out, a point per index, and on such a list of points, or a literal
+  `List` of points, `Abs`, `PointX`, `PointY`, `PointZ`, the
+  `Add` of a point, a `Distance` to a point, and a `Multiply` or a `Divide` by
+  a list of numbers give the list of their values at each point. A list of
+  points as the result, and a component of a run-time length, still decline
+  on GLSL.
+
 - **`compile()` compiles a list of the calls of a recursive function again**
   (CE-1472). With `r` declared `(real) -> real` and
   `r(k) := Which(k <= 0, 0, True, s + r(k - 1))`,

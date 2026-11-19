@@ -251,6 +251,13 @@ interpreter's value. A line is removed when the case declines or is fixed.
   that WebGL 2 refuses ("Size of declared private variable exceeds
   implementation-defined limit"). With `storage` the parameter is a
   `sampler2D` and the shader is valid.
+- `javascript` (crafted), `x: real`, `k(v) := v + x` defined at the top
+  level, compiled with `inputs: { x: 'real' }` in a user scope that declares
+  `x` again (`ce.pushScope(); ce.declare('x', 'real')`): the code passes the
+  input `x` to `k`, whose body reads the global `x`, which has no value.
+  `Add(x, k(1))` gives 21 at x = 10, where the interpreter gives `x + 11`
+  (and `Add(x, Sum(k(1), Limits(x, 1, 3)))` 43, where it gives `3x + 13`).
+  Without `inputs`, the compilation declines.
 - `plausible?` — `javascript`, `s: integer`, `r` a recursive function of
   depth `i` (`r(i) := Which(i <= 0, 0, True, r(i - 1) + s)`): a
   `Comprehension` computes every element, where the interpreter computes

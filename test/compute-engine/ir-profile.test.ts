@@ -1169,7 +1169,7 @@ describe('a user function that reads an input of the compilation', () => {
       /P\(Add\(j, -1\)\): a recursive call of P, which reads the input n \(a function on a cycle of calls through another function reads no input\)/
     );
   });
-  test('a name that holds a value in a body is that value; a local of the name at the call declines', () => {
+  test('a name that holds a value in a body is that value; a local of the name at the call leaves the body reading the input', () => {
     const e = engine();
     // The value of the binding of the body, as at the entry (batch G6).
     const symbolDeps = new Set<string>();
@@ -1184,13 +1184,16 @@ describe('a user function that reads an input of the compilation', () => {
     );
     expect(value.freeSymbols).toEqual(['x', 'y']);
     expect([...symbolDeps].sort()).toEqual(['F_s', 'm_s']);
-    const local = outcome(
-      box(['Block', ['Declare', 'n', 'real', 5], ['TychoCertificate55']], e),
-      { symbolic: ['n'] }
-    );
-    expect('message' in local && local.message).toMatch(
-      /reads the input n, where n is a local or a parameter/
-    );
+    // The body reads the input n, not the local n of the block (CE-1479):
+    // 2.5·n, not 12.5.
+    const json = ['Block', ['Declare', 'n', 'real', 5], ['TychoCertificate55']];
+    const local = outcome(box(json, e), { symbolic: ['n'] });
+    expect('result' in local && local.result.run({ n: 2 })).toBe(5);
+    for (const n of [2, -0.3]) {
+      const i = engine();
+      i.assign('n', n);
+      expect(box(json, i).evaluate().N().re).toBe(2.5 * n);
+    }
   });
 });
 
