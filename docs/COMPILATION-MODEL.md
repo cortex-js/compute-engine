@@ -2199,11 +2199,15 @@ array in place, with these rules:
 
 - The local owns its array: the declaration copies its value, so an input
   (`let L = H`) or a constant (`let L = C`) is not changed.
-- Every other occurrence of `L` in its scope is `At(L, i)`, `Length(L)` or
-  the value of the block (its last statement, also `Typed(L, …)`). Any other
-  read (`let M = L`, `f(L)`, `[L, M]`, `L` in a function literal) declines:
+- A read of the whole list (`let M = L`, `f(L)`, `[L, M]`, `sum(L)`, `L` in
+  the `Tuple` that a block returns) reads a copy of the array at that point:
   the interpreter's lists are values (`let M = L; L[1] += 5; M` is the old
-  list), and compiled code shares no array.
+  list), and compiled code shares no array that a write changes. The value of
+  the block (its last statement `L`, also `Typed(L, …)`) is the array after
+  the last write. `L` in a function literal (`map(x => L[x], [1, 2])`)
+  declines, since the function could run after a later write. A copy has an
+  effect, so an operation that declines an operand with an effect
+  (`reverse(L)`) declines on such a read.
 - The element type is the declared type of the local (`let L: list<real> =
   …`) or the type of its value. A real written to a list of integers of no
   declared type (`let L = [0 for k in 1..n]`, then `L[k] = 0.5`) puts the
@@ -2218,6 +2222,16 @@ array in place, with these rules:
   interpreter gives an error; a constant index out of a stated length
   declines.
 - `L[i] += e` evaluates `i` once, before `e`.
+
+`ReplaceAt(L, i, v)` used as a value, not as the right side of a write of
+`L` (`let M = replaceAt(H, 1, 5)`), is a copy of the list with the element
+replaced; `H` is not changed. It takes a list of reals, integers or booleans
+and a value of the same kind (a real in a list of integers gives a list of
+reals). A constant index that is 0 or out of a stated length declines (the
+interpreter leaves `ReplaceAt` unevaluated); an index known only at run time
+throws `out-of-range` there, on JavaScript only. GLSL and the interval mode
+compile a constant index (GLSL: of a list of a constant length), and decline
+an index known at run time.
 
 Every other write to a list local declines: `xs = Append(xs, v)` and any
 other write of a whole list ("a write to a constant … or to a list local"),

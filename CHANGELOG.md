@@ -10,9 +10,10 @@
     the list in place. The declaration copies the value, so the input `H` is
     not changed. A negative index counts from the end; an index that is 0, not
     an integer or out of range throws `out-of-range` when the code runs, where
-    the interpreter gives an error. A list local that the code reads other
-    than with `L[i]` or `length(L)` (`let M = L`, `f(L)`), and a written value
-    of another type (a complex number in a list of reals), decline.
+    the interpreter gives an error. Another read of the list (`let M = L`,
+    `f(L)`) reads a copy of it at that point. A list local read in a function
+    literal (`map(x => L[x], [1, 2])`), and a written value of another type (a
+    complex number in a list of reals), decline.
   - `s += e` (`AddTo(s, e)`) is `s = s + e`, and `(a, b) := (b, a + b)`
     computes both values before it writes either name, on every target that
     compiles an assignment.
@@ -49,6 +50,32 @@
   a `CancellationError` with the cause `iteration-limit-exceeded` at the end
   of the budget. Without the option the loop has no count, as in 0.193.0. GLSL
   and the interval mode still decline such a loop.
+
+- **`compile()` compiles a list local that is written in place and also read
+  whole** (CE-1485). With `H: list<integer>`, the step
+  `let L = H; L[1] += n; let M = L; L[1] += 1; M` declined ("the list local L,
+  written in place, read other than by At or Length (an alias)"), as did a
+  list local passed to a function literal, summed, mapped over, or returned in
+  a tuple. On JavaScript such a read now reads a copy of the list at that
+  point, so `M` above is `[H[1] + n, …]`, the interpreter's value, and a later
+  write does not change it. A block whose value is such a local in a tuple
+  (`(L, s)`) compiles too, and so does the copying form of Tycho's buddhabrot
+  step, which ends in `replaceAt(L, N, r + n)` (CE-1487). A list local
+  read in a function literal still declines: the function can run after a
+  later write. The action body of Tycho's Othello showcase still declines at a
+  later rule: it passes a local of no stated type (a `number`) to a parameter
+  declared `integer`.
+
+- **`compile()` compiles `ReplaceAt` used as a value** (CE-1487). With
+  `H: list<real>`, `ReplaceAt(H, 1, 5)` declined ("the operator ReplaceAt is
+  not supported by the compiler"). It now gives `[5, 2, 3]` at `H = [1, 2, 3]`,
+  as the interpreter does, and `H` is not changed. A negative index counts
+  from the end. On JavaScript an index known only when the code runs that is
+  0, out of range or not an integer throws `out-of-range`, where the
+  interpreter leaves `ReplaceAt` unevaluated or gives an error; a constant
+  index 0 or not an integer declines, and so does one out of a stated length.
+  The interval mode and GLSL compile a constant index of a list of a stated
+  length.
 
 - **`compile()` compiles a function of a point called with a list of points
   again** (CE-1477). With `P: list<tuple<real, real>>` and `f` declared

@@ -1258,12 +1258,18 @@ copy, the reads and the writes are `effectful` ("Effects"): no pass merges,
 moves or removes them, so no read of the array crosses a write of it, and the
 lowering memo never shares a read; the SSA value of `L` does not change, and a
 `Loop` or an `if` carries nothing for it. `inPlace()` checks the scope of the
-local (the statements after the declaration) before the copy: each occurrence of
-`L` is `At(L, i)`, `Length(L)`, the target of one of the two writes, or the
-value of the block (its last statement, also `Typed(L, …)`). Any other read
-(`M = L`, `f(L)`, `List(L)`, `L` in a function literal) declines ("an alias"):
-the interpreter's lists are values, and the code shares no array of a written
-local. Any other write (`Assign(L, Append(L, v))`, a whole list, a declaration
+local (the statements after the declaration) before the copy: no function
+literal reads `L` ("read in a function literal (a capture)": the function can
+run after a later write, which compiled code would show). `At(L, i)` is
+`getat` and `Length(L)` the length of the array, which no write changes. Any
+other read of `L` (`M = L`, `f(L)`, `List(L)`, `Sum(L)`, `Tuple(L, s)`, an
+argument of `Apply`) is a `copy` of the array at the read (`symbol()`,
+CE-1485): the interpreter's lists are values, so no later write changes what
+was read, and the code shares no array of a written local. The value of the
+block, its last statement `L` or `Typed(L, …)`, is the array itself, after
+every write (`whole`). A copy is effectful, so an operation that declines an
+operand with an effect (`Reverse(L)`, a lazy `Comprehension` body) declines
+such a read. Any other write (`Assign(L, Append(L, v))`, a whole list, a declaration
 of `L` again in the scope) declines with "a write to a constant … or to a list
 local", as before. A written value whose lane is not a sub-lane of the element
 lane declines, with one exception; the element lane is the declared one
@@ -1285,6 +1291,21 @@ decline such a local. In a random frame these operations are no draw sites
 (`LIST_LOCAL_OPS`, `seededWarnings()`); a call of a function that writes a list
 local is `effectful` and counts as one (a warning `seeded-draw-order` that a
 frame around such a call can give where its draws are in order).
+
+`ReplaceAt(L, i, v)` as a value (`replaceAt()`; CE-1487), not the right side of
+the write of a list local: of a flat list of reals, integers or booleans and a
+scalar `v` of the same kind, the build whose element at `wix(n, i)` is `v` and
+whose other elements are those of `L` (an integer list and a real `v` give a
+list of reals, as the interpreter's). It is pure: `L` is not changed. A
+constant index of a list of stated length is a constant; one that is 0 or out
+of range declines (the interpreter leaves `ReplaceAt` unevaluated). An index
+known at run time is `wix` (it throws `out-of-range` for an index that is 0,
+out of range or not an integer, where the interpreter gives an unevaluated form
+or an error), on JavaScript only: GLSL, the interval mode and the `bigint` mode
+decline it. On GLSL, which builds no list, a constant index of a list of a
+constant length is the list of its elements. A boolean value in a list of
+numbers, or the reverse, and a complex value decline; so do several indexes
+(`ReplaceAt(M, i, j, v)`).
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`

@@ -1254,6 +1254,8 @@ function lowerOnce(
           decline(e, 'RandomShuffle of a value that is not a list of numbers');
         return apply(e, 'RandomShuffle', [l]);
       }
+      case 'ReplaceAt':
+        return replaceAt(e);
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
         // A read of a list local written in place: in order with its writes.
@@ -1506,8 +1508,15 @@ function lowerOnce(
           tol === undefined ? stated! : b.constant(tol, 'real'),
         ]);
       }
-      case 'Length':
+      case 'Length': {
+        // The length of a list local written in place: no write changes it.
+        const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
+        if (e.nops === 1 && owned?.binding.role === 'list') {
+          const n = type(owned.binding.v).shape[0];
+          return typeof n === 'number' ? b.constant(n, 'integer') : n.v;
+        }
         return lists.source(e.ops[0], false, true).length;
+      }
       case 'Count':
       case 'IsEmpty':
       case 'Rest':
@@ -2539,6 +2548,12 @@ function lowerOnce(
       );
     if (known?.binding.role === 'input')
       note(name, e.type.type, resolvedValueDefinition(e));
+    // A read of a whole list local written in place (`listLocal()`) is a
+    // copy of its array at the read, so no later write changes the value
+    // read (the interpreter's lists are values), except as the value of
+    // its block, after its last write.
+    if (known?.binding.role === 'list' && known.binding !== whole)
+      return listCopy(known.binding.v, known.binding.lane!);
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
@@ -3532,7 +3547,22 @@ function lowerOnce(
               'a function definition that is not the binding of its calls'
             );
           result = undefined;
-        } else result = value(s, want && i === e.nops - 1);
+        } else {
+          // The value of the block, `L` or `Typed(L, …)` of a list local
+          // of the block written in place: its array, after every write.
+          const read = isFunction(s, 'Typed') ? s.ops[0] : s;
+          const own =
+            i === e.nops - 1 && isSymbol(read)
+              ? frame.names.get(read.symbol)
+              : undefined;
+          const before = whole;
+          if (own?.role === 'list') whole = own;
+          try {
+            result = value(s, want && i === e.nops - 1);
+          } finally {
+            whole = before;
+          }
+        }
       };
       // The statements after one that may leave the pass of a Loop (`loop()`)
       // run in the arm where it did not.
@@ -4067,6 +4097,105 @@ function lowerOnce(
    *  its value, and its declaration (`listLocal()`). */
   const widenable = new Map<V, Expression>();
 
+  /** `ReplaceAt(L, i, v)` as a value (a write of a list local is
+   *  `assign()`): the list `L` of numbers or of booleans with its element
+   *  at `i` (from 1, from the end when negative) replaced by `v`, a build
+   *  that copies the others; of an integer list and a real `v`, a list of
+   *  reals, as the interpreter's. The interpreter leaves an index that is 0
+   *  or out of range unevaluated and gives an error for one that is not an
+   *  integer: a constant index declines, one known at run time throws
+   *  (`wix`, JavaScript only). */
+  const replaceAt = (e: Fn): V => {
+    if (e.nops !== 3) decline(e, 'ReplaceAt with an index for each level');
+    const l = value(e.ops[0])!;
+    const t = type(l);
+    if (
+      t.shape.length !== 1 ||
+      tuples.has(l) ||
+      !(isSubLane(t.lane, 'real') || t.lane === 'boolean')
+    )
+      decline(
+        e,
+        'ReplaceAt of a value that is not a list of reals, integers or booleans'
+      );
+    const i = scalar(e.ops[1]);
+    if (!isSubLane(type(i).lane, 'real'))
+      decline(e.ops[1], 'an index that is not a number');
+    const x = scalar(e.ops[2]);
+    if ((type(x).lane === 'boolean') !== (t.lane === 'boolean'))
+      decline(
+        e,
+        `ReplaceAt of a ${type(x).lane} value in a list of ${t.lane} elements`
+      );
+    if (!isSubLane(type(x).lane, 'real') && type(x).lane !== 'boolean')
+      decline(e, `ReplaceAt of a ${type(x).lane} value`);
+    const n = t.shape[0];
+    const c = constant(i);
+    const source = lists.listSource(l);
+    let k: V;
+    // A constant index 0 or not an integer: the interpreter leaves the form
+    // unevaluated or gives an error, whatever the length.
+    if (c !== undefined && (c === 0 || !Number.isInteger(c)))
+      decline(e, `the index ${c} of ReplaceAt (the interpreter gives no list)`);
+    if (c !== undefined && typeof n === 'number') {
+      const at = elementIndex(n, c);
+      if (at === undefined)
+        decline(
+          e,
+          `the index ${c} of ReplaceAt of a list of ${n} elements (the interpreter leaves it unevaluated)`
+        );
+      // A target with no run-time lengths (GLSL) builds no list: the list
+      // of the elements.
+      if (options.runtimeLengths === false)
+        return list(
+          e,
+          Array.from({ length: n }, (_, j) =>
+            j === at ? x : source.at(b.constant(j, 'integer'))
+          )
+        );
+      k = b.constant(at, 'integer');
+    } else {
+      if (!options.javascript || bigint)
+        decline(
+          e,
+          c !== undefined
+            ? 'ReplaceAt at a constant index of a list of a length known at run time (JavaScript only)'
+            : 'ReplaceAt at an index known at run time (JavaScript only)'
+        );
+      k = b.op(
+        'wix',
+        [typeof n === 'number' ? b.constant(n, 'integer') : n.v, i],
+        scalarType('integer')
+      );
+    }
+    return lists.built(e, source.length, (j) =>
+      branch(
+        e,
+        apply(e, 'Equal', [j, k]),
+        () => x,
+        () => source.at(j),
+        true
+      )!
+    );
+  };
+
+  /** The binding of the list local whose array is the value of its block
+   *  (`block()`), read with no copy (`symbol()`). */
+  let whole: Binding | undefined;
+
+  /** A copy of the array `v` on the lane `lane` (effectful: it keeps its
+   *  place among the writes of `v`). */
+  const listCopy = (v: V, lane: Lane): V =>
+    b.op(
+      lane === 'integer'
+        ? 'copy.int'
+        : lane === 'boolean'
+          ? 'copy.bool'
+          : 'copy',
+      [v],
+      { lane, shape: type(v).shape }
+    );
+
   /** A write of the element `index` of the list local `owned`, in place:
    *  the value `value()` (`add`: plus the element), evaluated after the
    *  index. An index that is 0, not an integer or out of range fails at
@@ -4147,7 +4276,7 @@ function lowerOnce(
     [typeName, listType]: [string, ReturnType<typeof inputType>]
   ): Binding => {
     const misuse = scope.reduce<Misuse>(
-      (m, x, k) => worse(m, inPlace(x, name, k === scope.length - 1)),
+      (m, x) => worse(m, inPlace(x, name)),
       undefined
     );
     if (misuse === 'write')
@@ -4186,38 +4315,29 @@ function lowerOnce(
     if (misuse === 'read')
       decline(
         s,
-        `the list local ${name}, written in place, read other than by At or Length (an alias)`
+        `the list local ${name}, written in place, read in a function literal (a capture)`
       );
-    const op =
-      lane === 'integer'
-        ? 'copy.int'
-        : lane === 'boolean'
-          ? 'copy.bool'
-          : 'copy';
-    const copy = b.op(op, [v], { lane, shape: t.shape });
+    const copy = listCopy(v, lane);
     if (listType === undefined && typeName === 'unknown' && lane === 'integer')
       widenable.set(copy, s);
     return { v: copy, lane, role: 'list' };
   };
 
   /** The worst use of the list local `name` in `x` (a `write` is worse than
-   *  a `read`), or `undefined` when each occurrence is `At(name, i)`,
-   *  `Length(name)`, the target of `Assign(name, ReplaceAt(name, i, v))` or
-   *  of `AddTo(At(name, i), e)`, or (`last`: `x` is the last statement of
-   *  the block) `x` itself, or `Typed(name, …)`. A `read` is any other read
-   *  of the array, which another value could then share (an alias, a
-   *  capture), a `write` any other write. */
-  const inPlace = (x: Expression, name: string, last = false): Misuse => {
-    if (isSymbol(x)) return x.symbol === name && !last ? 'read' : undefined;
+   *  a `read`), or `undefined` when each write is the target of
+   *  `Assign(name, ReplaceAt(name, i, v))` or of `AddTo(At(name, i), e)`
+   *  and no function literal reads `name`. A `read` is a read in a function
+   *  literal (a capture), which can run after a later write; a `write` any
+   *  other write. Any other read is a copy of the array (`symbol()`), or
+   *  `At(name, i)` and `Length(name)`, in order with the writes. */
+  const inPlace = (x: Expression, name: string): Misuse => {
+    if (isSymbol(x)) return undefined;
     const all = (ys: readonly Expression[]) =>
       ys.reduce<Misuse>((m, y) => worse(m, inPlace(y, name)), undefined);
     if (isDictionary(x)) return all(x.values);
     if (!isFunction(x)) return undefined;
     const own = (y: Expression | undefined) => isSymbol(y, name);
     switch (x.operator) {
-      case 'Typed':
-        if (last && own(x.ops[0])) return undefined;
-        break;
       case 'At':
         // The interpreter reads the list before the index, so a write to
         // it in the index is not seen by the read.
@@ -4225,9 +4345,6 @@ function lowerOnce(
           return facts(x.ops[1]).writes.has(name)
             ? 'write'
             : inPlace(x.ops[1], name);
-        break;
-      case 'Length':
-        if (x.nops === 1 && own(x.ops[0])) return undefined;
         break;
       case 'Assign': {
         const t = x.ops[0];

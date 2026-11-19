@@ -201,21 +201,19 @@ describe('A list local written in place (4.1)', () => {
       [{ n: 0 }, { n: 9 }]
     ));
 
-  test('another read of the list declines (an alias): value semantics', () => {
-    // The interpreter gives [[5, 0], [0, 0]]: `M` keeps the old value.
-    expect(
-      declines(
-        'function f(n: integer) -> list<integer> { let L = [0, n]; let M = L; L[1] += 5; M }',
-        { n: 0 }
-      )
-    ).toMatch(/the list local L, written in place, read other than by At/);
+  test('another read of the list is a copy (value semantics); a capture declines', () => {
+    // `M` keeps the old value (CE-1485, `ir-list-local-whole-reads.test.ts`).
+    agrees(
+      'function f(n: integer) -> list<integer> { let L = [0, n]; let M = L; L[1] += 5; M }',
+      [{ n: 0 }, { n: 2 }]
+    );
     // A capture in a function literal.
     expect(
       declines(
         'function f(n: integer) -> list<integer> { let L = [0, n]; L[1] += 1; map(x => L[x], [1, 2]) }',
         { n: 0 }
       )
-    ).toMatch(/the list local L, written in place, read other than by At/);
+    ).toMatch(/the list local L, written in place, read in a function literal/);
   });
 
   test('a constant, a local of a range and a write inside ReplaceAt decline', () => {
