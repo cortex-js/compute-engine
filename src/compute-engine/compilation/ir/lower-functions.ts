@@ -256,15 +256,23 @@ function signatureTypes(e: Fn, literal: Fn) {
   // With no signature (a name declared `function`), a parameter annotated
   // in the literal (`Typed(p, 'real')`) has the type of its annotation, as
   // for the interpreter.
+  // A parameter with a default (`Optional(k, 2)`) is the next one after
+  // the required ones in the signature (`optArgs`); a call has its
+  // argument, which the canonical form supplies.
+  const slot = (s: Type, i: number) => {
+    if (typeof s !== 'object' || s.kind !== 'signature') return undefined;
+    const n = s.args?.length ?? 0;
+    return (i < n ? s.args?.[i] : s.optArgs?.[i - n])?.type;
+  };
   const own = literal.type.type;
-  const annotated = (i: number) =>
-    typeof own === 'object' &&
-    own.kind === 'signature' &&
-    literal.ops[i + 1]?.operator === 'Typed'
-      ? own.args?.[i]?.type
+  const annotated = (i: number) => {
+    const p = literal.ops[i + 1];
+    return (isFunction(p, 'Optional') ? p.ops[0] : p)?.operator === 'Typed'
+      ? slot(own, i)
       : undefined;
+  };
   const params = names.map((p, i) => {
-    const d = signature?.args?.[i]?.type ?? annotated(i) ?? 'unknown';
+    const d = (signature && slot(signature, i)) ?? annotated(i) ?? 'unknown';
     // A parameter `broadcastable<T>` takes a `T`: a list there is mapped
     // (`listMapsAt()`).
     const t =

@@ -244,6 +244,18 @@ export const JS: Syntax = deepFreeze({
       ],
       close: ([y]) => [`  return ${y};`, '});'],
     }),
+    // The elements of an `Iterate`: the accumulator is a variable that
+    // each pass sets to its element.
+    iterate: ({ outs: [out], args: [n, x0], params: [k, acc] }) => ({
+      open: [
+        `const ${out}_n = ${n};`,
+        guard(`${out}_n`, 'a list'),
+        `const ${out} = new Array(${out}_n);`,
+        `let ${acc} = ${x0};`,
+        blocks(NUMBERS, k, `${out}_n`),
+      ],
+      close: ([y]) => [`  ${acc} = ${out}[${k}] = ${y};`, '}'],
+    }),
     // The numeric derivative of the runtime (`_SYS.nd`).
     derivative: ({ outs: [out], args: [x], params: [t] }) => ({
       open: [`const ${out} = _SYS.nd((${t}) => {`],

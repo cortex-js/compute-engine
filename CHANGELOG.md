@@ -141,6 +141,17 @@
 
 ### Improvements
 
+- **`Iterate` and default parameters of user functions compile to
+  JavaScript.** `Take(Iterate(f, x0), n)`, and `At`, `First`, `Second` and
+  `Third` of an `Iterate`, compile to a loop with the interpreter's
+  conventions: `f(acc)` or `f(index, acc)` by the parameters of `f`, and a
+  real accumulator when an integer start leads to a value that is not an
+  integer (`a ↦ a/3` from 1). A list accumulator, an effect in `f` and
+  `Last` or `Drop` of the unbounded list decline. A user function with a
+  default (`d(x, k = 3) := x + k`, or `k: integer = 3` in Epsil) compiles,
+  with the call `d(x)` filled as the interpreter fills it; a function with
+  defaults is also accepted by `Map` and as a `Sort` key.
+
 - **`Pipe`, `Boole`, `KroneckerDelta`, `Any`, `All`, `Contains`, `IndexOf`
   and `Sort` with a function compile to JavaScript.** They declined and fell
   back to the interpreter. `Pipe` also compiles to GLSL and in the interval

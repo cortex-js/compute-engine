@@ -502,6 +502,20 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
         ? [listOf(ys[0], { v: n })]
         : undefined,
   },
+  // The first `n` elements of `Iterate(f, x0)`: the region runs `n` passes
+  // of its index from 0, its second parameter the accumulator, `x0` (the
+  // second operand) at the first pass and the yield of the pass before it
+  // after; each yield is an element.
+  {
+    op: 'iterate',
+    effect: 'may-fail',
+    args: [I, R],
+    params: [I, R],
+    results: ([n], ys) =>
+      ys.length === 1 && ys[0].shape.length === 0 && widensTo(ys[0].lane, R)
+        ? [listOf(ys[0], { v: n })]
+        : undefined,
+  },
   // The numeric derivative at `x` of the region's yield at its parameter:
   // the stencil of the runtime (`_SYS.nd`).
   {

@@ -153,6 +153,12 @@ once, or an issue file.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- `javascript`: `Take(Iterate(s, x), 3)` at `x = 1`, with `s` declared
+  `(real, real = 5) -> real` and assigned `(u, v = 7) ↦ v - u`. The compiled
+  code applies the declared default (`[4, 1, 4]`, as a call `s(x)`, `Map`
+  and `Filter` do in the interpreter); the interpreter's `Iterate` applies
+  the literal's (`[6, 1, 6]`). CE-1461.
+
 - `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is

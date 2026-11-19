@@ -44,8 +44,10 @@ import {
 import { SCALARIZE_LIMIT } from './passes.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
- *  with a type (`Typed(z, "real")`). */
+ *  with a type (`Typed(z, "real")`), also with a default value
+ *  (`Optional(z, 2)`, `Optional(Typed(z, "real"), 2)`). */
 export function parameterName(p: Expression): string | undefined {
+  if (isFunction(p, 'Optional') && p.nops === 2) p = p.ops[0];
   if (isFunction(p, 'Typed')) p = p.ops[0];
   return isSymbol(p) ? p.symbol : undefined;
 }
@@ -72,15 +74,22 @@ export function operatorLiteral(
     valueDefinition: f.valueDefinition,
     engine: f.engine,
   };
-  // A user function of `n` parameters (a `Map`, a `Filter`, a quantifier):
-  // the interpreter applies it as the call `f(a1, …, an)`. The call is
-  // boxed here, so its head must resolve to the definition of `f`.
+  // A user function of `n` parameters (a `Map`, a `Filter`, a quantifier),
+  // or of more whose parameters after the `n`th have a default: the
+  // interpreter applies it as the call `f(a1, …, an)`, which the canonical
+  // form completes with the defaults. The call is boxed here, so its head
+  // must resolve to the definition of `f`.
   const user = userBinding(node as never);
   if (user !== undefined) {
     const ps = Array.from({ length: n ?? 0 }, (_, i) => `_p${i + 1}`);
+    const total = user.literal.nops - 1;
+    const required = user.literal.ops
+      .slice(1)
+      .filter((p) => !isFunction(p, 'Optional')).length;
     if (
       n === undefined ||
-      user.literal.nops - 1 !== n ||
+      n > total ||
+      n < required ||
       userBinding(f.engine.box([name, ...ps]) as never)?.key !== user.key
     )
       return f;
@@ -1038,8 +1047,9 @@ export function listLowering(cx: Lowering) {
     const g = e.ops[1];
     // The interpreter sorts by a key when the value of `g` requires one
     // argument, and calls `g(a, b)` as a comparator otherwise
-    // (`sortedIndicesWalk()`): a user function by the parameters of its
-    // literal, a library operator by its signature (`Floor`, whose second
+    // (`sortedIndicesWalk()`): a user function by the required parameters
+    // of its literal (`(a, b = 0) ↦ …` is a key), a library operator by its
+    // signature (`Floor`, whose second
     // parameter is optional, is a comparator there).
     if (isSymbol(g) && rowOfHead(cx.rows, g.symbol)?.arity === 'variadic')
       decline(e, 'Sort by a variadic operator');
@@ -1051,12 +1061,7 @@ export function listLowering(cx: Lowering) {
           engine: g.engine,
         } as never)
       : undefined;
-    const n =
-      (user !== undefined
-        ? user.literal.nops - 1
-        : requiredArity(g.type.type)) === 1
-        ? 1
-        : 2;
+    const n = requiredArity((user?.literal ?? g).type.type) === 1 ? 1 : 2;
     const f = operatorLiteral(g, cx.rows, n);
     const params = isFunction(f, 'Function')
       ? f.ops.slice(1).map(parameterName)
@@ -1156,6 +1161,139 @@ export function listLowering(cx: Lowering) {
     return reindexed(e, s, s.length, at(order));
   };
 
+  /** The list of the first `n` elements of `it`, `Iterate(f, x0)`, for a
+   *  run-time `n >= 0`: the region `iterate`, whose pass `k` from 0 binds
+   *  the accumulator (`x0`, then the element before) and yields
+   *  `f(k + 1, acc)`, or `f(acc)` when the value of `f` requires one
+   *  argument (`iterateArgs()` of the library: a user function by its
+   *  literal, a library operator by its signature). Real numbers only; an
+   *  integer `x0` keeps the integer lane when `f` gives an integer of one.
+   *  The interpreter's list is lazy and memoized, so an effect declines. */
+  const iterated = (e: Fn, it: Fn, n: V): V => {
+    if (cx.interval) decline(it, 'Iterate on interval-js');
+    if (it.nops > 2) decline(it, `Iterate of ${it.nops} operands`);
+    const g = it.ops[0];
+    const user = isSymbol(g)
+      ? userBinding({
+          operator: g.symbol,
+          operatorDefinition: g.operatorDefinition,
+          valueDefinition: g.valueDefinition,
+          engine: g.engine,
+        } as never)
+      : undefined;
+    const arity = requiredArity((user?.literal ?? g).type.type) === 1 ? 1 : 2;
+    const f = operatorLiteral(g, cx.rows, arity);
+    const params = isFunction(f, 'Function')
+      ? f.ops.slice(1).map(parameterName)
+      : [];
+    if (
+      !isFunction(f, 'Function') ||
+      params.length !== arity ||
+      params.includes(undefined) ||
+      new Set(params).size !== params.length
+    )
+      decline(
+        it,
+        `Iterate of a function that is not a literal of ${arity} parameters of distinct names`
+      );
+    // With no initial value the accumulator of the first pass is
+    // `Nothing`: a function of the index that does not name it (any
+    // occurrence of the name, also one bound again inside) is a function
+    // of the index alone.
+    const names = (x: Expression): boolean =>
+      isSymbol(x) ? x.symbol === params[1] : isFunction(x) && x.ops.some(names);
+    if (it.nops !== 2 && (arity === 1 || names((f as Fn).ops[0])))
+      decline(it, 'Iterate with no initial value of a function that reads it');
+    const effects = b.effects;
+    const real = (v: V) =>
+      type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
+    const init = it.nops === 2 ? cx.scalar(it.ops[1]) : integer(0);
+    if (!real(init))
+      decline(
+        it.ops[1],
+        'an initial value of Iterate that is not a real number'
+      );
+    /** The parameters of a pass whose accumulator is on `lane`, and its
+     *  yield. */
+    const pass = (lane: Lane): [V[], () => V[]] => {
+      const [k, acc] = [
+        b.newValue(scalarType('integer')),
+        b.newValue(scalarType(lane)),
+      ];
+      const yields = () =>
+        cx.withFrame(true, (frame) => {
+          if (arity === 2)
+            frame.names.set(params[0]!, {
+              v: cx.apply(e, 'Add', [k, integer(1)]),
+              role: 'index',
+            });
+          frame.names.set(params[arity - 1]!, { v: acc, role: 'index' });
+          const y = cx.scalar((f as Fn).ops[0]);
+          if (!real(y))
+            decline(
+              it,
+              'Iterate of a function whose value is not a real number'
+            );
+          return [y];
+        });
+      return [[k, acc], yields];
+    };
+    // An integer `x0` whose next element is not an integer: the
+    // accumulator is a real. The trial region is not emitted.
+    let lane = type(init).lane;
+    if (lane === 'integer') {
+      const before = b.effects;
+      const [ps, yields] = pass(lane);
+      const r = b.region(ps, yields);
+      b.effects = before;
+      if (type(r.yields[0]).lane !== 'integer') lane = 'real';
+    }
+    const [ps, yields] = pass(lane);
+    const [out] = cx.region('iterate', [n, init], ps, yields, e);
+    // A guard: the trial above lowered the same body on the same lane.
+    if (lane === 'integer' && type(out).lane !== 'integer')
+      decline(it, 'an accumulator that changes lane');
+    if (b.effects > effects)
+      decline(
+        it,
+        'Iterate with an effect (the interpreter computes its elements lazily)'
+      );
+    return out;
+  };
+
+  /** `x` is the library's `Iterate`. */
+  const isIterate = (x: Expression): x is Fn =>
+    isFunction(x, 'Iterate') && cx.isLibrary(x);
+
+  /** The elements of `Iterate(f, x0)` up to the integer index `i`, from 1
+   *  (none for `i < 1`), which an `At` of `i` reads. */
+  const iterateTo = (e: Fn, it: Fn, i: V): V => {
+    if (type(i).lane !== 'integer' || type(i).shape.length > 0)
+      decline(e, 'an index of Iterate that is not an integer');
+    return iterated(e, it, int(e, 'Max', i, integer(0)));
+  };
+
+  /** `Take(Iterate(f, x0), m)` of an integer `m`: the first `m` elements.
+   *  A negative constant `m` declines, and a negative `m` at run time
+   *  throws (the interpreter leaves both unevaluated). */
+  const iterateTake = (e: Fn): V => {
+    const m = count(e.ops[1]);
+    const c = cx.constant(m);
+    if (c !== undefined && c < 0)
+      decline(
+        e,
+        'Take of a negative count of an unbounded list (the interpreter leaves it unevaluated)'
+      );
+    const n =
+      c !== undefined
+        ? m
+        : cx.apply(e, op('present.int'), [
+            cx.apply(e, 'Less', [m, integer(0)]),
+            m,
+          ]);
+    return iterated(e, e.ops[0] as Fn, n);
+  };
+
   /** The heads of a list that `lower.ts` hands over (`README.md`,
    *  "Lists", the list operators). */
   const collection = (e: Fn): V => {
@@ -1238,6 +1376,7 @@ export function listLowering(cx: Lowering) {
     }
     if (h === 'Count' && e.nops === 2)
       return listSource(build(e, e.ops[0], e.ops[1], true)).length;
+    if (h === 'Take' && isIterate(e.ops[0])) return iterateTake(e);
     const effects = b.effects;
     const s = source(e.ops[0], false, true);
     const n = s.length;
@@ -1311,5 +1450,7 @@ export function listLowering(cx: Lowering) {
     over,
     comprehension,
     join,
+    isIterate,
+    iterateTo,
   };
 }

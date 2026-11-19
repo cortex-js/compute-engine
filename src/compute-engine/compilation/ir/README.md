@@ -1267,6 +1267,33 @@ whose length is not one number). On GLSL a count known at run time declines
 (an unbounded list) and a value of a run-time length (a list of lists of
 run-time length) decline.
 
+`Iterate(f, x0)` is an unbounded list, read through `Take(Iterate(f, x0), m)`
+(the first `m` elements), `At(Iterate(f, x0), i)`, `First`, `Second` and
+`Third`: the region `iterate` (`iterated()` of `lower-lists.ts`), a loop of
+`m` passes, or of `Max(i, 0)` for an `At`, whose accumulator is a variable
+that each pass sets to its element and writes into the list, from `x0`. Its
+element `k` is `f(k, element(k − 1))`, or `f(element(k − 1))` when the value
+of `f` requires one argument, the choice of the interpreter's `iterateArgs()`:
+a literal by its signature, a user function by the required parameters of its
+literal (a name declared `function` that holds a unary literal is unary;
+`s` declared `(real, real = 2) -> real` with a literal of two parameters is
+called with two), a library operator by its signature (`Sin` is unary).
+`At` of an index below 1 is NaN, where the interpreter gives `Missing`. The
+accumulator and the elements are real or integer scalars: an integer `x0`
+keeps the integer lane when `f` gives an integer of an integer (a trial
+lowering, not emitted, settles it: `a ↦ a/3` from 1 is real). With no `x0`,
+a function of two parameters whose body does not name its second compiles
+(`Iterate((i, a) ↦ i²)`, the interpreter's `[1, 4, 9, …]`); another declines
+(the first accumulator is `Nothing`). A count or an index that is not an
+integer declines (the interpreter rounds a real count of `Take`); a negative
+constant count declines and a negative count at run time throws
+(`_present`), where the interpreter leaves `Take(Iterate(…), −2)`
+unevaluated. Declined: an effect in `f` or `x0` (the interpreter's list is
+lazy and memoized), a list or a tuple accumulator, a complex or a boolean
+element, `Last` and every other consumer (`Drop`, `Length`, `Sum` of the
+unbounded list), GLSL and the bigint mode (no spelling of the region) and the
+interval mode.
+
 `Map(f, L1, …, Ln)` of two lists or more is the interpreter's list as long as
 the shortest list (`Map((a, b) ↦ a + b, [1, 2, 3], [10, 20])` is `[11, 22]`): a
 build over the `Min` of the lengths (the least stated length, and the length
@@ -1368,8 +1395,9 @@ above, with the interpreter's value for every length, also 0:
   permutation is the interpreter's (`sortedIndicesWalk()`), also for a
   comparator that is not an order (`(a, b) ↦ |a| ≤ |b|`). The choice
   between a key and a comparator is the interpreter's: a key when the value
-  of `f` requires one argument (a user function by the parameters of its
-  literal, a library operator by its signature), a comparator otherwise, so
+  of `f` requires one argument (a user function by the required parameters
+  of its literal, so `(a, b = 0) ↦ …` is a key, a library operator by its
+  signature), a comparator otherwise, so
   `Sort(L, Floor)` (whose second parameter is optional) is a comparator, and
   declines, since `Floor` does not take two arguments in the compiled code. Elements that are not real numbers, a comparator
   with an effect and a variadic library operator (`Max`) decline;
@@ -1877,7 +1905,18 @@ interpreter binds the name of the `Limits`, the quadrature bound the parameter.
 
 A user function is lowered once per compilation, keyed by its definition: the
 parameter types from the signature of its binding (`real` when unknown), the
-result from the signature or the body. A result of no stated type (none,
+result from the signature or the body. A parameter with a default value
+(`Optional(k, 2)` in the literal, `(real, real = 2) -> real` in a declared
+signature, Epsil's `function f(x, k: integer = 3)`) is a parameter like the
+others, typed by its place in the `optArgs` of the signature: the canonical
+form completes a call that leaves it out with the default
+(`fillParameterDefaults()`), as the interpreter does, so every call has all
+its arguments, and a list argument there maps or binds whole by the same rule
+as at any other parameter (`d(L)` is `d(L, 3)`). A call that the canonical
+form did not complete declines (another count of arguments). A default is a
+constant (the language admits no default that reads an earlier parameter). A
+root function literal with a default declines: `run()` takes every positional
+argument. A result of no stated type (none,
 `unknown`, `number`, `any`, a `broadcastable` type, or a union that is no IR
 type, as the engine infers `list<…> | number | tuple` for
 `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type of the body: a scalar, or a point
@@ -2039,9 +2078,11 @@ the number of lists of the `Map`, 1 for a `Filter` and 2 for the root (the
 combiner of the `Reduce` of the engine: `Reduce(L, Max, 0)` compiles `Max` as
 `Math.max(a0, a1)`). A name of a user function whose literal has as many
 parameters as the `Map` has lists (1 for a `Filter`, a `Count`, `Any`, `All`
-and a sort key, 2 for a comparator of `Sort`) is the literal
-`(p1, …, pn) ↦ f(p1, …, pn)`, the call that the interpreter makes, when
-that call resolves to the same definition (`operatorLiteral()`); of another
+and a sort key, 2 for a comparator of `Sort`), or more whose parameters after
+the `n`th have a default value in the literal, is the literal
+`(p1, …, pn) ↦ f(p1, …, pn)`, the call that the interpreter makes, which the
+canonical form completes with the defaults, when that call resolves to the
+same definition (`operatorLiteral()`); of another
 arity, at the root, as the combiner of a `Reduce`, a shadowed name and a
 `chain` row (`Less`) decline as before. `Pipe(x, f)` is the call that the
 interpreter evaluates (`pipeStep()` of `library/core.ts`), lowered in its

@@ -180,6 +180,7 @@ const CONSTRUCTS = new Set([
   'PointList',
   'Comprehension',
   'Repeat',
+  'Iterate',
   // The list operators (`lists.collection()`, and `At` of `First`, ...).
   'First',
   'Second',
@@ -214,6 +215,7 @@ const LOOPS = new Set([
   'Loop',
   'Comprehension',
   'Repeat',
+  'Iterate',
 ]);
 
 /** What the memo and `closedValue()` read of a node: the names it reads
@@ -1141,6 +1143,11 @@ export function lower(
       }
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
+        // An element of an `Iterate`: the elements up to the index.
+        if (lists.isIterate(e.ops[0])) {
+          const i = scalar(e.ops[1]);
+          return at(e, lists.iterateTo(e, e.ops[0], i), i);
+        }
         const effects = b.effects;
         const [l, i] = [value(e.ops[0])!, value(e.ops[1])!];
         const t = type(l);
@@ -1189,7 +1196,10 @@ export function lower(
       case 'Last': {
         if (e.nops !== 1) break;
         const k = { First: 1, Second: 2, Third: 3, Last: -1 }[e.operator]!;
-        return at(e, value(e.ops[0])!, b.constant(k, 'integer'));
+        const i = b.constant(k, 'integer');
+        if (lists.isIterate(e.ops[0]) && k > 0)
+          return at(e, lists.iterateTo(e, e.ops[0], i), i);
+        return at(e, value(e.ops[0])!, i);
       }
       case 'PointX':
       case 'PointY':
@@ -3475,6 +3485,9 @@ export function lower(
       root.ops.slice(1).forEach((p, i) => {
         const name = parameterName(p);
         if (name === undefined) decline(root, 'a parameter that is not a name');
+        // `run()` takes every positional argument: no default fills one.
+        if (isFunction(p, 'Optional'))
+          decline(root, `the parameter ${name} with a default value`);
         const declared =
           isFunction(p, 'Typed') && isString(p.ops[1])
             ? ce.type(p.ops[1].string).type
