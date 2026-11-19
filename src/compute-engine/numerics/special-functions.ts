@@ -2871,9 +2871,42 @@ export function bigBetaRegularized(
 export function bigZeta(ce: ComputeEngine, s: BigNum, prec: number): BigNum {
   if (!s.isFinite()) return BigDecimal.NAN;
   if (s.eq(1)) return new BigDecimal(Infinity); // pole
-  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+  const extra = zetaNearIntegerGuard(s);
+  if (extra === undefined) return BigDecimal.NAN;
+  return withGuardDigits(prec, SPECIAL_FN_GUARD + extra, (prec) =>
     zetaCore(ce, s, prec)
   );
+}
+
+/**
+ * The most guard digits `bigZeta` adds for an `s` near a pole or a trivial
+ * zero; farther than that it declines (`zetaNearIntegerGuard`).
+ */
+const ZETA_NEAR_INTEGER_MAX_GUARD = 500;
+
+/**
+ * The extra guard digits that `bigZeta(s)` needs for the relative accuracy of
+ * its result, or `undefined` when they pass `ZETA_NEAR_INTEGER_MAX_GUARD`.
+ *
+ * Next to the pole at 1 and the zeros at 0 and −2, −4, … (ζ(0) is finite, but
+ * by the functional equation it is the product of the zero of the sine and
+ * the pole ζ(1 − s)), the value is a product or quotient of a factor of
+ * size 10^−j (the distance δ = |s − m| to the integer m, j = ⌈−log₁₀ δ⌉) with
+ * its rounding error absolute at the working precision: j digits of the
+ * result are lost, however small the result (ζ(−2 − 10⁻³⁰) ≈ 3.0·10⁻³²
+ * lost five digits of 30 to the 24 fixed guard digits). So the guard grows by
+ * j. Elsewhere (an odd negative integer, any integer above 1) no factor
+ * vanishes and the fixed guard is enough.
+ */
+export function zetaNearIntegerGuard(s: BigNum): number | undefined {
+  if (s.isInteger() || s.gt(1.5)) return 0;
+  const m = s.round();
+  // Odd negative integers: the sine is ±1, no cancellation.
+  if (m.isNegative() && BigInt(m.toFixed(0)) % 2n !== 0n) return 0;
+  // `s − m` is exact: the working precision covers every digit of `s`.
+  const delta = s.sub(m, s._digitCount() + Math.abs(s.exponent) + 2).abs();
+  const j = Math.max(0, -(delta._digitCount() + delta.exponent)) + 1;
+  return j > ZETA_NEAR_INTEGER_MAX_GUARD ? undefined : j;
 }
 
 function zetaCore(ce: ComputeEngine, s: BigNum, prec: number): BigNum {
@@ -3115,7 +3148,9 @@ function lnAbsHurwitzTerm(w: number, s: number): number {
  * large. `relDigits` (the significant digits the caller wants) bounds how
  * many pairs the search may try in that case.
  *
- * `sDist` is |s − round(s)|, taken from the exact operand. The Pochhammer
+ * `log10DistToOne` is log₁₀|s − 1|, from the exact operand (the double of
+ * s is 1 within 1.1e-16 of the pole). `sDist` is |s − round(s)|, taken from
+ * the exact operand. The Pochhammer
  * factor (s + m) closest to zero is read from it, not from `sRe + m`: for
  * s = −2 + 10⁻³⁰, `sRe` rounds to −2 and `sRe + 2 = 0` would end the
  * correction series as if s were the integer −2, whose Pochhammer symbol
@@ -3126,7 +3161,8 @@ function hurwitzZetaBigPlan(
   sDist: number,
   aRe: number,
   digits: number,
-  relDigits: number
+  relDigits: number,
+  log10DistToOne: number
 ): HurwitzEMPlan | undefined {
   const LN_2PI = Math.log(2 * Math.PI);
   const target = -digits * Math.LN10 - Math.LN10;
@@ -3155,7 +3191,7 @@ function hurwitzZetaBigPlan(
     const lnZ = Math.log(Math.abs(z));
     const lnZs = lnAbsHurwitzTerm(z, sRe); // ln |z^{-s}|
     let lnPoch = Math.log(absFactor(0)); // ln |(s)_1|
-    let largest = lnZs + lnZ - Math.log(Math.abs(sRe - 1)); // z^{1-s}/(s-1)
+    let largest = lnZs + lnZ - log10DistToOne * Math.LN10; // z^{1-s}/(s-1)
     let prev = Infinity;
     let pairs = -1;
     for (let j = 1; j <= maxPairs; j++) {
@@ -3205,9 +3241,13 @@ function hurwitzZetaBigPlan(
  *   and the leading term |a^(1−s)/(s − 1)| of the expansion for large a.
  * - 0 ≤ s < 1: the leading term for large a, and at least 1.
  */
-function hurwitzLog10Estimate(sRe: number, aRe: number): number {
+function hurwitzLog10Estimate(
+  sRe: number,
+  aRe: number,
+  log10DistToOne: number
+): number {
   const w = aRe > 0 ? aRe : 1;
-  const leading = (1 - sRe) * Math.log10(w) - Math.log10(Math.abs(sRe - 1));
+  const leading = (1 - sRe) * Math.log10(w) - log10DistToOne;
   if (sRe > 1) return Math.max(-sRe * Math.log10(w), leading);
   if (sRe < 0) {
     const reflected =
@@ -3341,16 +3381,31 @@ function bigHurwitzZetaEM(
     return bigHurwitzZetaNegativeInteger(ce, -sRe, a, requested);
 
   let sDist = 0;
+  // log₁₀|s − 1|, from the operand and not its double: within 1.1e-16 of 1
+  // the double is exactly 1 and the estimate would be infinite.
+  let log10DistToOne = Math.log10(Math.abs(sRe - 1));
   if (!sInteger) {
     const wp = requested + SPECIAL_FN_GUARD;
     const sBig = hurwitzOperandBig(s, wp);
     sDist = sBig.sub(sBig.round(), wp).abs().toNumber();
+    const toOne = sBig.sub(BigDecimal.ONE, wp).abs();
+    if (toOne.isZero()) return undefined;
+    log10DistToOne = toOne._digitCount() + toOne.exponent - 1;
   }
 
   const relative = requested + SPECIAL_FN_GUARD;
-  let absolute = relative - Math.floor(hurwitzLog10Estimate(sRe, aRe));
+  const estimate = hurwitzLog10Estimate(sRe, aRe, log10DistToOne);
+  if (!Number.isFinite(estimate)) return undefined;
+  let absolute = relative - Math.floor(estimate);
   for (let pass = 0; pass < HURWITZ_BIG_MAX_PASSES; pass++) {
-    const plan = hurwitzZetaBigPlan(sRe, sDist, aRe, absolute, relative);
+    const plan = hurwitzZetaBigPlan(
+      sRe,
+      sDist,
+      aRe,
+      absolute,
+      relative,
+      log10DistToOne
+    );
     if (plan === undefined) return undefined;
     // Rounding each intermediate (at most 10^plan.largest) to `working`
     // digits leaves an error near 10^(plan.largest − working): keep it 12

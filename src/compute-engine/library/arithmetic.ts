@@ -155,6 +155,7 @@ import {
   bigPolygamma,
   bigBeta,
   bigZeta,
+  zetaNearIntegerGuard,
   bigDirichletEta,
   bigDirichletBeta,
   bigHurwitzZeta,
@@ -10017,6 +10018,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? undefined
               : boxComplexResult(engine, z.value, false);
           }
+          // Next to the pole or a trivial zero the kernel loses a digit per
+          // power of ten of the distance; past its guard it declines here, not
+          // by a NaN that would fall through to the double kernel.
+          if (
+            isNumber(x) &&
+            !x.isComplex &&
+            bignumPreferred(engine) &&
+            x.bignumRe !== undefined &&
+            zetaNearIntegerGuard(x.bignumRe) === undefined
+          )
+            return undefined;
           return apply(
             x,
             zeta,
