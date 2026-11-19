@@ -1,5 +1,6 @@
 import {
   CodeActionKind,
+  CompletionItemKind,
   createConnection,
   DiagnosticSeverity,
   DidChangeConfigurationNotification,
@@ -12,6 +13,7 @@ import {
   TextDocuments,
   TextDocumentSyncKind,
   type CodeAction,
+  type CompletionItem,
   type Diagnostic,
   type DocumentHighlight,
   type DocumentSymbol,
@@ -36,7 +38,12 @@ import {
   type JsonDiagnostic,
 } from '../../src/cli/format.js';
 import { compile } from '../../src/compute-engine/compilation/compile-expression.js';
-import { ComputeEngine, resolveLibraryNames } from '../../src/epsil.js';
+import {
+  ComputeEngine,
+  epsilCompletions,
+  resolveLibraryNames,
+  type EpsilCompletionItem,
+} from '../../src/epsil.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import { operator, operands, symbol } from '../../src/math-json/utils.js';
 import { parseType } from '../../src/common/type/parse.js';
@@ -78,6 +85,7 @@ let hasConfigurationCapability = false;
 let hasRelatedInformationCapability = false;
 let hasCodeDescriptionCapability = false;
 let hasHierarchicalSymbolCapability = false;
+let hasInsertReplaceCapability = false;
 let diagnosticsEnabled = true;
 
 /** Where the extended error explanations are hosted — one section per
@@ -140,6 +148,12 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasHierarchicalSymbolCapability =
     params.capabilities.textDocument?.documentSymbol
       ?.hierarchicalDocumentSymbolSupport === true;
+  // With this capability a completion edit carries both the range to insert
+  // over (the word before the cursor) and the range to replace (the whole
+  // word under the cursor), and the client picks one.
+  hasInsertReplaceCapability =
+    params.capabilities.textDocument?.completion?.completionItem
+      ?.insertReplaceSupport === true;
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -150,6 +164,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       documentHighlightProvider: true,
       documentSymbolProvider: true,
       renameProvider: { prepareProvider: true },
+      completionProvider: {},
     },
   };
 });
@@ -235,6 +250,57 @@ connection.onHover(({ textDocument, position }) => {
           },
         }),
   };
+});
+
+/** The LSP kind of each kind of completion item. */
+const COMPLETION_KINDS: Record<
+  EpsilCompletionItem['kind'],
+  CompletionItemKind
+> = {
+  'fixit': CompletionItemKind.Text,
+  'variable': CompletionItemKind.Variable,
+  'function': CompletionItemKind.Function,
+  'type': CompletionItemKind.Class,
+  'library-function': CompletionItemKind.Function,
+  'library-constant': CompletionItemKind.Constant,
+  'keyword': CompletionItemKind.Keyword,
+  'value': CompletionItemKind.Value,
+};
+
+// The items come from `epsilCompletions()`, the function Tycho's editor
+// calls too. Its `range` becomes each item's text edit, so that the client
+// replaces the word being typed, and its order is kept through `sortText`.
+// A client with `insertReplaceSupport` also gets the whole word under the
+// cursor (`range[0]` to `replaceEnd`) as the range to replace.
+connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
+  const document = documents.get(textDocument.uri);
+  if (document === undefined) return [];
+  hoverEngine ??= new ComputeEngine();
+  const result = epsilCompletions(
+    hoverEngine,
+    document.getText(),
+    document.offsetAt(position)
+  );
+  const range = {
+    start: document.positionAt(result.range[0]),
+    end: document.positionAt(result.range[1]),
+  };
+  const replace = {
+    start: range.start,
+    end: document.positionAt(result.replaceEnd),
+  };
+  return result.items.map((item, index) => ({
+    label: item.label,
+    kind: COMPLETION_KINDS[item.kind],
+    ...(item.detail === undefined ? {} : { detail: item.detail }),
+    ...(item.documentation === undefined
+      ? {}
+      : { documentation: item.documentation }),
+    sortText: `${item.rank}-${String(index).padStart(5, '0')}`,
+    textEdit: hasInsertReplaceCapability
+      ? { insert: range, replace, newText: item.insertText ?? item.label }
+      : { range, newText: item.insertText ?? item.label },
+  }));
 });
 
 documents.listen(connection);

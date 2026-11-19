@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### New Features
+
+- **`epsilCompletions()` gives the completion items at an offset of an Epsil
+  source.** The items are the likely values of the type expected at the offset,
+  the names of the source visible there (with their type or signature), the
+  standard-library names (with their signature and the first line of their
+  description) and the keywords valid at the position. After `:` in a
+  declaration or a parameter, the items are the type names. Each item has a
+  `kind` and a `rank`, and the items come sorted, best first:
+
+  ```ts
+  epsilCompletions(ce, "let count: integer = 10\nlet a: integer = co", 43);
+  // ➔ { range: [41, 43], expectedType: "integer",
+  //     items: [{ label: "count", kind: "variable", detail: "integer", rank: 2 },
+  //             { label: "countIf", kind: "library-function", rank: 3, … }, …] }
+  ```
+
+  The Epsil extension for VS Code offers the same items as completions.
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes

@@ -22,6 +22,11 @@ export {
 } from './epsil/resolve-library-names.js';
 export type { BinderSite, ProgramDeclaration } from './epsil/occurrences.js';
 export { checkEpsil } from './epsil/check-epsil.js';
+export { epsilCompletions } from './epsil/completion.js';
+export type {
+  EpsilCompletionItem,
+  EpsilCompletions,
+} from './epsil/completion.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {
   canonicalLibraryName,

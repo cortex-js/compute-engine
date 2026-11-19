@@ -1305,5 +1305,69 @@ await scenario('rename on a broken parse', undefined, async (c) => {
   );
 });
 
+// ── Completion ──────────────────────────────────────────────────────────
+await scenario('completion', undefined, async (c) => {
+  await c.open(URI, 'let count: integer = 1\nlet a: integer = co');
+  const items = await c.request('textDocument/completion', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 19 },
+  });
+  const labels = items.map((item) => item.label);
+  check(
+    'the items match the word typed, the source name first',
+    labels[0] === 'count' &&
+      labels.every((label) => label.toLowerCase().startsWith('co')),
+    JSON.stringify(labels)
+  );
+  const count = items[0];
+  check(
+    'a source name has its kind, type and an edit over the word typed',
+    count.kind === 6 &&
+      count.detail === 'integer' &&
+      count.textEdit.newText === 'count' &&
+      count.textEdit.range.start.line === 1 &&
+      count.textEdit.range.start.character === 17 &&
+      count.textEdit.range.end.character === 19,
+    JSON.stringify(count)
+  );
+  const cos = items.find((item) => item.label === 'cos');
+  check(
+    'a library function has its signature, and the order is kept',
+    cos?.kind === 3 &&
+      cos.detail.includes('->') &&
+      items.every(
+        (item, i) => i === 0 || items[i - 1].sortText < item.sortText
+      ),
+    JSON.stringify(cos)
+  );
+});
+
+await scenario(
+  'completion with insertReplaceSupport',
+  {
+    textDocument: {
+      completion: { completionItem: { insertReplaceSupport: true } },
+    },
+  },
+  async (c) => {
+    // The cursor inside a word: `l▮e`
+    await c.open(URI, 'le');
+    const items = await c.request('textDocument/completion', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 1 },
+    });
+    const edit = items.find((item) => item.label === 'let')?.textEdit;
+    check(
+      'an item inserts over the word before the cursor and replaces the whole word',
+      edit?.newText === 'let' &&
+        edit.insert.start.character === 0 &&
+        edit.insert.end.character === 1 &&
+        edit.replace.start.character === 0 &&
+        edit.replace.end.character === 2,
+      JSON.stringify(edit)
+    );
+  }
+);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

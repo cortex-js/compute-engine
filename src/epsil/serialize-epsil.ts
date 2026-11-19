@@ -3521,7 +3521,7 @@ function escapeProtocolName(s: string): string {
   return escapeSymbol(s);
 }
 
-function escapeSymbol(s: string): string {
+export function escapeSymbol(s: string): string {
   // A HARD-reserved word (a literal or a head/word operator the grammar claims)
   // has no plain spelling — emit the verbatim form so it re-parses as a symbol.
   // Merely *reserved* words are ordinary identifiers and are emitted as-is.

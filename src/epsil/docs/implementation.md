@@ -302,6 +302,46 @@ passes of `for i in 1..200000 { s += i * i }` took 1.4 to 1.5 times as long
 as with `executeEpsil`, with a hook that does little work. Give a run that a
 debugger follows an engine of its own.
 
+### Completion
+
+`epsilCompletions(ce, source, offset)` gives the completion items at an
+offset of a source, for an editor. It replaces the word being typed with a
+placeholder name, parses the result, and reads the context from the node
+around the placeholder. The items are:
+
+- the likely values of the expected type: `0` for a numeric type that holds
+  0, `true` and `false`, `""`, `[]`, a tuple, a record or the variants of a
+  sum type (`green()`) built from their fields;
+- the names of the source visible at the offset, with their declared type
+  or signature: a `let` is visible after its statement, a parameter in the
+  body of its function;
+- the standard-library names, by their Epsil spelling, with their signature
+  and the first line of their description;
+- the keywords valid at the position.
+
+The type expected at the offset comes from the value of a typed `let`, the
+parameter of a called function (of the source or of the library), the
+element type of a list, or the type of an assigned variable. After `:` in a
+declaration or a parameter, after `->` of a function header and after
+`type name =`, the items are the type names instead.
+
+```ts
+const source = "let count: integer = 10\nlet a: integer = co";
+const result = epsilCompletions(ce, source, source.length);
+result.range;        // ➔ [41, 43]: the word "co"
+result.replaceEnd;   // ➔ 43: the end of the word under the offset
+result.expectedType; // ➔ "integer"
+result.items[0];     // ➔ { label: "count", kind: "variable", rank: 2, detail: "integer" }
+result.items[1].label; // ➔ "countIf": a library function returning an integer
+```
+
+The items match the word typed, ignoring case, and come sorted by `rank`:
+1 for the likely values, 2 and 3 for the names of the source and of the
+library whose type matches the expected type, 4 and 5 for the other names,
+6 for the keywords. A statement that does not parse yet (`if ▮`) has no
+expected type: its items are the names and the keywords. The VS Code
+extension serves the same items as its completions.
+
 ### Serialization
 
 `serializeEpsil(expression, options?)` converts MathJSON back to Epsil:
