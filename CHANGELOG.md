@@ -10,6 +10,12 @@
   in the interval mode, as the interpreter does: `k` reads the input `x`, not
   the parameter `x` of `u`. GLSL compiles it too. The same holds through a
   chain of such functions (`h(x) := k(x)` called in `n(x) := x·h(x)`).
+- **`compile()` compiles a colour conversion of a tuple of three numbers.**
+  `AsOklab((1, 0, 0))`, `AsRgb((r, g, b))` and the other `As…` conversions
+  read the tuple as the sRGB colour of its channels, as the interpreter does,
+  on JavaScript and GLSL (`AsHsl` and `AsHsv` on JavaScript only). Before,
+  they declined ("AsOklab of a tuple: its value on a tuple is not its value
+  on a list"). A tuple of four numbers (with an alpha) still declines.
 
 ## 0.194.1 _2026-11-19_
 

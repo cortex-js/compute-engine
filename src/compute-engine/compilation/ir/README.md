@@ -519,14 +519,19 @@ element-wise operation of the lists of numbers ("Lists"): lists of two stated
 lengths decline (the interpreter gives `incompatible-dimensions`); lists of
 run-time lengths that differ give an unspecified result, a list as long as the
 first one whose colours past the end of a shorter list have NaN channels
-(`Rgb(D, E, 0.5)` with 3 and 1 elements); a tuple operand declines, also of a
-conversion (`Hsv(Tuple(1, 2), 0, 0.5)`, `AsOklab(Tuple(Cv, Cr))`, an error of
-the interpreter). On JavaScript a list of colours is an array of the objects,
-also as the result of the program (`List(Cv, Cr)` of two colour names), and
-`Length` reads it; an `At` of it that the passes do not make an element (an
-index that is not a constant in range of a stated length after `fold`) declines
-in `admits()` (the interpreter gives `Missing` out of range), and a `Sum` of it
-declines (an `incompatible-type` error of the interpreter). On GLSL a list of
+(`Rgb(D, E, 0.5)` with 3 and 1 elements). A conversion reads a tuple of three
+numbers, a literal or an input of type `tuple<real, real, real>`, as the sRGB
+colour of its channels, as the interpreter does (`AsOklab((1, 0, 0))` is
+`AsOklab(Rgb(1, 0, 0))`). Every other tuple operand declines: a tuple of four
+(its alpha) or of two numbers, a tuple of colours (`AsOklab(Tuple(Cv, Cr))`, an
+error of the interpreter), a list of tuples, and a tuple operand of a
+constructor (`Hsv(Tuple(1, 2), 0, 0.5)`). On JavaScript a list of colours is
+an array of the objects, also as the result of the program (`List(Cv, Cr)` of
+two colour names), and `Length` reads it; an `At` of it that the passes do not
+make an element (an index that is not a constant in range of a stated length
+after `fold`) declines in `admits()` (the interpreter gives `Missing` out of
+range), and a `Sum` of it declines (an `incompatible-type` error of the
+interpreter). On GLSL a list of
 colours declines (`admits()`); `At` of a constant index of an operation of a
 stated length is the colour of that element (`At(Hsv(0, 0, L), 2)` of
 `L: list<real^3>`), since the `scalarize` and `fold` passes leave no list. On
@@ -545,12 +550,13 @@ whose value is a constructor of three numbers is that colour (see the values of
 free names above). A user function may return a colour, declared
 (`(real) -> color`, also through `Typed(…, 'color')` in the body) or inferred
 from the body: an object on JavaScript, a `vec3` on GLSL. Declined: a list of
-colours on GLSL, a colour input, a colour string, a tuple of components
-(`AsRgb((r, g, b))`), a parameter of a user function that is a colour,
-arithmetic on a colour (an `error` of the canonical form), every other colour
-operator (`ColorMix`, `ColorContrast`, …), and `mode: 'bigint'`. The colour of
-non-finite channels follows the JavaScript runtime (its `NaN` colour); on GLSL
-no fidelity is owed there. The hue of a colour whose two chromatic components
+colours on GLSL, a colour input, a colour string, a tuple of components other
+than three real numbers (`AsRgb((r, g, b, a))`), a list of tuples, a
+parameter of a user function that is a colour, arithmetic on a colour (an
+`error` of the canonical form), every other colour operator (`ColorMix`,
+`ColorContrast`, …), and `mode: 'bigint'`. The colour of non-finite channels
+follows the JavaScript runtime (its `NaN` colour); on GLSL no fidelity is owed
+there. The hue of a colour whose two chromatic components
 are 0 is 0 on both targets, as in the interpreter (`_gpu_ir_lch` does not call
 `atan(0, 0)`, which GLSL leaves undefined). A colour result has
 `broadcastOutputs` and `broadcast()` (one number per cell, `NaN`).

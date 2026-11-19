@@ -138,6 +138,11 @@ const PROGRAMS: [label: string, json: Json, points: object[]][] = [
   ['AsRgb of a primary', ['AsRgb', ['Rgb', 0, 0, 1]], [{}]],
   ['AsRgb of primaries with a channel at 0', ['AsRgb', ['Rgb', 'x', 0, ['Subtract', 1, 'x']]], [{ x: 0 }, { x: 1 }]],
   ['AsOklab of a primary', ['AsOklab', ['Rgb', 1, 0, 0]], [{}]],
+  // A tuple of three numbers is the sRGB colour of its channels.
+  ['AsOklab of a tuple of channels', ['AsOklab', ['Tuple', 'x', 0.2, 0.3]], [{ x: 0.3 }, { x: 0.9 }]],
+  ['AsOklab of a constant tuple', ['AsOklab', ['Tuple', 1, 0, 0]], [{}]],
+  ['AsOklch of a tuple, extended sRGB', ['AsOklch', ['Tuple', 'x', -0.5, ['Multiply', 2, 'x']]], [{ x: 0.6 }]],
+  ['AsRgb of a tuple', ['AsRgb', ['Tuple', 'x', 0.4, 0.6]], [{ x: 0.3 }]],
   ['Hsl', ['Hsl', 200, 'x', 0.4], [{ x: 0.3 }]],
   ['Hsv', ['Hsv', 200, 'x', 0.4], [{ x: 0.3 }]],
   ['AsOklab as the last operand of a Block', ['Block', ['Declare', 'k', { str: 'unknown' }, ['Oklch', 'x', 0.1, 250]], ['AsOklab', 'k']], [{ x: 0.4 }]],
@@ -150,6 +155,7 @@ const JS_ONLY: [label: string, json: Json, points: object[]][] = [
   ['AsHsl', ['AsHsl', ['Rgb', 'x', 0.4, 0.6]], [{ x: 0.3 }]],
   ['AsHsv', ['AsHsv', ['Oklch', 'x', 0.1, 250]], [{ x: 0.6 }]],
   ['AsOklab of AsRgb', ['AsOklab', ['AsRgb', ['Oklch', 'x', 0.1, 250]]], [{ x: 0.6 }]],
+  ['AsHsv of a tuple', ['AsHsv', ['Tuple', 'x', 0.5, 0.6]], [{ x: 0.3 }]],
 ];
 
 describe('IR profile, colours on JavaScript', () => {
@@ -182,6 +188,19 @@ describe('IR profile, colours on JavaScript', () => {
   test('a constructor gives OKLCh, a conversion the space it names', () => {
     expect(js(['Rgb', 'x', 0.4, 0.6]).run!({ x: 0.3 } as never)).toMatchObject({ space: 'oklch' });
     expect(js(['AsRgb', ['Oklch', 'x', 0.1, 250]]).code).toMatch(/_SYS\.asRgb\(_SYS\.oklch\(_\.x, 0\.1, 250\)\)/);
+  });
+
+  test('a conversion of a tuple input reads its three channels as sRGB', () => {
+    const local = new ComputeEngine();
+    local.declare('P', 'tuple<real, real, real>');
+    const r = compile(local.box(['AsOklab', 'P']), IR);
+    expect(r.success).toBe(true);
+    const v = r.run!({ P: [0.2, 0.5, 0.9] } as never) as unknown as Color;
+    const want = ce.box(['AsOklab', ['Tuple', 0.2, 0.5, 0.9]]).evaluate();
+    if (!isFunction(want)) throw new Error(`not a colour: ${want}`);
+    [v.c0, v.c1, v.c2].forEach((x, k) =>
+      expect(near(x, want.ops[k].re, 1e-12)).toBe(true)
+    );
   });
 
   test('broadcast() gives what the existing compiler gives', () => {
@@ -330,7 +349,9 @@ const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], 
   ['an alpha', ['Oklch', 'x', 0.1, 250, 0.5], ['javascript', 'glsl'], /Oklch with 4 operands/],
   ['a list of colours on GLSL', ['List', ['Oklch', 'x', 0.1, 250], ['Rgb', 'x', 0, 0]], ['glsl'], /a list of colours/],
   ['a constructor of a list on GLSL', ['Rgb', ['List', 1, 2], 0, 0], ['glsl'], /a list of colours/],
-  ['a tuple of components', ['AsOklab', ['Tuple', 'x', 0.2, 0.3]], ['javascript', 'glsl'], /AsOklab of a tuple/],
+  ['a tuple of components with an alpha', ['AsOklab', ['Tuple', 'x', 0.2, 0.3, 0.5]], ['javascript', 'glsl'], /AsOklab of a tuple that is not three real numbers/],
+  ['a list of tuples of components', ['AsOklab', ['List', ['Tuple', 'x', 0, 0], ['Tuple', 0, 'x', 0]]], ['javascript', 'glsl'], /AsOklab of a list of tuples/],
+  ['a tuple of two components',['AsOklab', ['Tuple', 'x', 0.2]], ['javascript', 'glsl'], /AsOklab of a tuple that is not three real numbers/],
   ['a colour string', ['AsOklab', { str: 'red' }], ['javascript', 'glsl'], /./],
   ['a colour input', ['AsOklab', 'c'], ['javascript', 'glsl'], /./],
   ['a colour parameter of a user function', ['AsOklab', ['fk', ['fc', 'x']]], ['javascript', 'glsl'], /the parameter q of fk is not a scalar \(color\)/],

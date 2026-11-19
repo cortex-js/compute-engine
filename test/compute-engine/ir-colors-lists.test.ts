@@ -358,10 +358,10 @@ describe('IR profile, batch G24: a colour constructor of a list (JavaScript)', (
     for (const head of ['AsOklab', 'AsRgb', 'AsOklch', 'AsHsv'])
       for (const f of [js, glsl])
         expect(failure(() => f([head, ['Tuple', 'Cv', 'Cr']]))).toMatch(
-          `${head} of a tuple: its value on a tuple is not its value on a list`
+          `${head} of a tuple that is not three real numbers`
         );
     // prettier-ignore
-    expect(failure(() => js(['AsOklab', ['List', ['Tuple', 'Cv', 'Cr'], ['Tuple', 'Cr', 'Cv']]]))).toMatch(/AsOklab of a tuple/);
+    expect(failure(() => js(['AsOklab', ['List', ['Tuple', 'Cv', 'Cr'], ['Tuple', 'Cr', 'Cv']]]))).toMatch(/AsOklab of a list of tuples/);
   });
 });
 

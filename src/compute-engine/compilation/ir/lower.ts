@@ -220,6 +220,14 @@ const CONSTRUCTS = new Set([
   'Dot',
   'Norm',
 ]);
+/** The colour conversions, which read a tuple of three numbers as sRGB. */
+const COLOR_CONVERSIONS = new Set([
+  'AsRgb',
+  'AsHsl',
+  'AsHsv',
+  'AsOklab',
+  'AsOklch',
+]);
 const LOOPS = new Set([
   'Map',
   'Filter',
@@ -790,6 +798,26 @@ function lowerOnce(
     const n = args.length;
     if (typeof r.arity === 'number' ? n !== r.arity : n < 2)
       decline(node, `${r.head} with ${n} operands`);
+    // A colour conversion reads a tuple of three numbers as the sRGB colour
+    // of its channels (`extractRgb()` of `library/colors.ts`):
+    // `AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`. A tuple of four
+    // carries an alpha, which `Rgb` here does not, and declines below.
+    const channels = args[0];
+    if (
+      COLOR_CONVERSIONS.has(r.head ?? '') &&
+      tuples.get(channels) === 0 &&
+      same(type(channels).shape, [3]) &&
+      ['real', 'integer'].includes(type(channels).lane)
+    )
+      return apply(node, r, [
+        apply(
+          node,
+          'Rgb',
+          [1, 2, 3].map((k) =>
+            apply(node, 'At', [channels, b.constant(k, 'integer')])
+          )
+        ),
+      ]);
     // A product of a list of rank 2 or more with another list, and a power
     // of such a list, are the matrix product and power of the interpreter
     // (`M·N`, `M·L`, `M^s` at an integer `s`), not element by element.
@@ -826,10 +854,18 @@ function lowerOnce(
       // A tuple operand: only a row whose value on a tuple is its value on
       // the list of the same elements (`TUPLE_RULES`).
       const tuple = given.find((v) => tuples.has(v));
+      if (tuple !== undefined && COLOR_CONVERSIONS.has(r.head ?? ''))
+        decline(
+          node,
+          tuples.get(tuple) === 1
+            ? `${r.head} of a list of tuples (a colour from a tuple compiles from one tuple of three real numbers only)`
+            : `${r.head} of a tuple that is not three real numbers (a colour from a tuple compiles from three sRGB channels only)`
+        );
       if (tuple !== undefined) {
         // `div.q`, the division by the denominator of a rational factor,
         // reads a tuple dividend as `Divide` does. A colour conversion of a
-        // tuple is an error of the interpreter.
+        // tuple of three numbers was read as a colour above; any other tuple
+        // declines.
         const rule =
           TUPLE_RULES[
             r.signatures[0][2] === 'div.q' ? 'Divide' : (r.head ?? '')
