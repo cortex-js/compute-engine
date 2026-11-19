@@ -1,9 +1,10 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 /**
  * An assumption is a FACT, a declaration is a CONTRACT, and facts never enter
  * contracts.
  *
  * `assume()` writes no type and installs no value on a definition. What a fact
- * proves is merged into the definition's DECLARED type by the type READ, so
+ * proves is merged into the definition's DECLARED type by a proof query, so
  * retracting the fact — a `forget()`, a scope pop, a rolled-back transaction —
  * retracts what it proved, with nothing to rewind. These tests pin the read
  * side: what a fact contributes, which definition it contributes to, and what
@@ -17,12 +18,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 import '../utils'; // For snapshot serializers
 
-describe('what a fact contributes to the type', () => {
+describe('what a fact contributes to a proof', () => {
   test('an inequality against a literal proves a range, and forget() takes it back', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     expect(ce.assume(ce.parse('x > 4'))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('real<4<..>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('real<4<..>');
 
     ce.forget('x');
     // Nothing was written, so nothing has to be rewound: the declared type is
@@ -34,7 +35,7 @@ describe('what a fact contributes to the type', () => {
     const ce = new ComputeEngine();
     ce.declare('y', 'real');
     expect(ce.assume(ce.parse('y \\ne 2'))).toBe('ok');
-    expect(ce.box('y').type.toString()).toBe('real & !2');
+    expect(typeWithFacts(ce.box('y')).toString()).toBe('real & !2');
   });
 
   test('a disequality against a non-machine value excludes nothing', () => {
@@ -49,7 +50,7 @@ describe('what a fact contributes to the type', () => {
   test('an equality proves the promoted tier of its value', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.parse('z = 5'))).toBe('ok');
-    expect(ce.box('z').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('z')).toString()).toBe('integer');
     expect(ce.box('z').evaluate().json).toBe(5);
 
     ce.forget('z');
@@ -61,7 +62,7 @@ describe('what a fact contributes to the type', () => {
   test('a membership proves the set element type', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Element', 'n', 'Integers']))).toBe('ok');
-    expect(ce.box('n').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('n')).toString()).toBe('integer');
 
     ce.forget('n');
     expect(ce.box('n').type.toString()).toBe('unknown');
@@ -80,7 +81,7 @@ describe('what a fact contributes to the type', () => {
   test('a finite modulus bound proves the whole value is finite', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.parse('|q| < 1'))).toBe('ok');
-    expect(ce.box('q').type.toString()).toBe('complex');
+    expect(typeWithFacts(ce.box('q')).toString()).toBe('complex');
     expect(ce.box('q').isFinite).toBe(true);
   });
 
@@ -106,12 +107,12 @@ describe('what a fact contributes to the type', () => {
     upperFirst.assume(upperFirst.parse('x < 5'));
     upperFirst.assume(upperFirst.parse('x > 1/3'));
 
-    expect(upperFirst.box('x').type.toString()).toBe(
-      lowerFirst.box('x').type.toString()
+    expect(typeWithFacts(upperFirst.box('x')).toString()).toBe(
+      typeWithFacts(lowerFirst.box('x')).toString()
     );
     // An exact bound the machine cannot represent is rounded OUTWARD, so the
     // range still admits every value the assumption admits.
-    expect(lowerFirst.box('x').type.toString()).toBe(
+    expect(typeWithFacts(lowerFirst.box('x')).toString()).toBe(
       'real<0.33333333333333326..<5>'
     );
   });
@@ -125,7 +126,7 @@ describe('what a fact contributes to the type', () => {
     ce.declare('a', 'integer');
     ce.declare('b', 'integer');
     expect(ce.assume(ce.box(['Element', 'x', ['Range', 'a', 'b']]))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('integer');
   });
 });
 
@@ -242,7 +243,7 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     // Direction 2: a HELD reference reads the definition of the scope it was
     // boxed in, with its fact; bound again in the inner scope, it reads the
     // inner definition.
-    expect(outer.type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(outer).toString()).toBe('real<3<..>');
     expect(ce.rebind(outer).type.toString()).toBe('string');
     // @fixme The SIGN channel is still keyed by NAME, so it answers from the
     // enclosing scope's fact about a value the shadowing `x` is not. Folding
@@ -252,8 +253,8 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     expect(ce.box('x').isPositive).toBe(true);
     ce.popScope();
 
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
-    expect(outer.type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('real<3<..>');
+    expect(typeWithFacts(outer).toString()).toBe('real<3<..>');
   });
 
   test('two definitions of one name each keep their own facts', () => {
@@ -265,19 +266,19 @@ describe('the identity rule — a fact is about a DEFINITION', () => {
     ce.pushScope();
     ce.declare('x', 'integer');
     expect(ce.assume(ce.parse('x < 10'))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('integer<..9>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('integer<..9>');
     // A held reference reads the definition of the scope it was boxed in;
     // bound again here, it reads the inner definition.
-    expect(outer.type.toString()).toBe('real<3<..>');
-    expect(ce.rebind(outer).type.toString()).toBe('integer<..9>');
+    expect(typeWithFacts(outer).toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.rebind(outer)).toString()).toBe('integer<..9>');
 
     // Re-asserting the enclosing scope's bound is NOT redundant here: the
     // inherited record is about the OTHER definition, and this one has no
     // lower bound until the assertion is recorded against it.
     expect(ce.assume(ce.parse('x > 3'))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('integer<4..9>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('integer<4..9>');
     ce.popScope();
-    expect(outer.type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(outer).toString()).toBe('real<3<..>');
   });
 
   test('re-asserting a bound about the SAME definition is still a tautology', () => {
@@ -294,7 +295,7 @@ describe('a scoped assumption needs no shadow binding', () => {
     ce.declare('u', 'real');
     ce.pushScope();
     expect(ce.assume(ce.parse('u > 3'))).toBe('ok');
-    expect(ce.box('u').type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('u')).toString()).toBe('real<3<..>');
     ce.popScope();
     // No shadow binding was ever declared; the inner scope's fact map went
     // with the scope.
@@ -332,8 +333,8 @@ describe('the transaction', () => {
     expect(
       ce.assume(ce.box(['And', ['Greater', 'a', 0], ['Less', 'b', 10]]))
     ).toBe('ok');
-    expect(ce.box('a').type.toString()).toBe('real<0<..>');
-    expect(ce.box('b').type.toString()).toBe('real<..<10>');
+    expect(typeWithFacts(ce.box('a')).toString()).toBe('real<0<..>');
+    expect(typeWithFacts(ce.box('b')).toString()).toBe('real<..<10>');
   });
 
   test('two assumed values for one symbol contradict', () => {
@@ -372,7 +373,7 @@ describe('the transaction', () => {
     expect(ce.assume(ce.box(['And', ['Greater', 'x', 3], ['Foo', 'x']]))).toBe(
       'not-a-predicate'
     );
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('real<3<..>');
   });
 
   test('the four empty-type shapes are all contradictions', () => {
@@ -427,7 +428,7 @@ describe('a transaction gives up the bindings it introduced', () => {
       )
     ).toBe('not-a-predicate');
     // The conjuncts applied before the rejected one stand, binding included…
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('x')).toString()).toBe('real<3<..>');
     // …and the rejected conjunct takes its own binding with it.
     expect(ce.lookupDefinition('y')).toBeUndefined();
   });
@@ -495,12 +496,12 @@ describe('the effective type heals', () => {
     ce.declare('m', 'real');
     ce.assume(ce.parse('m > 3'));
     // The first read fills the memo…
-    expect(ce.box('m').type.toString()).toBe('real<3<..>');
-    expect(ce.box('m').type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('real<3<..>');
     ce.forget('m');
     // …which is keyed on the fact index, so retracting the fact retires it.
-    expect(ce.box('m').type.toString()).toBe('real');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('real');
     ce.assume(ce.parse('m < 0'));
-    expect(ce.box('m').type.toString()).toBe('real<..<0>');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('real<..<0>');
   });
 });

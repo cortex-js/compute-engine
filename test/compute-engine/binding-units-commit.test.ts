@@ -331,29 +331,27 @@ describe('RULE 12: ce.assume() declares the names it constrains', () => {
   test('an equality', () => {
     const ce = engine();
     expect(ce.assume(ce.parse('y = 3'))).toBe('ok');
-    expect(inferredType(ce, 'y')).toBe('integer (inferred)');
+    expect(inferredType(ce, 'y')).toBe('unknown (inferred)');
     expect(ce.parse('y + 1').evaluate().json).toBe(4);
   });
 
   test('a membership', () => {
     const ce = engine();
     expect(ce.assume(ce.box(['Element', 'z', 'RealNumbers']))).toBe('ok');
-    expect(inferredType(ce, 'z')).toBe('real (inferred)');
+    expect(inferredType(ce, 'z')).toBe('unknown (inferred)');
+    expect(ce.box('z').isExtendedReal).toBe(true);
   });
 
-  test('a disequality derived from a part bound narrows the type of a use', () => {
-    // `Im(tau) > 0` derives `tau ≠ 0`. The definition that `assume()` made
-    // has the type `unknown`, and the use under `Imaginary` requires
-    // `complex | infinity` in its unit: the exclusion is added to that.
+  test('a disequality derived from a part bound preserves the type of a use', () => {
     const ce = engine();
     ce.assume(
       ce.expr(['Greater', ['Imaginary', 'tau'], 0], { canonical: false })
     );
     expect(ce.expr(['Imaginary', 'tau']).op1.type.toString()).toBe(
-      'complex & !0 | infinity'
+      'complex | infinity'
     );
     // A use that requires nothing gets no exclusion: `!0` needs a base.
-    expect(ce.expr('tau').type.toString()).toBe('number');
+    expect(ce.expr('tau').type.toString()).toBe('unknown');
   });
 });
 

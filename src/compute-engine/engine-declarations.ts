@@ -128,7 +128,6 @@ import {
   _BoxedValueDefinition,
   prepareValueWhenBoxed,
   refineConstructorPlaceholder,
-  valuePresenceRefinesType,
 } from './boxed-expression/boxed-value-definition.js';
 import { countDeclaredHolder, uncountRemovedHolder } from './engine-scope.js';
 import {
@@ -4469,9 +4468,7 @@ function restoreWithValuesBindings(
         kind: 'value-write',
         ephemeral: false,
         callable,
-        typeRead:
-          callable ||
-          valuePresenceRefinesType(ce, def, valueBefore, valueAfter),
+        typeRead: callable,
       });
     } catch (error) {
       failure ??= { error };

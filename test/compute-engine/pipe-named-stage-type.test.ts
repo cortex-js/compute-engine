@@ -30,7 +30,7 @@ function check(
 describe('a pipe whose stage is an operator name', () => {
   test('is typed as the call of that operator', () => {
     const ce = new ComputeEngine();
-    check(ce, ['Pipe', 16, 'Sqrt'], 'real');
+    check(ce, ['Pipe', 16, 'Sqrt'], 'real<0<..>');
     check(ce, ['Pipe', 'x', 'Sin'], 'number');
     check(ce, ['Pipe', "'ab'", 'Length'], 'integer');
     check(ce, ['Pipe', ['List', 3, 1, 2], 'Sort'], 'list<integer>');
@@ -44,7 +44,7 @@ describe('a pipe whose stage is an operator name', () => {
 
   test('a chain reads the type of the inner pipe', () => {
     const ce = new ComputeEngine();
-    check(ce, ['Pipe', ['Pipe', 16, 'Sqrt'], 'Sqrt'], 'complex');
+    check(ce, ['Pipe', ['Pipe', 16, 'Sqrt'], 'Sqrt'], 'real<0<..>');
   });
 
   test('an opaque or undefined stage stays `unknown`', () => {
@@ -113,7 +113,7 @@ describe('the Epsil static check', () => {
   test('reports a declaration the piped call cannot satisfy', () => {
     const r = run('let s: string = 16 |> sqrt\ns');
     expect(r.diagnostics.join('\n')).toMatch(
-      /static-type-error The value "Pipe\(16, sqrt\)" of type "real" is not compatible with the declared type "string"/
+      /static-type-error The value "Pipe\(16, sqrt\)" of type "real<0<\.\.>" is not compatible with the declared type "string"/
     );
   });
 

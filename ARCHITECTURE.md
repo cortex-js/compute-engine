@@ -744,13 +744,16 @@ invalidation axes since the 2026-08-11 state-event migration — see
 invalidates the cached rule sets and the FactIndex (below) so stale sign/bound
 answers cannot survive a scope change.
 
-**Assumptions and types.** An assumption never writes a symbol's type. The facts
-in force are combined with the symbol's declared or inferred type when the type
-is read: with `q: real` and `assume(q > 0)`, `q` reads `real<0<..>`, and after
-`forget(q)` it reads `real` again. A write that installs a lasting contract (a
-value, and through it a definition's type or signature) runs inside
-`ce._withoutFacts()`, so it stays true after the next `forget()`. Design:
-`docs/plans/2026-08-29-assumptions-as-facts-type.md`.
+**Assumptions and static types.** A symbol's `.type` reports its declared or
+inferred static type. Both a saved symbol and the type of an expression that
+uses it keep the same static contract across `assume()` and `forget()`. A
+membership assumption about a real variable can establish that its current
+value is an integer. Ask `verify()` for that proposition or `ask()` for
+stored facts matching a pattern. Internally, symbol membership and sign
+queries can request a view refined by facts with `typeWithFacts(expr)`.
+Declare an integer or a ranged real when a type checker or compiler needs
+that guarantee. An equality assumption can supply a value for evaluation
+within the assumption's scope.
 
 **Three-valued discharge.** `verify(P)` returns `true` when `P` is provable from
 the current assumptions, `false` when its negation is provable, and `undefined`
@@ -777,11 +780,8 @@ identically whether queried through `expr.sgn` / `isPositive` or through
 `verify(Greater(x, 0))`. A legacy linear scan remains only as a fallback for
 facts the index does not capture.
 
-One binding nuance: on a held `BoxedSymbol` instance, type-backed predicates
-(`type`, `isInteger`, …) read the definition captured when the symbol was bound,
-while sign predicates resolve dynamically by symbol name against the live
-assumptions (see the note on `sgn` in `boxed-symbol.ts`). Both agree in the
-common path — `assume()` mutates the bound definition in place.
+A held symbol reads the static type of its binding. Sign queries such as
+`isPositive` can use the bounds in scope when the question is asked.
 
 **`forget()` and provenance.** `forget(symbol)` removes every stored fact that
 references the symbol and resets any value the symbol received **from an

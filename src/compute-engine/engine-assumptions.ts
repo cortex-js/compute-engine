@@ -13,6 +13,7 @@ import {
   contextAssumptions,
   isFactTrue,
   subjectOf,
+  typeWithFacts,
 } from './boxed-expression/constraint-subject.js';
 import { isValueDef } from './boxed-expression/utils.js';
 import type { BoxedValueDefinition } from './types-definitions.js';
@@ -265,7 +266,7 @@ export function ask(
     if (isSymbol(patOp1) && isWildcard(patOp2)) {
       const typeWildcard = wildcardName(patOp2);
       if (typeWildcard && !typeWildcard.startsWith('__')) {
-        const symbolType = ce.expr(patOp1.symbol).type;
+        const symbolType = typeWithFacts(ce.expr(patOp1.symbol));
         if (!symbolType.isUnknown) {
           pushResult({
             [typeWildcard]: ce.expr(symbolType.toString(), {
@@ -547,21 +548,17 @@ export function assumeFn(
     // rolls back — or a conjunct the assumptions layer refuses — has to leave
     // the scope as it found it, and may give back only those
     // (`introducibleNames`).
-    const { predicate: raw, undeclared } = predicateFromArg(
-      ce,
-      predicate,
-      'assume'
-    );
-
-    const pred = raw.canonical;
-
-    // Popping this context silently reverts the assumption: mark it so the
-    // pop bumps `_semanticVersion` too (clean pops don't). The `assumption`
-    // state event itself is emitted by `assume()` on EVERY outcome, a rollback
-    // included, so emitting one here as well would be a second advance for the
-    // same change.
+    // Canonicalizing arithmetic in the predicate must not infer types
+    // on its subjects. Run the solver and any user callbacks normally.
+    const { pred, undeclared } = ce._resolveOnly(() => {
+      const { predicate: raw, undeclared } = predicateFromArg(
+        ce,
+        predicate,
+        'assume'
+      );
+      return { pred: raw.canonical, undeclared };
+    });
     if (ce.context) ce.context._assumptionsDirty = true;
-
     return assumeImpl(pred, undeclared);
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
@@ -602,9 +599,8 @@ export function forget(
   //
   // Forgetting removes FACTS. Existing definitions are preserved —
   // expressions point at them — and their declared TYPES are never touched,
-  // because an assumption never wrote one: a type an assumption proved was
-  // merged in by the READ, so dropping the fact is all it takes for the read
-  // to stop proving it. A value an assumption installed lives in the
+  // because assumptions supply evidence to proofs independently of the
+  // static type. A value an assumption installed lives in the
   // context's assumed-value overlay, not on the definition, so dropping the
   // overlay entry is all that form of retraction takes either.
   //

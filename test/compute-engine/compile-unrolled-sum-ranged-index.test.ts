@@ -1,7 +1,7 @@
 /**
  * The index of a `Sum`/`Product` over a `Limits` clause with integer-literal
  * bounds is typed with its range (`integer<1..40>`), so a body such as
- * `√(1 − ((i − 0.5)/40)²)` types `real` instead of `complex`.
+ * `√(1 − ((i − 0.5)/40)²)` has a strictly positive real type.
  *
  * The JavaScript target must lower such a radical with the real kernel. The
  * compiler's sign test for a radicand did not read ranged types: the `Sqrt`
@@ -41,9 +41,9 @@ function interpreted(json: unknown, vars: Record<string, number>): number {
 }
 
 describe('A Sum index typed with its literal range', () => {
-  test('the radical body types real', () => {
+  test('the radical body is strictly positive over indices 1 through 40', () => {
     const sum = ce.box(['Sum', ROOT, ['Limits', 'i', 1, 40]] as never);
-    expect(sum.op1.type.toString()).toBe('real');
+    expect(sum.op1.type.toString()).toBe('real<0<..>');
   });
 
   test('a body that assigns the index keeps the unranged integer index', () => {

@@ -72,8 +72,8 @@ describe('INTERVAL DIVISION — headline claims', () => {
       expect(e.type('~oo').matches(t)).toBe(true);
       expect(e.type('nan').matches(t)).toBe(true);
     }
-    // A sign proof restores the real tier even without an interval.
-    e.assume(e.box(['Greater', 'g', 0]));
+    // A strictly positive declared divisor restores the real tier.
+    e.declare('g', 'real<0<..>');
     expect(e.box(['Divide', 1, 'g']).type.toString()).toBe('real<0<..>');
   });
 
@@ -114,11 +114,11 @@ describe('INTERVAL DIVISION — headline claims', () => {
     e.declare('w', 'real<0..1>');
     for (const [b, n] of [['n', -2], ['n', -1], ['q', -2], ['q', -3], ['w', -2]] as const)
       expect(e.box(['Power', b, n]).type.toString()).toBe('infinity | nan | real');
-    // A sign proof or a zero-excluding range restores the finite tier.
+    // A zero-excluding range restores the finite tier.
     // p ∈ (0, 1], and p = 1 is ATTAINED, so 1/p² attains 1: closed at 1.
     e.declare('p', 'real<0<..1>');
     expect(e.box(['Power', 'p', -2]).type.toString()).toBe('real<1..>');
-    e.assume(e.box(['Greater', 'g', 0]));
+    e.declare('g', 'real<0<..>');
     expect(e.box(['Power', 'g', -2]).type.matches('real')).toBe(true);
   });
 

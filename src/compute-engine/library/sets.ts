@@ -42,6 +42,7 @@ import {
   isFactTrue,
   subjectKey,
   subjectOf,
+  typeWithFacts,
 } from '../boxed-expression/constraint-subject.js';
 import { declaredOperator, domainToType } from '../boxed-expression/utils.js';
 // The shared type-handler helpers take one `OperandDescriptor` per operand,
@@ -170,7 +171,7 @@ function numberSetSubsetOf(
  * declared `real` is *not* refuted as an integer.
  */
 export function typeMembership(x: Expression, t: Type): boolean | undefined {
-  const vt = x.type;
+  const vt = typeWithFacts(x);
   if (vt.matches(t)) return true;
   if (isEmptyType(typeIntersection(vt.type, t))) return false;
   // The static type overlaps `t` but does not entail it. A concrete number
@@ -2227,7 +2228,7 @@ function membershipKleene(
     // Non-unit steps do not decompose (assume keeps only the type there)
     if (step === undefined || step.isSame(1) || step.isSame(-1)) {
       const r = kleeneAnd([
-        x.type.matches('integer') ? true : undefined,
+        typeWithFacts(x).matches('integer') ? true : undefined,
         boundKleene(x, 'GreaterEqual', lo),
         boundKleene(x, 'LessEqual', hi),
       ]);
@@ -2248,7 +2249,7 @@ function membershipKleene(
       hi = hi.op1;
     }
     const r = kleeneAnd([
-      x.type.matches('real') ? true : undefined,
+      typeWithFacts(x).matches('real') ? true : undefined,
       boundKleene(x, loStrict ? 'Greater' : 'GreaterEqual', lo),
       boundKleene(x, hiStrict ? 'Less' : 'LessEqual', hi),
     ]);

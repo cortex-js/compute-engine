@@ -34,6 +34,8 @@
 // `interiorPoleVerdict` (a pole at a finite point is inside `(−∞, b)` when it
 // is less than `b`), but not by the checks that need a finite range.
 
+import { typeWithFacts } from '../boxed-expression/constraint-subject.js';
+import { signOfType } from '../../common/type/utils.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -1310,7 +1312,7 @@ function isUntypedFree(
   if (!isValueDef(def) || def.value.isConstant === true) return false;
   if (def.value.value !== undefined && def.value.value !== null) return false;
   if (!def.value.inferredType) return false;
-  const type = def.value.type;
+  const type = def.value._typeWithFacts(def.value.declaredType, true);
   if (type.isUnknown) return true;
   return type.matches('number') && !type.matches('real');
 }
@@ -1336,9 +1338,17 @@ function occurrenceOf(e: Expression, name: string): Expression | undefined {
  * so the assumption still applies.
  */
 function realSign(d: Expression, ce: ComputeEngine): -1 | 1 | undefined {
-  const read = (e: Expression): -1 | 1 | undefined => {
+  const strictSign = (e: Expression): -1 | 1 | undefined => {
     if (e.isNegative === true) return -1;
     if (e.isPositive === true) return 1;
+    const sign = signOfType(typeWithFacts(e).type);
+    if (sign === 'negative') return -1;
+    if (sign === 'positive') return 1;
+    return undefined;
+  };
+  const read = (e: Expression): -1 | 1 | undefined => {
+    const sign = strictSign(e);
+    if (sign !== undefined) return sign;
     // A sum of terms with symbols and of a constant `K` with a numeric value
     // (`a − sin 1`): the sign is not always proven with `K` itself, so it is
     // proven with a number just below `K` (for a positive sign) or just
@@ -1355,8 +1365,8 @@ function realSign(d: Expression, ce: ComputeEngine): -1 | 1 | undefined {
     const margin = 1e-9 * Math.max(1, Math.abs(k));
     const withConstant = (c: number) =>
       ce.function('Add', [...rest, ce.number(c)]);
-    if (withConstant(k - margin).isPositive === true) return 1;
-    if (withConstant(k + margin).isNegative === true) return -1;
+    if (strictSign(withConstant(k - margin)) === 1) return 1;
+    if (strictSign(withConstant(k + margin)) === -1) return -1;
     return undefined;
   };
   const names = d.unknowns.filter((name) => isUntypedFree(ce, name, d));

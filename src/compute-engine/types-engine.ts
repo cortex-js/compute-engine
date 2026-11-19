@@ -1354,8 +1354,8 @@ export interface IComputeEngine {
   _cacheGeneration(): number;
 
   /** The key of the type cache of a function expression
-   * (`BoxedFunction.type`): `_typeVersion` in place of the `any` axis, with
-   * the same facts bit. Only the type cache uses it, so its
+   * (`BoxedFunction.type`): `_typeVersion` in place of the `any` axis, independent of
+   * assumption visibility. Only the type cache uses it, so its
    * values never meet a key of `_cacheGeneration()` in one cell. Inside a
    * value shield it is the shield key, which moves with the `any` axis and
    * is negative, so it never equals a key made from `_typeVersion`.

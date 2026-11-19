@@ -19,6 +19,7 @@ import {
   sym,
   hasInferredType,
 } from './type-guards.js';
+import { typeWithFacts } from './constraint-subject.js';
 import { conditionalValue, restrictionParts } from './conditional-value.js';
 import {
   hasArbitraryConstant,
@@ -3442,7 +3443,7 @@ export function unknownType(ce: ComputeEngine, x: string): Expression['type'] {
   const symbol = ce.symbol(x);
   if (isSymbol(symbol) && hasInferredType(symbol) && symbol.value !== undefined)
     return ce.type('unknown');
-  return symbol.type;
+  return typeWithFacts(symbol);
 }
 
 /**
@@ -3470,7 +3471,7 @@ function isGenericRealParameter(ce: ComputeEngine, name: string): boolean {
   // A free name (`binding-unit.ts`) has an inferred type
   // (`hasInferredType()`).
   if (!hasInferredType(symbol)) return false;
-  const type = symbol.type;
+  const type = typeWithFacts(symbol);
   return type.isUnknown || ce.type('real').matches(type);
 }
 
@@ -3547,7 +3548,7 @@ function isRealForSolve(
 function isRealWhereNumber(expr: Expression): boolean | undefined {
   const real = expr.isExtendedReal;
   if (real !== undefined) return real;
-  const type = expr.type;
+  const type = typeWithFacts(expr);
   if (type.matches(REAL_OR_NON_FINITE_TYPE) && !type.matches(NON_FINITE_TYPE))
     return true;
   return undefined;

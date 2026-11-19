@@ -58,12 +58,9 @@ describe('INFERENCE PROVENANCE — an assumption writes nothing', () => {
     ce.infer([ce.box(['Add', 'q', 1])]);
     const before = historyOf(ce, 'q');
     ce.assume(ce.parse('q > 0'));
-    // An assumption is a FACT, not a write: what it proves is merged into the
-    // type by the READ, so nothing lands in the write history and there is no
-    // `'assumed'` kind to find. The proven range is still what the type
-    // reports while the fact is in force.
     expect(historyOf(ce, 'q')).toEqual(before);
-    expect(ce.box('q').type.toString()).toBe('real<0<..>');
+    expect(ce.box('q').isPositive).toBe(true);
+    expect(ce.box('q').type.toString()).toBe('number');
     // ...and it is gone again once the fact is retracted, with no rewind:
     // what is left is exactly the type that `ce.infer()` committed from the
     // USE (`q + 1` ⇒ `number`).

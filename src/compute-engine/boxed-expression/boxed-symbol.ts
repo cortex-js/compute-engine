@@ -111,7 +111,11 @@ import {
 } from './sgn.js';
 import { matchesSymbol } from '../../math-json/utils.js';
 import { getSignFromAssumptions } from '../assume.js';
-import { getFactIndex, hasAssumptions } from './constraint-subject.js';
+import {
+  getFactIndex,
+  hasAssumptions,
+  typeWithFacts,
+} from './constraint-subject.js';
 import {
   isAbsentSymbol,
   isFunction,
@@ -1308,12 +1312,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * `entry` the requirement of its unit:
    * - the type of `v`, when `v` has an explicit type (not inferred and not
    *   `unknown`), or when there is no entry;
-   * - otherwise, the meet of the type of `v` and the entry, with the facts
-   *   of the assumptions of the context merged in, as the type of a
-   *   definition merges them. When this meet is `never`, before or after the
-   *   facts are merged, the type of `v`: a definition is made by an
-   *   assignment, an assumption or a commit, and evaluation reads it, so its
-   *   type wins.
+   * - otherwise, their meet, or the declaration when the two conflict.
    */
   private _typeOfDefinitionInUnit(
     v: BoxedValueDefinition,
@@ -1323,9 +1322,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const declared = v.declaredType;
     if (!v.inferredType && !declared.isUnknown) return v.type;
     const meet = narrow(declared.type, entry.type);
-    if (meet === 'never') return v.type;
-    const merged = v._typeWithFacts(this.engine.type(meet), false);
-    return merged.type === 'never' ? v.type : merged;
+    return meet === 'never' ? declared : this.engine.type(meet);
   }
 
   /**
@@ -2437,18 +2434,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   // The sign of the value of the symbol
   //
-  // Mixed binding semantics (SYMBOLIC P2-13, documented). The TYPE channel is
-  // keyed by DEFINITION: `type` and the type-backed predicates (`isInteger`,
-  // …) read the definition captured in `_def` when this instance was bound,
-  // and an assumption is merged into it only when the assertion was recorded
-  // against that same definition. The SIGN channel is still keyed by NAME: it
-  // resolves dynamically against whatever the current scope assumes about the
-  // spelling. The two therefore disagree on a shadowed name — `assume(x > 3)`
-  // then an inner `declare x string` leaves `x.type` `string` while
-  // `x.isPositive` is still `true`. Folding the sign, bounds and membership
-  // channels onto the definition is the next round of
-  // `docs/plans/2026-08-29-assumptions-as-facts-type.md` (§6 Q1); until then
-  // the divergence stands, pinned as a known-wrong result.
+  // Membership facts follow the resolved definition. The sign query also
+  // consults inequalities recorded under the symbol's name.
   get sgn(): Sign | undefined {
     // First check if there's an assigned value
     const value = this.value;
@@ -2480,7 +2467,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // reached the sign channel (measured 2026-08-22; see the ROADMAP entry
     // "Ranged types should carry sign (and a literal's value) through type
     // derivation").
-    return meetSigns(assumed, signOfType(this.type.type));
+    return meetSigns(assumed, signOfType(typeWithFacts(this).type));
   }
 
   get isOdd(): boolean | undefined {
@@ -2519,7 +2506,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // finiteness even without a value, `complex` being the widest FINITE
     // numeric type. Symmetrically, an infinite or NaN
     // type entails non-finiteness (see `get isInfinity`).
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (!t.isUnknown) {
       return t.facts.finite;
     }
@@ -2546,7 +2533,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Type fallback, mirroring `BoxedFunction.isInfinity`: the static type can
     // prove non-finiteness where no value is available — e.g. a symbol
     // declared `infinity` or `+oo | -oo`.
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (!t.isUnknown) {
       // `infinity` is any value of infinite magnitude, which is exactly what
       // `isInfinity` asks; it covers the signed pair `+oo | -oo`
@@ -2581,7 +2568,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Type fallback, as for `isFinite` and `isInfinity`: `nan` is the type of
     // the NaN singleton, and `infinity` (the infinite-magnitude values) is
     // disjoint from it, so both answers are decided by the declaration alone.
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (!t.isUnknown) {
       if (t.matches('nan')) return true;
       if (t.matches('infinity')) return false;
@@ -2621,7 +2608,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get isNumber(): boolean | undefined {
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (t.isUnknown) return undefined;
     // Three-valued, like `isInteger` below: a symbol declared `number |
     // string` or `any` may hold a number, so it is undecided, not `false`.
@@ -2635,19 +2622,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   // `false` means "certainly not". `isExtendedReal` below reads a declared
   // `complex` the same way.
   get isInteger(): boolean | undefined {
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (t.isUnknown) return undefined;
     return staticMembership(t.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (t.isUnknown) return undefined;
     return staticMembership(t.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (t.isUnknown) return undefined;
     // `+oo | -oo` is admitted explicitly: the bare name `real` denotes
     // the FINITE reals, and this predicate means "on the EXTENDED real line",

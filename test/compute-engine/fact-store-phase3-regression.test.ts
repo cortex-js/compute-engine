@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 /**
  * Every write routine, against every kind of fact.
  *
@@ -314,7 +315,7 @@ describe('behavior rows the other fact-store suites leave unpinned', () => {
     const ce = new ComputeEngine();
     ce.declare('tau', 'number');
     expect(ce.assume(ce.box(['Greater', ['Im', 'tau'], 0]))).toBe('ok');
-    expect(ce.box('tau').type.toString()).toBe('number & !0');
+    expect(typeWithFacts(ce.box('tau')).toString()).toBe('number & !0');
   });
 
   test('a stored value wins over a widening membership fact', () => {
@@ -360,7 +361,7 @@ describe('behavior rows the other fact-store suites leave unpinned', () => {
     // with it.
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Greater', 'w', 3]))).toBe('ok');
-    expect(ce.box('w').type.toString()).toBe('real<3<..>');
+    expect(typeWithFacts(ce.box('w')).toString()).toBe('real<3<..>');
     expect(() => ce.declare('w', 'integer')).not.toThrow();
     expect(ce.box('w').type.toString()).toBe('integer');
   });
@@ -378,9 +379,7 @@ describe('behavior rows the other fact-store suites leave unpinned', () => {
     );
   });
 
-  test('the two channels of a definition read differently', () => {
-    // `type` is the effective read — the declaration merged with the facts.
-    // `declaredType` is the contract, and is what a write path reads.
+  test('definition types stay static while the proof sees the bound', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     expect(ce.assume(ce.box(['Greater', 'x', 4]))).toBe('ok');
@@ -390,7 +389,8 @@ describe('behavior rows the other fact-store suites leave unpinned', () => {
         declaredType: { toString(): string };
       };
     };
-    expect(def.value.type.toString()).toBe('real<4<..>');
+    expect(ce.box('x').isGreater(4)).toBe(true);
+    expect(def.value.type.toString()).toBe('real');
     expect(def.value.declaredType.toString()).toBe('real');
   });
 

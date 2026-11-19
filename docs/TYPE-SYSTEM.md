@@ -1742,15 +1742,12 @@ invalidates no cached type: the type version (`typeVersion`,
   `let f = (n) => do { let out = [n]; if n < 2 { out = Join(out, f(n + 1)) }; out }`
   the self-call `f(n + 1)` is typed `unknown`, inside a run and after it. A
   declared type of the definition is static, and types the call.
-- The pop of a scope changes no type, and it moves the type version only
-  when it reverts an assumption. A scope that a host pushes keeps its
-  definitions after the pop (`popScope()`, `engine-scope.ts`), and a node
-  resolves its names from the scope it was boxed in. So during a run the
-  type version moves only at a declaration, a retype, an assumption or its
-  revert, and a call of a function, a block or a loop leaves every cached
-  type in place. One call of a prelude of nested functions over a list of
-  64 cells computed 13,184 types before this rule and computes 8 now
-  (CE-1210, decision D17 of `docs/plans/2026-11-11-bound-once-spec.md`).
+- A scope that a host pushes keeps its definitions after the pop
+  (`popScope()`, `engine-scope.ts`). A node resolves its names from the
+  scope where it was boxed. Entering or leaving a scope of assumptions
+  changes the facts available to reasoning. A type read still uses the
+  binding's static contract. Neither an assumption event nor a scope pop
+  advances the static type version.
 - The evaluation of a call writes nothing on the nodes of the call: the
   result of `f := y ↦ (x ↦ x + y)` applied to `q` holds a copy of the
   argument `q` (`parameterSubVisitors`, `function-utils.ts`), so the mark that
@@ -1759,9 +1756,9 @@ invalidates no cached type: the type version (`typeVersion`,
   type stays `(x: unknown) -> number`.
 - A variable whose value is a literal keeps the type its assignment recorded.
   A variable whose value reads other names has the static type of that value
-  (`declaredType`, `boxed-value-definition.ts`), read with the assumptions
-  hidden and widened to its tier as an inferred declaration is: it follows a
-  change of the TYPE of those names, never their values. With `y := x + 1`,
+  (`declaredType`, `boxed-value-definition.ts`), widened to its tier as for
+  an inferred declaration. It follows changes to the types of those names.
+  With `y := x + 1`,
   `y` is `number`; after `x := [1, 2]`, which changes the type of `x`, `y` is
   `vector<integer^2>`. A definition held by activations (a block local, a
   parameter, the variable of a binder) keeps its recorded type. A variable
@@ -1773,9 +1770,11 @@ invalidates no cached type: the type version (`typeVersion`,
   inferred type, the adoption of the value's type, the element refinement of
   a declared placeholder such as `list<unknown>`), and the restore of
   `ce.withValues()`, report a `type-write` event of their own.
-- An assumption does not narrow the type of a symbol that holds a value: the
-  facts are merged only into the type of a symbol with no value
-  (`_typeWithFacts`).
+- A membership or range assumption supplies a fact for reasoning. To
+  establish a static contract for uses of a variable, declare its type.
+  A real variable keeps its `real` type even when `verify()` proves that
+  it belongs to the integers. The distinction also applies to a variable
+  with an assumed value and to the inferred result type of a call.
 - A sign, a count, an evaluation or an application computed in a type
   computation reads no value either, so a memo of such an answer never
   serves or stores an entry across the two views (`staticViewDiverges()`):
@@ -1790,10 +1789,6 @@ invalidates no cached type: the type version (`typeVersion`,
   the static view maps the frame of an application in progress to the body
   of its literal and skips the parameter activations, so the view has no key
   of its own there.
-- An assumption refines the type of a variable with no value only, so a
-  write that gives a variable a value, or takes it away, while assumptions
-  are in force moves the type version (the `typeRead` flag of the
-  `value-write` event, also at the restore of `ce.withValues()`).
 - The kind of the value of a collection operation is not its static type. A
   `Map`, `Filter` or `Scan` whose type says nothing (`unknown`, `any`) or is an
   abstract `collection<T>` is an indexed collection when its sources hold

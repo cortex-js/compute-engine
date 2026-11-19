@@ -48,7 +48,7 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     ce.assign('inf_val', ce.PositiveInfinity); // decided by its VALUE
     ce.declare('three_val', 'number');
     ce.assign('three_val', 3); // decided by its VALUE
-    ce.assume(ce.box(['Greater', 'p_r', 0])); // provably positive real
+    ce.declare('p_r', 'real<0<..>'); // provably positive real
   });
   afterAll(() => ce.popScope());
 
@@ -968,8 +968,7 @@ describe('POSSIBLY INFINITE EXTENDED-REAL OPERANDS', () => {
   ce.declare('y', 'real | signed_infinity');
   ce.declare('a', 'real | signed_infinity | nan');
   ce.declare('r', 'real');
-  ce.declare('p', 'real');
-  ce.assume(ce.parse('p > 0'));
+  ce.declare('p', 'real<0<..>');
   ce.declare('z', 'complex');
   ce.declare('L', 'list<real>');
   ce.declare('K', 'list<real>');
@@ -1071,12 +1070,10 @@ describe('EXTENDED-REAL POWERS, FUNCTIONS AND REDUCTIONS', () => {
 describe('EXTENDED-REAL NARROWING: POLES, INFINITE RANGES, MATRICES', () => {
   const ce = new ComputeEngine();
   ce.declare('y', 'real | signed_infinity');
-  ce.declare('h', 'real');
-  ce.assume(ce.parse('h >= 0'));
+  ce.declare('h', 'real<0..>');
   ce.declare('x', 'real');
   ce.declare('k', 'integer');
-  ce.declare('n', 'integer');
-  ce.assume(ce.parse('n >= 0'));
+  ce.declare('n', 'integer<0..>');
   ce.declare('M', 'matrix<real^(2x2)>');
   test.each([
     // `0^−1` and `0^−∞` are the complex infinity `~oo`.

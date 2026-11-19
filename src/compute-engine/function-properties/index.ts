@@ -12,14 +12,13 @@
 //    when `f(z).N()` lands on a known pole and the kernel could not resolve a
 //    value (NaN / still-symbolic) — see `BoxedFunction._computeValue`.
 //
-// IMPORTANT: this module imports engine TYPES only — it never runtime-imports
-// the engine. Everything goes through the `IComputeEngine` argument's public
-// API, so there is no dependency cycle with the boxed-expression layer.
+// The real-domain rewrite gate also consults the current mathematical facts.
 
 import dataJson from './function-properties-data.json';
 
 import type { IComputeEngine } from '../types-engine.js';
 import type { Expression, ExpressionInput } from '../types-expression.js';
+import { typeWithFacts } from '../boxed-expression/constraint-subject.js';
 import { isNonRealNumber } from '../../common/type/utils.js';
 import type { FunctionProperties, FunctionPropertyRecord } from './types.js';
 
@@ -222,7 +221,7 @@ export function onBranchCut(
  *   values — that is, `complex` or `imaginary`; `true` otherwise.
  */
 export function isEligibleRealRewrite(x: Expression): boolean {
-  return !isNonRealNumber(x.type.type);
+  return !isNonRealNumber(typeWithFacts(x).type);
 }
 
 // Operators that carry at least one Poles record — a cheap gate so the numeric

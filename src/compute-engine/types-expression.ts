@@ -2874,16 +2874,13 @@ export interface Expression {
   );
 
   /**
+   * The static type of this expression. A symbol reads the declared or
+   * inferred type of its binding. A function call has its result type,
+   * and a function value has its signature.
    *
-   * The type of the value of this expression.
-   *
-   * If a symbol the type of the value of the symbol.
-   *
-   * If a function expression, the type of the value of the function
-   * (the result type).
-   *
-   * If a symbol with a `"function"` type (a function literal), returns the
-   * signature.
+   * To test a proposition under the current assumptions, use `ce.verify()`.
+   * For example, a symbol declared `real` keeps that type when an
+   * assumption establishes that it belongs to the integers.
    *
    * If not valid, return `"error"`.
    *

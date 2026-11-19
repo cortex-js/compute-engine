@@ -281,6 +281,7 @@ import {
   kindArmNames,
   type KindTypeNames,
   type AliasDescent,
+  signOfType,
 } from '../../common/type/utils.js';
 import {
   kindTypeHasHook,
@@ -14038,6 +14039,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // operand carries the original facts, whose sign is undecided
           // because NaN is unsigned, while its type (`real<0..>`) states the
           // bound outright.
+          // A strictly positive finite radicand has a strictly positive
+          // root. Preserve that bound for enclosing handlers with poles.
+          if (finiteOperand && signOfType(x.type) === 'positive')
+            return result('real<0<..>');
           if (
             nonNegativeSign(operandSgnOnTypes(x)) === true ||
             provablyGreaterEqualOnTypes(x, 0)

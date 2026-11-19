@@ -41,21 +41,18 @@ describe('A VALUE MEMO IS NOT SHARED WITH A TYPE COMPUTATION', () => {
 });
 
 describe('A VALUE THAT APPEARS OR DISAPPEARS UNDER AN ASSUMPTION', () => {
-  // An assumption refines the type of a variable with no value only
-  // (`_typeWithFacts`), so the type changes when the variable gets a value
-  // or loses it.
-  test('an assignment drops the refinement', () => {
+  test('assigning a compatible value preserves the element type', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.assume(ce.parse('x > 0'));
     const list = ce.box(['List', 'x']);
-    expect(list.type.toString()).toBe('list<real<0<..>^1>');
+    expect(list.type.toString()).toBe('vector<real^1>');
     ce.assign('x', 1);
     expect(ce.box('x').type.toString()).toBe('real');
     expect(list.type.toString()).toBe('vector<real^1>');
   });
 
-  test('a value taken away brings the refinement back', () => {
+  test('removing a value preserves the element type', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.assign('x', 1);
@@ -63,26 +60,23 @@ describe('A VALUE THAT APPEARS OR DISAPPEARS UNDER AN ASSUMPTION', () => {
     const list = ce.box(['List', 'x']);
     expect(list.type.toString()).toBe('vector<real^1>');
     (ce.lookupDefinition('x') as any).value.value = undefined;
-    expect(ce.box('x').type.toString()).toBe('real<0<..>');
-    expect(list.type.toString()).toBe('list<real<0<..>^1>');
+    expect(ce.box('x').type.toString()).toBe('real');
+    expect(list.type.toString()).toBe('vector<real^1>');
   });
 
-  test('the restore of `withValues()` brings the refinement back', () => {
+  test('a temporary value preserves the element type', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.assume(ce.parse('x > 0'));
     const list = ce.box(['List', 'x']);
-    expect(list.type.toString()).toBe('list<real<0<..>^1>');
+    expect(list.type.toString()).toBe('vector<real^1>');
     ce.withValues({ x: 1 }, () => {
       expect(list.type.toString()).toBe('vector<real^1>');
     });
-    expect(list.type.toString()).toBe('list<real<0<..>^1>');
+    expect(list.type.toString()).toBe('vector<real^1>');
   });
 
-  test('a value of the other name of `x > y` moves the subject', () => {
-    // The fact refines the one of `x` and `y` that has no value
-    // (`soleSelfSubject`), so a value given to `y` or taken from it changes
-    // the type of `x`, although the fact contributes nothing to `y`.
+  test('changing the other operand of an assumed relation preserves the static type', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'number');
     ce.declare('y', 'real');
@@ -90,11 +84,11 @@ describe('A VALUE THAT APPEARS OR DISAPPEARS UNDER AN ASSUMPTION', () => {
     const e = ce.box(['Add', 'x', 1]);
     expect(e.type.toString()).toBe('number');
     ce.assign('y', 0);
-    expect(e.type.toString()).toBe('real');
+    expect(e.type.toString()).toBe('number');
     (ce.lookupDefinition('y') as any).value.value = undefined;
     expect(e.type.toString()).toBe('number');
     ce.withValues({ y: 0 }, () => {
-      expect(e.type.toString()).toBe('real');
+      expect(e.type.toString()).toBe('number');
     });
     expect(e.type.toString()).toBe('number');
   });

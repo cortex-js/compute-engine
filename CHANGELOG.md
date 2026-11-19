@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`assume()` and `forget()` leave static types unchanged.** If `x` is
+  declared `real`, assuming that it belongs to the integers makes
+  `ce.verify(["Element", "x", "Integers"])` return `true`. The type of
+  `x` and the type of `x + 1` remain `real`. Code that read `.type` to
+  test an assumption should query the predicate with `ce.verify()`.
+  Use `ce.declare("x", "integer")` when an integer is required by the
+  static contract. The square root of a declared strictly positive finite
+  real now retains that positive bound in its result type.
+
 ### Resolved Issues
 
 - **`compile()` compiles a call of a function of an input inside a function

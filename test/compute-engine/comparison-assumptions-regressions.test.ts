@@ -203,18 +203,17 @@ describe('multi-symbol inequalities entail no numeric bound', () => {
     expect(ce.box('c').isPositive).toBe(true);
   });
 
-  test('an exact machine-representable rational bound reaches the descriptor channel', () => {
-    // `1/2` is exactly 0.5 in machine arithmetic, so the assumption bound
-    // travels to the descriptor bounds fact; `1/3` has no machine value
-    // and reads as no bound (the claim stays at the sound join).
+  test('rational bounds remain available for comparison after static typing', () => {
     const ce = new ComputeEngine();
     ce.declare('h', 'real');
     ce.assume(ce.box(['Less', 0, 'h', ['Rational', 1, 2]]));
-    expect(ce.box(['Artanh', 'h']).type.toString()).toBe('real');
+    expect(ce.box('h').isLess(0.5)).toBe(true);
+    expect(ce.box(['Artanh', 'h']).type.toString()).toBe('complex | signed_infinity');
     const ce2 = new ComputeEngine();
     ce2.declare('t', 'real');
     ce2.assume(ce2.box(['Less', 0, 't', ['Rational', 1, 3]]));
-    expect(ce2.box(['Artanh', 't']).type.toString()).toBe('real');
+    expect(ce2.box('t').isLess(0.5)).toBe(true);
+    expect(ce2.box(['Artanh', 't']).type.toString()).toBe('complex | signed_infinity');
   });
 });
 

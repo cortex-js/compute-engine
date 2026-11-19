@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
@@ -250,11 +251,11 @@ describe('OPEN BOUNDS — the assume refinement is the single channel', () => {
   it('a strict machine bound refines to an open range', () => {
     const e = new ComputeEngine();
     e.assume(e.box(['Greater', 'x', 2]));
-    expect(e.box('x').type.toString()).toBe('real<2<..>');
+    expect(typeWithFacts(e.box('x')).toString()).toBe('real<2<..>');
     e.assume(e.box(['GreaterEqual', 'w', 2]));
-    expect(e.box('w').type.toString()).toBe('real<2..>');
+    expect(typeWithFacts(e.box('w')).toString()).toBe('real<2..>');
     e.assume(e.box(['Less', 0, 'v', 1]));
-    expect(e.box('v').type.toString()).toBe('real<0<..<1>');
+    expect(typeWithFacts(e.box('v')).toString()).toBe('real<0<..<1>');
   });
 
   it('an open domain is proven from the type alone', () => {
@@ -262,7 +263,7 @@ describe('OPEN BOUNDS — the assume refinement is the single channel', () => {
     // needed the descriptor `facts.bounds` side channel; the type now
     // says it.
     const e = new ComputeEngine();
-    e.assume(e.box(['Less', 0, 'v', 1]));
+    e.declare('v', 'real<0<..<1>');
     expect(e.box(['Artanh', 'v']).type.toString()).toBe('real');
     // A closed bound at the pole is NOT enough.
     e.declare('c', 'real<0..1>');
@@ -275,7 +276,7 @@ describe('OPEN BOUNDS — the assume refinement is the single channel', () => {
     // the rounded-up side, which would exclude admissible values.
     const e = new ComputeEngine();
     e.assume(e.box(['Greater', 'q', ['Rational', 1, 3]]));
-    const t = e.box('q').type.type;
+    const t = typeWithFacts(e.box('q')).type;
     expect(typeof t).toBe('object');
     if (typeof t === 'object' && t.kind === 'numeric') {
       expect(t.lower).toBeLessThan(1 / 3);
@@ -296,8 +297,8 @@ describe('OPEN BOUNDS — the assume refinement is the single channel', () => {
 describe('OPEN BOUNDS — kernel attainability', () => {
   it('add: strict + anything at an exact sum is strict', () => {
     const e = new ComputeEngine();
-    e.assume(e.box(['Greater', 'x', 2]));
-    e.assume(e.box(['Greater', 'y', 3]));
+    e.declare('x', 'real<2<..>');
+    e.declare('y', 'real<3<..>');
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
     expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe('real<6<..>');
     const r = addIntervals({ lo: 2, hi: 5, loOpen: true }, { lo: 3, hi: 7 });

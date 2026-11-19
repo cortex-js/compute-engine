@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 import { ComputeEngine } from '../../src/compute-engine';
 
 // A RANGED declaration carries a sign. `BoxedSymbol.sgn` answers from the
@@ -88,13 +89,13 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');
     ce.assume(ce.parse('p > 0'));
-    expect(ce.symbol('p').type.toString()).toBe('real<0<..>');
+    expect(typeWithFacts(ce.symbol('p')).toString()).toBe('real<0<..>');
     expect(ce.symbol('p').sgn).toBe('positive');
     // The meet pushes the range into a narrower declared base.
     ce.declare('n', 'integer');
     ce.assume(ce.parse('n > 0'));
-    expect(ce.symbol('n').type.toString()).toBe('integer<1..>');
-    expect(ce.box(['Factorial', 'n']).type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.symbol('n')).toString()).toBe('integer<1..>');
+    expect(ce.box(['Factorial', 'n']).type.toString()).toBe('infinity | integer');
   });
 
   test('assume on an undeclared symbol declares the range', () => {
@@ -102,7 +103,7 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     ce.assume(ce.parse('q \\geq 2'));
     // A strict non-zero bound would be approximated by its closed range
     // (`real<2..>`); the non-strict one here is exact.
-    expect(ce.symbol('q').type.toString()).toBe('real<2..>');
+    expect(typeWithFacts(ce.symbol('q')).toString()).toBe('real<2..>');
     expect(ce.symbol('q').sgn).toBe('positive');
   });
 
@@ -122,7 +123,7 @@ describe('an assumption refines the symbol type to a range (§5.8 A2)', () => {
     ce.assume(ce.parse('x > 0'));
     const roots = (ce.parse('x^2 = a').solve('x') ?? []).map(String).sort();
     expect(roots).toEqual(['-sqrt(a)', 'sqrt(a)'].sort());
-    expect(ce.box(['Sqrt', 'a']).type.toString()).toBe('real');
+    expect(ce.box(['Sqrt', 'a']).type.toString()).toBe('number');
   });
 });
 
@@ -131,7 +132,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     const ce = new ComputeEngine();
     ce.declare('p', 'real');
     ce.assume(ce.parse('p > 0'));
-    expect(ce.symbol('p').type.toString()).toBe('real<0<..>');
+    expect(typeWithFacts(ce.symbol('p')).toString()).toBe('real<0<..>');
     ce.forget('p');
     expect(ce.symbol('p').type.toString()).toBe('real');
     expect(ce.symbol('p').sgn).toBe(undefined);
@@ -140,7 +141,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
   test('no-argument forget() rewinds to the pre-assumption state', () => {
     const ce = new ComputeEngine();
     ce.assume(ce.parse('q > 4'));
-    expect(ce.symbol('q').type.toString()).toBe('real<4<..>');
+    expect(typeWithFacts(ce.symbol('q')).toString()).toBe('real<4<..>');
     ce.forget(undefined);
     // `q` was auto-declared `unknown` when the proposition was boxed; the
     // rewind restores that pre-assumption state, not a blanket `real`.
@@ -171,7 +172,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     const ce = new ComputeEngine();
     ce.parse('x + 1'); // x is inference-pending before the assumption
     expect(ce.assume(ce.parse('0 < x < 10'))).toBe('ok');
-    expect(ce.symbol('x').type.toString()).toBe('real<0<..<10>');
+    expect(typeWithFacts(ce.symbol('x')).toString()).toBe('real<0<..<10>');
     expect(ce.symbol('x').sgn).toBe('positive');
   });
 
@@ -186,7 +187,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     expect(ce.symbol('r').type.toString()).toBe('real<..-1>');
     // …and a consistent one keeps the inherited base in the meet.
     expect(ce.assume(ce.parse('n > 0'))).toBe('ok');
-    expect(ce.symbol('n').type.toString()).toBe('integer<1..>');
+    expect(typeWithFacts(ce.symbol('n')).toString()).toBe('integer<1..>');
     ce.popScope();
     expect(ce.symbol('n').type.toString()).toBe('integer');
   });
@@ -201,7 +202,7 @@ describe('assumption type-refinement — review hardening (2026-08-23)', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
     ce.assume(ce.box(['Greater', 'u', ['Rational', 1, 3]]));
-    const t = ce.symbol('u').type.type;
+    const t = typeWithFacts(ce.symbol('u')).type;
     expect(typeof t === 'object' && t.kind === 'numeric').toBe(true);
     if (typeof t === 'object' && t.kind === 'numeric') {
       expect(t.lower).toBeLessThan(1 / 3);
@@ -240,9 +241,9 @@ describe('type-handler consumers of a ranged declaration', () => {
   ce.declare('s', 'real<0..> & !0');
   const t = (json: unknown) => ce.box(json as any).type.toString();
 
-  test('Sqrt of a provably non-negative real is real', () => {
-    expect(t(['Sqrt', 'p'])).toBe('real');
-    expect(t(['Sqrt', 's'])).toBe('real');
+  test('Sqrt preserves strict positivity from the declared range', () => {
+    expect(t(['Sqrt', 'p'])).toBe('real<0<..>');
+    expect(t(['Sqrt', 's'])).toBe('real<0<..>');
     // Non-positive: the radicand may be 0 (→ 0) or negative (→ imaginary).
     expect(t(['Sqrt', 'r'])).toBe('complex');
   });

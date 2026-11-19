@@ -155,20 +155,30 @@ describe('D17: a run keeps the cached types', () => {
     expect(r.typeComputations).toBeLessThanOrEqual(8);
   });
 
-  // A guard of behaviour that the change must keep: it holds before the
-  // change too.
-  test('a pop that reverts an assumption moves the type version', () => {
+  test('a scoped fact changes proof answers without moving the static type version', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const e = ce.box(['Sqrt', 'x']);
-    expect(e.type.toString()).toBe('complex');
+    const x = ce.box('x');
+    const root = ce.box(['Sqrt', 'x']);
+    const positive = ce.box(['Greater', 'x', 0]);
+    const rootIsReal = ce.box(['Element', root, 'RealNumbers']);
+    expect(x.type.toString()).toBe('real');
+    expect(root.type.toString()).toBe('complex');
     ce.pushScope();
-    ce.assume(ce.box(['Greater', 'x', 0]));
-    expect(e.type.toString()).toBe('real');
     const before = ce._typeVersion;
+    expect(ce.assume(positive)).toBe('ok');
+    expect(x.type.toString()).toBe('real');
+    expect(root.type.toString()).toBe('complex');
+    expect(ce.box(['Sqrt', 'x']).type.toString()).toBe('complex');
+    expect(x.isPositive).toBe(true);
+    expect(ce.verify(positive)).toBe(true);
+    expect(ce.verify(rootIsReal)).toBe(true);
+    expect(ce._typeVersion).toBe(before);
     ce.popScope();
-    expect(ce._typeVersion).toBeGreaterThan(before);
-    expect(e.type.toString()).toBe('complex');
+    expect(ce._typeVersion).toBe(before);
+    expect(root.type.toString()).toBe('complex');
+    expect(x.isPositive).toBeUndefined();
+    expect(ce.verify(rootIsReal)).toBeUndefined();
   });
 
   test('the evaluation of a call that returns a closure leaves the type of the call', () => {

@@ -25,6 +25,7 @@ import { SIGNED_NUMBER_SETS } from './boxed-expression/number-set-types.js';
 import { isInequalityOperator } from './latex-syntax/utils.js';
 import {
   isFunction,
+  isFreeName,
   isSymbol,
   isNumber,
   isString,
@@ -130,16 +131,23 @@ function hasIncompatibleTypeError(expr: Expression): boolean {
  * the two disagreed about which value the assertion is about. Re-boxing the
  * fact against the live scope puts them back in agreement.
  *
- * The re-boxing is reached only when a disposed definition is actually
- * present; every other fact pays one traversal and is returned unchanged.
+ * Predicate preparation also leaves an undeclared name unbound until the
+ * fact has a subject. Bind it once the transaction has installed that subject.
  */
 function withLiveDefinitions(ce: ComputeEngine, fact: Expression): Expression {
-  const hasDisposedDef = (expr: Expression): boolean => {
-    if (isSymbol(expr)) return expr.valueDefinition?.disposed === true;
-    return isFunction(expr) && expr.ops.some(hasDisposedDef);
+  const needsBinding = (expr: Expression): boolean => {
+    if (isSymbol(expr))
+      return (
+        expr.valueDefinition?.disposed === true ||
+        (!isFreeName(expr) &&
+          !expr.valueDefinition &&
+          !expr.operatorDefinition &&
+          ce.lookupDefinition(expr.symbol) !== undefined)
+      );
+    return isFunction(expr) && expr.ops.some(needsBinding);
   };
-  if (!hasDisposedDef(fact)) return fact;
-  return ce.expr(fact.json);
+  if (!needsBinding(fact)) return fact;
+  return ce._resolveOnly(() => ce.expr(fact.json));
 }
 
 /**
@@ -160,25 +168,23 @@ function recordFact(
   assertion: Expression,
   truth: boolean
 ): AssumeResult {
-  // The fact expression and the subjects recorded with it must be about the
-  // same definitions: `factSubjects` resolves each name in the live scope,
-  // and the expression can still hold a definition an earlier, rolled-back
-  // conjunct disposed of.
-  const fact = withLiveDefinitions(ce, assertion);
-
   // A predicate that does not type-check is no fact. `declare s string;
   // assume(Re(s) > 1)` reduces to the `incompatible-type` error itself: a
   // string has no real part, so the predicate is REFUTED and the answer is a
   // contradiction. Any other invalid shape is simply not a predicate the
   // assumptions layer can represent.
-  if (!fact.isValid)
-    return hasIncompatibleTypeError(fact) ? 'contradiction' : 'not-a-predicate';
+  const invalidResult = (expr: Expression): AssumeResult =>
+    hasIncompatibleTypeError(expr) ? 'contradiction' : 'not-a-predicate';
+  if (!assertion.isValid) return invalidResult(assertion);
 
+  const subjects = factSubjects(ce, assertion);
+  const fact = withLiveDefinitions(ce, assertion);
+  if (fact !== assertion && !fact.isValid) return invalidResult(fact);
   const assumptions = ce.context.assumptions;
   const record: FactRecord = Object.freeze({
     id: ce._nextFactId(),
     truth,
-    subjects: factSubjects(ce, fact),
+    subjects,
   });
   const previous = assumptions.get(fact);
   const tx = _transaction;
@@ -201,7 +207,7 @@ function recordFact(
 // the whole conjunction in a throw-away child scope and then replay it. The
 // log is what makes a conjunction atomic (`And(p > 0, p < −5)` reports a
 // contradiction and leaves `p > 0` nowhere), and it is also what lets a
-// contradiction be detected by READING the effective type after the fact is
+// contradiction be detected by checking the declaration and facts after a fact is
 // stored, now that storing a fact writes no type.
 
 type AssumeTransaction = {
@@ -299,9 +305,8 @@ function stageAssumedValue(
  * declared it.
  *
  * The definition is PROVISIONAL: its type is `unknown` — an assumption
- * declares nothing, it only states a fact, and what the fact proves is merged
- * in by the type read — and the transaction discards the binding if it rolls
- * back.
+ * supplies evidence to proofs. The transaction discards this binding on
+ * rollback.
  */
 function declareProvisional(ce: ComputeEngine, symbol: string): void {
   if (ce.lookupDefinition(symbol) !== undefined) return;
@@ -376,7 +381,8 @@ function transactionConsistency(
   // itself was checked against the predicate before it was recorded.
   for (const def of tx.touched) {
     if (def.disposed || def.storedValue !== undefined) continue;
-    if (isEmptyType(def.type.type)) return 'contradiction';
+    const allowed = def._typeWithFacts(def.declaredType, true);
+    if (isEmptyType(allowed.type)) return 'contradiction';
   }
 
   return undefined;
@@ -753,12 +759,7 @@ function assumeEquality(proposition: Expression): AssumeResult {
     return sawOk ? 'ok' : 'tautology';
   }
 
-  // Case 2
-  // @todo: this is dubious. Should we allow this?
-  // i.e. `ce.assume(ce.parse("x = 3"))`
-  // that's not really an assumption, that's an assignment.
-  // Assumptions are meant to be complementary to declarations, not replacing
-  // them, i.e. `ce.assume(ce.parse("x > 0"))`
+  // A single determined value goes in the scoped equality overlay.
   if (!isFunction(proposition)) return 'not-a-predicate';
   const lhsExpr = proposition.op1;
   const lhs = isSymbol(lhsExpr) ? lhsExpr.symbol : undefined;
@@ -771,27 +772,22 @@ function assumeEquality(proposition: Expression): AssumeResult {
   // Case 3
   if (unknowns.length === 1) {
     const lhs = unknowns[0];
-    const sols = findUnivariateRoots(proposition, lhs);
+    const stats = { candidates: false, undecided: false, partial: false };
+    const sols = findUnivariateRoots(proposition, lhs, 0, undefined, stats);
     const def = ce.lookupDefinition(lhs);
 
-    // Contradiction check (P1-3): an *explicitly* typed symbol whose declared
-    // type is incompatible with every root is inconsistent with the equation.
-    // Compare *each root* against the definition's type; the earlier code
-    // compared the roots-`List` type (`list<…>`) against each root's type,
-    // which never matched and so always reported a contradiction for
-    // multi-root equations. A single compatible root suffices — with
-    // `x: natural`, `x² = 4` is satisfiable (x = 2) even though the root −2
-    // is not. As in Case 2, an *inferred* declared type is widened, not
-    // enforced.
-    if (
-      def &&
-      isValueDef(def) &&
-      def.value.type &&
-      !def.value.inferredType &&
-      sols.length > 0 &&
-      !sols.some((sol) => !sol.type || sol.type.matches(def.value.type!))
-    )
-      return 'contradiction';
+    // Only a complete set of roots can refute the equation. Each root
+    // must be compatible with an explicit declaration and with the facts
+    // about the symbol, including a range assumed for an undeclared name.
+    if (isValueDef(def) && sols.length > 0 && !stats.undecided && !stats.partial) {
+      const target = def.value;
+      const possible = sols.some(
+        (root) =>
+          (target.inferredType || root.type.matches(target.declaredType)) &&
+          refutingFact(ce, target, root) === undefined
+      );
+      if (!possible) return 'contradiction';
+    }
 
     // Zero or multiple roots: the symbol is *not* uniquely determined, so
     // store the equation itself as an opaque fact (answered later by the
@@ -951,8 +947,8 @@ function assumeInequality(proposition: Expression): AssumeResult {
 
     // What a part-predicate over Real/Imaginary/Abs/Argument(x) proves about
     // the WHOLE value — at most `x: number`, or `complex` when a finite
-    // upper bound on `Abs(x)` proves finiteness — is a CONTRIBUTION the type
-    // read merges in from the fact recorded just below, derived in
+    // upper bound on `Abs(x)` proves finiteness — is evidence for
+    // proof queries, derived from the fact recorded just below in
     // `boxed-expression/constraint-subject.ts`. All this path owes it is a
     // definition to be recorded against.
     declareProvisional(ce, partSubject.symbol);
@@ -1001,12 +997,7 @@ function assumeInequality(proposition: Expression): AssumeResult {
 
   // Case 3: single unknown. An inequality implies the symbol is a real
   // number, and a simple comparison against a finite literal implies a
-  // RANGE. Both are CONTRIBUTIONS the type READ merges into the declared
-  // type from the fact recorded just below — nothing is written here, so
-  // retracting the fact retracts what it proved and no stored type can be
-  // built from it (`docs/plans/2026-08-29-assumptions-as-facts-type.md`
-  // §2.5; the contributions themselves are derived in
-  // `boxed-expression/constraint-subject.ts`).
+  // range. The fact index derives both for proof queries.
   //
   // A part term (Real/Imaginary/Abs/Argument of a symbol) is excluded here
   // as it was before: `Re(s) + Im(s) < 0` does not imply `s: real` (design
@@ -1121,7 +1112,7 @@ function assumeElementOfSet(
   setExpr: Expression
 ): AssumeResult {
   // 1. Primitive number sets → the membership fact alone; the type it
-  //    proves is merged in by the type read (`membershipType`,
+  //    proves is available to proof queries (`membershipType`,
   //    `boxed-expression/constraint-subject.ts`).
   const type = domainToType(setExpr);
   if (type !== 'unknown') return recordMembership(ce, symbol, setExpr, type);
@@ -1235,7 +1226,7 @@ function assumeElementOfSet(
  *
  * `type` is what the membership proves about the subject; it is passed only
  * to refuse a membership an OPERATOR definition's result type cannot satisfy
- * — the contribution the type read merges in is derived from the stored fact
+ * — the evidence used for value subjects is derived from the stored fact
  * itself, never from this argument.
  */
 function recordMembership(
@@ -1257,7 +1248,7 @@ function recordMembership(
  * for an `f` declared `(number) -> string`).
  *
  * A VALUE definition needs no check here: what the facts prove about it is
- * merged into its type by the read, and an empty result is caught by the
+ * checked against its declaration for an empty intersection by the
  * transaction's consistency pass.
  */
 function checkOperatorSubject(
@@ -1442,8 +1433,7 @@ function undefinedIdentifiers(expr: Expression): string[] {
  * Record `symbol = value`.
  *
  * Two records, and no write to the definition: the equality itself becomes a
- * FACT (what it proves about the type — the promoted tier of the value — is
- * merged in by the type read, so `forget()` retracts it), and the value goes
+ * fact for proof and consistency checks, and the value goes
  * into the current context's assumed-value overlay, which the scope that
  * assumed it drops on its pop. A user `declare()`/`assign()` value is stored
  * on the definition instead, and the two never collide.

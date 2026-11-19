@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 import { ComputeEngine } from '../../src/compute-engine';
 import { isFreeName } from '../../src/compute-engine/boxed-expression/type-guards';
 
@@ -26,9 +27,8 @@ describe('VALUE RESOLUTION FROM EQUALITY ASSUMPTIONS', () => {
     expect(ce.expr('one').evaluate().json).toEqual(1);
   });
 
-  test(`one.domain should be integer`, () => {
-    // The type might be 'integer' (subtype of integer)
-    expect(ce.expr('one').type.matches('integer')).toBe(true);
+  test('the assumed value proves integer membership', () => {
+    expect(ce.expr('one').isInteger).toBe(true);
   });
 
   test(`Equal(one, 1) should evaluate to True`, () => {
@@ -102,59 +102,122 @@ describe('TAUTOLOGY AND CONTRADICTION DETECTION', () => {
   });
 });
 
-// #21: Type Inference from Assumptions - IMPLEMENTED
-// When assumptions are made, symbol types should be inferred
-describe('TYPE INFERENCE FROM ASSUMPTIONS', () => {
-  // Since 2026-08-22 a simple literal bound refines to the proven RANGE
-  // type, not bare `real` (`docs/plans/2026-08-22-type-handlers-on-types.md`
-  // §5.8 A2), so the assumption is visible to consumers that read the type.
-  test(`x should have type real<4<..> (x > 4 assumed)`, () => {
-    // A strict non-zero bound is approximated by its closed range: types
-    // have no open bounds, and the closed range admits every assumed value.
-    expect(ce.expr('x').type.toString()).toBe('real<4<..>');
-    expect(ce.expr('x').type.matches('real')).toBe(true);
+// Facts contribute bounds and membership to proof queries.
+describe('TYPE EVIDENCE FROM ASSUMPTIONS', () => {
+  test(`x has proof type real<4<..> (x > 4 assumed)`, () => {
+    expect(typeWithFacts(ce.expr('x')).toString()).toBe('real<4<..>');
+    expect(typeWithFacts(ce.expr('x')).matches('real')).toBe(true);
   });
 
-  test(`s should have type real<5<..> (s > 5 assumed)`, () => {
-    expect(ce.expr('s').type.toString()).toBe('real<5<..>');
+  test(`s has proof type real<5<..> (s > 5 assumed)`, () => {
+    expect(typeWithFacts(ce.expr('s')).toString()).toBe('real<5<..>');
   });
 
-  test(`t should have type real<0<..> (t > 0 assumed)`, () => {
+  test(`t has proof type real<0<..> (t > 0 assumed)`, () => {
     // The zero bound is exact: the range plus the zero exclusion.
-    expect(ce.expr('t').type.toString()).toBe('real<0<..>');
+    expect(typeWithFacts(ce.expr('t')).toString()).toBe('real<0<..>');
   });
 
-  test(`one should have type integer (one = 1 assumed)`, () => {
-    expect(ce.expr('one').type.toString()).toBe('integer');
+  test(`one has proof type integer (one = 1 assumed)`, () => {
+    expect(typeWithFacts(ce.expr('one')).toString()).toBe('integer');
   });
 
-  test(`o should have type integer (o = 1 assumed)`, () => {
-    expect(ce.expr('o').type.toString()).toBe('integer');
+  test(`o has proof type integer (o = 1 assumed)`, () => {
+    expect(typeWithFacts(ce.expr('o')).toString()).toBe('integer');
   });
 
-  test(`p should have type integer (p = 11 assumed)`, () => {
-    expect(ce.expr('p').type.toString()).toBe('integer');
+  test(`p has proof type integer (p = 11 assumed)`, () => {
+    expect(typeWithFacts(ce.expr('p')).toString()).toBe('integer');
   });
 
   // A `Range` holds integers only, so membership in a range gives an integer
   // type with the bounds of the range. An unbounded range gives `integer`.
-  test(`m should have type integer (m ∈ Range(-∞, ∞) assumed)`, () => {
-    expect(ce.expr('m').type.toString()).toBe('integer');
+  test(`m has proof type integer (m ∈ Range(-∞, ∞) assumed)`, () => {
+    expect(typeWithFacts(ce.expr('m')).toString()).toBe('integer');
     expect(ce.expr('m').isInteger).toBe(true);
   });
 
-  test(`n should have type integer<0..> (n ∈ Range(0, ∞) assumed)`, () => {
-    expect(ce.expr('n').type.toString()).toBe('integer<0..>');
+  test(`n has proof type integer<0..> (n ∈ Range(0, ∞) assumed)`, () => {
+    expect(typeWithFacts(ce.expr('n')).toString()).toBe('integer<0..>');
   });
 
-  test(`q should have type integer<..0> (q ∈ Range(-∞, 0) assumed)`, () => {
-    expect(ce.expr('q').type.toString()).toBe('integer<..0>');
+  test(`q has proof type integer<..0> (q ∈ Range(-∞, 0) assumed)`, () => {
+    expect(typeWithFacts(ce.expr('q')).toString()).toBe('integer<..0>');
   });
 
   // An `Interval` holds reals. The open lower bound 0 is exact: the range
   // plus the zero exclusion.
-  test(`r should have type real<0<..> (r ∈ Interval(Open(0), ∞) assumed)`, () => {
-    expect(ce.expr('r').type.toString()).toBe('real<0<..>');
+  test(`r has proof type real<0<..> (r ∈ Interval(Open(0), ∞) assumed)`, () => {
+    expect(typeWithFacts(ce.expr('r')).toString()).toBe('real<0<..>');
+  });
+});
+
+describe('saved expressions keep their static types when facts change', () => {
+  test.each(['Gamma', 'Factorial'])(
+    '%s(sqrt(x)) is provably real while x > 0',
+    (head) => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      const value = ce.box([head, ['Sqrt', 'x']]);
+      const membership = ce.box(['Element', value, 'RealNumbers']);
+      expect(value.type.toString()).toBe('number');
+      expect(ce.verify(membership)).toBeUndefined();
+
+      expect(ce.assume(ce.box(['Greater', 'x', 0]))).toBe('ok');
+      expect(value.type.toString()).toBe('number');
+      expect(ce.verify(membership)).toBe(true);
+      ce.forget('x');
+      expect(ce.verify(membership)).toBeUndefined();
+    }
+  );
+
+  test.each([
+    ['Sqrt', 'Greater'],
+    ['Negate', 'Less'],
+  ])('the sign used to prove Gamma(%s(x)) real follows the binding', (op, relation) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const gammaIsReal = () =>
+      ce.box(['Element', ['Gamma', [op, 'x']], 'RealNumbers']);
+    const outer = gammaIsReal();
+    expect(ce.assume(ce.box([relation, 'x', 0]))).toBe('ok');
+    expect(ce.verify(outer)).toBe(true);
+
+    ce.pushScope();
+    try {
+      ce.declare('x', 'real');
+      const inner = gammaIsReal();
+      expect(ce.verify(inner)).toBeUndefined();
+      expect(ce.verify(outer)).toBe(true);
+    } finally {
+      ce.popScope();
+    }
+    expect(ce.verify(outer)).toBe(true);
+  });
+
+  test('membership, equality and contradiction remain live until forget', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const x = ce.box('x');
+    const sum = ce.box(['Add', 'x', 1]);
+    const sumIsInteger = ce.box(['Element', sum, 'Integers']);
+    const member = ce.box(['Element', 'x', 'Integers']);
+    expect(sum.type.toString()).toBe('real');
+    expect(ce.assume(member)).toBe('ok');
+    expect(x.type.toString()).toBe('real');
+    expect(x.isInteger).toBe(true);
+    expect(ce.verify(member)).toBe(true);
+    expect(ce.verify(sumIsInteger)).toBe(true);
+    expect(ce.assume(ce.box(['Equal', 'x', 3]))).toBe('ok');
+    expect(ce.assume(ce.box(['Equal', 'x', 4]))).toBe('contradiction');
+    expect(sum.type.toString()).toBe('real');
+    expect(x.evaluate().json).toBe(3);
+    ce.forget('x');
+    expect(x.type.toString()).toBe('real');
+    expect(sum.type.toString()).toBe('real');
+    expect(x.isInteger).toBeUndefined();
+    expect(ce.verify(sumIsInteger)).toBeUndefined();
+    expect(x.evaluate().json).toBe('x');
   });
 });
 
@@ -361,7 +424,7 @@ describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
     ce.assume(ce.parse('x > 0'));
     // In-scope, the refinement is visible (the proven range, since the
     // §5.8 A2 change — previously bare `real`)…
-    expect(ce.expr('x').type.toString()).toBe('real<0<..>');
+    expect(typeWithFacts(ce.expr('x')).toString()).toBe('real<0<..>');
     ce.popScope();
 
     // After popping, the outer-scope type refinement must be gone.
@@ -375,7 +438,7 @@ describe('SCOPED INEQUALITY TYPE REFINEMENT DOES NOT LEAK (P1-6)', () => {
 
     ce.pushScope();
     ce.assume(ce.expr(['Element', 'w', 'Integers']));
-    expect(ce.expr('w').type.matches('integer')).toBe(true);
+    expect(typeWithFacts(ce.expr('w')).matches('integer')).toBe(true);
     ce.popScope();
 
     expect(ce.expr('w').type.toString()).toBe('unknown');
@@ -656,14 +719,14 @@ describe('domainToType SIGNED-SET COVERAGE (SYM P2-11)', () => {
   test('PositiveNumbers ⇒ real and positive', () => {
     const ce = new ComputeEngine();
     ce.assume(ce.box(['Element', 'u', 'PositiveNumbers']));
-    expect(ce.box('u').type.matches('real')).toBe(true);
+    expect(typeWithFacts(ce.box('u')).matches('real')).toBe(true);
     expect(ce.box('u').isPositive).toBe(true);
   });
 
   test('NonPositiveNumbers ⇒ real and non-positive', () => {
     const ce = new ComputeEngine();
     ce.assume(ce.box(['Element', 'v', 'NonPositiveNumbers']));
-    expect(ce.box('v').type.matches('real')).toBe(true);
+    expect(typeWithFacts(ce.box('v')).matches('real')).toBe(true);
     expect(ce.box('v').isNonPositive).toBe(true);
   });
 
@@ -686,7 +749,7 @@ describe('AN EXTENDED NUMBER SET PROVES ITS TIER', () => {
   ])('t ∈ %s ⇒ %s', (set, type) => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.box(['Element', 't', set]))).toBe('ok');
-    expect(ce.box('t').type.toString()).toBe(type);
+    expect(typeWithFacts(ce.box('t')).toString()).toBe(type);
     expect(ce.box('t').isNumber).toBe(true);
     expect(ce.box(['Element', 't', set]).evaluate().symbol).toBe('True');
   });
@@ -713,7 +776,7 @@ describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
         ce.box(['Element', 'm', ['Union', ['Range', 1, 3], ['Range', 5, 7]]])
       )
     ).toBe('ok');
-    expect(ce.box('m').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('integer');
     expect(ce.box('m').isInteger).toBe(true);
   });
 
@@ -728,7 +791,7 @@ describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
         ])
       )
     ).toBe('ok');
-    expect(ce.box('m').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('integer');
   });
 
   test('an exclusion from a union of ranges still proves integer', () => {
@@ -749,7 +812,7 @@ describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
         ])
       )
     ).toBe('ok');
-    expect(ce.box('m').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('integer');
     expect(ce.box('m').isInteger).toBe(true);
     expect(ce.box(['Equal', 'm', 2]).evaluate().json).toBe('False');
   });
@@ -765,7 +828,7 @@ describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
         ])
       )
     ).toBe('ok');
-    expect(ce.box('m').type.toString()).toBe('real');
+    expect(typeWithFacts(ce.box('m')).toString()).toBe('real');
   });
 });
 
@@ -872,15 +935,10 @@ describe('ASSUME VALUE-BLINDNESS (SHIELD + RECORD)', () => {
 });
 
 describe('A MODULUS BOUND IMPLIES FINITE, NOT REAL', () => {
-  // A finite upper bound on `|x|` proves that `x` is finite, but it says
-  // nothing about the imaginary part of `x`, so the symbol is declared
-  // `complex` — the widest finite numeric type — and not a real type. The
-  // consequence is that real-only rewrites correctly decline for such a
-  // symbol.
-  test('assume(|q| < 1) declares q complex and finite', () => {
+  test('a modulus bound proves finiteness', () => {
     const ce = new ComputeEngine();
     expect(ce.assume(ce.parse('|q| < 1'))).toBe('ok');
-    expect(ce.symbol('q').type.toString()).toBe('complex');
+    expect(typeWithFacts(ce.symbol('q')).toString()).toBe('complex');
     expect(ce.symbol('q').isFinite).toBe(true);
   });
 

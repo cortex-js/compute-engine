@@ -83,8 +83,7 @@ describe('TYPE AUDIT: pole reciprocals (Tan/Sec/Csc/Cot/Coth/Csch)', () => {
     expect(typeOf(['Csc', 'r'])).toBe('number');
     expect(typeOf(['Coth', 'r'])).toBe('number');
     const e2 = new ComputeEngine();
-    e2.declare('s', 'real');
-    e2.assume(e2.parse('s > 0'));
+    e2.declare('s', 'real<0<..>');
     expect(e2.box(['Csc', 's']).type.toString()).toBe('real');
   });
 
@@ -605,25 +604,12 @@ describe('TYPE AUDIT: Mod (floored remainder)', () => {
 });
 
 describe('TYPE AUDIT: Sqrt over a closed (unknowns-free) radicand', () => {
-  // Machine floats are deliberately not folded at canonicalization, so the
-  // radicand of `√(1 − 0.2²)` reaches the type handler unevaluated and its
-  // `sgn` is undecided — and the handler claims the `complex` hedge
-  // for it, exactly as it does for any other unknown-sign real radicand. A
-  // type derivation never evaluates: the `closedRealSign` fold that used to
-  // numericize a closed radicand here (Tycho 0.100.0 adoption item 137) was
-  // retired once the compile targets learned to fold constants before
-  // reading a node's type (§5.4 `Sqrt` row and §5.8 A5 of
-  // `docs/plans/2026-08-22-type-handlers-on-types.md`) — the compiled bytes
-  // are pinned unchanged in the item-137 block below.
-  it('an unfolded non-negative float radicand proves its sign through interval arithmetic', () => {
-    // This claimed the `complex` hedge until the interval round
-    // (2026-08-27): the radicand `1 − 0.2²` now carries a computed range
-    // (`0.2` is a point interval, `Power`/`Add` fold it to ~[0.96, 0.96]),
-    // so `Sqrt` proves the radicand non-negative without evaluation.
-    expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]])).toBe('real');
-    // …while a literal radicand, whose sign is statically known, still
-    // claims `real` — no evaluation is needed to see `0.96 ≥ 0`
-    expect(typeOf(['Sqrt', 0.96])).toBe('real');
+  it('an unfolded positive float radicand proves its sign through interval arithmetic', () => {
+    // The point interval for 0.2 bounds 1 − 0.2² strictly above zero.
+    expect(typeOf(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]])).toBe(
+      'real<0<..>'
+    );
+    expect(typeOf(['Sqrt', 0.96])).toBe('real<0<..>');
     expectSound(['Sqrt', ['Subtract', 1, ['Power', 0.2, 2]]]);
   });
 

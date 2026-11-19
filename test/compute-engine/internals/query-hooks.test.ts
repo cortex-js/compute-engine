@@ -39,9 +39,7 @@ describe('§11.1 Element(n, Range(1, +oo))', () => {
     expect(ce.expr('n').isInteger).toBe(true);
     expect(ce.verify(ce.expr(['GreaterEqual', 'n', 1]))).toBe(true);
     expect(ce.verify(ce.expr(['Greater', 'n', 0]))).toBe(true);
-    // No destructive retype: the integer refinement plus, since §5.8 A2,
-    // the Range membership's own lower bound.
-    expect(ce.expr('n').type.toString()).toBe('integer<1..>');
+    expect(ce.expr('n').type.toString()).toBe('unknown');
   });
 
   it('stays undefined without the assumption', () => {
@@ -68,13 +66,9 @@ describe('§11.2 Greater(Imaginary(tau), 0)', () => {
 
     // The sgn fallback flows through BoxedFunction.sgn into isPositive
     expect(ce.expr(['Imaginary', 'tau']).isPositive).toBe(true);
-    // The part-bound never proves `real` about the whole value: the use
-    // under `Imaginary` requires that operator's carrier `complex | infinity`
-    // of the symbol, and the disequality it derives (`Im(tau)` bounded away
-    // from zero implies `tau ≠ 0`) excludes the one value the type can name.
-    // The type is read on the use: a `tau` boxed alone has no use.
+    // The occurrence retains the carrier required by Imaginary.
     expect(ce.expr(['Imaginary', 'tau']).op1!.type.toString()).toBe(
-      'complex & !0 | infinity'
+      'complex | infinity'
     );
   });
 

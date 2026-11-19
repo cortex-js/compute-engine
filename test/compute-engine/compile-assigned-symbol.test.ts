@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 /**
  * Regression tests for compiling expressions that reference a symbol with an
  * **assigned value** in the engine (`ce.assign("a", 1.5)`).
@@ -144,12 +145,7 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     expect(r.run!({ a: -2, x: 3 })).toBeCloseTo(-9, 12);
   });
 
-  it('only the compile marker drops the facts from the type, not the assume() shield', () => {
-    // `assume()` hides the values of the names it records a fact about
-    // (`withShieldedValues`), including a value an assumption put in force.
-    // While it does so, the facts must still type the symbol. Only the marker
-    // a compilation sets on a `vars`-mapped input (`withDeclaredTypeOnly`)
-    // gives the declared type.
+  it('the compile marker hides proof evidence while the value shield preserves it', () => {
     const ce = new ComputeEngine();
     ce.pushScope();
     ce.declare('a', 'real');
@@ -157,13 +153,13 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     const def = ce.lookupDefinition('a')!;
     if (!isValueDef(def)) throw new Error('expected a value definition');
     const defs = new Set([def.value]);
-    expect(ce.symbol('a').type.toString()).toBe('integer');
-    expect(withShieldedValues(defs, () => def.value.type.toString())).toBe(
+    expect(typeWithFacts(ce.symbol('a')).toString()).toBe('integer');
+    expect(withShieldedValues(defs, () => typeWithFacts(ce.symbol('a')).toString())).toBe(
       'integer'
     );
-    expect(withDeclaredTypeOnly(defs, () => def.value.type.toString())).toBe(
+    expect(withDeclaredTypeOnly(defs, () => typeWithFacts(ce.symbol('a')).toString())).toBe(
       'real'
     );
-    expect(ce.symbol('a').type.toString()).toBe('integer');
+    expect(typeWithFacts(ce.symbol('a')).toString()).toBe('integer');
   });
 });

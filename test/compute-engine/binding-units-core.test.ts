@@ -136,15 +136,13 @@ describe('BINDING UNITS: TYPES', () => {
     );
   });
 
-  test('a fact that excludes the requirement of the unit reads the definition', () => {
+  test('a fact cannot override the static requirement of a use', () => {
     const ce = engine();
     const b = ce.parse('x \\land y');
     expect(b.op1.type.toString()).toBe('boolean');
     ce.assume(ce.parse('x > 0'));
-    // The requirement `boolean` meets the facts of `x > 0` in `never`: the
-    // occurrence reads the type of the definition.
-    expect(b.op1.type.toString()).not.toBe('never');
-    expect(b.op1.type.toString()).toBe(ce.box('x').type.toString());
+    expect(b.op1.type.toString()).toBe('boolean');
+    expect(ce.box('x').type.toString()).toBe('unknown');
   });
 
   test('a parameter of a function literal does not read a global of its name', () => {

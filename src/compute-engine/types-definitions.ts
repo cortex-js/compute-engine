@@ -2393,7 +2393,7 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
   inferredType: boolean;
 
   /** The type `declared` with the facts of the current context merged in,
-   * as `type` merges them into the declared type. `memoize` is false when
+   * for a proof. `memoize` is false when
    * `declared` is not the declared type of this definition (the type that a
    * binding unit reads for an occurrence, `binding-unit.ts`).
    * @internal */
@@ -2503,17 +2503,11 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _restoreFieldSnapshot(snapshot: unknown): void;
 
-  /** The type known in the CURRENT state: {@link declaredType} narrowed by
-   * everything the assumptions in force prove about this definition. Reading
-   * it is what makes a fact visible; nothing derived from it may be STORED
-   * (see {@link declaredType}). Writing it reports a `type-write` state
-   * event, so cached results that read this type are computed again. */
+  /** The static type of the definition. Assigning it writes its contract. */
   type: BoxedType;
 
-  /** The type this definition DECLARES — its contract, built from the
-   * declaration and the stored value alone and never from an assumption.
-   * A write must read this rather than {@link type}: a type derived from a
-   * fact and then stored would outlive the fact it was proved from.
+  /** The contract derived from the declaration and stored value, independent
+   * of assumptions in force.
    * @internal */
   readonly declaredType: BoxedType;
 

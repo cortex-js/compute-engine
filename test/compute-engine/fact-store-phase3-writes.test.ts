@@ -47,7 +47,7 @@ describe('a stored signature never carries a proof over an assumption', () => {
     expect(ce.assume(ce.parse('p > 3'))).toBe('ok');
 
     // The DIRECT read still sees the proof: that is what an assumption is for.
-    expect(ce.box(['Greater', 'p', 2]).type.toString()).toBe('true');
+    expect(ce.verify(ce.box(['Greater', 'p', 2]))).toBe(true);
     // The STORED signature does not.
     ce.assign('f', ce.box(lambda(['Greater', 'p', 2])));
     expect(storedType(ce, 'f')).toBe('(t: unknown) -> boolean');
@@ -202,7 +202,7 @@ describe('scopes', () => {
     ce.pushScope();
     expect(ce.assume(ce.parse('u > 3'))).toBe('ok');
     // The READ inside the scope still proves the bound...
-    expect(ce.box('u').type.toString()).toBe('real<3<..>');
+    expect(ce.box('u').isGreater(3)).toBe(true);
     // ... and the write inside the scope still does not.
     ce.assign('w', ce.box(lambda(['Greater', 'u', 1])));
     expect(storedType(ce, 'w')).toBe('(t: unknown) -> boolean');
@@ -245,11 +245,11 @@ describe('the fact-blind bracket itself', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     ce.assume(ce.parse('x > 3'));
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(ce.box('x').isGreater(3)).toBe(true);
     ce._withoutFacts(() => {
-      expect(ce.box('x').type.toString()).toBe('real');
+      expect(ce.box('x').isGreater(3)).toBeUndefined();
     });
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(ce.box('x').isGreater(3)).toBe(true);
   });
 
   test('refuses a thunk that returns a promise', () => {

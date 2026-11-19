@@ -563,6 +563,20 @@ export function describe(
   return descriptor;
 }
 
+/** A proof descriptor reads signs from the occurrence's refined type.
+ * Numeric values also supply literal evidence such as parity. */
+export function describeForProof(
+  op: Expression,
+  type: Type
+): OperandDescriptor {
+  if (isNumber(op)) return describe(op);
+  if (isSymbol(op)) {
+    const value = op.value;
+    if (value && isNumber(value)) return describe(value);
+  }
+  return describeType(type);
+}
+
 /**
  * The expression that a structural view of an application or of a function
  * literal was built from (`structureOfExpression`). The key is the view, which

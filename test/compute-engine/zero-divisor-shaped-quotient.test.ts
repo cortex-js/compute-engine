@@ -58,8 +58,7 @@ describe('A DIVISOR THAT MAY BE ZERO', () => {
 describe('A DIVISOR PROVEN NOT TO BE ZERO KEEPS THE FINITE TYPE', () => {
   const ce = new ComputeEngine();
   ce.declare('n', 'integer<1..>');
-  ce.declare('r', 'real');
-  ce.assume(ce.box(['Greater', 'r', 0]));
+  ce.declare('r', 'real<0<..>');
   ce.declare('tup', 'tuple<integer, integer>');
   // An imaginary number is never zero.
   ce.declare('w', 'complex');
@@ -126,11 +125,10 @@ describe('A COLLECTION DIVIDED BY ITSELF', () => {
 
 describe('MORE DIVISORS THAT CANNOT BE ZERO', () => {
   const ce = new ComputeEngine();
-  ce.declare('c', 'complex');
-  ce.assume(ce.box(['NotEqual', 'c', 0]));
+  ce.declare('c', 'complex & !0');
   ce.declare('t', 'tuple<integer, integer>');
   test.each<[MathJsonExpression, string]>([
-    // An assumption `c ≠ 0` gives `c` the type `complex & !0`.
+    // The declared exclusion rules out a zero divisor.
     [['Divide', ['Complex', 1, 2], 'c'], 'complex'],
     // A complex literal other than `0`.
     [['Divide', 't', ['Complex', 1, 2]], 'tuple<complex, complex>'],

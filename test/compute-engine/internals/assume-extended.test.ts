@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../../src/compute-engine';
-import { getFactIndex } from '../../../src/compute-engine/boxed-expression/constraint-subject';
+import { getFactIndex, typeWithFacts } from '../../../src/compute-engine/boxed-expression/constraint-subject';
 import { getInequalityBoundsFromAssumptions } from '../../../src/compute-engine/boxed-expression/inequality-bounds';
 
 import '../../utils'; // For snapshot serializers
@@ -37,7 +37,7 @@ describe('Element(n, Range(1, +oo))', () => {
     expect(ce.expr('n').isInteger).toBe(true);
     // Since §5.8 A2 the Range membership's bound (`n ≥ 1`) refines the
     // type to the proven range, not bare `integer`.
-    expect(ce.expr('n').type.toString()).toBe('integer<1..>');
+    expect(typeWithFacts(ce.expr('n')).toString()).toBe('integer<1..>');
   });
 
   it('stores the lower bound n >= 1', () => {
@@ -89,7 +89,7 @@ describe('Greater(Imaginary(tau), 0)', () => {
     // value the type can name. The type is read on the operand of a use:
     // the requirement of the use is in the environment of its unit.
     expect(
-      ce.expr(['Imaginary', 'tau']).op1.type.toString()
+      typeWithFacts(ce.expr(['Imaginary', 'tau']).op1).toString()
     ).toBe('complex & !0 | infinity');
   });
 
@@ -212,7 +212,7 @@ describe('Less(Abs(q), 1)', () => {
   it('refines q to complex (|q| bounded => finite)', () => {
     // `complex` is the widest FINITE numeric type, so it is what a bounded
     // magnitude implies now that the `finite_number` spelling is retired.
-    expect(ce.expr('q').type.toString()).toBe('complex');
+    expect(typeWithFacts(ce.expr('q')).toString()).toBe('complex');
     expect(ce.expr('q').isExtendedReal).not.toBe(true);
   });
 
@@ -262,7 +262,7 @@ describe('Element(z, SetMinus(ComplexNumbers, Set(i, -i)))', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('refines z to complex', () => {
-    expect(ce.expr('z').type.matches('complex')).toBe(true);
+    expect(typeWithFacts(ce.expr('z')).matches('complex')).toBe(true);
   });
 
   it('stores NotEqual facts for both exclusions', () => {
@@ -292,7 +292,7 @@ describe('Element(z, SetMinus(ComplexNumbers, NonPositiveIntegers))', () => {
   it('returns ok', () => expect(result).toBe('ok'));
 
   it('refines z to complex and stores a NotElement fact', () => {
-    expect(ce.expr('z').type.matches('complex')).toBe(true);
+    expect(typeWithFacts(ce.expr('z')).matches('complex')).toBe(true);
     const m = getFactIndex(ce).membership.get('z');
     expect(m?.notIn).toHaveLength(1);
     expect(m?.notIn[0].symbol).toBe('NonPositiveIntegers');
@@ -352,7 +352,7 @@ describe('Element(x, Interval(...))', () => {
     // open lower bound at 0 is an OPEN endpoint of the range (open-bound
     // ranged types, 2026-08-28), the closed upper bound the closed one.
     // The stored facts below are unchanged.
-    expect(ce.expr('x').type.toString()).toBe('real<0<..10>');
+    expect(typeWithFacts(ce.expr('x')).toString()).toBe('real<0<..10>');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(0)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);
@@ -440,7 +440,7 @@ describe('And(...) assumptions', () => {
       )
     );
     expect(result).toBe('ok');
-    expect(ce.expr('z').type.matches('complex')).toBe(true);
+    expect(typeWithFacts(ce.expr('z')).matches('complex')).toBe(true);
     const facts = getFactIndex(ce).bySubject.get('self:z');
     expect(facts?.notEqual).toHaveLength(1);
     expect(facts?.notEqual[0].isSame(0)).toBe(true);
@@ -608,7 +608,7 @@ describe('regression: bare-symbol inequalities keep historical behavior', () => 
     // stored assumption facts below still carry the exact strict bound.
     // Open-bound ranged types (2026-08-28): the strict bound is kept in
     // the type as an open endpoint.
-    expect(ce.expr('x').type.toString()).toBe('real<4<..>');
+    expect(typeWithFacts(ce.expr('x')).toString()).toBe('real<4<..>');
     const bounds = getInequalityBoundsFromAssumptions(ce, 'x');
     expect(bounds.lower?.isSame(4)).toBe(true);
     expect(bounds.lowerStrict).toBe(true);

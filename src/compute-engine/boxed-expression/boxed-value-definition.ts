@@ -60,7 +60,6 @@ import {
   exclusionsFor,
   getFactIndex,
   isDeclaredTypeOnly,
-  presenceCanChangeFactSubject,
   isValueShielded,
   typeFor,
 } from './constraint-subject.js';
@@ -903,11 +902,8 @@ export class _BoxedValueDefinition
     }
     // A type computation reads the value of a constant that no activation
     // holds, and the value of a variable that holds a function literal
-    // (`storedValue`). The static
-    // type of a variable that holds a formula is the type of the formula.
-    // Only such a write can change a type. A type computation also reads
-    // whether a variable holds a value at all: the assumptions refine the
-    // type of a variable with no value only (`_typeWithFacts`).
+    // (`storedValue`). An inferred variable holding a formula also reads
+    // the static result type of its body.
     let formulaTypeChanged = false;
     if (formulaTypeBefore !== undefined) {
       const after = this.declaredType;
@@ -918,8 +914,7 @@ export class _BoxedValueDefinition
     const typeRead =
       (this._isConstant && !isActivatedDefinition(this)) ||
       (callable && !isActivatedDefinition(this)) ||
-      formulaTypeChanged ||
-      valuePresenceRefinesType(this._engine, this, prev, v);
+      formulaTypeChanged;
     this._engine._noteStateEvent({
       kind: 'value-write',
       ephemeral,
@@ -1130,9 +1125,6 @@ export class _BoxedValueDefinition
    * declaration and the stored value only, never from an assumption, so a
    * type derived from it and stored elsewhere stays true when a fact is
    * retracted (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.2).
-   *
-   * This is the read for the write path, for provenance and for a hover: use
-   * {@link type} for what is known in the current state.
    */
   get declaredType(): BoxedType {
     const t = this._type;
@@ -1404,6 +1396,20 @@ export class _BoxedValueDefinition
       sameDefinitions(previous.freeDefinitions, this._freeSymbolDefinitions(v))
         ? functionResult(previous.type.type)
         : undefined;
+    // Typing the literal can reach this binding before signature derivation
+    // starts. Its type cell still holds the signature from an earlier pass.
+    // Use the same checked recursion hypothesis as the body, or its declared
+    // skeleton on the first pass. Leave the completed signature to the caller
+    // that can read the literal after its type computation returns.
+    if ((v as { _isTypeInFlight?: () => boolean })._isTypeInFlight?.()) {
+      noteReentrantSignatureRead();
+      return hypothesis === undefined
+        ? recorded
+        : new BoxedType(
+            withSignatureResult(recorded.type, hypothesis),
+            this._engine._typeResolver
+          );
+    }
     this._derivingSignature = true;
     this._recursionResult = hypothesis;
     try {
@@ -1560,40 +1566,13 @@ export class _BoxedValueDefinition
     return type;
   }
 
-  /**
-   * The type known in the CURRENT state: the declared type narrowed by
-   * everything the assumptions in force prove about this definition.
-   *
-   * The single site where the two channels meet. A fact contributes only to
-   * the definition its assertion was recorded against, so a name re-declared
-   * in an inner scope keeps its own type and the facts about the enclosing
-   * definition stay with that one. A definition holding a STORED value takes
-   * its type from the value alone: an assumption about such a symbol is
-   * CHECKED against the value when it is made and never retypes it.
-   *
-   * A definition marked by `withDeclaredTypeOnly` also takes the declared
-   * type: the facts are not merged. A compilation marks a `vars`-mapped input
-   * (`withVarsValuesHidden` in `compilation/vars-inputs.ts`) so that it reads
-   * as the input of its declared type; without this, `assume(a = 4)` would
-   * narrow `a` to an integer and a compiled `⌊a⌋` would drop the floor. The
-   * value shield of `assume()` (`withShieldedValues`) does not have this
-   * effect: it also hides a value put in force by an assumption, and the
-   * facts about that symbol must still apply while it records a new fact.
-   *
-   * The operands are intersected as one type NODE and reduced once — the meet
-   * (`narrow()`) would answer `never` for `real & !2`, which is exactly the
-   * shape a disequality fact contributes.
-   */
   get type(): BoxedType {
-    return this._typeWithFacts(this.declaredType, true);
+    return this.declaredType;
   }
 
-  /** The type `declared` with the facts of the current context merged in,
-   * as {@link type} merges them into the declared type. `memoize` is false
-   * when `declared` is not the declared type of this definition: the type
-   * that a binding unit reads for an occurrence (`BoxedSymbol.type`). The
-   * memo is keyed on this definition alone, so such a read neither reads nor
-   * writes it. */
+  /** Refine a static type for a proof using the facts about this definition.
+   * Only its declared type uses the definition's memo. A binding unit can
+   * supply a narrower base for an individual occurrence. */
   _typeWithFacts(declared: BoxedType, memoize: boolean): BoxedType {
     const ce = this._engine;
     if (contextAssumptions(ce).size === 0) return declared;
@@ -1648,7 +1627,7 @@ export class _BoxedValueDefinition
     return merged;
   }
 
-  /** Memo for {@link type}'s merge, keyed on the fact index it was computed
+  /** Memo for the fact-refined reading, keyed on the fact index it was computed
    * from and on this record's own write counter. */
   private _effectiveType:
     { index: FactIndex; writeVersion: number; type: BoxedType } | undefined =
@@ -2331,30 +2310,6 @@ function callsItselfDirectly(v: Expression, name: string): boolean {
   const visit = (e: Expression): boolean =>
     (isFunction(e) && (e.operator === name || e.ops.some(visit))) || false;
   return visit(v.ops[0]);
-}
-
-/** True when a write from `prev` to `next` gives the variable `def` a value
- * or takes its value away while a fact refines its type: the facts refine
- * the type of a variable with no value only (`_typeWithFacts`), so its type
- * changes. */
-export function valuePresenceRefinesType(
-  ce: ComputeEngine,
-  def: BoxedValueDefinition,
-  prev: Expression | null | undefined,
-  next: Expression | null | undefined
-): boolean {
-  // `null` is a value computed again from the declaration when it is read.
-  if ((prev === undefined) === (next === undefined)) return false;
-  if (contextAssumptions(ce).size === 0) return false;
-  if (def.isConstant) return false;
-  // The fact `x > y` refines the one of `x` and `y` that has no value: a
-  // value given to `y`, also a block local or a parameter, can change the
-  // type of `x`.
-  if (presenceCanChangeFactSubject(ce, def)) return true;
-  if (isActivatedDefinition(def) || isDeclaredTypeOnly(def)) return false;
-  // The contributions that `_typeWithFacts` merges, exclusions included.
-  const index = getFactIndex(ce);
-  return typeFor(index, def).length > 0 || exclusionsFor(index, def).length > 0;
 }
 
 /** True when `x` is, or holds as an operand, a `Function` literal. */

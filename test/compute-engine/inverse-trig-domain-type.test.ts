@@ -127,13 +127,11 @@ const SYMBOLIC_CASES: [string, string, string, string][] = [
 ];
 
 /** A fresh engine with `u` a bare real, `w ≥ 2` and `0 < v < 1`. */
-function engineWithAssumptions(): ComputeEngine {
+function engineWithDeclaredRanges(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('u', 'real');
-  ce.declare('w', 'real');
-  ce.assume(ce.parse('w \\ge 2'));
-  ce.declare('v', 'real');
-  ce.assume(ce.parse('0 \\lt v \\lt 1'));
+  ce.declare('w', 'real<2..>');
+  ce.declare('v', 'real<0<..<1>');
   return ce;
 }
 
@@ -184,10 +182,10 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     });
   });
 
-  describe('symbolic arguments, refined by assumptions', () => {
+  describe('symbolic arguments, with declared ranges', () => {
     for (const [head, bare, geTwo, unitOpen] of SYMBOLIC_CASES) {
       it(`${head}: bare real → ${bare}, w ≥ 2 → ${geTwo}, 0 < v < 1 → ${unitOpen}`, () => {
-        const ce = engineWithAssumptions();
+        const ce = engineWithDeclaredRanges();
         expect(typeOf(ce, head, 'u')).toBe(bare);
         expect(typeOf(ce, head, 'w')).toBe(geTwo);
         expect(typeOf(ce, head, 'v')).toBe(unitOpen);
@@ -195,7 +193,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     }
 
     it('no bounded head claims `real` for a bare real symbol', () => {
-      const ce = engineWithAssumptions();
+      const ce = engineWithDeclaredRanges();
       for (const head of BOUNDED_HEADS)
         expect([head, typeOf(ce, head, 'u')]).not.toEqual([
           head,
@@ -204,7 +202,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
     });
 
     it('`w ≥ 2` proves Arcosh in-domain and Arcsin out-of-domain', () => {
-      const ce = engineWithAssumptions();
+      const ce = engineWithDeclaredRanges();
       expect(ce.box('w').isGreaterEqual(1)).toBe(true);
       expect(typeOf(ce, 'Arcosh', 'w')).toBe('real');
       expect(typeOf(ce, 'Arcsin', 'w')).toBe('complex');
@@ -215,8 +213,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
 
     it('a provably non-zero argument drops the pole arm (Arcsec/Arccsc)', () => {
       const ce = new ComputeEngine();
-      ce.declare('p', 'real');
-      ce.assume(ce.parse('p \\gt 0'));
+      ce.declare('p', 'real<0<..>');
       // Not provably in `|x| ≥ 1` nor in `(0, 1)`, but provably not 0, so the
       // NaN arm is gone: the value is finite, real or complex.
       expect(typeOf(ce, 'Arcsec', 'p')).toBe('complex');
@@ -227,7 +224,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
   describe('real-closed heads are UNCHANGED', () => {
     for (const head of ['Arsinh', 'Arctan', 'Arccot'] as const) {
       it(`${head} stays real everywhere`, () => {
-        const ce = engineWithAssumptions();
+        const ce = engineWithDeclaredRanges();
         for (const arg of [-2, -1, -0.5, 0, 0.5, 1, 2])
           expect(typeOf(ce, head, arg)).toBe('real');
         for (const sym of ['u', 'w', 'v'])
@@ -237,7 +234,7 @@ describe('INVERSE TRIG: bounded real domain — result type', () => {
 
     it('Arcsch keeps the generic-point convention', () => {
       // Real-valued on every non-zero real; only a PROVABLE 0 widens.
-      const ce = engineWithAssumptions();
+      const ce = engineWithDeclaredRanges();
       for (const arg of [-2, -1, -0.5, 0.5, 1, 2])
         expect(typeOf(ce, 'Arcsch', arg)).toBe('real');
       expect(typeOf(ce, 'Arcsch', 0)).toBe('number');

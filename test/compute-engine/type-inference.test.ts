@@ -164,8 +164,7 @@ describe('TYPE INFERENCE FOR LOG FUNCTIONS', () => {
 
   it('Ln of provably-positive real → real', () => {
     const localCe = new ComputeEngine();
-    localCe.declare('p', { type: 'real' });
-    localCe.assume(localCe.parse('p > 0'));
+    localCe.declare('p', { type: 'real<0<..>' });
     const expr = localCe.parse('\\ln(p)');
     expect(expr.type.toString()).toBe('real');
   });

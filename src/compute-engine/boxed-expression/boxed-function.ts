@@ -1,3 +1,4 @@
+import { typeWithFacts } from './constraint-subject.js';
 import { programSourceOrder } from '../statement-position.js';
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
@@ -111,6 +112,7 @@ import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import {
   describe as describeOperand,
+  describeForProof,
   describeType,
   type DescriptorMemo,
   guardedTypeHandlerCall,
@@ -482,7 +484,6 @@ import {
   cachedCell,
   cachedValue,
   CachedValue,
-  type CachedCell,
   forgetSettledValue,
 } from './cache.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
@@ -1756,11 +1757,7 @@ export class BoxedFunction
    * it did last time and `cachedValue` would hit — the recomputation cannot
    * change the answer. `-1` is "never computed" (generations start at 0).
    *
-   * The COMPOSITE generation (`ce._cacheGeneration()`), so that the fast path
-   * closes when the engine starts or stops hiding its assumptions. One field
-   * for both cells of `_type`: a read that alternates between the two sides
-   * simply misses the fast path and goes to `cachedValue`, which serves the
-   * right cell. */
+   * Assumption visibility does not select a separate type cache cell. */
   private _typeGeneration = -1;
   /** The world version (`engine._worldVersion`) under which the
    * constant-keyed type entry of a literal list tree was stored — see the
@@ -3923,21 +3920,9 @@ export class BoxedFunction
   }
 
   get isInfinity(): boolean | undefined {
-    if (!this.isNumber) return false;
-    // Type fallback: the static type can prove non-finiteness where no
-    // structural analysis can — e.g. `Ln(0)` types `+oo | -oo`.
-    // `infinity` is any value of infinite magnitude, which is exactly what
-    // `isInfinity` asks, and it covers the signed pair `+oo | -oo`
-    // (`+oo`, `-oo`) as well as the unsigned `~oo`. A type that has no value
-    // in common with `infinity` answers `false`: that is `nan` (NaN is not an
-    // infinity), and, now that the bare name `real` denotes the FINITE reals,
-    // every finite numeric tier as well. The type is already computed and
-    // cached at this point (consulted by `isNumber` on entry).
-    const t = this.type;
-    if (!t.isUnknown) {
-      return t.facts.infinityMembership;
-    }
-    return undefined; // We don't know until we evaluate
+    const type = typeWithFacts(this);
+    if (!type.facts.numberMembership) return false;
+    return type.facts.infinityMembership;
   }
 
   // Not +- Infinity, not NaN
@@ -4063,7 +4048,7 @@ export class BoxedFunction
     }
 
     // A type-provable non-finite expression (e.g. `Ln(0)`) never reaches here:
-    // `isInfinity` consults the static type and the early-return above already
+    // `isInfinity` consults the proof type and the early-return above already
     // answered `false`. See `get isInfinity` for that type-consult site.
     if (this.isNaN === undefined || this.isInfinity === undefined)
       return undefined;
@@ -4561,6 +4546,35 @@ export class BoxedFunction
     return isValueDef(this._def) ? this._def.value : undefined;
   }
 
+  /** Derive a refinement from these operands in the current proof. Scoped
+   * bodies have their own lexical assumptions and keep their static type. */
+  _typeForProof(read: (operand: Expression) => BoxedType): BoxedType {
+    const base = this.type;
+    const def = this.operatorDefinition;
+    if (!def?.type || def.scoped || !this.isValid || this._numericStore)
+      return base;
+    // describeForProof adds two kinds of evidence: a refined operand type
+    // or a numeric value held by a symbol (including an assumed equality).
+    // An unrelated assumption supplies neither.
+    const types = this.ops.map(read);
+    if (
+      !this.ops.some(
+        (op, i) =>
+          types[i].type !== op.type.type || (isSymbol(op) && isNumber(op.value))
+      )
+    )
+      return base;
+    const operands = this.ops.map((op, i) =>
+      describeForProof(op, types[i].type)
+    );
+    const result = deriveApplicationType(this.engine, this.operator, operands, {
+      operator: def,
+    });
+    if (result === undefined) return base;
+    const refined = this.engine.type(result);
+    return refined.matches(base) ? refined : base;
+  }
+
   // The membership predicates answer three-valued from the claimed type
   // (`staticMembership`): `true` only when every value of the type is a
   // member, `false` only when none is, `undefined` when the type merely
@@ -4568,28 +4582,30 @@ export class BoxedFunction
   // value is not an integer, so a `false` there would be wrong for an
   // even `k`. A `false` means "certainly not".
   get isNumber(): boolean | undefined {
-    return this.type.facts.numberMembership;
+    return typeWithFacts(this).facts.numberMembership;
   }
 
   get isInteger(): boolean | undefined {
     // A kind value: see `isFinite`.
     if (isKindValue(this)) return undefined;
-    if (this.type.isUnknown) return undefined;
-    return staticMembership(this.type.type, 'integer');
+    const t = typeWithFacts(this);
+    if (t.isUnknown) return undefined;
+    return staticMembership(t.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
     // A kind value: see `isFinite`.
     if (isKindValue(this)) return undefined;
-    if (this.type.isUnknown) return undefined;
+    const t = typeWithFacts(this);
+    if (t.isUnknown) return undefined;
     // Every integer is a rational: `integer` is below `rational`.
-    return staticMembership(this.type.type, 'rational');
+    return staticMembership(t.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {
     // A kind value: see `isFinite`.
     if (isKindValue(this)) return undefined;
-    const t = this.type;
+    const t = typeWithFacts(this);
     if (t.isUnknown) return undefined;
     // Rationals and integers are real. `+oo | -oo` is admitted
     // explicitly: the bare name `real` denotes the FINITE reals, and this
@@ -4616,26 +4632,21 @@ export class BoxedFunction
     return true;
   }
 
-  /** True while a computation of the type of this expression runs, with the
-   * assumptions in force or hidden. A read of `type` made then is a
+  /** True while a computation of the static type of this expression runs.
+   * A read of `type` made then is a
    * re-entrant read, which a recursive function makes when its body calls
    * it: the read gets a provisional answer (`cachedValue()`, `cache.ts`).
    * @internal */
   _isTypeInFlight(): boolean {
-    return (
-      (this._type.inFlight ?? 0) > 0 ||
-      (this._type.suppressed?.inFlight ?? 0) > 0
-    );
+    return (this._type.inFlight ?? 0) > 0;
   }
 
   /** Whether the `type` getter serves the value of `typeCell`, the cell of
    * the type cache for `generation`, with no computation: the cache is on,
    * the cell was consulted and filled at this generation, and the objects
    * that the cached type read did not change since. */
-  private _typeCellServes(
-    typeCell: CachedCell<BoxedType | undefined>,
-    generation: number
-  ): boolean {
+  private _typeCellServes(generation: number): boolean {
+    const typeCell = this._type;
     return (
       !cacheOff('type') &&
       this._typeGeneration === generation &&
@@ -4679,13 +4690,15 @@ export class BoxedFunction
     if (
       !this.isValid ||
       this._isTypeInFlight() ||
-      this._typeCellServes(cachedCell(this._type, generation), generation) ||
+      this._typeCellServes(generation) ||
       this._reboxedForCallee() !== undefined ||
       this._reboxedForForwardCallee() !== undefined
     )
       return signatureEffects(this.type.type);
     const effects = canonicalEffectSet(
-      withStaticTypingView(this.engine, () => functionLiteralArrowEffects(this))
+      withStaticTypingView(this.engine, () =>
+        this.engine._withoutFacts(() => functionLiteralArrowEffects(this))
+      )
     );
     if (EFFECTS_PARANOID) {
       const fromType = signatureEffects(this.type.type);
@@ -4702,7 +4715,7 @@ export class BoxedFunction
   /** The type of the value of the function */
   get type(): BoxedType {
     // Keyed on `_typeCacheGeneration()`, which only a declaration, a
-    // retype, an assumption or the revert of one moves (`typeVersion` in
+    // retype or another static binding change moves (`typeVersion` in
     // `engine-configuration-lifecycle.ts`): the declarations of a call of a
     // function literal and the pop of a scope do not, so the nodes of a
     // function body are not typed again at each call. That is sound because
@@ -4721,19 +4734,13 @@ export class BoxedFunction
     // `isConstant` subtree walk — is necessarily the same one now. See
     // `_typeGeneration`.
     //
-    // The generation is the COMPOSITE one, so that the assumption-bearing
-    // answer and the answer derived with the assumptions hidden never stand
-    // in for each other here — this path decides for itself and would
-    // otherwise serve the live type inside a suppressed window. The cell is
-    // selected the same way `cachedValue` selects it.
-    //
     // This path bypasses `cachedValue`, so it repeats that helper's two
     // object-dependency duties itself: an entry whose recorded
     // `(object, version)` pairs no longer hold must NOT be served (a field
     // store advances no engine generation, so `_typeGeneration` alone cannot
     // see it), and a served entry must fold its dependencies into any
     // enclosing collector, since a hit performs no field reads of its own.
-    const typeCell = cachedCell(this._type, generation);
+    const typeCell = this._type;
     // `typeCell.generation` is checked as well as `_typeGeneration`: when
     // `cachedValue` declines a commit (a provisional read happened), it puts
     // the cell's previous key back and keeps the previous value, while
@@ -4742,7 +4749,7 @@ export class BoxedFunction
     // the previous value from here — one computed under another key, which
     // since the value-shield key (`_cacheGeneration()`) can be the
     // value-blind answer of a shield, or the valued answer outside one.
-    if (this._typeCellServes(typeCell, generation)) {
+    if (this._typeCellServes(generation)) {
       mergeObjectDeps(typeCell.objectDeps);
       if (CACHE_STATS) recordCache('type', 'hitFastPath');
       // A type that depends on the computations in progress makes the type
@@ -4795,13 +4802,10 @@ export class BoxedFunction
     if (this._isLiteralListTree()) {
       const epoch = this.engine._worldVersion;
       if (this._typeEpoch !== epoch) {
-        // A new world: discard the constant entry (and the assumptions-hidden
-        // cell, which a symbol-free node never needs) so the read below
-        // recomputes and stores under this epoch.
+        // Configuration changes can affect the type of numeric literals.
         this._type.value = null;
         this._type.generation = -1;
         this._type.objectDeps = undefined;
-        this._type.suppressed = undefined;
         this._typeEpoch = epoch;
       }
       key = undefined;
@@ -4826,7 +4830,9 @@ export class BoxedFunction
     let stackDependent = false;
     const compute = (): BoxedType => {
       computed = true;
-      return withStaticTypingView(this.engine, computeType);
+      return withStaticTypingView(this.engine, () =>
+        this.engine._withoutFacts(computeType)
+      );
     };
     const computeType = (): BoxedType => {
       // The `List` type handler receives operand DESCRIPTORS, which the
@@ -4850,7 +4856,7 @@ export class BoxedFunction
     const fallbackOnEntry = this._typeStackDependent
       ? generation
       : this.engine._typeCacheFallbackGeneration();
-    if (cacheOff('type')) forgetSettledValue(cachedCell(this._type, key));
+    if (cacheOff('type')) forgetSettledValue(this._type);
     // Counted around `cachedValue()`, which takes back the answers of the
     // recursion that ends at this cell (`forgetStackDependentAnswers()`).
     const answersBefore = stackDependentAnswerCount();
@@ -4881,7 +4887,7 @@ export class BoxedFunction
     let observed = generation;
     stackDependent = computed && stackDependentAnswerCount() !== answersBefore;
     if (computed && key !== undefined) {
-      const cell = cachedCell(this._type, key);
+      const cell = this._type;
       // The entry was committed under the key it was computed with; move it
       // to the key of its kind (the fallback key is computed before the
       // keys can move, as `generation` was).
@@ -4896,9 +4902,7 @@ export class BoxedFunction
     } else if (this._typeStackDependent) noteStackDependentAnswer();
     this._typeGeneration = observed;
     if (TYPE_PARANOID) {
-      if (computed)
-        this._typeParanoidStamp =
-          this.engine._anyVersion * 2 + (this.engine._factsHidden() ? 1 : 0);
+      if (computed) this._typeParanoidStamp = this.engine._anyVersion;
       // A read of the cell while its computation is in progress is served
       // the previous value provisionally: it is not checked.
       else if (
@@ -4915,8 +4919,7 @@ export class BoxedFunction
    * `_typeCacheGeneration()` (see `type`). */
   private _typeStackDependent = false;
 
-  /** `CE_TYPE_PARANOID`: the `any` version (doubled, with the facts bit)
-   * when the cached type was computed. */
+  /** The `any` version when the cached type was computed. */
   private _typeParanoidStamp: number | undefined = undefined;
 
   /** `CE_TYPE_PARANOID`: compare a served type with a new computation.
@@ -4930,15 +4933,13 @@ export class BoxedFunction
     // provisional answer by design, and a computation here would change the
     // derivation.
     if (this.engine._recursionKnots.size > 0) return;
-    if (
-      this._typeParanoidStamp ===
-      this.engine._anyVersion * 2 + (this.engine._factsHidden() ? 1 : 0)
-    )
-      return;
+    if (this._typeParanoidStamp === this.engine._anyVersion) return;
     _typeParanoidActive = true;
     try {
       const before = stackDependentAnswerCount();
-      const derived = withStaticTypingView(this.engine, () => type(this));
+      const derived = withStaticTypingView(this.engine, () =>
+        this.engine._withoutFacts(() => type(this))
+      );
       // A computation that read an answer that depends on the computations
       // in progress is not a reference: it can differ from the cached type
       // for that reason alone.

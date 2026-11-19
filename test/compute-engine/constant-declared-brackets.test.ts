@@ -53,8 +53,8 @@ describe('CONSTANT VALUE BRACKETS', () => {
   });
 
   it('the sign reaches type-channel consumers', () => {
-    // `√φ` and `ln(π)` are real off the declared brackets alone.
-    expect(ce.box(['Sqrt', 'GoldenRatio']).type.toString()).toBe('real');
+    // The declared bracket for φ puts its square root strictly above zero.
+    expect(ce.box(['Sqrt', 'GoldenRatio']).type.toString()).toBe('real<0<..>');
     expect(ce.box(['Ln', 'Pi']).type.toString()).toBe('real');
   });
 

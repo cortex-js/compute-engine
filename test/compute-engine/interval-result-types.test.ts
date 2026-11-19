@@ -25,10 +25,10 @@ import { reduceType } from '../../src/common/type/reduce';
 const ce = new ComputeEngine();
 
 describe('INTERVAL RESULT TYPES — the headline claims', () => {
-  it('a sum of assume-bounded symbols carries the interval sum', () => {
+  it('a sum of symbols declared with bounds carries the interval sum', () => {
     const e = new ComputeEngine();
-    e.assume(e.box(['Greater', 'x', 2]));
-    e.assume(e.box(['Greater', 'y', 3]));
+    e.declare('x', 'real<2<..>');
+    e.declare('y', 'real<3<..>');
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<5<..>');
     expect(e.box(['Multiply', 'x', 'y']).type.toString()).toBe(
       'real<6<..>'
@@ -40,8 +40,8 @@ describe('INTERVAL RESULT TYPES — the headline claims', () => {
     // (refuted by x = y = −0.9) — the reason joins strip. The interval
     // fold claims the SOUND bound −2 instead.
     const e = new ComputeEngine();
-    e.assume(e.box(['Greater', 'x', -1]));
-    e.assume(e.box(['Greater', 'y', -1]));
+    e.declare('x', 'real<-1<..>');
+    e.declare('y', 'real<-1<..>');
     expect(e.box(['Add', 'x', 'y']).type.toString()).toBe('real<-2<..>');
   });
 

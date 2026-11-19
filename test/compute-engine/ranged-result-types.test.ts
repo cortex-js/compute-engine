@@ -56,12 +56,12 @@ describe('RANGED RESULTS — the enumerated heads', () => {
 });
 
 describe('RANGED RESULTS — type-channel consumers', () => {
-  it('√(x²) and √|x| are real: the branch choice reads the range', () => {
+  it('√(x²) and √|x| admit zero, while √(e^x) is strictly positive', () => {
     // Before item 4 both typed `complex`: `x²`'s sgn handler cannot
     // answer for a valueless `x`, and nothing else carried the sign.
     expect(ce.parse('\\sqrt{x^2}').type.toString()).toBe('real');
     expect(ce.parse('\\sqrt{|x|}').type.toString()).toBe('real');
-    expect(ce.parse('\\sqrt{e^x}').type.toString()).toBe('real');
+    expect(ce.parse('\\sqrt{e^x}').type.toString()).toBe('real<0<..>');
   });
 
   it('ln(2^x) is real: the log domain reads the positivity', () => {

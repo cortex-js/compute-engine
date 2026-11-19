@@ -455,10 +455,7 @@ export class EngineConfigurationLifecycle {
    * (`BoxedFunction.type`). It advances with the `any` version, except for
    * the write of a value that no type computation reads (a `value-write`
    * without `typeRead`), the declaration of the parameters of a call of a
-   * function literal in the new scope of the call (the `activation` flag of
-   * the `declare` event), and the pop of a scope, unless the pop reverts an
-   * assumption (`assumptionsDirty`). So during a run the type version moves
-   * only at a declaration, a retype, an assumption or the revert of one.
+   * function literal in its call frame, scope pops, and assumption changes.
    *
    * A static type does not depend on a value: in a type computation a
    * definition that is not a constant has no value, except a variable that
@@ -706,7 +703,8 @@ export class EngineConfigurationLifecycle {
       m.any &&
       !(e.kind === 'declare' && e.activation) &&
       !(e.kind === 'value-write' && !e.typeRead) &&
-      !(e.kind === 'scope-pop' && !e.assumptionsDirty)
+      e.kind !== 'assumption' &&
+      e.kind !== 'scope-pop'
     )
       this._typeVersion += 1;
     if (m.semantic) this._semanticVersion += 1;

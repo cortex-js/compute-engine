@@ -366,7 +366,8 @@ describe('LATTICE PHASE 1: assignment promotion', () => {
   it('applies the same rungs to an equality assumption', () => {
     const e = new ComputeEngine();
     expect(e.assume(e.parse('x = \\infty'))).toBe('ok');
-    expect(e.box('x').type.toString()).toBe('infinity');
+    expect(e.box('x').isInfinity).toBe(true);
+    expect(e.box('x').type.toString()).toBe('unknown');
   });
 });
 

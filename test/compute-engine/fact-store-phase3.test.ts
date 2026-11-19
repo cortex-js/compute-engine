@@ -181,18 +181,15 @@ describe('the two cells of a cache entry', () => {
 });
 
 describe('a read on each side of a window', () => {
-  test('a function expression answers fact-bearing, fact-free, fact-bearing', () => {
+  test('a function expression has the same static type across the window', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     expect(ce.assume(ce.parse('x > 3'))).toBe('ok');
     const e = ce.box(['Add', 'x', 1]);
 
-    expect(e.type.toString()).toBe('real<4<..>');
-    // The same node, with the assumptions hidden: the live answer above must
-    // not be served here.
+    expect(e.type.toString()).toBe('real');
     expect(withoutFacts(ce, () => e.type.toString())).toBe('real');
-    // And the fact-free answer must not outlive the window.
-    expect(e.type.toString()).toBe('real<4<..>');
+    expect(e.type.toString()).toBe('real');
   });
 
   test('alternating reads keep answering correctly', () => {
@@ -202,7 +199,7 @@ describe('a read on each side of a window', () => {
     const e = ce.box(['Add', 'x', 1]);
 
     for (let i = 0; i < 4; i++) {
-      expect(e.type.toString()).toBe('real<4<..>');
+      expect(e.type.toString()).toBe('real');
       expect(withoutFacts(ce, () => e.type.toString())).toBe('real');
     }
   });
@@ -211,23 +208,21 @@ describe('a read on each side of a window', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     expect(ce.assume(ce.parse('x > 3'))).toBe('ok');
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(ce.box('x').type.toString()).toBe('real');
     expect(withoutFacts(ce, () => ce.box('x').type.toString())).toBe('real');
-    expect(ce.box('x').type.toString()).toBe('real<3<..>');
+    expect(ce.box('x').type.toString()).toBe('real');
   });
 });
 
-describe('a dictionary literal heals when a fact is retracted', () => {
-  test('the synthesized record type follows the assumptions', () => {
+describe('a dictionary literal keeps its static field types', () => {
+  test('forgetting a fact preserves the synthesized record type', () => {
     const ce = new ComputeEngine();
     ce.declare('q', 'real');
     expect(ce.assume(ce.parse('q > 3'))).toBe('ok');
 
     const d = ce.box({ dict: { a: ce.symbol('q') } });
-    expect(d.type.toString()).toBe('record{a: real<3<..>}');
+    expect(d.type.toString()).toBe('record{a: real}');
 
-    // The memo had no key at all before, so this answer used to stand for the
-    // life of the literal.
     ce.forget('q');
     expect(d.type.toString()).toBe('record{a: real}');
   });
@@ -238,9 +233,9 @@ describe('a dictionary literal heals when a fact is retracted', () => {
     expect(ce.assume(ce.parse('q > 3'))).toBe('ok');
 
     const d = ce.box({ dict: { a: ce.symbol('q') } });
-    expect(d.type.toString()).toBe('record{a: real<3<..>}');
+    expect(d.type.toString()).toBe('record{a: real}');
     expect(withoutFacts(ce, () => d.type.toString())).toBe('record{a: real}');
-    expect(d.type.toString()).toBe('record{a: real<3<..>}');
+    expect(d.type.toString()).toBe('record{a: real}');
   });
 });
 

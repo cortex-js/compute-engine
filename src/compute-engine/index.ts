@@ -1318,8 +1318,7 @@ export class ComputeEngine implements IComputeEngine {
   private readonly _staticViewKeys = new Map<number, number>();
 
   /** `_cacheGeneration()` outside the static view of a type computation. */
-  private _baseCacheGeneration(): number {
-    const facts = this._factsHidden() ? 1 : 0;
+  private _baseCacheGeneration(facts = this._factsHidden() ? 1 : 0): number {
     const shields = this._valueShieldKeys;
     if (shields.length === 0) return this._anyVersion * 2 + facts;
     const top = shields[shields.length - 1];
@@ -1340,12 +1339,9 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._typeCacheGeneration()`.
    * @internal */
   _typeCacheGeneration(): number {
-    if (this._valueShieldKeys.length > 0) return this._baseCacheGeneration();
-    const facts = this._factsHidden() ? 1 : 0;
-    // The key is the type version, times four: a key of
-    // `_typeCacheFallbackGeneration()` is two more. A type does not depend
-    // on the scope of its reader, so a call frame has no key of its own.
-    return this._configurationLifecycle.typeVersion * 4 + facts;
+    if (this._valueShieldKeys.length > 0) return this._baseCacheGeneration(0);
+    // Even keys select the ordinary cache cell. Reserve bit 1 for fallback.
+    return this._configurationLifecycle.typeVersion * 4;
   }
 
   /** See `IComputeEngine._typeCacheFallbackGeneration()`.
@@ -1357,12 +1353,8 @@ export class ComputeEngine implements IComputeEngine {
     // `staticParentOf()`) and skips the parameter activations: a type
     // computed inside an application is the one computed outside it, so the
     // view has no key of its own here.
-    const generation = this._baseCacheGeneration();
-    // A minted key (negative) is unique. A key of the `any` axis is moved
-    // out of the values of `_typeCacheGeneration()`: four times the axis,
-    // plus two, plus the facts bit.
-    if (generation < 0) return generation;
-    return Math.floor(generation / 2) * 4 + 2 + (generation & 1);
+    if (this._valueShieldKeys.length > 0) return this._baseCacheGeneration(0);
+    return this._anyVersion * 4 + 2;
   }
 
   /** The value shields on the stack, innermost last: the key in force inside

@@ -1,3 +1,4 @@
+import { typeWithFacts } from './constraint-subject.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 
 import {
@@ -188,7 +189,7 @@ export const CONDITIONS = {
   // A `broadcastable<boolean>` expression (a comparison whose operand may be
   // a collection or a scalar) may be a boolean, so it matches too
   // (`isBooleanOrBroadcastableBooleanType`).
-  boolean: (x: Expression) => isBooleanOrBroadcastableBooleanType(x.type.type),
+  boolean: (x: Expression) => isBooleanOrBroadcastableBooleanType(typeWithFacts(x).type),
   string: (x: Expression) => isString(x),
   number: (x: Expression) => isNumber(x),
   symbol: (x: Expression) => isSymbol(x),
@@ -211,9 +212,9 @@ export const CONDITIONS = {
   notreal: (x: Expression) => x.isExtendedReal === false,
 
   // number with a non-zero imaginary part:
-  complex: (x: Expression) => x.type.matches('complex'),
+  complex: (x: Expression) => typeWithFacts(x).matches('complex'),
   // number with a zero real part and non-zero imaginary part:
-  imaginary: (x: Expression) => x.type.matches('imaginary'),
+  imaginary: (x: Expression) => typeWithFacts(x).matches('imaginary'),
 
   positive: (x: Expression) => x.isPositive,
   negative: (x: Expression) => x.isNegative,

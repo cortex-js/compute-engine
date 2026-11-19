@@ -267,10 +267,11 @@ describe('BINDING UNITS: CACHES', () => {
     ce.assume(ce.parse('x > 0'));
     const a = ce.box(['Tuple', 'x']);
     const before = a.op1.type.toString();
-    expect(before).toBe('real<0<..>');
-    // `Divisors` requires an integer: the fact `x > 0` is merged with it.
+    expect(before).toBe('unknown');
+    // `Divisors` requires an integer: its use adds a requirement to the unit.
     ce.function('Divisors', [a.op1]);
-    expect(a.op1.type.toString()).toBe('integer<1..>');
+    expect(a.op1.type.toString()).toBe('integer');
+    expect(a.op1.isPositive).toBe(true);
     // The definition is not narrowed by the requirement.
     expect(ce.box('x').type.toString()).toBe(before);
   });

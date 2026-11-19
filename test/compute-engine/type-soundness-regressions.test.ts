@@ -1,3 +1,4 @@
+import { typeWithFacts } from '../../src/compute-engine/boxed-expression/constraint-subject';
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
 import { deriveApplicationType } from '../../src/compute-engine/boxed-expression/derive-application-type';
@@ -49,7 +50,7 @@ describe('SYM P0-16 — assume(x ∈ ℤ) narrows via the meet, not `!isSubtype`
     const r = ce.assume(
       ce.function('Element', [ce.symbol('q'), ce.symbol('Integers')])
     );
-    return [r, ce.symbol('q').type.toString()];
+    return [r, typeWithFacts(ce.symbol('q')).toString()];
   };
 
   it('number ∈ ℤ → ok, narrowed to integer', () => {
@@ -108,7 +109,7 @@ describe('Power over a float literal claims the tier of its float value', () => 
     ['2.0^{-2}', 'real<0.25..0.25>', 0.25],
     ['(\\frac12)^{3.0}', 'real<0.125..0.125>', 0.125],
     ['(-8)^{1/3}', 'real', -2],
-    ['\\sqrt{4.0}', 'real', { num: '2.0' }],
+    ['\\sqrt{4.0}', 'real<0<..>', { num: '2.0' }],
   ])('%s', (latex, type, value) => {
     const e = ce.parse(latex);
     const v = e.evaluate();

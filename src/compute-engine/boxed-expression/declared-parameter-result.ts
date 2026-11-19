@@ -611,7 +611,7 @@ function callIsInComputation(
  * the signature of `G` derived inside the derivation of `F` read `F` as
  * `-> unknown`, was memoized, and stayed `-> unknown` after `F` settled.
  */
-export function noteReentrantSignatureRead(owner: object): void {
+export function noteReentrantSignatureRead(owner?: object): void {
   failClosedCounts.reentrantSignature += 1;
   // A type computed from a provisional signature is not kept under the type
   // version, which a call does not move: it depends on the derivation in
@@ -619,7 +619,9 @@ export function noteReentrantSignatureRead(owner: object): void {
   noteStackDependentAnswer();
   let i = derivationStack.length - 1;
   while (i >= 0 && derivationStack[i].owner !== owner) i -= 1;
-  if (i < 0) return;
+  if (owner !== undefined && i < 0) return;
+  // A read from a literal whose type was already in flight has no enclosing
+  // signature owner. Conservatively taint all active signature derivations.
   for (let j = i + 1; j < derivationStack.length; j++)
     derivationStack[j].tainted = true;
 }

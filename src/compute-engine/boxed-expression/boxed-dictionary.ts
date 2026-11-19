@@ -96,14 +96,7 @@ export class BoxedDictionary
   private readonly _keyValues: Record<string, Expression> = Object.create(null);
   private _digest: string | undefined;
   private _isValid: boolean | undefined;
-  /** Memo for {@link type}, keyed on the composite cache generation
-   * (`ce._cacheGeneration()`). A cell's type can be narrowed by an
-   * assumption about a symbol it mentions — `{a: q}` with `q` assumed
-   * greater than 3 types `record{a: real<3<..>}` — and that is a FACT about
-   * the current state, not a property of the literal, so the entry must
-   * expire when `assume()` or `forget()` moves the engine generation. It was
-   * unversioned before, which left the narrowed answer standing after the
-   * assumption was retracted. */
+  /** A field can contain a call whose result type is still being derived. */
   private _type: CachedValue<BoxedType> = { value: null, generation: -1 };
   /** Set when the input was not a well-formed dictionary. Boxing checks this
    * and returns the error INSTEAD of the half-built dictionary, so a caller
@@ -390,7 +383,7 @@ export class BoxedDictionary
   get type(): BoxedType {
     return cachedValue(
       this._type,
-      this.engine._cacheGeneration(),
+      this.engine._typeCacheFallbackGeneration(),
       () => this._computeType(),
       undefined,
       this.engine

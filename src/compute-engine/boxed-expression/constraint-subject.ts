@@ -1,4 +1,5 @@
 import type {
+  BoxedDefinition,
   BoxedValueDefinition,
   Expression,
   ExpressionMapInterface,
@@ -9,6 +10,7 @@ import type {
   NumberLiteralInterface,
   Sign,
 } from '../global-types.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import {
   ExactNumericValue,
@@ -17,7 +19,7 @@ import {
 import type { Type } from '../../common/type/types.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { withoutStaticTypingView } from '../static-typing-view.js';
+import { inStaticTypingView, withoutStaticTypingView } from '../static-typing-view.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
 import { restrictionParts } from './conditional-value.js';
@@ -545,7 +547,8 @@ const EMPTY_ASSUMED_VALUES: AssumedValueOverlay = Object.freeze(
  * must not see it.
  */
 export function contextAssumedValues(ce: ComputeEngine): AssumedValueOverlay {
-  if (ce._factSuppressionDepth > 0) return EMPTY_ASSUMED_VALUES;
+  if (ce._factSuppressionDepth > 0 || inStaticTypingView(ce))
+    return EMPTY_ASSUMED_VALUES;
   return ce.context?.assumedValues ?? EMPTY_ASSUMED_VALUES;
 }
 
@@ -597,7 +600,7 @@ export function isValueShielded(def: BoxedValueDefinition): boolean {
 
 /**
  * The definitions that take their declared type only, without the facts the
- * assumptions prove about them (`BoxedValueDefinition.type`). A compilation
+ * assumptions prove about them (`typeWithFacts()`). A compilation
  * sets this for a `vars`-mapped input (`withVarsValuesHidden` in
  * `compilation/vars-inputs.ts`): the compiled code reads the input, so the
  * symbol must read as the input of its declared type. Without this,
@@ -698,7 +701,7 @@ export type FactIndex = {
   /**
    * What the facts prove about the TYPE of each subject definition, as the
    * operands of one intersection the reader reduces together with the
-   * definition's declared type (see `BoxedValueDefinition.type`).
+   * definition's declared type (see `typeWithFacts()`).
    *
    * Keyed by DEFINITION, never by name — the identity rule of
    * `docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.2: a fact
@@ -730,6 +733,55 @@ const EMPTY_FACT_INDEX: FactIndex = Object.freeze({
   typeByDefinition: new Map<BoxedValueDefinition, Type[]>(),
   exclusionsByDefinition: new Map<BoxedValueDefinition, Type[]>(),
 });
+
+/** The type available to a proof about this expression in the current context. */
+export function typeWithFacts(expr: Expression): BoxedType {
+  if (!hasAssumptions(expr.engine)) return expr.type;
+  if (isSymbol(expr)) return symbolTypeWithFacts(expr);
+  if (!isFunction(expr)) return expr.type;
+
+  // A shared operand can occur on many paths through one expression. Keep
+  // the answers for this proof only. A later query can see different facts.
+  const types = new Map<Expression, BoxedType>();
+  const read = (node: Expression): BoxedType => {
+    const prior = types.get(node);
+    if (prior) return prior;
+    let result: BoxedType;
+    if (isSymbol(node)) result = symbolTypeWithFacts(node);
+    else if (isFunction(node)) {
+      const call = node as Expression & {
+        _typeForProof?(read: (operand: Expression) => BoxedType): BoxedType;
+      };
+      result = call._typeForProof?.(read) ?? node.type;
+    } else result = node.type;
+    types.set(node, result);
+    return result;
+  };
+  return read(expr);
+}
+
+function symbolTypeWithFacts(expr: Expression): BoxedType {
+  const base = expr.type;
+  const symbol = expr as Expression & {
+    _readDefinition?(): BoxedDefinition | undefined;
+  };
+  const binding = symbol._readDefinition?.();
+  const def =
+    binding === undefined
+      ? expr.valueDefinition
+      : 'value' in binding
+        ? binding.value
+        : undefined;
+  if (!def) return base;
+  const declared = def.declaredType;
+  if (base === declared) return def._typeWithFacts(declared, true);
+  const refined = def._typeWithFacts(base, false);
+  // A use-site requirement can conflict with a fact about its binding.
+  // In that case the proof follows the binding itself.
+  return refined.type === 'never'
+    ? def._typeWithFacts(declared, true)
+    : refined;
+}
 
 /** The type contributions the facts make to `def`, or an empty array. */
 export function typeFor(index: FactIndex, def: BoxedValueDefinition): Type[] {
@@ -984,35 +1036,6 @@ function soleSelfSubject(record: FactRecord): FactSubject | undefined {
   if (valueless.length === 1) return valueless[0];
   if (valueless.length === 0 && variables.length === 1) return variables[0];
   return undefined;
-}
-
-/**
- * True when a value given to `def` or taken from it can change the subject
- * of an active fact, and so the type of another definition: an inequality
- * that names `def` and another variable as whole values (`x > y`), whose
- * subject {@link soleSelfSubject} chooses by which of them have no value.
- * The other kinds of fact name their subject by its symbol (`Element`,
- * `Equal`, `NotEqual`, a bound on a part).
- */
-export function presenceCanChangeFactSubject(
-  ce: ComputeEngine,
-  def: BoxedValueDefinition
-): boolean {
-  for (const [assumption, records] of contextAssumptions(ce)) {
-    const op = assumption.operator;
-    if (op !== 'Less' && op !== 'LessEqual') continue;
-    for (const record of records) {
-      let mentioned = false;
-      let variables = 0;
-      for (const s of record.subjects) {
-        if (s.part !== 'self' || s.def.isConstant === true) continue;
-        variables += 1;
-        if (s.def === def) mentioned = true;
-      }
-      if (mentioned && variables > 1) return true;
-    }
-  }
-  return false;
 }
 
 /** The subject of `record` named `symbol` with the given part, if any. */

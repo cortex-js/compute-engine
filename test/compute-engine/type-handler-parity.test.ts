@@ -575,25 +575,17 @@ describe('bounded inverse trig heads read ranged types', () => {
     expect(ce.box(['Arccos', ['Sign', 'r']]).type.toString()).toBe('real');
   });
 
-  it('an assumed range still proves membership (both channels agree)', () => {
-    expect(ce.box(['Arcosh', 's']).type.toString()).toBe('real');
+  it('assumed domain membership does not narrow the static result', () => {
+    expect(ce.box('s').isGreaterEqual(2)).toBe(true);
+    expect(ce.box(['Arcosh', 's']).type.toString()).toBe('complex');
   });
 
   it('a STRICT assumed bound proves membership in an OPEN domain', () => {
-    // The assumption refinement emits the open-endpoint spelling
-    // (`& !k`) only for zero, so `0 < v < 1` refines the type to
-    // `(real<0..1>) & !0` and the range alone cannot prove `v < 1`
-    // strictly; the strictness travels on the descriptor's
-    // assumption-bounds fact (`facts.bounds`), which is what proves
-    // membership in Artanh's open (−1, 1) and non-membership at Arcoth's
-    // ±1 poles.
-    // The assumption is built as MathJSON: a multi-character name in a
-    // LaTeX string (`0 < v01 < 1`) parses as a PRODUCT of one-letter
-    // symbols, and the assumption then never mentions the declared symbol.
     ce.declare('v01', 'real');
     ce.assume(ce.box(['Less', 0, 'v01', 1]));
-    expect(ce.box(['Artanh', 'v01']).type.toString()).toBe('real');
-    expect(ce.box(['Arcoth', 'v01']).type.toString()).toBe('complex');
+    expect(ce.box('v01').isLess(1)).toBe(true);
+    expect(ce.box(['Artanh', 'v01']).type.toString()).toBe('complex | signed_infinity');
+    expect(ce.box(['Arcoth', 'v01']).type.toString()).toBe('complex | signed_infinity');
   });
 
   it('a DECLARED open-endpoint spelling proves the strict comparison', () => {

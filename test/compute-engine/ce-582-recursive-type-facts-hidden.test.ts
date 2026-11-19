@@ -115,7 +115,7 @@ describe('CE-582: the reproduction', () => {
     // window and this read took about 3 s.
     const body = ['If', ['Equal', 'n', 0], ['List', 'x'], ['Append', R, 'x']];
     const ce = engineWith(body);
-    expect(ce.box(['F', 'm']).type.toString()).toBe('list<real<0<..>>');
+    expect(ce.box(['F', 'm']).type.toString()).toBe('list<real>');
     const read = countedHiddenRead(ce);
     expect(read.type).toBe('list<real>');
     expect(read.literalStored).toBe(true);
@@ -126,9 +126,8 @@ describe('CE-582: the reproduction', () => {
 
 /** Read the type of `F(m)` with the assumptions hidden, and report how many
  * signature derivations of `F` the read ran (`_deriveSignatureOnce`,
- * `boxed-value-definition.ts`) and whether the cell for reads with the
- * assumptions hidden of the stored literal and of the call holds a value
- * afterwards. A recursion whose computations are not cached derives the
+ * `boxed-value-definition.ts`) and whether the static type cells of
+ * the stored literal and the call hold a value afterwards. A recursion whose computations are not cached derives the
  * signature again at each level. */
 function countedHiddenRead(ce: ComputeEngine): {
   type: string;
@@ -159,8 +158,8 @@ function countedHiddenRead(ce: ComputeEngine): {
   return {
     type,
     derivations,
-    literalStored: literal._type.suppressed?.value != null,
-    callStored: (call as any)._type.suppressed?.value != null,
+    literalStored: literal._type.value != null,
+    callStored: (call as any)._type.value != null,
   };
 }
 
@@ -266,22 +265,20 @@ describe('CE-582: the assumptions bit of the recursive-hypothesis key', () => {
     [
       'a tuple',
       ['If', ['Equal', 'n', 0], ['Tuple', 'x', 'x'], R],
-      'tuple<real<0<..>, real<0<..>>',
       'tuple<real, real>',
     ],
     [
       'a list',
       ['If', ['Equal', 'n', 0], ['List', 'x'], ['Append', R, 'x']],
-      'list<real<0<..>>',
       'list<real>',
     ],
   ])(
     'with %s result, a hidden read after a visible one has no assumed range',
-    (_tag, body, visibleType, hiddenType) => {
+    (_tag, body, hiddenType) => {
       const ce = engineWith(body);
       const def = ce.lookupDefinition('F')!.value as any;
       const literal = def.storedValue;
-      expect(ce.box(['F', 'm']).type.toString()).toBe(visibleType);
+      expect(ce.box(['F', 'm']).type.toString()).toBe(hiddenType);
       expect(hidden(ce, () => ce.box(['F', 'm']).type.toString())).toBe(
         hiddenType
       );
