@@ -200,6 +200,10 @@ const CONSTRUCTS = new Set([
   'RotateLeft',
   'RotateRight',
   'Mean',
+  'Variance',
+  'PopulationVariance',
+  'StandardDeviation',
+  'PopulationStandardDeviation',
   'Median',
   'Sort',
   'Ordering',
@@ -627,6 +631,18 @@ export function lower(
     isLibraryOperator(e as never, e.operator) &&
     handled(e) === undefined;
 
+  /** The names that the pattern `p` of a `Declare` or of a `Loop` index
+   *  binds: `p` itself, or the names in a `Tuple` of patterns; `_` binds
+   *  nothing. */
+  const patternNames = (p: Expression): string[] =>
+    isSymbol(p)
+      ? p.symbol === '_'
+        ? []
+        : [p.symbol]
+      : isFunction(p, 'Tuple')
+        ? p.ops.flatMap(patternNames)
+        : [];
+
   const facts = (e: Expression): Facts => {
     const none = new Set<string>();
     const leaf = (names: Set<string>, slice: boolean): Facts => ({
@@ -692,8 +708,8 @@ export function lower(
     }
     if (h === 'Block')
       for (const op of e.ops)
-        if (isFunction(op, 'Declare') && isSymbol(op.ops[0]))
-          info.writes.delete(op.ops[0].symbol);
+        if (isFunction(op, 'Declare'))
+          for (const n of patternNames(op.ops[0])) info.writes.delete(n);
     known.set(e, info);
     return info;
   };
@@ -1429,6 +1445,10 @@ export function lower(
       case 'RotateLeft':
       case 'RotateRight':
       case 'Mean':
+      case 'Variance':
+      case 'PopulationVariance':
+      case 'StandardDeviation':
+      case 'PopulationStandardDeviation':
       case 'Median':
       case 'Sort':
       case 'Ordering':
@@ -3140,6 +3160,58 @@ export function lower(
     return widen(v, lane);
   };
 
+  /** The names of the pattern `p` (a name, `_`, or a `Tuple` of patterns)
+   *  of the statement `s`, each with its value and the expression of that
+   *  value when there is one, as the interpreter binds them: a `Tuple`
+   *  value of the length of a `Tuple` pattern binds its elements; another
+   *  value, `x` or the value of the expression `x`, must be a point of
+   *  that length (a list or a scalar is an error in the interpreter) and
+   *  binds a name to each of its elements. Every element is evaluated, in
+   *  order, before a name is bound. A pattern that names a name twice, or
+   *  a length that differs, declines. */
+  const destructure = (
+    s: Expression,
+    p: Expression,
+    x: Expression | V
+  ): [string, V, Expression | undefined][] => {
+    if (interval) decline(s, 'a destructuring pattern in the interval mode');
+    const names = patternNames(p);
+    const twice = names.find((n, k) => names.indexOf(n) !== k);
+    if (twice !== undefined) decline(s, `a pattern that names ${twice} twice`);
+    const out: [string, V, Expression | undefined][] = [];
+    const bind = (q: Expression, y: Expression | V): void => {
+      if (isSymbol(q)) {
+        const v = typeof y === 'number' ? y : value(y)!;
+        if (q.symbol !== '_')
+          out.push([q.symbol, v, typeof y === 'number' ? undefined : y]);
+        return;
+      }
+      if (!isFunction(q, 'Tuple'))
+        decline(s, 'a pattern that is not a name or a Tuple');
+      if (typeof y !== 'number' && isFunction(y, 'Tuple')) {
+        if (y.nops !== q.nops)
+          decline(
+            s,
+            `a pattern of ${q.nops} names for a tuple of ${y.nops} elements`
+          );
+        q.ops.forEach((z, k) => bind(z, y.ops[k]));
+        return;
+      }
+      const v = typeof y === 'number' ? y : value(y)!;
+      const t = type(v);
+      if (tuples.get(v) !== 0 || t.shape.length !== 1 || t.shape[0] !== q.nops)
+        decline(
+          s,
+          `a pattern of ${q.nops} names for a value that is not a point of ${q.nops} elements`
+        );
+      q.ops.forEach((z, k) =>
+        bind(z, b.op('elem', [v, b.constant(k, 'integer')], scalarType(t.lane)))
+      );
+    };
+    bind(p, x);
+    return out;
+  };
+
   /** The engine type of the first read of `name` in `xs` that has one, or
    *  `real` when `xs` holds a `Power`, which lowers to a real where the
    *  engine type is `integer` (`i^2`). */
@@ -3155,6 +3227,52 @@ export function lower(
   const block = (e: Fn, want: boolean): V | undefined =>
     withFrame(false, (frame) => {
       let result: V | undefined;
+      /** Bind `n`, declared by the statement `s` of index `i` with the
+       *  value `v` (of the expression `x`, when there is one) and the type
+       *  `typeName`: a list or a tuple is a constant, a scalar a local of
+       *  its lane. */
+      const bindLocal = (
+        s: Expression,
+        i: number,
+        n: string,
+        v: V,
+        x: Expression | undefined,
+        typeName: string,
+        constant: Expression | undefined
+      ): void => {
+        if (type(v).shape.length > 0) {
+          if (typeName !== 'unknown')
+            decline(
+              s,
+              `a list value for a local declared ${typeName}`,
+              UNSETTLED_SHAPE
+            );
+          frame.names.set(n, { v, role: 'constant' });
+          return void (result = v);
+        }
+        // With no type, a number is a real: a later write of a real to
+        // `let t = 0` is valid. An integer stays one in the bigint mode,
+        // and where a later read has an integer engine type (its type
+        // after every write) and no `Power` follows (`readType()`): a
+        // write that is not an integer then declines (`local()`).
+        const lane: Lane =
+          typeName !== 'unknown'
+            ? (typeName as Lane)
+            : bigint ||
+                !isSubLane(type(v).lane, 'real') ||
+                (type(v).lane === 'integer' &&
+                  isSubtype(readType(e.ops.slice(i), n), 'integer'))
+              ? type(v).lane
+              : 'real';
+        result = local(s, v, lane);
+        const unwritten = !e.ops.some((y) => facts(y).writes.has(n));
+        frame.names.set(n, {
+          v: result,
+          lane,
+          role: isSymbol(constant, 'True') ? 'constant' : 'local',
+          exact: unwritten && x !== undefined && isNumber(x) ? x : undefined,
+        });
+      };
       const statement = (s: Expression, i: number) => {
         if (isFunction(s, 'Declare')) {
           // `Declare(t, type, value)`, `Declare(t, type, {value})` or
@@ -3168,8 +3286,9 @@ export function lower(
           const value = init ?? attributes?.get('value');
           // `constant: True` makes a local that no `Assign` writes.
           const constant = attributes?.get('constant');
+          const pattern = isFunction(name, 'Tuple') ? name : undefined;
           if (
-            !isSymbol(name) ||
+            (!isSymbol(name) && pattern === undefined) ||
             value === undefined ||
             attributes?.keys.some((k) => k !== 'value' && k !== 'constant') ===
               true ||
@@ -3185,6 +3304,25 @@ export function lower(
             : isSymbol(declared)
               ? declared.symbol
               : 'unknown';
+          if (pattern !== undefined) {
+            // `let (a, b) = p`: every element is evaluated, then each name
+            // is a local of the lane of its value. The interpreter checks
+            // a stated type against every element and binds no name when
+            // one does not fit.
+            if (typeName !== 'unknown')
+              decline(s, 'a destructuring declaration that states a type');
+            for (const [n, v, x] of destructure(s, pattern, value)) {
+              if (
+                type(v).shape.length > 0 &&
+                e.ops.slice(i + 1).some((y) => facts(y).writes.has(n))
+              )
+                decline(s, `a list or a point ${n} that the block writes`);
+              bindLocal(s, i, n, v, x, typeName, constant);
+            }
+            return void (result = undefined);
+          }
+          // The pattern branch returned: `name` is a symbol (narrows the type).
+          if (!isSymbol(name)) return;
           // A list local that the block writes is written in place
           // (`listLocal()`); its declared type can be a list type.
           const written = e.ops
@@ -3232,40 +3370,7 @@ export function lower(
               s,
               `a value that is not a list for a local of type ${typeName}`
             );
-          if (type(v).shape.length > 0) {
-            if (typeName !== 'unknown')
-              decline(
-                s,
-                `a list value for a local declared ${typeName}`,
-                UNSETTLED_SHAPE
-              );
-            frame.names.set(name.symbol, { v, role: 'constant' });
-            return void (result = v);
-          }
-          // With no type, a number is a real: a later write of a real to
-          // `let t = 0` is valid. An integer stays one in the bigint mode,
-          // and where a later read has an integer engine type (its type
-          // after every write) and no `Power` follows (`readType()`): a
-          // write that is not an integer then declines (`local()`).
-          const lane: Lane =
-            typeName !== 'unknown'
-              ? (typeName as Lane)
-              : bigint ||
-                  !isSubLane(type(v).lane, 'real') ||
-                  (type(v).lane === 'integer' &&
-                    isSubtype(readType(e.ops.slice(i), name.symbol), 'integer'))
-                ? type(v).lane
-                : 'real';
-          result = local(s, v, lane);
-          const unwritten = !e.ops.some((x) =>
-            facts(x).writes.has(name.symbol)
-          );
-          frame.names.set(name.symbol, {
-            v: result,
-            lane,
-            role: isSymbol(constant, 'True') ? 'constant' : 'local',
-            exact: unwritten && isNumber(value) ? value : undefined,
-          });
+          bindLocal(s, i, name.symbol, v, value, typeName, constant);
         } else if (isFunction(s, 'DefineFunction')) {
           // `f(x) = …` of a program: the canonical form installed the clause,
           // and a call of `f` is a call of the user function of that binding.
@@ -3362,7 +3467,8 @@ export function lower(
       if (!isFunction(c, 'Element') || c.nops !== 2)
         decline(c, 'a Loop clause that is not Element(i, L)');
       const index = c.ops[0];
-      if (!isSymbol(index)) decline(c, 'a Loop index that is not a name');
+      if (!isSymbol(index) && !isFunction(index, 'Tuple'))
+        decline(c, 'a Loop index that is not a name or a Tuple of names');
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
       const hi = apply(c, 'Subtract', [s.length, b.constant(1, 'integer')]);
@@ -3372,7 +3478,14 @@ export function lower(
       const body = b.region([k, ...params], () => {
         carried.forEach((x, i) => (x.v = params[i]));
         withFrame(false, (frame) => {
-          frame.names.set(index.symbol, { v: s.at(k), role: 'index' });
+          // `for (p, q) in L` of a list of points binds each name to an
+          // element of the point (`destructure()`).
+          const x = s.at(k);
+          if (isSymbol(index))
+            frame.names.set(index.symbol, { v: x, role: 'index' });
+          else
+            for (const [n, v] of destructure(c, index, x))
+              frame.names.set(n, { v, role: 'index' });
           clause(j + 1);
         });
         return carried.map((x) => x.v);
@@ -4015,20 +4128,16 @@ export function lower(
         if (n !== undefined) names.add(n);
       }
     for (const c of x.ops)
-      if (isFunction(c, 'Element') && isSymbol(c.ops[0]))
-        names.add(c.ops[0].symbol);
+      if (isFunction(c, 'Element'))
+        for (const n of patternNames(c.ops[0])) names.add(n);
     if (x.operator === 'Assign') {
       const t = x.ops[0];
       for (const n of isFunction(t, 'Tuple') ? t.ops : [t])
         if (isSymbol(n) && !names.has(n.symbol)) return n.symbol;
     }
     for (const op of x.ops) {
-      if (
-        x.operator === 'Block' &&
-        isFunction(op, 'Declare') &&
-        isSymbol(op.ops[0])
-      )
-        names.add(op.ops[0].symbol);
+      if (x.operator === 'Block' && isFunction(op, 'Declare'))
+        for (const n of patternNames(op.ops[0])) names.add(n);
       const w = outerWrite(op, names);
       if (w !== undefined) return w;
     }

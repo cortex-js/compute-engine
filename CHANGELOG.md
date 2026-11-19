@@ -28,6 +28,58 @@
 
 ### Resolved Issues
 
+- **`compile()` compiles `StandardDeviation` and `Variance` again**
+  (CE-1473). `StandardDeviation(L)` declined with "the operator
+  StandardDeviation is not supported by the compiler" since 0.194.0; at
+  `L = [3, 1, 3]` it now gives `1.1547005383792515`, the numeric value of the
+  interpreter's `2/3·√3`. `Variance`, `PopulationVariance` and
+  `PopulationStandardDeviation` compile too, also of several operands
+  (`Variance(x, L)`). The code computes the mean first, then the sum of the
+  squares of the deviations from it, so data far from 0 keeps its digits. An
+  empty list, and a list of one element for a sample, give `NaN`, as in the
+  interpreter. Complex elements and a distribution decline; GLSL compiles a
+  list of a stated length only.
+
+- **`compile()` compiles a call of a user function with a complex argument
+  at a parameter of no stated type again** (CE-1476). With `x, y: real`, `f`
+  declared `function` and `f(w) := w^2`, `Arg(f(x + i·y)) + f(x)` declined in
+  0.194.0 ("an argument of f that is not real"); at x = 0.5, y = 0.3 it now
+  gives 1.3308390005411683, as the interpreter does. A parameter of no stated
+  type, or of type `unknown` or `number`, takes the lane of its argument: a
+  call with a real argument calls a compiled function of a real parameter,
+  and a call with a complex argument a function of a complex parameter, in
+  both modes and on GLSL. A parameter declared `real` still declines a
+  complex argument.
+
+- **`compile()` compiles a `let` and a `for` loop that name the parts of a
+  point again** (CE-1478). `let (a, b) = (1, 2); a + b` declined in 0.194.0
+  ("a declaration with no value, or with attributes"), and
+  `for (p, q) in P1 { s = s + p * q }` over an input `P1` of type
+  `list<tuple<real, real>>` declined with "a Loop index that is not a name".
+  They now give `3`, and `3.5` at `P1 = [(1, 0.5), (2, 1.5)]`, as in the
+  interpreter. The value of the `let` can be a tuple, nested tuples
+  (`let ((a, b), c) = ((1, 2), 3)`) or a point of the length of the pattern
+  (an input `P` of type `tuple<real, real>`); `_` names no part. Every part is
+  computed before a name is bound. On GLSL the `let` of a point compiles; a
+  list of points still declines there. A pattern whose length differs from
+  that of the point, a list or a number in place of a point, a nested pattern
+  over a point, a `let` with a stated type, and both forms on `interval-js`,
+  decline.
+
+- **`compile()` compiles a recursive function with a list or point result
+  again** (CE-1471). A recursive call of a function whose signature states a
+  list or a tuple result declined in 0.194.0 ("a recursive call of F, a
+  function with a list or tuple result"). The stated result is now the type of
+  the call, on JavaScript: with `F` declared `(real) -> list<real>`,
+  `F(k) := Which(k = N - 1, [k], True, ListJoin([k], F(k + 1)))` gives
+  `[0, 1, 2, 3]` for `F(0)` at `N = 4`, and with `F` declared
+  `(real, tuple<real, real>) -> tuple<real, real>`,
+  `F(k, p) := Which(k = 0, p, True, F(k - 1, p) + (1, 0))` gives `[4, 2]` for
+  `F(3, (1, 2))`, as in the interpreter. A result type that the engine infers
+  from the body (`list<number>` of a `Join`) serves too. A result whose
+  elements have no stated type (`tuple<unknown, unknown>`) still declines, and
+  GLSL, which has no recursion, declines.
+
 - **`compile()` compiles `Apply` of a function literal whose parameters are
   typed** (CE-1469). `Apply(Function(Add(At(H, 1), n), Typed(H, 'list<real>'),
   Typed(n, 'integer')), L, 5)` declined in 0.194.0 ("Apply of a value that is

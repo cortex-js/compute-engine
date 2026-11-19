@@ -928,9 +928,13 @@ describe('IR profile on GLSL: storage', () => {
   });
 
   test('a recursive function with a tuple result: the cause', () => {
+    // The declared result settles the recursive call (CE-1471); GLSL has no
+    // recursion.
     expect(declined(['rt', 'x'])?.message).toMatch(
-      /a recursive call of rt, a function with a list or tuple result/
+      /a recursive function \(u0_rt\) on glsl/
     );
+    const r = compile(ce.box(['rt', 'x']), { profile: 'ir', fallback: false });
+    expect(r.run!({ x: -2.5 } as never)).toEqual([0.5, 0.5]);
   });
 
   test('a loop over S in a Sum: a run-time count is not multiplied in', () => {

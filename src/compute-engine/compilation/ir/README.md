@@ -360,6 +360,22 @@ a list or a tuple (`Declare(H, {value: Comprehension(…)})`) is that value; an
 except for a list local that its block writes in place ("Lists"), which can also
 be declared with a list type (`Declare(L, 'list<real>', …)`).
 
+A destructuring `Declare`, whose name is a pattern (`Declare(Tuple(a, b),
+{value: p})`, `let (a, b) = p`), binds its names as the interpreter does
+(`destructure()`): a `Tuple` value of the length of a `Tuple` pattern binds
+each element to the pattern at its position (`Tuple(Tuple(a, b), c)` of
+`Tuple(Tuple(1, 2), 3)`); another value must be a point of the length of the
+pattern (a tuple value, "Tuples") and binds a name to the element at each
+index, a scalar; `_` binds nothing. Every element is lowered, in order, before
+a name is bound, so an element that reads a name of the pattern reads its
+binding from before the statement. Each name is then a local as above, of no
+stated type. The interpreter gives an `incompatible-type` error for a value of
+another length, a list and a scalar: those decline, and so do a nested pattern
+over a point, a name twice in the pattern, a stated type (the interpreter
+checks it against every element), a list or a point that the block then
+writes, and every pattern in the interval mode. On GLSL a point is a `vecN`, so
+the declaration of a point compiles.
+
 A root `Tuple`, or the last operand of a root `Block` that is one, whose
 elements are tuples or are not of one shape (`Tuple(H)` of a list of run-time
 length, `Tuple(D, x)`) is no value of the program: the entry yields each element
@@ -1474,6 +1490,21 @@ interpreter's value for every length, also 0:
   of the elements that no earlier element equals (NaN equals NaN, as in the
   interpreter): a loop over the elements before, quadratic in the length. GLSL
   has none of these four operations.
+- `Variance(L1, …)`, `PopulationVariance`, `StandardDeviation` and
+  `PopulationStandardDeviation` read the elements and the scalars of `Mean` in
+  two passes: the mean, as `Mean`, then, of the deviations `d` from it, the
+  corrected sum `Σd² - (Σd)²/n` (it cancels the rounding of the mean: data with
+  a large common offset, `[2^52, 2^52 + 1]`, give `0.5`, and constant data give
+  exactly 0, as the interpreter), at least 0, divided by `Max(n - 1, 0)` for a
+  sample and by `n` for a population, and the square root of that for a
+  deviation. No element, and one element of a sample, are `0/0`, NaN, as the
+  interpreter's (a divisor that is the constant 0 is the constant NaN); a NaN or
+  an infinite element is NaN. The interpreter keeps an exact value of exact data
+  (`StandardDeviation([3, 1, 3])` is `2/3·√3`); the compiled value is its
+  numeric value. The interpreter scales data whose squares would overflow or
+  underflow (`[1e200, -1e200]`), which the compiled code does not: a known
+  limitation, as for `Norm`. Complex elements and a distribution decline. GLSL
+  compiles them for a list of a stated length.
 - `Any(L, p)` and `All(L, p)` (`p` a literal of one parameter, a user function
   or a library operator of one operand), and `Any(L)` and `All(L)` of a list of
   booleans, are the count of a `filter` of `L` by `p` (by its elements),
@@ -1511,7 +1542,10 @@ an input of a stated length (`list<real^3>`) and a constant count only; of a
 list of a run-time length (also a `Range`), and of a run-time count of `Take`
 and `Drop`, they decline (`a list whose length is not one number`); a count that
 is a box with more than one integer gives `{ kind: 'entire' }`. `Mean` is the
-interval sum divided by the count.
+interval sum divided by the count, and a variance the corrected interval sum of
+the squares of the deviations from that mean (an enclosure, wider than the range
+of the variance, since each deviation reads its element twice, except where a
+square overflows: a known limitation).
 
 `Binomial(n, k)` and `Choose(n, k)` of integers are `_SYS.binomial` on
 JavaScript (exact below 2^53, the interpreter's value for every pair of
@@ -1860,7 +1894,11 @@ is no bound and no counter.
 `Loop(body, Element(i, L), …)` is a statement whose value is `Nothing`: one
 counted loop per clause over the source of `L` (an input list, a list, a
 `Range`), a later clause lowered in the body of the one before, so it reads its
-index. The locals declared outside the loop that the body writes are its carried
+index. An index that is a pattern (`Element(Tuple(p, q), P1)`, `for (p, q) in
+P1` of a list of points) binds its names to each element as a destructuring
+`Declare` binds them to a point ("The contracts"); an element that is not a
+point of the length of the pattern declines (a list of points is JavaScript
+only). The locals declared outside the loop that the body writes are its carried
 values. A `Break` or a `Continue` (with no operand) is a statement of the body:
 a statement of a `Block`, or of an arm of an `If` or a `Which` that is one. A
 `Break` sets a boolean carried value, false before the loop, which is the `exit`
@@ -2260,10 +2298,43 @@ of the body: the call has two results, the length and then the list, and the
 JavaScript code reads the length of the returned array (`.length`); the function
 returns one value, as any other. The verifier checks that the type of the list
 result names the length result of the same call. A result that can be a
-parameter (`same(L) := L`) is the parameter. Declined: a recursive call of a
-function with a list result (its type is the body's), a list of lists, and on
-GLSL a result of a run-time length; one of a stated length is a `vecN` or a
-`float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
+parameter (`same(L) := L`) is the parameter. A recursive call (made while the
+body is lowered, also through another function on a cycle of calls) of a
+function with such a result has the type of the signature, which settles its
+shape (R1): the stated lane and length, a tuple mark for a point or a list of
+points, and for a run-time length a length result, as any call; the body is then
+checked against the signature as above, its length must be a run-time value
+where the signature states none ("a body of F of a constant length, where its
+recursive call takes a list of a run-time length"), and the result of the
+function is on the stated lane (an integer body of `list<real>`). The signature
+is the binding's, declared or inferred by the engine: with no declaration,
+`rf(u) := Which(u = N − 1, [u], True, Join([u], rf(u + 1)))` is typed
+`(u: unknown) -> list<number>`, a list of reals, and `rf(0)` is `[0, 1, 2, 3]`
+at N = 4; so is `F(k, p) := Which(k = 0, p, True, F(k − 1, p) + (1, 0))` of
+`(real, tuple<real, real>) -> tuple<real, real>`, `[4, 2]` for `F(3, (1, 2))`.
+The arms of a `Which` in such a body follow the rule of the arms ("Lists"): a
+list of points or of booleans and a list of another length in the two arms
+decline ("arms of two types"), and so do lists of two lengths on GLSL (which has
+no recursion either) and in the interval mode. Declined: a recursive call of a
+function whose list or tuple result has elements of no stated type
+(`tuple<unknown, unknown>`, `list<unknown>`: its type is the body's), a list of
+lists, and on GLSL a result of a run-time length; one of a stated length is a
+`vecN` or a `float[n]` (`vec2 _fn_ir_u0_pt(float v0)`).
+
+A scalar parameter of no stated type, or of type `unknown` or `number`, takes
+the lane of its argument, not always `real` (CE-1476): a call whose argument
+there is complex calls a function of a complex parameter, any other call a
+function of a real parameter (an integer argument is widened), so a binding is
+lowered once per lane of such parameters (`laneKey()`), in both modes and on
+every target that has the complex lane. With `f(w) := w^2`,
+`Arg(f(x + i·y)) + f(x)` calls `f` of a complex `w` and `f` of a real `w`; the
+arguments of each call of such a function are lowered before the function is
+chosen. A real call keeps the value of the real lane: `Sqrt(w)` at `w = -1` is
+`i` in `mode: 'complex'` and NaN in the default mode, as `Sqrt(x)` is. A
+parameter declared `real` (or `integer`) declines a complex argument. A
+recursive call of another lane calls the function of that lane, which, for a
+function with no declared result (a real result, above), declines with its
+complex body.
 
 The pass `inline` (`passes.ts`, before `cse` and `invariants`) replaces a call
 in the body of a `loop`, a `build` or a `filter` with a copy of the callee's

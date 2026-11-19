@@ -27,6 +27,7 @@ import {
   type IRFunction,
   type IRType,
   type Lane,
+  type Length,
   type V,
 } from './ir.js';
 import { functionEffects, type Effect } from './effects.js';
@@ -287,6 +288,9 @@ function signatureTypes(e: Fn, literal: Fn) {
           lane: scalar ? s!.lane : 'real',
           shape: [],
           point: t === 'unknown' || !scalar ? t : undefined,
+          // No stated type, or `number`: the lane of a scalar argument,
+          // a real or a complex (`laneKey()`).
+          open: present(t) === 'unknown' || present(t) === 'number',
         };
   });
   const r = signature?.result && present(signature.result);
@@ -385,6 +389,16 @@ type UserFunction = {
   /** The first call of the function made while its body is lowered, when
    *  it has no declared result: the call assumed a real scalar. */
   guess?: Fn;
+  /** The declared list or tuple result (`signatureTypes()`, `list`), of a
+   *  stated or a run-time length, and the axis of its tuple mark: a call
+   *  made while the body is lowered (a recursive call) has that type. */
+  declared?: {
+    lane: Lane;
+    shape: readonly (number | 'run-time')[];
+    tuple?: 0 | 1;
+  };
+  /** The first call that took `declared` while the body is lowered. */
+  assumed?: Fn;
 };
 
 export function functionLowering(
@@ -392,11 +406,34 @@ export function functionLowering(
   lists: ReturnType<typeof listLowering>
 ) {
   const { b, type } = cx;
-  const functions = new Map<object, UserFunction>();
+  /** The IR functions of each binding, one per lane key (`laneKey()`). */
+  const functions = new Map<object, Map<string, UserFunction>>();
+  const signatures = new Map<object, ReturnType<typeof signatureTypes>>();
+  let count = 0;
+  /** A parameter of no stated type, or of type `number`, that takes the
+   *  complex lane of the scalar argument `v`; with any other argument the
+   *  parameter is a real (an integer is widened). */
+  const complexAt = (
+    p: ReturnType<typeof signatureTypes>['params'][number],
+    v: V | undefined
+  ) =>
+    'open' in p &&
+    p.open &&
+    v !== undefined &&
+    type(v).shape.length === 0 &&
+    type(v).lane === 'complex';
+  /** The lanes of the open parameters at a call of the arguments `args`:
+   *  one IR function per key, so that a call with a real and a call with a
+   *  complex argument each call a function of the lane of its argument. */
+  const laneKey = (sig: ReturnType<typeof signatureTypes>, args?: V[]) =>
+    sig.params.map((p, i) => (complexAt(p, args?.[i]) ? 'c' : 'r')).join('');
   /** The functions being lowered, by the name of their head: a call of
    *  that name in the body is the recursive call (its node can be bound
    *  before the definition is). */
   const pending = new Map<string, UserFunction>();
+  /** Every function being lowered, also a lane of a binding that another
+   *  lane of it hides in `pending` (`laneKey()`). */
+  const lowering = new Set<UserFunction>();
   let settled = new Map<string, Effect>();
   // The lowerings of a function begun (`cx.attempt()`).
   let begun = 0;
@@ -428,6 +465,7 @@ export function functionLowering(
     begun += 1;
     const { names, result, list, tuple, r, open, points, shaped } = sig;
     const params = sig.params.map((p, i) => {
+      if (complexAt(p, args?.[i])) return { ...p, lane: 'complex' as const };
       const n = args?.[i] === undefined ? undefined : type(args[i]).shape[0];
       if (
         !cx.runtimeLengths &&
@@ -483,7 +521,7 @@ export function functionLowering(
       return p;
     });
     const ir: IRFunction = {
-      name: `u${functions.size}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
+      name: `u${count++}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
       paramNames: [],
       lengthOf: [],
@@ -511,9 +549,16 @@ export function functionLowering(
       inputs: [],
       called: false,
       self: [],
+      declared: list && { lane: list.lane, shape: list.shape, tuple },
     };
-    functions.set(key, fn);
+    let variants = functions.get(key);
+    if (variants === undefined) functions.set(key, (variants = new Map()));
+    variants.set(laneKey(sig, args), fn);
+    // The function of this name being lowered, if any (another lane of
+    // the same binding, `laneKey()`): restored after this one.
+    const before = pending.get(e.operator);
     pending.set(e.operator, fn);
+    lowering.add(fn);
     const own = names.map((p, i): [string, Binding] => [
       p,
       { v: values[i], role: 'index' },
@@ -587,6 +632,20 @@ export function functionLowering(
             literal,
             `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
           );
+        // A recursive call took the declared result (`call()`): of a
+        // run-time length, it has a length result, so the body's length is
+        // a run-time value too.
+        const m = t.shape[0];
+        if (
+          fn.assumed &&
+          list?.shape[0] === 'run-time' &&
+          (typeof m === 'number' ||
+            (m !== undefined && cx.constant(m.v) !== undefined))
+        )
+          decline(
+            literal,
+            `a body of ${e.operator} of a constant length, where its recursive call takes a list of a run-time length (declare the length in the result type)`
+          );
         // A real body of a complex result is converted.
         const v = fn.guess
           ? cx.widen(body, 'real')
@@ -610,6 +669,8 @@ export function functionLowering(
       const t = type(ir.body.yields[0]);
       fn.result = {
         ...t,
+        // On the declared lane where a recursive call took it.
+        lane: fn.assumed ? fn.declared!.lane : t.lane,
         shape: t.shape.map((n) =>
           typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
         ),
@@ -618,7 +679,9 @@ export function functionLowering(
     ir.results.push(fn.result);
     // A call in the body passes the inputs, parameters of the body.
     for (const a of fn.self) a.push(...ir.body.params.slice(fn.own));
-    pending.delete(e.operator);
+    if (before === undefined) pending.delete(e.operator);
+    else pending.set(e.operator, before);
+    lowering.delete(fn);
     // A `Comprehension` in the body of a function being lowered reads the
     // effect of a function it calls (`flips` in `moves`).
     settled = functionEffects(cx.rows, b.functions);
@@ -633,28 +696,45 @@ export function functionLowering(
     binding?: { key: object; literal: Fn },
     given?: V[]
   ): number => {
-    let fn = binding ? functions.get(binding.key) : pending.get(e.operator)!;
+    let fn = (binding ? undefined : pending.get(e.operator)) as UserFunction;
     // Without run-time lengths, the arguments of the first call are lowered
     // before the function, which takes their stated lengths; so are they
-    // for a parameter that can take the point of its argument.
+    // for a parameter that can take the point of its argument, and at each
+    // call for a parameter that takes the lane of its argument
+    // (`laneKey()`).
     let early = given;
-    if (fn === undefined) {
-      const sig = signatureTypes(e, binding!.literal);
+    if (binding !== undefined) {
+      let sig = signatures.get(binding.key);
+      if (sig === undefined) {
+        sig = signatureTypes(e, binding.literal);
+        signatures.set(binding.key, sig);
+      }
       if (
+        early === undefined &&
         sig.params.some(
           (p) =>
-            (!cx.runtimeLengths && p.shape[0] === 'run-time') ||
-            ('point' in p && p.point !== undefined)
+            ('open' in p && p.open) ||
+            (!functions.has(binding.key) &&
+              ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
+                ('point' in p && p.point !== undefined)))
         )
       )
         early = e.ops.map((op) => cx.value(op)!);
       // An argument can hold the first call of the same function.
       fn =
-        functions.get(binding!.key) ??
-        define(e, binding!.key, binding!.literal, sig, early);
+        functions.get(binding.key)?.get(laneKey(sig, early)) ??
+        define(e, binding.key, binding.literal, sig, early);
     }
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
+    // A call back to a lane of the function that another lane of it hides
+    // (a body of the complex lane that calls the real one, still being
+    // lowered): its inputs are not settled yet.
+    if (lowering.has(fn) && pending.get(e.operator) !== fn)
+      decline(
+        e,
+        `a recursive call of ${e.operator} between the lanes of its parameters`
+      );
     // Each argument is lowered once, in order; `mapped`, a list for a
     // scalar parameter, which the call maps over (`mapOver()`).
     const values: V[] = [];
@@ -759,15 +839,27 @@ export function functionLowering(
     if (mapped) return mapOver(e, binding, fn, values);
     // A call of a function whose body is being lowered (on a cycle of
     // calls) with no declared result assumes a real scalar, which
-    // `define()` checks against the body; a list or tuple result declines.
-    if (fn.result === undefined) {
-      if (fn.list)
+    // `define()` checks against the body; a declared list or tuple result
+    // is the type of the call, which `define()` checks against the body;
+    // a list or tuple result of no stated type declines.
+    let result:
+      | {
+          lane: Lane;
+          shape: readonly (Length | 'run-time')[];
+        }
+      | undefined = fn.result;
+    if (result === undefined && fn.list) {
+      if (fn.declared === undefined)
         decline(
           e,
-          `a recursive call of ${e.operator}, a function with a list or tuple result`
+          `a recursive call of ${e.operator}, a function with a list or tuple result of no stated type`
         );
+      fn.assumed ??= e;
+      result = fn.declared;
+    }
+    if (result === undefined) {
       fn.guess = e;
-      fn.result = { lane: 'real', shape: [] };
+      result = fn.result = { lane: 'real', shape: [] };
     }
     // A call of a function being lowered, in its own body, passes the
     // inputs when the body is lowered (`define()`); in another body (a
@@ -797,21 +889,26 @@ export function functionLowering(
     });
     // A list result of a run-time length: its length is a result of the
     // call before it, the length of the returned list.
-    const n = fn.result.shape[0];
+    const n = result.shape[0];
     const outs =
-      typeof n === 'object' ? [b.newValue({ lane: 'integer', shape: [] })] : [];
+      typeof n === 'object' || n === 'run-time'
+        ? [b.newValue({ lane: 'integer', shape: [] })]
+        : [];
     const out = b.newValue(
       outs.length > 0
         ? {
-            lane: fn.result.lane,
-            shape: [{ v: outs[0] }, ...fn.result.shape.slice(1)],
+            lane: result.lane,
+            shape: [{ v: outs[0] }, ...(result.shape.slice(1) as Length[])],
           }
-        : fn.result
+        : (result as IRType)
     );
     const all = [...args, ...inputs];
     if (self) fn.self.push(all);
     b.emit({ k: 'call', outs: [...outs, out], fn: fn.ir.name, args: all });
-    const axis = cx.tuples.get(fn.ir.body.yields[0]);
+    const axis =
+      fn.ir.body.yields.length > 0
+        ? cx.tuples.get(fn.ir.body.yields[0])
+        : fn.declared?.tuple;
     if (axis !== undefined) cx.tuples.set(out, axis);
     return out;
   };
@@ -828,7 +925,7 @@ export function functionLowering(
     fn: UserFunction,
     args: V[]
   ): V => {
-    if (pending.get(e.operator) === fn)
+    if (lowering.has(fn))
       decline(e, `a list argument of a recursive call of ${e.operator}`);
     const lengths = new Set<string | number>();
     const sources = args.map((v, i) => {

@@ -137,6 +137,14 @@ const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
   Norm: [1, 2],
 });
 
+/** The variances and the standard deviations (`variance()`). */
+const VARIANCES: readonly string[] = [
+  'Variance',
+  'PopulationVariance',
+  'StandardDeviation',
+  'PopulationStandardDeviation',
+];
+
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
@@ -1308,6 +1316,71 @@ export function listLowering(cx: Lowering) {
     return iterated(e, e.ops[0] as Fn, n);
   };
 
+  /** The operands of `Mean` and of a variance, read the same way: the
+   *  elements of each list and each scalar, their sum from 0 in order, and
+   *  their count. */
+  const meanParts = (e: Fn) => {
+    const items = e.ops.map((x) => source(x, true, true));
+    const sum = reduce(e, rowOfHead(cx.rows, 'Add')!, items, integer(0));
+    if (type(sum).lane === 'complex')
+      decline(e, `${e.operator} of complex numbers`);
+    const n = items
+      .map((x) => (typeof x === 'number' ? integer(1) : x.length))
+      .reduce((a, c) => int(e, 'Add', a, c));
+    return { items, sum, n };
+  };
+
+  /** `Variance`, `PopulationVariance`, `StandardDeviation` and
+   *  `PopulationStandardDeviation` of the elements and the scalars of the
+   *  operands, in two passes: the mean (as `Mean`), then the corrected sum
+   *  `Σd² - (Σd)²/n` of the deviations `d` from it, at least 0, over
+   *  `n - 1` (the sample) or `n`. The divisor of the sample is at least 0,
+   *  so no element and one element are `0/0`, NaN, as the interpreter's; a
+   *  NaN or an infinite element makes the mean or a deviation NaN, which
+   *  `Max` keeps, as the interpreter's. */
+  const variance = (e: Fn): V => {
+    const h = e.operator;
+    // A distribution is no list or number of the compiled code.
+    if (e.ops.some((x) => !x.type.matches('collection<number> | number')))
+      decline(e, `${h} of other than numbers and lists of numbers`);
+    const add = rowOfHead(cx.rows, 'Add')!;
+    const { items, sum, n } = meanParts(e);
+    const divisor = h.startsWith('Population')
+      ? n
+      : int(e, 'Max', int(e, 'Subtract', n, integer(1)), integer(0));
+    if (cx.constant(divisor) === 0) return b.constant(NaN, 'real');
+    const mean = cx.apply(e, 'Divide', [sum, n]);
+    // The corrected two-pass form: with `d = x - mean`, the sum of the
+    // squares of the deviations is `Σd² - (Σd)²/n` for any `mean`, so the
+    // rounding of the mean (data with a large common offset, constant data)
+    // cancels; `Max(…, 0)` keeps a rounding (or an enclosure) from going
+    // below 0. A square, not a product of two reads: the interval mode
+    // encloses a square of a box that crosses 0 from 0.
+    const deviation = (x: V) => cx.apply(e, 'Subtract', [x, mean]);
+    const over = (f: (x: V) => V) =>
+      items.map((x) =>
+        typeof x === 'number'
+          ? f(x)
+          : { length: x.length, at: (k: V) => f(x.at(k)) }
+      );
+    const squares = reduce(
+      e,
+      add,
+      over((x) => cx.apply(e, 'Power', [deviation(x), integer(2)])),
+      integer(0)
+    );
+    const drift = reduce(e, add, over(deviation), integer(0));
+    const centered = cx.apply(e, 'Subtract', [
+      squares,
+      cx.apply(e, 'Divide', [cx.apply(e, 'Power', [drift, integer(2)]), n]),
+    ]);
+    const v = cx.apply(e, 'Divide', [
+      cx.apply(e, 'Max', [centered, integer(0)]),
+      divisor,
+    ]);
+    return h.endsWith('Deviation') ? cx.apply(e, 'Sqrt', [v]) : v;
+  };
+
   /** The heads of a list that `lower.ts` hands over (`README.md`,
    *  "Lists", the list operators). */
   const collection = (e: Fn): V => {
@@ -1380,14 +1453,10 @@ export function listLowering(cx: Lowering) {
     if (h === 'Mean') {
       // The sum from 0, in order, over the count of the elements and of
       // the scalars: the interpreter's `mean()` (NaN of no element).
-      const items = e.ops.map((x) => source(x, true, true));
-      const sum = reduce(e, rowOfHead(cx.rows, 'Add')!, items, integer(0));
-      if (type(sum).lane === 'complex') decline(e, 'Mean of complex numbers');
-      const n = items
-        .map((x) => (typeof x === 'number' ? integer(1) : x.length))
-        .reduce((a, c) => int(e, 'Add', a, c));
+      const { sum, n } = meanParts(e);
       return cx.apply(e, 'Divide', [sum, n]);
     }
+    if (VARIANCES.includes(h)) return variance(e);
     if (h === 'Count' && e.nops === 2)
       return listSource(build(e, e.ops[0], e.ops[1], true)).length;
     if (h === 'Take' && isIterate(e.ops[0])) return iterateTake(e);

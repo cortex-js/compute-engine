@@ -83,10 +83,10 @@ describe('destructuring from a non-literal value: what still fails closed', () =
 });
 
 //
-// The path is JavaScript-only: the shader targets have no tuple-indexing
-// lowering for an untyped local. They must keep the existing D6 refusal — NOT
-// miscompile. Probed through a tuple-TYPED symbol (rather than a call) so the
-// refusal that fires is this gate's.
+// The interval mode has no destructuring: it must keep the refusal — NOT
+// miscompile. GLSL compiles a declaration of a point (CE-1478) and keeps the
+// refusal of the assign form. Probed through a tuple-TYPED symbol (rather
+// than a call) so the refusal that fires is this gate's.
 //
 describe('non-JavaScript targets keep the fail-closed refusal', () => {
   const tupleSymbolEngine = () => {
@@ -119,17 +119,27 @@ describe('non-JavaScript targets keep the fail-closed refusal', () => {
       ['Add', ['Multiply', 10, 'a'], 'b'],
     ]);
 
-  for (const to of ['glsl', 'interval-js'] as const) {
-    test(`${to} fails closed on the declare form`, () => {
-      const r = compile(declareBlock(tupleSymbolEngine()), { to });
-      expect(r?.success).toBe(false);
-      // The interval mode has no destructuring declaration.
-      if (to === 'interval-js') {
-        expect(r?.diagnostic?.code).toBe('outside-profile');
-        expect(r?.diagnostic?.operator).toBe('Declare');
-      } else expect(r?.error).toMatch(/Could not compile/);
-    });
+  // GLSL reads a point at each index (CE-1478): the value of `t` is a
+  // constant, so the shader is that of the interpreter's value, 34.
+  test('glsl compiles the declare form of a point', () => {
+    const ce = tupleSymbolEngine();
+    const r = compile(declareBlock(ce), { to: 'glsl' });
+    expect(r?.success).toBe(true);
+    expect(r?.code).toBe('34.0');
+    expect(declareBlock(ce).evaluate().re).toBe(34);
+  });
 
+  test('interval-js fails closed on the declare form', () => {
+    const r = compile(declareBlock(tupleSymbolEngine()), {
+      to: 'interval-js',
+    });
+    expect(r?.success).toBe(false);
+    // The interval mode has no destructuring declaration.
+    expect(r?.diagnostic?.code).toBe('outside-profile');
+    expect(r?.diagnostic?.operator).toBe('Declare');
+  });
+
+  for (const to of ['glsl', 'interval-js'] as const) {
     test(`${to} fails closed on the assign form`, () => {
       const r = compile(assignBlock(tupleSymbolEngine()), { to });
       expect(r?.success).toBe(false);

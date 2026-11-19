@@ -222,7 +222,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   gives `5e200` and `5e-200`. `Norm` of a list, a point or a list of points
   squares its elements the same way: `Norm(L)` at `L = [1e-200, 1e-200]` is
   `0` (the interpreter gives `1.414e-200`) and at `[3e160, 4e160]` is
-  `Infinity` (`5e160`). With `x: real`, `\frac{2x}{3}` is
+  `Infinity` (`5e160`). `Variance`, `StandardDeviation` and their
+  population forms square the deviations the same way: `StandardDeviation(L)`
+  at `L = [1e200, -1e200]` is `Infinity` (the interpreter gives
+  `1.414e200`) and at `[-1e-200, 3e-200]` is `0` (`2.828e-200`); on
+  `interval-js` (crafted) the first is `[∞, ∞]`, and `Variance(L)` at
+  `[1e300, -1e300, 1e300]` is empty (an overflow of both terms of the
+  corrected sum); neither contains the interpreter's value. With
+  `x: real`, `\frac{2x}{3}` is
   `(2 * x) / 3`: at `x = 1e308` it gives `Infinity`; the interpreter gives
   `6.666666666666666e307`.
 - `javascript` (crafted): `Range(0, 9999999999999/10^12)`
@@ -643,10 +650,13 @@ read:
   list `C` with a number;
 - a fold of a list of points (`Sum(L)` with `L: list<tuple<real, real>>`:
   "a term that is not a number");
-- a recursive function whose result is a list or a tuple (the point
-  function `Q(i) = \operatorname{PointList}(1, 0)` for `i ≤ 0` and
+- a recursive function whose list or tuple result has no stated element
+  type (the point function `Q(i) = \operatorname{PointList}(1, 0)` for
+  `i ≤ 0` and
   `\operatorname{PointList}(Q(i-1).x + Q(i-1).y, Q(i-1).x - Q(i-1).y)`
-  otherwise).
+  otherwise, whose inferred result is a union). Declared
+  `(real) -> tuple<real, real>`, `Q` compiles on JavaScript and `Q(3)` is
+  `(2, 2)`; GLSL, which has no recursion, declines it.
 
 `Max` or `Min` of one operand typed as a list compiles:
 `Min(P·(1 − v) + Q·v)` with `P, Q: list<real>` gives `1` at `P = [1, 2]`,
