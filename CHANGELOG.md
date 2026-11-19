@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- A parameter of an outer function literal that a literal nested two levels
+  down reads, under a lazy `Map` that a reducer holds, stayed a free symbol:
+  `Apply(s ↦ Sum(Map(v ↦ Apply(t ↦ Length(Take(s, 2)), v), 1..2)), [2, 3, 4, 4])`
+  was `2Length(Take(s, 2))`, and is `4`. `Map` lowers its callback, so the
+  callback's scope is never an activation, and the call frame of the inner
+  literal chained to a template that holds no value of `s`. The frame now
+  chains to the activation of the nearest enclosing scope that has one
+  (#624, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes

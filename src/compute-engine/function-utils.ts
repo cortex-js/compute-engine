@@ -124,6 +124,7 @@ import {
   functionValueTemplateOf,
   registerCallFrame,
   registerFunctionValueScope,
+  scopeActivation,
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
@@ -6860,11 +6861,23 @@ function exitAppliedBodyScope(bodyScope: Scope): void {
  * that is not a function value (held unevaluated in a lazy collection), the
  * activation of its defining scope on the links from the current lexical
  * scope (`activationOnLinks`), or that scope itself.
+ *
+ * A defining scope with no activation on the links (the literal sits in the
+ * body of a callback that a lazy `Map` lowered, and the callback was never
+ * applied) is a copy whose parent is the activation of the nearest enclosing
+ * scope that has one. Its own parent is a template that holds no values, so
+ * a parameter of the outer literal read in the body would stay free:
+ * `Apply(s ↦ Sum(Map(v ↦ Apply(t ↦ Take(s, 2), v), …)), …)`.
  */
 function definingScopeOf(ce: ComputeEngine, bodyScope: Scope): Scope | null {
   const scope = bodyScope.parent;
   if (!scope) return scope;
-  return activationOnLinks(ce.context.lexicalScope, scope);
+  const active = activationOnLinks(ce.context.lexicalScope, scope);
+  if (active !== scope) return active;
+  const outer = definingScopeOf(ce, scope);
+  return outer === scope.parent || !outer
+    ? scope
+    : scopeActivation(outer, scope);
 }
 
 /**
