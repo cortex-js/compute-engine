@@ -186,9 +186,15 @@ change the code, and the inputs object is not read for that name
 4. **Determinism.** The emitted text is a function of the expression, the
    options and the definitions it reads.
 
-`Power` is on the real lane. On JavaScript it calls the engine's real-power
-function (`realPow` of `javascript-runtime.ts`, through `_SYS.ir.pow`), which
-the fold also uses: a negative base with a rational exponent of odd denominator
+`Power` is on the real lane, except the power of a scalar on the integer lane by
+a literal integer exponent `>= 1` (`n^2` of an integer `n` is `integer<0..>`,
+CE-1484; a base on the integer lane whose engine type is `number`, the local
+`c` of `let c = n^2`, too): it is the product by squaring on the
+integer lane (`n^5` is `(n·n)·(n·n)·n`), exact below 2^53 (2^24 on GLSL) as
+`Multiply`, and past it under the rule below for an integer value of 2^53 or
+more. `n^m` stays real (a rational at `m < 0`). On JavaScript the real power
+calls the engine's real-power function (`realPow` of `javascript-runtime.ts`,
+through `_SYS.ir.pow`), which the fold also uses: a negative base with a rational exponent of odd denominator
 gives the interpreter's real root (`(-8)^(1/3)` is -2), also for a run-time
 exponent. On GLSL it is `_gpu_ir_pow`: the exact product for an integer exponent
 from 1 to 16, the sign of an integer exponent of a negative base, NaN for a
@@ -1946,11 +1952,19 @@ budget counts the passes that run (an early exit runs fewer). The guard of the
 JavaScript loop before its first pass is 2^53 passes for a loop with a `Break`
 (an open search over `Range(1, 1e12)` ends at its `Break`), 2^32 for another. A
 loop that never reaches its `Break` and has no budget runs until the host's
-deadline (`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes"). A `Break` or
-a `Continue` that is not such a statement (`If(c, Break(), 1)` read as a value,
+deadline (`docs/COMPILATION-MODEL.md`, "A limit on `Loop` passes").
+`Loop(body)`, with no `Element` clause, is on JavaScript one counted loop of
+2^53 passes whose `exit` is the flag of a `Break`, made also when the body has
+no `Break` (so its guard is the one of 2^53): a `Break` ends it, and with an
+`iterationBudget` its passes count, so `Loop(k := k + 1)` throws the
+`CancellationError` of the budget, as the interpreter throws at
+`ce.iterationLimit`; with no budget it has no count, and it runs until its
+`Break` or the host's deadline. GLSL and the interval mode decline it: the
+bound of its passes is not a constant within the budget. A `Break` or a
+`Continue` that is not such a statement (`If(c, Break(), 1)` read as a value,
 one outside a `Loop`, or in a function literal in the body), a `Break` with a
-value, a `Return`, a `Loop` with no `Element` clause, a write to the index and a
-`Loop` whose value is read decline. `Repeat(v, n)` is the list of `n` copies of
+value, a `Return`, a write to the index and a `Loop` whose value is read
+decline. `Repeat(v, n)` is the list of `n` copies of
 `v`, not a loop (see "Lists").
 
 `AddTo(s, e)` of a local `s` is `Assign(s, Add(s, e))`, with the lane rules of

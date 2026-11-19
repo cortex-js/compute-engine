@@ -14,6 +14,10 @@ when it compiles. A difference that this list does not name is a defect.
 - The precision of the target: `f32` arithmetic on `glsl`, a
   different order of summation, a different library routine for `Sin`,
   `Exp` or `Gamma`.
+- A value where the interpreter stops at `ce.iterationLimit`. With no
+  `iterationBudget`, a compiled `Loop` counts no passes and gives its value
+  where the interpreter throws `iteration-limit-exceeded` (see "A limit on
+  `Loop` passes").
 - A value where the interpreter gives no number. Where `evaluate()` gives
   `Missing`, `Nothing`, an unevaluated form or an error,
   the compiled code can give `NaN`, `0`, `±Infinity`, `undefined` or
@@ -1101,16 +1105,12 @@ with no value, and the compiled loop does not carry the value of a
 `Break(v)`, so every loop whose value is used declines:
 `Loop(k + x, k ∈ 1..3)` declines, where the JavaScript code gave
 `undefined`. Put the loop in a statement position and end the block with
-its value: `Block(s ≔ 0; Loop(s ≔ s + k, k ∈ 1..3); s)` compiles. Only a
-loop with no indexing set and no `Break` of its own compiles where its value
-is used: it ends only through a `Return` or never ends, so its value is the
-value of the `Return`. A loop with an indexing set declines also when it has
-a `Return` and is the body of its function, or the last statement of a block
-in tail position. For example, with `x: real`, the search loop
-`((p) ↦ Loop(If(k > p, Return(k)), k ∈ 1..5))(x)` gives `3` for `x = 2` and
-`Nothing` for `x = 9`, where no `Return` runs; the compiled function gave
-`undefined` (JavaScript) for `x = 9`, so the loop
-declines. To compile a search loop, put the loop in a statement position,
+its value: `Block(s ≔ 0; Loop(s ≔ s + k, k ∈ 1..3); s)` compiles. A loop
+with no indexing set declines there too (`Loop(Return(x))`: "the value of a
+Loop"), and `Return` has no compiled form, so a search loop that returns what
+it finds declines: with `x: real`, `((p) ↦ Loop(If(k > p, Return(k)), k ∈
+1..5))(x)` gives `3` for `x = 2` and `Nothing` for `x = 9` in the
+interpreter. To compile a search loop, put the loop in a statement position,
 store the value that it finds in a local, and end the block with that local:
 `Block(r ≔ 0; Loop(If(k > x, Block(r ≔ k, Break())), k ∈ 1..5); r)` compiles
 on JavaScript, and gives `3` for `x = 2` and `0` for `x = 9`, as
@@ -1692,12 +1692,13 @@ element by element. `Which(x < 0, 1)` over `x = [−1, 1]` gives
 
 ## A limit on `Loop` passes
 
-A compiled `Loop` has no check of its own. `Block(k := 0, Loop(k := k + 1))`
-compiles to `while (true) { k = k + 1 }`, which does not return, also under
-`ce.withTimeLimit({ ms: 500 })`: the time limit belongs to the engine, and the
-emitted code does not read it. The interpreter stops the same loop at
-`ce.iterationLimit`. A host that runs an imported document sets a limit when it
-compiles the code:
+A compiled `Loop` has no count of its own. On JavaScript,
+`Block(k := 0, Loop(k := k + 1), k)` (the loop in a statement position)
+compiles to a loop of 2^53 passes, which in practice does not return: only a
+deadline of the engine (`ce.withTimeLimit({ ms: 500 })`) stops it, and GLSL
+and `interval-js` decline it. The interpreter stops the same loop at
+`ce.iterationLimit`. A host that runs an imported document sets a limit when
+it compiles the code:
 
 ```js
 const { run } = compile(expr, { iterationBudget: 1e6 });

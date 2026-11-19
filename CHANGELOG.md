@@ -28,6 +28,28 @@
 
 ### Resolved Issues
 
+- **`compile()` treats an integer to a literal power as an integer**
+  (CE-1484). With `n: integer`, `g(c: integer) -> integer { c % 7 }` and
+  `g(n^2)`, the compilation declined ("an argument of g that is not
+  integer"): `n^2` was a real in compiled code, where the interpreter types it
+  `integer<0..>`. A power of an integer by a literal integer exponent of 1 or
+  more is now an integer in compiled code, the exact product (`n^5` is
+  `(n·n)·(n·n)·n`), on JavaScript and GLSL, so `g(n^2)` at `n = 6` is 1, as
+  the interpreter gives. A value of 2^53 or more (2^24 on GLSL) is rounded, as
+  a product of integers is. A power by an exponent that is not a literal
+  (`n^m`) stays real: it is a rational at `m < 0`. The starting state of the
+  Turing patterns showcase (`seedState()`, `let CellCount = N^2`) now compiles.
+
+- **`compile()` compiles a `Loop` with no `Element` clause again** (CE-1486).
+  `Block(k := 0, Loop(Block(k := k + 1, If(3 < k, Break()))), k + x)` declined
+  in 0.194.0 ("a Loop with no Element clause"). On JavaScript it now gives 5
+  at `x = 1`, as the interpreter does: a `Break` ends the loop, and a
+  `Continue` skips the rest of a pass. With the `iterationBudget` option, each
+  pass counts, and a loop with no `Break`, such as `Loop(k := k + 1)`, throws
+  a `CancellationError` with the cause `iteration-limit-exceeded` at the end
+  of the budget. Without the option the loop has no count, as in 0.193.0. GLSL
+  and the interval mode still decline such a loop.
+
 - **`compile()` compiles a function of a point called with a list of points
   again** (CE-1477). With `P: list<tuple<real, real>>` and `f` declared
   `(tuple<number, number>) -> tuple<number, number>`,

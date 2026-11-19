@@ -386,11 +386,16 @@ describe('IR slice: exact integers', () => {
     exact(['Sum', 'k', ['Limits', 'k', 1, 'n']], { n: -5 }, 0);
     exact(['Product', 'k', ['Limits', 'k', 1, 'n']], { n: 0 }, 1);
   });
-  test('Power is on the real lane, and a small integer exponent is a product', () => {
-    const p = sliceProgram(ce.box(['Power', 'n', 16] as never), {
-      target: 'javascript',
-    });
-    expect(p.types[p.functions[0].body.yields[0]].lane).toBe('real');
+  test('Power is on the real lane, an integer power is an integer, and a small integer exponent is a product', () => {
+    const lane = (json: Json) => {
+      const p = sliceProgram(ce.box(json as never), { target: 'javascript' });
+      return p.types[p.functions[0].body.yields[0]].lane;
+    };
+    // `n^16` is an integer for the interpreter, `n^m` a rational at
+    // `m < 0` (CE-1484).
+    expect(lane(['Power', 'n', 16])).toBe('integer');
+    expect(lane(['Power', 'n', 'm'])).toBe('real');
+    expect(lane(['Power', 'x', 2])).toBe('real');
     expect(js(['Power', 'n', 3]).code).not.toMatch(/pow/);
     // x^(1+1): the closed exponent is 2, then strength reduction.
     expect(js(['Power', 'x', ['Add', 1, 1]]).code).not.toMatch(/pow/);

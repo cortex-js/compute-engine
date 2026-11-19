@@ -1381,6 +1381,26 @@ function lowerOnce(
         // (`realPowerBranchTerms()`), `pow.branch` over a base that can be
         // negative when its `q` is odd, `pow.principal` otherwise; a power
         // by the unmarked constant 2 is `square`.
+        //
+        // Elsewhere, a scalar base on the integer lane to a literal exponent
+        // `>= 1` is the product by squaring on the integer lane, as
+        // `Multiply` (exact below 2^53, 2^24 on GLSL): an integer to such a
+        // power is an integer, whatever the engine's type of the base (a
+        // local `c` of `let c = n^2` is `number` there); the bigint mode
+        // has `pow.int`.
+        const m = interval || bigint ? undefined : literalExponent(e);
+        if (m !== undefined) {
+          const x = value(e.ops[0])!;
+          if (type(x).lane !== 'integer' || type(x).shape.length > 0)
+            return apply(e, 'Power', [x, value(e.ops[1])!]);
+          const power = (k: number): V => {
+            if (k === 1) return x;
+            if (k % 2 === 1) return apply(e, 'Multiply', [power(k - 1), x]);
+            const y = power(k / 2);
+            return apply(e, 'Multiply', [y, y]);
+          };
+          return power(m);
+        }
         const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
         const float =
           !interval || nv === undefined
@@ -3323,13 +3343,18 @@ function lowerOnce(
   };
 
   /** The engine type of the first read of `name` in `xs` that has one, or
-   *  `real` when `xs` holds a `Power`, which lowers to a real where the
-   *  engine type is `integer` (`i^2`). */
+   *  `real` when `xs` holds a `Power`, which can lower to a real where the
+   *  engine type is `integer` (`i^2` of an `i` on the real lane). */
   const readType = (xs: readonly Expression[], name: string): Type => {
     let t: Type = 'unknown';
     const power = (x: Expression): boolean => {
       if (t === 'unknown' && isSymbol(x, name)) t = x.type.type;
-      return isFunction(x) && (x.operator === 'Power' || x.ops.some(power));
+      // An integer power (`integerPower()`) stays on the integer lane.
+      return (
+        isFunction(x) &&
+        ((x.operator === 'Power' && integerPower(x) === undefined) ||
+          x.ops.some(power))
+      );
     };
     return xs.some(power) ? 'real' : t;
   };
@@ -3546,10 +3571,14 @@ function lowerOnce(
    *  pass is a pass of the `iterationBudget` (`passes`). A `Break` sets the
    *  carried flag `DONE`, the `exit` of every clause; a `Break` or a
    *  `Continue` sets `SKIP` (`DONE` itself when there is no `Continue`),
-   *  under which `block()` skips the rest of the pass. */
+   *  under which `block()` skips the rest of the pass. `Loop(body)`, with
+   *  no clause, is one counted loop of 2^53 passes whose `exit` is `DONE`
+   *  (JavaScript only): a `Break` or the `iterationBudget` ends it. */
   const loop = (e: Fn, want: boolean): undefined => {
     if (want) decline(e, 'the value of a Loop (Nothing)');
-    if (e.nops < 2) decline(e, 'a Loop with no Element clause');
+    const bare = e.nops === 1;
+    if (bare && (interval || !options.javascript))
+      decline(e, 'a Loop with no Element clause (JavaScript only)');
     const heads = jumps(e.ops[0]);
     if (heads & 4)
       decline(e, 'a Break or a Continue in a function literal in a Loop');
@@ -3558,13 +3587,28 @@ function lowerOnce(
       lane: 'boolean',
       role: 'local',
     });
-    const done = heads & 1 ? flag() : undefined;
+    const done = heads & 1 || bare ? flag() : undefined;
     const carried = [...facts(e).writes].flatMap((n) => {
       const x = lookup(n);
       return x?.binding.role === 'local' && !x.outer ? [x.binding] : [];
     });
     if (done) carried.push(done);
     const exit = done ? { exit: carried.length - 1 } : {};
+    /** A counted loop from `lo` to `hi` whose pass runs `pass(k)` of its
+     *  index `k`, the carried values bound to the parameters. */
+    const counted = (lo: V, hi: V, pass: (k: V) => void): void => {
+      const init = carried.map((x) => widen(x.v, x.lane!));
+      const k = b.newValue(scalarType('integer'));
+      const params = carried.map((x) => b.newValue(scalarType(x.lane!)));
+      const body = b.region([k, ...params], () => {
+        carried.forEach((x, i) => (x.v = params[i]));
+        pass(k);
+        return carried.map((x) => x.v);
+      });
+      const outs = params.map((v) => b.newValue(type(v)));
+      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true, ...exit });
+      carried.forEach((x, i) => (x.v = outs[i]));
+    };
     const clause = (j: number): void => {
       if (j === e.nops)
         return withFrame(false, (frame) => {
@@ -3582,11 +3626,7 @@ function lowerOnce(
       const s = lists.source(c.ops[1]);
       const lo = b.constant(0, 'integer');
       const hi = apply(c, 'Subtract', [s.length, b.constant(1, 'integer')]);
-      const init = carried.map((x) => widen(x.v, x.lane!));
-      const k = b.newValue(scalarType('integer'));
-      const params = carried.map((x) => b.newValue(scalarType(x.lane!)));
-      const body = b.region([k, ...params], () => {
-        carried.forEach((x, i) => (x.v = params[i]));
+      counted(lo, hi, (k) =>
         withFrame(false, (frame) => {
           // `for (p, q) in L` of a list of points binds each name to an
           // element of the point (`destructure()`).
@@ -3597,14 +3637,16 @@ function lowerOnce(
             for (const [n, v] of destructure(c, index, x))
               frame.names.set(n, { v, role: 'index' });
           clause(j + 1);
-        });
-        return carried.map((x) => x.v);
-      });
-      const outs = params.map((v) => b.newValue(type(v)));
-      b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true, ...exit });
-      carried.forEach((x, i) => (x.v = outs[i]));
+        })
+      );
     };
-    clause(1);
+    if (bare)
+      counted(
+        b.constant(0, 'integer'),
+        b.constant(2 ** 53 - 1, 'integer'),
+        () => clause(1)
+      );
+    else clause(1);
     return undefined;
   };
 
@@ -4418,6 +4460,27 @@ function numberKey(nv: number | NumericValue): string | undefined {
   if (nv instanceof ExactNumericValue)
     return `q${q(nv.rational)}r${nv.radical},${q(nv.imRational)}r${nv.imRadical}`;
   return undefined;
+}
+
+/** The exponent of `x` when it is a `Power` of a literal integer exponent
+ *  `>= 1` that the engine types `integer` (`n^2` of an integer `n` is
+ *  `integer<0..>`), or `undefined`. */
+function integerPower(x: Expression): number | undefined {
+  const k = literalExponent(x);
+  return k !== undefined && isSubtype(x.type.type, 'integer') ? k : undefined;
+}
+
+/** The exponent of `x` when it is a `Power` of a literal safe integer
+ *  exponent `>= 1`, or `undefined`. */
+function literalExponent(x: Expression): number | undefined {
+  if (!isFunction(x, 'Power') || x.nops !== 2) return undefined;
+  const k = x.ops[1];
+  return isNumber(k) &&
+    k.isInteger === true &&
+    Number.isSafeInteger(k.re) &&
+    k.re >= 1
+    ? k.re
+    : undefined;
 }
 
 /**
