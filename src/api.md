@@ -1326,6 +1326,30 @@ ce.number({ re: 2.5, im: 3 }).isExact;
 number(value, options?): Expression
 ```
 
+Create a number literal.
+
+A JavaScript `number` that is a safe integer (`Number.isSafeInteger()`,
+at most `2^53 − 1` in magnitude) is an exact integer. Any other
+`number` is a float. Above machine precision a float holds its shortest
+decimal, the digits `String(x)` prints, not the exact binary value of
+the double: `ce.number(0.1)` is the decimal `0.1`, and
+`ce.number(2 ** 60)` is `1152921504606847000`, not
+`1152921504606846976`. At machine precision a float is the double.
+
+An integer beyond `2^53 − 1` is exact when it is given as a `bigint` or
+as a string of digits.
+
+```js
+ce.number(2 ** 60).isExact;
+// ➔ false
+ce.box(['Remainder', 2 ** 60, 7]).evaluate();
+// ➔ -3 (the remainder of 1152921504606847000)
+ce.function('Remainder', [ce.number(2n ** 60n), ce.number(7)]).evaluate();
+// ➔ 1
+ce.number('1152921504606846976').isExact;
+// ➔ true
+```
+
 ####### value
 
   \| `string`
@@ -13927,6 +13951,30 @@ ce.number({ re: 2.5, im: 3 }).isExact;
 
 ```ts
 number(value, options?): Expression
+```
+
+Create a number literal.
+
+A JavaScript `number` that is a safe integer (`Number.isSafeInteger()`,
+at most `2^53 − 1` in magnitude) is an exact integer. Any other
+`number` is a float. Above machine precision a float holds its shortest
+decimal, the digits `String(x)` prints, not the exact binary value of
+the double: `ce.number(0.1)` is the decimal `0.1`, and
+`ce.number(2 ** 60)` is `1152921504606847000`, not
+`1152921504606846976`. At machine precision a float is the double.
+
+An integer beyond `2^53 − 1` is exact when it is given as a `bigint` or
+as a string of digits.
+
+```js
+ce.number(2 ** 60).isExact;
+// ➔ false
+ce.box(['Remainder', 2 ** 60, 7]).evaluate();
+// ➔ -3 (the remainder of 1152921504606847000)
+ce.function('Remainder', [ce.number(2n ** 60n), ce.number(7)]).evaluate();
+// ➔ 1
+ce.number('1152921504606846976').isExact;
+// ➔ true
 ```
 
 ####### value

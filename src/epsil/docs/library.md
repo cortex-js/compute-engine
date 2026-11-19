@@ -874,7 +874,7 @@ The [Units reference](/epsil/reference/units/) has the full description and the 
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `isCompatibleUnit` | `IsCompatibleUnit` | `(value, value) -> value` | Check if two units have the same dimension |
+| `isCompatibleUnit` | `IsCompatibleUnit` | `(value, value) -> value` | Check if two units have the same dimension and convert into each other (`dB` and `Np` do, `dB` and `percent` do not) |
 | `quantity` | `Quantity` | `(value, value) -> quantity` | A value paired with a physical unit |
 | `quantityMagnitude` | `QuantityMagnitude` | `(value) -> value` | Extract the numeric value from a quantity |
 | `quantityUnit` | `QuantityUnit` | `(value) -> value` | Extract the unit from a quantity |
