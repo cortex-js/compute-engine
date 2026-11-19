@@ -221,6 +221,26 @@ const CONSTRUCTS = new Set([
   'Dot',
   'Norm',
 ]);
+/** The heads of a body of draws over literals that a held value folds
+ *  under a number as the seed (`seededConstant()`; CE-1524, option (a)). */
+const SEEDED_CONSTANT_HEADS = new Set([
+  'Random',
+  'RandomChoice',
+  'RandomSample',
+  'List',
+  'Range',
+  'Interval',
+  'Open',
+  'Tuple',
+]);
+/** `x` is a list, at any depth, of finite real numbers. */
+const finiteReals = (x: Expression): boolean =>
+  isFunction(x, 'List') &&
+  x.ops.every(
+    (op) =>
+      finiteReals(op) ||
+      (isNumber(op) && op.im === 0 && Number.isFinite(op.re))
+  );
 /** The colour conversions, which read a tuple of three numbers as sRGB. */
 const COLOR_CONVERSIONS = new Set([
   'AsRgb',
@@ -2577,7 +2597,7 @@ function lowerOnce(
     expanding.add(name);
     let x: V;
     try {
-      x = value(v)!;
+      x = value(seededValue(v) ?? v)!;
     } finally {
       expanding.delete(name);
     }
@@ -3093,6 +3113,98 @@ function lowerOnce(
       ...(pieces === undefined ? {} : { pieces }),
     });
     return outs;
+  };
+
+  /** `x` is draws over literals: each node is a number, a constant of the
+   *  library, or a call of the library's definition of a head of
+   *  `SEEDED_CONSTANT_HEADS` (no user function of that name, no host compile
+   *  handler), whose draws and `Range`s make at most
+   *  `MAX_FOLD_EXPANDED_NODES` elements in all, by literal counts. It reads
+   *  no name with a value (which a host can supply at run time through
+   *  `vars`), no user function and no other effect, so under a constant
+   *  seed its value is the same at every call, and its evaluation at compile
+   *  time is bounded. */
+  const seededConstant = (x: Expression): boolean => {
+    if (size(x) > MAX_FOLD_EXPANDED_NODES) return false;
+    // The elements that `N()` makes, summed over the whole body: a draw
+    // makes its literal count (one with no count), a `Range` its length.
+    // The walk has no memo: `size()` bounds the tree, and a shared node is
+    // evaluated once per occurrence.
+    let made = 0;
+    const num = (b: Expression | number) =>
+      typeof b === 'number' ? b : isNumber(b) && b.im === 0 ? b.re : NaN;
+    const elements = (y: Fn): number => {
+      if (y.operator === 'Random') return 1;
+      if (y.operator === 'RandomChoice' || y.operator === 'RandomSample')
+        return y.nops < 2 ? 1 : num(y.ops[1]);
+      if (y.operator !== 'Range') return 0;
+      const [lo, hi, step] =
+        y.nops === 1 ? [1, y.ops[0], 1] : [y.ops[0], y.ops[1], y.ops[2] ?? 1];
+      return Math.max(0, Math.floor((num(hi) - num(lo)) / num(step)) + 1);
+    };
+    const constant = (y: Expression): boolean => {
+      // Only a constant of the library (`Pi`), not shadowed: a declared
+      // constant can hold a value that reads a variable, and a name of
+      // `vars` is an input.
+      if (isSymbol(y))
+        return (
+          CONSTANTS.has(y.symbol) &&
+          !options.vars?.includes(y.symbol) &&
+          !isShadowedSymbol(y as never) &&
+          held(y.symbol)?.library === true
+        );
+      if (isNumber(y)) return true;
+      if (!isFunction(y) || !SEEDED_CONSTANT_HEADS.has(y.operator))
+        return false;
+      // The library's definition of the head: not a user function of the
+      // same name, and no host compile handler.
+      if (!isLibrary(y)) return false;
+      made += elements(y);
+      if (!(made <= MAX_FOLD_EXPANDED_NODES)) return false;
+      return y.ops.every(constant);
+    };
+    return constant(x);
+  };
+
+  /** The interpreter's value of the held value `v`, a literal, when `v` is
+   *  draws under a number as the seed that read no variable and have no
+   *  other effect (`seededConstant()`): `a := WithRandomSeed(7,
+   *  RandomChoice([0, 1), 3))`, a seeded list of Desmos (CE-1524), is the
+   *  same at every call. A finite real, or a list of them. */
+  const seededValues = new WeakMap<Expression, Expression | null>();
+  const seededValue = (v: Expression): Expression | undefined => {
+    let r = seededValues.get(v);
+    if (r === undefined) {
+      r = seededFold(v) ?? null;
+      seededValues.set(v, r);
+    }
+    return r ?? undefined;
+  };
+  const seededFold = (v: Expression): Expression | undefined => {
+    if (
+      options.fold === false ||
+      bigint ||
+      interval ||
+      !isFunction(v, 'WithRandomSeed') ||
+      v.nops !== 2 ||
+      !isNumber(v.ops[0]) ||
+      !isLibrary(v) ||
+      !seededConstant(v.ops[1])
+    )
+      return undefined;
+    // An evaluation that throws (not a cancellation) keeps the frame.
+    let n: Expression | undefined;
+    try {
+      n = v.N();
+    } catch (error) {
+      if (error instanceof Error && error.name === 'CancellationError')
+        throw error;
+      return undefined;
+    }
+    if (isNumber(n) && n.im === 0 && Number.isFinite(n.re)) return n;
+    return size(n) <= MAX_FOLD_EXPANDED_NODES && finiteReals(n)
+      ? n
+      : undefined;
   };
 
   /** A region run in a new random frame of `seed`: a binding that it

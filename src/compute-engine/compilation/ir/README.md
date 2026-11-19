@@ -1947,7 +1947,16 @@ GLSL too (not in the `bigint` and interval modes, not with
 `constantFold: false`, and not when a host's handler answers for the frame or
 the draw). A seed that is not a number literal
 (`WithRandomSeed(Random(), Random())` draws its seed from the frame around it)
-and any other body keep the frame:
+and any other body keep the frame. The held value of a name is the exception
+(`expression()` of `lower.ts`), since it declines with an effect: under a number
+as the seed, draws over literals (the library's `Random`, `RandomChoice`,
+`RandomSample`, `List`, `Range`, `Interval`, `Open` and `Tuple`, numbers and
+the library's constants, with a literal count of a draw or a `Range` of at most
+`MAX_FOLD_EXPANDED_NODES`), such as `a := WithRandomSeed(7, RandomChoice([0, 1),
+3))`, a seeded list of Desmos, give their interpreter value as a literal, a real
+or a list of reals, under the same conditions. A held value that reads another
+name or calls a user function still declines: a host can supply that name at
+run time. Otherwise:
 
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful

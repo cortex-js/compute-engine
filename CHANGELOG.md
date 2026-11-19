@@ -55,6 +55,13 @@
   and NaN where the interpreter leaves the call unevaluated (a point that is
   not finite, a count that is not positive). The `interval-js` target still
   declines them: it has no complex numbers.
+- **An expression that reads a seeded random list compiles again.** With
+  `a := WithRandomSeed(7, RandomChoice([0, 1), 3))`, compiling `x + Min(a)`
+  declined since 0.194.0 ("the value of a, which has an effect"). Draws over
+  literals under a number as the seed are the same at every evaluation, so the
+  compiled code now holds their values, the interpreter's, on `javascript` and
+  `glsl`. A seeded value that reads a variable or calls a user function still
+  declines.
 - **The `iterationBudget` of `compile()` stops a loop of more than 2^32
   passes.** On the `javascript` target, such a loop threw a `RangeError` ("a
   loop of more than 2^32 iterations") before its first pass, where the budget
