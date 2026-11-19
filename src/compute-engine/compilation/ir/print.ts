@@ -106,14 +106,17 @@ export type Syntax = {
    *  iteration budget counts. `done`: the name of the flag of the loop's
    *  `exit`; no pass runs once it is true. `window`: the texts of the first
    *  and the end pass count of the loop's `window` (JavaScript only); `hi`
-   *  is then not read. */
+   *  is then not read. `counted`: a pass counter of an iteration budget
+   *  below 2^32 bounds the loop, so its length needs no bound (JavaScript
+   *  only). */
   loopOpen(
     k: string,
     lo: string,
     hi: string,
     passes: boolean,
     done?: string,
-    window?: readonly [string, string]
+    window?: readonly [string, string],
+    counted?: boolean
   ): string[];
   /** The return of the array of `values` (an entry `tuple`). Absent: the
    *  target declines such an entry. */

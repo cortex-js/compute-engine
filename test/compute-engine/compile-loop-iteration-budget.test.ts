@@ -85,11 +85,16 @@ const lambda = () =>
   ] as any);
 
 describe('COMPILE Loop - iterationBudget on the JavaScript target', () => {
-  // The pipeline refuses a counted loop of more than 2^32 passes with a
-  // RangeError before the first pass.
+  // A budget below 2^32 stops a counted loop of more than 2^32 passes with
+  // its cancellation, as any loop past the budget (CE-1525).
   test('a range of 1..1e12 stops', () => {
     const { run } = js(hugeRange(), { iterationBudget: 1000 });
-    expect(() => run!({})).toThrow(RangeError);
+    expect(() => run!({})).toThrow(
+      expect.objectContaining({
+        name: 'CancellationError',
+        cause: 'iteration-limit-exceeded',
+      })
+    );
   });
 
   test.each([
@@ -409,5 +414,35 @@ describe('COMPILE Loop - iterationBudget on the other targets', () => {
           ...options,
         } as any)
       ).toThrow(/the value of a Loop/);
+  });
+});
+
+describe('COMPILE Loop - a counted loop of 2^32 passes or more (CE-1525)', () => {
+  // A budget below 2^32 throws its cancellation before the 2^32nd pass, so
+  // the loop has no test of its length; a budget of 2^32 or more keeps it.
+  const passes = (n: number, budget: number) => {
+    const { run } = js(counting(inc, ['Element', 'i', ['Range', 1, n]]), {
+      iterationBudget: budget,
+    });
+    try {
+      return run!({});
+    } catch (e: any) {
+      return e.name === 'CancellationError' ? e.cause : e.message;
+    }
+  };
+
+  test.each([1e7, 1e12, 2 ** 53])(
+    'a loop of %d passes stops on a budget of 1e6',
+    (n) => {
+      expect(passes(n, 1e6)).toBe('iteration-limit-exceeded');
+    }
+  );
+
+  test('a loop within the budget runs', () => {
+    expect(passes(1000, 1e6)).toBe(1000);
+  });
+
+  test('a budget of 2^32 or more keeps the guard of the length', () => {
+    expect(passes(1e12, 2 ** 33)).toMatch(/a loop of more than 2\^32/);
   });
 });

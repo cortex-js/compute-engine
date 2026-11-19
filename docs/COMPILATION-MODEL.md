@@ -1888,10 +1888,14 @@ indexing set declines there.
   runs all of its elements.
 - A helper of the runtime over a list that exists is finite, and one long call
   inside a pass is not interrupted.
-- On the JavaScript target, a for-each over a `Range` of more than 2^32 elements
-  throws a `RangeError` before its first pass, with or without the option. A
-  counted loop over a literal range of that size has no such test, and the limit
-  stops it.
+- On the JavaScript target, a `Loop` over `Element(i, Range(lo, hi))` of more
+  than 2^32 passes stops on the budget's `CancellationError` when the budget is
+  below 2^32. With a larger budget, such a loop throws a `RangeError` before its
+  first pass, or, for a loop with a `Break`, past 2^53 passes. A `Range` held as
+  a list value of more than 2^32 elements throws the `RangeError` too, with or
+  without the option. On `interval-js`, the count of a `Range` of 2^32 elements
+  or more gives `entire` before the first pass, with or without the option: the
+  mode computes no length of 2^32 or more (`_IA.rangeCount()`).
 - A call that the compiler folds at compile time runs no pass: with
   `g(n) := Block(s := 0, Loop(s := s + 1, Element(i, 1..n)), s)`, the code of
   `g(3)` is `3`, whatever the budget.

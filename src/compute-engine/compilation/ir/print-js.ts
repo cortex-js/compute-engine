@@ -114,14 +114,19 @@ const blocks = (
 /** A counted loop of `n` passes, from `lo` while the index is at most `hi`
  *  (a bound can be a real: `Floor(hi - lo) + 1` passes): the index is
  *  `lo + i` for a count `i` of the passes, so that the loop ends also where
- *  `k++` would not advance (from 2^53). */
+ *  `k++` would not advance (from 2^53). A loop that a pass budget below
+ *  2^32 bounds (`counted`) throws the budget's cancellation before the
+ *  2^32nd pass, and its index is exact, so it is refused only for a count
+ *  that is NaN: a loop of 1e12 passes stops on the budget (CE-1525). */
 const loopOpen =
   (z: Ints): Syntax['loopOpen'] =>
-  (k, lo, hi, _passes, done, window) =>
+  (k, lo, hi, _passes, done, window, counted) =>
     window === undefined
       ? [
           `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
-          guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
+          counted
+            ? `if (${k}_n !== ${k}_n) throw new RangeError('a loop of a count that is not a number');`
+            : guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
           blocks(z, `${k}_i`, `${k}_n`, done),
           `  const ${k} = ${k}_lo + ${k}_i;`,
         ]
@@ -556,7 +561,15 @@ export function printJavaScript(
       : {
           ...syntax,
           loopOpen: (k, lo, hi, passes, done, window) => [
-            ...syntax.loopOpen(k, lo, hi, passes, done, window),
+            ...syntax.loopOpen(
+              k,
+              lo,
+              hi,
+              passes,
+              done,
+              window,
+              passes && budget < 2 ** 32
+            ),
             ...(passes ? [`  _SYS.countLoopPass(${budget});`] : []),
           ],
         },

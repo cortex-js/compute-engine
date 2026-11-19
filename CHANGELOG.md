@@ -19,6 +19,21 @@
 
   The Epsil extension for VS Code offers the same items as completions.
 
+### Resolved Issues
+
+- **`Mandelbrot` and `Julia` compile again on JavaScript and GLSL.** Since
+  0.194.0, `compile()` declined them ("the operator Mandelbrot is not supported
+  by the compiler"), so a field such as `Mandelbrot(x + y·i, 256)` was computed
+  by the interpreter, point by point. The compiled value is the interpreter's,
+  and NaN where the interpreter leaves the call unevaluated (a point that is
+  not finite, a count that is not positive). The `interval-js` target still
+  declines them: it has no complex numbers.
+- **The `iterationBudget` of `compile()` stops a loop of more than 2^32
+  passes.** On the `javascript` target, such a loop threw a `RangeError` ("a
+  loop of more than 2^32 iterations") before its first pass, where the budget
+  throws a `CancellationError` with the cause `iteration-limit-exceeded`. A
+  budget below 2^32 now throws its cancellation for every loop past it.
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes
