@@ -86,6 +86,17 @@ describe('Statements that call the hooks', () => {
     ]);
   });
 
+  test('the body of a `parallel for` calls no hook, and gives the same value', async () => {
+    // A documented limitation: the passes run in order on the synchronous
+    // route, each with its own random frame.
+    const { texts, value } = await statementsOf(
+      'let s = 0\nparallel for k in 1..4 {\n  let t = k * k\n  s += t\n}\ns'
+    );
+    expect(value).toBe('30');
+    expect(texts).not.toContain('let t = k * k');
+    expect(texts).not.toContain('s += t');
+  });
+
   test('a debugged run gives the same value as a run without hooks', async () => {
     const source =
       'let s = 0\nfor i in 1..5 {\n  for j in 1..i {\n    if (i + j) % 2 == 0 { s += j }\n  }\n}\ns';

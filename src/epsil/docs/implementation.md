@@ -280,8 +280,10 @@ A statement that the engine evaluates on the synchronous route calls no hook.
 This is the case of a statement of a function that a lazy collection applies
 when it produces an element: a function given to `map`, `filter`,
 `takeWhile`, `any`, `all` or `count`, for example, and of a function called
-in the domain of a `for` (`for x in g(3)`). A breakpoint in such a function
-does not stop the run. It is also the case of a statement that runs
+in the domain of a `for` (`for x in g(3)`). The body of a `parallel for` calls
+no hook either: the interpreter runs its passes in order, each with its own
+random frame, on the synchronous route. A breakpoint in such a body or
+function does not stop the run. It is also the case of a statement that runs
 after the run ends, when the host reads the elements of a lazy collection
 that the program returned.
 
