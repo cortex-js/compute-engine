@@ -1369,5 +1369,68 @@ await scenario(
   }
 );
 
+// ── Signature help ──────────────────────────────────────────────────────
+await scenario('signature help', undefined, async (c) => {
+  const source =
+    'function f(x: real, n: integer = 2) -> real { x }\nf(1, \nf(1, 2, 3';
+  await c.open(URI, source);
+  const help = await c.request('textDocument/signatureHelp', {
+    textDocument: { uri: URI },
+    position: { line: 1, character: 5 },
+  });
+  const signature = help?.signatures?.[0];
+  const label = signature?.label ?? '';
+  const [start, end] = signature?.parameters?.[1]?.label ?? [];
+  check(
+    'a partial call has the signature, with parameter label ranges',
+    help?.signatures.length === 1 &&
+      label === 'f(x: real, n: integer?) -> real' &&
+      label.slice(start, end) === 'n: integer?' &&
+      help.activeSignature === 0 &&
+      help.activeParameter === 1,
+    JSON.stringify(help)
+  );
+  const past = await c.request('textDocument/signatureHelp', {
+    textDocument: { uri: URI },
+    position: { line: 2, character: 9 },
+  });
+  check(
+    'an argument past the last parameter is sent past the last index',
+    past?.activeParameter === 2,
+    JSON.stringify(past)
+  );
+  const outside = await c.request('textDocument/signatureHelp', {
+    textDocument: { uri: URI },
+    position: { line: 0, character: 0 },
+  });
+  check('outside a call there is no signature help', outside === null);
+});
+
+await scenario(
+  'signature help with noActiveParameterSupport',
+  {
+    textDocument: {
+      signatureHelp: {
+        signatureInformation: { noActiveParameterSupport: true },
+      },
+    },
+  },
+  async (c) => {
+    await c.open(
+      URI,
+      'function f(x: real, n: integer = 2) -> real { x }\nf(1, 2, 3'
+    );
+    const past = await c.request('textDocument/signatureHelp', {
+      textDocument: { uri: URI },
+      position: { line: 1, character: 9 },
+    });
+    check(
+      'an argument past the last parameter is sent as null',
+      past?.signatures.length === 1 && past.activeParameter === null,
+      JSON.stringify(past)
+    );
+  }
+);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 process.exit(failures === 0 ? 0 : 1);

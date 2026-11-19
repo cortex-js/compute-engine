@@ -27,6 +27,12 @@ export type {
   EpsilCompletionItem,
   EpsilCompletions,
 } from './epsil/completion.js';
+export { epsilSignatureHelp } from './epsil/signature-help.js';
+export type {
+  EpsilSignature,
+  EpsilSignatureHelp,
+  EpsilSignatureParameter,
+} from './epsil/signature-help.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {
   canonicalLibraryName,

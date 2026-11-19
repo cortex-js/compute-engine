@@ -8,7 +8,8 @@ import {
   symbol,
 } from '../math-json/utils.js';
 import { isValidSymbol } from '../math-json/symbols.js';
-import type { Type } from '../common/type/types.js';
+import type { FunctionSignature, Type } from '../common/type/types.js';
+import { parseType } from '../common/type/parse.js';
 import { PRIMITIVE_TYPES } from '../common/type/primitive.js';
 import { typeToString } from '../common/type/serialize.js';
 
@@ -70,6 +71,9 @@ export type EpsilCompletionItem = {
   detail?: string;
   /** The first line of the library description, for a library name. */
   documentation?: string;
+  /** The paragraphs of the library description, for a library name: what
+   * the hover of the name shows. */
+  description?: string[];
   /** Smaller first: 0 fix-its, 1 likely values, 2 names of the source whose
    * type matches the expected type, 3 library names whose type matches, 4
    * other names of the source, 5 other library names, 6 keywords. */
@@ -130,7 +134,7 @@ const isWordChar = (c: number): boolean =>
   !isSubscript(c);
 
 /** A type declared by the source, with what `likelyValues` needs. */
-type SourceType =
+export type SourceType =
   | {
       kind: 'sum';
       /** `payload` is `undefined` for a variant known only from the
@@ -140,7 +144,7 @@ type SourceType =
   | { kind: 'alias' | 'nominal'; body: string };
 
 /** What the declaring node of a name says about its type. */
-type Declaration =
+export type Declaration =
   | { kind: 'value'; type: string }
   | {
       kind: 'function';
@@ -149,7 +153,15 @@ type Declaration =
       names: (string | undefined)[];
       /** Whether each parameter has a default value. */
       optional: boolean[];
+      /** Whether the last parameter is a rest parameter (`...xs`). */
+      rest: boolean;
+      /** The ascription of the body: the return type, or the full signature
+       * when the definition declares effects or type parameters. */
       result?: string;
+      /** The offset of the ascription in the source: a return type follows
+       * the `->` of the header, a full signature starts at the effects or at
+       * the type parameters. */
+      resultStart?: number;
     }
   | { kind: 'type'; detail: string }
   | { kind: 'protocol' };
@@ -160,6 +172,7 @@ type LibraryEntry = {
   kind: 'library-function' | 'library-constant';
   detail?: string;
   documentation?: string;
+  description?: string[];
   /** The result type of a function, the type of a constant. */
   type?: Type;
 };
@@ -190,24 +203,7 @@ export function epsilCompletions(
   }
 ): EpsilCompletions {
   offset = Math.max(0, Math.min(offset, source.length));
-  // The word is scanned by code point (`𝑥` is two UTF-16 units), the
-  // offsets stay UTF-16 offsets.
-  let start = offset;
-  while (start > 0) {
-    const pair = source.slice(Math.max(0, start - 2), start);
-    const char =
-      pair.length === 2 && pair.codePointAt(0)! > 0xffff
-        ? pair
-        : source[start - 1];
-    if (!isWordChar(char.codePointAt(0)!)) break;
-    start -= char.length;
-  }
-  let end = offset;
-  while (end < source.length) {
-    const char = String.fromCodePoint(source.codePointAt(end)!);
-    if (!isWordChar(char.codePointAt(0)!)) break;
-    end += char.length;
-  }
+  let [start, end] = wordAt(source, offset);
   const tokens = tokenize(source);
   // A word typed after an opening backtick (`` `wh▮ ``) is a verbatim name:
   // the range covers the backtick, and the items match the text after it.
@@ -218,8 +214,7 @@ export function epsilCompletions(
     if (t.type !== 'VERBATIM_SYMBOL' || t.start >= offset) return false;
     if (/[\n\r\u2028\u2029]/.test(source.slice(t.start, offset))) return false;
     const unclosed = t.diagnostics?.some(
-      (d) =>
-        (typeof d === 'string' ? d : d[0]) === 'unbalanced-verbatim-symbol'
+      (d) => (typeof d === 'string' ? d : d[0]) === 'unbalanced-verbatim-symbol'
     );
     return unclosed ? offset <= t.end : offset < t.end;
   });
@@ -241,22 +236,7 @@ export function epsilCompletions(
     return { range, replaceEnd, items: [] };
   const before = tokens.filter((t) => t.type !== 'EOF' && t.end <= start);
 
-  // The hole: the whole word under the offset becomes the placeholder, so
-  // that the rest of a word does not glue to it.
-  let placeholder = 'completionHole';
-  for (let i = 1; source.includes(placeholder); i += 1)
-    placeholder = `completionHole${i}`;
-  const text = source.slice(0, start) + placeholder + source.slice(end);
-  let ast: MathJsonExpression | null = null;
-  try {
-    [ast] = parseEpsil(text, undefined, {
-      typeNames: options?.typeNames,
-      protocolNames: options?.protocolNames,
-      sumVariants: options?.sumVariants,
-    });
-  } catch {
-    // A `#error` pragma throws: complete with no tree.
-  }
+  const { text, placeholder, ast } = parseWithHole(source, start, end, options);
   const groups = documentBindings(ast, text);
   const declarations = collectDeclarations(ast);
   const sourceTypes = collectSourceTypes(ast, options?.sumVariants);
@@ -308,15 +288,7 @@ export function epsilCompletions(
           operator(path.nodes[path.nodes.length - 2])
         );
 
-  // The innermost binding of each name visible at the offset.
-  const visible = new Map<string, BindingGroup>();
-  for (const group of groups) {
-    if (group.kind === 'free' || group.name === placeholder) continue;
-    if (!isNameVisibleAt([group], group.name, start)) continue;
-    const known = visible.get(group.name);
-    if (known === undefined || group.scope[0] >= known.scope[0])
-      visible.set(group.name, group);
-  }
+  const visible = visibleBindings(groups, placeholder, start);
 
   const context: Context = {
     ce,
@@ -341,6 +313,10 @@ export function epsilCompletions(
 
   // 2. Names of the source visible at the offset.
   const textLength = text.length;
+  const typeNames = new Set([
+    ...(options?.typeNames ?? []),
+    ...sourceTypes.keys(),
+  ]);
   for (const group of visible.values()) {
     const declaration = declarationOf(group, declarations);
     const kind: EpsilCompletionItem['kind'] =
@@ -353,13 +329,16 @@ export function epsilCompletions(
     let type: string | undefined;
     if (declaration?.kind === 'value') detail = type = declaration.type;
     else if (declaration?.kind === 'function') {
-      detail = `(${declaration.params
+      const { params, tail, result } = functionSignatureParts(
+        ce,
+        declaration,
+        text,
+        typeNames
+      );
+      detail = `(${params
         .map((p, i) => (p ?? 'any') + (declaration.optional[i] ? '?' : ''))
-        .join(', ')})`;
-      if (declaration.result !== undefined) {
-        detail += ` -> ${declaration.result}`;
-        type = declaration.result;
-      }
+        .join(', ')})${tail}`;
+      type = result;
     } else if (declaration?.kind === 'type') detail = declaration.detail;
     const matches =
       expectedType !== undefined &&
@@ -422,6 +401,9 @@ export function epsilCompletions(
       ...(entry.documentation === undefined
         ? {}
         : { documentation: entry.documentation }),
+      ...(entry.description === undefined
+        ? {}
+        : { description: entry.description }),
     });
   }
 
@@ -441,6 +423,78 @@ export function epsilCompletions(
     ...(expectedType === undefined ? {} : { expectedType }),
     items: finish(items, prefix),
   };
+}
+
+/** The word under `offset`, as `[start, end]`: the word is scanned by code
+ * point (`𝑥` is two UTF-16 units), the offsets stay UTF-16 offsets. */
+export function wordAt(source: string, offset: number): [number, number] {
+  let start = offset;
+  while (start > 0) {
+    const pair = source.slice(Math.max(0, start - 2), start);
+    const char =
+      pair.length === 2 && pair.codePointAt(0)! > 0xffff
+        ? pair
+        : source[start - 1];
+    if (!isWordChar(char.codePointAt(0)!)) break;
+    start -= char.length;
+  }
+  let end = offset;
+  while (end < source.length) {
+    const char = String.fromCodePoint(source.codePointAt(end)!);
+    if (!isWordChar(char.codePointAt(0)!)) break;
+    end += char.length;
+  }
+  return [start, end];
+}
+
+/** The source with the hole: `[start, end]` (the whole word under the
+ * offset, so that the rest of a word does not glue to the placeholder)
+ * replaced by a placeholder name that does not occur in the source, and its
+ * raw parse, or `null` when the parse throws. */
+export function parseWithHole(
+  source: string,
+  start: number,
+  end: number,
+  options:
+    | {
+        typeNames?: readonly string[];
+        protocolNames?: readonly string[];
+        sumVariants?: Readonly<Record<string, string>>;
+      }
+    | undefined
+): { text: string; placeholder: string; ast: MathJsonExpression | null } {
+  let placeholder = 'completionHole';
+  for (let i = 1; source.includes(placeholder); i += 1)
+    placeholder = `completionHole${i}`;
+  const text = source.slice(0, start) + placeholder + source.slice(end);
+  let ast: MathJsonExpression | null = null;
+  try {
+    [ast] = parseEpsil(text, undefined, {
+      typeNames: options?.typeNames,
+      protocolNames: options?.protocolNames,
+      sumVariants: options?.sumVariants,
+    });
+  } catch {
+    // A `#error` pragma throws: no tree.
+  }
+  return { text, placeholder, ast };
+}
+
+/** The innermost binding of each name visible at `start`. */
+export function visibleBindings(
+  groups: readonly BindingGroup[],
+  placeholder: string,
+  start: number
+): Map<string, BindingGroup> {
+  const visible = new Map<string, BindingGroup>();
+  for (const group of groups) {
+    if (group.kind === 'free' || group.name === placeholder) continue;
+    if (!isNameVisibleAt([group], group.name, start)) continue;
+    const known = visible.get(group.name);
+    if (known === undefined || group.scope[0] >= known.scope[0])
+      visible.set(group.name, group);
+  }
+  return visible;
 }
 
 /** Keep the items that match `prefix`, sort them and drop the sort tier. */
@@ -470,7 +524,7 @@ function finish(
 }
 
 /** Whether `start` is inside a string, a LaTeX island or a comment. */
-function insideLiteralOrComment(
+export function insideLiteralOrComment(
   source: string,
   tokens: readonly Token[],
   start: number
@@ -602,11 +656,16 @@ function openingParen(before: readonly Token[], i: number): number {
   return -1;
 }
 
-/** Whether the `(` at `paren` opens the parameters of `function name(`. */
-function isFunctionHeader(before: readonly Token[], paren: number): boolean {
+/** Whether the `(` at `paren` opens the parameters of `function name(`. As
+ * in the parser, the name may be verbatim. */
+export function isFunctionHeader(
+  before: readonly Token[],
+  paren: number
+): boolean {
   return (
     paren >= 2 &&
-    before[paren - 1].type === 'SYMBOL' &&
+    (before[paren - 1].type === 'SYMBOL' ||
+      before[paren - 1].type === 'VERBATIM_SYMBOL') &&
     before[paren - 2].type === 'SYMBOL' &&
     before[paren - 2].text === 'function'
   );
@@ -638,9 +697,9 @@ function isStatementStart(
 
 /** The path from the root to the placeholder: `nodes[k]` is operand
  * `indices[k]` (zero-based, the head not counted) of `nodes[k - 1]`. */
-type HolePath = { nodes: MathJsonExpression[]; indices: number[] };
+export type HolePath = { nodes: MathJsonExpression[]; indices: number[] };
 
-function findHole(
+export function findHole(
   ast: MathJsonExpression | null,
   placeholder: string,
   start: number
@@ -662,7 +721,9 @@ function findHole(
   return visit(ast, -1) ? { nodes, indices } : undefined;
 }
 
-function spanOf(node: MathJsonExpression | null): [number, number] | undefined {
+export function spanOf(
+  node: MathJsonExpression | null
+): [number, number] | undefined {
   return typeof node === 'object' && node !== null && !Array.isArray(node)
     ? (node as { sourceOffsets?: [number, number] }).sourceOffsets
     : undefined;
@@ -797,9 +858,7 @@ function likelyValues(
             ? t.elements.map((e) => typeToString(e.type))
             : [p];
         });
-        const args = payload.map(
-          (p) => likelyValues(context, p, depth + 1)[0]
-        );
+        const args = payload.map((p) => likelyValues(context, p, depth + 1)[0]);
         if (args.every((a) => a !== undefined))
           values.push(`${variant.name}(${args.join(', ')})`);
       }
@@ -874,9 +933,40 @@ function valuesOfType(context: Context, type: Type, depth: number): string[] {
 
 /** A type string parsed by the engine, or `undefined` when it does not
  * parse (a type of the source that the engine does not know). */
-function parseTypeString(ce: ComputeEngine, text: string): Type | undefined {
+export function parseTypeString(
+  ce: ComputeEngine,
+  text: string
+): Type | undefined {
   try {
     return ce.type(text).type;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A type of the source: parsed by the engine, or else with the names of
+ * `typeNames` (the types the source declares and those of the `typeNames`
+ * option, which the engine does not know) resolved to a reference by name,
+ * as in the parser. A reference with type arguments (`Box<real>`) does not
+ * parse: the reference does not record the type parameters. */
+export function parseSourceType(
+  ce: ComputeEngine,
+  text: string,
+  typeNames: ReadonlySet<string>
+): Type | undefined {
+  const type = parseTypeString(ce, text);
+  if (type !== undefined || typeNames.size === 0) return type;
+  try {
+    return parseType(text, {
+      get names(): string[] {
+        return [...typeNames];
+      },
+      forward: () => undefined,
+      resolve: (name) =>
+        typeNames.has(name)
+          ? { kind: 'reference', name, alias: false, def: undefined }
+          : undefined,
+    });
   } catch {
     return undefined;
   }
@@ -897,9 +987,76 @@ function typeMatches(
   }
 }
 
+/** The ascription of a `function` definition when it is a full signature
+ * (the definition declares effects or type parameters), not a return type:
+ * a return type follows the `->` of the header in `text`. `null` for a full
+ * signature that does not parse (a reference with type arguments to a type
+ * of the source): it is not a return type either. */
+function fullSignature(
+  ce: ComputeEngine,
+  declaration: Extract<Declaration, { kind: 'function' }>,
+  text: string,
+  typeNames: ReadonlySet<string>
+): FunctionSignature | null | undefined {
+  const { result, resultStart } = declaration;
+  if (result === undefined || resultStart === undefined) return undefined;
+  const before = tokenize(text).filter(
+    (t) => t.type !== 'EOF' && t.end <= resultStart
+  );
+  const arrow = before[before.length - 1];
+  if (arrow?.type === 'OPERATOR' && arrow.text === '->') return undefined;
+  const type = parseSourceType(ce, result, typeNames);
+  return typeof type === 'object' && type.kind === 'signature' ? type : null;
+}
+
+/** The parameter types of a `function` declaration, the text after its
+ * parameter list (`-> real`, or the effects, the result and the `where`
+ * clause of a full signature: ` pure -> real`) and its result type. A
+ * parameter of a full signature typed `unknown` has no declared type; a rest
+ * parameter, always last, has no slot in it (its tail is `any*`). A full
+ * signature that does not parse gives the parameters of the header and no
+ * tail or result. `typeNames` are the types of the source and of the
+ * `typeNames` option (see `parseSourceType`). */
+export function functionSignatureParts(
+  ce: ComputeEngine,
+  declaration: Extract<Declaration, { kind: 'function' }>,
+  text: string,
+  typeNames: ReadonlySet<string>
+): { params: (string | undefined)[]; tail: string; result?: string } {
+  const signature = fullSignature(ce, declaration, text, typeNames);
+  if (signature === null) return { params: declaration.params, tail: '' };
+  if (signature === undefined)
+    return {
+      params: declaration.params,
+      tail: declaration.result === undefined ? '' : ` -> ${declaration.result}`,
+      ...(declaration.result === undefined
+        ? {}
+        : { result: declaration.result }),
+    };
+  const elements = [...(signature.args ?? []), ...(signature.optArgs ?? [])];
+  const params = declaration.params.map((type, i) => {
+    const t = elements[i]?.type;
+    return t === undefined || t === 'unknown' ? type : typeToString(t);
+  });
+  // The serialization of the signature with no parameters, after the `()`.
+  const {
+    args: _args,
+    optArgs: _optArgs,
+    variadicArg: _variadicArg,
+    variadicMin: _variadicMin,
+    ...rest
+  } = signature;
+  const result = typeToString(signature.result);
+  return {
+    params,
+    tail: typeToString(rest).slice(2),
+    ...(result === 'unknown' ? {} : { result }),
+  };
+}
+
 /** The declaration of a binding: the one recorded at its first definition
  * occurrence. */
-function declarationOf(
+export function declarationOf(
   group: BindingGroup,
   declarations: ReadonlyMap<number, Declaration>
 ): Declaration | undefined {
@@ -912,7 +1069,7 @@ function declarationOf(
 /** What the source declares about each name, keyed by the start offset of
  * the name in its declaration: the type of a `let` or of a parameter, the
  * parameter and result types of a `function`, the body of a `type`. */
-function collectDeclarations(
+export function collectDeclarations(
   ast: MathJsonExpression | null
 ): Map<number, Declaration> {
   const result = new Map<number, Declaration>();
@@ -920,9 +1077,12 @@ function collectDeclarations(
     const span = symbol(name) === null ? undefined : spanOf(name);
     if (span !== undefined && !result.has(span[0])) result.set(span[0], d);
   };
-  // A parameter with a default is `Optional(param, default)`.
+  // A parameter with a default is `Optional(param, default)`, a rest
+  // parameter is `Spread(param)`.
   const unwrap = (node: MathJsonExpression | null) =>
-    operator(node) === 'Optional' ? operand(node, 1) : node;
+    operator(node) === 'Optional' || operator(node) === 'Spread'
+      ? operand(node, 1)
+      : node;
   const typeOf = (node: MathJsonExpression | null): string | undefined =>
     operator(unwrap(node)) === 'Typed'
       ? (stringValue(operand(unwrap(node), 2)) ?? undefined)
@@ -948,7 +1108,12 @@ function collectDeclarations(
           params: params.map(typeOf),
           names: params.map(nameOf),
           optional: params.map((p) => operator(p) === 'Optional'),
+          rest: operator(params[params.length - 1]) === 'Spread',
           result: typeOf(body),
+          resultStart:
+            operator(body) === 'Typed'
+              ? spanOf(operand(body, 2))?.[0]
+              : undefined,
         });
       }
     } else if (head === 'DeclareType') {
@@ -972,7 +1137,7 @@ function collectDeclarations(
 
 /** The types the source declares, and the sum types of the variants the
  * options name, keyed by type name. */
-function collectSourceTypes(
+export function collectSourceTypes(
   ast: MathJsonExpression | null,
   sumVariants: Readonly<Record<string, string>> | undefined
 ): Map<string, SourceType> {
@@ -1042,6 +1207,9 @@ function libraryEntries(ce: ComputeEngine): LibraryEntry[] {
         ? { detail: entry.signature ?? entry.type }
         : {}),
       ...(documentation ? { documentation } : {}),
+      ...(entry.description === undefined
+        ? {}
+        : { description: entry.description }),
       ...(type === undefined ? {} : { type }),
     });
   }

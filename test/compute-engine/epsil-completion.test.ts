@@ -298,6 +298,30 @@ describe('EPSIL COMPLETION: SCOPE', () => {
     });
   });
 
+  test('effects or type parameters: the ascription is the signature', () => {
+    const pure = complete('function h(x) pure -> real { x + 1 }\n▮');
+    expect(item(pure, 'h')).toMatchObject({ detail: '(any) pure -> real' });
+    const generic = complete('function id<T>(x: T) -> T { x }\n▮');
+    expect(item(generic, 'id')).toMatchObject({
+      detail: '(T) -> T where T',
+    });
+    // A return type that is a function type stays a return type.
+    const k = complete('function k(x) -> (real) pure -> real { x }\n▮');
+    expect(item(k, 'k')).toMatchObject({
+      detail: '(any) -> (real) pure -> real',
+    });
+    // A type of the source in a full signature.
+    const point = complete(
+      'type Point = tuple<x: real, y: real>\nfunction h(p: Point) pure -> real { 1 }\n▮'
+    );
+    expect(item(point, 'h')).toMatchObject({ detail: '(Point) pure -> real' });
+    // A full signature that does not parse is not a return type.
+    const box = complete(
+      'type Box<T> = tuple<T>\nfunction h(p: Box<real>) pure -> real { 1 }\n▮'
+    );
+    expect(item(box, 'h')).toMatchObject({ detail: '(Box<real>)' });
+  });
+
   test('a name of the source shadows a library name', () => {
     const result = complete('let sin = 2\n▮');
     expect(result.items.filter((i) => i.label === 'sin')).toEqual([

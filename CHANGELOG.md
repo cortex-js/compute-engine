@@ -17,7 +17,26 @@
   //             { label: "countIf", kind: "library-function", rank: 3, … }, …] }
   ```
 
-  The Epsil extension for VS Code offers the same items as completions.
+  The Epsil extension for VS Code offers the same items as completions. Each
+  library item also has a `description`: the paragraphs that the hover of the
+  name shows.
+
+- **`epsilSignatureHelp()` gives the signatures of the call at an offset of
+  an Epsil source** (CE-1541), also in a call that is not closed yet. Each
+  signature has a label and the range of each parameter in it, and the result
+  marks the parameter of the argument at the offset. A named argument marks
+  the parameter of that name. A library function whose signature is an
+  overload set has one signature per arm.
+
+  ```ts
+  epsilSignatureHelp(ce, "function f(x: real, n: integer = 2) { x }\nf(1, ", 47);
+  // ➔ { callee: "f", activeSignature: 0, activeParameter: 1,
+  //     signatures: [{ label: "f(x: real, n: integer?)", parameters: [
+  //       { name: "x", type: "real", range: [2, 9] },
+  //       { name: "n", type: "integer", range: [11, 22] }] }] }
+  ```
+
+  The Epsil extension for VS Code offers the same signature help.
 
 ### Resolved Issues
 

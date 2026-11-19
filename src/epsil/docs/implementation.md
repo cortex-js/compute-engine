@@ -342,6 +342,38 @@ library whose type matches the expected type, 4 and 5 for the other names,
 expected type: its items are the names and the keywords. The VS Code
 extension serves the same items as its completions.
 
+Each library item also has a `description`: the paragraphs of the library
+description, which the hover of the name shows.
+
+### Signature help
+
+`epsilSignatureHelp(ce, source, offset)` gives the signatures of the call
+whose arguments contain the offset, for an editor, or `null` outside a call.
+It finds the call with the placeholder of `epsilCompletions`: the innermost
+call `name(…)` around the offset, also when it is not closed. The callee is
+the function of the source visible at the offset, or a standard-library
+function; a callee that is not a name (`(f)(▮`) or that is unknown gives
+`null`, as does an offset in a string or a comment.
+
+```ts
+const source = "function f(x: real, n: integer = 2) -> real { x }\nf(1, ";
+const result = epsilSignatureHelp(ce, source, source.length);
+result.callee;                        // ➔ "f"
+result.signatures[0].label;           // ➔ "f(x: real, n: integer?) -> real"
+result.signatures[0].parameters[1];   // ➔ { name: "n", type: "integer", range: [11, 22] }
+result.activeParameter;               // ➔ 1
+epsilSignatureHelp(ce, "join(", 5).signatures.length; // ➔ 2: an overload set
+```
+
+A parameter's `range` is its text in the `label`. The active parameter is
+the parameter of the argument at the offset; a named argument (`f(n: ▮)`)
+selects the parameter of that name, and a rest or variadic parameter stays
+active for every later argument. An argument past the last parameter gives
+`-1`. A library function whose signature is an overload set has one
+signature per arm; the active signature is the first that has the active
+parameter. The VS Code extension serves the same signatures as its
+signature help.
+
 ### Serialization
 
 `serializeEpsil(expression, options?)` converts MathJSON back to Epsil:

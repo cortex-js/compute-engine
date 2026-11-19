@@ -21,6 +21,7 @@ import {
   type InitializeResult,
   type Location,
   type Range,
+  type SignatureHelp,
   type SymbolInformation,
   type TextEdit,
   type WorkspaceEdit,
@@ -41,6 +42,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import {
   ComputeEngine,
   epsilCompletions,
+  epsilSignatureHelp,
   resolveLibraryNames,
   type EpsilCompletionItem,
 } from '../../src/epsil.js';
@@ -86,6 +88,7 @@ let hasRelatedInformationCapability = false;
 let hasCodeDescriptionCapability = false;
 let hasHierarchicalSymbolCapability = false;
 let hasInsertReplaceCapability = false;
+let hasNoActiveParameterCapability = false;
 let diagnosticsEnabled = true;
 
 /** Where the extended error explanations are hosted — one section per
@@ -154,6 +157,14 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasInsertReplaceCapability =
     params.capabilities.textDocument?.completion?.completionItem
       ?.insertReplaceSupport === true;
+  // With this capability (LSP 3.18) an `activeParameter` of `null` means
+  // that no parameter is active. The protocol types of this package predate
+  // it.
+  hasNoActiveParameterCapability =
+    (
+      params.capabilities.textDocument?.signatureHelp?.signatureInformation as
+        { noActiveParameterSupport?: boolean } | undefined
+    )?.noActiveParameterSupport === true;
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -165,6 +176,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       documentSymbolProvider: true,
       renameProvider: { prepareProvider: true },
       completionProvider: {},
+      signatureHelpProvider: { triggerCharacters: ['(', ','] },
     },
   };
 });
@@ -302,6 +314,46 @@ connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
       : { range, newText: item.insertText ?? item.label },
   }));
 });
+
+// The signatures come from `epsilSignatureHelp()`, the function Tycho's
+// editor calls too. A parameter label is its `[start, end]` range in the
+// signature label. An argument that matches no parameter (`-1`) is sent as
+// `null` to a client that declares `noActiveParameterSupport`. Otherwise it
+// is sent as an index past the last parameter: VS Code highlights none, but
+// the protocol reads an index out of range as 0, so another client may
+// highlight the first parameter.
+connection.onSignatureHelp(
+  ({ textDocument, position }): SignatureHelp | null => {
+    const document = documents.get(textDocument.uri);
+    if (document === undefined) return null;
+    hoverEngine ??= new ComputeEngine();
+    const result = epsilSignatureHelp(
+      hoverEngine,
+      document.getText(),
+      document.offsetAt(position)
+    );
+    if (result === null) return null;
+    const active = result.signatures[result.activeSignature];
+    return {
+      signatures: result.signatures.map((signature) => ({
+        label: signature.label,
+        parameters: signature.parameters.map((parameter) => ({
+          label: parameter.range,
+        })),
+        ...(signature.documentation === undefined
+          ? {}
+          : { documentation: signature.documentation }),
+      })),
+      activeSignature: result.activeSignature,
+      activeParameter:
+        result.activeParameter >= 0
+          ? result.activeParameter
+          : hasNoActiveParameterCapability
+            ? (null as unknown as number)
+            : active.parameters.length,
+    };
+  }
+);
 
 documents.listen(connection);
 connection.listen();
