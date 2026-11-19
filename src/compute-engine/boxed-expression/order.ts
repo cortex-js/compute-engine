@@ -240,7 +240,7 @@ export function addOrder(a: Expression, b: Expression): number {
 export function sortAddTerms(
   xs: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
-  if (xs.length <= 1) return [...xs];
+  if (xs.length <= 2) return [...xs].sort(addOrder);
   const keyed = xs.map((x) => ({
     x,
     total: totalDegree(x),
