@@ -1022,7 +1022,7 @@ third is the one delivered to Tycho.
 - **CE-1255.2** The sites query: for a parsed program, each symbol site with
   its role, its source range and the binding it resolves to, and for each
   statement the top-level names it reads and the names it defines or
-  assigns. A short spec of its own first.
+  assigns. Draft [Program source sites](docs/plans/2026-11-19-program-sites.md).
 - **CE-1255.3** The program runner (a separate entry above `compile()`, with
   an asynchronous form): each value statement is a compile unit, a statement
   that declines runs in the interpreter and the run continues compiled,
