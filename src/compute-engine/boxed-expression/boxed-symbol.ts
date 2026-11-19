@@ -409,7 +409,6 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * `_homeBinding()`). */
   private _resolution?: {
     version: number;
-    variable: boolean;
     def: BoxedDefinition | undefined;
     scope: Scope | undefined;
   };
@@ -417,17 +416,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   /** The cached resolution, when it was found under the type version
    * `version` and its scope still holds it (the end of the Epsil static
    * check puts back a scope entry, and need not move the type version). */
-  private _cachedResolution(
-    version: number,
-    variable: boolean
-  ): { def: BoxedDefinition | undefined } | undefined {
+  private _cachedResolution(version: number): typeof this._resolution {
     const cached = this._resolution;
-    if (
-      cached === undefined ||
-      cached.version !== version ||
-      cached.variable !== variable
-    )
-      return undefined;
+    if (cached === undefined || cached.version !== version) return undefined;
     if (
       cached.scope !== undefined &&
       cached.scope.bindings.get(this._id) !== cached.def
@@ -1390,44 +1381,37 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   private _freeNameBinding(): BoxedDefinition | undefined {
     const home = this._homeScope!;
-    const variable = this._readsAsVariable(home);
     const version = this.engine._typeVersion;
-    // The resolution from the home chain changes only at a declaration, and
-    // a declaration moves the type version. The type version is in the key
-    // of every type cache (`ce._typeCacheGeneration()`), so a cached type
-    // needs no record of this read.
-    const cached = this._cachedResolution(version, variable);
-    if (cached !== undefined) {
-      if (RESOLUTION_PARANOID) {
-        const fresh = freeNameBindingAndScope(
-          this.engine,
-          this._id,
-          home,
-          variable
+    // Cache the unfiltered home-scope walk. Only a root operator can be
+    // skipped, and there is no enclosing binding to find when it is.
+    let cached = this._cachedResolution(version);
+    if (cached === undefined) {
+      const found = freeNameBindingAndScope(this.engine, this._id, home);
+      cached = this._resolution = {
+        version,
+        def: found?.def,
+        scope: found?.scope,
+      };
+    } else if (RESOLUTION_PARANOID) {
+      const fresh = freeNameBindingAndScope(this.engine, this._id, home);
+      // A declaration can install its binding before sending its state event.
+      if (
+        (fresh?.def !== cached.def || fresh?.scope !== cached.scope) &&
+        !isBeingDefined(this.engine, this._id)
+      )
+        throw new Error(
+          `CE_TYPE_PARANOID: outdated resolution served for free name "${this._id}"`
         );
-        // A declaration of the name in flight can install its binding
-        // before it sends its state event: the resolution is then
-        // provisional, and the event retires it.
-        if (fresh?.def !== cached.def && !isBeingDefined(this.engine, this._id))
-          throw new Error(
-            `CE_TYPE_PARANOID: outdated resolution served for free name "${this._id}"`
-          );
-      }
-      return cached.def;
     }
-    const found = freeNameBindingAndScope(
-      this.engine,
-      this._id,
-      home,
-      variable
-    );
-    this._resolution = {
-      version,
-      variable,
-      def: found?.def,
-      scope: found?.scope,
-    };
-    return found?.def;
+    if (
+      cached.scope !== undefined &&
+      !cached.scope.parent &&
+      cached.def !== undefined &&
+      'operator' in cached.def &&
+      this._readsAsVariable(home)
+    )
+      return undefined;
+    return cached.def;
   }
 
   /**
@@ -1440,7 +1424,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (home === undefined) return def;
     const version = this.engine._typeVersion;
     // As for a free name (`_freeNameBinding()`), the type version is the key.
-    const cached = this._cachedResolution(version, false);
+    const cached = this._cachedResolution(version);
     if (cached !== undefined) {
       if (
         RESOLUTION_PARANOID &&
@@ -1453,7 +1437,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return cached.def;
     }
     const found = homeChainBinding(this._id, def, home);
-    this._resolution = { version, variable: false, ...found };
+    this._resolution = { version, ...found };
     return found.def;
   }
 

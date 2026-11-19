@@ -8,7 +8,10 @@ import {
   recordObjectRead,
   stampObjectDepsAtEnd,
 } from '../../src/compute-engine/boxed-expression/object-deps';
-import { unitEnvironmentOfOperands } from '../../src/compute-engine/binding-unit';
+import {
+  UnitEnvironment,
+  unitEnvironmentOfOperands,
+} from '../../src/compute-engine/binding-unit';
 import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
@@ -32,7 +35,66 @@ function attempts(run: () => void): number {
   }
 }
 
+/** Read a warm type and collect the dependencies replayed by its cache hit. */
+function warmTypeDependencies(expr: Expression) {
+  void expr.type;
+  let deps: ReturnType<typeof endObjectDeps>;
+  beginObjectDeps();
+  try {
+    void expr.type;
+  } finally {
+    deps = endObjectDeps();
+  }
+  return deps;
+}
+
 describe('BINDING UNITS: CACHES', () => {
+  test('a free name depends on its variable reading only while a library operator is visible', () => {
+    const ce = engine();
+    const home = ce.context.lexicalScope!;
+    const name = 'flagProbe';
+    const tuple = ce.box(['Tuple', name]);
+    const overlay = new UnitEnvironment();
+    const absent = warmTypeDependencies(tuple);
+    overlay.setReadsAsVariable(home, name);
+    ce._boxingState.withOperation(overlay, () => {
+      expect(objectDepsValid(absent)).toBe(true);
+      expect(String(tuple.type)).toBe('tuple<unknown>');
+    });
+
+    ce.declare(name, { signature: '(real) -> real' }, home.parent!);
+    const callable = String(tuple.type);
+    expect(callable).toContain('->');
+    const visible = warmTypeDependencies(tuple);
+    ce._boxingState.withOperation(overlay, () => {
+      expect(objectDepsValid(visible)).toBe(false);
+      expect(String(tuple.type)).toBe('tuple<unknown>');
+    });
+    expect(String(tuple.type)).toBe(callable);
+  });
+
+  test('a nearer operator and a root value keep their types under a variable reading', () => {
+    const ce = engine();
+    const home = ce.context.lexicalScope!;
+    const local = ce.box(['Tuple', 'localOp']);
+    const value = ce.box(['Tuple', 'rootValue']);
+    ce.declare('localOp', { signature: '(real) -> real' }, home);
+    ce.declare('rootValue', 'integer', home.parent!);
+    const callable = String(local.type);
+    expect(callable).toContain('->');
+    const localDeps = warmTypeDependencies(local);
+    const valueDeps = warmTypeDependencies(value);
+    const overlay = new UnitEnvironment();
+    overlay.setReadsAsVariable(home, 'localOp');
+    overlay.setReadsAsVariable(home, 'rootValue');
+    ce._boxingState.withOperation(overlay, () => {
+      expect(objectDepsValid(localDeps)).toBe(true);
+      expect(objectDepsValid(valueDeps)).toBe(true);
+      expect(String(local.type)).toBe(callable);
+      expect(String(value.type)).toBe('tuple<integer>');
+    });
+  });
+
   test('the closed form of a D node is recorded across operations', () => {
     // The attempt writes `x: number` in the environment of the operation,
     // after its first read of `x`; the next operation finds the entry that
