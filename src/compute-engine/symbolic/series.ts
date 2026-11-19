@@ -2726,8 +2726,18 @@ function isSmoothAt(f: Expression, x: string, x0: Expression): boolean {
     const op = f.operator;
     const kink = KINK_AT_ZERO.has(op);
     if (!kink && STEP_JUMP_OFFSET[op] === undefined) return false;
-    if (f.nops !== 1 || holdsNonRealNumber(f.op1)) return false;
-    const u = f.op1.subs({ [x]: x0 }).evaluate();
+    if (holdsNonRealNumber(f.op1)) return false;
+    let u = f.op1.subs({ [x]: x0 }).evaluate();
+    if (f.nops === 2 && !kink) {
+      // A step with a constant step `s` jumps where its operand divided by
+      // `|s|` is at a jump of the step without one (`Floor(x, -2)` is
+      // `Floor(x, 2)`).
+      const s = f.op2;
+      if (s.has(x) || holdsNonRealNumber(s)) return false;
+      const step = s.evaluate();
+      if (!isRealNonzero(step)) return false;
+      u = f.engine.function('Divide', [u, step.abs()]).evaluate();
+    } else if (f.nops !== 1) return false;
     if (kink ? !isRealNonzero(u) : !stepIsSmoothAt(op, u)) return false;
   }
   return f.ops.every((op) => isSmoothAt(op, x, x0));

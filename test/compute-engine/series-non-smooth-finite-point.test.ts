@@ -42,6 +42,14 @@ describe('SERIES AT A KINK OR A JUMP DECLINES', () => {
     ],
     // ln(x) is −∞ at 0 and not real for x < 0: sign(ln x) is not −1.
     ['sign(ln x) at 0', ['Sign', ['Ln', 'x']], 0],
+    // A step with a step `s` jumps at the multiples of `|s|` (`Round` at the
+    // odd multiples of `|s|/2`).
+    ['floor(x, 2) at 2', ['Floor', 'x', 2], 2],
+    ['floor(x, −2) at 4', ['Floor', 'x', -2], 4],
+    ['round(x, 2) at 1', ['Round', 'x', 2], 1],
+    ['ceil(x, 1/2) at 1/2', ['Ceil', 'x', half], half],
+    ['truncate(x, 3) at 3', ['Truncate', 'x', 3], 3],
+    ['floor(x, y) at 1', ['Floor', 'x', 'y'], 1],
   ];
   for (const [name, f, point] of declined)
     test(`${name} stays Series`, () =>
@@ -63,6 +71,22 @@ describe('SERIES AWAY FROM A KINK OR A JUMP', () => {
     expect(series(['Round', 'x']).toString()).toBe('BigO(x^4)'));
   test('truncate(x) at 0 is 0', () =>
     expect(series(['Truncate', 'x']).toString()).toBe('BigO(x^4)'));
+  test('floor(x, 2) at 1 is 0', () =>
+    expect(series(['Floor', 'x', 2], 1).toString()).toBe('BigO((x - 1)^4)'));
+  test('floor(x, −2) at 1 is 0', () =>
+    expect(series(['Floor', 'x', -2], 1).toString()).toBe('BigO((x - 1)^4)'));
+  test('round(x, 2) at 2 is 2', () =>
+    expect(series(['Round', 'x', 2], 2).toString()).toBe(
+      '2 + BigO((x - 2)^4)'
+    ));
+  test('ceil(x, 1/2) at 1/4 is 1/2', () =>
+    expect(series(['Ceil', 'x', half], ['Rational', 1, 4]).toString()).toBe(
+      '1/2 + BigO((x - 1/4)^4)'
+    ));
+  test('truncate(x, 3) at −2 is 0', () =>
+    expect(series(['Truncate', 'x', 3], -2).toString()).toBe(
+      'BigO((x + 2)^4)'
+    ));
   test('|sin(x)| at 1 is sin(x)', () =>
     expect(series(['Abs', ['Sin', 'x']], 1).toString()).toBe(
       'sin(1) + (x - 1) * cos(1) - 1/2 * sin(1) * (x - 1)^2 - 1/6 * cos(1) * (x - 1)^3 + BigO((x - 1)^4)'
