@@ -180,11 +180,14 @@ describe('CE-139: D and Integrate over a variable with a list binding', () => {
 });
 
 describe('CE-139: compiled D and Integrate over a variable with a list binding', () => {
-  test('a parameter of a list type declines', () => {
+  test('a parameter of a list type: D compiles to a broadcast, Integrate declines', () => {
+    // A list parameter of an applied literal binds its argument whole
+    // (CE-1469), so the closed form `2a` reads the list, as for a global
+    // of a list type (below).
     const ce = new ComputeEngine();
     ce.declare('v', 'list<real>');
-    for (const op of ['D', 'Integrate']) {
-      const expr = ce.box([
+    const apply = (op: string) =>
+      ce.box([
         'Apply',
         [
           'Function',
@@ -193,10 +196,21 @@ describe('CE-139: compiled D and Integrate over a variable with a list binding',
         ],
         'v',
       ]);
-      expect(() =>
-        compile(expr, { to: 'javascript', fallback: false })
-      ).toThrow(/Could not compile/);
+    const d = apply('D');
+    const run = compile(d, { to: 'javascript', fallback: false }).run!;
+    for (const v of [
+      [1.5, -2, 0.25],
+      [3],
+      [0, 1, 2, 3],
+    ]) {
+      ce.assign('v', ce.box(['List', ...v]));
+      expect(JSON.stringify(run({ v } as never))).toBe(
+        d.evaluate().toString()
+      );
     }
+    expect(() =>
+      compile(apply('Integrate'), { to: 'javascript', fallback: false })
+    ).toThrow(/Could not compile/);
   });
 
   test('a block local of a list type declines', () => {

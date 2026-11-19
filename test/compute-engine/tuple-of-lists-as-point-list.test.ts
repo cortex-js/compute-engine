@@ -653,13 +653,48 @@ describe('A point parameter called with a list of points maps over the points', 
     }
   });
 
-  test.each([['glsl'], ['interval-js']])(
+  test('the interval-js target maps over the points', () => {
+    // A call of a point function over a list of points maps (CE-1477):
+    // each interval holds the interpreter's value at its point.
+    const ce = pointEngine('tuple<real, real>', 'real', false);
+    const call = ce.parse('k\\left(\\left(x,y\\right)\\right)');
+    const result = compile(call, {
+      to: 'interval-js',
+      fallback: false,
+    } as any) as any;
+    expect(result.success).toBe(true);
+    for (const [x, y] of [
+      [[1, 2], 3],
+      [[-1.5, 4, 0], -2],
+    ] as [number[], number][]) {
+      const want = x.map((xi) => Math.hypot(xi - 4, y));
+      const got = result.run({ x, y }) as {
+        kind: string;
+        value: { lo: number; hi: number };
+      }[];
+      expect(got.length).toBe(want.length);
+      got.forEach((r, i) => {
+        expect(r.kind).toBe('interval');
+        expect(r.value.lo).toBeLessThanOrEqual(want[i]);
+        expect(r.value.hi).toBeGreaterThanOrEqual(want[i]);
+        expect(r.value.hi - r.value.lo).toBeLessThan(1e-9);
+      });
+      // The interpreter's value at the same inputs.
+      const v = pointEngine('tuple<real, real>', 'real', false);
+      v.assign('x', v.box(['List', ...x]));
+      v.assign('y', y);
+      close(
+        plain(v.parse('k\\left(\\left(x,y\\right)\\right)').N()),
+        want
+      );
+    }
+  });
+
+  test.each([['glsl']])(
     'the %s target fails closed',
     (to) => {
-      // A list of points is not a shader value, and the interval target has
-      // no lowering for a call that maps over points (it does not compile
-      // this body at a single point either). The shader targets throw; the
-      // interval target reports the decline in its result.
+      // A list of points of a run-time length is not a shader value. The
+      // shader targets throw.
       const ce = pointEngine('tuple<real, real>', 'real', false);
       let result: any;
       let thrown: unknown;
@@ -908,7 +943,7 @@ describe('A list of points at a parameter that also admits a matrix', () => {
         to: 'javascript',
         fallback: false,
       } as any)
-    ).toThrow(/the result of k is not a scalar/);
+    ).toThrow(/a body of k that is not a scalar/);
   });
 
 });

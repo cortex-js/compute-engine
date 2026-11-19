@@ -91,10 +91,11 @@ describe('a parameter of no stated type takes the lane of its argument', () => {
     ['a declared parameter number', ['Power', 'w', 3], ['Add', ['Arg', ['f', IY]], ['f', 'x']], { x: 0.5, y: 0.3 }, '(number) -> number'],
     ['two parameters of two lanes', ['Add', ['Multiply', 'a', 'b'], 'a'], ['Add', ['f', IY, 'x'], ['f', 'x', IY], ['f', 'x', 'x']], { x: 0.5, y: 0.3 }, 'function', ['a', 'b']],
   ])('%s', (_, body, json, at, decl = 'function', params = ['w']) => {
-    for (const options of [COMPLEX, {}]) {
-      const ce = engine(body, decl, params);
-      expectClose(run(ce, json, at, options), interpret(ce, json, at));
-    }
+    const ce = engine(body, decl, params);
+    expectClose(run(ce, json, at, COMPLEX), interpret(ce, json, at));
+    // The strict mode (the default) declines a complex value at a parameter
+    // of no stated type (`compile-mode-strict.test.ts`).
+    expect(failure(() => run(ce, json, at))).toMatch(/an argument of f that is not real/);
   });
 
   // The real call of a negative real: the interpreter's value is complex,
@@ -174,10 +175,9 @@ describe('a parameter of no stated type takes the lane of its argument', () => {
       '(number, number) -> real',
       ['w', 'n']
     );
-    for (const options of [COMPLEX, {}])
-      expect(
-        failure(() => run(ce, ['f', 1, 2], { x: 0.5, y: 0 }, options))
-      ).toMatch(/a recursive call of f between the lanes of its parameters/);
+    expect(
+      failure(() => run(ce, ['f', 1, 2], { x: 0.5, y: 0 }, COMPLEX))
+    ).toMatch(/a recursive call of f between the lanes of its parameters/);
   });
 });
 

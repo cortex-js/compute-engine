@@ -29,6 +29,27 @@
 
 ### Resolved Issues
 
+- **A compiled expression boxed in a scope reads the names of that scope**
+  (CE-1500). With `a = 1` in the document, `a = 10` in a scope `s`, and
+  `ce.expr(['Add', ['PointX', 'P'], 'a'], { scope: s })` with `P = (3, 4)`,
+  the compiled code returned 4, where `evaluate()` gives 13; 0.193.0 compiled
+  13. The same held for a binder boxed in the scope (`Sum(a·k)` gave 6, not
+  60). `compile()` took the
+  scope of the boxing, which `ce.expr()` gives to some nodes of the
+  expression, for a scope of the expression itself, and read the names from
+  the current scope. It now reads them from the scope of the boxing, and
+  gives the interpreter's value.
+
+- **`compile()` compiles a call of a function declared
+  `(unknown, unknown) -> unknown` whose body is a `Dot`** (CE-1497). With
+  `p := (a, b) ↦ (cos a, sin a)` and `d := (u, v) ↦ Dot(p(u, v), (u, v))`,
+  `d` declared `(unknown, unknown) -> unknown`, compiling `d(x, y)` declined
+  in 0.194.0 ("the result of d is not a scalar (value)"), and compiled in
+  0.193.0. The assignment narrows the declared result to `value`, the type of
+  the body; the compiler now takes the result of such a function from its
+  lowered body, as for a result of no stated type, and gives the
+  interpreter's value (0.40480902940221763 at x = 0.3, y = 0.4).
+
 - **`compile()` compiles a loop over a list of tuples of tuples** (CE-1488).
   `for gap in [(OuterCircle, RightCircle, TopCircle), …] { … gap[1] … }`, each
   gap a tuple of three circles and each circle a tuple of three numbers,
@@ -127,8 +148,10 @@
   to each call. On GLSL, a function with a number result compiles over a
   `PointList` or a literal list of points of a constant length. Lists of
   different lengths, lists whose lengths are known only when the code runs
-  and are not the same value, and a function whose result is a list still
-  decline. A function of numbers called with a list of numbers can now also
+  and are not the same value, an argument of type `unknown` beside a list of
+  points (its shape is not settled), and a function whose result is a list
+  still decline. A function of numbers called with a list of numbers can now
+  also
   return a point: `g(L)` with `g := u ↦ (u, 2u)` is `[(1, 2), (2, 4)]` at
   `L = [1, 2]`.
 
@@ -226,12 +249,13 @@
 - **`compile()` compiles a call of a user function with a complex argument
   at a parameter of no stated type again** (CE-1476). With `x, y: real`, `f`
   declared `function` and `f(w) := w^2`, `Arg(f(x + i·y)) + f(x)` declined in
-  0.194.0 ("an argument of f that is not real"); at x = 0.5, y = 0.3 it now
-  gives 1.3308390005411683, as the interpreter does. A parameter of no stated
+  0.194.0 ("an argument of f that is not real") in `mode: 'complex'`; at
+  x = 0.5, y = 0.3 it now gives 1.3308390005411683, as the interpreter does. A parameter of no stated
   type, or of type `unknown` or `number`, takes the lane of its argument: a
   call with a real argument calls a compiled function of a real parameter,
   and a call with a complex argument a function of a complex parameter, in
-  both modes and on GLSL. A parameter declared `real` still declines a
+  `mode: 'complex'` and on GLSL; the default (strict) mode declines a complex
+  argument there, as in 0.194.0. A parameter declared `real` still declines a
   complex argument.
 
 - **`compile()` compiles a `let` and a `for` loop that name the parts of a

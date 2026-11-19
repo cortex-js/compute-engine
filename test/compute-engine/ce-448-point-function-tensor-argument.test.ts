@@ -137,9 +137,9 @@ describe('CE-448: a function of a point maps over a tensor of points', () => {
   // is a result only"), so the absent points below are written in the
   // argument, and its type is inferred.
   test('an argument cannot be declared with absent points', () => {
-    expect(() => engine().declare('S', `list<list<${POINT} | missing>>`)).toThrow(
-      /cannot be declared/
-    );
+    expect(() =>
+      engine().declare('S', `list<list<${POINT} | missing>>`)
+    ).toThrow(/cannot be declared/);
   });
 
   test('an absent point at depth 2 is a Missing cell, and the type says so', () => {
@@ -259,4 +259,31 @@ describe('CE-448: a compiled call that maps one level only fails closed', () => 
         .toString()
     ).toBe('[6,8]');
   });
+});
+
+describe('a flat list mapped beside an argument of type unknown declines', () => {
+  // `(L, u) ↦ h(L, u)`: at `u = [10, 20]` the interpreter zips the lists
+  // (`[11, 22]`); the static type `unknown` of `u` settles no shape (R3).
+  test.each([['h(s, t) := s + t', ['Function', ['Add', 's', 't'], 's', 't']]])(
+    '%s',
+    (_, h) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', 'function');
+      ce.assign('h', ce.box(h as never));
+      const root = ce.box([
+        'Function',
+        ['h', 'L', 'u'],
+        ['Typed', 'L', "'list<real>'"],
+        'u',
+      ] as never);
+      let message: string | undefined;
+      try {
+        compile(root, { fallback: false } as never);
+      } catch (x) {
+        message = (x as { diagnostic?: { message: string } }).diagnostic
+          ?.message;
+      }
+      expect(message).toMatch(/beside a list that the call maps over/);
+    }
+  );
 });

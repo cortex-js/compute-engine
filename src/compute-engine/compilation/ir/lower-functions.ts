@@ -308,8 +308,16 @@ function signatureTypes(e: Fn, literal: Fn) {
   const list = ir?.shape.length === 1 || tuple === 1 ? ir : undefined;
   // No stated result, or a tuple of elements of no stated type
   // (`tuple<unknown, unknown>`): the type of the body, a scalar or a point
-  // of that many numbers (`points`).
-  const open = r === undefined || r === 'number' || r === 'any' || loose(r);
+  // of that many numbers (`points`). A `value` result (declared, or a
+  // declared `unknown` that the engine narrowed to the type of a `Dot` of
+  // open parameters) states no shape either: the body decides, as for `any`
+  // (CE-1497).
+  const open =
+    r === undefined ||
+    r === 'number' ||
+    r === 'any' ||
+    r === 'value' ||
+    loose(r);
   const points = list === undefined && r ? pointLength(r) : undefined;
   // A list of elements of no stated type: the shape of the body.
   const shaped = list === undefined && r ? openList(r) : undefined;
@@ -449,6 +457,9 @@ export function functionLowering(
     p: ReturnType<typeof signatureTypes>['params'][number],
     v: V | undefined
   ) =>
+    // Only in `mode: 'complex'`: the strict mode declines a complex value
+    // at a parameter of no stated type (a `LaneMismatch`).
+    cx.wide === 'complex' &&
     'open' in p &&
     p.open &&
     v !== undefined &&
@@ -790,7 +801,21 @@ export function functionLowering(
         pointsAt &&
         lowered !== undefined &&
         lowered.some((v, i) => sig.pointsAt(i) && cx.tuples.get(v) === 1)
-      )
+      ) {
+        // An argument whose static type settles no shape (`unknown`) where
+        // the call maps: the interpreter pairs it with the points when it
+        // is a list and binds it whole otherwise (R3).
+        e.ops.forEach((op, i) => {
+          if (
+            (sig.pointsAt(i) || sig.mapsAt(i, false)) &&
+            hasUnsettledShape(op.type.type)
+          )
+            decline(
+              op,
+              `an argument of ${e.operator} of type ${engineTypeToString(op.type.type)} beside a list of points (the interpreter pairs it with the points when it is a list)`,
+              UNSETTLED_SHAPE
+            );
+        });
         return mapOver(
           e,
           binding,
@@ -809,6 +834,7 @@ export function functionLowering(
               : undefined;
           }
         );
+      }
       // An argument can hold the first call of the same function.
       fn =
         functions.get(binding.key)?.get(laneKey(sig, early)) ??
@@ -925,6 +951,24 @@ export function functionLowering(
         );
       return [...length, v];
     });
+    if (mapped) {
+      // An argument whose static type settles no shape (`unknown`) at a
+      // slot where the call maps: the interpreter zips it with the list
+      // when it is a list and binds it whole otherwise (R3), as beside a
+      // list of points above.
+      e.ops.forEach((op, i) => {
+        if (
+          fn.params[i].shape.length === 0 &&
+          fn.mapsAt(i, false) &&
+          hasUnsettledShape(op.type.type)
+        )
+          decline(
+            op,
+            `an argument of ${e.operator} of type ${engineTypeToString(op.type.type)} beside a list that the call maps over (the interpreter zips it with the list when it is a list)`,
+            UNSETTLED_SHAPE
+          );
+      });
+    }
     if (mapped)
       return mapOver(e, binding, lowering.has(fn), values, (i) =>
         type(values[i]).shape.length > 0 && fn.params[i].shape.length === 0

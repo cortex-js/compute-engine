@@ -490,9 +490,29 @@ describe('CE-418: A broadcastable<tuple<…>> PARAMETER BESIDE A BARE tuple<…>
     ]);
   });
 
-  test('the compiled call declines, as for the uniform declarations', () => {
-    for (const sig of Object.values(SIGS))
-      declines(engine(sig), 'f([(1,2),(3,4)], [(10,20),(30,40)])');
+  test('the compiled call declines at a broadcastable slot, and pairs two bare slots', () => {
+    const latex = 'f([(1,2),(3,4)], [(10,20),(30,40)])';
+    for (const [name, sig] of Object.entries(SIGS))
+      if (name !== 'both bare') declines(engine(sig), latex);
+    // Two bare `tuple<…>` slots map one point per call (CE-1477), as the
+    // interpreter does; lists of two lengths decline.
+    for (const [src, want] of [
+      [latex, [[11, 22], [33, 44]]],
+      [
+        'f([(1.5,-2),(3,4),(0,7)], [(10,20),(30,40),(1,1)])',
+        [[11.5, 18], [33, 44], [1, 8]],
+      ],
+    ] as [string, number[][]][]) {
+      const ce = engine(SIGS['both bare']);
+      expect(ce.parse(src).evaluate().toString()).toBe(
+        `[${want.map(([a, b]) => `(${a}, ${b})`).join(',')}]`
+      );
+      expect(compiled(ce, src)).toEqual(want);
+    }
+    declines(
+      engine(SIGS['both bare']),
+      'f([(1,2),(3,4),(5,6)], [(10,20),(30,40)])'
+    );
   });
 });
 
@@ -720,10 +740,13 @@ describe('review round 3 (compiler)', () => {
       expect(r.diagnostic?.code).toBe('unsettled-shape');
       expect(r.diagnostic?.message).toContain('the input t of type any');
     } else {
-      // The parameter of `f` would take the list `Ps` whole, where the
-      // interpreter maps `f` over it.
-      expect(r.diagnostic?.code).toBe('outside-profile');
-      expect(r.diagnostic?.message).toContain('would take whole');
+      // The call maps over the points of `Ps` (CE-1477), and `t` of type
+      // `unknown` settles no shape there: the interpreter pairs it with the
+      // points when it is a list, and binds it whole otherwise.
+      expect(r.diagnostic?.code).toBe('unsettled-shape');
+      expect(r.diagnostic?.message).toContain(
+        't: an argument of f of type unknown beside a list of points'
+      );
     }
   });
 });

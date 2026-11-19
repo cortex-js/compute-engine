@@ -2144,10 +2144,12 @@ any other parameter (`d(L)` is `d(L, 3)`). A call that the canonical form did
 not complete declines (another count of arguments). A default is a constant (the
 language admits no default that reads an earlier parameter). A root function
 literal with a default declines: `run()` takes every positional argument. A
-result of no stated type (none, `unknown`, `number`, `any`, a `broadcastable`
-type, or a union that is no IR type, as the engine infers
+result of no stated type (none, `unknown`, `number`, `any`, `value`, a
+`broadcastable` type, or a union that is no IR type, as the engine infers
 `list<…> | number | tuple` for `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type of
-the body: a scalar, or a point (a tuple of real or integer numbers,
+the body. An assignment narrows a declared `unknown` result to the type of the
+body, `value` for `Dot(p(u, v), PointList(u, v))` with `u, v` of no stated type
+(CE-1497). The result is a scalar, or a point (a tuple of real or integer numbers,
 `Function(Block(PointList(x, y)), x, y)`), and the result of a call is then a
 tuple; a result that is a tuple of such elements or of real or integer scalars
 (`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`) takes a
@@ -2204,7 +2206,7 @@ length declines: `R(p, φ) := [Σ p·[cos φ, −sin φ], Σ p·[sin φ, cos φ]
 `R([−0.57, 2.8], φ)`. Otherwise, when the lowered argument of the first call is
 not a point, a parameter of no declared type is a real, and one of a type that
 is not a scalar declines. A recursive function whose result is not declared (no
-type, `number`, `any`) has a real scalar result: a call of it made while its
+type, `number`, `any`, `value`) has a real scalar result: a call of it made while its
 body is lowered has a real result (`UserFunction.guess`), and the body must then
 be a real or an integer scalar, which is widened; a complex or a boolean body
 declines with the cause of that call, and a node that reads the call as another
@@ -2376,7 +2378,15 @@ interpreter's `pointListParamSlots()`), is mapped the same way, one point per
 call (CE-1477): the arguments of each call of such a function are lowered before
 the function, a list of points at such a parameter is zipped with the other
 lists of points there and with the flat lists at scalar parameters (of one
-length, as above), and a point or a scalar elsewhere is bound whole. A result
+length, as above), and a point or a scalar elsewhere is bound whole. An
+argument of such a call whose static type at the call settles no shape
+(`unknown`), at a slot where the call maps, declines with `unsettled-shape`, and
+so does one beside a flat list that a call maps over: the interpreter pairs it
+with the points or zips it with the list when it is a list and binds it whole
+otherwise. An occurrence that the engine narrows at the call (`t` at a `real`
+slot) is read by its narrowed type: a list passed to an untyped parameter of a
+function literal is a value outside the type that the body implies, and the
+result is unspecified (`docs/COMPILATION-MODEL.md`, "Fail closed"). A result
 that is a point makes the call a list of points: with
 `f := (p: tuple<number, number>) ↦ (p[1] + 1, p[2])` declared
 `(tuple<number, number>) -> tuple<number, number>`, `f(P)` is `[(2, 2), (4, 4)]`
@@ -2464,8 +2474,10 @@ A scalar parameter of no stated type, or of type `unknown` or `number`, takes
 the lane of its argument, not always `real` (CE-1476): a call whose argument
 there is complex calls a function of a complex parameter, any other call a
 function of a real parameter (an integer argument is widened), so a binding is
-lowered once per lane of such parameters (`laneKey()`), in both modes and on
-every target that has the complex lane. With `f(w) := w^2`,
+lowered once per lane of such parameters (`laneKey()`), in `mode: 'complex'`
+on every target that has the complex lane; the strict mode (the default)
+declines a complex argument there (a `LaneMismatch`,
+`compile-mode-strict.test.ts`). With `f(w) := w^2`,
 `Arg(f(x + i·y)) + f(x)` calls `f` of a complex `w` and `f` of a real `w`; the
 arguments of each call of such a function are lowered before the function is
 chosen. A real call keeps the value of the real lane: `Sqrt(w)` at `w = -1` is

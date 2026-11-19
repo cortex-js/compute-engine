@@ -13,7 +13,10 @@ import {
   isObject,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { readsActivation } from '../boxed-expression/binders.js';
+import {
+  isBlockLocalBinding,
+  readsActivation,
+} from '../boxed-expression/binders.js';
 import { lookup } from '../function-utils.js';
 import { CompileDeclineError } from './diagnostics.js';
 
@@ -87,6 +90,8 @@ export function compilationScope(
   // The scopes of the binders, blocks and function literals of `expr` and
   // of the bodies that it reaches.
   const local = new Set<Scope>();
+  /** The names that a `Program` of `expr` declares (hoisted). */
+  const declaredByPrograms = new Set<string>();
   // Each node to visit, with the names that the binders, blocks and
   // function literals on its path bind.
   const stack: [Expression, ReadonlySet<string> | undefined][] = [
@@ -179,8 +184,18 @@ export function compilationScope(
     // A qualified name (`["Module", "Pi"]`) reads the standard library
     // wherever it is compiled.
     if (e.operator === 'Module') continue;
+    // A `Program` makes no scope and hoists its declarations into the
+    // enclosing one, which can be a scope of `expr` (a `Sum`, a function
+    // literal, a block): those names are declared by `expr`.
+    if (e.operator === 'Program')
+      for (const d of e.ops)
+        if (isFunction(d, 'Declare') && isSymbol(d.ops[0]))
+          declaredByPrograms.add(d.ops[0].symbol);
     let inner = bound;
-    if (e.localScope !== undefined) {
+    // The scope of a node whose operator makes no scope is the scope that
+    // the node was boxed in (`ce.expr(x, { scope })` gives it to the nodes
+    // that canonicalization keeps, CE-1500): it binds no name of `expr`.
+    if (e.localScope !== undefined && e.operatorDefinition?.scoped !== false) {
       local.add(e.localScope);
       inner = new Set([...(bound ?? []), ...e.localScope.bindings.keys()]);
     }
@@ -223,6 +238,25 @@ export function compilationScope(
     follow(op, () => op?._lambdaLiteral);
     followValue(name, e.valueDefinition);
     for (const x of e.ops) stack.push([x, inner]);
+  }
+
+  // A scope that holds the definition an occurrence reads, other than a
+  // local of a block, is not a scope of `expr`, even when a node holds it:
+  // `ce.expr(x, { scope })` gives the scope it boxes in to the binders and
+  // the nodes that canonicalization keeps (`Sum(a·k)`, `PointX(P)`,
+  // CE-1500), and the names that the caller declared there are read by
+  // name, not bound by the compiler.
+  for (const { kind, symbol, scope } of found) {
+    if (kind !== 'bound' || !local.has(scope)) continue;
+    if (declaredByPrograms.has(symbol.symbol)) continue;
+    const binding = scope.bindings.get(symbol.symbol);
+    if (
+      binding !== undefined &&
+      halfOf(binding) ===
+        (symbol.valueDefinition ?? symbol.operatorDefinition) &&
+      !isBlockLocalBinding(binding)
+    )
+      local.delete(scope);
   }
 
   // A function that a scope of `expr` defines (a `Declare` in a block) is

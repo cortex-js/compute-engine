@@ -65,13 +65,15 @@ describe('a variable assigned a lazy collection over itself', () => {
     ).toBe('2');
   });
 
-  test('an inferred number list remains interpreted when the callback requires integers', () => {
-    const src =
-      'let xs = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs';
-    expect(run(src)).toBe('[4,5,6]');
-    expect(() => compiled(src)).toThrow(
-      /Could not compile/
-    );
+  test('an inferred number list rebuilt in a loop compiles', () => {
+    // A list local rebuilt whole (CE-1481): the compiled value is the
+    // interpreter's.
+    for (const src of [
+      'let xs = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs',
+      'let xs = [1.5, 2, 3, 4.5, 5, 6]\nfor k in [1, 2, 3] { xs = filter(xs, c => c > k) }\nxs',
+      'let xs = [1, 2, 3, 4, 5, 6]\nfor k in [1, 2, 3, 4, 5, 6, 7] { xs = filter(xs, c => c > k) }\nxs',
+    ])
+      expect(JSON.stringify(compiled(src))).toBe(run(src));
   });
 });
 
