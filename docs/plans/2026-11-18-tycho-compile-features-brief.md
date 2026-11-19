@@ -103,5 +103,11 @@ with `source: tycho` and the Tycho program that needs it
 - `tycho-desk`: Tycho's side; the source of the requests.
 - `ce-interval`: owns the interval mode (`print-interval.ts`,
   `interval/`); ask before changing interval spellings.
-- The binding workstream is paused by the user: change nothing in the
-  binding area (`docs/plans/2026-11-15-binding-workstream-post-mortem.md`).
+- The binding workstream is active, worked on by Codex: the `Program`
+  operator is delivered as a proof of concept, and a `Document` operator,
+  a unit of binding, is in progress. Outside such a unit the values of
+  expressions can change, but not their types. Change nothing in the
+  binding area. `compile()` compiles a library `Program` as the `Block` of
+  its operands (`compile-expression.ts`); how a `Document` compiles is
+  that workstream's decision, so ask the user before adding it to the
+  compiler.
