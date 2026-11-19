@@ -666,7 +666,7 @@ export class ExactNumericValue extends NumericValue {
     });
   }
 
-  inv(prec: number = BigDecimal.precision): NumericValue {
+  inv(_prec: number = BigDecimal.precision): NumericValue {
     // Guard non-finite values before the bigint conversions below — otherwise
     // `BigInt(NaN)` / `BigInt(Infinity)` throw a RangeError.
     if (this.isNaN) return this;

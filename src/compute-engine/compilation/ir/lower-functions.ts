@@ -48,7 +48,6 @@ import {
 import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
 import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
-import { userBinding } from './lower-context.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
