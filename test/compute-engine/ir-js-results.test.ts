@@ -120,6 +120,19 @@ describe('compiled code never writes to an input or to a list computed once', ()
       ['Declare', 'L', "'unknown'", 'Q'],
       ['Add', ['Multiply', 3, 'L'], 'x'],
     ],
+    // A list local written whole (CE-1481): each write is a new list.
+    [
+      'Block',
+      ['Declare', 'L', "'unknown'", 'Q'],
+      ['Assign', 'L', ['Multiply', 2, 'L']],
+      'L',
+    ],
+    [
+      'Block',
+      ['Declare', 'L', "'unknown'", K],
+      ['Assign', 'L', ['Multiply', 2, 'L']],
+      'L',
+    ],
   ];
   test.each(programs.map((json) => [json]))('%j', (json) => {
     const r = js(json);
@@ -133,22 +146,7 @@ describe('compiled code never writes to an input or to a list computed once', ()
       expect(value).toEqual(run(existing(json), structuredClone(before)));
   });
 
-  test('a write to a list local declines, a write to an element too', () => {
-    for (const json of [
-      [
-        'Block',
-        ['Declare', 'L', "'unknown'", 'Q'],
-        ['Assign', 'L', ['Multiply', 2, 'L']],
-        'L',
-      ],
-      [
-        'Block',
-        ['Declare', 'L', "'unknown'", K],
-        ['Assign', 'L', ['Multiply', 2, 'L']],
-        'L',
-      ],
-    ])
-      expect(() => js(json)).toThrow(/a list local/);
+  test('a write to an element of a list constant declines', () => {
     expect(() =>
       js([
         'Block',

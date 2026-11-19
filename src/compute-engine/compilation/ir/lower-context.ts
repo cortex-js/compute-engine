@@ -217,12 +217,22 @@ export function decline(
  *  writes. A `list` is a list local that its block writes in place: `v` is
  *  the array that it owns, which its writes change (`README.md`, "Lists").
  *  `exact` is the number literal of a local that no `Assign` of its block
- *  writes. */
+ *  writes. `whole`: a `local` that holds a list, which its block writes
+ *  whole (`Assign(L, value)`): the lengths of its shape after the first,
+ *  which a write keeps, and the tuple mark of a list of points; `lane` is
+ *  the lane of its elements; `widen`, the declaration of a list of integers
+ *  of no stated type, which a real list written to it widens
+ *  (`README.md`, "Lists"). */
 export type Binding = {
   v: V;
   lane?: Lane;
   exact?: Expression;
   role: 'input' | 'local' | 'constant' | 'index' | 'list';
+  whole?: {
+    readonly inner: readonly number[];
+    readonly points: boolean;
+    readonly widen?: Expression;
+  };
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };

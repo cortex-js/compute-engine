@@ -2216,7 +2216,8 @@ array in place, with these rules:
   another lane declines: a real for a declared `list<integer>` (the
   interpreter gives an `incompatible-type` error), a complex number or a
   boolean for a list of integers.
-- A list of tuples (of points) written in place declines.
+- A list of tuples (of points) written in place declines (one written
+  whole compiles, below).
 - A negative index counts from the end, as in the interpreter. An index out
   of range, 0 or not an integer throws `out-of-range` at run time, where the
   interpreter gives an error; a constant index out of a stated length
@@ -2233,10 +2234,27 @@ throws `out-of-range` there, on JavaScript only. GLSL and the interval mode
 compile a constant index (GLSL: of a list of a constant length), and decline
 an index known at run time.
 
-Every other write to a list local declines: `xs = Append(xs, v)` and any
-other write of a whole list ("a write to a constant … or to a list local"),
-and a write in a `Sum` or a `Product` body to a list local declared outside
-it. GLSL and the interval mode decline a list local that its block writes.
+On `javascript` a block local whose value is a list can also be written
+whole, `L = value`, when every write of it in its scope is of that form
+(CE-1481): a list of reals, integers or booleans of rank 1, or a list of
+points of reals or integers, whose length can change at each write
+(`out = [...out, (k, x, y)]`, `out = [...take(out, i), c, ...drop(out, i)]`,
+`L = f(L)`). A list of a run-time length is one shape whatever its length
+("Shapes are settled at compile time"), so the length can differ between
+the passes of a loop and between the arms of an `if`. Each write gives a new
+value and no array is changed, so any read of `L` is allowed. The type is
+the declared one or that of the value (a declared empty list `[]` is the
+empty list of that type); a written value of another rank, another length
+of its points, or a lane that is not a sub-lane declines, except a real list
+written to a list of integers of no declared type, which puts the local on
+reals as above.
+
+Every other write to a list local declines: a local with both a whole write
+and a write in place (`L = [...L, 2]` and `L[1] = 5`), a tuple (a point)
+written whole, an empty list of no stated type (`let L = []`), a write in a
+`Sum` or a `Product` body to a list local declared outside it, and
+`xs = Append(xs, v)` (the operator `Append` is not compiled). GLSL and the
+interval mode decline a list local that its block writes.
 
 ### Dictionary literals
 

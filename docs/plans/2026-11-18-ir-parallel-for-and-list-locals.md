@@ -144,6 +144,56 @@ known-limitations line.
 `false`. GLSL may compile the same in-order loop for scalar accumulators,
 but no corpus program needs it: GLSL declines in this version.
 
+### 4.6 A list local reassigned whole
+
+**Issue:** CE-1481 (user decision (a), 2026-11-18). **Witness** (`corpus`):
+Tycho's `apollonian-gasket` prelude. `allCirclesLocal = fillGap(…,
+allCirclesLocal)` in a `for` loop, where `fillGap` copies its list
+(`let out = found`) and rebuilds it (`out = [...out, (c[1], c[2], c[3],
+depth)]`, `out = fillGap(…, out)`); and `generations`, whose
+`let out: list<tuple<number, number, number, integer>> = []` is rebuilt with
+`out = [...take(out, i), c, ...drop(out, i)]`. 0.193.0 compiled them: its
+JavaScript was a `let` of an array that each statement bound again.
+
+The shape rule (`docs/COMPILATION-MODEL.md`, R1 to R6) allows it: the shape
+of a value is its form (a number, a list, a point, …), and a list of a
+run-time length is one shape whatever its length. A write that keeps the
+rank, the lengths after the first and the tuple mark keeps the shape; only
+the first length changes. The rules:
+
+- **Which local.** A `Block` local whose value is a list, every write of
+  which in its scope is `Assign(L, value)` (no `ReplaceAt(L, …)` value and
+  no `AddTo`, which are the §4.1 forms, no parallel assignment, no write in
+  a function literal). A list of reals, integers or booleans of rank 1, or
+  a list of points of reals or integers. The type is the declared one
+  (`list<tuple<number, number, number, integer>>`: a list of points of four
+  reals) or the type of the value. A declared empty list `[]` is the empty
+  list of that type.
+- **An SSA value per write**, as for a scalar local. Nothing is written in
+  place, so a read can share the array (`M = L`, `f(L)`): there is no
+  alias rule. A `Loop` carries two values for the local, its length
+  and the list of that length; an `if` whose arms leave two lengths gives
+  the length of the arm taken as a result before the list (the rule of list
+  arms, extended to lists of points for such a local); a random frame gives
+  the length as a result too.
+- **A written value of another type declines**: another rank, another
+  inner length (`(1, 2, 3)` into a list of pairs), a tuple, a lane that is
+  not a sub-lane. One exception, as for §4.1 (CE-1480): a real list written
+  to a list of integers of no declared type puts the local on the real lane
+  from its declaration, as the interpreter widens it. A declared
+  `list<integer>` gives an `incompatible-type` error in the interpreter and
+  declines.
+- **Interaction with §4.1.** A local with both forms (`L = [...L, 2]` and
+  `L[1] = 5`) declines, with the §4.1 cause. The two kinds never meet in one
+  local: the in-place local stays one array, the whole local a value per
+  write.
+- **Declines.** An empty list of no stated type (`let L = []`: no lane), a
+  point (a tuple local) written whole, a list of lists. GLSL (no run-time
+  length), the interval mode and the `bigint` mode decline the local.
+
+`Append` is not supported by the compiler, so `L = Append(L, v)` still
+declines, as an operator.
+
 ## 5. Steps and definition of done
 
 1. (Done, section 2.) The scalar part of `step` compiles.

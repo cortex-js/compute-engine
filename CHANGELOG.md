@@ -77,6 +77,21 @@
   The interval mode and GLSL compile a constant index of a list of a stated
   length.
 
+- **`compile()` compiles a list that a program builds again in each pass of a
+  loop** (CE-1481). A local holding a list that the program replaces as a
+  whole, `L = value`, declined in 0.194.0 ("a write to a constant (the
+  interpreter refuses it) or to a list local other than ReplaceAt or AddTo of
+  an element"), and so did a local declared a list of tuples. On JavaScript,
+  `let L = [1]; for k in 1..n { L = [...L, k] }` now gives `[1, 1, 2, 3]` at
+  `n = 3`, as the interpreter does: the length of the list can change at each
+  write, in a loop and in the arms of an `if`. The list can hold numbers,
+  booleans or points (`let P: list<tuple<real, real>> = []`, then
+  `P = [...P, (k, k/2)]`), and can be passed to a function that rebuilds it
+  (`L = f(L)`), also a recursive one. A local written both whole and in place
+  (`L[1] = 5`), a value of another type, and an empty list of no stated type
+  still decline, and so does every such list on GLSL and in the interval
+  mode.
+
 - **`compile()` compiles a function of a point called with a list of points
   again** (CE-1477). With `P: list<tuple<real, real>>` and `f` declared
   `(tuple<number, number>) -> tuple<number, number>`,

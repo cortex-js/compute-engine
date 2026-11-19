@@ -194,11 +194,17 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         if (i.exit !== undefined && type(params[i.exit + 1]).lane !== 'boolean')
           fail('loop: an exit that is not a boolean carried value');
         sub(params[0], scalarType('integer'), 'loop index');
+        // A carried list whose type names a carried length is read against
+        // the initial value, the yield or the result there.
+        const at = (vs: V[]) => (n: V) => {
+          const k = params.indexOf(n);
+          return k > 0 ? vs[k - 1] : n;
+        };
         i.init.forEach((v, j) => {
           const t = type(params[j + 1]);
-          sub(v, t, 'loop init');
-          sub(yields[j], t, 'loop yield');
-          if (!equal(type(i.outs[j]), t))
+          sub(v, mapLengths(t, at(i.init)), 'loop init');
+          sub(yields[j], mapLengths(t, at(yields)), 'loop yield');
+          if (!equal(type(i.outs[j]), mapLengths(t, at(i.outs))))
             fail('loop: a result of another type than its carried value');
         });
         return;

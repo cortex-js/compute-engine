@@ -211,19 +211,17 @@ describe('A list local copied from a constant (CE-1481)', () => {
     );
   });
 
-  test('a list of tuples written in place, or rebuilt whole, declines', () => {
+  test("a list of tuples written in place declines; a list rebuilt whole is the interpreter's (CE-1481)", () => {
     expect(
       declines(
         'function f(n: integer) { let L = [(1.5, 2.0), (3.0, 4.5)]; L = replaceAt(L, 1, (n, 0.5)); L }',
         ['f', 7]
       )
     ).toMatch(/not a list of reals, integers or booleans/);
-    expect(
-      declines(
-        'function f(n: integer) { let L = [1.5, 2.5]; for k in 1..n { L = [...L, k] }; L }',
-        ['f', 2]
-      )
-    ).toMatch(/or to a list local other than ReplaceAt or AddTo/);
+    agrees(
+      'function f(n: integer) { let L = [1.5, 2.5]; for k in 1..n { L = [...L, k] }; L }',
+      ['f', 2]
+    );
   });
 });
 

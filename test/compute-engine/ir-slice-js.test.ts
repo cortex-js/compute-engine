@@ -324,17 +324,18 @@ describe('IR slice: the forms of a declaration', () => {
         ['Block', ['Declare', 't', "'list<real>'", 'D'], ['At', 't', 1]],
         /a local of type list<real>/,
       ],
-      [
-        [
-          'Block',
-          ['Declare', 't', "'unknown'", 'D'],
-          ['Assign', 't', 'D'],
-          ['At', 't', 1],
-        ],
-        /a write to a constant .* or to a list local/,
-      ],
     ] as [unknown, RegExp][])
       expect(declineOf(() => js(json)).cause).toMatch(cause);
+  });
+  test('a list local of no stated type written whole is its value (CE-1481)', () => {
+    const write = [
+      'Block',
+      ['Declare', 't', "'unknown'", 'D'],
+      ['Assign', 't', 'D'],
+      ['At', 't', 1],
+    ];
+    expect(js(write).run({ D: [2.5, 3] })).toBe(2.5);
+    expect(interpret(ce, ce.box(write as never), { D: [2.5, 3] })).toBe(2.5);
   });
   test('a declaration with no value is an error of the canonical form', () =>
     expect(

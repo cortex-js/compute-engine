@@ -633,7 +633,7 @@ describe('Prelude statements of a list or a tuple', () => {
     expect(got[0]).toBe(D);
     expect(r.broadcastOutputs).toBeUndefined();
   });
-  test('a list local that is not written; one that is written declines', () => {
+  test('a list local that is not written; one written whole is its value', () => {
     check(
       constant(
         'L',
@@ -642,8 +642,9 @@ describe('Prelude statements of a list or a tuple', () => {
       ),
       [{ D: [1, 2, 3] }]
     );
-    expect(
-      declined([
+    // A list local written whole (CE-1481).
+    check(
+      [
         'Block',
         [
           'Declare',
@@ -652,22 +653,23 @@ describe('Prelude statements of a list or a tuple', () => {
         ],
         ['Assign', 't', ['List', 1]],
         't',
-      ])
-    ).toMatch(/or to a list local/);
+      ],
+      [{ D: [1, 2, 3] }]
+    );
     // An inner block that writes the outer list local; one that then
     // declares its own of that name is an error of the canonical form.
     const value = (v: Json) => [
       'Dictionary',
       ['KeyValuePair', { str: 'value' }, v],
     ];
-    const inner = (...rest: Json[]) =>
-      declined([
-        'Block',
-        ['Declare', 'H', value('D')],
-        ['Block', ['Assign', 'H', ['List', 1]], ...rest],
-        ['At', 'H', 1],
-      ]);
-    expect(inner(0)).toMatch(/or to a list local/);
+    const outer = (...rest: Json[]) => [
+      'Block',
+      ['Declare', 'H', value('D')],
+      ['Block', ['Assign', 'H', ['List', 1]], ...rest],
+      ['At', 'H', 1],
+    ];
+    const inner = (...rest: Json[]) => declined(outer(...rest));
+    check(outer(0), [{ D: [1, 2, 3] }]);
     expect(inner(['Declare', 'H', value(['List', 5, 6])], 'H')).toMatch(
       /static type error/
     );

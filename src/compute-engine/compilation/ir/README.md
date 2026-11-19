@@ -1307,6 +1307,34 @@ constant length is the list of its elements. A boolean value in a list of
 numbers, or the reverse, and a complex value decline; so do several indexes
 (`ReplaceAt(M, i, j, v)`).
 
+A list local written whole (JavaScript; CE-1481): a `Block` local whose value
+is a list, each write of which in its scope is `Assign(L, value)`
+(`rebuiltOnly()`: no `ReplaceAt(L, …)` value, no `AddTo`, no parallel
+assignment, no write in a function literal, no declaration again), is a
+`local` binding with `whole` (`wholeLocal()`): a list of reals, integers or
+booleans of rank 1, or a list of points of reals or integers (marked a tuple
+on its inner axis), of the declared type or of the type of its value; a
+declared `List()` is an empty build of that type (a stated length is at least
+1). Each write is a new SSA value, as for a scalar local (`fitWhole()`): the
+same rank, the same lengths after the first and the same tuple mark, of a
+sub-lane, and any first length; another value declines ("a value of type …
+written to a list local of type …"). A real list written to a list of
+integers of no declared type throws `WidenList`, as above, and the local is on
+the real lane from its declaration. No array is written, so the local has no
+alias rule and no copy: `M = L` and `f(L)` read the value. A `Loop` carries
+two values for such a local, its length (an integer) and the list whose type
+names it (the verifier reads the initial value, the yield and the result of
+the list at the length carried before it); `branch()` joins two lengths of
+such a local's list of points as it joins flat lists (a length result before
+the list), and a random frame (`seededFrame()`) gives the length of a list
+made in it as a result before the lists. The gasket's `fillGap` and
+`generations` (`out = [...out, (…)]`, `out = fillGap(…, out)`,
+`out = [...take(out, i), c, ...drop(out, i)]`) compile this way. A local with
+both a whole write and a write in place declines with the cause of the
+paragraph above; so do a point written whole and an empty list of no stated
+type (no lane). GLSL (no run-time length), the interval mode and the `bigint`
+mode decline such a local.
+
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
 of `L` by `cond`, then a build of `body` over the elements kept. The

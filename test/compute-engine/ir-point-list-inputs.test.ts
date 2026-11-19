@@ -387,11 +387,19 @@ describe('IR profile, batch G14: the witnesses', () => {
     );
   });
 
-  // The two records that write a list local.
+  // The two records that write a list local. A list local written whole
+  // (CE-1481) is the interpreter's value.
+  test('circlesLocal, assigned in a Loop', () => {
+    // prettier-ignore
+    check(
+      ['Block', ['Declare', 'cl', ['Dictionary', ['KeyValuePair', { str: 'value' }, 'C4']]], ['Loop', ['Block', ['Assign', 'cl', ['fill', ['At', 'gap', 1], ['At', 'gap', 2], ['At', 'gap', 3], 2, 'cl']]], ['Element', 'gap', ['List', ['Tuple', 1, 2, 3], ['Tuple', 3, 2, 1]]]], ['Tuple', 'cl']],
+      [{ C4: [] }, { C4: [[1, 2, 3, 4]] }, { C4: rows(3, (k) => [k, -k, 0.5 * k, 2]) }],
+      { symbolic: ['C4'] }
+    );
+  });
   // prettier-ignore
   test.each([
-    ['circlesLocal, assigned in a Loop', ['Block', ['Declare', 'cl', ['Dictionary', ['KeyValuePair', { str: 'value' }, 'C4']]], ['Loop', ['Block', ['Assign', 'cl', ['fill', ['At', 'gap', 1], ['At', 'gap', 2], ['At', 'gap', 3], 2, 'cl']]], ['Element', 'gap', ['List', ['Tuple', 1, 2, 3], ['Tuple', 3, 2, 1]]]], ['Tuple', 'cl']], /a write to a constant \(the interpreter refuses it\) or to a list local/],
-    ['generations, a local list of tuples grown in a Loop', ['Block', ['Declare', 'G', ['Dictionary', ['KeyValuePair', { str: 'value' }, ['generations', 'C4', 1, 1]], ['KeyValuePair', { str: 'constant' }, 'True']]], ['Tuple', 'G']], /a local of type list<tuple<number, number, number, integer>>/],
+    ['generations, a local list of tuples grown in a Loop', ['Block', ['Declare', 'G', ['Dictionary', ['KeyValuePair', { str: 'value' }, ['generations', 'C4', 1, 1]], ['KeyValuePair', { str: 'constant' }, 'True']]], ['Tuple', 'G']], /the operator Append is not supported/],
   ])('%s declines, with the cause', (_, json, cause) => {
     const d = failure(() => js(json, { symbolic: ['C4'] }));
     expect(d?.code).toBe('outside-profile');

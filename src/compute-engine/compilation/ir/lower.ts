@@ -84,6 +84,7 @@ import {
   joinType,
   widensTo,
   lengthValues,
+  mapLengths,
   regionsOf,
   sameShape,
   scalarType,
@@ -2793,26 +2794,40 @@ function lowerOnce(
     const c = arm(otherwise, a.bindings);
     const { bindings, before } = a;
     const outs: V[] = [];
-    const join = (x: V, y: V, cause: string): V => {
+    const join = (
+      x: V,
+      y: V,
+      cause: string,
+      whole?: { points?: boolean }
+    ): V => {
+      const points = whole?.points === true;
       let t = joinType(type(x), type(y));
       // Flat lists of reals or integers of two lengths: one constant length
       // is a stated length; otherwise the length of the arm taken is a
-      // result too, before the list (README, "Lists").
+      // result too, before the list (README, "Lists"). With `points` (a
+      // list local written whole, `wholeLocal()`), lists of points of one
+      // stated length too, and a flat list of booleans of such a local.
       const [n, m] = [type(x).shape, type(y).shape];
       const lane = joinType(scalarType(type(x).lane), scalarType(type(y).lane));
       const stated = (l: Length) => (typeof l === 'number' ? l : constant(l.v));
+      const inner = n.slice(1);
       if (
         t === undefined &&
-        n.length === 1 &&
-        m.length === 1 &&
-        isSubLane(lane?.lane ?? 'boolean', 'real') &&
-        !tuples.has(x) &&
-        !tuples.has(y)
+        ((n.length === 1 && !tuples.has(x)) ||
+          (points &&
+            n.length === 2 &&
+            typeof n[1] === 'number' &&
+            tuples.get(x) === 1)) &&
+        m.length === n.length &&
+        inner.every((l, k) => l === m[k + 1]) &&
+        tuples.get(x) === tuples.get(y) &&
+        (isSubLane(lane?.lane ?? 'boolean', 'real') ||
+          (whole !== undefined && n.length === 1 && lane?.lane === 'boolean'))
       ) {
         const k = stated(n[0]);
         // A stated length is at least 1: two empty arms keep the form below.
         if (k !== undefined && k > 0 && k === stated(m[0]))
-          t = { lane: lane!.lane, shape: [k] };
+          t = { lane: lane!.lane, shape: [k, ...inner] };
         else {
           if (interval || !options.runtimeLengths)
             decline(node, 'arms that are lists of two lengths');
@@ -2829,7 +2844,10 @@ function lowerOnce(
           a.region.yields.push(length(a.region, n[0]));
           c.region.yields.push(length(c.region, m[0]));
           outs.push(b.newValue(scalarType('integer')));
-          t = { lane: lane!.lane, shape: [{ v: outs[outs.length - 1] }] };
+          t = {
+            lane: lane!.lane,
+            shape: [{ v: outs[outs.length - 1] }, ...inner],
+          };
         }
       }
       // Arms of two ranks, or a tuple and a list, have no settled shape;
@@ -2851,7 +2869,12 @@ function lowerOnce(
     );
     const joined = changed.map((x) => {
       const i = bindings.indexOf(x);
-      return join(a.after[i], c.after[i], 'a local written with two types');
+      return join(
+        a.after[i],
+        c.after[i],
+        'a local written with two types',
+        x.whole
+      );
     });
     let result: V | undefined;
     if (want) {
@@ -2909,14 +2932,19 @@ function lowerOnce(
     const changed = bindings.filter((_, i) => after[i] !== before[i]);
     if (want && result === undefined) decline(node, 'a frame with no value');
     // A value made in the frame is not visible after it: the length of a
-    // list made in the frame is a result too (the row `seeded`).
-    const lengths = want
-      ? lengthValues(type(result!)).filter(
-          (n) => n >= start && !inputLengths.has(n)
-        )
-      : [];
-    region.yields.push(...changed.map((x) => after[bindings.indexOf(x)]));
+    // list made in the frame is a result too (the row `seeded`), also that
+    // of a list local written whole in it (`wholeLocal()`).
+    const made = (v: V) =>
+      lengthValues(type(v)).filter((n) => n >= start && !inputLengths.has(n));
+    const lengths = [
+      ...new Set([
+        ...changed.flatMap((x) => made(after[bindings.indexOf(x)])),
+        ...(want ? made(result!) : []),
+      ]),
+    ];
+    // A length before the lists whose types name it.
     region.yields.push(...lengths);
+    region.yields.push(...changed.map((x) => after[bindings.indexOf(x)]));
     if (want) region.yields.push(result!);
     const ys = region.yields;
     const outs = ys.map((y) => keep(y, b.newValue(type(y))));
@@ -2931,7 +2959,7 @@ function lowerOnce(
       regions: [region],
       site: text(node),
     });
-    changed.forEach((x, j) => (x.v = outs[j]));
+    changed.forEach((x, j) => (x.v = outs[lengths.length + j]));
     return want ? outs[outs.length - 1] : undefined;
   };
 
@@ -3485,15 +3513,48 @@ function lowerOnce(
             'complex',
             'unknown',
           ].includes(typeName);
+          // A local that every write of its scope gives a whole value
+          // (`wholeLocal()`).
+          const rebuilt =
+            written && rebuiltOnly(e.ops.slice(i + 1), name.symbol);
           const listType =
-            written && !scalarLocal
+            written && !scalarLocal && !rebuilt
               ? inputType(ce.type(typeName).type)
               : undefined;
-          if (!scalarLocal && listType === undefined)
+          const wholeType =
+            rebuilt && !scalarLocal
+              ? tupleOrInputType(ce.type(typeName).type)
+              : undefined;
+          if (!scalarLocal && listType === undefined && wholeType === undefined)
             decline(s, `a local of type ${typeName}`);
+          // A constant list that a later statement writes declines (the
+          // interpreter refuses the write: `constant-assignment`).
+          if (rebuilt && !scalarLocal && isSymbol(constant, 'True'))
+            decline(s, 'a write to a constant list local');
+          // An empty list of a stated type has the type of the local.
+          if (rebuilt && wholeType !== undefined && isEmptyList(value)) {
+            const owned = wholeLocal(s, undefined, wholeType, typeName);
+            frame.names.set(name.symbol, owned);
+            return void (result = owned.v);
+          }
           // A list (or a tuple) local of no stated type is its value, a
           // local that no `Assign` writes (`assign()` declines one).
           const v = cx.value(value)!;
+          if (rebuilt && (!scalarLocal || type(v).shape.length > 0)) {
+            if (isSymbol(constant, 'True'))
+              decline(s, 'a write to a constant list local');
+            if (
+              typeName === 'unknown' &&
+              (!value.type.matches('list') || value.type.matches('range'))
+            )
+              decline(
+                s,
+                `a list local written whole whose value is of type ${value.type.toString()}`
+              );
+            const owned = wholeLocal(s, v, wholeType, typeName);
+            frame.names.set(name.symbol, owned);
+            return void (result = owned.v);
+          }
           if (written && type(v).shape.length > 0) {
             // The interpreter refuses a write to a constant, and to a local
             // whose type it infers from its value as a type that is not a
@@ -3623,21 +3684,48 @@ function lowerOnce(
       return x?.binding.role === 'local' && !x.outer ? [x.binding] : [];
     });
     if (done) carried.push(done);
-    const exit = done ? { exit: carried.length - 1 } : {};
+    // A list local written whole is carried as two values: its length, then
+    // the list of that length (`wholeLocal()`). `slot` is the position of
+    // the value of each binding.
+    let slots = 0;
+    const slot = carried.map((x) => (slots += x.whole ? 2 : 1) - 1);
+    const exit = done ? { exit: slots - 1 } : {};
+    const carry = (x: Binding): V[] => {
+      if (x.whole === undefined) return [x.v];
+      const n = type(x.v).shape[0];
+      return [typeof n === 'number' ? b.constant(n, 'integer') : n.v, x.v];
+    };
     /** A counted loop from `lo` to `hi` whose pass runs `pass(k)` of its
      *  index `k`, the carried values bound to the parameters. */
     const counted = (lo: V, hi: V, pass: (k: V) => void): void => {
-      const init = carried.map((x) => widen(x.v, x.lane!));
+      const init = carried.flatMap((x) =>
+        x.whole ? carry(x) : [widen(x.v, x.lane!)]
+      );
       const k = b.newValue(scalarType('integer'));
-      const params = carried.map((x) => b.newValue(scalarType(x.lane!)));
-      const body = b.region([k, ...params], () => {
-        carried.forEach((x, i) => (x.v = params[i]));
-        pass(k);
-        return carried.map((x) => x.v);
+      const params = carried.flatMap((x) => {
+        if (x.whole === undefined) return [b.newValue(scalarType(x.lane!))];
+        const n = b.newValue(scalarType('integer'));
+        const shape = [{ v: n }, ...x.whole.inner];
+        const l = b.newValue({ lane: x.lane!, shape });
+        if (x.whole.points) tuples.set(l, 1);
+        return [n, l];
       });
-      const outs = params.map((v) => b.newValue(type(v)));
+      const body = b.region([k, ...params], () => {
+        carried.forEach((x, i) => (x.v = params[slot[i]]));
+        pass(k);
+        return carried.flatMap(carry);
+      });
+      // The type of a carried list names the length carried before it.
+      const outs: V[] = [];
+      for (const v of params)
+        outs.push(
+          keep(
+            v,
+            b.newValue(mapLengths(type(v), (n) => outs[params.indexOf(n)]))
+          )
+        );
       b.emit({ k: 'loop', outs, lo, hi, init, body, passes: true, ...exit });
-      carried.forEach((x, i) => (x.v = outs[i]));
+      carried.forEach((x, i) => (x.v = outs[slot[i]]));
     };
     const clause = (j: number): void => {
       if (j === e.nops)
@@ -4034,6 +4122,14 @@ function lowerOnce(
       return listWrite(e, owned, r.ops[1], () => scalar(r.ops[2]), false, want);
     }
     const binding = writable(e, name);
+    if (binding.whole !== undefined) {
+      // A list local written whole (`wholeLocal()`).
+      const r = e.ops[1];
+      const x = isEmptyList(r) ? undefined : value(r);
+      if (x === undefined && !isEmptyList(r)) decline(e, 'a write of no value');
+      binding.v = fitWhole(e, x, binding.whole, binding.lane!);
+      return binding.v;
+    }
     const v = local(e, scalar(e.ops[1]), binding.lane!);
     binding.v = v;
     return v;
@@ -4389,6 +4485,137 @@ function lowerOnce(
     isSymbol(x, name) ||
     (isDictionary(x) && x.values.some((y) => mentions(y, name))) ||
     (isFunction(x) && x.ops.some((y) => mentions(y, name)));
+
+  /** Every write of the local `name` in `scope` (the statements of its block
+   *  after its declaration) is `Assign(name, value)` of a whole value: no
+   *  `ReplaceAt(name, …)` value and no `AddTo` (the forms written in place,
+   *  `listLocal()`), no parallel assignment, no write in a function literal
+   *  and no declaration of `name` again. */
+  const rebuiltOnly = (scope: readonly Expression[], name: string): boolean => {
+    const own = (y: Expression) => isSymbol(y, name);
+    const ok = (x: Expression): boolean => {
+      if (!isFunction(x) || !facts(x).writes.has(name)) return true;
+      if (x.operator === 'Function') return false;
+      const [t, r] = x.ops;
+      if (x.operator === 'Assign' && own(t))
+        return !(isFunction(r, 'ReplaceAt') && own(r.ops[0])) && ok(r);
+      if (
+        (x.operator === 'Assign' &&
+          isFunction(t, 'Tuple') &&
+          t.ops.some(own)) ||
+        (x.operator === 'AddTo' &&
+          (own(t) || (isFunction(t, 'At') && own(t.ops[0]))))
+      )
+        return false;
+      return x.ops.every(ok);
+    };
+    return scope.every(
+      (x) => !(isFunction(x, 'Declare') && own(x.ops[0])) && ok(x)
+    );
+  };
+
+  /** The binding of a list local of the value `v` that its block writes
+   *  whole (`rebuiltOnly()`): an SSA value per write, as a scalar local,
+   *  whose length can change at each write. Its type (`declared`, of the
+   *  stated type `typeName`, or that of `v`) is a list of reals, integers or
+   *  booleans, or a list of points of reals or integers, of a run-time
+   *  length; a write keeps the rest of its shape. A `Loop` carries its
+   *  length and its list (`loop()`), an `if` joins two lengths (`branch()`).
+   *  No array is written in place, so a read of the local can share the
+   *  array (`M = L`, `f(L)`). JavaScript only. */
+  const wholeLocal = (
+    s: Fn,
+    v: V | undefined,
+    declared: ReturnType<typeof inputType>,
+    typeName: string
+  ): Binding => {
+    if (!options.javascript || bigint || !options.runtimeLengths)
+      decline(s, 'a list local that its block writes whole (JavaScript only)');
+    const t = declared ?? type(v!);
+    const points =
+      declared !== undefined
+        ? tupleAxis(ce.type(typeName).type) === 1
+        : tuples.get(v!) === 1;
+    const [n, ...inner] = t.shape;
+    if (
+      (declared === undefined && typeName !== 'unknown') ||
+      (declared !== undefined && n !== 'run-time') ||
+      (declared === undefined && tuples.get(v!) === 0) ||
+      t.shape.length !== (points ? 2 : 1) ||
+      !inner.every((x): x is number => typeof x === 'number') ||
+      !(
+        t.lane === 'real' ||
+        t.lane === 'integer' ||
+        (t.lane === 'boolean' && !points)
+      )
+    )
+      decline(
+        s,
+        `a list local written whole of type ${typeName === 'unknown' ? typeToString(type(v!), tuples.get(v!) ?? -1) : typeName}: only a list of reals, integers or booleans, or of points of reals, of a run-time length`
+      );
+    // A real written to a list of integers of no stated type: the
+    // interpreter widens the list, and the lowering again puts the local on
+    // the real lane (`WidenList`, as for a list local written in place).
+    const lane =
+      declared === undefined && t.lane === 'integer' && wide.has(s)
+        ? 'real'
+        : t.lane;
+    const whole = {
+      inner,
+      points,
+      widen: declared === undefined && lane === 'integer' ? s : undefined,
+    };
+    return { v: fitWhole(s, v, whole, lane), lane, role: 'local', whole };
+  };
+
+  /** `List()`, which has no type of its own. */
+  const isEmptyList = (x: Expression) => isFunction(x, 'List') && x.nops === 0;
+
+  /** The value `x` written to a list local written whole of the lane `lane`
+   *  (`wholeLocal()`): a list of the rank, the lengths after the first and
+   *  the tuple mark of the local, of a sub-lane; an empty list (`undefined`
+   *  for `List()`) is the empty list of that type. Another value declines:
+   *  the interpreter changes the type of the local or gives an error. */
+  const fitWhole = (
+    e: Fn,
+    x: V | undefined,
+    whole: NonNullable<Binding['whole']>,
+    lane: Lane
+  ): V => {
+    const t = x === undefined ? { lane, shape: [0] } : type(x);
+    if (x === undefined || (t.shape.length === 1 && t.shape[0] === 0)) {
+      // A build of no element: a stated length is at least 1.
+      const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+      const k = b.newValue(scalarType('integer'));
+      return region(
+        'build',
+        [b.constant(0, 'integer')],
+        [k],
+        () => [
+          whole.points ? tuple(e, Array<V>(whole.inner[0]).fill(zero)) : zero,
+        ],
+        e
+      )[0];
+    }
+    const shaped =
+      t.shape.length === 1 + whole.inner.length &&
+      whole.inner.every((n, k) => t.shape[k + 1] === n) &&
+      (tuples.get(x) === 1) === whole.points &&
+      tuples.get(x) !== 0;
+    if (shaped && isSubLane(t.lane, lane)) return x;
+    const mismatch = () =>
+      decline(
+        e,
+        `a value of type ${typeToString(t, tuples.get(x) ?? -1)} written to a list local of type ${typeToString({ lane, shape: [{ v: 0 }, ...whole.inner] }, whole.points ? 1 : -1)}`
+      );
+    if (shaped && whole.widen !== undefined && t.lane === 'real')
+      try {
+        mismatch();
+      } catch (d) {
+        throw new WidenList(d as Decline, whole.widen);
+      }
+    return mismatch();
+  };
 
   /** `ParallelLoop(body, Element(x, coll), …)`: the `Loop` of the same
    *  operands, whose passes run in order, as the interpreter runs them. It
