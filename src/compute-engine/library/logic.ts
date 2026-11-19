@@ -1042,11 +1042,13 @@ function evaluateExists(
 }
 
 /** True when the condition of a quantifier gives a finite domain with no
- * value (`Element(x, Set())`). */
+ * value (`Element(x, Set())`, `Element(x, EmptySet)`). */
 function hasEmptyFiniteDomain(
   condition: Expression,
   ce: ComputeEngine
 ): boolean {
+  if (isFunction(condition, 'Element') && sym(condition.op2) === 'EmptySet')
+    return true;
   const domain = extractFiniteDomainWithReason(condition, ce, 'reals');
   return domain.status === 'success' && domain.values.length === 0;
 }

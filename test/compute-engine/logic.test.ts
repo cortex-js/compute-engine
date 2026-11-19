@@ -1325,6 +1325,8 @@ describe('A quantifier over an empty finite domain', () => {
     [['Exists', ['Element', 'y', ['Set']], ['Greater', 1, 0]], 'False'],
     [['ForAll', ['Element', 'y', ['Set']], ['Less', 1, 0]], 'True'],
     [['Exists', ['Element', 'y', ['Set']], ['Greater', 'z', 0]], 'False'],
+    [['Exists', ['Element', 'y', 'EmptySet'], 'True'], 'False'],
+    [['ForAll', ['Element', 'y', 'EmptySet'], 'False'], 'True'],
     // An inner quantifier, evaluated for each value of the outer variable
     [
       [
