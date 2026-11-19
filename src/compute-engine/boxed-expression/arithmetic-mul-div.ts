@@ -70,6 +70,7 @@ import {
   isTupleWithListCoordinate,
   isAbsentScalarTerm,
   isCollectionShaped,
+  isTupleShapedType,
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
@@ -2727,14 +2728,26 @@ export function canonicalMultiply(
         // With `w := 4`, `Multiply(0, 2, w)` is `0w`, which evaluates to
         // `NaN` after `w := NaN`. This is the rule of `Multiply(0, w)`, where
         // there is only one exact factor and nothing to fold, and of `mul()`.
-        // A list with no value yet keeps the product too: `0·2·L` is a list of
-        // zeros of the length of `L`, as `0·L` is.
-        // A NaN or infinite literal factor is the indeterminate form below.
+        // A list or a tuple factor keeps the product too, also with a NaN or
+        // infinite factor: `0·2·L` is a list of zeros of the length of `L`,
+        // as `0·L` is, also for a literal list or tuple (`0·2·[2, 4, 8]` is
+        // `[0, 0, 0]`, `0·2·(1, 2)` is `(0, 0)`, `0·2·NaN·[1, 2]` is
+        // `[NaN, NaN]`, CE-1504). An indexed collection only: a set or an
+        // interval factor is not mapped over.
+        // Otherwise a NaN or infinite literal factor is the indeterminate
+        // form below.
+        const shaped = nonNumeric.some(
+          (x) =>
+            (isCollectionShaped(x) &&
+              x.type.matches('indexed_collection')) ||
+            isTupleShapedType(x.type.type)
+        );
         if (
-          !nonNumeric.some(
+          shaped ||
+          (!nonNumeric.some(
             (x) => isNumber(x) && (x.isInfinity === true || x.isNaN === true)
           ) &&
-          nonNumeric.some((x) => hasAssignedVariable(x) || isUnresolvedList(x))
+            nonNumeric.some((x) => hasAssignedVariable(x)))
         )
           return ce._fn(
             'Multiply',

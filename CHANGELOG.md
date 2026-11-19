@@ -48,6 +48,12 @@
   that applies only these operators and `Negate` to its parameters and to
   integers.
 
+- **A product of zero, another number and a list is a list of zeros**
+  (CE-1504). `0·2·[2, 4, 8]` gave the number `0`, while `0·[2, 4, 8]` gives
+  `[0, 0, 0]`; it now gives `[0, 0, 0]` too. The same holds for a tuple
+  (`0·2·(1, 2)` is `(0, 0)`) and with a NaN or infinite factor (`0·2·NaN·[1, 2]`
+  is `[NaN, NaN]`).
+
 - **`Mandelbrot` and `Julia` compile again on JavaScript and GLSL.** Since
   0.194.0, `compile()` declined them ("the operator Mandelbrot is not supported
   by the compiler"), so a field such as `Mandelbrot(x + y·i, 256)` was computed
