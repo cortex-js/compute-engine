@@ -27,6 +27,8 @@ import {
   rgb255ToHsv,
   isParseColorSpelling,
   parseOkColorString,
+  lerpOklchColor,
+  normalizeAlpha,
 } from '../numerics/color-conversion.js';
 import {
   binomial,
@@ -283,20 +285,6 @@ const isImaginaryUnitPole = (z: { re: number; im: number }): boolean =>
  */
 function complexModulus(z: ComplexResult): number {
   return z.im === 0 ? Math.abs(z.re) : Math.hypot(z.re, z.im);
-}
-
-/**
- * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
- * or effectively-1 inputs so downstream sites can use a simple
- * `alpha !== undefined` check to decide whether to emit it. Mirrors the
- * helper of the same name in `library/colors.ts` so the interpreted and
- * compiled paths agree on alpha semantics.
- */
-function normalizeAlpha(a: number | undefined): number | undefined {
-  if (a === undefined) return undefined;
-  if (!Number.isFinite(a)) return undefined;
-  if (Math.abs(a - 1) < 1e-9) return undefined;
-  return a;
 }
 
 /** Are all three channels finite numbers? A conversion result whose channels
@@ -758,6 +746,18 @@ const colorHelpers = {
   // that the pass-through would hand back unconverted.
   asOklch(input: unknown): CompiledColor {
     const c = toOklch(input);
+    return mkColor('oklch', c.L, c.C, c.H, c.alpha);
+  },
+  // `ColorMix(a, b, t)`: the interpreter's mix in OKLCh (`lerpOklchColor`),
+  // with the ratio clamped into [0, 1]; the result is in OKLCh. A ratio that
+  // is not finite (an `expected-value` error of the interpreter) gives the
+  // `NaN` colour.
+  colorMix(a: unknown, b: unknown, t: number): CompiledColor {
+    const c = lerpOklchColor(
+      toOklch(a),
+      toOklch(b),
+      Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : NaN
+    );
     return mkColor('oklch', c.L, c.C, c.H, c.alpha);
   },
 };

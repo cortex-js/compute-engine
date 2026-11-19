@@ -23,6 +23,7 @@ import {
   scalarType,
   type Instr,
   type Lane,
+  type Length,
   type Region,
   type V,
 } from './ir.js';
@@ -42,6 +43,7 @@ import {
   userBinding,
 } from './lower-context.js';
 import { SCALARIZE_LIMIT } from './passes.js';
+import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
  *  with a type (`Typed(z, "real")`), also with a default value
@@ -222,36 +224,74 @@ export function listLowering(cx: Lowering) {
     return { length, at };
   }
 
+  /** A term of an indexed `Sum` or `Product` that is a list: a flat list
+   *  of numbers, not a tuple. */
+  const listTerm = (t: V): boolean =>
+    type(t).shape.length === 1 && !cx.tuples.has(t);
+
+  /** The list of the length `n` whose every element is `x`. */
+  const filled = (e: Fn, n: Length, x: V): V =>
+    over(
+      e,
+      { length: typeof n === 'number' ? integer(n) : n.v, at: (k) => k },
+      '',
+      () => x,
+      false,
+      e
+    );
+
   /** A counted loop from `lo` to `hi` that carries the accumulator of
-   *  `r`, from `init`, over the value of `term` at each index. */
+   *  `r`, from `init`, over the value of `term` at each index. With
+   *  `lists` (an indexed `Sum` or `Product`), a term may be a flat list
+   *  whose length is known before the loop: the accumulator is then a list
+   *  of that length, from `init` in each element, and the terms are added
+   *  element by element (`README.md`, "Lists"). */
   const accumulate = (
-    e: Expression,
+    e: Fn,
     r: OperatorRow,
     init: V,
     lo: V,
     hi: V,
-    term: (k: V) => V
+    term: (k: V) => V,
+    lists = false
   ): V => {
     const k = b.newValue(scalarType('integer'));
     const params = [k];
     let lane: Lane | undefined;
+    let shape: readonly Length[] = [];
     const body = b.region(params, () => {
       const t = term(k);
       lane = signatureOf(r, [type(init), type(t)])?.[1] as Lane | undefined;
-      if (lane === undefined || type(t).shape.length > 0)
+      shape = type(t).shape;
+      if (lane === undefined || (shape.length > 0 && !(lists && listTerm(t))))
         decline(e, 'a term that is not a number');
-      const acc = b.newValue(scalarType(lane));
+      const acc = b.newValue({ lane, shape });
       params.push(acc);
       const next = cx.apply(e, r, [acc, t]);
       if (type(next).lane !== lane)
         decline(e, 'an accumulator that changes lane');
       return [next];
     });
-    const out = b.newValue(scalarType(lane!));
-    const start = cx.widen(init, lane!);
+    // The length of a list term is a value made before the loop (the
+    // length of an input, of a list computed outside the sum): a length
+    // computed in the loop can change from term to term, and the
+    // accumulator has one length.
+    const n = shape[0];
+    if (n !== undefined && typeof n !== 'number' && definedIn(body, n.v))
+      decline(e, 'a term that is a list whose length is computed in each term');
+    const out = b.newValue({ lane: lane!, shape });
+    const first = cx.widen(init, lane!);
+    const start = n === undefined ? first : filled(e, n, first);
     b.emit({ k: 'loop', outs: [out], lo, hi, init: [start], body });
     return out;
   };
+
+  /** `v` is a parameter of `r` or a value defined in it. */
+  const definedIn = (r: Region, v: V): boolean =>
+    r.params.includes(v) ||
+    r.body.some(
+      (i) => outsOf(i).includes(v) || regionsOf(i).some((x) => definedIn(x, v))
+    );
 
   /** The sums whose term held a loop that no limit made: a nest of
    *  constant sums tries each once, not once per term of the sums around
@@ -289,7 +329,8 @@ export function listLowering(cx: Lowering) {
    *  the loop's operations, with no loop. `undefined`, and the loop runs, in
    *  the cases of `README.md`, "Lists" (a sum written out). With
    *  `identity`, `init` is the identity of `r`: the fold starts at the
-   *  first term when the loop's accumulator has its lane. */
+   *  first term when the loop's accumulator has its lane. With `lists`, a
+   *  term may be a flat list (`accumulate()`). */
   const writtenOut = (
     e: Fn,
     r: OperatorRow,
@@ -297,7 +338,8 @@ export function listLowering(cx: Lowering) {
     lo: V,
     hi: V,
     term: (k: V) => V,
-    identity = false
+    identity = false,
+    lists = false
   ): V | undefined => {
     const [a, z] = [cx.constant(lo), cx.constant(hi)];
     const n = a === undefined || z === undefined ? 0 : z - a + 1;
@@ -344,7 +386,8 @@ export function listLowering(cx: Lowering) {
             return undefined;
           }
           const s = signatureOf(r, [type(acc), type(t)]);
-          if (type(t).shape.length > 0 || !s) return undefined;
+          if ((type(t).shape.length > 0 && !(lists && listTerm(t))) || !s)
+            return undefined;
           acc =
             identity && j === 0 && s[1] === type(t).lane
               ? t
@@ -383,10 +426,30 @@ export function listLowering(cx: Lowering) {
       return v;
     });
     const init = integer(REDUCTIONS.get(e.operator)!.identity);
-    const term = (k: V) => indexed(index.symbol, k, () => cx.scalar(e.ops[0]));
-    const written = writtenOut(e, r, init, lo, hi, term);
+    // A term may be a flat list: the interpreter adds (multiplies) the
+    // terms element by element (`accumulate()`).
+    const term = (k: V) => indexed(index.symbol, k, () => cx.value(e.ops[0])!);
+    const written = writtenOut(e, r, init, lo, hi, term, false, true);
     if (written !== undefined) return written;
-    const run = () => accumulate(e, r, init, lo, hi, term);
+    const run = () => {
+      const v = accumulate(e, r, init, lo, hi, term, true);
+      const n = type(v).shape[0];
+      // Over a range with no term, the interpreter's value is a list of the
+      // identity only when the static type of the sum states its length
+      // (`emptyBigOpValue()`), and the identity (a number) otherwise.
+      const [a, z] = [cx.constant(lo), cx.constant(hi)];
+      const empty = emptyBigOpValue(e, e.operator as 'Sum' | 'Product');
+      if (
+        n !== undefined &&
+        !(a !== undefined && z !== undefined && a <= z) &&
+        !(isFunction(empty, 'List') && empty.nops === n)
+      )
+        decline(
+          e,
+          'a term that is a list, over a range that can be empty, where the interpreter gives a number (the type of the sum states no length)'
+        );
+      return v;
+    };
     if (cx.budget === undefined || !Number.isFinite(cx.budget)) return run();
     // `iterationBudget`: a loop of more passes than the budget is NaN
     // (`CompilationOptions.iterationBudget`), `hi - lo < budget` otherwise.
@@ -394,18 +457,24 @@ export function listLowering(cx: Lowering) {
     const budget = integer(Math.floor(cx.budget));
     const within = cx.apply(e, 'Less', [span, budget]);
     let lane: Lane = 'real';
+    let shape: readonly Length[] = [];
     return cx.branch(
       e,
       within,
       () => {
         const v = run();
         lane = type(v).lane;
+        shape = type(v).shape;
         return v;
       },
-      () =>
-        lane === 'complex'
-          ? b.constant({ re: NaN, im: NaN }, 'complex')
-          : b.constant(NaN, 'real'),
+      () => {
+        const nan =
+          lane === 'complex'
+            ? b.constant({ re: NaN, im: NaN }, 'complex')
+            : b.constant(NaN, 'real');
+        // A list of NaN for a list of terms.
+        return shape.length === 0 ? nan : filled(e, shape[0], nan);
+      },
       true
     )!;
   };

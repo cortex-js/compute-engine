@@ -163,6 +163,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
   and `Filter` do in the interpreter); the interpreter's `Iterate` applies
   the literal's (`[6, 1, 6]`). CE-1461.
 
+- `javascript` (crafted): a structural tree that holds calls of one name
+  boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
+  pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
+  `17.5` at `x = 1`: each call keeps the binding it was boxed with, as in
+  the canonical form. The interpreter of the same structural tree reads both
+  calls as the outer `g` and gives `5`.
+- `javascript` (crafted): a structural `Floor(Multiply(x, Power(49, -1)))`
+  folds the constant `49^-1` to its double, so the product misses the exact
+  quotient: at `x = 49` it gives `0`, where the interpreter gives `1` (the
+  canonical form divides by 49 and gives `1`). `interval-js` gives a
+  `singular` enclosure that holds the value.
+
 - `javascript` and `interval-js` (crafted): an input declared again in a
   nested scope. With `x: real`, `k(v) := v + x`, then in a pushed scope
   `x: real` again and `g(v) := v + 1000x`, `k(0) + g(0)` with
@@ -667,12 +679,16 @@ read:
   (`U: real | list<real>`) or with `broadcastable<real>` (`Max(2b)`);
 - `Max` or `Min` of an operand that can be a number or a list: with
   `S: indexed_collection`, `Min(Distance(S, (1, 2)))` declines;
-- a term of an indexed `Sum` or `Product` that is a list: with
-  `L: list<real>` and `n: integer`, `Sum(L·i, i, 1, n)` declines ("a list
-  where a scalar is required"), and so does the corpus case
+- an indexed `Sum` or `Product` whose term is a list, over bounds that can
+  give no term, when the type of the sum states no length: at an empty
+  range the interpreter gives the number `0` (or `1`), and a list
+  otherwise. With `L: list<real>` and `n: integer`, `Sum(L·i, i, 1, n)`
+  declines, and so does the corpus case
   `\sum_{i=1}^{\mathrm{Length}(U)} \begin{cases}i & C=U[i]\\0 &
-  \top\end{cases}` with `C` and `U` lists, whose condition compares the
-  list `C` with a number;
+  \top\end{cases}` with `C` and `U` lists. Over two integer constant bounds
+  with at least one term, or with a term of a stated length (`L: list<real^2>`), the
+  terms are added element by element and the sum compiles
+  (`compilation/ir/README.md`, "Lists", CE-1470);
 - a fold of a list of points (`Sum(L)` with `L: list<tuple<real, real>>`:
   "a term that is not a number");
 - a recursive function whose list or tuple result has no stated element
@@ -1571,7 +1587,8 @@ name stays in `freeSymbols`); `preamble` holds the helpers (`_gpu_ir_…`) and
 the user functions (`_fn_ir_…`); `freeSymbolTypes[name].lowered` is `float`,
 `bool`, `vecN` or `float[n]`. A shader cannot throw, so the pass cap is
 the option `iterationBudget` (10,000 by default), counted
-by loop: a `Sum` or a `Product` of more passes is `NaN`, and a program
+by loop: a `Sum` or a `Product` of more passes is `NaN` (a list of `NaN`
+of the term's length for a list term), and a program
 whose loops can run more passes in all, bounded at compile time (a constant
 count multiplied down the nesting, a run-time count as one pass), declines.
 Loops of run-time counts, nested or one after the other, compile; when they

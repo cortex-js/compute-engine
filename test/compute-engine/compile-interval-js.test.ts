@@ -810,11 +810,11 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
     expect(result.value.hi).toBe(24);
   });
 
-  test('a collection-valued Sum body fails closed', () => {
+  test('a collection-valued Sum body: the boxes contain the interpreter’s value', () => {
     // `Σ h(i)·(1/1.4^i)·a(…)` where `a` returns a vector — the interpreter's
-    // elementwise zip-broadcast Sum. Interval scalar accumulation over arrays
-    // would silently produce a wrong value, so compilation must fail closed
-    // (mirrors the JS/base/gpu gate).
+    // elementwise Sum. The loop carries a list of two intervals and adds the
+    // terms element by element (CE-1470), so each box contains the
+    // interpreter's element.
     const e = new ComputeEngine();
     e.parse('a(t)\\coloneq[\\cos t,\\sin t]').evaluate();
     e.parse(
@@ -824,8 +824,22 @@ describe('INTERVAL JS - NEGATIVE BASE POWER', () => {
       '\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^{i}}a(1.9^{i}t+h(i))'
     );
     const fn = compile(expr, { to: 'interval-js' });
-    expect(fn.success).toBe(false);
-    expect(fn.diagnostic?.code).toBe('outside-profile');
+    expect(fn.success).toBe(true);
+    for (const t of [0.3, -1.2]) {
+      const want = e
+        .withValues({ t: e.number(t) } as never, () => expr.evaluate().N())
+        .ops!.map((x) => x.re);
+      const got = fn.run!({ t: { lo: t, hi: t } }) as unknown as {
+        kind: string;
+        value: { lo: number; hi: number };
+      }[];
+      expect(got).toHaveLength(2);
+      got.forEach((b, k) => {
+        expect(b.kind).toBe('interval');
+        expect(b.value.lo).toBeLessThanOrEqual(want[k]);
+        expect(want[k]).toBeLessThanOrEqual(b.value.hi);
+      });
+    }
   });
 });
 

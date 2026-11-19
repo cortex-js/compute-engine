@@ -42,6 +42,58 @@
 
 ### Resolved Issues
 
+- **`compile()` compiles `ColorMix` on JavaScript and `Cot` of a complex
+  argument on GLSL again** (CE-1468). Both compiled in 0.193.0 and declined in
+  0.194.0. `AsOklab(ColorMix(Rgb(1, 0, 0), Rgb(0, 0, 1), x))` at x = 0.25 gives
+  the interpreter's `Oklab(0.58397, 0.27139, -0.00977)`: the mix is in OKLCh,
+  the ratio is clamped into [0, 1], and `ColorMix(a, b)` mixes at 0.5.
+  `ColorMix` still declines on GLSL. On GLSL, `Cot(z)` of a complex `z` is the
+  helper `_gpu_ir_ccot`. `LambertW` still declines on GLSL and in the interval
+  mode.
+
+- **`compile()` compiles a `Sum` or a `Product` whose terms are lists**
+  (CE-1470). With `X: list<real>`, `Sum(X + i, Limits(i, 1, 3))` declined
+  ("a list where a scalar is required") and now gives `[6.75, 7.5]` at
+  `X = [0.25, 0.5]`, as the interpreter does: the terms are added element by
+  element. So does a count per element of a list,
+  `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))`. This works on
+  JavaScript and in the interval mode, and on GLSL for lists of a stated
+  length. Two cases still decline. The first is a term whose length is
+  computed in each term (`Sum(Range(1, i), …)`). The second is a sum over
+  bounds that are not constants (`Limits(i, 1, N)`) when the type of the sum
+  states no length: at `N = 0` the interpreter gives the number `0`, not a
+  list. With `L: list<real^2>`, `Sum(L + i, Limits(i, 1, N))` compiles and
+  gives `[0, 0]` at `N = 0`.
+
+- **A lazy list that a function returns, made from a lazy argument, has a
+  length** (CE-1368). With `clean(l) := Map(i ↦ l[i], Range(1, Length(l)))`
+  and `R(p, q) := clean([p[k] + q for k in 1..Length(p)])`,
+  `ListFrom(R([10, 20, 30], 1))`, `Sum(…)`, `Length(…)` and `At(…, 2)` stayed
+  unevaluated, though the elements could be listed one by one. They now give
+  `[11, 21, 31]`, 63, 3 and 21: the bound of the `Range` reads `p` and `q` in
+  the call of `R` that made the comprehension, where they have values. A name
+  with no value there still leaves the length unknown.
+
+- **`compile()` compiles an exact fraction of an expression boxed without the
+  canonical form again** (CE-1499). With `x: real`,
+  `ce.expr(['Add', 'x', ['Rational', 1, 256]], { form: 'structural' })`
+  declined in 0.194.0 on every target ("the operator Rational is not
+  supported by the compiler"); 0.193.0 compiled it on JavaScript and GLSL.
+  `Rational(p, q)` of two exact integer literals is now the number `p/q`, as
+  in the canonical form: at x = 1 the code gives 1.00390625 on JavaScript, as
+  the interpreter does, `x + 0.00390625` on GLSL, and it compiles in the
+  interval mode too. `Floor(Rational(1, 49)·x)` at 49 gives 1, as the
+  canonical form does.
+
+- **A recursive function whose result wraps the result of its recursive call
+  no longer gets slower at each read** (CE-1501). With `P` declared
+  `(unknown, unknown) -> unknown` and `P(n, x) := If(n = 0, x, Length(n) +
+  P(n − 1, x))`, each read of the type of `P(1, 2)` gave one more level of
+  `broadcastable<…>`, and the fourth read took about 15 s. A new derivation
+  of the signature no longer replaces the earlier one with an equivalent type
+  written differently: the type is now `broadcastable<any>` at every read,
+  and a read takes constant time. The values do not change.
+
 - **`compile()` compiles a call of a function of an input inside a function
   whose parameter has the name of that input again** (CE-1502). With
   `x, y: real`, `k(v) := v + x` and `u(x, y) := k(0)^2 + y^2`, `u(x, y)`

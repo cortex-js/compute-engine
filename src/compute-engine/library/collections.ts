@@ -309,6 +309,10 @@ import {
 } from '../boxed-expression/listed-element.js';
 import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
+  inLazyViewContext,
+  lazyViewActivationOf,
+} from '../boxed-expression/lazy-view-context.js';
+import {
   isAbsentSymbol,
   isAbsentValue,
   isDictionary,
@@ -22670,8 +22674,38 @@ function replaceAtPathType(source: Type, levels: number, value: Type): Type {
 function operandNumericValue(op: Expression): number {
   const v = op.re;
   if (!Number.isNaN(v)) return v;
-  if (op.unknowns.length > 0) return NaN;
+  if (hasUnknownsInViews(op)) return NaN;
   return op.N().re;
+}
+
+/**
+ * Whether `op` has an unknown (`.unknowns`) when each lazy collection in it
+ * is read in the activation that it keeps (`lazy-view-context.ts`). A
+ * parameter of the call that made the collection is not an unknown there:
+ * `Length(Comprehension(p[k] + q, …))` returned by a call of a function of
+ * `p` and `q` has no unknowns (CE-1368). A node that binds names (a function
+ * literal, a scoped node) is not split: its operands name its own variables.
+ *
+ * `memo` holds the answer of each node already read in this walk, so a
+ * sub-expression reached through several operands is read once, not once
+ * per path (see the memo of `getReferences()`, `abstract-boxed-expression.ts`).
+ * It is per call: the walk reads every node from one outer context.
+ */
+function hasUnknownsInViews(
+  op: Expression,
+  memo: Map<Expression, boolean> = new Map()
+): boolean {
+  const hit = memo.get(op);
+  if (hit !== undefined) return hit;
+  let result: boolean;
+  if (op.unknowns.length === 0) result = false;
+  else if (lazyViewActivationOf(op) !== undefined)
+    result = inLazyViewContext(op, () => op.unknowns.length > 0);
+  else if (!isFunction(op) || op.localScope !== undefined) result = true;
+  else if (op.operator === 'Function') result = true;
+  else result = op.ops.some((x) => hasUnknownsInViews(x, memo));
+  memo.set(op, result);
+  return result;
 }
 
 /**
@@ -22757,7 +22791,7 @@ function linspaceHasNoValue(ops: ReadonlyArray<Expression>): boolean {
     // A NaN value with no unknowns (a symbol whose value is `NaN`) is a NaN
     // endpoint. With unknowns, NaN only means that the value is not known
     // yet, and the endpoint is symbolic.
-    if (Number.isNaN(v) && op.unknowns.length === 0) return true;
+    if (Number.isNaN(v) && !hasUnknownsInViews(op)) return true;
     if ((isNumber(op) && !op.isFinite) || v === Infinity || v === -Infinity)
       infinite = true;
   }

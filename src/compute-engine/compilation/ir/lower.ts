@@ -48,6 +48,7 @@ import type {
   Expression,
   Scope,
 } from '../../global-types.js';
+import type { NumberLiteralInterface } from '../../types-expression.js';
 import type { NumericValue } from '../../numeric-value/types.js';
 import { BigNumericValue } from '../../numeric-value/big-numeric-value.js';
 import { ExactNumericValue } from '../../numeric-value/exact-numeric-value.js';
@@ -283,7 +284,8 @@ const NODE_LIMIT = 50_000;
  *  `mode: 'interval'`: `'strict'`, with a real literal whose double is not
  *  its value marked `inexact`, and `x^(p/q)` of a literal rational `p/q`
  *  lowered as `Root(x, q)^p`. `iterationBudget`:
- *  a `Sum` or a `Product` of more passes than it is NaN. */
+ *  a `Sum` or a `Product` of more passes than it is NaN (a list of NaN of
+ *  the term's length for a list term). */
 export type LowerOptions = {
   readonly fold?: boolean;
   readonly mode?: 'strict' | 'complex' | 'bigint' | 'interval';
@@ -358,6 +360,43 @@ export function lower(
       wide.add(error.declaration);
     }
   }
+}
+
+/**
+ * `[p, q]` when `e` is a call of the library's `Rational` of two exact integer
+ * literals, `q` not 0, in an expression boxed without the canonical form
+ * (`form: 'structural'`), else `undefined` (CE-1499). The canonical form makes
+ * such a call the exact number `p/q`, and the lowering reads it as that number
+ * (`literalNumber()`). A call of a user's `Rational`, of one with a host
+ * `compile` handler, or of an operand that is not exact (`1.0`, which the
+ * canonical form divides as a float) is not one. No node is rebuilt: a
+ * rebuilt ancestor would be bound again in the current scope.
+ */
+function exactRational(e: Expression): [bigint, bigint] | undefined {
+  if (
+    e.isCanonical ||
+    !isFunction(e, 'Rational') ||
+    e.nops !== 2 ||
+    !isLibraryOperator(e as never, 'Rational') ||
+    hasOwnLowering(e.operator, e.operatorDefinition)
+  )
+    return undefined;
+  const [p, q] = e.ops.map((op) =>
+    isNumber(op) && op.isExact && op.isInteger === true ? toBigint(op) : null
+  );
+  return p !== null && q !== null && q !== 0n ? [p, q] : undefined;
+}
+
+/** `x` when it is a number literal; the exact number `p/q` when it is a
+ *  structural `Rational(p, q)` (`exactRational()`); else `undefined`. */
+function literalNumber(
+  x: Expression
+): (Expression & NumberLiteralInterface) | undefined {
+  if (isNumber(x)) return x;
+  const pq = exactRational(x);
+  if (pq === undefined) return undefined;
+  const n = x.engine.number(pq);
+  return isNumber(n) ? n : undefined;
 }
 
 /** `lower()` with the list locals of the declarations `wide` on the real
@@ -800,24 +839,35 @@ function lowerOnce(
       decline(node, `${r.head} with ${n} operands`);
     // A colour conversion reads a tuple of three numbers as the sRGB colour
     // of its channels (`extractRgb()` of `library/colors.ts`):
-    // `AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`. A tuple of four
-    // carries an alpha, which `Rgb` here does not, and declines below.
-    const channels = args[0];
-    if (
-      COLOR_CONVERSIONS.has(r.head ?? '') &&
-      tuples.get(channels) === 0 &&
-      same(type(channels).shape, [3]) &&
-      ['real', 'integer'].includes(type(channels).lane)
-    )
-      return apply(node, r, [
-        apply(
-          node,
-          'Rgb',
-          [1, 2, 3].map((k) =>
-            apply(node, 'At', [channels, b.constant(k, 'integer')])
-          )
-        ),
-      ]);
+    // `AsOklab((1, 0, 0))` is `AsOklab(Rgb(1, 0, 0))`, and so does each of
+    // the two colours of `ColorMix`. A tuple of four carries an alpha, which
+    // `Rgb` here does not, and declines below.
+    const colors = COLOR_CONVERSIONS.has(r.head ?? '')
+      ? 1
+      : r.head === 'ColorMix'
+        ? 2
+        : 0;
+    const channels = (v: V, i: number) =>
+      i < colors &&
+      tuples.get(v) === 0 &&
+      same(type(v).shape, [3]) &&
+      ['real', 'integer'].includes(type(v).lane);
+    if (args.some(channels))
+      return apply(
+        node,
+        r,
+        args.map((v, i) =>
+          channels(v, i)
+            ? apply(
+                node,
+                'Rgb',
+                [1, 2, 3].map((k) =>
+                  apply(node, 'At', [v, b.constant(k, 'integer')])
+                )
+              )
+            : v
+        )
+      );
     // A product of a list of rank 2 or more with another list, and a power
     // of such a list, are the matrix product and power of the interpreter
     // (`M·N`, `M·L`, `M^s` at an integer `s`), not element by element.
@@ -854,7 +904,10 @@ function lowerOnce(
       // A tuple operand: only a row whose value on a tuple is its value on
       // the list of the same elements (`TUPLE_RULES`).
       const tuple = given.find((v) => tuples.has(v));
-      if (tuple !== undefined && COLOR_CONVERSIONS.has(r.head ?? ''))
+      if (
+        tuple !== undefined &&
+        (COLOR_CONVERSIONS.has(r.head ?? '') || r.head === 'ColorMix')
+      )
         decline(
           node,
           tuples.get(tuple) === 1
@@ -1110,9 +1163,12 @@ function lowerOnce(
   const node = (e: Expression, want: boolean): V | undefined => {
     if (++lowered > NODE_LIMIT)
       decline(root, `more than ${NODE_LIMIT} nodes to lower`);
-    if (isNumber(e))
+    // A number literal, or a structural `Rational(p, q)` of the library: the
+    // number `p/q` (`exactRational()`, CE-1499).
+    const n = literalNumber(e);
+    if (n !== undefined)
       return (
-        number(e, interval ? literalUlps(e.numericValue) : undefined) ??
+        number(n, interval ? literalUlps(n.numericValue) : undefined) ??
         decline(e, 'a complex number with an infinite part')
       );
     if (isSymbol(e)) return symbol(e, want);
@@ -1454,7 +1510,8 @@ function lowerOnce(
           };
           return power(m);
         }
-        const nv = isNumber(e.ops[1]) ? e.ops[1].numericValue : undefined;
+        const exponent = literalNumber(e.ops[1]);
+        const nv = exponent?.numericValue;
         const float =
           !interval || nv === undefined
             ? undefined
@@ -1476,7 +1533,7 @@ function lowerOnce(
         const odd = terms != null && terms[1] % 2 !== 0;
         const pq =
           interval && typeof nv === 'object' && nv.isExact
-            ? e.ops[1].toRational()
+            ? exponent!.toRational()
             : null;
         if (pq === null || !pq.every(Number.isSafeInteger) || pq[1] < 2) {
           if (!interval || e.nops !== 2) break;
@@ -1520,6 +1577,14 @@ function lowerOnce(
         return pq[0] === 1
           ? root
           : apply(e, 'Power', [root, b.constant(pq[0], 'integer')]);
+      }
+      case 'ColorMix': {
+        // `ColorMix(a, b)` mixes at the ratio 0.5, as the interpreter.
+        if (e.nops !== 2) break;
+        return apply(e, 'ColorMix', [
+          ...e.ops.map((op) => value(op)!),
+          b.constant(0.5, 'real'),
+        ]);
       }
       case 'Log': {
         // `Log(x, 10)` is `log10`, a real `Log(x, 2)` is `log2` (exact at a
@@ -2061,9 +2126,11 @@ function lowerOnce(
     );
   };
 
-  /** The number of `x`: a literal, or the value a free name holds. */
+  /** The number of `x`: a literal (`literalNumber()`), or the value a free
+   *  name holds. */
   const numberOf = (x: Expression): Expression | undefined => {
-    if (isNumber(x)) return x;
+    const n = literalNumber(x);
+    if (n !== undefined) return n;
     if (!isSymbol(x) || lookup(x.symbol) !== undefined) return undefined;
     if (options.vars?.includes(x.symbol) || CONSTANTS.has(x.symbol)) return;
     const v = own(x);
@@ -2289,7 +2356,8 @@ function lowerOnce(
   const factors = (x: Expression): Expression[] =>
     isFunction(x) && ['Multiply', 'Negate', 'Sqrt'].includes(x.operator)
       ? x.ops.flatMap(factors)
-      : isFunction(x, 'Root') || (isFunction(x, 'Power') && isNumber(x.ops[1]))
+      : isFunction(x, 'Root') ||
+          (isFunction(x, 'Power') && literalNumber(x.ops[1]) !== undefined)
         ? factors(x.ops[0])
         : [x];
   /** The factors of the divisors in `x` (the denominator of a `Divide`, the
@@ -2318,7 +2386,8 @@ function lowerOnce(
       x.operator === 'Divide'
         ? q
         : x.operator === 'Power' &&
-            ((!always && isFunction(q, 'Negate')) || (isNumber(q) && q.re < 0))
+            ((!always && isFunction(q, 'Negate')) ||
+              (literalNumber(q)?.re ?? 0) < 0)
           ? p
           : undefined;
     for (const f of d === undefined ? [] : factors(d)) {
@@ -3522,7 +3591,7 @@ function lowerOnce(
           v: result,
           lane,
           role: isSymbol(constant, 'True') ? 'constant' : 'local',
-          exact: unwritten && x !== undefined && isNumber(x) ? x : undefined,
+          exact: unwritten && x !== undefined ? literalNumber(x) : undefined,
         });
       };
       const statement = (s: Expression, i: number) => {
@@ -4957,8 +5026,8 @@ function integerPower(x: Expression): number | undefined {
  *  exponent `>= 1`, or `undefined`. */
 function literalExponent(x: Expression): number | undefined {
   if (!isFunction(x, 'Power') || x.nops !== 2) return undefined;
-  const k = x.ops[1];
-  return isNumber(k) &&
+  const k = literalNumber(x.ops[1]);
+  return k !== undefined &&
     k.isInteger === true &&
     Number.isSafeInteger(k.re) &&
     k.re >= 1

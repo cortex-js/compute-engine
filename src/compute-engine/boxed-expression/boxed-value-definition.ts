@@ -46,6 +46,7 @@ import {
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { isSubtype } from '../../common/type/subtype.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';
 import { isInstallingStandardLibrary } from './host-handler-changes.js';
@@ -1495,10 +1496,31 @@ export class _BoxedValueDefinition
         ? valueType.type
         : withSignatureResult(valueType.type, typedResult)
     );
-    const type =
+    let type =
       refined === recorded.type
         ? recorded
         : new BoxedType(refined, this._engine._typeResolver);
+    // A result f(H) derived under the hypothesis H that is EQUIVALENT to H
+    // but written differently is not stored: the earlier signature is kept,
+    // since H is then a fixed point. Storing such an f(H) made the next
+    // derivation read f(H), and a body whose result type wraps the result
+    // of its recursive call grew one level at each derivation without end:
+    // with `P(n, x) := If(n = 0, x, Length(n) + P(n − 1, x))`, f(H) is
+    // `broadcastable<H>`, equivalent to `H = broadcastable<any>` (CE-1501).
+    // A narrower or a wider f(H) is stored, so that a later derivation can
+    // reach a narrower fixed point, and so is `unknown`, which the subtype
+    // test finds equivalent to `any`: a derivation under `unknown` can narrow.
+    if (hypothesis !== undefined) {
+      const result = functionResult(type.type);
+      if (
+        result !== undefined &&
+        result !== 'unknown' &&
+        typeToString(result) !== typeToString(hypothesis) &&
+        isSubtype(result, hypothesis) &&
+        isSubtype(hypothesis, result)
+      )
+        type = previous!.type;
+    }
     // Not stored while a result may be discarded (`_resultMayBeDiscarded()`):
     // the static check puts back the definitions it wrote by raw writes that
     // advance no counter of the key, and a trial reads its own environment

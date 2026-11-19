@@ -156,6 +156,13 @@ const JS_ONLY: [label: string, json: Json, points: object[]][] = [
   ['AsHsv', ['AsHsv', ['Oklch', 'x', 0.1, 250]], [{ x: 0.6 }]],
   ['AsOklab of AsRgb', ['AsOklab', ['AsRgb', ['Oklch', 'x', 0.1, 250]]], [{ x: 0.6 }]],
   ['AsHsv of a tuple', ['AsHsv', ['Tuple', 'x', 0.5, 0.6]], [{ x: 0.3 }]],
+  // CE-1468: the ratio is clamped into [0, 1].
+  ['ColorMix', ['AsOklab', ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 'x']], [{ x: 0.25 }, { x: 2 }, { x: -1 }]],
+  ['ColorMix of two operands', ['ColorMix', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250]], [{ x: 0.3 }]],
+  ['ColorMix with an achromatic colour', ['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 1, 1, 1], 'x'], [{ x: 0.5 }]],
+  ['ColorMix across the hue 0', ['ColorMix', ['Oklch', 0.5, 0.1, 350], ['Oklch', 0.5, 0.1, 10], 'x'], [{ x: 0.75 }]],
+  ['ColorMix of tuples of channels', ['ColorMix', ['Tuple', 'x', 0, 0], ['Tuple', 0, 0, 1], 0.75], [{ x: 1 }]],
+  ['ColorMix of a conversion', ['ColorMix', ['AsHsv', ['Rgb', 'x', 0.2, 0.3]], ['Rgb', 0, 0, 1], 'n'], [{ x: 0.5, n: 0 }]],
 ];
 
 describe('IR profile, colours on JavaScript', () => {
@@ -188,6 +195,15 @@ describe('IR profile, colours on JavaScript', () => {
   test('a constructor gives OKLCh, a conversion the space it names', () => {
     expect(js(['Rgb', 'x', 0.4, 0.6]).run!({ x: 0.3 } as never)).toMatchObject({ space: 'oklch' });
     expect(js(['AsRgb', ['Oklch', 'x', 0.1, 250]]).code).toMatch(/_SYS\.asRgb\(_SYS\.oklch\(_\.x, 0\.1, 250\)\)/);
+  });
+
+  test('ColorMix of a ratio that is not finite is the NaN colour', () => {
+    // The interpreter gives `Error(expected-value)` (CE-1468).
+    const r = js(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 'x']);
+    for (const x of [Infinity, -Infinity, NaN]) {
+      const v = r.run!({ x } as never) as unknown as Color;
+      expect([v.c0, v.c1, v.c2]).toEqual([NaN, NaN, NaN]);
+    }
   });
 
   test('a conversion of a tuple input reads its three channels as sRGB', () => {
@@ -356,7 +372,9 @@ const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], 
   ['a colour input', ['AsOklab', 'c'], ['javascript', 'glsl'], /./],
   ['a colour parameter of a user function', ['AsOklab', ['fk', ['fc', 'x']]], ['javascript', 'glsl'], /the parameter q of fk is not a scalar \(color\)/],
   ['a Which with no True clause', ['Which', ['Less', 'x', 0], ['Rgb', 'x', 0, 0], ['Less', 'x', 1], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /arms of two types/],
-  ['an operator of colours not in the slice', ['ColorMix', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250], 0.5], ['javascript', 'glsl'], /ColorMix/],
+  ['ColorMix on GLSL', ['ColorMix', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250], 0.5], ['glsl'], /ColorMix \(the operation colormix\) on glsl/],
+  ['ColorMix of a tuple with an alpha', ['ColorMix', ['Tuple', 1, 0, 0, 0.5], ['Rgb', 'x', 0, 0], 0.5], ['javascript', 'glsl'], /ColorMix of a tuple that is not three real numbers/],
+  ['an operator of colours not in the slice', ['ColorContrast', ['Rgb', 'x', 0, 0], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /ColorContrast/],
 ];
 
 describe('IR profile, colours: the declines', () => {

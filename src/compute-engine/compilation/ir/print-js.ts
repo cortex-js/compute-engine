@@ -228,6 +228,7 @@ export const JS: Syntax = deepFreeze({
     'ashsv': '_SYS.asHsv($0)',
     'asoklab': '_SYS.asOklab($0)',
     'asoklch': '_SYS.asOklch($0)',
+    'colormix': '_SYS.colorMix($0, $1, $2)',
     // The functions of `REAL_FUNCTIONS` and `COMPLEX_FUNCTIONS`, by name.
     ...Object.fromEntries(
       Object.entries({ ...REAL_FUNCTIONS, ...COMPLEX_FUNCTIONS }).map(

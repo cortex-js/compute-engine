@@ -111,6 +111,11 @@ const COMPLEX: Record<string, [binary: boolean, ...body: string[]]> = {
   sin: [false, 'return vec2(sin(a.x) * cosh(a.y), cos(a.x) * sinh(a.y));'],
   cos: [false, 'return vec2(cos(a.x) * cosh(a.y), -sin(a.x) * sinh(a.y));'],
   tan: [false, 'return vec2(sin(2.0 * a.x), sinh(2.0 * a.y)) / (cos(2.0 * a.x) + cosh(2.0 * a.y));'],
+  // `cos(a)·conj(sin(a)) / |sin(a)|^2`, with `|sin(a)|^2 = sin²x + sinh²y`:
+  // no cancellation near a pole, as `cosh 2y - cos 2x` would have.
+  cot: [false,
+    'float s = sin(a.x), c = cos(a.x), sh = sinh(a.y), ch = cosh(a.y);',
+    'return vec2(s * c, -sh * ch) / (s * s + sh * sh);'],
   sinh: [false, 'return vec2(sinh(a.x) * cos(a.y), cosh(a.x) * sin(a.y));'],
   cosh: [false, 'return vec2(cosh(a.x) * cos(a.y), sinh(a.x) * sin(a.y));'],
   tanh: [false, 'return vec2(sinh(2.0 * a.x), sin(2.0 * a.y)) / (cosh(2.0 * a.x) + cos(2.0 * a.y));'],

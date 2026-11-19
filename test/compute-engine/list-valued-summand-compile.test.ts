@@ -204,7 +204,7 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
 // on POSITIVE evidence — the operator names a user function whose
 // `Function`-literal body has a type that MATCHES a collection. Absence of
 // evidence stays admitted, per the item-121 closure.
-describe('list-valued big-op bodies decline on the non-JS targets (item 171 residue)', () => {
+describe('list-valued big-op bodies on the non-JS targets (item 171 residue)', () => {
   const NON_JS = ['glsl', 'interval-js'] as const;
 
   const setup = (hBody: any = 'i') => {
@@ -231,30 +231,65 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
   // variables, so compile-time constant folding would answer it from the
   // interpreter and emit a literal list, bypassing the static decline (and, on
   // JavaScript, the element-wise `_SYS.bcast` emission) under test.
-  test.each(NON_JS)('%s declines `Sum a(h(i))` (direct form)', (to) => {
-    const ce = setup();
-    const r = compile(
-      ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
-      {
-        to,
-        fallback: true,
-        constantFold: false,
-      } as any
+  // The IR compiler has an element-wise arm on these targets too (CE-1470):
+  // the loop carries a list accumulator (a `vec2` on GLSL), and the sum is
+  // the interpreter's `[cos 0 + cos 1 + cos 2, sin 0 + sin 1 + sin 2]`. The
+  // GLSL value is checked in WebGL2 in `ir-sum-list-terms.test.ts`.
+  const sumOfA = (ce: ComputeEngine) =>
+    ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]);
+  const expected = (ce: ComputeEngine) =>
+    sumOfA(ce)
+      .evaluate()
+      .N()
+      .ops!.map((x) => x.re);
+  const contains = (got: any, want: number[]) =>
+    got.length === want.length &&
+    got.every(
+      (b: any, k: number) => b.value.lo <= want[k] && want[k] <= b.value.hi
     );
-    expect(r?.success ?? false).toBe(false);
-    expect((r as any).diagnostic?.code).toBe('outside-profile');
-  });
 
-  test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
-    const ce = setup();
-    // `A`'s body ignores `t`, so the Sum subtree is still constant: fold off.
-    const r = compile(ce.parse('A(t)', { strict: false }), {
+  test.each(NON_JS)(
+    '%s compiles `Sum a(h(i))` (direct form) with the interpreter’s value',
+    (to) => {
+      const ce = setup();
+      const r = compile(sumOfA(ce), {
+        to,
+        fallback: false,
+        constantFold: false,
+      } as any);
+      expect(r?.success).toBe(true);
+      if (to === 'interval-js')
+        expect(contains((r as any).run({}), expected(ce))).toBe(true);
+      else expect(r.code).toMatch(/vec2 \w+ = vec2\(0\.0, 0\.0\);/);
+    }
+  );
+
+  test.each(NON_JS)('%s compiles the `A(t)` wrapper form', (to) => {
+    // `t` has no type: the input declines (R1, `untyped-input`), now that
+    // the sum compiles; declared `real`, the call compiles. `A`'s body
+    // ignores `t`, so the Sum subtree is still constant: fold off.
+    const untyped = setup();
+    const r = compile(untyped.parse('A(t)', { strict: false }), {
       to,
       fallback: true,
       constantFold: false,
     } as any);
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).diagnostic?.code).toBe('outside-profile');
+    expect((r as any).diagnostic?.code).toBe('untyped-input');
+    expect((r as any).unsupported).toEqual(['t']);
+
+    const ce = setup();
+    ce.declare('t', 'real');
+    const typed = compile(ce.parse('A(t)', { strict: false }), {
+      to,
+      fallback: false,
+      constantFold: false,
+    } as any);
+    expect(typed?.success).toBe(true);
+    if (to === 'interval-js')
+      expect(
+        contains((typed as any).run({ t: { lo: 0.5, hi: 0.5 } }), expected(ce))
+      ).toBe(true);
   });
 
   test.each(['javascript', ...NON_JS] as const)(
@@ -517,9 +552,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
       }
       // The GLSL fragment refuses the body before the emitter runs, with its
       // own message.
-      expect((r as any).error).toMatch(
-        PIPELINE_DECLINE
-      );
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
     }
   });
 
@@ -535,9 +568,7 @@ describe('a contradicted scalar declaration is refused, or declines in every sca
     (_name, mathjson) => {
       const r = compile(withLaterList().box(mathjson), { fallback: true });
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(
-        PIPELINE_DECLINE
-      );
+      expect((r as any).error).toMatch(PIPELINE_DECLINE);
     }
   );
 
@@ -678,7 +709,6 @@ describe('a contradicted scalar declaration is refused, or declines at DEFINITIO
 // refused when it is defined. The compiler declines are reached through clause
 // bodies that call a helper assigned after the clauses.
 describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refused, or declines through a helper assigned later (2026-08-12 ruling, wave 4)', () => {
-
   const p = (name: string, type: string) => ['Typed', name, { str: type }];
 
   const LIST_1 = ['List', ['Cos', 't'], ['Sin', 't']];
@@ -804,9 +834,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
           { fallback: true, constantFold: false }
         );
         expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(
-          PIPELINE_DECLINE
-        );
+        expect((r as any).error).toMatch(PIPELINE_DECLINE);
       });
 
       test.each(['glsl'] as const)('stays closed on %s', (to) => {
@@ -824,9 +852,7 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
           fallback: true,
         });
         expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(
-          PIPELINE_DECLINE
-        );
+        expect((r as any).error).toMatch(PIPELINE_DECLINE);
       });
     }
   );
@@ -862,7 +888,6 @@ describe('a contradicted scalar declaration of a MULTI-CLAUSE function is refuse
 // assigned later.
 describe('a contradicted scalar declaration is refused, or seen through a MULTI-STATEMENT body that calls a helper assigned later (2026-08-12 ruling, wave 5)', () => {
   const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
-
 
   /**
    * `a` DECLARED scalar, ASSIGNED a MULTI-statement body whose last statement
@@ -962,9 +987,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
     }
     // The GLSL fragment refuses the body before the emitter runs, with its
     // own message.
-    expect((r as any).error).toMatch(
-      PIPELINE_DECLINE
-    );
+    expect((r as any).error).toMatch(PIPELINE_DECLINE);
   });
 
   // The big-op body check reads the same predicate.
@@ -984,9 +1007,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
       expect((r as any).diagnostic?.operator).toBe('Function');
       return;
     }
-    expect((r as any).error).toMatch(
-      PIPELINE_DECLINE
-    );
+    expect((r as any).error).toMatch(PIPELINE_DECLINE);
   });
 
   // The definition-emission check reads it too, so the bare call does not
@@ -1011,9 +1032,7 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
   test('bare `a(u)` declines on JavaScript', () => {
     const r = compile(withLaterList().box(['a', 'u']), { fallback: true });
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(
-      PIPELINE_DECLINE
-    );
+    expect((r as any).error).toMatch(PIPELINE_DECLINE);
   });
 
   // CONTROL: a TRUTHFUL multi-statement scalar body — no contradiction, so every
@@ -1082,7 +1101,6 @@ describe('a contradicted scalar declaration is refused, or seen through a MULTI-
 // later.
 describe('a contradicted BOOLEAN declaration is refused, or declines in every scalar position through a helper assigned later (2026-08-12 ruling, wave 6)', () => {
   const ALL_TARGETS = ['javascript', 'glsl', 'interval-js'] as const;
-
 
   /** `b` DECLARED `-> boolean`, ASSIGNED a list-constructing body. */
   const withBody = (body: any, signature = '(number) -> boolean') => {
@@ -1223,10 +1241,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           // list of booleans; the emitter refuses the other body.
           if (bodyName === '[t < 1, t < 2]')
             expect((r as any).diagnostic?.code).toBe('outside-profile');
-          else
-            expect((r as any).error).toMatch(
-              PIPELINE_DECLINE
-            );
+          else expect((r as any).error).toMatch(PIPELINE_DECLINE);
           expect((r as any).preamble ?? '').not.toContain('_fn_b');
         }
       );
@@ -1236,9 +1251,7 @@ describe('a contradicted BOOLEAN declaration is refused, or declines in every sc
           fallback: true,
         });
         expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(
-          PIPELINE_DECLINE
-        );
+        expect((r as any).error).toMatch(PIPELINE_DECLINE);
       });
     }
   );

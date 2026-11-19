@@ -52,9 +52,9 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, the conversions to HSL and HSV, a sort, an ordering and a median, the run-time test of a real count of a rotation, and the operations of a list local written in place)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, the conversions to HSL and HSV, a colour mix, a sort, an ordering and a median, the run-time test of a real count of a rotation, and the operations of a list local written in place)', () => {
     // prettier-ignore
-    const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'ashsl', 'ashsv', 'atu', 'atp',
+    const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'ashsl', 'ashsv', 'colormix', 'atu', 'atp',
       'sort', 'sort.int', 'ordering', 'median',
       'rbinomial', 'rgcd', 'rlcm', 'fibonacci.int',
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
@@ -64,7 +64,7 @@ describe('IR slice: GLSL text', () => {
         'factorial2', 'zeta', 'lcm', 'heaviside', 'remainder', 'smoothstep', 'invhav', 'erfinv', 'beta', 'digamma',
         'trigamma', 'besselj'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS).filter((f) => !['cplx', 'cadd', 'csub', 'cneg', 'cmul', 'cdiv',
-        'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
+        'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'ccot', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
         'cconj', 'cabs', 'carg', 'ceq', 'cne'].includes(f))]);
     const bigintOnly = new Set<string>();
     for (const row of OPERATORS)

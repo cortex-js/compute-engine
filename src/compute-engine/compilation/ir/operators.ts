@@ -410,6 +410,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('AsHsv',        1,          [[[K], K, 'ashsv']],           {}),
   row('AsOklab',      1,          [[[K], K, 'asoklab']],         {}),
   row('AsOklch',      1,          [[[K], K, 'asoklch']],         {}),
+  // `ColorMix(a, b)` is lowered with the ratio 0.5. No GLSL spelling.
+  row('ColorMix',     3,          [[[K, K, R], K, 'colormix']],  {}),
 ].map((r) => deepFreeze(r)));
 
 /**

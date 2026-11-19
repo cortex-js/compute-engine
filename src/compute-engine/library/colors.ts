@@ -36,28 +36,13 @@ import {
   displayP3String,
   isParseColorSpelling,
   parseOkColorString,
+  normalizeAlpha,
+  lerpOklchColor,
 } from '../numerics/color-conversion.js';
 import type {
   ColorChannelSpace,
   ColorGamut,
 } from '../numerics/color-conversion.js';
-
-/**
- * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
- * or effectively-1 inputs so downstream sites can use a simple
- * `alpha !== undefined` check to decide whether the value needs to be emitted
- * as a 4th component.
- *
- * The 1e-9 tolerance collapses float-arithmetic noise (e.g. an interpolation
- * result that comes out as 0.9999999998 instead of 1) without dropping any
- * user-supplied value above that floor.
- */
-function normalizeAlpha(a: number | undefined): number | undefined {
-  if (a === undefined) return undefined;
-  if (!Number.isFinite(a)) return undefined;
-  if (Math.abs(a - 1) < 1e-9) return undefined;
-  return a;
-}
 
 /**
  * For a typed color head with a 4th alpha argument, drop alpha when it's a
@@ -396,40 +381,6 @@ function toOklch(ce: any, arg: any): OklchColor | null {
   if (direct) return direct;
   const rgb = extractRgb(ce, arg);
   return rgb ? asOklch(rgb) : null;
-}
-
-/**
- * Linear interpolation between two OklchColor values. Hue takes the shortest
- * path around the wheel (delta wrapped to ±180°). Operates on raw components
- * — does not pack/unpack — so wide-gamut chroma is preserved.
- *
- * When one endpoint is achromatic (C ≈ 0) its hue is undefined; the other
- * endpoint's hue is used throughout, matching CSS Color 4 `color-mix` so
- * mixing red with white yields a desaturated red rather than drifting through
- * intermediate hues.
- */
-function lerpOklchColor(a: OklchColor, b: OklchColor, t: number): OklchColor {
-  const L = a.L + (b.L - a.L) * t;
-  const C = a.C + (b.C - a.C) * t;
-
-  const aAchromatic = a.C < 1e-6;
-  const bAchromatic = b.C < 1e-6;
-  let H: number;
-  if (aAchromatic && bAchromatic) H = a.H;
-  else if (aAchromatic) H = b.H;
-  else if (bAchromatic) H = a.H;
-  else {
-    let dH = b.H - a.H;
-    if (dH > 180) dH -= 360;
-    if (dH < -180) dH += 360;
-    H = a.H + dH * t;
-    if (H < 0) H += 360;
-    if (H >= 360) H -= 360;
-  }
-
-  const alphaA = a.alpha ?? 1;
-  const alphaB = b.alpha ?? 1;
-  return { L, C, H, alpha: normalizeAlpha(alphaA + (alphaB - alphaA) * t) };
 }
 
 /**

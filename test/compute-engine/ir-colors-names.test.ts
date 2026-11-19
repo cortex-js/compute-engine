@@ -488,19 +488,28 @@ describe('IR profile, batch G9: the declines', () => {
     }
   });
 
-  test('a colour name of another value declines with the cause', () => {
+  test('a colour name of another value declines with the cause on GLSL', () => {
     const e = new ComputeEngine();
     e.declare('Cm', {
       type: 'color',
       value: e.box(['ColorMix', ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1], 0.5]),
     });
-    for (const to of ['javascript', 'glsl'] as const) {
-      const d = failure(() => compile(e.box(['AsOklab', 'Cm']), { ...IR, to }));
-      expect(d?.code).toBe('outside-profile');
-      expect(d?.message).toMatch(
-        /the operator ColorMix is not supported by the compiler/
-      );
-    }
+    const d = failure(() =>
+      compile(e.box(['AsOklab', 'Cm']), { ...IR, to: 'glsl' })
+    );
+    expect(d?.code).toBe('outside-profile');
+    expect(d?.message).toMatch(/ColorMix \(the operation colormix\) on glsl/);
+    // JavaScript compiles `ColorMix` (CE-1468): the interpreter's colour.
+    const v = compile(e.box(['AsOklab', 'Cm']), IR).run!() as unknown as {
+      c0: number;
+      c1: number;
+      c2: number;
+    };
+    const want = e.box(['AsOklab', 'Cm']).evaluate();
+    if (!isFunction(want)) throw new Error(`not a colour: ${want}`);
+    [v.c0, v.c1, v.c2].forEach((x, k) =>
+      expect(Math.abs(x - want.ops[k].re)).toBeLessThan(1e-12)
+    );
   });
 
   test('a colour name whose channel is a name is its expression', () => {

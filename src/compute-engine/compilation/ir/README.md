@@ -74,7 +74,17 @@ not evaluated by the interpreter, and a `D` or an `Integrate` over it declines
 false for such a node, so `literalList()`, a `Range` read as a list source and
 `speculatable()` lower it through `value()`; a node whose handler defers is the
 library's everywhere. The standard handler of `PointList` is not such a handler
-(the identity of the function in the library table). Then a sub-expression that
+(the identity of the function in the library table). A call of the library's
+`Rational` of two exact integer literals, `q` not 0, in an expression that was
+not made canonical (the `structural` form), is read as the exact number `p/q`
+that the canonical form makes of it (`exactRational()`, `literalNumber()`,
+CE-1499): as a literal, and where the walk reads an operand as a number (the
+single quotient of a product: `Floor(Rational(1, 49)·x)` at 49 is 1, also
+through a local declared with it; a literal exponent; a negative exponent's
+divisor). No node is rebuilt, so each call
+keeps the definition it was boxed with. `Rational` of other operands (`1.0`,
+which the canonical form divides as a float), a user's `Rational` and one with
+a host handler decline. Then a sub-expression that
 the slice would lower and that has no free name, no name bound by the walk, no
 effectful operation and no loop is evaluated once with `N()` and becomes a
 literal (`Mod(1, 1/10)` is exactly 0). A closed `Mode(List(1, 2, 4))` is not
@@ -459,7 +469,7 @@ axis, ±π/2 on the imaginary axis, 0 at 0, as the interpreter), since a part th
 `Divide`, `Exp`, `Ln`, `Sqrt`, `Power` (a real or a complex exponent, as
 `exp(b·ln a)`; an exponent that is an integer from 1 to 16 at run time is a
 product, as `_gpu_ir_pow` on the real lane, so `z^2 + c` at `z = 0` is `c`),
-`Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` are one helper each
+`Sin`, `Cos`, `Tan`, `Cot`, `Sinh`, `Cosh` and `Tanh` are one helper each
 (`_gpu_ir_cmul`, …), written only when used: the textbook formulas of the
 principal branch, with no guard (no fidelity at a pole, a branch point or cut, a
 signed zero, or on overflow of an intermediate such as `|b|^2` in a division).
@@ -467,7 +477,7 @@ signed zero, or on overflow of an intermediate such as `|b|^2` in a division).
 parameter or the result of a user function hold a complex `vec2`. The other
 complex rows decline with the operation they lack
 (`Arcsin (the operation casin) on glsl`): the inverse trigonometric and
-hyperbolic functions, `Root`, `Log`, `Cot`, `Sec`, `Csc`, `Coth`, `Sech`,
+hyperbolic functions, `Root`, `Log`, `Sec`, `Csc`, `Coth`, `Sech`,
 `Csch`; and so does a list or a tuple of complex numbers
 (`a list of complex numbers`, `Profile.scalarLanes`), also an input one or the
 result of a user function. `mode: 'complex'` is admitted: an input of type
@@ -553,8 +563,12 @@ from the body: an object on JavaScript, a `vec3` on GLSL. Declined: a list of
 colours on GLSL, a colour input, a colour string, a tuple of components other
 than three real numbers (`AsRgb((r, g, b, a))`), a list of tuples, a
 parameter of a user function that is a colour, arithmetic on a colour (an
-`error` of the canonical form), every other colour operator (`ColorMix`,
-`ColorContrast`, …), and `mode: 'bigint'`. The colour of non-finite channels
+`error` of the canonical form), every other colour operator (`ColorContrast`,
+…), and `mode: 'bigint'`. `ColorMix(a, b, t)` compiles on JavaScript only
+(`_SYS.colorMix`, the interpreter's mix in OKLCh, `lerpOklchColor` of
+`numerics/color-conversion.ts`): the ratio is clamped into [0, 1], `ColorMix(a,
+b)` mixes at 0.5, a tuple of three numbers in place of a colour is its sRGB
+colour, as for a conversion, and the result is in OKLCh; it declines on GLSL. The colour of non-finite channels
 follows the JavaScript runtime (its `NaN` colour); on GLSL no fidelity is owed
 there. The hue of a colour whose two chromatic components
 are 0 is 0 on both targets, as in the interpreter (`_gpu_ir_lch` does not call
@@ -1230,6 +1244,31 @@ or integers: its elements are `lo + k·step` for `k` from 0, of the count of
 `rangeCount`, the interpreter's (`Range(1, N)` at `N = 3.5` is `[1, 2, 3]`,
 `Range(-h, h)` at `h = 2.5` is `[-2.5, -1.5, …, 2.5]`), integers when the first
 element and the step are. GLSL has no spelling of a run-time count.
+
+A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers (not a
+tuple) adds or multiplies the terms element by element, as the interpreter does
+(CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is
+`[6.75, 7.5]`, and `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two
+lists `C` and `U` is the sum, for each element of `C`, of the indexes where `U`
+holds it. A sum written out (above) folds the list terms from the identity with
+the element-wise operation; the loop (`accumulate()`) carries a list
+accumulator of the length of the term, the identity in each element before the
+first pass. The length of the term must be a value made before the loop (a
+number, the length of an input, of a list computed outside the sum): a length
+computed in each term (`Sum(Range(1, i), …)`, or a `Range(1, u)` lowered in the
+term) declines, since the accumulator has one length. As for any element-wise
+operation, terms of two lengths are an error of the interpreter
+(`incompatible-dimensions`) and the compiled value is unspecified. Over a range
+with no term, the interpreter's value is a list of the identity only when the
+static type of the sum states the length (`emptyBigOpValue()`): the loop then
+gives that list. When the static type states no length and the bounds are not
+two constants with at least one term, the shape of the value depends on the
+bounds at run time, and the sum declines: `Sum(X + i, Limits(i, 1, N))` with
+`X: list<real>` (the interpreter gives `0` at `N = 0`); with
+`L: list<real^2>` it compiles and gives `[0, 0]` there. Past the
+`iterationBudget` a list sum is a list of NaN. A list of a run-time length
+declines on GLSL, and a selection at each position (`Which` of a list
+condition) declines in the interval mode, as elsewhere.
 
 A JavaScript result is read-only, as the contract of `run()` states
 (`docs/COMPILATION-MODEL.md`, "inputs of the shape the compiled code reads,
