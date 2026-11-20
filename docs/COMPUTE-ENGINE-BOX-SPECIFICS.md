@@ -68,6 +68,15 @@ a run of one test file do not need the lock. A Jest worker can hold about 3 GB,
 so the lock limits memory as well as CPU. Worktrees and sub-agents share these
 limits; a sub-agent takes the lock under `<session name>:<label>`.
 
+**A run of several test files, or the full suite, can run on univac instead**,
+with no box lock here:
+`node ~/.claude/scripts/remote-jest.mjs --name <label> -- <jest arguments>`.
+It tests this tree as it is (HEAD, the uncommitted changes and the untracked
+files) in the WSL Linux of univac, the user's other machine, and prints the
+summary of `run-summarized.mjs`. Its header gives the options. Two runs use
+univac at a time; a third waits there. Use it when the box lock has a queue.
+The local lock rules above still apply to every run on this machine.
+
 Exception: a local release (`npm run release`, or `npm publish`) takes no lock
 for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
 production build, the VS Code extension), because the user releases only when
