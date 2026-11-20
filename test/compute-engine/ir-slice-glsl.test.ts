@@ -52,7 +52,7 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering and a median, the run-time test of a real count of a rotation, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, and the matrix kernels)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering and a median, the run-time test of a real count of a rotation, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, and the rows of Chunk and Partition)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'colormap', 'atu', 'atp',
       'sort', 'sort.int', 'ordering', 'median',
@@ -61,6 +61,8 @@ describe('IR slice: GLSL text', () => {
       'count.round', 'linspace.count', 'linspace',
       'copy', 'copy.int', 'copy.bool', 'wix', 'get', 'set', 'set.bool', 'getat', 'getatu',
       'mdet', 'minverse', 'mpower', 'mrowreduce',
+      // The rows lane and the checks of its counts (CE-1549).
+      'rows.chunk', 'rows.partition', 'rows.pair', 'rows.chunks', 'rows.size',
       // The string lane (CE-1530).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',

@@ -25,6 +25,7 @@ import {
   bigintBroadcastError,
   checkEntry,
   normalizeRunResult,
+  rowsBroadcastError,
   setReconstructionDigits,
   storeEntryPlan,
   stringBroadcastError,
@@ -442,6 +443,8 @@ function compileIr(
   const shared: Key[] = [];
   // A string input, or a string result: no batch (a batch is of numbers).
   let strings = entry.results.some((t) => t.lane === 'string');
+  // A list of rows of different lengths as the result: no batch either.
+  const rows = entry.results.some((t) => t.lane === 'rows');
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
@@ -500,6 +503,7 @@ function compileIr(
   const code = [slice.preambleOnce, slice.code].join('\n');
   const shippable =
     !strings &&
+    !rows &&
     Object.values(vars).every(readsVarsObject) &&
     isShippableCode(code);
   const once = slice.preambleOnce;
@@ -534,6 +538,7 @@ function compileIr(
     unsupported: [],
     mode,
     ...(strings ? { strings } : {}),
+    ...(rows ? { rows } : {}),
     profile: 'ir',
     shippable,
     ...(warnings.length > 0 ? { warnings } : {}),
@@ -549,6 +554,7 @@ function compileIr(
   const inFrame = <T>(g: () => T): T => {
     if (bigint) throw bigintBroadcastError();
     if (strings) throw stringBroadcastError();
+    if (rows) throw rowsBroadcastError();
     const previous = setReconstructionDigits(result.reconstructionDigits);
     try {
       return g();
@@ -586,9 +592,11 @@ function compileIr(
     ? () => Promise.reject(bigintBroadcastError())
     : strings
       ? () => Promise.reject(stringBroadcastError())
-      : makeBroadcastAsync(asyncSpec);
+      : rows
+        ? () => Promise.reject(rowsBroadcastError())
+        : makeBroadcastAsync(asyncSpec);
   result.willUsePool =
-    bigint || strings ? () => false : makeWillUsePool(asyncSpec);
+    bigint || strings || rows ? () => false : makeWillUsePool(asyncSpec);
   // The pool loops (`outline()`): each worker program as a stored lambda,
   // which a worker loads, and as a function over the engine's runtime, for
   // a sub-range that the calling thread runs again. The asynchronous text

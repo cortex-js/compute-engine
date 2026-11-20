@@ -1208,6 +1208,16 @@ export type CompilationResult<
   strings?: boolean;
 
   /**
+   * JavaScript only. `true` when the result is a list of lists whose rows
+   * can have different lengths (`Chunk(L, k)` or `Partition(L, n)` of a list
+   * of run-time length, `Partition(L, p)` of a predicate): `run()` returns
+   * an array of plain arrays of numbers or booleans, and such code has no
+   * batch form: `broadcast()`, `broadcastAsync()` and the batch loaders of
+   * the runtime throw, and `shippable` is `false`. Absent otherwise.
+   */
+  rows?: boolean;
+
+  /**
    * JavaScript only. The significant digits `run()` reads the float exponent
    * of a negative base to, to tell `(-8)^(1/3)` from an irrational power
    * (`realPowerReconstructionDigits()`), fixed when the code is compiled.

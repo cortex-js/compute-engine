@@ -3,7 +3,9 @@
  *
  * A program is a list of functions; the entry function's parameters are the
  * inputs. Every value is defined once and has one type: a scalar lane
- * (`real`, `integer`, `boolean`, `complex`, `color`, `string`) and a shape
+ * (`real`, `integer`, `boolean`, `complex`, `color`, `string`; `rows`, the
+ * opaque list of lists of rows of different lengths that is the result of
+ * a program only, `README.md`, "The rows lane") and a shape
  * (the lengths of the nested lists around the scalars: `[]` for a scalar,
  * `[3]` for a list of three). A length is a number, or an integer VALUE of the program that holds a
  * length known only at run time (`{ v }`): the length parameter of an input,
@@ -26,7 +28,7 @@
 import type { Type } from '../../../common/type/types.js';
 
 export type Lane =
-  'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string';
+  'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string' | 'rows';
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };

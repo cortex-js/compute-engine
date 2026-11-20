@@ -719,6 +719,51 @@ gives a string has `strings: true` and `shippable: false`: `broadcast()`,
 `loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a `TypeError` (a batch is
 of numbers).
 
+## The rows lane
+
+The lane `rows` holds the value of `Chunk(L, k)`, `Partition(L, n)` and
+`Partition(L, p)` whose rows can have different lengths ("Lists", the list
+operators), on JavaScript only (CE-1549): a JavaScript array of plain arrays
+of numbers or booleans, of the shape `[]`, which no numeric row names. It is
+made by `rows.chunk` and `rows.partition` (`_SYS.chunk`, `_SYS.partition` of
+`javascript-runtime.ts`, which check the count, a `RangeError` where the
+interpreter leaves the form unevaluated, and make each row with
+`Array.prototype.slice.call`, so that a row is a plain array also of an
+array-like input) and by `rows.pair` of the two groups of a predicate (two
+filters of the indices, `[$0, $1]`). A signature whose result is the lane
+gives `{ lane: 'rows', shape: [] }` and compares the shapes of no operand
+(`resultType()`). The list `L` is an input of the entry or a literal `List`
+(also a name whose value is one), of reals, integers or booleans: the
+interpreter holds it whole. Another list (a `Range`, a `Map`, a `Filter`, a
+local, a parameter, a positional input) declines: past `maxCollectionSize` the
+interpreter leaves `Chunk` and `Partition(L, p)` of a lazy list unevaluated
+(`Chunk(Range(1, 10001), 2)`).
+
+A value of the lane is admitted only as an entry yield used once
+(`Profile.resultOnly` of JavaScript; `Profile.scalarLanes` refuses a list of
+them): a root `Block` that returns it, a local of type `unknown` that holds it,
+`Coalesce` and `AssertPresent` of it, an `If` whose arm `fold` takes, and a
+root `Tuple` of it and an element of another shape (`Tuple(Chunk(L, 2), L)`, a
+multi-result entry). Every other reader checks its lane and declines, finds no
+signature, or makes a value that the use check refuses: `Rank`, `Shape`,
+`Flatten`, `Transpose`, `Max`, `Sum`, `First`, `ListJoin`, `PointList`, `List`,
+`Length` of a local that holds it, a call of a user function with it as an
+argument, arithmetic and comparisons; an `If` between two values of the lane
+(`If(x > 0, Chunk(L, 2), Chunk(L, 3))`), a `Tuple` of it and a scalar
+(`Tuple(Chunk(L, 2), x)`: "elements of two types") and a `Tuple` of the value
+twice (`cse` makes one value used twice). `IsMissing` of it is `False`, the
+interpreter's value (with no pass the producer stays, and it declines). No pass
+has a case of its own for the lane.
+
+Code whose result is of the lane has `rows: true` and `shippable: false`:
+`broadcast()`, `broadcastAsync()` and the batch loaders of the runtime
+(`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a
+`TypeError` (a batch writes numbers); `run()`, `runtime.load()` and
+`runAsync()` return the arrays. Declined: the lane on GLSL, in the interval
+mode and in the bigint mode; a list of points, of complex numbers or of
+colours (`Chunk(P, 2)`); a literal list of rows of two lengths as the result,
+`List(List(x, y), List(z))` ("elements of two types").
+
 ## The `bigint` mode
 
 `mode: 'bigint'` (JavaScript only) computes every integer as a JavaScript
@@ -1825,14 +1870,33 @@ built the same way, with the interpreter's value for every length, also 0:
   at least 0, 50 when it is not finite; 50 by default, and `Linspace(b)` is
   `Linspace(1, b)`), the element `k` of the interpreter's `linspaceSample()`
   (`linspace`, the helper `_linspace`).
-- `Chunk(L, k)` and `Partition(L, m)` compile when every row has one length: a
-  stated length and a constant count that the rows divide.
-  `Partition(L, m, step)` of a constant `m` and a constant `step` (one known at
-  run time can be below 1, where the interpreter leaves the form unevaluated) is
-  the complete windows, `Max(Floor((n − m)/step) + 1, 0)` rows of `m` elements.
-  A list of lists whose rows can have two lengths (`Chunk(L, 2)` of
-  `L: list<real>`, a short last chunk, `Partition(L, p)` of a predicate) has no
-  shape in the compiled code and declines.
+- `Chunk(L, k)` and `Partition(L, m)` are a list of lists when every row has
+  one length: a stated length and a constant count that the rows divide
+  (`chunks()` of `lower-lists.ts`). `Partition(L, m, step)` of a constant `m`
+  and a constant `step` (one known at run time can be below 1, where the
+  interpreter leaves the form unevaluated) is the complete windows,
+  `Max(Floor((n − m)/step) + 1, 0)` rows of `m` elements; a size `m` known at
+  run time declines. Rows that can have two lengths (`Chunk(L, 2)` of
+  `L: list<real>`, a short last chunk, `Partition(L, p)` of a predicate) have
+  no shape: as the result of the program they are the lane `rows` ("The rows
+  lane"), and a consumer reads them one by one, each row a build over `L`
+  made where it is read (`source()`): `Map` (also of several lists),
+  `Comprehension`, `Length`, `Count`, `IsEmpty`, `Reduce`, `CountIf`,
+  `Position`, `IndexWhere`, and `At` of a constant index in range of a constant
+  count (`At(Chunk(L, 3), -1)`). `Chunk(L, k)` has `k` rows of `⌈n/k⌉`
+  elements, the row `i` of `Max(0, Min(⌈n/k⌉, n − i·⌈n/k⌉))`; `Partition(L,
+  m)` has `⌈n/m⌉` rows, the row `i` of `Min(m, n − i·m)`. A count known at run
+  time is checked where it is read (`rows.chunks`, `rows.size`: a
+  `RangeError` below 1, and above `MAX_CHUNK_COUNT`, 10,000, for `Chunk`,
+  where the interpreter leaves the form unevaluated); a constant there
+  declines, also for rows of one length. The groups of a predicate are read by
+  `Length`, `Count` and `At` only: the interpreter leaves `Map` of them
+  unevaluated, so every other reader declines. A consumer whose value holds a
+  row (`Map(r ↦ r, Chunk(L, 3))`, a `Filter` or an `Any` that keeps rows,
+  `ListJoin` and `Join` of such rows) declines ("a list of lists of run-time
+  length"). On GLSL a consumer compiles
+  only when every row has a constant length of at least 1
+  (`Map(r ↦ Sum(r), Partition(L6, 4))` of `L6: list<real^6>`).
 - `TakeWhile(L, p)` and `DropWhile(L, p)` split `L` at the first index of a
   `filter` of the indices where `p` fails, or at the length. `CountIf(L, p)` is
   the count of the `filter` of the indices where `p` holds, `IndexWhere` its

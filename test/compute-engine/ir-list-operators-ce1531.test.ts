@@ -317,11 +317,9 @@ describe('CE-1531: where the interpreter gives no list, the compiled code throws
 describe('CE-1531: declines', () => {
   // prettier-ignore
   test.each([
-    // A list of lists whose rows can have two lengths.
-    ['Chunk of a run-time length', ['Chunk', 'L', 2], 'javascript', 'rows can have different lengths'],
-    ['Chunk with a short last chunk', ['Chunk', 'L6', 4], 'javascript', 'rows can have different lengths'],
-    ['Partition with a short last chunk', ['Partition', 'L', 2], 'javascript', 'rows can have different lengths'],
-    ['Partition by a predicate', ['Partition', 'L', pred('Less', 2.5)], 'javascript', 'rows can have different lengths'],
+    // A list of lists whose rows can have two lengths: rows of run-time
+    // lengths (`Chunk` and `Partition` of such rows are
+    // `ir-ragged-rows-ce1549.test.ts`).
     ['FlatMap of rows of run-time lengths', ['FlatMap', 'J', ['Function', ['Range', 1, 't'], 't']], 'javascript', 'a list of lists of run-time length'],
     ['FlatMap of a point', ['FlatMap', 'L', ['Function', ['Tuple', 't', 't'], 't']], 'javascript', 'a tuple'],
     // The interpreter's list is lazy: an effect declines.

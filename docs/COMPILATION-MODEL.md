@@ -491,6 +491,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter: 1e-9): `ColorToColorspace(Rgb(0.5, 0.5, 0.5000005), "hsv")`
   is `(0, 0, 0.5000006)`, where the interpreter gives `(240, 1.0·10⁻⁶, 0.5000005)`.
 
+- `plausible?` — `javascript`, `x: real`, `y: real`, `z: real`:
+  `List(List(x, y), List(z))` as the result declines ("elements of two
+  types"); the interpreter gives `[[x, y], [z]]`.
+- `plausible?` — `javascript`, `P: list<tuple<real, real>>`: `Chunk(P, 2)`
+  declines ("Chunk of a list of other than numbers or booleans"); the
+  interpreter gives the rows of points. Of a list of complex numbers or of
+  colours it declines too (crafted).
+
 ## `parallel for` and `runAsync()`
 
 On `javascript` a `parallel for` (`ParallelLoop(body, Element(x, coll))`)
@@ -2287,6 +2295,21 @@ false (`x\{y > 0\}` at `y = -1`). A restriction whose condition is a list
 (an element-wise selection, `x\{L > 0\}` with `L: list<real>`) declines
 ("a list where a scalar is required"); the interpreter selects position by
 position (`docs/BROADCAST-MODEL.md`).
+
+`Chunk(L, k)` and `Partition(L, n)` whose rows can have different lengths
+(`L: list<real>` of run-time length, a last row that is shorter), and the two
+groups of `Partition(L, p)`, compile on the JavaScript target when `L` is an
+input or a literal list of numbers or booleans: as the result of the program,
+`run()` returns an array of plain arrays and the compilation result has
+`rows: true` (no batch form: `broadcast()`, `broadcastAsync()` and the batch
+loaders throw); a consumer that reduces each row, `Map(r ↦ Sum(r), Chunk(L, k))`,
+`Length(Partition(L, n))` or `At(Partition(L, p), 1)`, reads the rows one by
+one. Where the interpreter leaves the form unevaluated (a count below 1, a
+count of `Chunk` above 10,000), a constant count declines and a count known at
+run time throws a `RangeError`. Any other use of the value declines, and so does
+`Chunk` of a computed list (a `Range`, a `Map`): the interpreter leaves it
+unevaluated past `maxCollectionSize` (`compilation/ir/README.md`, "The rows
+lane").
 
 An infinite collection declines: a `Range` with an infinite end ("a Range of
 an operand that is a constant infinity or NaN") and an `Iterate`, also under

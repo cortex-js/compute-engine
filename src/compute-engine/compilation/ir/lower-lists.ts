@@ -45,6 +45,7 @@ import {
 } from './lower-context.js';
 import { SCALARIZE_LIMIT } from './passes.js';
 import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
+import { MAX_CHUNK_COUNT } from '../../numerics/value-scaled-caps.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
  *  with a type (`Typed(z, "real")`), also with a default value
@@ -243,6 +244,10 @@ export function listLowering(cx: Lowering) {
   function source(e: Expression, scalars?: false, tuple?: boolean): Source;
   function source(e: Expression, scalars: true, tuple?: boolean): Source | V;
   function source(e: Expression, scalars = false, tuple = false): Source | V {
+    // The rows of a `Chunk` or a `Partition`, each made where it is read.
+    const r = chunks(e);
+    if (r !== undefined)
+      return typeof r === 'number' ? listSource(r) : r.source();
     // A host's `Range` (a handler, `cx.isLibrary()`) is lowered in
     // `cx.value()`.
     if (!isFunction(e, 'Range') || !cx.isLibrary(e)) {
@@ -764,6 +769,9 @@ export function listLowering(cx: Lowering) {
           if (!filter) return [v];
           if (type(v).lane !== 'boolean' || type(v).shape.length > 0)
             decline(site, 'a predicate that is not a boolean');
+          // An element kept is a row of a list of lists (`chunks()`).
+          if (lengthValues(type(x)).length > 0)
+            decline(e, 'a list of lists of run-time length');
           return [v, x];
         }),
       e
@@ -864,6 +872,11 @@ export function listLowering(cx: Lowering) {
   const join = (e: Fn): V => {
     if (e.nops === 0) decline(e, 'ListJoin with no operand');
     const parts = e.ops.map((x) => source(x, true));
+    // A part whose element is a row of a run-time length (`chunks()`): the
+    // row is made in the arm that reads it.
+    for (const x of parts)
+      if (typeof x !== 'number' && lengthValues(type(elementOf(x))).length > 0)
+        decline(e, 'a list of lists of run-time length');
     const length = (x: Source | V) =>
       typeof x === 'number' ? integer(1) : x.length;
     const ends: V[] = [];
@@ -1684,6 +1697,152 @@ export function listLowering(cx: Lowering) {
       e
     );
 
+  /** `x` is a list that the interpreter holds whole: an input, a literal
+   *  `List`, or a name whose value is one (a `Range`, a `Map`, a local or
+   *  a parameter can be a lazy list, which the interpreter leaves
+   *  unevaluated past `maxCollectionSize` in `Chunk` and `Partition`). */
+  const whole = (x: Expression): boolean => {
+    if (literalList(cx, x)) return true;
+    if (!isSymbol(x)) return false;
+    for (let i = cx.frames.length - 1; i >= 0; i--) {
+      const binding = cx.frames[i].names.get(x.symbol);
+      if (binding !== undefined) return binding.role === 'input';
+    }
+    return isFunction(x.value, 'List');
+  };
+
+  /** `Chunk(L, k)`, `Partition(L, n)` and `Partition(L, p)` of a
+   *  predicate `p` (`README.md`, "Lists", the list operators): the list of
+   *  lists when every row has one length, else its rows, which `source()`
+   *  makes each where it is read and `rows()` makes the value of the lane
+   *  `rows`, the result of the program only (`README.md`, "The rows
+   *  lane"). `undefined` for another expression, and in the interval
+   *  mode. */
+  const chunks = (
+    e: Expression
+  ):
+    | V
+    | { source: () => Source; rows: () => V; groups?: readonly V[] }
+    | undefined => {
+    if (
+      cx.interval ||
+      !isFunction(e) ||
+      (e.operator !== 'Chunk' && e.operator !== 'Partition') ||
+      e.nops !== 2 ||
+      !cx.isLibrary(e)
+    )
+      return undefined;
+    const h = e.operator;
+    const [x, k] = e.ops;
+    // The list as `source()` reads it, and its value when it is not a
+    // `Range`.
+    const effects = b.effects;
+    const range = isFunction(x, 'Range') && cx.isLibrary(x);
+    const l = range ? undefined : cx.value(x)!;
+    if (l !== undefined && cx.tuples.get(l) === 0)
+      decline(x, 'a tuple where a list is read');
+    if (l !== undefined && type(l).shape.length === 0)
+      decline(x, 'a scalar where a list is required');
+    const s = l === undefined ? source(x) : listSource(l);
+    // The interpreter's list is lazy: it reads the elements it needs only.
+    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    const n = s.length;
+    const predicate = h === 'Partition' && !k.type.matches('number');
+    const c = predicate ? undefined : count(k);
+    if (c !== undefined) {
+      const [m, q] = [cx.constant(n), cx.constant(c)];
+      // The interpreter leaves a count below 1 unevaluated, and a count of
+      // `Chunk` above `MAX_CHUNK_COUNT`.
+      if (q !== undefined && q < 1) decline(e, `${h} of a count below 1`);
+      if (h === 'Chunk' && q !== undefined && q > MAX_CHUNK_COUNT)
+        decline(e, `Chunk of a count above ${MAX_CHUNK_COUNT}`);
+      // Rows of one length: a list of lists.
+      if (m !== undefined && q !== undefined) {
+        const size = h === 'Chunk' ? Math.ceil(m / q) : q;
+        const rows = h === 'Chunk' ? q : Math.ceil(m / q);
+        if (size * rows === m && size !== 0)
+          return windows(e, s, integer(rows), size, integer(size));
+      }
+    }
+    // Rows that can have different lengths, of numbers or booleans.
+    if (l === undefined || !whole(x))
+      decline(
+        e,
+        `${h} of a computed list (the interpreter leaves it unevaluated past maxCollectionSize)`
+      );
+    const y = elementOf(s);
+    if (
+      type(y).shape.length > 0 ||
+      !(isSubLane(type(y).lane, 'real') || type(y).lane === 'boolean')
+    )
+      decline(e, `${h} of a list of other than numbers or booleans`);
+    const zero = integer(0);
+    const times = (p: V, q: V): V => {
+      const [a, z] = [cx.constant(p), cx.constant(q)];
+      return a !== undefined && z !== undefined
+        ? integer(a * z)
+        : cx.apply(e, 'Multiply', [p, q]);
+    };
+    if (c === undefined) {
+      // The two groups: the elements where `p` holds, then the others.
+      const groups = [false, true].map((negate) => {
+        const ks = listSource(where(e, s, k, negate));
+        return reindexed(e, s, ks.length, (j) => ks.at(j));
+      });
+      // The interpreter reads the length of the groups, and a group by
+      // `At` (`groups`), but leaves `Map` and the other operators that read
+      // each group unevaluated: they decline.
+      return {
+        source: () => ({
+          length: integer(2),
+          at: () =>
+            decline(
+              e,
+              'a group of Partition by a predicate read one by one (the interpreter leaves Map of the groups unevaluated)'
+            ),
+        }),
+        rows: () => cx.apply(e, op('rows.pair'), groups),
+        groups,
+      };
+    }
+    return {
+      // A count known at run time is checked where it is read, as the
+      // helpers check it (`rows.chunks`, `rows.size`).
+      source: () => {
+        const q =
+          cx.constant(c) !== undefined
+            ? c
+            : cx.apply(e, op(h === 'Chunk' ? 'rows.chunks' : 'rows.size'), [c]);
+        const [a, z] = [cx.constant(n), cx.constant(q)];
+        const ceil = (): V =>
+          a !== undefined && z !== undefined
+            ? integer(Math.ceil(a / z))
+            : cx.apply(e, 'Ceil', [cx.apply(e, 'Divide', [n, q])]);
+        // `Chunk`: `q` rows of `⌈n/q⌉` elements, the last ones shorter or
+        // empty; `Partition`: `⌈n/q⌉` rows of `q` elements, the last one
+        // shorter.
+        const size = h === 'Chunk' ? ceil() : q;
+        return {
+          length: h === 'Chunk' ? q : ceil(),
+          at: (i) => {
+            const start = times(i, size);
+            const rest = int(e, 'Subtract', n, start);
+            const length =
+              h === 'Chunk'
+                ? int(e, 'Max', zero, int(e, 'Min', size, rest))
+                : int(e, 'Min', size, rest);
+            return reindexed(e, s, length, (j) => int(e, 'Add', start, j));
+          },
+        };
+      },
+      rows: () =>
+        cx.apply(e, op(h === 'Chunk' ? 'rows.chunk' : 'rows.partition'), [
+          l,
+          c,
+        ]),
+    };
+  };
+
   /** A run of passes over the first `n` indices from `x0` (the region
    *  `iterate`): the element `k` is `step(k, acc)`, `acc` the element
    *  before, or `x0` at the first pass. Real numbers only; an integer `x0`
@@ -1952,6 +2111,10 @@ export function listLowering(cx: Lowering) {
         'ApplyWhole of a value that is not a function literal or a library operator'
       );
     }
+    if (h === 'Chunk' || (h === 'Partition' && e.nops === 2)) {
+      const r = chunks(e)!;
+      return typeof r === 'number' ? r : r.rows();
+    }
     // The operators of a list.
     const effects = b.effects;
     const s =
@@ -1959,7 +2122,6 @@ export function listLowering(cx: Lowering) {
       h === 'DeleteAt' ||
       h === 'Insert' ||
       h === 'Slice' ||
-      h === 'Chunk' ||
       h === 'Partition' ||
       h === 'TakeWhile' ||
       h === 'DropWhile' ||
@@ -2095,51 +2257,37 @@ export function listLowering(cx: Lowering) {
       const first = int(e, 'Subtract', start, one);
       return reindexed(e, s, length, (k) => int(e, 'Add', first, k));
     }
-    if (h === 'Chunk' || h === 'Partition') {
-      // Rows of one length only: a list of lists whose rows can have two
-      // lengths (the last chunk of a length that the size does not divide,
-      // the two groups of a predicate) has no shape in the compiled code.
-      const ragged = () =>
-        decline(
-          e,
-          `${h} whose rows can have different lengths (a list of lists of different lengths)`
-        );
+    if (h === 'Partition') {
+      // Sliding windows of `c` elements, `step` apart, complete only (the
+      // forms of two operands are `chunks()`).
       const k = e.ops[1];
-      if (h === 'Partition' && !k.type.matches('number')) ragged();
+      if (!k.type.matches('number'))
+        decline(e, 'Partition by a predicate with a step');
       const c = cx.constant(count(k));
-      if (c === undefined) ragged();
+      if (c === undefined)
+        decline(e, 'Partition in windows of a size that is not a constant');
       // The interpreter leaves a count below 1 unevaluated.
-      if (c! < 1) decline(e, `${h} of a count below 1`);
-      if (h === 'Partition' && e.nops === 3) {
-        // Sliding windows of `c` elements, `step` apart, complete only.
-        // A step known at run time can be below 1, where the interpreter
-        // leaves the form unevaluated: it declines.
-        const step = count(e.ops[2]);
-        const t = cx.constant(step);
-        if (t === undefined)
-          decline(e, `${h} of a step that is not a constant`);
-        if (t < 1) decline(e, `${h} of a step below 1`);
-        const rows = int(
+      if (c < 1) decline(e, `${h} of a count below 1`);
+      // A step known at run time can be below 1, where the interpreter
+      // leaves the form unevaluated: it declines.
+      const step = count(e.ops[2]);
+      const t = cx.constant(step);
+      if (t === undefined) decline(e, `${h} of a step that is not a constant`);
+      if (t < 1) decline(e, `${h} of a step below 1`);
+      const rows = int(
+        e,
+        'Max',
+        int(
           e,
-          'Max',
-          int(
-            e,
-            'Add',
-            cx.apply(e, 'Floor', [
-              cx.apply(e, 'Divide', [int(e, 'Subtract', n, integer(c!)), step]),
-            ]),
-            one
-          ),
-          zero
-        );
-        return windows(e, s, rows, c!, step);
-      }
-      const m = cx.constant(n);
-      if (m === undefined) ragged();
-      const size = h === 'Chunk' ? Math.ceil(m! / c!) : c!;
-      const rows = h === 'Chunk' ? c! : Math.ceil(m! / c!);
-      if (size * rows !== m || size === 0) ragged();
-      return windows(e, s, integer(rows), size, integer(size));
+          'Add',
+          cx.apply(e, 'Floor', [
+            cx.apply(e, 'Divide', [int(e, 'Subtract', n, integer(c)), step]),
+          ]),
+          one
+        ),
+        zero
+      );
+      return windows(e, s, rows, c, step);
     }
     if (h === 'TakeWhile' || h === 'DropWhile') {
       // The first index where the predicate fails, or the length.
@@ -2407,6 +2555,7 @@ export function listLowering(cx: Lowering) {
     collection,
     reduceBy,
     source,
+    chunks,
     listSource,
     built,
     reduce,

@@ -93,9 +93,15 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
     const define = (v: V) => {
       const t = type(v);
       if (
-        !['real', 'integer', 'boolean', 'complex', 'color', 'string'].includes(
-          t.lane
-        )
+        ![
+          'real',
+          'integer',
+          'boolean',
+          'complex',
+          'color',
+          'string',
+          'rows',
+        ].includes(t.lane)
       )
         fail(`v${v}: lane ${t.lane}`);
       for (const n of t.shape)

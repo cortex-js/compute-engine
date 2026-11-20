@@ -10,6 +10,7 @@ import {
   isBeyondSafeInteger,
 } from '../numerics/numeric.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
+import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import {
   parseColor,
   rgbToOklch,
@@ -1059,6 +1060,26 @@ function enterIntegral(): boolean {
   return true;
 }
 
+/** The count `k` of `Chunk(l, k)`: the interpreter leaves the form
+ *  unevaluated below 1 and above `MAX_CHUNK_COUNT`. */
+function chunkCount(k: number): number {
+  if (!(k >= 1 && k <= MAX_CHUNK_COUNT))
+    throw new RangeError(
+      `Chunk: expected a count in 1..${MAX_CHUNK_COUNT}, got ${String(k)}`
+    );
+  return k;
+}
+
+/** The size `n` of `Partition(l, n)`: the interpreter leaves the form
+ *  unevaluated below 1. */
+function partitionSize(n: number): number {
+  if (!(n >= 1))
+    throw new RangeError(
+      `Partition: expected a size of 1 or more, got ${String(n)}`
+    );
+  return n;
+}
+
 export const SYS_HELPERS = {
   // The helpers of `mode: 'bigint'`, which compute with JavaScript
   // `bigint` values and throw a `NonFiniteValue` at a pole
@@ -1372,6 +1393,30 @@ export const SYS_HELPERS = {
   // poles and infinite points (see `binomial()` in
   // `numerics/special-functions.ts`).
   binomial,
+  // `Chunk(l, k)` and `Partition(l, n)` of a list of numbers or booleans
+  // whose rows can have different lengths, as the interpreter's (`Chunk`,
+  // `partitionWalk()` of `library/collections.ts`): `k` rows of
+  // `⌈len/k⌉` elements, the last ones shorter or empty; rows of `n`
+  // elements, the last one shorter. Each row is a plain array, also of an
+  // array-like `l`. A count where the interpreter leaves the form
+  // unevaluated (`k` below 1 or above `MAX_CHUNK_COUNT`, `n` below 1)
+  // throws a `RangeError`; `chunkCount` and `partitionSize` are the checks
+  // of a count of rows read one by one.
+  chunkCount,
+  partitionSize,
+  chunk: (l: ArrayLike<unknown>, k: number): unknown[][] => {
+    const m = chunkCount(k);
+    const s = Math.ceil(l.length / m);
+    return Array.from({ length: m }, (_, i) =>
+      Array.prototype.slice.call(l, i * s, (i + 1) * s)
+    );
+  },
+  partition: (l: ArrayLike<unknown>, n: number): unknown[][] => {
+    const m = partitionSize(n);
+    return Array.from({ length: Math.ceil(l.length / m) }, (_, i) =>
+      Array.prototype.slice.call(l, i * m, (i + 1) * m)
+    );
+  },
   // The determinant, inverse, power and row echelon form of a matrix of
   // numbers (`matrix-runtime.ts`).
   ...MATRIX_HELPERS,
@@ -2964,6 +3009,10 @@ export type StoredJavaScript = {
   /** The `strings` field of the compilation result: the code reads or
    * returns a string, so the batch loaders refuse it. */
   strings?: boolean;
+  /** The `rows` field of the compilation result: the result is a list of
+   * lists whose rows can have different lengths, so the batch loaders
+   * refuse it. */
+  rows?: boolean;
   /** The count of values per cell that `loadBroadcast()` and
    * `loadBroadcastSlice()` write when the `outputs` option is absent: the
    * arity of a tuple-of-numbers expression. Absent means 1. */
@@ -3311,6 +3360,7 @@ export function createSysRuntime(
               : structuredClone(stored.entryPlan),
           mode: stored.mode,
           strings: stored.strings,
+          rows: stored.rows,
           broadcastOutputs: stored.broadcastOutputs,
           batch:
             stored.batch === undefined
@@ -3413,6 +3463,14 @@ export function stringBroadcastError(): Error {
   );
 }
 
+/** The error of a batch of code whose result is a list of lists of rows of
+ *  different lengths (`Chunk`, `Partition`): a batch writes numbers only. */
+export function rowsBroadcastError(): Error {
+  return new TypeError(
+    'Code whose result is a list of lists of rows of different lengths cannot be broadcast: the batch runner writes numbers only. Call `run()` for each value.'
+  );
+}
+
 /**
  * Throw for stored code compiled with the compile contract of a value kind
  * (`valueKinds`). The run-time checks of a kind are functions of the host
@@ -3461,6 +3519,7 @@ function storedExpressionRunner(
   // function, before it gives any task to a worker.
   if (stored.mode === 'bigint') throw bigintBroadcastError();
   if (stored.strings === true) throw stringBroadcastError();
+  if (stored.rows === true) throw rowsBroadcastError();
   if (stored.calling === 'lambda')
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'

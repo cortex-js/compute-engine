@@ -2,6 +2,15 @@
 
 ### New Features
 
+- **The compilation result has a `rows` field** (CE-1549). It is `true` when
+  the result of compiled JavaScript is a list of lists whose rows can have
+  different lengths, as `Chunk(L, k)` of a list of run-time length gives:
+  `run()` returns an array of plain arrays, and the code has no batch form.
+  `broadcast()`, `broadcastAsync()` and the batch loaders of the runtime
+  (`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a
+  `TypeError`, and `shippable` is `false`. A stored copy of the result keeps
+  the field.
+
 - **A parameter of a protocol function can have a default value** (CE-1554). The
   protocol owns the default: a call that leaves the argument out receives it, in
   the bare, the method and the qualified form, and every implementation takes
@@ -47,6 +56,21 @@
   back, and a definition of your own named `fill` still wins over both.
 
 ### Resolved Issues
+
+- **`Chunk` and `Partition` compile when their rows can have different
+  lengths** (CE-1549). On the JavaScript target, `Chunk(L, k)` and
+  `Partition(L, n)` of a list `L: list<real>` of run-time length, and
+  `Partition(L, p)` of a predicate, compile again as the result of the
+  program, as they did in 0.193.0: `Chunk(L, 2)` at `L = [1, 2, 3]` gives
+  `[[1, 2], [3]]`. A consumer that reduces each row compiles too:
+  `Map(r ↦ Sum(r), Chunk(L, k))`, `Length(Partition(L, n))`,
+  `At(Partition(L, p), 1)`. The list must be an input or a literal list of
+  numbers or booleans; a count known at run time throws a `RangeError` where
+  the interpreter leaves the form unevaluated (a count below 1, a count of
+  `Chunk` above 10,000). Other uses of such rows, and `Chunk` of a computed
+  list such as a `Range`, fall back to the interpreter. `Chunk` of a constant
+  count above 10,000 now declines also when every row has one length, where
+  the interpreter leaves it unevaluated.
 
 - **A protocol function called under `.N()` receives its arguments exactly, as
   any function does.** With `D = (25! - 1)/24!` and an implementation that

@@ -96,23 +96,25 @@ export type Profile = {
   readonly elementwise: boolean;
   /** The lanes of which no list is held: on GLSL, a list of colours or of
    *  complex numbers (a `vec3` or a `vec2` has no array of its own here);
-   *  on JavaScript, a list of strings. */
+   *  on JavaScript, a list of strings or of lists of rows. */
   readonly scalarLanes: readonly Lane[];
   /** A list of rank 2 is held when its two lengths are constants and its
    *  rows have 2 to 4 elements: on GLSL an array of vectors (`vec2[3]`, a
    *  list of points). */
   readonly vectorArrays?: boolean;
   /** The operations whose value is admitted only as the result of the
-   *  entry: on GLSL a colour is an OKLCh `vec3` with no tag of its space,
-   *  so a conversion to another space is the program's result only. */
-  readonly resultOnly?: readonly string[];
+   *  entry, each with the cause of a refusal elsewhere: on GLSL a colour is
+   *  an OKLCh `vec3` with no tag of its space, so a conversion to another
+   *  space is the program's result only; on JavaScript a list of rows of
+   *  different lengths (the lane `rows`) is read by no operation. */
+  readonly resultOnly?: Readonly<Record<string, string>>;
   /** The spellings of the IR operations and of the region rows. */
   readonly syntax: Syntax;
 };
 
 export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'string'],
+    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'string', 'rows'],
     rank: Infinity,
     runtimeLengths: true,
     draws: true,
@@ -120,7 +122,13 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     recursion: true,
     elementwise: true,
     // A list of strings is phase 2 of CE-1530.
-    scalarLanes: ['string'],
+    scalarLanes: ['string', 'rows'],
+    resultOnly: Object.fromEntries(
+      ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
+        op,
+        'Chunk or Partition with rows of different lengths, other than as the result of the program',
+      ])
+    ),
     syntax: JS,
   },
   glsl: {
@@ -133,14 +141,14 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     elementwise: false,
     scalarLanes: ['color', 'complex'],
     vectorArrays: true,
-    resultOnly: [
-      'asoklab',
-      'asrgb',
-      'ashsv',
-      'ashsl',
-      'ashsv.own',
-      'ashsl.own',
-    ],
+    resultOnly: Object.fromEntries(
+      ['asoklab', 'asrgb', 'ashsv', 'ashsl', 'ashsv.own', 'ashsl.own'].map(
+        (op) => [
+          op,
+          `${rowOfOp(OPERATORS, op)!.row.head} other than as the result of the program (a colour is an OKLCh value with no tag of its space)`,
+        ]
+      )
+    ),
     syntax: GLSL,
   },
 });
@@ -161,13 +169,13 @@ export function admits(
 ): Refusal | undefined {
   const entry = entryOf(p);
   // Read by the `resultOnly` check only.
-  const uses = profile.resultOnly === undefined ? undefined : useIndex(p).uses;
+  let uses: ReturnType<typeof useIndex>['uses'] | undefined;
   const type = (t: IRType, what: string): Refusal | undefined => {
     if (!profile.lanes.includes(t.lane))
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {
-        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : 'complex numbers'}`,
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : 'complex numbers'}`,
       };
     if (
       t.shape.length > profile.rank &&
@@ -216,14 +224,15 @@ export function admits(
           head,
           cause: 'an index that can be out of range, of a list of colours',
         };
+      const only = profile.resultOnly?.[i.op];
       if (
-        profile.resultOnly?.includes(i.op) === true &&
-        !(entry.body.yields.includes(i.out) && uses?.get(i.out) === 1)
+        only !== undefined &&
+        !(
+          entry.body.yields.includes(i.out) &&
+          (uses ??= useIndex(p).uses).get(i.out) === 1
+        )
       )
-        return {
-          head,
-          cause: `${head} other than as the result of the program (a colour is an OKLCh value with no tag of its space)`,
-        };
+        return { head, cause: only };
     }
     if (i.k === 'region') {
       if (i.op === 'seeded' && !profile.frames)

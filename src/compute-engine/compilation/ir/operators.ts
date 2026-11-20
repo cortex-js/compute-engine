@@ -411,6 +411,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[['list'], R, 'sort']],       list),
   row(undefined,      1,          [[['list'], I, 'ordering']],   list),
   row(undefined,      1,          [[['list'], 'real-element', 'median']], list),
+  // `Chunk(L, k)` and `Partition(L, n)` whose rows can have different
+  // lengths, and the two groups of `Partition(L, p)`: the lane `rows`, a
+  // value that is the result of the program only (`README.md`, "The rows
+  // lane"); JavaScript only. The helpers check the count, which fails where
+  // the interpreter leaves the form unevaluated (`may-fail`), as the count
+  // checks of the rows read one by one (`rows.chunks`, `rows.size`) do.
+  row(undefined,      2,          [[['list', I], 'rows', 'rows.chunk']], { ...list, effect: 'may-fail' }),
+  row(undefined,      2,          [[['list', I], 'rows', 'rows.partition']], { ...list, effect: 'may-fail' }),
+  row(undefined,      2,          [[['list', 'list'], 'rows', 'rows.pair']], list),
+  row(undefined,      1,          [[[I], I, 'rows.chunks']],     { ...list, effect: 'may-fail' }),
+  row(undefined,      1,          [[[I], I, 'rows.size']],       { ...list, effect: 'may-fail' }),
   // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
   // whose shape the lowering settles (`lower-matrices.ts`): the determinant
   // of the entries of an `n × n` matrix row by row and `n`; the inverse;
@@ -796,6 +807,9 @@ export function resultType(
   sameShape: (a: readonly Length[], b: readonly Length[]) => boolean
 ): IRType | undefined {
   const [args, result] = signature;
+  // A list of rows of different lengths has no shape: its operands are
+  // not compared (the two groups of `Partition(L, p)`).
+  if (result === 'rows') return { lane: result, shape: [] };
   if (result === 'element') return elementType(types[args.indexOf('list')]);
   if (result === 'real-element')
     return { ...elementType(types[args.indexOf('list')]), lane: R };

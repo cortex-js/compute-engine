@@ -1496,7 +1496,24 @@ function lowerOnce(
           return at(e, lists.iterateTo(e, e.ops[0], i), i);
         }
         const effects = b.effects;
-        const [l, i] = [value(e.ops[0])!, value(e.ops[1])!];
+        // A row of a `Chunk` or a `Partition` whose rows can have different
+        // lengths (`lists.chunks()`): at a constant index in range of a
+        // constant count only.
+        const rows = lists.chunks(e.ops[0]);
+        if (rows !== undefined && typeof rows !== 'number') {
+          const s = rows.source();
+          const k = elementIndex(
+            constant(s.length),
+            constant(scalar(e.ops[1]))
+          );
+          if (k === undefined)
+            decline(
+              e,
+              'At of a Chunk or a Partition whose rows can have different lengths, at an index other than a constant in range of a constant count'
+            );
+          return rows.groups?.[k] ?? s.at(b.constant(k, 'integer'));
+        }
+        const [l, i] = [rows ?? value(e.ops[0])!, value(e.ops[1])!];
         const t = type(l);
         // A list of indexes into a list of numbers: the list of the `At` of
         // each index, as the interpreter's.

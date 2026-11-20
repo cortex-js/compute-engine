@@ -237,6 +237,14 @@ export const JS: Syntax = deepFreeze({
     'sort': { text: '_sort($0)', helpers: ['_sort'] },
     'ordering': { text: '_ordering($0)', helpers: ['_ordering'] },
     'median': { text: '_median($0)', helpers: ['_median'] },
+    // `Chunk` and `Partition` whose rows can have different lengths
+    // (`javascript-runtime.ts`), the two groups of a predicate, and the
+    // checks of their counts.
+    'rows.chunk': '_SYS.chunk($0, $1)',
+    'rows.partition': '_SYS.partition($0, $1)',
+    'rows.pair': '[$0, $1]',
+    'rows.chunks': '_SYS.chunkCount($0)',
+    'rows.size': '_SYS.partitionSize($0)',
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',
