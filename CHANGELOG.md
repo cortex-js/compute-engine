@@ -70,6 +70,15 @@
 
 ### Resolved Issues
 
+- **A `Sum` or a `Product` of list terms from 0 to the length of a list
+  compiles** (CE-1567). With `L: list<real>`,
+  `Sum(Multiply(k, L), Limits(k, 0, Length(L)))` compiles to JavaScript again,
+  as it did in 0.186.0, and gives `[3, 6]` for `L = [1, 2]`, as the interpreter
+  does. It declined with "a term that is a list, over a range that can be
+  empty": a length is never negative, so a range from a constant at most 0 to a
+  length always has a term. `Limits(k, 1, Length(L))` still declines: for an
+  empty `L` that range has no term, and the interpreter gives the number `0`.
+
 - **A name whose value is a `Comprehension`, a `Sum` or a `Product` compiles
   when the index of a clause has the name of another symbol with a value**
   (CE-1566). With `j := [4, 5]` and

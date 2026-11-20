@@ -507,12 +507,17 @@ export function listLowering(cx: Lowering) {
       const n = type(v).shape[0];
       // Over a range with no term, the interpreter's value is a list of the
       // identity only when the static type of the sum states its length
-      // (`emptyBigOpValue()`), and the identity (a number) otherwise.
+      // (`emptyBigOpValue()`), and the identity (a number) otherwise. A
+      // range from a constant at most 0 to a value proved `>= 0` (a
+      // `Length`) holds a term.
       const [a, z] = [cx.constant(lo), cx.constant(hi)];
       const empty = emptyBigOpValue(e, e.operator as 'Sum' | 'Product');
+      const held =
+        a !== undefined &&
+        (z !== undefined ? a <= z : a <= 0 && cx.nonnegative(hi));
       if (
         n !== undefined &&
-        !(a !== undefined && z !== undefined && a <= z) &&
+        !held &&
         !(isFunction(empty, 'List') && empty.nops === n)
       )
         decline(

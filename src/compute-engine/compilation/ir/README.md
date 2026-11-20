@@ -1539,7 +1539,11 @@ type states no length and the bounds are not two constants with at least one
 term, the shape of the value depends on the bounds at run time, and the sum
 declines: `Sum(X + i, Limits(i, 1, N))` with `X: list<real>` (the interpreter
 gives `0` at `N = 0`); with `L: list<real^2>` it compiles and gives `[0, 0]`
-there. Past the `iterationBudget` a list sum is a list of NaN. A list of a
+there. A range from a constant at most 0 to an integer upper bound that
+`nonnegative()` proves `>= 0` (a `Length`) has a term:
+`Sum(i X, Limits(i, 0, Length(X)))` compiles, and
+`Sum(i X, Limits(i, 1, Length(X)))` declines (no term when `X` is empty). A real
+upper bound is lowered through `Floor`, which `nonnegative()` does not prove. Past the `iterationBudget` a list sum is a list of NaN. A list of a
 run-time length declines on GLSL, and a selection at each position (`Which` of a
 list condition) declines in the interval mode, as elsewhere.
 

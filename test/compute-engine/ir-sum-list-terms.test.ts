@@ -199,6 +199,22 @@ describe('IR profile: a Sum or a Product of list terms (CE-1470)', () => {
     ]);
   });
 
+  // `Length` is never negative, so a range from 0 (or below) to a length
+  // holds a term (CE-1567).
+  // prettier-ignore
+  test.each([
+    ['from 0 to a length', sum(['Multiply', 'i', 'X'], 0, ['Length', 'X'])],
+    ['from -2 to a length', sum(['Add', 'X', 'i'], -2, ['Length', 'U'])],
+    ['from 0 to a length plus 1', sum(['Multiply', 'i', 'X'], 0, ['Add', ['Length', 'X'], 1])],
+    ['a product from 0 to a length', product(['Add', 'X', 'i'], 0, ['Length', 'X'])],
+  ])('a range from at most 0 to a length, %s: the interpreter’s value', (_, json) => {
+    check(json, [
+      { X: [1, 2], U: [5] },
+      { X: [-0.5, 2, 7.5], U: [] },
+      { X: [], U: [1, 2, 3] },
+    ]);
+  });
+
   test('over a range with no term: the list of the identity of a stated length', () => {
     expect(
       js(sum(['Add', 'L', 'i'], 1, 'N')).run!({ L: [1, 2], N: 0 } as never)
@@ -221,6 +237,8 @@ describe('IR profile: a Sum or a Product of list terms (CE-1470)', () => {
     ['the second witness of CE-1470', sum(['Which', ['Equal', ['Range', 1, 'u'], ['At', 'A', 'j']], 1, 'True', 0], 1, 'N', 'j'), /computed in each term|over a range that can be empty/],
     ['the corpus case of COMPILATION-MODEL.md, R3', sum(['Which', ['Equal', 'C', ['At', 'U', 'i']], 'i', 'True', 0], 1, ['Length', 'U']), /over a range that can be empty/],
     ['a range with no term', sum(['Add', 'X', 'i'], 3, 1), /over a range that can be empty/],
+    // At Length(X) = 0 the range from 1 has no term.
+    ['a range from 1 to a length', sum(['Multiply', 'i', 'X'], 1, ['Length', 'X']), /over a range that can be empty/],
     // The accumulator has one length.
     ['a length computed in each term', sum(['Range', 1, 'i'], 1, 200), /computed in each term/],
     ['a term that is a tuple', sum(['Tuple', 'i', 'N'], 1, 200), /a term that is not a number/],

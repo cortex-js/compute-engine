@@ -769,7 +769,8 @@ function lowerOnce(
 
   /** `v` is proved `>= 0` by what cannot change after the compilation: a
    *  constant, an input whose declared type is ranged at or above 0
-   *  (`b.signs`; an assumption does not change a type), an operation whose
+   *  (`b.signs`; an assumption does not change a type), the run-time
+   *  length of an input list (`inputLengths`), an operation whose
    *  value is nonnegative (`abs`, `exp`, an even power), a sum or a product
    *  of such values.
    *
@@ -785,7 +786,7 @@ function lowerOnce(
     const c = constant(v);
     if (c !== undefined)
       return enclosed && type(v).lane !== 'integer' ? c >= 2 ** -1022 : c >= 0;
-    if (!enclosed && b.signs.has(v)) return true;
+    if (!enclosed && (b.signs.has(v) || inputLengths.has(v))) return true;
     const i = b.defs.get(v);
     if (i === undefined || depth > 16) return false;
     const op = i.op.split('.')[0];
@@ -5759,6 +5760,7 @@ function lowerOnce(
     apply,
     type,
     constant,
+    nonnegative: (v) => nonnegative(v),
     branch,
     withFrame,
     region,

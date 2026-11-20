@@ -831,7 +831,8 @@ read:
   declines, and so does the corpus case
   `\sum_{i=1}^{\mathrm{Length}(U)} \begin{cases}i & C=U[i]\\0 &
   \top\end{cases}` with `C` and `U` lists. Over two integer constant bounds
-  with at least one term, or with a term of a stated length (`L: list<real^2>`), the
+  with at least one term, from a constant at most 0 to a length
+  (`Sum(L·i, i, 0, Length(L))`, CE-1567), or with a term of a stated length (`L: list<real^2>`), the
   terms are added element by element and the sum compiles
   (`compilation/ir/README.md`, "Lists", CE-1470);
 - a fold of a list of points (`Sum(L)` with `L: list<tuple<real, real>>`:

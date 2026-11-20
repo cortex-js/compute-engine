@@ -274,6 +274,8 @@ export type Lowering = {
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;
   type(v: V): IRType;
   constant(v: V): number | undefined;
+  /** `v` is proved `>= 0` (`lower.ts`, `nonnegative()`). */
+  nonnegative(v: V): boolean;
   branch(
     node: Expression,
     cond: V,
