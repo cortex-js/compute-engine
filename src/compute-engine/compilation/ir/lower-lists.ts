@@ -161,6 +161,10 @@ const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
   Find: [2],
   IndexWhere: [2],
   Position: [2],
+  ArgMax: [1, 2],
+  ArgMin: [1, 2],
+  MaxBy: [2],
+  MinBy: [2],
   RandomSample: [2],
   StartsWith: [2],
   EndsWith: [2],
@@ -187,6 +191,10 @@ const MORE: ReadonlySet<string> = new Set([
   'Find',
   'IndexWhere',
   'Position',
+  'ArgMax',
+  'ArgMin',
+  'MaxBy',
+  'MinBy',
   'RandomSample',
   'ApplyWhole',
   'StartsWith',
@@ -1768,6 +1776,117 @@ export function listLowering(cx: Lowering) {
   /** The first element of the list `l`, read where it has one. */
   const head = (l: V): V => b.op('elem', [l, integer(0)], elementType(type(l)));
 
+  /** `ArgMax(L)`, `ArgMin(L)` and, by a key `f` of one parameter,
+   *  `ArgMax(L, f)`, `ArgMin(L, f)`, `MaxBy(L, f)` and `MinBy(L, f)` of the
+   *  list `s`. The keys are computed once per element, in order, as the
+   *  interpreter's `extremumBy()` does where it has a value; the index is
+   *  the first one whose key equals the `Max` (the `Min`) of the keys: the
+   *  interpreter keeps the first of equal keys. `ArgMax` is that index plus
+   *  1, `MaxBy` the element there. Where the interpreter leaves the form
+   *  unevaluated (no element, or a NaN key among two elements or more),
+   *  `ArgMax` is 0 and `MaxBy` NaN: a NaN key is neither the `Max` nor
+   *  below it, whatever the `Max` of the target gives for a NaN (GLSL's
+   *  `max` does not give NaN). One element is the answer whatever its key,
+   *  as the interpreter compares no key then. A key that is not a real
+   *  number declines. */
+  const extremum = (e: Fn, s: Source): V => {
+    const h = e.operator;
+    const [zero, one] = [integer(0), integer(1)];
+    const n = s.length;
+    const x = elementOf(s);
+    const real = (v: V) =>
+      type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
+    let keys = s;
+    if (e.nops === 2) {
+      const { names, body, site } = literalOf(e, e.ops[1], 1);
+      const ks = over(e, s, names[0], body, false, site);
+      if (
+        cx.tuples.has(ks) ||
+        type(ks).shape.length !== 1 ||
+        !isSubLane(type(ks).lane, 'real')
+      )
+        decline(e, `${h} by a key that is not a real number`);
+      keys = listSource(ks);
+    } else if (!real(x))
+      decline(e, `${h} of a list of other than real numbers`);
+    // The element that `MaxBy` and `MinBy` give: a real number, or a tuple
+    // of real numbers (a point).
+    const element = h === 'MaxBy' || h === 'MinBy';
+    const point =
+      cx.tuples.get(x) === 0 &&
+      type(x).shape.length === 1 &&
+      isSubLane(type(x).lane, 'real');
+    if (element && !real(x) && !point)
+      decline(e, `${h} of a list of other than real numbers or points`);
+    const max = h === 'ArgMax' || h === 'MaxBy';
+    const first = (): V => {
+      const m = reduce(
+        e,
+        rowOfHead(cx.rows, max ? 'Max' : 'Min')!,
+        [keys],
+        b.constant(max ? -Infinity : Infinity, 'real'),
+        undefined,
+        true
+      );
+      // The least index whose key is `m`; the length when there is none,
+      // -1 when a key is NaN.
+      const indices: Source = {
+        length: n,
+        at: (k) => {
+          const key = keys.at(k);
+          const inside = cx.apply(e, 'Less', max ? [key, m] : [m, key]);
+          return cx.branch(
+            e,
+            cx.apply(e, 'Equal', [key, m]),
+            () => k,
+            () =>
+              cx.branch(
+                e,
+                inside,
+                () => n,
+                () => integer(-1),
+                true
+              )!,
+            true
+          )!;
+        },
+      };
+      return reduce(e, rowOfHead(cx.rows, 'Min')!, [indices], n);
+    };
+    const i = when(e, 'Equal', n, one, () => zero, first);
+    /** `then()` where `i` is an index of the list. */
+    const found = (then: () => V, otherwise: () => V): V =>
+      when(
+        e,
+        'LessEqual',
+        zero,
+        i,
+        () => when(e, 'Less', i, n, then, otherwise),
+        otherwise
+      );
+    if (!element)
+      return found(
+        () => int(e, 'Add', i, one),
+        () => zero
+      );
+    // A point of NaN is the list of its coordinates, written out: a build
+    // of them has no shape to join with the point of the other arm.
+    const nan = b.constant(NaN, 'real');
+    const d = type(x).shape[0];
+    const v = found(
+      () => s.at(i),
+      () => {
+        if (typeof d !== 'number') return nan;
+        const coordinates = Array.from({ length: d }, () => nan);
+        const absent = cx.list(e, coordinates);
+        cx.tuples.set(absent, 0);
+        return absent;
+      }
+    );
+    if (point) cx.tuples.set(v, 0);
+    return v;
+  };
+
   /** The list of the elements of the flat list `s` (of numbers or
    *  booleans) and of the scalars `xs` after them (`Append`). */
   const appended = (e: Fn, s: Source, xs: V[]): V => {
@@ -2236,6 +2355,10 @@ export function listLowering(cx: Lowering) {
       h === 'Find' ||
       h === 'IndexWhere' ||
       h === 'Position' ||
+      h === 'ArgMax' ||
+      h === 'ArgMin' ||
+      h === 'MaxBy' ||
+      h === 'MinBy' ||
       h === 'RandomSample'
         ? source(e.ops[0])
         : undefined;
@@ -2429,6 +2552,8 @@ export function listLowering(cx: Lowering) {
         () => (h === 'Find' ? b.constant(NaN, 'real') : zero)
       );
     }
+    if (h === 'ArgMax' || h === 'ArgMin' || h === 'MaxBy' || h === 'MinBy')
+      return extremum(e, s);
     if (h === 'Position') {
       const kept = where(e, s, e.ops[1]);
       const ks = listSource(kept);

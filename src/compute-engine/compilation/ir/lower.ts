@@ -257,6 +257,10 @@ const CONSTRUCTS = new Set([
   'Find',
   'IndexWhere',
   'Position',
+  'ArgMax',
+  'ArgMin',
+  'MaxBy',
+  'MinBy',
   'ApplyWhole',
   'StartsWith',
   'EndsWith',
@@ -2115,6 +2119,10 @@ function lowerOnce(
       case 'Find':
       case 'IndexWhere':
       case 'Position':
+      case 'ArgMax':
+      case 'ArgMin':
+      case 'MaxBy':
+      case 'MinBy':
       case 'RandomSample':
       case 'ApplyWhole':
       case 'ContainsSequence':
@@ -4249,6 +4257,16 @@ function lowerOnce(
   const absent = (node: Expression, operand: Expression, v: V): V => {
     const t = type(v);
     const nan = (x: V) => apply(node, ofOp('isnan'), [x]);
+    // The NaN of `MaxBy` and `MinBy` stands for a form that the interpreter
+    // leaves unevaluated, which is not absent.
+    if (
+      (isFunction(operand, 'MaxBy') || isFunction(operand, 'MinBy')) &&
+      isLibrary(operand)
+    )
+      decline(
+        node,
+        `${node.operator} of ${operand.operator} (the interpreter leaves it unevaluated where it has no value)`
+      );
     if (
       isSubLane(t.lane, 'real') &&
       !(

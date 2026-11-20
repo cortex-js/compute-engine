@@ -2026,6 +2026,27 @@ built the same way, with the interpreter's value for every length, also 0:
   first index plus 1 or 0, `Find` the element there or NaN (of real numbers
   only), `Position` the indices plus 1. As for `Any`, the compiled code tests
   every element, and a predicate or a list with an effect declines.
+- `ArgMax(L)`, `ArgMin(L)` and, by a key `f` of one parameter, `ArgMax(L, f)`,
+  `ArgMin(L, f)`, `MaxBy(L, f)` and `MinBy(L, f)` (`extremum()`): the keys (the
+  elements, or the build of `f` over `L`, each key computed once, in order),
+  their `Max` or `Min`, then the least index whose key equals it, a `Min` loop
+  over the indices: the first of equal keys, as the interpreter's
+  `extremumBy()`. `ArgMax` is that index plus 1, `MaxBy` the element there, a
+  real number or a point. Where the interpreter leaves the form unevaluated (no
+  element, or a NaN key among two elements or more), `ArgMax` is 0 and `MaxBy`
+  NaN (a point of NaN): the index loop gives -1 for a key that is neither the
+  `Max` nor below it, so the answer does not depend on what the `Max` of the
+  target gives for a NaN (GLSL's `max` does not give NaN). That NaN is not an
+  absent value, so a discharge (`IsMissing`, `Coalesce`, `AssertPresent`) of
+  `MaxBy` or `MinBy` declines (`absent()` of `lower.ts`). A list of one element
+  gives that element whatever its key (the interpreter compares no key then). A
+  key with an effect compiles, as for `Sort` by a key: where the interpreter has
+  a value, it computes each key once, in order. A key that is not a real number
+  (the interpreter orders strings) and an element of `MaxBy` that is not a real
+  number or a point decline; so does `ArgMax(f, domain)`, the locations of a
+  maximum over a set, which the interpreter does not evaluate. No filter is
+  used, so GLSL compiles them for an input of a stated length
+  (`ArgMin(L, t ↦ |t − a|)` of `L: list<real^4>`).
 - `FlatMap(L, f)` of a scalar value is `Map`; of a list of a constant length
   `m`, the build of the `n·m` elements of the rows in order. A row of a length
   known at run time and a tuple decline.
