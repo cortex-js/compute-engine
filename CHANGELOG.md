@@ -10,6 +10,17 @@
   channel, as `evaluate()` does: at `z = -4`, `Hsv(Sqrt(z), 1, 1)` is the
   colour of `Hsv(0, 1, 1)`.
 
+- **A `Map` or a `Comprehension` over a `Range` of constant integer bounds
+  compiles to GLSL again** (CE-1587). `compile()` with `to: 'glsl'` declined
+  `Min(Comprehension((x - k)^2, Element(k, Range(1, 16))))` ("the region
+  build (a Map, a Filter or a Range) on glsl"), so such a shader ran on the
+  CPU. A `Range` whose bounds and step are integer constants now has a
+  constant length at compile time, and the build over it is written out, one
+  element after the other, as for a literal list of up to 64 elements. On
+  JavaScript, a build over such a `Range` of up to 16 elements is also
+  written out instead of a loop. A `Range` with a real bound or step, and
+  every `Range` with `constantFold: false`, keep the previous behavior.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features

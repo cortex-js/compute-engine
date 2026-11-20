@@ -28,16 +28,6 @@ const js = (json: Json) => compile(box(json), IR);
 /** The number of matches of `re` in `text`. */
 const count = (text: string, re: RegExp) => (text.match(re) ?? []).length;
 
-/** The message of a compilation that throws, or `undefined`. */
-function failure(f: () => unknown): string | undefined {
-  try {
-    f();
-  } catch (x) {
-    return (x as { diagnostic?: { message: string } }).diagnostic?.message;
-  }
-  return undefined;
-}
-
 const P20 = Array.from({ length: 20 }, (_, k) => Math.sin(k + 1) * (k - 7));
 const POINTS: Point[] = [
   { x: 0.7, y: -1.5, P: P20 },
@@ -193,16 +183,18 @@ describe('the other targets', () => {
     }
   });
 
-  test('GLSL: a build declines, a Sum written twice is one loop', () => {
+  test('GLSL: a build written twice is written out once, a Sum written twice is one loop', () => {
     const glsl = (json: Json) => compile(box(json), { ...IR, to: 'glsl' });
     const over = (l: string) => [
       'Comprehension',
       ['Multiply', 3, ['At', l, 'i']],
       ['Element', 'i', ['Range', 1, ['Length', l]]],
     ];
-    expect(failure(() => glsl(['Sum', ['Add', over('S'), over('S')]]))).toMatch(
-      /the region build/
-    );
+    // `Range(1, Length(S))` of `S: list<real^4>` has the constant length 4
+    // (CE-1587): the build is the list of its 4 elements, each made once.
+    const built = glsl(['Sum', ['Add', over('S'), over('S')]]);
+    expect(built.success).toBe(true);
+    expect(count(built.code, /3\.0 \* S\[/g)).toBe(4);
     const sum = [
       'Sum',
       ['Multiply', 'k', ['Sin', ['Multiply', 'k', 'x']]],

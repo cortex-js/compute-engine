@@ -50,6 +50,7 @@ import {
 import { SCALARIZE_LIMIT } from './passes.js';
 import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
 import { MAX_CHUNK_COUNT } from '../../numerics/value-scaled-caps.js';
+import { brangeCount } from '../bigint-runtime.js';
 import { textOrder } from './lower-strings.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
@@ -293,8 +294,27 @@ export function listLowering(cx: Lowering) {
         decline(x, 'a Range of an operand that is a constant infinity or NaN');
       return v;
     });
-    const step = given ?? cx.apply(e, op('rangestep'), [lo, hi]);
-    const length = cx.apply(e, op('rangecount'), [lo, hi, step]);
+    // Integer constant operands give a constant count, so that a build over
+    // the `Range` is written out where a build of that length is (`over()`):
+    // on GLSL, `Map(f, Range(1, 16))`. The count is exact (`brangeCount()`
+    // of `bigint-runtime.ts`), as the interpreter's on integers; a real
+    // operand keeps `rangecount`.
+    const ints =
+      cx.fold &&
+      [lo, hi, given]
+        .map((v) => (v === undefined ? 0 : cx.constant(v)))
+        .every((c) => c !== undefined && Number.isSafeInteger(c));
+    const [a, z] = ints ? [cx.constant(lo)!, cx.constant(hi)!] : [0, 0];
+    const step =
+      given ??
+      (ints ? integer(z >= a ? 1 : -1) : cx.apply(e, op('rangestep'), [lo, hi]));
+    const length = ints
+      ? integer(
+          Number(
+            brangeCount(BigInt(a), BigInt(z), BigInt(cx.constant(step)!))
+          )
+        )
+      : cx.apply(e, op('rangecount'), [lo, hi, step]);
     const at = (k: V) =>
       cx.apply(e, 'Add', [lo, cx.apply(e, 'Multiply', [k, step])]);
     return { length, at };

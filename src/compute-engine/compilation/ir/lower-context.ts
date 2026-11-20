@@ -308,6 +308,9 @@ export type Lowering = {
   readonly wide: 'real' | 'complex';
   /** The interval mode (`LowerOptions.mode`). */
   readonly interval: boolean;
+  /** Constants are folded at lowering (`LowerOptions.fold` is not
+   *  `false`). */
+  readonly fold: boolean;
   /** The name of the user function whose body is being lowered. */
   inFunction?: string;
   /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */

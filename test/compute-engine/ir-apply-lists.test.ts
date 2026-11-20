@@ -108,7 +108,7 @@ function check(json: Json, points: Point[]) {
 }
 
 const W = ['Function', ['Which', ['Equal', 'k', 'm'], 1e9, 'True', 'k'], 'k'];
-const sq = (d: number) => ['Square', ['Subtract', 'x', d]];
+const sq = (d: number | string) => ['Square', ['Subtract', 'x', d]];
 const LIST3 = ['List', ['Square', 'x'], sq(1), sq(2)];
 const LIST6 = ['List', ['Square', 'x'], sq(1), sq(2), sq(3), sq(4), sq(5)];
 const witness = (op: string, d: Json) => ['Min', [op, W, d]];
@@ -271,11 +271,35 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     ['a list of 4 (a vec4)', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm']]]],
     ['a list of 5 (an array)', ['Sum', ['Map', W, ['List', 'x', 1, 2, 'm', 4]]]],
     ['a one-clause Comprehension', ['Sum', ['Comprehension', ['Sin', 'k'], ['Element', 'k', 'L']]]],
+    // CE-1587: a `Range` of integer constant operands has a constant length.
+    ['a Comprehension over a Range of 16 (the Voronoi witness)', ['Min', ['Comprehension', sq('k'), ['Element', 'k', ['Range', 1, 16]]]]],
+    ['a Map over a Range', ['Sum', ['Map', W, ['Range', 1, 4]]]],
+    ['a Map over a descending Range', ['Sum', ['Map', W, ['Range', 5, 1]]]],
+    ['a Map over a Range of a negative step', ['At', ['Map', W, ['Range', 10, 1, -3]], 2]],
     ['a user function of a scalar parameter over a literal list', ['Sum', ['g', LIST3]]],
     ['a user function of a scalar parameter over a list<real^3>', ['At', ['g', 'L'], 2]],
   ])('%s compiles', (_, json) => {
     expect(glsl(json)).toMatchObject({ success: true, profile: 'ir' });
     check(json, POINTS);
+  });
+
+  test('a Comprehension over a Range of 16 is a float[16] of the 16 elements', () => {
+    const json = ['Min', ['Comprehension', sq('k'), ['Element', 'k', ['Range', 1, 16]]]];
+    const code = glsl(json).code!;
+    expect(code).toMatch(/float v\d+\[16\] = float\[16\]\(/);
+    expect(code).toMatch(/\(-16\.0\) \+ x/);
+    // With `constantFold: false`, the count is not folded, and GLSL
+    // declines as before.
+    expect(failure(() => glsl(json, { constantFold: false }))).toMatch(
+      /rangecount/
+    );
+  });
+
+  test('the count of a Range of integer constants is exact (the bigint mode)', () => {
+    // In doubles, (hi - lo) / step rounds up to the next integer.
+    const json = ['Length', ['Range', -9007199252643327, 9007199252643327, 4194305]];
+    expect(js(json, { mode: 'bigint' }).run!({} as never)).toBe(4294966271n);
+    expect(box(json).evaluate().re).toBe(4294966271);
   });
 
   test('the list of 6 is a float[6], the list of 4 a vec4', () => {
@@ -290,6 +314,10 @@ describe('IR profile, batch G18: Map of a list of a constant length on GLSL', ()
     ['a list of run-time length', ['Sum', ['Map', W, 'D']], /it needs a stated length/],
     ['a Filter', ['Sum', ['Filter', 'L', ['Function', ['Less', 'k', 2], 'k']]], /the region filter/],
     ['a Range of a run-time length', ['Sum', ['Map', W, ['Range', 1, 'n']]], /rangecount/],
+    ['a Range of more than 64 elements', ['Sum', ['Map', W, ['Range', 1, 65]]], /the region build/],
+    ['a Range of no element', ['Sum', ['Map', W, ['Range', 3, 1, 1]]], /the region build/],
+    ['a Range of real operands', ['Sum', ['Map', W, ['Range', 0.5, 3.7]]], /the region build/],
+    ['a Range of a real step', ['Sum', ['Map', W, ['Range', 1, 2, 0.25]]], /the region build/],
     ['a Comprehension of two clauses', ['Sum', ['Comprehension', ['Multiply', 'k', 'j'], ['Element', 'k', 'L'], ['Element', 'j', 'L']]], /the region build/],
     ['a list of more than 64 elements', ['Sum', ['Map', W, ['List', ...Array.from({ length: 65 }, (_, i) => ['Add', 'x', i])]]], /the region build/],
     ['a draw', ['Map', ['Function', ['Add', 'k', ['Random']], 'k'], 'L'], /Random/],

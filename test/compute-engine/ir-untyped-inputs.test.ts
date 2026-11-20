@@ -310,8 +310,9 @@ describe('IR profile: an input with no type', () => {
   });
 
   // The names that are not inputs, and the inputs that a declaration types:
-  // the value on JavaScript, and the types of the inputs on GLSL (`null`: a
-  // comprehension declines on GLSL, for a cause that is not a type).
+  // the value on JavaScript, and the types of the inputs on GLSL (`null`:
+  // the program declines on GLSL, for a cause that is not a type; no row
+  // has one now).
   const real = { type: 'real', lowered: 'float', provenance: 'declared' };
   test.each([
     ['a name with a value', ['List', 'cst', 1], {}, {}, [3, 1], {}],
@@ -338,7 +339,9 @@ describe('IR profile: an input with no type', () => {
       {},
       {},
       [1, 2, 3],
-      null,
+      // On GLSL, a build over a `Range` of constant operands is the list of
+      // its elements (CE-1587).
+      {},
     ],
     [
       'an untyped parameter of a user function',

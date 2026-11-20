@@ -5885,6 +5885,7 @@ function lowerOnce(
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     interval,
+    fold: options.fold !== false,
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
     unrollSums: options.unrollSums ?? 0,

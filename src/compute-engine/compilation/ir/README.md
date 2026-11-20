@@ -1420,11 +1420,14 @@ elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a
 `Map` (and a one-clause `Comprehension`) over a source of a constant length of 1
 to 64 (`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
 element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
-`Map(f, List(a, b, c))`). The elements of such builds in one program are at most
-4,096; past that, a `Filter`, a `Range` and a list of a run-time length, the
-build declines on GLSL. The short lists: on JavaScript (the interval mode
-included; not in the bigint and complex modes), a list of a constant length of 1
-to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the option `unrollBuilds` of
+`Map(f, List(a, b, c))`). A `Range` of integer constant operands is a source of
+a constant length, its exact count (`Min(Comprehension((x - k)², Element(k,
+Range(1, 16))))` is a `float[16]`); not with `constantFold: false`. The
+elements of such builds in one program are at most 4,096; past that, a
+`Filter`, a `Range` of a run-time length, of a real operand or of no element,
+and a list of a run-time length, the build declines on GLSL. The short lists:
+on JavaScript (the interval mode included; not in the bigint and complex
+modes), a list of a constant length of 1 to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the option `unrollBuilds` of
 the lowering and of the passes; GLSL keeps its 64 for builds) is written out. A
 build over a source of such a length, and a list that `built()` makes (a
 `Range`, a `Comprehension` of several clauses), is the list of its elements, as

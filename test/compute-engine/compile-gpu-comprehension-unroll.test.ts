@@ -11,7 +11,8 @@
  * and the shader targets lower a list of points of one arity as an array of
  * vectors (`vec3[12](…)`). A literal index into a
  * literal range folds to the number (rule 5), which the substituted rows
- * need. The JavaScript target keeps its loop.
+ * need. The JavaScript target writes out a list of up to 16 elements and
+ * keeps the loop of a longer one.
  *
  * Of the four audit rows, the one pinned here — a literal index into a
  * COLUMN of the point list — compiled with the unroll alone. The other three
@@ -202,16 +203,25 @@ describe.each(['glsl'] as const)('%s — guards', (to) => {
 
 });
 
-test('the JavaScript target keeps its loop', () => {
-  const r = compile(
-    ce.box([
-      'Comprehension',
-      ['Multiply', 'u', 'k'],
-      ['Element', 'k', ['Range', 1, 5]],
-    ]),
-    { fallback: false }
+test('the JavaScript target writes out a short list and keeps the loop of a longer one', () => {
+  const comprehension = (n: number) =>
+    compile(
+      ce.box([
+        'Comprehension',
+        ['Multiply', 'u', 'k'],
+        ['Element', 'k', ['Range', 1, n]],
+      ]),
+      { fallback: false }
+    );
+  // Up to 16 elements, the list of its elements (CE-1587).
+  const short = comprehension(5);
+  expect(short.success).toBe(true);
+  expect(short.code).not.toContain('for (');
+  expect(short.run!({ u: 2 })).toEqual([2, 4, 6, 8, 10]);
+  const long = comprehension(17);
+  expect(long.success).toBe(true);
+  expect(long.code).toContain('for (');
+  expect(long.run!({ u: 2 })).toEqual(
+    Array.from({ length: 17 }, (_, k) => 2 * (k + 1))
   );
-  expect(r.success).toBe(true);
-  expect(r.code).toContain('for (');
-  expect(r.run!({ u: 2 })).toEqual([2, 4, 6, 8, 10]);
 });

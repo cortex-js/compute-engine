@@ -370,6 +370,8 @@ describe('A parallel for on the pool', () => {
   }, 60_000);
 
   test('a loop in a function called from an if arm, a for body and a second function; in order from a callback position', async () => {
+    // The comprehension is over more than 16 elements, so that it keeps its
+    // loop (a callback position): a shorter one is written out.
     const { code } = program(
       `function g(n: integer) -> integer {
         let s: integer = 0
@@ -382,7 +384,7 @@ describe('A parallel for on the pool', () => {
         if n > 0 { t = g(n) }
         for j in 1..2 { t += g(n) }
         t += h(n)
-        const c = [g(i) for i in 1..2]
+        const c = [g(i) for i in 1..17]
         [t, c[1], c[2]]
       }`,
       { n: 'integer' }
