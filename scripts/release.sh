@@ -1,6 +1,6 @@
 #! bash
 
-# Usage: npm run release [-- <patch|minor|major|x.y.z>] [force] [--yes]
+# Usage: npm run release [-- <patch|minor|major|x.y.z>] [force | remote] [--yes]
 #
 # Without a version argument, the release is a minor release.
 #
@@ -12,6 +12,15 @@
 # circular imports, the script tests, the corpus pipeline and the build. Use
 # it when the content was tested before the release commit. The nightly
 # full run still tests the released commit afterwards.
+#
+# `remote` (`npm run release -- patch remote`) runs the full test suite of
+# the publish check on univac, the user's other machine (the WSL Linux side,
+# through `~/.claude/scripts/remote-jest.mjs`), instead of here under the box
+# lock: `scripts/ci-nightly.sh run --remote`. Every other check runs here as
+# usual, and nothing is skipped. A test file that fails in that run is run
+# again alone on univac too. When univac cannot be reached the release stops
+# before the upload; run it again without `remote`. CE_RELEASE_REMOTE names
+# another host (default univac.local).
 #
 # Makes a release in one command:
 #
@@ -59,19 +68,30 @@ cd "$(dirname "$0")/.."
 BUMP="minor"
 YES=1
 FORCE=0
+REMOTE=0
 for arg in "$@"; do
   case "$arg" in
     --yes) YES=1 ;;
     force | --force) FORCE=1 ;;
+    remote | --remote) REMOTE=1 ;;
     patch | minor | major) BUMP="$arg" ;;
     [0-9]*.[0-9]*.[0-9]*) BUMP="$arg" ;;
     *)
-      echo "Usage: npm run release [-- <patch|minor|major|x.y.z>] [force] [--yes]" >&2
+      echo "Usage: npm run release [-- <patch|minor|major|x.y.z>] [force | remote] [--yes]" >&2
       exit 2
       ;;
   esac
 done
 # scripts/release-checks.sh and scripts/prepublish-check.sh read it.
+if [ "$FORCE" -eq 1 ] && [ "$REMOTE" -eq 1 ]; then
+  echo "✗ force skips the full test suite, and remote says where it runs: use one of them." >&2
+  exit 2
+fi
+# scripts/prepublish-check.sh reads it.
+if [ "$REMOTE" -eq 1 ]; then
+  export CE_RELEASE_REMOTE="${CE_RELEASE_REMOTE:-univac.local}"
+  echo "→ remote: the full test suite runs on $CE_RELEASE_REMOTE."
+fi
 if [ "$FORCE" -eq 1 ]; then
   export CE_RELEASE_FORCE=1
   echo "⚠ force: the Prettier step, lint and the full test suite are skipped."

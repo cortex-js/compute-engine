@@ -6,7 +6,7 @@
 #   bash scripts/ci-nightly.sh install     start it every night at 02:30 (launchd)
 #   bash scripts/ci-nightly.sh uninstall   stop it
 #   bash scripts/ci-nightly.sh run         one run now (what launchd starts)
-#   bash scripts/ci-nightly.sh run [--force] [--commit <sha>] [--priority]
+#   bash scripts/ci-nightly.sh run [--force] [--commit <sha>] [--priority] [--remote <host>]
 #                                          --force: run even when the commit
 #                                          already passed; --commit: test that
 #                                          commit, not the main tree's HEAD
@@ -15,7 +15,9 @@
 #                                          --priority: wait for the box lock
 #                                          in front of every queued session
 #                                          without priority (only the publish
-#                                          check passes it)
+#                                          check passes it);
+#                                          --remote: run the checks on univac
+#                                          (see "Remote runs" below)
 #   bash scripts/ci-nightly.sh status      print the last recorded result
 #
 # Why (user decision 2026-10-28): a session no longer runs the full suite
@@ -65,6 +67,16 @@
 #        an attempt does not replace the last complete result.
 #   5. Calls `suite-status.mjs notify`, which shows a macOS notification
 #      when the run failed.
+#
+# Remote runs (`run --remote <host>`, which `npm run release -- remote` passes
+# through scripts/prepublish-check.sh): the typecheck, the declaration test and
+# `CE_NIGHTLY=1 scripts/test.sh` run at the commit on the WSL Linux of <host>
+# (univac), in a slot of `~/.claude/scripts/remote-jest.mjs`, not here; the run
+# takes no box lock and makes no worktree on this machine. The result is
+# recorded here as for a local run, with `host` in the state. The compiler
+# growth numbers are not measured: the compile depth limit depends on the
+# machine, so a number from another machine would make a false rise or fall in
+# the history. When <host> cannot be reached the attempt is `error`.
 #
 # STATE_DIR is `${XDG_STATE_HOME:-$HOME/.local/state}/compute-engine-ci-nightly`.
 # It is outside the repository because the result belongs to this machine,
@@ -138,6 +150,8 @@ write_state() {
     const [file, sha, startedAt, endedAt, exit, result, log, ...failedJobs] = process.argv.slice(1);
     // `repo` lets suite-status.mjs find the repo of this state directory.
     const state = { sha, startedAt, endedAt, exit: Number(exit), result, failedJobs, log, leftOut: [], repo: process.env.REPO };
+    // A run of `run --remote <host>`: the machine that ran the checks.
+    if (process.env.CI_REMOTE_HOST) state.host = process.env.CI_REMOTE_HOST;
     const metricsFile = process.env.METRICS_FILE, historyFile = process.env.METRICS_HISTORY;
     let metrics;
     try { metrics = metricsFile && JSON.parse(fs.readFileSync(metricsFile, "utf8")); } catch {}
@@ -329,12 +343,13 @@ on_interrupt() {
 }
 
 cmd_run() {
-  local force="" commit="" priority=() sha started log rc result depth_hint="" failed=()
+  local force="" commit="" priority=() remote="" sha started log rc result depth_hint="" failed=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) force="--force" ;;
       --priority) priority=(--priority) ;;
       --commit) commit="$2"; shift ;;
+      --remote) remote="$2"; shift ;;
       *) echo "ci-nightly: unknown option $1" >&2; return 2 ;;
     esac
     shift
@@ -365,9 +380,12 @@ cmd_run() {
   # The pid makes the name unique: two runs started in the same second
   # would otherwise share a log and read each other's failures.
   log="$STATE_DIR/logs/$(date +%Y%m%d-%H%M%S)-$$.log"
-  echo "ci-nightly: full suite; log $log"
+  echo "ci-nightly: full suite${remote:+ on $remote}; log $log"
   RUN_SHA="$sha" RUN_STARTED="$started" RUN_LOG="$log"
   trap on_interrupt INT TERM HUP
+  # A remote run takes no box lock and makes no worktree here.
+  [ -n "$remote" ] && export CI_REMOTE_HOST="$remote"
+  if [ -z "$remote" ]; then
 
   # --pid lets the lock see that this run died, if it dies without the trap.
   # The wait runs in the background, so that a signal reaches on_interrupt
@@ -414,7 +432,25 @@ cmd_run() {
     node "$SUITE_STATUS" notify >/dev/null 2>&1
     return 1
   fi
+  fi
 
+  if [ -n "$remote" ]; then
+    echo "ci-nightly: testing ${sha:0:9} on $remote" | tee -a "$log"
+    # The same checks as below, but the growth measure (see "Remote runs").
+    # Each failure writes a "failed job" line; the command ends with status
+    # 0, so a status of remote-jest other than 0 means the checks did not all
+    # run (255: SSH failed; 254: the slot could not be made; 124: the time
+    # limit).
+    node "$HOME/.claude/scripts/remote-jest.mjs" --host "$remote" --name nightly \
+      --commit "$sha" --timeout-min $((DEADLINE_MINUTES - 5)) --command '
+      echo "=== typecheck"
+      npm run typecheck || echo "ci-nightly: failed job: typecheck"
+      echo "=== declarations"
+      bash scripts/test-types.sh || echo "ci-nightly: failed job: declarations"
+      echo "=== test.sh"
+      CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
+      true' >> "$log" 2>&1 &
+  else
   (
     cd "$WT" || { echo "ci-nightly: failed job: worktree"; exit 1; }
     echo "=== typecheck"
@@ -439,6 +475,7 @@ cmd_run() {
       echo "ci-nightly: the compiler growth measure failed (status $?)"
     fi
   ) >> "$log" 2>&1 &
+  fi
   # In the background with `wait`: bash runs a trap only after a foreground
   # command ends, which would be after the whole suite.
   RUN_CHILD=$!
@@ -465,6 +502,9 @@ cmd_run() {
     write_state "$STATE_DIR/attempt.json" "$sha" "$started" "$(now)" "$rc" error "$log"
     rm -f "$RUN_METRICS"
     echo "ci-nightly: ${sha:0:9} did not complete (status $rc; see $log)"
+    if [ -n "$remote" ] && [ "$rc" -eq 255 ]; then
+      echo "ci-nightly: $remote could not be reached; run without --remote to test here"
+    fi
     node "$SUITE_STATUS" notify >/dev/null 2>&1
     return 1
   fi

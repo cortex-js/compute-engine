@@ -213,7 +213,17 @@ One command makes a release:
 npm run release # a minor release; or: npm run release -- patch (major, or an explicit version)
                 # --yes skips the confirmation question
 npm run release force # the same, without the Prettier step, lint and the full test suite
+npm run release -- patch remote # the full test suite runs on univac, not here
 ```
+
+`remote` runs the full test suite of the publish check on univac, the
+user's other machine (its WSL Linux, through
+`~/.claude/scripts/remote-jest.mjs`), with no box lock here:
+`scripts/ci-nightly.sh run --remote`. Every other check runs here, and nothing
+is skipped. It takes about 10 minutes, and a test file that fails in that run
+is run again alone on univac. When univac cannot be reached, the release stops
+before the upload; run it again without `remote`. It does not combine with
+`force`.
 
 `force` skips the three steps that take the longest. Use it when the content
 was tested before the release commit: the other checks and the build still run

@@ -68,6 +68,10 @@ fi
 # the machine, and the release continues (`second_look`). The line that
 # reports the suite gives the time it took.
 #
+# `CE_RELEASE_REMOTE=<host>` (`npm run release -- remote`) runs that full
+# suite on <host> (`ci-nightly.sh run --remote`), with no box lock here, and
+# runs the test files that failed in it again alone there too.
+#
 # `CE_RELEASE_FORCE=1` (`npm run release force`) skips the full suite, and
 # with it the Prettier step and lint of scripts/release-checks.sh. The fast
 # refusals (uncommitted changes, HEAD moved) still apply.
@@ -172,6 +176,10 @@ second_look() {
   printf '    %s\n' "${FAILED_FILES[@]}"
   local runner=(npx jest -w 2 --)
   if command -v timeout > /dev/null 2>&1; then runner=(timeout -k 30 900 "${runner[@]}"); fi
+  if [ -n "${CE_RELEASE_REMOTE:-}" ]; then
+    runner=(node "$HOME/.claude/scripts/remote-jest.mjs" --host "$CE_RELEASE_REMOTE"
+      --name second-look --commit "$(git rev-parse HEAD)" --workers 2 --timeout-min 15 --)
+  fi
   bash scripts/run-quietly.sh "→ Failed test files, alone" "${runner[@]}" "${FAILED_FILES[@]}" || return 1
   local log="$HOME/.local/state/compute-engine-ci-nightly/release-second-look.log"
   mkdir -p "$(dirname "$log")" 2> /dev/null &&
@@ -241,16 +249,23 @@ if [ "$STATUS" -eq 3 ] && [ "${CE_RELEASE_FORCE:-}" = "1" ]; then
   SUITE_NOTE=""
   STATUS=0
 elif [ "$STATUS" -eq 3 ]; then
-  echo "→ Full test suite running (about 7 minutes)"
   SUITE_START=$SECONDS
-  # --priority: the run waits for the box lock in front of every session
-  # without priority; it does not take the box from its holder.
-  bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)" --priority
+  if [ -n "${CE_RELEASE_REMOTE:-}" ]; then
+    echo "→ Full test suite running on $CE_RELEASE_REMOTE (about 10 minutes)"
+    bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)" --remote "$CE_RELEASE_REMOTE"
+    SUITE_WHERE="on $CE_RELEASE_REMOTE"
+  else
+    echo "→ Full test suite running (about 7 minutes)"
+    # --priority: the run waits for the box lock in front of every session
+    # without priority; it does not take the box from its holder.
+    bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)" --priority
+    SUITE_WHERE="with the wait for the box lock"
+  fi
   SUITE_TIME=$(minutes_seconds $((SECONDS - SUITE_START)))
-  SUITE_NOTE="$SUITE_TIME, with the wait for the box lock"
+  SUITE_NOTE="$SUITE_TIME, $SUITE_WHERE"
   release_check
   if [ "$STATUS" -eq 3 ]; then
-    echo "· The full test suite took $SUITE_TIME (with the wait for the box lock)."
+    echo "· The full test suite took $SUITE_TIME ($SUITE_WHERE)."
     if second_look; then
       SUITE_NOTE="$SUITE_TIME; ${#FAILED_FILES[@]} test file(s) failed in the full run and passed alone"
       STATUS=0
