@@ -1825,7 +1825,23 @@ function literalBodyResultType(
       declaredParams,
       partialArgCount
     );
-  return inLiteralScope(engine, literal, walk);
+  const t = inLiteralScope(engine, literal, walk);
+  // A function argument at a parameter that the body does not use as a
+  // function: a call binds the function, and an arithmetic use of it gives
+  // a symbolic value that the walk does not type. With `f := (a, b) ↦ a[b +
+  // [1, 2, 3]]`, `f(j, Sin)` is the list `j[[sin + 1, sin + 2, sin + 3]]`,
+  // but the walk types `b + [1, 2, 3]` as a number and the call as an
+  // element of `j`. Only a function result (`g ↦ g`) and an error are kept;
+  // otherwise the walk gives no type, and the call keeps the result of the
+  // signature.
+  if (
+    t !== undefined &&
+    t !== 'error' &&
+    !isFunctionValueType(t) &&
+    functionAtValueParameter(literal, args, declaredParams, partialArgCount)
+  )
+    return undefined;
+  return t;
 }
 
 /**
@@ -1843,6 +1859,40 @@ export function inLiteralScope<T>(
   const written = body?.isScoped ? body.localScope?.parent : undefined;
   if (!written || written === engine.context?.lexicalScope) return fn();
   return engine._inScope(written, fn);
+}
+
+/** True when a value of type `t` is a function (`(real) -> real`, an
+ * overload set). */
+function isFunctionValueType(t: Type): boolean {
+  return t !== 'never' && t !== 'error' && isSubtype(t, 'function');
+}
+
+/**
+ * True when an argument of `args` is a function and its parameter in
+ * `literal` is not typed with a function type, by its annotation, by the
+ * declared signature (`declaredParams`, as the walk reads it) or by its uses
+ * in the body (`g` in `g ↦ g(1)` is a function, `b` in `b ↦ b + 1` is not).
+ * A parameter from `partialArgCount` on has no argument.
+ */
+function functionAtValueParameter(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[],
+  declaredParams: ReadonlyArray<Type> | undefined,
+  partialArgCount: number | undefined
+): boolean {
+  const params = literal.ops.slice(1);
+  return args.some((arg, i) => {
+    if (partialArgCount !== undefined && i >= partialArgCount) return false;
+    if (!isFunctionValueType(presentPart(arg.type))) return false;
+    const param = params[i];
+    if (param === undefined) return false;
+    const annotated =
+      functionLiteralParameterType(param) ?? declaredParams?.[i];
+    if (annotated !== undefined && isFunctionValueType(annotated))
+      return false;
+    const p = optionalParameterTarget(param);
+    return !isSymbol(p) || !isFunctionValueType(p.type.type);
+  });
 }
 
 /** The body walk of `literalBodyResultType()`, in the current context. */

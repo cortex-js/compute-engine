@@ -74,7 +74,7 @@ import {
   capturedValueMismatchNow,
   exactArgumentSources,
   isUndecidedLiteralApplication,
-  kindTypedFunctionLiteral,
+  declarationTypedFunctionLiteral,
   withCallerCapturedCheck,
   type ApplyOptions,
 } from '../function-utils.js';
@@ -2459,7 +2459,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       const kindTyped =
         this.inferredSignature || this._derivedSignature
           ? undefined
-          : kindTypedFunctionLiteral(
+          : declarationTypedFunctionLiteral(
               this.engine,
               def.evaluate,
               this.signature.type

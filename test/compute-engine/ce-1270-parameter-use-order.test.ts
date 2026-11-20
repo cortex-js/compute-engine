@@ -160,7 +160,25 @@ describe('CE-1270: the number of boxings of a body', () => {
     return { ce, count: () => n };
   }
 
-  test('a body whose uses keep each type is boxed once', () => {
+  test('a body whose uses keep each type and that has no product is boxed once', () => {
+    const { ce, count } = counter();
+    ce.box([
+      'Function',
+      [
+        'Tuple',
+        ['Determinant', 'A'],
+        ['Determinant', 'B'],
+        ['Mark', ['Add', 'A', 'B']],
+      ],
+      'A',
+      'B',
+    ] as any);
+    expect(count()).toBe(1);
+  });
+
+  // A parameter that ends as a matrix in a body with a product boxes the
+  // body again, also when the matrix use comes first (`typesToBoxAgain()`).
+  test('a product after the matrix use is boxed twice', () => {
     const { ce, count } = counter();
     ce.box([
       'Function',
@@ -168,7 +186,7 @@ describe('CE-1270: the number of boxings of a body', () => {
       'A',
       'B',
     ] as any);
-    expect(count()).toBe(1);
+    expect(count()).toBe(2);
   });
 
   test('a body boxed again is boxed twice, never three times', () => {

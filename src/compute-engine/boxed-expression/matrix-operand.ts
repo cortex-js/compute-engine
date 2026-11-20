@@ -4,6 +4,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { resolveTypeAlias } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { isFunctionLiteralParameter } from './function-literal.js';
 
 /** An unknown source contract cannot acquire a scalar type from its use. */
 function isFixedUnknownSymbol(x: Expression): boolean {
@@ -78,8 +79,12 @@ export function mayBeMatrixPowerBase(x: Expression): boolean {
  * Can the value of `x` be a matrix of numbers, by the type of `x`? This is
  * `true` for a symbol or a call typed `matrix`, `tensor<number>`,
  * `list<list<number>>`, a bare `list`, `list<unknown>`, `any`,
- * `broadcastable<number>` or `number | matrix`. It is `false` for an operand
- * typed `expression` (a symbolic expression, not a numeric array), `unknown` (the call `g(x)` of a function that was not declared), for
+ * `broadcastable<number>` or `number | matrix`, and for a parameter of a
+ * function literal typed `expression`, which receives a matrix argument whole
+ * (`docs/BROADCAST-MODEL.md`). It is `false` for another operand typed
+ * `expression` (a symbol declared `expression` is a symbolic expression, not
+ * a numeric array), for an operand typed `unknown` (the call `g(x)` of a
+ * function that was not declared), for
  * a vector or a list of numbers (one axis), for a type whose cells cannot be
  * numbers (`list<string>`, `list<boolean>`), for a set, and for a list of
  * tuples (points).
@@ -111,8 +116,20 @@ export function typeMayHoldMatrix(x: Expression, depth = 0): boolean {
     return x.ops.some((op) => typeMayHoldMatrix(op, depth + 1));
   const t = x.type.type;
   if (t === 'unknown') return isFixedUnknownSymbol(x);
+  if (resolveTypeAlias(t) === 'expression') return isFunctionParameterSymbol(x);
   if (!mayBeTensorProductOperand(x)) return false;
   return mayHoldNumericArray(t, 2, 0);
+}
+
+/** Is `x` a parameter of a function literal: one being boxed (it has a
+ * parameter record), or one of a canonical literal? */
+function isFunctionParameterSymbol(x: Expression): boolean {
+  if (!isSymbol(x)) return false;
+  const v = x.valueDefinition;
+  if (v === undefined) return false;
+  return (
+    isFunctionLiteralParameter(v) || x.engine._parameterRecord(v) !== undefined
+  );
 }
 
 /**
@@ -172,9 +189,37 @@ export function mayBeMatrixValued(x: Expression): boolean {
  * A list of points is a list that scales by numbers, not a matrix.
  */
 export function isPointListOperand(x: Expression): boolean {
-  const t = resolveTypeAlias(x.type.type);
-  if (typeof t === 'string' || t.kind !== 'list') return false;
-  const e = resolveTypeAlias(t.elements);
+  return isPointListType(x.type.type);
+}
+
+/**
+ * Can a value of the declared type `t` be a matrix of numbers? This is
+ * `true` for `matrix`, `tensor<number>`, `list<list<number>>`, a bare
+ * `list`, a union with such an arm, and `expression`, which a parameter
+ * receives whole (`docs/BROADCAST-MODEL.md`). It is `false` for `unknown` (a
+ * parameter with no declared type), for `any` and `value` (a parameter
+ * typed so by a declaration would stop narrowing from its uses, and `x/x`
+ * would not fold), for a number type, for a vector and for a list of
+ * tuples.
+ *
+ * A parameter of a function literal that a declared signature types so is
+ * annotated with that type before the body is canonicalized
+ * (`declarationTypedFunctionLiteral()` in `function-utils.ts`): a bare
+ * parameter is a number, so `a·b − b·a` would be sorted to `a·b − a·b`,
+ * which is `0` for two matrices that do not commute.
+ */
+export function declaredTypeMayHoldMatrix(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'expression') return true;
+  if (r === 'unknown' || r === 'any' || r === 'value') return false;
+  if (isPointListType(t)) return false;
+  return mayHoldNumericArray(t, 2, 0);
+}
+
+function isPointListType(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'list') return false;
+  const e = resolveTypeAlias(r.elements);
   return typeof e === 'string' ? e === 'tuple' : e.kind === 'tuple';
 }
 

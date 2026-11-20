@@ -156,7 +156,7 @@ import {
   canonicalFunctionLiteral,
   functionLiteralDefiningScope,
   isApplicableDef,
-  kindTypedFunctionLiteral,
+  declarationTypedFunctionLiteral,
   lookup,
 } from './function-utils.js';
 import {
@@ -3303,7 +3303,7 @@ function assignNamedValue(
   // whose parameters have a value kind arm (`f: (real | umeasurement) -> …`)
   // has those parameters typed from the declaration before its body is
   // canonicalized, as for `ce.declare()` with a body
-  // (`kindTypedFunctionLiteral()`): an untyped parameter folds `x/x` to `1`.
+  // (`declarationTypedFunctionLiteral()`): an untyped parameter folds `x/x` to `1`.
   {
     const declared = ce.lookupDefinition(id);
     if (
@@ -3311,7 +3311,7 @@ function assignNamedValue(
       isValueDef(declared) &&
       !declared.value.inferredType
     ) {
-      const typed = kindTypedFunctionLiteral(
+      const typed = declarationTypedFunctionLiteral(
         ce,
         arg2,
         declared.value.type.type
@@ -3376,7 +3376,7 @@ function assignNamedValue(
         // parameter list).
         //
         // Only a canonical literal is boxed again. A literal that is not
-        // canonical yet (the literal that `kindTypedFunctionLiteral()`
+        // canonical yet (the literal that `declarationTypedFunctionLiteral()`
         // annotated above, or one boxed with `form: 'raw'`) is canonicalized
         // later, when the self-reference is already declared. A re-box from
         // the MathJSON would also drop the annotations that are marked as

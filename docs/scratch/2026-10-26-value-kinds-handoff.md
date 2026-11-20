@@ -147,7 +147,7 @@ plus P3b's section-6 edits; take the worktree's.
   folded the body before the gate opened (`bindIndexAuthoritatively()` now
   opens the declaration gate); evaluation rebound a kind value to the head
   of the current scope (`withCallableBinding()` at the fallback rebuild);
-  a signature did not type a `Function` body (`kindTypedFunctionLiteral()`);
+  a signature did not type a `Function` body (`declarationTypedFunctionLiteral()`);
   plus `Exp(U)` admitted and CE-507.2 (group 1 keyed by the DEFINITION:
   `isLibraryKindOperator()`). Open items filed as CE-507.3 to CE-507.6.
 - Step 7: DONE (guides, TYPE-SYSTEM, COMPILATION-MODEL, CHECKPOINT-MODEL,

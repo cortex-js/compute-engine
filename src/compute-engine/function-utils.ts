@@ -253,6 +253,7 @@ import {
   stripNumericRanges,
 } from '../common/type/utils.js';
 import { kindTypeNames } from './boxed-expression/value-kinds.js';
+import { declaredTypeMayHoldMatrix } from './boxed-expression/matrix-operand.js';
 import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
 import { recordTypeProvenance } from './boxed-expression/type-provenance.js';
 import { sharedEvaluationStarts } from './boxed-expression/shared-evaluation-memo.js';
@@ -753,8 +754,9 @@ export function annotateFunctionLiteralParams(
 
 /**
  * The function literal `literal` with each untyped parameter that the
- * declared function type `declared` types with a value kind annotated with
- * that type, as a `Typed` parameter is (`annotateFunctionLiteralParams()`).
+ * declared function type `declared` types with a value kind, or with a type
+ * that can hold a matrix, annotated with that type, as a `Typed` parameter
+ * is (`annotateFunctionLiteralParams()`).
  * `literal` is the MathJSON or the boxed value of a declaration
  * (`ce.declare('g', { signature, evaluate: literal })`) or of an assignment
  * to a symbol declared with a function type. A canonical literal is read
@@ -767,15 +769,20 @@ export function annotateFunctionLiteralParams(
  * the body keeps `x/x` (`docs/plans/2026-10-26-value-kinds.md`, section
  * 4.2, decision B).
  *
- * Only the parameters whose declared type has a kind arm are annotated: the
- * other parameters keep the reading of an untyped parameter. The annotation
- * is marked as inferred, so the literal prints as written. `undefined` when
- * no parameter is annotated: `declared` is not a signature or an
- * intersection of signatures, or no
- * parameter type has a kind arm, or the literal has no parameter list or
- * annotates its parameters itself.
+ * An untyped parameter is a number, so the product `a·b − b·a` is sorted
+ * to `a·b − a·b`. Typed by the declaration (`(matrix, matrix) -> matrix`),
+ * the parameters can hold matrices, and the products keep their written
+ * order (`declaredTypeMayHoldMatrix()` in `matrix-operand.ts`).
+ *
+ * Only the parameters whose declared type has a kind arm or can hold a
+ * matrix are annotated: the other parameters keep the reading of an
+ * untyped parameter. The annotation is marked as inferred, so the literal
+ * prints as written. `undefined` when no parameter is annotated: `declared`
+ * is not a signature or an intersection of signatures, or no parameter type
+ * has a kind arm or can hold a matrix, or the literal has no parameter list
+ * or annotates its parameters itself.
  */
-export function kindTypedFunctionLiteral(
+export function declarationTypedFunctionLiteral(
   ce: ComputeEngine,
   literal: unknown,
   declared: Type
@@ -806,7 +813,9 @@ export function kindTypedFunctionLiteral(
       arm.args?.[i] === undefined ? [] : [arm.args[i].type]
     );
     types.push(
-      atI.some((t) => hasKindArm(t, kinds)) ? widen(...atI) : undefined
+      atI.some((t) => hasKindArm(t, kinds) || declaredTypeMayHoldMatrix(t))
+        ? widen(...atI)
+        : undefined
     );
   }
   if (types.every((t) => t === undefined)) return undefined;
@@ -1402,7 +1411,7 @@ export function canonicalFunctionLiteralArguments(
     shadowedDefs = ce._currentShadowedParameterDefs();
     record = ce._currentParameterRecord();
     if (firstBoxing !== undefined)
-      boxAgain = typesToBoxAgain(params, shadowedDefs, record);
+      boxAgain = typesToBoxAgain(params, shadowedDefs, record, block);
   } finally {
     exitFunctionBody();
     captured = endProvisionalCapture(boxAgain === undefined);
@@ -1692,30 +1701,66 @@ let startingTypes: WeakMap<object, ReadonlyMap<string, Type>> | undefined;
 /**
  * The bare parameters of a literal (no annotation, not a rest or
  * destructuring parameter) that the first boxing of its body must box again,
- * with the type each starts at in the second boxing: a parameter whose
- * recorded type was a number type at a use (`ParameterRequirement.numeric`)
- * and is another type at the end. `undefined` when there is none.
+ * with the type each starts at in the second boxing, and `undefined` when
+ * there is none. Such a parameter is one of:
+ *
+ * - a parameter whose recorded type was a number type at a use
+ *   (`ParameterRequirement.numeric`) and is another type at the end;
+ * - a parameter that no use proved scalar, whose type at the end can hold a
+ *   matrix (`declaredTypeMayHoldMatrix()`), in a body that has a product. A
+ *   product built before the use that gave that type read the parameter as
+ *   a number and was sorted: in `(Transpose(a)·Transpose(b) − Transpose(b)·
+ *   Transpose(a), Determinant(a), Determinant(b))` the two products became
+ *   the same, and the commutator `0`. The body is boxed again also when the
+ *   use came first and no product was sorted: the second boxing gives the
+ *   same value.
  */
 function typesToBoxAgain(
   params: ReadonlyArray<Expression>,
   defs: ReadonlyMap<string, BoxedDefinition>,
-  record: ParameterRecord | undefined
+  record: ParameterRecord | undefined,
+  body: Expression
 ): Map<string, Type> | undefined {
   let result: Map<string, Type> | undefined;
+  let bodyHasProduct: boolean | undefined;
   for (const param of params) {
     const target = optionalParameterTarget(param);
     if (!isSymbol(target)) continue;
     const def = defs.get(target.symbol);
     if (def === undefined || !('value' in def)) continue;
     const requirement = record?.requirements.get(def.value);
+    if (requirement === undefined) continue;
+    const t = requirement.type.type;
+    if (t === 'never' || isSubtype(t, 'number')) continue;
     if (
-      requirement?.numeric !== true ||
-      isSubtype(requirement.type.type, 'number')
+      requirement.numeric !== true &&
+      (requirement.numeric === false ||
+        !declaredTypeMayHoldMatrix(t) ||
+        !(bodyHasProduct ??= hasProduct(body)))
     )
       continue;
-    (result ??= new Map()).set(target.symbol, requirement.type.type);
+    (result ??= new Map()).set(target.symbol, t);
   }
   return result;
+}
+
+/** Does `x` have a `Multiply`, `Divide` or `Power` node: an operation whose
+ * canonical form depends on whether its operands can be matrices? A node
+ * that `x` shares in several places is read once. */
+function hasProduct(x: Expression): boolean {
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (!isFunction(e) || seen.has(e)) return false;
+    seen.add(e);
+    if (
+      e.operator === 'Multiply' ||
+      e.operator === 'Divide' ||
+      e.operator === 'Power'
+    )
+      return true;
+    return e.ops.some(visit);
+  };
+  return visit(x);
 }
 
 /** Definitions currently being re-derived, so a repair that itself installs a

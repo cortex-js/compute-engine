@@ -724,7 +724,7 @@ describe('VALUE KINDS ACCEPTANCE: UserMeasurement, a user kind admitted as a num
 
     // The body of a declared function is made canonical with each untyped
     // parameter that the signature types with a kind arm typed so
-    // (`kindTypedFunctionLiteral()`, `function-utils.ts`), as a `Typed`
+    // (`declarationTypedFunctionLiteral()`, `function-utils.ts`), as a `Typed`
     // parameter is. So `x/x` is kept (plan, section 4.2). Until 2026-10-26
     // the parameter was `unknown` in the body, `x/x` folded to `1` at the
     // declaration, and `g2(U)` was `1`.

@@ -70,6 +70,32 @@
 
 ### Resolved Issues
 
+- **A function of two matrices keeps the order of its products** (CE-1490,
+  CE-1491, CE-1494). The commutator `a·b − b·a` gave the zero matrix for two
+  matrices that do not commute in three cases: the parameters annotated
+  `expression`, a literal with untyped parameters assigned to a name declared
+  `(matrix, matrix) -> matrix` or `(expression, expression) -> expression`
+  (or given as the `evaluate` of such a declaration), and a body whose products read the parameters through another
+  operator (`Transpose(a)·Transpose(b)`) before a later use made them matrices
+  (`Determinant(a)`). Each case now gives the matrix product in the written
+  order:
+
+  ```ts
+  ce.declare('g', '(matrix, matrix) -> matrix');
+  ce.assign('g', ['Function', ['Subtract', ['Multiply', 'a', 'b'], ['Multiply', 'b', 'a']], 'a', 'b']);
+  ce.box(['g', [[1, 2], [3, 4]], [[0, 1], [1, 0]]]).evaluate();
+  // ➔ [[-1, -3], [3, 1]]  (0.194.2: [[0, 0], [0, 0]])
+  ```
+
+  A product of untyped names with no matrix use is still a product of
+  numbers (CE-1317).
+
+- **The type of a call with a function argument at a value parameter holds
+  its value** (CE-1452). With `f := (a, b) ↦ a[b + [1, 2, 3]]` and `j` a list
+  of integers, `f(j, N)` (`N` is the library function) was typed `integer`;
+  its value is a list. It is now typed `unknown`, the result of the
+  signature. A function passed through (`g ↦ g`) keeps its type.
+
 - **The functions of a complex number and the zeta family compile to GLSL
   again** (CE-1534). Since 0.194.0, a shader of `Csc(Sec(x + iy))` (a domain
   colouring) declined ("Sec (the operation csec) on glsl"), in the strict and
