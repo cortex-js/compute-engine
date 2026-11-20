@@ -133,7 +133,14 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     elementwise: false,
     scalarLanes: ['color', 'complex'],
     vectorArrays: true,
-    resultOnly: ['asoklab', 'asrgb', 'ashsv', 'ashsl', 'ashsv.own', 'ashsl.own'],
+    resultOnly: [
+      'asoklab',
+      'asrgb',
+      'ashsv',
+      'ashsl',
+      'ashsv.own',
+      'ashsl.own',
+    ],
     syntax: GLSL,
   },
 });

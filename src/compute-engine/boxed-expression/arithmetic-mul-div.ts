@@ -2738,8 +2738,7 @@ export function canonicalMultiply(
         // form below.
         const shaped = nonNumeric.some(
           (x) =>
-            (isCollectionShaped(x) &&
-              x.type.matches('indexed_collection')) ||
+            (isCollectionShaped(x) && x.type.matches('indexed_collection')) ||
             isTupleShapedType(x.type.type)
         );
         if (

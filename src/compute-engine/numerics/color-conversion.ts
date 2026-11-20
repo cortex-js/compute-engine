@@ -98,12 +98,11 @@ export function packedToOklchColor(color: number): OklchColor {
 }
 
 /** The palettes of `Colormap`, by name. */
-export const COLORMAP_PALETTES: Readonly<Record<string, readonly string[]>> =
-  {
-    ...SEQUENTIAL_PALETTES,
-    ...CATEGORICAL_PALETTES,
-    ...DIVERGING_PALETTES,
-  };
+export const COLORMAP_PALETTES: Readonly<Record<string, readonly string[]>> = {
+  ...SEQUENTIAL_PALETTES,
+  ...CATEGORICAL_PALETTES,
+  ...DIVERGING_PALETTES,
+};
 
 /** The names of the palettes of `Colormap`, in one order: a compiled
  * `Colormap` names its palette by its index here. */

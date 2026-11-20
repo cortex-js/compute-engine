@@ -1888,8 +1888,7 @@ function functionAtValueParameter(
     if (param === undefined) return false;
     const annotated =
       functionLiteralParameterType(param) ?? declaredParams?.[i];
-    if (annotated !== undefined && isFunctionValueType(annotated))
-      return false;
+    if (annotated !== undefined && isFunctionValueType(annotated)) return false;
     const p = optionalParameterTarget(param);
     return !isSymbol(p) || !isFunctionValueType(p.type.type);
   });

@@ -127,7 +127,11 @@ const loopOpen =
           `const ${k}_lo = ${lo}, ${k}_n = ${z.floor(`${hi} - ${k}_lo`)} + ${z.c(1)};`,
           counted
             ? `if (${k}_n !== ${k}_n) throw new RangeError('a loop of a count that is not a number');`
-            : guard(`${k}_n - ${z.c(1)}`, 'a loop', done === undefined ? 32 : 53),
+            : guard(
+                `${k}_n - ${z.c(1)}`,
+                'a loop',
+                done === undefined ? 32 : 53
+              ),
           blocks(z, `${k}_i`, `${k}_n`, done),
           `  const ${k} = ${k}_lo + ${k}_i;`,
         ]

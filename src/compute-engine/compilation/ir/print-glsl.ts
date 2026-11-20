@@ -793,8 +793,14 @@ export const GLSL: Syntax = deepFreeze({
     // CE-1535: the other colour operators of the interpreter, on the OKLCh
     // `vec3`. `ashsv` and `ashsl` are, like `asrgb`, the program's result
     // only (`resultOnly`).
-    'ashsv': { text: '_gpu_ir_hsv_of($0)', helpers: GAMUT_HELPERS('_gpu_ir_hsv_of') },
-    'ashsl': { text: '_gpu_ir_hsl_of($0)', helpers: GAMUT_HELPERS('_gpu_ir_hsl_of') },
+    'ashsv': {
+      text: '_gpu_ir_hsv_of($0)',
+      helpers: GAMUT_HELPERS('_gpu_ir_hsv_of'),
+    },
+    'ashsl': {
+      text: '_gpu_ir_hsl_of($0)',
+      helpers: GAMUT_HELPERS('_gpu_ir_hsl_of'),
+    },
     'colormix': { text: '_gpu_ir_mix($0, $1, $2)', helpers: ['_gpu_ir_mix'] },
     'colordelta': {
       text: 'distance(_gpu_ir_lab($0), _gpu_ir_lab($1))',
@@ -823,16 +829,27 @@ export const GLSL: Syntax = deepFreeze({
     },
     // `AsHsv(Hsv(…))`, `AsHsl(Hsl(…))`: the channels as the interpreter
     // reads them (the hue reduced into [0, 360), the others clamped).
-    'ashsv.own': 'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
-    'ashsl.own': 'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
+    'ashsv.own':
+      'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
+    'ashsl.own':
+      'vec3(mod($0, 360.0), clamp($1, 0.0, 1.0), clamp($2, 0.0, 1.0))',
     'colorchannel.oklch': '$0[int($1)]',
-    'colorchannel.oklab': { text: '_gpu_ir_lab($0)[int($1)]', helpers: ['_gpu_ir_lab'] },
+    'colorchannel.oklab': {
+      text: '_gpu_ir_lab($0)[int($1)]',
+      helpers: ['_gpu_ir_lab'],
+    },
     'colorchannel.rgb': {
       text: '_gpu_ir_lab_srgb(_gpu_ir_lab($0))[int($1)]',
       helpers: ['_gpu_ir_lab', '_gpu_ir_lab_srgb'],
     },
-    'colorchannel.hsv': { text: '_gpu_ir_hsv_of($0)[int($1)]', helpers: GAMUT_HELPERS('_gpu_ir_hsv_of') },
-    'colorchannel.hsl': { text: '_gpu_ir_hsl_of($0)[int($1)]', helpers: GAMUT_HELPERS('_gpu_ir_hsl_of') },
+    'colorchannel.hsv': {
+      text: '_gpu_ir_hsv_of($0)[int($1)]',
+      helpers: GAMUT_HELPERS('_gpu_ir_hsv_of'),
+    },
+    'colorchannel.hsl': {
+      text: '_gpu_ir_hsl_of($0)[int($1)]',
+      helpers: GAMUT_HELPERS('_gpu_ir_hsl_of'),
+    },
   },
   helpers: {
     // The real power: an exact product for an integer exponent from 1 to 16

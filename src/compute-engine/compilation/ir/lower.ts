@@ -276,8 +276,7 @@ const finiteReals = (x: Expression): boolean =>
   isFunction(x, 'List') &&
   x.ops.every(
     (op) =>
-      finiteReals(op) ||
-      (isNumber(op) && op.im === 0 && Number.isFinite(op.re))
+      finiteReals(op) || (isNumber(op) && op.im === 0 && Number.isFinite(op.re))
   );
 /** The colour conversions, which read a tuple of three numbers as sRGB. */
 const COLOR_CONVERSIONS = new Set([
@@ -3559,9 +3558,7 @@ function lowerOnce(
       return undefined;
     }
     if (isNumber(n) && n.im === 0 && Number.isFinite(n.re)) return n;
-    return size(n) <= MAX_FOLD_EXPANDED_NODES && finiteReals(n)
-      ? n
-      : undefined;
+    return size(n) <= MAX_FOLD_EXPANDED_NODES && finiteReals(n) ? n : undefined;
   };
 
   /** A region run in a new random frame of `seed`: a binding that it
