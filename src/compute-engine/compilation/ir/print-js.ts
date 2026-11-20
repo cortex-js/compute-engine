@@ -223,10 +223,13 @@ export const JS: Syntax = deepFreeze({
     'isnan': 'Number.isNaN($0)',
     'isundef': '($0 === undefined)',
     ...Object.fromEntries(
-      ['present.int', 'present', 'cpresent', 'present.bool'].map((op) => [
-        op,
-        { text: '_present($0, $1)', helpers: ['_present'] },
-      ])
+      [
+        'present.int',
+        'present',
+        'cpresent',
+        'present.bool',
+        'text.present',
+      ].map((op) => [op, { text: '_present($0, $1)', helpers: ['_present'] }])
     ),
     'count.int': { text: '_count($0)', helpers: ['_count'] },
     'count.round': 'Math.round($0)',

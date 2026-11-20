@@ -4020,10 +4020,15 @@ function lowerOnce(
    *  `Coalesce`, `AssertPresent`), chosen from its static type as the
    *  producers spell an absent value (`docs/COMPILATION-MODEL.md`): NaN for
    *  a number (a complex number with a NaN part), a point whose
-   *  coordinates are all NaN, `undefined` for a boolean on JavaScript. No
-   *  compiled value of another kind is absent (a list, a colour, a boolean
-   *  on GLSL or in the interval mode: each producer of one declines), so
-   *  its test is `false`.
+   *  coordinates are all NaN, `undefined` for a boolean or a string on
+   *  JavaScript (only JavaScript has strings). No compiled value of
+   *  another kind is absent (a list, the rows, a tuple of another lane, a
+   *  boolean on GLSL or in the interval mode: each producer of one
+   *  declines), so its test is `false`. A colour has no absent value to
+   *  test either, but its producer that can give one (an `At` out of
+   *  range) refuses only after the passes: `Coalesce` and `AssertPresent`
+   *  keep the colour as their value, so the producer still refuses, while
+   *  `IsMissing` would let `dce` remove it first, and declines.
    *  A NaN on the real lane is also a complex value of the interpreter
    *  (`Sqrt(x)` at `x = -4`), which is not absent: the test of an
    *  `operand` whose engine type admits a value that is not real declines,
@@ -4066,8 +4071,17 @@ function lowerOnce(
           nan(apply(node, 'At', [v, b.constant(k + 1, 'integer')]))
         ).reduce((x, y) => apply(node, 'And', [x, y]));
     }
-    if (t.shape.length === 0 && t.lane === 'boolean' && options.javascript)
+    if (
+      t.shape.length === 0 &&
+      (t.lane === 'string' || (t.lane === 'boolean' && options.javascript))
+    )
       return apply(node, ofOp('isundef'), [v]);
+    if (
+      t.shape.length === 0 &&
+      t.lane === 'color' &&
+      node.operator === 'IsMissing'
+    )
+      decline(node, `${node.operator} of a colour`);
     return b.constant(false, 'boolean');
   };
 

@@ -2222,9 +2222,15 @@ chosen from the static type, with no test of a type at run time: `isnan` of a
 real or an integer; of a complex value, `isnan` of its real part or of its
 imaginary part; of a point (a tuple of reals of a stated length), `isnan` of
 every coordinate; on JavaScript, `isundef` (`=== undefined`) of a boolean, which
-`atu` gives out of range. No compiled list, colour, boolean on GLSL or tuple of
-booleans is absent (each producer of one declines), so its test is `false`. A
-point of complex numbers declines. The written symbol `Missing` (of the library)
+`atu` gives out of range, and `text.isundef` of a string. No compiled list,
+boolean on GLSL or tuple of booleans is absent (each producer of one declines),
+so its test is `false`. A colour has no absent value either, but its producer
+that can give one, an `at` out of range, refuses only after the passes: the
+constant `false` of `IsMissing` would let `dce` remove it first, so `IsMissing`
+of a colour declines, while `Coalesce` and `AssertPresent` keep the colour as
+their value and the producer still refuses. A string read out of range refuses
+after the passes too (`stringListRefusal()`); its test keeps the read. A point
+of complex numbers declines. The written symbol `Missing` (of the library)
 is the constant NaN, as a selection that takes no arm; a `Tuple` with it as a
 coordinate declines (the point of NaN coordinates is absent; the interpreter's
 tuple of `Missing` is not). A NaN on the real lane is also the value of an
@@ -2239,7 +2245,7 @@ an arm, only when the operands before it are absent; the last is the value when
 all the others are. Operands of two shapes (`Coalesce(At(P, i), 0)` of a list of
 points `P`) decline. `AssertPresent(a)` is `a` when its test is the constant
 `false`; otherwise on JavaScript it is `present` (`present.int`, `cpresent`,
-`present.bool`; per coordinate of a point) of the test and `a`, a `may-fail`
+`present.bool`, `text.present`; per coordinate of a point) of the test and `a`, a `may-fail`
 operation that throws an `Error` whose message starts with `expected-present`
 where the test is true (the interpreter gives that error), and on GLSL it
 declines.

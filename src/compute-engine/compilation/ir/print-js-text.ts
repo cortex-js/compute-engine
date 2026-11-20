@@ -13,6 +13,7 @@ import type { RegionSpelling } from './print.js';
 export const TEXT = {
   'text.in': '_SYS.ct($0)',
   'text.length': '_SYS.tlength($0)',
+  'text.isundef': '($0 === undefined)',
   'text.upper': '_SYS.tupper($0)',
   'text.lower': '_SYS.tlower($0)',
   'text.fold': '_SYS.cfold($0)',

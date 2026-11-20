@@ -62,9 +62,13 @@ when it compiles. A difference that this list does not name is a defect.
   is not checked (a `number` input must be real in `strict`). The written
   `Missing` is `NaN`; as a coordinate of a tuple it declines
   (`IsMissing(Tuple(Missing, Missing))` is `False` in the interpreter, and
-  a point of `NaN` coordinates is absent). No compiled list or colour is
-  absent, nor a boolean on `glsl` (their producers decline): a discharge
-  reads such a value as present. A point (a tuple of numbers, `tuple<real,
+  a point of `NaN` coordinates is absent). No compiled list is absent, nor
+  a boolean on `glsl` (their producers decline): a discharge reads such a
+  value as present. A colour read out of range refuses after the passes,
+  so `IsMissing` of a colour declines, while `Coalesce` and
+  `AssertPresent` keep the colour as their value. A string read out of
+  range refuses after the passes too; the test of a string on
+  `javascript` is `undefined`. A point (a tuple of numbers, `tuple<real,
   real>` included) is tested at a discharge with the point
   test, which also reads the point of `NaN` coordinates as absent: no point
   is proved present by its type, as no `real` is, because a read out of

@@ -70,6 +70,16 @@
 
 ### Resolved Issues
 
+- **`IsMissing` of a string or a colour read out of range no longer compiles
+  to `false`.** `IsMissing(At(["a", "b"], i))`, `IsMissing(At(L, i))` of a
+  `list<string>` `L` and `IsMissing(At(Characters("ab"), i))` compiled to
+  `false` on JavaScript, and `IsMissing(At([Rgb(x, 0, 0), Rgb(0, x, 0)], i))`
+  to `false` on JavaScript and GLSL, where the interpreter gives `True` at
+  `i = 9`. They now decline (a compilation without fallback fails, and the
+  default compilation falls back to the interpreter). The discharges of a
+  present string give its value (`Coalesce(ToUpperCase(s), "z")` is `"AB"`
+  at `s = "ab"`); `IsMissing` of any colour declines.
+
 - **A compiled program nested too deep for the JavaScript parser declines as
   too deep.** Where the parser of the host runs out of stack (on Windows, a
   `Which` of 1,000 clauses on the interval target, a `ListJoin` of 1,000

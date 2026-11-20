@@ -388,8 +388,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // `AssertPresent` of the test and the value, which fails where the test
   // is true.
   row(undefined,      1,          [[[R], B, 'isnan']],           { ...list, fold: Number.isNaN }),
-  row(undefined,      1,          [[[B], B, 'isundef']],         list),
-  row(undefined,      2,          [[[B, I], I, 'present.int'], [[B, R], R, 'present'], [[B, C], C, 'cpresent'], [[B, B], B, 'present.bool']], { ...list, effect: 'may-fail' }),
+  row(undefined,      1,          [[[B], B, 'isundef'], [[S], B, 'text.isundef']], list),
+  row(undefined,      2,          [[[B, I], I, 'present.int'], [[B, R], R, 'present'], [[B, C], C, 'cpresent'], [[B, B], B, 'present.bool'], [[B, S], S, 'text.present']], { ...list, effect: 'may-fail' }),
   // A real count of a rotation as an integer, which fails where it is not
   // one (the interpreter gives `incompatible-type`); JavaScript only.
   row(undefined,      1,          [[[R], I, 'count.int']],       { ...list, effect: 'may-fail' }),
