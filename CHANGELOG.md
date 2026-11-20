@@ -37,10 +37,9 @@
   by the host or by an earlier program. An optional parameter without a default,
   and a default on a parameter whose type mentions `Self`, are still refused.
   `ce.declareProtocol()` accepts the same signatures:
-  `'(self: Self, scale: real = 10) -> real'`. A known limitation: a named
-  argument cannot skip a parameter with a default in a bare or a method call
-  (`sc(x, b: 5)` with `a: real = 1, b: real = 2` is
-  `argument-optional-skipped`); the qualified call `S.sc(x, b: 5)` works.
+  `'(self: Self, scale: real = 10) -> real'`. A named argument may skip a
+  parameter with a default: with `a: real = 1, b: real = 2`, `sc(x, b: 5)`,
+  `x.sc(b: 5)` and `S.sc(x, b: 5)` are `sc(x, 1, 5)`.
 
 ### Behavior Changes
 

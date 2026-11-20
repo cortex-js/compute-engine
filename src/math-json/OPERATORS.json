@@ -9889,6 +9889,12 @@
       "description": "The set of all prime numbers."
     },
     {
+      "name": "ProtocolDefault",
+      "category": "Core",
+      "type": "unknown",
+      "description": "Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter."
+    },
+    {
       "name": "RationalNumbers",
       "category": "Collections",
       "type": "set<rational>",

@@ -5370,13 +5370,18 @@ function sharedParameterName(
  * numbers of arguments: one `any` parameter per position, the positions
  * after the required ones optional.
  *
- * An optional position carries no default value. The requirement owns it,
- * and {@link dispatchMember} fills the default of the requirement it selects
- * when the call is evaluated (the v2 rule of R9 of
- * `docs/plans/2026-10-31-parameter-default-values.md`). A default filled at
+ * The default of an optional position is the placeholder
+ * {@link PROTOCOL_DEFAULT}, not a value. The requirement owns the default,
+ * and {@link dispatchMember} replaces the placeholder with the default of the
+ * requirement it selects when the call is evaluated (the v2 rule of R9 of
+ * `docs/plans/2026-10-31-parameter-default-values.md`). A value filled at
  * canonicalization would stay in the canonical call after a later program
  * re-declares the protocol with another default, and would reach the
- * library twin of the member ({@link dispatcherCanonical}).
+ * library twin of the member ({@link dispatcherCanonical}). The placeholder
+ * lets a named argument skip a position (`sc(x, b: 5)`): the named-argument
+ * normalization fills the hole with it. {@link dispatcherCanonical} drops a
+ * placeholder after the last written argument, so a positional call keeps
+ * the operands it was written with.
  */
 function agreedDispatcherSignature(
   shapes: ReadonlyArray<FunctionSignature>
@@ -5390,8 +5395,31 @@ function agreedDispatcherSignature(
   };
   const args = Array.from({ length: min }, (_, i) => param(i));
   if (max === min) return { kind: 'signature', args, result: 'unknown' };
-  const optArgs = Array.from({ length: max - min }, (_, i) => param(min + i));
+  const optArgs = Array.from({ length: max - min }, (_, i) => ({
+    ...param(min + i),
+    default: { kind: 'symbol', name: PROTOCOL_DEFAULT } as const,
+  }));
   return { kind: 'signature', args, optArgs, result: 'unknown' };
+}
+
+/** The engine-internal symbol that stands for the default value of a
+ * parameter in a call of a protocol member ({@link agreedDispatcherSignature}).
+ * It is a constant of the core library. */
+const PROTOCOL_DEFAULT = 'ProtocolDefault';
+
+function isProtocolDefault(x: Expression | undefined): boolean {
+  return isSymbol(x, PROTOCOL_DEFAULT);
+}
+
+/** `ops` without the {@link PROTOCOL_DEFAULT} placeholders after the last
+ * other operand: the operands that the call was written with, up to the
+ * last one. `ops` itself when it ends with no placeholder. */
+function withoutTrailingDefaults(
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  let n = ops.length;
+  while (n > 0 && isProtocolDefault(ops[n - 1])) n -= 1;
+  return n === ops.length ? ops : ops.slice(0, n);
 }
 
 //
@@ -5621,7 +5649,9 @@ function checkMemberArguments(
   if (requirements.some((s) => s === null)) return xs;
 
   for (let i = 1; i < xs.length; i++) {
-    if (!xs[i]!.isValid) continue;
+    // A placeholder stands for the default of the requirement that dispatch
+    // selects, not for an argument of type `unknown`.
+    if (!xs[i]!.isValid || isProtocolDefault(xs[i])) continue;
     const declared = requirements.map(
       (s) => requirementParameters(s!)[i]?.type
     );
@@ -5659,12 +5689,21 @@ function dispatcherCanonical(
   member: string,
   ops: ReadonlyArray<Expression>
 ): Expression {
+  // The default of an optional position of the dispatcher is a placeholder
+  // (`agreedDispatcherSignature`). After the last written argument it is
+  // dropped, on every return of this handler: `stroke(p, "red")` stays as
+  // written, and the twin receives the written arguments. A placeholder
+  // before a written argument (a position that a named argument skipped)
+  // stays, and the library twin cannot express it: the call is the member's.
+  ops = withoutTrailingDefaults(ops);
+
   if (protocolsWithMember(ce, member).length === 0)
     return ce._fn(member, [...ops]);
-
   const selfType = receiverType(ops);
   const records = candidateRecords(ce, member, selfType);
-  const twin = libraryTwinOf(ce, member);
+  const twin = ops.some(isProtocolDefault)
+    ? undefined
+    : libraryTwinOf(ce, member);
   // A receiver that no protocol could serve is the library twin's call. So
   // is a decided receiver that conforms to none, with an arity that no
   // requirement admits (from its required parameters to all of them): a
@@ -5861,6 +5900,9 @@ function dispatchMember(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> & { expression?: Expression }
 ): Expression | undefined {
+  // The placeholders after the last written argument (`dispatcherCanonical`
+  // drops them; a call boxed without that handler can hold them).
+  ops = withoutTrailingDefaults(ops);
   const self = ops[0];
   if (self === undefined) return undefined;
 
@@ -5885,8 +5927,13 @@ function dispatchMember(
   if (best.length === 0) {
     // The bare call of a member with a library twin, on a value that
     // conforms to no protocol of the member, is the twin's call (CE-1552).
-    // The qualified call names the protocol: no fallback.
-    const twin = only === null ? libraryTwinOf(ce, member) : undefined;
+    // The qualified call names the protocol: no fallback. Nor has a call
+    // with a placeholder before a written argument, which the twin cannot
+    // express (`dispatcherCanonical`).
+    const twin =
+      only === null && !ops.some(isProtocolDefault)
+        ? libraryTwinOf(ce, member)
+        : undefined;
     if (
       twin !== undefined &&
       !conformsForMember(ce, member, runtime) &&
@@ -5944,30 +5991,50 @@ function dispatchMember(
     // receives the default of the SELECTED requirement, evaluated as the
     // written arguments were, so that a host callback receives the value of
     // a constant, not its symbol. A supplied argument is passed as it is,
-    // also an absent value (`Missing`), as for every other function.
-    if (ops.length < max) {
-      const defaults = requirementDefaults(
-        ce,
-        selected.record,
-        member,
-        shape
-      ).slice(ops.length - min);
+    // also an absent value (`Missing`), as for every other function. A
+    // position that a named argument skipped holds the placeholder
+    // `ProtocolDefault` (`agreedDispatcherSignature`), and receives the
+    // default too.
+    if (ops.length < max || ops.some(isProtocolDefault)) {
+      const defaults = requirementDefaults(ce, selected.record, member, shape);
       // Under `.N()` an expression implementation reads the exact value of
       // an argument near a jump of its body from the argument's source
       // (`ApplyOptions.exactSources`): the source of a default is the boxed
       // default.
-      if (
+      const written =
         options.numericApproximation === true &&
         isExpressionImplementation(selected.impl)
-      )
-        exactSources = [
-          ...writtenExactSources(ce, ops, options.expression),
-          ...defaults.map((d) => defaultExactSource(ce, d)),
-        ];
-      ops = [
-        ...ops,
-        ...defaults.map((d) => d.evaluate(operandOptions(options))),
-      ];
+          ? writtenExactSources(ce, ops, options.expression)
+          : undefined;
+      const filled: Expression[] = [];
+      const sources: (Expression | undefined)[] = [];
+      for (let i = 0; i < max; i++) {
+        const op = ops[i];
+        if (op !== undefined && !isProtocolDefault(op)) {
+          filled.push(op);
+          sources.push(written?.[i]);
+          continue;
+        }
+        const d = i < min ? undefined : defaults[i - min];
+        // A placeholder written at a position without a default: the
+        // implementation must not receive it.
+        if (d === undefined) {
+          const name = requirementParameters(shape)[i]?.name;
+          return ce.error(
+            [
+              'missing',
+              name !== undefined
+                ? `no value for parameter \`${name}\``
+                : `no value for argument ${i + 1}`,
+            ],
+            ce.function(member, [...ops], { form: 'raw' }).toString()
+          );
+        }
+        filled.push(d.evaluate(operandOptions(options)));
+        sources.push(defaultExactSource(ce, d));
+      }
+      if (written !== undefined) exactSources = sources;
+      ops = filled;
     }
   }
 
@@ -6033,7 +6100,7 @@ function writtenExactSources(
     ? undefined
     : expression.operator === 'ProtocolMember'
       ? expression.ops.slice(2)
-      : expression.ops;
+      : withoutTrailingDefaults(expression.ops);
   if (written === undefined || written.length !== ops.length)
     return ops.map(() => undefined);
   return exactArgumentSources(ce, written);

@@ -152,6 +152,7 @@ export const ENGINE_INTERNAL_NAMES: ReadonlySet<string> = new Set([
   'Object',
   'Pin',
   'Predicate',
+  'ProtocolDefault',
   'ProtocolMember',
   'ProtocolProperty',
   'RuntimeError',

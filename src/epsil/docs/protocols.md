@@ -84,10 +84,21 @@ without a default cannot be optional, and a parameter whose type mentions
 `Self` cannot have a default: the default is checked when the protocol is
 declared, before `Self` is known. Both are `invalid-protocol-declaration`.
 
-A named argument cannot skip a parameter with a default in a bare or a
-method call: with `function sc(self: Self, a: real = 1, b: real = 2)`,
-`sc(x, b: 5)` is `argument-optional-skipped`. Write the qualified call
-`S.sc(x, b: 5)`, or the argument: `sc(x, 1, 5)`.
+A named argument can skip a parameter with a default, and the parameter
+receives its default:
+
+```epsil-live
+protocol Figure {
+  function stroke(self: Self, color: string, width: real = 1, dash: real = 0) -> Self
+}
+type Pen = tuple<color: string, width: real, dash: real>
+type Pen is Figure {
+  function stroke(self: Pen, color: string, width: real, dash: real) -> Pen { Pen(color, width, dash) }
+}
+let p = Pen("black", 3, 0)
+(p.stroke("red", dash: 2).width, stroke(p, "red", dash: 2).dash)
+// ➔ (1, 2)
+```
 
 ## Conforming a type
 

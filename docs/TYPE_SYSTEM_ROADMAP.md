@@ -1851,13 +1851,19 @@ same default. A supplied argument is never replaced, also when it is absent
 of its program, so a symbol default names a constant of the library, of the
 host, or of an earlier program, not a `const` of the same program.
 
-A known limitation: a named argument cannot skip a parameter with a default
-in a bare or a method call. With
-`function sc(self: Self, a: real = 1, b: real = 2) -> real`, `sc(x, b: 5)`
-and `x.sc(b: 5)` are `argument-optional-skipped`, because the names are
-matched when the call is canonicalized and the default is filled only when
-it is evaluated. The qualified call `S.sc(x, b: 5)` works (it is
-`S.sc(x, 1, 5)`), and so does the positional call `sc(x, 1, 5)`.
+A named argument may skip a parameter with a default, in every form of the
+call. With `function sc(self: Self, a: real = 1, b: real = 2) -> real`,
+`sc(x, b: 5)`, `x.sc(b: 5)` and `S.sc(x, b: 5)` are `sc(x, 1, 5)`. The names
+are matched when the call is canonicalized, before dispatch selects a
+requirement, so the bare and the method call hold the engine-internal
+placeholder `ProtocolDefault` at the skipped position (`["sc", "x",
+"ProtocolDefault", 5]`; the dispatcher's signature gives it as the default
+of each optional position), and the dispatcher replaces it with the default
+of the selected requirement when the call is evaluated. A placeholder after
+the last written argument is dropped at canonicalization, so `stroke(r,
+"red")` keeps the arguments as written. A call with a placeholder before a
+written argument never falls back to the library twin, which has no
+parameter names to express the skipped position.
 
 #### Property implementations
 

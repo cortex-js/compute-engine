@@ -8585,6 +8585,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         evaluateProtocolMember(options.engine, ops, options),
     },
 
+    // The default of an optional parameter of a protocol member's dispatcher
+    // (`engine-protocols.ts`, `agreedDispatcherSignature`): it holds the
+    // position that a named argument skips, and the dispatcher replaces it
+    // with the default of the requirement it selects.
+    ProtocolDefault: {
+      description:
+        'Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter.',
+      examples: [
+        'protocol Scaled { function scale(self: Self, by: real = 2, shift: real = 0) -> real }\ntype number is Scaled { function scale(self, by, shift) -> real { self * by + shift } }\nscale(5, shift: 1)',
+      ],
+      type: 'unknown',
+      isConstant: true,
+    },
+
     // Deliberately NOT `lazy`: the operands are evaluated before the handler
     // runs, which is what guarantees a `set` handler — an author's, or one the
     // engine synthesized for a field-backed property — receives the EVALUATED

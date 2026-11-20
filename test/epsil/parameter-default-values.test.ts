@@ -385,13 +385,15 @@ type Money = tuple<cents: integer>
   test('the canonical call keeps the arguments as written', () => {
     // The default is filled when the call is evaluated, from the requirement
     // that dispatch selects, so that a later declaration of the protocol
-    // with another default applies to a call made before it.
+    // with another default applies to a call made before it. The default
+    // of the dispatcher's signature is the placeholder `ProtocolDefault`,
+    // which the canonical call drops after the last written argument.
     const { ce } = run(IMPLEMENTED);
     const short = ce.box(['scale', ['Money', 3]]);
     expect(short.json).toEqual(['scale', ['Money', 3]]);
     expect(short.evaluate().json).toBe(6);
     expect(ce.lookupDefinition('scale')?.operator?.signature.toString()).toBe(
-      '(self: any, k: any?) -> unknown'
+      '(self: any, k: any = ProtocolDefault) -> unknown'
     );
   });
 
@@ -515,24 +517,112 @@ function g(m: Money) { let D = 100; f(m) }`
     ).toBe(5000);
   });
 
-  test('a named argument after a skipped parameter with a default', () => {
-    // A known limitation: the bare and the method call fill the default
-    // when they are evaluated, so a named argument that skips a parameter
-    // with a default is `argument-optional-skipped`. The qualified call
-    // fills it.
-    const r =
-      run(`protocol S { function sc(self: Self, a: real = 1, b: real = 2) -> real }
+  test('a named argument skips a parameter with a default', () => {
+    // The bare and the method call hold the placeholder `ProtocolDefault`
+    // at the skipped position, and the dispatcher replaces it with the
+    // default of the selected requirement.
+    const ce = new ComputeEngine();
+    const declarations = `protocol S { function sc(self: Self, a: real = 1, b: real = 2) -> real }
 type Money = tuple<cents: integer>
 type Money is S { function sc(self: Money, a: real, b: real) -> real { a * 10 + b } }
-let x = Money(1)
-[sc(x, 3), S.sc(x, b: 5), sc(x, b: 5)]`);
-    expect(r.diagnostics.map((m: any) => m[m.length - 1])).toEqual([
-      'argument-optional-skipped',
+let x = Money(1)`;
+    const r = executeEpsil(
+      ce,
+      `${declarations}\n[sc(x, 3), S.sc(x, b: 5), sc(x, b: 5), x.sc(b: 5), sc(x), x.sc()]`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.json).toEqual(['List', 32, 15, 15, 15, 12, 12]);
+    // In a later program.
+    const later = executeEpsil(ce, '[sc(x, b: 7), x.sc(b: 8)]');
+    expect(later.diagnostics).toEqual([]);
+    expect(later.value?.json).toEqual(['List', 17, 18]);
+  });
+
+  test('a skipped parameter receives the default of the selected requirement', () => {
+    const r =
+      value(`protocol A { function sc(self: Self, a: real = 1, b: real = 2) -> real }
+protocol B { function sc(self: Self, a: real = 7, b: real = 2) -> real }
+type Money = tuple<cents: integer>
+type Euro = tuple<cents: integer>
+type Money is A { function sc(self: Money, a: real, b: real) -> real { a * 10 + b } }
+type Euro is B { function sc(self: Euro, a: real, b: real) -> real { a * 10 + b } }
+[sc(Money(1), b: 5), sc(Euro(1), b: 5), Euro(1).sc(b: 3)]`);
+    expect(r).toEqual(['List', 15, 75, 73]);
+  });
+
+  test('a host implementation receives the default of a skipped parameter', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Q', {
+      functions: { q: '(self: Self, a: real = 1, b: real = 2) -> any' },
+    });
+    ce.declareProtocolImplementation('real', 'Q', {
+      functions: { q: (_x: any, a: any, b: any) => ce.box(['List', a, b]) },
+    });
+    expect(
+      ce.box(['q', 5, ['NamedArgument', { str: 'b' }, 7]]).evaluate().json
+    ).toEqual(['List', 1, 7]);
+    const r = executeEpsil(ce, 'q(5, b: 7)');
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.json).toEqual(['List', 1, 7]);
+  });
+
+  test('a skipped middle parameter keeps the exact sources of the later arguments under .N()', () => {
+    // `(1/49) * 49` is `0.9999999999999999` in floating point: `floor` gives
+    // 1 only with the exact source of `b`, which stays at its position after
+    // the default fills the skipped `a`. The placeholder that the Epsil
+    // serializer writes for the skipped slot reads back as the same call.
+    const ce = new ComputeEngine();
+    executeEpsil(
+      ce,
+      [
+        'protocol S { function sc(self: Self, a: real = 1, b: real = 2) -> real }',
+        'type Money = tuple<cents: integer>',
+        'type Money is S { function sc(self: Money, a: real, b: real) -> real { floor(a * b * 49) } }',
+        'let x = Money(1)',
+      ].join('\n')
+    );
+    const value = (src: string) => executeEpsil(ce, src).value.json;
+    expect(value('N(sc(x, b: 1/49))')).toEqual({ num: '1.0' });
+    expect(value('N(sc(x, 1, 1/49))')).toEqual({ num: '1.0' });
+    expect(value('sc(x, ProtocolDefault, 1/49)')).toEqual(1);
+  });
+
+  test('a call that leaves out a parameter with a default prints as written', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      `protocol Figure { function stroke(self: Self, color: string, width: real = 1, dash: real = 0) -> Self }
+type Pen = tuple<color: string, width: real, dash: real>
+type Pen is Figure { function stroke(self: Pen, color: string, width: real, dash: real) -> Pen { Pen(color, width, dash) } }
+let p = Pen("black", 3, 0)`
+    );
+    expect(r.diagnostics).toEqual([]);
+    const call = ce.box(['stroke', 'p', { str: 'red' }]);
+    expect(call.json).toEqual(['stroke', 'p', "'red'"]);
+    expect(call.latex).toBe('\\mathrm{stroke}(p, \\text{red})');
+    expect(serializeEpsil(call.json)).toBe('stroke(p, "red")');
+    expect(call.isSame(ce.box(['stroke', 'p', { str: 'red' }]))).toBe(true);
+    // A position that a named argument skips holds the placeholder, which
+    // reads back as the same call.
+    const skipped = ce.box([
+      'stroke',
+      'p',
+      { str: 'red' },
+      ['NamedArgument', { str: 'dash' }, 2],
     ]);
-    const [, written, qualified, bare] = r.value as unknown[];
-    expect(written).toBe(32);
-    expect(qualified).toBe(15);
-    expect(JSON.stringify(bare)).toContain('argument-optional-skipped');
+    expect(skipped.json).toEqual([
+      'stroke',
+      'p',
+      "'red'",
+      'ProtocolDefault',
+      2,
+    ]);
+    expect(serializeEpsil(skipped.json)).toBe(
+      'stroke(p, "red", ProtocolDefault, 2)'
+    );
+    expect(ce.box(skipped.json).isSame(skipped)).toBe(true);
+    expect(ce.parse(skipped.latex).isSame(skipped)).toBe(true);
+    expect(skipped.evaluate().json).toEqual(['Pen', "'red'", 1, 2]);
   });
 
   test('an implementation with an optional parameter without a default is refused', () => {
@@ -660,8 +750,9 @@ scale(Money(4))`)
   });
 
   test('two protocols that give the member different defaults', () => {
-    // The dispatcher's signature carries no default, and the default of the
-    // requirement that dispatch selects is filled when the call is evaluated.
+    // The dispatcher's signature carries the placeholder `ProtocolDefault`,
+    // and the default of the requirement that dispatch selects is filled when
+    // the call is evaluated.
     const r =
       run(`protocol A { function scale(self: Self, k: real = 2) -> real }
 protocol B { function scale(self: Self, k: real = 3) -> real }
@@ -673,7 +764,7 @@ type Coin is B { function scale(self: Coin, k: real) -> real { self.n * k } }
     expect(r.diagnostics).toEqual([]);
     expect(r.value).toEqual(['List', 6, 9, 3, 2, 3]);
     expect(r.ce.lookupDefinition('scale')?.operator?.signature.toString()).toBe(
-      '(self: any, k: any?) -> unknown'
+      '(self: any, k: any = ProtocolDefault) -> unknown'
     );
   });
 

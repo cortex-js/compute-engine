@@ -460,7 +460,9 @@
       "WildcardSequence",
       "WithRandomSeed"
     ],
-    "constants": []
+    "constants": [
+      "ProtocolDefault"
+    ]
   },
   "fractals": {
     "description": "",
