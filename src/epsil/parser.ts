@@ -40,6 +40,7 @@ import {
 import {
   DiagnosticMessage,
   FatalParsingError,
+  type Fixit,
   ParsingDiagnostic,
 } from './diagnostics.js';
 import { tokenize } from './lexer.js';
@@ -706,6 +707,9 @@ export class Parser {
    * shadowing, and names such as `T` versus `Tx`. */
   private typeParamHits: Set<string> | null = null;
 
+  /** Whether the source is a span of an enclosing parser's source. */
+  private readonly isSpan: boolean;
+
   /**
    * The nodes a radical sign or a superscript exponent built over a numeric
    * coefficient — `√2`, `2²`, `√√2`, `2⁻¹`. Such a node may lead an invisible
@@ -734,11 +738,16 @@ export class Parser {
       /** Expression-nesting depth already consumed by an enclosing parser
        * whose stack this one runs on (see `expressionNesting`). */
       nestingDepth?: number;
+      /** The source is a span of an enclosing parser's source (a `\(…)`
+       * hole, the ASCII translation of a script run): the end of this source
+       * is not the end of the input (see `closingBracketFixit`). */
+      span?: boolean;
     }
   ) {
     this.source = source;
     this.url = options?.url;
     this.baseOffset = options?.offset ?? 0;
+    this.isSpan = options?.span ?? false;
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.deadline = options?.deadline;
@@ -827,17 +836,128 @@ export class Parser {
     end: number,
     severity: 'warning' | 'error' = 'error'
   ): void {
-    this.diagnostics.push({
+    const diagnostic: ParsingDiagnostic = {
       severity,
       message,
       range: [this.baseOffset + start, this.baseOffset + end],
-    });
+    };
+    if (
+      Array.isArray(message) &&
+      message[0] === 'closing-bracket-expected' &&
+      typeof message[1] === 'string'
+    ) {
+      const fixit = this.closingBracketFixit(message[1]);
+      if (fixit !== undefined) diagnostic.fixits = [fixit];
+    }
+    this.diagnostics.push(diagnostic);
   }
 
-  /** Collect any lexical diagnostics carried by a token. */
+  /** The fixit of a `closing-bracket-expected` that the parser reports: the
+   * insertion of `bracket` after the last token, so before trailing white
+   * space and comments (`f(1 // note` gives `f(1) // note`). It is given only
+   * when the parser reached the end of the input: for a bracket missing
+   * before another token (`f(1]`), the insertion at the end would leave the
+   * error. A parser of a span (a `\(…)` hole, a script run) gives none: the
+   * end of its source is not the end of the input, and the source of a script
+   * run is a translation. A fixit of an error is a guess
+   * (`ParsingDiagnostic.fixits`). */
+  private closingBracketFixit(bracket: string): Fixit | undefined {
+    if (this.isSpan || this.current.type !== 'EOF') return undefined;
+    // An escape at the end of the input gives the last token an end one past
+    // the source (CE-1579).
+    const at = Math.min(
+      this.tokens[this.tokens.length - 2]?.end ?? 0,
+      this.source.length
+    );
+    return [this.baseOffset + at, this.baseOffset + at, bracket];
+  }
+
+  /** The fixit of the `string-literal-closing-delimiter-expected` of the
+   * string `token`: the insertion of the closing `delimiter`, or `undefined`
+   * when the insertion would be an escape (`"C:\`).
+   *
+   * A single-line string (`"…`, `#"…`) runs to the end of its line, so the
+   * delimiter goes after the last character that is neither white space nor
+   * a closing bracket (`{ "Buzz }` gives `{ "Buzz" }`), but not before the
+   * end of its last `\(…)` hole, or at the end of the line when no such
+   * character follows the opening delimiter. A multiline string (`"""`) gets
+   * its delimiter on a new line after its last line of text, and a LaTeX
+   * island (`$`) after its last character that is not white space. */
+  private closingStringDelimiterFixit(
+    delimiter: string,
+    token: Token
+  ): Fixit | undefined {
+    const source = this.source;
+    const start = token.start;
+    // An escape at the end of the input (`"C:\`) gives the token an end one
+    // past the source (CE-1579).
+    const end = Math.min(token.end, source.length);
+    let at = end;
+    let text = delimiter;
+    if (delimiter === '"""' || delimiter === '$') {
+      while (at > start && /\s/.test(source[at - 1])) at -= 1;
+      if (delimiter === '"""') {
+        // After the trailing spaces of the last line of text, which are part
+        // of the value.
+        while (at < end && (source[at] === ' ' || source[at] === '\t'))
+          at += 1;
+        text = '\n' + delimiter;
+      }
+    } else {
+      // The lexer names an extended string by its OPENING delimiter (`##"`),
+      // whose reverse is the closing one (`"##`).
+      text = [...delimiter].reverse().join('');
+      const contentStart = start + delimiter.length;
+      // The `)` that closes the last hole is not a bracket that the string
+      // ran over.
+      let floor = contentStart;
+      for (const part of token.parts ?? [])
+        if (typeof part !== 'string') floor = Math.max(floor, part.end + 1);
+      let last = end;
+      while (
+        last > floor &&
+        (/\s/.test(source[last - 1]) || ')]}'.includes(source[last - 1]))
+      )
+        last -= 1;
+      if (last > contentStart) at = last;
+    }
+    if (delimiter === '"' || delimiter === '$') {
+      let backslashes = 0;
+      while (at - backslashes > start && source[at - backslashes - 1] === '\\')
+        backslashes += 1;
+      // In a LaTeX island, every `\` before a `$` escapes it (`\\$` too).
+      if (backslashes % 2 === 1 || (delimiter === '$' && backslashes > 0))
+        return undefined;
+    }
+    return [this.baseOffset + at, this.baseOffset + at, text];
+  }
+
+  /** Collect any lexical diagnostics carried by a token. A lexical
+   * `closing-bracket-expected` is an unclosed `\(` hole of a string: the
+   * fixits of the parser do not apply to it, and the token then gets none. */
   private harvest(token: Token): void {
-    if (token.diagnostics)
-      for (const m of token.diagnostics) this.error(m, token.start, token.end);
+    const diagnostics = token.diagnostics;
+    if (!diagnostics) return;
+    const openHole = diagnostics.some(
+      (m) => Array.isArray(m) && m[0] === 'closing-bracket-expected'
+    );
+    for (const message of diagnostics) {
+      const diagnostic: ParsingDiagnostic = {
+        severity: 'error',
+        message,
+        range: [this.baseOffset + token.start, this.baseOffset + token.end],
+      };
+      if (
+        !openHole &&
+        Array.isArray(message) &&
+        message[0] === 'string-literal-closing-delimiter-expected' &&
+        typeof message[1] === 'string'
+      ) {
+        const fixit = this.closingStringDelimiterFixit(message[1], token);
+        if (fixit !== undefined) diagnostic.fixits = [fixit];
+      }
+      this.diagnostics.push(diagnostic);
+    }
   }
 
   //
@@ -9086,6 +9206,7 @@ export class Parser {
       allowHostPragmas: this.allowHostPragmas,
       deadline: this.deadline,
       isLibraryFunction: this.isLibraryFunction,
+      span: true,
       // A copy: a `function` statement in the interpolation does not count
       // after it.
       functionNames: new Set(
@@ -9121,6 +9242,7 @@ export class Parser {
       deadline: this.deadline,
       isLibraryFunction: this.isLibraryFunction,
       nestingDepth: this.expressionNesting,
+      span: true,
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);

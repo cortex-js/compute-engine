@@ -2,6 +2,15 @@
 
 ### New Features
 
+- **An unclosed string or bracket in Epsil has a fixit** (CE-1520). The
+  `string-literal-closing-delimiter-expected` diagnostic of `parseEpsil()`
+  inserts the delimiter after the text of the string on its line, before a
+  closing bracket that the string ran over: `{ "Buzz }` gives `{ "Buzz" }`.
+  The `closing-bracket-expected` diagnostic of a bracket still open at the
+  end of the input inserts the bracket after the last token, before trailing
+  white space and comments: `f(1 // note` gives `f(1) // note`. A bracket
+  missing before another token (`f(1]`) has no fixit.
+
 - **`epsilDiagnosticMessage()` gives the text of an Epsil diagnostic**
   (CE-1519). It is exported from `@cortex-js/compute-engine/epsil` and turns
   the `[code, ...args]` message of a diagnostic of `parseEpsil()` or
