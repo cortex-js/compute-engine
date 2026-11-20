@@ -70,6 +70,19 @@
 
 ### Resolved Issues
 
+- **A selection at each position whose arms are a `Map` or a `Range` compiles**
+  (CE-1562). With `L: list<real>` and `i: list<real>`,
+  `Which(Equal(Mod(i, 2), 1), Map(w ↦ 2w, At(L, i)), True, 0)` compiles to
+  JavaScript again, as it did in 0.186.0, and gives `[10, 0, 14]` for
+  `L = [5, 6, 7]` and `i = [1, 2, 3]`, as the interpreter does. So does a
+  selection whose arms and later conditions are ranges, such as
+  `Which(Equal(Mod(Range(1, N), 3), 1), Range(1, N), Equal(Mod(Range(1, N), 3), 2), Range(0, N - 1), True, 0)`.
+  Both declined with "a selection at each position whose arms or later
+  conditions are not pure". A `Range` arm is read at each position and never
+  built. An arm that builds a list of another length than the first condition
+  still declines, because the interpreter does not evaluate an arm that no
+  position selects.
+
 - **A point multiplied by a list of numbers compiles** (CE-1569). With
   `l: list<real>`, `a: real` and `b: real`, `Multiply(l, Tuple(a, b))` compiles
   to JavaScript again, as it did in 0.186.0. It declined with "Multiply of a

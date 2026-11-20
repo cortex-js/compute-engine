@@ -213,6 +213,15 @@ describe('If and Which of a list condition on JavaScript', () => {
     ['point arms, no default: a point of NaN', ['Which', ['Less', 3, 'L'], ['Tuple', 1, 2]], [{ L: [2, 5] }]],
     ['a list of points as an arm', ['Which', ['Less', 3, 'L'], 'Pp', 'True', ['Tuple', 'x', 0]], [{ L: [2, 5], Pp: [[1, 2], [3, 4]], x: 9 }]],
     ['a coordinate of a selection of points', ['PointX', ['Which', ['Less', 3, 'L'], 'Pp']], [{ L: [2, 5], Pp: [[1, 2], [3, 4]] }]],
+    // A list that an arm builds of the length of the first condition, or a
+    // later condition of its own length, is built before the selection; a
+    // `Range` arm is read at each position, never built (CE-1562).
+    ['a Map arm of a list of indexes', ['Which', ['Equal', ['Mod', 'K', 2], 1], ['Map', ['Function', ['Multiply', 2, 'w'], 'w'], ['At', 'L', 'K']], 'True', 0], [{ L: [5, 6, 7], K: [1, 2, 3] }]],
+    ['Range arms and a later Range condition', ['Which', ['Equal', ['Mod', ['Range', 1, 'x'], 3], 1], ['Range', 1, 'x'], ['Equal', ['Mod', ['Range', 1, 'x'], 3], 2], ['Range', 0, ['Add', 'x', -1]], 'True', 0], [{ x: 6 }, { x: 1 }]],
+    ['a later condition that builds a list', ['Which', ['Less', 3, 'L'], 1, ['Less', 2, ['Range', 1, 'x']], 2, 'True', 0], [{ L: [5, 1, 1], x: 3 }]],
+    ['a Range arm that no position selects, of an infinite length', ['If', 'B', 0, ['Range', 1, ['Divide', 1, 'x']]], [{ B: [true], x: 0 }]],
+    ['a Range arm that no position selects, of 2^32 elements', ['Which', ['Less', 3, 'L'], ['Range', 1, 'x'], 'True', 0], [{ L: [1, 2], x: 2 ** 32 }]],
+    ['a restriction to a Range', ['If', ['Less', 3, 'L'], ['Range', 1, 'x']], [{ L: [5, 1, 5], x: 2 }, { L: [5, 1], x: 4 }]],
   ];
   test.each(PROGRAMS)('%s', (_, json, at) => {
     check(json, at);
@@ -243,6 +252,16 @@ describe('If and Which of a list condition on JavaScript', () => {
     ['an arm with an effect', ['Which', ['Less', 3, 'L'], ['Random'], 'True', 0], /whose arms or later conditions are not pure/],
     // The interpreter evaluates an arm only where the selection reaches it.
     ['an arm that can throw', ['Which', ['Less', 3, 'L'], ['AssertPresent', ['If', ['Less', 0, 'x'], 1]], 'True', 0], /whose arms or later conditions are not pure/],
+    // An arm that builds a list of another length than the first condition
+    // would fail where that length is 2^32 or more, also where no position
+    // selects the arm (CE-1562).
+    ['a scalar arm that builds a list', ['Which', ['Less', 3, 'L'], ['Max', ['Range', 1, 'x']], 'True', 0], /whose arms or later conditions are not pure/],
+    // The interpreter does not evaluate a condition after a scalar one that
+    // holds.
+    ['a later condition that builds a list after a scalar condition', ['Which', ['Less', 3, 'L'], 1, ['Less', 1000, 'x'], 0, ['Less', 2, ['Range', 1, 'x']], 2, 'True', 0], /whose arms or later conditions are not pure/],
+    ['a Range of literals of another stated length',['Which', ['Less', 3, 'L3'], ['Range', 1, 4], 'True', 0], /lists of two lengths/],
+    ['an arm that maps a Range',['Which', ['Less', 3, 'L'], ['Map', ['Function', ['Multiply', 2, 'w'], 'w'], ['Range', 1, 'x']], 'True', 0], /whose arms or later conditions are not pure/],
+    ['a Map arm of a function with an effect', ['Which', ['Less', 3, 'L'], ['Map', ['Function', ['Multiply', ['Random'], 'w'], 'w'], 'L'], 'True', 0], /whose arms or later conditions are not pure/],
     ['an arm that writes a local', ['Block', ['Declare', 'p', "'real'", 0], ['Which', 'B', ['Assign', 'p', 1], 'True', 0], 'p'], /a selection at each position that writes a name/],
     ['a number arm and a point arm (an error of the canonical form)', ['Which', ['Less', 3, 'L'], ['Tuple', 1, 2], 'True', 'x'], /an error of the canonical form/],
     ['points of two lengths', ['If', ['Less', 3, 'L'], ['Tuple', 1, 2], ['Tuple', 3, 4, 5]], /arms of two types/],

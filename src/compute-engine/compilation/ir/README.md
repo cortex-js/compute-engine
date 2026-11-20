@@ -1823,7 +1823,15 @@ The conditions, the arms and the default are lowered once, before the
 build, all of them: the interpreter evaluates an arm and a later condition only
 where the selection reaches it, so one that is not pure (an effect, a write to a
 name, an operation that can throw such as `AssertPresent`, a loop, a recursive
-call) declines. The first condition reached must be a list: a scalar condition
+call) declines. Two exceptions (CE-1562). A `Range` arm is read at each position
+(`lo + k·step`) and is never built. A list that an arm or a later condition
+builds (`Map`, `At` of a list of indexes) is accepted when it has the length of
+the first condition, or, in a later condition with no scalar condition before it,
+the length of that condition: a build fails only at 2^32 elements or more, the
+first condition exists, and the interpreter evaluates every list condition up to
+the first scalar condition that holds. A
+build of another length in an arm declines (`Which(3 < L, Max(Range(1, x)),
+True, 0)`). The first condition reached must be a list: a scalar condition
 before it selects its arm whole when it holds, a value of another shape (its
 static type is a union), and declines. Arms are all numbers or booleans (with a
 clause `True`: without one, the interpreter gives `Missing`) and flat lists of

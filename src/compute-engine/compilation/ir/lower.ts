@@ -135,6 +135,7 @@ import {
   type Fn,
   type Frame,
   type Lowering,
+  type Source,
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
 import {
@@ -3858,7 +3859,9 @@ function lowerOnce(
    *  lowered once, before the build: the interpreter evaluates an arm (and
    *  a later condition) only where it is reached, so one that is not pure
    *  (an effect, a write to a name, an operation that can throw such as
-   *  `AssertPresent`, a loop, a recursive call) declines. The first condition is a
+   *  `AssertPresent`, a loop, a recursive call) declines, except a `Range`
+   *  arm, read at each position and never built, and a build that `eager()`
+   *  accepts by its length. The first condition is a
    *  list: before it, a scalar condition that holds selects its arm whole,
    *  a value of another shape. Stated lengths that differ decline (the
    *  interpreter gives `incompatible-dimensions`); run-time lengths that
@@ -3880,15 +3883,75 @@ function lowerOnce(
     ];
     if (lazy.some((x) => facts(x).writes.size > 0))
       decline(node, 'a selection at each position that writes a name');
-    const impure = b.impure;
-    const conds = [first, ...clauses.slice(1).map(([c]) => value(c)!)];
-    const arms = clauses.map(([, a]) => value(a)!);
-    const rest = otherwise === undefined ? undefined : value(otherwise)!;
-    if (b.impure > impure)
-      decline(
-        node,
-        'a selection at each position whose arms or later conditions are not pure'
+    // The length of the mask, which exists: below 2^32.
+    const masked = type(first).shape[0];
+    // `x` lowered, which declines when it emits an instruction that is not
+    // pure, other than a `build` of a length that `safe()` accepts: a build
+    // fails only for a length of 2^32 or more.
+    const eager = (x: Expression, safe: (n: Length, v: V) => boolean): V => {
+      const start = b.impure.length;
+      const v = value(x)!;
+      for (const i of b.impure.slice(start))
+        if (
+          i.k !== 'region' ||
+          i.op !== 'build' ||
+          masked === undefined ||
+          !safe(type(i.outs[0]).shape[0], v)
+        )
+          decline(
+            node,
+            'a selection at each position whose arms or later conditions are not pure'
+          );
+      return v;
+    };
+    // The interpreter evaluates every list condition up to the first scalar
+    // condition that holds, and gives `incompatible-dimensions` for one of
+    // another length than the mask: a build of the length of the mask, or
+    // of a condition with no scalar condition before it, cannot fail where
+    // the selection has a value.
+    let scalar = false;
+    const conds = [first];
+    for (const [c] of clauses.slice(1)) {
+      const v = eager(c, (n, v) =>
+        [masked!, ...(scalar ? [] : type(v).shape.slice(0, 1))].some((m) =>
+          same([n], [m])
+        )
       );
+      if (type(v).shape.length === 0) scalar = true;
+      conds.push(v);
+    }
+    // The interpreter evaluates an arm only where a position selects it,
+    // and reads it at the positions of the mask. A `Range` is the source of
+    // its elements, built nowhere: its element at the position is computed
+    // there (`ranges`). Another arm accepts a build of the length of the
+    // mask only.
+    const ranges = new Map<V, Source>();
+    const arm = (a: Expression): V => {
+      // A `Range` of number literals is a literal list of a stated length.
+      if (!isFunction(a, 'Range') || !isLibrary(a) || a.ops.every(isNumber))
+        return eager(a, (n) => same([n], [masked!]));
+      const start = b.impure.length;
+      const s = lists.source(a);
+      // The type of an element, from a read in a region that is not
+      // emitted; the list is a value that no instruction reads.
+      const element = type(
+        b.region([], () => [s.at(b.constant(0, 'integer'))]).yields[0]
+      );
+      if (b.impure.length > start)
+        decline(
+          node,
+          'a selection at each position whose arms or later conditions are not pure'
+        );
+      const n = constant(s.length);
+      const v = b.newValue({
+        lane: element.lane,
+        shape: [n ?? { v: s.length }],
+      });
+      ranges.set(v, s);
+      return v;
+    };
+    const arms = clauses.map(([, a]) => arm(a));
+    const rest = otherwise === undefined ? undefined : arm(otherwise);
     // A scalar, a flat list, a point, a list of points, or none of them.
     const kind = (v: V) => {
       const [axis, n] = [tuples.get(v), type(v).shape.length];
@@ -3959,7 +4022,9 @@ function lowerOnce(
       tuples.set(p, 0);
       return p;
     };
-    const cell = (v: V, k: V) => (listed(v) ? lists.listSource(v).at(k) : v);
+    const cell = (v: V, k: V) =>
+      (ranges.get(v) ?? (listed(v) ? lists.listSource(v) : undefined))?.at(k) ??
+      v;
     const pick = (j: number, k: V): V => {
       if (j === clauses.length)
         return rest === undefined ? absent() : cell(rest, k);

@@ -433,9 +433,9 @@ export class Builder {
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
   effects = 0;
-  /** The number of instructions emitted so far that are not pure (that can
-   *  throw, not terminate or have an effect). */
-  impure = 0;
+  /** The instructions emitted so far that are not pure (that can throw,
+   *  not terminate or have an effect), in the order of their emission. */
+  readonly impure: Instr[] = [];
   /** The number of positional parameters of the entry. */
   positional = 0;
   /** The entry is a root function literal. */
@@ -498,14 +498,18 @@ export class Builder {
    *  body are not counted in `effects` and `impure`: they are not the
    *  caller's, which counts the call by the function's effect. */
   define(fn: IRFunction, f: () => V[]): void {
-    const [open, effects, impure] = [this.open, this.effects, this.impure];
+    const [open, effects, impure] = [
+      this.open,
+      this.effects,
+      this.impure.length,
+    ];
     this.open = [fn.body];
     try {
       fn.body.yields = f();
     } finally {
       this.open = open;
       this.effects = effects;
-      this.impure = impure;
+      this.impure.length = impure;
     }
     this.functions.push(fn);
   }
@@ -524,7 +528,7 @@ export class Builder {
 
   emit(i: Instr): void {
     if (this.effectful(i)) this.effects++;
-    if (this.notPure(i)) this.impure++;
+    if (this.notPure(i)) this.impure.push(i);
     if (i.k === 'op') this.defs.set(i.out, i);
     this.current().body.push(i);
   }
