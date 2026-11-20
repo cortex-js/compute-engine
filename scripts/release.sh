@@ -195,8 +195,8 @@ if [ -d issues ]; then
   node scripts/issues.mjs release "$NEXT_VERSION" || ISSUES_STATUS=$?
   case $ISSUES_STATUS in
     0) ;;
-    1) fail "✗ An issue assigned to $NEXT_VERSION is still open, is carried over from an earlier version, or a confirmed P0 is open (above). Nothing was changed. Fix, close or reassign the issues, then run the release again." ;;
-    *) fail "✗ scripts/issues.mjs failed with exit status $ISSUES_STATUS (above). Nothing was changed." ;;
+    1) fail "The issues above block $NEXT_VERSION. Nothing was changed. Fix, close or reassign them, then run the release again." ;;
+    *) fail "scripts/issues.mjs failed with exit status $ISSUES_STATUS (above). Nothing was changed." ;;
   esac
 fi
 if [ "${GITHUB_ACTIONS:-}" != "true" ] && [ "${CE_FULL_SUITE_PASSED:-}" != "1" ]; then

@@ -321,8 +321,9 @@ it.
 
 ## Releases
 
-`node scripts/issues.mjs release <version>` lists every item with that
-`release`, in any state, and exits with 1 while one is not `fixed` or `close`,
+`node scripts/issues.mjs release <version>` counts the items with that
+`release`, lists the ones that block it (one line each: id, priority, state,
+title; `--json` gives every item), and exits with 1 while one is not `fixed` or `close`,
 while an open item is assigned to an earlier version (set a new `release` on
 it), while a confirmed P0 is open, or while a file has lint errors. The
 release script runs it in its first step, before anything changes, with the

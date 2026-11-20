@@ -869,31 +869,40 @@ function release(all, version) {
       ready,
     });
   else {
-    // console.log(`# Release ${version}, ${TODAY}`);
-    if (items.length > 0)
-      printList(
-        `Items of ${version}`,
-        items.map((i) => [i, isDone(i) ? 'done' : 'OPEN'])
-      );
-    if (carried.length > 0)
-      printList(
-        'Carried over from an earlier version: set a new `release`',
-        carried.map((i) => [i, i.fields.release])
-      );
-    if (p0.length > 0)
-      printList(
-        'Confirmed P0 open',
-        p0.map((i) => [i, ''])
-      );
+    // Plain text, one line per blocking item: this output is read in a
+    // terminal, where a Markdown table of every item wraps into a wall of text.
+    const width = process.stdout.isTTY ? process.stdout.columns || 100 : 0;
+    const line = (i, note) => {
+      const s = `  ${i.fields.id.padEnd(8)} ${(i.fields.priority ?? '').padEnd(3)} ${note.padEnd(15)} ${i.title}`;
+      return width > 0 && s.length > width ? s.slice(0, width - 1) + '…' : s;
+    };
+    const section = (heading, list, note) => {
+      if (list.length === 0) return;
+      console.log(`\n${heading}:`);
+      for (const i of list) console.log(line(i, note(i)));
+    };
+    const done = items.length - open.length;
+    console.log(`Release ${version}: ${done} of ${items.length} item(s) done.`);
+    section(`Open items of ${version}`, open, (i) => i.fields.state ?? '');
+    section(
+      'Open items of an earlier version (set a new `release`)',
+      carried,
+      (i) => `${i.fields.state} ${i.fields.release}`
+    );
+    section('Confirmed P0 open', p0, (i) => i.fields.state ?? '');
     if (broken.length)
       console.log(
         `\nFiles with lint errors (run lint): ${broken.map((i) => i.name).join(', ')}`
       );
-    console.log(
-      ready
-        ? `\n✓ Release ${version} is ready to ship.`
-        : `\n${version} cannot ship: ${open.length} item(s) open, ${carried.length} carried over, ${p0.length} P0, ${broken.length} file(s) with errors.`
-    );
+    if (ready) console.log(`\n✓ Release ${version} is ready to ship.`);
+    else {
+      const ids = [...new Set([...open, ...carried, ...p0])].map(
+        (i) => i.fields.id
+      );
+      console.log(
+        `\n${version} cannot ship. Blocking: ${[...ids, ...broken.map((i) => i.name)].join(', ')}`
+      );
+    }
   }
   process.exit(ready ? 0 : 1);
 }
