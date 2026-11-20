@@ -1100,12 +1100,19 @@ function lowerOnce(
             ? 'each'
             : undefined);
         // A list of points with a point (`all`), scaled by a list of
-        // numbers (`scale`), or under `norm`: point by point.
+        // numbers (`scale`), or under `norm`: point by point. A point scaled
+        // by a list of numbers (divided by one, as the dividend) is the list
+        // of the points that each element scales, as the interpreter gives
+        // it.
         if (
-          given.some((v) => tuples.get(v) === 1) &&
-          (rule === 'norm' ||
-            (rule === 'all' && given.some((v) => tuples.get(v) === 0)) ||
-            (rule === 'scale' && given.some((v) => numbers(v))))
+          (given.some((v) => tuples.get(v) === 1) &&
+            (rule === 'norm' ||
+              (rule === 'all' && given.some((v) => tuples.get(v) === 0)) ||
+              (rule === 'scale' && given.some((v) => numbers(v))))) ||
+          (rule === 'scale' &&
+            given.some((v) => numbers(v)) &&
+            ((r.head !== 'Divide' && r.signatures[0][2] !== 'div.q') ||
+              tuples.get(given[0]) === 0))
         )
           return eachPoint(node, r.head!, given, operation);
         if (rule === 'norm') return norm(node, tuple);
@@ -1202,14 +1209,16 @@ function lowerOnce(
    *  `resultType()`, a run-time length of the outer axis fits any length:
    *  two different lengths are an error of the interpreter that the static
    *  type does not show, and the build has the length of the first list of
-   *  points. */
+   *  points. With no list of points (a point scaled by a list of numbers),
+   *  the build is over the first list of numbers. */
   const eachPoint = (
     node: Expression,
     head: string,
     given: V[],
     f: (xs: V[]) => V
   ): V => {
-    const first = given.find((v) => tuples.get(v) === 1)!;
+    const first =
+      given.find((v) => tuples.get(v) === 1) ?? given.find((v) => numbers(v))!;
     const shape = type(first).shape;
     const known = (x: Length) => (typeof x === 'number' ? x : constant(x.v));
     const fits = (

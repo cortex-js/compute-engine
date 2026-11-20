@@ -70,6 +70,15 @@
 
 ### Resolved Issues
 
+- **A point multiplied by a list of numbers compiles** (CE-1569). With
+  `l: list<real>`, `a: real` and `b: real`, `Multiply(l, Tuple(a, b))` compiles
+  to JavaScript again, as it did in 0.186.0. It declined with "Multiply of a
+  tuple: its value on a tuple is not its value on a list". The value is the
+  list of the points that each number scales, as in the interpreter: for
+  `l = [1, 2]` and `(a, b) = (3, 4)` it is `[(3, 4), (6, 8)]`. A point divided
+  by a list of numbers (`Divide(Tuple(a, b), l)`) also compiles, and on GLSL
+  both compile when the list has a constant length.
+
 - **A `Sum` of points, or of lists of points, compiles** (CE-1568). With
   `P: list<tuple<real, real>>`, the spline
   `Sum(Multiply(At(P, Add(Mod(Add(k, Range(0, 1)), 2), 1)), k), Limits(k, 1, 4))`

@@ -251,6 +251,12 @@ const VALUES: [label: string, json: Json][] = [
   ['a list of points scaled by a list of numbers of a run-time length', ['Multiply', 'P', 'D']],
   ['a list of numbers times a list of points', ['Multiply', 'D', 'P']],
   ['a list of points divided by a list of numbers of a run-time length', ['Divide', 'P', 'D']],
+  // CE-1569: a point scaled by each element of a list of numbers.
+  ['a list of numbers times a point', ['Multiply', 'D', ['Tuple', 'x', 2]]],
+  ['a point times a list of numbers and a scalar', ['Multiply', 'M', 'D', 'x']],
+  ['a point times a list of numbers twice', ['Multiply', 'M', 'D', 'D']],
+  ['a point divided by a list of numbers', ['Divide', 'M3', ['Add', 10, 'D3']]],
+  ['a point times a list of numbers of its length', ['Multiply', 'M3', 'D3']],
   ['the x coordinates times a PointList of a list of numbers', ['Multiply', ['PointX', 'P'], ['PointList', 1, 'D']]],
   ['a PointList of a list of numbers times the x coordinates', ['Multiply', ['PointList', 1, 'D'], ['PointX', 'P']]],
   ['Map over the points', ['Map', ['Function', ['Add', ['PointX', 'q'], ['Abs', 'q']], 'q'], 'P']],

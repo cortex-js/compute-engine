@@ -81,6 +81,8 @@ const PROGRAMS: [string, unknown][] = [
   ['S', 'S'],
   ['S[2]', ['At', 'S', 2]],
   ['S + (x, y)', ['Add', 'S', ['Tuple', 'x', 'y']]],
+  ['L3 (x, y)', ['Multiply', 'L3', ['Tuple', 'x', 'y']]],
+  ['(x, y) / (L3 + 10)', ['Divide', ['Tuple', 'x', 'y'], ['Add', 'L3', 10]]],
   ['PointX(S[2])', ['PointX', ['At', 'S', 2]]],
   ['fs(S)', ['fs', 'S']],
   ['fp(S)', ['fp', 'S']],
@@ -308,7 +310,7 @@ const leaves = (v: Expected, path = ''): [string, Expected][] =>
           failures.push(`${name}: ${v.value} vs ${JSON.stringify(expected)}`);
       });
       expect(failures).toEqual([]);
-      expect(items.length).toBe(312);
+      expect(items.length).toBe(348);
     }, 120_000);
   }
 );

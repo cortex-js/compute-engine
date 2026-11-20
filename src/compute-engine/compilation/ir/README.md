@@ -2112,7 +2112,10 @@ whose element scales the point of the same index (`(M − P) / D`, as the
 interpreter gives it). A run-time length fits any length, as in `resultType()`
 (`Multiply(D, P)` of two inputs, `Multiply(PointX(P), PointList(1, D))`): two
 different lengths are an error of the interpreter that the static type does not show.
-Two stated lengths that differ decline. `PointX`, `PointY` and `PointZ` of
+Two stated lengths that differ decline. A point times a list of numbers (or
+divided by one, as the dividend) is the same build over the list of numbers:
+the list of the points that each element scales (`Multiply(D, Tuple(a, b))`,
+as the interpreter gives it). `PointX`, `PointY` and `PointZ` of
 a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a point of 2
 coordinates is an `incompatible-dimensions` error of the canonical form, and
 declines); of a list of points, the list of those coordinates, and of a literal
