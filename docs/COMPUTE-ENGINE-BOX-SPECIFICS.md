@@ -74,8 +74,13 @@ with no box lock here:
 It tests this tree as it is (HEAD, the uncommitted changes and the untracked
 files) in the WSL Linux of univac, the user's other machine, and prints the
 summary of `run-summarized.mjs`. Its header gives the options. Two runs use
-univac at a time; a third waits there. Use it when the box lock has a queue.
-The local lock rules above still apply to every run on this machine.
+univac at a time; a third waits there. A run of one file takes about 3 s; the
+full suite (`--workers 12 --timeout-min 30 -- --silent`) about 9 minutes, slower
+than here, so use it when the box lock has a queue. At 12 workers two timing
+tests can fail from load (`ir-interval-contract` "a chain of 1,000 Ifs",
+`ce-1102-provisional-registry-weak-references`); run a failing file again alone
+before you read it as a defect. The local lock rules above still apply to every
+run on this machine.
 
 Exception: a local release (`npm run release`, or `npm publish`) takes no lock
 for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
