@@ -56,6 +56,16 @@
 
 ### Resolved Issues
 
+- A function value that reads a parameter of the call that made it lost the
+  parameter when another call's argument mentioned the same name:
+  `Apply(a ↦ Apply(v ↦ Map(j ↦ v[j] + a, 1..2), Map(q ↦ a + q, 1..2)), 10)`
+  was `[a_1 + 11, a_1 + 12]`, and is `[21, 22]` (as in 0.187.1). The scope of a
+  callback body holds the binding of the enclosing parameter it reads, and the
+  substitution of `v` took it for a binder of `a` and renamed it to keep the
+  free `a` of the argument from being captured. A parameter of a literal is no
+  binder of the nested `Block` (#632, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`Characters`, `StringJoin` of a list and `ColorToString` compile again on
   JavaScript (CE-1548).** `Characters(s)` and `GraphemeClusters(s)` give the
   array of the characters of `s`, `StringJoin(L)` and `StringJoin(L, sep)`

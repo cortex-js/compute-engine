@@ -5234,6 +5234,24 @@ function isParameterEntry(
 }
 
 /**
+ * True when the scope entry `entry` holds the binding of a parameter of a
+ * `Function` literal. The body `Block` of a literal holds its own parameters
+ * (bound by the literal) and the parameters of the enclosing literals that
+ * it reads; neither is a binder of the `Block`, so neither is renamed.
+ * `a ↦ Apply(v ↦ Map(j ↦ v[j] + a, …), Map(q ↦ a + q, …))` read `a_1`, free,
+ * when the `a` of the callback counted as bound.
+ */
+function isEnclosingParameterEntry(
+  entry: BoxedDefinition | undefined
+): boolean {
+  return (
+    entry !== undefined &&
+    'value' in entry &&
+    isFunctionLiteralParameter(entry.value)
+  );
+}
+
+/**
  * How `node` binds `name` itself, so that an occurrence of `name` below it
  * does not denote the parameter `name` of `subs`. `'all'`: in every
  * operand (a `Function` literal whose parameter list holds the name, a
@@ -5325,7 +5343,10 @@ function parameterSubBinds(
     const kept = names.filter(
       (name) =>
         locals.includes(name) ||
-        !isParameterEntry(subs, node.localScope?.bindings.get(name), name)
+        !(
+          isParameterEntry(subs, node.localScope?.bindings.get(name), name) ||
+          isEnclosingParameterEntry(node.localScope?.bindings.get(name))
+        )
     );
     const added = locals.filter((name) => !names.includes(name));
     return kept.length === names.length && added.length === 0
