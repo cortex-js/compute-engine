@@ -258,6 +258,23 @@ A checked-but-never-run Program changes no caller registry. This is a necessary
 explicit replacement of P2's global registration during boxing, not a cleanup
 justified merely by popping a scope.
 
+CE-1557 adds an ordering requirement for protocol defaults. A declaration
+table built before type and protocol checking must retain the original
+source positions and admission decisions. An accepted earlier `const`
+admits a symbol default. A same-program `let` or later declaration of that
+name masks a constant from an older run for this check. If the current
+constant's type is still unavailable, check the argument when the default
+is filled. The shared declaration table can replace the rank-0 pre-scan once
+it supplies those facts without publishing an initializer value.
+
+In the live Program namespace, existing protocol member handles read the
+default from the protocol's declaring scope at each call. They observe a
+later redeclaration there and ignore a caller-local shadow. Keep those
+semantics until a change to the live API is explicitly accepted. A separate
+Document revision with a revision-owned namespace can resolve its defaults
+in that namespace. Preserve both CE-1557 cases in
+`test/epsil/parameter-default-values.test.ts` when replacing the Program pass.
+
 P1/P3/P4/P6/P8/P9/P10 otherwise stand: Program has no extra user lexical scope,
 functions are available in canonical order, function bodies can refer to a later
 Program variable, top-level-only forms stay restricted, invalid siblings continue,
