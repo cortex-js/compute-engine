@@ -372,7 +372,6 @@ describe('IR slice: random programs against the interpreter', () => {
     const errorSamples: string[] = [];
     const bitDifferences: string[] = [];
     const compiledDeclines: string[] = [];
-    const missingWarnings: string[] = [];
     const changedInputs: string[] = [];
     let warned = 0;
     // The compiled programs that reach each construct of round 3.
@@ -426,14 +425,10 @@ describe('IR slice: random programs against the interpreter', () => {
       if (decline !== undefined) compiledDeclines.push(JSON.stringify(json));
       compiled += 1;
       const text = JSON.stringify(json);
-      // One frame with two draw sites or more has a warning.
-      const sites = (text.match(/"(Random|rnd)"/g) ?? []).length;
-      if (
-        text.split('WithRandomSeed').length === 2 &&
-        sites >= 2 &&
-        warnings.length === 0
-      )
-        missingWarnings.push(text);
+      // The warning of a frame with two draw sites or more is checked on
+      // focused programs (`ir-list-operators.test.ts`, `ir-profile.test.ts`):
+      // a count of `Random` in the text also counts a draw in a branch that
+      // the compiler removes, which has no warning.
       if (warnings.length > 0) warned += 1;
       for (const c of CONSTRUCTS)
         if (text.includes(c.startsWith('"') ? c : `"${c}"`))
@@ -532,7 +527,6 @@ describe('IR slice: random programs against the interpreter', () => {
     for (const [c, n] of reached)
       expect([c, n > (10 * COUNT) / 5000]).toEqual([c, true]);
     expect(compiledDeclines).toEqual([]);
-    expect(missingWarnings).toEqual([]);
     expect(changedInputs).toEqual([]);
     expect(warned).toBeGreaterThan((10 * COUNT) / 5000);
     // A smaller sample need not embed each program of `DECLINES`: the next
