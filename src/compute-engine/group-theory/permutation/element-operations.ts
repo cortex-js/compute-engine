@@ -20,6 +20,8 @@ import {
   degreeLimit,
   composePermutations,
   inversePermutation,
+  assertPermutationFits,
+  type PermutationAction,
   type PermutationWork,
 } from './values.js';
 
@@ -188,4 +190,77 @@ export function permutationCommutator(
     right,
     work
   );
+}
+
+/**
+ * All cycles of the permutation on {1, ..., n}, fixed points (cycles of
+ * length 1) included, each starting at its least point, in order of that
+ * point. Example: `[2, 1]` on a degree-3 action gives `[[1, 2], [3]]`.
+ *
+ * Throws `permutation-outside-action` when a moved point is above `n`.
+ */
+export function permutationCyclesIn(
+  value: PermutationValue,
+  action: PermutationAction,
+  work: PermutationWork = {}
+): readonly (readonly number[])[] {
+  assertPermutationFits(value, action, work);
+  const result: (readonly number[])[] = [];
+  const seen = new Uint8Array(action.degree);
+  for (let root = 1; root <= action.degree; root++) {
+    work.check?.();
+    if (seen[root - 1]) continue;
+    const cycle: number[] = [];
+    let point = root;
+    do {
+      work.check?.();
+      seen[point - 1] = 1;
+      cycle.push(point);
+      point = point <= value.supportDegree ? value.images[point - 1] : point;
+    } while (point !== root);
+    result.push(cycle);
+  }
+  return result;
+}
+
+/**
+ * The points of {1, ..., n} that the permutation fixes, in increasing order.
+ * `[2, 1]` on a degree-3 action fixes `[3]`.
+ *
+ * Throws `permutation-outside-action` when a moved point is above `n`.
+ */
+export function permutationFixedPoints(
+  value: PermutationValue,
+  action: PermutationAction,
+  work: PermutationWork = {}
+): readonly number[] {
+  assertPermutationFits(value, action, work);
+  const result: number[] = [];
+  for (let point = 1; point <= action.degree; point++) {
+    work.check?.();
+    if (point > value.supportDegree || value.images[point - 1] === point)
+      result.push(point);
+  }
+  return result;
+}
+
+/**
+ * The one-line form on {1, ..., n}: the stored images followed by the
+ * trailing fixed points up to `n`. `[2, 1]` on a degree-3 action gives
+ * `[2, 1, 3]`.
+ *
+ * Throws `permutation-outside-action` when a moved point is above `n`.
+ */
+export function permutationImagesIn(
+  value: PermutationValue,
+  action: PermutationAction,
+  work: PermutationWork = {}
+): readonly number[] {
+  assertPermutationFits(value, action, work);
+  const result = [...value.images];
+  for (let point = result.length + 1; point <= action.degree; point++) {
+    work.check?.();
+    result.push(point);
+  }
+  return result;
 }

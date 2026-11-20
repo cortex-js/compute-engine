@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### New Features
+
+- **Group-theory heads read the degree of a permutation from an action**
+  (#622). A `Permutation` stays in its canonical form, which drops trailing
+  fixed points, so `Permutation([2, 1, 3])` and `Permutation([2, 1])` are
+  the same value (`isSame`, `hash`, `Set`, `Contains`, `Unique` agree with
+  `Equal`). A statistic on S_n that needs n now passes it as a
+  `PermutationAction(n)`, as `PermutationApply` does: `PermutationCycles(p,
+  action)` also lists the fixed points as cycles of length 1,
+  `PermutationFixedPoints(p, action)` is new, and `PermutationImages(p,
+  action)` is new and pads the one-line form to n. Without the action
+  `PermutationCycles` is unchanged. A permutation that moves a point above n
+  is an `Error("permutation-outside-action")`.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues
