@@ -834,7 +834,9 @@ read:
   with at least one term, from a constant at most 0 to a length
   (`Sum(L·i, i, 0, Length(L))`, CE-1567), or with a term of a stated length (`L: list<real^2>`), the
   terms are added element by element and the sum compiles
-  (`compilation/ir/README.md`, "Lists", CE-1470);
+  (`compilation/ir/README.md`, "Lists", CE-1470); so are terms that are
+  tuples or lists of tuples (`Sum(P_k·k, k, 1, 4)` with
+  `P: list<tuple<real, real>>`, CE-1568);
 - a fold of a list of points (`Sum(L)` with `L: list<tuple<real, real>>`:
   "a term that is not a number");
 - a recursive function whose list or tuple result has no stated element

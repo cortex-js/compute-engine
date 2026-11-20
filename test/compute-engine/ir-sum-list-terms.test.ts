@@ -23,12 +23,14 @@ import {
 } from '../../src/compute-engine/boxed-expression/type-guards';
 
 type Json = unknown;
-type Point = Record<string, number | number[]>;
+/** A value of an input; an array of arrays is a list of tuples. */
+type Point = Record<string, number | number[] | number[][]>;
 
 const ce = new ComputeEngine();
 for (const name of ['C', 'U', 'A', 'X'])
   ce.declare(name, 'list<nan | real | signed_infinity>');
 ce.declare('L', 'list<real^2>');
+ce.declare('P', 'list<tuple<real, real>>');
 ce.declare('N', 'real');
 ce.declare('u', 'real');
 
@@ -53,18 +55,25 @@ function failure(f: () => unknown): string | undefined {
 /** The interpreter's value: a list is an array. */
 function read(e: Expression): unknown {
   if (isNumber(e)) return e.re;
-  if (isFunction(e, 'List')) return e.ops.map(read);
+  if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e.ops.map(read);
   throw new Error(`no value: ${e.toString()}`);
 }
 
 function interpreted(json: Json, point: Point): unknown {
+  const element = (x: number | number[]): Expression =>
+    Array.isArray(x)
+      ? ce.function(
+          'Tuple',
+          x.map((n) => ce.number(n))
+        )
+      : ce.number(x);
   const values = Object.fromEntries(
     Object.entries(point).map(([k, v]) => [
       k,
       Array.isArray(v)
         ? ce.function(
             'List',
-            v.map((n) => ce.number(n))
+            v.map((x) => element(x))
           )
         : ce.number(v),
     ])
@@ -215,6 +224,34 @@ describe('IR profile: a Sum or a Product of list terms (CE-1470)', () => {
     ]);
   });
 
+  // A term that is a tuple or a list of tuples: the interpreter adds the
+  // tuples element by element (CE-1568). The first case is the Tycho
+  // spline of CE-1568: each term picks the points of `P` in turn.
+  // prettier-ignore
+  test.each([
+    ['the spline of CE-1568', sum(['Multiply', ['At', 'P', ['Add', ['Mod', ['Add', 'i', ['Range', 0, 1]], 2], 1]], 'i'], 1, 4)],
+    ['a tuple written out', sum(['Multiply', 'i', ['At', 'P', 'i']], 1, 2)],
+    ['a tuple in a loop (200 terms)', sum(['Multiply', ['Sin', 'i'], ['At', 'P', 1]], 1, 200)],
+    ['a tuple literal in a loop (200 terms)', sum(['Tuple', 'i', 'N'], 1, 200)],
+    ['a list of tuples written out', sum(['Multiply', 'i', 'P'], 1, 3)],
+    ['a list of tuples in a loop (200 terms)', sum(['Add', 'P', ['At', 'P', 1]], 1, 200)],
+    ['a list of tuples from 0 to a length', sum(['Multiply', 'i', 'P'], 0, ['Length', 'P'])],
+  ])('%s: the interpreter’s value', (_, json) => {
+    check(json, [
+      { P: [[1, 2], [3, 4]], N: 3 },
+      { P: [[-0.5, 7.25], [2, 0], [1e3, -4]], N: -1 },
+    ]);
+  });
+
+  test('past the iteration budget: a tuple of NaN, a list of tuples of NaN', () => {
+    const options = { iterationBudget: 10 };
+    const P = [[1, 2], [3, 4]];
+    const point = js(sum(['Multiply', 'i', ['At', 'P', 1]], 1, 400), options);
+    expect(point.run!({ P } as never)).toEqual([NaN, NaN]);
+    const points = js(sum(['Multiply', 'i', 'P'], 1, 400), options);
+    expect(points.run!({ P } as never)).toEqual([[NaN, NaN], [NaN, NaN]]);
+  });
+
   test('over a range with no term: the list of the identity of a stated length', () => {
     expect(
       js(sum(['Add', 'L', 'i'], 1, 'N')).run!({ L: [1, 2], N: 0 } as never)
@@ -241,7 +278,11 @@ describe('IR profile: a Sum or a Product of list terms (CE-1470)', () => {
     ['a range from 1 to a length', sum(['Multiply', 'i', 'X'], 1, ['Length', 'X']), /over a range that can be empty/],
     // The accumulator has one length.
     ['a length computed in each term', sum(['Range', 1, 'i'], 1, 200), /computed in each term/],
-    ['a term that is a tuple', sum(['Tuple', 'i', 'N'], 1, 200), /a term that is not a number/],
+    // At N = 0 the interpreter gives the number 0, a tuple otherwise.
+    ['a tuple over run-time bounds', sum(['Multiply', 'i', ['At', 'P', 1]], 1, 'N'), /over a range that can be empty/],
+    ['a list of tuples over run-time bounds', sum(['Multiply', 'i', 'P'], 1, 'N'), /run-time length|over a range that can be empty/],
+    // A product of two tuples is not element by element.
+    ['a product of tuples', product(['Multiply', 'i', ['At', 'P', 1]], 1, 3), /Multiply of a tuple/],
   ])('%s declines', (_, json, cause) => {
     expect(failure(() => js(json))).toMatch(cause);
   });

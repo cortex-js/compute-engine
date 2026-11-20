@@ -70,6 +70,15 @@
 
 ### Resolved Issues
 
+- **A `Sum` of points, or of lists of points, compiles** (CE-1568). With
+  `P: list<tuple<real, real>>`, the spline
+  `Sum(Multiply(At(P, Add(Mod(Add(k, Range(0, 1)), 2), 1)), k), Limits(k, 1, 4))`
+  compiles to JavaScript again, as it did in 0.186.0, and gives
+  `[(18, 28), (22, 32)]` for `P = [(1, 2), (3, 4)]`, as the interpreter does. It
+  declined with "a term that is not a number". The terms are added point by
+  point. A `Product` of points still declines, and so does a sum of points over
+  a range that can be empty: the interpreter then gives the number `0`.
+
 - **A `Sum` or a `Product` of list terms from 0 to the length of a list
   compiles** (CE-1567). With `L: list<real>`,
   `Sum(Multiply(k, L), Limits(k, 0, Length(L)))` compiles to JavaScript again,

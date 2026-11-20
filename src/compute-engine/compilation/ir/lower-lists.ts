@@ -296,9 +296,13 @@ export function listLowering(cx: Lowering) {
   }
 
   /** A term of an indexed `Sum` or `Product` that is a list: a flat list
-   *  of numbers, not a tuple. */
-  const listTerm = (t: V): boolean =>
-    type(t).shape.length === 1 && !cx.tuples.has(t);
+   *  of numbers, a tuple, or a list of tuples, each tuple of a constant
+   *  length (the interpreter adds tuples element by element). */
+  const listTerm = (t: V): boolean => {
+    const [shape, axis] = [type(t).shape, cx.tuples.get(t)];
+    if (axis === undefined) return shape.length === 1;
+    return shape.length === axis + 1 && typeof shape[axis] === 'number';
+  };
 
   /** The list of the length `n` whose every element is `x`. */
   const filled = (e: Fn, n: Length, x: V): V =>
@@ -311,12 +315,34 @@ export function listLowering(cx: Lowering) {
       e
     );
 
+  /** The value of the shape `shape` whose every number is `x`, a tuple at
+   *  the axis `axis` (`cx.tuples`). */
+  const filledAs = (
+    e: Fn,
+    shape: readonly Length[],
+    axis: number | undefined,
+    x: V
+  ): V => {
+    if (shape.length === 0) return x;
+    const inner = filledAs(
+      e,
+      shape.slice(1),
+      axis === undefined || axis === 0 ? undefined : axis - 1,
+      x
+    );
+    // A build of tuples is a list of tuples (`keep()` of `lower.ts`).
+    const v = filled(e, shape[0], inner);
+    if (axis === 0) cx.tuples.set(v, 0);
+    return v;
+  };
+
   /** A counted loop from `lo` to `hi` that carries the accumulator of
    *  `r`, from `init`, over the value of `term` at each index. With
-   *  `lists` (an indexed `Sum` or `Product`), a term may be a flat list
-   *  whose length is known before the loop: the accumulator is then a list
-   *  of that length, from `init` in each element, and the terms are added
-   *  element by element (`README.md`, "Lists"). */
+   *  `lists` (an indexed `Sum` or `Product`), a term may be a flat list, a
+   *  tuple or a list of tuples (`listTerm()`) whose length is known before
+   *  the loop: the accumulator then has the shape of the term, from `init`
+   *  in each element, and the terms are added element by element
+   *  (`README.md`, "Lists"). */
   const accumulate = (
     e: Fn,
     r: OperatorRow,
@@ -330,13 +356,16 @@ export function listLowering(cx: Lowering) {
     const params = [k];
     let lane: Lane | undefined;
     let shape: readonly Length[] = [];
+    let axis: number | undefined;
     const body = b.region(params, () => {
       const t = term(k);
       lane = signatureOf(r, [type(init), type(t)])?.[1] as Lane | undefined;
       shape = type(t).shape;
+      axis = cx.tuples.get(t);
       if (lane === undefined || (shape.length > 0 && !(lists && listTerm(t))))
         decline(e, 'a term that is not a number');
       const acc = b.newValue({ lane, shape });
+      if (axis !== undefined) cx.tuples.set(acc, axis);
       params.push(acc);
       const next = cx.apply(e, r, [acc, t]);
       if (type(next).lane !== lane)
@@ -351,8 +380,8 @@ export function listLowering(cx: Lowering) {
     if (n !== undefined && typeof n !== 'number' && definedIn(body, n.v))
       decline(e, 'a term that is a list whose length is computed in each term');
     const out = b.newValue({ lane: lane!, shape });
-    const first = cx.widen(init, lane!);
-    const start = n === undefined ? first : filled(e, n, first);
+    if (axis !== undefined) cx.tuples.set(out, axis);
+    const start = filledAs(e, shape, axis, cx.widen(init, lane!));
     b.emit({ k: 'loop', outs: [out], lo, hi, init: [start], body });
     return out;
   };
@@ -401,7 +430,8 @@ export function listLowering(cx: Lowering) {
    *  the cases of `README.md`, "Lists" (a sum written out). With
    *  `identity`, `init` is the identity of `r`: the fold starts at the
    *  first term when the loop's accumulator has its lane. With `lists`, a
-   *  term may be a flat list (`accumulate()`). */
+   *  term may be a flat list, a tuple or a list of tuples (`listTerm()`,
+   *  `accumulate()`). */
   const writtenOut = (
     e: Fn,
     r: OperatorRow,
@@ -459,6 +489,16 @@ export function listLowering(cx: Lowering) {
           const s = signatureOf(r, [type(acc), type(t)]);
           if ((type(t).shape.length > 0 && !(lists && listTerm(t))) || !s)
             return undefined;
+          // A tuple term: the fold starts from a tuple of `init`, as the
+          // loop's accumulator (`accumulate()`); `init` and a tuple have no
+          // sum.
+          if (j === 0 && cx.tuples.has(t))
+            acc = filledAs(
+              e,
+              type(t).shape,
+              cx.tuples.get(t),
+              cx.widen(init, s[1] as Lane)
+            );
           acc =
             identity && j === 0 && s[1] === type(t).lane
               ? t
@@ -497,8 +537,10 @@ export function listLowering(cx: Lowering) {
       return v;
     });
     const init = integer(REDUCTIONS.get(e.operator)!.identity);
-    // A term may be a flat list: the interpreter adds (multiplies) the
-    // terms element by element (`accumulate()`).
+    // A term may be a flat list, a tuple or a list of tuples: the
+    // interpreter adds (multiplies) the terms element by element
+    // (`accumulate()`). A `Product` of tuples declines: `Multiply` of two
+    // tuples is not element by element.
     const term = (k: V) => indexed(index.symbol, k, () => cx.value(e.ops[0])!);
     const written = writtenOut(e, r, init, lo, hi, term, false, true);
     if (written !== undefined) return written;
@@ -534,6 +576,7 @@ export function listLowering(cx: Lowering) {
     const within = cx.apply(e, 'Less', [span, budget]);
     let lane: Lane = 'real';
     let shape: readonly Length[] = [];
+    let axis: number | undefined;
     return cx.branch(
       e,
       within,
@@ -541,6 +584,7 @@ export function listLowering(cx: Lowering) {
         const v = run();
         lane = type(v).lane;
         shape = type(v).shape;
+        axis = cx.tuples.get(v);
         return v;
       },
       () => {
@@ -548,8 +592,8 @@ export function listLowering(cx: Lowering) {
           lane === 'complex'
             ? b.constant({ re: NaN, im: NaN }, 'complex')
             : b.constant(NaN, 'real');
-        // A list of NaN for a list of terms.
-        return shape.length === 0 ? nan : filled(e, shape[0], nan);
+        // A list (a tuple) of NaN for a list (a tuple) of terms.
+        return filledAs(e, shape, axis, nan);
       },
       true
     )!;

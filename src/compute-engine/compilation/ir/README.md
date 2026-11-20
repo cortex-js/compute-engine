@@ -1519,13 +1519,18 @@ operands of a `Range` are reals or integers: its elements are `lo + k·step` for
 `[-2.5, -1.5, …, 2.5]`), integers when the first element and the step are. GLSL
 has no spelling of a run-time count.
 
-A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers (not a
-tuple) adds or multiplies the terms element by element, as the interpreter does
-(CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is `[6.75, 7.5]`,
+A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers adds
+or multiplies the terms element by element, as the interpreter does (CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is `[6.75, 7.5]`,
 and `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two lists `C` and
 `U` is the sum, for each element of `C`, of the indexes where `U` holds it. A
-sum written out (above) folds the list terms from the identity with the
-element-wise operation; the loop (`accumulate()`) carries a list accumulator of
+`Sum` whose term is a tuple or a list of tuples, each tuple of a constant
+length, adds the tuples element by element too (CE-1568): the spline
+`Sum(P[Mod(k + Range(0, 1), 2) + 1]·k, Limits(k, 1, 4))` with
+`P: list<tuple<real, real>>` is a list of two points. The accumulator is a
+tuple (a list of tuples) of the identity, since the identity and a tuple have
+no sum. A `Product` of tuples declines (`Multiply` of two tuples is not
+element by element). A sum written out (above) folds the list terms from the
+identity with the element-wise operation; the loop (`accumulate()`) carries a list accumulator of
 the length of the term, the identity in each element before the first pass. The
 length of the term must be a value made before the loop (a number, the length of
 an input, of a list computed outside the sum): a length computed in each term
@@ -1543,8 +1548,9 @@ there. A range from a constant at most 0 to an integer upper bound that
 `nonnegative()` proves `>= 0` (a `Length`) has a term:
 `Sum(i X, Limits(i, 0, Length(X)))` compiles, and
 `Sum(i X, Limits(i, 1, Length(X)))` declines (no term when `X` is empty). A real
-upper bound is lowered through `Floor`, which `nonnegative()` does not prove. Past the `iterationBudget` a list sum is a list of NaN. A list of a
-run-time length declines on GLSL, and a selection at each position (`Which` of a
+upper bound is lowered through `Floor`, which `nonnegative()` does not prove.
+Past the `iterationBudget` a list sum is a list of NaN (a tuple sum, a tuple of
+NaN). A list of a run-time length declines on GLSL, and a selection at each position (`Which` of a
 list condition) declines in the interval mode, as elsewhere.
 
 A JavaScript result is read-only, as the contract of `run()` states
