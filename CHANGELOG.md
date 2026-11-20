@@ -56,6 +56,31 @@
 
 ### Resolved Issues
 
+- **`Zeta` of a real number within 10^-j of 1, 0, −2, −4, … is right to the
+  working precision.** Next to the pole and the trivial zeros the value is a
+  quotient or product with a factor of size 10^-j, and the rounding error of
+  that factor, absolute at the working precision, cost j digits of the result:
+  `Zeta(-2 - 10^-30).N()` at 30 digits was 3.0448457058393270780251**4788**e-32
+  for 3.0448457058393270780251**5305**e-32, and `Zeta(1 + 10^-30)` was wrong
+  from its 25th digit. The kernel now adds j guard digits, so the error is
+  relative to the result, and declines (the call stays unevaluated) when j
+  passes 500; within 10^-(p+2) of 0, at p digits, the value is −1/2. Against mpmath on `s = n ± 10^-k` for `n` in 1, 0, −1, −2, −4,
+  −10, `k` from 10 to 40 and 30, 50 and 100 digits, a float operand, an exact
+  one, `evaluate()` and the LaTeX parse route had 74 wrong points of 252 each
+  (27 for an exact operand), and have none. Machine precision is unchanged.
+  (#626, PR #627, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **`HurwitzZeta(s, a)` within 1.1e-16 of `s = 1` is answered, not an internal
+  error.** The double of such an `s` is exactly 1, and the Euler-Maclaurin
+  planner sized the sum from `log10|s - 1|` of that double, an infinite
+  estimate that ended in `RangeError: The number NaN cannot be converted to a
+  BigInt`. It reads the distance from the operand now, and declines when the
+  estimate is still not finite or, as `Zeta` does, within 10^-500 of 1. `HurwitzZeta(1 + 10^-30, 3).N()` at 30 digits
+  is `999999999999999999999999999999.0772…`. Against mpmath, `a` = 1/4 and 3,
+  `s = 1 ± 10^-k` for `k` from 3 to 40, at 30, 50 and 100 digits: 78 of 156
+  points were an error, and none is now. (#626, PR #627, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **A finite value past the exponent range of a big decimal stays
   unevaluated.** A `BigDecimal` keeps its decimal exponent in a JS number, so
   `exp()` saturates beyond 2^53 and `Gamma(3000000000000001/3)` (about
