@@ -257,6 +257,16 @@
   nothing. A tuple beside a list whose elements are not tuples of the same
   length still declines.
 
+- **A parameter of an outer function literal, read two literals down under a
+  lazy `Map` that a reducer holds, has its value.**
+  `Apply(s ↦ Sum(Map(v ↦ Apply(t ↦ Length(Take(s, 2)), v), 1..2)), [2, 3, 4, 4])`
+  was `2Length(Take(s, 2))`; it is `4`. The same for `Max` and `Reduce` in place
+  of `Sum`. `Map` lowers its callback, so the callback's scope is never an
+  activation, and the call frame of the inner literal chained to a scope that
+  holds no value of `s`. The frame now chains to the activation of the nearest
+  enclosing scope that has one.
+  (#624, PR #625, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `AiryAiPrime`
   and `AiryBiPrime` of a real argument carry the precision asked for.** At
   `ce.precision = 50`, `SinIntegral(0.7)` was the double `0.6812222391166113`;
