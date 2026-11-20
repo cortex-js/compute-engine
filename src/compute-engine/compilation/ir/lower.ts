@@ -4009,11 +4009,39 @@ function lowerOnce(
     const cond = scalar(test);
     if (type(cond).lane !== 'boolean')
       decline(test, 'a condition that is not a boolean');
-    // The interval mode, whose `fold` is off: a decided condition takes its
-    // arm, and the other is not lowered, as on the earlier interval target.
+    // A decided condition (a constant: a closed condition is folded, and
+    // the interval mode decides one too) takes its arm, and the other is
+    // not lowered: the interpreter does not evaluate it, so an arm that
+    // would decline (`Less(x, Sqrt(-0.44))`) does not decline the program.
     // A false one with no arm after it is lowered: the shape of the missing
     // value is the shape of its arm.
-    const decided = interval ? b.constants.get(cond) : undefined;
+    // Outside the interval mode, the arms are still compared
+    // (`docs/COMPILATION-MODEL.md`, "The arms of a conditional are compared
+    // on every target"): an arm is left out only when there is an
+    // `otherwise` and the static types of all the arms are one scalar kind
+    // (integer, real or boolean), so that the comparison of `branch()`
+    // could not decline and its join could not widen the lane of the
+    // result (an integer to a real on GLSL, a real to a complex, a number
+    // to the NaN of no arm taken). Otherwise both arms are lowered, and the
+    // `fold` pass removes the one not taken.
+    const arms = [then, ...rest.map(([, a]) => a)];
+    if (otherwise !== undefined) arms.push(otherwise);
+    const kind = (a: Expression) =>
+      isSubtype(a.type.type, 'integer')
+        ? 'integer'
+        : isSubtype(a.type.type, 'real')
+          ? 'real'
+          : isSubtype(a.type.type, 'boolean')
+            ? 'boolean'
+            : undefined;
+    const scalarArms =
+      otherwise !== undefined &&
+      kind(then) !== undefined &&
+      arms.every((a) => kind(a) === kind(then));
+    const decided =
+      interval || (options.fold !== false && scalarArms)
+        ? b.constants.get(cond)
+        : undefined;
     if (decided === true) return value(then, want);
     if (
       decided === false &&

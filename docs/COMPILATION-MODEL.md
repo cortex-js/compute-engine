@@ -1328,7 +1328,15 @@ rule: an input typed `any` (R1) or a value with no settled shape
 
 The arms of a conditional are compared on every target, also where the
 condition is known when the code is generated: the compiler keeps both arms
-of `If(2 < 3, …)` (its code tests `true`). So points of different sizes
+of `If(2 < 3, …)` (its code tests `true`). The one exception is a conditional
+with an `else` arm whose arms all have a static type of one scalar kind
+(integer, real or boolean): then the compiler lowers only the arm that is
+taken, as the interpreter evaluates only that arm, and an arm that is not
+taken does not decline the program
+(`Which(1.2 <= 1, Which(x < -Sqrt(1 - 1.2^2), 1, True, 0), True, 1)` is `1`).
+A name read only in the arm that is not taken is then not an input, and is
+not in `freeSymbols` (`If(1 < 2, x, y)` with `x, y: real` reads `x` only).
+So points of different sizes
 (`If(x > 0, (1, 2), (3, 4, 5))`), a `NaN` arm beside a point
 (`If(c, (x, y), NaN)`), `Which(2 < 3, [1, 2], True, 0)`,
 `If(2 < 3, (1, 2), 0)` (on `glsl`) and `If(2 < 3, 0, If(x > 0, [1, 2], 3))`

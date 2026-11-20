@@ -70,6 +70,16 @@
 
 ### Resolved Issues
 
+- **A conditional whose condition is a constant compiles when the arm that is
+  not taken would decline** (CE-1560). With `x: real`,
+  `Which(1.2 <= 1, Which(x < -Sqrt(1 - 1.2^2), 1, True, 0), True, 1)` compiles
+  to `1` again, as it did in 0.186.0. It declined with "Less of real, complex".
+  The interpreter does not evaluate the arm that is not taken, and now the
+  compiler does not lower it either. This applies only when every arm has the
+  same scalar type (integer, real or boolean) and there is an `else` arm. A
+  name read only in the arm that is not taken is then not in `freeSymbols`.
+  Arms of two shapes still decline, as `docs/COMPILATION-MODEL.md` says.
+
 - **The characters of a string and the elements of a list of strings can be
   counted, read and transformed in compiled JavaScript** (CE-1556). With
   `s: string` and `L: list<string>`, `Count(Characters(s), c -> c == "a")`,
