@@ -203,6 +203,17 @@ Known outer constructors can retain their shape only when the ordinary type hand
 proves it without consulting the cyclic unknown. No optimistic placeholder counts
 as a proven shape.
 
+An interface is available before the group has any executable bodies. Check each
+body against that interface using the other declared interfaces on recursive
+edges. Check the body's own result before adding a return ascription, since the
+ascription can determine the literal's reported type. Publish the group only
+after all bodies pass. Keep existing argument admission, currying rules, absence
+propagation and shape mapping. The prepared call's static result comes from its
+interface and those application rules. An unknown result does not enable the
+legacy call-site walk of the installed body. The compiler can still lower a
+closed function body when it establishes a single supported shape under the
+existing compilation rules.
+
 A loop's carried variables already have fixed contracts. Check each assignment
 against them. Derive the index from the finalized collection contract and a
 pattern leaf from that contract once. A local initialized inside the loop is typed
