@@ -56,6 +56,15 @@
 
 ### Resolved Issues
 
+- **`LogGamma` at a negative real and `HurwitzZeta(s, a)` at a negative `a`
+  with a non-integer `s` are computed at the engine precision.** Their values
+  are complex and were answered in doubles (15 digits) at every precision.
+  `LogGamma(x)` is now `ln|Γ(x)| − iπ⌈−x⌉` and `HurwitzZeta` is the principal
+  front sum plus `ζ(s, a + ⌈−a⌉)`, both in big decimals; a case the kernel
+  cannot vouch for stays unevaluated. `Gamma(s, z)` at `z < 0` stays
+  unevaluated at a precision above 15 digits instead of answering in doubles
+  (#612, PR #613, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`DirichletEta(n)` and `DirichletBeta(n)` at an integer `n` carry every
   digit asked for under `.N()`.** `N(DirichletEta(3))` at 30 digits ended
   `…49803621132`, where the correct value ends `…49803621134`: the closed form

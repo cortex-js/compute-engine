@@ -52,12 +52,19 @@ function interpret(json: Json, p: Point): Value {
   const subs = Object.fromEntries(
     Object.entries(p).map(([k, v]) => [k, boxed(v)])
   );
-  return valueOf(
-    ce
-      .box(json as never)
-      .subs(subs)
-      .N()
-  );
+  const expr = ce.box(json as never).subs(subs);
+  const r = expr.N();
+  if (r.isNumberLiteral || r.operator === 'List') return valueOf(r);
+  // Above machine precision a kernel that has only a double value stays
+  // unevaluated (`Gamma(s, z)` at `z < 0`); compiled code reads doubles, so
+  // its reference is the interpreter at machine precision.
+  const precision = ce.precision;
+  ce.precision = 'machine';
+  try {
+    return valueOf(expr.N());
+  } finally {
+    ce.precision = precision;
+  }
 }
 
 function compiled(json: Json, options: object = {}) {

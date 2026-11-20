@@ -87,6 +87,7 @@ import {
   bigPolyLog,
   gammaln,
   bigGammaln,
+  bigLogGammaNegative,
 } from '../numerics/special-functions.js';
 import { logGammaComplex } from '../numerics/log-gamma.js';
 import {
@@ -341,6 +342,26 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               engine.number(2),
             ])
             .evaluate();
+        }
+        // A negative non-integer real has a complex value: at the engine's
+        // precision it is computed in big decimals, and declines rather than
+        // answer in doubles.
+        if (
+          shouldNumericize(numericApproximation, z) &&
+          bignumPreferred(engine) &&
+          isNumber(z) &&
+          !z.isComplex &&
+          Number.isFinite(z.re) &&
+          z.re < 0
+        ) {
+          const v = bigLogGammaNegative(
+            engine,
+            z.bignumRe ?? engine.bignum(z.re),
+            engine.precision
+          );
+          return v === undefined
+            ? undefined
+            : engine.number(engine._inexactNumericValue(v));
         }
         return shouldNumericize(numericApproximation, z)
           ? applyN(

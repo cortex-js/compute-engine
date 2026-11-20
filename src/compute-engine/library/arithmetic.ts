@@ -160,6 +160,9 @@ import {
   bigHurwitzZeta,
   bigDecimalQuotient,
   bigZetaGeneralized,
+  bigHurwitzZetaComplex,
+  hurwitzOperandIsInteger,
+  hurwitzOperandIsNegative,
   bigLerchPhi,
   type HurwitzOperand,
   bigLambertW,
@@ -6843,6 +6846,28 @@ function evaluateHurwitzZeta(
   // complex operand stays on the double kernel below — the complex
   // special-function kernels run at machine precision at every engine
   // precision.
+  // Real s and a, a < 0, non-integer s: the value is complex. The bignum
+  // kernel answers or the expression stays symbolic (the doubles would give
+  // 15 digits at any precision).
+  if (!s.isComplex && !a.isComplex && !real && bignumPreferred(engine)) {
+    const sOperand = hurwitzOperand(engine, s);
+    const aOperand = hurwitzOperand(engine, a);
+    if (
+      hurwitzOperandIsNegative(aOperand) &&
+      !hurwitzOperandIsInteger(sOperand)
+    ) {
+      const v = bigHurwitzZetaComplex(
+        engine,
+        sOperand,
+        aOperand,
+        engine.precision
+      );
+      return v === undefined
+        ? undefined
+        : engine.number(engine._inexactNumericValue(v));
+    }
+  }
+
   if (real && bignumPreferred(engine)) {
     const big = bigHurwitzZeta(
       engine,
@@ -8074,7 +8099,12 @@ function evaluateGamma(
       ? applyN(
           [s, z],
           (s, z) => incompleteGammaUpper(s, z),
-          (s, z) => bigIncompleteGammaUpper(engine, s, z, engine.precision),
+          // z < 0: the value is complex and no bignum kernel exists, so it
+          // declines (`null`) instead of answering in doubles.
+          (s, z) =>
+            z.isNegative()
+              ? null
+              : bigIncompleteGammaUpper(engine, s, z, engine.precision),
           (s, z) => incompleteGammaUpperComplex(s, z)
         )
       : undefined;
