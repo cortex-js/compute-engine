@@ -694,7 +694,7 @@ describe('tier 2: Characters / GraphemeClusters', () => {
     ce.declare('mq', 'string | number');
     const r = compile(ce.box(['Characters', 'mq']));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/Characters is not supported by the compiler/);
+    expect(r.error).toMatch(/Characters of an operand that is not a string/);
   });
 });
 
@@ -745,7 +745,9 @@ describe('tier 2: StringJoin', () => {
     const r = compile(ce.box(json as any));
     expect(r.success).toBe(false);
     if (ownGate)
-      expect(r.error).toMatch(/Set is not supported by the compiler/);
+      expect(r.error).toMatch(
+        /StringJoin of an operand that is not a list of strings/
+      );
   });
 
   test('the removed variadic form is a signature ERROR in the interpreter (the fallback answer)', () => {

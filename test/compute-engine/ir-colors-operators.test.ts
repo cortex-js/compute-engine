@@ -311,7 +311,8 @@ describe('CE-1535: colour operators on GLSL, the text', () => {
 
 // prettier-ignore
 const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], cause: RegExp, code?: string][] = [
-  ['ColorToString (a string value)', ['ColorToString', ['Rgb', 'x', 0.4, 0.6]], ['javascript', 'glsl'], /ColorToString/],
+  // On JavaScript it compiles (CE-1548, compile-ir-list-of-strings.test.ts).
+  ['ColorToString (a string value)', ['ColorToString', ['Rgb', 'x', 0.4, 0.6]], ['glsl'], /string/],
   ['Color of a string that is not a colour', ['Color', { str: 'nosuchcolor' }], ['javascript', 'glsl'], /Color of an operand that is not a literal colour string/],
   ['Color of a colour with an alpha', ['Color', { str: '#ff000080' }], ['javascript', 'glsl'], /Color of a colour string with an alpha/],
   ['Colormap of a real position', ['Colormap', { str: 'viridis' }, 'x'], ['javascript', 'glsl'], /Colormap of a position that can be an integer of 2 or more/, 'unsettled-shape'],

@@ -57,7 +57,7 @@ import {
   type Printed,
   type Syntax,
 } from './print.js';
-import { TEXT } from './print-js-text.js';
+import { TEXT, TEXT_REGIONS } from './print-js-text.js';
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
@@ -298,6 +298,7 @@ export const JS: Syntax = deepFreeze({
   },
   regions: {
     ...builds(NUMBERS, (out) => `${out}.length`),
+    ...TEXT_REGIONS,
     integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],

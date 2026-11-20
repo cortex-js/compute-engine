@@ -96,6 +96,7 @@ import {
   scalarType,
   typeToString,
   type IRType,
+  type Instr,
   type Lane,
   type Length,
   type Program,
@@ -144,7 +145,9 @@ import {
 } from './lower-lists.js';
 import { SCALARIZE_LIMIT } from './passes.js';
 import {
+  characters,
   checkTextDomains,
+  colorToString,
   isTextRow,
   patternReplace,
 } from './lower-strings.js';
@@ -310,6 +313,25 @@ const COLOR_SAFE = new Set([
   'gamutmap.p3',
   'colormap',
 ]);
+/** The space of the colour that an operation of three channels makes: a
+ *  constructor, or the own-space conversion of one (`ashsv.own`). */
+const CHANNEL_SPACES: Readonly<Record<string, string>> = Object.freeze({
+  'rgb': 'rgb',
+  'hsl': 'hsl',
+  'hsv': 'hsv',
+  'oklab': 'oklab',
+  'oklch': 'oklch',
+  'ashsl.own': 'hsl',
+  'ashsv.own': 'hsv',
+});
+/** The space that each conversion of one colour names. */
+const CONVERSION_SPACES: Readonly<Record<string, string>> = Object.freeze({
+  asrgb: 'rgb',
+  ashsl: 'hsl',
+  ashsv: 'hsv',
+  asoklab: 'oklab',
+  asoklch: 'oklch',
+});
 /** The number of leading operands of a colour operator that are colours,
  *  which a tuple of three numbers can stand for (`extractRgb()` of
  *  `library/colors.ts`). */
@@ -902,6 +924,22 @@ function lowerOnce(
           for (const n of patternNames(op.ops[0])) info.writes.delete(n);
     known.set(e, info);
     return info;
+  };
+
+  /** The operation that makes the colour `x` (`b.defs`), seen through a
+   *  conversion of a colour of the space it names, which the interpreter
+   *  answers with its operand unchanged: `AsRgb(Rgb(r, g, b))` is the
+   *  `rgb` of `r, g, b`. So a constructor written in place and a name whose
+   *  value is one are seen alike. `undefined` for a value that no
+   *  operation makes (an `If`, a call, a loop value, a parameter). */
+  const colorDef = (x: V): (Instr & { k: 'op' }) | undefined => {
+    const i = b.defs.get(x);
+    const space = i === undefined ? undefined : CONVERSION_SPACES[i.op];
+    if (space !== undefined && i!.args.length === 1) {
+      const j = colorDef(i!.args[0]);
+      if (j?.args.length === 3 && CHANNEL_SPACES[j.op] === space) return j;
+    }
+    return i;
   };
 
   /** Apply the row `head`, or the row of the library head of that name, to
@@ -1728,8 +1766,7 @@ function lowerOnce(
         // The interpreter answers a colour of the conversion's own space
         // unchanged, which OKLCh loses at black and at grey (`AsHsv(Hsv(h,
         // 1, 0))` keeps `h`). The value of the operand is read from the
-        // operation that makes it, so a constructor written in place and a
-        // name whose value is one are seen alike: a constructor of the own
+        // operation that makes it (`colorDef()`): a constructor of the own
         // space is its channels (`ashsv.own`, which threads over a list
         // channel as the constructor does), a conversion to that space is
         // its value, and an operation whose interpreter value is never of
@@ -1745,7 +1782,7 @@ function lowerOnce(
           // (`apply()`).
           if (type(x).lane !== 'color' || tuples.has(x))
             return apply(e, ofOp(op), [x]);
-          const i = b.defs.get(x);
+          const i = colorDef(x);
           if (i?.op === own && i.args.length === 3)
             return apply(e, ofOp(`${op}.own`), i.args);
           if (i?.op === op || i?.op === `${op}.own`) return x;
@@ -1771,6 +1808,40 @@ function lowerOnce(
         // The operand is lowered once: an effectful operand draws once.
         return convert(value(e.ops[0])!);
       }
+      case 'ColorToString':
+        // The interpreter formats the source channels of a colour, so the
+        // compiled one formats a colour whose channels it has: a
+        // constructor (`colorDef()`), or a tuple of three numbers, the
+        // channels of `Rgb`. Any other colour, held in OKLCh here where the
+        // interpreter holds it in its own space, can print one unit off at
+        // a rounding boundary, and declines.
+        return colorToString(e, {
+          channels: (x) => {
+            const v = value(x)!;
+            if (
+              tuples.get(v) === 0 &&
+              same(type(v).shape, [3]) &&
+              ['real', 'integer'].includes(type(v).lane)
+            )
+              return [
+                'rgb',
+                [1, 2, 3].map((k) =>
+                  apply(e, 'At', [v, b.constant(k, 'integer')])
+                ),
+              ];
+            if (type(v).lane !== 'color' || type(v).shape.length > 0)
+              return undefined;
+            const i = colorDef(v);
+            const space = i === undefined ? undefined : CHANNEL_SPACES[i.op];
+            return space === undefined || i!.args.length !== 3
+              ? undefined
+              : [space, i!.args];
+          },
+          apply: (op, args) => apply(e, ofOp(op), args),
+        });
+      case 'Characters':
+      case 'GraphemeClusters':
+        return characters(e, cx);
       case 'Color': {
         // `Color` of a string literal: the interpreter's colour of the
         // string (`colorStringToOklch()`), computed here, as the `Oklch` of
@@ -3272,7 +3343,8 @@ function lowerOnce(
     textInput(t) ??
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
 
-  /** A scalar string input (read once by `text.in`, `input()`). */
+  /** A string input (read once by `text.in`, `input()`), or a list of
+   *  strings. */
   const textInput = (t: Type) => {
     const x = inputType(t, cx.wide, true);
     return x?.lane === 'string' ? x : undefined;
@@ -3349,9 +3421,10 @@ function lowerOnce(
       return { v: length };
     });
     const param = b.param(name, { lane: ir.lane, shape });
-    // A string is read once, as the engine boxes it (`text.in`).
+    // A string is read once, as the engine boxes it (`text.in`); a list of
+    // strings is read by `StringJoin` only, which conditions its elements.
     const v =
-      ir.lane === 'string'
+      ir.lane === 'string' && shape.length === 0
         ? b.entryOp('text.in', [param], scalarType('string'))
         : param;
     // The sign that the range of the declared type proves (`real<0..5>`,

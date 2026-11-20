@@ -877,6 +877,14 @@ export function listLowering(cx: Lowering) {
     for (const x of parts)
       if (typeof x !== 'number' && lengthValues(type(elementOf(x))).length > 0)
         decline(e, 'a list of lists of run-time length');
+    // The interpreter spreads a string into its characters (CE-1548).
+    if (
+      parts.some((x) => typeof x === 'number' && cx.type(x).lane === 'string')
+    )
+      decline(
+        e,
+        'ListJoin of a string (the interpreter spreads its characters)'
+      );
     const length = (x: Source | V) =>
       typeof x === 'number' ? integer(1) : x.length;
     const ends: V[] = [];

@@ -1,9 +1,10 @@
 /**
  * The lowering of the text operators that is their own (README, "The
  * string lane"; CE-1530): the operands out of their domain, which decline,
- * `String` of an operand that is not text, which declines, and
- * `StringReplace` of a literal pattern. The other text operators are rows
- * of `operators.ts`, applied by the walk of `lower.ts`.
+ * `String` of an operand that is not text, which declines, `StringReplace`
+ * of a literal pattern, `Characters` and `ColorToString` (CE-1548). The
+ * other text operators are rows of `operators.ts`, applied by the walk of
+ * `lower.ts`.
  */
 
 import type { Expression } from '../../global-types.js';
@@ -15,9 +16,22 @@ import {
 import { SMALL_INTEGER } from '../../numerics/numeric.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { isLibraryOperator } from '../../library-shadowing.js';
-import { decline, type Fn } from './lower-context.js';
+import { COLOR_STRING_FORMATS } from '../../numerics/color-conversion.js';
+import { decline, type Fn, type Lowering } from './lower-context.js';
 import type { V } from './ir.js';
 import type { OperatorRow } from './operators.js';
+
+/** The operations that read a list of strings: its one use that compiled
+ *  code admits besides the result (`admits()` of `index.ts`). Each reads
+ *  the list as its first operand and conditions each element. */
+export const TEXT_LIST_READS: readonly string[] = Object.freeze([
+  'text.joinl',
+  'text.joinl.sep',
+]);
+
+/** A static type of text: a string or a character. */
+const isText = (x: Expression): boolean =>
+  isSubtype(x.type.type, 'string') || isSubtype(x.type.type, 'character');
 
 /** A row of a string operand or result. A node of one is never evaluated
  *  at compile time (`closedValue()` of `lower.ts`): `N()` gives the
@@ -45,14 +59,16 @@ const TEXT_DOMAINS: Readonly<Record<string, [number, number | 'text'][]>> = {
  *  (`TEXT_DOMAINS`). */
 export function checkTextDomains(e: Fn): void {
   // The text of a number follows the formatting options of the engine.
-  if (
-    e.operator === 'String' &&
-    !e.ops.every(
-      (x) =>
-        isSubtype(x.type.type, 'string') || isSubtype(x.type.type, 'character')
-    )
-  )
+  if (e.operator === 'String' && !e.ops.every(isText))
     decline(e, 'String of an operand that is not a string');
+  // Of another collection, the interpreter's `StringJoin` is unevaluated.
+  if (
+    e.operator === 'StringJoin' &&
+    e.nops > 0 &&
+    !isText(e.ops[0]) &&
+    !isSubtype(e.ops[0].type.type, 'list<string | character>')
+  )
+    decline(e, 'StringJoin of an operand that is not a list of strings');
   for (const [i, d] of TEXT_DOMAINS[e.operator] ?? []) {
     const x = e.ops[i];
     if (
@@ -95,4 +111,45 @@ export function patternReplace(
     `text.rerep${e.nops === 4 ? '.count' : ''}`,
     e.ops.map((x, i) => (i === 1 ? pattern : cx.scalar(x)))
   );
+}
+
+/** `Characters(s)` and `GraphemeClusters(s)` of a string `s`: the region
+ *  `text.chars`, whose list result has the count of the clusters as its
+ *  length. */
+export function characters(e: Fn, cx: Lowering): V {
+  if (e.nops !== 1 || !isText(e.ops[0]))
+    decline(e, `${e.operator} of an operand that is not a string`);
+  const s = cx.scalar(e.ops[0]);
+  if (cx.type(s).lane !== 'string')
+    decline(e, `${e.operator} of an operand that is not a string`);
+  return cx.region('text.chars', [s], [], () => [], e)[1];
+}
+
+/** `ColorToString(c, f)` of a format `f` that is absent (`hex`) or a
+ *  string literal of `COLOR_STRING_FORMATS`, read without case, and a
+ *  colour `c` of which `channels()` gives the space and the three channels
+ *  that the interpreter formats: the row `colortostring.<space>.<f>`. A
+ *  string operand, another format and another colour decline. */
+export function colorToString(
+  e: Fn,
+  cx: {
+    channels: (x: Expression) => [string, V[]] | undefined;
+    apply: (op: string, args: V[]) => V;
+  }
+): V {
+  const [c, f] = e.ops;
+  const format =
+    f === undefined ? 'hex' : isString(f) ? f.string.toLowerCase() : undefined;
+  if (e.nops < 1 || e.nops > 2 || format === undefined)
+    decline(e, 'ColorToString of a format that is not a string literal');
+  if (!COLOR_STRING_FORMATS.includes(format))
+    decline(e, `ColorToString of "${format}", which is not a format`);
+  if (isText(c)) decline(e, 'ColorToString of a string');
+  const read = cx.channels(c);
+  if (read === undefined)
+    decline(
+      e,
+      'ColorToString of a colour whose channels are not those of a constructor or of a conversion of one to its own space'
+    );
+  return cx.apply(`colortostring.${read[0]}.${format}`, read[1]);
 }

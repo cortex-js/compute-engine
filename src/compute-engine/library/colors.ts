@@ -21,8 +21,8 @@ import { MAX_COLORMAP_SAMPLES } from '../numerics/value-scaled-caps.js';
 import {
   readColorChannels,
   hslToRgb255,
-  oklabToRgb255,
-  oklchToRgb255,
+  channelsToRgb255,
+  formatColorString,
   rgb255ToHsl,
   rgb255ToHsv,
   gamutMapOklch,
@@ -31,7 +31,6 @@ import {
   srgbToGamut,
   inGamut,
   readColorGamut,
-  displayP3String,
   isParseColorSpelling,
   parseOkColorString,
   normalizeAlpha,
@@ -286,21 +285,16 @@ function colorExprToRgb(arg: any): RgbColor | null {
   // c.alpha is already normalized by readColorExpr — undefined ↔ opaque.
   const withAlpha = (rgb: { r: number; g: number; b: number }): RgbColor =>
     c.alpha !== undefined ? { ...rgb, alpha: c.alpha } : rgb;
-  switch (c.space) {
-    case 'Rgb':
-      // Rgb head components are 0-1 sRGB; `@arnog/colors`'s RgbColor is
-      // 0-255, so scale at the boundary.
-      return withAlpha({ r: c.c0 * 255, g: c.c1 * 255, b: c.c2 * 255 });
-    case 'Hsv':
-      return withAlpha(hsvToRgb(c.c0, c.c1, c.c2));
-    case 'Hsl':
-      return withAlpha(hslToRgb255(c.c0, c.c1, c.c2));
-    case 'Oklab':
-      return withAlpha(oklabToRgb255({ L: c.c0, a: c.c1, b: c.c2 }));
-    case 'Oklch':
-      return withAlpha(oklchToRgb255({ L: c.c0, C: c.c1, H: c.c2 }));
-  }
-  return null;
+  // The conversion that the compiled `ColorToString` also applies
+  // (`channelsToRgb255()`). Rgb head components are 0-1 sRGB;
+  // `@arnog/colors`'s RgbColor is 0-255, so it scales at the boundary.
+  return withAlpha(
+    channelsToRgb255(c.space.toLowerCase() as ColorChannelSpace, [
+      c.c0,
+      c.c1,
+      c.c2,
+    ])
+  );
 }
 
 /**
@@ -505,21 +499,6 @@ function colorHeadFromSpace(
   return ce.function(head, args);
 }
 
-/** Convert an RgbColor (0-255) to a hex string (#rrggbb or #rrggbbaa). */
-function rgbToHex(rgb: RgbColor): string {
-  const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
-  const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
-  const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
-  const hex = `#${r.toString(16).padStart(2, '0')}${g
-    .toString(16)
-    .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-  if (rgb.alpha !== undefined) {
-    const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
-    return hex + a.toString(16).padStart(2, '0');
-  }
-  return hex;
-}
-
 /**
  * Map a color into `gamut` with the CSS Color 4 gamut mapping, and answer
  * its gamma-encoded coordinates in that gamut (0-1 scale), each in [0, 1].
@@ -577,55 +556,16 @@ export const COLORS_LIBRARY: SymbolDefinitions = {
           ? ops[1].string?.toLowerCase()
           : 'hex';
 
-      if (format === 'display-p3') {
-        const p3 = gamutMapColor(ops[0], rgb, 'display-p3');
-        return ce.string(displayP3String(p3, rgb.alpha));
-      }
-
-      // The formats below are sRGB: the color is first mapped into the sRGB
-      // gamut.
-      if (
-        format === 'hex' ||
-        format === 'srgb' ||
-        format === 'rgb' ||
-        format === 'hsl'
-      ) {
-        const [r, g, b] = gamutMapColor(ops[0], rgb, 'srgb');
-        const mapped: RgbColor = { r: r * 255, g: g * 255, b: b * 255 };
-        if (rgb.alpha !== undefined) mapped.alpha = rgb.alpha;
-
-        if (format === 'hex' || format === 'srgb')
-          return ce.string(rgbToHex(mapped));
-
-        if (format === 'rgb') {
-          const r = Math.round(mapped.r);
-          const g = Math.round(mapped.g);
-          const b = Math.round(mapped.b);
-          if (rgb.alpha !== undefined)
-            return ce.string(`rgb(${r} ${g} ${b} / ${rgb.alpha})`);
-          return ce.string(`rgb(${r} ${g} ${b})`);
-        }
-
-        const hsl = rgb255ToHsl(mapped.r, mapped.g, mapped.b);
-        const h = Math.round(hsl.h * 10) / 10;
-        const sat = Math.round(hsl.s * 1000) / 10;
-        const l = Math.round(hsl.l * 1000) / 10;
-        if (rgb.alpha !== undefined)
-          return ce.string(`hsl(${h} ${sat}% ${l}% / ${rgb.alpha})`);
-        return ce.string(`hsl(${h} ${sat}% ${l}%)`);
-      }
-
-      if (format === 'oklch') {
-        // Wide-gamut path: prefer typed extraction so out-of-sRGB chroma
-        // serializes losslessly. Fall back to the already-extracted sRGB.
-        const c = colorExprToOklch(ops[0]) ?? asOklch(rgb);
-        const L = Math.round(c.L * 1000) / 1000;
-        const C = Math.round(c.C * 1000) / 1000;
-        const H = Math.round(c.H * 10) / 10;
-        if (c.alpha !== undefined)
-          return ce.string(`oklch(${L} ${C} ${H} / ${c.alpha})`);
-        return ce.string(`oklch(${L} ${C} ${H})`);
-      }
+      // The formatting of `numerics/color-conversion.ts`, which the
+      // compiled runtime shares: an `Oklch` or `Oklab` colour is mapped and
+      // written from its own OKLCh channels.
+      const space = readColorExpr(ops[0])?.space;
+      const ok =
+        space === 'Oklch' || space === 'Oklab'
+          ? (colorExprToOklch(ops[0]) ?? undefined)
+          : undefined;
+      const s = formatColorString(rgb, ok, format ?? '');
+      if (s !== undefined) return ce.string(s);
 
       return ce.error('expected-value');
     },

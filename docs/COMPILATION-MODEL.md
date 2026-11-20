@@ -490,6 +490,27 @@ interpreter's value. A line is removed when the case declines or is fixed.
   a colour whose sRGB channels differ by at most 1e-6 as grey (the
   interpreter: 1e-9): `ColorToColorspace(Rgb(0.5, 0.5, 0.5000005), "hsv")`
   is `(0, 0, 0.5000006)`, where the interpreter gives `(240, 1.0·10⁻⁶, 0.5000005)`.
+- `javascript`, `s: string`: the elements of a list of strings that is the
+  result (`Characters(s)`, `Reverse(["a", s])`) are JavaScript strings,
+  where the interpreter's are character or string values (CE-1548).
+- `javascript` (plausible), `s: string`, `L: list<string>`: a read of an
+  element, `Map`, `Filter`, `Count`, a fold, `Sort`, `Reverse` and the other
+  list operators of a list of strings of run-time length decline
+  (`Count(Characters(s), c -> c == "a")`, `At(L, 1)`); so does a literal list
+  whose reads the passes do not fold (`Reverse(["a", s])` with
+  `constantFold: false`). CE-1556.
+- `javascript` (crafted), `L: list<string>`, `b: boolean`: a list of strings
+  in an `If`, a `Loop` or a user function that is not inlined declines
+  (`If(b, L, ["x"])`), and so do a list of lists of strings and an input list
+  of strings returned as the result (`L`).
+- `javascript` (crafted), `f: string`: `ColorToString(c, f)` of a format that
+  is not a string literal declines, as the other colour operators read a
+  space, a gamut or a palette as a literal; so does `ColorToString` of a
+  colour that is not a constructor, a name of one, a conversion of one to its
+  own space or a tuple of three numbers (`ColorToString(AsRgb(Oklch(0.5, x,
+  30)))`, `ColorToString(ColorMix(a, b))`): such a colour is held in OKLCh,
+  and a rounding to a unit of its sRGB channels can differ from the
+  interpreter's by one.
 
 - `plausible?` — `javascript`, `x: real`, `y: real`, `z: real`:
   `List(List(x, y), List(z))` as the result declines ("elements of two
@@ -1695,8 +1716,11 @@ program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
 `Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
 colour) is a `CompiledColor` object, and so is the value of the other
 colour operators (`ColorMix`, `ColorContrast`, …: `compilation/ir/README.md`,
-"The colour lane"); an alpha, a list of colours, a colour input or string,
-`ColorToString` and `ColorFromColorspace` decline.
+"The colour lane"). `ColorToString` of a constructor, a name of one, a
+conversion of one to its own space or a tuple of three numbers, in a format
+that is absent or a string literal, is the interpreter's string; an alpha, a
+list of colours, a colour input or string, `ColorToString` of another colour
+and `ColorFromColorspace` decline.
 
 With `to: 'glsl'` the compiler takes a scalar
 or a list result of stated length (a point `vec2(cos(t), sin(t))`; a list of
@@ -2195,8 +2219,10 @@ A string is a collection of its characters, so a parameter that the body
 reads as a collection has a collection type: in `s ↦ Length(s)`, `s` is a
 `collection`. Compiled code on JavaScript holds a scalar string (an input of
 type `string`, a literal, the text operators: "The string lane" of
-`src/compute-engine/compilation/ir/README.md`), but no list of strings and no
-collection read of one, so `g(t)` with `g := s ↦ Length(s)` and `t: string`,
+`src/compute-engine/compilation/ir/README.md`) and a list of strings at the
+boundary only (a literal, `Characters(s)`, an input read by `StringJoin`, the
+result), but no collection read of a string, so `g(t)` with
+`g := s ↦ Length(s)` and `t: string`,
 and `g("abc")`, decline (`outside-profile`) and run on the interpreter;
 `Length(t)` compiles. Every other target declines a string.
 
@@ -2496,8 +2522,14 @@ call shares the object (`compilation/ir/README.md`, "The colour lane").
 The other color operators (`ColorMix`, `ColorContrast`, `ColorDelta`,
 `ContrastingColor`, `GamutMap`, `Colormap`, `ColorToColorspace`, and `Color`
 of a string literal) call the interpreter's kernels
-(`compilation/ir/README.md`, "The colour lane"). `ColorToString` and
-`ColorFromColorspace` decline, and so do an alpha (a fourth operand), a color
+(`compilation/ir/README.md`, "The colour lane"). `ColorToString` compiles
+on JavaScript for a color whose channels the code has: a constructor, a name
+whose value is one, a conversion of one to its own space (`AsRgb(Rgb(…))`)
+or a tuple of three numbers; it formats them with the interpreter's kernel
+(`formatColorString()` of `numerics/color-conversion.ts`). Any other color
+is held in OKLCh, where the interpreter holds it in its own space, and a
+rounding of its sRGB channels to a unit could differ: it declines.
+`ColorFromColorspace` declines, and so do an alpha (a fourth operand), a color
 input, a color string, a tuple of components other than three real numbers
 at a color position (`AsRgb((x, 0.5, 0.2, 1))`), arithmetic on a color and
 the `bigint` mode. A list of colors is an array of color objects on JavaScript, and

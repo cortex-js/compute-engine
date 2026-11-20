@@ -37,7 +37,9 @@ import {
   parseOkColorString,
   lerpOklchColor,
   normalizeAlpha,
+  channelsColorString,
 } from '../numerics/color-conversion.js';
+import type { ColorChannelSpace } from '../numerics/color-conversion.js';
 import {
   binomial,
   gamma,
@@ -870,6 +872,23 @@ const colorHelpers = {
               ? colorHelpers.asOklab(input)
               : colorHelpers.asOklch(input);
     return k === 0 ? c.c0 : k === 1 ? c.c1 : c.c2;
+  },
+  // `ColorToString` of the constructor of `space` of the channels `c0, c1,
+  // c2` (CE-1548): the interpreter's string (`channelsColorString()`). The
+  // channels that make no colour are the interpreter's `incompatible-type`.
+  colorToString(
+    space: ColorChannelSpace,
+    c0: number,
+    c1: number,
+    c2: number,
+    format: string
+  ): string {
+    const s = channelsColorString(space, c0, c1, c2, format);
+    if (s === undefined)
+      throw new RangeError(
+        `ColorToString: the channels (${c0}, ${c1}, ${c2}) do not make a colour`
+      );
+    return s;
   },
 };
 

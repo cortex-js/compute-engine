@@ -63,8 +63,8 @@ describe('IR slice: GLSL text', () => {
       'mdet', 'minverse', 'mpower', 'mrowreduce',
       // The rows lane and the checks of its counts (CE-1549).
       'rows.chunk', 'rows.partition', 'rows.pair', 'rows.chunks', 'rows.size',
-      // The string lane (CE-1530).
-      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.')),
+      // The string lane (CE-1530), and `ColorToString` (CE-1548).
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',
         'acot', 'asec', 'acsc', 'hav', 'acoth', 'asech', 'acsch', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
         'factorial2', 'zeta', 'lcm', 'heaviside', 'remainder', 'smoothstep', 'invhav', 'erfinv', 'beta', 'digamma',

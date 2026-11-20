@@ -452,6 +452,7 @@ function compileIr(
     if (entry.lengthOf[k]) return;
     if (t.shape.length > 0) {
       shared.push(key);
+      if (t.lane === 'string') strings = true;
       if (!checks) return;
       plan.lists.push(key);
       plan.strings.set(key, literal ? `argument ${i + 1}` : `"${name}"`);

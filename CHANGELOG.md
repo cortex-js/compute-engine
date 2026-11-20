@@ -56,6 +56,21 @@
 
 ### Resolved Issues
 
+- **`Characters`, `StringJoin` of a list and `ColorToString` compile again on
+  JavaScript (CE-1548).** `Characters(s)` and `GraphemeClusters(s)` give the
+  array of the characters of `s`, `StringJoin(L)` and `StringJoin(L, sep)`
+  join an input `L: list<string>` (or `list<character>`), a literal list or
+  `Characters(s)`, and `Length(Characters(s))` is the number of characters,
+  each as the interpreter gives it. A list of strings compiles as an input
+  that `StringJoin` reads, a literal, `Characters(s)` or the result; a read of
+  its elements (`At`, `Map`, `Count`, `Sort`) declines when the list has a
+  run-time length, and the interpreter answers it. `ColorToString(c)` and
+  `ColorToString(c, format)` with a literal format give the interpreter's
+  string for a colour constructor, a name whose value is one, a conversion
+  of one to its own space (`AsRgb(Rgb(…))`) or a tuple of three numbers: `ColorToString(Rgb(0, x, 0.25))` at `x = 0.5` is
+  `#008040`. Another colour (`ColorMix`, a conversion to another space, an
+  `If`) declines: its compiled channels can print one unit off.
+
 - **`Chunk` and `Partition` compile when their rows can have different
   lengths** (CE-1549). On the JavaScript target, `Chunk(L, k)` and
   `Partition(L, n)` of a list `L: list<real>` of run-time length, and

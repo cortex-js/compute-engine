@@ -18,6 +18,7 @@
 import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
 import { UNSUPPORTED_MODE } from './lower-context.js';
+import { TEXT_LIST_READS } from './lower-strings.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { passChecksOn, SliceInternalError, verify } from './verify.js';
 import {
@@ -96,7 +97,8 @@ export type Profile = {
   readonly elementwise: boolean;
   /** The lanes of which no list is held: on GLSL, a list of colours or of
    *  complex numbers (a `vec3` or a `vec2` has no array of its own here);
-   *  on JavaScript, a list of strings or of lists of rows. */
+   *  on JavaScript, a list of lists of rows. A list of strings is admitted
+   *  at the boundary only (`stringListRefusal()`). */
   readonly scalarLanes: readonly Lane[];
   /** A list of rank 2 is held when its two lengths are constants and its
    *  rows have 2 to 4 elements: on GLSL an array of vectors (`vec2[3]`, a
@@ -121,8 +123,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
-    // A list of strings is phase 2 of CE-1530.
-    scalarLanes: ['string', 'rows'],
+    scalarLanes: ['rows'],
     resultOnly: Object.fromEntries(
       ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
         op,
@@ -272,12 +273,74 @@ export function admits(
     const m = region(f.body);
     if (m !== undefined) return m;
   }
+  if (profile.lanes.includes('string')) {
+    const m = stringListRefusal(p);
+    if (m !== undefined) return m;
+  }
   if (entry.tuple === true && profile.syntax.retTuple === undefined)
     return { head: 'Tuple', cause: 'a Tuple of elements of several shapes' };
   if (!profile.recursion && recursiveFunctions(p.functions).size > 0)
     return {
       cause: `a recursive function (${[...recursiveFunctions(p.functions)].join(', ')})`,
     };
+  return undefined;
+}
+
+/**
+ * A list of strings is a value at the boundary of the program (CE-1548): it
+ * has rank 1; it is made by a `list` instruction or by `text.chars`
+ * (`Characters`), or it is a parameter of the entry; and it is read only as
+ * the list operand of `StringJoin` (`TEXT_LIST_READS`), or, when it is not a
+ * parameter, it is a result of the entry. A read of an element, a list
+ * operation, an arm, a carried value or a call refuses: each would need its
+ * own rule for a string (an absent element, an order, an equality). The
+ * passes run before, so a list of constant length whose reads they fold is
+ * a `list` of its elements.
+ */
+function stringListRefusal(p: Program): Refusal | undefined {
+  const entry = entryOf(p);
+  const listOf = (v: V) =>
+    p.types[v].lane === 'string' && p.types[v].shape.length > 0;
+  const refusal: Refusal = {
+    cause:
+      'a list of strings other than a literal, Characters, an input read by StringJoin, or the result',
+  };
+  const walk = (r: Region): Refusal | undefined => {
+    if (r !== entry.body && r.params.some(listOf)) return refusal;
+    for (const i of r.body) {
+      const made = outsOf(i).filter(listOf);
+      if (
+        made.some((v) => p.types[v].shape.length !== 1) ||
+        (made.length > 0 &&
+          i.k !== 'list' &&
+          !(i.k === 'region' && i.op === 'text.chars'))
+      )
+        return refusal;
+      const read = i.k === 'op' && TEXT_LIST_READS.includes(i.op);
+      if (read && !listOf(i.args[0]))
+        return {
+          head: 'StringJoin',
+          cause: 'StringJoin of a list that is not of strings',
+        };
+      if (argsOf(i).some((v, k) => listOf(v) && !(read && k === 0)))
+        return refusal;
+      for (const x of regionsOf(i)) {
+        const m = walk(x);
+        if (m !== undefined) return m;
+      }
+    }
+    if (
+      r.yields.some(
+        (v) => listOf(v) && (r !== entry.body || r.params.includes(v))
+      )
+    )
+      return refusal;
+    return undefined;
+  };
+  for (const f of p.functions) {
+    const m = walk(f.body);
+    if (m !== undefined) return m;
+  }
   return undefined;
 }
 

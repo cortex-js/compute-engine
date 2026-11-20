@@ -38,6 +38,10 @@ import {
 } from './ir.js';
 import { rangeCount } from '../../numerics/range-count.js';
 import { binomial } from '../../numerics/special-functions.js';
+import {
+  COLOR_CHANNEL_SPACES,
+  COLOR_STRING_FORMATS,
+} from '../../numerics/color-conversion.js';
 // The functions that the runtime `_SYS.ir` holds (`javascript-runtime.ts`),
 // which the folds compute.
 import {
@@ -503,9 +507,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('String',       'variadic', [[[S], S, 'text.concat']],     list),
   row('String',       0,          [[[], S, 'text.empty']],       list),
   row('String',       1,          [[[S], S, 'text.string']],     list),
-  // `StringJoin` of a string: its characters, joined.
-  row('StringJoin',   1,          [[[S], S, 'text.string']],     list),
-  row('StringJoin',   2,          [[[S, S], S, 'text.join']],    list),
+  // `StringJoin` of a string: its characters, joined; of a list of strings
+  // (CE-1548): its elements, each conditioned, joined. The element of a
+  // list of strings is a string.
+  row('StringJoin',   1,          [[[S], S, 'text.string'], [['list'], 'element', 'text.joinl']], list),
+  row('StringJoin',   2,          [[[S, S], S, 'text.join'], [['list', S], 'element', 'text.joinl.sep']], list),
+  // `ColorToString(c, f)` of the three channels of a colour of `space`, read
+  // from the operation that makes it (`lower.ts`), for each format: the
+  // interpreter's string, which throws where its value is an error.
+  ...COLOR_CHANNEL_SPACES.flatMap((space) =>
+    COLOR_STRING_FORMATS.map((f) =>
+      row(undefined,  3,          [[[R, R, R], S, `colortostring.${space}.${f}`]], { ...list, effect: 'may-fail' }))),
 ].map((r) => deepFreeze(r)));
 
 /**
@@ -605,6 +617,22 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
         ? [
             { lane: I, shape: [] },
             { lane: I, shape: [{ v: count }] },
+          ]
+        : undefined,
+  },
+  // `Characters(s)` (CE-1548): the grapheme clusters of `s`, each
+  // conditioned (its body is empty); the results are the count and the
+  // list.
+  {
+    op: 'text.chars',
+    effect: 'pure',
+    args: [S],
+    params: [],
+    results: (_, ys, [count]) =>
+      ys.length === 0
+        ? [
+            { lane: I, shape: [] },
+            { lane: S, shape: [{ v: count }] },
           ]
         : undefined,
   },

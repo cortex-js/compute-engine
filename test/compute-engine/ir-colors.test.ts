@@ -372,7 +372,7 @@ const DECLINES: [label: string, json: Json, targets: ('javascript' | 'glsl')[], 
   ['a colour parameter of a user function', ['AsOklab', ['fk', ['fc', 'x']]], ['javascript', 'glsl'], /the parameter q of fk is not a scalar \(color\)/],
   ['a Which with no True clause', ['Which', ['Less', 'x', 0], ['Rgb', 'x', 0, 0], ['Less', 'x', 1], ['Oklch', 'x', 0.1, 250]], ['javascript', 'glsl'], /arms of two types/],
   ['ColorMix of a tuple with an alpha', ['ColorMix', ['Tuple', 1, 0, 0, 0.5], ['Rgb', 'x', 0, 0], 0.5], ['javascript', 'glsl'], /ColorMix of a tuple that is not three real numbers/],
-  ['an operator of colours not in the slice', ['ColorToString', ['Rgb', 'x', 0, 0]], ['javascript', 'glsl'], /ColorToString/],
+  ['an operator of colours not in the slice', ['ColorFromColorspace', ['Tuple', 'x', 0, 0], { str: 'hsl' }], ['javascript', 'glsl'], /ColorFromColorspace/],
 ];
 
 describe('IR profile, colours: the declines', () => {

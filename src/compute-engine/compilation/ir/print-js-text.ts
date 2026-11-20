@@ -4,6 +4,12 @@
  * into the `JS` syntax of `print-js.ts`.
  */
 
+import {
+  COLOR_CHANNEL_SPACES,
+  COLOR_STRING_FORMATS,
+} from '../../numerics/color-conversion.js';
+import type { RegionSpelling } from './print.js';
+
 export const TEXT = {
   'text.in': '_SYS.ct($0)',
   'text.length': '_SYS.tlength($0)',
@@ -32,4 +38,25 @@ export const TEXT = {
   'text.empty': "''",
   'text.string': '$0',
   'text.join': '_SYS.tjoin($0, $1)',
+  // A list of strings (CE-1548): its elements, each conditioned, joined.
+  'text.joinl': "_SYS.tjoinl($0, '')",
+  'text.joinl.sep': '_SYS.tjoinl($0, $1)',
+  // `ColorToString` of the channels of a constructor (`javascript-runtime.ts`).
+  ...Object.fromEntries(
+    COLOR_CHANNEL_SPACES.flatMap((space) =>
+      COLOR_STRING_FORMATS.map((f) => [
+        `colortostring.${space}.${f}`,
+        `_SYS.colorToString('${space}', $0, $1, $2, '${f}')`,
+      ])
+    )
+  ),
+};
+
+/** The region rows of the string lane: `Characters(s)`, its grapheme
+ *  clusters, each conditioned, and their count. */
+export const TEXT_REGIONS: Record<string, RegionSpelling> = {
+  'text.chars': ({ outs: [c, out], args: [s] }) => ({
+    open: [`const ${out} = _SYS.tchars(${s});`, `const ${c} = ${out}.length;`],
+    close: () => [],
+  }),
 };

@@ -4,8 +4,9 @@
  * on JavaScript, its input read as the engine boxes a string, and the text
  * operators, each against the interpreter on inputs with combining marks,
  * emoji, surrogate pairs and case mappings. Then the declines: other
- * targets, the bigint mode, a list of strings, a batch, and the operators
- * of phase 2.
+ * targets, the bigint mode, a read of an element of a list of strings, a
+ * batch, and the operators of phase 2. Lists of strings at the boundary
+ * (CE-1548) are in `compile-ir-list-of-strings.test.ts`.
  */
 
 import { compile } from '../../src/compile';
@@ -275,11 +276,9 @@ describe('declines', () => {
   });
 
   test.each<[string, Json]>([
-    ['a list of strings', ['Length', 'L']],
-    ['a list of string literals', ['List', { str: 'a' }, { str: 'b' }]],
-    ['Characters', ['Characters', 's']],
-    ['GraphemeClusters', ['GraphemeClusters', 's']],
-    ['StringJoin of a list', ['StringJoin', 'L', { str: '-' }]],
+    // A list of strings at the boundary compiles (CE-1548,
+    // `compile-ir-list-of-strings.test.ts`); a read of its element does not.
+    ['an element of a list of strings', ['At', 'L', 1]],
     ['At of a string', ['At', 's', 1]],
     ['Equal of strings', ['Equal', 's', 't']],
     ['a string and a number', ['If', ['Less', 'n', 0], 's', 1]],

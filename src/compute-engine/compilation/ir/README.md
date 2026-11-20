@@ -623,7 +623,6 @@ JavaScript, a `vec3` on GLSL. Declined: a list of colours on GLSL, a colour
 input, a colour string, a tuple of components other than three real numbers
 (`AsRgb((r, g, b, a))`), a list of tuples, a parameter of a user function that
 is a colour, arithmetic on a colour (an `error` of the canonical form),
-`ColorToString` (its value is a string, and the IR has no string value),
 `ColorFromColorspace`, and `mode: 'bigint'`.
 
 The other colour operators call the interpreter's kernels on JavaScript
@@ -667,6 +666,25 @@ compile time (any other declines):
   `t: real<0..1>` compiles; with `t: real` it declines (`unsettled-shape`), and
   the remedy is the declaration. `Colormap(name)` (the palette, a list)
   declines.
+- `ColorToString(c, format)` (JavaScript only, CE-1548): a string of the lane
+  `string`. The interpreter formats the source channels of the colour, and a
+  rounding to a unit amplifies any difference of the channels, so the operand
+  must be a colour whose channels the lowering has: a constructor `Rgb`, `Hsl`,
+  `Hsv`, `Oklab` or `Oklch` of three channels, a name whose value is one, a
+  conversion of one to its own space (`AsRgb(Rgb(…))`, read through `b.defs` by
+  `colorDef()` of `lower.ts`, which `AsHsv` and `AsHsl` share), or a tuple of
+  three numbers (the channels of `Rgb`). The row
+  `colortostring.<space>.<format>` passes the three channels to
+  `_SYS.colorToString`, which runs the interpreter's steps
+  (`channelsColorString()` and `formatColorString()` of
+  `numerics/color-conversion.ts`, which the interpreter calls too) and throws a
+  `RangeError` where the channels make no colour. The format is absent (`hex`)
+  or a string literal, read without case: `hex`, `srgb`, `rgb`, `hsl`, `oklch`,
+  `display-p3`. Declined: another format, a format that is not a literal, a
+  string operand, a list of colours, and any other colour (a cross-space
+  conversion, `ColorMix`, `GamutMap`, `ContrastingColor`, `Colormap`, an `If`, a
+  call of a user function, a loop value): those are held in OKLCh here and in
+  their own space in the interpreter, and can print one unit off.
 
 A colour that is not finite (a `NaN` channel), or a ratio or a position that is
 not finite, is an error of the interpreter; on JavaScript these operators give
@@ -709,15 +727,38 @@ the helper, which throws a `RangeError` that names the operator (such rows are
 (`isTextRow()` makes `facts().slice` false): `N()` gives the decimal text of a
 number (`String(1/3)`), the interpreter its exact text. No pass has a case of
 its own for the lane. Declined: a string on GLSL, in the interval mode and in
-the bigint mode; a list of strings (`Profile.scalarLanes` on JavaScript: phase
-2), with `Characters`, `GraphemeClusters`, `StringJoin` of a list, `At` and
-`Equal` of strings; a string of a `vars` name; `String` of a number (its text
-follows the engine's formatting options); a function as the replacement of
-`StringReplace`; a `RegExp` that is not the library operator. Code that reads or
-gives a string has `strings: true` and `shippable: false`: `broadcast()`,
-`broadcastAsync()` and the batch loaders of the runtime (`loadBroadcast()`,
-`loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a `TypeError` (a batch is
-of numbers).
+the bigint mode; `Equal` of strings; a string of a `vars` name; `String` of a
+number (its text follows the engine's formatting options); a function as the
+replacement of `StringReplace`; a `RegExp` that is not the library operator.
+
+A list of strings (CE-1548) is a value at the boundary of the program, which
+`stringListRefusal()` of `index.ts` checks after the passes: it has rank 1; it
+is made by a `list` instruction or by the region `text.chars`, or it is a
+parameter of the entry; and it is read only as the list operand of `StringJoin`
+(`TEXT_LIST_READS` of `lower-strings.ts`), or, when it is not a parameter, it is
+a result of the entry. `Characters(s)` and `GraphemeClusters(s)` are the region
+`text.chars` (`_SYS.tchars`: the grapheme clusters of `s`, each conditioned),
+whose results are the count of the clusters and the list of that length, so
+`Length(Characters(s))` reads the count. `StringJoin(L)` and
+`StringJoin(L, sep)` of a list are `text.joinl` and `text.joinl.sep`
+(`_SYS.tjoinl`: each element conditioned, then joined), so an input list is
+passed as the host gave it, with no walk and no copy at the entry; a string for
+it throws (`plan.lists`). The passes fold the reads of a list of constant length
+(`At` of a constant index, a short `Map`, an inlined user function), so
+`Reverse(["a", s])` compiles to a `list` of its elements; with
+`constantFold: false` its reads remain and it declines. `ListJoin` of a string
+declines: the interpreter spreads its characters, where `source(x, true)` makes
+one element. The elements of a list result are JavaScript strings. Declined (the
+remedy is the interpreter): a read of an element, `Map`, `Filter`, a fold,
+`Sort`, `Reverse` and the other list operators of a list of run-time length (an
+input, `Characters(s)`); a list of strings in an `If`, a `Loop` or a user
+function that is not inlined; a list of lists of strings; an input list returned
+as the result.
+
+Code that reads or gives a string, or a list of strings, has `strings: true` and
+`shippable: false`: `broadcast()`, `broadcastAsync()` and the batch loaders of
+the runtime (`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`)
+throw a `TypeError` (a batch is of numbers).
 
 ## The rows lane
 

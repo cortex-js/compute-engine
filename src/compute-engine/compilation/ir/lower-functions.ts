@@ -57,19 +57,19 @@ import { parameterName, type listLowering } from './lower-lists.js';
  * with no declared type (`unknown`) or of type `number` is `wide`: a real,
  * or a complex in `mode: 'complex'`. `any`, a list element of type
  * `unknown` or `any`, and an inner list of run-time length have no IR
- * type. With `strings`, a scalar `string` or `character` is a string (a
- * list of them is not: phase 2 of CE-1530).
+ * type. With `strings`, a `string` or `character` scalar, or the element of
+ * a list of rank 1, is a string (CE-1548).
  */
 export function inputType(
   t: Type,
   wide: 'real' | 'complex' = 'real',
   strings = false
 ): { lane: Lane; shape: (number | 'run-time')[] } | undefined {
-  const lane = (t: Type, element: boolean): Lane | undefined => {
+  const lane = (t: Type, element: boolean, rank: number): Lane | undefined => {
     t = present(t);
     if (
       strings &&
-      !element &&
+      rank <= 1 &&
       t !== 'never' &&
       (isSubtype(t, 'string') || isSubtype(t, 'character'))
     )
@@ -96,7 +96,7 @@ export function inputType(
     else shape.push(...t.dimensions);
     t = t.elements;
   }
-  const l = lane(t, shape.length > 0);
+  const l = lane(t, shape.length > 0, shape.length);
   return l === undefined ? undefined : { lane: l, shape };
 }
 

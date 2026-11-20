@@ -17,7 +17,9 @@
  */
 
 import {
+  asOklch,
   gammaCorrect,
+  hsvToRgb,
   inverseGammaCorrect,
   isNamedColor,
   isValidColor,
@@ -28,7 +30,7 @@ import {
   CATEGORICAL_PALETTES,
   DIVERGING_PALETTES,
 } from '@arnog/colors';
-import type { OklchColor } from '@arnog/colors';
+import type { OklchColor, RgbColor } from '@arnog/colors';
 
 /**
  * Canonicalize an alpha value. Returns `undefined` for undefined, non-finite,
@@ -929,4 +931,149 @@ export function displayP3String(
   const channels = `${f(rgb[0])} ${f(rgb[1])} ${f(rgb[2])}`;
   if (alpha !== undefined) return `color(display-p3 ${channels} / ${alpha})`;
   return `color(display-p3 ${channels})`;
+}
+
+/** An `RgbColor` (0-255) as a hex string (`#rrggbb`, or `#rrggbbaa` with an
+ *  alpha), each channel clamped and rounded. */
+function rgbToHex(rgb: RgbColor): string {
+  const r = Math.round(Math.max(0, Math.min(255, rgb.r)));
+  const g = Math.round(Math.max(0, Math.min(255, rgb.g)));
+  const b = Math.round(Math.max(0, Math.min(255, rgb.b)));
+  const hex = `#${r.toString(16).padStart(2, '0')}${g
+    .toString(16)
+    .padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  if (rgb.alpha !== undefined) {
+    const a = Math.round(Math.max(0, Math.min(255, rgb.alpha * 255)));
+    return hex + a.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/** The spaces of a colour of three channels, each a constructor's. */
+export const COLOR_CHANNEL_SPACES: readonly ColorChannelSpace[] = Object.freeze(
+  ['rgb', 'hsl', 'hsv', 'oklab', 'oklch']
+);
+
+/** The formats of `ColorToString`, read without case (`srgb` is `hex`). */
+export const COLOR_STRING_FORMATS: readonly string[] = Object.freeze([
+  'hex',
+  'srgb',
+  'rgb',
+  'hsl',
+  'oklch',
+  'display-p3',
+]);
+
+/** The extended sRGB channels (0-255) of the channels `ch` of `space`, read
+ *  by `readColorChannels()`: the conversion of the interpreter's
+ *  `colorExprToRgb()` (`library/colors.ts`). */
+export function channelsToRgb255(
+  space: ColorChannelSpace,
+  [c0, c1, c2]: readonly [number, number, number]
+): { r: number; g: number; b: number } {
+  switch (space) {
+    case 'rgb':
+      return { r: c0 * 255, g: c1 * 255, b: c2 * 255 };
+    case 'hsv':
+      return hsvToRgb(c0, c1, c2);
+    case 'hsl':
+      return hslToRgb255(c0, c1, c2);
+    case 'oklab':
+      return oklabToRgb255({ L: c0, a: c1, b: c2 });
+    case 'oklch':
+      return oklchToRgb255({ L: c0, C: c1, H: c2 });
+  }
+}
+
+/**
+ * The string of `ColorToString` of a colour in `format` (one of
+ * `COLOR_STRING_FORMATS`, in lower case), or `undefined` for another
+ * format. `rgb` is the colour's extended sRGB (0-255) with its alpha; `ok`
+ * is its own OKLCh when it is an `Oklch` or an `Oklab` colour, which the
+ * gamut mapping and the `oklch` format read instead of `rgb`.
+ *
+ * The interpreter (`library/colors.ts`) and the compiled runtime
+ * (`colorToString` of `compilation/javascript-runtime.ts`) both format with
+ * this function.
+ */
+export function formatColorString(
+  rgb: RgbColor,
+  ok: OklchColor | undefined,
+  format: string
+): string | undefined {
+  const mapped = (gamut: ColorGamut): [number, number, number] =>
+    ok !== undefined
+      ? gamutMapOklch(ok.L, ok.C, ok.H, gamut)
+      : gamutMapSrgb(rgb.r / 255, rgb.g / 255, rgb.b / 255, gamut);
+  if (format === 'display-p3')
+    return displayP3String(mapped('display-p3'), rgb.alpha);
+
+  // The formats below are sRGB: the color is first mapped into the sRGB
+  // gamut.
+  if (
+    format === 'hex' ||
+    format === 'srgb' ||
+    format === 'rgb' ||
+    format === 'hsl'
+  ) {
+    const [r, g, b] = mapped('srgb');
+    const m: RgbColor = { r: r * 255, g: g * 255, b: b * 255 };
+    if (rgb.alpha !== undefined) m.alpha = rgb.alpha;
+
+    if (format === 'hex' || format === 'srgb') return rgbToHex(m);
+
+    if (format === 'rgb') {
+      const r = Math.round(m.r);
+      const g = Math.round(m.g);
+      const b = Math.round(m.b);
+      if (rgb.alpha !== undefined) return `rgb(${r} ${g} ${b} / ${rgb.alpha})`;
+      return `rgb(${r} ${g} ${b})`;
+    }
+
+    const hsl = rgb255ToHsl(m.r, m.g, m.b);
+    const h = Math.round(hsl.h * 10) / 10;
+    const sat = Math.round(hsl.s * 1000) / 10;
+    const l = Math.round(hsl.l * 1000) / 10;
+    if (rgb.alpha !== undefined)
+      return `hsl(${h} ${sat}% ${l}% / ${rgb.alpha})`;
+    return `hsl(${h} ${sat}% ${l}%)`;
+  }
+
+  if (format === 'oklch') {
+    // Wide-gamut path: the own OKLCh of an `Oklch` or `Oklab` colour, so
+    // that an out-of-sRGB chroma is written as it is.
+    const c = ok ?? asOklch(rgb);
+    const L = Math.round(c.L * 1000) / 1000;
+    const C = Math.round(c.C * 1000) / 1000;
+    const H = Math.round(c.H * 10) / 10;
+    if (c.alpha !== undefined) return `oklch(${L} ${C} ${H} / ${c.alpha})`;
+    return `oklch(${L} ${C} ${H})`;
+  }
+
+  return undefined;
+}
+
+/**
+ * `ColorToString` of the opaque colour of `space` of the three channels
+ * `c0, c1, c2` (the operands of its constructor), in `format`: the steps of
+ * the interpreter, which reads the channels with `readColorChannels()` and
+ * formats with `formatColorString()`. `undefined` where the channels do not
+ * make a colour (a `NaN` channel, an infinite channel that is not clamped).
+ */
+export function channelsColorString(
+  space: ColorChannelSpace,
+  c0: number,
+  c1: number,
+  c2: number,
+  format: string
+): string | undefined {
+  const ch = readColorChannels(space, c0, c1, c2);
+  if (ch === undefined) return undefined;
+  const ok =
+    space === 'oklch'
+      ? asOklch({ L: ch[0], C: ch[1], H: ch[2] })
+      : space === 'oklab'
+        ? asOklch({ L: ch[0], a: ch[1], b: ch[2] })
+        : undefined;
+  return formatColorString(channelsToRgb255(space, ch), ok, format);
 }

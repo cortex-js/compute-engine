@@ -8,7 +8,8 @@
  *
  * Every string value of compiled code is conditioned: an input by `ct`
  * (`text.in`), a literal by the engine, a result here. So the helpers read
- * their operands as they are.
+ * their operands as they are, except the elements of an input list of
+ * strings, which only `tjoinl` reads and conditions.
  *
  * An operand that the interpreter answers with an error value (a negative
  * or too large count, an empty pad or target) throws a `RangeError` that
@@ -198,4 +199,12 @@ export const TEXT_HELPERS = {
   /** `StringJoin(s, sep)` of a string `s`: its characters, `sep` between. */
   tjoin: (s: string, sep: string): string =>
     condition(splitGraphemeClusters(s).join(sep)),
+  /** `Characters(s)`, `GraphemeClusters(s)`: the clusters of `s`, each
+   *  conditioned as a `BoxedCharacter` (CE-1548). */
+  tchars: (s: string): string[] => splitGraphemeClusters(s).map(condition),
+  /** `StringJoin(l, sep)` of a list of strings: each element conditioned
+   *  as the engine boxes it, then joined. An input list is read here only,
+   *  so its elements are conditioned here and not at the entry. */
+  tjoinl: (l: readonly string[], sep: string): string =>
+    condition(l.map(condition).join(sep)),
 };
