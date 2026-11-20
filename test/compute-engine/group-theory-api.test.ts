@@ -60,7 +60,7 @@ describe('permutation API contracts', () => {
       operations: [
         {
           name: 'PermutationCycles',
-          signature: '(Permutation) -> list<list<integer>>',
+          signature: '(Permutation, PermutationAction?) -> list<list<integer>>',
         },
         {
           name: 'PermutationOrder',

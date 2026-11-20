@@ -13,7 +13,8 @@
 //  - three constructors with a `canonical` handler (`Permutation`,
 //    `PermutationAction`, `PermutationGroup`);
 //  - the element operators (compose, inverse, power, order, cycles, conjugate,
-//    commutator, apply) and the group queries (order, membership, orbits,
+//    commutator, apply; fixed points and one-line form on a given action) and
+//    the group queries (order, membership, orbits,
 //    transversal, stabilizer, subgroup relations, element list).
 //
 // The finite-group adapter also registers exact matrix descriptors, polycyclic
@@ -133,6 +134,9 @@ import {
 import { toBigint } from '../boxed-expression/numerics.js';
 import {
   permutationCycles,
+  permutationCyclesIn,
+  permutationFixedPoints,
+  permutationImagesIn,
   permutationElementOrder,
   permutationPower,
   conjugatePermutation,
@@ -766,7 +770,10 @@ export function loadGroupTheory(
   // Operations on one or two permutations. Products use the right action
   // (the left factor acts first).
   //  - `cycles`: the disjoint cycles of length 2 or more, each one starting
-  //    at its least point, in order of that point.
+  //    at its least point, in order of that point. With a
+  //    `PermutationAction(n)` operand: all the cycles on {1, …, n}, fixed
+  //    points included. Error `permutation-outside-action` when the
+  //    permutation moves a point above n.
   //  - `order`: the least common multiple of the cycle lengths.
   //  - `power`: aᵏ for an exact integer k, negative values included. Errors:
   //    `invalid-permutation-exponent` (k is not an integer),
@@ -782,11 +789,17 @@ export function loadGroupTheory(
     adapt(() => {
       const value = readPermutation(ops[0]);
       if (!value) return undefined;
-      if (kind === 'cycles')
+      if (kind === 'cycles') {
+        const domain = ops[1] ? readAction(ops[1]) : undefined;
+        if (ops[1] && !domain) return undefined;
         return ce.function(
           'List',
-          permutationCycles(value, work).map(encodePoints)
+          (domain
+            ? permutationCyclesIn(value, domain, work)
+            : permutationCycles(value, work)
+          ).map(encodePoints)
         );
+      }
       if (kind === 'order')
         return ce.number(permutationElementOrder(value, work));
       if (kind === 'power') {
@@ -897,9 +910,45 @@ export function loadGroupTheory(
   const definitions: Record<string, OperatorDefinition> = {
     // Element operations: see `elementQuery()`.
     PermutationCycles: {
-      signature: '(Permutation) -> list<list<integer>>',
+      signature: '(Permutation, PermutationAction?) -> list<list<integer>>',
       pure: true,
       evaluate: (ops) => elementQuery(ops, 'cycles'),
+    },
+    // The fixed points in {1, …, n}, and the one-line form on {1, …, n}
+    // (without an action, the stored images). A permutation does not record
+    // n, so these read it from the action. Error `permutation-outside-action`
+    // when the permutation moves a point above n.
+    PermutationFixedPoints: {
+      signature: '(Permutation, PermutationAction) -> list<integer>',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          const value = readPermutation(ops[0]),
+            domain = readAction(ops[1]);
+          if (!value || !domain) return undefined;
+          return ce.function(
+            'List',
+            permutationFixedPoints(value, domain, work).map((p) => ce.number(p))
+          );
+        }),
+    },
+    PermutationImages: {
+      signature: '(Permutation, PermutationAction?) -> list<integer>',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          const value = readPermutation(ops[0]);
+          if (!value) return undefined;
+          const domain = ops[1] ? readAction(ops[1]) : undefined;
+          if (ops[1] && !domain) return undefined;
+          const images = domain
+            ? permutationImagesIn(value, domain, work)
+            : value.images;
+          return ce.function(
+            'List',
+            images.map((p) => ce.number(p))
+          );
+        }),
     },
     PermutationOrder: {
       signature: '(Permutation) -> integer',
