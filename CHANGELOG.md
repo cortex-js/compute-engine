@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.195.2 _2026-11-20_
 
 ### New Features
 
