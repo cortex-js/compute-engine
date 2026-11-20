@@ -1476,7 +1476,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Sample colors from a named palette"
+      "description": "Sample colors from a named palette. With no second argument, the colors of the palette. With an integer n >= 2, a list of n colors. With a number t in [0, 1] (clamped), the color at position t. A sequential or diverging palette is a gradient: n gives n evenly spaced samples, and t an interpolated color. A categorical palette (such as \"tycho11\" or \"tableau10\") is a list of distinct colors and is never interpolated: n gives its first n colors, repeated from the start past the length of the palette, and t the nearest color, the color at index round(t × (length − 1))"
     },
     {
       "name": "ColorMix",
@@ -4218,7 +4218,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "True if n is a centered square number."
+      "description": "True if n is a centered square number, n = t² + (t + 1)² for an integer t ≥ 0: 1, 5, 13, 25, 41, ..."
     },
     {
       "name": "IsCompatibleUnit",
@@ -4230,7 +4230,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Check if two units have the same dimension"
+      "description": "Check if two units have the same dimension and convert into each other (`dB` and `Np` do, `dB` and `percent` do not)"
     },
     {
       "name": "IsComposite",
@@ -5584,7 +5584,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Numerical derivative evaluated at a point."
+      "description": "Numerical derivative evaluated at a point.\n\nThe function is an expression (ND(Sin(x), 1)), a function literal or\n\nthe name of a function (ND(Sin, 1)): each gives cos(1)."
     },
     {
       "name": "NDSolve",
@@ -7046,6 +7046,18 @@
         "Product(k, (k, 1, 5))",
         "Product(1 - 1/k^2, (k, 2, 10))"
       ]
+    },
+    {
+      "name": "Program",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(unknown*) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Evaluate a program in the caller scope, continuing after statement errors."
     },
     {
       "name": "ProtocolMember",
