@@ -193,13 +193,10 @@ describe('Shader targets keep the supported shapes', () => {
 describe('A point with an undecided component type beside a list', () => {
   // A shader lowers a point and a list of the same length to one `vecN`,
   // and its operators combine them component-wise. In the interpreter a point
-  // times a list is a list of points, and a point divided by a list stays
-  // unevaluated.
+  // times or divided by a list is a list of points.
   test.each([
     ['a list times the point', ['Multiply', ['List', 1, 2], P]],
     ['the point divided by a list', ['Divide', P, ['List', 1, 2]]],
-    ['a point times a list', ['Multiply', ['Tuple', 'x', 1], ['List', 1, 2]]],
-    ['a point divided by a list', ['Divide', ['Tuple', 3, 1], ['List', 1, 2]]],
   ])('%s fails closed on the shader targets', (_l, json) => {
     for (const to of ['glsl']) {
       expect(declines(json, to)).toBe(true);
@@ -209,6 +206,27 @@ describe('A point with an undecided component type beside a list', () => {
       } as never);
       expect(r.success).toBe(false);
     }
+  });
+
+  // A point of numbers times or divided by a list is an array of points on
+  // GLSL, as in the interpreter (CE-1569).
+  test.each([
+    [
+      'a point times a list',
+      ['Multiply', ['Tuple', 'x', 1], ['List', 1, 2]],
+      /^float (v\d+) = vec2\(x, 1\.0\)\[int\(1\.0\)\];\nreturn vec2\[2\]\(vec2\(\(x \* 1\.0\), \(\1 \* 1\.0\)\), vec2\(\(x \* 2\.0\), \(\1 \* 2\.0\)\)\);$/,
+    ],
+    [
+      'a point divided by a list',
+      ['Divide', ['Tuple', 3, 1], ['List', 1, 2]],
+      /^vec2\[2\]\(vec2\(3\.0, 1\.0\), vec2\(1\.5, 0\.5\)\)$/,
+    ],
+  ])('%s is an array of points on GLSL', (_l, json, code) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compile(ce.box(json as never), { to: 'glsl' } as never);
+    expect(r.success).toBe(true);
+    expect(r.code).toMatch(code);
   });
 
   test('a point divided by a list fails closed on the interval target', () => {
