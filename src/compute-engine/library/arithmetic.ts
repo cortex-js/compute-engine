@@ -7510,6 +7510,13 @@ function evaluateDirichletEta(
   // (1 − 2^{1−n}) ζ(n): ζ's closed forms at the even and nonpositive integers,
   // and the odd ones stay (1 − 2^{1−n}) ζ(n) with ζ(n) symbolic.
   if (n !== null) {
+    // Under `.N()` the kernel carries its own guard digits: `.N()` of the
+    // product below rounds ζ(n) and then the product, two roundings.
+    if (numeric && n > 1 && bignumPreferred(engine)) {
+      const big = bigDirichletEta(engine, new BigDecimal(n), engine.precision);
+      if (big !== undefined)
+        return floatIfFloatOperand([s], boxBignumApprox(engine, big));
+    }
     const value = engine
       .function('Multiply', [
         engine.function('Subtract', [
@@ -7607,6 +7614,13 @@ function evaluateDirichletBeta(
 
   const n = dirichletInteger(s);
   if (n !== null) {
+    // The odd n > 2 closed form is a rational times π^n: `.N()` of it rounds
+    // π^n and then the product, so the kernel (with guard digits) answers.
+    if (numeric && n > 2 && bignumPreferred(engine)) {
+      const big = bigDirichletBeta(engine, new BigDecimal(n), engine.precision);
+      if (big !== undefined)
+        return floatIfFloatOperand([s], boxBignumApprox(engine, big));
+    }
     const exact = dirichletBetaInteger(engine, n);
     if (exact !== undefined)
       return floatIfFloatOperand([s], numeric ? exact.N() : exact);
