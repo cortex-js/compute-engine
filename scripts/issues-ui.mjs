@@ -758,6 +758,11 @@ table.batch tr.waiting { color: var(--muted); }
 let data = null;
 let view = 'board';
 let filter = '';
+// The sort order and the filters of the Board and All tabs (see refine()).
+let sort = 'default';
+let prioFilter = '';
+let stateFilter = '';
+const chips = new Set();
 const open = new Set();
 const notes = new Map();
 
@@ -891,9 +896,11 @@ function card(i, note) {
   '</article>';
 }
 
-function list(title, refs, map) {
+/** A list of cards. total, when given, is the length of the list before refine(). */
+function list(title, refs, map, total) {
   const cards = refs.map((r) => map.get(r.id) ? card(map.get(r.id), r.note) : '').join('');
-  return '<h2>' + esc(title) + ' <span class="count">(' + refs.length + ')</span></h2>' + (refs.length ? cards : '<p class="none">none</p>');
+  const count = total !== undefined && total !== refs.length ? refs.length + ' of ' + total : refs.length;
+  return '<h2>' + esc(title) + ' <span class="count">(' + count + ')</span></h2>' + (refs.length ? cards : '<p class="none">none</p>');
 }
 
 const matches = (i) => {
@@ -901,6 +908,66 @@ const matches = (i) => {
   const q = filter.toLowerCase();
   return [i.id, i.title, i.fields.source, i.fields['source-ref']].some((s) => String(s ?? '').toLowerCase().includes(q));
 };
+
+/**
+ * The filter chips of the Board and All tabs. Each one is a test on an
+ * issue; the chips that are on must all pass.
+ */
+const CHIPS = () => [
+  ['tycho', 'Tycho', (i) => origin(i.fields)?.kind === 'tycho'],
+  ['github', 'GitHub', (i) => origin(i.fields)?.kind === 'github'],
+  ['unreviewed', 'not reviewed', (i) => !i.fields.reviewed],
+  ['release', 'in a release', (i) => !!i.fields.release],
+  ...data.flags.map((x) => [x, x, (i) => (i.fields.flags ?? []).includes(x)]),
+];
+
+const SORTS = [
+  ['default', 'Default order'],
+  ['recent', 'Most recent (updated or opened)'],
+  ['opened', 'Newest opened'],
+  ['oldest', 'Least recently touched'],
+  ['priority', 'Priority, then most recent'],
+];
+
+const touched = (i) => String(i.fields.updated ?? i.fields.opened ?? '');
+const idNumber = (i) => Number(/\d+/.exec(i.id)?.[0] ?? 0);
+const byRecent = (a, b) => touched(b).localeCompare(touched(a)) || idNumber(b) - idNumber(a);
+const COMPARE = {
+  recent: byRecent,
+  opened: (a, b) => String(b.fields.opened ?? '').localeCompare(String(a.fields.opened ?? '')) || idNumber(b) - idNumber(a),
+  oldest: (a, b) => -byRecent(a, b),
+  priority: (a, b) => {
+    const p = (i) => { const k = data.priorities.indexOf(i.fields.priority); return k < 0 ? data.priorities.length : k; };
+    return p(a) - p(b) || byRecent(a, b);
+  },
+};
+
+/** The refs of a list after the text filter, the filters and the sort order of the toolbar. */
+function refine(refs, map) {
+  const on = CHIPS().filter(([k]) => chips.has(k)).map(([, , test]) => test);
+  const kept = refs.filter((r) => {
+    const i = map.get(r.id);
+    return i && matches(i) && (!prioFilter || i.fields.priority === prioFilter) &&
+      (!stateFilter || i.fields.state === stateFilter) && on.every((test) => test(i));
+  });
+  const cmp = COMPARE[sort];
+  return cmp ? kept.sort((a, b) => cmp(map.get(a.id), map.get(b.id))) : kept;
+}
+
+const filtering = () => !!(filter || prioFilter || stateFilter || chips.size);
+
+/** The sort and filter toolbar of the Board and All tabs. */
+function refineTools() {
+  const opt = (v, label, cur) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
+  return '<div class="tools" id="refine-tools">' +
+    '<input type="search" id="filter" placeholder="Filter on id, title or source" value="' + esc(filter) + '">' +
+    '<label>Sort <select id="sort">' + SORTS.map(([v, l]) => opt(v, l, sort)).join('') + '</select></label>' +
+    '<label>Priority <select id="prio-filter">' + opt('', 'any', prioFilter) + data.priorities.map((p) => opt(p, p, prioFilter)).join('') + '</select></label>' +
+    '<label>State <select id="state-filter">' + opt('', 'any', stateFilter) + data.states.map((s) => opt(s, s, stateFilter)).join('') + '</select></label>' +
+    '<span>' + CHIPS().map(([k, label]) => '<button type="button" class="flag" data-chip="' + esc(k) + '" aria-pressed="' + chips.has(k) + '">' + esc(label) + '</button>').join(' ') + '</span>' +
+    (filtering() ? '<button type="button" class="act" id="clear-refine">Clear filters</button>' : '') +
+  '</div>';
+}
 
 const SECTIONS = [
   ['p0', '1. P0, proposed or confirmed'],
@@ -935,10 +1002,10 @@ function renderMain() {
   let html = '';
   if (data.strays.length) html += '<div class="banner">Not issue files (the name must be CE-&lt;n&gt;.md): ' + data.strays.map(esc).join(', ') + '</div>';
   if (view === 'board') {
-    html += '<div class="tools" id="board-tools">' + boardTools() + '</div>';
+    html += '<div class="tools" id="board-tools">' + boardTools() + '</div>' + refineTools();
     const bad = data.board.leftOut.map((n) => ({ id: n.replace(/\.md$/, ''), note: 'lint errors: left out of the lists' }));
     if (bad.length) html += list('Files with lint errors', bad, map);
-    for (const [k, title] of SECTIONS) html += list(title, data.board.sections[k], map);
+    for (const [k, title] of SECTIONS) html += list(title, refine(data.board.sections[k], map), map, data.board.sections[k].length);
   } else if (view === 'backlog') {
     html += '<div class="tools"><input type="search" id="filter" placeholder="Filter on id, title or source" value="' + esc(filter) + '"></div>';
     const keep = (refs) => refs.filter((r) => map.get(r.id) && matches(map.get(r.id)));
@@ -954,9 +1021,9 @@ function renderMain() {
   } else if (view === 'progress') {
     html += renderProgress(map);
   } else {
-    html += '<div class="tools"><input type="search" id="filter" placeholder="Filter on id, title or source" value="' + esc(filter) + '"></div>';
-    const items = data.issues.filter(matches).map((i) => ({ id: i.id, note: '' }));
-    html += list('Every file', items, map);
+    html += refineTools();
+    const items = data.issues.map((i) => ({ id: i.id, note: '' }));
+    html += list('Every file', refine(items, map), map, items.length);
     html += '<h2>Closed (issues/CLOSED.md)</h2><div class="body closed">' + md(data.closed) + '</div>';
   }
   $('#main').innerHTML = html;
@@ -1193,6 +1260,12 @@ document.addEventListener('click', async (ev) => {
   if (!(t instanceof HTMLElement)) return;
   if (t.dataset.view) { view = t.dataset.view; renderHeader(); renderMain(); return; }
   if (t.id === 'refresh') { notes.clear(); return refresh(); }
+  if (t.dataset.chip) {
+    if (chips.has(t.dataset.chip)) chips.delete(t.dataset.chip); else chips.add(t.dataset.chip);
+    renderMain();
+    return;
+  }
+  if (t.id === 'clear-refine') { filter = ''; prioFilter = ''; stateFilter = ''; chips.clear(); renderMain(); return; }
   if (t.id === 'close-all') {
     const ids = data.board.sections.closing.map((r) => r.id);
     const c = $('#close-confirm');
@@ -1243,6 +1316,8 @@ document.addEventListener('click', async (ev) => {
 
 document.addEventListener('change', (ev) => {
   const t = ev.target;
+  const refineSelects = { sort: (v) => { sort = v; }, 'prio-filter': (v) => { prioFilter = v; }, 'state-filter': (v) => { stateFilter = v; } };
+  if (refineSelects[t.id]) { refineSelects[t.id](t.value); renderMain(); return; }
   const el = t.closest?.('.card');
   if (!el || !t.dataset.op) return;
   if (t.dataset.op === 'state' && (t.value === 'close' || t.value === 'fixed')) {

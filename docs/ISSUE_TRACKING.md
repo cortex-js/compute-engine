@@ -372,6 +372,13 @@ order, and the files that have lint errors), **Backlog** (the lists of
 `backlog`, with a text filter), **Progress** and **All** (every file, then
 `CLOSED.md`).
 
+Board and All have a toolbar that sorts and filters the cards: a text filter
+(id, title, source), a sort order (default, most recent by `updated` or
+`opened`, newest opened, least recently touched, priority then most recent),
+a priority and a state, and chips (Tycho, GitHub, not reviewed, in a release,
+and each flag) that must all match. On Board they apply inside each section,
+whose count reads `n of m`; the lint-error list and Close all ignore them.
+
 **Progress** shows, in this order:
 
 - The batch of `scripts/roadmap-batch.mjs` that runs: one row per item, with
