@@ -171,4 +171,21 @@ export type ParsingDiagnostic = {
   // Supplementary explanations — see {@link DiagnosticNote}. They add context
   // to the message; they never change what the diagnostic means.
   notes?: DiagnosticNote[];
+  /**
+   * `true` when the parser reached the end of the input before the construct
+   * was complete: more text at the end of the source can remove the error
+   * (`"abc`, `f(1`, `let a = 1 +`, `if x`). An editor can wait before it
+   * shows such a diagnostic on the line being typed. The other diagnostics do
+   * not have the field.
+   *
+   * The parser sets it on a diagnostic that expects more input
+   * (`closing-bracket-expected`, `expression-expected`,
+   * `string-literal-closing-delimiter-expected`, `unexpected-symbol`, ...)
+   * when nothing but white space and comments follows the place of the error.
+   * An error before the last line (`let a = 1 +\nlet b = 2`) does not have
+   * it: the input continues after the construct. Neither does a single-line
+   * string that a line break ended (`"abc` and a new line), nor an error that
+   * more text cannot remove (`1 )`, `let a = *`).
+   */
+  incomplete?: true;
 };

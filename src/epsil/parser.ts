@@ -57,6 +57,7 @@ import {
   CONTEXTUAL_STATEMENT_WORDS,
   HARD_RESERVED_WORDS,
   LITERAL_WORDS,
+  RESERVED_WORDS,
 } from './reserved-words.js';
 import { SourceSpan, Token, TokenType } from './tokens.js';
 import { CHAINABLE_COMPARISONS } from '../compute-engine/latex-syntax/comparison-chain.js';
@@ -92,6 +93,55 @@ const EXPRESSION_NESTING_ABORT = Symbol('expression-nesting-abort');
 /** The legacy spelling of the mapsto arrow, replaced by `=>`. Still lexed and
  * parsed as the arrow, but reported (`mapsto-arrow-legacy`) with a fixit. */
 const LEGACY_MAPSTO_ARROW = '|->';
+
+/** The codes of the diagnostics that expect more input. At the end of the
+ * input such a diagnostic is `incomplete` (`ParsingDiagnostic.incomplete`):
+ * more text can remove the error. */
+const INCOMPLETE_CODES: ReadonlySet<string> = new Set([
+  'closing-bracket-expected',
+  'conditional-else-expected',
+  'dictionary-key-value-expected',
+  'end-of-comment-expected',
+  'expression-expected',
+  'if-let-equal-expected',
+  'literal-expected',
+  'match-case-arrow-expected',
+  'opening-bracket-expected',
+  'primary-expected',
+  'protocol-member-signature-expected',
+  'protocol-name-expected',
+  'string-literal-closing-delimiter-expected',
+  'string-literal-opening-delimiter-expected',
+  'symbol-expected',
+  'type-annotation-error',
+  'unexpected-symbol',
+  'while-let-equal-expected',
+]);
+
+/** The codes of the lexical diagnostics of a token that is not closed. On the
+ * last token of the input such a diagnostic is `incomplete`. */
+const UNCLOSED_TOKEN_CODES: ReadonlySet<string> = new Set([
+  'closing-bracket-expected',
+  'end-of-comment-expected',
+  'string-literal-closing-delimiter-expected',
+  'string-literal-opening-delimiter-expected',
+  'unbalanced-verbatim-symbol',
+]);
+
+/** The types of the tokens that can end an operand, so that an operator after
+ * one of them is in infix position. */
+const OPERAND_END_TOKENS: ReadonlySet<TokenType> = new Set<TokenType>([
+  'NUMBER',
+  'SYMBOL',
+  'VERBATIM_SYMBOL',
+  'STRING',
+  'LATEX_ISLAND',
+  'SUPERSCRIPT',
+  'SUBSCRIPT',
+  'CLOSE_PAREN',
+  'CLOSE_BRACKET',
+  'CLOSE_BRACE',
+]);
 
 /** The two rows a bare `=` resolves to. Reading them from the shared table
  * keeps the positional `=` identical to the explicit spellings — same head,
@@ -710,6 +760,9 @@ export class Parser {
   /** Whether the source is a span of an enclosing parser's source. */
   private readonly isSpan: boolean;
 
+  /** Whether the end of the source is the end of the input. */
+  private readonly endsInput: boolean;
+
   /**
    * The nodes a radical sign or a superscript exponent built over a numeric
    * coefficient — `√2`, `2²`, `√√2`, `2⁻¹`. Such a node may lead an invisible
@@ -742,12 +795,17 @@ export class Parser {
        * hole, the ASCII translation of a script run): the end of this source
        * is not the end of the input (see `closingBracketFixit`). */
       span?: boolean;
+      /** A span that runs to the end of the input of the enclosing parser
+       * (an unclosed `\(` hole at the end of the source): the end of this
+       * source is the end of the input (see `isIncomplete`). */
+      endsInput?: boolean;
     }
   ) {
     this.source = source;
     this.url = options?.url;
     this.baseOffset = options?.offset ?? 0;
     this.isSpan = options?.span ?? false;
+    this.endsInput = !this.isSpan || (options?.endsInput ?? false);
     this.parseLatex = options?.parseLatex;
     this.allowHostPragmas = options?.allowHostPragmas ?? false;
     this.deadline = options?.deadline;
@@ -849,7 +907,75 @@ export class Parser {
       const fixit = this.closingBracketFixit(message[1]);
       if (fixit !== undefined) diagnostic.fixits = [fixit];
     }
+    if (this.isIncomplete(message, start)) diagnostic.incomplete = true;
     this.diagnostics.push(diagnostic);
+  }
+
+  /** Whether the diagnostic `message` that the parser reports at the (local)
+   * offset `start` means that the input ended too soon
+   * (`ParsingDiagnostic.incomplete`): its code expects more input and the
+   * parser is at the end of the input. A type subparse reads the source text
+   * and does not move the cursor, so for a `type-annotation-error` the test
+   * is that `start` is at or after the end of the last token. */
+  private isIncomplete(message: DiagnosticMessage, start: number): boolean {
+    if (!this.endsInput) return false;
+    const code = typeof message === 'string' ? message : message[0];
+    if (!INCOMPLETE_CODES.has(code)) return false;
+    const last = this.tokens[this.tokens.length - 2];
+    if (code === 'type-annotation-error') return start >= (last?.end ?? 0);
+    // The parser reports the last token itself: an infix operator after an
+    // operand, that waits for its right operand (`let a = 1 +`, `x in`), or
+    // an unclosed comment after code (`1 /* note`). An infix operator where
+    // an operand starts (`let a = *`) stays an error.
+    if (code === 'unexpected-symbol' && this.current === last) {
+      const token = this.current;
+      if (this.isInfixOperatorAfterOperand(token)) return true;
+      return (
+        this.reachesEndOfSource(token) &&
+        (token.diagnostics?.some((m) =>
+          UNCLOSED_TOKEN_CODES.has(typeof m === 'string' ? m : m[0])
+        ) ??
+          false)
+      );
+    }
+    if (this.current.type !== 'EOF') return false;
+    // An unclosed bracket is reported at its opening bracket. Another
+    // diagnostic at the end of the input is at the last token or after it;
+    // one before the last token is about a construct that the input closed
+    // (`let ()`).
+    return code === 'closing-bracket-expected' || start >= (last?.start ?? 0);
+  }
+
+  /** Whether `token`, the last token, is an infix operator after a token
+   * that ends an operand (`1 +`, `3! +`, `1 ×`), not after a word that
+   * starts one (`return *`, `not *`). */
+  private isInfixOperatorAfterOperand(token: Token): boolean {
+    const text =
+      token.type === 'ERROR' ? this.fancyOperator(token) : token.text;
+    if (text === null || infixOperatorForSymbol(text) === undefined)
+      return false;
+    if (!['OPERATOR', 'SYMBOL', 'ERROR'].includes(token.type)) return false;
+    const before = this.tokens[this.tokens.length - 3];
+    if (before === undefined) return false;
+    // A postfix operator ends its operand (`3!`).
+    if (before.type === 'OPERATOR')
+      return postfixOperatorForSymbol(before.text) !== undefined;
+    if (!OPERAND_END_TOKENS.has(before.type)) return false;
+    if (before.type !== 'SYMBOL' || LITERAL_WORDS.has(before.text)) return true;
+    return !(
+      RESERVED_WORDS.has(before.text) ||
+      CONTEXTUAL_STATEMENT_WORDS.has(before.text) ||
+      infixOperatorForSymbol(before.text) !== undefined ||
+      prefixOperatorForSymbol(before.text) !== undefined
+    );
+  }
+
+  /** Whether the lexer ended `token` at the end of the source, not at a line
+   * break: an unclosed token that more text can close. */
+  private reachesEndOfSource(token: Token): boolean {
+    // An escape at the end of the input gives the token an end one past the
+    // source (CE-1579).
+    return token.end >= this.source.length;
   }
 
   /** The fixit of a `closing-bracket-expected` that the parser reports: the
@@ -956,6 +1082,15 @@ export class Parser {
         const fixit = this.closingStringDelimiterFixit(message[1], token);
         if (fixit !== undefined) diagnostic.fixits = [fixit];
       }
+      // An unclosed string, comment or hole that the end of the input ended
+      // (not a single-line string that a line break ended).
+      const code = typeof message === 'string' ? message : message[0];
+      if (
+        this.endsInput &&
+        UNCLOSED_TOKEN_CODES.has(code) &&
+        this.reachesEndOfSource(token)
+      )
+        diagnostic.incomplete = true;
       this.diagnostics.push(diagnostic);
     }
   }
@@ -1277,15 +1412,14 @@ export class Parser {
   private parseDoBlock(): MathJsonExpression | null {
     const kw = this.advance(); // 'do'
     if (!this.check('OPEN_BRACE')) {
-      this.diagnostics.push({
-        severity: 'error',
-        message: ['opening-bracket-expected', '{'],
-        range: [
-          this.baseOffset + this.current.start,
-          this.baseOffset + this.current.end,
-        ],
-        fixits: [[this.baseOffset + kw.end, this.baseOffset + kw.end, ' {}']],
-      });
+      this.error(
+        ['opening-bracket-expected', '{'],
+        this.current.start,
+        this.current.end
+      );
+      this.diagnostics[this.diagnostics.length - 1].fixits = [
+        [this.baseOffset + kw.end, this.baseOffset + kw.end, ' {}'],
+      ];
       return null;
     }
     const block = this.parseBlock();
@@ -9207,6 +9341,8 @@ export class Parser {
       deadline: this.deadline,
       isLibraryFunction: this.isLibraryFunction,
       span: true,
+      // An unclosed hole runs to the end of the source.
+      endsInput: this.endsInput && span.end >= this.source.length,
       // A copy: a `function` statement in the interpolation does not count
       // after it.
       functionNames: new Set(
@@ -9243,6 +9379,8 @@ export class Parser {
       isLibraryFunction: this.isLibraryFunction,
       nestingDepth: this.expressionNesting,
       span: true,
+      endsInput:
+        this.endsInput && token === this.tokens[this.tokens.length - 2],
     });
     const value = sub.parseProgram();
     for (const d of sub.diagnostics) this.diagnostics.push(d);

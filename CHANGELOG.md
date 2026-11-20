@@ -2,6 +2,15 @@
 
 ### New Features
 
+- **A parse diagnostic of Epsil tells when the input ended too soon**
+  (CE-1522). A diagnostic of `parseEpsil()` has `incomplete: true` when the
+  parser reached the end of the input before the construct was complete, so
+  that more text at the end can remove the error: `let s = "abc`, `f(1`,
+  `let a = 1 +`, `if x`, `let x: list<`. An editor can wait before it shows
+  such a diagnostic on the line being typed, and show the others at once. An
+  error before the last line (`let a = 1 +` and then `let b = 2`) and an error
+  that more text cannot remove (`1 )`, `let a = *`) do not have the field.
+
 - **An unclosed string or bracket in Epsil has a fixit** (CE-1520). The
   `string-literal-closing-delimiter-expected` diagnostic of `parseEpsil()`
   inserts the delimiter after the text of the string on its line, before a
