@@ -3091,7 +3091,9 @@ function lowerOnce(
   /** The held value `v` of the name `name`, which is not a literal, lowered
    *  where `e` reads it. It declines when `v` reads `name` again, has an
    *  effect, or has another rank or lane than the type of `e`, and when a
-   *  name that `v` reads (outside a function literal of `v` that binds it)
+   *  name that `v` reads (outside a function literal of `v` that binds it,
+   *  and outside the body and the condition of a clause of a `Sum`, a
+   *  `Product` or a `Comprehension` of `v` that binds it as its index)
    *  is bound here other than as an input, or has another binding here
    *  than in `v` with a value in one of the two (the interpreter reads the
    *  bindings of `v`). */
@@ -3107,6 +3109,44 @@ function lowerOnce(
           ...inner,
           ...x.ops.slice(1).map((p) => (isSymbol(p) ? p.symbol : '')),
         ];
+      // A `Sum`, a `Product` or a `Comprehension` binds the index of each
+      // clause `Limits(i, …)` or `Element(i, …)` in its body and in the
+      // condition of an `Element` clause. The bounds and the lists are
+      // checked as reads of the names outside: a later clause that reads an
+      // earlier index there can decline, never take another value.
+      const clauses =
+        isFunction(x) &&
+        (x.operator === 'Comprehension' ||
+          REDUCTIONS.get(x.operator)?.indexed === true)
+          ? x.ops.slice(1)
+          : [];
+      const indexes = clauses.flatMap((c) =>
+        (isFunction(c, 'Limits') || isFunction(c, 'Element')) &&
+        isSymbol(c.ops[0])
+          ? [c.ops[0].symbol]
+          : []
+      );
+      if (isFunction(x) && indexes.length > 0) {
+        const within = [...inner, ...indexes];
+        const clause = (c: Expression) =>
+          isFunction(c, 'Limits') || isFunction(c, 'Element')
+            ? c.ops.reduce(
+                (s, op, i) =>
+                  s ||
+                  (i === 0 && isSymbol(op)
+                    ? ''
+                    : reason(
+                        op,
+                        i === 2 && isFunction(c, 'Element') ? within : inner
+                      )),
+                ''
+              )
+            : reason(c, inner);
+        return clauses.reduce(
+          (s, c) => s || clause(c),
+          reason(x.ops[0], within)
+        );
+      }
       if (!isSymbol(x))
         return isFunction(x)
           ? x.ops.reduce((s, op) => s || reason(op, inner), '')

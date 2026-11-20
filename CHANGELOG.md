@@ -70,6 +70,16 @@
 
 ### Resolved Issues
 
+- **A name whose value is a `Comprehension`, a `Sum` or a `Product` compiles
+  when the index of a clause has the name of another symbol with a value**
+  (CE-1566). With `j := [4, 5]` and
+  `c := Comprehension(j / 10, Element(j, Range(0, S - 1)))`, `x + Sum(c)`
+  compiles to JavaScript again, as it did in 0.186.0. It declined with "the
+  value of c, which reads j of another binding": the index `j` of the clause
+  was taken for a read of the outer `j`. The index is now bound in the body of
+  the clause and in its condition. A bound or a list of a clause that reads a
+  symbol of another binding still declines.
+
 - **A list of points multiplied or divided by a list of numbers compiles when
   the lists have lengths known only at run time** (CE-1561). With
   `p: list<tuple<real, real>>` and `n: list<real>`,

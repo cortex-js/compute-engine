@@ -1469,6 +1469,37 @@ describe('a name whose held value is an expression is that expression where it i
     e.popScope();
   });
 
+  test('the index of a clause of a value is not a name of another binding (CE-1566)', () => {
+    // The outer j is a list; the j of each clause is the index. Tycho's
+    // art/3y0t1f0mo7.
+    const e = new ComputeEngine();
+    e.declare('S', 'integer<1..20>');
+    e.declare('x', 'real');
+    e.declare('j', 'list<integer>');
+    e.assign('j', box(['List', 4, 5], e));
+    const points = [{ x: 0.5, S: 3 }, { x: -2, S: 7 }];
+    const values: [string, Json][] = [
+      ['c1', ['Comprehension', ['Divide', 'j', 10], ['Element', 'j', ['Range', 0, ['Add', 'S', -1]]]]],
+      ['c2', ['Comprehension', 'k', ['Element', 'k', ['Range', 0, 'S'], ['Greater', 'k', ['At', 'j', 1]]]]],
+      ['c3', ['Comprehension', ['Add', 'j', 'k'], ['Element', 'j', ['Range', 0, 'S']], ['Element', 'k', ['Range', 1, 2]]]],
+    ];
+    for (const [name, value] of values) {
+      e.box(['Assign', name, value]).evaluate();
+      againstInterpreter(e, ['Add', 'x', ['Sum', name]], points);
+    }
+    e.box(['Assign', 's1', ['Sum', ['Divide', 'j', 10], ['Limits', 'j', 0, 'S']]]).evaluate();
+    e.box(['Assign', 'p1', ['Product', ['Divide', 'j', 10], ['Limits', 'j', 1, 'S']]]).evaluate();
+    // A bound reads the outer j: 0 + 1 + 2 at its length 2.
+    e.box(['Assign', 's2', ['Sum', 'j', ['Limits', 'j', 0, ['Length', 'j']]]]).evaluate();
+    for (const json of [['Add', 'x', 's1'], ['Add', 'x', 'p1'], ['Add', 'x', 's2']])
+      againstInterpreter(e, json, points);
+    // The list of a clause is not in the scope of its index, but its j
+    // resolves to the binding of the Comprehension, not to the outer j that
+    // holds a value, so the value declines.
+    e.box(['Assign', 'c4', ['Comprehension', 'j', ['Element', 'j', 'j']]]).evaluate();
+    expect(failure(e, ['Add', 'x', ['Sum', 'c4']])).toMatch(/the value of c4, which reads j of another binding/);
+  });
+
   test('a value that reads itself, or a draw, declines', () => {
     const e = engine();
     e.declare('aa', { type: 'real', value: box(['Add', 'aa', 1], e) });
