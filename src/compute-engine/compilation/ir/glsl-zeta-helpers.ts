@@ -1,8 +1,8 @@
 /**
  * The GLSL helpers of the zeta family for the IR printer (`print-glsl.ts`):
  * `PolyGamma` of an integer order, the Hurwitz zeta function, Wolfram's
- * generalized `Zeta(s, a)`, the Lerch transcendent and the polylogarithm,
- * of real operands, real-valued (float32).
+ * generalized `Zeta(s, a)`, the Lerch transcendent, the polylogarithm and
+ * the harmonic numbers, of real operands, real-valued (float32).
  *
  * The text of the deleted GPU target's preambles
  * (`GPU_POLYGAMMA_PREAMBLE_GLSL`, `GPU_ZETA_PREAMBLE_GLSL` and
@@ -15,15 +15,20 @@
  * and ψ₁ are the printer's `_gpu_ir_gamma`, `_gpu_ir_gammaln`,
  * `_gpu_ir_digamma` and `_gpu_ir_trigamma`, and NaN and +∞ are their bit
  * patterns. `_gpu_ir_polygamma` answers the order -1, ln Γ(x), as the
- * JavaScript kernel. `test/compute-engine/gpu-lerch-f32-model.ts` is a
- * float32 model of the zeta and Lerch functions, statement by statement.
+ * JavaScript kernel. The sine of the reduced argument of
+ * `_gpu_ir_riemann_zeta` and `_gpu_ir_zeta_fourier` is `_gpu_ir_sincospi`:
+ * a renderer's `sin` is 6e-5 off at π/4 (SwiftShader).
+ * `test/compute-engine/gpu-lerch-f32-model.ts` is a float32 model of the
+ * zeta and Lerch functions, statement by statement. The harmonic numbers
+ * (`_gpu_ir_harmonic`, `_gpu_ir_harmonic2`) are not from that target.
  *
  * A helper is NaN where the value is complex, and where its terms cancel or
  * no method vouches for its value: `_gpu_ir_polygamma` next to a zero for
  * x < 0, and for an order above 24; `_gpu_ir_zeta_shifted` next to a zero
  * of ζ(s, a); `_gpu_ir_lerch_phi` and `_gpu_ir_poly_log` where their error
- * estimates exceed 3e-5 of the value. `print-glsl.ts` finds the helpers
- * that each one calls in its text.
+ * estimates exceed 3e-5 of the value; `_gpu_ir_harmonic` and
+ * `_gpu_ir_harmonic2` likewise (the IR README lists the points).
+ * `print-glsl.ts` finds the helpers that each one calls in its text.
  */
 
 // prettier-ignore
@@ -170,7 +175,7 @@ float _gpu_ir_riemann_zeta(float s, float sm1) {
     // sine keeps its relative accuracy next to an even s.
     float hs = s / 2.0;
     float n = floor(hs + 0.5);
-    float sinHalfPiS = sin(PI * (hs - n));
+    float sinHalfPiS = _gpu_ir_sincospi(hs - n).x;
     if (mod(n, 2.0) != 0.0) sinHalfPiS = -sinHalfPiS;
     // 1 - s is rounded, but its distance to the pole, -s, is exact.
     float oneMinusS = 1.0 - s;
@@ -332,7 +337,7 @@ vec2 _gpu_ir_zeta_fourier(float s, float b) {
     float kb = fk * b;
     float ph = 2.0 * (kb - floor(kb)) + ps;
     float n = floor(ph + 0.5);
-    float sn = sin(PI * (ph - n));
+    float sn = _gpu_ir_sincospi(ph - n).x;
     if (mod(n, 2.0) != 0.0) sn = -sn;
     float pk = pow(fk, s - 1.0);
     float t = sn * pk;
@@ -373,6 +378,15 @@ float _gpu_ir_zeta_shifted(float s, float a) {
   if (!(6.0e-8 * err <= 3.0e-5 * abs(z))) return uintBitsToFloat(0x7fc00000u);
   return z;
 }`,
+  _gpu_ir_zeta_negative_terms: `// The sum of the sizes |a + k|^(-s) of the terms of zeta(s, a) with
+// a + k < 0: of an integer s > 0 they cancel those of a + k > 0 (exactly at
+// a half-integer a for an odd s).
+float _gpu_ir_zeta_negative_terms(float s, float a) {
+  float e = 0.0;
+  int n = int(ceil(-a));
+  for (int k = 0; k < n; k++) e += pow(abs(a + float(k)), -s);
+  return e;
+}`,
   _gpu_ir_hurwitz_zeta: `float _gpu_ir_hurwitz_zeta(float s, float a) {
   if (s == 1.0) return uintBitsToFloat(0x7f800000u); // pole, every base point a
   if (s == 0.0) return 0.5 - a;
@@ -386,7 +400,15 @@ float _gpu_ir_zeta_shifted(float s, float a) {
   // and 1/2 <= s < 1 below a = 1 (the zeros of zeta(s, a) there).
   if (a > 0.0 && s >= -24.5 && s < 1.0 && (s < 0.5 ? a < 4.0 * edge : a < 1.0))
     return _gpu_ir_zeta_shifted(s, a);
-  if (s >= 0.0 || a >= 4.0 * edge) return _gpu_ir_hurwitz_zeta_em(s, a, s - 1.0);
+  if (s >= 0.0 || a >= 4.0 * edge) {
+    float z = _gpu_ir_hurwitz_zeta_em(s, a, s - 1.0);
+    // Below a = 0 the terms (a + k)^(-s) of both signs cancel (exactly at a
+    // half-integer a for an odd s: zeta(25, -1.5) is 1.1e-10 from terms of
+    // 2^25): NaN where the error of their sizes passes 3e-5 of the value.
+    if (a < 0.0 && !(6.0e-8 * 8.0 * _gpu_ir_zeta_negative_terms(s, a) <= 3.0e-5 * abs(z)))
+      return uintBitsToFloat(0x7fc00000u);
+    return z;
+  }
   // Shift a to 1+h (|h| <= 3/4) and expand in Taylor series — see
   // hurwitzZetaComplex's doc comment for why EM alone cancels here.
   float m = floor(a - 0.5);
@@ -1371,5 +1393,167 @@ float _gpu_ir_poly_log(float s, float z) {
     if (r.y > 0.5) return r.x;
   }
   return uintBitsToFloat(0x7fc00000u);
+}`,
+  _gpu_ir_harmonic_pos: `// H(m) = psi(m + 1) + gamma for m > -1. Below |m| = 0.1, where the two
+// cancel, its Taylor series m sum_{j>=0} zeta(j + 2) (-m)^j (error 1e-11).
+float _gpu_ir_harmonic_pos(float m) {
+  if (m > 3.4028234663852886e38) return m;
+  if (abs(m) < 0.1) {
+    float z[11] = float[11](
+      1.6449340668482264, 1.2020569031595942, 1.0823232337111381,
+      1.03692775514337, 1.0173430619844492, 1.008349277381923,
+      1.0040773561979444, 1.0020083928260821, 1.000994575127818,
+      1.0004941886041194, 1.000246086553308
+    );
+    float s = 0.0;
+    for (int j = 10; j >= 0; j--) s = s * -m + z[j];
+    return s * m;
+  }
+  return _gpu_ir_digamma(m + 1.0) + 0.5772156649015329;
+}`,
+  _gpu_ir_harmonic: `// HarmonicNumber(n) = psi(n + 1) + gamma: 0 at 0, +inf at a negative
+// integer, NaN at -inf. Below -1 the reflection H(n) = H(-n - 1) - pi
+// cot(pi n), NaN where its terms cancel to less than 3e-5 of the value (next
+// to the zero of H in each interval (-k - 1, -k), k >= 1).
+float _gpu_ir_harmonic(float n) {
+  if (n <= 0.0 && n == floor(n)) {
+    if (n == 0.0) return 0.0;
+    return n >= -3.4028234663852886e38 ? uintBitsToFloat(0x7f800000u) : uintBitsToFloat(0x7fc00000u);
+  }
+  if (n >= -1.0) return _gpu_ir_harmonic_pos(n);
+  float a = _gpu_ir_harmonic_pos(-n - 1.0);
+  vec2 sc = _gpu_ir_sincospi(n);
+  float b = 3.14159265358979 * sc.y / sc.x;
+  float v = a - b;
+  if (!(6.0e-8 * 4.0 * abs(a) + 6.0e-8 * 4.0 * abs(b) <= 3.0e-5 * abs(v))) return uintBitsToFloat(0x7fc00000u);
+  return v;
+}`,
+  _gpu_ir_harmonic_series: `// HarmonicNumber(n, r) = -sum_{k>=1} C(-r, k) n^k zeta(r + k), for |n| < 1:
+// the series of _gpu_ir_zeta_near_one_mag less its term k = 0, zeta(r), which
+// zeta(r) - zeta(r, 1 + n) cancels. At an integer r <= 0 the term of
+// zeta(1) is its limit and the series ends: a polynomial, for every n.
+// vec2(the value, the sum of the sizes of its terms), or vec2(0, +inf) where
+// it does not converge in 100 terms or overflows.
+vec2 _gpu_ir_harmonic_series(float n, float r) {
+  vec2 fail = vec2(0.0, uintBitsToFloat(0x7f800000u));
+  if (r < -24.5) return fail;
+  float sum = 0.0;
+  float mag = 0.0;
+  float largest = 0.0;
+  float c = 1.0;
+  float hk = 1.0;
+  int small = 0;
+  for (int k = 1; k < 100; k++) {
+    hk *= n;
+    if (hk == 0.0) return vec2(sum, mag);
+    float f = float(1 - k) - r;
+    if (f == 0.0) {
+      float last = c * hk / float(k);
+      sum += last;
+      mag += abs(last);
+      return mag < 3.4028234663852886e38 ? vec2(sum, mag) : fail;
+    }
+    c = c * f / float(k);
+    float term = c * hk * _gpu_ir_riemann_zeta(r + float(k), -f);
+    sum -= term;
+    float size = abs(term);
+    mag += size;
+    if (!(mag < 3.4028234663852886e38)) return fail;
+    largest = max(largest, size);
+    if (size <= 1e-7 * largest) {
+      if (++small == 2) return vec2(sum, mag);
+    } else small = 0;
+  }
+  return fail;
+}`,
+  _gpu_ir_harmonic2: `// HarmonicNumber(n, r) = sum_{k=1}^n k^(-r) = zeta(r) - zeta(r, n + 1), as
+// the JavaScript kernel: 0 at n = 0; at a negative integer n, +inf for
+// r > 0 and NaN otherwise; at n = +inf, zeta(r) for r > 1 (1 for r = +inf)
+// and NaN otherwise; at r = +inf and a finite n, 1 for n > 0, -inf for
+// -1 < n < 0 and NaN below; NaN for r = -inf. The sum for an
+// integer n up to 256 (the smallest terms first). For another n from -256.5
+// to 256.5 (to 1/2 for r >= 2), the value at n' = n - m in [-1/2, 1/2) and
+// the recurrence H(n) = H(n - 1) + n^(-r) (below n' = -1 a negative base,
+// real for an integer r only); H(n') is the series of
+// _gpu_ir_harmonic_series, else zeta(r) - zeta(r, n' + 1). Elsewhere the
+// series for an integer r <= 0 (a polynomial), else the difference. NaN
+// where the error estimate (each term's size times its rounding error, a
+// multiple of 6e-8, so that it does not overflow) passes 3e-5 of the value:
+// next to r = 1 the difference cancels (each zeta is about 1/(r - 1)), next
+// to a zero the recurrence.
+float _gpu_ir_harmonic2(float n, float r) {
+  const float NAN = uintBitsToFloat(0x7fc00000u);
+  if (n > 3.4028234663852886e38)
+    return r > 3.4028234663852886e38 ? 1.0 : r > 1.0 ? _gpu_ir_zeta_riemann(r) : NAN;
+  if (r == 1.0) return _gpu_ir_harmonic(n);
+  // H(n, +inf): the term 1 of k = 1, less (n + 1)^(-r) below n = 0.
+  if (r > 3.4028234663852886e38) {
+    if (n <= 0.0 && n == floor(n))
+      return n == 0.0 ? 0.0 : n >= -3.4028234663852886e38 ? uintBitsToFloat(0x7f800000u) : NAN;
+    return n > 0.0 ? 1.0 : n > -1.0 ? uintBitsToFloat(0xff800000u) : NAN;
+  }
+  if (r < -3.4028234663852886e38) return NAN;
+  if (n <= 0.0 && n == floor(n)) {
+    if (n == 0.0) return 0.0;
+    return n >= -3.4028234663852886e38 && r > 0.0 ? uintBitsToFloat(0x7f800000u) : NAN;
+  }
+  if (n == floor(n) && n <= 256.0) {
+    int m = int(n);
+    float s = 0.0;
+    if (r > 0.0) {
+      for (int k = m; k >= 1; k--) s += pow(float(k), -r);
+    } else {
+      for (int k = 1; k <= m; k++) s += pow(float(k), -r);
+    }
+    return s;
+  }
+  // Above n = 1/2 for r >= 2 the terms of the recurrence cancel H(n') < 0
+  // (n'^(-r) is large), and the difference does not cancel.
+  bool shifted = n < -0.5 ? n > -256.5 : n < 256.5 && (r < 2.0 || n < 0.5);
+  float shift = 0.0;
+  float err = 0.0;
+  if (shifted) {
+    float m = floor(n + 0.5);
+    if (n < -1.0 && r != floor(r)) return NAN; // complex value
+    // The terms n - j for j = 0 .. m - 1 above n', n' + j for j = 1 .. -m
+    // below.
+    for (int j = 0; j < 257; j++) {
+      if (float(j) >= abs(m)) break;
+      float b = m > 0.0 ? n - float(j) : n + float(j + 1);
+      float t = _gpu_ir_zeta_pow(b, -r);
+      shift += m > 0.0 ? t : -t;
+      err += 6.0e-8 * abs(t) * (3.0 + abs(r * log2(abs(b))));
+    }
+    n -= m;
+  }
+  float v;
+  vec2 t = vec2(0.0, uintBitsToFloat(0x7f800000u));
+  if (shifted || (r <= 0.0 && r == floor(r)))
+    t = _gpu_ir_harmonic_series(n, r);
+  // The series, unless its error passes 3e-5 of the larger of H(n') and the
+  // recurrence (H(n', -2k) is 0 at n' = -1/2).
+  if (6.0e-8 * 4.0 * t.y <= 3.0e-5 * max(abs(t.x), abs(shift))) {
+    v = t.x;
+    err += 6.0e-8 * 4.0 * t.y;
+  } else {
+    float a = _gpu_ir_zeta_riemann(r);
+    float b;
+    // Below n = -1 (r an integer), the terms of zeta(r, n + 1) cancel: their
+    // sizes go in the estimate, which _gpu_ir_hurwitz_zeta makes relative to
+    // its own value.
+    if (n < -1.0 && r > 0.0) {
+      // Both loops take -n steps: NaN below n = -10^6, as
+      // _gpu_ir_hurwitz_zeta below a = -10^6.
+      if (n < -1.0e6) return NAN;
+      b = _gpu_ir_hurwitz_zeta_em(r, n + 1.0, r - 1.0);
+      err += 6.0e-8 * 8.0 * _gpu_ir_zeta_negative_terms(r, n + 1.0);
+    } else b = _gpu_ir_hurwitz_zeta(r, n + 1.0);
+    v = a - b;
+    err += 6.0e-8 * 16.0 * abs(a) + 6.0e-8 * 16.0 * abs(b);
+  }
+  v += shift;
+  err += 6.0e-8 * abs(v);
+  if (!(err <= 3.0e-5 * abs(v))) return NAN;
+  return v;
 }`,
 };

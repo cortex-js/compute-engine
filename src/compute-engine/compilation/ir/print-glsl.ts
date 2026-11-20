@@ -454,6 +454,7 @@ const COMPLEX_HELPERS: Record<string, string> = {
 const CALLED: Record<string, string[]> = {
   _gpu_ir_carg: ['_gpu_ir_carg'],
   _gpu_ir_root: ['_gpu_ir_root'],
+  _gpu_ir_sincospi: ['_gpu_ir_sincospi'],
   _gpu_ir_gamma: ['_gpu_ir_sincospi', '_gpu_ir_gamma'],
   _gpu_ir_gammaln: ['_gpu_ir_sincospi', '_gpu_ir_gammaln'],
   _gpu_ir_digamma: ['_gpu_ir_sincospi', '_gpu_ir_digamma'],
@@ -784,6 +785,8 @@ export const GLSL: Syntax = deepFreeze({
     'zetagen': helperCall('_gpu_ir_zeta_generalized', 2),
     'lerchphi': helperCall('_gpu_ir_lerch_phi', 3),
     'polylog': helperCall('_gpu_ir_poly_log', 2),
+    'harmonic': helperCall('_gpu_ir_harmonic', 1),
+    'harmonic2': helperCall('_gpu_ir_harmonic2', 2),
     'asoklch': '$0',
     'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
     'asrgb': {

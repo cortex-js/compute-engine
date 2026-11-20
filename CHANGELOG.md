@@ -56,6 +56,40 @@
 
 ### Resolved Issues
 
+- **`HarmonicNumber(n)` and `HarmonicNumber(n, r)` compile to GLSL again.**
+  Since 0.194.0, `compile(expr, { to: 'glsl' })` declined them. A shader now
+  gives the value of the interpreter within single-float precision, for an
+  integer and for a non-integer `n`:
+
+  ```ts
+  ce.declare('n', 'real');
+  compile(ce.box(['HarmonicNumber', 'n', 2]), { to: 'glsl' }).code;
+  // ➔ "_gpu_ir_harmonic2(n, 2.0)" (0.194.3: declined)
+  ```
+
+  As on JavaScript, a negative integer `n` is +∞ (a pole) and a value that is
+  not real is `NaN`. The shader also gives `NaN` where single floats cannot
+  hold the digits of the value, such as next to the zero of
+  `HarmonicNumber(n)` between two negative integers (`HarmonicNumber(-24.78)`)
+  and for an `r` close to 1 with `n` above 256
+  (`HarmonicNumber(300, 1.001)`).
+
+- **`HarmonicNumber(n, +∞)` in compiled code gives the interpreter value.**
+  It was `NaN` on JavaScript. It is now 1 for `n > 0`, 0 at `n = 0` and −∞
+  for `-1 < n < 0`: `HarmonicNumber(2, +∞)` is 1, `HarmonicNumber(-0.5, +∞)`
+  is −∞.
+
+- **`HurwitzZeta(s, a)` and `Zeta(s, a)` on GLSL are accurate for a negative
+  `s`.** The shader of a negative `s` that is not an integer, and of an
+  integer `s` below -14, was up to 2e-4 off (relative), as at
+  `HurwitzZeta(-19.5, 1.6)` and `HurwitzZeta(-24, 1.3)`. It is now within
+  2e-6 of the interpreter there.
+
+- **`HurwitzZeta(s, a)` on GLSL gives `NaN` instead of a wrong value where
+  its terms cancel at a negative `a`.** `HurwitzZeta(25, -1.5)` gave
+  `3.96e-5`; the value is `1.126e-10`, the remainder of the terms ±2^25. The
+  shader now gives `NaN` there.
+
 - **`Characters`, `StringJoin` of a list and `ColorToString` compile again on
   JavaScript (CE-1548).** `Characters(s)` and `GraphemeClusters(s)` give the
   array of the characters of `s`, `StringJoin(L)` and `StringJoin(L, sep)`

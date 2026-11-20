@@ -291,10 +291,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `plausible?` — `glsl`, `mode: 'complex'`, `x: real`:
   `Power(x, 0.2)` at `x = -8` gives the principal value `1.226 + 0.891i`;
   the interpreter and the `javascript` target give the real root `-1.5157`.
-- `plausible?` — `glsl`, `z: complex`: `Tanh(z)` is NaN from
-  `|Re(z)|` about 44.4 and `Tan(z)` from `|Im(z)|` about 44.4 (`cosh` of
-  twice the part overflows a single float), where the value is close to
-  `±1` and `±i`.
 - `plausible?` — `javascript` and `glsl`, `x: real`,
   `y: real`: `Floor(x/5 + y/10)` at `x = 24`, `y = -98` gives `-6`: each
   quotient is rounded, and their sum falls just under `-5`. The interpreter

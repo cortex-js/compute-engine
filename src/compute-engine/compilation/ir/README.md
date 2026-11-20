@@ -302,7 +302,28 @@ with their methods and measured accuracy in its source at 384222963), NaN where
 the value is complex and where their terms cancel or their error estimates
 exceed 3e-5 of the value: `PolyGamma(2, -0.5)` (the terms of both signs at a
 negative half-integer for an even order), `LerchPhi(-1, -1, 0.5)` (next to a
-zero), and an order of `PolyGamma` above 24. The others decline on GLSL. `GCD`
+zero), and an order of `PolyGamma` above 24. `HurwitzZeta(s, a)` of a negative `a` is NaN where its terms of both signs
+cancel (`HurwitzZeta(25, -1.5)`, 1.1e-10 from terms of 2^25). `HarmonicNumber(n)` is
+`_gpu_ir_harmonic`: ψ(n + 1) + γ, its Taylor series below |n| = 0.1, and
+below -1 the reflection H(n) = H(-n - 1) - π cot(πn). `HarmonicNumber(n, r)`
+is `_gpu_ir_harmonic2`: the sum of an integer n up to 256; from -256.5 to
+256.5 (to 1/2 for r >= 2) the recurrence to n' in [-1/2, 1/2) and the
+binomial series of H(n') (`_gpu_ir_harmonic_series`, ζ(r) - ζ(r, 1 + n')
+less its cancelling term ζ(r)); else ζ(r) - ζ(r, n + 1). At r = +∞,
+`HarmonicNumber(n, r)` is 1 for n > 0 and -∞ for -1 < n < 0. Both are NaN where
+the value is complex (n < -1 and an r that is not an integer, also where the
+interpreter drops an imaginary part below its tolerance, `HarmonicNumber(-1.2,
+-19.5)`) and where their error estimates exceed 3e-5 of the value: next to the
+zero of H(n) in each interval (-k - 1, -k), k >= 1, where |H(n)| is below about
+0.8% of |H(-n - 1)| + |π cot πn| (`HarmonicNumber(-24.78)`; 12 of 2,117 points
+from -30 to -1 in steps of 0.0137); r next to 1 for |n| > 256 (`HarmonicNumber(300, 1.001)`, where each
+ζ is about 1/(r - 1)); the recurrence of a large r below -1
+(`HarmonicNumber(-2.5, 25)`), and below -256.5 an odd r >= 7 at a half-integer
+n, where the terms ±(1/2)^-r of ζ(r, n + 1) cancel (`HarmonicNumber(-300.5,
+7)`); an even r <= -2 next to n = -1/2, where the value is 0 or small
+(`HarmonicNumber(0.5, -10)` is 2^-10); r < -24.5 for an n that is not an
+integer from 1 to 256; n below -10^6 for an r other than 1; and where the value
+overflows a single float (`HarmonicNumber(1195.5, -13.9)`). The others decline on GLSL. `GCD`
 of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s. `Hypot` is
 `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin is wrong for
 a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan` and the reciprocal

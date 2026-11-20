@@ -399,7 +399,6 @@ describe('Argument of a real in the interval mode', () => {
 describe('a target with no spelling declines', () => {
   // prettier-ignore
   test.each([
-    ['HarmonicNumber on GLSL', ['HarmonicNumber', 'x'], 'glsl', /the operation harmonic/],
     ['HarmonicNumber in the interval mode', ['HarmonicNumber', 'x'], 'interval-js', /the operation harmonic/],
     ['Gamma of two operands on GLSL', ['Gamma', 'x', 'y'], 'glsl', /the operation gammaupper/],
     ['Sign of a complex on GLSL', ['Sign', 'w'], 'glsl', /the operation csign/],
@@ -412,5 +411,12 @@ describe('a target with no spelling declines', () => {
   // (`ce-1534-glsl-complex-and-zeta.test.ts` checks its values).
   test('Zeta of two operands compiles on GLSL', () => {
     expect(decline(['Zeta', 'x', 'y'], { to: 'glsl' })).toBeUndefined();
+  });
+
+  // `HarmonicNumber` has a GLSL spelling (`ir-glsl-harmonic.test.ts` checks
+  // its values).
+  test('HarmonicNumber compiles on GLSL', () => {
+    expect(decline(['HarmonicNumber', 'x'], { to: 'glsl' })).toBeUndefined();
+    expect(decline(['HarmonicNumber', 'x', 'y'], { to: 'glsl' })).toBeUndefined();
   });
 });

@@ -2103,7 +2103,8 @@ const EULER_GAMMA = 0.5772156649015329;
  * of reals (`evaluateHarmonicNumber()`): 0 at `n = 0`; at a negative integer
  * `n` a pole (+∞) for `r > 0`, and NaN otherwise (the interpreter leaves it
  * unevaluated); at `n = +∞`, +∞ for `HarmonicNumber(n)` and `ζ(r)` for
- * `r > 1`. Otherwise `ψ(n + 1) + γ` for `r = 1`, its Taylor series
+ * `r > 1`; at `r = +∞`, 1 for `n > 0`, −∞ for `−1 < n < 0`, NaN below.
+ * Otherwise `ψ(n + 1) + γ` for `r = 1`, its Taylor series
  * `Σ (−1)^k ζ(k) n^(k−1)` (k ≥ 2) for `|n| < 0.1`, where the sum cancels;
  * the sum of `k^(−r)` for an integer `n` from 1 to 1000; else
  * `ζ(r) − ζ(r, n + 1)`.
@@ -2111,6 +2112,11 @@ const EULER_GAMMA = 0.5772156649015329;
 function harmonicNumber(n: number, r?: number): number {
   if (Number.isNaN(n) || (r !== undefined && Number.isNaN(r))) return NaN;
   if (n === Infinity) return r === undefined ? Infinity : r > 1 ? zeta(r) : NaN;
+  // H(n, +∞): the term 1 of k = 1, less (n + 1)^(−r) below n = 0.
+  if (r === Infinity && Number.isFinite(n)) {
+    if (Number.isInteger(n) && n <= 0) return n === 0 ? 0 : Infinity;
+    return n > 0 ? 1 : n > -1 ? -Infinity : NaN;
+  }
   if (n === -Infinity || (r !== undefined && !Number.isFinite(r))) return NaN;
   if (Number.isInteger(n) && n < 0)
     return r === undefined || r > 0 ? Infinity : NaN;
