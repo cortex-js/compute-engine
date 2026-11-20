@@ -276,3 +276,133 @@ describe('an asynchronous-only operator inside a held operand', () => {
     expect(ce.calls).toBe(0);
   });
 });
+
+// `NextCount()` gives 1, 2, 3, … at its successive runs, so a value shows
+// which run produced it. `Mark()` is a host function with a synchronous
+// handler. `order` records the runs of both.
+function withCounter(): ComputeEngine & { order: string[] } {
+  const ce = new ComputeEngine() as ComputeEngine & { order: string[] };
+  ce.order = [];
+  let count = 0;
+  ce.declare('NextCount', {
+    signature: '() -> integer',
+    pure: false,
+    evaluateAsync: async () => {
+      ce.order.push('NextCount');
+      count += 1;
+      return ce.number(count);
+    },
+  } as never);
+  ce.declare('Mark', {
+    signature: '() -> integer',
+    pure: false,
+    evaluate: () => {
+      ce.order.push('Mark');
+      return ce.number(100);
+    },
+  } as never);
+  return ce;
+}
+
+describe('an asynchronous-only application under a list operand runs once', () => {
+  test('an entry of a nested list', async () => {
+    const ce = withCounter();
+    const nested = await ce
+      .box(['List', ['List', ['NextCount'], 2], ['List', 3, 4]])
+      .evaluateAsync();
+    expect(nested.json).toEqual(['List', ['List', 1, 2], ['List', 3, 4]]);
+    expect(ce.order).toEqual(['NextCount']);
+  });
+
+  test('the entries of a nested list run in the order of the entries', async () => {
+    const ce = withCounter();
+    const nested = await ce
+      .box([
+        'List',
+        ['List', ['Mark'], ['NextCount']],
+        ['List', ['List', ['NextCount']], ['Mark']],
+      ])
+      .evaluateAsync();
+    expect(nested.json).toEqual([
+      'List',
+      ['List', 100, 1],
+      ['List', ['List', 2], 100],
+    ]);
+    expect(ce.order).toEqual(['Mark', 'NextCount', 'NextCount', 'Mark']);
+  });
+
+  test('a list entry of a tuple', async () => {
+    const ce = withCounter();
+    const tuple = await ce
+      .box(['Tuple', ['List', ['NextCount'], 2], ['NextCount']])
+      .evaluateAsync();
+    expect(tuple.json).toEqual(['Tuple', ['List', 1, 2], 2]);
+    expect(ce.order).toEqual(['NextCount', 'NextCount']);
+  });
+
+  test('a list operand of an operator that maps over its cells', async () => {
+    // `Add` can lift a conditional operand, so the applications under its
+    // list operand are awaited before the lift is tried. No operand is
+    // conditional here: the asynchronous handler of `Add` gets the awaited
+    // values.
+    const ce = withCounter();
+    const sum = await ce
+      .box(['Add', ['List', ['NextCount'], 2], 1])
+      .evaluateAsync();
+    expect(sum.json).toEqual(['List', 2, 3]);
+    expect(ce.order).toEqual(['NextCount']);
+  });
+
+  test('a list operand of a comparison', async () => {
+    const ce = withCounter();
+    const equal = await ce
+      .box(['Equal', ['List', ['NextCount'], 2], ['List', 1, 2]])
+      .evaluateAsync();
+    expect(equal.symbol).toBe('True');
+    expect(ce.order).toEqual(['NextCount']);
+  });
+
+  test('a list operand beside a conditional operand that is lifted', async () => {
+    const ce = withCounter();
+    ce.declare('c', 'real');
+    const sum = await ce
+      .box([
+        'Add',
+        ['List', ['NextCount'], 2],
+        ['If', ['Greater', 'c', 0], 3],
+      ])
+      .evaluateAsync();
+    expect(sum.json).toEqual([
+      'List',
+      ['If', ['Less', 0, 'c'], 4],
+      ['If', ['Less', 0, 'c'], 5],
+    ]);
+    expect(ce.order).toEqual(['NextCount']);
+  });
+
+  test('a matrix operand', async () => {
+    const ce = withCounter();
+    const product = await ce
+      .box([
+        'MatrixMultiply',
+        ['List', ['List', ['NextCount'], 0], ['List', 0, 1]],
+        ['List', ['List', 1, 0], ['List', 0, 1]],
+      ])
+      .evaluateAsync();
+    expect(product.json).toEqual(['List', ['List', 1, 0], ['List', 0, 1]]);
+    expect(ce.order).toEqual(['NextCount']);
+  });
+
+  test('under a numeric approximation', async () => {
+    const ce = withCounter();
+    const nested = await ce
+      .box(['List', ['List', ['Divide', ['NextCount'], 4], 2]])
+      .evaluateAsync({ numericApproximation: true });
+    expect(nested.json).toEqual(['List', ['List', 0.25, 2]]);
+    const sum = await ce
+      .box(['Add', ['List', ['Divide', ['NextCount'], 4], 2], 1])
+      .evaluateAsync({ numericApproximation: true });
+    expect(sum.json).toEqual(['List', 1.5, 3]);
+    expect(ce.order).toEqual(['NextCount', 'NextCount']);
+  });
+});

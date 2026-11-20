@@ -123,6 +123,26 @@
   numeral with a letter digit is written `\operatorname{BaseForm}(50, 40)`. A
   numeral with decimal digits only is unchanged (`101010_{2}`).
 
+- **With `evaluateAsync()`, a function that has only an `evaluateAsync`
+  handler runs once when its call is inside a list operand** (CE-1454). The
+  function ran twice when its call was an entry of a nested list, or an entry
+  of a list that is an operand of an operator such as `Add` or `Equal`, and
+  the result held the value of the second run:
+
+  ```js
+  let n = 0;
+  ce.declare('g', {
+    signature: '() -> integer',
+    pure: false,
+    evaluateAsync: async () => ce.number(++n),
+  });
+  await ce.box(['List', ['List', ['g'], 2], ['List', 3, 4]]).evaluateAsync();
+  // was [[2, 2], [3, 4]] after two runs of g, now [[1, 2], [3, 4]] after one
+  ```
+
+  The entries of a nested list are now evaluated in their order, as the
+  entries of a flat list are.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features

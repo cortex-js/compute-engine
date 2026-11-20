@@ -11384,7 +11384,10 @@ export class BoxedFunction
           : undefined;
       // The walk gives the event loop a turn about every 8 ms, and an abort
       // of the signal stops it there (`holdMapAsync`).
-      const tail = await holdMapAsync(
+      // The conditional-value lift (step 3b-cond) can replace the held
+      // operands of a lazy operator by the same operands with their
+      // asynchronous-only applications awaited.
+      let tail = await holdMapAsync(
         this,
         async (x, index) =>
           (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
@@ -11926,7 +11929,18 @@ export class BoxedFunction
       // for each of its steps. A lazy operator's held operands are evaluated
       // by the lift with `evaluate()`, which cannot run an asynchronous-only
       // descendant: those are awaited first, as for the handler in step 5
-      // (`awaitAsyncOnlyDescendants`).
+      // (`awaitAsyncOnlyDescendants`). An operator that never lifts a
+      // conditional operand (`liftsConditionalOperands()`) awaits nothing
+      // here: a `List` awaits its own entries in step 5, each one in its
+      // turn.
+      //
+      // An asynchronous-only application runs once. When the lift finds
+      // nothing to do, the operands with the awaited values replace `tail`,
+      // so the handler in step 5 receives those values and does not run the
+      // applications again. This holds for a synchronous handler and for an
+      // `evaluateAsync` handler (`Add` over a list operand), and for an
+      // operator that is rebuilt over its operands because it has no
+      // handler.
       //
       // A cheap test first, the same one as the lift makes: only a `Which`,
       // a single-branch `If` or a `List` operand can be lifted, so an
@@ -11944,7 +11958,8 @@ export class BoxedFunction
           this.engine._hasAsyncOnlyOperator &&
           !def.selectsOperands &&
           !def.scoped &&
-          def.holdClass !== 'quote'
+          def.holdClass !== 'quote' &&
+          liftsConditionalOperands(this.operator, def)
             ? await awaitAsyncOnlyDescendants(tail, options)
             : tail;
         const threaded = await runMaterializationAsync(
@@ -11953,6 +11968,7 @@ export class BoxedFunction
           options
         );
         if (threaded) return threaded;
+        tail = threadTail;
       }
 
       //
@@ -12097,7 +12113,9 @@ export class BoxedFunction
         // connective: `selectsOperands`) would have an unreachable arm run;
         // one that SCOPES them (`Block`, a big operator) orders and binds
         // their evaluation itself; one that QUOTES them holds data. An
-        // `evaluateAsync` handler awaits its own operands.
+        // `evaluateAsync` handler awaits its own operands; the
+        // asynchronous-only applications that the conditional-value lift
+        // (step 3b-cond) awaited are values in `tail` already.
         const demandsOperands =
           def.lazy === true &&
           def.evaluateAsync === undefined &&
@@ -14067,6 +14085,23 @@ const CONDITIONAL_THREADING_SKIP = new Set([
 ]);
 
 /**
+ * Whether an application of `operator`, with the definition `def`, can lift
+ * a conditional operand (`threadConditionalOperands()`): the operator is
+ * broadcastable and is not a logic operator, or its `threadsConditionals`
+ * flag selects a position. For any other operator, the lift does nothing,
+ * whatever the operands are.
+ */
+function liftsConditionalOperands(
+  operator: string,
+  def: BoxedOperatorDefinition
+): boolean {
+  return (
+    (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(operator)) ||
+    def.threadsConditionals !== false
+  );
+}
+
+/**
  * Step 4c of the evaluation of a function expression, shared by the
  * synchronous and the asynchronous routes: lift a conditional operand
  * (a restriction `If(c, v)`, `Which`) of the evaluated operands `tail` out of
@@ -14099,6 +14134,7 @@ function* threadConditionalOperands(
   options: Partial<EvaluateOptions> | undefined
 ): ConditionalThreadingSteps {
   const ce = expr.engine;
+  if (!liftsConditionalOperands(expr.operator, def)) return undefined;
   // A restriction is the single-branch `If(c, v)` that the parser gives
   // `v\{c\}` (`isRestriction()`): `Sin(If(c, 3))` is `If(c, Sin(3))`.
   if (def.broadcastable && !CONDITIONAL_THREADING_SKIP.has(expr.operator)) {
@@ -14115,7 +14151,6 @@ function* threadConditionalOperands(
     );
   }
   if (
-    def.threadsConditionals === false ||
     // A cheap test first, so that an application with no conditional
     // operand (the common case) allocates nothing: only a restriction, a
     // `Which`, or a `List` (which can hold restricted cells) at a
