@@ -70,6 +70,16 @@
 
 ### Resolved Issues
 
+- **A list of points multiplied or divided by a list of numbers compiles when
+  the lists have lengths known only at run time** (CE-1561). With
+  `p: list<tuple<real, real>>` and `n: list<real>`,
+  `Multiply(PointX(p), PointList(1, n))` compiles to JavaScript again, as it did
+  in 0.186.0. It declined with "Multiply of a list of points and a value of
+  another shape". Each number scales the point at the same index, as in the
+  interpreter: for `p = [(1, 2), (3, 4)]` and `n = [10, 20]` the value is
+  `[(1, 10), (3, 60)]`. `Multiply(n, p)` and `Divide(p, n)` also compile. Two
+  lists whose stated lengths differ still decline.
+
 - **A conditional whose condition is a constant compiles when the arm that is
   not taken would decline** (CE-1560). With `x: real`,
   `Which(1.2 <= 1, Which(x < -Sqrt(1 - 1.2^2), 1, True, 0), True, 1)` compiles

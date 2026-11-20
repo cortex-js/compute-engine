@@ -1197,7 +1197,11 @@ function lowerOnce(
    *  list written out through `lists.over()`, a `Map`), which reads their
    *  element at each index, and so
    *  under `Multiply` and `Divide` the element of a list of numbers of their
-   *  length; a point and a scalar are read as they are. */
+   *  length; a point and a scalar are read as they are. As in
+   *  `resultType()`, a run-time length of the outer axis fits any length:
+   *  two different lengths are an error of the interpreter that the static
+   *  type does not show, and the build has the length of the first list of
+   *  points. */
   const eachPoint = (
     node: Expression,
     head: string,
@@ -1206,16 +1210,25 @@ function lowerOnce(
   ): V => {
     const first = given.find((v) => tuples.get(v) === 1)!;
     const shape = type(first).shape;
+    const known = (x: Length) => (typeof x === 'number' ? x : constant(x.v));
+    const fits = (
+      [n, ...rest]: readonly Length[],
+      [m, ...inner]: readonly Length[]
+    ) =>
+      same(rest, inner) &&
+      (known(n) === undefined ||
+        known(m) === undefined ||
+        known(n) === known(m));
     for (const v of given) {
       const t = type(v);
       if (
         t.shape.length > 0 &&
         !(tuples.get(v) === 0 && t.shape.length === 1) &&
-        !(tuples.get(v) === 1 && same(t.shape, shape)) &&
+        !(tuples.get(v) === 1 && fits(t.shape, shape)) &&
         !(
           TUPLE_RULES[head] === 'scale' &&
           numbers(v) &&
-          same(t.shape, shape.slice(0, 1))
+          fits(t.shape, shape.slice(0, 1))
         )
       )
         decline(

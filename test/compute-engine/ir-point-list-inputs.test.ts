@@ -245,6 +245,14 @@ const VALUES: [label: string, json: Json][] = [
   ['Sin of a list of points', ['Sin', 'P']],
   ['a list of points scaled by its norms', ['Multiply', 'P', ['Abs', 'P']]],
   ['a list of points divided by a list of numbers of its length', ['Divide', ['Subtract', 'M', 'P'], ['Add', 1, ['Power', ['PointX', 'P'], 2]]]],
+  // CE-1561: a list of numbers and a list of points of two run-time
+  // lengths (two different lengths are an error of the interpreter that the
+  // static type does not show, as for `Add(D, E)`).
+  ['a list of points scaled by a list of numbers of a run-time length', ['Multiply', 'P', 'D']],
+  ['a list of numbers times a list of points', ['Multiply', 'D', 'P']],
+  ['a list of points divided by a list of numbers of a run-time length', ['Divide', 'P', 'D']],
+  ['the x coordinates times a PointList of a list of numbers', ['Multiply', ['PointX', 'P'], ['PointList', 1, 'D']]],
+  ['a PointList of a list of numbers times the x coordinates', ['Multiply', ['PointList', 1, 'D'], ['PointX', 'P']]],
   ['Map over the points', ['Map', ['Function', ['Add', ['PointX', 'q'], ['Abs', 'q']], 'q'], 'P']],
   ['Filter of the points', ['Filter', 'P', ['Function', ['Greater', ['PointX', 'q'], 0], 'q']]],
   ['a Comprehension of points', ['Comprehension', ['Tuple', ['PointY', 'q'], ['Multiply', 'x', ['PointX', 'q']]], ['Element', 'q', 'P']]],
@@ -526,7 +534,7 @@ describe('IR profile, batch G14: declines', () => {
     // `ir-glsl-point-arrays.test.ts`).
     ['an untyped parameter of a run-time length on GLSL', ['gu', 'P'], 'glsl', /a list of rank 2 on glsl|run-time length/],
     ['Sum of a list of points (a point)', ['Sum', 'P'], 'javascript', /a term that is not a number/],
-    ['a list of points scaled by a list of another length', ['Multiply', 'P', 'D'], 'javascript', /another shape/],
+    ['a list of points scaled by a list of another stated length', ['Multiply', 'S', ['List', 1, 2]], 'javascript', /another shape/],
     ['a list of points read by a function body (a capture)', ['cap', 1], 'javascript', /reads the input P of type list<tuple<real, real>>/],
     ['an untyped parameter, a list of points and a point', ['Add', ['gu', 'P'], ['gu', 'M']], 'javascript', /an argument of gu of another shape than at its first call/],
     ['a scalar after a list of points', ['List', ['ga', 'P'], ['ga', 'x']], 'javascript', /x: an argument of ga of another shape than at its first call: the parameter L is a list of points of 2 numbers \(real here\)/],
