@@ -47,14 +47,7 @@ Give each Jest test file by its path, never by a glob, because a glob that
 matches no file leaves Jest with no file argument, and Jest then runs the whole
 suite without the box lock.
 
-On Windows (Git Bash), the main tree is the directory the batch runs in, not
-`/Users/arno/dev/compute-engine`. Link `node_modules` in step 4 as a junction,
-`powershell -NoProfile -Command "New-Item -ItemType Junction -Path '<cygpath -w
-of the link>' -Target '<cygpath -w of the main tree's node_modules>'"`,
-because `ln -s` copies the directory. Before you remove a worktree, remove its
-junction with `cmd //c rmdir "<cygpath -w of the link>"`, because
-`git worktree remove --force` follows a junction and deletes the
-`node_modules` of the main tree.
+The main tree is `{{REPO}}`.{{MACHINE}}
 
 A Jest run of more than one test file, in the worktree as in the main tree,
 uses `-w 4` and holds the box lock
@@ -87,7 +80,7 @@ is still going without the lock competes with the next holder.
    fix verifies), because the web app tells whether a fix is released only
    from a hash or a version. Stage that change with the fix.
 4. Make a worktree: `git worktree add --detach /tmp/wt-{{NAME}} HEAD`, then
-   `ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-{{NAME}}/node_modules`.
+   `{{LINK}}`.
    Write every later command for it with an absolute path or
    `git -C /tmp/wt-{{NAME}}`. When `/tmp/wt-{{NAME}}` already exists, an
    earlier session stopped there, and the "State of the work" paragraph of
@@ -125,7 +118,7 @@ is still going without the lock competes with the next holder.
 9. Stage with `node ~/.claude/scripts/stage-helper.mjs prepare {{NAME}} …`
    and `stage {{NAME}}`, read the patches it prints, and commit. On WAIT,
    run `node ~/.claude/scripts/staging-queue.mjs wait {{NAME}}`.
-10. Remove the worktree with `git worktree remove --force /tmp/wt-{{NAME}}`
+10. Remove the worktree with `{{REMOVE}}`
     only after the commit contains your change.
 
 A defect that you find in older code that your change does not touch is an

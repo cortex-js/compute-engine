@@ -39,6 +39,12 @@
  * order still decides, but an `unassigned` item can wait until the items
  * after it that can start have run.
  *
+ * The brief's parts that depend on the machine are filled in here: the path
+ * of the main tree (`{{REPO}}`), the commands that link and remove the
+ * `node_modules` of a worktree (`{{LINK}}`, `{{REMOVE}}`: a junction on
+ * Windows, which `git worktree remove --force` would follow), and the notes on
+ * the machine (`{{MACHINE}}`: Windows, no `~/dev/cortexjs.io`, `--secondary`).
+ *
  * A usage limit of the account stops the batch: when a session ends on one
  * (an error result with HTTP status 429, "You've hit your weekly limit"), no
  * other session starts, because each would end on the same limit at once.
@@ -72,6 +78,9 @@
  *   --one-at-a-time       One batch session at a time, also when other
  *                         sessions run (see above).
  *   --timeout-min <n>     Stop a session after this many minutes (default 180).
+ *   --secondary           The repo is a copy on a second machine (univac):
+ *                         the brief tells each session to push nothing and to
+ *                         read `~/dev/tycho` only (see above).
  *   --dry-run             Print the briefs and the launch order; start nothing.
  *
  * Example:
@@ -87,6 +96,7 @@ import {
   appendFileSync,
   mkdirSync,
   readdirSync,
+  existsSync,
   createWriteStream,
   renameSync,
 } from 'node:fs';
@@ -107,11 +117,12 @@ const { values } = parseArgs({
     'timeout-min': { type: 'string', default: '180' },
     'dry-run': { type: 'boolean', default: false },
     'one-at-a-time': { type: 'boolean', default: false },
+    'secondary': { type: 'boolean', default: false },
   },
 });
 if (!values.queue || !values.out) {
   console.error(
-    'Usage: roadmap-batch.mjs --queue <file> --out <dir> [--items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--dry-run]'
+    'Usage: roadmap-batch.mjs --queue <file> --out <dir> [--items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--secondary] [--dry-run]'
   );
   process.exit(2);
 }
@@ -247,8 +258,47 @@ const template = readFileSync(
   'utf8'
 );
 const nameOf = (item) => `cebatch-${item.id.slice(3)}`;
+
+// The parts of the brief that depend on the machine (see the header).
+const windows = process.platform === 'win32';
+const repoPath = repo.replaceAll('\\', '/');
+const linkOf = (name) =>
+  windows
+    ? // `ln -s` in Git Bash copies the directory: a junction instead.
+      `powershell -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w /tmp/wt-${name}/node_modules)' -Target '$(cygpath -w ${repoPath}/node_modules)'" > /dev/null`
+    : `ln -s ${repoPath}/node_modules /tmp/wt-${name}/node_modules`;
+const removeOf = (name) =>
+  windows
+    ? // `git worktree remove --force` follows a junction and deletes the
+      // files of its target, the `node_modules` of the main tree.
+      `cmd //c rmdir "$(cygpath -w /tmp/wt-${name}/node_modules)" && git worktree remove --force /tmp/wt-${name}`
+    : `git worktree remove --force /tmp/wt-${name}`;
+const machineNotes = [
+  ...(windows
+    ? [
+        'This machine runs Windows; your shell is Git Bash. Remove a worktree only with the command of step 10, never with a bare `git worktree remove --force`, because Git for Windows follows the `node_modules` junction and deletes the files of the main tree.',
+      ]
+    : []),
+  ...(existsSync(join(homedir(), 'dev', 'cortexjs.io'))
+    ? []
+    : [
+        'There is no `~/dev/cortexjs.io` on this machine: when a guide page must change, edit nothing outside the repo, and name the page and the change in the `Open:` line of the report.',
+      ]),
+  ...(values.secondary
+    ? [
+        'This tree is a copy on a second machine: commit as the steps say, and push nothing; the orchestrator moves the commit to the main machine. `~/dev/tycho` here can be out of date: read it, never edit it, and name a change that Tycho needs in the `Open:` line.',
+      ]
+    : []),
+];
 const briefOf = (item) =>
   template
+    .replaceAll('{{REPO}}', repoPath)
+    .replaceAll(
+      '{{MACHINE}}',
+      machineNotes.length > 0 ? '\n\n' + machineNotes.join('\n\n') : ''
+    )
+    .replaceAll('{{LINK}}', linkOf(nameOf(item)))
+    .replaceAll('{{REMOVE}}', removeOf(nameOf(item)))
     .replaceAll('{{ID}}', item.id)
     .replaceAll('{{TITLE}}', item.title)
     .replaceAll('{{NAME}}', nameOf(item));
