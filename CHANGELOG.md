@@ -56,6 +56,13 @@
 
 ### Resolved Issues
 
+- **`Reduce(L, f)` with no initial value compiles when `f` is a function
+  literal.** The first element is the seed and the fold runs over the rest, as
+  the interpreter does: `Reduce(Range(1, n), (a, b) => a * b)` is `n!`, and
+  `Reduce(L, (a, b) => a - b)` folds from the left. Of an empty list the
+  interpreter gives no value, so the compiled code throws `out-of-range`
+  (#630, contributed by [enumeratio](https://github.com/enumeratio)).
+
 - **`Characters`, `StringJoin` of a list and `ColorToString` compile again on
   JavaScript (CE-1548).** `Characters(s)` and `GraphemeClusters(s)` give the
   array of the characters of `s`, `StringJoin(L)` and `StringJoin(L, sep)`
