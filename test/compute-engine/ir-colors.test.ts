@@ -220,6 +220,36 @@ describe('IR profile, colours on JavaScript', () => {
     );
   });
 
+  test('a constructor reads a complex channel as its real part, as the interpreter does (CE-1586)', () => {
+    // Tycho's document: the channel `20√z` is complex in the complex mode.
+    const json = [
+      'AsOklab',
+      [
+        'Hsv',
+        ['Multiply', 20, ['Sqrt', 'z']],
+        1,
+        ['Add', 'z', ['Rational', -12, 5]],
+      ],
+    ];
+    const options = { mode: 'complex', inputs: { z: 'real' } };
+    for (const program of [
+      json,
+      ['Hsv', ['Sqrt', 'z'], 1, 1],
+      ['Rgb', ['Sqrt', 'z'], 0.5, 0.5],
+    ]) {
+      const r = js(program, options);
+      expect(r.success).toBe(true);
+      for (const z of [4, 6, -4, -9]) {
+        const v = r.run!({ z } as never) as unknown as Color;
+        const want = interpreted(program, { z }, v.space);
+        [v.c0, v.c1, v.c2].forEach((x, k) => {
+          if (!near(x, want[k], 1e-12))
+            throw new Error(`z = ${z}: ${[v.c0, v.c1, v.c2]} vs ${want}`);
+        });
+      }
+    }
+  });
+
   test('broadcast() gives what the existing compiler gives', () => {
     const json = ['AsOklab', ['Oklch', 'x', 0.1, 250]];
     const r = js(json);
@@ -347,6 +377,42 @@ function shader(r: ReturnType<typeof glsl>, k: number): string {
       });
       expect(failures).toEqual([]);
       expect(items.length).toBeGreaterThanOrEqual(120);
+    }, 120_000);
+
+    test('a constructor of a complex channel agrees with the JavaScript value (CE-1586)', async () => {
+      const options = { mode: 'complex', inputs: { z: 'real' } };
+      const programs = [
+        ['Hsv', ['Sqrt', 'z'], 1, 1],
+        ['AsHsv', ['Hsv', ['Sqrt', 'z'], 1, 1]],
+      ];
+      const items = programs.flatMap((json) => {
+        const f = js(json, options);
+        const r = glsl(json, options);
+        expect(r.success).toBe(true);
+        return [4, -4].flatMap((z) => {
+          const v = f.run!({ z } as never) as unknown as Color;
+          return [v.c0, v.c1, v.c2].map((expected, k) => ({
+            name: `${JSON.stringify(json)} at z = ${z}, channel ${k}`,
+            source: shader(r, k),
+            uniforms: { u_z: z },
+            expected,
+          }));
+        });
+      });
+      const values = await driver.evaluate(items);
+      const failures: string[] = [];
+      values.forEach((v, k) => {
+        const { name, expected } = items[k];
+        if (!v.ok) return failures.push(`${name}: ${v.log}`);
+        if (
+          !(
+            Math.abs(v.value - expected) <=
+            1e-4 * Math.max(1, Math.abs(expected))
+          )
+        )
+          failures.push(`${name}: ${v.value} vs ${expected}`);
+      });
+      expect(failures).toEqual([]);
     }, 120_000);
   }
 );

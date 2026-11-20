@@ -1077,6 +1077,20 @@ function lowerOnce(
         c.head,
         args.filter((_, i) => i !== c.index)
       );
+    // A colour constructor reads the real part of a complex channel, as the
+    // interpreter does (`.re` in `library/colors.ts`): `Hsv(Sqrt(z), 1, 1)`
+    // of the `complex` mode is `Hsv(Real(Sqrt(z)), 1, 1)`.
+    if (
+      CHANNEL_SPACES[r.signatures[0][2]] !== undefined &&
+      args.some((v) => type(v).lane === 'complex')
+    )
+      return apply(
+        node,
+        r,
+        args.map((v) =>
+          type(v).lane === 'complex' ? apply(node, 'Real', [v]) : v
+        )
+      );
     const complex = leaves(r, args, node);
     const operation = (given: V[]): V => {
       // A tuple operand: only a row whose value on a tuple is its value on

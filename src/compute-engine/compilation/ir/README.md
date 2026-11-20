@@ -601,7 +601,9 @@ run time, and declines. A constructor with a list channel
 literal list of colours is each element by itself. No space is tracked at run
 time and no code tests one.
 
-The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a fourth
+The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour. A
+constructor reads a complex channel (`mode: 'complex'`) as its real part, as the
+interpreter does: `Hsv(Sqrt(z), 1, 1)` is `Hsv(Real(Sqrt(z)), 1, 1)`. A fourth
 operand (alpha) declines on both targets (GLSL has no alpha channel, and a row
 has at most three operands). Every row threads, as the interpreter maps it: a
 list operand gives the list of the colours of its elements, a scalar operand is

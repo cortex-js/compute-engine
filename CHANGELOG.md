@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A colour made from a complex channel compiles again in the complex mode**
+  (CE-1586). With `mode: 'complex'`, `compile()` declined a colour
+  constructor whose channel has a complex value, such as `Hsv(Sqrt(z), 1, 1)`
+  for a real input `z` ("Hsv of complex, integer, integer"). The constructors
+  `Rgb`, `Hsl`, `Hsv`, `Oklab` and `Oklch` now read the real part of a complex
+  channel, as `evaluate()` does: at `z = -4`, `Hsv(Sqrt(z), 1, 1)` is the
+  colour of `Hsv(0, 1, 1)`.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features
