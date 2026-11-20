@@ -281,6 +281,6 @@ describe('TYPE VARIABLES / BaseForm — `(T, (string|number)?) -> T where T: num
     // `evaluate` echoes the value operand (the base is a display attribute).
     expect(ce.box(['BaseForm', 255, 16]).evaluate().toString()).toBe('255');
     expect(ce.parse('1010_{2}').evaluate().toString()).toBe('10');
-    expect(ce.box(['BaseForm', 255, 16]).latex).toBe('\\mathrm{ff}_{16}');
+    expect(ce.box(['BaseForm', 255, 16]).latex).toBe('\\text{ff}_{16}');
   });
 });

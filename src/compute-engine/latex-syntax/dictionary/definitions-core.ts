@@ -2697,12 +2697,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           // A numeral whose digits are all decimal (0–9) round-trips through
           // the base-subscript numeral parser (`digits_{radix}` →
           // `BaseForm(value, radix)`), so emit it as plain digits + subscript.
-          // Otherwise (letter digits, e.g. hex `abc`) the numeral would not
-          // re-parse; keep the readable subscripted form but with `\mathrm`.
-          if (digits !== null) {
-            if (/^[0-9]+$/.test(digits)) return `${digits}_{${radix}}`;
-            return `\\mathrm{${digits}}_{${radix}}`;
-          }
+          if (digits !== null && /^[0-9]+$/.test(digits))
+            return `${digits}_{${radix}}`;
+          // A numeral with a letter digit (hex `2a`) is written as a string:
+          // `\text{2a}_{16}` reads back as the number, while `\mathrm{2a}_{16}`
+          // reads back as a symbol. The string serializer writes digits that
+          // spell a unit or a keyword with double quotes (`"cd"_{16}`):
+          // `\text{cd}` reads back as the candela and `\text{and}` as the
+          // conjunction. The parser reads a string numeral only in a base of at
+          // most 36; above that the functional form below is used.
+          if (digits !== null && radix <= 36)
+            return `${serializer.serialize({ str: digits })}_{${radix}}`;
         }
       }
       // Symbolic base: `BaseForm(digit polynomial, b)` → `digits_{b}`, the

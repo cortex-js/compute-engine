@@ -106,6 +106,23 @@
   value (`0/\pi` is `0`, `\pi^0` is `1`), a constant with no value and a
   variable are unchanged.
 
+- **A number written in a base above 10 reads back from its LaTeX as the same
+  number** (CE-1400). `BaseForm(42, 16)` was written `\mathrm{2a}_{16}`, which
+  parses as a symbol. A numeral with a letter digit is now written as a
+  string with the base as a subscript, the form that the parser reads as a
+  number:
+
+  ```js
+  ce.box(['BaseForm', 42, 16]).latex; // was \mathrm{2a}_{16}, now \text{2a}_{16}
+  ce.parse('\\text{2a}_{16}').json; // ➔ 42
+  ce.box(['BaseForm', 205, 16]).latex; // ➔ "cd"_{16}
+  ```
+
+  Digits that spell a unit or a keyword (`cd`, `and`) are written with double
+  quotes, as the string is: `\text{cd}` is the candela. In a base above 36, a
+  numeral with a letter digit is written `\operatorname{BaseForm}(50, 40)`. A
+  numeral with decimal digits only is unchanged (`101010_{2}`).
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features

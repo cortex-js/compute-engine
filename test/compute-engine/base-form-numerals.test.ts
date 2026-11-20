@@ -137,6 +137,64 @@ describe('BaseForm LaTeX serialization round-trip', () => {
   });
 });
 
+describe('BaseForm with a letter digit round-trips through LaTeX (CE-1400)', () => {
+  // A numeral with a letter digit is written as a string, the form that the
+  // parser reads as a number. `\mathrm{2a}_{16}` reads back as a symbol.
+  test.each([
+    [42, 16, '\\text{2a}_{16}'],
+    [255, 16, '\\text{ff}_{16}'],
+    [10, 16, '\\text{a}_{16}'],
+    // `b1` is a numeral of base 16, not the binary numeral `0b1`
+    [177, 16, '\\text{b1}_{16}'],
+    [11, 12, '\\text{b}_{12}'],
+    [1295, 36, '\\text{zz}_{36}'],
+    // Digits that spell a unit or a keyword are written with double quotes:
+    // `\text{cd}` reads back as the candela, `\text{and}` as the conjunction.
+    [205, 16, '"cd"_{16}'],
+    [22, 36, '"m"_{36}'],
+    [13801, 36, '"and"_{36}'],
+  ])('BaseForm(%p, %p) is written %p and reads back as the number', (value, base, latex) => {
+    const e = ce.box(['BaseForm', value, base]);
+    expect(e.latex).toBe(latex);
+    const back = ce.parse(e.latex);
+    expect(back.json).toEqual(value);
+    expect(back.type.matches('integer')).toBe(true);
+  });
+
+  test('a value beyond 2^53 reads back exactly', () => {
+    const v = 0xffff_ffff_ffff_ffff_ffff_ffff_ffff_ffffn;
+    const e = ce.box(['BaseForm', { num: v.toString() }, 16]);
+    expect(e.latex).toBe(`\\text{${'f'.repeat(32)}}_{16}`);
+    expect(ce.parse(e.latex).json).toEqual({ num: v.toString() });
+  });
+
+  test('above base 36 a numeral with a letter digit keeps the functional form', () => {
+    // 50 is `1a` in base 40, and the parser reads a text numeral only up to
+    // base 36: `\text{1a}_{40}` reads back as an `invalid-base` error.
+    const e = ce.box(['BaseForm', 50, 40]);
+    expect(e.latex).toBe('\\operatorname{BaseForm}(50, 40)');
+    expect(ce.parse(e.latex).json).toEqual(['BaseForm', 50, 40]);
+    // 42 is `12` in base 40: decimal digits only, so the numeral form reads
+    // back.
+    expect(ce.box(['BaseForm', 42, 40]).latex).toBe('12_{40}');
+  });
+
+  test.each([
+    [['Multiply', 2, ['BaseForm', 42, 16]], '84'],
+    [['Multiply', ['BaseForm', 42, 16], ['BaseForm', 255, 16]], '10710'],
+    [['Power', ['BaseForm', 42, 16], 2], '1764'],
+    [['Negate', ['BaseForm', 42, 16]], '-42'],
+    [['Add', 'x', ['BaseForm', 42, 16]], 'x + 42'],
+    [['Divide', ['BaseForm', 42, 16], 'x'], '42 / x'],
+    [['Multiply', ['BaseForm', 42, 16], ['BaseForm', 205, 16]], '8610'],
+    [['Power', ['BaseForm', 205, 16], 2], '42025'],
+  ])('as an operand, %j reads back with the value %p', (json, value) => {
+    const e = ce.box(json as Parameters<typeof ce.box>[0]);
+    expect(e.evaluate().toString()).toBe(value);
+    expect(ce.parse(e.latex).evaluate().toString()).toBe(value);
+  });
+});
+
 describe('BaseForm result type', () => {
   // `BaseForm` is a display wrapper: it echoes its numeric operand (the base
   // only affects serialization). The declared result must therefore be
