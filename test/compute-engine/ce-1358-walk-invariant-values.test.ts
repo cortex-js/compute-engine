@@ -292,3 +292,52 @@ describe('CE-1358 THE INVARIANT LIST OF A CALLBACK IS EVALUATED ONCE PER WALK', 
     expect(m.at(2)?.json).toBe(1);
   });
 });
+
+describe('CE-1602 EAGER APPLY COLLECTION WALK', () => {
+  test('reuses a pure collection under a scalar reduction within one walk', () => {
+    const { ce, calls } = engine();
+    ce.assign('L', list(ce, [-1, 2, -4]));
+    const expr = ce.box([
+      'Apply',
+      ['Function', ['Add', 'j', ['Max', ['Count', ['Abs', 'L']]]], 'j'],
+      ['Range', 1, 4],
+    ]);
+    expect(expr.evaluate().json).toEqual(['List', 5, 6, 7, 8]);
+    expect(calls()).toBe(1);
+
+    ce.assign('L', list(ce, [8, 2, -4]));
+    expect(expr.evaluate().json).toEqual(['List', 9, 10, 11, 12]);
+    expect(calls()).toBe(2);
+  });
+
+  test('a pure callback sees writes made by the source between cells', () => {
+    const { ce, calls } = engine();
+    const writes: number[] = [];
+    ce.assign('L', list(ce, [0]));
+    ce.declare('UpdateList', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: ([x]) => {
+        writes.push(x.re);
+        ce.assign('L', list(ce, [10 * x.re]));
+        return x;
+      },
+    });
+    const expr = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['Add', 'j', ['Max', ['Count', 'L']]],
+        'j',
+      ],
+      [
+        'Map',
+        ['Function', ['UpdateList', 'j'], 'j'],
+        ['Range', 1, 3],
+      ],
+    ]);
+    expect(expr.evaluate().json).toEqual(['List', 11, 22, 33]);
+    expect(writes).toEqual([1, 2, 3]);
+    expect(calls()).toBe(3);
+  });
+});

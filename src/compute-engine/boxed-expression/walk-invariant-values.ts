@@ -8,7 +8,8 @@ import { isDictionary, isFunction, isSymbol } from './type-guards.js';
 
 /**
  * The values of the sub-expressions of a callback that do not depend on the
- * call, kept for one walk of a lazy collection operator (`Map`, `Filter`).
+ * call, kept for one collection walk (`Map`, `Filter`, or an eager `Apply`
+ * broadcast).
  *
  * The body of a callback is evaluated at each element
  * (`docs/SCOPING-MODEL.md`, "Callable resolution"). A sub-expression of the
@@ -136,15 +137,19 @@ const INVARIANT_NODES = new WeakMap<
  * `f`, the application of the callback `fn` (`applicable(fn)`), wrapped so
  * that the invariant sub-expressions of `fn` are evaluated once in the walk
  * that calls the result. Call this once per walk. When `fn` has no invariant
- * sub-expression, `f` itself.
+ * sub-expression, return `f` itself. An eager `Apply` cell can evaluate its
+ * arguments inside `f`, so use the wrapper only for cells known to be pure.
  *
  * `fn` can also be the callbacks of the levels of a lowered chain of `Map`s
  * (`map-lowering.ts`), whose runner `f` evaluates the operands of each body.
  */
-export function walkInvariantApplicable<O>(
+export function walkInvariantApplicable<
+  Args extends unknown[],
+  Result extends Expression | undefined,
+>(
   fn: Expression | ReadonlyArray<Expression>,
-  f: (xs: ReadonlyArray<Expression>, options?: O) => Expression | undefined
-): (xs: ReadonlyArray<Expression>, options?: O) => Expression | undefined {
+  f: (...args: Args) => Result
+): (...args: Args) => Result {
   if (cacheOff('walkinvariant')) return f;
   const fns = Array.isArray(fn) ? fn : [fn as Expression];
   if (fns.length === 0) return f;
@@ -161,7 +166,7 @@ export function walkInvariantApplicable<O>(
     worldVersion: -1,
     objectStoreEpoch: -1,
   };
-  return (xs, options) => {
+  return (...args) => {
     if (
       walk.anyVersion !== ce._anyVersion ||
       walk.worldVersion !== ce._worldVersion ||
@@ -177,7 +182,7 @@ export function walkInvariantApplicable<O>(
     const saved = active;
     active = walk;
     try {
-      return f(xs, options);
+      return f(...args);
     } finally {
       active = saved;
       walk.anyVersion = ce._anyVersion;

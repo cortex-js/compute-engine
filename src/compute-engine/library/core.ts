@@ -327,6 +327,7 @@ import {
   typePrimitiveConformanceProblem,
 } from '../engine-protocols.js';
 import { errorValue } from '../boxed-expression/error-value.js';
+import { walkInvariantApplicable } from '../boxed-expression/walk-invariant-values.js';
 import {
   NESTED_DEFAULT_MESSAGE,
   forgetConstantDeclaration,
@@ -7141,12 +7142,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         );
         if (isApplyCells(before)) {
           const results: Expression[] = [];
+          const evaluateCell = (call: Expression) =>
+            call.evaluate({ numericApproximation });
+          const run =
+            before.collection === 'List' && !numericApproximation
+              ? walkInvariantApplicable(ops[0], evaluateCell)
+              : evaluateCell;
           for (
             let call = before.nextCall();
             call !== undefined;
             call = before.nextCall()
           )
-            results.push(call.evaluate({ numericApproximation }));
+            // A cell can still contain an unevaluated argument. If evaluating
+            // it can write state, run it outside the invariant walk.
+            results.push(
+              run !== evaluateCell && call.isPure
+                ? run(call)
+                : evaluateCell(call)
+            );
           return applyCellsValue(engine, before, results, numericApproximation);
         }
         if (before !== undefined) return before;
