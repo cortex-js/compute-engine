@@ -1183,6 +1183,18 @@ MathJSON `Program` · `(unknown*) -> unknown`
 
 Evaluate a program in the caller scope, continuing after statement errors.
 
+### ProtocolDefault
+
+constant `unknown`
+
+Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter.
+
+```epsil
+protocol Scaled { function scale(self: Self, by: real = 2, shift: real = 0) -> real }
+type number is Scaled { function scale(self, by, shift) -> real { self * by + shift } }
+scale(5, shift: 1)
+```
+
 ### ProtocolMember
 
 `(protocol: string, member: string, arguments: any*) -> unknown`

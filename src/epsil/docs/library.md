@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 725 functions and constants of the standard library, by category.
+The 726 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 121 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 122 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 16 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
@@ -121,6 +121,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `prime` | `Prime` | `(T, integer?) -> T where T` | Derivative or prime notation (`f'`, `f^{(n)}`) — opaque typed head until a derivative library handler runs. |
 | `print` | `Print` | `(any*) console -> nothing` | Print the operands to the host console, separated by spaces and followed by a newline. |
 | `program` | `Program` | `(unknown*) -> unknown` | Evaluate a program in the caller scope, continuing after statement errors. |
+| — | `ProtocolDefault` | constant `unknown` | Stands for the default value of a parameter in a call of a protocol member: the call receives the default that the selected requirement declares for that parameter. |
 | — | `ProtocolMember` | `(protocol: string, member: string, arguments: any*) -> unknown` | Invoke a protocol member on a value — the lowering of a QUALIFIED protocol call (`Comparable.compare(x, y)` in Epsil, whose parse, a `MemberCall` on the protocol name, canonicalizes to `Apply(Field(Comparable, "compare"), x, y)`). |
 | — | `ProtocolProperty` | `(protocol: string, property: string, receiver: any, value: any?) -> unknown` | Read (or write) a protocol PROPERTY through a NAMED protocol — the lowering of the qualified field form `person.(Nameable.name)` (protocols design P6, amending the D16 field grammar). |
 | `quadrilateral` | `Quadrilateral` | `(any+) -> expression` | Quadrilateral mark (`\square ABCD`) — opaque typed head; not evaluated. |
