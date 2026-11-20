@@ -5806,11 +5806,7 @@ function evaluateAiry(
   // Above machine precision a real argument has the digits asked for or the
   // head stays unevaluated (`bigAiry` declines where it cannot reach them).
   // A complex argument keeps the double kernels.
-  if (
-    bignumPreferred(ce) &&
-    isRealLiteral(x) &&
-    !Number.isNaN(x.re)
-  ) {
+  if (bignumPreferred(ce) && isRealLiteral(x) && !Number.isNaN(x.re)) {
     const value = bigAiry(ce, kind, bigRealOperand(ce, x), ce.precision);
     return value === undefined ? undefined : boxBignumApprox(ce, value);
   }

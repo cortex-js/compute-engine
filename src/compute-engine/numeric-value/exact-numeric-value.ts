@@ -370,8 +370,7 @@ export class ExactNumericValue extends NumericValue {
       // and an engine below machine precision (`precision: 3`) numericizes
       // to that coarse precision by design (`6000001/2000000` is `3`).
       const p = doubleDigits(prec);
-      if (r[1] === 1 || r[1] === 1n)
-        return new BigDecimal(r[0]).toPrecision(p);
+      if (r[1] === 1 || r[1] === 1n) return new BigDecimal(r[0]).toPrecision(p);
       return isMachineRational(r)
         ? new BigDecimal(r[0]).div(r[1], p)
         : new BigDecimal(r[0]).div(new BigDecimal(r[1]), p);

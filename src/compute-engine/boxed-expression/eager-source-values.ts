@@ -429,10 +429,7 @@ export function keptEagerSourceValue(expr: Expression): Expression | undefined {
 
 /** The value of `expr` kept in `store` during the evaluations in progress,
  * or `undefined`. */
-function keptValue(
-  store: KeptStore,
-  expr: Expression
-): Expression | undefined {
+function keptValue(store: KeptStore, expr: Expression): Expression | undefined {
   if (keptCount === 0 || cacheOff('eagersource')) return undefined;
   const ce = expr.engine;
   // Inside a type computation a variable has no value, so a value computed

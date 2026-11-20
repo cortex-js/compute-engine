@@ -1025,8 +1025,7 @@ export class Parser {
       if (delimiter === '"""') {
         // After the trailing spaces of the last line of text, which are part
         // of the value.
-        while (at < end && (source[at] === ' ' || source[at] === '\t'))
-          at += 1;
+        while (at < end && (source[at] === ' ' || source[at] === '\t')) at += 1;
         text = '\n' + delimiter;
       }
     } else {

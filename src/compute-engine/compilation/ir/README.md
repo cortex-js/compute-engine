@@ -302,40 +302,41 @@ with their methods and measured accuracy in its source at 384222963), NaN where
 the value is complex and where their terms cancel or their error estimates
 exceed 3e-5 of the value: `PolyGamma(2, -0.5)` (the terms of both signs at a
 negative half-integer for an even order), `LerchPhi(-1, -1, 0.5)` (next to a
-zero), and an order of `PolyGamma` above 24. `HurwitzZeta(s, a)` of a negative `a` is NaN where its terms of both signs
-cancel (`HurwitzZeta(25, -1.5)`, 1.1e-10 from terms of 2^25). `HarmonicNumber(n)` is
-`_gpu_ir_harmonic`: ψ(n + 1) + γ, its Taylor series below |n| = 0.1, and
-below -1 the reflection H(n) = H(-n - 1) - π cot(πn). `HarmonicNumber(n, r)`
-is `_gpu_ir_harmonic2`: the sum of an integer n up to 256; from -256.5 to
-256.5 (to 1/2 for r >= 2) the recurrence to n' in [-1/2, 1/2) and the
-binomial series of H(n') (`_gpu_ir_harmonic_series`, ζ(r) - ζ(r, 1 + n')
-less its cancelling term ζ(r)); else ζ(r) - ζ(r, n + 1). At r = +∞,
-`HarmonicNumber(n, r)` is 1 for n > 0 and -∞ for -1 < n < 0. Both are NaN where
-the value is complex (n < -1 and an r that is not an integer, also where the
-interpreter drops an imaginary part below its tolerance, `HarmonicNumber(-1.2,
--19.5)`) and where their error estimates exceed 3e-5 of the value: next to the
-zero of H(n) in each interval (-k - 1, -k), k >= 1, where |H(n)| is below about
-0.8% of |H(-n - 1)| + |π cot πn| (`HarmonicNumber(-24.78)`; 12 of 2,117 points
-from -30 to -1 in steps of 0.0137); r next to 1 for |n| > 256 (`HarmonicNumber(300, 1.001)`, where each
-ζ is about 1/(r - 1)); the recurrence of a large r below -1
+zero), and an order of `PolyGamma` above 24. `HurwitzZeta(s, a)` of a negative
+`a` is NaN where its terms of both signs cancel (`HurwitzZeta(25, -1.5)`,
+1.1e-10 from terms of 2^25). `HarmonicNumber(n)` is `_gpu_ir_harmonic`:
+ψ(n + 1) + γ, its Taylor series below |n| = 0.1, and below -1 the reflection
+H(n) = H(-n - 1) - π cot(πn). `HarmonicNumber(n, r)` is `_gpu_ir_harmonic2`: the
+sum of an integer n up to 256; from -256.5 to 256.5 (to 1/2 for r >= 2) the
+recurrence to n' in [-1/2, 1/2) and the binomial series of H(n')
+(`_gpu_ir_harmonic_series`, ζ(r) - ζ(r, 1 + n') less its cancelling term ζ(r));
+else ζ(r) - ζ(r, n + 1). At r = +∞, `HarmonicNumber(n, r)` is 1 for n > 0 and -∞
+for -1 < n < 0. Both are NaN where the value is complex (n < -1 and an r that is
+not an integer, also where the interpreter drops an imaginary part below its
+tolerance, `HarmonicNumber(-1.2, -19.5)`) and where their error estimates exceed
+3e-5 of the value: next to the zero of H(n) in each interval (-k - 1, -k), k >=
+1, where |H(n)| is below about 0.8% of |H(-n - 1)| + |π cot πn|
+(`HarmonicNumber(-24.78)`; 12 of 2,117 points from -30 to -1 in steps of
+0.0137); r next to 1 for |n| > 256 (`HarmonicNumber(300, 1.001)`, where each ζ
+is about 1/(r - 1)); the recurrence of a large r below -1
 (`HarmonicNumber(-2.5, 25)`), and below -256.5 an odd r >= 7 at a half-integer
-n, where the terms ±(1/2)^-r of ζ(r, n + 1) cancel (`HarmonicNumber(-300.5,
-7)`); an even r <= -2 next to n = -1/2, where the value is 0 or small
-(`HarmonicNumber(0.5, -10)` is 2^-10); r < -24.5 for an n that is not an
-integer from 1 to 256; n below -10^6 for an r other than 1; and where the value
-overflows a single float (`HarmonicNumber(1195.5, -13.9)`). The others decline on GLSL. `GCD`
-of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd` on `int`s. `Hypot` is
-`length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin is wrong for
-a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan` and the reciprocal
-rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or their reciprocals.
-`FresnelC` and `FresnelS` are the helpers `_gpu_ir_fresnelc` and
-`_gpu_ir_fresnels`: the rational approximations of the JavaScript kernels, each
-table a `float[12]` padded with zeros (GLSL converts no array size), the phase
-πx²/2 reduced mod 2π from x = n + r, and its sine and cosine Taylor polynomials
-(a renderer's `sin` can be wrong by 1e-5); ±1/2 from |x| = 10^7. `Sinc` is its
-Taylor polynomial of degree 8 below |x| = 0.5 (error 2e-11), and `sin(x) / x`
-above. The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`,
-...) decline there.
+n, where the terms ±(1/2)^-r of ζ(r, n + 1) cancel
+(`HarmonicNumber(-300.5, 7)`); an even r <= -2 next to n = -1/2, where the value
+is 0 or small (`HarmonicNumber(0.5, -10)` is 2^-10); r < -24.5 for an n that is
+not an integer from 1 to 256; n below -10^6 for an r other than 1; and where the
+value overflows a single float (`HarmonicNumber(1195.5, -13.9)`). The others
+decline on GLSL. `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd`
+on `int`s. `Hypot` is `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)`
+(the builtin is wrong for a large negative argument); `Sinh`, `Cosh`, `Tanh`,
+`Arctan` and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are
+builtins or their reciprocals. `FresnelC` and `FresnelS` are the helpers
+`_gpu_ir_fresnelc` and `_gpu_ir_fresnels`: the rational approximations of the
+JavaScript kernels, each table a `float[12]` padded with zeros (GLSL converts no
+array size), the phase πx²/2 reduced mod 2π from x = n + r, and its sine and
+cosine Taylor polynomials (a renderer's `sin` can be wrong by 1e-5); ±1/2 from
+|x| = 10^7. `Sinc` is its Taylor polynomial of degree 8 below |x| = 0.5 (error
+2e-11), and `sin(x) / x` above. The other real functions (`Erf`, `Gamma`,
+`Zeta`, `Arccot`, `Arcsec`, ...) decline there.
 
 `Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
 divisor). For a divisor of 1 it computes `x - floor(x)`, the same double with no
@@ -586,19 +587,19 @@ of a constructor of its own space, `AsHsv(Hsv(h, s, v))` and
 `AsHsl(Hsl(h, s, l))`, is the constructor's channels as the interpreter reads
 them (`ashsv.own`, `ashsl.own`: the hue reduced into [0, 360), the others
 clamped), on both targets, since the round trip through OKLCh loses the hue and
-the saturation at black, at white (HSL) and at a saturation of 0. The operand
-is read from the operation that makes its value, so a name whose value is such
-a constructor (`C = Hsv(270, 1, 0)`, `AsHsv(C)` is `(270, 1, 0)`) is one too,
-and a conversion to the same space (`AsHsv(AsHsv(c))`) is its operand. An
-operand made by an operation whose interpreter value is never of that space (a
+the saturation at black, at white (HSL) and at a saturation of 0. The operand is
+read from the operation that makes its value, so a name whose value is such a
+constructor (`C = Hsv(270, 1, 0)`, `AsHsv(C)` is `(270, 1, 0)`) is one too, and
+a conversion to the same space (`AsHsv(AsHsv(c))`) is its operand. An operand
+made by an operation whose interpreter value is never of that space (a
 constructor or a conversion of another space, `ColorMix`, `GamutMap`,
 `Colormap`, `ContrastingColor` of one colour) converts; any other operand (an
 `If` or a `Which` of colours, a call of a user function, `ContrastingColor` of
 three colours, which answers the candidate as written) can be of that space at
 run time, and declines. A constructor with a list channel
 (`AsHsv(Hsv(List(270, 90), 1, 0))`) is the list of its colours' channels, and a
-literal list of colours is each element by itself. No space is tracked at run time and no code tests
-one.
+literal list of colours is each element by itself. No space is tracked at run
+time and no code tests one.
 
 The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a fourth
 operand (alpha) declines on both targets (GLSL has no alpha channel, and a row
@@ -737,39 +738,39 @@ conditions its result: `Length` of an operand of static type `string`
 `RegExp(source, flags)` (one constant: the flags of the host, `u` added as the
 interpreter adds it, `/`, the source), `StartsWith`, `EndsWith`,
 `StringCompare`, `String` of strings (of none, one, or several: their texts
-joined), `StringJoin(s, sep)` of a string `s` (its characters joined by
-`sep`), and `Equal` and `NotEqual` of two strings (`text.eq`, `text.ne`:
-`===` of two conditioned texts, the interpreter's equality of strings and
-characters; `KroneckerDelta` is `Boole` of it). `Less`, `LessEqual`,
-`Greater` and `GreaterEqual` of two strings compare `text.cmpu` (`_SYS.cmpu`:
-UTF-16 code units, the interpreter's `<` of two strings) with 0, and of two
-characters `text.compare` (`_SYS.cmpc`: code points, its order of characters);
+joined), `StringJoin(s, sep)` of a string `s` (its characters joined by `sep`),
+and `Equal` and `NotEqual` of two strings (`text.eq`, `text.ne`: `===` of two
+conditioned texts, the interpreter's equality of strings and characters;
+`KroneckerDelta` is `Boole` of it). `Less`, `LessEqual`, `Greater` and
+`GreaterEqual` of two strings compare `text.cmpu` (`_SYS.cmpu`: UTF-16 code
+units, the interpreter's `<` of two strings) with 0, and of two characters
+`text.compare` (`_SYS.cmpc`: code points, its order of characters);
 `textOrder()` of `lower-strings.ts` picks the order from the static types, as
 the compiled lane holds both as strings, and a character against a string, a
-type that admits both and a chain of three or more decline (CE-1574). An operand that the interpreter answers with an error value (a count
-below 0, or 1 for the count of `StringReplace`, or above 1,000,000; an empty pad
-or target) declines when it is a literal or when the engine proves it out of the
-domain (`TEXT_DOMAINS` of `lower-strings.ts`, which also lowers `StringReplace`
-of a pattern; the spellings are in `print-js-text.ts`); another is checked by
-the helper, which throws a `RangeError` that names the operator (such rows are
+type that admits both and a chain of three or more decline (CE-1574). An operand
+that the interpreter answers with an error value (a count below 0, or 1 for the
+count of `StringReplace`, or above 1,000,000; an empty pad or target) declines
+when it is a literal or when the engine proves it out of the domain
+(`TEXT_DOMAINS` of `lower-strings.ts`, which also lowers `StringReplace` of a
+pattern; the spellings are in `print-js-text.ts`); another is checked by the
+helper, which throws a `RangeError` that names the operator (such rows are
 `may-fail`). A node of a text row, or of a row with a string signature whose
 operand is text, is never evaluated at compile time (`isTextRow()` makes
-`facts().slice` false; `Equal` of numbers is evaluated): `N()` gives the decimal text of a
-number (`String(1/3)`), the interpreter its exact text. No pass has a case of
-its own for the lane. Declined: a string on GLSL, in the interval mode and in
-the bigint mode; a string of a `vars` name; `String` of a
-number (its text follows the engine's formatting options); a function as the
-replacement of `StringReplace`; a `RegExp` that is not the library operator.
+`facts().slice` false; `Equal` of numbers is evaluated): `N()` gives the decimal
+text of a number (`String(1/3)`), the interpreter its exact text. No pass has a
+case of its own for the lane. Declined: a string on GLSL, in the interval mode
+and in the bigint mode; a string of a `vars` name; `String` of a number (its
+text follows the engine's formatting options); a function as the replacement of
+`StringReplace`; a `RegExp` that is not the library operator.
 
 A list of strings (CE-1548, CE-1556) is checked by `stringListRefusal()` of
 `index.ts` after the passes: it has rank 1; it is made by a `list` instruction,
 by a region of `TEXT_LIST_MAKERS` of `lower-strings.ts` (`text.chars`, `build`,
 `filter`: `Characters`, `Map`, `Filter`, `Reverse`, `Take` and the other list
-operators that move elements), or it is a parameter of the entry; and it is
-read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, `text.elem`,
+operators that move elements), or it is a parameter of the entry; and it is read
+only as the list operand of `TEXT_LIST_READS` (`StringJoin`, `text.elem`,
 `text.at`, `text.ordering`), or, when it is not a parameter, it is a result of
-the entry.
-`Characters(s)` and `GraphemeClusters(s)` are the region `text.chars`
+the entry. `Characters(s)` and `GraphemeClusters(s)` are the region `text.chars`
 (`_SYS.tchars`: the grapheme clusters of `s`, each conditioned), whose results
 are the count of the clusters and the list of that length, so
 `Length(Characters(s))` reads the count. `StringJoin(L)` and
@@ -782,13 +783,13 @@ comment of `listSource()` names each caller), and `text.at` (`_SYS.tat`) is
 constant in range of a constant length: from 1, from the end when negative,
 `undefined` when the index is 0, not an integer or out of range. So an input
 list is passed as the host gave it, with no walk and no copy at the entry; a
-string for it throws (`plan.lists`). No string helper takes `undefined`: a
-value of `text.at` is used only by `text.isundef`, as the operand 1 of
-`text.present`, as the yield of the `else` arm of an `if` whose condition is
-`text.isundef` of it (`Coalesce`), or as a result of the entry, and any other
-use refuses ("a string read of a list that can be out of range"; the remedy is
-`Coalesce(At(L, i), "")`). This is a check of the program after the passes,
-not of the passes: no pass makes `text.elem` or `text.at`, and a pass that
+string for it throws (`plan.lists`). No string helper takes `undefined`: a value
+of `text.at` is used only by `text.isundef`, as the operand 1 of `text.present`,
+as the yield of the `else` arm of an `if` whose condition is `text.isundef` of
+it (`Coalesce`), or as a result of the entry, and any other use refuses ("a
+string read of a list that can be out of range"; the remedy is
+`Coalesce(At(L, i), "")`). This is a check of the program after the passes, not
+of the passes: no pass makes `text.elem` or `text.at`, and a pass that
 speculates an operation computes on a present string. `scalarize` writes an
 element-wise operation of a short static list (`Equal(["a", s], "a")`) with
 `elem` reads, which `fold` replaces with the elements; with
@@ -799,13 +800,11 @@ indices of `text.ordering` (`_SYS.tord`: the indices from 0 of the conditioned
 elements, sorted stably by `cmpu`), and of characters (`Characters(s)`) of
 `text.ordering.cp` (by `cmpc`); a list that holds both declines. `Unique(L)` is
 the `filter` that `Unique` of numbers is ("Lists"), with `text.eq` as its test
-(CE-1574). The elements of
-a list result are JavaScript strings. Declined (the
-remedy is the interpreter): `Max`, `Contains`,
-`IndexOf`, `Find`, `Reduce` and `Fold` of a list of strings; an element-wise
-operation on one; a list of strings in an `If`, a `Loop` or a user function
-that is not inlined; a list of lists of strings; an input list returned as the
-result.
+(CE-1574). The elements of a list result are JavaScript strings. Declined (the
+remedy is the interpreter): `Max`, `Contains`, `IndexOf`, `Find`, `Reduce` and
+`Fold` of a list of strings; an element-wise operation on one; a list of strings
+in an `If`, a `Loop` or a user function that is not inlined; a list of lists of
+strings; an input list returned as the result.
 
 Code that reads or gives a string, or a list of strings, has `strings: true` and
 `shippable: false`: `broadcast()`, `broadcastAsync()` and the batch loaders of
@@ -816,15 +815,15 @@ throw a `TypeError` (a batch is of numbers).
 
 The lane `rows` holds the value of `Chunk(L, k)`, `Partition(L, n)` and
 `Partition(L, p)` whose rows can have different lengths ("Lists", the list
-operators), on JavaScript only (CE-1549): a JavaScript array of plain arrays
-of numbers or booleans, of the shape `[]`, which no numeric row names. It is
-made by `rows.chunk` and `rows.partition` (`_SYS.chunk`, `_SYS.partition` of
+operators), on JavaScript only (CE-1549): a JavaScript array of plain arrays of
+numbers or booleans, of the shape `[]`, which no numeric row names. It is made
+by `rows.chunk` and `rows.partition` (`_SYS.chunk`, `_SYS.partition` of
 `javascript-runtime.ts`, which check the count, a `RangeError` where the
 interpreter leaves the form unevaluated, and make each row with
 `Array.prototype.slice.call`, so that a row is a plain array also of an
 array-like input) and by `rows.pair` of the two groups of a predicate (two
-filters of the indices, `[$0, $1]`). A signature whose result is the lane
-gives `{ lane: 'rows', shape: [] }` and compares the shapes of no operand
+filters of the indices, `[$0, $1]`). A signature whose result is the lane gives
+`{ lane: 'rows', shape: [] }` and compares the shapes of no operand
 (`resultType()`). The list `L` is an input of the entry or a literal `List`
 (also a name whose value is one), of reals, integers or booleans: the
 interpreter holds it whole. Another list (a `Range`, a `Map`, a `Filter`, a
@@ -835,8 +834,8 @@ interpreter leaves `Chunk` and `Partition(L, p)` of a lazy list unevaluated
 A value of the lane is admitted only as an entry yield used once
 (`Profile.resultOnly` of JavaScript; `Profile.scalarLanes` refuses a list of
 them): a root `Block` that returns it, a local of type `unknown` that holds it,
-`Coalesce` and `AssertPresent` of it, an `If` whose arm `fold` takes, and a
-root `Tuple` of it and an element of another shape (`Tuple(Chunk(L, 2), L)`, a
+`Coalesce` and `AssertPresent` of it, an `If` whose arm `fold` takes, and a root
+`Tuple` of it and an element of another shape (`Tuple(Chunk(L, 2), L)`, a
 multi-result entry). Every other reader checks its lane and declines, finds no
 signature, or makes a value that the use check refuses: `Rank`, `Shape`,
 `Flatten`, `Transpose`, `Max`, `Sum`, `First`, `ListJoin`, `PointList`, `List`,
@@ -851,11 +850,11 @@ has a case of its own for the lane.
 Code whose result is of the lane has `rows: true` and `shippable: false`:
 `broadcast()`, `broadcastAsync()` and the batch loaders of the runtime
 (`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a
-`TypeError` (a batch writes numbers); `run()`, `runtime.load()` and
-`runAsync()` return the arrays. Declined: the lane on GLSL, in the interval
-mode and in the bigint mode; a list of points, of complex numbers or of
-colours (`Chunk(P, 2)`); a literal list of rows of two lengths as the result,
-`List(List(x, y), List(z))` ("elements of two types").
+`TypeError` (a batch writes numbers); `run()`, `runtime.load()` and `runAsync()`
+return the arrays. Declined: the lane on GLSL, in the interval mode and in the
+bigint mode; a list of points, of complex numbers or of colours (`Chunk(P, 2)`);
+a literal list of rows of two lengths as the result, `List(List(x, y), List(z))`
+("elements of two types").
 
 ## The `bigint` mode
 
@@ -1533,38 +1532,40 @@ operands of a `Range` are reals or integers: its elements are `lo + k·step` for
 has no spelling of a run-time count.
 
 A `Sum` or a `Product` with `Limits` whose term is a flat list of numbers adds
-or multiplies the terms element by element, as the interpreter does (CE-1470): `Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is `[6.75, 7.5]`,
-and `Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two lists `C` and
-`U` is the sum, for each element of `C`, of the indexes where `U` holds it. A
-`Sum` whose term is a tuple or a list of tuples, each tuple of a constant
-length, adds the tuples element by element too (CE-1568): the spline
+or multiplies the terms element by element, as the interpreter does (CE-1470):
+`Sum(X + i, Limits(i, 1, 3))` of `X = [0.25, 0.5]` is `[6.75, 7.5]`, and
+`Sum(Which(C = U[i], i, True, 0), Limits(i, 1, 20))` of two lists `C` and `U` is
+the sum, for each element of `C`, of the indexes where `U` holds it. A `Sum`
+whose term is a tuple or a list of tuples, each tuple of a constant length, adds
+the tuples element by element too (CE-1568): the spline
 `Sum(P[Mod(k + Range(0, 1), 2) + 1]·k, Limits(k, 1, 4))` with
-`P: list<tuple<real, real>>` is a list of two points. The accumulator is a
-tuple (a list of tuples) of the identity, since the identity and a tuple have
-no sum. A `Product` of tuples declines (`Multiply` of two tuples is not
-element by element). A sum written out (above) folds the list terms from the
-identity with the element-wise operation; the loop (`accumulate()`) carries a list accumulator of
-the length of the term, the identity in each element before the first pass. The
-length of the term must be a value made before the loop (a number, the length of
-an input, of a list computed outside the sum): a length computed in each term
-(`Sum(Range(1, i), …)`, or a `Range(1, u)` lowered in the term) declines, since
-the accumulator has one length. As for any element-wise operation, terms of two
-lengths are an error of the interpreter (`incompatible-dimensions`) and the
-compiled value is unspecified. Over a range with no term, the interpreter's
-value is a list of the identity only when the static type of the sum states the
-length (`emptyBigOpValue()`): the loop then gives that list. When the static
-type states no length and the bounds are not two constants with at least one
-term, the shape of the value depends on the bounds at run time, and the sum
-declines: `Sum(X + i, Limits(i, 1, N))` with `X: list<real>` (the interpreter
-gives `0` at `N = 0`); with `L: list<real^2>` it compiles and gives `[0, 0]`
-there. A range from a constant at most 0 to an integer upper bound that
-`nonnegative()` proves `>= 0` (a `Length`) has a term:
+`P: list<tuple<real, real>>` is a list of two points. The accumulator is a tuple
+(a list of tuples) of the identity, since the identity and a tuple have no sum.
+A `Product` of tuples declines (`Multiply` of two tuples is not element by
+element). A sum written out (above) folds the list terms from the identity with
+the element-wise operation; the loop (`accumulate()`) carries a list accumulator
+of the length of the term, the identity in each element before the first pass.
+The length of the term must be a value made before the loop (a number, the
+length of an input, of a list computed outside the sum): a length computed in
+each term (`Sum(Range(1, i), …)`, or a `Range(1, u)` lowered in the term)
+declines, since the accumulator has one length. As for any element-wise
+operation, terms of two lengths are an error of the interpreter
+(`incompatible-dimensions`) and the compiled value is unspecified. Over a range
+with no term, the interpreter's value is a list of the identity only when the
+static type of the sum states the length (`emptyBigOpValue()`): the loop then
+gives that list. When the static type states no length and the bounds are not
+two constants with at least one term, the shape of the value depends on the
+bounds at run time, and the sum declines: `Sum(X + i, Limits(i, 1, N))` with
+`X: list<real>` (the interpreter gives `0` at `N = 0`); with `L: list<real^2>`
+it compiles and gives `[0, 0]` there. A range from a constant at most 0 to an
+integer upper bound that `nonnegative()` proves `>= 0` (a `Length`) has a term:
 `Sum(i X, Limits(i, 0, Length(X)))` compiles, and
 `Sum(i X, Limits(i, 1, Length(X)))` declines (no term when `X` is empty). A real
 upper bound is lowered through `Floor`, which `nonnegative()` does not prove.
 Past the `iterationBudget` a list sum is a list of NaN (a tuple sum, a tuple of
-NaN). A list of a run-time length declines on GLSL, and a selection at each position (`Which` of a
-list condition) declines in the interval mode, as elsewhere.
+NaN). A list of a run-time length declines on GLSL, and a selection at each
+position (`Which` of a list condition) declines in the interval mode, as
+elsewhere.
 
 A JavaScript result is read-only, as the contract of `run()` states
 (`docs/COMPILATION-MODEL.md`, "inputs of the shape the compiled code reads,
@@ -1831,32 +1832,31 @@ The interpreter's value there is `Missing`, which `IsMissing`, `Coalesce`,
 `AssertPresent`, `Length` and `Rest` read as absent, and a compiled list is
 never absent: such an `If` compiles only where its value is the result of the
 program (the root, an arm of such an `If` or `Which`, the last expression of
-such a `Block`), and declines where an operator reads it.
-The conditions, the arms and the default are lowered once, before the
-build, all of them: the interpreter evaluates an arm and a later condition only
-where the selection reaches it, so one that is not pure (an effect, a write to a
-name, an operation that can throw such as `AssertPresent`, a loop, a recursive
-call) declines. Two exceptions (CE-1562). A `Range` arm is read at each position
-(`lo + k·step`) and is never built. A list that an arm or a later condition
-builds (`Map`, `At` of a list of indexes) is accepted when it has the length of
-the first condition, or, in a later condition with no scalar condition before it,
-the length of that condition: a build fails only at 2^32 elements or more, the
-first condition exists, and the interpreter evaluates every list condition up to
-the first scalar condition that holds. A
-build of another length in an arm declines (`Which(3 < L, Max(Range(1, x)),
-True, 0)`). The first condition reached must be a list: a scalar condition
-before it selects its arm whole when it holds, a value of another shape (its
-static type is a union), and declines. Arms are all numbers or booleans (with a
-clause `True`: without one, the interpreter gives `Missing`) and flat lists of
-them, or all points of numbers and lists of points (on GLSL a list of points of
-a constant length is an array of vectors, below; another declines). Stated
-lengths that differ decline (the canonical form already gives
-`incompatible-dimensions` for most); lists of two run-time lengths are an error
-of the interpreter (`incompatible-dimensions` for `Which` and for `If` with an
-`else`), so the value is unspecified: a list as long as the first condition,
-never an arm whole (CE-1238). On GLSL a stated length writes the selection out
-(`vec3` of three conditionals); a run-time length declines. The interval mode
-declines it.
+such a `Block`), and declines where an operator reads it. The conditions, the
+arms and the default are lowered once, before the build, all of them: the
+interpreter evaluates an arm and a later condition only where the selection
+reaches it, so one that is not pure (an effect, a write to a name, an operation
+that can throw such as `AssertPresent`, a loop, a recursive call) declines. Two
+exceptions (CE-1562). A `Range` arm is read at each position (`lo + k·step`) and
+is never built. A list that an arm or a later condition builds (`Map`, `At` of a
+list of indexes) is accepted when it has the length of the first condition, or,
+in a later condition with no scalar condition before it, the length of that
+condition: a build fails only at 2^32 elements or more, the first condition
+exists, and the interpreter evaluates every list condition up to the first
+scalar condition that holds. A build of another length in an arm declines
+(`Which(3 < L, Max(Range(1, x)), True, 0)`). The first condition reached must be
+a list: a scalar condition before it selects its arm whole when it holds, a
+value of another shape (its static type is a union), and declines. Arms are all
+numbers or booleans (with a clause `True`: without one, the interpreter gives
+`Missing`) and flat lists of them, or all points of numbers and lists of points
+(on GLSL a list of points of a constant length is an array of vectors, below;
+another declines). Stated lengths that differ decline (the canonical form
+already gives `incompatible-dimensions` for most); lists of two run-time lengths
+are an error of the interpreter (`incompatible-dimensions` for `Which` and for
+`If` with an `else`), so the value is unspecified: a list as long as the first
+condition, never an arm whole (CE-1238). On GLSL a stated length writes the
+selection out (`vec3` of three conditionals); a run-time length declines. The
+interval mode declines it.
 
 `RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
 `RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region
@@ -1990,33 +1990,31 @@ built the same way, with the interpreter's value for every length, also 0:
   at least 0, 50 when it is not finite; 50 by default, and `Linspace(b)` is
   `Linspace(1, b)`), the element `k` of the interpreter's `linspaceSample()`
   (`linspace`, the helper `_linspace`).
-- `Chunk(L, k)` and `Partition(L, m)` are a list of lists when every row has
-  one length: a stated length and a constant count that the rows divide
-  (`chunks()` of `lower-lists.ts`). `Partition(L, m, step)` of a constant `m`
-  and a constant `step` (one known at run time can be below 1, where the
-  interpreter leaves the form unevaluated) is the complete windows,
-  `Max(Floor((n − m)/step) + 1, 0)` rows of `m` elements; a size `m` known at
-  run time declines. Rows that can have two lengths (`Chunk(L, 2)` of
-  `L: list<real>`, a short last chunk, `Partition(L, p)` of a predicate) have
-  no shape: as the result of the program they are the lane `rows` ("The rows
-  lane"), and a consumer reads them one by one, each row a build over `L`
-  made where it is read (`source()`): `Map` (also of several lists),
-  `Comprehension`, `Length`, `Count`, `IsEmpty`, `Reduce`, `CountIf`,
-  `Position`, `IndexWhere`, and `At` of a constant index in range of a constant
-  count (`At(Chunk(L, 3), -1)`). `Chunk(L, k)` has `k` rows of `⌈n/k⌉`
-  elements, the row `i` of `Max(0, Min(⌈n/k⌉, n − i·⌈n/k⌉))`; `Partition(L,
-  m)` has `⌈n/m⌉` rows, the row `i` of `Min(m, n − i·m)`. A count known at run
-  time is checked where it is read (`rows.chunks`, `rows.size`: a
-  `RangeError` below 1, and above `MAX_CHUNK_COUNT`, 10,000, for `Chunk`,
-  where the interpreter leaves the form unevaluated); a constant there
-  declines, also for rows of one length. The groups of a predicate are read by
-  `Length`, `Count` and `At` only: the interpreter leaves `Map` of them
-  unevaluated, so every other reader declines. A consumer whose value holds a
-  row (`Map(r ↦ r, Chunk(L, 3))`, a `Filter` or an `Any` that keeps rows,
-  `ListJoin` and `Join` of such rows) declines ("a list of lists of run-time
-  length"). On GLSL a consumer compiles
-  only when every row has a constant length of at least 1
-  (`Map(r ↦ Sum(r), Partition(L6, 4))` of `L6: list<real^6>`).
+- `Chunk(L, k)` and `Partition(L, m)` are a list of lists when every row has one
+  length: a stated length and a constant count that the rows divide (`chunks()`
+  of `lower-lists.ts`). `Partition(L, m, step)` of a constant `m` and a constant
+  `step` (one known at run time can be below 1, where the interpreter leaves the
+  form unevaluated) is the complete windows, `Max(Floor((n − m)/step) + 1, 0)`
+  rows of `m` elements; a size `m` known at run time declines. Rows that can
+  have two lengths (`Chunk(L, 2)` of `L: list<real>`, a short last chunk,
+  `Partition(L, p)` of a predicate) have no shape: as the result of the program
+  they are the lane `rows` ("The rows lane"), and a consumer reads them one by
+  one, each row a build over `L` made where it is read (`source()`): `Map` (also
+  of several lists), `Comprehension`, `Length`, `Count`, `IsEmpty`, `Reduce`,
+  `CountIf`, `Position`, `IndexWhere`, and `At` of a constant index in range of
+  a constant count (`At(Chunk(L, 3), -1)`). `Chunk(L, k)` has `k` rows of
+  `⌈n/k⌉` elements, the row `i` of `Max(0, Min(⌈n/k⌉, n − i·⌈n/k⌉))`;
+  `Partition(L, m)` has `⌈n/m⌉` rows, the row `i` of `Min(m, n − i·m)`. A count
+  known at run time is checked where it is read (`rows.chunks`, `rows.size`: a
+  `RangeError` below 1, and above `MAX_CHUNK_COUNT`, 10,000, for `Chunk`, where
+  the interpreter leaves the form unevaluated); a constant there declines, also
+  for rows of one length. The groups of a predicate are read by `Length`,
+  `Count` and `At` only: the interpreter leaves `Map` of them unevaluated, so
+  every other reader declines. A consumer whose value holds a row
+  (`Map(r ↦ r, Chunk(L, 3))`, a `Filter` or an `Any` that keeps rows, `ListJoin`
+  and `Join` of such rows) declines ("a list of lists of run-time length"). On
+  GLSL a consumer compiles only when every row has a constant length of at least
+  1 (`Map(r ↦ Sum(r), Partition(L6, 4))` of `L6: list<real^6>`).
 - `TakeWhile(L, p)` and `DropWhile(L, p)` split `L` at the first index of a
   `filter` of the indices where `p` fails, or at the length. `CountIf(L, p)` is
   the count of the `filter` of the indices where `p` holds, `IndexWhere` its
@@ -2128,35 +2126,35 @@ build over it (on GLSL, by the points written out, below): under `Abs` and
 of the list (`P + List(Tuple(1, 2), Tuple(3, 4))`), so `Distance(P, L)` of a
 list `L` of points is the list of the distances, and `Distance(L, M)` of two
 lists of points the list of the distances pair by pair (lists of two lengths
-decline); and under `Multiply` and `Divide` with a list of numbers of its length,
-whose element scales the point of the same index (`(M − P) / D`, as the
+decline); and under `Multiply` and `Divide` with a list of numbers of its
+length, whose element scales the point of the same index (`(M − P) / D`, as the
 interpreter gives it). A run-time length fits any length, as in `resultType()`
 (`Multiply(D, P)` of two inputs, `Multiply(PointX(P), PointList(1, D))`): two
-different lengths are an error of the interpreter that the static type does not show.
-Two stated lengths that differ decline. A point times a list of numbers (or
-divided by one, as the dividend) is the same build over the list of numbers:
-the list of the points that each element scales (`Multiply(D, Tuple(a, b))`,
-as the interpreter gives it). `PointX`, `PointY` and `PointZ` of
-a tuple of scalars are `At` of index 1, 2 and 3 (`PointZ` of a point of 2
-coordinates is an `incompatible-dimensions` error of the canonical form, and
-declines); of a list of points, the list of those coordinates, and of a literal
-`List` of points (the library's, as `Max(List(…))` reads one) the list of the
-coordinate of each point, with no list of points (so on GLSL too:
-`PointX(List(p1, …, p9))` is a `float[9]`); of a list of numbers, they decline.
-GLSL has no list of rank 2 other than an array of vectors and no build: there
-`PointList` of list components of a constant length of 1 to 64
-(`SCALARIZE_LIMIT`) is written out as a `Map` is ("Lists"), a tuple per index,
-and each reader above is a `Map` over the points of any list of points of such a
-length (a `PointList` or a literal `List` of points), the list of its values at
-each one (`Abs(PointList(x - List(1/2, 1), y))` is the `vec2` of the two
-distances, and `dce` removes the points); a component of a run-time length and
-more than 64 points decline (CE-1474). A list of points that is a value of the
-shader (the result, a local, an arm, a `List` of calls that each give a point)
-is an array of vectors when its length is a constant and its points have 2 to 4
-coordinates (`Profile.vectorArrays`): `List(R(x, y), R(x + 1, y))` of a function
-`R` whose value is a point is `vec2[2](_fn_ir_u0_R(x, y), …)`, as in 0.193.0
-(CE-1538); this holds for any list of rank 2 of such lengths, a matrix of 2 to 4
-columns too (`vec2[3]`). Any other reader declines a tuple operand:
+different lengths are an error of the interpreter that the static type does not
+show. Two stated lengths that differ decline. A point times a list of numbers
+(or divided by one, as the dividend) is the same build over the list of numbers:
+the list of the points that each element scales (`Multiply(D, Tuple(a, b))`, as
+the interpreter gives it). `PointX`, `PointY` and `PointZ` of a tuple of scalars
+are `At` of index 1, 2 and 3 (`PointZ` of a point of 2 coordinates is an
+`incompatible-dimensions` error of the canonical form, and declines); of a list
+of points, the list of those coordinates, and of a literal `List` of points (the
+library's, as `Max(List(…))` reads one) the list of the coordinate of each
+point, with no list of points (so on GLSL too: `PointX(List(p1, …, p9))` is a
+`float[9]`); of a list of numbers, they decline. GLSL has no list of rank 2
+other than an array of vectors and no build: there `PointList` of list
+components of a constant length of 1 to 64 (`SCALARIZE_LIMIT`) is written out as
+a `Map` is ("Lists"), a tuple per index, and each reader above is a `Map` over
+the points of any list of points of such a length (a `PointList` or a literal
+`List` of points), the list of its values at each one
+(`Abs(PointList(x - List(1/2, 1), y))` is the `vec2` of the two distances, and
+`dce` removes the points); a component of a run-time length and more than 64
+points decline (CE-1474). A list of points that is a value of the shader (the
+result, a local, an arm, a `List` of calls that each give a point) is an array
+of vectors when its length is a constant and its points have 2 to 4 coordinates
+(`Profile.vectorArrays`): `List(R(x, y), R(x + 1, y))` of a function `R` whose
+value is a point is `vec2[2](_fn_ir_u0_R(x, y), …)`, as in 0.193.0 (CE-1538);
+this holds for any list of rank 2 of such lengths, a matrix of 2 to 4 columns
+too (`vec2[3]`). Any other reader declines a tuple operand:
 `Equal(Tuple(1, 2), List(1, 2))` is `False`, a comparison of a tuple stays
 unevaluated, `Map`, `Filter`, `Reduce`, `Loop` and `Comprehension` over a tuple,
 and the arms of a conditional of which one is a tuple and the other a list. The
@@ -2283,28 +2281,28 @@ so its test is `false`. A colour has no absent value either, but its producer
 that can give one, an `at` out of range, refuses only after the passes: the
 constant `false` of `IsMissing` would let `dce` remove it first, so `IsMissing`
 of a colour declines, while `Coalesce` and `AssertPresent` keep the colour as
-their value and the producer still refuses. A string read out of range (`text.at`)
-is `undefined`, which only a discharge or the result reads
-(`stringListRefusal()`); its test keeps the read. A point
-of complex numbers declines. The written symbol `Missing` (of the library)
-is the constant NaN, as a selection that takes no arm; a `Tuple` with it as a
-coordinate declines (the point of NaN coordinates is absent; the interpreter's
-tuple of `Missing` is not). A NaN on the real lane is also the value of an
-operation whose exact value is complex (`Sqrt(x)` at `x = -4`), which is not
-absent: the test of an operand on the real lane whose engine type overlaps
-`imaginary` (`complex`, `number`) declines, except an input of the program,
-which is real by its type in `strict`. In `mode: 'bigint'` `isnan` and `isundef`
-have no spelling, so the discharges decline there.
+their value and the producer still refuses. A string read out of range
+(`text.at`) is `undefined`, which only a discharge or the result reads
+(`stringListRefusal()`); its test keeps the read. A point of complex numbers
+declines. The written symbol `Missing` (of the library) is the constant NaN, as
+a selection that takes no arm; a `Tuple` with it as a coordinate declines (the
+point of NaN coordinates is absent; the interpreter's tuple of `Missing` is
+not). A NaN on the real lane is also the value of an operation whose exact value
+is complex (`Sqrt(x)` at `x = -4`), which is not absent: the test of an operand
+on the real lane whose engine type overlaps `imaginary` (`complex`, `number`)
+declines, except an input of the program, which is real by its type in `strict`.
+In `mode: 'bigint'` `isnan` and `isundef` have no spelling, so the discharges
+decline there.
 
 `Coalesce(a, b, …)` is a chain of `if`: an operand after the first is lowered in
 an arm, only when the operands before it are absent; the last is the value when
 all the others are. Operands of two shapes (`Coalesce(At(P, i), 0)` of a list of
 points `P`) decline. `AssertPresent(a)` is `a` when its test is the constant
 `false`; otherwise on JavaScript it is `present` (`present.int`, `cpresent`,
-`present.bool`, `text.present`; per coordinate of a point) of the test and `a`, a `may-fail`
-operation that throws an `Error` whose message starts with `expected-present`
-where the test is true (the interpreter gives that error), and on GLSL it
-declines.
+`present.bool`, `text.present`; per coordinate of a point) of the test and `a`,
+a `may-fail` operation that throws an `Error` whose message starts with
+`expected-present` where the test is true (the interpreter gives that error),
+and on GLSL it declines.
 
 In the interval mode `isnan` is `_IA.isAbsent`, a verdict over the box: `'true'`
 for the `empty` result and for an enclosure of NaN (the absent value of the
@@ -2871,28 +2869,28 @@ the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is 
 application of the function literal that the engine gives for the derivative at
 compile time, and `D(f, x, …)` the expression it gives
 (`derivativeClosedForm()`; `closedForm()` of `lower.ts`): `D(Abs(x), x)` is
-`Sign(x)`, `Apply(Derivative(Sin), x)` is `Cos(x)`. That expression can hold
-the derivative of another function (`Apply(Derivative(f, 2), t)` in the
-derivative of `F := t ↦ f′(t)/|f′(t)|`) when that derivative has a closed form
-itself, at most four levels deep: its application is lowered from that closed
-form. The engine computes it with
-the values of the `vars` names hidden (`withVarsValuesHidden()`): `D(T·x², x)`
-with `vars: {T}` is `2T·x` also when `T` holds 2. That helper hides no value of
-a constant or of a name whose type is inferred from its value (`T` assigned and
-not declared): with such a name in `vars`, a derivative declines. A variable of
-a `D` that holds a value, and is not bound in the walk or a `vars` name,
-declines (`D(T²·x, T)` with `T = 2`: the engine reads 2). A `D(f, x)` with no
-closed form (a derivative head stays in it: `D(Min(L), x)` of a list) is, on
-JavaScript, the runtime's numeric derivative: the region `derivative`, printed
-as its call `_SYS.nd((t) => …, 1, 'scalar')(x)`, so the value is its value bit
-for bit, at the value of the name `x` outside (`D` binds `x`). Its body is pure,
-of a real scalar value; one with an effect (a draw, a write, a `vars` read)
-declines, and so do GLSL and the interval mode. The region is `may-fail`, as
-`integrate`: `cse` merges it only with an equal visible region, and it moves out
-of a loop only as a whole. `ND(f, x)` of a function literal of one parameter is
-the same region, the parameter bound at the point: the interpreter's `ND` runs
-the same stencil (`stencilDerivativeAt()`). `EvaluateAt(f, a)` of a function
-literal of one parameter is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
+`Sign(x)`, `Apply(Derivative(Sin), x)` is `Cos(x)`. That expression can hold the
+derivative of another function (`Apply(Derivative(f, 2), t)` in the derivative
+of `F := t ↦ f′(t)/|f′(t)|`) when that derivative has a closed form itself, at
+most four levels deep: its application is lowered from that closed form. The
+engine computes it with the values of the `vars` names hidden
+(`withVarsValuesHidden()`): `D(T·x², x)` with `vars: {T}` is `2T·x` also when
+`T` holds 2. That helper hides no value of a constant or of a name whose type is
+inferred from its value (`T` assigned and not declared): with such a name in
+`vars`, a derivative declines. A variable of a `D` that holds a value, and is
+not bound in the walk or a `vars` name, declines (`D(T²·x, T)` with `T = 2`: the
+engine reads 2). A `D(f, x)` with no closed form (a derivative head stays in it:
+`D(Min(L), x)` of a list) is, on JavaScript, the runtime's numeric derivative:
+the region `derivative`, printed as its call
+`_SYS.nd((t) => …, 1, 'scalar')(x)`, so the value is its value bit for bit, at
+the value of the name `x` outside (`D` binds `x`). Its body is pure, of a real
+scalar value; one with an effect (a draw, a write, a `vars` read) declines, and
+so do GLSL and the interval mode. The region is `may-fail`, as `integrate`:
+`cse` merges it only with an equal visible region, and it moves out of a loop
+only as a whole. `ND(f, x)` of a function literal of one parameter is the same
+region, the parameter bound at the point: the interpreter's `ND` runs the same
+stencil (`stencilDerivativeAt()`). `EvaluateAt(f, a)` of a function literal of
+one parameter is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
 `Apply(f, b) - Apply(f, a)`, on every target; at two bounds a function with an
 effect declines (the interpreter applies `f` at `a` first). A `Limit` compiles
 only when it is closed (it reads no input, local, parameter, index or `vars`

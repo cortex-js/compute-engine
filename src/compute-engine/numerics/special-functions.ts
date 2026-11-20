@@ -2911,7 +2911,8 @@ export function bigZeta(ce: ComputeEngine, s: BigNum, prec: number): BigNum {
   if (s.eq(1)) return new BigDecimal(Infinity); // pole
   // ζ(s) = −1/2 − s·ln(2π)/2 + O(s²): within 10^−(prec+2) of 0 the value is
   // −1/2 to every digit asked for, however small s is.
-  if (s.abs().lt(new BigDecimal(`1e-${prec + 2}`))) return BigDecimal.HALF.neg();
+  if (s.abs().lt(new BigDecimal(`1e-${prec + 2}`)))
+    return BigDecimal.HALF.neg();
   const extra = zetaNearIntegerGuard(s);
   if (extra === undefined) return BigDecimal.NAN;
   return withGuardDigits(prec, SPECIAL_FN_GUARD + extra, (prec) =>
