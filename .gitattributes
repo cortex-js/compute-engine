@@ -1,7 +1,8 @@
 #
-# Normalize text files line ending to LF in the repository
+# Normalize text files line ending to LF in the repository, and check them
+# out with LF on every platform: tests read source files and match `\n`.
 #
-* text=auto
+* text=auto eol=lf
 
 #
 # Text files
