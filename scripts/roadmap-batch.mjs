@@ -39,6 +39,12 @@
  * order still decides, but an `unassigned` item can wait until the items
  * after it that can start have run.
  *
+ * A usage limit of the account stops the batch: when a session ends on one
+ * (an error result with HTTP status 429, "You've hit your weekly limit"), no
+ * other session starts, because each would end on the same limit at once.
+ * The sessions that run end on their own. The summary marks the items that
+ * did not start `not run (usage limit)`, and the script exits with code 3.
+ *
  * Output, in `--out <dir>`: for each item, `<id>.jsonl` (the session's
  * stream-json output), `<id>.err`, and `<id>.report.md` (the session's last
  * message); and `summary.md`, one line per item, written as items end.
@@ -383,8 +389,22 @@ function finalResult(jsonlFile) {
   return result;
 }
 
+/** The text of a usage limit when the session ended on one ("You've hit
+ *  your weekly limit · resets 1am …", an error result with HTTP status 429),
+ *  else undefined. */
+function usageLimit(result) {
+  if (result?.is_error !== true) return undefined;
+  const text = String(result.result ?? '');
+  if (result.api_error_status === 429 || /hit your .*limit/i.test(text))
+    return text.trim() || 'usage limit (HTTP 429)';
+  return undefined;
+}
+
 const pending = [...items];
 const running = new Map(); // id -> { item, child, started }
+// Set when a session ends on a usage limit: no other session starts, because
+// each would end on the same limit at once.
+let limitReached;
 
 function launch(item) {
   const name = nameOf(item);
@@ -444,9 +464,19 @@ function launch(item) {
     } catch {}
     const text = result?.result ?? '(no result message)';
     writeFileSync(join(values.out, `${item.id}.report.md`), text + '\n');
+    const limit = usageLimit(result);
+    if (limit !== undefined && limitReached === undefined) {
+      limitReached = limit;
+      log(
+        `usage limit: ${limit}; no other session starts. ` +
+          `Reopen the items that \`issues.mjs in-progress\` lists for a stopped session.`
+      );
+    }
     const status =
       /^Result:\s*(.+)$/m.exec(text)?.[1]?.trim() ??
-      `no report (exit ${code ?? signal})`;
+      (limit !== undefined
+        ? `stopped: usage limit (${limit})`
+        : `no report (exit ${code ?? signal})`);
     const cost =
       result?.total_cost_usd !== undefined
         ? `$${result.total_cost_usd.toFixed(2)}`
@@ -474,6 +504,22 @@ function launch(item) {
 
 let waitingNoted = '';
 function schedule() {
+  if (limitReached !== undefined && pending.length > 0) {
+    for (const item of pending.splice(0)) {
+      appendFileSync(
+        join(values.out, 'summary.md'),
+        `- ${item.id}: not run (usage limit)\n`
+      );
+      Object.assign(itemStatus.get(item.id), {
+        state: 'ended',
+        ended: new Date().toISOString(),
+        result: 'not run (usage limit)',
+      });
+    }
+    log('the items that had not started are not run');
+    waitingNote = `stopped: usage limit (${limitReached})`;
+    writeStatus();
+  }
   if (oneAtATime) {
     // The queue order decides; areas and other sessions are not read.
     if (pending.length > 0 && running.size === 0) {
@@ -520,9 +566,14 @@ function schedule() {
     launch(item);
   }
   if (running.size === 0) {
-    log('batch finished');
+    log(
+      limitReached === undefined
+        ? 'batch finished'
+        : 'batch stopped on a usage limit'
+    );
     writeStatus(new Date().toISOString());
-    process.exit(0);
+    // Exit code 3: a usage limit stopped the batch before its end.
+    process.exit(limitReached === undefined ? 0 : 3);
   }
 }
 

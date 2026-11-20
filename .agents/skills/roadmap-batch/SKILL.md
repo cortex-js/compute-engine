@@ -76,6 +76,10 @@ Read `<out>/summary.md` and each `<out>/<id>.report.md`. Then:
 - **Stalled items.** `node scripts/issues.mjs in-progress` lists the items a
   session left `in-progress`; an item whose session stopped returns to `open`
   (`issues.mjs set <id> state open`) with its report's "Open" line in the body.
+  When the runner exits with code 3, a usage limit stopped the batch: the
+  summary marks the item that hit it `stopped: usage limit` and the items after
+  it `not run (usage limit)`. Report the reset time of the limit and offer to
+  run the items that were not run in a new batch after it.
 - **Report to the user**, in this order:
   1. a table: item, result, minutes, the API-price equivalent (the sessions run
      on the user's subscription; the amount is what the tokens would cost at API
