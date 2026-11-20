@@ -291,11 +291,12 @@ export function admits(
  * instruction, by a region of `TEXT_LIST_MAKERS` (`Characters`, a build or
  * a filter of a list operator), or it is a parameter of the entry; and it is
  * read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, an
- * element, `At`), each of which conditions what it reads, or, when it is
- * not a parameter, it is a result of the entry. An element-wise operation,
- * an order, an arm, a carried value or a call refuses. The passes run
- * before, so a list of constant length whose reads they fold is a `list` of
- * its elements.
+ * element, `At`, the order of `Sort`), each of which conditions what it
+ * reads, or, when it is not a parameter, it is a result of the entry. An
+ * element-wise operation, another order (`Max`, `Ordering`, a `Sort` by a
+ * key or a comparator), an arm, a carried value or a call refuses. The
+ * passes run before, so a list of constant length whose reads they fold is
+ * a `list` of its elements.
  *
  * A value of `text.at` is `undefined` out of range, which no other
  * operation on a string takes: it is used only by `text.isundef`, as the
@@ -309,7 +310,7 @@ function stringListRefusal(p: Program): Refusal | undefined {
     p.types[v].lane === 'string' && p.types[v].shape.length > 0;
   const refusal: Refusal = {
     cause:
-      'a list of strings other than a literal, Characters, a list operation or an input, read by StringJoin, an element read or as the result',
+      'a list of strings other than a literal, Characters, a list operation or an input, read by StringJoin, an element read, Sort or as the result',
   };
   const absent: Refusal = {
     head: 'At',

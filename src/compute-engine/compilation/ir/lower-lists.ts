@@ -12,7 +12,10 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
-import { requiredArity } from '../../../common/type/utils.js';
+import {
+  collectionElementType,
+  requiredArity,
+} from '../../../common/type/utils.js';
 import {
   elementIndex,
   elementType,
@@ -47,6 +50,7 @@ import {
 import { SCALARIZE_LIMIT } from './passes.js';
 import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
 import { MAX_CHUNK_COUNT } from '../../numerics/value-scaled-caps.js';
+import { textOrder } from './lower-strings.js';
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
  *  with a type (`Typed(z, "real")`), also with a default value
@@ -220,7 +224,8 @@ export function listLowering(cx: Lowering) {
    *  `for` loop, `Apply`, `Tuple`, a selection and the threaded calls of
    *  `lower.ts` and `lower-functions.ts`), that index shifted below a
    *  length it is tested against (`join()`, `appended()`, `Insert`,
-   *  `ReplaceAt` of `lower.ts`), the indices that `sample` draws, or a constant in
+   *  `ReplaceAt` of `lower.ts`), the indices that `sample` draws, the
+   *  permutation of `text.ordering` (`Sort`), or a constant in
    *  range (`at()` of `lower.ts`, the rows of a `Chunk`). Two read a
    *  computed index: `Find` (`s.at(head(kept))`) declines for strings, and
    *  `elementOf()` reads in a region that is not emitted. */
@@ -1035,8 +1040,7 @@ export function listLowering(cx: Lowering) {
 
   /** The value of a real list `x` for `Median` and `Sort`: one list of
    *  real or integer numbers, not a tuple. */
-  const reals = (e: Fn): V => {
-    const l = cx.value(e.ops[0])!;
+  const reals = (e: Fn, l: V = cx.value(e.ops[0])!): V => {
     if (
       cx.tuples.has(l) ||
       type(l).shape.length !== 1 ||
@@ -2519,17 +2523,41 @@ export function listLowering(cx: Lowering) {
     if (h === 'Contains' || h === 'IndexOf') return search(e);
     if (h === 'Median') return cx.apply(e, op('median'), [reals(e)]);
     if (h === 'Sort' && e.nops === 2) return sortBy(e);
+    // A list of strings (CE-1574), for `Sort` and `Unique`.
+    const texts = (l: V) =>
+      type(l).lane === 'string' && type(l).shape.length === 1;
     if (h === 'Sort') {
-      const l = reals(e);
-      const lane = type(l).lane === 'integer' ? 'sort.int' : 'sort';
-      return cx.apply(e, op(lane), [l]);
+      const l = cx.value(e.ops[0])!;
+      if (texts(l)) {
+        // The elements in the order of `text.ordering`: of strings by
+        // UTF-16 code units, of characters by code points (`textOrder()`).
+        const order = textOrder([
+          collectionElementType(e.ops[0].type.type) ?? 'any',
+        ]);
+        if (order === undefined)
+          decline(e, 'Sort of a list of characters and strings');
+        const at = cx.apply(
+          e,
+          op(order === 'points' ? 'text.ordering.cp' : 'text.ordering'),
+          [l]
+        );
+        const s = listSource(l);
+        return reindexed(e, s, s.length, (k) =>
+          b.op('elem', [at, k], elementType(type(at)))
+        );
+      }
+      const r = reals(e, l);
+      const lane = type(r).lane === 'integer' ? 'sort.int' : 'sort';
+      return cx.apply(e, op(lane), [r]);
     }
     if (h === 'Ordering') return cx.apply(e, op('ordering'), [reals(e)]);
     if (h === 'Unique') {
       // The elements that no earlier element equals (NaN equals NaN, as
-      // the interpreter's), in order: a filter whose test is a loop over
-      // the elements before.
-      const s = listSource(reals(e));
+      // the interpreter's; a string by its text, CE-1574), in order: a
+      // filter whose test is a loop over the elements before.
+      const l = cx.value(e.ops[0])!;
+      const text = texts(l);
+      const s = listSource(text ? l : reals(e, l));
       const or = rowOfHead(cx.rows, 'Or')!;
       const nan = op('isnan');
       return over(
@@ -2545,6 +2573,7 @@ export function listLowering(cx: Lowering) {
             cx.apply(e, 'Subtract', [k, integer(1)]),
             (j) => {
               const y = s.at(j);
+              if (text) return cx.apply(e, 'Equal', [y, x]);
               return cx.apply(e, or, [
                 cx.apply(e, 'Equal', [y, x]),
                 cx.apply(e, 'And', [

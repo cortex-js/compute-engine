@@ -194,7 +194,17 @@
   of range) and in `IsMissing`, `Coalesce` and `AssertPresent`, which give the
   interpreter's value at `i = 9` too. Elsewhere such a read declines; write
   `ToUpperCase(Coalesce(At(L, i), ""))` for `ToUpperCase(At(L, i))`.
-  `Sort`, `Unique` and the orders of strings still decline.
+
+- **Lists of strings can be sorted and strings compared in compiled
+  JavaScript** (CE-1574). With `s, t: string` and `L: list<string>`,
+  `Sort(L)`, `Unique(L)`, `Sort(Characters(s))`, `Unique(Characters(s))` and
+  `Less`, `LessEqual`, `Greater` and `GreaterEqual` of two strings or of two
+  characters now compile; they declined before. The order is the
+  interpreter's: two strings by UTF-16 code units, two characters by code
+  points, so `Less("\u{E000}", "😀")` is `False` and the same comparison of
+  two characters is `True`. `Unique` keeps the first of equal elements, by
+  their NFC text. A character against a string, a chain of three or more
+  operands and `Sort` of a list that holds both still decline.
 
 - **`IsMissing` of a string or a colour read out of range no longer compiles
   to `false`.** `IsMissing(At(["a", "b"], i))`, `IsMissing(At(L, i))` of a

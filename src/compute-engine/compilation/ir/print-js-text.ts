@@ -47,6 +47,10 @@ export const TEXT = {
   'text.at': '_SYS.tat($0, $1)',
   'text.eq': '($0 === $1)',
   'text.ne': '($0 !== $1)',
+  // The orders of text (CE-1574): two strings, and the sort of a list.
+  'text.cmpu': '_SYS.cmpu($0, $1)',
+  'text.ordering': '_SYS.tord($0, false)',
+  'text.ordering.cp': '_SYS.tord($0, true)',
   // `ColorToString` of the channels of a constructor (`javascript-runtime.ts`).
   ...Object.fromEntries(
     COLOR_CHANNEL_SPACES.flatMap((space) =>

@@ -420,6 +420,13 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[['list'], I, 'sort.int']],   list),
   row(undefined,      1,          [[['list'], R, 'sort']],       list),
   row(undefined,      1,          [[['list'], I, 'ordering']],   list),
+  // Of text (CE-1574): the order of two strings by UTF-16 code units, -1,
+  // 0 or 1 (`Less` of strings; `text.compare` orders two characters), and
+  // the indices from 0 that sort a list of strings, or of characters by
+  // code points, each element conditioned, stable (`Sort`).
+  row(undefined,      2,          [[[S, S], I, 'text.cmpu']],    list),
+  row(undefined,      1,          [[['list'], I, 'text.ordering']], list),
+  row(undefined,      1,          [[['list'], I, 'text.ordering.cp']], list),
   row(undefined,      1,          [[['list'], 'real-element', 'median']], list),
   // `Chunk(L, k)` and `Partition(L, n)` whose rows can have different
   // lengths, and the two groups of `Partition(L, p)`: the lane `rows`, a

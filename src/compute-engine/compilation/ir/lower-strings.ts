@@ -15,6 +15,7 @@ import {
 } from '../../boxed-expression/type-guards.js';
 import { SMALL_INTEGER } from '../../numerics/numeric.js';
 import { isSubtype } from '../../../common/type/subtype.js';
+import type { Type } from '../../../common/type/types.js';
 import { isLibraryOperator } from '../../library-shadowing.js';
 import { COLOR_STRING_FORMATS } from '../../numerics/color-conversion.js';
 import { decline, type Fn, type Lowering } from './lower-context.js';
@@ -27,13 +28,30 @@ import type { OperatorRow } from './operators.js';
  *  that it reads: `StringJoin`, an element from 0 in range (`text.elem`,
  *  the reads of `Map`, `Filter`, `Count`, …) and `At` (`text.at`, from 1,
  *  `undefined` out of range, read only by a discharge or as the result;
- *  CE-1556). */
+ *  CE-1556), and the order of `Sort` (`text.ordering`, CE-1574). */
 export const TEXT_LIST_READS: readonly string[] = Object.freeze([
   'text.joinl',
   'text.joinl.sep',
   'text.elem',
   'text.at',
+  'text.ordering',
+  'text.ordering.cp',
 ]);
+
+/** The order of text values of the static types `types` (CE-1574), as
+ *  `cmp()` of `boxed-expression/compare.ts` orders them: by code points
+ *  (`points`) when each is a character, by UTF-16 code units (`units`)
+ *  when each is a string. A character against a string (by code points
+ *  against a string of one character, undecided against a longer one) and
+ *  a type that admits both are `undefined`: compiled code holds both as
+ *  JavaScript strings, so the static type alone picks the order. */
+export function textOrder(
+  types: readonly Type[]
+): 'points' | 'units' | undefined {
+  if (types.every((t) => isSubtype(t, 'character'))) return 'points';
+  if (types.every((t) => isSubtype(t, 'string'))) return 'units';
+  return undefined;
+}
 
 /** The regions that make a list of strings besides a `list` instruction:
  *  `Characters` and the builds and filters of the list operators, whose

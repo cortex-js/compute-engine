@@ -26,6 +26,8 @@ ce.declare('s', 'string');
 ce.declare('t', 'string');
 ce.declare('L', 'list<string>');
 ce.declare('K', 'list<character>');
+ce.declare('c1', 'character');
+ce.declare('c2', 'character');
 ce.declare('M', 'list<list<string>>');
 ce.declare('b', 'boolean');
 ce.declare('x', 'real');
@@ -232,7 +234,6 @@ describe('a literal list whose reads the passes fold', () => {
 
 describe('a list of strings of run-time length', () => {
   test.each([
-    ['Sort(L)', ['Sort', 'L']],
     ['If(b, L, ["x"])', ['If', 'b', 'L', ['List', { str: 'x' }]]],
     ['L', 'L'],
     ['M', ['StringJoin', ['At', 'M', 1]]],
@@ -739,11 +740,113 @@ describe('Equal, NotEqual and KroneckerDelta of strings', () => {
   });
 });
 
-describe('the orders and the other operators stay declined', () => {
+describe('the orders of strings and of characters (CE-1574)', () => {
+  // Two strings are ordered by UTF-16 code units, two characters by code
+  // points (`cmp()` of `boxed-expression/compare.ts`): U+E000 is after 😀
+  // (U+1F600, the code units D83D DE00) as a string, before it as a
+  // character. `é` is written decomposed in `e\u0301`; conditioned, it
+  // equals the precomposed `é`.
+  const ASTRAL = ['\ue000', '😀', 'b', 'a', 'b'];
+  const NFC = ['e\u0301', 'é', 'f', 'e'];
+  const lists = [...LENGTHS, DECOMPOSED, ASTRAL, NFC].map((L) => ({ L }));
+  const texts = ['\ue000😀ba', 'banana', '', 'e\u0301é', 'a😀\ue000😀'].map(
+    (s) => ({ s })
+  );
+
   test.each([
     ['Sort(L)', ['Sort', 'L']],
     ['Unique(L)', ['Unique', 'L']],
-    ['Less(s, "b")', ['Less', 's', str('b')]],
+    ['StringJoin(Sort(L), ",")', ['StringJoin', ['Sort', 'L'], str(',')]],
+    ['Map(ToUpperCase, Sort(L))', ['Map', 'ToUpperCase', ['Sort', 'L']]],
+    ['Sort(Unique(L))', ['Sort', ['Unique', 'L']]],
+    ['Length(Unique(L))', ['Length', ['Unique', 'L']]],
+  ])('%s', (_, json) => {
+    agrees(json, lists);
+  });
+
+  test.each([
+    ['Sort(Characters(s))', ['Sort', ['Characters', 's']]],
+    ['Unique(Characters(s))', ['Unique', ['Characters', 's']]],
+    [
+      'StringJoin(Sort(Characters(s)))',
+      ['StringJoin', ['Sort', ['Characters', 's']]],
+    ],
+  ])('%s', (_, json) => {
+    agrees(json, texts);
+  });
+
+  test('Sort of a literal list of strings', () => {
+    agrees(['Sort', ['List', str('b'), str('😀'), 's', str('\ue000')]], texts);
+  });
+
+  test.each(['Less', 'LessEqual', 'Greater', 'GreaterEqual'])(
+    '%s of two strings and of two characters',
+    (head) => {
+      const pairs = [
+        ['\ue000', '😀'],
+        ['😀', '\ue000'],
+        ['a', 'b'],
+        ['b', 'b'],
+        ['', 'a'],
+        ['ab', 'a'],
+        ['e\u0301', 'é'],
+      ].map(([s, t]) => ({ s, t }));
+      agrees([head, 's', 't'], pairs);
+      agrees([head, 's', str('b')], pairs);
+      // Two characters: two inputs declared `character`, which the
+      // interpreter reads as character values.
+      for (const { s, t } of pairs.filter(
+        (p) => [...p.s.normalize()].length === 1 && [...p.t].length === 1
+      )) {
+        const want = ce
+          .box([head, ['CharacterFrom', str(s)], ['CharacterFrom', str(t)]])
+          .evaluate().symbol;
+        for (const options of PASSES)
+          expect([
+            s,
+            t,
+            options,
+            run([head, 'c1', 'c2'], { c1: s, c2: t }, options),
+          ]).toEqual([s, t, options, want === 'True']);
+      }
+    }
+  );
+
+  test('a string order in a predicate', () => {
+    agrees(['Filter', 'L', fn(['Less', 'c', str('b')], 'c')], lists);
+  });
+
+  test.each([
+    // A character against a string: by code points against a string of
+    // one character, undecided against a longer one.
+    [
+      'Map(c -> c < "b", Characters(s))',
+      ['Map', fn(['Less', 'c', str('b')], 'c'), ['Characters', 's']],
+    ],
+    [
+      'Sort(["b", First(Characters(s))])',
+      ['Sort', ['List', str('b'), ['First', ['Characters', 's']]]],
+    ],
+    ['Less(s, t, "z")', ['Less', 's', 't', str('z')]],
+    ['Less(s, 1)', ['Less', 's', 1]],
+    ['Sort(s)', ['Sort', 's']],
+  ])('%s declines', (_, json) => {
+    declinesEverywhere(json);
+  });
+
+  test.each([
+    ['Sort(L)', ['Sort', 'L']],
+    ['Unique(L)', ['Unique', 'L']],
+    ['Less(s, t)', ['Less', 's', 't']],
+  ])('%s declines on glsl, interval-js and in the bigint mode', (_, json) => {
+    expect(declines(json, { to: 'glsl' })).toBe(true);
+    expect(declines(json, { to: 'interval-js' })).toBe(true);
+    expect(declines(json, { mode: 'bigint' })).toBe(true);
+  });
+});
+
+describe('the orders and the other operators stay declined', () => {
+  test.each([
     ['Max(L)', ['Max', 'L']],
     ['Contains(L, "x")', ['Contains', 'L', str('x')]],
     [

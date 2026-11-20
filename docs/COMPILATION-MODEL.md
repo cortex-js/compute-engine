@@ -504,11 +504,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   inlined whose value is such a read. The remedy is the discharge:
   `ToUpperCase(Coalesce(At(L, i), ""))`, inside the function for a call.
   CE-1556.
-- `javascript` (plausible), `s: string`, `L: list<string>`: `Sort(L)`,
-  `Unique(L)`, `Less(s, "b")` and `Max(L)` decline (an order of strings);
-  so do `Contains(L, "x")`, `IndexOf(L, "x")` and `Find` of a list of
-  strings, and `Reduce` or `Fold` of `String` over `Characters(s)` (the
-  reductions read real numbers only).
+- `javascript` (plausible), `s: string`, `L: list<string>`: `Max(L)`
+  declines; so do `Contains(L, "x")`, `IndexOf(L, "x")` and `Find` of a
+  list of strings, and `Reduce` or `Fold` of `String` over `Characters(s)`
+  (the reductions read real numbers only). `Sort(L)`, `Unique(L)` and
+  `Less(s, "b")` compile (CE-1574); an order of a character and a string
+  (`Map(c -> c < "b", Characters(s))`), a chain of three or more strings
+  (`Less(s, t, "z")`) and `Sort` of a list of characters and strings
+  decline, as the compiled code holds both as strings and the static type
+  picks the order.
 - `javascript` (crafted), `L: list<string>`, `i: integer`, `j: integer`:
   `Coalesce(At(L, i), At(L, j))` declines (its second read can be absent);
   `Equal(L, "a")` of an input or a list of run-time length declines (an
@@ -2247,7 +2251,7 @@ reads as a collection has a collection type: in `s ↦ Length(s)`, `s` is a
 type `string`, a literal, the text operators: "The string lane" of
 `src/compute-engine/compilation/ir/README.md`) and a list of strings (a
 literal, `Characters(s)`, a list operation or an input, read by `StringJoin`,
-an element read or as the result), but no collection read of a string, so `g(t)` with
+an element read, `Sort` or as the result), but no collection read of a string, so `g(t)` with
 `g := s ↦ Length(s)` and `t: string`,
 and `g("abc")`, decline (`outside-profile`) and run on the interpreter;
 `Length(t)` compiles. Every other target declines a string.

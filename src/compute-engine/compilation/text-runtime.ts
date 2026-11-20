@@ -10,7 +10,8 @@
  * (`text.in`), a literal by the engine, a result here. So the helpers read
  * their operands as they are, except the elements of an input list of
  * strings, which the entry passes as the host gave them: each read of an
- * element (`tel`, `tat`) and `tjoinl` conditions them (CE-1556).
+ * element (`tel`, `tat`), `tjoinl` and `tord` condition them (CE-1556,
+ * CE-1574).
  *
  * An operand that the interpreter answers with an error value (a negative
  * or too large count, an empty pad or target) throws a `RangeError` that
@@ -194,6 +195,17 @@ export const TEXT_HELPERS = {
     for (let i = 0; i < n; i++)
       if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
     return sa.length === sb.length ? 0 : sa.length < sb.length ? -1 : 1;
+  },
+  /** The order of two strings: by UTF-16 code units, the interpreter's `<`
+   *  of two strings (`cmp()` of `boxed-expression/compare.ts`; CE-1574). */
+  cmpu: (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0),
+  /** `Sort` of a list of strings, or of characters (`points`): the indices
+   *  from 0 of the elements, each conditioned, in the order of `cmpu`, or of
+   *  `cmpc`; stable, as the interpreter's sort (CE-1574). */
+  tord: (l: readonly string[], points: boolean): number[] => {
+    const xs = l.map(condition);
+    const order = points ? TEXT_HELPERS.cmpc : TEXT_HELPERS.cmpu;
+    return Array.from(xs, (_, i) => i).sort((i, j) => order(xs[i], xs[j]));
   },
   /** `String(a, b)`: the two texts joined. */
   tconcat: (a: string, b: string): string => condition(a + b),

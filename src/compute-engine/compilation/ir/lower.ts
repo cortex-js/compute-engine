@@ -151,6 +151,7 @@ import {
   colorToString,
   isTextRow,
   patternReplace,
+  textOrder,
 } from './lower-strings.js';
 import {
   CONTROL_FLOW_HEADS,
@@ -2586,6 +2587,32 @@ function lowerOnce(
           );
           return value(f.ops[0], want);
         });
+      }
+      // An order of two strings or two characters (CE-1574): the order of
+      // `textOrder()` compared with 0. A character against a string and a
+      // chain of three or more decline; an operand that is not text takes
+      // the rows, which have no signature of text.
+      case 'Less':
+      case 'LessEqual':
+      case 'Greater':
+      case 'GreaterEqual': {
+        const types = e.ops.map((o) => o.type.type);
+        if (!types.every((t) => textOrder([t]) !== undefined)) break;
+        const order = textOrder(types);
+        if (order === undefined || e.nops !== 2)
+          decline(
+            e,
+            `${e.operator} of other than two strings or two characters`
+          );
+        const [x, y] = [scalar(e.ops[0]), scalar(e.ops[1])];
+        if (type(x).lane !== 'string' || type(y).lane !== 'string')
+          decline(e, `${e.operator} of text that is not a string value`);
+        const c = apply(
+          e,
+          ofOp(order === 'points' ? 'text.compare' : 'text.cmpu'),
+          [x, y]
+        );
+        return apply(e, e.operator, [c, b.constant(0, 'integer')]);
       }
       // `KroneckerDelta(a, b)` of two numbers or two strings is
       // `Boole(a = b)`, and

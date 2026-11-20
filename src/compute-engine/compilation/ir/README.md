@@ -740,7 +740,13 @@ interpreter adds it, `/`, the source), `StartsWith`, `EndsWith`,
 joined), `StringJoin(s, sep)` of a string `s` (its characters joined by
 `sep`), and `Equal` and `NotEqual` of two strings (`text.eq`, `text.ne`:
 `===` of two conditioned texts, the interpreter's equality of strings and
-characters; `KroneckerDelta` is `Boole` of it). An operand that the interpreter answers with an error value (a count
+characters; `KroneckerDelta` is `Boole` of it). `Less`, `LessEqual`,
+`Greater` and `GreaterEqual` of two strings compare `text.cmpu` (`_SYS.cmpu`:
+UTF-16 code units, the interpreter's `<` of two strings) with 0, and of two
+characters `text.compare` (`_SYS.cmpc`: code points, its order of characters);
+`textOrder()` of `lower-strings.ts` picks the order from the static types, as
+the compiled lane holds both as strings, and a character against a string, a
+type that admits both and a chain of three or more decline (CE-1574). An operand that the interpreter answers with an error value (a count
 below 0, or 1 for the count of `StringReplace`, or above 1,000,000; an empty pad
 or target) declines when it is a literal or when the engine proves it out of the
 domain (`TEXT_DOMAINS` of `lower-strings.ts`, which also lowers `StringReplace`
@@ -751,7 +757,7 @@ operand is text, is never evaluated at compile time (`isTextRow()` makes
 `facts().slice` false; `Equal` of numbers is evaluated): `N()` gives the decimal text of a
 number (`String(1/3)`), the interpreter its exact text. No pass has a case of
 its own for the lane. Declined: a string on GLSL, in the interval mode and in
-the bigint mode; an order of strings (`Less`, `Sort`); a string of a `vars` name; `String` of a
+the bigint mode; a string of a `vars` name; `String` of a
 number (its text follows the engine's formatting options); a function as the
 replacement of `StringReplace`; a `RegExp` that is not the library operator.
 
@@ -761,7 +767,8 @@ by a region of `TEXT_LIST_MAKERS` of `lower-strings.ts` (`text.chars`, `build`,
 `filter`: `Characters`, `Map`, `Filter`, `Reverse`, `Take` and the other list
 operators that move elements), or it is a parameter of the entry; and it is
 read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, `text.elem`,
-`text.at`), or, when it is not a parameter, it is a result of the entry.
+`text.at`, `text.ordering`), or, when it is not a parameter, it is a result of
+the entry.
 `Characters(s)` and `GraphemeClusters(s)` are the region `text.chars`
 (`_SYS.tchars`: the grapheme clusters of `s`, each conditioned), whose results
 are the count of the clusters and the list of that length, so
@@ -787,8 +794,14 @@ element-wise operation of a short static list (`Equal(["a", s], "a")`) with
 `elem` reads, which `fold` replaces with the elements; with
 `constantFold: false` they remain and refuse. `ListJoin` of a string declines:
 the interpreter spreads its characters, where `source(x, true)` makes one
-element. The elements of a list result are JavaScript strings. Declined (the
-remedy is the interpreter): an order (`Sort`, `Unique`, `Max`), `Contains`,
+element. `Sort(L)` of a list of strings is the build of the elements at the
+indices of `text.ordering` (`_SYS.tord`: the indices from 0 of the conditioned
+elements, sorted stably by `cmpu`), and of characters (`Characters(s)`) of
+`text.ordering.cp` (by `cmpc`); a list that holds both declines. `Unique(L)` is
+the `filter` that `Unique` of numbers is ("Lists"), with `text.eq` as its test
+(CE-1574). The elements of
+a list result are JavaScript strings. Declined (the
+remedy is the interpreter): `Max`, `Contains`,
 `IndexOf`, `Find`, `Reduce` and `Fold` of a list of strings; an element-wise
 operation on one; a list of strings in an `If`, a `Loop` or a user function
 that is not inlined; a list of lists of strings; an input list returned as the
