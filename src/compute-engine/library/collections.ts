@@ -21235,22 +21235,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     // Lazy view for the chunk/window forms past the eager threshold. The
     // predicate form has no lazy view (it needs totality over the source), so
-    // `partitionWindowParams` returns `undefined` for it and every facet stays
-    // inert — `Count(Partition(<inf>, <pred>))` remains symbolic.
+    // `partitionWindowParams` returns `undefined` for it, and its facets are
+    // read from its value instead (`partitionPredicateFormHandlers`):
+    // `Count(Partition(<inf>, <pred>))` remains symbolic.
     collection: refusingUnindexedSource(
-      stringAwareWindowedCollectionOps((expr) => {
-        if (!isFunction(expr)) return undefined;
-        const n = toIntegerOperand(expr.op2);
-        if (n === null || n <= 0) return undefined; // predicate form or invalid
-        if (expr.nops >= 3) {
-          // Sliding-window form: complete windows only.
-          const step = toIntegerOperand(expr.op3);
-          if (step === null || step <= 0) return undefined;
-          return { src: expr.op1, size: n, step, keepPartial: false };
-        }
-        // Chunk form: consecutive size-`n` chunks; trailing partial kept.
-        return { src: expr.op1, size: n, step: n, keepPartial: true };
-      })
+      partitionPredicateFormHandlers(
+        stringAwareWindowedCollectionOps(partitionWindowParams)
+      )
     ),
   },
 
@@ -26682,6 +26673,81 @@ function* groupByWalk(
       ce._fn('Tuple', [ce.string(k), ce.function('List', vals)])
     )
   );
+}
+
+/** The lazy view of the chunk and sliding-window forms of `Partition`, or
+ * `undefined` for the predicate form and for a size or step that is not a
+ * positive integer. */
+function partitionWindowParams(expr: Expression): WindowedParams | undefined {
+  if (!isFunction(expr)) return undefined;
+  const n = toIntegerOperand(expr.op2);
+  if (n === null || n <= 0) return undefined; // predicate form or invalid
+  if (expr.nops >= 3) {
+    // Sliding-window form: complete windows only.
+    const step = toIntegerOperand(expr.op3);
+    if (step === null || step <= 0) return undefined;
+    return { src: expr.op1, size: n, step, keepPartial: false };
+  }
+  // Chunk form: consecutive size-`n` chunks; trailing partial kept.
+  return { src: expr.op1, size: n, step: n, keepPartial: true };
+}
+
+/**
+ * The collection handlers of `Partition`: `handlers` (the lazy view of the
+ * chunk and sliding-window forms) for the size forms, and the facets of the
+ * evaluated value of the call for the predicate form.
+ *
+ * The predicate form is a collection operator whose groups are known only
+ * once the predicate has been applied to every element. With handlers that
+ * answered "unknown" for it, a lazy consumer, which reads its source by its
+ * handlers and does not evaluate a source that has them (`mapSource`), had
+ * nothing to read: `Map(f, Partition(xs, p))` and its `Count` stayed
+ * unevaluated, while `Map(f, Chunk(xs, 2))`, whose operator has no
+ * collection handlers and is evaluated by the consumer, gave a value
+ * (CE-1558). The value is read through `evaluateEagerSource`, as `mapSource`
+ * reads an eager source, and only for a pure call. A call that does not
+ * evaluate to a list (an infinite source, an undecided predicate, a
+ * predicate that only the asynchronous evaluation can apply, an error)
+ * answers "unknown", as before.
+ *
+ * The predicate form is told from the size forms by the shape of the second
+ * operand (`isCallbackShaped`), with no evaluation: a size operand is
+ * evaluated by the handlers of the lazy view only, once per read, and an
+ * invalid size (`Partition(xs, 0)`) keeps their answers.
+ */
+function partitionPredicateFormHandlers(
+  handlers: CollectionHandlers
+): CollectionHandlers {
+  const value = (expr: Expression): Expression | undefined => {
+    if (!expr.isPure) return undefined;
+    const v = evaluateEagerSource(expr);
+    return v !== expr && isFunction(v, 'List') ? v : undefined;
+  };
+  const isPredicateForm = (expr: Expression) =>
+    isFunction(expr) && expr.nops >= 2 && isCallbackShaped(expr.op2);
+  return {
+    ...handlers,
+    count: (expr) =>
+      isPredicateForm(expr) ? value(expr)?.count : handlers.count(expr),
+    isFinite: (expr) =>
+      isPredicateForm(expr)
+        ? value(expr)?.isFiniteCollection
+        : handlers.isFinite?.(expr),
+    isEnumerable: (expr) =>
+      isPredicateForm(expr)
+        ? value(expr)?.isEnumerableCollection
+        : handlers.isEnumerable?.(expr),
+    isEmpty: (expr) =>
+      isPredicateForm(expr)
+        ? value(expr)?.isEmptyCollection
+        : handlers.isEmpty?.(expr),
+    at: (expr, index) => {
+      if (!isPredicateForm(expr)) return handlers.at?.(expr, index);
+      return typeof index === 'number' ? value(expr)?.at(index) : undefined;
+    },
+    iterator: (expr) =>
+      isPredicateForm(expr) ? value(expr)?.each() : handlers.iterator(expr),
+  };
 }
 
 /** The eager walk of `Partition`, shared by its synchronous and asynchronous

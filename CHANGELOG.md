@@ -70,6 +70,14 @@
 
 ### Resolved Issues
 
+- **`Map` over the groups of `Partition(xs, p)` gives a value (CE-1558).**
+  With a predicate `p`, `Map(f, Partition(xs, p))`, its `Count`, `At`,
+  `Reduce` and `Sum` stayed unevaluated, while the same over
+  `Partition(xs, 2)` or `Chunk(xs, 2)` gave a value. They now give the value
+  that they give over the list of the two groups: with
+  `F = Function(Length(r), r)`, `Count(Map(F, Partition([1, 2, 3, 4], t ↦ t < 3)))`
+  is `2`.
+
 - **`SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `AiryAiPrime`
   and `AiryBiPrime` of a real argument carry the precision asked for.** At
   `ce.precision = 50`, `SinIntegral(0.7)` was the double `0.6812222391166113`;
