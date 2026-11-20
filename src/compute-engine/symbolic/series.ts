@@ -217,7 +217,8 @@ let activeZeroTests: ZeroTests | undefined;
 
 /** Whether the expansion that runs must hold on both sides of the point: a
  * `Series` at a finite point. The expansion at ±∞ (in `s` at `s = 0⁺`) and
- * `laurentData()` keep the expansion for `t > 0` (`puiseuxPower()`). */
+ * `laurentData()` keep the expansion for `t > 0` (`puiseuxPower()`,
+ * `lnLaurent()`). */
 let bothSides = false;
 
 /** The value in `cache` for the constant `e`. When there is none, it is
@@ -1788,6 +1789,73 @@ function puiseuxPower(
 }
 
 /**
+ * Whether the step `ln(c₀·t^m·(1 + h)) = m·ln(t) + ln(c₀) + log1p(h)` of
+ * `lnLaurent()` holds for `t < 0` too. `inner` is the expansion of the
+ * argument, `m` its valuation and `c0` its leading coefficient.
+ *
+ * For `t < 0` and a real `c₀ ≠ 0`, `c₀·t^m` has the argument `π·(m − 2k)`
+ * with `k = ⌊m/2⌋` when `c₀ > 0` and `k = ⌈m/2⌉` when `c₀ < 0` (the count of
+ * `puiseuxHoldsBelow()`), and `m·ln(t) + ln(c₀)` has the imaginary part
+ * `π·m`, or `π·(m + 1)` when `c₀ < 0`: the two sides differ by `2πi·k`, and
+ * the step holds when `k = 0`. `ln(x)`, `ln(sin x)` (`m = 1`) and `ln(−1/x)`
+ * hold; `ln(x²)` is `2·ln|x|`, not `2·ln(x)`; `ln(−x)` is `ln|x|`, not
+ * `ln(x) + iπ`; `ln(1/x)` is `−ln|x| + iπ`, not `−ln(x)`.
+ *
+ * The argument is positive on both sides only when `c₀ > 0` and `m = 0`
+ * (`ln(1 + √x)`). In the other cases it is on the negative real axis, the cut
+ * of `ln`, on one side or on both, and it stays there only when it is real
+ * for every real `x` (`isRealOnRealAxis()`) and has no fractional power:
+ * `ln(x − i·x²)` crosses the cut at `x = 0`, and `ln(∛x)` is `ln(−∛|x|)`, not
+ * `ln(x)/3`. The coefficients of the window do not show a term of a higher
+ * order that is not real (`ln(x − i·x¹⁰)`). A leading coefficient that is not
+ * a real number of known sign does not hold.
+ */
+function lnHoldsBelow(
+  arg: Expression,
+  x: string,
+  inner: Laurent,
+  m: number,
+  c0: Expression
+): boolean {
+  const positive = c0.isPositive === true;
+  if (!positive && c0.isNegative !== true) return false;
+  if (positive && m === 0) return true;
+  if (inner.d !== 1) return false;
+  const k = positive ? Math.floor(m / 2) : Math.ceil(m / 2);
+  return k === 0 && isRealOnRealAxis(arg, x);
+}
+
+/** Operators that are real for one real operand, where they are defined, and
+ * are not in `ANALYTIC_OPERATORS`. With two operands, `Gamma` is the
+ * incomplete gamma function, which is not real for a negative operand. */
+const REAL_UNARY_OPERATORS = new Set(['Arctan', 'Arsinh', 'Erf', 'Gamma']);
+
+/**
+ * Whether `e` is real for every real `x` where it is defined: `x`, a real
+ * number, a symbol whose type is real, a constant whose numeric value is
+ * real (`√2`), or an operator of `ANALYTIC_OPERATORS` or
+ * `REAL_UNARY_OPERATORS` applied to such operands. A power qualifies with an
+ * integer exponent, or with a positive constant for its base (`e^x`). A
+ * root, a logarithm and an inverse function with a cut on the real axis
+ * (`Arcsin`) of an operand that is not a constant do not:
+ * `x + x¹⁰·√(x − 1)` is not real near 0. The static type of a constant is
+ * not read: `Gamma(1/2, -1)` has the type `real` and a complex value.
+ */
+function isRealOnRealAxis(e: Expression, x: string): boolean {
+  if (isSymbol(e)) return e.symbol === x || e.type.matches('real');
+  if (isNumber(e)) return e.im === 0;
+  if (!isFunction(e)) return false;
+  if (!e.has(x) && e.unknowns.length === 0) return realValue(e) !== undefined;
+  const op = e.operator;
+  if (op === 'Power') {
+    const positiveBase = !e.op1.has(x) && e.op1.isPositive === true;
+    if (asSmallInteger(e.op2) === null && !positiveBase) return false;
+  } else if (REAL_UNARY_OPERATORS.has(op) ? e.nops !== 1 : !ANALYTIC_OPERATORS.has(op))
+    return false;
+  return e.ops.every((operand) => isRealOnRealAxis(operand, x));
+}
+
+/**
  * Log-aware Laurent expansion of `ln(g)` about `x0`. Writing
  * `g = c₀·t^{m/d}·(1 + h)` (leading coefficient `c₀ ≠ 0`, `h` of valuation ≥ 1),
  *
@@ -1798,7 +1866,9 @@ function puiseuxPower(
  * Taylor series. Returns `null` (defer) when `g` vanishes identically (`ln 0`),
  * carries a log atom in its leading coefficient (`ln(ln x)`), or the window
  * would exceed `MAX_SERIES_ORDER`. Because the Taylor engines already handle
- * regular points, this only fires at a genuine zero or pole of `g`.
+ * regular points, this only fires at a genuine zero or pole of `g`. A `Series`
+ * at a finite point defers when the identity holds for `t > 0` only
+ * (`lnHoldsBelow()`).
  */
 function lnLaurent(
   ce: ComputeEngine,
@@ -1826,6 +1896,7 @@ function lnLaurent(
   if (m > inner.hi) return null; // leading term past the reliable window
   const c0 = coeffAt(ce, inner, m);
   if (c0.has(x)) return null; // log-carrying leading coeff (e.g. ln(ln x))
+  if (bothSides && !lnHoldsBelow(arg, x, inner, m, c0)) return null;
   const d = inner.d;
   if (W * d > MAX_SERIES_ORDER) return null; // window too large — defer
   const Wn = W * d;

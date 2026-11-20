@@ -923,11 +923,16 @@ describe('Series — log-aware expansions (§8)', () => {
     );
   });
 
-  test('ln(x²(1+x)) = 2 ln x + x − x²/2 + x³/3 − x⁴/4 + O(x⁵)', () => {
-    // Cross-checked against SymPy: 2*log(x) + x - x**2/2 + x**3/3 - x**4/4.
-    expect(series('\\ln(x^2(1+x))', '0', 4).latex).toBe(
-      '2\\ln(x)+x-\\frac{x^2}{2}+\\frac{x^3}{3}-\\frac{x^4}{4}+O\\left(x^5\\right)'
+  test('ln(x(1+x)) = ln x + x − x²/2 + x³/3 − x⁴/4 + O(x⁵)', () => {
+    // Cross-checked against SymPy: log(x) + x - x**2/2 + x**3/3 - x**4/4.
+    expect(series('\\ln(x(1+x))', '0', 4).latex).toBe(
+      '\\ln(x)+x-\\frac{x^2}{2}+\\frac{x^3}{3}-\\frac{x^4}{4}+O\\left(x^5\\right)'
     );
+  });
+
+  test('ln(x²(1+x)) at 0 stays unevaluated (2 ln|x| for x < 0)', () => {
+    // 2·ln(x) + x − … holds for x > 0 only: it is off by 2πi for x < 0.
+    expect(series('\\ln(x^2(1+x))', '0', 4).operator).toBe('Series');
   });
 
   test('1/ln x at 0 stays unevaluated (reciprocal log)', () => {
@@ -1071,40 +1076,33 @@ describe('Series — GammaLn Stirling asymptotics', () => {
     expect(series('\\Gamma(x)', '+\\infty').operator).toBe('Series');
   });
 
-  test('GammaLn(x) at 0 expands as ln Γ: −ln x − γx + …', () => {
-    // Regression: the derivative fallback used to keep the symbolic-inert
-    // `GammaLn(0)`, `Digamma(0)`, … as coefficients (same class as `x^π`);
-    // `GammaLn(0)` now evaluates to +∞ so the Taylor engines defer, and the
-    // Laurent path expands `ln(Γ(x))` through the log-aware machinery.
+  test('GammaLn(x) at 0 stays unevaluated', () => {
+    // The derivative fallback used to keep the symbolic-inert `GammaLn(0)`,
+    // `Digamma(0)`, … as coefficients (same class as `x^π`); `GammaLn(0)`
+    // evaluates to +∞, so the Taylor engines defer. The Laurent path defers
+    // too: `ln(Γ(x)) = −ln x − γx + …` holds for x > 0 only (Γ(x) < 0 for
+    // −1 < x < 0, where `−ln x` is `−ln|x| − iπ`).
     const s = series('\\operatorname{GammaLn}(x)', '0', 3);
-    expect(s.operator).not.toBe('Series');
+    expect(s.operator).toBe('Series');
     expect(s.toString()).not.toContain('GammaLn(0)');
-    // Identical to the composed ln Γ(x) expansion. (`evaluate` first: the
-    // nested γ-polynomial coefficients need folding before `simplify` can
-    // recognize the difference as 0.)
-    const composed = normal('\\ln\\Gamma(x)', '0', 3);
-    const mine = ce.function('Normal', [s]).evaluate();
-    expect(
-      ce.function('Subtract', [mine, composed]).evaluate().simplify().isSame(0)
-    ).toBe(true);
-    // Numeric: error at x = 0.1 is small and consistent with O(x⁴).
-    const err = Math.abs(
-      mine.subs({ x: ce.number(0.1) }).N().re -
-        ce.function('GammaLn', [ce.number(0.1)]).N().re
-    );
-    expect(err).toBeLessThan(1e-4);
+    expect(series('\\ln\\Gamma(x)', '0', 3).operator).toBe('Series');
   });
 
-  test('GammaLn(x) at a negative pole (−2) expands with exact data', () => {
-    // −ln(x+2) + ln(1/2) + (3/2 − γ)(x+2) + … — the ψ constant at −2 is
-    // −γ + H₂ = 3/2 − γ.
-    const p = normal('\\operatorname{GammaLn}(x)', '-2', 1);
-    const t = ce.parse('x + 2');
+  test('GammaLn(x) at a negative pole (−2) stays unevaluated', () => {
+    // `−ln(x+2) + ln(1/2) + (3/2 − γ)(x+2) + …` holds for x > −2 only.
+    expect(series('\\operatorname{GammaLn}(x)', '-2', 1).operator).toBe(
+      'Series'
+    );
+  });
+
+  test('ln Γ(x) at −1 expands with exact data', () => {
+    // Γ(x) is about −1/(x+1) at −1: −ln(x+1) + iπ + (1 − γ)(x+1) + … holds
+    // on both sides. The ψ constant at −1 is −γ + H₁ = 1 − γ.
+    const p = normal('\\ln\\Gamma(x)', '-1', 1);
+    const t = ce.parse('x + 1');
     const expected = ce
-      .parse('-\\ln(x+2) + \\ln(\\frac{1}{2})')
-      .add(
-        ce.parse('\\frac{3}{2}').sub(ce.symbol('EulerGamma')).mul(t)
-      );
+      .parse('-\\ln(x+1) + \\ln(-1)')
+      .add(ce.One.sub(ce.symbol('EulerGamma')).mul(t));
     expect(
       ce.function('Subtract', [p, expected]).evaluate().simplify().isSame(0)
     ).toBe(true);

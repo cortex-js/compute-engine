@@ -48,6 +48,18 @@
 
 ### Resolved Issues
 
+- **A `Series` at a zero or a pole of the argument of a logarithm no longer
+  gives a series that holds on one side only** (CE-1442).
+  `Series(Ln(x^2), x, 0, 3)` was `2ln(x) + O(x^4)`, which is `ln(x²) + 2πi`
+  for `x < 0`. `Ln(-x)`, `Ln(1/x)` and `Ln(1 - Cos(x))` were off by `2πi`
+  for `x < 0` in the same way. Each one now stays `Series(...)`, and so do
+  `Log(x^2)`, `x * Ln(x^2)`, `Ln(a * x)` when the sign of `a` is not known,
+  and `GammaLn(x)` and `Ln(Gamma(x))` at `0` and at `-2`. A
+  logarithm whose series holds on both sides is unchanged:
+  `Series(Ln(Sin(x)), x, 0, 3)` is `ln(x) - x^2/6 + O(x^4)`, and
+  `Series(Ln(-1/x), x, 0, 3)` is `-ln(x) + ln(-1) + O(x^6)`. The series at
+  `+∞` and `−∞` are unchanged.
+
 - **A colour made from a complex channel compiles again in the complex mode**
   (CE-1586). With `mode: 'complex'`, `compile()` declined a colour
   constructor whose channel has a complex value, such as `Hsv(Sqrt(z), 1, 1)`
