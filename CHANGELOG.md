@@ -445,6 +445,16 @@
   user function, and `ContrastingColor` of three colours. A list of colours
   (`AsHsv(List(Hsv(270, 1, 0), C))`) converts each element by the same rule.
 
+### Performance
+
+- **A bound of a `Range` is evaluated once per evaluation** (CE-1510). An
+  operator applied to a `Range` whose bound is computed, such as
+  `1 + Range(1, Length(C))` or `Sin(Map(j ↦ C[j], Range(1, Length(C))))`,
+  evaluated the bound, and thus `C`, at each read of the length of the range:
+  about fifty times for one `evaluate()`, whatever the length of `C`. It is now
+  evaluated twice (once exactly, once numerically). An impure bound
+  (`Range(1, RandomInteger(1, 5))`) is still evaluated at each read.
+
 ## 0.194.3 _2026-11-19_
 
 ### New Features

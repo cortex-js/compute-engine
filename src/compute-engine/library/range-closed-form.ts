@@ -5,6 +5,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
+import { evaluateRangeBound } from '../boxed-expression/eager-source-values.js';
 import { rangeCount } from '../numerics/range-count.js';
 
 /**
@@ -79,13 +80,14 @@ function rangeOperands(
   // elements with a tolerance for rounding errors (`rangeCount()`), and the
   // rational value of the float can give a different count (`Range(0, 1,
   // 0.1)` has 11 elements, but `1 / 0.1` in exact binary arithmetic is a
-  // little less than 10).
+  // little less than 10). The value of an operand is kept for the
+  // evaluations in progress (`evaluateRangeBound()`).
   const read = (op: Expression): [BigRational, number] | undefined => {
     const value = isNumber(op)
       ? op
       : evaluateOperands === true ||
           (typeof evaluateOperands === 'function' && evaluateOperands(op))
-        ? op.evaluate()
+        ? evaluateRangeBound(op, 'evaluate')
         : undefined;
     if (value === undefined || !isNumber(value) || value.isComplex)
       return undefined;

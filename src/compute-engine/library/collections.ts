@@ -32,7 +32,10 @@ import {
   snapshotMemoDeps,
 } from '../boxed-expression/collection-element-memo.js';
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
-import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
+import {
+  evaluateEagerSource,
+  evaluateRangeBound,
+} from '../boxed-expression/eager-source-values.js';
 import { walkInvariantApplicable } from '../boxed-expression/walk-invariant-values.js';
 import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
 import {
@@ -22778,13 +22781,15 @@ function replaceAtPathType(source: Type, levels: number, value: Type): Type {
  * `.N()` — collection iteration is float-based, so numericizing the bound
  * is lossless here. An expression with unknowns (`Range(1, n)`) reads as
  * NaN; the `.unknowns` gate keeps `.N()` off expressions whose value cannot
- * resolve (the discarded-`.N()` cost class).
+ * resolve (the discarded-`.N()` cost class). The value of `.N()` is kept for
+ * the evaluations in progress (`evaluateRangeBound()`), so the facets of one
+ * `Range` do not evaluate the same bound again.
  */
 function operandNumericValue(op: Expression): number {
   const v = op.re;
   if (!Number.isNaN(v)) return v;
   if (hasUnknownsInViews(op)) return NaN;
-  return op.N().re;
+  return evaluateRangeBound(op, 'N').re;
 }
 
 /**

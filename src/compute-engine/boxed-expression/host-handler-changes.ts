@@ -66,9 +66,12 @@
  * - the values of eager sources that a finiteness read evaluates and shares
  *   with the operand step (`evaluateEagerSource`, `eager-source-values.ts`):
  *   a value computed with host code is kept for the top-level evaluation
- *   that computed it only (`hostKeptByEngine`, by evaluation number), for
- *   every consumer of the same source node in that evaluation, and each use of it counts the host code again, since
- *   the use runs no host code that an enclosing memo could see.
+ *   that computed it only (`KeptStore.hostByEngine`, by evaluation number),
+ *   for every consumer of the same source node in that evaluation, and each
+ *   use of it counts the host code again, since the use runs no host code
+ *   that an enclosing memo could see;
+ * - the values of the bounds of a `Range` (`evaluateRangeBound`,
+ *   `eager-source-values.ts`), kept with the same rule.
  *
  * The other hooks of a definition (`canonical`, `type`, `sgn`, `eq`, `neq`,
  * `cmp`, `even`, `canEnumerate`, `elementCount`, `elementAt`, `derivative`,

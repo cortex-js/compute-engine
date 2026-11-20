@@ -11,6 +11,8 @@ import { beginStoreGuard } from './store-guard.js';
 import { noteUncachedHostEvaluation } from './shared-evaluation-memo.js';
 import { topLevelEvaluationEpoch } from './evaluation-epoch.js';
 import { staticViewDiverges } from '../static-typing-view.js';
+import { hiddenValuesKey } from './hidden-values.js';
+import { isTransitivelyPure } from './transitive-purity.js';
 
 /**
  * The values of eager sources that a finiteness read of a lazy collection
@@ -271,25 +273,62 @@ export function releaseEagerSourceValues(owner: Expression): void {
  * The state that the value of a pure expression can depend on, other than the
  * expression: the value writes and the global changes (the two versions), the
  * stores to the fields of objects (the epoch), the scope where the names of
- * the expression are looked up, the assumptions that are hidden or not, and
- * the precision.
+ * the expression are looked up, the assumptions that are hidden or not, the
+ * values that are hidden (`withHiddenValues()`), the precision and the
+ * precision that an `N(x, p)` requests, the angular unit, and whether the
+ * engine verifies (as the shared memo of evaluations,
+ * `shared-evaluation-memo.ts`).
  */
 type KeptEntry = Entry & {
   scope: unknown;
   factsHidden: boolean;
+  hidden: object | undefined;
   precision: number;
+  requestedPrecision: number | undefined;
+  /** A transient angular unit (`_withTransientAngularUnit()`) moves no
+   * version. */
+  angularUnit: string;
+  verifying: boolean;
   /** For a value that host code computed: the number of the top-level
    * evaluation that computed it (`topLevelEvaluationEpoch()`). The value is
    * used in that evaluation only. */
   epoch?: number;
 };
 
-/** The values of pure eager sources kept by `keepEagerSourceValue()`, for
- * each engine. The map of an engine is discarded when the engine has no
- * evaluation in progress any more. */
-const keptByEngine = new WeakMap<object, Map<Expression, KeptEntry>>();
+/**
+ * The values of one kind that are kept for the evaluations in progress, for
+ * each engine. The maps of an engine are discarded when the engine has no
+ * evaluation in progress any more.
+ */
+type KeptStore = {
+  /** The values that no host code computed. */
+  byEngine: WeakMap<object, Map<Expression, KeptEntry>>;
+  /** The values that host code computed (`host-handler-changes.ts`), for
+   * each top-level evaluation (`topLevelEvaluationEpoch()`): a value is used
+   * only in the evaluation that computed it, also when two asynchronous
+   * evaluations run at the same time. The values of an evaluation are
+   * discarded when it ends (`releaseHostEagerSourceValues()`). */
+  hostByEngine: WeakMap<object, Map<number, Map<Expression, KeptEntry>>>;
+};
 
-/** The number of values in all the maps of `keptByEngine`, so that the
+function newKeptStore(): KeptStore {
+  return { byEngine: new WeakMap(), hostByEngine: new WeakMap() };
+}
+
+/** The values of pure eager sources kept by `keepEagerSourceValue()`. */
+const SOURCE_VALUES = newKeptStore();
+
+/** The values of the bounds of a `Range` kept by `evaluateRangeBound()`: the
+ * values of `evaluate()` and those of `N()`, which differ. */
+const BOUND_VALUES = { evaluate: newKeptStore(), N: newKeptStore() };
+
+const ALL_STORES: ReadonlyArray<KeptStore> = [
+  SOURCE_VALUES,
+  BOUND_VALUES.evaluate,
+  BOUND_VALUES.N,
+];
+
+/** The number of values in all the maps of the stores, so that the
  * evaluation of an expression does not look up a map when no value is kept.
  * The values of an engine that is garbage collected during an evaluation are
  * not subtracted: the count is then too large, and the look-up is done. */
@@ -324,22 +363,35 @@ function keepEagerSourceValue(
   objectDeps: ObjectDeps | undefined,
   hostCode: boolean
 ): void {
-  const ce = source.engine;
-  if (!evaluationInProgress(ce)) return;
   if (!value.isCollection || !source.isPure) return;
+  keepValue(SOURCE_VALUES, source, value, objectDeps, hostCode);
+}
+
+/** Keep `value`, the value of the pure expression `expr`, in `store` for
+ * the evaluations in progress on its engine. Nothing is kept when the engine
+ * has no evaluation in progress. */
+function keepValue(
+  store: KeptStore,
+  expr: Expression,
+  value: Expression,
+  objectDeps: ObjectDeps | undefined,
+  hostCode: boolean
+): void {
+  const ce = expr.engine;
+  if (!evaluationInProgress(ce)) return;
   const epoch = hostCode ? topLevelEvaluationEpoch(ce) : undefined;
   let kept: Map<Expression, KeptEntry> | undefined;
   if (epoch === undefined) {
-    kept = keptByEngine.get(ce);
+    kept = store.byEngine.get(ce);
     if (kept === undefined) {
       kept = new Map();
-      keptByEngine.set(ce, kept);
+      store.byEngine.set(ce, kept);
     }
   } else {
-    let byEpoch = hostKeptByEngine.get(ce);
+    let byEpoch = store.hostByEngine.get(ce);
     if (byEpoch === undefined) {
       byEpoch = new Map();
-      hostKeptByEngine.set(ce, byEpoch);
+      store.hostByEngine.set(ce, byEpoch);
     }
     kept = byEpoch.get(epoch);
     if (kept === undefined) {
@@ -348,30 +400,23 @@ function keepEagerSourceValue(
     }
   }
   const size = kept.size;
-  // A source that is kept again (each iteration of a loop) is removed
+  // An expression that is kept again (each iteration of a loop) is removed
   // first, so that it is the newest value of the map and not the oldest.
-  if (!kept.delete(source) && kept.size >= MAX_KEPT_VALUES)
+  if (!kept.delete(expr) && kept.size >= MAX_KEPT_VALUES)
     kept.delete(kept.keys().next().value!);
-  kept.set(source, {
+  kept.set(expr, {
     ...newEntry(ce, value, objectDeps),
     scope: ce.context?.lexicalScope,
     factsHidden: ce._factsHidden(),
+    hidden: hiddenValuesKey(),
     precision: ce.precision,
+    requestedPrecision: ce._requestedPrecision,
+    angularUnit: ce.angularUnit,
+    verifying: ce.isVerifying,
     ...(epoch !== undefined ? { hostCode: true, epoch } : {}),
   });
   keptCount += kept.size - size;
 }
-
-/** The values of eager sources that host code computed
- * (`host-handler-changes.ts`), for each engine, then for each top-level
- * evaluation (`topLevelEvaluationEpoch()`): a value is used only in the
- * evaluation that computed it, also when two asynchronous evaluations run
- * at the same time. The values of an evaluation are discarded when it ends
- * (`releaseHostEagerSourceValues()`). */
-const hostKeptByEngine = new WeakMap<
-  object,
-  Map<number, Map<Expression, KeptEntry>>
->();
 
 /**
  * The value of `expr` kept by a finiteness read during the evaluations in
@@ -379,21 +424,90 @@ const hostKeptByEngine = new WeakMap<
  * evaluation of `expr` (no numeric approximation, no materialization).
  */
 export function keptEagerSourceValue(expr: Expression): Expression | undefined {
+  return keptValue(SOURCE_VALUES, expr);
+}
+
+/** The value of `expr` kept in `store` during the evaluations in progress,
+ * or `undefined`. */
+function keptValue(
+  store: KeptStore,
+  expr: Expression
+): Expression | undefined {
   if (keptCount === 0 || cacheOff('eagersource')) return undefined;
   const ce = expr.engine;
   // Inside a type computation a variable has no value, so a value computed
   // outside it is not the value there: see `evaluateEagerSource()`.
   if (staticViewDiverges(ce)) return undefined;
-  // Each store is tried in turn: an ordinary entry that is out of date must
-  // not hide a valid entry that host code computed for the same source in
-  // this evaluation.
+  // Each map is tried in turn: an ordinary entry that is out of date must
+  // not hide a valid entry that host code computed for the same expression
+  // in this evaluation.
   return (
-    keptEntryValue(ce, keptByEngine.get(ce)?.get(expr)) ??
+    keptEntryValue(ce, store.byEngine.get(ce)?.get(expr)) ??
     keptEntryValue(
       ce,
-      hostKeptByEngine.get(ce)?.get(topLevelEvaluationEpoch(ce))?.get(expr)
+      store.hostByEngine.get(ce)?.get(topLevelEvaluationEpoch(ce))?.get(expr)
     )
   );
+}
+
+/**
+ * The value of `op`, a bound or the step of a `Range`: `op.evaluate()` for
+ * `mode` `'evaluate'`, `op.N()` for `'N'`.
+ *
+ * The `Range` handlers read the bounds for each facet (`count`,
+ * `isFinite`, `isEnumerable`, the elements), and a broadcast or a consumer
+ * reads several facets of the same `Range` before it evaluates it. A bound
+ * that is not a number literal (`Range(1, Length(C))`) was evaluated at each
+ * read, so `C` was evaluated about fifty times for one evaluation of
+ * `1 + Range(1, Length(C))` (CE-1510). The value of a pure bound is kept for
+ * the evaluations in progress on its engine, with the same conditions as the
+ * value of a pure eager source (`keepEagerSourceValue()`): it is used only in
+ * the same state (versions, scope, assumptions, precision, field stores), and
+ * a value that host code computed only in the same top-level evaluation.
+ *
+ * A value is kept only when the computation gave a final answer
+ * (`store-guard.ts`): a bound read in a reference cycle, or stopped by the
+ * iteration limit, is read again. A bound that is not transitively pure
+ * (`RandomInteger(1, 5)`, or a symbol whose value is `Random()`), a read
+ * outside an evaluation and a read in a type computation are not kept.
+ */
+export function evaluateRangeBound(
+  op: Expression,
+  mode: 'evaluate' | 'N'
+): Expression {
+  const compute = () => (mode === 'N' ? op.N() : op.evaluate());
+  const ce = op.engine;
+  if (
+    cacheOff('eagersource') ||
+    !evaluationInProgress(ce) ||
+    staticViewDiverges(ce) ||
+    // `isPure` reads the expression only: a symbol whose value is
+    // `Random()` is pure. `isTransitivelyPure()` also reads the values and
+    // the function bodies that the bound reads.
+    !isTransitivelyPure(op)
+  )
+    return compute();
+  const store = BOUND_VALUES[mode];
+  const kept = keptValue(store, op);
+  if (kept !== undefined) return kept;
+  beginObjectDeps();
+  let value: Expression;
+  let objectDeps: ObjectDeps | undefined;
+  const guard = beginStoreGuard();
+  try {
+    value = compute();
+  } finally {
+    objectDeps = endObjectDeps();
+  }
+  // The value of a bound that host code computed is kept for this top-level
+  // evaluation only, so the host code runs once in it, as for an eager
+  // source; each use counts the host code again (`entryValue()`), so a memo
+  // around the use does not keep a result built on it. Every other count
+  // stops the store: unlike `evaluateEagerSource()`, no result here depends
+  // on one value being shared, so a value that is not final is read again.
+  if (guard.movedOnly('host'))
+    keepValue(store, op, value, objectDeps, guard.moved('host'));
+  return value;
 }
 
 /** The value of `entry`, or `undefined` when there is no entry or it
@@ -407,7 +521,11 @@ function keptEntryValue(
   if (
     entry.scope !== ce.context?.lexicalScope ||
     entry.factsHidden !== ce._factsHidden() ||
-    entry.precision !== ce.precision
+    entry.hidden !== hiddenValuesKey() ||
+    entry.precision !== ce.precision ||
+    entry.requestedPrecision !== ce._requestedPrecision ||
+    entry.angularUnit !== ce.angularUnit ||
+    entry.verifying !== ce.isVerifying
   )
     return undefined;
   return entryValue(ce, entry);
@@ -420,25 +538,29 @@ export function releaseHostEagerSourceValues(
   epoch: number
 ): void {
   if (keptCount === 0) return;
-  const byEpoch = hostKeptByEngine.get(ce);
-  const kept = byEpoch?.get(epoch);
-  if (kept === undefined) return;
-  keptCount -= kept.size;
-  byEpoch!.delete(epoch);
+  for (const store of ALL_STORES) {
+    const byEpoch = store.hostByEngine.get(ce);
+    const kept = byEpoch?.get(epoch);
+    if (kept === undefined) continue;
+    keptCount -= kept.size;
+    byEpoch!.delete(epoch);
+  }
 }
 
 /** Discard the values kept for the evaluations of `ce`, when `ce` has no
  * evaluation in progress any more. */
 export function releaseKeptEagerSourceValues(ce: Expression['engine']): void {
   if (keptCount === 0 || evaluationInProgress(ce)) return;
-  const kept = keptByEngine.get(ce);
-  if (kept !== undefined) {
-    keptCount -= kept.size;
-    keptByEngine.delete(ce);
-  }
-  const byEpoch = hostKeptByEngine.get(ce);
-  if (byEpoch !== undefined) {
-    for (const values of byEpoch.values()) keptCount -= values.size;
-    hostKeptByEngine.delete(ce);
+  for (const store of ALL_STORES) {
+    const kept = store.byEngine.get(ce);
+    if (kept !== undefined) {
+      keptCount -= kept.size;
+      store.byEngine.delete(ce);
+    }
+    const byEpoch = store.hostByEngine.get(ce);
+    if (byEpoch !== undefined) {
+      for (const values of byEpoch.values()) keptCount -= values.size;
+      store.hostByEngine.delete(ce);
+    }
   }
 }
