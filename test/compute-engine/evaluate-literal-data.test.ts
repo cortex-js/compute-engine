@@ -14,6 +14,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { effectsComputeCount } from '../../src/compute-engine/boxed-expression/boxed-function';
 
 const ce = new ComputeEngine();
 
@@ -195,5 +196,73 @@ describe('The answer follows the precision of the engine', () => {
     expect(e.evaluate()).toBe(e);
     const narrow = e.N().json as [string, unknown, [string, number, number]];
     expect(narrow[2][1]).toBeCloseTo(1 / 3, 15);
+  });
+});
+
+describe('A list of the constants True and False', () => {
+  // A list of booleans was not data: at each turn of a `Map` that read an
+  // element of it, the effects of the list were computed again, with a visit
+  // of each element, because the scope of the callback changes at each turn.
+  // A `Map` over 16,000 booleans took 1.5 s (CE-1369).
+  test('evaluates to itself, under evaluate() and under N()', () => {
+    const e = ce.box(['List', 'True', 1, ['List', 'False', { str: 'a' }]]);
+    expect(e.evaluate()).toBe(e);
+    expect(e.N()).toBe(e);
+    expect(e.isPure).toBe(true);
+  });
+
+  test('evaluates to itself on the asynchronous route', async () => {
+    const e = ce.box(['List', 'True', 'False']);
+    expect(await e.evaluateAsync()).toBe(e);
+  });
+
+  test('still holds the symbols True and False', () => {
+    const e = ce.box(['List', 'True', ['List', 'False']]);
+    expect([...e.symbols].sort()).toEqual(['False', 'True']);
+  });
+
+  test('its effects are never computed: it is data', () => {
+    const e = ce.box(['List', 'True', 'False', 'True']);
+    const before = effectsComputeCount();
+    for (let i = 0; i < 3; i++) expect(e.isPure).toBe(true);
+    expect(effectsComputeCount()).toBe(before);
+  });
+
+  test('a function that reads its list of booleans by position', () => {
+    const engine = new ComputeEngine();
+    engine.assign(
+      'f',
+      engine.box([
+        'Function',
+        ['Map', ['Function', ['At', 'l', 'j'], 'j'], ['Range', 1, ['Length', 'l']]],
+        ['Typed', 'l', 'list<boolean>'],
+      ])
+    );
+    engine.declare('M', {
+      type: 'list<boolean>',
+      value: engine.box(['List', 'True', 'False', 'False', 'True']),
+    });
+    expect(engine.box(['ListFrom', ['f', 'M']]).evaluate().json).toEqual([
+      'List',
+      'True',
+      'False',
+      'False',
+      'True',
+    ]);
+  });
+
+  test('a symbol True declared in a scope takes the general route', () => {
+    const engine = new ComputeEngine();
+    engine.pushScope();
+    try {
+      engine.declare('True', 'integer');
+      engine.assign('True', 5);
+      const e = engine.box(['List', 'True', 'False']);
+      const v = e.evaluate();
+      expect(v).not.toBe(e);
+      expect(v.json).toEqual(['List', 5, 'False']);
+    } finally {
+      engine.popScope();
+    }
   });
 });

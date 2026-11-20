@@ -1082,6 +1082,9 @@ export class BoxedFunction
    * too. See `_isLiteralData()`. */
   private _literalData: 0 | 1 | 2 | undefined;
 
+  /** The same levels for `_isValueData()`, computed with `_literalData`. */
+  private _valueData: 0 | 1 | 2 | undefined;
+
   /** The boxed operands. A store-backed list boxes them here, once, on the
    * first read; every other node has them from construction. */
   private get _ops(): ReadonlyArray<Expression> {
@@ -2418,14 +2421,15 @@ export class BoxedFunction
     // A store-backed list is a container of numbers: evaluating it has no
     // effect, and the projection must not box the operands to find that out.
     // A `List` or `Tuple` that is other written-out data (`_isLiteralData()`:
-    // numbers, failed cells and lists of them) evaluates to itself, so it has
-    // no effect either. Its projection visited each `Error` cell, and the
-    // cache below is keyed on the lexical scope, which changes at each turn
-    // of a loop. A single `Error` node is small, and keeps its cached
+    // numbers, strings, failed cells and lists of them), possibly with the
+    // constants `True` and `False` (`_isValueData()`), evaluates to itself,
+    // so it has no effect either. Its projection visited each element, and
+    // the cache below is keyed on the lexical scope, which changes at each
+    // turn of a loop. A single `Error` node is small, and keeps its cached
     // projection.
     if (
       this._numericStore !== undefined ||
-      (this._operator !== 'Error' && this._isLiteralData())
+      (this._operator !== 'Error' && this._isValueData())
     )
       return undefined;
     const callableVersion = this.engine._callableVersion;
@@ -5034,8 +5038,8 @@ export class BoxedFunction
     // approximation of it is itself), so it is returned without boxing.
     if (this._numericStore !== undefined) return this;
     if (this._declinedByHandler) return this;
-    // Written-out data is its own value too: see `_isLiteralData()`.
-    if (this._isLiteralData(options)) return this;
+    // Written-out data is its own value too: see `_isValueData()`.
+    if (this._isValueData(options)) return this;
     // An operation runs in an operation environment of its own (rule 8 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`, see
     // `ce._opensOperation()`).
@@ -5723,49 +5727,89 @@ export class BoxedFunction
    */
   _isLiteralData(options?: Partial<EvaluateOptions>): boolean {
     // A list that holds its numbers unboxed is data under every option, and
-    // the walk below would read its operands, which boxes every number.
+    // the walk would read its operands, which boxes every number.
     if (this._numericStore !== undefined) return true;
+    const needed = dataLevelNeeded(this._operator, options);
+    if (needed === 0) return false;
+    this._computeDataLevels();
+    return this._literalData! >= needed;
+  }
+
+  /**
+   * Is this node written-out data (`_isLiteralData()`), or such data in which
+   * some elements are the library constants `True` and `False`? Such a node
+   * also evaluates to itself and has no effect, but it holds symbols, so a
+   * walk that collects symbols must not skip it: use `_isLiteralData()` for
+   * that.
+   *
+   * A list of booleans was not data, so the effects of the list were
+   * computed again, with a visit of each element, at each turn of a loop
+   * whose scope changes: a `Map` over `Range(1, Length(l))` that reads
+   * `l[j]` from a list of 16,000 booleans took 1.5 s, against 0.09 s for a
+   * list of numbers (CE-1369).
+   */
+  private _isValueData(options?: Partial<EvaluateOptions>): boolean {
+    if (this._numericStore !== undefined) return true;
+    const needed = dataLevelNeeded(this._operator, options);
+    if (needed === 0) return false;
+    this._computeDataLevels();
+    return this._valueData! >= needed;
+  }
+
+  /** Compute `_literalData` and `_valueData` once, in one walk of the
+   * elements. */
+  private _computeDataLevels(): void {
+    if (this._literalData !== undefined) return;
     if (
       this._operator !== 'List' &&
       this._operator !== 'Tuple' &&
       this._operator !== 'Error'
-    )
-      return false;
-    let numeric = false;
-    if (options !== undefined)
-      for (const k in options) {
-        if (k !== 'numericApproximation') return false;
-        numeric = options.numericApproximation === true;
-      }
-    if (this._literalData === undefined) {
-      // The node must be bound to the LIBRARY's `List` or `Tuple`. A host can
-      // declare an operator of its own under either name, with an `evaluate`
-      // handler that answers something else, and that handler must run.
-      let level: 0 | 1 | 2 =
-        this.isCanonical && this._isBoundToLibraryDefinition() ? 2 : 0;
-      if (this._operator === 'Error') {
-        if (level !== 0 && !holdsOnlyData(this)) level = 0;
-        this._literalData = level;
-        return this._literalData >= (numeric ? 2 : 1);
-      }
-      for (const op of this._ops) {
-        if (level === 0) break;
-        if (isNumber(op)) {
-          if (level === 2 && op.N() !== op) level = 1;
-        } else if (isString(op)) {
-          // A string literal evaluates to itself under every option.
-          continue;
-        } else if (op instanceof BoxedFunction) {
-          // A list that holds its numbers unboxed is its own value under
-          // every option, and asking it would box them.
-          if (op._numericStore !== undefined) continue;
-          op._isLiteralData();
-          level = Math.min(level, op._literalData ?? 0) as 0 | 1 | 2;
-        } else level = 0;
-      }
-      this._literalData = level;
+    ) {
+      this._literalData = this._valueData = 0;
+      return;
     }
-    return this._literalData >= (numeric ? 2 : 1);
+    // The node must be bound to the LIBRARY's `List` or `Tuple`. A host can
+    // declare an operator of its own under either name, with an `evaluate`
+    // handler that answers something else, and that handler must run.
+    let level = (
+      this.isCanonical && this._isBoundToLibraryDefinition() ? 2 : 0
+    ) as 0 | 1 | 2;
+    if (this._operator === 'Error') {
+      if (level !== 0 && !holdsOnlyData(this)) level = 0;
+      this._literalData = this._valueData = level;
+      return;
+    }
+    // `value` is the level of `_valueData`, never lower than `level`.
+    let value: 0 | 1 | 2 = level;
+    const ce = this.engine;
+    for (const op of this._ops) {
+      if (value === 0) break;
+      if (isNumber(op)) {
+        // `value` is never lower than `level`: when it is below 2, `N()`
+        // cannot lower either level.
+        if (value === 2 && op.N() !== op) {
+          level = Math.min(level, 1) as 0 | 1 | 2;
+          value = 1;
+        }
+      } else if (isString(op)) {
+        // A string literal evaluates to itself under every option.
+        continue;
+      } else if (op === ce.True || op === ce.False) {
+        // These objects stay bound to the library constants when a scope
+        // declares a symbol of the same name: a symbol boxed in that scope
+        // is another object. Each evaluates to itself under every option.
+        level = 0;
+      } else if (op instanceof BoxedFunction) {
+        // A list that holds its numbers unboxed is its own value under
+        // every option, and asking it would box them.
+        if (op._numericStore !== undefined) continue;
+        op._computeDataLevels();
+        level = Math.min(level, op._literalData!) as 0 | 1 | 2;
+        value = Math.min(value, op._valueData!) as 0 | 1 | 2;
+      } else level = value = 0;
+    }
+    this._literalData = level;
+    this._valueData = value;
   }
 
   /**
@@ -6424,13 +6468,13 @@ export class BoxedFunction
     if (this._numericStore !== undefined) return Promise.resolve(this);
     if (this._declinedByHandler) return Promise.resolve(this);
     // Written-out data is its own value too, as in `evaluate()`
-    // (`_isLiteralData()`). The options that carry the state of an
+    // (`_isValueData()`). The options that carry the state of an
     // asynchronous evaluation (the registry, the context stack, the
     // precision window, the abort signal) do not change the value of data,
     // so only the numeric request is given to the test. Without this test,
     // each element was evaluated and a new node was built: about 85 ms for a
     // list of 20,000 points, against 4 ms on the synchronous route.
-    if (this._isLiteralData(literalDataOptions(options)))
+    if (this._isValueData(literalDataOptions(options)))
       return Promise.resolve(this);
     let evaluation = asyncEvaluationOf(options?._contextStack);
     let contextStack = options?._contextStack;
@@ -16584,6 +16628,26 @@ function unionArmsGenericResult(
 function listRank(t: Type): number {
   if (typeof t !== 'object' || t.kind !== 'list') return 0;
   return (t.dimensions?.length ?? 1) + listRank(t.elements);
+}
+
+/** The data level (`BoxedFunction._literalData`) that a node with this
+ * operator must have to be its own value under these options: `1` under
+ * `evaluate()`, `2` under a numeric approximation, `0` when the node cannot
+ * be data (another operator, or an option other than
+ * `numericApproximation`, which takes the general route). */
+function dataLevelNeeded(
+  operator: string,
+  options: Partial<EvaluateOptions> | undefined
+): 0 | 1 | 2 {
+  if (operator !== 'List' && operator !== 'Tuple' && operator !== 'Error')
+    return 0;
+  let numeric = false;
+  if (options !== undefined)
+    for (const k in options) {
+      if (k !== 'numericApproximation') return 0;
+      numeric = options.numericApproximation === true;
+    }
+  return numeric ? 2 : 1;
 }
 
 /** True when `expr` holds no symbol at any depth: it is a string, a number,

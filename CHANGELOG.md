@@ -70,6 +70,14 @@
 
 ### Resolved Issues
 
+- **A list of `True` and `False` values is read as fast as a list of numbers**
+  (CE-1369). A list whose elements are `True`, `False`, numbers and strings
+  evaluates to itself and has no effect, so it is no longer walked at each
+  turn of a `Map` that reads it. A function
+  `f(l) := Map(j ↦ l[j], Range(1, Length(l)))` with `l: list<boolean>` took
+  four times longer each time the list doubled: about 1.5 s for 16,000
+  values. It now takes about 0.13 s, as for a list of numbers.
+
 - **A selection at each position whose arms are a `Map` or a `Range` compiles**
   (CE-1562). With `L: list<real>` and `i: list<real>`,
   `Which(Equal(Mod(i, 2), 1), Map(w ↦ 2w, At(L, i)), True, 0)` compiles to
