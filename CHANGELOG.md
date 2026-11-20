@@ -56,6 +56,16 @@
 
 ### Resolved Issues
 
+- **`Rationalize(x, 0)` of a float is the exact value of its decimal.** A
+  float literal is a decimal, so `Rationalize(0.1, 0)` is `1/10` and
+  `Rationalize(3.141592653589793, 0)` is `3141592653589793/10^15`, with every
+  digit the number holds (`N(Pi)` keeps its 25). It gave the same coarser
+  convergent as `Rationalize(x)` (`80143857/25510582`), so the result jumped
+  at a tolerance of 0: `Rationalize(x, 1e-30)` was exact and `Rationalize(x, 0)`
+  was not. `evaluate()` and `N()` agree, an exact rational or integer operand
+  is returned as it is, and `Rationalize(x)` and every positive tolerance are
+  unchanged (#634, contributed by [enumeratio](https://github.com/enumeratio)).
+
 - **`Characters`, `StringJoin` of a list and `ColorToString` compile again on
   JavaScript (CE-1548).** `Characters(s)` and `GraphemeClusters(s)` give the
   array of the characters of `s`, `StringJoin(L)` and `StringJoin(L, sep)`
