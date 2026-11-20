@@ -21,6 +21,16 @@
   written out instead of a loop. A `Range` with a real bound or step, and
   every `Range` with `constantFold: false`, keep the previous behavior.
 
+- **A call of a function declared with an `unknown` result is real again in
+  the strict mode** (CE-1588). A function declared `(real) -> unknown` and
+  assigned `w ↦ sin(w)·√(1 − e²)`, with `e: real<-10..10>`, has the
+  reported result type `complex`. `compile()` returned a complex value for a
+  call of it, so `(F(t), t)` declined on GLSL ("a list of complex numbers on
+  glsl"). In `mode: 'strict'`, the result of such a call now has the type of
+  the compiled body, as when the body is written in place: a real, which is
+  `NaN` where `1 − e²` is negative. A result declared `complex`, and the
+  `complex` mode, keep the complex value.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features

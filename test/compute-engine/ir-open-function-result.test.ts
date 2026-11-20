@@ -126,3 +126,106 @@ describe('A user function whose declared unknown result is narrowed to value', (
     ).toThrow(/not a scalar or a point of numbers/);
   });
 });
+
+/**
+ * A user function declared `(real) -> unknown` whose body has the static
+ * type `complex` (`Sqrt(1 - e^2)` with `e: real<-10..10>`): the assignment
+ * narrows the result to `complex`, and in `mode: 'strict'` the result is
+ * the type of the lowered body, a real, as the body is in place (CE-1588).
+ */
+describe('A user function whose declared unknown result is narrowed to complex', () => {
+  const BODY = [
+    'Multiply',
+    ['Sin', 'w'],
+    ['Sqrt', ['Add', ['Negate', ['Power', 'e', 2]], 1]],
+  ];
+
+  function kepler(signature: string, body: Json = BODY) {
+    const ce = new ComputeEngine();
+    ce.declare('e', 'real<-10..10>');
+    ce.declare('t', 'real');
+    ce.declare('z', 'complex');
+    ce.declare('F', { signature });
+    ce.assign('F', ce.box(['Function', body, 'w'] as never));
+    return ce;
+  }
+
+  function compiled(ce: ComputeEngine, json: Json, options: object = {}) {
+    const r = compile(ce.box(json as never), {
+      to: 'javascript',
+      fallback: false,
+      ...options,
+    } as never) as {
+      success: boolean;
+      code: string;
+      preamble?: string;
+      run: (a: object) => unknown;
+    };
+    expect(r.success).toBe(true);
+    return r;
+  }
+
+  test('a point of a call compiles on GLSL, with a real function', () => {
+    for (const signature of [
+      '(real) -> unknown',
+      '(real | signed_infinity | nan) -> unknown',
+    ]) {
+      const ce = kepler(signature);
+      const r = compiled(ce, ['Tuple', ['F', 't'], 't'], {
+        to: 'glsl',
+        callerLocals: ['t'],
+        symbolic: ['t', 'e'],
+      });
+      expect(r.preamble).toMatch(/^float _fn_ir_u0_F\(/m);
+      expect(r.code).toMatch(/return vec2\(v\d+, t\);/);
+    }
+  });
+
+  test('a function declared with a literal, then assigned, is real too', () => {
+    const ce = new ComputeEngine();
+    ce.declare('e', 'real<-10..10>');
+    ce.declare('t', 'real');
+    ce.declare('F', {
+      signature: '(real) -> unknown',
+      evaluate: ce.box(['Function', 'w', 'w']),
+    } as never);
+    ce.assign('F', ce.box(['Function', BODY, 'w'] as never));
+    const r = compiled(ce, ['Tuple', ['F', 't'], 't'], {
+      to: 'glsl',
+      callerLocals: ['t'],
+      symbolic: ['t', 'e'],
+    });
+    expect(r.preamble).toMatch(/^float _fn_ir_u0_F\(/m);
+  });
+
+  test('the real value of the strict mode: the interpreter value, NaN where it is complex', () => {
+    const ce = kepler('(real) -> unknown');
+    const r = compiled(ce, ['F', 't']);
+    expect(r.preamble).not.toMatch(/cplx/);
+    expect(r.run({ t: 0.7, e: 0.5 })).toBeCloseTo(
+      Math.sin(0.7) * Math.sqrt(0.75),
+      14
+    );
+    expect(r.run({ t: 0.7, e: 2 })).toBeNaN();
+  });
+
+  test('a complex body stays complex', () => {
+    const ce = kepler('(real) -> unknown', ['Multiply', 'w', 'z']);
+    const r = compiled(ce, ['Add', ['F', 't'], 1]);
+    expect(r.run({ t: 2, z: { re: 1, im: 1 } })).toEqual({ re: 3, im: 2 });
+  });
+
+  test('a result declared complex stays complex', () => {
+    const ce = kepler('(real) -> complex');
+    const r = compiled(ce, ['F', 't']);
+    expect(r.preamble).toMatch(/return _SYS\.ir\.cplx\(/);
+  });
+
+  test('the complex mode keeps the complex value', () => {
+    const ce = kepler('(real) -> unknown');
+    const r = compiled(ce, ['F', 't'], { mode: 'complex' });
+    const v = r.run({ t: 0.7, e: 2 }) as { re: number; im: number };
+    expect(v.re).toBeCloseTo(0, 14);
+    expect(v.im).toBeCloseTo(Math.sin(0.7) * Math.sqrt(3), 14);
+  });
+});

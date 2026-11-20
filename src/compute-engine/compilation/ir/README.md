@@ -2707,7 +2707,12 @@ result of no stated type (none, `unknown`, `number`, `any`, `value`, a
 `list<…> | number | tuple` for `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type of
 the body. An assignment narrows a declared `unknown` result to the type of the
 body, `value` for `Dot(p(u, v), PointList(u, v))` with `u, v` of no stated type
-(CE-1497). The result is a scalar, or a point (a tuple of real or integer
+(CE-1497). In `mode: 'strict'`, an `unknown` result that an assignment
+narrows to a complex scalar (`(real) -> unknown` reports `(real) -> complex`
+for `w ↦ sin(w)·√(1 − e²)` with `e: real`) is the type of the body too: a real
+body stays on the real lane, as it does in place, so `(F(t), t)` is a point
+on GLSL (CE-1588). A result declared `complex` is a complex. The result is a
+scalar, or a point (a tuple of real or integer
 numbers, `Function(Block(PointList(x, y)), x, y)`), and the result of a call is
 then a tuple; a result that is a tuple of such elements or of real or integer
 scalars (`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`)

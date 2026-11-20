@@ -240,16 +240,33 @@ function openList(t: Type): { length?: number; point?: number } | undefined {
   return { length: d[0] > 0 ? d[0] : undefined, point };
 }
 
-/** The parameter names of a function literal, and its signature's types. */
-function signatureTypes(e: Fn, literal: Fn) {
+/** The parameter names of a function literal, and its signature's types.
+ *  `wide` is `cx.wide`: in `'real'` (`mode: 'strict'`), a result written
+ *  `unknown` that the engine refined to a complex scalar is open. */
+function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   const od = e.operatorDefinition as
-    { _isLambda?: boolean; signature?: { type: Type } } | undefined;
-  const declared = od?._isLambda
-    ? od.signature?.type
-    : e.valueDefinition?.type.type;
+    | {
+        _isLambda?: boolean;
+        inferredSignature?: boolean;
+        _signatureSkeleton?: Type;
+        signature?: { type: Type };
+      }
+    | undefined;
+  const vd = od?._isLambda ? undefined : e.valueDefinition;
+  const declared = od?._isLambda ? od.signature?.type : vd?.type.type;
   const signature =
     typeof declared === 'object' && declared.kind === 'signature'
       ? declared
+      : undefined;
+  // The signature as written, when its `unknown` slots are refined from the
+  // body (`(real) -> unknown` reports `(real) -> complex`), on the value
+  // definition or on the operator definition of a lambda.
+  const written = od?._isLambda
+    ? od.inferredSignature
+      ? undefined
+      : od._signatureSkeleton
+    : vd !== undefined && !vd.inferredType
+      ? vd._signatureSkeleton
       : undefined;
   const names = literal.ops.slice(1).map((p) => {
     const n = parameterName(p);
@@ -320,13 +337,24 @@ function signatureTypes(e: Fn, literal: Fn) {
   // of that many numbers (`points`). A `value` result (declared, or a
   // declared `unknown` that the engine narrowed to the type of a `Dot` of
   // open parameters) states no shape either: the body decides, as for `any`
-  // (CE-1497).
+  // (CE-1497). In `strict`, a result written `unknown` that the engine
+  // refined to a complex scalar states no lane either: the body decides, so
+  // a real body stays real, as it is in place (CE-1588).
+  const refined = r === undefined ? undefined : inputType(r);
+  const refinedComplex =
+    wide === 'real' &&
+    typeof written === 'object' &&
+    written.kind === 'signature' &&
+    loose(present(written.result)) &&
+    refined?.lane === 'complex' &&
+    refined.shape.length === 0;
   const open =
     r === undefined ||
     r === 'number' ||
     r === 'any' ||
     r === 'value' ||
-    loose(r);
+    loose(r) ||
+    refinedComplex;
   const points = list === undefined && r ? pointLength(r) : undefined;
   // A list of elements of no stated type: the shape of the body.
   const shaped = list === undefined && r ? openList(r) : undefined;
@@ -515,7 +543,7 @@ export function functionLowering(
   const noResult = (call: Fn): never =>
     decline(
       call,
-      `a recursive call of ${call.operator}, which has no declared result type (declare it, as (real) -> real)`
+      `a recursive call of ${call.operator}, which has no declared result type (declare it, as (real) -> real or (real) -> complex)`
     );
 
   /** A parameter `name` of the type `t` of the IR function `ir`. */
@@ -788,7 +816,7 @@ export function functionLowering(
     if (binding !== undefined) {
       let sig = signatures.get(binding.key);
       if (sig === undefined) {
-        sig = signatureTypes(e, binding.literal);
+        sig = signatureTypes(e, binding.literal, cx.wide);
         signatures.set(binding.key, sig);
       }
       // A parameter declared as a point maps a list of points
