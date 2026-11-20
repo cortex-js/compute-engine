@@ -130,6 +130,19 @@ can tell one static error from another without reading the message. The
 about: for a name that a statement reads before its `let`, the range of that
 name.
 
+The `message` of a diagnostic is a code and its arguments. To show it to a
+user, `epsilDiagnosticMessage` gives the sentence that the `epsil` command line
+shows, without the code:
+
+```js
+import { ComputeEngine, checkEpsil, epsilDiagnosticMessage } from "@cortex-js/compute-engine/epsil";
+
+const ce = new ComputeEngine();
+const { diagnostics } = checkEpsil(ce, "let x: notatype = 1");
+console.log(diagnostics[0].message[0]); // type-annotation-error
+console.log(epsilDiagnosticMessage(diagnostics[0])); // Unknown type "notatype"
+```
+
 An error that only a run finds, such as a division by zero in a loop, is not in
 these diagnostics.
 

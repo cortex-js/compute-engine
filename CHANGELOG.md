@@ -2,6 +2,14 @@
 
 ### New Features
 
+- **`epsilDiagnosticMessage()` gives the text of an Epsil diagnostic**
+  (CE-1519). It is exported from `@cortex-js/compute-engine/epsil` and turns
+  the `[code, ...args]` message of a diagnostic of `parseEpsil()` or
+  `checkEpsil()` into the sentence that the `epsil` command line, its MCP
+  server and the VS Code extension show, without the code. For
+  `let x: notatype = 1` it gives `Unknown type "notatype"`; these tools showed
+  `type annotation error: Unknown type "notatype"` before.
+
 - `Permutations(n)` for a non-negative integer `n` is the permutations of
   `Range(1, n)`, as lists and in the same order as `Permutations(Range(1, n))`,
   and `Permutations(n, k)` its arrangements of length `k`. It is a lazy
@@ -56,6 +64,14 @@
   `x.sc(b: 5)` and `S.sc(x, b: 5)` are `sc(x, 1, 5)`.
 
 ### Behavior Changes
+
+- **The text of an Epsil `type-annotation-error` no longer starts with "type
+  annotation error: "** (CE-1519). The `epsil` command line, its MCP server,
+  the VS Code extension and the `message` field of `epsil check --json` show
+  the sentence of the type parser alone: for `let x: notatype = 1`,
+  `Unknown type "notatype"`, not
+  `type annotation error: Unknown type "notatype"`. The `code` field is still
+  `type-annotation-error`.
 
 - **In Epsil, a bare call of a protocol function member named like a library
   function calls the library function when no implementation applies to its
