@@ -150,8 +150,13 @@ reads no name bound in the callback (a parameter, a local, the variable of a
 binder) and no parameter or local of an enclosing call is evaluated once, and
 its value is used at the next elements while no write happens between two
 elements: in `Map(j ↦ At(Abs(C), j), Range(1, n))`, `Abs(C)` is evaluated once
-per walk, not `n` times. Only a value that is a collection is kept. A read
-by position (`at()`) is not a walk and evaluates the sub-expression each time.
+per walk, not `n` times. A value is kept when it is a collection, or when
+the sub-expression reads a collection (`Min(d)` for a list `d`): both cost a
+time that grows with the length of the collection. A kept value that is
+evaluated in the walk is evaluated once, and that result is kept too: a
+branch condition evaluates the values of the operands of its relation again
+(`Which(k = Min(d), …)`). A read by position (`at()`) is not a walk and
+evaluates the sub-expression each time.
 The implementation is `boxed-expression/walk-invariant-values.ts`.
 
 A source that is provably not a collection is refused when the call is boxed,

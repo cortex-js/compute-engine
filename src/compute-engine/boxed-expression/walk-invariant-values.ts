@@ -35,8 +35,22 @@ import { isDictionary, isFunction, isSymbol } from './type-guards.js';
  *   parameter or a local of an enclosing call), so that its names read the
  *   same definitions at each element.
  *
- * Only a value that is a collection is kept: this is the case that costs a
- * time that grows with the length of the collection at each element.
+ * A value is kept when it is a collection, or when the node reads a
+ * collection (an operand whose value is kept in the walk, or whose type is a
+ * collection): these are the cases that cost a time that grows with the
+ * length of the collection at each element. In
+ * `Map(k ↦ Which(k = Min(d), 10^9, True, k), d)`, `Min(d)` over a list `d`
+ * of symbolic elements is not a collection, and evaluating it reads every
+ * element of `d`.
+ *
+ * A kept value that is evaluated during the walk is evaluated once, and the
+ * result is kept too. A branch condition evaluates the operands of its
+ * relation and then the relation over their values (`evaluateCondition()`,
+ * `library/control-structures.ts`), which evaluates each value again: for
+ * the `Min` above, every element of `d` once more at each element of the
+ * walk. The second evaluation is not skipped, because a value is not always
+ * its own value: with `d := Sort([3, x, 1])`, `Length(d)` evaluates to
+ * `Length([3, x, 1])`, which evaluates to `3`.
  *
  * A value is used only for a plain evaluation (no numeric approximation, no
  * materialization), and only while the state that it can depend on is the
@@ -66,8 +80,12 @@ type Walk = {
   callableVersion: number;
   /** The values kept, for each invariant node evaluated in this walk. */
   readonly values: Map<Expression, Kept>;
-  /** The invariant nodes whose value in this walk is not a collection: they
-   * are evaluated at each element, with no other work. */
+  /** The record of each kept value, by the value: a kept value that is
+   * evaluated in this walk is evaluated once (`Kept.again`). */
+  readonly keptValues: Map<Expression, Kept>;
+  /** The invariant nodes whose value in this walk is not kept (it is not a
+   * collection and the node reads none): they are evaluated at each
+   * element, with no other work. */
   readonly skipped: Set<Expression>;
   /** The nodes whose first evaluation is in progress. */
   readonly computing: Set<Expression>;
@@ -84,6 +102,9 @@ type Walk = {
  * shield, a seed frame, a verification). */
 type Kept = {
   value: Expression;
+  /** The value of `value.evaluate()` in the same state, once a consumer of
+   * the walk has evaluated `value`. */
+  again?: Expression;
   precision: number;
   requested: unknown;
   angularUnit: string;
@@ -160,6 +181,7 @@ export function walkInvariantApplicable<
     nodes,
     callableVersion: ce._callableVersion,
     values: new Map(),
+    keptValues: new Map(),
     skipped: new Set(),
     computing: new Set(),
     anyVersion: -1,
@@ -173,6 +195,7 @@ export function walkInvariantApplicable<
       walk.objectStoreEpoch !== ce._objectStoreEpoch
     ) {
       walk.values.clear();
+      walk.keptValues.clear();
       walk.skipped.clear();
       if (walk.callableVersion !== ce._callableVersion) {
         walk.nodes = invariantNodesOf(fns);
@@ -195,8 +218,10 @@ export function walkInvariantApplicable<
 /**
  * The value of `expr` in the walk in progress, when `expr` is an invariant
  * node of its callback: the value kept, or the value of
- * `expr.evaluate(options)`, which is then kept when it can be. `undefined`
- * when `expr` is not such a node: the caller evaluates it.
+ * `expr.evaluate(options)`, which is then kept when it can be. When `expr`
+ * is itself a value kept in the walk, the value of `expr.evaluate(options)`,
+ * computed once in the walk. `undefined` when `expr` is neither: the caller
+ * evaluates it.
  *
  * The caller calls this only for a plain evaluation (no numeric
  * approximation, no materialization).
@@ -206,9 +231,27 @@ export function walkInvariantValue(
   options: Parameters<Expression['evaluate']>[0]
 ): Expression | undefined {
   const walk = active;
-  if (walk === undefined || !walk.nodes.has(expr)) return undefined;
-  if (walk.computing.has(expr) || walk.skipped.has(expr)) return undefined;
+  if (walk === undefined) return undefined;
   const ce = expr.engine;
+  if (!walk.nodes.has(expr)) {
+    const own = walk.keptValues.get(expr);
+    if (own === undefined || walk.computing.has(expr)) return undefined;
+    if (staticViewDiverges(ce) || ce._atTransientConfiguration)
+      return undefined;
+    if (!keptStillValid(ce, own)) return undefined;
+    if (own.again !== undefined) return own.again;
+    walk.computing.add(expr);
+    const guard = beginStoreGuard();
+    let again: Expression;
+    try {
+      again = expr.evaluate(options);
+    } finally {
+      walk.computing.delete(expr);
+    }
+    if (guard.allowsStore() && keptStillValid(ce, own)) own.again = again;
+    return again;
+  }
+  if (walk.computing.has(expr) || walk.skipped.has(expr)) return undefined;
   // Inside a type computation a variable has no value, so a value computed
   // outside it is not the value there (`eager-source-values.ts`). Inside a
   // transient configuration window, a value is neither kept nor served, as
@@ -227,10 +270,28 @@ export function walkInvariantValue(
   } finally {
     walk.computing.delete(expr);
   }
-  if (!value.isCollection) walk.skipped.add(expr);
-  else if (guard.allowsStore() && keptStillValid(ce, inputs))
-    walk.values.set(expr, { ...inputs, value });
+  if (!value.isCollection && !readsCollection(walk, expr))
+    walk.skipped.add(expr);
+  else if (guard.allowsStore() && keptStillValid(ce, inputs)) {
+    const kept: Kept = { ...inputs, value };
+    // The value that the node had before, in another state, is no longer
+    // served: its record is removed, so that the walk does not hold every
+    // value that the node has had.
+    const previous = walk.values.get(expr);
+    if (previous !== undefined) walk.keptValues.delete(previous.value);
+    walk.values.set(expr, kept);
+    walk.keptValues.set(value, kept);
+  }
   return value;
+}
+
+/** True when an operand of the invariant node `expr` is a collection: its
+ * value is kept in `walk`, or its type is a collection. */
+function readsCollection(walk: Walk, expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.ops.some(
+    (op) => walk.values.has(op) || op.type.matches('collection')
+  );
 }
 
 /** The invariant nodes of the callbacks `fns`. */

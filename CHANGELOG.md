@@ -155,6 +155,17 @@
   The entries of a nested list are now evaluated in their order, as the
   entries of a flat list are.
 
+### Performance
+
+- **A `Map`, a `Filter` or an `Apply` over a list evaluates once a part of
+  its function that reduces another list** (CE-1609). In
+  `Map(k ↦ Which(k = Min(d), 10^9, True, k), d)`, with `d` a list of 100
+  symbolic distances, `Min(d)` was evaluated at each element, and again in
+  the condition, so the time grew with the square of the length. It is now
+  evaluated once for the whole list: reading the 100 elements took about
+  1,060 ms and takes about 270 ms, and 64 elements about 530 ms and now
+  150 ms. The values are the same.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features
