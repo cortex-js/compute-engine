@@ -1144,7 +1144,7 @@ export function erfInv(x: number): number {
  * several digits. Evaluating with guard digits and rounding once at the end
  * restores a fully-accurate result.
  */
-function withGuardDigits(
+export function withGuardDigits(
   prec: number,
   guard: number,
   fn: (prec: number) => BigNum
@@ -1153,7 +1153,7 @@ function withGuardDigits(
 }
 
 /** Working-precision guard (extra digits) for the bignum Gamma/Zeta kernels. */
-const SPECIAL_FN_GUARD = 24;
+export const SPECIAL_FN_GUARD = 24;
 
 /**
  * Above this exact positive integer (or half-integer) argument, computing

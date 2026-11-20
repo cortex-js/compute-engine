@@ -152,7 +152,7 @@ export function guardDigitsN(
  * big-decimal parts; `result` otherwise. It is called after the precision
  * of the engine is restored to `working`.
  */
-function roundToWorkingPrecision(
+export function roundToWorkingPrecision(
   result: Expression | undefined,
   working: number
 ): Expression | undefined {

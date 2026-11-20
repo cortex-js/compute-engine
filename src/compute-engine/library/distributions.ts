@@ -5,7 +5,9 @@ import {
   bigGammaQNegativeOrder,
   betaRegularized,
   gammaQ,
+  SPECIAL_FN_GUARD,
 } from '../numerics/special-functions.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
 import { apply2, applyN, shouldNumericize } from '../boxed-expression/apply.js';
 import {
   isAbsentSymbol,
@@ -45,6 +47,10 @@ import {
   poissonQuantileExact,
 } from '../numerics/distributions.js';
 import { asRational, asSmallInteger } from '../boxed-expression/numerics.js';
+import {
+  guardDigitsN,
+  roundToWorkingPrecision,
+} from './exact-operands-under-n.js';
 import { isWalkableFiniteCollection } from '../collection-utils.js';
 import type {
   Expression,
@@ -419,7 +425,16 @@ function gammaRegularizedSeries(
     ce.function('Exp', [ce.function('Negate', [z])]),
     ce.function('Add', terms),
   ]);
-  return numericApproximation ? r.N() : r.evaluate();
+  if (!numericApproximation) return r.evaluate();
+  if (!bignumPreferred(ce)) return r.N();
+  // Exp(−z) and the sum are each rounded at the working precision, and the
+  // sum has terms of both signs for a negative z: evaluate with guard digits
+  // and round once.
+  const working = ce.precision;
+  const value = ce._withTransientPrecision(working + SPECIAL_FN_GUARD, () =>
+    r.N()
+  );
+  return roundToWorkingPrecision(value, working) ?? value;
 }
 
 /**
@@ -604,7 +619,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: (ops, options) => {
+      evaluate: guardDigitsN((ops, options) => {
         // Q(a, z0, z1) = Q(a, z0) − Q(a, z1).
         if (ops.length === 3) return evaluateGammaBetween(options, ops, true);
         const [a, z] = ops;
@@ -721,7 +736,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           (a, z) => gammaQ(a, z),
           (a, z) => bigGammaQ(ce, a, z, ce.precision)
         );
-      },
+      }),
     },
 
     BetaRegularized: {
@@ -770,7 +785,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: (ops, options) => {
+      evaluate: guardDigitsN((ops, options) => {
         // I_z1(a, b) − I_z0(a, b).
         if (ops.length === 4)
           return evaluateRegularizedBetaBetween(options, ops);
@@ -803,7 +818,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           (x, a, b) => betaRegularized(x, a, b),
           (x, a, b) => bigBetaRegularized(ce, x, a, b, ce.precision)
         );
-      },
+      }),
     },
   },
 

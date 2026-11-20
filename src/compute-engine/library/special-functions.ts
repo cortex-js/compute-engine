@@ -1062,102 +1062,105 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine, expression }) => {
-        const [n, theta] = ops;
-        if (!isNumber(n) || n.isComplex) return undefined;
-        const order = asSmallInteger(n);
-        if (order === null || order < 1) return undefined;
-        const even = order % 2 === 0;
-        // A float operand makes the special values below floats (Cl₃(0.0) is
-        // the float ζ(3), not `Zeta(3)`).
-        const numericPoint = numericApproximation || hasFloatOperand(ops);
+      evaluate: guardDigitsN(
+        (ops, { numericApproximation, engine, expression }) => {
+          const [n, theta] = ops;
+          if (!isNumber(n) || n.isComplex) return undefined;
+          const order = asSmallInteger(n);
+          if (order === null || order < 1) return undefined;
+          const even = order % 2 === 0;
+          // A float operand makes the special values below floats (Cl₃(0.0) is
+          // the float ζ(3), not `Zeta(3)`).
+          const numericPoint = numericApproximation || hasFloatOperand(ops);
 
-        // θ ≡ qπ (mod 2π) for an exact rational q ∈ (−1, 1]. Even orders
-        // are odd in θ and odd orders are even in θ, so a negative q is
-        // folded onto −q with `sign`.
-        // Under `.N()` the operands arrive evaluated, so an exact 2π is
-        // already the float 6.28…; the operand before evaluation (as `Sin`
-        // reads it) keeps the multiple of π, so `.N()` agrees with
-        // `evaluate()` at these points.
-        const q =
-          exactPiMultiple(theta) ??
-          (isFunction(expression) && expression.nops === 2
-            ? exactPiMultiple(expression.op2)
-            : undefined);
-        const sign = q !== undefined && q[0] < 0n && even ? -1 : 1;
-        const point =
-          q === undefined
-            ? undefined
-            : q[0] === 0n
-              ? 'zero'
-              : q[0] === q[1]
-                ? 'pi'
-                : q[1] === 2n * (q[0] < 0n ? -q[0] : q[0])
-                  ? 'half-pi'
-                  : q[1] === 3n && (q[0] === 1n || q[0] === -1n)
-                    ? 'third-pi'
-                    : undefined;
+          // θ ≡ qπ (mod 2π) for an exact rational q ∈ (−1, 1]. Even orders
+          // are odd in θ and odd orders are even in θ, so a negative q is
+          // folded onto −q with `sign`.
+          // Under `.N()` the operands arrive evaluated, so an exact 2π is
+          // already the float 6.28…; the operand before evaluation (as `Sin`
+          // reads it) keeps the multiple of π, so `.N()` agrees with
+          // `evaluate()` at these points.
+          const q =
+            exactPiMultiple(theta) ??
+            (isFunction(expression) && expression.nops === 2
+              ? exactPiMultiple(expression.op2)
+              : undefined);
+          const sign = q !== undefined && q[0] < 0n && even ? -1 : 1;
+          const point =
+            q === undefined
+              ? undefined
+              : q[0] === 0n
+                ? 'zero'
+                : q[0] === q[1]
+                  ? 'pi'
+                  : q[1] === 2n * (q[0] < 0n ? -q[0] : q[0])
+                    ? 'half-pi'
+                    : q[1] === 3n && (q[0] === 1n || q[0] === -1n)
+                      ? 'third-pi'
+                      : undefined;
 
-        // θ ≡ 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
-        if (
-          point === 'zero' ||
-          (isNumber(theta) && !theta.isComplex && theta.isSame(0))
-        ) {
-          if (order === 1) return engine.PositiveInfinity;
-          const value = even ? engine.Zero : engine.function('Zeta', [n]);
-          return floatIfFloatOperand(
-            ops,
-            value.evaluate({ numericApproximation: numericPoint })
-          );
+          // θ ≡ 0: Cl₁ is +∞, even orders vanish, odd orders are ζ(n).
+          if (
+            point === 'zero' ||
+            (isNumber(theta) && !theta.isComplex && theta.isSame(0))
+          ) {
+            if (order === 1) return engine.PositiveInfinity;
+            const value = even ? engine.Zero : engine.function('Zeta', [n]);
+            return floatIfFloatOperand(
+              ops,
+              value.evaluate({ numericApproximation: numericPoint })
+            );
+          }
+
+          // Cl_n(π) = 0 (even) or −η(n) (odd); Cl_n(π/2) = −2⁻ⁿ·η(n) (odd) and
+          // β(n) (even, since sin(kπ/2) = (−1)ʲ at k = 2j+1; β(2) = G);
+          // η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
+          const eta = (): Expression =>
+            order === 1
+              ? engine.function('Ln', [engine.number(2)])
+              : engine
+                  .number(1)
+                  .sub(engine.number(2).pow(engine.number(1 - order)))
+                  .mul(engine.function('Zeta', [n]));
+          if (point === 'pi') {
+            const value = even ? engine.Zero : eta().neg();
+            return floatIfFloatOperand(
+              ops,
+              value.evaluate({ numericApproximation: numericPoint })
+            );
+          }
+          if (point === 'half-pi') {
+            const value = even
+              ? engine.function('DirichletBeta', [n]).mul(sign)
+              : eta()
+                  .mul(engine.number(2).pow(engine.number(-order)))
+                  .neg();
+            return floatIfFloatOperand(
+              ops,
+              value.evaluate({ numericApproximation: numericPoint })
+            );
+          }
+
+          // Cl₁(±π/3) = −ln|2 sin(π/6)| = 0: the zeros of Cl₁, where the
+          // numeric kernel cannot give `ce.precision` correct digits.
+          if (point === 'third-pi' && order === 1)
+            return floatIfFloatOperand(ops, engine.Zero);
+
+          if (!shouldNumericize(numericApproximation, n, theta))
+            return undefined;
+          // A real value carries `ce.precision` digits or the head stays unevaluated.
+          if (isNumber(theta) && !theta.isComplex && bignumPreferred(engine)) {
+            const big = bigClausen(
+              engine,
+              order,
+              bigRealOperand(engine, theta),
+              engine.precision
+            );
+            return big === undefined ? undefined : boxBignumApprox(engine, big);
+          }
+          return applyN([n, theta], clausen);
         }
-
-        // Cl_n(π) = 0 (even) or −η(n) (odd); Cl_n(π/2) = −2⁻ⁿ·η(n) (odd) and
-        // β(n) (even, since sin(kπ/2) = (−1)ʲ at k = 2j+1; β(2) = G);
-        // η(n) = (1 − 2¹⁻ⁿ)ζ(n), with η(1) = ln 2.
-        const eta = (): Expression =>
-          order === 1
-            ? engine.function('Ln', [engine.number(2)])
-            : engine
-                .number(1)
-                .sub(engine.number(2).pow(engine.number(1 - order)))
-                .mul(engine.function('Zeta', [n]));
-        if (point === 'pi') {
-          const value = even ? engine.Zero : eta().neg();
-          return floatIfFloatOperand(
-            ops,
-            value.evaluate({ numericApproximation: numericPoint })
-          );
-        }
-        if (point === 'half-pi') {
-          const value = even
-            ? engine.function('DirichletBeta', [n]).mul(sign)
-            : eta()
-                .mul(engine.number(2).pow(engine.number(-order)))
-                .neg();
-          return floatIfFloatOperand(
-            ops,
-            value.evaluate({ numericApproximation: numericPoint })
-          );
-        }
-
-        // Cl₁(±π/3) = −ln|2 sin(π/6)| = 0: the zeros of Cl₁, where the
-        // numeric kernel cannot give `ce.precision` correct digits.
-        if (point === 'third-pi' && order === 1)
-          return floatIfFloatOperand(ops, engine.Zero);
-
-        if (!shouldNumericize(numericApproximation, n, theta)) return undefined;
-        // A real value carries `ce.precision` digits or the head stays unevaluated.
-        if (isNumber(theta) && !theta.isComplex && bignumPreferred(engine)) {
-          const big = bigClausen(
-            engine,
-            order,
-            bigRealOperand(engine, theta),
-            engine.precision
-          );
-          return big === undefined ? undefined : boxBignumApprox(engine, big);
-        }
-        return applyN([n, theta], clausen);
-      },
+      ),
     },
 
     Hypergeometric1F1: {

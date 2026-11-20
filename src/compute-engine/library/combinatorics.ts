@@ -40,6 +40,8 @@ import {
 import {
   gamma,
   bigGamma,
+  SPECIAL_FN_GUARD,
+  withGuardDigits,
   bigBinomialLogForm,
   binomial as machineBinomial,
   estimatedFactorialDigits,
@@ -48,6 +50,7 @@ import {
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
+import { guardDigitsN } from './exact-operands-under-n.js';
 import {
   collectionContains,
   enumerableFromAllSources,
@@ -428,11 +431,31 @@ function binomialType(
   return 'number';
 }
 
+/** The `evaluate` handler of `Binomial` and `Choose`. */
+const evaluateBinomialHandler = guardDigitsN(
+  ([n, k], { numericApproximation, engine: ce, expression }) => {
+    // Exact operands as written; a float operand keeps its own value.
+    const written =
+      expression !== undefined &&
+      isFunction(expression) &&
+      expression.nops === 2
+        ? expression.ops.map((x, i) =>
+            isNumber(x) && x.isExact ? x : [n, k][i]
+          )
+        : undefined;
+    return floatIfFloatOperand(
+      [n, k],
+      evaluateBinomial(n, k, numericApproximation, ce, written)
+    );
+  }
+);
+
 function evaluateBinomial(
   nExpr: Expression,
   kExpr: Expression,
   numericApproximation: boolean | undefined,
-  ce: Expression['engine']
+  ce: Expression['engine'],
+  exact?: ReadonlyArray<Expression>
 ): Expression | undefined {
   // The infinite points are exact, so they are answered on both routes and
   // BEFORE any numeric kernel sees an `Infinity` argument.
@@ -465,7 +488,9 @@ function evaluateBinomial(
 
   // A Γ factor on a pole. Exact, so answered on both routes, and before the
   // kernel — the Γ-ratio overflows to garbage there.
-  const pole = binomialPoleValue(nExpr, kExpr, ce);
+  // Under `.N()` the operands are floats (`n − k + 1 = −60 + 1e-29` is not a
+  // pole), so the test reads the operands as written when they are exact.
+  const pole = binomialPoleValue(exact?.[0] ?? nExpr, exact?.[1] ?? kExpr, ce);
   if (pole !== undefined) return pole;
 
   // A symbolic `n` with `k` equal to `n` or to `n - 1`, decided by value:
@@ -501,11 +526,14 @@ function evaluateBinomial(
         const v = bigBinomialLogForm(ce, n, k, prec);
         if (v !== undefined) return v;
       }
-      const r = bigGamma(ce, n.add(1, prec), prec).div(
-        bigGamma(ce, k.add(1, prec), prec).mul(
-          bigGamma(ce, n.sub(k, prec).add(1, prec), prec)
-        ),
-        prec
+      // Three rounded Γ values and a division would end up to 2 units off.
+      const r = withGuardDigits(prec, SPECIAL_FN_GUARD, (g) =>
+        bigGamma(ce, n.add(1, g), g).div(
+          bigGamma(ce, k.add(1, g), g).mul(
+            bigGamma(ce, n.sub(k, g).add(1, g), g)
+          ),
+          g
+        )
       );
       // A `0` that is not on a pole is a quotient whose numerator
       // underflowed (`Γ(n+1)` for `n` near `−10¹⁵`): the log form decides.
@@ -757,11 +785,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
 
-      evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        floatIfFloatOperand(
-          [n, k],
-          evaluateBinomial(n, k, numericApproximation, ce)
-        ),
+      evaluate: evaluateBinomialHandler,
     },
   },
 
@@ -842,11 +866,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: ([n, k], context) =>
         BoxedType.forResult(binomialType(n, k), context.engine._typeResolver),
-      evaluate: ([n, k], { numericApproximation, engine: ce }) =>
-        floatIfFloatOperand(
-          [n, k],
-          evaluateBinomial(n, k, numericApproximation, ce)
-        ),
+      evaluate: evaluateBinomialHandler,
     },
     Pochhammer: {
       description:

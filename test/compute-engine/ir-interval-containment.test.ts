@@ -226,13 +226,6 @@ const MACHINE_CASES: Case[] = CASES.filter((c) => {
  *  the result of the mode. */
 type Miss = { point: Record<string, number>; v: number | boolean; got: unknown };
 
-/** The distance of `v` from the enclosure of `got`, relative to `|v|`. */
-const relativeMiss = (v: number, got: unknown): number => {
-  const k = (got as Kinded).value;
-  if (k === undefined) return Infinity;
-  return Math.max(k.lo - v, v - k.hi, 0) / Math.abs(v);
-};
-
 /** The programs whose comparison the interpreter decides within its
  *  tolerance (1e-10): `1.7999999999999998 < 1.8` is `False`, the mode
  *  compares the doubles. A miss is excused at a point
@@ -242,10 +235,7 @@ const TOLERANCE: Record<string, (m: Miss) => boolean> = {
     Math.abs(m.point.x - 1.8) <= ce.tolerance,
 };
 
-/** The programs whose reference is not the value of the doubles: the
- *  interpreter's `Choose` of a double near 1 is wrong from the 15th digit
- *  (CE-1346), and the mode encloses the exact value. A miss is excused
- *  within 1e-5 of 1 and below 1e-14 of the value only. At `x = -0.35` the
+/** The programs whose reference is not the value of the doubles. At `x = -0.35` the
  *  reference of `Remainder(x, 0.7)` reads the exact rational of `x` beside
  *  the decimal of the double 0.7 at the working precision, as every float
  *  lane does (21 digits: -0.349999999999999977796), so the quotient is not
@@ -254,10 +244,6 @@ const TOLERANCE: Record<string, (m: Miss) => boolean> = {
 const INTERPRETER_DEFECTS: Record<string, (m: Miss) => boolean> = {
   [`machine ${JSON.stringify(['Remainder', x, 0.7])}`]: (m) =>
     m.point.x === -0.35 && m.v === 0.35,
-  [JSON.stringify(['Choose', x, 2])]: (m) =>
-    Math.abs(m.point.x - 1) < 1e-5 &&
-    typeof m.v === 'number' &&
-    relativeMiss(m.v, m.got) < 1e-14,
 };
 const EXCUSED = { ...TOLERANCE, ...INTERPRETER_DEFECTS };
 
