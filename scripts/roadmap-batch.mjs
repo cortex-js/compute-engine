@@ -257,6 +257,28 @@ if (values['dry-run']) {
   process.exit(0);
 }
 
+/** The parent pid of a process. On Windows, Git Bash's `ps` has no `-o`
+ *  option and lists MSYS pids, so the parent comes from PowerShell. */
+function parentOf(pid) {
+  const [command, args] =
+    process.platform === 'win32'
+      ? [
+          'powershell',
+          [
+            '-NoProfile',
+            '-Command',
+            `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').ParentProcessId`,
+          ],
+        ]
+      : ['ps', ['-o', 'ppid=', '-p', String(pid)]];
+  return Number(
+    execFileSync(command, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  );
+}
+
 /** The pids of this process and its parents: the session that started the
  *  batch is one of them, and it does not count against the limit. */
 function ancestors() {
@@ -265,11 +287,7 @@ function ancestors() {
   for (let i = 0; i < 30 && pid > 1; i++) {
     pids.add(pid);
     try {
-      pid = Number(
-        execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)], {
-          encoding: 'utf8',
-        }).trim()
-      );
+      pid = parentOf(pid);
     } catch {
       break;
     }

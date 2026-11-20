@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
 import type {
@@ -664,6 +664,11 @@ describe('coupling rule audit', () => {
     entropy: { 'library/core.ts': ['RandomExpression'], 'index.ts': [] },
   };
 
+  /** The path of a source file relative to `SRC`, with `/` separators on
+   *  every platform, Windows included. */
+  const rel = (path: string): string =>
+    relative(SRC, path).split(sep).join('/');
+
   const sourceFiles = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
@@ -683,7 +688,7 @@ describe('coupling rule audit', () => {
             .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
             .some((line) => reads.test(line))
         )
-        .map((path) => relative(SRC, path))
+        .map(rel)
         .filter((path) => path !== 'effects-registry.ts')
         .sort();
       expect(readers).toEqual(Object.keys(CONSUMERS[capability]).sort());
@@ -716,7 +721,7 @@ describe('coupling rule audit', () => {
             )
           )
       )
-      .map((path) => relative(SRC, path));
+      .map(rel);
     expect(offenders).toEqual([]);
   });
 
@@ -737,7 +742,7 @@ describe('coupling rule audit', () => {
       for (let m = call.exec(text); m !== null; m = call.exec(text))
         if (!m[1].includes('_effects'))
           offenders.push(
-            `${relative(SRC, path)}: evaluateAsync({${m[1].replace(/\s+/g, ' ')}})`
+            `${rel(path)}: evaluateAsync({${m[1].replace(/\s+/g, ' ')}})`
           );
     }
     expect(offenders).toEqual([]);

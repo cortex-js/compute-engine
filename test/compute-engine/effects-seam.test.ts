@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, statSync } from 'fs';
-import { join } from 'path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 import { ComputeEngine } from '../../src/compute-engine';
 
@@ -42,7 +42,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 const SRC = join(__dirname, '../../src');
 
-/** Every `.ts` file under `src/`, as `[repoRelativePath, contents]`. */
+/** Every `.ts` file under `src/`, as `[repoRelativePath, contents]`. The
+ *  path has `/` separators on every platform, Windows included. */
 function sourceFiles(): [string, string][] {
   const out: [string, string][] = [];
   const walk = (dir: string): void => {
@@ -50,7 +51,10 @@ function sourceFiles(): [string, string][] {
       const p = join(dir, entry);
       if (statSync(p).isDirectory()) walk(p);
       else if (entry.endsWith('.ts'))
-        out.push([p.slice(SRC.length + 1), readFileSync(p, 'utf-8')]);
+        out.push([
+          p.slice(SRC.length + 1).split(sep).join('/'),
+          readFileSync(p, 'utf-8'),
+        ]);
     }
   };
   walk(SRC);
@@ -139,7 +143,7 @@ describe('The Function-literal construction seam is the only builder', () => {
           !path.endsWith('boxed-expression/effects-inference.ts') &&
           /from\s+'[^']*effects-inference\.js'/.test(src)
       )
-      .map(([path]) => path.split('\\').join('/'))
+      .map(([path]) => path)
       .sort();
 
     expect(importers).toEqual(ALLOWED);
