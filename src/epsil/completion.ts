@@ -370,21 +370,12 @@ export function epsilCompletions(
         : group.kind === 'type'
           ? 'type'
           : 'variable';
-    let detail: string | undefined;
-    let type: string | undefined;
-    if (declaration?.kind === 'value') detail = type = declaration.type;
-    else if (declaration?.kind === 'function') {
-      const { params, tail, result } = functionSignatureParts(
-        ce,
-        declaration,
-        text,
-        typeNames
-      );
-      detail = `(${params
-        .map((p, i) => (p ?? 'any') + (declaration.optional[i] ? '?' : ''))
-        .join(', ')})${tail}`;
-      type = result;
-    } else if (declaration?.kind === 'type') detail = declaration.detail;
+    const { detail, type } = declarationDetail(
+      ce,
+      declaration,
+      text,
+      typeNames
+    );
     const matches =
       expectedType !== undefined &&
       kind !== 'type' &&
@@ -1583,6 +1574,37 @@ export function functionSignatureParts(
     tail: typeToString(rest).slice(2),
     ...(result === 'unknown' ? {} : { result }),
   };
+}
+
+/** What an editor shows for a declaration of the source (`detail`): the
+ * declared type of a variable or of a parameter, the signature of a
+ * `function` (`(real, integer?) -> real`), the body of a `type`. `type` is
+ * the type of a use of the name, when the declaration gives it: the declared
+ * type of a value, the result type of a function. `text` is the source that
+ * the declaration was parsed from, and `typeNames` are the types of the
+ * source and of the `typeNames` option (see `functionSignatureParts`). */
+export function declarationDetail(
+  ce: ComputeEngine,
+  declaration: Declaration | undefined,
+  text: string,
+  typeNames: ReadonlySet<string>
+): { detail?: string; type?: string } {
+  if (declaration?.kind === 'value')
+    return { detail: declaration.type, type: declaration.type };
+  if (declaration?.kind === 'function') {
+    const { params, tail, result } = functionSignatureParts(
+      ce,
+      declaration,
+      text,
+      typeNames
+    );
+    const detail = `(${params
+      .map((p, i) => (p ?? 'any') + (declaration.optional[i] ? '?' : ''))
+      .join(', ')})${tail}`;
+    return { detail, ...(result === undefined ? {} : { type: result }) };
+  }
+  if (declaration?.kind === 'type') return { detail: declaration.detail };
+  return {};
 }
 
 /** The declaration of a binding: the one recorded at its first definition

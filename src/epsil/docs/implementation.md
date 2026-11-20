@@ -395,6 +395,68 @@ signature per arm; the active signature is the first that has the active
 parameter. The VS Code extension serves the same signatures as its
 signature help.
 
+### Hover and definition
+
+`epsilHover(ce, source, offset)` says what the name at an offset is, and
+`epsilDefinition(ce, source, offset)` says where the source declares it, for
+the "Show Info" and "Go to Definition" commands of an editor. Both give
+`null` when the offset is not on a name: in the text of a string, a comment
+or a LaTeX island, on a number, between two statements. A name in an
+interpolation hole of a string (`"\(x + 1)"`) is code. The name is the name
+that contains the offset or ends at it.
+
+```ts
+const source =
+  "/// Twice the sine.\nfunction f(x: real) -> real { 2 * sin(x) }\nlet y = f(1)";
+
+epsilHover(ce, source, source.indexOf("f(1)"));
+// ➔ { range: [71, 72], name: "f", kind: "function",
+//     detail: "(real) -> real", description: ["Twice the sine."] }
+
+epsilHover(ce, source, source.indexOf("sin(x)"));
+// ➔ { range: [54, 57], name: "sin", kind: "library-function",
+//     detail: "(complex | quantity) -> number",
+//     description: ["Sine of an angle."],
+//     reference: "https://epsil.dev/reference/trigonometry/#sin" }
+
+epsilDefinition(ce, source, source.indexOf("f(1)"));
+// ➔ { name: [29, 30], header: [20, 48] }: "f" and "function f(x: real) -> real "
+
+epsilDefinition(ce, source, source.indexOf("x) }"));
+// ➔ { name: [31, 32], header: [31, 32] }: the parameter "x"
+
+epsilDefinition(ce, source, source.indexOf("sin(x)")); // ➔ null: a library name
+```
+
+The name is resolved in its scope, as when the program runs. A name that the
+source binds at that place is described from its declaration, also when it
+shadows a library name: the `kind` is `function`, `variable` or `type`, the
+`detail` is the detail of its completion item (a signature, a declared type,
+the body of a `type`), and the `description` is the doc comment of a
+`function`. The variable of a library call (the `k` of `sum(k^2, k, 1, 3)`)
+is a `variable` of that call. Any other name is the definition of the engine
+under the written name (a name that an earlier program declared), a function
+member of a `protocol` of the source, a variant of a sum type, or the
+standard-library name that the spelling stands for, with the paragraphs of
+its description and the address of its entry in the library reference
+(`library-function`, `library-constant`). A name that follows `std::` is the
+standard library's, whatever the source or the engine binds. A reserved word, and `let`, `type`
+or `parallel` at the head of its statement, is a `keyword`. A name that
+nothing defines gives `null`, as does a name that is not a use of a binding:
+a type name of the engine (`real` in `x: real`), a field name after `.`.
+
+`epsilDefinition` gives the offsets of the name in its declaration (`name`)
+and of the text that shows the declaration (`header`): the header of a
+`function` up to its body, the statement of a `let`, a `const`, a first
+assignment or a `type`, the `x in xs` clause of a loop variable, and the name
+alone for a parameter or a variable of a `match` pattern. A `function` with
+several clauses gives its first clause. A library name, a name that only the
+engine defines, a keyword and the variable of a library call have no
+declaration in the source: the result is `null`.
+
+Both functions parse the source and do not evaluate it, and take the options
+of `epsilCompletions`.
+
 ### Serialization
 
 `serializeEpsil(expression, options?)` converts MathJSON back to Epsil:

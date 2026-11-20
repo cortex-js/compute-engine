@@ -34,6 +34,8 @@ export type {
   EpsilSignatureHelp,
   EpsilSignatureParameter,
 } from './epsil/signature-help.js';
+export { epsilDefinition, epsilHover } from './epsil/hover.js';
+export type { EpsilDefinition, EpsilHover } from './epsil/hover.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {
   canonicalLibraryName,

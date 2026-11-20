@@ -1,4 +1,5 @@
 import type { ComputeEngine } from '../compute-engine.js';
+import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import { STANDARD_LIBRARIES } from '../compute-engine/library/library.js';
 
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
@@ -108,12 +109,37 @@ export function describeName(
       : describeName(engine, canonical);
   }
 
-  const entry: DocEntry = { id: name, kind: 'variable' };
   // The spelling and the reference belong to the STANDARD library's
   // definition: a user binding that shadows a library name (`let Sin = 5` on
   // a shared engine) is described as what it is, with neither.
   const isLibraryBinding =
     engine.contextStack[0]?.lexicalScope.bindings.get(name) === def;
+  return describeDefinition(name, def, isLibraryBinding);
+}
+
+/**
+ * The documentation entry of the standard library's definition of one exact
+ * name, or `undefined` when the standard library does not define it. A
+ * binding of the engine that shadows the name is not read: this is the
+ * meaning of a qualified name (`std::e` after `let e = 5`). No Epsil
+ * spelling is resolved here.
+ */
+export function describeLibraryName(
+  engine: ComputeEngine,
+  name: string
+): DocEntry | undefined {
+  const def = engine.contextStack[0]?.lexicalScope.bindings.get(name);
+  return def === undefined ? undefined : describeDefinition(name, def, true);
+}
+
+/** The documentation entry of the definition `def` of `name`.
+ * `isLibraryBinding` says that it is the standard library's definition. */
+function describeDefinition(
+  name: string,
+  def: BoxedDefinition,
+  isLibraryBinding: boolean
+): DocEntry {
+  const entry: DocEntry = { id: name, kind: 'variable' };
   const epsilName = epsilNameOf(name);
   if (
     epsilName !== undefined &&
@@ -135,26 +161,26 @@ export function describeName(
   if (base.url) entry.url = base.url;
   if (base.wikidata) entry.wikidata = base.wikidata;
 
-  const operator = engine.operatorInfo(name);
-  if (operator) {
-    entry.kind = operator.kind;
+  // The kind, the signature and the type are read from the definition, by
+  // the rules of `operatorInfo()` and `symbolInfo()`, which read the visible
+  // definition of the name only.
+  if ('operator' in def) {
+    const operator = def.operator;
+    entry.kind =
+      operator.evaluate || operator.collection ? 'function' : 'opaque';
     if (operator.signature) entry.signature = operator.signature.toString();
     return entry;
   }
 
-  const symbol = engine.symbolInfo(name);
-  if (symbol) {
-    entry.kind = symbol.kind;
-    entry.type = symbol.type.toString();
-    if (symbol.kind === 'constant') {
-      // The value of a constant is part of its documentation (`Pi` ≈ π).
-      try {
-        const value = 'value' in def ? def.value.value : undefined;
-        if (value !== undefined && value !== null)
-          entry.value = value.toString();
-      } catch {
-        // A value that cannot be computed is simply omitted.
-      }
+  entry.kind = def.value.isConstant ? 'constant' : 'variable';
+  entry.type = def.value.type.toString();
+  if (entry.kind === 'constant') {
+    // The value of a constant is part of its documentation (`Pi` ≈ π).
+    try {
+      const value = def.value.value;
+      if (value !== undefined && value !== null) entry.value = value.toString();
+    } catch {
+      // A value that cannot be computed is simply omitted.
     }
   }
   return entry;
