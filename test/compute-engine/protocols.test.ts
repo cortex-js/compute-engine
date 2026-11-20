@@ -298,11 +298,10 @@ describe('DeclareProtocol (box route)', () => {
 });
 
 describe('P17: v1 prohibits optional, variadic and generic members', () => {
-  // The prohibition has to be enforced at DECLARATION: every downstream
-  // consumer (the dispatcher's arity, `selfPositions`, the implementation
-  // signature check) reads only `signature.args`, so a stored requirement
-  // carrying `optArgs`/`variadicArg`/`typeParams` would be matched,
-  // dispatched and typed at the wrong arity.
+  // The prohibition has to be enforced at DECLARATION: a stored requirement
+  // carrying `variadicArg`/`typeParams` would be matched, dispatched and
+  // typed at the wrong arity. An optional parameter is allowed only with a
+  // default value, which the dispatcher fills (CE-1554).
   const BAD: [string, string, RegExp][] = [
     [
       'optional',

@@ -23466,7 +23466,7 @@ function literalDataOptions(
  * handler, which reads the option from the handler options, not from the
  * operand evaluation.
  */
-function operandOptions(
+export function operandOptions(
   options: Partial<EvaluateOptions> | undefined
 ): Partial<EvaluateOptions> | undefined {
   if (options === undefined || (options.materialization ?? false) === false)

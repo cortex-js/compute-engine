@@ -1,5 +1,38 @@
 ## [Unreleased]
 
+### New Features
+
+- **A parameter of a protocol function can have a default value** (CE-1554). The
+  protocol owns the default: a call that leaves the argument out receives it, in
+  the bare, the method and the qualified form, and every implementation takes
+  the full parameter list:
+
+  ```epsil
+  protocol Figure {
+    function stroke(self: Self, color: string, width: real = 1) -> Self
+  }
+  type Pen = tuple<color: string, width: real>
+  type Pen is Figure {
+    function stroke(self: Pen, color: string, width: real) -> Pen { Pen(color, width) }
+  }
+  let p = Pen("black", 3)
+  (p.stroke("red").width, p.stroke("red", 4).width, Figure.stroke(p, "blue").width)
+  // ➔ (1, 4, 1)
+  ```
+
+  Before, the declaration was refused (`invalid-protocol-declaration`). An
+  implementation that leaves out `width`, or gives it another default, is
+  `protocol-signature-mismatch`. A default is a constant, as for any function. A
+  `protocol` statement is declared before the other statements of its program,
+  so a symbol default names a library constant or a constant declared earlier,
+  by the host or by an earlier program. An optional parameter without a default,
+  and a default on a parameter whose type mentions `Self`, are still refused.
+  `ce.declareProtocol()` accepts the same signatures:
+  `'(self: Self, scale: real = 10) -> real'`. A known limitation: a named
+  argument cannot skip a parameter with a default in a bare or a method call
+  (`sc(x, b: 5)` with `a: real = 1, b: real = 2` is
+  `argument-optional-skipped`); the qualified call `S.sc(x, b: 5)` works.
+
 ### Behavior Changes
 
 - **In Epsil, a bare call of a protocol function member named like a library
@@ -14,6 +47,11 @@
   back, and a definition of your own named `fill` still wins over both.
 
 ### Resolved Issues
+
+- **A protocol function called under `.N()` receives its arguments exactly, as
+  any function does.** With `D = (25! - 1)/24!` and an implementation that
+  returns `Floor(k)`, `f(m, D).N()` gives `24`; it gave `25`, because the
+  argument was approximated before the implementation saw it.
 
 - **A compiled `AsHsv` or `AsHsl` of a name keeps the channels of its own
   space.** With `C = Hsv(270, 1, 0)`, the compiled `AsHsv(C)` gave

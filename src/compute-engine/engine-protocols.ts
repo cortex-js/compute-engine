@@ -3,6 +3,7 @@ import type {
   DeclarationOrigin,
   EffectSet,
   FunctionSignature,
+  NamedElement,
   Type,
   TypeParameter,
   TypeReference,
@@ -13,7 +14,10 @@ import {
   isSameStatementReRegistration,
 } from './declaration-origin.js';
 import { parseType } from '../common/type/parse.js';
-import { typeToString } from '../common/type/serialize.js';
+import {
+  parameterDefaultToString,
+  typeToString,
+} from '../common/type/serialize.js';
 import {
   isObjectType,
   isSubtype,
@@ -71,12 +75,13 @@ import type {
   PureEngineView,
   ReadonlyDefinitionView,
 } from './types-definitions.js';
-import type { Scope } from './types-evaluation.js';
+import type { EvaluateOptions, Scope } from './types-evaluation.js';
 import {
   isExpression,
   isFunction,
   isObject,
   isString,
+  isSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
 import { noteUncachedHostEvaluation } from './boxed-expression/shared-evaluation-memo.js';
@@ -95,8 +100,15 @@ import {
 } from './boxed-expression/utils.js';
 import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import { checkArity, checkType } from './boxed-expression/validate.js';
+import { flatten } from './boxed-expression/flatten.js';
+import {
+  boxParameterDefault,
+  checkParameterDefaultsUnboxed,
+  literalParameterDefault,
+} from './boxed-expression/parameter-defaults.js';
 import { settleTypeText } from './library/type-value-utils.js';
-import { apply, lookup } from './function-utils.js';
+import { apply, exactArgumentSources, lookup } from './function-utils.js';
+import { operandOptions } from './boxed-expression/boxed-function.js';
 
 //
 // PROTOCOLS — declarations, conformance, implementations, and dispatch.
@@ -504,8 +516,15 @@ export function declareProtocolImpl(
         `The member \`${name}.${member}\` must declare a function signature, e.g. \`(self: Self) -> integer\``
       );
     assertSelfFirstParameter(name, member, parsed);
-    assertV1MemberShape(name, member, parsed);
+    assertV1MemberShape(ce, name, member, parsed);
     validated[member] = { kind: 'function', signature };
+    if (parsed.optArgs !== undefined)
+      REQUIREMENT_DEFAULTS.set(
+        validated[member],
+        Object.freeze(
+          parsed.optArgs.map((a) => boxParameterDefault(ce, a.default!))
+        )
+      );
   }
 
   for (const kind of ['readonly', 'readwrite'] as const) {
@@ -730,33 +749,49 @@ function assertSelfFirstParameter(
 }
 
 /**
- * Protocol members cannot be optional, variadic, or generic. Enforce this
- * at declaration, because every downstream consumer (the dispatcher's arity,
- * `checkMemberArguments`, the implementation signature check) reads only
- * at declaration because downstream consumers read only `signature.args`; a
- * requirement carrying `optArgs`, `variadicArg`, or
- * `typeParams` would silently lose them and be matched, dispatched and typed
- * at the wrong arity. Naming the offending feature is what makes the
- * rejection actionable — the prohibition is not spelled anywhere in the
- * surface grammar.
+ * A protocol member has a fixed list of parameters: it cannot be variadic
+ * or generic, and a parameter after the required ones must have a default
+ * value (`about: tuple<real, real> = Origin`). The REQUIREMENT owns the
+ * default: the dispatcher fills it, and every implementation receives the
+ * full argument list (CE-1554). An optional parameter without a default
+ * would leave an implementation called with fewer arguments than it takes.
+ *
+ * A default on a parameter whose type mentions `Self` is refused, as a
+ * default on a generic parameter is (R1 of
+ * `docs/plans/2026-10-31-parameter-default-values.md`): the default is
+ * checked here, before `Self` is bound. Every other default gets the checks
+ * of a default of an operator definition (R4): a constant that matches the
+ * parameter type.
+ *
+ * Naming the offending feature is what makes the rejection actionable: the
+ * prohibition is not spelled anywhere in the surface grammar.
  */
 function assertV1MemberShape(
+  ce: IComputeEngine,
   protocol: string,
   member: string,
   signature: FunctionSignature
 ): void {
-  const feature =
-    signature.optArgs !== undefined && signature.optArgs.length > 0
-      ? 'an optional argument'
-      : signature.variadicArg !== undefined
-        ? 'a variadic argument'
-        : signature.typeParams !== undefined && signature.typeParams.length > 0
-          ? 'a type parameter'
-          : undefined;
-  if (feature === undefined) return;
-  throw Error(
-    `The signature of \`${protocol}.${member}\` declares ${feature}; a protocol member may not be optional, variadic or generic`
+  const subject = `The signature of \`${protocol}.${member}\``;
+  const feature = signature.optArgs?.some((a) => a.default === undefined)
+    ? 'an optional argument without a default value'
+    : signature.variadicArg !== undefined
+      ? 'a variadic argument'
+      : signature.typeParams !== undefined && signature.typeParams.length > 0
+        ? 'a type parameter'
+        : undefined;
+  if (feature !== undefined)
+    throw Error(
+      `${subject} declares ${feature}; a protocol member may not be variadic or generic, and an optional argument must have a default value`
+    );
+  const selfDefault = signature.optArgs?.find((a) =>
+    /\bSelf\b/.test(typeToString(a.type))
   );
+  if (selfDefault !== undefined)
+    throw Error(
+      `${subject} declares a default value on the parameter${selfDefault.name === undefined ? '' : ` "${selfDefault.name}"`} of type \`${typeToString(selfDefault.type)}\`; a default value of a protocol member cannot be on a parameter whose type mentions \`Self\``
+    );
+  checkParameterDefaultsUnboxed(ce, subject, signature);
 }
 
 //
@@ -3876,11 +3911,18 @@ function groundedImplementationBlock(
  * unchecked rather than inferred — inference would require canonicalizing the
  * body.
  */
+/** The default value of a parameter of an implementation literal: the
+ * default as the type DSL prints it, `undefined` for a required parameter,
+ * `false` for an optional parameter without a default, `null` for a default
+ * that is not a value a signature can hold. */
+type ImplementationDefault = string | null | false | undefined;
+
 function declaredImplementationSignature(
   fn: Expression,
   resolver: TypeResolver
 ): {
   args: Type[];
+  defaults?: ImplementationDefault[];
   result?: Type;
   effects?: EffectSet;
 } | null {
@@ -3890,7 +3932,15 @@ function declaredImplementationSignature(
   /** Which positions the literal's own operands left UNANNOTATED — the
    * positions a marker signature is the only remaining source for. */
   const bare: boolean[] = [];
+  const defaults: ImplementationDefault[] = [];
   for (const operand of fn.ops.slice(1)) {
+    if (isFunction(operand, 'Optional')) {
+      if (operand.nops < 2) defaults.push(false);
+      else {
+        const d = literalParameterDefault(operand.op2);
+        defaults.push(d === undefined ? null : parameterDefaultToString(d));
+      }
+    } else defaults.push(undefined);
     // A parameter with a default value is read inside its `Optional`.
     const param = optionalParameterTarget(operand);
     const text = isFunction(param, 'Typed')
@@ -3912,7 +3962,7 @@ function declaredImplementationSignature(
   const marker = functionLiteralReturnMarker(fn);
   const markerText =
     marker === undefined ? undefined : typeTextOf(marker.ops[1]);
-  if (markerText === undefined) return { args };
+  if (markerText === undefined) return { args, defaults };
 
   if (!isGroupedTypeText(markerText)) {
     const declared = parseType(markerText, resolver);
@@ -3931,12 +3981,13 @@ function declaredImplementationSignature(
             args[i] = widestConditionalTarget(marked[i]!.type, quantifiers);
       return {
         args,
+        defaults,
         result: declared.result,
         effects: signatureEffects(declared),
       };
     }
   }
-  return { args, result: parseType(markerText, resolver) };
+  return { args, defaults, result: parseType(markerText, resolver) };
 }
 
 /**
@@ -4036,20 +4087,42 @@ function effectCeilingDetail(
  * ceiling's own fix site, which the effects diagnostic points at.
  */
 function signatureMismatch(
-  impl: { args: Type[]; result?: Type; effects?: EffectSet },
+  impl: {
+    args: Type[];
+    defaults?: ImplementationDefault[];
+    result?: Type;
+    effects?: EffectSet;
+  },
   requirement: FunctionSignature,
   site: string,
   options?: { checkResult?: boolean }
 ): string | null {
-  const expected = requirement.args ?? [];
+  // An implementation takes every parameter of the requirement, also one
+  // with a default value: the dispatcher fills the default (CE-1554).
+  const expected = requirementParameters(requirement);
   if (impl.args.length !== expected.length)
-    return `it takes ${impl.args.length} parameter${impl.args.length === 1 ? '' : 's'}; the requirement takes ${expected.length}`;
+    return `it takes ${impl.args.length} parameter${impl.args.length === 1 ? '' : 's'}; the requirement takes ${expected.length}${impl.args.length < expected.length && requirement.optArgs !== undefined ? ', and an implementation takes the parameters with a default value too' : ''}`;
 
   for (let i = 0; i < expected.length; i++) {
     // CONTRAVARIANT: the implementation must accept everything the
     // requirement may hand it — its parameter may WIDEN, never narrow.
     if (!isSubtype(expected[i]!.type, impl.args[i]!))
       return `argument ${i + 1} is \`${typeToString(impl.args[i]!)}\`; expected \`${typeToString(expected[i]!.type)}\` or a supertype`;
+  }
+
+  // The requirement owns the defaults: an implementation may repeat the
+  // default of a parameter, and declares no other one. A call never leaves
+  // out an argument of the implementation, so another default would be
+  // dead, and would read as a second meaning of the call.
+  for (let i = 0; i < expected.length; i++) {
+    const own = impl.defaults?.[i];
+    if (own === undefined) continue;
+    if (own === false)
+      return `argument ${i + 1} is optional; an implementation takes every parameter of the requirement`;
+    const d = expected[i]!.default;
+    const required = d === undefined ? undefined : parameterDefaultToString(d);
+    if (own !== required)
+      return `argument ${i + 1} declares ${own === null ? 'a default value' : `the default value ${own}`}; the requirement declares ${required === undefined ? 'none' : required}`;
   }
 
   // COVARIANT: the result may narrow. An implementation that declares no
@@ -4780,6 +4853,61 @@ function requirementShape(
   );
 }
 
+/** Every parameter of a requirement, in order: the required ones, then the
+ * ones with a default value (`assertV1MemberShape` admits no other kind). An
+ * implementation takes all of them, and a call of the member receives all of
+ * them once the defaults are filled. */
+function requirementParameters(
+  signature: FunctionSignature
+): ReadonlyArray<NamedElement> {
+  const optional = signature.optArgs ?? [];
+  if (optional.length === 0) return signature.args ?? [];
+  return [...(signature.args ?? []), ...optional];
+}
+
+/**
+ * The boxed default operands of each function requirement that has
+ * parameters with a default, aligned with its `optArgs`. They are boxed once,
+ * when the protocol is declared, in the declaring scope, as the defaults of
+ * an operator definition are (R4 of
+ * `docs/plans/2026-10-31-parameter-default-values.md`): a symbol default is
+ * the constant that the declaring scope gives it, and a local of the same
+ * name where the member is called does not replace it.
+ */
+const REQUIREMENT_DEFAULTS = new WeakMap<
+  ProtocolMember,
+  ReadonlyArray<Expression>
+>();
+
+/** The default operands of `record.member`, aligned with the `optArgs` of
+ * its requirement `shape` ({@link REQUIREMENT_DEFAULTS}). */
+function requirementDefaults(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  member: string,
+  shape: FunctionSignature
+): ReadonlyArray<Expression> {
+  const requirement = record.members[member];
+  const known =
+    requirement === undefined
+      ? undefined
+      : REQUIREMENT_DEFAULTS.get(requirement);
+  if (known !== undefined) return known;
+  // A record that was not built by `declareProtocolImpl` has no boxed
+  // defaults: box them now.
+  return (shape.optArgs ?? []).map((a) => boxParameterDefault(ce, a.default!));
+}
+
+/** The numbers of arguments a call of a requirement may have: the required
+ * parameters at least, every parameter at most. */
+function requirementArity(signature: FunctionSignature): {
+  min: number;
+  max: number;
+} {
+  const min = signature.args?.length ?? 0;
+  return { min, max: min + (signature.optArgs?.length ?? 0) };
+}
+
 /** The requirement of `record.member` at `Self = selfType` (P12: the
  * substitution is performed by the resolver, so `Self` and the target's own
  * name reach the same type and diagnostics quote the substituted spelling). */
@@ -5159,19 +5287,15 @@ function dispatcherDefinition(
     .filter((s): s is FunctionSignature => s !== null);
   if (shapes.length === 0) return null;
 
-  const arities = new Set(shapes.map((s) => s.args?.length ?? 0));
+  const ranges = new Set(
+    shapes.map((s) => {
+      const { min, max } = requirementArity(s);
+      return `${min}:${max}`;
+    })
+  );
   const signature: FunctionSignature =
-    arities.size === 1
-      ? {
-          kind: 'signature',
-          args: Array.from({ length: [...arities][0]! }, (_, i) => {
-            const name = sharedParameterName(shapes, i);
-            return name === undefined
-              ? { type: 'any' as Type }
-              : { name, type: 'any' as Type };
-          }),
-          result: 'unknown',
-        }
+    ranges.size === 1
+      ? agreedDispatcherSignature(shapes)
       : {
           kind: 'signature',
           variadicArg: { type: 'any' },
@@ -5233,11 +5357,41 @@ function sharedParameterName(
   shapes: ReadonlyArray<FunctionSignature>,
   index: number
 ): string | undefined {
-  const name = shapes[0].args?.[index]?.name;
+  const name = requirementParameters(shapes[0])[index]?.name;
   if (name === undefined) return undefined;
   for (let i = 1; i < shapes.length; i++)
-    if (shapes[i].args?.[index]?.name !== name) return undefined;
+    if (requirementParameters(shapes[i])[index]?.name !== name)
+      return undefined;
   return name;
+}
+
+/**
+ * The dispatcher's signature when every requirement shape takes the same
+ * numbers of arguments: one `any` parameter per position, the positions
+ * after the required ones optional.
+ *
+ * An optional position carries no default value. The requirement owns it,
+ * and {@link dispatchMember} fills the default of the requirement it selects
+ * when the call is evaluated (the v2 rule of R9 of
+ * `docs/plans/2026-10-31-parameter-default-values.md`). A default filled at
+ * canonicalization would stay in the canonical call after a later program
+ * re-declares the protocol with another default, and would reach the
+ * library twin of the member ({@link dispatcherCanonical}).
+ */
+function agreedDispatcherSignature(
+  shapes: ReadonlyArray<FunctionSignature>
+): FunctionSignature {
+  const { min, max } = requirementArity(shapes[0]);
+  const param = (i: number): NamedElement => {
+    const name = sharedParameterName(shapes, i);
+    return name === undefined
+      ? { type: 'any' as Type }
+      : { name, type: 'any' as Type };
+  };
+  const args = Array.from({ length: min }, (_, i) => param(i));
+  if (max === min) return { kind: 'signature', args, result: 'unknown' };
+  const optArgs = Array.from({ length: max - min }, (_, i) => param(min + i));
+  return { kind: 'signature', args, optArgs, result: 'unknown' };
 }
 
 //
@@ -5428,12 +5582,23 @@ function checkMemberArguments(
   member: string,
   ops: ReadonlyArray<Expression>
 ): Expression[] {
-  const arities = new Set(
-    records.map((r) => requirementShape(ce, r, member)?.args?.length)
-  );
+  // The arity range, when every candidate has the same one: a call may
+  // leave out the parameters with a default value.
+  const ranges = records.map((r) => {
+    const shape = requirementShape(ce, r, member);
+    return shape === null ? undefined : requirementArity(shape);
+  });
+  const range = ranges[0];
   let xs: Expression[] = [...ops];
-  const arity = arities.size === 1 ? [...arities][0] : undefined;
-  if (arity !== undefined) xs = [...checkArity(ce, xs, arity)];
+  if (
+    range !== undefined &&
+    ranges.every((r) => r?.min === range.min && r.max === range.max)
+  ) {
+    const count = flatten(xs).length;
+    xs = [
+      ...checkArity(ce, xs, Math.min(Math.max(count, range.min), range.max)),
+    ];
+  }
 
   const selfType = receiverType(xs);
   // An indeterminate receiver binds nothing: every position stays unchecked
@@ -5457,7 +5622,9 @@ function checkMemberArguments(
 
   for (let i = 1; i < xs.length; i++) {
     if (!xs[i]!.isValid) continue;
-    const declared = requirements.map((s) => s!.args?.[i]?.type);
+    const declared = requirements.map(
+      (s) => requirementParameters(s!)[i]?.type
+    );
     // A position beyond some candidate's arity is not one they agree on (their
     // arities differed, so `checkArity` let the call through): unchecked.
     if (declared.some((t) => t === undefined)) continue;
@@ -5500,18 +5667,22 @@ function dispatcherCanonical(
   const twin = libraryTwinOf(ce, member);
   // A receiver that no protocol could serve is the library twin's call. So
   // is a decided receiver that conforms to none, with an arity that no
-  // requirement has: a value of a subtype that conforms at run time would
-  // only get the member's arity error. An undecided receiver may conform at
-  // run time, where the member's arity check reports the call.
+  // requirement admits (from its required parameters to all of them): a
+  // value of a subtype that conforms at run time would only get the member's
+  // arity error. An undecided receiver may conform at run time, where the
+  // member's arity check reports the call.
   if (
     twin !== undefined &&
     (records === null ||
       (selfType !== undefined &&
         isDecidedReceiverType(selfType) &&
         !conformsForMember(ce, member, selfType) &&
-        !protocolsWithMember(ce, member).some(
-          (r) => requirementShape(ce, r, member)?.args?.length === ops.length
-        )))
+        !protocolsWithMember(ce, member).some((r) => {
+          const shape = requirementShape(ce, r, member);
+          if (shape === null) return false;
+          const { min, max } = requirementArity(shape);
+          return ops.length >= min && ops.length <= max;
+        })))
   )
     return ce.function(twin, [...ops]);
   // A receiver that is not known to conform (an undecided type, a supertype
@@ -5688,7 +5859,7 @@ function dispatchMember(
   member: string,
   only: ProtocolRecord | null,
   ops: ReadonlyArray<Expression>,
-  options: { numericApproximation?: boolean }
+  options: Partial<EvaluateOptions> & { expression?: Expression }
 ): Expression | undefined {
   const self = ops[0];
   if (self === undefined) return undefined;
@@ -5750,18 +5921,55 @@ function dispatchMember(
   // `checkMemberArguments`: the static check runs on the CANDIDATE set, and
   // when the candidates disagree on arity — or the receiver was undecided —
   // it lets the call through to be decided at run time. Selection has now
-  // named one requirement, so its arity is exact; without this, a short call
-  // reached `apply` and came back a PARTIAL APPLICATION rather than an error.
+  // named one requirement, so its arity range is known; without this, a
+  // short call reached `apply` and came back a PARTIAL APPLICATION rather
+  // than an error.
   const selected = best[0]!;
-  const arity = requirementShape(ce, selected.record, member)?.args?.length;
-  if (arity !== undefined && arity !== ops.length)
-    return ce.error(
-      [
-        'protocol-signature-mismatch',
-        `\`${selected.record.name}.${member}\` takes ${arity} argument${arity === 1 ? '' : 's'}; it was called with ${ops.length}`,
-      ],
-      ce.function(member, [...ops], { form: 'raw' }).toString()
-    );
+  const shape = requirementShape(ce, selected.record, member);
+  let exactSources: ReadonlyArray<Expression | undefined> | undefined;
+  if (shape !== null) {
+    const { min, max } = requirementArity(shape);
+    if (ops.length < min || ops.length > max) {
+      const takes = min === max ? `${max}` : `from ${min} to ${max}`;
+      return ce.error(
+        [
+          'protocol-signature-mismatch',
+          `\`${selected.record.name}.${member}\` takes ${takes} argument${max === 1 ? '' : 's'}; it was called with ${ops.length}`,
+        ],
+        ce.function(member, [...ops], { form: 'raw' }).toString()
+      );
+    }
+    // The requirement owns its defaults, and every implementation takes the
+    // full argument list (CE-1554): a parameter that the call leaves out
+    // receives the default of the SELECTED requirement, evaluated as the
+    // written arguments were, so that a host callback receives the value of
+    // a constant, not its symbol. A supplied argument is passed as it is,
+    // also an absent value (`Missing`), as for every other function.
+    if (ops.length < max) {
+      const defaults = requirementDefaults(
+        ce,
+        selected.record,
+        member,
+        shape
+      ).slice(ops.length - min);
+      // Under `.N()` an expression implementation reads the exact value of
+      // an argument near a jump of its body from the argument's source
+      // (`ApplyOptions.exactSources`): the source of a default is the boxed
+      // default.
+      if (
+        options.numericApproximation === true &&
+        isExpressionImplementation(selected.impl)
+      )
+        exactSources = [
+          ...writtenExactSources(ce, ops, options.expression),
+          ...defaults.map((d) => defaultExactSource(ce, d)),
+        ];
+      ops = [
+        ...ops,
+        ...defaults.map((d) => d.evaluate(operandOptions(options))),
+      ];
+    }
+  }
 
   // …and the SELECTED requirement's parameter types, for the same reason: the
   // static check runs on the candidate set (and not at all when the receiver
@@ -5778,7 +5986,57 @@ function dispatchMember(
   );
   if (mismatch !== null) return mismatch;
 
-  return invokeImplementation(ce, selected.impl, ops, options);
+  return invokeImplementation(
+    ce,
+    selected.impl,
+    ops,
+    options,
+    exactSources ?? writtenExactSources(ce, ops, options.expression)
+  );
+}
+
+/**
+ * The exact source of the boxed default `d` of a requirement under `.N()`,
+ * read from what `d` is bound to, never from its name where the call is
+ * made: a local of the same name in the caller is not the default
+ * ({@link REQUIREMENT_DEFAULTS}). A symbol default gives the value of the
+ * definition it was bound to when the protocol was declared, when that
+ * definition is constant; that value then gets the rules of a written
+ * argument (`exactArgumentSources`), except that a value that is itself a
+ * symbol records nothing. `undefined` when there is no such source: the
+ * evaluated default is used.
+ */
+function defaultExactSource(
+  ce: IComputeEngine,
+  d: Expression
+): Expression | undefined {
+  if (!isSymbol(d)) return exactArgumentSources(ce, [d])[0];
+  const def = d.valueDefinition;
+  if (def === undefined || !def.isConstant) return undefined;
+  const value = def.value;
+  if (value === undefined || isSymbol(value)) return undefined;
+  return exactArgumentSources(ce, [value])[0];
+}
+
+/**
+ * The sources of the written arguments `ops` of a dispatched call under
+ * `.N()` (`exactArgumentSources`), read from the call node `expression`:
+ * the bare call `m(args…)`, or the qualified `ProtocolMember(P, m, args…)`.
+ * `undefined` at each position when the node does not hold them.
+ */
+function writtenExactSources(
+  ce: IComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  expression: Expression | undefined
+): ReadonlyArray<Expression | undefined> {
+  const written = !isFunction(expression)
+    ? undefined
+    : expression.operator === 'ProtocolMember'
+      ? expression.ops.slice(2)
+      : expression.ops;
+  if (written === undefined || written.length !== ops.length)
+    return ops.map(() => undefined);
+  return exactArgumentSources(ce, written);
 }
 
 /**
@@ -5797,8 +6055,8 @@ function argumentTypeError(
   requirement: FunctionSignature | null,
   ops: ReadonlyArray<Expression>
 ): Expression | null {
-  const expected = requirement?.args;
-  if (expected === undefined) return null;
+  if (requirement === null) return null;
+  const expected = requirementParameters(requirement);
   for (let i = 1; i < ops.length; i++) {
     const arg = ops[i];
     const type = expected[i]?.type;
@@ -5894,11 +6152,14 @@ function invokeImplementation(
   ce: IComputeEngine,
   impl: Expression | JSImplementation,
   ops: ReadonlyArray<Expression>,
-  options: { numericApproximation?: boolean }
+  options: { numericApproximation?: boolean },
+  exactSources?: ReadonlyArray<Expression | undefined>
 ): Expression | undefined {
   if (isExpressionImplementation(impl))
     return apply(impl, ops, {
       numericApproximation: options.numericApproximation,
+      exactSources:
+        options.numericApproximation === true ? exactSources : undefined,
     });
 
   // A host callback is host code that cannot state its purity: no memo
@@ -6064,18 +6325,43 @@ export function protocolMemberValue(
     return record.members[member] === undefined && record.extends.length > 0
       ? qualifiedMemberError(ce, record, member)
       : undefined;
-  const arity = shape.args?.length ?? 0;
-  const params = parameterNames(shape, arity);
-  return ce.box([
-    'Function',
-    [
-      'ProtocolMember',
-      { str: record.name },
-      { str: member },
-      ...params,
-    ] as unknown as Parameters<IComputeEngine['box']>[0],
-    ...params,
-  ] as unknown as Parameters<IComputeEngine['box']>[0]);
+  const parameters = requirementParameters(shape);
+  const params = parameterNames(shape, parameters.length);
+  // A parameter with a default value is an `Optional` parameter of the
+  // literal, with the requirement's default, so `Figure.rotate(r, a)` calls
+  // the member with the full argument list. It is typed, so that a default
+  // that the parameter type lists (`mode: symbol<Auto> = Auto`) is accepted
+  // as a constant; its type does not mention `Self` (`assertV1MemberShape`).
+  // The default operand is the one boxed when the protocol was declared
+  // ({@link REQUIREMENT_DEFAULTS}).
+  const required = shape.args?.length ?? 0;
+  const defaults = requirementDefaults(ce, record, member, shape);
+  const declared = params.map((name, i) => {
+    const p = parameters[i]!;
+    if (i < required || p.default === undefined) return name;
+    return [
+      'Optional',
+      ['Typed', name, { str: typeToString(p.type) }],
+      defaults[i - required]!,
+    ];
+  });
+  const box = () =>
+    ce.box([
+      'Function',
+      [
+        'ProtocolMember',
+        { str: record.name },
+        { str: member },
+        ...params,
+      ] as unknown as Parameters<IComputeEngine['box']>[0],
+      ...declared,
+    ] as unknown as Parameters<IComputeEngine['box']>[0]);
+  // A literal with a default is canonicalized in the scope of the
+  // dispatchers, where protocols are declared: its canonicalization checks
+  // that a symbol default is a constant, and a local of the same name in the
+  // scope of the call would read as a variable. The body names only the
+  // parameters.
+  return defaults.length === 0 ? box() : ce._inScope(dispatcherScope(ce), box);
 }
 
 /** Parameter names for the wrapper literal: the requirement's own names when
@@ -6083,7 +6369,7 @@ export function protocolMemberValue(
  * `(self, other) => …`), else positional placeholders. The body mentions
  * nothing else, so no capture is possible either way. */
 function parameterNames(shape: FunctionSignature, arity: number): string[] {
-  const declared = (shape.args ?? []).map((a) => a.name);
+  const declared = requirementParameters(shape).map((a) => a.name);
   const fallback = Array.from({ length: arity }, (_, i) => `x${i + 1}`);
   if (declared.length !== arity) return fallback;
   if (declared.some((n) => n === undefined)) return fallback;
@@ -6107,7 +6393,7 @@ function protocolMemberOperandsOf(
 export function evaluateProtocolMember(
   ce: IComputeEngine,
   ops: ReadonlyArray<Expression>,
-  options: { numericApproximation?: boolean }
+  options: Partial<EvaluateOptions> & { expression?: Expression }
 ): Expression | undefined {
   const parts = protocolMemberOperandsOf(ops);
   if (parts === null) return undefined;

@@ -53,6 +53,42 @@ protocol Copyable {}
 type string is Copyable
 ```
 
+### Default values
+
+A parameter of a protocol function after the required ones can have a
+[default value](/epsil/control-flow/#default-values). The protocol owns the default: a call
+that leaves the argument out receives it, and every implementation takes
+the full parameter list.
+
+```epsil-live
+protocol Figure {
+  function stroke(self: Self, color: string, width: real = 1) -> Self
+}
+type Pen = tuple<color: string, width: real>
+type Pen is Figure {
+  function stroke(self: Pen, color: string, width: real) -> Pen { Pen(color, width) }
+}
+let p = Pen("black", 3)
+(p.stroke("red").width, p.stroke("red", 4).width, Figure.stroke(p, "blue").width)
+// ➔ (1, 4, 1)
+```
+
+An implementation that leaves out `width`, or gives it another default, is
+the `protocol-signature-mismatch` error; it may repeat the default
+`width: real = 1`. A default is a constant, as for any function: a number, a
+string, a boolean, `[]`, `{}`, or a constant symbol. A `protocol` statement
+is declared before the other statements of its program, so a symbol default
+names a library constant (`pi`) or a constant declared earlier, by the host
+or by an earlier program, not a `const` of the same program. A parameter
+without a default cannot be optional, and a parameter whose type mentions
+`Self` cannot have a default: the default is checked when the protocol is
+declared, before `Self` is known. Both are `invalid-protocol-declaration`.
+
+A named argument cannot skip a parameter with a default in a bare or a
+method call: with `function sc(self: Self, a: real = 1, b: real = 2)`,
+`sc(x, b: 5)` is `argument-optional-skipped`. Write the qualified call
+`S.sc(x, b: 5)`, or the argument: `sc(x, 1, 5)`.
+
 ## Conforming a type
 
 The `is` keyword declares that a type conforms, and a braced block after it

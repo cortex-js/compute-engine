@@ -351,21 +351,404 @@ describe('PARAMETER DEFAULT VALUES — invalid defaults', () => {
       ],
     ]);
   });
+});
 
-  test('a protocol requirement with a default is refused', () => {
-    // The same check as an optional parameter (`k: number?`): protocol
-    // dispatch assumes a fixed arity.
-    const r = run(`protocol Scalable {
+describe('PARAMETER DEFAULT VALUES — protocol requirements', () => {
+  // CE-1554: the REQUIREMENT owns the default, the dispatcher fills it, and
+  // every implementation receives the full argument list.
+  const SCALABLE = `protocol Scalable {
   function scale(self, k: number = 2) -> number
+}
+type Money = tuple<cents: integer>
+`;
+  const IMPLEMENTED = `${SCALABLE}type Money is Scalable {
+  function scale(self: Money, k: number) -> number { self.cents * k }
+}
+`;
+
+  test('a call that leaves the argument out receives the default', () => {
+    expect(
+      value(
+        `${IMPLEMENTED}[scale(Money(3)), Money(3).scale(), Scalable.scale(Money(3))]`
+      )
+    ).toEqual(['List', 6, 6, 6]);
+  });
+
+  test('an argument that the call supplies is passed', () => {
+    expect(
+      value(
+        `${IMPLEMENTED}[scale(Money(3), 5), Money(3).scale(5), Scalable.scale(Money(3), 5)]`
+      )
+    ).toEqual(['List', 15, 15, 15]);
+  });
+
+  test('the canonical call keeps the arguments as written', () => {
+    // The default is filled when the call is evaluated, from the requirement
+    // that dispatch selects, so that a later declaration of the protocol
+    // with another default applies to a call made before it.
+    const { ce } = run(IMPLEMENTED);
+    const short = ce.box(['scale', ['Money', 3]]);
+    expect(short.json).toEqual(['scale', ['Money', 3]]);
+    expect(short.evaluate().json).toBe(6);
+    expect(ce.lookupDefinition('scale')?.operator?.signature.toString()).toBe(
+      '(self: any, k: any?) -> unknown'
+    );
+  });
+
+  test('a later declaration of the protocol with another default applies', () => {
+    const ce = new ComputeEngine();
+    const first = executeEpsil(
+      ce,
+      `protocol P { function f(self: Self, k: real = 2) -> real }
+type Money = tuple<cents: integer>
+type Money is P { function f(self: Money, k: real) -> real { k } }
+function g(m: Money) { f(m) }
+g(Money(1))`
+    );
+    expect(first.diagnostics).toEqual([]);
+    expect(first.value?.json).toBe(2);
+    const second = executeEpsil(
+      ce,
+      `protocol P { function f(self: Self, k: real = 3) -> real }
+g(Money(1))`
+    );
+    expect(second.diagnostics).toEqual([]);
+    expect(second.value?.json).toBe(3);
+  });
+
+  test('a default that the parameter type lists', () => {
+    // `Auto` is not declared: the type lists it, so it is a constant.
+    expect(
+      value(`protocol P { function f(self: Self, mode: symbol<Auto> | symbol<Manual> = Auto) -> symbol }
+type Money = tuple<cents: integer>
+type Money is P { function f(self: Money, mode: symbol<Auto> | symbol<Manual>) -> symbol { mode } }
+let x = Money(1)
+[f(x), x.f(), P.f(x), f(x, Manual)]`)
+    ).toEqual(['List', 'Auto', 'Auto', 'Auto', 'Manual']);
+  });
+
+  test('a symbol default is the constant of the declaring scope', () => {
+    // A local `D` where the member is called does not replace the constant
+    // `D` that the protocol was declared with.
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, 'const D = 5').diagnostics).toEqual([]);
+    const r = executeEpsil(
+      ce,
+      `protocol P { function f(self: Self, k: real = D) -> real }
+type Money = tuple<cents: integer>
+type Money is P { function f(self: Money, k: real) -> real { k } }
+function g(m: Money) { let D = 100; [f(m), m.f(), P.f(m), P.f(m, D)] }
+g(Money(1))`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value?.json).toEqual(['List', 5, 5, 5, 100]);
+  });
+
+  test('a host implementation receives the value of a constant default', () => {
+    const ce = new ComputeEngine();
+    ce.declare('W', { value: 7, isConstant: true });
+    ce.declareProtocol('Q', {
+      functions: { q: '(self: Self, k: real = W) -> any' },
+    });
+    ce.declareProtocolImplementation('real', 'Q', {
+      functions: {
+        q: (_x: any, k: any) => ce.string(JSON.stringify(k.json)),
+      },
+    });
+    expect(ce.box(['q', 1]).evaluate().json).toBe("'7'");
+    expect(ce.box(['q', 1, 'W']).evaluate().json).toBe("'7'");
+  });
+
+  test('under `.N()` a default keeps its exact source near a jump', () => {
+    // The float of `(25! - 1)/24!` is 25; its floor is 24.
+    const ce = new ComputeEngine();
+    ce.declare('D', {
+      value: ['Divide', ['Subtract', ['Factorial', 25], 1], ['Factorial', 24]],
+      isConstant: true,
+    });
+    expect(
+      executeEpsil(
+        ce,
+        `protocol P { function f(self: Self, k: real = D) -> integer }
+type Money = tuple<cents: integer>
+type Money is P { function f(self: Money, k: real) -> integer { floor(k) } }`
+      ).diagnostics
+    ).toEqual([]);
+    const n = (x: any) => ce.box(x).N().toString();
+    expect(n(['f', ['Money', 1]])).toBe('24');
+    expect(n(['f', ['Money', 1], 'D'])).toBe('24');
+    expect(n(['ProtocolMember', "'P'", "'f'", ['Money', 1]])).toBe('24');
+  });
+
+  test('under `.N()` a local of the caller does not replace a constant default', () => {
+    // The `floor` makes the body read the exact source of `k` under `.N()`.
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, 'const D = 5').diagnostics).toEqual([]);
+    const r = executeEpsil(
+      ce,
+      `protocol P { function f(self: Self, k: real = D) -> real }
+type Money = tuple<cents: integer>
+type Money is P { function f(self: Money, k: real) -> real { floor(k) } }
+function g(m: Money) { let D = 100; f(m) }`
+    );
+    expect(r.diagnostics).toEqual([]);
+    const call = ce.box(['g', ['Money', 1]]);
+    expect(call.N().toString()).toBe('5');
+  });
+
+  test('a default reaches a host implementation as a written operand', () => {
+    // The `materialization` option is for the result of the call: the
+    // implementation receives the lazy `Range`, not its preview.
+    const ce = new ComputeEngine();
+    ce.declare('R', { value: ['Range', 1, 5000], isConstant: true });
+    ce.declareProtocol('Q', {
+      functions: { q: '(self: Self, k: any = R) -> any' },
+    });
+    ce.declareProtocolImplementation('real', 'Q', {
+      functions: { q: (_x: any, k: any) => k.count },
+    });
+    expect(ce.box(['q', 1]).evaluate({ materialization: [5, 5] }).json).toBe(
+      5000
+    );
+    expect(
+      ce.box(['q', 1, 'R']).evaluate({ materialization: [5, 5] }).json
+    ).toBe(5000);
+  });
+
+  test('a named argument after a skipped parameter with a default', () => {
+    // A known limitation: the bare and the method call fill the default
+    // when they are evaluated, so a named argument that skips a parameter
+    // with a default is `argument-optional-skipped`. The qualified call
+    // fills it.
+    const r =
+      run(`protocol S { function sc(self: Self, a: real = 1, b: real = 2) -> real }
+type Money = tuple<cents: integer>
+type Money is S { function sc(self: Money, a: real, b: real) -> real { a * 10 + b } }
+let x = Money(1)
+[sc(x, 3), S.sc(x, b: 5), sc(x, b: 5)]`);
+    expect(r.diagnostics.map((m: any) => m[m.length - 1])).toEqual([
+      'argument-optional-skipped',
+    ]);
+    const [, written, qualified, bare] = r.value as unknown[];
+    expect(written).toBe(32);
+    expect(qualified).toBe(15);
+    expect(JSON.stringify(bare)).toContain('argument-optional-skipped');
+  });
+
+  test('an implementation with an optional parameter without a default is refused', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('S', {
+      functions: { sc: '(self: Self, k: number = 2) -> number' },
+    });
+    const r = ce
+      .box([
+        'DeclareConformance',
+        { str: 'real' },
+        ['List', 'S'],
+        [
+          'Dictionary',
+          [
+            'KeyValuePair',
+            'sc',
+            [
+              'Function',
+              1,
+              ['Typed', 'self', { str: 'real' }],
+              ['Optional', ['Typed', 'k', { str: 'number' }]],
+            ],
+          ],
+        ],
+      ] as any)
+      .evaluate();
+    expect(JSON.stringify(r.json)).toContain(
+      'argument 2 is optional; an implementation takes every parameter of the requirement'
+    );
+  });
+
+  test('a supplied absent value is passed, not replaced by the default', () => {
+    // As for every other function: a default fills only an argument that
+    // the call leaves out.
+    expect(
+      value(`protocol Probe { function probe(self: Self, k: any = 2) -> boolean }
+type Money = tuple<cents: integer>
+type Money is Probe { function probe(self: Money, k) -> boolean { isMissing(k) } }
+[probe(Money(3)), probe(Money(3), Missing), Money(3).probe(Missing)]`)
+    ).toEqual(['List', 'False', 'True', 'True']);
+  });
+
+  test('an implementation may repeat the default', () => {
+    expect(
+      value(`${SCALABLE}type Money is Scalable {
+  function scale(self: Money, k: number = 2) -> number { self.cents * k }
+}
+scale(Money(4))`)
+    ).toBe(8);
+  });
+
+  test('an implementation that leaves out the parameter with a default is refused', () => {
+    const r = run(`${SCALABLE}type Money is Scalable {
+  function scale(self: Money) -> number { self.cents }
 }`);
-    expect(r.value).toEqual([
+    expect(JSON.stringify(r.value)).toContain('protocol-signature-mismatch');
+    expect(JSON.stringify(r.value)).toContain(
+      'it takes 1 parameter; the requirement takes 2, and an implementation takes the parameters with a default value too'
+    );
+  });
+
+  test('an implementation that declares another default is refused', () => {
+    const r = run(`${SCALABLE}type Money is Scalable {
+  function scale(self: Money, k: number = 3) -> number { self.cents * k }
+}`);
+    expect(JSON.stringify(r.value)).toContain('protocol-signature-mismatch');
+    expect(JSON.stringify(r.value)).toContain(
+      'argument 2 declares the default value 3; the requirement declares 2'
+    );
+  });
+
+  test('a default on a parameter whose type mentions `Self` is refused', () => {
+    expect(
+      run(`protocol Figure {
+  function rotate(self: Self, angle: real, about: Self = 0) -> Self
+}`).value
+    ).toEqual([
       'Error',
       [
         'ErrorCode',
         "'invalid-protocol-declaration'",
-        "'The signature of `Scalable.scale` declares an optional argument; a protocol member may not be optional, variadic or generic'",
+        `'The signature of \`Figure.rotate\` declares a default value on the parameter "about" of type \`Self\`; a default value of a protocol member cannot be on a parameter whose type mentions \`Self\`'`,
       ],
-      "'Scalable'",
+      "'Figure'",
+    ]);
+  });
+
+  test('an optional parameter without a default is refused', () => {
+    expect(
+      JSON.stringify(
+        run(`protocol Scalable { function scale(self, k: number?) -> number }`)
+          .value
+      )
+    ).toContain(
+      'declares an optional argument without a default value; a protocol member may not be variadic or generic, and an optional argument must have a default value'
+    );
+  });
+
+  test('a default that is not a constant, or does not fit its type, is refused', () => {
+    expect(
+      JSON.stringify(
+        run(`protocol P { function f(self, k: real = "a") -> real }`).value
+      )
+    ).toContain(
+      'the default value \\"a\\" of the parameter \\"k\\" does not match its type \\"real\\"'
+    );
+    expect(
+      JSON.stringify(
+        run(`protocol P { function f(self, k: real = W) -> real }`).value
+      )
+    ).toContain('a default value is a constant');
+  });
+
+  test('a `const` of the same program is not a constant for a protocol default', () => {
+    // A `protocol` statement is declared before the other statements of its
+    // program; a constant of an earlier program on the same engine is one.
+    const source = `protocol P { function f(self, k: real = W) -> real }`;
+    expect(JSON.stringify(run(`const W = 2\n${source}`).diagnostics)).toContain(
+      'a default value is a constant'
+    );
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, 'const W = 2').diagnostics).toEqual([]);
+    expect(executeEpsil(ce, source).value?.json).toBe('Nothing');
+  });
+
+  test('two protocols that give the member different defaults', () => {
+    // The dispatcher's signature carries no default, and the default of the
+    // requirement that dispatch selects is filled when the call is evaluated.
+    const r =
+      run(`protocol A { function scale(self: Self, k: real = 2) -> real }
+protocol B { function scale(self: Self, k: real = 3) -> real }
+type Money = tuple<cents: integer>
+type Coin = tuple<n: integer>
+type Money is A { function scale(self: Money, k: real) -> real { self.cents * k } }
+type Coin is B { function scale(self: Coin, k: real) -> real { self.n * k } }
+[scale(Money(3)), scale(Coin(3)), scale(Coin(3), 1), A.scale(Money(1)), B.scale(Coin(1))]`);
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value).toEqual(['List', 6, 9, 3, 2, 3]);
+    expect(r.ce.lookupDefinition('scale')?.operator?.signature.toString()).toBe(
+      '(self: any, k: any?) -> unknown'
+    );
+  });
+
+  test('a receiver whose type is decided when the call runs', () => {
+    expect(value(`${IMPLEMENTED}function g(m) { scale(m) }\ng(Money(3))`)).toBe(
+      6
+    );
+  });
+
+  test('a member with a library twin: the twin receives the arguments as written', () => {
+    // `round` is the Epsil spelling of the library `Round`. A first argument
+    // that conforms calls the member with the default; one that conforms to
+    // no protocol of the member calls `Round` with its one argument.
+    expect(
+      value(`protocol Roundable { function round(self: Self, digits: integer = 0) -> real }
+type Money = tuple<cents: integer>
+type Money is Roundable { function round(self: Money, digits: integer) -> real { self.cents + digits } }
+[round(Money(3)), round(Money(3), 2), Money(3).round(), Roundable.round(Money(3)), round(2.7)]`)
+    ).toEqual(['List', 3, 5, 3, 3, 3]);
+  });
+
+  test('a protocol declared by the host takes defaults too', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('Sized', {
+      functions: { size: '(self: Self, scale: real = 10) -> real' },
+    });
+    ce.declareProtocolImplementation('real', 'Sized', {
+      functions: { size: (x: any, k: any) => x.re * k.re },
+    });
+    expect(ce.box(['size', 3]).evaluate().json).toBe(30);
+    expect(ce.box(['size', 3, 2]).evaluate().json).toBe(6);
+    expect(
+      ce.box(['ProtocolMember', "'Sized'", "'size'", 3]).evaluate().json
+    ).toBe(30);
+    expect(ce.box(['size', 1, 2, 3]).evaluate().toString()).toContain(
+      'unexpected-argument'
+    );
+  });
+
+  test('the Figure example of CE-1554', () => {
+    // The constant `Origin` is declared by an earlier program, as a prelude
+    // declares it.
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, 'const Origin = (0, 0)').diagnostics).toEqual([]);
+    const r = executeEpsil(
+      ce,
+      `protocol Figure {
+  function rotate(self: Self, angle: real, about: tuple<real, real> = Origin) -> Self
+  function stroke(self: Self, color: string, width: real = 1) -> Self
+}
+type Box = tuple<w: real, about: tuple<real, real>, color: string, width: real>
+type Box is Figure {
+  function rotate(self: Box, angle: real, about: tuple<real, real>) -> Box { Box(self.w + angle, about, self.color, self.width) }
+  function stroke(self: Box, color: string, width: real) -> Box { Box(self.w, self.about, color, width) }
+}
+let r = Box(1, (5, 5), "black", 3)
+[r.rotate(2), r.rotate(2, (1, 2)), rotate(r, 2), Figure.rotate(r, 2), Figure.rotate(r, 2, (3, 4)), r.stroke("red"), r.stroke("red", 4)]`
+    );
+    expect(r.diagnostics).toEqual([]);
+    const box = (about: unknown, color: string, width: number) => [
+      'Box',
+      3,
+      about,
+      `'${color}'`,
+      width,
+    ];
+    expect(r.value?.json).toEqual([
+      'List',
+      box(['Tuple', 0, 0], 'black', 3),
+      box(['Tuple', 1, 2], 'black', 3),
+      box(['Tuple', 0, 0], 'black', 3),
+      box(['Tuple', 0, 0], 'black', 3),
+      box(['Tuple', 3, 4], 'black', 3),
+      ['Box', 1, ['Tuple', 5, 5], "'red'", 1],
+      ['Box', 1, ['Tuple', 5, 5], "'red'", 4],
     ]);
   });
 });

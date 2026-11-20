@@ -37,11 +37,17 @@ type of the default, and the rules of the
 engine completes a call at canonicalization, so `f(3)` and `f(3, 2)` are one
 expression.
 
+A parameter of a protocol requirement can have a default too
+(`function stroke(self: Self, color: string, width: real = 1) -> Self`):
+the requirement owns it, the dispatcher fills it when the call is
+evaluated, and every implementation takes the full parameter list (`docs/TYPE_SYSTEM_ROADMAP.md`, "Signature
+matching"). A requirement refuses an optional parameter without a default,
+and a default on a parameter whose type mentions `Self`, with
+`invalid-protocol-declaration`.
+
 Limits of v1: a multi-clause function cannot have a default in any clause
 (the engine refuses the second clause, "a default value in an overloaded
-signature is not supported yet"), and a protocol requirement cannot have one
-(`engine-protocols.ts` refuses an optional member with
-`invalid-protocol-declaration`). When a definition has an effect specifier
+signature is not supported yet"). When a definition has an effect specifier
 or a type-parameter clause, its signature marker lists a defaulted parameter
 with its type only (`k: number`): the type language admits a default only in
 a top-level signature, and the `Optional` operand carries the default.

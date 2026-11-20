@@ -1806,10 +1806,10 @@ requirement imposes no effect bound at all — the dispatcher's effects are
 derived from the conformers registered at the time, and a conformer that
 mutates is admitted.
 
-v1 restrictions: same arity (no optional or variadic parameters in protocol
-members), no generic protocol members, and exactly one implementation
-function per requirement (no overload arms). A mismatch emits
-`protocol-signature-mismatch`:
+v1 restrictions: same arity (no variadic parameters in protocol members,
+and no optional parameter without a default value), no generic protocol
+members, and exactly one implementation function per requirement (no
+overload arms). A mismatch emits `protocol-signature-mismatch`:
 
 ```epsil
 type string is Comparable {
@@ -1823,6 +1823,41 @@ type string is Comparable {
   }
 }
 ```
+
+A parameter of a requirement after the required ones may have a default
+value (CE-1554): `function stroke(self: Self, color: string, width: real =
+1) -> Self`. The requirement owns the default. A call may leave the
+argument out, `r.stroke("red")`, and the dispatcher fills the default, so
+every implementation receives the full argument list. An implementation
+takes every parameter of the requirement: one that leaves out the defaulted
+parameter, or declares another default for it, is a
+`protocol-signature-mismatch`; it may repeat the requirement's default. A
+default follows the rules of an operator definition
+(`docs/plans/2026-10-31-parameter-default-values.md`, R1 to R4): a constant
+that matches the parameter type. A default on a parameter whose type
+mentions `Self` is refused, because the default is checked when the protocol
+is declared, before `Self` is bound. The default is boxed once, when the
+protocol is declared, in the declaring scope, so a symbol default is the
+constant of that scope, also where a local of the same name is in scope at
+the call. The call keeps the arguments as written, and the default of the
+requirement that dispatch selects is filled, and evaluated, when the call is
+evaluated: `stroke(r, "red")` and `stroke(r, "red", 1)` are two canonical
+expressions with one value, a later declaration of the protocol with
+another default applies to a call made before it, and a library twin (name
+resolution, rule 1) receives the arguments as written. The method form
+`r.stroke("red")` and the qualified form `Figure.stroke(r, "red")` take the
+same default. A supplied argument is never replaced, also when it is absent
+(`Missing`). A `protocol` statement is declared before the other statements
+of its program, so a symbol default names a constant of the library, of the
+host, or of an earlier program, not a `const` of the same program.
+
+A known limitation: a named argument cannot skip a parameter with a default
+in a bare or a method call. With
+`function sc(self: Self, a: real = 1, b: real = 2) -> real`, `sc(x, b: 5)`
+and `x.sc(b: 5)` are `argument-optional-skipped`, because the names are
+matched when the call is canonicalized and the default is filled only when
+it is evaluated. The qualified call `S.sc(x, b: 5)` works (it is
+`S.sc(x, 1, 5)`), and so does the positional call `sc(x, 1, 5)`.
 
 #### Property implementations
 
@@ -2122,8 +2157,11 @@ produces the ordinary runtime error value when no implementation applies.
    protocol of the member (a conformance that is still pending included),
    the member is called, also when the library function would accept the
    call; otherwise the library function is. A call with an arity that no
-   requirement has, on a first argument of a decided type that conforms to
-   none, is the library function's. A first argument whose static
+   requirement admits (from its required parameters to all of them), on a
+   first argument of a decided type that conforms to none, is the library
+   function's. The library function receives the arguments as written: a
+   default value of the requirement is filled only for a call of the
+   member. A first argument whose static
    type is known to conform to none of the protocols that have conformances
    is resolved when the call is canonicalized, and keeps that verdict; one
    that is not known to conform (an undecided type, a supertype of a
