@@ -116,6 +116,38 @@ import {
   sincImaginaryAxis,
 } from '../numerics/sinc-fresnel-complex.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
+import { bigRealOperand, boxBignumApprox } from './arithmetic.js';
+import {
+  bigCoshIntegral,
+  bigCosIntegral,
+  bigSinhIntegral,
+  bigSinIntegral,
+} from '../numerics/trigonometric-integral-big.js';
+
+/**
+ * `kernel(|t|)` of a real `t` ≠ 0 above machine precision, as `Ci` and `Chi`
+ * take it: the principal value `f(−x) = f(x) + iπ` for a negative `t`. The
+ * call stays unevaluated (`undefined`) where the kernel declines.
+ */
+function bigPrincipalValue(
+  ce: IComputeEngine,
+  t: BigDecimal,
+  kernel: (
+    ce: IComputeEngine,
+    x: BigDecimal,
+    prec: number
+  ) => BigDecimal | undefined
+): Expression | undefined {
+  const value = kernel(ce, t.abs(), ce.precision);
+  if (value === undefined) return undefined;
+  if (!t.isNegative()) return boxBignumApprox(ce, value);
+  return ce.number(
+    ce._inexactNumericValue({
+      re: value,
+      im: BigDecimal.pi(ce.precision).toPrecision(ce.precision),
+    })
+  );
+}
 
 /**
  * Whether a `Hypot` leg has an infinite magnitude, which makes the hypotenuse
@@ -1525,9 +1557,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
     /**
      * SinIntegral(x) = ∫₀ˣ sin t / t dt — odd function, Si(±∞) = ±π/2.
-     * Numeric evaluation is machine-precision only (no bignum kernel); like
-     * the other special functions it does not yet honor `ce.precision` beyond
-     * machine precision (ROADMAP B1).
+     * A real argument above machine precision has the digits asked for or the
+     * head stays unevaluated (`bigSinIntegral`); a complex argument is
+     * machine-precision.
      */
     SinIntegral: {
       examples: ['SinIntegral(+oo)', 'N(SinIntegral(1))'],
@@ -1567,7 +1599,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         // Exact special values, regardless of numericApproximation.
         const point = infinitePoint(x);
@@ -1588,9 +1620,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // past the number range (`Si(1000i)`) stays unevaluated.
         const onAxis = applyOnImaginaryAxis(x, (y) => [0, sinhIntegral(y)]);
         if (onAxis !== undefined) return onAxis ?? undefined;
+        // Above machine precision a real argument has the digits asked for
+        // or the head stays unevaluated, never a double.
+        if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re)) {
+          const value = bigSinIntegral(ce, bigRealOperand(ce, x), ce.precision);
+          return value === undefined ? undefined : boxBignumApprox(ce, value);
+        }
         // Real args use the machine kernel; complex args the E₁-based kernel.
         return apply(x, (x) => sinIntegral(x), undefined, sinIntegralComplex);
-      },
+      }),
     },
 
     /**
@@ -1599,7 +1637,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
      * iπ` (Mathematica's `CosIntegral[-1]` is `0.337 + 3.142i`; the engine's
      * own `Ln(−1) = iπ` is the same convention; ruling recorded in
      * `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
-     * batch 8). Machine-precision only (no bignum kernel; ROADMAP B1).
+     * batch 8). Above machine precision a real argument has the digits
+     * asked for or the head stays unevaluated (`bigCosIntegral`).
      */
     CosIntegral: {
       examples: ['N(CosIntegral(1))'],
@@ -1641,7 +1680,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         // Exact special values, regardless of numericApproximation.
         const point = infinitePoint(x);
@@ -1665,6 +1704,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           Math.sign(y) * (Math.PI / 2),
         ]);
         if (onAxis !== undefined) return onAxis ?? undefined;
+        // Above machine precision a real argument has the digits asked for
+        // or the head stays unevaluated, never a double. A negative one is
+        // the principal value `Ci(−x) = Ci(x) + iπ`.
+        if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re))
+          return bigPrincipalValue(ce, bigRealOperand(ce, x), bigCosIntegral);
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Ci(−x) = Ci(x) + iπ`, built from
         // the real kernel (the complex kernel hands an exactly-real
@@ -1676,12 +1720,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           undefined,
           cosIntegralComplex
         );
-      },
+      }),
     },
 
     /**
      * SinhIntegral(x) = ∫₀ˣ sinh(t)/t dt — odd and entire, Shi(±∞) = ±∞.
-     * Machine-precision only (no bignum kernel; ROADMAP B1).
+     * Above machine precision a real argument has the digits asked for or the
+     * head stays unevaluated (`bigSinhIntegral`).
      */
     SinhIntegral: {
       examples: ['SinhIntegral(0)', 'N(SinhIntegral(1))'],
@@ -1715,7 +1760,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           );
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         // Exact special values, regardless of numericApproximation
         const point = infinitePoint(x);
@@ -1730,16 +1775,27 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // 0, and the real kernel of Si computes the other part.
         const onAxis = applyOnImaginaryAxis(x, (y) => [0, sinIntegral(y)]);
         if (onAxis !== undefined) return onAxis ?? undefined;
+        // Above machine precision a real argument has the digits asked for
+        // or the head stays unevaluated, never a double.
+        if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re)) {
+          const value = bigSinhIntegral(
+            ce,
+            bigRealOperand(ce, x),
+            ce.precision
+          );
+          return value === undefined ? undefined : boxBignumApprox(ce, value);
+        }
         // Real args use the machine kernel; complex args the Si-based kernel.
         return apply(x, (x) => sinhIntegral(x), undefined, sinhIntegralComplex);
-      },
+      }),
     },
 
     /**
      * CoshIntegral(x) = γ + ln|x| + ∫₀ˣ (cosh t − 1)/t dt — Chi(0⁺) = −∞,
      * Chi(∞) = ∞. For x < 0 the value is the PRINCIPAL one, `Chi(−x) =
      * Chi(x) + iπ` (the `CosIntegral` convention above).
-     * Machine-precision only (no bignum kernel; ROADMAP B1).
+     * Above machine precision a real argument has the digits asked for or the
+     * head stays unevaluated (`bigCoshIntegral`).
      */
     CoshIntegral: {
       examples: ['N(CoshIntegral(1))'],
@@ -1782,7 +1838,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         // Exact special values, regardless of numericApproximation.
         const point = infinitePoint(x);
@@ -1799,6 +1855,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           Math.sign(y) * (Math.PI / 2),
         ]);
         if (onAxis !== undefined) return onAxis ?? undefined;
+        // Above machine precision a real argument has the digits asked for
+        // or the head stays unevaluated, never a double. A negative one is
+        // the principal value `Chi(−x) = Chi(x) + iπ`.
+        if (bignumPreferred(ce) && !x.isComplex && !Number.isNaN(x.re))
+          return bigPrincipalValue(ce, bigRealOperand(ce, x), bigCoshIntegral);
         // A non-negative real argument uses the machine kernel; a negative
         // real one is the principal value `Chi(−x) = Chi(x) + iπ`, built
         // from the real kernel (see `CosIntegral` above).
@@ -1809,7 +1870,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           undefined,
           coshIntegralComplex
         );
-      },
+      }),
     },
 
     /* converts (radius, angle) -> (x, y) */

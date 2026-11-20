@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `AiryAiPrime`
+  and `AiryBiPrime` of a real argument carry the precision asked for.** At
+  `ce.precision = 50`, `SinIntegral(0.7)` was the double `0.6812222391166113`;
+  it is `0.68122223911661131088950681145394251597654289921409`. The same for the
+  other four, and for `AiryAiPrime(0.7)` and `AiryBiPrime(0.7)`. A value the
+  engine cannot compute to the digits asked for stays unevaluated: the four
+  integrals past `|x| = 1000`, `AiryBiPrime(200)` and `AiryAiPrime(10001)` were
+  doubles (or `+∞`) and are now left as written. `CosIntegral(-3)` and
+  `CoshIntegral(-3)` are the principal value `f(3) + iπ` with both parts at the
+  working precision. Complex arguments and machine precision are unchanged.
+  (#628, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.194.2 _2026-11-19_
 
 ### Breaking Changes
