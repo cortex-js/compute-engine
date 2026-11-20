@@ -22,7 +22,10 @@ import {
   verifiedListHypothesis,
   beginSignatureDerivation,
   endSignatureDerivation,
+  nextDerivationPhase,
+  keepSignatureInFrame,
   noteReentrantSignatureRead,
+  signatureDerivedInFrame,
   type SignatureDerivationFrame,
   withSignatureResult,
   type HomeScope,
@@ -1418,12 +1421,38 @@ export class _BoxedValueDefinition
             this._engine._typeResolver
           );
     }
+    // A signature derived earlier in the same state of the frames below
+    // (`signatureDerivedInFrame`). The key holds what the derivation also
+    // reads: the recorded type, the skeleton, the literal, the earlier
+    // derivation that gives the hypothesis, the engine versions and the
+    // definitions of the free symbols of the body in the scope of the read.
+    // A literal whose type is in flight is left out: its type cell answers
+    // an earlier type that no frame records. So is a derivation whose result
+    // may be discarded, for the reason given where the memo is stored below.
+    const frameKey =
+      typeInFlight || this._engine._resultMayBeDiscarded()
+        ? undefined
+        : [
+            recorded,
+            skeleton,
+            v,
+            previous,
+            this._definitionsKey(),
+            declaredResultMemoKey(this._engine, v),
+            ...this._freeSymbolDefinitions(v),
+          ];
+    if (frameKey !== undefined) {
+      const kept = signatureDerivedInFrame(frame, this, frameKey);
+      if (kept !== undefined) return this._noted(kept.type, kept.calleeHomes);
+    }
+    nextDerivationPhase(frame);
     this._derivingSignature = true;
     this._recursionResult = hypothesis;
     try {
       valueType = v.type;
     } finally {
       this._derivingSignature = false;
+      nextDerivationPhase(frame);
       this._recursionResult = undefined;
     }
     // The memo keys on the value's type by CONTENT: the object is rebuilt
@@ -1442,8 +1471,19 @@ export class _BoxedValueDefinition
       memo.valueType === valueTypeKey &&
       memo.versions === declaredResultMemoKey(this._engine, v) &&
       calleeHomesDeclarationCount(memo.calleeHomes) === memo.calleeCount
-    )
+    ) {
+      // The type of the literal can depend on provisional answers too: the
+      // next read in the same state skips it.
+      if (frameKey !== undefined && !this._engine._resultMayBeDiscarded())
+        keepSignatureInFrame(
+          frame,
+          this,
+          frameKey,
+          memo.type,
+          memo.calleeHomes
+        );
       return this._noted(memo.type, memo.calleeHomes);
+    }
     // The stored literal reads its scalar parameters as `unknown`; its
     // result under the DECLARED parameter types is the accurate one to
     // report (`resultUnderDeclaredParameters`).
@@ -1455,6 +1495,7 @@ export class _BoxedValueDefinition
     // while the result is derived (`collectCalleeHomes`).
     let typedResult: Type | undefined;
     let calleeHomes: HomeScope[];
+    nextDerivationPhase(frame);
     this._derivingSignature = true;
     try {
       ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
@@ -1469,6 +1510,7 @@ export class _BoxedValueDefinition
       ));
     } finally {
       this._derivingSignature = false;
+      nextDerivationPhase(frame);
     }
     // A self-recursive body whose result is an abstract collection is
     // re-typed under the hypothesis that the result is a list, and the
@@ -1483,12 +1525,14 @@ export class _BoxedValueDefinition
       this.name,
       typedResult ?? functionResult(valueType.type),
       (candidate, thunk) => {
+        nextDerivationPhase(frame);
         this._recursionResult = candidate;
         this._derivingSignature = true;
         try {
           return thunk();
         } finally {
           this._derivingSignature = false;
+          nextDerivationPhase(frame);
           this._recursionResult = undefined;
         }
       }
@@ -1553,6 +1597,8 @@ export class _BoxedValueDefinition
         definitions: this._definitionsKey(),
         freeDefinitions: this._freeSymbolDefinitions(v),
       };
+    else if (frameKey !== undefined && !this._engine._resultMayBeDiscarded())
+      keepSignatureInFrame(frame, this, frameKey, type, calleeHomes);
     return this._noted(type, calleeHomes);
   }
 

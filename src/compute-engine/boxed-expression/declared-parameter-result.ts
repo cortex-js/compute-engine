@@ -1,4 +1,5 @@
 import type { Type } from '../../common/type/types.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type { Expression, IComputeEngine, Scope } from '../global-types.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
@@ -18,7 +19,10 @@ import {
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
 import { failClosedCounts } from './store-guard.js';
-import { noteStackDependentAnswer } from '../static-typing-view.js';
+import {
+  noteStackDependentAnswer,
+  stackDependentAnswerCount,
+} from '../static-typing-view.js';
 
 /**
  * The scope the function literal `literal` was defined in: the parent of the
@@ -446,8 +450,39 @@ function calleeLiteral(expr: Expression): Expression | undefined {
  * value definition). `tainted` becomes true when the derivation read the
  * provisional signature of a definition whose own derivation was running
  * below it on the stack: the result then depends on an answer that is not
- * final, and must not be memoized. */
-export type SignatureDerivationFrame = { owner: object; tainted: boolean };
+ * final, and must not be memoized. `opaque` becomes true when such a read
+ * had no owner on the stack (see {@link noteReentrantSignatureRead}).
+ *
+ * `phase` counts the passes of the owner that read its provisional
+ * signature ({@link nextDerivationPhase}). `derived` holds the signatures
+ * derived directly above this frame ({@link signatureDerivedInFrame}).
+ * `answers` is the count of stack-dependent answers when the frame started
+ * (`stackDependentAnswerCount()`). */
+export type SignatureDerivationFrame = {
+  owner: object;
+  tainted: boolean;
+  opaque: boolean;
+  phase: number;
+  derived: Map<object, FrameSignature> | undefined;
+  answers: number;
+};
+
+/** A signature derived directly above a frame, with the pass of the frame
+ * it was derived in. `key` holds the identities and versions that the
+ * derivation also read, which the owner of the signature chooses.
+ * `stackDependent` is true when the derivation read an answer that depends
+ * on the computations in progress (`noteStackDependentAnswer()`). */
+export type FrameSignature = {
+  phase: number;
+  key: readonly unknown[];
+  type: BoxedType;
+  calleeHomes: HomeScope[];
+  /** The count of declarations along `calleeHomes` when the signature was
+   * derived (`calleeHomesDeclarationCount`), as the memo of the definition
+   * checks it. */
+  calleeCount: number;
+  stackDependent: boolean;
+};
 
 /** The signature derivations in flight, in this process, innermost last (a
  * derivation is a dynamic extent of the host call stack). */
@@ -458,9 +493,105 @@ const derivationStack: SignatureDerivationFrame[] = [];
 export function beginSignatureDerivation(
   owner: object
 ): SignatureDerivationFrame {
-  const frame = { owner, tainted: false };
+  const frame: SignatureDerivationFrame = {
+    owner,
+    tainted: false,
+    opaque: false,
+    phase: 0,
+    derived: undefined,
+    answers: stackDependentAnswerCount(),
+  };
   derivationStack.push(frame);
   return frame;
+}
+
+/** Start or end a pass of the derivation of `frame` that reads its
+ * provisional signature. The owner calls it each time it sets or clears the
+ * answer of a re-entrant read of its signature, so that a signature kept in
+ * one pass is not read in another, or between two passes, where a read of
+ * the owner's signature starts a new derivation. */
+export function nextDerivationPhase(frame: SignatureDerivationFrame): void {
+  frame.phase += 1;
+}
+
+/**
+ * The signature of `owner` derived earlier in the same state, or
+ * `undefined`. `frame` is the frame of the derivation of `owner` that
+ * starts, and `key` is what the derivation also reads.
+ *
+ * A signature that read a provisional answer (a tainted one) is not
+ * memoized on its definition ({@link noteReentrantSignatureRead}), and an
+ * untainted one is checked against the type of the literal, which is
+ * computed again at each read. In a cycle of three or more functions, each
+ * read of a head in the cycle derived its signature again, and so did each
+ * read of the heads that this derivation read: the work grew by a factor at
+ * each level of the cycle, and a fourth function that called the cycle did
+ * not finish (CE-1516).
+ *
+ * The result of a derivation depends on the frames below it, and on the
+ * provisional answers of their owners. While the frame directly below
+ * (the parent) stays on the stack, the frames below the parent stay the
+ * same and their owners wait for the parent, so their answers do not
+ * change. Only the answer of the parent can change, at each of its passes
+ * (`phase`). So a signature is kept in the parent frame, with the pass of
+ * the parent, and is read again only in the same pass, with the same `key`.
+ * It is dropped when the parent ends.
+ *
+ * When the derivation read an answer that depends on the computations in
+ * progress, so does the read of its result (`noteStackDependentAnswer()`).
+ */
+export function signatureDerivedInFrame(
+  frame: SignatureDerivationFrame,
+  owner: object,
+  key: readonly unknown[]
+): FrameSignature | undefined {
+  // List verification changes the candidates of multiple literals without
+  // advancing the parent signature frame. Its reads must see the current pass.
+  if (inListHypothesisPass()) return undefined;
+  const parent = parentFrame(frame);
+  const entry = parent?.derived?.get(owner);
+  if (
+    entry === undefined ||
+    entry.phase !== parent!.phase ||
+    entry.key.length !== key.length ||
+    entry.key.some((k, i) => k !== key[i]) ||
+    calleeHomesDeclarationCount(entry.calleeHomes) !== entry.calleeCount
+  )
+    return undefined;
+  if (entry.stackDependent) noteStackDependentAnswer();
+  return entry;
+}
+
+/** Keep the signature `type` of `owner`, derived in `frame`, for
+ * {@link signatureDerivedInFrame}. Nothing is kept when the derivation read
+ * a provisional answer with no owner on the stack (`opaque`). */
+export function keepSignatureInFrame(
+  frame: SignatureDerivationFrame,
+  owner: object,
+  key: readonly unknown[],
+  type: BoxedType,
+  calleeHomes: HomeScope[]
+): void {
+  // A signature derived under these candidates must not survive the pass.
+  if (frame.opaque || inListHypothesisPass()) return;
+  const parent = parentFrame(frame);
+  if (parent === undefined) return;
+  parent.derived ??= new Map();
+  parent.derived.set(owner, {
+    phase: parent.phase,
+    key,
+    type,
+    calleeHomes,
+    calleeCount: calleeHomesDeclarationCount(calleeHomes),
+    stackDependent: stackDependentAnswerCount() !== frame.answers,
+  });
+}
+
+function parentFrame(
+  frame: SignatureDerivationFrame
+): SignatureDerivationFrame | undefined {
+  const i = derivationStack.lastIndexOf(frame);
+  return i > 0 ? derivationStack[i - 1] : undefined;
 }
 
 export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
@@ -622,8 +753,13 @@ export function noteReentrantSignatureRead(owner?: object): void {
   if (owner !== undefined && i < 0) return;
   // A read from a literal whose type was already in flight has no enclosing
   // signature owner. Conservatively taint all active signature derivations.
-  for (let j = i + 1; j < derivationStack.length; j++)
+  // Their results also depend on a computation that no frame records, so
+  // they are not kept for a later read in the same frame either
+  // (`keepSignatureInFrame`).
+  for (let j = i + 1; j < derivationStack.length; j++) {
     derivationStack[j].tainted = true;
+    if (i < 0) derivationStack[j].opaque = true;
+  }
 }
 
 /** The number of list-hypothesis passes in flight, in this process (a pass

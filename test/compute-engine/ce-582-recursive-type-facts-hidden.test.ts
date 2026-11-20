@@ -173,6 +173,61 @@ describe('CE-582: the reproduction', () => {
     }
   });
 
+  // Each head is declared with an open signature, so each read of a head
+  // derives its signature. Before CE-1516, the assignment of `d_2` did not
+  // finish in 60 s.
+  test('CE-1516: a mutual cycle of heads declared (unknown) -> unknown ends', () => {
+    const ce = new ComputeEngine();
+    const heads = ['a_2', 'b_2', 'c_2'] as const;
+    for (const name of [...heads, 'd_2'])
+      ce.declare(name, '(unknown) -> unknown');
+    const call = (name: string): MathJsonExpression => [
+      name,
+      ['Subtract', 'n', 1],
+    ];
+    const steps: Record<(typeof heads)[number], MathJsonExpression> = {
+      a_2: ['Add', call('c_2'), call('b_2')],
+      b_2: ['Add', call('c_2'), ['Square', 'n']],
+      c_2: call('a_2'),
+    };
+    for (const name of heads)
+      ce.assign(name, [
+        'Function',
+        ['If', ['LessEqual', 'n', 0], 1, steps[name]],
+        'n',
+      ]);
+    ce.assign('d_2', ['Function', ['Add', ['a_2', 3], ['Square', 'x']], 'x']);
+    const caller = ce.box(['d_2', 1]);
+    expect(caller.type.toString()).toBe('number');
+    expect(caller.evaluate().re).toBe(8);
+    expect(caller.N().re).toBe(8);
+  });
+
+  // `h_0` calls itself and `h_1`, and `h_1` calls `h_0` and itself. Before
+  // CE-1516, the assignment of `d` did not finish in 60 s.
+  test('CE-1516: two heads declared (unknown) -> unknown that call each other and themselves', () => {
+    const ce = new ComputeEngine();
+    for (const name of ['h_0', 'h_1', 'd'])
+      ce.declare(name, '(unknown) -> unknown');
+    const call = (name: string): MathJsonExpression => [
+      name,
+      ['Subtract', 'n', 1],
+    ];
+    for (const [name, other] of [
+      ['h_0', 'h_1'],
+      ['h_1', 'h_0'],
+    ])
+      ce.assign(name, [
+        'Function',
+        ['If', ['LessEqual', 'n', 0], 1, ['Add', call(other), call(name)]],
+        'n',
+      ]);
+    ce.assign('d', ['Function', ['Add', ['h_0', 3], ['Square', 'x']], 'x']);
+    const caller = ce.box(['d', 1]);
+    expect(caller.type.toString()).toBe('number');
+    expect(caller.evaluate().re).toBe(9);
+  });
+
   test('CE-1515: reading the second head first preserves fractional result elements', () => {
     const ce = new ComputeEngine();
     const heads = ['a_2', 'b_2', 'c_2'] as const;

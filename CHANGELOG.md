@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Functions that call each other in a cycle are defined quickly**
+  (CE-1516). Defining functions that call each other in a cycle, each with a
+  head declared `(unknown) -> unknown`, took seconds or ran out of memory:
+  with `a(n)` calling `c(n - 1)` and `b(n - 1)`, `b(n)` calling `c(n - 1)`
+  and `c(n)` calling `a(n - 1)`, the assignment of `c` took several seconds
+  and the next definition that called `a` did not finish. Each read of a head
+  inside the cycle derived its signature again. A derived signature is now
+  kept for the current pass of the derivation that reads it so repeated reads
+  within that pass can reuse it.
+
 ## 0.195.0 _2026-11-20_
 
 ### New Features

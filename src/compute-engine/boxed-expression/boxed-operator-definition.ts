@@ -17,6 +17,7 @@ import {
   withSignatureResult,
   beginSignatureDerivation,
   endSignatureDerivation,
+  nextDerivationPhase,
   noteReentrantSignatureRead,
   type SignatureDerivationFrame,
   type HomeScope,
@@ -1002,11 +1003,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     frame: SignatureDerivationFrame
   ): BoxedType {
     let lambdaType: BoxedType;
+    nextDerivationPhase(frame);
     this._derivingSignature = true;
     try {
       lambdaType = literal.type;
     } finally {
       this._derivingSignature = false;
+      nextDerivationPhase(frame);
     }
     // The memo keys on the lambda's type by CONTENT: the object is rebuilt
     // whenever the cache generation moves, which the computation below does
@@ -1060,6 +1063,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // that read answer the stored signature, as for the lambda's type
       // above. Without it, each level boxed the body again, without end.
       let typedResult: Type | undefined;
+      nextDerivationPhase(frame);
       this._derivingSignature = true;
       try {
         ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
@@ -1067,6 +1071,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         ));
       } finally {
         this._derivingSignature = false;
+        nextDerivationPhase(frame);
       }
       // A self-recursive body whose result is an abstract collection is
       // re-typed under the hypothesis that the result is a list, and the
@@ -1081,12 +1086,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this.name,
         typedResult ?? functionResult(lambdaType.type),
         (candidate, thunk) => {
+          nextDerivationPhase(frame);
           this._recursionResult = candidate;
           this._derivingSignature = true;
           try {
             return thunk();
           } finally {
             this._derivingSignature = false;
+            nextDerivationPhase(frame);
             this._recursionResult = undefined;
           }
         }
