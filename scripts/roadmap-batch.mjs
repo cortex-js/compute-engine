@@ -65,28 +65,36 @@
  * report. The web app shows a batch whose end time is null and whose process
  * is gone as stopped before the end. The files are not removed.
  *
+ * The short form, `npm run roadmap-batch -- 3` or
+ * `npm run roadmap-batch -- CE-1,CE-2`: one argument, a count or a list of
+ * ids, and the defaults of --queue, --out and --secondary below.
+ *
  * Options:
- *   --queue <file>        The queue file (required).
+ *   --queue <file>        The queue file. Default: the backlog of now
+ *                         (`issues.mjs backlog --json`), written to
+ *                         <out>/queue.json.
  *   --items CE-1,CE-2     Run these items of the queue, in this order.
  *   --count <n>           Without --items: run the first n items of the
  *                         queue (the release scope first, then the pool by
  *                         priority, size and age). With neither, the script
  *                         refuses: the whole queue holds
  *                         flagged and low-priority candidates.
- *   --out <dir>           The output directory (required).
+ *   --out <dir>           The output directory. Default: a new directory
+ *                         `~/.local/state/compute-engine-batches/<UTC time>`.
  *   --concurrency <n>     At most this many sessions in this repo (default 3).
  *   --one-at-a-time       One batch session at a time, also when other
  *                         sessions run (see above).
  *   --timeout-min <n>     Stop a session after this many minutes (default 180).
  *   --secondary           The repo is a copy on a second machine (univac):
  *                         the brief tells each session to push nothing and to
- *                         read `~/dev/tycho` only (see above).
+ *                         read `~/dev/tycho` only (see above). On by default
+ *                         on Windows, the platform of univac's copy;
+ *                         `--no-secondary` turns it off.
  *   --dry-run             Print the briefs and the launch order; start nothing.
  *
- * Example:
- *   node scripts/issues.mjs backlog --json > /tmp/queue.json
- *   node scripts/roadmap-batch.mjs --queue /tmp/queue.json \
- *     --items CE-765,CE-766 --out /tmp/batch-1
+ * Examples:
+ *   npm run roadmap-batch -- 3
+ *   node scripts/roadmap-batch.mjs --items CE-765,CE-766 --out /tmp/batch-1
  */
 import { parseArgs } from 'node:util';
 import { spawn, execFileSync } from 'node:child_process';
@@ -107,7 +115,12 @@ import { fileURLToPath } from 'node:url';
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sessionsDir = join(homedir(), '.claude', 'sessions');
 
-const { values } = parseArgs({
+const usage =
+  'Usage: npm run roadmap-batch -- <n | CE-1,CE-2> [--one-at-a-time] [--dry-run]\n' +
+  '   or: roadmap-batch.mjs [--queue <file>] [--out <dir>] [--count <n> | --items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--[no-]secondary] [--dry-run]';
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  allowNegative: true,
   options: {
     'queue': { type: 'string' },
     'items': { type: 'string' },
@@ -117,15 +130,56 @@ const { values } = parseArgs({
     'timeout-min': { type: 'string', default: '180' },
     'dry-run': { type: 'boolean', default: false },
     'one-at-a-time': { type: 'boolean', default: false },
-    'secondary': { type: 'boolean', default: false },
+    // On Windows the tree is univac's copy, the only Windows machine with one.
+    'secondary': { type: 'boolean', default: process.platform === 'win32' },
   },
 });
-if (!values.queue || !values.out) {
-  console.error(
-    'Usage: roadmap-batch.mjs --queue <file> --out <dir> [--items CE-1,CE-2] [--concurrency 3 | --one-at-a-time] [--secondary] [--dry-run]'
-  );
+// One positional argument: a count (`3`) or a list of ids (`CE-1,CE-2`).
+if (
+  positionals.length > 1 ||
+  (positionals.length === 1 && (values.count || values.items))
+) {
+  console.error(usage);
   process.exit(2);
 }
+if (positionals.length === 1) {
+  if (/^\d+$/.test(positionals[0])) values.count = positionals[0];
+  else values.items = positionals[0];
+}
+if (!values.count && !values.items) {
+  console.error(`No items: give a count or a list of ids.\n${usage}`);
+  process.exit(2);
+}
+// Without --out: a new directory under ~/.local/state/compute-engine-batches,
+// named by the UTC date and time (`20261120T041841Z`).
+values.out ??= join(
+  homedir(),
+  '.local',
+  'state',
+  'compute-engine-batches',
+  new Date().toISOString().replace(/\.\d+/, '').replace(/[-:]/g, '')
+);
+// Without --queue: the backlog of now, written to <out>/queue.json.
+if (!values.queue) {
+  mkdirSync(values.out, { recursive: true });
+  values.queue = join(values.out, 'queue.json');
+  writeFileSync(
+    values.queue,
+    execFileSync(
+      process.execPath,
+      [join(repo, 'scripts', 'issues.mjs'), 'backlog', '--json'],
+      {
+        cwd: repo,
+        encoding: 'utf8',
+      }
+    )
+  );
+}
+console.log(`roadmap-batch: output in ${values.out}`);
+if (values.secondary)
+  console.log(
+    'roadmap-batch: secondary machine: the sessions commit here and push nothing'
+  );
 
 const oneAtATime = values['one-at-a-time'];
 const concurrency = Number(values.concurrency);
@@ -137,7 +191,11 @@ const queueFile = JSON.parse(readFileSync(values.queue, 'utf8'));
  * the six areas.
  */
 function areaOfPath(path) {
-  if (/^src\/compute-engine\/compilation\/|^src\/(compile|runtime)\.ts$/.test(path))
+  if (
+    /^src\/compute-engine\/compilation\/|^src\/(compile|runtime)\.ts$/.test(
+      path
+    )
+  )
     return 'compilation';
   if (
     /^src\/compute-engine\/(boxed-expression|numerics)\/|^src\/compute-engine\/engine-[^/]*\.ts$/.test(
@@ -236,9 +294,7 @@ const ids = values.items
     ? queue.slice(0, Number(values.count)).map((c) => c.id)
     : [];
 if (ids.length === 0) {
-  console.error(
-    'No items: pass --items CE-1,CE-2 or --count <n> (the queue is `node scripts/issues.mjs backlog --json`).'
-  );
+  console.error(`No items: give a count or a list of ids.\n${usage}`);
   process.exit(2);
 }
 let items;
