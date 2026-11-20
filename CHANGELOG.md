@@ -13,6 +13,18 @@
   `{ "Buzz }"`. Outside the range, or in a host without a caret, the fixit
   inserts at its range as before. A multiline string has no caret range.
 
+### Behavior Changes
+
+- **Epsil completion offers only what the grammar admits there**.
+  `epsilCompletions()` reads the tokens before the offset: a name being
+  declared (`let ▮`, `for ▮`) and the place after a declared name or
+  a type (`let a ▮`, `let a: integer ▮`) get no items; `for i ▮` gets `in`,
+  `if x { 1 } ▮` gets `else`, and a complete expression on its line
+  (`f(1) ▮`) gets `if`, `in` and `is`, not the names and the statement
+  keywords. `x is ▮` gets the types, `type T is ▮` and `protocol P extends ▮`
+  get the protocols, and a case pattern of `match` gets no keyword other
+  than `true` and `false`.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues

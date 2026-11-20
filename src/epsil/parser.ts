@@ -181,7 +181,7 @@ const ALGEBRAIC_SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
 
 /** Every word the specifier slot consumes — what the math-form lookahead
  * (`isMathFunctionDef`) skips between the parameter list and `->`. */
-const SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
+export const SPECIFIER_WORDS: ReadonlySet<string> = new Set<string>([
   ...EFFECT_SPECIFIER_WORDS,
   ...ALGEBRAIC_SPECIFIER_WORDS,
 ]);

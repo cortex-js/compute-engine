@@ -3516,7 +3516,7 @@ function addName(name: string, names: ExpressionNames, pattern: boolean): void {
  * protocol name, so such a name is printed in the verbatim form. Any other
  * name is spelled as `escapeSymbol()` spells it.
  */
-function escapeProtocolName(s: string): string {
+export function escapeProtocolName(s: string): string {
   if (CONTEXTUAL_STATEMENT_WORDS.has(s)) return `\`${s}\``;
   return escapeSymbol(s);
 }

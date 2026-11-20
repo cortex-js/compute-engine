@@ -102,13 +102,14 @@ describe('EPSIL COMPLETION: CONTEXT', () => {
       );
       expect(labels(result)).toContain('real');
     }
-    // A comparison, a parameter name and a new statement are not
-    for (const source of [
-      'let x = a < ▮',
-      'function f(x: real, ▮',
-      'let x: integer\nb | ▮',
-    ])
+    // A comparison and a new statement are not
+    for (const source of ['let x = a < ▮', 'let x: integer\nb | ▮'])
       expect(item(complete(source), 'real')?.kind).toBe('library-function');
+    // A parameter is a new name or a literal
+    expect(labels(complete('function f(x: real, ▮'))).toEqual([
+      'false',
+      'true',
+    ]);
   });
 
   test('a dropped statement gets names and keywords, with no expected type', () => {
@@ -466,5 +467,173 @@ describe('EPSIL COMPLETION: SPELLING', () => {
     const result = complete('function f(m: real, n: integer) { n }\nf(n: ▮)');
     expect(result.expectedType).toBe('integer');
     expect(labels(result, 'value')).toEqual(['0']);
+  });
+});
+
+describe('EPSIL COMPLETION: ONLY WHAT THE GRAMMAR ADMITS', () => {
+  test.each([
+    // A name being declared, and the place after it or after its type.
+    ['let ▮', []],
+    ['const ▮', []],
+    ['let a ▮', []],
+    ['let a: integer ▮', []],
+    ['let a: list<integer> ▮', []],
+    ['let (a, ▮', []],
+    ['function ▮', []],
+    ['function f ▮', []],
+    // A parameter of a multi-clause function can be a literal.
+    ['function f(▮', ['false', 'true']],
+    ['function f(x ▮', []],
+    ['function f(x: integer, ▮', ['false', 'true']],
+    // The specifier words of a function header.
+    ['function f(x) ra▮', ['random']],
+    ['function f(x) random sc▮', ['scope']],
+    ['function f(x) -> real ▮', []],
+    ['type alias ▮', []],
+    ['type T = integer ▮', []],
+    ['protocol ▮', []],
+    ['protocol P { readonly ▮', []],
+    ['for ▮', []],
+    ['do ▮', []],
+    // A keyword that the construct needs next.
+    ['for i ▮', ['in']],
+    ['for (i, j) ▮', ['in']],
+    ['parallel ▮', ['for']],
+    ['type ▮', ['alias']],
+    ['type T ▮', ['is']],
+    ['protocol P ▮', ['extends']],
+    ['protocol P { ▮', ['function', 'readonly', 'readwrite']],
+    ['if x { 1 } else ▮', ['if']],
+    ['if x { 1 } ▮', ['else']],
+    ['if x { 1 } else if y { 2 } ▮', ['else']],
+    ['if x { 1 } else { 2 } ▮', []],
+    ['while x { 1 } ▮', []],
+    // After a complete expression on its line.
+    ['f(1) ▮', ['if', 'in', 'is']],
+    ['let a = 1 ▮', ['if', 'in', 'is']],
+    ['a if c ▮', ['else', 'if', 'in', 'is']],
+    ['match x { y ▮', ['if']],
+    // In a guard, the `if` of the case is not a postfix `if`.
+    ['match x { n if n ▮', ['if', 'in', 'is']],
+    // The `if` of a statement is not a postfix `if`.
+    ['let a = 1\nif a ▮', ['if', 'in', 'is']],
+    // A set ends an operand; a type test is an expression.
+    ['let s = {1} ▮', ['if', 'in', 'is']],
+    ['x is integer ▮', ['if', 'in', 'is']],
+    ['let f: (integer) -> real ▮', []],
+    ['protocol P { readonly x ▮', []],
+    ['continue ▮', []],
+    ['let b = x in {1, 2} ▮', ['if', 'in', 'is']],
+    // The `>` of a type argument list ends a type, not an operand.
+    ['function f(x) -> list<integer> { [x] } ▮', []],
+    ['if x is list<integer> { 1 } ▮', ['else']],
+    ['if x is list<integer> { 1 } else ▮', ['if']],
+    // A literal parameter admits no default value before it.
+    ['function f(x: integer = 1, ▮', []],
+    ['let a = do { 1 } ▮', ['if', 'in', 'is']],
+    ['let is ▮', []],
+    ['let a: integer |\n  real ▮', []],
+  ])('%j offers %j', (source, expected) => {
+    expect(labels(complete(source))).toEqual(expected);
+  });
+
+  test.each([
+    ['for i ▮', ' L { i }'],
+    ['parallel ▮', ' i in L { i }'],
+    ['type ▮', ' T = integer'],
+    ['protocol P ▮', ' Q {}'],
+    ['if x { 1 } ▮', ' { 2 }'],
+    ['if x { 1 }\n▮', ' { 2 }'],
+    ['let x = 1 if c ▮', ' 2'],
+  ])('%j: the keyword offered makes a valid program', (source, rest) => {
+    const result = complete(source);
+    const keyword = labels(result, 'keyword').find(
+      (k) =>
+        k === 'in' ||
+        k === 'for' ||
+        k === 'alias' ||
+        k === 'extends' ||
+        k === 'else'
+    );
+    expect(keyword).toBeDefined();
+    const program =
+      (source.startsWith('protocol P') ? 'protocol Q {}\n' : '') +
+      source.replace('▮', keyword! + rest);
+    expect(parseEpsil(program)[1]).toEqual([]);
+  });
+
+  test('a type test is a type position', () => {
+    const result = complete('x is ▮');
+    expect(new Set(result.items.map((i) => i.kind))).toEqual(new Set(['type']));
+    expect(labels(result)).toContain('integer');
+  });
+
+  test('a list of protocols offers the protocols', () => {
+    for (const source of [
+      'protocol Q {}\ntype integer is ▮',
+      'protocol Q {}\ntype integer is Q & ▮',
+      'protocol Q {}\nprotocol P extends ▮',
+      'protocol Q {}\nprotocol P extends Q, ▮',
+    ])
+      expect(labels(complete(source))).toEqual(['Q']);
+    expect(labels(complete('protocol Q {}\ntype integer is Q ▮'))).toEqual([]);
+  });
+
+  test('a case pattern offers no statement or expression keyword', () => {
+    for (const source of ['match x { ▮', 'match x {\n  1 => 2\n  ▮']) {
+      const keywords = labels(complete(source), 'keyword');
+      expect(keywords).toEqual(['false', 'true']);
+    }
+  });
+
+  test('a member name offers no keyword', () => {
+    expect(labels(complete('x.▮'), 'keyword')).toEqual([]);
+  });
+
+  test('a new line after an if block also offers `else`', () => {
+    const keywords = labels(complete('if x { 1 }\n▮'), 'keyword');
+    expect(keywords).toContain('else');
+    expect(keywords).toContain('let');
+  });
+
+  test('a new line after a declaration is a statement start', () => {
+    expect(labels(complete('let a\n▮'), 'keyword')).toContain('let');
+  });
+
+  test('the `else` of a postfix conditional takes an expression', () => {
+    const result = complete('let c = 1\nlet x = 1 if c else ▮');
+    expect(labels(result, 'variable')).toEqual(['c']);
+    expect(labels(result, 'keyword')).toContain('match');
+  });
+
+  test('a type test also offers the protocols', () => {
+    expect(labels(complete('protocol Shape {}\nx is ▮'))).toContain('Shape');
+    expect(labels(complete('protocol Shape {}\nlet a: ▮'))).not.toContain(
+      'Shape'
+    );
+  });
+
+  test('a new line after `continue` is a statement start', () => {
+    expect(labels(complete('while true {\ncontinue\n▮'), 'keyword')).toContain(
+      'let'
+    );
+  });
+
+  test('the `else` after a set or a `do` block takes an expression', () => {
+    for (const source of [
+      'let c = 1\nlet a = 1 if x in {1, 2} else ▮',
+      'let c = 1\nlet a = 1 if do { true } else ▮',
+    ])
+      expect(labels(complete(source), 'variable')).toEqual(['c']);
+  });
+
+  test('a type test ends at its line', () => {
+    expect(labels(complete('x is\n▮'), 'keyword')).toContain('let');
+    expect(labels(complete('x\nis ▮'), 'type')).toEqual([]);
+  });
+
+  test('a protocol name that needs backticks is inserted with them', () => {
+    const result = complete('protocol `type` {}\nprotocol P extends ▮');
+    expect(item(result, 'type')?.insertText).toBe('`type`');
   });
 });

@@ -32,7 +32,12 @@ import {
   type BindingGroup,
 } from './occurrences.js';
 import { parseEpsil } from './parse-epsil.js';
-import { escapeSymbol, serializeEpsil } from './serialize-epsil.js';
+import { SPECIFIER_WORDS } from './parser.js';
+import {
+  escapeProtocolName,
+  escapeSymbol,
+  serializeEpsil,
+} from './serialize-epsil.js';
 import type { Token } from './tokens.js';
 
 //
@@ -45,7 +50,10 @@ import type { Token } from './tokens.js';
 // call, so the parent of the placeholder tells what is expected there. A
 // statement that does not parse (`if ▮`, `let a: ▮`) is dropped by the
 // parser: a type position is then detected from the tokens before the
-// offset, and any other dropped position gets the names and the keywords.
+// offset. The tokens also tell the positions that take a new name, one
+// keyword or no word at all (`slotAt`), where the parse does not: every item
+// offered is valid where it is offered. Any other dropped position gets the
+// names and the keywords.
 //
 // Design: `docs/plans/2026-11-19-ce1521-epsil-completion.md`.
 //
@@ -186,8 +194,10 @@ const LIBRARY_ENTRIES = new WeakMap<ComputeEngine, LibraryEntry[]>();
  * for `let a: integer = ▮`), the names of the source that are visible at
  * the offset, the standard-library names (by their Epsil spelling, with
  * their signature) and the keywords valid at the position. After `:` in a
- * declaration or a parameter, after `->` of a function header, and after
- * `type name =`, the items are the type names instead.
+ * declaration or a parameter, after `->` of a function header, after
+ * `type name =` and after `is` of a type test, the items are the type names
+ * instead. Where the grammar takes a new name or no word, there are no items;
+ * where it takes one keyword (`for i ▮`), that keyword.
  *
  * The options are those of `parseEpsil()`: the type, protocol and sum
  * variant names that the source may use without declaring them.
@@ -243,7 +253,7 @@ export function epsilCompletions(
 
   const items: (EpsilCompletionItem & { tier: number })[] = [];
 
-  if (isTypePosition(before)) {
+  if (isTypePosition(source, before, start)) {
     const seen = new Set<string>();
     const add = (label: string, rank: number, detail?: string) => {
       if (seen.has(label)) return;
@@ -256,11 +266,14 @@ export function epsilCompletions(
         ...(detail === undefined ? {} : { detail }),
       });
     };
-    // A protocol is not a type (`protocol-in-type-position`, ruling P8).
+    // A protocol is not a type (`protocol-in-type-position`, ruling P8),
+    // but a type test takes one (`x is Comparable`).
+    const lastToken = before[before.length - 1];
+    const typeTest = lastToken?.type === 'SYMBOL' && lastToken.text === 'is';
     for (const group of groups) {
       if (group.kind !== 'type') continue;
       const declaration = declarationOf(group, declarations);
-      if (declaration?.kind === 'protocol') continue;
+      if (declaration?.kind === 'protocol' && !typeTest) continue;
       add(
         group.name,
         2,
@@ -268,6 +281,7 @@ export function epsilCompletions(
       );
     }
     for (const name of options?.typeNames ?? []) add(name, 2);
+    if (typeTest) for (const name of options?.protocolNames ?? []) add(name, 2);
     for (const name of Object.values(options?.sumVariants ?? {})) add(name, 2);
     // A variant of a sum type of the source is a type (`let a: red = red()`);
     // a variant known only from the options is not.
@@ -277,6 +291,37 @@ export function epsilCompletions(
           if (variant.payload !== undefined) add(variant.name, 2, sum);
     for (const name of [...PRIMITIVE_TYPES, 'matrix', 'tensor', 'vector'])
       add(name, 3);
+    return { range, replaceEnd, items: finish(items, prefix) };
+  }
+
+  const slot = slotAt(source, before, start);
+  if (slot.kind === 'words') {
+    for (const keyword of slot.keywords)
+      items.push({ label: keyword, kind: 'keyword', rank: 6, tier: 0 });
+    return { range, replaceEnd, items: finish(items, prefix) };
+  }
+
+  if (slot.kind === 'protocol') {
+    const seen = new Set<string>();
+    const add = (label: string) => {
+      if (seen.has(label)) return;
+      seen.add(label);
+      const spelling = escapeProtocolName(label);
+      items.push({
+        label,
+        kind: 'type',
+        rank: 2,
+        tier: 0,
+        ...(spelling === label ? {} : { insertText: spelling }),
+      });
+    };
+    for (const group of groups)
+      if (
+        group.kind === 'type' &&
+        declarationOf(group, declarations)?.kind === 'protocol'
+      )
+        add(group.name);
+    for (const name of options?.protocolNames ?? []) add(name);
     return { range, replaceEnd, items: finish(items, prefix) };
   }
 
@@ -408,9 +453,20 @@ export function epsilCompletions(
   }
 
   // 4. Keywords. At the start of a statement an expression is valid too.
-  const keywords = statementStart
-    ? new Set([...STATEMENT_KEYWORDS, ...EXPRESSION_KEYWORDS])
-    : EXPRESSION_KEYWORDS;
+  // A case pattern admits the literal keywords only; a member name after `.`
+  // none; after the block of an `if`, `else` continues the statement.
+  const keywords: Iterable<string> =
+    slot.kind === 'pattern'
+      ? ['false', 'true']
+      : slot.kind === 'member'
+        ? []
+        : statementStart || slot.kind === 'statement-or-else'
+          ? new Set([
+              ...STATEMENT_KEYWORDS,
+              ...EXPRESSION_KEYWORDS,
+              ...(slot.kind === 'statement-or-else' ? ['else'] : []),
+            ])
+          : EXPRESSION_KEYWORDS;
   // A name of the source hides a keyword only when it inserts the same text:
   // `` `while` `` does not hide `while`.
   for (const keyword of keywords)
@@ -567,7 +623,11 @@ export function insideLiteralOrComment(
  * (`let xs: list<▮`, `let x: integer | ▮`). The tokens decide, because the
  * parser drops a statement whose annotation does not parse.
  */
-function isTypePosition(before: readonly Token[]): boolean {
+function isTypePosition(
+  source: string,
+  before: readonly Token[],
+  start: number
+): boolean {
   // Inside an annotation: scan back over the tokens of a type, then check
   // that they follow an annotation start and alternate operand, operator.
   const last = before[before.length - 1];
@@ -575,14 +635,16 @@ function isTypePosition(before: readonly Token[]): boolean {
     (last?.type === 'OPERATOR' && (last.text === '<' || last.text === '|')) ||
     last?.type === 'COMMA'
   ) {
-    const isOperand = (t: Token) => t.type === 'SYMBOL' || t.type === 'NUMBER';
+    const isOperand = (t: Token) =>
+      (t.type === 'SYMBOL' && t.text !== 'is') || t.type === 'NUMBER';
     const isOperator = (t: Token) =>
       t.type === 'COMMA' ||
       (t.type === 'OPERATOR' &&
         ['<', '>', '>>', '|', '^', '..'].includes(t.text));
     let i = before.length - 1;
     while (i >= 0 && (isOperand(before[i]) || isOperator(before[i]))) i -= 1;
-    if (i < 0 || !isAnnotationStart(before.slice(0, i + 1))) return false;
+    if (i < 0 || !isAnnotationStart(before.slice(0, i + 1), source))
+      return false;
     let depth = 0;
     let operand = true;
     for (const t of before.slice(i + 1)) {
@@ -600,17 +662,34 @@ function isTypePosition(before: readonly Token[]): boolean {
     }
     return true;
   }
-  return isAnnotationStart(before);
+  // A type test ends at the end of its line (`x is` and a new statement).
+  if (
+    last?.type === 'SYMBOL' &&
+    last.text === 'is' &&
+    /[\n\r]/.test(source.slice(last.end, start))
+  )
+    return false;
+  return isAnnotationStart(before, source);
 }
 
 /** Whether the tokens end at the start of an annotation (see
- * `isTypePosition`). */
-function isAnnotationStart(before: readonly Token[]): boolean {
+ * `isTypePosition`). The `is` of a type test follows its operand on the same
+ * line of `source`: an `is` at the start of a line is a name. */
+function isAnnotationStart(before: readonly Token[], source: string): boolean {
   const last = before[before.length - 1];
-  if (last?.type !== 'OPERATOR') return false;
   const word = (i: number): string | undefined =>
     before[i]?.type === 'SYMBOL' ? before[i].text : undefined;
   const n = before.length;
+  // The type test `x is T`; after `type T is` come protocols.
+  if (last?.type === 'SYMBOL' && last.text === 'is')
+    return (
+      endsOperand(before, n - 2) &&
+      word(n - 3) !== 'type' &&
+      // `let is`: `is` is the declared name.
+      !['let', 'const', 'function', 'for'].includes(word(n - 2) ?? '') &&
+      !/[\n\r]/.test(source.slice(before[n - 2].end, last.start))
+    );
+  if (last?.type !== 'OPERATOR') return false;
   if (last.text === ':') {
     if (word(n - 2) === undefined) return false;
     const head = word(n - 3);
@@ -693,6 +772,458 @@ function isStatementStart(
   )
     return false;
   return source.slice(last.end, start).includes('\n');
+}
+
+/**
+ * What the grammar admits at a word position, as the tokens before it tell.
+ * The parse with a hole does not settle it there: the parser drops the
+ * statement, or recovers with the hole as a statement of its own.
+ *
+ * - `words`: only these keywords, possibly none: a name being declared
+ *   (`let ▮`, `function f(▮`), the place after a declared name or a type
+ *   (`let a ▮`, `let a: integer ▮`), after a block (`while x { } ▮`), or
+ *   after a complete expression on its line (`f(1) ▮`, where `in`, `is` and
+ *   a postfix `if` are valid);
+ * - `protocol`: a protocol name (`type T is ▮`, `protocol P extends ▮`);
+ * - `pattern`: a case pattern of a `match`;
+ * - `member`: a member name after `.`;
+ * - `statement-or-else`: a statement start that may also continue an `if`;
+ * - `default`: the hole decides.
+ */
+type Slot =
+  | { kind: 'words'; keywords: string[] }
+  | { kind: 'protocol' }
+  | { kind: 'pattern' }
+  | { kind: 'member' }
+  | { kind: 'statement-or-else' }
+  | { kind: 'default' };
+
+/** Words that cannot end an expression: the keywords the grammar consumes,
+ * and the contextual heads when they head a statement (checked apart). */
+const NON_OPERAND_WORDS: ReadonlySet<string> = new Set([
+  'break',
+  'const',
+  'continue',
+  'do',
+  'else',
+  'for',
+  'function',
+  'if',
+  'in',
+  'is',
+  'match',
+  'protocol',
+  'while',
+]);
+
+function slotAt(source: string, before: readonly Token[], start: number): Slot {
+  const n = before.length;
+  if (n === 0) return { kind: 'default' };
+  const last = before[n - 1];
+  const none: Slot = { kind: 'words', keywords: [] };
+  const word = (i: number): string | undefined =>
+    before[i]?.type === 'SYMBOL' ? before[i].text : undefined;
+  const isName = (i: number): boolean =>
+    (before[i]?.type === 'SYMBOL' && !NON_OPERAND_WORDS.has(before[i].text)) ||
+    before[i]?.type === 'VERBATIM_SYMBOL';
+  // An unclosed verbatim name ends with the linebreak that ends it.
+  const newlineAfter = (i: number, end: number) =>
+    /[\n\r\u2028\u2029]/.test(
+      source.slice(Math.max(before[i].start, before[i].end - 1), end)
+    );
+  const sameLine = !newlineAfter(n - 1, start);
+  // Whether the token `i` heads a statement: `let` and `type` are also
+  // ordinary names.
+  const isHead = (i: number) =>
+    isStatementStart(source, before.slice(0, i), before[i].start);
+  const continuesLine = (t: Token) =>
+    t.type === 'OPERATOR' ||
+    t.type === 'COMMA' ||
+    t.type === 'OPEN_PAREN' ||
+    t.type === 'OPEN_BRACKET' ||
+    t.type === 'OPEN_BRACE';
+
+  // The block of a `match`, when the innermost unclosed bracket is one.
+  const open = innermostOpen(before, n - 1);
+  if (open >= 0 && before[open].type === 'OPEN_BRACE') {
+    const head = headOfBlock(source, before, open);
+    if (head === 'match') {
+      // The start of the current case: after the `{`, a `;`, or a linebreak
+      // at the depth of the block.
+      // Past the pattern: after its `=>`, or in its guard (`n if n > 0`).
+      let arrow = false;
+      let guard = false;
+      let depth = 0;
+      for (let i = n - 1; i > open; i -= 1) {
+        const t = before[i];
+        if (/^CLOSE_/.test(t.type)) depth += 1;
+        else if (/^OPEN_/.test(t.type)) depth -= 1;
+        if (depth !== 0) continue;
+        if (t.type === 'SEMICOLON') break;
+        if (t.type === 'OPERATOR' && t.text === '=>') arrow = true;
+        if (t.type === 'SYMBOL' && t.text === 'if') guard = true;
+        if (newlineAfter(i - 1, t.start) && !continuesLine(before[i - 1]))
+          break;
+      }
+      const caseStart =
+        last === before[open] ||
+        last.type === 'SEMICOLON' ||
+        (!sameLine && !continuesLine(last));
+      if (caseStart) return { kind: 'pattern' };
+      if (!arrow && endsOperand(before, n - 1) && sameLine)
+        return {
+          kind: 'words',
+          // In the guard, the `if` of the case is not a postfix `if`.
+          keywords: guard ? ['if', 'in', 'is'] : ['if'],
+        };
+    }
+    if (head === 'protocol') {
+      // A member of a protocol: a function or a property requirement.
+      if (last === before[open] || last.type === 'SEMICOLON' || !sameLine)
+        return {
+          kind: 'words',
+          keywords: ['function', 'readonly', 'readwrite'],
+        };
+    }
+  }
+
+  // A list of protocols, after `type T is` or `protocol P extends`: a name
+  // after the keyword or after `,` and `&`, and none after a name (`,`, `&`
+  // or `{` follows).
+  {
+    const separator = (k: number) =>
+      before[k].type === 'COMMA' ||
+      (before[k].type === 'OPERATOR' && before[k].text === '&');
+    let i = n - 1;
+    while (i >= 0 && ((isName(i) && word(i) !== 'extends') || separator(i)))
+      i -= 1;
+    const inList =
+      (word(i) === 'extends' && isName(i - 1) && word(i - 2) === 'protocol') ||
+      (word(i) === 'is' &&
+        isName(i - 1) &&
+        word(i - 2) === 'type' &&
+        isHead(i - 2));
+    if (inList && sameLine)
+      return i === n - 1 || separator(n - 1) ? { kind: 'protocol' } : none;
+  }
+
+  if (last.type === 'OPERATOR' && last.text === '.') return { kind: 'member' };
+
+  if (last.type === 'SYMBOL') {
+    switch (last.text) {
+      case 'function':
+      case 'const':
+      case 'protocol':
+      case 'for':
+      case 'do':
+        return none;
+      case 'break':
+      case 'continue':
+        if (sameLine) return none;
+        break;
+      case 'else':
+        // After a block, `if` or `{` follows; the `else` of a postfix
+        // conditional (`a if c else ▮`) takes an expression.
+        if (
+          before[n - 2]?.type === 'CLOSE_BRACE' &&
+          !isCollectionBrace(before, matchingOpen(before, n - 2)) &&
+          ['if', 'else'].includes(
+            headOfBlock(source, before, matchingOpen(before, n - 2)) ?? ''
+          )
+        )
+          return { kind: 'words', keywords: ['if'] };
+        break;
+      case 'let':
+        if (isHead(n - 1)) return none;
+        break;
+      case 'type':
+        if (isHead(n - 1)) return { kind: 'words', keywords: ['alias'] };
+        break;
+      case 'parallel':
+        if (isHead(n - 1)) return { kind: 'words', keywords: ['for'] };
+        break;
+      case 'alias':
+        if (word(n - 2) === 'type' && isHead(n - 2)) return none;
+        break;
+      case 'readonly':
+      case 'readwrite':
+        if (open >= 0 && headOfBlock(source, before, open) === 'protocol')
+          return none;
+        break;
+    }
+  }
+
+  // After the name of a declaration, on its line. `is` is a contextual word
+  // and can be the name (`let is`).
+  if (sameLine && (isName(n - 1) || word(n - 1) === 'is')) {
+    const head = word(n - 2);
+    if ((head === 'let' && isHead(n - 2)) || head === 'const') return none;
+    if (head === 'function') return none;
+    if (head === 'for') return { kind: 'words', keywords: ['in'] };
+    if (head === 'protocol') return { kind: 'words', keywords: ['extends'] };
+    if (head === 'type' && isHead(n - 2))
+      return { kind: 'words', keywords: ['is'] };
+    if (head === 'alias' && word(n - 3) === 'type') return none;
+    // The name of a property requirement: `:` follows.
+    if (
+      (head === 'readonly' || head === 'readwrite') &&
+      open >= 0 &&
+      headOfBlock(source, before, open) === 'protocol'
+    )
+      return none;
+  }
+
+  // A parenthesized list of names: the parameters of a function header, the
+  // names of a destructuring `let` or `for`. A parameter of a multi-clause
+  // function can also be a literal (`function g(true) { 1 }`).
+  const paren = openingParen(before, n - 1);
+  if (
+    paren >= 0 &&
+    (isFunctionHeader(before, paren) ||
+      ['let', 'const', 'for'].includes(word(paren - 1) ?? '')) &&
+    (last.type === 'OPEN_PAREN' || last.type === 'COMMA' || isName(n - 1))
+  )
+    // A literal parameter makes the signature overloaded, which admits no
+    // default value: after `x: integer = 1,` no literal is offered.
+    return isFunctionHeader(before, paren) &&
+      !isName(n - 1) &&
+      !before
+        .slice(paren + 1)
+        .some((t) => t.type === 'OPERATOR' && t.text === '=')
+      ? { kind: 'words', keywords: ['false', 'true'] }
+      : none;
+
+  // After the parameters of a function header, and after each word of its
+  // specifier (`function roll(n) random -> integer`), a specifier word.
+  {
+    let i = n - 1;
+    while (
+      i >= 0 &&
+      before[i].type === 'SYMBOL' &&
+      SPECIFIER_WORDS.has(before[i].text)
+    )
+      i -= 1;
+    if (sameLine && before[i]?.type === 'CLOSE_PAREN') {
+      const p = matchingOpen(before, i);
+      if (p >= 0 && isFunctionHeader(before, p))
+        return { kind: 'words', keywords: [...SPECIFIER_WORDS].sort() };
+    }
+  }
+
+  if (sameLine && last.type === 'CLOSE_PAREN') {
+    const p = matchingOpen(before, n - 1);
+    if (word(p - 1) === 'for') return { kind: 'words', keywords: ['in'] };
+    if (word(p - 1) === 'let' || word(p - 1) === 'const') return none;
+  }
+
+  // After a type annotation: `=`, `{` or an operator of types follows.
+  if (
+    sameLine &&
+    (endsOperand(before, n - 1) || last.text === '>' || last.text === '>>') &&
+    inAnnotation(source, before)
+  )
+    return none;
+
+  // A `{` after an operator, a comma or an opening bracket opens a set or a
+  // dictionary, which ends an operand (`let s = {1} ▮`).
+  let collection = false;
+  if (last.type === 'CLOSE_BRACE') {
+    const p = matchingOpen(before, n - 1);
+    // A set, a dictionary, and the block of a `do` or `match` expression end
+    // an operand (`let a = do { 1 } if c else 0`).
+    collection =
+      isCollectionBrace(before, p) ||
+      ['do', 'match'].includes(headOfBlock(source, before, p) ?? '');
+    if (!collection) {
+      const isIf = p >= 0 && headOfBlock(source, before, p) === 'if';
+      if (sameLine) return { kind: 'words', keywords: isIf ? ['else'] : [] };
+      if (isIf) return { kind: 'statement-or-else' };
+      return { kind: 'default' };
+    }
+  }
+
+  // After a complete expression on its line: a word continues it only as
+  // `in`, `is`, or a postfix `if` (and its `else`).
+  if (sameLine && (collection || endsOperand(before, n - 1))) {
+    const keywords = ['if', 'in', 'is'];
+    if (hasPostfixIf(source, before)) keywords.push('else');
+    return { kind: 'words', keywords };
+  }
+
+  return { kind: 'default' };
+}
+
+/** Whether `before[i]` ends an operand: a name that is not a keyword, a
+ * number, a string, a literal, or a closing parenthesis or bracket. */
+function endsOperand(before: readonly Token[], i: number): boolean {
+  const t = before[i];
+  if (t === undefined) return false;
+  if (t.type === 'SYMBOL') return !NON_OPERAND_WORDS.has(t.text);
+  return [
+    'VERBATIM_SYMBOL',
+    'NUMBER',
+    'STRING',
+    'LATEX_ISLAND',
+    'CLOSE_PAREN',
+    'CLOSE_BRACKET',
+    'SUPERSCRIPT',
+    'SUBSCRIPT',
+  ].includes(t.type);
+}
+
+/** Whether the `{` at `p` opens a set or a dictionary, not a block: it
+ * follows a comma, an opening bracket, an operator other than `=>`, `in`, or
+ * the `else` of a postfix conditional. */
+function isCollectionBrace(before: readonly Token[], p: number): boolean {
+  const previous = before[p - 1];
+  if (p <= 0 || previous === undefined) return false;
+  return (
+    previous.type === 'COMMA' ||
+    /^OPEN_/.test(previous.type) ||
+    // The `>` of a type argument list ends a type: a block follows
+    // (`-> list<integer> {`, `if x is list<integer> {`).
+    (previous.type === 'OPERATOR' &&
+      !['=>', '>', '>>'].includes(previous.text)) ||
+    (previous.type === 'SYMBOL' && previous.text === 'in') ||
+    (previous.type === 'SYMBOL' &&
+      previous.text === 'else' &&
+      before[p - 2]?.type !== 'CLOSE_BRACE')
+  );
+}
+
+/** The index of the bracket that `before[i]`, a closing bracket, closes. */
+function matchingOpen(before: readonly Token[], i: number): number {
+  let depth = 0;
+  for (let j = i; j >= 0; j -= 1) {
+    if (/^CLOSE_/.test(before[j].type)) depth += 1;
+    else if (/^OPEN_/.test(before[j].type)) {
+      depth -= 1;
+      if (depth === 0) return j;
+    }
+  }
+  return -1;
+}
+
+/** The index of the innermost bracket still open at `before[i]`, or -1. */
+function innermostOpen(before: readonly Token[], i: number): number {
+  let depth = 0;
+  for (let j = i; j >= 0; j -= 1) {
+    if (/^CLOSE_/.test(before[j].type)) depth += 1;
+    else if (/^OPEN_/.test(before[j].type)) {
+      if (depth === 0) return j;
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+/** The keyword that heads the block opened by the `{` at `brace`: the first
+ * of `if`, `else`, `match`, `while`, `for`, `do`, `function`, `protocol`
+ * found back from it at its depth, within its statement. */
+function headOfBlock(
+  source: string,
+  before: readonly Token[],
+  brace: number
+): string | undefined {
+  const heads = [
+    'if',
+    'else',
+    'match',
+    'while',
+    'for',
+    'do',
+    'function',
+    'protocol',
+  ];
+  let depth = 0;
+  for (let j = brace - 1; j >= 0; j -= 1) {
+    const t = before[j];
+    if (/^CLOSE_/.test(t.type)) depth += 1;
+    else if (/^OPEN_/.test(t.type)) {
+      if (depth === 0) return undefined;
+      depth -= 1;
+    }
+    if (depth !== 0) continue;
+    if (t.type === 'SEMICOLON') return undefined;
+    if (t.type === 'SYMBOL' && heads.includes(t.text)) return t.text;
+    // A linebreak ends the statement unless the line before continues.
+    const previous = before[j - 1];
+    if (
+      previous !== undefined &&
+      source.slice(previous.end, t.start).includes('\n') &&
+      !(
+        previous.type === 'OPERATOR' ||
+        previous.type === 'COMMA' ||
+        /^OPEN_/.test(previous.type)
+      )
+    )
+      return undefined;
+  }
+  return undefined;
+}
+
+/** Whether the tokens end inside a type annotation of a declaration on
+ * the line: back from the end, at bracket depth 0, a `:` of `let a:` or of a
+ * parameter, a `->` of a function header or the `=` of `type T =` comes
+ * before an `=`, a `;` or the start of the line. A type test (`x is T`) is
+ * an expression, not an annotation. */
+function inAnnotation(source: string, before: readonly Token[]): boolean {
+  let depth = 0;
+  for (let j = before.length - 1; j >= 0; j -= 1) {
+    const t = before[j];
+    if (/^CLOSE_/.test(t.type)) depth += 1;
+    else if (/^OPEN_/.test(t.type)) {
+      if (depth === 0) return false;
+      depth -= 1;
+    }
+    if (depth === 0) {
+      if (t.text !== 'is' && isAnnotationStart(before.slice(0, j + 1), source))
+        return true;
+      if (t.type === 'SEMICOLON' || (t.type === 'OPERATOR' && t.text === '='))
+        return false;
+    }
+    // A linebreak ends the annotation unless the line before continues
+    // (`let a: integer |` and `real` on the next line).
+    const previous = before[j - 1];
+    if (
+      previous !== undefined &&
+      /[\n\r]/.test(source.slice(previous.end, t.start)) &&
+      !(
+        previous.type === 'OPERATOR' ||
+        previous.type === 'COMMA' ||
+        /^OPEN_/.test(previous.type)
+      )
+    )
+      return false;
+  }
+  return false;
+}
+
+/** Whether the line before the offset has a postfix `if` (`a if c`) that
+ * has no `else` yet, at depth 0. */
+function hasPostfixIf(source: string, before: readonly Token[]): boolean {
+  let depth = 0;
+  let open = 0;
+  for (let j = before.length - 1; j > 0; j -= 1) {
+    const t = before[j];
+    if (/^CLOSE_/.test(t.type)) depth += 1;
+    else if (/^OPEN_/.test(t.type)) {
+      if (depth === 0) return false;
+      depth -= 1;
+    }
+    // The first token of the line is not a postfix `if`: the `if` of a
+    // statement follows the end of the line before.
+    const lineStart = /[\n\r]/.test(source.slice(before[j - 1].end, t.start));
+    if (depth === 0 && t.type === 'SYMBOL' && !lineStart) {
+      if (t.text === 'else') open -= 1;
+      if (t.text === 'if' && endsOperand(before, j - 1)) {
+        open += 1;
+        if (open > 0) return true;
+      }
+    }
+    if (t.type === 'SEMICOLON' || lineStart) return false;
+  }
+  return false;
 }
 
 /** The path from the root to the placeholder: `nodes[k]` is operand

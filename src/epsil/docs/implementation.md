@@ -330,8 +330,21 @@ around the placeholder. The items are:
 The type expected at the offset comes from the value of a typed `let`, the
 parameter of a called function (of the source or of the library), the
 element type of a list, or the type of an assigned variable. After `:` in a
-declaration or a parameter, after `->` of a function header and after
-`type name =`, the items are the type names instead.
+declaration or a parameter, after `->` of a function header, after
+`type name =` and after `is` of a type test, the items are the type names
+instead.
+
+Every item is valid where it is offered. Where the grammar takes a new name
+(`let ▮`, `for ▮`) or no word (`let a ▮`, `let a: integer ▮`), there are no
+items; a parameter of a function header (`function f(▮`) offers `true` and
+`false`, the literals of a multi-clause function, and the place after
+the parameters offers the specifier words (`random`, `pure`,
+`commutative`, ...). Where it takes one keyword, that keyword is the only item:
+`in` after `for i`, `else` after the block of an `if`, `if` after `else`.
+After a complete expression on its line (`f(1) ▮`) the items are `if`, `in`
+and `is`, and `else` after a postfix `if`. After `type T is` and
+`protocol P extends` the items are the protocols. A case pattern of a
+`match` offers the names and `true` and `false`, but no other keyword.
 
 ```ts
 const source = "let count: integer = 10\nlet a: integer = co";
