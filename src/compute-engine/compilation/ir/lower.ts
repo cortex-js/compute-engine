@@ -286,6 +286,30 @@ const COLOR_CONVERSIONS = new Set([
   'AsOklab',
   'AsOklch',
 ]);
+/** The operations of the colour lane whose interpreter value is a colour of
+ *  the space they name (a constructor, a conversion), an `Oklch`
+ *  (`ColorMix`, `Colormap`) or an `Rgb` (`GamutMap`, `ContrastingColor` of a
+ *  background alone): not the head of a candidate, as `ContrastingColor` of
+ *  three colours answers. `AsHsv` and `AsHsl` read the space from these. */
+const COLOR_SAFE = new Set([
+  'rgb',
+  'hsl',
+  'hsv',
+  'oklab',
+  'oklch',
+  'asrgb',
+  'ashsl',
+  'ashsv',
+  'ashsl.own',
+  'ashsv.own',
+  'asoklab',
+  'asoklch',
+  'colormix',
+  'contrastingcolor.bw',
+  'gamutmap',
+  'gamutmap.p3',
+  'colormap',
+]);
 /** The number of leading operands of a colour operator that are colours,
  *  which a tuple of three numbers can stand for (`extractRgb()` of
  *  `library/colors.ts`). */
@@ -1684,24 +1708,51 @@ function lowerOnce(
       }
       case 'AsHsv':
       case 'AsHsl': {
-        // A conversion of a constructor of its own space is the
-        // constructor's channels (`ashsv.own`), as the interpreter answers
-        // it: `AsHsv(Hsv(h, 1, 0))` keeps `h`, which OKLCh loses at black.
-        const own = e.operator.slice(2);
-        const c = e.ops[0];
-        if (
-          e.nops !== 1 ||
-          !isFunction(c, own) ||
-          c.nops !== 3 ||
-          !isLibraryOperator(c as never, own) ||
-          hasOwnLowering(own, c.operatorDefinition)
-        )
-          break;
-        return apply(
-          e,
-          ofOp(`${e.operator.toLowerCase()}.own`),
-          c.ops.map((op) => value(op)!)
-        );
+        // The interpreter answers a colour of the conversion's own space
+        // unchanged, which OKLCh loses at black and at grey (`AsHsv(Hsv(h,
+        // 1, 0))` keeps `h`). The value of the operand is read from the
+        // operation that makes it, so a constructor written in place and a
+        // name whose value is one are seen alike: a constructor of the own
+        // space is its channels (`ashsv.own`, which threads over a list
+        // channel as the constructor does), a conversion to that space is
+        // its value, and an operation whose interpreter value is never of
+        // that space (`COLOR_SAFE`) converts. Any other colour (an `If`, a
+        // call of a user function, a `ContrastingColor` of candidates, a
+        // loop value) can be of that space at run time, and declines. A
+        // literal list of colours is each element by itself.
+        if (e.nops !== 1) break;
+        const op = e.operator.toLowerCase();
+        const own = op.slice(2);
+        const convert = (x: V): V => {
+          // A tuple of three numbers is sRGB, and another tuple declines
+          // (`apply()`).
+          if (type(x).lane !== 'color' || tuples.has(x))
+            return apply(e, ofOp(op), [x]);
+          const i = b.defs.get(x);
+          if (i?.op === own && i.args.length === 3)
+            return apply(e, ofOp(`${op}.own`), i.args);
+          if (i?.op === op || i?.op === `${op}.own`) return x;
+          if (i !== undefined && COLOR_SAFE.has(i.op))
+            return apply(e, ofOp(op), [x]);
+          // A literal list of colours, just made: each element by itself.
+          const l =
+            type(x).shape.length === 1
+              ? b.current().body.find((j) => j.k === 'list' && j.out === x)
+              : undefined;
+          if (
+            l?.k === 'list' &&
+            l.args.every(
+              (v) => type(v).lane === 'color' && type(v).shape.length === 0
+            )
+          )
+            return b.list(l.args.map(convert), type(x));
+          decline(
+            e,
+            `${e.operator} of a colour that can be ${own === 'hsv' ? 'an Hsv' : 'an Hsl'} colour at run time and is not one at compile time`
+          );
+        };
+        // The operand is lowered once: an effectful operand draws once.
+        return convert(value(e.ops[0])!);
       }
       case 'Color': {
         // `Color` of a string literal: the interpreter's colour of the

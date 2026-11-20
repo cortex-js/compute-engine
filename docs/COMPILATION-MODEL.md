@@ -490,12 +490,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   a colour whose sRGB channels differ by at most 1e-6 as grey (the
   interpreter: 1e-9): `ColorToColorspace(Rgb(0.5, 0.5, 0.5000005), "hsv")`
   is `(0, 0, 0.5000006)`, where the interpreter gives `(240, 1.0·10⁻⁶, 0.5000005)`.
-- `javascript`, `glsl` (plausible?: a conversion of a name or of a
-  conditional whose value is a constructor of its own space): only a
-  conversion written on the constructor keeps its channels (`AsHsv(Hsv(h,
-  1, 0))` is `(h, 1, 0)`). With `C = Hsv(270, 1, 0)`, `AsHsv(C)` gives
-  `(0, 0, 0)` through OKLCh, where the interpreter gives `(270, 1, 0)`; and
-  so does `AsHsv(If(x > 0, Hsv(270, 1, 0), Rgb(1, 0, 0)))` at `x = 1`.
 
 ## `parallel for` and `runAsync()`
 
@@ -1733,7 +1727,10 @@ parameter.
 A colour result (`Rgb`, `Hsl`, `Hsv`, `Oklab`, `Oklch`, `AsOklch`) is an
 OKLCh `vec3`; `AsOklab`, `AsRgb`, `AsHsv` and `AsHsl` give the
 `vec3` of their space and are admitted only as the result of the program;
-an alpha declines. `ColorMix`, `ColorContrast`, `ColorDelta`,
+an alpha declines. `AsHsv` and `AsHsl` of a colour of their own space (a
+constructor, a name whose value is one) keep its channels; of a colour that
+can be of that space at run time (an `If` of colours, a call of a user
+function, `ContrastingColor` of three colours) they decline. `ColorMix`, `ColorContrast`, `ColorDelta`,
 `ContrastingColor`, `GamutMap`, `ColorToColorspace` and `Color` of a string
 literal compile (`compilation/ir/README.md`, "The colour lane"). A name whose value is a colour
 constructor of three real numbers (`Hsv(270, 0.4, 0.95)`) is that

@@ -13,6 +13,20 @@
   decided when it runs. The qualified call `Styled.fill(7, 3)` does not fall
   back, and a definition of your own named `fill` still wins over both.
 
+### Resolved Issues
+
+- **A compiled `AsHsv` or `AsHsl` of a name keeps the channels of its own
+  space.** With `C = Hsv(270, 1, 0)`, the compiled `AsHsv(C)` gave
+  `(0, 0, 0)` on JavaScript and GLSL: the colour went through OKLCh, which
+  loses the hue and the saturation of a black or a grey. It now gives
+  `(270, 1, 0)`, as the interpreter, also for a value with a channel that is
+  an input (`Hsv(y, 1, 0)`) and for `AsHsv(AsHsv(c))`. A conversion of a
+  colour that can be of the same space at run time but is not known at
+  compile time declines, so the interpreter answers it: an `If` or a `Which`
+  of colours (`AsHsv(If(x > 0, Hsv(270, 1, 0), Rgb(1, 0, 0)))`), a call of a
+  user function, and `ContrastingColor` of three colours. A list of colours
+  (`AsHsv(List(Hsv(270, 1, 0), C))`) converts each element by the same rule.
+
 ## 0.194.3 _2026-11-19_
 
 ### New Features

@@ -565,8 +565,19 @@ of a constructor of its own space, `AsHsv(Hsv(h, s, v))` and
 `AsHsl(Hsl(h, s, l))`, is the constructor's channels as the interpreter reads
 them (`ashsv.own`, `ashsl.own`: the hue reduced into [0, 360), the others
 clamped), on both targets, since the round trip through OKLCh loses the hue and
-the saturation at black, at white (HSL) and at a saturation of 0. No space is
-tracked at compile time and no code tests one.
+the saturation at black, at white (HSL) and at a saturation of 0. The operand
+is read from the operation that makes its value, so a name whose value is such
+a constructor (`C = Hsv(270, 1, 0)`, `AsHsv(C)` is `(270, 1, 0)`) is one too,
+and a conversion to the same space (`AsHsv(AsHsv(c))`) is its operand. An
+operand made by an operation whose interpreter value is never of that space (a
+constructor or a conversion of another space, `ColorMix`, `GamutMap`,
+`Colormap`, `ContrastingColor` of one colour) converts; any other operand (an
+`If` or a `Which` of colours, a call of a user function, `ContrastingColor` of
+three colours, which answers the candidate as written) can be of that space at
+run time, and declines. A constructor with a list channel
+(`AsHsv(Hsv(List(270, 90), 1, 0))`) is the list of its colours' channels, and a
+literal list of colours is each element by itself. No space is tracked at run time and no code tests
+one.
 
 The rows take three real channels (`Rgb(x, 0.4, 0.6)`) or one colour; a fourth
 operand (alpha) declines on both targets (GLSL has no alpha channel, and a row
