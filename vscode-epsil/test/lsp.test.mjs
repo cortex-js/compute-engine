@@ -137,8 +137,9 @@ await scenario('hover', undefined, async (c) => {
 
 // ── Hover: a protocol function member named like a library function ─────
 // A free `floor` after the `protocol` statement calls the protocol's
-// dispatcher, not the library `Floor`, so its hover and rename name the
-// member. A `floor` before the statement is still the library function.
+// dispatcher, which falls back to the library `Floor` when no implementation
+// applies, so its hover names the member and the fallback, and rename names
+// the member. A `floor` before the statement is the library function.
 await scenario('protocol member hover', undefined, async (c) => {
   await c.open(
     URI,
@@ -156,7 +157,7 @@ await scenario('protocol member hover', undefined, async (c) => {
     'a bare call after the protocol shows the protocol member',
     member?.contents.value.includes('protocol `F`') === true &&
       member.contents.value.includes('function floor(self: Self) -> integer') &&
-      !member.contents.value.includes('Floor'),
+      member.contents.value.includes('the library function `Floor`'),
     JSON.stringify(member)
   );
 

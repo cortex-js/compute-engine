@@ -68,6 +68,7 @@ import {
   type ProtocolMemberDeclaration,
 } from '../../src/epsil/occurrences.js';
 import { binderSitesOf } from '../../src/epsil/resolve-library-names.js';
+import { canonicalLibraryName } from '../../src/epsil/library-names.js';
 import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations.js';
 import { HARD_RESERVED_WORDS } from '../../src/epsil/reserved-words.js';
 import type { ParsingDiagnostic } from '../../src/epsil/diagnostics.js';
@@ -894,9 +895,9 @@ function identifierAt(
  * The document is consulted FIRST because a program's own declaration shadows
  * a library name of the same spelling; showing the library's `Length` for a
  * file that declares its own would describe something the reader is not
- * looking at. A free name at `start` that a protocol function member of the
- * document shadows (see `protocolMemberAt()`) shows that member, for the
- * same reason.
+ * looking at. A free name at `start` that calls a protocol function member
+ * of the document (see `protocolMemberAt()`) shows that member, for the
+ * same reason, and the library function the call falls back to.
  */
 function describeSymbol(
   name: string,
@@ -909,13 +910,29 @@ function describeSymbol(
   if (declared !== undefined) return declared;
   if (group?.kind === 'free' && start !== undefined) {
     const members = protocolMemberAt(text, name, start);
-    if (members !== undefined)
-      return members
-        .flatMap((member) => [
+    if (members !== undefined) {
+      // The call falls back to the library function of this spelling when
+      // no implementation of the member applies to its first argument.
+      const library = canonicalLibraryName(name);
+      hoverEngine ??= new ComputeEngine();
+      const twin =
+        library !== undefined &&
+        hoverEngine.lookupDefinition(library) !== undefined &&
+        'operator' in hoverEngine.lookupDefinition(library)!
+          ? library
+          : undefined;
+      return [
+        ...members.flatMap((member) => [
           `Function member of the protocol \`${member.protocol}\`:`,
           codeBlock(clip(`function ${name}${member.signature}`)),
-        ])
-        .join('\n\n');
+        ]),
+        ...(twin === undefined
+          ? []
+          : [
+              `When no implementation applies to the first argument, the call is the library function \`${twin}\`.`,
+            ]),
+      ].join('\n\n');
+    }
   }
   return libraryHover(name);
 }

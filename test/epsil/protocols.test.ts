@@ -1594,10 +1594,11 @@ describe('EPSIL CONDITIONAL CONFORMANCE (phase 5)', () => {
 describe('a protocol function member named like a library function', () => {
   // The Epsil spelling `floor` of the library `Floor` is not an engine
   // binding: the resolution pass rewrites a free `floor` to `Floor` before
-  // the program runs. A protocol function member of the program shadows
-  // that spelling from its `protocol` statement onward, as a user `function`
-  // does, so the bare call reaches the protocol's dispatcher in the same
-  // program as in a later one. The library stays reachable as `Floor`.
+  // the program runs. After a `protocol` statement that declares a function
+  // member `floor`, the bare call reaches the protocol's dispatcher, in the
+  // same program as in a later one. The dispatcher calls the member when an
+  // implementation applies to the first argument and the library `Floor`
+  // otherwise (CE-1552). The library stays reachable as `Floor`.
   const DECLARATIONS = [
     'protocol F { function floor(self: Self) -> integer }',
     'type Money = tuple<cents: integer>',
@@ -1613,10 +1614,7 @@ describe('a protocol function member named like a library function', () => {
 
   test('the capitalized library name still calls the library function', () => {
     const ce = new ComputeEngine();
-    const r = executeEpsil(
-      ce,
-      `${DECLARATIONS}\nfloor(Money(3))\nFloor(2.5)`
-    );
+    const r = executeEpsil(ce, `${DECLARATIONS}\nfloor(Money(3))\nFloor(2.5)`);
     expect(r.diagnostics).toEqual([]);
     expect(r.value.toString()).toBe('2');
   });
@@ -1706,5 +1704,181 @@ describe('a protocol function member named like a library function', () => {
     expect(later.diagnostics).toEqual([]);
     expect(later.value.json).toEqual('Pi');
     expect(same.value.json).toEqual(later.value.json);
+  });
+
+  test('a first argument that no implementation serves calls the library function', () => {
+    // CE-1552: `integer` does not conform to `F`, so the bare call is the
+    // library `Floor`, in the same batch as in a later one.
+    const same = executeEpsil(
+      new ComputeEngine(),
+      `${DECLARATIONS}\n(floor(Money(3)), floor(2.5))`
+    );
+    expect(same.diagnostics).toEqual([]);
+    expect(same.value.toString()).toBe('(3, 2)');
+    const ce = new ComputeEngine();
+    expect(executeEpsil(ce, DECLARATIONS).diagnostics).toEqual([]);
+    const later = executeEpsil(ce, 'floor(2.5)');
+    expect(later.diagnostics).toEqual([]);
+    expect(later.value.toString()).toBe('2');
+  });
+
+  test('a member with no conformance yet calls the library function', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'protocol Q { function floor(self: Self) -> integer }\nfloor(2.5)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('2');
+  });
+
+  test('an undecided first argument is decided at run time', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      `${DECLARATIONS}\nfunction g(x) { floor(x) }\n(g(Money(3)), g(2.5))`
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('(3, 2)');
+  });
+
+  test('a value outside the implemented subtype of its static type calls the library function', () => {
+    // `real` is a supertype of the implemented `integer`: `h(3)` reaches the
+    // member and `h(2.5)` the library.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      [
+        'protocol N { function floor(self: Self) -> integer }',
+        'type integer is N { function floor(self: integer) -> integer { 100 } }',
+        'function h(x: real) { floor(x) }',
+        '(h(3), h(2.5))',
+      ].join('\n')
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('(100, 2)');
+  });
+
+  test('the qualified call does not fall back to the library function', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      `${DECLARATIONS}\nF.floor(2.5)`
+    );
+    expect(r.value.json).toMatchObject([
+      'Error',
+      ['ErrorCode', "'protocol-implementation-missing'", expect.anything()],
+      expect.anything(),
+    ]);
+  });
+
+  test('a declared conformance without its implementation calls the member', () => {
+    // A pending edge is conformance: the call is the member, which reports
+    // the missing implementation, not the library `Fill`.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      [
+        'protocol Styled { function fill(self: Self, c: any) -> Self }',
+        'type Money = tuple<cents: integer>',
+        'type Money is Styled',
+        'fill(Money(1), 3)',
+      ].join('\n')
+    );
+    expect(r.value.json).toMatchObject([
+      'Error',
+      ['ErrorCode', "'protocol-implementation-missing'", expect.anything()],
+      expect.anything(),
+    ]);
+  });
+
+  test('a call with an arity that no requirement has calls the library function', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'protocol Styled { function fill(self: Self, c: any) -> Self }\nfill(7, 2, 3)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('[[7,7,7],[7,7,7]]');
+  });
+
+  test('the effects of the member include those of the library function', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'protocol P { function print(self: Self) -> nothing }');
+    const def = ce.lookupDefinition('print');
+    expect(def !== undefined && 'operator' in def && def.operator.pure).toBe(
+      false
+    );
+  });
+
+  test('a lazy library function is not a fallback at run time', () => {
+    // The dispatcher evaluates its operands, and `Solve` needs the
+    // equation: a call left to the run time (an undecided receiver) keeps
+    // the missing implementation. A receiver that no conformance could serve
+    // is rewritten to `Solve` before anything is evaluated.
+    const lazy = executeEpsil(
+      new ComputeEngine(),
+      'protocol S { function solve(self: Self, x: any) -> list }\nfunction g(e) { solve(e, x) }\ng(x^2 == 1)'
+    );
+    expect(lazy.value.json).toMatchObject([
+      'Error',
+      ['ErrorCode', "'protocol-implementation-missing'", expect.anything()],
+      expect.anything(),
+    ]);
+    const settled = executeEpsil(
+      new ComputeEngine(),
+      [
+        'protocol S { function solve(self: Self, x: any) -> list }',
+        'type Money = tuple<cents: integer>',
+        'type Money is S { function solve(self: Money, x: any) -> list { [] } }',
+        'solve(x^2 == 1, x)',
+      ].join('\n')
+    );
+    expect(settled.diagnostics).toEqual([]);
+    expect(settled.value.toString()).toBe('[1,-1]');
+    // A supertype of a conformance target can still hold a conforming value,
+    // so it is left to the run time, where the member serves that value.
+    const supertype = executeEpsil(
+      new ComputeEngine(),
+      [
+        'protocol S { function solve(self: Self, x: any) -> list }',
+        'type integer is S { function solve(self: integer, x: any) -> list { [self] } }',
+        'function h(v: real) { solve(v, x) }',
+        'h(3)',
+      ].join('\n')
+    );
+    expect(supertype.diagnostics).toEqual([]);
+    expect(supertype.value.toString()).toBe('[3]');
+    // A member with no conformance yet is not resolved at canonicalization,
+    // so that a later conformance reaches it: the lazy twin is not reached.
+    const unconformed = executeEpsil(
+      new ComputeEngine(),
+      'protocol S { function solve(self: Self, x: any) -> list }\nsolve(x^2 == 1, x)'
+    );
+    expect(unconformed.value.json).toMatchObject([
+      'Error',
+      ['ErrorCode', "'protocol-implementation-missing'", expect.anything()],
+      expect.anything(),
+    ]);
+  });
+
+  test('a library function with an asynchronous evaluation too is a fallback at run time', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'protocol P { function sort(self: Self) -> list }\nlet u: any = [3, 1, 2]\nsort(u)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('[1,2,3]');
+  });
+
+  test('a member declared by the host has no library fallback', () => {
+    const ce = new ComputeEngine();
+    ce.declareProtocol('F', {
+      functions: { floor: '(self: Self) -> integer' },
+    });
+    ce.declareProtocolImplementation('string', 'F', {
+      functions: { floor: () => 3 },
+    });
+    expect(
+      ce
+        .box(['floor', { str: 'a' }])
+        .evaluate()
+        .toString()
+    ).toBe('3');
+    expect(ce.box(['floor', 2.5]).evaluate().operator).toBe('Error');
   });
 });

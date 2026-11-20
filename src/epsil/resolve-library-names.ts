@@ -53,10 +53,13 @@ import {
 // `function` of that name does: in `protocol F { function floor(self: Self)
 // -> integer }` followed by `floor(m)`, the call keeps the name `floor` and
 // reaches the protocol's dispatcher, which the `protocol` statement installs
-// when it runs. The library function stays reachable by its capitalized
-// name (`Floor(x)`). A later batch sees the installed dispatcher as an
-// engine binding, so the two cases agree (user decision 2026-10-31, ROADMAP
-// CE-716).
+// when it runs. The dispatcher calls the library function (`Floor`) when no
+// implementation of the member applies to the first argument (CE-1552), and
+// the capitalized name always calls it. A later batch sees the installed
+// dispatcher as an engine binding, so the two cases agree (user decision
+// 2026-10-31, CE-716). The arguments of such a call resolve as those of the
+// member, which binds nothing, also when the call falls back to a library
+// binder (`solve`).
 //
 // The rewrite is done in place, node by node, and keeps every node's
 // `sourceOffsets`, so the diagnostics of the later phases still point at

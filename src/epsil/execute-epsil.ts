@@ -47,7 +47,7 @@ import {
 } from '../compute-engine/library/control-structures.js';
 import { parseEpsil } from './parse-epsil.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
-import { epsilNameOf } from './library-names.js';
+import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import { definitionSites } from './definition-sites.js';
 import {
   narrowToFrames,
@@ -358,6 +358,10 @@ function* executeEpsilRun(
   // host re-entering the interpreter) leaves the outer batch intact.
   const enclosingBatch = ce._epsilBatchId;
   ce._epsilBatchId = nextEpsilBatchId();
+  // The Epsil spelling of the library, for the protocol dispatchers the
+  // batch installs (`IComputeEngine._epsilLibraryName`).
+  const enclosingLibraryName = ce._epsilLibraryName;
+  ce._epsilLibraryName = canonicalLibraryName;
   // The nested-statement hook the evaluation loop installs (see
   // `nestedStatementReporter`). The loop restores it when it ends; this
   // restores it too when the run ends with an exception. Restored rather
@@ -378,6 +382,7 @@ function* executeEpsilRun(
   } finally {
     ce._deadlineFrame = runFrame;
     ce._epsilBatchId = enclosingBatch;
+    ce._epsilLibraryName = enclosingLibraryName;
     ce._epsilStatementResultHook = enclosingStatementHook;
   }
 }

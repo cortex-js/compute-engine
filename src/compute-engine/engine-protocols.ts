@@ -68,6 +68,8 @@ import type {
   BoxedDefinition,
   OperandDescriptor,
   OperatorDefinition,
+  PureEngineView,
+  ReadonlyDefinitionView,
 } from './types-definitions.js';
 import type { Scope } from './types-evaluation.js';
 import {
@@ -4681,8 +4683,15 @@ export function declareProtocolImplementationImpl(
  * for that reason. */
 const DISPATCHER = '_protocolDispatcher';
 
+/** Second marker on a dispatcher installed in an Epsil batch: the standard
+ * library operator whose Epsil spelling is the member name (`Fill` for
+ * `fill`). A bare call falls back to it when no implementation of the member
+ * applies to the first argument (CE-1552, {@link libraryTwinOf}). */
+const LIBRARY_TWIN = '_protocolLibraryTwin';
+
 interface DispatcherMarker {
   [DISPATCHER]?: true;
+  [LIBRARY_TWIN]?: string;
 }
 
 /** Is this binding a protocol dispatcher WE installed? Used by the
@@ -4693,6 +4702,44 @@ export function isProtocolDispatcher(
 ): boolean {
   if (def === undefined || !isOperatorDef(def)) return false;
   return (def.operator as unknown as DispatcherMarker)[DISPATCHER] === true;
+}
+
+/** The operator definition of a binding, or `undefined` for a value. */
+function operatorOf(def: BoxedDefinition | undefined) {
+  return def !== undefined && isOperatorDef(def) ? def.operator : undefined;
+}
+
+/** The library twin recorded on a dispatcher binding, if any. */
+function recordedLibraryTwin(
+  def: ReadonlyDefinitionView | undefined
+): string | undefined {
+  if (def?.operator === undefined) return undefined;
+  return (def.operator as unknown as DispatcherMarker)[LIBRARY_TWIN];
+}
+
+/**
+ * The standard-library operator a bare call of the protocol member `member`
+ * falls back to when no implementation applies to its first argument, or
+ * `undefined` when there is none (CE-1552, `docs/TYPE_SYSTEM_ROADMAP.md`,
+ * Appendix A, name resolution, rule 1).
+ *
+ * Only a dispatcher installed in an Epsil batch records one, because the
+ * lowercase spelling of a library name is a property of the Epsil language:
+ * a member that only the host declares (`ce.declareProtocol`) has no twin.
+ * Once recorded, the twin belongs to the dispatcher, so a MathJSON
+ * `["fill", 7, 3]` boxed by the host after the batch falls back too, as the
+ * body of an Epsil function that the host calls later must. The twin
+ * must still name an operator, so a host that declares a constant `Fill`
+ * removes the fallback rather than turning the call into an application of a
+ * value.
+ */
+function libraryTwinOf(
+  ce: Pick<PureEngineView, 'lookupDefinition'>,
+  member: string
+): string | undefined {
+  const twin = recordedLibraryTwin(ce.lookupDefinition(member));
+  if (twin === undefined) return undefined;
+  return ce.lookupDefinition(twin)?.operator !== undefined ? twin : undefined;
 }
 
 /**
@@ -4845,7 +4892,10 @@ function parseRequirement(
  *   dispatcher. For a member that gets a dispatcher, the
  *   Epsil resolution pass does not rewrite a bare `floor(…)` written after
  *   the `protocol` statement to `Floor`, so that the call reaches the
- *   dispatcher (`resolveLibraryNames()` in `src/epsil/resolve-library-names.ts`);
+ *   dispatcher (`resolveLibraryNames()` in `src/epsil/resolve-library-names.ts`).
+ *   A dispatcher installed in an Epsil batch records that library twin, and
+ *   a bare call that no implementation serves calls it
+ *   ({@link libraryTwinOf});
  * - a dispatcher whose member name no longer exists in any protocol (a
  *   replacement that removed or renamed the member) is removed.
  *
@@ -4908,6 +4958,12 @@ function installDispatcher(
   const def = dispatcherDefinition(ce, member);
   if (def === null) return;
 
+  // The library twin survives a refresh outside an Epsil batch (a host
+  // conformance): the name it stands for does not change.
+  const twin =
+    ce._epsilLibraryName?.(member) ??
+    (ours ? recordedLibraryTwin(own) : undefined);
+
   try {
     if (ours) updateDef(ce, member, own!, def);
     else ce.declare(member, def, scope);
@@ -4917,12 +4973,18 @@ function installDispatcher(
 
   const installed = scope.bindings.get(member);
   if (installed !== undefined && isOperatorDef(installed)) {
-    (installed.operator as unknown as DispatcherMarker)[DISPATCHER] = true;
+    const marker = installed.operator as unknown as DispatcherMarker;
+    marker[DISPATCHER] = true;
+    if (twin !== undefined && twin !== member) marker[LIBRARY_TWIN] = twin;
     // The stored signature carries the DECLARED ceilings, which are fixed at
     // declaration time; the BARE requirements' contribution is the union over
     // the conformers registered at the moment the effects are read, so it is
     // derived lazily rather than baked in here.
-    installed.operator._deriveEffects = makeDispatcherDeriver(ce, member);
+    installed.operator._deriveEffects = makeDispatcherDeriver(
+      ce,
+      member,
+      () => marker[LIBRARY_TWIN]
+    );
   }
 }
 
@@ -4951,9 +5013,16 @@ function installDispatcher(
  */
 function derivedDispatcherEffects(
   ce: IComputeEngine,
-  member: string
+  member: string,
+  twin: string | undefined
 ): EffectSet | undefined {
-  let union: EffectSet | undefined = undefined;
+  // A bare call may fall back to the library twin (CE-1552), so its
+  // effects are in the union too.
+  let union: EffectSet | undefined =
+    twin === undefined
+      ? undefined
+      : operatorOf(ce.lookupDefinition(twin))?.effects;
+  if (union === 'any') return 'any';
   for (const record of protocolsWithMember(ce, member)) {
     const shape = requirementShape(ce, record, member);
     if (shape === null) continue;
@@ -5025,7 +5094,9 @@ function derivedDispatcherEffects(
  */
 function makeDispatcherDeriver(
   ce: IComputeEngine,
-  member: string
+  member: string,
+  /** The library twin recorded on the dispatcher the deriver belongs to. */
+  twin: () => string | undefined
 ): () => EffectSet | undefined {
   let stampedConformance = -1;
   let stampedCallable = -1;
@@ -5040,7 +5111,7 @@ function makeDispatcherDeriver(
       return memo;
     inFlight = true;
     try {
-      memo = derivedDispatcherEffects(ce, member);
+      memo = derivedDispatcherEffects(ce, member, twin());
       if (!ce._resultMayBeDiscarded()) {
         stampedConformance = ce._conformanceVersion;
         stampedCallable = ce._callableVersion;
@@ -5125,7 +5196,13 @@ function dispatcherDefinition(
     canonical: (ops, { engine }) => dispatcherCanonical(engine, member, ops),
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        dispatcherResultTypeOfDescriptors(engine, member, null, ops),
+        // A call that may fall back to the library twin has the type of
+        // neither alone: it is left to the signature's `unknown`.
+        libraryTwinOf(engine, member) !== undefined &&
+          !ops.some((x) => x.type === 'error') &&
+          !conformsForMember(engine, member, receiverTypeOfDescriptors(ops))
+          ? undefined
+          : dispatcherResultTypeOfDescriptors(engine, member, null, ops),
         engine._typeResolver
       ),
     evaluate: (ops, options) =>
@@ -5189,6 +5266,50 @@ function receiverType(ops: ReadonlyArray<Expression>): Type | undefined {
   return self._literalType !== undefined
     ? stripNumericRanges(self.type.type)
     : widenValueTypes(self.type.type);
+}
+
+/**
+ * Does a value of type `receiver` conform to a protocol that declares
+ * `member`? True when the type is decided for dispatch and a conformance
+ * edge of such a protocol applies to it: registered on the type or on a
+ * supertype, with an implementation of the member, inherited, or still
+ * pending. A conforming value calls the member, and a pending edge then
+ * reports `protocol-implementation-missing`, as it does with no library twin
+ * (P3). A value that conforms to none calls the library twin (CE-1552).
+ */
+function conformsForMember(
+  ce: ProtocolReadView,
+  member: string,
+  receiver: Type | undefined
+): boolean {
+  if (receiver === undefined || !isDecidedReceiverType(receiver)) return false;
+  return protocolsWithMember(ce, member).some((record) =>
+    record.conformances.some(
+      (edge) => edgeTargetAt(ce, edge, receiver) !== null
+    )
+  );
+}
+
+/**
+ * Can the run time fall back to the library operator `twin`? Only when it
+ * evaluates its operands and has a synchronous evaluation, since the
+ * dispatcher is synchronous and hands it evaluated operands: a `lazy` twin
+ * (`Solve`, which needs the unevaluated equation) and an asynchronous-only
+ * one keep the dispatcher's `protocol-implementation-missing`. Their call is
+ * still the twin's when the receiver has a type that no conformance of the
+ * member could serve, because canonicalization rewrites it before anything
+ * is evaluated ({@link dispatcherCanonical}). A member with no conformance
+ * yet is not rewritten, so that a later conformance reaches it: its call to
+ * a lazy twin is the error (`docs/TYPE_SYSTEM_ROADMAP.md`, name
+ * resolution, rule 1).
+ */
+function isEagerTwin(ce: IComputeEngine, twin: string): boolean {
+  const def = operatorOf(ce.lookupDefinition(twin));
+  return (
+    def !== undefined &&
+    !def.lazy &&
+    !(def.evaluateAsync !== undefined && def.evaluate === undefined)
+  );
 }
 
 /**
@@ -5376,6 +5497,29 @@ function dispatcherCanonical(
 
   const selfType = receiverType(ops);
   const records = candidateRecords(ce, member, selfType);
+  const twin = libraryTwinOf(ce, member);
+  // A receiver that no protocol could serve is the library twin's call. So
+  // is a decided receiver that conforms to none, with an arity that no
+  // requirement has: a value of a subtype that conforms at run time would
+  // only get the member's arity error. An undecided receiver may conform at
+  // run time, where the member's arity check reports the call.
+  if (
+    twin !== undefined &&
+    (records === null ||
+      (selfType !== undefined &&
+        isDecidedReceiverType(selfType) &&
+        !conformsForMember(ce, member, selfType) &&
+        !protocolsWithMember(ce, member).some(
+          (r) => requirementShape(ce, r, member)?.args?.length === ops.length
+        )))
+  )
+    return ce.function(twin, [...ops]);
+  // A receiver that is not known to conform (an undecided type, a supertype
+  // of a conformance target, or a member with no conformance yet) is decided
+  // at run time, between the member and the twin: the argument check of the
+  // member would reject a call the twin accepts.
+  if (twin !== undefined && !conformsForMember(ce, member, selfType))
+    return ce._fn(member, [...ops]);
   if (records === null)
     return ce._fn(member, [
       ce.error(
@@ -5566,6 +5710,19 @@ function dispatchMember(
   if (!isDecidedReceiverType(runtime)) return undefined;
 
   const best = bestCandidates(ce, records, member, runtime);
+
+  if (best.length === 0) {
+    // The bare call of a member with a library twin, on a value that
+    // conforms to no protocol of the member, is the twin's call (CE-1552).
+    // The qualified call names the protocol: no fallback.
+    const twin = only === null ? libraryTwinOf(ce, member) : undefined;
+    if (
+      twin !== undefined &&
+      !conformsForMember(ce, member, runtime) &&
+      isEagerTwin(ce, twin)
+    )
+      return ce.function(twin, [...ops]).evaluate(options);
+  }
 
   if (best.length === 0)
     return ce.error(

@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **In Epsil, a bare call of a protocol function member named like a library
+  function calls the library function when no implementation applies to its
+  first argument.** After
+  `protocol Styled { function fill(self: Self, c: any) -> Self }` and a
+  conformance of a `Fig` type, `fill(s, "red")` still calls the member for a
+  `Fig` value, and `fill(7, 3)` is now the library `Fill`: `[7, 7, 7]` (before:
+  a `protocol-implementation-missing` error). When the type of the first
+  argument does not settle the question (an untyped parameter), the call is
+  decided when it runs. The qualified call `Styled.fill(7, 3)` does not fall
+  back, and a definition of your own named `fill` still wins over both.
+
 ## 0.194.3 _2026-11-19_
 
 ### New Features

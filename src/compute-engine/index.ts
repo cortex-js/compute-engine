@@ -700,6 +700,10 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._epsilBatchId`. @internal */
   _epsilBatchId: number | undefined = undefined;
 
+  /** See `IComputeEngine._epsilLibraryName`. @internal */
+  _epsilLibraryName: ((spelling: string) => string | undefined) | undefined =
+    undefined;
+
   /** See `IComputeEngine._epsilDeclarationRoute`. @internal */
   _epsilDeclarationRoute = false;
 

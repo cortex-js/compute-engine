@@ -2114,11 +2114,34 @@ produces the ordinary runtime error value when no implementation applies.
 
 1. A lexically visible user definition of the name shadows all protocol
    members — the user's function matches the bare name. A library function
-   does not: a protocol function member shadows the Epsil lowercase spelling
-   of a library function (`floor` for `Floor`) from its `protocol` statement
-   onward, in the same batch as in a later one, and the library function
-   stays reachable by its capitalized name (user decision 2026-10-31,
-   CE-716).
+   does not shadow them: from its `protocol` statement onward, in the same
+   batch as in a later one, a bare call of the Epsil lowercase spelling of a
+   library function (`floor` for `Floor`) reaches the protocol member. The
+   library function is one more candidate of that call, filtered by the
+   first argument as in rule 3: when the first argument conforms to a
+   protocol of the member (a conformance that is still pending included),
+   the member is called, also when the library function would accept the
+   call; otherwise the library function is. A call with an arity that no
+   requirement has, on a first argument of a decided type that conforms to
+   none, is the library function's. A first argument whose static
+   type is known to conform to none of the protocols that have conformances
+   is resolved when the call is canonicalized, and keeps that verdict; one
+   that is not known to conform (an undecided type, a supertype of a
+   conformance target, or a member with no conformance yet) is decided at
+   run time, and the call's static type is then `unknown`. The run time
+   hands the library function evaluated operands, so it does not fall back
+   to a `lazy` operator (`Solve`) or an asynchronous-only one: that call
+   keeps `protocol-implementation-missing`. A call resolved when it is
+   canonicalized reaches such an operator; a call of a member that has no
+   conformance yet is not resolved then, so that a later conformance still
+   reaches the member, and `solve(x^2 == 1, x)` right after
+   `protocol S { function solve(self: Self, x: any) -> list }` is that
+   error. `Solve(x^2 == 1, x)` is the workaround. The dispatcher's
+   effects include those of the library function. Only a protocol declared
+   by an Epsil program has the fallback. The capitalized name always calls
+   the library function and the qualified name always the member, which
+   never falls back (user decisions 2026-10-31, CE-716, and 2026-11-19,
+   CE-1552).
 2. Otherwise, if the name belongs to exactly one protocol, it resolves
    there.
 3. Otherwise (the name is in several protocols), candidates are filtered by

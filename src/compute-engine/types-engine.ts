@@ -981,6 +981,16 @@ export interface IComputeEngine {
    * @internal */
   _epsilBatchId: number | undefined;
 
+  /** The standard-library name that an Epsil spelling stands for (`fill` →
+   * `Fill`), or `undefined` outside an Epsil batch. Set with
+   * {@link IComputeEngine._epsilBatchId}: the lowercase spelling is a
+   * property of the Epsil language, and the engine does not import its
+   * table. A protocol dispatcher installed in a batch reads it to record the
+   * library function a bare call falls back to when no implementation of the
+   * member applies to the first argument (CE-1552).
+   * @internal */
+  _epsilLibraryName: ((spelling: string) => string | undefined) | undefined;
+
   /** Remove the iteration limit of this engine, unless a host has assigned
    * `iterationLimit` (an assigned limit is kept). Called by `executeEpsil`
    * before a program runs: a loop written by the author of a program runs

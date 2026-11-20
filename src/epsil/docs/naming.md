@@ -78,8 +78,10 @@ resolve by **scope**, not by case.
 A user binding shadows a library name for the rest of its scope, whichever
 spelling the library name has: a `let`, a `const`, a parameter, a loop
 variable, a `match` pattern, or a `function` definition. A function member
-of a `protocol` shadows a library name the same way, from the `protocol`
-statement onward. The qualified name `std::name` always names the library
+of a `protocol` takes the bare name from the `protocol` statement onward,
+but a call whose first argument no implementation of the member serves
+still calls the library function (see
+[Protocols](/epsil/protocols/)). The qualified name `std::name` always names the library
 definition: `std::floor(x)` calls the library function wherever the program
 binds `floor` or `Floor`.
 

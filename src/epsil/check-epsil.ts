@@ -4,6 +4,7 @@ import { FatalParsingError, type ParsingDiagnostic } from './diagnostics.js';
 import type { ExecuteEpsilOptions } from './execute-epsil.js';
 import { nextEpsilBatchId, sumVariantNames } from './execute-epsil.js';
 import { parseEpsil } from './parse-epsil.js';
+import { canonicalLibraryName } from './library-names.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { staticDiagnostics } from './static-diagnostics.js';
 
@@ -71,11 +72,14 @@ export function checkEpsil(
     // implementation block for one type and protocol in the same program is
     // an error.
     const enclosingBatch = ce._epsilBatchId;
+    const enclosingLibraryName = ce._epsilLibraryName;
     ce._epsilBatchId = nextEpsilBatchId();
+    ce._epsilLibraryName = canonicalLibraryName;
     try {
       staticDiagnostics(ce, ast, source, diagnostics);
     } finally {
       ce._epsilBatchId = enclosingBatch;
+      ce._epsilLibraryName = enclosingLibraryName;
     }
   }
   return { diagnostics };

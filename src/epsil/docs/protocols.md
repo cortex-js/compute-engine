@@ -270,19 +270,20 @@ flowchart TD
 
 ### When the bare name is taken, qualify
 
-A library function does not take the bare name. A protocol function member
-shadows the lowercase spelling of a library function of the same name, as a
-user `function` does: after the `protocol` statement, a bare `floor(m)`
-calls the protocol member. The library function stays reachable by its
-capitalized name, `Floor(x)`.
+A protocol function member can have the name of the lowercase spelling of
+a library function. After the `protocol` statement, a bare `floor(m)` calls
+the protocol member when an implementation applies to `m`, and the library
+function otherwise. When the type of the first argument does not settle it
+(an untyped parameter), the call is decided when it runs. The capitalized
+name `Floor(x)` always calls the library function.
 
 ```epsil-live
 protocol Rounded { function floor(self: Self) -> integer }
 type Money = tuple<cents: integer>
 type Money is Rounded { function floor(self: Money) -> integer { self.cents } }
 
-(floor(Money(3)), Floor(2.5))
-// ➔ (3, 2)
+(floor(Money(3)), floor(2.5), Floor(2.5))
+// ➔ (3, 2, 2)
 ```
 
 Two situations take the bare name away. A definition of your own of the
