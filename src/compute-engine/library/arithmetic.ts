@@ -6934,17 +6934,23 @@ function bigGcd(a: bigint, b: bigint): bigint {
 /**
  * The exact `H_n^(r) = Σ_{k=1}^n k^(−r)` for integers n ≥ 1 and r, as a
  * reduced `[numerator, denominator]`, or `undefined` past the work cap. The
- * terms share the denominator `lcm(1..n)^r` (`lcm(1..n) ≈ eⁿ`), so the work
- * is about n·(0.43·n·r) digit-steps; a negative r is a plain integer sum.
+ * terms share the denominator `lcm(1..n)^r` (`lcm(1..n) ≈ eⁿ`, 0.43·n
+ * digits): the lcm takes n steps on up to 0.43·n digits, and each of the n
+ * terms is an r-th power of `r·log10(lcm)` digits, whose cost grows about as
+ * r times its digits (measured: 0.9 to 1.4 ns per unit of this work for
+ * H(30000), H(20000, 2), H(5000, 10) and H(1000, 50)). n = 1 is 1, r = 0 is
+ * n, and a negative r is a plain integer sum.
  */
 function harmonicNumberExact(
   ce: ComputeEngine,
   n: number,
   r: number
 ): [bigint, bigint] | undefined {
-  const digits =
-    r >= 0 ? r * n * Math.LOG10E + 1 : -r * Math.log10(n) + Math.log10(n) + 1;
-  if (!Number.isFinite(digits) || n * digits > MAX_EXACT_HARMONIC_WORK)
+  if (n === 1) return [1n, 1n];
+  if (r === 0) return [BigInt(n), 1n];
+  const work =
+    r > 0 ? n * n * Math.LOG10E : n * (-r * Math.log10(n) + Math.log10(n) + 1);
+  if (!Number.isFinite(work) || work > MAX_EXACT_HARMONIC_WORK)
     return undefined;
   let steps = 0;
   const tick = () => {
@@ -6964,6 +6970,13 @@ function harmonicNumberExact(
     tick();
     lcm = (lcm / bigGcd(lcm, k)) * k;
   }
+  // The work of the sum, from log10 of the lcm: of its leading 53 bits, and
+  // the bits past them.
+  const shift = Math.max(0, lcm.toString(2).length - 53);
+  const lcmDigits =
+    Math.log10(Number(lcm >> BigInt(shift))) + shift * Math.log10(2);
+  if (n * ((r + 1) * lcmDigits + 1) * r > MAX_EXACT_HARMONIC_WORK)
+    return undefined;
   let sum = 0n;
   const br = BigInt(r);
   for (let k = 1n; k <= bn; k++) {
@@ -6973,6 +6986,145 @@ function harmonicNumberExact(
   const den = lcm ** br;
   const g = bigGcd(sum, den);
   return [sum / g, den / g];
+}
+
+/**
+ * The most terms of the series of `harmonicNumberNearZero()`. Each term is a
+ * `bigZeta` at the working precision, so a series of a number of terms of
+ * the order of the precision (|n| near 0.1) is slower than the analytic
+ * continuation at a raised precision (`harmonicNumberRaised()`).
+ */
+const MAX_HARMONIC_SERIES_TERMS = 24;
+
+/** The digits added to the working precision near n = 0. */
+const HARMONIC_GUARD_DIGITS = 10;
+
+/** The decimal magnitude of a nonzero finite big decimal (`3` for `123.4`). */
+function bigMagnitude(x: BigNum): number {
+  return x.exponent + x._digitCount();
+}
+
+/**
+ * The generalized harmonic number `H_n^(r)` of a real `0 < |n| < 0.1`, where
+ * `ψ(1 + n) + γ` and `ζ(r) − ζ(r, 1 + n)` cancel: the binomial series of
+ * `(k + n)^(−r)`, `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)` (`r = 1`:
+ * `n·Σ ζ(j + 2)(−n)^j`), at the working precision `prec`. It is the series of
+ * `harmonicNearZero()` in the JavaScript runtime, in big decimals. At an
+ * integer `r = −m ≤ 0` the term of `ζ(1)` (j = m + 1) is its limit, `nʲ/j`,
+ * and the later terms are 0. Near that pole (`r` close to −m) the factor
+ * `r + m` of the coefficient cancels the pole of `ζ(1 + (r + m))`, which is
+ * computed with the digits that its argument loses. `undefined` when the
+ * series needs more than `MAX_HARMONIC_SERIES_TERMS` terms, when its terms
+ * cancel by more than the guard digits (a large `r`), or when a term is not
+ * finite.
+ */
+function harmonicNumberNearZero(
+  ce: ComputeEngine,
+  n: BigNum,
+  r: BigNum,
+  prec: number
+): BigNum | undefined {
+  const guard = HARMONIC_GUARD_DIGITS;
+  const p = prec + guard;
+  const absN = Math.abs(n.toNumber());
+  const rNum = r.toNumber();
+  const rInteger = r.isInteger();
+  // The terms fall by a factor of about |n| once r + j > 2: an estimate of
+  // their number, and the terms of an integer r ≤ 0, which end at j = 1 − r.
+  const terms =
+    rInteger && rNum <= 0
+      ? 1 - rNum
+      : Math.max(0, Math.ceil(2 - rNum)) + Math.ceil(p / -Math.log10(absN));
+  if (!(terms <= MAX_HARMONIC_SERIES_TERMS)) return undefined;
+  const tolerance = new BigDecimal(`1e-${p}`);
+  let sum: BigNum = BigDecimal.ZERO;
+  let c: BigNum = BigDecimal.ONE;
+  let power: BigNum = BigDecimal.ONE;
+  let peak: BigNum = BigDecimal.ZERO;
+  for (let j = 1; j <= 2 * MAX_HARMONIC_SERIES_TERMS; j++) {
+    checkDeadline(ce._deadlineFrame);
+    power = power.mul(n.neg()).toPrecision(p);
+    if (rInteger && rNum + j === 1)
+      return sum.add(power.div(j % 2 === 0 ? j : -j, p), p).toPrecision(prec);
+    // `r + j − 1` and `r + j` are exact sums.
+    const d = r.add(j - 1);
+    c = c.mul(d).div(j, p).toPrecision(p);
+    const cp = c.mul(power).toPrecision(p);
+    // ζ(1 + d) is about 1/d: its argument loses −log10|d| digits.
+    const lost = d.isZero() ? 0 : Math.max(0, -bigMagnitude(d) + 1);
+    if (lost > 4 * p) return undefined;
+    const t = cp.mul(bigZeta(ce, r.add(j), p + lost)).toPrecision(p);
+    if (!t.isFinite()) return undefined;
+    if (t.abs().gt(peak)) peak = t.abs();
+    sum = sum.sub(t, p);
+    // Past `r + j = 2`, `ζ(r + j) < 2`; where the ratio of two terms,
+    // `|n|·(r + j)/(j + 1)`, is below 1/2 and falls, the rest is below the
+    // last term.
+    if (
+      rNum + j > 2 &&
+      (absN * (rNum + j)) / (j + 1) < 0.5 &&
+      cp.abs().lte(sum.abs().mul(tolerance))
+    ) {
+      // Terms much larger than the sum cancel: their rounding is in it.
+      if (!sum.isFinite() || peak.gt(sum.abs().mul(10 ** (guard - 3))))
+        return undefined;
+      return sum.toPrecision(prec);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The generalized harmonic number `H_n^(r)` of a real `0 < |n| < 0.1` by the
+ * analytic continuation `ψ(1 + n) + γ` (no `r`) or `ζ(r) − ζ(r, 1 + n)`, at a
+ * precision raised by the digits that the difference loses: first
+ * `−log10|n|`, then the loss it measures (a value whose leading term is
+ * 0, as `H(n, −5) ≈ −n²/12`). `undefined` when the value still has fewer
+ * than the working digits `prec`, or a kernel declines.
+ */
+function harmonicNumberRaised(
+  ce: ComputeEngine,
+  n: BigNum,
+  r: BigNum | undefined,
+  prec: number
+): BigNum | undefined {
+  const at = (digits: number) => {
+    const shifted = n.add(1);
+    const [a, b] =
+      r === undefined
+        ? [bigDigamma(ce, shifted, digits), BigDecimal.eulerGamma(digits)]
+        : [
+            bigZeta(ce, r, digits),
+            bigHurwitzZeta(ce, r, shifted, digits)?.neg(),
+          ];
+    if (a === undefined || b === undefined) return undefined;
+    if (!a.isFinite() || !b.isFinite()) return undefined;
+    const value = a.add(b, digits).toPrecision(digits);
+    const largest = Math.max(
+      a.isZero() ? -Infinity : bigMagnitude(a),
+      b.isZero() ? -Infinity : bigMagnitude(b)
+    );
+    const lost = value.isZero() ? Infinity : largest - bigMagnitude(value);
+    return { value, kept: digits - Math.max(0, lost) };
+  };
+  const limit = prec + MAX_CANCELLATION_EXTRA_DIGITS;
+  let digits = Math.min(
+    limit,
+    prec +
+      Math.ceil(-Math.log10(Math.abs(n.toNumber()))) +
+      HARMONIC_GUARD_DIGITS
+  );
+  let result = at(digits);
+  if (result === undefined) return undefined;
+  if (result.kept < prec + CANCELLATION_DIGITS && digits < limit) {
+    // The loss is now measured (the full precision when the value was 0).
+    const lost = Number.isFinite(result.kept) ? digits - result.kept : digits;
+    digits = Math.min(limit, prec + lost + HARMONIC_GUARD_DIGITS);
+    result = at(digits);
+    if (result === undefined) return undefined;
+  }
+  if (result.kept < prec + CANCELLATION_DIGITS) return undefined;
+  return result.value.toPrecision(prec);
 }
 
 /**
@@ -6990,7 +7142,10 @@ function harmonicNumberExact(
  *   continuation: H_z = ψ(z+1) + γ (DLMF 5.15.2) and, for r ≠ 1,
  *   H_z^(r) = ζ(r) − ζ(r, z+1) (DLMF 25.11.1), through `Digamma` and
  *   `HurwitzZeta` so every route and precision is theirs. A non-finite
- *   answer declines.
+ *   answer declines. For a real `|n| < 0.1` and a real r, where that
+ *   difference cancels, the series of `harmonicNumberNearZero()` when it is
+ *   short, else the continuation at a raised precision
+ *   (`harmonicNumberRaised()`), which declines when it still cancels.
  */
 function evaluateHarmonicNumber(
   engine: ComputeEngine,
@@ -7040,6 +7195,33 @@ function evaluateHarmonicNumber(
 
   if (!numericize) return undefined;
   if (!isNumber(n) || (r !== undefined && !isNumber(r))) return undefined;
+  // Near n = 0 the analytic continuation below cancels (to 0 at
+  // `n = 1e-30`): a real n and r take the series when it is short, else the
+  // continuation at a raised precision.
+  if (
+    !n.isComplex &&
+    Math.abs(n.re) < 0.1 &&
+    (r === undefined || (!r.isComplex && Number.isFinite(r.re)))
+  ) {
+    const working = Math.max(engine.precision, MACHINE_PRECISION);
+    const [bn, br] = engine._withTransientPrecision(
+      working + HARMONIC_GUARD_DIGITS,
+      () =>
+        [n, r ?? engine.One].map((x) => {
+          const v = x.N();
+          return isNumber(v) ? (v.bignumRe ?? engine.bignum(v.re)) : undefined;
+        })
+    );
+    if (bn !== undefined && br !== undefined && bn.isFinite() && !bn.isZero()) {
+      const value =
+        harmonicNumberNearZero(engine, bn, br, working) ??
+        harmonicNumberRaised(engine, bn, one ? undefined : br, working);
+      if (value === undefined) return undefined;
+      return bignumPreferred(engine)
+        ? boxBignumResult(engine, value)
+        : engine.number(value.toNumber());
+    }
+  }
   const value = one
     ? engine.function('Add', [
         engine.function('Digamma', [shifted]),

@@ -80,6 +80,22 @@
   present string give its value (`Coalesce(ToUpperCase(s), "z")` is `"AB"`
   at `s = "ab"`); `IsMissing` of any colour declines.
 
+- **`HarmonicNumber(n, 0)` of a large `n` is immediate** (CE-1555).
+  `HarmonicNumber(1e6, 0).N()` took minutes and is now `1000000` at once. The
+  exact sum of a large `n` counts the work of its common denominator, so
+  `HarmonicNumber(20000, 2)` and `HarmonicNumber(5000, 10)` stay symbolic
+  under `evaluate()` and take the numeric route under `N()`, instead of
+  computing a rational of tens of thousands of digits for more than a second.
+
+- **`HarmonicNumber` of a number close to 0 is no longer 0** (CE-1559). For a
+  real `|n| < 0.1` and a real `r`, `HarmonicNumber(n)` and
+  `HarmonicNumber(n, r)` are the series `Σ −(−n)ʲ (r)ⱼ/j! ζ(r + j)` when it
+  is short, and otherwise the continuation at a precision raised by the
+  digits that it loses, so every digit of the working precision is right:
+  `HarmonicNumber(1e-30).N()` is `1.6449e-30` (it was `0`),
+  `HarmonicNumber(1e-30, 2)` is `2.4041e-30`, `HarmonicNumber(1e-30, -1)` is
+  `5e-31` and `HarmonicNumber(1e-30, -5.5)` is `1.7004e-32`.
+
 - **A compiled program nested too deep for the JavaScript parser declines as
   too deep.** Where the parser of the host runs out of stack (on Windows, a
   `Which` of 1,000 clauses on the interval target, a `ListJoin` of 1,000
