@@ -104,6 +104,18 @@
 
 ### Resolved Issues
 
+- **The harmonic number of a very small complex number is correct** (CE-1572).
+  `HarmonicNumber(10^{-30}(1+i))` evaluates to about
+  `1.6449e-30 + 1.6449e-30i`; its real part was `−7.39e-16`. A complex `n`
+  with `|n| < 0.1`, with no order or a real order `r`, now takes the series in
+  `n` that a real `n` takes, so each part keeps its digits:
+  `HarmonicNumber(10^{-30}i)` has a real part of about `ζ(3)·10^{-60}`. When
+  the series cannot give each part to the working precision, the value stays
+  unevaluated. With an integer order `r ≤ 0`, the harmonic number of a
+  complex `n` is the exact polynomial in `n`, rounded once:
+  `HarmonicNumber(10^{-30}(1+i), -3)` is about `−10^{-90} + 5·10^{-61}i`,
+  where its real part was `0`.
+
 - **A list of `True` and `False` values is read as fast as a list of numbers**
   (CE-1369). A list whose elements are `True`, `False`, numbers and strings
   evaluates to itself and has no effect, so it is no longer walked at each

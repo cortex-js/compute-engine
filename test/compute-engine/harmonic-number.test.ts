@@ -207,3 +207,227 @@ describe('HarmonicNumber NEAR 0 (CE-1559)', () => {
     expect(H(ce, '0.05', '0').N().re).toBe(0.05);
   });
 });
+
+describe('HarmonicNumber NEAR 0 OF A COMPLEX n (CE-1572)', () => {
+  // [re(n), im(n), r, re(value), im(value)]; r = '' is the one-operand form.
+  // Reference values are mpmath's at 400 digits, `psi(0, n + 1) + euler` and
+  // `zeta(r) - zeta(r, n + 1)`, which agree with the series
+  // `Σ (−1)^(k+1) C(r + k − 1, k) ζ(r + k) n^k` to 340 digits.
+  const cases: [number, number, string, string, string][] = [
+    [
+      1e-30,
+      1e-30,
+      '',
+      '1.644934066848226436472415e-30',
+      '1.644934066848226436472415e-30',
+    ],
+    [
+      0,
+      1e-30,
+      '',
+      '1.202056903159594285399738e-60',
+      '1.644934066848226436472415e-30',
+    ],
+    [
+      1e-30,
+      1e-30,
+      '2',
+      '2.404113806319188570799476e-30',
+      '2.404113806319188570799476e-30',
+    ],
+    [
+      0,
+      1e-30,
+      '2',
+      '3.246969701133414574548011e-60',
+      '2.404113806319188570799476e-30',
+    ],
+    // An integer r ≤ 0: the polynomial n⁴/4 + n³/2 + n²/4.
+    [1e-30, 1e-30, '-3', '-1e-90', '5e-61'],
+    [-0.05, 0.0866, '-3', '-0.0007624229999516', '-0.0021433328532'],
+    // |n| = 0.0999, in the series, and |n| = 0.1001, past it.
+    [
+      0.07,
+      0.0713,
+      '',
+      '0.1146784340600116144555783',
+      '0.1060242064609686822753704',
+    ],
+    [
+      0.0708,
+      0.0708,
+      '',
+      '0.1157901505889978350388322',
+      '0.1051723026765588861563387',
+    ],
+    [
+      0,
+      0.0999,
+      '',
+      '0.01189425376010605505672744',
+      '0.1632598577085796161461687',
+    ],
+    [
+      0,
+      0.1001,
+      '',
+      '0.01194151843508526524691951',
+      '0.1635824509269772716228322',
+    ],
+    [
+      0.07,
+      0.0713,
+      '2',
+      '0.1663452731873912504302354',
+      '0.1418265022318602763240803',
+    ],
+    [
+      0.0708,
+      0.0708,
+      '2',
+      '0.1677359374442305396451055',
+      '0.1405669448886427081758387',
+    ],
+    [-0.0708, 0.0708, '-3', '0.0003297683522304', '-0.002151425088'],
+  ];
+
+  for (const precision of [undefined, 50]) {
+    test(`at precision ${precision ?? 'default'}`, () => {
+      const ce = new ComputeEngine();
+      if (precision !== undefined) ce.precision = precision;
+      for (const [a, b, r, re, im] of cases) {
+        const ops = [ce.number(ce.complex(a, b))];
+        if (r !== '') ops.push(ce.number(r));
+        const v = ce.function('HarmonicNumber', ops).N();
+        const [eRe, eIm] = [Number(re), Number(im)];
+        const error = Math.hypot(v.re - eRe, v.im - eIm) / Math.hypot(eRe, eIm);
+        // Inside the series each part has its own relative precision. Past
+        // it, the machine continuation `ψ(1 + n) + γ` loses about one digit.
+        const inside = Math.hypot(a, b) < 0.1;
+        const parts = inside
+          ? Math.max(
+              Math.abs(v.re - eRe) / Math.abs(eRe),
+              Math.abs(v.im - eIm) / Math.abs(eIm)
+            )
+          : 0;
+        const tolerance = inside ? 1e-14 : 1e-13;
+        expect([a, b, r, error < tolerance, parts < 1e-14]).toEqual([
+          a,
+          b,
+          r,
+          true,
+          true,
+        ]);
+      }
+    });
+  }
+
+  test('the parsed form of the issue', () => {
+    const ce = new ComputeEngine();
+    const v = ce.function('HarmonicNumber', [ce.parse('10^{-30}(1+i)')]).N();
+    expect(v.re).toBeCloseTo(1.6449340668482264e-30, 44);
+    expect(v.im).toBeCloseTo(1.6449340668482264e-30, 44);
+  });
+
+  type Big = ReturnType<ComputeEngine['bignum']>;
+  /** The relative difference of each big-decimal part and its decimal. */
+  const partErrors = (
+    ce: ComputeEngine,
+    v: ReturnType<ComputeEngine['number']>,
+    re: string,
+    im: string
+  ) => {
+    const parts = v as unknown as { bignumRe?: Big; bignumIm?: Big };
+    return [
+      [parts.bignumRe, re],
+      [parts.bignumIm, im],
+    ].map(([x, e]) => {
+      const expected = ce.bignum(e as string);
+      return (x as Big).sub(expected).div(expected).abs().toNumber();
+    });
+  };
+
+  test('above machine precision the series keeps the working digits', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 50;
+    const n = ce.number({ re: ce.bignum('1e-30'), im: ce.bignum('1e-30') });
+    for (const [r, re, im] of [
+      [
+        '',
+        '1.644934066848226436472415166646025189218949901206798438e-30',
+        '1.644934066848226436472415166643621075412630712635998961e-30',
+      ],
+      [
+        '2',
+        '2.404113806319188570799476323022899981529972584680997764e-30',
+        '2.404113806319188570799476323016406042127705755531901741e-30',
+      ],
+    ]) {
+      const ops = r === '' ? [n] : [n, ce.number(r)];
+      const v = ce.function('HarmonicNumber', ops).N();
+      const errors = partErrors(ce, v, re, im);
+      expect([r, errors.every((e) => e < 1e-48)]).toEqual([r, true]);
+    }
+  });
+
+  test('an integer order r ≤ 0 is the exact polynomial, rounded once', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 50;
+    const n = ce.number({ re: ce.bignum('0.05'), im: ce.bignum('1e-400') });
+    // H(n, 0) = n.
+    const zero = ce.function('HarmonicNumber', [n, ce.number(0)]).N();
+    expect(partErrors(ce, zero, '0.05', '1e-400')).toEqual([0, 0]);
+    // H(n, −3) = n⁴/4 + n³/2 + n²/4.
+    const three = ce.function('HarmonicNumber', [n, ce.number(-3)]).N();
+    expect(partErrors(ce, three, '0.0006890625', '2.8875e-402')).toEqual([
+      0, 0,
+    ]);
+  });
+
+  test('a part too small for a double ends the series as early as a real n', () => {
+    // mpmath, `psi(0, n + 1) + euler` at 900 digits.
+    const re = '0.0793706736016624895436328372156106627759425578580506155';
+    const im = '1.532357342115119308491478588246367940749614429061652032e-400';
+    for (const precision of [undefined, 50, 100]) {
+      const ce = new ComputeEngine();
+      if (precision !== undefined) ce.precision = precision;
+      const n = ce.number({ re: ce.bignum('0.05'), im: ce.bignum('1e-400') });
+      const v = ce.function('HarmonicNumber', [n]).N();
+      // At precision 100 the series at the working precision is too long:
+      // the value is the series at about 17 digits, in big decimals.
+      const tolerance = precision === 100 ? 1e-15 : 10 ** (1 - ce.precision);
+      const errors = partErrors(ce, v, re, im);
+      expect([precision, errors.every((e) => e < tolerance)]).toEqual([
+        precision,
+        true,
+      ]);
+    }
+  });
+
+  test('a part much smaller than its terms keeps its digits', () => {
+    // The terms of the real part are about 2.5e-3; the real part is about
+    // 7.8e-24 (mpmath, `psi(0, n + 1) + euler` at 80 digits).
+    const re = '-7.81885370830619498294758965431e-24';
+    const im = '0.0823312479521255584082427859221';
+    for (const precision of [21, 50]) {
+      const ce = new ComputeEngine();
+      ce.precision = precision;
+      const n = ce.number({
+        re: ce.bignum('-0.00182955182601939081797'),
+        im: ce.bignum('0.05'),
+      });
+      const v = ce.function('HarmonicNumber', [n]).N();
+      // At precision 50 the series at the working precision is too long:
+      // the value is the series at machine precision.
+      const errors =
+        precision === 21
+          ? partErrors(ce, v, re, im)
+          : [Math.abs(v.re / Number(re) - 1), Math.abs(v.im / Number(im) - 1)];
+      const tolerance = precision === 21 ? 1e-20 : 1e-15;
+      expect([precision, errors.every((e) => e < tolerance)]).toEqual([
+        precision,
+        true,
+      ]);
+    }
+  });
+});

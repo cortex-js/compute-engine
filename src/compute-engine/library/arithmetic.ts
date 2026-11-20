@@ -7005,28 +7005,39 @@ function bigMagnitude(x: BigNum): number {
 }
 
 /**
- * The generalized harmonic number `H_n^(r)` of a real `0 < |n| < 0.1`, where
- * `ψ(1 + n) + γ` and `ζ(r) − ζ(r, 1 + n)` cancel: the binomial series of
- * `(k + n)^(−r)`, `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)` (`r = 1`:
- * `n·Σ ζ(j + 2)(−n)^j`), at the working precision `prec`. It is the series of
+ * The generalized harmonic number `H_n^(r)` of a real r and a real or
+ * complex `n = a + bi`, `0 < |n| < 0.1`, where `ψ(1 + n) + γ` and
+ * `ζ(r) − ζ(r, 1 + n)` cancel: the binomial series of `(k + n)^(−r)`,
+ * `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)` (`r = 1`: `n·Σ ζ(j + 2)(−n)^j`),
+ * at the working precision `prec`, as `[re, im]`. It is the series of
  * `harmonicNearZero()` in the JavaScript runtime, in big decimals. At an
  * integer `r = −m ≤ 0` the term of `ζ(1)` (j = m + 1) is its limit, `nʲ/j`,
  * and the later terms are 0. Near that pole (`r` close to −m) the factor
  * `r + m` of the coefficient cancels the pole of `ζ(1 + (r + m))`, which is
- * computed with the digits that its argument loses. `undefined` when the
- * series needs more than `MAX_HARMONIC_SERIES_TERMS` terms, when its terms
- * cancel by more than the guard digits (a large `r`), or when a term is not
- * finite.
+ * computed with the digits that its argument loses. Each part has its own
+ * relative precision: the series ends when the rest is below each part that
+ * has a nonzero term. The rest of the real part is bounded by the last term,
+ * and the rest of the imaginary part also by `|c|·j·|n|^(j−1)·|b|`
+ * (`|sin jθ| ≤ j·|sin θ|`), so a tiny `b` ends as early as a real n. The
+ * terms of a part must not cancel by more than
+ * the guard digits (a large `r`, or a complex n whose real part is much
+ * smaller than its terms). A complex n whose part cancels is summed again
+ * once, with `extra` digits for the loss. `undefined` when a part still
+ * cancels, when the series needs more than `maxTerms` terms, or when a term
+ * is not finite.
  */
 function harmonicNumberNearZero(
   ce: ComputeEngine,
-  n: BigNum,
+  a: BigNum,
+  b: BigNum,
   r: BigNum,
-  prec: number
-): BigNum | undefined {
+  prec: number,
+  maxTerms = MAX_HARMONIC_SERIES_TERMS,
+  extra = 0
+): [BigNum, BigNum] | undefined {
   const guard = HARMONIC_GUARD_DIGITS;
-  const p = prec + guard;
-  const absN = Math.abs(n.toNumber());
+  const p = prec + guard + extra;
+  const absN = Math.hypot(a.toNumber(), b.toNumber());
   const rNum = r.toNumber();
   const rInteger = r.isInteger();
   // The terms fall by a factor of about |n| once r + j > 2: an estimate of
@@ -7035,40 +7046,85 @@ function harmonicNumberNearZero(
     rInteger && rNum <= 0
       ? 1 - rNum
       : Math.max(0, Math.ceil(2 - rNum)) + Math.ceil(p / -Math.log10(absN));
-  if (!(terms <= MAX_HARMONIC_SERIES_TERMS)) return undefined;
+  if (!(terms <= maxTerms)) return undefined;
   const tolerance = new BigDecimal(`1e-${p}`);
-  let sum: BigNum = BigDecimal.ZERO;
+  // The larger part of a complex number, within √2 of its modulus.
+  const norm = ([x, y]: [BigNum, BigNum]) =>
+    x.abs().gt(y.abs()) ? x.abs() : y.abs();
+  // The largest term of each part: a part whose terms are all 0 is exact.
+  const peak: [BigNum, BigNum] = [BigDecimal.ZERO, BigDecimal.ZERO];
+  // An upper bound of |n|, and its power j − 1.
+  const nBound = norm([a, b]).mul(new BigDecimal('1.4143'));
+  let nPower: BigNum = BigDecimal.ONE;
+  let sum: [BigNum, BigNum] = [BigDecimal.ZERO, BigDecimal.ZERO];
   let c: BigNum = BigDecimal.ONE;
-  let power: BigNum = BigDecimal.ONE;
-  let peak: BigNum = BigDecimal.ZERO;
-  for (let j = 1; j <= 2 * MAX_HARMONIC_SERIES_TERMS; j++) {
+  let power: [BigNum, BigNum] = [BigDecimal.ONE, BigDecimal.ZERO];
+  for (let j = 1; j <= 2 * maxTerms; j++) {
     checkDeadline(ce._deadlineFrame);
-    power = power.mul(n.neg()).toPrecision(p);
-    if (rInteger && rNum + j === 1)
-      return sum.add(power.div(j % 2 === 0 ? j : -j, p), p).toPrecision(prec);
+    // power·(−n) = (−x·a + y·b) − (x·b + y·a)i
+    const [x, y] = power;
+    power = [
+      y.mul(b).sub(x.mul(a)).toPrecision(p),
+      x.mul(b).add(y.mul(a)).neg().toPrecision(p),
+    ];
+    if (rInteger && rNum + j === 1) {
+      const k = j % 2 === 0 ? j : -j;
+      return [
+        sum[0].add(power[0].div(k, p), p).toPrecision(prec),
+        sum[1].add(power[1].div(k, p), p).toPrecision(prec),
+      ];
+    }
     // `r + j − 1` and `r + j` are exact sums.
     const d = r.add(j - 1);
     c = c.mul(d).div(j, p).toPrecision(p);
-    const cp = c.mul(power).toPrecision(p);
+    const cp: [BigNum, BigNum] = [
+      c.mul(power[0]).toPrecision(p),
+      c.mul(power[1]).toPrecision(p),
+    ];
     // ζ(1 + d) is about 1/d: its argument loses −log10|d| digits.
     const lost = d.isZero() ? 0 : Math.max(0, -bigMagnitude(d) + 1);
     if (lost > 4 * p) return undefined;
-    const t = cp.mul(bigZeta(ce, r.add(j), p + lost)).toPrecision(p);
-    if (!t.isFinite()) return undefined;
-    if (t.abs().gt(peak)) peak = t.abs();
-    sum = sum.sub(t, p);
+    const zeta = bigZeta(ce, r.add(j), p + lost);
+    const t: [BigNum, BigNum] = [
+      cp[0].mul(zeta).toPrecision(p),
+      cp[1].mul(zeta).toPrecision(p),
+    ];
+    if (!t[0].isFinite() || !t[1].isFinite()) return undefined;
+    for (const i of [0, 1]) if (t[i].abs().gt(peak[i])) peak[i] = t[i].abs();
+    sum = [sum[0].sub(t[0], p), sum[1].sub(t[1], p)];
+    if (!sum[0].isFinite() || !sum[1].isFinite()) return undefined;
+    const parts = [0, 1].filter((i) => !peak[i].isZero());
     // Past `r + j = 2`, `ζ(r + j) < 2`; where the ratio of two terms,
     // `|n|·(r + j)/(j + 1)`, is below 1/2 and falls, the rest is below the
-    // last term.
+    // last term. The ratio of two bounds of the imaginary part is
+    // `|n|·(r + j)/j`.
+    const imBound = c.abs().mul(j).mul(nPower).mul(b.abs());
+    nPower = nPower.mul(nBound).toPrecision(p);
+    const bound = [
+      norm(cp),
+      (absN * (rNum + j)) / j < 0.5 && imBound.lt(norm(cp))
+        ? imBound
+        : norm(cp),
+    ];
     if (
       rNum + j > 2 &&
       (absN * (rNum + j)) / (j + 1) < 0.5 &&
-      cp.abs().lte(sum.abs().mul(tolerance))
+      parts.every((i) => bound[i].lte(sum[i].abs().mul(tolerance)))
     ) {
-      // Terms much larger than the sum cancel: their rounding is in it.
-      if (!sum.isFinite() || peak.gt(sum.abs().mul(10 ** (guard - 3))))
-        return undefined;
-      return sum.toPrecision(prec);
+      // Terms much larger than a part cancel: their rounding is in it.
+      const lost = Math.max(
+        0,
+        ...parts.map((i) =>
+          sum[i].isZero()
+            ? Infinity
+            : bigMagnitude(peak[i]) - bigMagnitude(sum[i])
+        )
+      );
+      if (lost > guard - 3 + extra) {
+        if (extra > 0 || b.isZero() || !Number.isFinite(lost)) return undefined;
+        return harmonicNumberNearZero(ce, a, b, r, prec, maxTerms, lost);
+      }
+      return [sum[0].toPrecision(prec), sum[1].toPrecision(prec)];
     }
   }
   return undefined;
@@ -7128,6 +7184,44 @@ function harmonicNumberRaised(
 }
 
 /**
+ * `H_n^(−m) = ζ(−m, 1) − ζ(−m, 1 + n)` for an integer `m ≥ 0` and a complex
+ * float `n`: the difference of the Bernoulli polynomials of
+ * `hurwitzZetaNegativeIntegerGaussianParts`, as an exact Gaussian rational,
+ * rounded once to the working precision. Each part keeps its digits, where
+ * the difference of the two rounded values cancels (`H(n, 0) = n`, and the
+ * real part `−10⁻⁹⁰` of `H(10⁻³⁰(1+i), −3)`). `undefined` past the limits of
+ * the exact route of `evaluateHurwitzZeta`.
+ */
+function harmonicNumberNonpositiveOrder(
+  engine: ComputeEngine,
+  n: Expression & NumberLiteralInterface,
+  m: number
+): Expression | undefined {
+  if (m > HURWITZ_NEGATIVE_ORDER_LIMIT) return undefined;
+  const gaussian = gaussianRationalFromNumber(n);
+  if (gaussian === undefined) return undefined;
+  const [num, den] = gaussian.re;
+  const a = { re: [num + den, den] as [bigint, bigint], im: gaussian.im };
+  if (gaussianRationalWorkDigits(m, a) > HURWITZ_FLOAT_DIGIT_LIMIT)
+    return undefined;
+  const at1 = hurwitzZetaNegativeIntegerGaussianParts(m, {
+    re: [1n, 1n],
+    im: [0n, 1n],
+  });
+  const atA = hurwitzZetaNegativeIntegerGaussianParts(m, a);
+  return engine.number(
+    engine._numericValue({
+      re: engineQuotient(
+        engine,
+        at1.re * atA.den - atA.re * at1.den,
+        at1.den * atA.den
+      ),
+      im: engineQuotient(engine, -atA.im, atA.den),
+    })
+  );
+}
+
+/**
  * Evaluate HarmonicNumber(n) = Σ_{k=1}^n 1/k and HarmonicNumber(n, r) =
  * Σ_{k=1}^n 1/k^r.
  *
@@ -7145,7 +7239,10 @@ function harmonicNumberRaised(
  *   answer declines. For a real `|n| < 0.1` and a real r, where that
  *   difference cancels, the series of `harmonicNumberNearZero()` when it is
  *   short, else the continuation at a raised precision
- *   (`harmonicNumberRaised()`), which declines when it still cancels.
+ *   (`harmonicNumberRaised()`), which declines when it still cancels. A
+ *   complex n with an integer r ≤ 0 is the exact difference of
+ *   `harmonicNumberNonpositiveOrder()`; with another real r or none, a
+ *   complex `|n| < 0.1` takes the same series when it is short.
  */
 function evaluateHarmonicNumber(
   engine: ComputeEngine,
@@ -7197,12 +7294,63 @@ function evaluateHarmonicNumber(
   if (!isNumber(n) || (r !== undefined && !isNumber(r))) return undefined;
   // Near n = 0 the analytic continuation below cancels (to 0 at
   // `n = 1e-30`): a real n and r take the series when it is short, else the
-  // continuation at a raised precision.
+  // continuation at a raised precision. A complex n with an integer order
+  // r = −m ≤ 0 is the exact difference ζ(−m, 1) − ζ(−m, 1 + n) of the
+  // Bernoulli polynomials, rounded once. With another real order or none, a
+  // complex n with |n| < 0.1 takes the series, with up to twice the terms of
+  // a real n: at the working precision when it is short, else at machine
+  // precision (about 17 digits, the precision of the complex kernels of the
+  // continuation), where it covers |n| < 0.1 for r > −5. (At a high
+  // precision a |n| near 0.1 needs too many terms, and the value has the 17
+  // digits of the machine series.) When the series fails at machine
+  // precision too, the value stays unevaluated: the machine continuation
+  // would cancel in the same part, or read a part too small for a double
+  // as 0.
+  const realR = r === undefined || (!r.isComplex && Number.isFinite(r.re));
+  if (n.isComplex && rInt !== null && rInt <= 0 && r !== undefined) {
+    const value = harmonicNumberNonpositiveOrder(engine, n, -rInt);
+    if (value !== undefined) return value;
+  }
   if (
-    !n.isComplex &&
-    Math.abs(n.re) < 0.1 &&
-    (r === undefined || (!r.isComplex && Number.isFinite(r.re)))
+    n.isComplex &&
+    realR &&
+    Math.hypot(n.re, n.im) < 0.1 &&
+    Number.isFinite(n.re) &&
+    Number.isFinite(n.im)
   ) {
+    const series = (working: number) => {
+      const br = engine._withTransientPrecision(
+        working + HARMONIC_GUARD_DIGITS,
+        () => {
+          const v = (r ?? engine.One).N();
+          return isNumber(v) ? (v.bignumRe ?? engine.bignum(v.re)) : undefined;
+        }
+      );
+      if (br === undefined) return undefined;
+      return harmonicNumberNearZero(
+        engine,
+        n.bignumRe ?? engine.bignum(n.re),
+        n.bignumIm ?? engine.bignum(n.im),
+        br,
+        working,
+        2 * MAX_HARMONIC_SERIES_TERMS
+      );
+    };
+    const big = bignumPreferred(engine);
+    const value =
+      (big
+        ? series(Math.max(engine.precision, MACHINE_PRECISION))
+        : undefined) ?? series(MACHINE_PRECISION + 2);
+    if (value === undefined) return undefined;
+    // Above machine precision the parts stay big decimals: a part such as
+    // `1.5e-400` is 0 as a double.
+    return engine.number(
+      big
+        ? engine._numericValue({ re: value[0], im: value[1] })
+        : engine.complex(value[0].toNumber(), value[1].toNumber())
+    );
+  }
+  if (!n.isComplex && Math.abs(n.re) < 0.1 && realR) {
     const working = Math.max(engine.precision, MACHINE_PRECISION);
     const [bn, br] = engine._withTransientPrecision(
       working + HARMONIC_GUARD_DIGITS,
@@ -7214,7 +7362,7 @@ function evaluateHarmonicNumber(
     );
     if (bn !== undefined && br !== undefined && bn.isFinite() && !bn.isZero()) {
       const value =
-        harmonicNumberNearZero(engine, bn, br, working) ??
+        harmonicNumberNearZero(engine, bn, BigDecimal.ZERO, br, working)?.[0] ??
         harmonicNumberRaised(engine, bn, one ? undefined : br, working);
       if (value === undefined) return undefined;
       return bignumPreferred(engine)
