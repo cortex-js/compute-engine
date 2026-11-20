@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`ReplaceAll` replaces a subexpression that a compound rule matches**
+  (#636). `ReplaceAll(List(x, x^2), Rule(x^2, y))` returned the list
+  unchanged: a rule whose left side is not a symbol was applied to the whole
+  expression only. It now applies wherever it matches, as `expr /. rule` does:
+  the expression is visited top-down, the first rule that matches a part
+  replaces it, and the replacement is not searched again.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues
