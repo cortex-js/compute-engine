@@ -56,6 +56,18 @@
 
 ### Resolved Issues
 
+- **`SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `AiryAiPrime`
+  and `AiryBiPrime` of a real argument carry the precision asked for.** At
+  `ce.precision = 50`, `SinIntegral(0.7)` was the double `0.6812222391166113`;
+  it is `0.68122223911661131088950681145394251597654289921409`. The same for the
+  other four, and for `AiryAiPrime(0.7)` and `AiryBiPrime(0.7)`. A value the
+  engine cannot compute to the digits asked for stays unevaluated: the four
+  integrals past `|x| = 1000`, `AiryBiPrime(200)` and `AiryAiPrime(10001)` were
+  doubles (or `+∞`) and are now left as written. `CosIntegral(-3)` and
+  `CoshIntegral(-3)` are the principal value `f(3) + iπ` with both parts at the
+  working precision. Complex arguments and machine precision are unchanged.
+  (#628, PR #629, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`Zeta` of a real number within 10^-j of 1, 0, −2, −4, … is right to the
   working precision.** Next to the pole and the trivial zeros the value is a
   quotient or product with a factor of size 10^-j, and the rounding error of

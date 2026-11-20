@@ -5803,11 +5803,10 @@ function evaluateAiry(
     return kind === 'AiPrime' ? value.neg() : value;
   }
   if (!shouldNumericize(numericApproximation, x)) return undefined;
-  // Above machine precision `Ai` and `Bi` of a real argument have the digits
-  // asked for or stay unevaluated (`bigAiry` declines where it cannot reach
-  // them). The derivatives and a complex argument keep the double kernels.
+  // Above machine precision a real argument has the digits asked for or the
+  // head stays unevaluated (`bigAiry` declines where it cannot reach them).
+  // A complex argument keeps the double kernels.
   if (
-    (kind === 'Ai' || kind === 'Bi') &&
     bignumPreferred(ce) &&
     isRealLiteral(x) &&
     !Number.isNaN(x.re)
@@ -10702,8 +10701,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           specialFunctionType(ops),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        evaluateAiry('AiPrime', x, engine, numericApproximation),
+      evaluate: guardDigitsN(([x], { numericApproximation, engine }) =>
+        evaluateAiry('AiPrime', x, engine, numericApproximation)
+      ),
     },
 
     // Derivative of the Airy function of the second kind Bi'(x)
@@ -10721,8 +10721,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           specialFunctionType(ops),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine }) =>
-        evaluateAiry('BiPrime', x, engine, numericApproximation),
+      evaluate: guardDigitsN(([x], { numericApproximation, engine }) =>
+        evaluateAiry('BiPrime', x, engine, numericApproximation)
+      ),
     },
 
     Ln: {

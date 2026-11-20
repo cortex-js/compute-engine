@@ -418,7 +418,7 @@ Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt.
 
 ```epsil
 N(cosIntegral(1))
-// ➔ 0.33740392290096816
+// ➔ 0.337403922900968134663
 ```
 
 ### cosh
@@ -445,7 +445,7 @@ Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.
 
 ```epsil
 N(coshIntegral(1))
-// ➔ 0.8378669409802082
+// ➔ 0.837866940980208240895
 ```
 
 ### cot
@@ -712,7 +712,7 @@ sinIntegral(+oo)
 
 ```epsil
 N(sinIntegral(1))
-// ➔ 0.946083070367183
+// ➔ 0.946083070367183014941
 ```
 
 ### sinc
@@ -760,7 +760,7 @@ sinhIntegral(0)
 
 ```epsil
 N(sinhIntegral(1))
-// ➔ 1.0572508753757286
+// ➔ 1.05725087537572851457
 ```
 
 ### tan

@@ -353,7 +353,7 @@ Derivative of the Airy function of the first kind
 
 ```epsil
 N(airyAiPrime(0))
-// ➔ -0.2588194037928068
+// ➔ -0.258819403792806798405
 ```
 
 ### airyBi
@@ -375,7 +375,7 @@ Derivative of the Airy function of the second kind
 
 ```epsil
 N(airyBiPrime(0))
-// ➔ 0.4482883573538264
+// ➔ 0.448288357353826357915
 ```
 
 ### arg
