@@ -23,13 +23,14 @@ Read `AGENTS.md`, then the documents it names for your work:
 Exceptions to the git rules of `~/.claude/CLAUDE.md`, for this item only:
 `git worktree add --detach` and `git worktree remove` for your own
 worktree, `git apply --check` then `git apply` of your own patch onto the main
-tree, staging your own files only with `~/.claude/scripts/stage-helper.mjs`,
-and `git commit` of what you staged. Owner name: `{{NAME}}`. Commit message:
+tree, and the commit of your own files with
+`~/.claude/scripts/stage-helper.mjs prepare --commit` and `commit` (step 9).
+Owner name: `{{NAME}}`. Commit message:
 `{{ID}}: <what the change does, in one line>`, with no trailer that names a
 tool (the commit-msg hook refuses one). Delete an issue file with `rm` and
-stage the deletion with `stage-helper.mjs`; run no other git command that
-writes the index (such as `git rm --cached`), because the index is shared with
-the other sessions.
+list the deletion in `--files`; do not stage and run no git command that
+writes the index (`git add`, `git rm --cached`, `git commit`), because the
+index is shared with the other sessions.
 
 After you write or change an issue file, run `node scripts/issues.mjs lint`
 and fix each error before you commit, because the backlog and the board leave
@@ -115,9 +116,20 @@ is still going without the lock competes with the next holder.
    `npm run doc`, which the release runs. Update the pages of
    `~/dev/cortexjs.io/docs/compute-engine/` as `AGENTS.md` says when public
    behavior changes.
-9. Stage with `node ~/.claude/scripts/stage-helper.mjs prepare {{NAME}} …`
-   and `stage {{NAME}}`, read the patches it prints, and commit. On WAIT,
-   run `node ~/.claude/scripts/staging-queue.mjs wait {{NAME}}`.
+9. Commit with
+   `node ~/.claude/scripts/stage-helper.mjs prepare {{NAME}} --commit --files <f>... --patch <file> --message "{{ID}}: …"`,
+   read the patches it prints, then
+   `node ~/.claude/scripts/stage-helper.mjs commit {{NAME}}`. Do not stage:
+   a staged set waits behind every session that staged and waits for the
+   user's commit, and `stage` takes a markdown file whole, with the hunks of
+   other sessions. `--patch` names a patch of your own hunks, for each file
+   that also holds hunks of other sessions (CHANGELOG.md,
+   docs/COMPILATION-MODEL.md, issues/NEXT.md): write
+   `git diff --binary HEAD -- <those files>` of the main tree to
+   `/tmp/{{NAME}}.own.patch` and delete the hunks that are not yours with the
+   Edit tool. On exit 3 (the index lock is held), run `commit` again; on exit
+   4 (a file of yours is staged by another session), stop and report it. Step 2
+   commits the same way.
 10. Remove the worktree with `{{REMOVE}}`
     only after the commit contains your change.
 
