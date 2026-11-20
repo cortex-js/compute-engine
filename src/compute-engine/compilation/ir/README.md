@@ -2815,7 +2815,11 @@ the call `g(x)` in the canonical form. `Apply(Derivative(g, n…), a1, …)` is 
 application of the function literal that the engine gives for the derivative at
 compile time, and `D(f, x, …)` the expression it gives
 (`derivativeClosedForm()`; `closedForm()` of `lower.ts`): `D(Abs(x), x)` is
-`Sign(x)`, `Apply(Derivative(Sin), x)` is `Cos(x)`. The engine computes it with
+`Sign(x)`, `Apply(Derivative(Sin), x)` is `Cos(x)`. That expression can hold
+the derivative of another function (`Apply(Derivative(f, 2), t)` in the
+derivative of `F := t ↦ f′(t)/|f′(t)|`) when that derivative has a closed form
+itself, at most four levels deep: its application is lowered from that closed
+form. The engine computes it with
 the values of the `vars` names hidden (`withVarsValuesHidden()`): `D(T·x², x)`
 with `vars: {T}` is `2T·x` also when `T` holds 2. That helper hides no value of
 a constant or of a name whose type is inferred from its value (`T` assigned and

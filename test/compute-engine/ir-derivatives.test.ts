@@ -632,6 +632,50 @@ describe('IR profile, batch G22: the review’s fixes', () => {
   });
 });
 
+describe('A derivative whose closed form holds the derivative of another function (CE-1563)', () => {
+  // Tycho's document `art/frthw0ihk5`, a tube along a curve: the unit tangent
+  // `F(t) = f′(t)/|f′(t)|` of a point-valued `f` and its derivative, with
+  // both functions declared `function` before they are assigned (`define`).
+  // The closed form of `F′` holds `Apply(Derivative(f, 2), t)`, which is
+  // compiled from the closed form of `f″`.
+  define('tc', [
+    'Function',
+    [
+      'PointList',
+      ['Sin', ['Multiply', 2, 't']],
+      ['Cos', ['Multiply', 3, 't']],
+      ['Sin', ['Multiply', 5, 't']],
+    ],
+    't',
+  ]);
+  define('tu', [
+    'Function',
+    [
+      'Divide',
+      ['Apply', ['Derivative', 'tc', 1], 't'],
+      ['Abs', ['Apply', ['Derivative', 'tc', 1], 't']],
+    ],
+    't',
+  ]);
+
+  test('the derivative of the unit tangent: the interpreter’s value', () => {
+    check(['Apply', ['Derivative', 'tu', 1], 'x']);
+    check(['D', ['tu', 'x'], 'x']);
+  });
+
+  test('the derivative of a function with no closed form still declines', () => {
+    ce.declare('opaque', 'function');
+    define('tv', [
+      'Function',
+      ['Multiply', 't', ['Apply', ['Derivative', 'opaque', 1], 't']],
+      't',
+    ]);
+    expect(
+      failure(() => js(['Apply', ['Derivative', 'tv', 1], 'x']))
+    ).toMatch(/a derivative with no closed form/);
+  });
+});
+
 describe('IR profile, batch G22: a coordinate of a literal list of points', () => {
   test('the reduced witness: the interpreter’s value, no list of points', () => {
     check(VORONOI);

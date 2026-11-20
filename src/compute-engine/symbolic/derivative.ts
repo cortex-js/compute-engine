@@ -2676,6 +2676,57 @@ function isPointValued(expr: Expression): boolean {
   return expr.type.matches('tuple') || expr.type.matches('list<tuple>');
 }
 
+/**
+ * The components of `vec`, the operand of a norm `|vec|`, or `null` when
+ * they are not known statically.
+ *
+ * A `Tuple` has its operands as components, and so does a `PointList` of
+ * number operands (a single point). A call that has such a value is
+ * expanded, and the expansion gives the components: the call of a user
+ * function that is not recursive (`userFunctionBody()`: the arguments in
+ * place of the parameters of its literal, or, with no literal, the
+ * evaluation of the call over wildcards), the application of a function
+ * literal (its body, not evaluated), and the application of the derivative
+ * of such a function, `Apply(Derivative(f, n), t)`, whose function literal
+ * is the value of the evaluated `Derivative`. The norm
+ * of a point-valued function that a document declares `function` and then
+ * assigns, `t ↦ |f′(t)|`, has a derivative this way. When a function is
+ * defined with no declaration, the evaluation of its body over holes
+ * (`derivative()`) gives a `Sqrt` of the components instead.
+ *
+ * An expansion is expanded again, at most `depth` times.
+ */
+function normComponents(
+  vec: Expression,
+  depth = 4
+): ReadonlyArray<Expression> | null {
+  if (isFunction(vec, 'Tuple')) return vec.ops;
+  if (isFunction(vec, 'PointList'))
+    return vec.ops.every((op) => op.type.matches('number')) ? vec.ops : null;
+  if (depth === 0 || !isFunction(vec)) return null;
+  const ce = vec.engine;
+  let expanded: Expression | undefined;
+  if (vec.operator === 'Apply') {
+    let fn = vec.op1;
+    const args = vec.ops.slice(1);
+    if (isFunction(fn, 'Derivative')) {
+      const f = fn.op1;
+      if (isSymbol(f) && isRecursiveUserFunction(f)) return null;
+      fn = fn.evaluate();
+    }
+    if (isFunction(fn, 'Function'))
+      expanded = partialFromFunctionLiteral(ce, fn, args);
+  } else {
+    const opSym = withCallableBinding(vec, () => ce.symbol(vec.operator));
+    if (isUserFunction(opSym) && !isRecursiveUserFunction(opSym))
+      expanded = withCallableBinding(vec, () =>
+        userFunctionBody(opSym, vec.ops)
+      );
+  }
+  if (expanded === undefined || containsSame(expanded, vec)) return null;
+  return normComponents(expanded, depth - 1);
+}
+
 /** Whether `expr` is a `Tuple` or has a `Tuple` among its subexpressions. */
 function containsTuple(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
@@ -4179,12 +4230,13 @@ function differentiateNode(
     if (!dependsOnVariable(expr, v)) return ce.Zero;
 
     const vec = expr.op1;
-    const comps = isFunction(vec, 'Tuple') ? vec.ops : null;
+    const comps = normComponents(vec);
     // The norm of an empty vector is `0` for every norm type (see `Norm` in
     // `library/linear-algebra.ts`), and `|()|` already evaluates to `0`, so
     // its derivative is `0` rather than a decline.
     if (comps?.length === 0) return ce.Zero;
-    // Beyond that, only a tuple has statically-known components to
+    // Beyond that, only a tuple, a point, or a call that expands to one
+    // (`normComponents()`) has statically-known components to
     // differentiate. Any other non-number operand that DOES mention `v` (an
     // opaque collection, a symbol typed `list<…>` with a `v`-dependent
     // binding) declines, leaving `D` inert rather than guessing — a decline

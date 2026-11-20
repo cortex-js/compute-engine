@@ -6729,8 +6729,9 @@ volumes
             if (isFunction(r, 'Function') && !bodyOverHoles) return r;
             // An INCOMPLETE closed form — a `D` the symbolic differentiator
             // could not resolve is left inside the body, such as the
-            // derivative of the norm of a point-valued function inside the
-            // quotient rule for `t ↦ f'(t)/|f'(t)|` — is no closed form: the
+            // derivative of the norm of a point-valued call whose components
+            // are not known, inside the quotient rule for `t ↦ g(t)/|g(t)|` —
+            // is no closed form: the
             // node stays inert, so an application of it stays an `Apply` and
             // `N()` answers it through the stencil fallback
             // (`numericDerivativeOfApply`), as the compiled JavaScript target

@@ -1789,6 +1789,79 @@ describe('|v| over a TUPLE is a NORM, not a scalar absolute value', () => {
     const d = ce.box(['D', ['Abs', 'x'], 'x']).evaluate();
     expect(d.toString()).toContain('Sign');
   });
+
+  // CE-1563: the components of a call of a point-valued function come from
+  // its expansion, `f(t)`, `f′(t)` and `Apply(t ↦ …, t)` alike, with the
+  // function declared `function` first (a value definition) or not.
+  const CURVE = [
+    'Function',
+    [
+      'PointList',
+      ['Sin', ['Multiply', 2, 't']],
+      ['Cos', ['Multiply', 3, 't']],
+      ['Sin', ['Multiply', 5, 't']],
+    ],
+    't',
+  ];
+  const curve = (t: number) => [Math.sin(2 * t), Math.cos(3 * t), Math.sin(5 * t)];
+  const curvePrime = (t: number) => [
+    2 * Math.cos(2 * t),
+    -3 * Math.sin(3 * t),
+    5 * Math.cos(5 * t),
+  ];
+  const CALLS: [string, unknown, (t: number) => number[]][] = [
+    ['f(t)', ['f', 't'], curve],
+    ["f'(t)", ['Apply', ['Derivative', 'f', 1], 't'], curvePrime],
+    ['a literal applied to t', ['Apply', CURVE, 't'], curve],
+  ];
+  for (const declared of [false, true])
+    for (const [name, call, g] of CALLS)
+      test(`the norm of ${name}, f ${declared ? 'declared' : 'not declared'}`, () => {
+        const ce = new ComputeEngine();
+        if (declared) ce.declare('f', 'function');
+        ce.assign('f', ce.box(CURVE as never));
+        const d = ce.box(['D', ['Abs', call], 't'] as never).evaluate();
+        expect(d.operator).not.toBe('D');
+        const norm = (t: number) => Math.hypot(...g(t));
+        for (const t0 of [0.25, 1.3, -0.7])
+          expect(d.subs({ t: t0 }).N().re).toBeCloseTo(central(norm, t0), 5);
+      });
+
+  test('the derivative of the unit tangent of a declared curve (CE-1563)', () => {
+    // Tycho's document `art/frthw0ihk5`: `F(t) = f′(t)/|f′(t)|`, with `f`
+    // and `F` declared `function` before they are assigned. Without the
+    // declarations the bodies are operator definitions, and `F′` was already
+    // a closed form.
+    const values = [false, true].map((declared) => {
+      const ce = new ComputeEngine();
+      if (declared) {
+        ce.declare('f', 'function');
+        ce.declare('F', 'function');
+      }
+      ce.assign('f', ce.box(CURVE as never));
+      ce.assign(
+        'F',
+        ce.box([
+          'Function',
+          [
+            'Divide',
+            ['Apply', ['Derivative', 'f', 1], 't'],
+            ['Abs', ['Apply', ['Derivative', 'f', 1], 't']],
+          ],
+          't',
+        ] as never)
+      );
+      const d = ce.box(['Derivative', 'F', 1] as never).evaluate();
+      expect(d.operator).toBe('Function');
+      return ce
+        .box(['Apply', ['Derivative', 'F', 1], 0.3] as never)
+        .N()
+        .ops!.map((x) => x.re);
+    });
+    for (const [i, v] of values[1].entries())
+      expect(v).toBeCloseTo(values[0][i], 12);
+    expect(values[1][2]).toBeCloseTo(-8.6272177813377, 10);
+  });
 });
 
 describe('VECTOR-VALUED DERIVATIVES — the declared type must not contradict the value', () => {

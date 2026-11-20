@@ -5,18 +5,12 @@
  * The Frenet-frame document `frthw0ihk5` of the Tycho code-generation audit
  * defines a space curve `f(t) = PointList(x(t), y(t), z(t))` and its unit
  * tangent `F_0(t) = f'(t)/|f'(t)|`, then reads `F_0'(t)`. The symbolic
- * differentiator has no rule for the derivative of the norm of a
- * point-valued function, so the closed form of `F_0'` was INCOMPLETE: a
- * `D(|f'(t)|, t)` residue inside an otherwise differentiated body. The
- * interpreter returned that residue from `N()` (no numeric value at all),
- * and the compiled JavaScript target, which falls back to the numeric
- * stencil for the whole application, answered `NaN`: the stencil helper
- * `_SYS.nd` read the point the function returns as a non-number.
- *
- * Now the `Derivative` handler treats an incomplete closed form as no
- * closed form (the node stays inert), so `N()` of the application takes
- * the same stencil fallback as the compiled route
- * (`numericDerivativeOfApply`, library/calculus.ts), and both stencils
+ * differentiator gives the derivative of the norm of a point-valued call
+ * from the components of its expansion (CE-1563), so `F_0'` has a closed
+ * form. An INCOMPLETE closed form (a `D` residue in a differentiated body)
+ * is no closed form: the node stays inert, and `N()` of the application
+ * takes the same stencil fallback as the compiled route
+ * (`numericDerivativeOfApply`, library/calculus.ts). Both stencils
  * differentiate a point- or list-valued function component by component.
  */
 
@@ -50,15 +44,30 @@ describe('Derivative of a point-valued function through the stencil', () => {
     );
   });
 
-  test('evaluate() keeps the exactness contract: the application stays symbolic', () => {
+  test('the unit tangent derivative has a closed form (CE-1563)', () => {
     const exact = atX(String.raw`F_0^{\prime}(u)`).evaluate();
-    expect(exact.operator).toBe('Apply');
+    expect(exact.operator).toBe('Tuple');
     expect(JSON.stringify(exact.json)).not.toContain('"D"');
-    // The derivative function itself stays inert rather than carrying the
-    // unresolved residue.
     expect(ce.box(['Derivative', 'F_0', 1]).evaluate().operator).toBe(
+      'Function'
+    );
+    const want = [-Math.sin(X) / Math.SQRT2, -Math.cos(X) / Math.SQRT2, 0];
+    components(exact.N()).forEach((v, i) =>
+      expect(v).toBeCloseTo(want[i], 12)
+    );
+  });
+
+  test('an incomplete closed form is inert, and N() takes the stencil', () => {
+    // `|h(t)|` of a list is elementwise, not a norm, and the norm rule has
+    // no components for it: the closed form of `H′` would hold a `D`.
+    define('H', String.raw`\frac{h(t)}{\vert h(t)\vert}`);
+    expect(ce.box(['Derivative', 'H', 1]).evaluate().operator).toBe(
       'Derivative'
     );
+    // `H(t)` is `[1, 1]` near 0.3, so its derivative is `[0, 0]`.
+    const v = ce.box(['Apply', ['Derivative', 'H', 1], X]).N();
+    expect(v.operator).toBe('List');
+    components(v).forEach((c) => expect(c).toBeCloseTo(0, 6));
   });
 
   test('a complete closed form is still taken', () => {

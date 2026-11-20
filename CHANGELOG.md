@@ -96,6 +96,16 @@
   `HarmonicNumber(1e-30, 2)` is `2.4041e-30`, `HarmonicNumber(1e-30, -1)` is
   `5e-31` and `HarmonicNumber(1e-30, -5.5)` is `1.7004e-32`.
 
+- **The derivative of the norm of a point-valued function call has a closed
+  form (CE-1563).** With `f := t ↦ PointList(sin 2t, cos 3t, sin 5t)`,
+  `D(|f(t)|, t)` and `D(|f'(t)|, t)` stayed unevaluated; they now give
+  `(Σ fᵢ·fᵢ′)/|f(t)|`, as for a written-out tuple `|(sin 2t, cos 3t, sin 5t)|`.
+  So the derivative of the unit tangent `F := t ↦ f'(t)/|f'(t)|` gives the
+  same function whether or not `f` and `F` are first declared `function`.
+  Before, with the declarations, `Derivative(F, 1)` stayed unevaluated and
+  `compile(F'(u))` declined with "a derivative with no closed form"; it now
+  compiles.
+
 - **A compiled program nested too deep for the JavaScript parser declines as
   too deep.** Where the parser of the host runs out of stack (on Windows, a
   `Which` of 1,000 clauses on the interval target, a `ListJoin` of 1,000
