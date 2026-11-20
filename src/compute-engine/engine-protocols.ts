@@ -4,6 +4,7 @@ import type {
   EffectSet,
   FunctionSignature,
   NamedElement,
+  ParameterDefault,
   Type,
   TypeParameter,
   TypeReference,
@@ -519,12 +520,10 @@ export function declareProtocolImpl(
     assertV1MemberShape(ce, name, member, parsed);
     validated[member] = { kind: 'function', signature };
     if (parsed.optArgs !== undefined)
-      REQUIREMENT_DEFAULTS.set(
-        validated[member],
-        Object.freeze(
-          parsed.optArgs.map((a) => boxParameterDefault(ce, a.default!))
-        )
-      );
+      REQUIREMENT_DEFAULTS.set(validated[member], {
+        scope: ce.context.lexicalScope,
+        defaults: Object.freeze(parsed.optArgs.map((a) => a.default!)),
+      });
   }
 
   for (const kind of ['readonly', 'readwrite'] as const) {
@@ -4866,17 +4865,20 @@ function requirementParameters(
 }
 
 /**
- * The boxed default operands of each function requirement that has
- * parameters with a default, aligned with its `optArgs`. They are boxed once,
- * when the protocol is declared, in the declaring scope, as the defaults of
- * an operator definition are (R4 of
+ * The defaults of each function requirement that has parameters with a
+ * default, aligned with its `optArgs`, and the scope that declares the
+ * protocol. A default is boxed in that scope each time it is filled, as a
+ * written operand of the call would be boxed there (R4 of
  * `docs/plans/2026-10-31-parameter-default-values.md`): a symbol default is
- * the constant that the declaring scope gives it, and a local of the same
- * name where the member is called does not replace it.
+ * the constant that the declaring scope binds when the call is evaluated, so
+ * a local of the same name where the member is called does not replace it,
+ * and a constant that a later program declares again in that scope is read
+ * with its new value (CE-1557). Boxing once at declaration kept the binding
+ * of that moment for good.
  */
 const REQUIREMENT_DEFAULTS = new WeakMap<
   ProtocolMember,
-  ReadonlyArray<Expression>
+  { scope: Scope; defaults: ReadonlyArray<ParameterDefault> }
 >();
 
 /** The default operands of `record.member`, aligned with the `optArgs` of
@@ -4892,9 +4894,12 @@ function requirementDefaults(
     requirement === undefined
       ? undefined
       : REQUIREMENT_DEFAULTS.get(requirement);
-  if (known !== undefined) return known;
-  // A record that was not built by `declareProtocolImpl` has no boxed
-  // defaults: box them now.
+  if (known !== undefined)
+    return ce._inScope(known.scope, () =>
+      known.defaults.map((d) => boxParameterDefault(ce, d))
+    );
+  // A record that was not built by `declareProtocolImpl` has no declaring
+  // scope: box the defaults where the call is evaluated.
   return (shape.optArgs ?? []).map((a) => boxParameterDefault(ce, a.default!));
 }
 
@@ -6395,24 +6400,22 @@ export function protocolMemberValue(
   const parameters = requirementParameters(shape);
   const params = parameterNames(shape, parameters.length);
   // A parameter with a default value is an `Optional` parameter of the
-  // literal, with the requirement's default, so `Figure.rotate(r, a)` calls
-  // the member with the full argument list. It is typed, so that a default
-  // that the parameter type lists (`mode: symbol<Auto> = Auto`) is accepted
-  // as a constant; its type does not mention `Self` (`assertV1MemberShape`).
-  // The default operand is the one boxed when the protocol was declared
-  // ({@link REQUIREMENT_DEFAULTS}).
+  // literal whose default is the placeholder {@link PROTOCOL_DEFAULT}, so
+  // `Figure.rotate(r, a)` calls the member with the full argument list and
+  // dispatch fills the requirement's default when the call is evaluated, in
+  // the scope that declares the protocol ({@link REQUIREMENT_DEFAULTS}). A
+  // value of `P.m` stored before a later program declares the constant again
+  // then reads its new value, as a call of the member does (CE-1557). The
+  // type of the filled default is checked by dispatch.
   const required = shape.args?.length ?? 0;
-  const defaults = requirementDefaults(ce, record, member, shape);
   const declared = params.map((name, i) => {
     const p = parameters[i]!;
     if (i < required || p.default === undefined) return name;
-    return [
-      'Optional',
-      ['Typed', name, { str: typeToString(p.type) }],
-      defaults[i - required]!,
-    ];
+    return ['Optional', name, PROTOCOL_DEFAULT];
   });
-  const box = () =>
+  // Boxed in the scope of the dispatchers, where protocols are declared, so
+  // that a local of the caller cannot shadow the placeholder.
+  return ce._inScope(dispatcherScope(ce), () =>
     ce.box([
       'Function',
       [
@@ -6422,13 +6425,8 @@ export function protocolMemberValue(
         ...params,
       ] as unknown as Parameters<IComputeEngine['box']>[0],
       ...declared,
-    ] as unknown as Parameters<IComputeEngine['box']>[0]);
-  // A literal with a default is canonicalized in the scope of the
-  // dispatchers, where protocols are declared: its canonicalization checks
-  // that a symbol default is a constant, and a local of the same name in the
-  // scope of the call would read as a variable. The body names only the
-  // parameters.
-  return defaults.length === 0 ? box() : ce._inScope(dispatcherScope(ce), box);
+    ] as unknown as Parameters<IComputeEngine['box']>[0])
+  );
 }
 
 /** Parameter names for the wrapper literal: the requirement's own names when

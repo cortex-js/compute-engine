@@ -482,6 +482,36 @@ type Money is P { function f(self: Money, k: real) -> integer { floor(k) } }`
     expect(n(['ProtocolMember', "'P'", "'f'", ['Money', 1]])).toBe('24');
   });
 
+  test('a constant default declared again by a later program is read with its new value', () => {
+    // CE-1557: the default is resolved in the declaring scope when it is
+    // filled, not once when the protocol is declared.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'const W = 9');
+    const declared = executeEpsil(
+      ce,
+      [
+        'const W = 2',
+        'protocol P { function scaled(self: Self, k: real = W) -> real }',
+        'type real is P { function scaled(self: real, k: real) -> real { self * k } }',
+        'P.scaled(3)',
+      ].join('\n')
+    );
+    expect(declared.diagnostics).toEqual([]);
+    expect(declared.value.json).toEqual(6);
+    expect(executeEpsil(ce, 'scaled(3)').value.json).toEqual(6);
+    executeEpsil(ce, 'const W = 5');
+    expect(executeEpsil(ce, 'scaled(3)').value.json).toEqual(15);
+    expect(executeEpsil(ce, 'P.scaled(3)').value.json).toEqual(15);
+    expect(
+      executeEpsil(ce, 'function g(v: real) { let W = 100; scaled(v) }\ng(3)')
+        .value.json
+    ).toEqual(15);
+    // A value of `P.scaled` stored before reads the new value too.
+    executeEpsil(ce, 'let h = P.scaled');
+    executeEpsil(ce, 'const W = 7');
+    expect(executeEpsil(ce, 'h(3)').value.json).toEqual(21);
+  });
+
   test('under `.N()` a local of the caller does not replace a constant default', () => {
     // The `floor` makes the body read the exact source of `k` under `.N()`.
     const ce = new ComputeEngine();
@@ -737,16 +767,55 @@ scale(Money(4))`)
     ).toContain('a default value is a constant');
   });
 
-  test('a `const` of the same program is not a constant for a protocol default', () => {
-    // A `protocol` statement is declared before the other statements of its
-    // program; a constant of an earlier program on the same engine is one.
+  test('a `const` declared above the protocol in the same program is a constant for its default', () => {
+    // CE-1557: as for a function default, a constant declared above the
+    // `protocol` statement is admitted; one declared below it, or a `let`,
+    // is not. A constant of an earlier program on the same engine is one too.
     const source = `protocol P { function f(self, k: real = W) -> real }`;
-    expect(JSON.stringify(run(`const W = 2\n${source}`).diagnostics)).toContain(
+    const impl =
+      'type real is P { function f(self: real, k: real) -> real { self * k } }';
+    const above = run(`const W = 2\n${source}\n${impl}\nf(3)`);
+    expect(above.diagnostics).toEqual([]);
+    expect(above.value).toEqual(6);
+    expect(JSON.stringify(run(`${source}\nconst W = 2`).diagnostics)).toContain(
       'a default value is a constant'
     );
+    expect(JSON.stringify(run(`let W = 2\n${source}`).diagnostics)).toContain(
+      'a default value is a constant'
+    );
+    // Its type is checked when the default is filled.
+    const text = run(`const W = "abc"\n${source}\n${impl}\nf(3)`);
+    expect(JSON.stringify(text.value)).toContain('incompatible-type');
     const ce = new ComputeEngine();
     expect(executeEpsil(ce, 'const W = 2').diagnostics).toEqual([]);
     expect(executeEpsil(ce, source).value?.json).toBe('Nothing');
+    // What an earlier program left does not decide: a `const` of another
+    // type is declared again, and a `let` hides an earlier constant.
+    const retyped = new ComputeEngine();
+    executeEpsil(retyped, 'const W = "abc"');
+    const again = executeEpsil(
+      retyped,
+      `const W = 2\n${source}\n${impl}\nf(3)`
+    );
+    expect(again.diagnostics).toEqual([]);
+    expect(again.value.json).toEqual(6);
+    // A function statement of the program still checks the type of the
+    // constant at declaration, against the binding the program hoists.
+    expect(
+      JSON.stringify(
+        run(`const W = "abc"\nfunction f(k: real = W) -> real { k }`)
+          .diagnostics
+      )
+    ).toContain('expected `real`, got `string` at `W`');
+    const hidden = new ComputeEngine();
+    executeEpsil(hidden, 'const W = 9');
+    expect(
+      JSON.stringify(
+        executeEpsil(hidden, `let W = 2\n${source}`).diagnostics.map(
+          (d) => d.message
+        )
+      )
+    ).toContain('a default value is a constant');
   });
 
   test('two protocols that give the member different defaults', () => {
@@ -947,9 +1016,11 @@ describe('PARAMETER DEFAULT VALUES — evaluate', () => {
     expect(
       value('let g = (x, k = 2) => [x, isMissing(k)]\ng(1, Missing)')
     ).toEqual(['List', 1, 'True']);
-    expect(
-      value('let g = (x, k = 2) => [x, isMissing(k)]\ng(1)')
-    ).toEqual(['List', 1, 'False']);
+    expect(value('let g = (x, k = 2) => [x, isMissing(k)]\ng(1)')).toEqual([
+      'List',
+      1,
+      'False',
+    ]);
   });
 
   test('a hold definition with a default', () => {

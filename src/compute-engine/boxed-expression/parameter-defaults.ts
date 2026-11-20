@@ -288,17 +288,30 @@ export function isConstantSymbolDefault(
   // accepts the default, and after an earlier `const W = 5`,
   // `let W = 7; function f(k = W) {…}` refuses it. The binding decides
   // only in a scope with no mark for the name.
+  const mark = constantDeclarationMark(ce, name);
+  if (mark !== undefined) return mark === 'const';
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && isValueDef(def) && def.value.isConstant === true;
+}
+
+/** The mark of the declaration of `name` that the program last
+ * canonicalized and has not run (`CONSTANT_DECLARATIONS`), in the nearest
+ * scope that declares the name or binds it; `undefined` when that scope has
+ * no mark for it. */
+function constantDeclarationMark(
+  ce: ComputeEngine,
+  name: string
+): 'const' | 'variable' | undefined {
   for (
     let scope: Scope | null | undefined = ce.context.lexicalScope;
     scope;
     scope = scope.parent
   ) {
     const mark = CONSTANT_DECLARATIONS.get(scope)?.get(name);
-    if (mark !== undefined) return mark === 'const';
-    if (scope.bindings.get(name) !== undefined) break;
+    if (mark !== undefined) return mark;
+    if (scope.bindings.get(name) !== undefined) return undefined;
   }
-  const def = ce.lookupDefinition(name);
-  return def !== undefined && isValueDef(def) && def.value.isConstant === true;
+  return undefined;
 }
 
 /**
@@ -363,6 +376,34 @@ export function noteConstantDeclaration(
       ? 'const'
       : 'variable'
   );
+}
+
+/** The engines that are canonicalizing the first statements of a program
+ * (its type and protocol declarations), before the program hoists its
+ * declarations: see {@link beforeProgramDeclarations}. */
+const BEFORE_DECLARATIONS = new WeakMap<ComputeEngine, number>();
+
+/**
+ * Run `fn` for the statements of a program that are canonicalized before
+ * its declarations are hoisted (`canonicalSequence`, rank 0: a `protocol`
+ * statement). There, a constant that the program declares has no binding of
+ * its own yet: the binding found is absent or left by an earlier program,
+ * so the type of a symbol default that names it is not checked at
+ * declaration (CE-1557). A later statement checks it against the hoisted
+ * binding.
+ */
+export function beforeProgramDeclarations<T>(
+  ce: ComputeEngine,
+  fn: () => T
+): T {
+  BEFORE_DECLARATIONS.set(ce, (BEFORE_DECLARATIONS.get(ce) ?? 0) + 1);
+  try {
+    return fn();
+  } finally {
+    const depth = BEFORE_DECLARATIONS.get(ce)! - 1;
+    if (depth === 0) BEFORE_DECLARATIONS.delete(ce);
+    else BEFORE_DECLARATIONS.set(ce, depth);
+  }
 }
 
 /** Preserve source-order constant-default admission while Program hoists
@@ -511,7 +552,9 @@ export function literalParameterDefault(
  *   refused (`SYMBOL_DEFAULT_MESSAGE`). A constant must match the
  *   parameter type (`over: set = Integers`). A symbol that the parameter
  *   type lists matches it, and is not boxed here: boxing a symbol that is
- *   not declared declares it.
+ *   not declared declares it. In a statement canonicalized before its
+ *   program hoists its declarations, a constant that the program declares
+ *   is not checked here either ({@link beforeProgramDeclarations}).
  */
 function checkParameterDefault(
   ce: ComputeEngine,
@@ -529,6 +572,17 @@ function checkParameterDefault(
         `${subject}: the default value ${display} of the parameter ${paramName}: ${SYMBOL_DEFAULT_MESSAGE}`
       );
     if (literalSymbolNames(param.type).includes(d.name)) return;
+    // A constant that the program declares, in a statement canonicalized
+    // before the program hoists its declarations (a `protocol` statement,
+    // CE-1557): the binding found is absent or left by an earlier program,
+    // with another type. Its type is checked where the default is used: the
+    // argument check of the selected protocol requirement. Boxing it here
+    // would also declare the name before its own declaration.
+    if (
+      (BEFORE_DECLARATIONS.get(ce) ?? 0) > 0 &&
+      constantDeclarationMark(ce, d.name) === 'const'
+    )
+      return;
   }
   if (!boxParameterDefault(ce, d).type.matches(param.type))
     throw new Error(

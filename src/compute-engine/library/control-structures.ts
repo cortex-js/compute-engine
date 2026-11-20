@@ -1,6 +1,9 @@
 import { initializationType } from '../boxed-expression/proved-absent-domain.js';
 import { assertDeclarationName } from '../engine-declarations.js';
-import { withEarlierConstantDeclarations } from '../boxed-expression/parameter-defaults.js';
+import {
+  beforeProgramDeclarations,
+  withEarlierConstantDeclarations,
+} from '../boxed-expression/parameter-defaults.js';
 import { scopeActivation } from '../boxed-expression/ambient-chain.js';
 import {
   carryLazyViewContexts,
@@ -4227,6 +4230,24 @@ export function closedLiteralType(
  * runner (`executeEpsil()`) declares the names of the statements before a
  * `function` statement before it installs the function.
  */
+/** True when the `Declare` statement `op` declares a constant: its
+ * attributes dictionary has `constant: True`. Read structurally, without
+ * canonicalizing the dictionary. */
+function isConstantDeclare(op: Expression): boolean {
+  if (!isFunction(op, 'Declare')) return false;
+  const attributes = op.ops[op.ops.length - 1];
+  return isDictionary(attributes)
+    ? isSymbol(attributes.get('constant'), 'True')
+    : isFunction(attributes, 'Dictionary') &&
+        attributes.ops.some(
+          (pair) =>
+            isFunction(pair, 'KeyValuePair') &&
+            (isString(pair.op1) ? pair.op1.string : sym(pair.op1)) ===
+              'constant' &&
+            isSymbol(pair.op2, 'True')
+        );
+}
+
 export function staticDeclarations(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -4258,17 +4279,7 @@ export function staticDeclarations(
   for (const statement of ops) {
     const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
-      const attributes = op.ops[op.ops.length - 1];
-      const constant = isDictionary(attributes)
-        ? isSymbol(attributes.get('constant'), 'True')
-        : isFunction(attributes, 'Dictionary') &&
-          attributes.ops.some(
-            (pair) =>
-              isFunction(pair, 'KeyValuePair') &&
-              (isString(pair.op1) ? pair.op1.string : sym(pair.op1)) ===
-                'constant' &&
-              isSymbol(pair.op2, 'True')
-          );
+      const constant = isConstantDeclare(op);
       const nameExpr = op.ops[0];
       // A destructuring `Declare((a, b), …)` (`let (a, b) = v`) introduces
       // each leaf of its pattern as a block local, as `Declare(a, …)` does
@@ -4537,11 +4548,49 @@ function canonicalSequence(
     }
     return statement;
   };
-  if (program)
-    for (const i of order) {
-      if (rank(i) !== 0) break;
-      early!.set(source[i], canonicalizeStatement(source[i]));
+  if (program) {
+    // The statements of rank 0 are canonicalized before the declarations of
+    // the program are collected below, and a `DeclareProtocol` checks there
+    // that a symbol default names a constant. The declarations of the
+    // program are read here by syntax: every declared name is marked, a
+    // constant with the source index of its declaration, so that a protocol
+    // sees the constants declared above it and a `let` of the program hides
+    // a constant that an earlier program left, as for a function definition
+    // (CE-1557). As in the acceptance below, a function statement declares
+    // its name, and a `Declare` with a name declared before is refused
+    // whole. The collection below replaces these facts.
+    const declared = new Set<string>();
+    for (const [i, statement] of source.entries()) {
+      const op = typedStatement(statement);
+      const local = localFunctionName(ce, op);
+      if (local !== undefined) {
+        declared.add(local);
+        continue;
+      }
+      if (!isFunction(op, 'Declare')) continue;
+      const constant = isConstantDeclare(op);
+      const target = op.op1;
+      const names = isSymbol(target)
+        ? [target.symbol]
+        : isFunction(target, 'Tuple')
+          ? tuplePatternNames(target).filter((name) => name !== 'Nothing')
+          : [];
+      if (names.some((name) => declared.has(name))) continue;
+      for (const name of names) {
+        declared.add(name);
+        if (constant) constantIndexes!.set(name, i);
+      }
     }
+    constantDeclarations = declared;
+    beforeProgramDeclarations(ce, () => {
+      for (const i of order) {
+        if (rank(i) !== 0) break;
+        early!.set(source[i], canonicalizeStatement(source[i]));
+      }
+    });
+    constantIndexes!.clear();
+    constantDeclarations = new Set();
+  }
   // An empty block is canonical as it is: its type handler answers `nothing`
   // and its evaluate handler answers `Nothing`. Declining here (`null`) left
   // the node non-canonical and unbound, so neither handler ever ran and

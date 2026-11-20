@@ -1847,9 +1847,14 @@ another default applies to a call made before it, and a library twin (name
 resolution, rule 1) receives the arguments as written. The method form
 `r.stroke("red")` and the qualified form `Figure.stroke(r, "red")` take the
 same default. A supplied argument is never replaced, also when it is absent
-(`Missing`). A `protocol` statement is declared before the other statements
-of its program, so a symbol default names a constant of the library, of the
-host, or of an earlier program, not a `const` of the same program.
+(`Missing`). A symbol default names a constant of the library, of the host,
+of an earlier program, or a `const` declared above the `protocol` statement
+in the same program, as for a function default. The default is read in the
+declaring scope when it is filled, so a program that declares the constant
+again is read with the new value (CE-1557). A constant of the same program
+has no binding when the `protocol` statement is checked, so its type is
+checked when it is filled: `const W = "abc"` with `k: real = W` is
+`incompatible-type` at the call.
 
 A named argument may skip a parameter with a default, in every form of the
 call. With `function sc(self: Self, a: real = 1, b: real = 2) -> real`,

@@ -31,10 +31,10 @@
 
   Before, the declaration was refused (`invalid-protocol-declaration`). An
   implementation that leaves out `width`, or gives it another default, is
-  `protocol-signature-mismatch`. A default is a constant, as for any function. A
-  `protocol` statement is declared before the other statements of its program,
-  so a symbol default names a library constant or a constant declared earlier,
-  by the host or by an earlier program. An optional parameter without a default,
+  `protocol-signature-mismatch`. A default is a constant, as for any function:
+  a library constant, a constant of the host, or a `const` declared above the
+  `protocol` statement, and it is read with the value the constant has when
+  the call is made. An optional parameter without a default,
   and a default on a parameter whose type mentions `Self`, are still refused.
   `ce.declareProtocol()` accepts the same signatures:
   `'(self: Self, scale: real = 10) -> real'`. A named argument may skip a

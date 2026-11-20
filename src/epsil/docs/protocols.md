@@ -76,10 +76,9 @@ let p = Pen("black", 3)
 An implementation that leaves out `width`, or gives it another default, is
 the `protocol-signature-mismatch` error; it may repeat the default
 `width: real = 1`. A default is a constant, as for any function: a number, a
-string, a boolean, `[]`, `{}`, or a constant symbol. A `protocol` statement
-is declared before the other statements of its program, so a symbol default
-names a library constant (`pi`) or a constant declared earlier, by the host
-or by an earlier program, not a `const` of the same program. A parameter
+string, a boolean, `[]`, `{}`, or a constant symbol: a library constant
+(`pi`), a constant of the host, or a `const` declared above the `protocol`
+statement, in the same program or an earlier one. A parameter
 without a default cannot be optional, and a parameter whose type mentions
 `Self` cannot have a default: the default is checked when the protocol is
 declared, before `Self` is known. Both are `invalid-protocol-declaration`.
