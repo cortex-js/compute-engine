@@ -2,6 +2,20 @@
 
 ### New Features
 
+- `Permutations(n)` for a non-negative integer `n` is the permutations of
+  `Range(1, n)`, as lists and in the same order as `Permutations(Range(1, n))`,
+  and `Permutations(n, k)` its arrangements of length `k`. It is a lazy
+  collection like the one over a collection: `Count` is `n!`, and `At`,
+  `IndexOf`, `Contains` and `Count(…, v)` read a position or an element with no
+  walk (`At(Permutations(25), 10^24)`). `Permutations(0)` is `[[]]`. A negative
+  or non-integer `n` is still a type error, a symbol of type `integer` reads its value, and `Permutations("abc")` is still
+  the list of strings. `IntegerPartitions` also gives the position of a
+  partition: `IndexOf`, `Contains` and `Count(…, v)` read it from the table of
+  counts that `At` uses, with no walk, for every form of the operands (the
+  number of parts, the allowed parts and the limit). A list that is not one of
+  the partitions, or has a part that is not an exact integer, is not contained
+  (#620, PR #621, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **The compilation result has a `rows` field** (CE-1549). It is `true` when
   the result of compiled JavaScript is a list of lists whose rows can have
   different lengths, as `Chunk(L, k)` of a list of run-time length gives:

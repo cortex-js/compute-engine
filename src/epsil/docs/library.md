@@ -673,7 +673,7 @@ The [Combinatorics reference](/epsil/reference/combinatorics/) has the full desc
 | `fibonacci` | `Fibonacci` | `(integer, number?) -> number` | Compute the nth Fibonacci number. |
 | `integerPartitions` | `IntegerPartitions` | `(integer, any?, list<integer>?, integer?) -> list<list<integer>>` | Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. |
 | `multinomial` | `Multinomial` | `(integer+) -> integer` | Compute the multinomial coefficient for multiple integers. |
-| `permutations` | `Permutations` | `((S, integer?) -> list<string> where S: string) & ((collection, integer?) -> list<list>)` | Return all permutations of length k (default full length) of a collection. |
+| `permutations` | `Permutations` | `((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)` | Return all permutations of length k (default full length) of a collection. |
 | `pochhammer` | `Pochhammer` | `(complex \| infinity, complex \| infinity) -> number` | Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1). |
 | `powerSet` | `PowerSet` | `(set<any>) -> set` | Return the power set of a set (set of all subsets). |
 | `subfactorial` | `Subfactorial` | `(integer) -> integer` | Compute the number of derangements (subfactorial) of n items. |

@@ -86,9 +86,9 @@ Compute the multinomial coefficient for multiple integers.
 
 ### permutations
 
-MathJSON `Permutations` · `((S, integer?) -> list<string> where S: string) & ((collection, integer?) -> list<list>)`
+MathJSON `Permutations` · `((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)`
 
-Return all permutations of length k (default full length) of a collection.
+Return all permutations of length k (default full length) of a collection. `Permutations(n)` for a non-negative integer n is the permutations of `Range(1, n)`, as lists, and `Permutations(n, k)` its arrangements of length k.
 
 ### pochhammer
 
