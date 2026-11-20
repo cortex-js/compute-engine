@@ -485,14 +485,23 @@ describe('IR profile, batch G17: robustness', () => {
     }
   }, 30_000);
 
-  test('a chain of 1,000 operands of ListJoin', () => {
+  test('a chain of 1,000 operands of ListJoin compiles or declines as too deep', () => {
     const root = ce.function(
       'ListJoin',
       Array.from({ length: 1_000 }, (_, i) =>
         ce.function('Multiply', [ce.number(i), ce.box('A')])
       )
     );
-    const r = compile(root, IR);
+    // The printed code is near the depth at which the JavaScript parser
+    // exceeds the call stack, which depends on the host (on Windows it
+    // declines).
+    let r: ReturnType<typeof compile>;
+    try {
+      r = compile(root, IR);
+    } catch (e) {
+      expect(String(e)).toMatch(/too deep to compile/);
+      return;
+    }
     const v = r.run!({ A: [1, 2] } as never) as number[];
     expect(v.length).toBe(2_000);
     expect(v[1_999]).toBe(1_998);

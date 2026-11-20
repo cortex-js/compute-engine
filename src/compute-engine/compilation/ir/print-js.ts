@@ -687,6 +687,10 @@ export function printJavaScript(
     } catch (e) {
       // A deadline that expires while the values computed once are computed.
       if (isCancellationError(e)) throw e;
+      // Code nested deeper than the parser's stack (a chain of 1,000 `If`s
+      // on a platform with a small stack): `sliceError()` declines it as
+      // too deep.
+      if (e instanceof RangeError && /call stack/.test(e.message)) throw e;
       throw new Error(
         `slice: the JavaScript printer made code that does not parse (${String(e)}), for the inputs ${entry.paramNames.join(', ')}:\n${preambleOnce}\n${code}`
       );

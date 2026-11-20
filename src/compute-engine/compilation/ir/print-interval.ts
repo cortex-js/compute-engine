@@ -641,6 +641,9 @@ export function printInterval(
   try {
     run = createIntervalRuntime().load(stored);
   } catch (e) {
+    // Code nested deeper than the parser's stack: `sliceError()` declines
+    // it as too deep.
+    if (e instanceof RangeError && /call stack/.test(e.message)) throw e;
     throw new Error(
       `slice: the interval printer made code that does not parse (${String(e)}):\n${stored.preambleOnce}\n${code}`
     );

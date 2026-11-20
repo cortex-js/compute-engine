@@ -70,6 +70,14 @@
 
 ### Resolved Issues
 
+- **A compiled program nested too deep for the JavaScript parser declines as
+  too deep.** Where the parser of the host runs out of stack (on Windows, a
+  `Which` of 1,000 clauses on the interval target, a `ListJoin` of 1,000
+  operands), the decline was "internal error: … made code that does not parse
+  (RangeError: Maximum call stack size exceeded)" with the whole code; it is now
+  "an expression too deep to compile", as for a walk of the compiler that runs
+  out of stack.
+
 - **`Map` over the groups of `Partition(xs, p)` gives a value (CE-1558).**
   With a predicate `p`, `Map(f, Partition(xs, p))`, its `Count`, `At`,
   `Reduce` and `Sum` stayed unevaluated, while the same over
