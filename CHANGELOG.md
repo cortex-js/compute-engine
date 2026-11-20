@@ -56,6 +56,18 @@
 
 ### Resolved Issues
 
+- **An `If` with no else of a list compiles again (CE-1564).** A restriction
+  of a list of curves, `If(0 < x, x·L)` with `L: list<real>`, compiles on
+  JavaScript, and on GLSL for a list of stated length, when it is the result
+  of the program: where the condition is false, its value is the list of
+  `NaN` of the length of the list (a list of points of `NaN` for a list of
+  points). Where an operator reads its value (`IsMissing`, `Length`), the
+  compilation still declines: the interpreter's value there is `Missing`,
+  and a compiled list is never absent. A restriction of a list by a list
+  condition, `If(PointX(P) < 20, P)`, selects at each position, to the
+  shorter of the condition and the list, as the interpreter does. Both
+  declined since 0.194.0.
+
 - **`HarmonicNumber(n)` and `HarmonicNumber(n, r)` compile to GLSL again.**
   Since 0.194.0, `compile(expr, { to: 'glsl' })` declined them. A shader now
   gives the value of the interpreter within single-float precision, for an

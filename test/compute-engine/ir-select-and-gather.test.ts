@@ -203,6 +203,10 @@ describe('If and Which of a list condition on JavaScript', () => {
     ['If with an else', ['If', ['Less', 3, 'L'], 'L', 0], [{ L: [2, 5, 7] }]],
     ['If with no else, a scalar arm', ['If', ['Less', 3, 'L'], 1], [{ L: [2, 5, 7] }]],
     ['If with no else, a point arm', ['If', ['Less', 3, 'L'], ['Tuple', 1, 2]], [{ L: [2, 5, 7] }]],
+    // With no else, a list arm is restricted to the mask, to the shorter of
+    // the two lengths, as in the interpreter (CE-1564).
+    ['If with no else, a list arm', ['If', ['Less', 3, 'L'], 'K'], [{ L: [5, 2, 5], K: [1, 2, 3] }, { L: [5, 5, 5], K: [1, 2] }, { L: [5, 2], K: [1, 2, 3] }, { L: [], K: [1] }]],
+    ['If with no else, a list of points arm', ['If', ['Less', ['PointX', 'Pp'], 20], 'Pp'], [{ Pp: [[1, 2], [30, 4], [5, 6]] }]],
     ['a reduction of a selection', ['Sum', ['Which', ['Less', 3, 'L'], 'L', 'True', 0]], [{ L: [2, 5, 7] }]],
     ['stated lengths', ['If', ['Less', 3, 'L3'], 'K3', ['Multiply', 'x', 'L3']], [{ L3: [2, 5, 7], K3: [1, 2, 3], x: 2 }]],
     ['point arms', ['Which', ['Less', 3, 'L'], ['Tuple', 1, 2], 'True', ['Tuple', 'x', 4]], [{ L: [2, 5], x: 3 }]],
@@ -240,10 +244,6 @@ describe('If and Which of a list condition on JavaScript', () => {
     // The interpreter evaluates an arm only where the selection reaches it.
     ['an arm that can throw', ['Which', ['Less', 3, 'L'], ['AssertPresent', ['If', ['Less', 0, 'x'], 1]], 'True', 0], /whose arms or later conditions are not pure/],
     ['an arm that writes a local', ['Block', ['Declare', 'p', "'real'", 0], ['Which', 'B', ['Assign', 'p', 1], 'True', 0], 'p'], /a selection at each position that writes a name/],
-    // With no else, the interpreter restricts the arm to the mask, to the
-    // shorter of the two lengths (`If(3 < L, K)` at L = [5, 5, 5], K = [1, 2]
-    // is [1, 2]).
-    ['If with no else, a list arm', ['If', ['Less', 3, 'L'], 'K'], /an If of a list condition with no else and a list arm/],
     ['a number arm and a point arm (an error of the canonical form)', ['Which', ['Less', 3, 'L'], ['Tuple', 1, 2], 'True', 'x'], /an error of the canonical form/],
     ['points of two lengths', ['If', ['Less', 3, 'L'], ['Tuple', 1, 2], ['Tuple', 3, 4, 5]], /arms of two types/],
     ['booleans with no default', ['Which', 'B', 'True'], /booleans with no default/],

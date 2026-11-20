@@ -877,16 +877,26 @@ describe('the causes of the third corpus run', () => {
     expect(ir(ints).run!({ x: 1 } as never)).toEqual(interpret(ints, { x: 1 }));
     const one = ['If', ['Less', 'x', 0], 'x'];
     expect(ir(one).run!({ x: 1 } as never)).toEqual(NaN);
-    // A list arm, a `Which` and a boolean tuple give `Missing` in the
-    // interpreter, not a tuple of NaN.
-    for (const then of [
-      ['List', 'x', 1],
-      ['Multiply', 2, 'D'],
-      ['Tuple', ['Less', 'x', 1], ['Less', 'x', 2]],
-    ])
-      expect(declined(['If', ['Less', 'x', 0], then])).toMatch(
-        /arms of two types/
-      );
+    // A list arm gives `Missing` in the interpreter: the compiled value is
+    // the list of NaN of its length (CE-1564).
+    expect(
+      ir(['If', ['Less', 'x', 0], ['List', 'x', 1]]).run!({ x: 1 } as never)
+    ).toEqual([NaN, NaN]);
+    expect(
+      ir(['If', ['Less', 'x', 0], ['Multiply', 2, 'D']]).run!({
+        x: 1,
+        D: [1, 2, 3],
+      } as never)
+    ).toEqual([NaN, NaN, NaN]);
+    // A `Which` and a boolean tuple give `Missing` in the interpreter, not
+    // a tuple of NaN.
+    expect(
+      declined([
+        'If',
+        ['Less', 'x', 0],
+        ['Tuple', ['Less', 'x', 1], ['Less', 'x', 2]],
+      ])
+    ).toMatch(/arms of two types/);
     expect(declined(['Which', ['Less', 'x', 0], ['Tuple', 'x', 1]])).toMatch(
       /arms of two types/
     );

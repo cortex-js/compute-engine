@@ -2313,10 +2313,17 @@ replaces the truncation of the user decision of 2026-07-31).
 
 A restriction `value\{conditions\}` (`If(conditions, value)`) whose
 condition is a scalar compiles: its value is `NaN` where the condition is
-false (`x\{y > 0\}` at `y = -1`). A restriction whose condition is a list
-(an element-wise selection, `x\{L > 0\}` with `L: list<real>`) declines
-("a list where a scalar is required"); the interpreter selects position by
-position (`docs/BROADCAST-MODEL.md`).
+false (`x\{y > 0\}` at `y = -1`). The value of a restriction of a flat list
+of numbers or of a list of points (`(x·L)\{x > 0\}` with `L: list<real>`)
+is then the list of `NaN` (of points of `NaN`) of the length of the list,
+when the restriction is the result of the program. A compiled list is never
+absent, and the interpreter's value is `Missing`: a restriction of a list
+that an operator reads (`IsMissing`, `Length`, `2·(x·L)\{x > 0\}`) declines,
+and so does a length that the restricted value makes itself
+(`Range(1, ⌊x⌋)\{x > 0\}`). A restriction whose condition is a list (an
+element-wise selection, `x\{L > 0\}` with `L: list<real>`) selects position
+by position, as the interpreter (`docs/BROADCAST-MODEL.md`); a restricted
+list is read to the shorter of the condition and the list.
 
 `Chunk(L, k)` and `Partition(L, n)` whose rows can have different lengths
 (`L: list<real>` of run-time length, a last row that is shorter), and the two

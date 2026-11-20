@@ -667,6 +667,32 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
+  // The nodes whose value is the result of the program: the root (the
+  // body of a function literal), an arm of such an `If` or `Which`, the
+  // last expression of such a `Block`. No operator of the program reads
+  // their value, so a list of NaN that stands for an absent list there
+  // (`conditional()`) meets no discharge, `Length` or `Rest`, which must
+  // see it as absent. A node that the program reaches twice (one boxed
+  // expression in two places, `If(IsMissing(r), K, r)`) is not one, nor is
+  // a node under it: each node is visited once.
+  const reached = new Set<Expression>();
+  const reachedTwice = new Set<Expression>();
+  const reach = (e: Expression): void => {
+    if (reached.has(e)) return void reachedTwice.add(e);
+    reached.add(e);
+    if (isFunction(e)) e.ops.forEach(reach);
+  };
+  reach(root);
+  const results = new Set<Expression>();
+  const resultOf = (e: Expression): void => {
+    if (results.has(e) || reachedTwice.has(e)) return;
+    results.add(e);
+    if (isFunction(e, 'If')) e.ops.slice(1).forEach(resultOf);
+    else if (isFunction(e, 'Which'))
+      e.ops.forEach((x, i) => i % 2 === 1 && resultOf(x));
+    else if (isFunction(e, 'Block') && e.nops > 0) resultOf(e.ops[e.nops - 1]);
+  };
+  resultOf(isFunction(root, 'Function') ? root.ops[0] : root);
   // The names read as inputs of the compilation (of the entry, lifted into
   // a body, `vars`), in the order the lowering reads them, and those that an
   // occurrence or a declaration types (`program()`).
@@ -1380,14 +1406,10 @@ function lowerOnce(
         // `If(c, a, b)` of a list condition is `Which(c, a, True, b)`, as
         // in the interpreter: a selection at each position.
         // With no `else`, the interpreter restricts a list arm to the mask
-        // (`evaluateRestriction()`: the shorter of the two lengths), not a
-        // selection: it declines. A scalar or a point arm is selected at
-        // each position, NaN where the condition does not hold.
-        if (mask(e.ops[0])) {
-          if (e.nops < 3 && e.ops[1].type.matches('list'))
-            decline(e, 'an If of a list condition with no else and a list arm');
-          return select(e, [[e.ops[0], e.ops[1]]], e.ops[2]);
-        }
+        // (`evaluateRestriction()`: the shorter of the two lengths), and
+        // selects a scalar or a point arm at each position; NaN, or a point
+        // of NaN, where the condition does not hold.
+        if (mask(e.ops[0])) return select(e, [[e.ops[0], e.ops[1]]], e.ops[2]);
         // The missing arm of a boolean is `False`, as in the interpreter
         // (`maskedValue()`); of a number NaN (`conditional()`).
         return conditional(
@@ -3763,7 +3785,9 @@ function lowerOnce(
    *  list: before it, a scalar condition that holds selects its arm whole,
    *  a value of another shape. Stated lengths that differ decline (the
    *  interpreter gives `incompatible-dimensions`); run-time lengths that
-   *  differ give an unspecified value, as for an element-wise operation. */
+   *  differ give an unspecified value, as for an element-wise operation.
+   *  An `If` with no `otherwise` and a list arm is a restriction, which
+   *  ends at the shorter of the mask and the arm. */
   const select = (
     node: Expression,
     clauses: [Expression, Expression][],
@@ -3839,7 +3863,12 @@ function lowerOnce(
         return k === undefined ? [] : [k];
       })
     );
-    if (stated.size > 1)
+    // An `If` with no else of a list arm is a restriction: it zips the mask
+    // with the arm, to the shorter of the two lengths, as the interpreter's
+    // (`evaluateRestriction()`).
+    const restriction =
+      node.operator === 'If' && rest === undefined && listed(arms[0]);
+    if (stated.size > 1 && !restriction)
       decline(node, 'lists of two lengths in a selection at each position');
     // Where no condition holds: NaN, or a point of NaN coordinates.
     const absent = (): V => {
@@ -3865,9 +3894,18 @@ function lowerOnce(
         true
       )!;
     };
+    const masks = lists.listSource(conds[0]);
     return lists.over(
       node as Fn,
-      lists.listSource(conds[0]),
+      restriction
+        ? {
+            ...masks,
+            length: lists.shortest(node as Fn, [
+              masks,
+              lists.listSource(arms[0]),
+            ]),
+          }
+        : masks,
       '',
       (_x, k) => pick(0, k),
       false,
@@ -3877,19 +3915,70 @@ function lowerOnce(
 
   /** `If` and `Which`: a chain of conditionals whose last arm is
    *  `otherwise` (absent: NaN, the value of a selection that takes no
-   *  arm; for an `If` whose arm is a tuple of numbers, the tuple of NaN:
-   *  a `Which` gives `Missing`). */
+   *  arm; for an `If` whose arm is a tuple of numbers, the tuple of NaN,
+   *  and whose arm is a list of numbers or of points, a list of NaN of its
+   *  length: a `Which` gives `Missing`). `start` is the first value of the
+   *  arm before `otherwise`. */
   const conditional = (
     node: Expression,
     clauses: [Expression, Expression][],
     otherwise: Expression | undefined,
     want: boolean,
-    first?: V
+    first?: V,
+    start = b.types.length
   ): V | undefined => {
     if (clauses.length === 0) {
       if (otherwise !== undefined) return value(otherwise, want);
       if (!want) return undefined;
       const t = first === undefined ? undefined : type(first);
+      // An `If` whose arm is a flat list of numbers or a list of points:
+      // the list of NaN, or of points of NaN, of the length of the arm (a
+      // Desmos restriction of a list of curves). A length made in the arm
+      // is not visible in the other arm, and declines.
+      const axis = first === undefined ? undefined : tuples.get(first);
+      if (
+        node.operator === 'If' &&
+        t !== undefined &&
+        isSubLane(t.lane, 'real') &&
+        ((t.shape.length === 1 && axis === undefined) ||
+          (t.shape.length === 2 &&
+            axis === 1 &&
+            typeof t.shape[1] === 'number'))
+      ) {
+        const [n, m] = t.shape;
+        // The interpreter's value is `Missing`, which a discharge, `Length`
+        // or `Rest` reads as absent; a list is never absent in compiled
+        // code (`absent()`), so the list of NaN is the value of the result
+        // only.
+        if (!results.has(node))
+          decline(
+            node,
+            'an If with no else of a list arm whose value an operator reads'
+          );
+        if (typeof n !== 'number' && n.v >= start && !inputLengths.has(n.v))
+          decline(
+            node,
+            'an If with no else whose list arm has a length made in the arm'
+          );
+        const nan = () => {
+          if (m === undefined) return b.constant(NaN, 'real');
+          const xs = Array.from({ length: m as number }, () =>
+            b.constant(NaN, 'real')
+          );
+          const p = b.list(xs, { lane: 'real', shape: [m] });
+          tuples.set(p, 0);
+          return p;
+        };
+        const length = typeof n === 'number' ? b.constant(n, 'integer') : n.v;
+        return lists.over(
+          node as Fn,
+          { length, at: (k) => k },
+          '',
+          nan,
+          false,
+          node
+        );
+      }
       if (
         node.operator !== 'If' ||
         t?.shape.length !== 1 ||
@@ -3916,12 +4005,13 @@ function lowerOnce(
       decided === false &&
       (rest.length > 0 || otherwise !== undefined || first !== undefined)
     )
-      return conditional(node, rest, otherwise, want, first);
+      return conditional(node, rest, otherwise, want, first, start);
+    const at = b.types.length;
     return branch(
       node,
       cond,
       () => (first = value(then, want)),
-      () => conditional(node, rest, otherwise, want, first),
+      () => conditional(node, rest, otherwise, want, first, at),
       want
     );
   };

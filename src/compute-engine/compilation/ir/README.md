@@ -1779,10 +1779,19 @@ every position, NaN (a point of NaN) where no condition holds and there is no
 clause `True` (`Which([2, 5] > 3, 1)` is `[NaN, 1]`); `If(c, a, b)` is
 `Which(c, a, True, b)`, as in the interpreter. An `If` of a list condition with
 no `else` is that selection for a scalar or a point arm (`If(3 < L, 1)` is
-`[NaN, 1, 1]` at `L = [2, 5, 7]`), and declines for a list arm: the interpreter
-restricts that arm to the mask, to the shorter of the two lengths
-(`If(3 < L, K)` is `[1, 2]` at `L = [5, 5, 5]`, `K = [1, 2]`), which is not a
-selection. The conditions, the arms and the default are lowered once, before the
+`[NaN, 1, 1]` at `L = [2, 5, 7]`). For a list arm (of numbers or of points) it
+is a restriction, as in the interpreter: the selection ends at the shorter of
+the mask and the arm (`If(3 < L, K)` is `[1, 2]` at `L = [5, 5, 5]`,
+`K = [1, 2]`). An `If` of a scalar condition with no `else` whose arm is a flat
+list of numbers or a list of points has, where the condition is false, the list
+of NaN (of points of NaN) of the length of the arm; a length made in the arm
+(`If(0 < x, Range(1, Floor(x)))`) is not visible in the other arm, and declines.
+The interpreter's value there is `Missing`, which `IsMissing`, `Coalesce`,
+`AssertPresent`, `Length` and `Rest` read as absent, and a compiled list is
+never absent: such an `If` compiles only where its value is the result of the
+program (the root, an arm of such an `If` or `Which`, the last expression of
+such a `Block`), and declines where an operator reads it.
+The conditions, the arms and the default are lowered once, before the
 build, all of them: the interpreter evaluates an arm and a later condition only
 where the selection reaches it, so one that is not pure (an effect, a write to a
 name, an operation that can throw such as `AssertPresent`, a loop, a recursive
