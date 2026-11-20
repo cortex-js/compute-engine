@@ -86,6 +86,15 @@
   `F = Function(Length(r), r)`, `Count(Map(F, Partition([1, 2, 3, 4], t ↦ t < 3)))`
   is `2`.
 
+- **A compiled `ListJoin` of a list of points and a point appends the point**
+  (CE-1565). With `S: list<tuple<real, real>>`, `ListJoin(S, Tuple(0, 0))`
+  compiled to JavaScript gives `[[1, 2], [3, 4], [0, 0]]` for
+  `S = [(1, 2), (3, 4)]`, as the interpreter does: a tuple operand is one
+  element. Since 0.194.0 it declined with "a tuple where a list is read", so the
+  polyline of the Desmos `join(L, (0, 0))` was computed point by point or drew
+  nothing. A tuple beside a list whose elements are not tuples of the same
+  length still declines.
+
 - **`SinIntegral`, `CosIntegral`, `SinhIntegral`, `CoshIntegral`, `AiryAiPrime`
   and `AiryBiPrime` of a real argument carry the precision asked for.** At
   `ce.precision = 50`, `SinIntegral(0.7)` was the double `0.6812222391166113`;

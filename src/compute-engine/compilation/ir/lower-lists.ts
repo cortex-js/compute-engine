@@ -36,6 +36,7 @@ import {
   type OperatorRow,
 } from './operators.js';
 import { isLibraryOperator } from '../../library-shadowing.js';
+import { isTupleOrTupleUnionShapedType } from '../../collection-utils.js';
 import {
   decline,
   type Fn,
@@ -866,12 +867,18 @@ export function listLowering(cx: Lowering) {
     return v;
   };
 
-  /** `ListJoin(L1, …, Ln)` of lists and scalars (a scalar is a list of one
-   *  element): a build over the sum of the lengths, whose element at `k` is
-   *  the element of the first list whose end is after `k`. */
+  /** `ListJoin(L1, …, Ln)` of lists, scalars and tuples (a scalar or a
+   *  tuple is a list of one element, as in the interpreter: a tuple does
+   *  not splice): a build over the sum of the lengths, whose element at `k`
+   *  is the element of the first list whose end is after `k`. */
   const join = (e: Fn): V => {
     if (e.nops === 0) decline(e, 'ListJoin with no operand');
-    const parts = e.ops.map((x) => source(x, true));
+    const parts = e.ops.map((x) => {
+      if (!isTupleOrTupleUnionShapedType(x.type.type)) return source(x, true);
+      const v = cx.value(x)!;
+      if (cx.tuples.get(v) !== 0) decline(x, 'a tuple that is not one point');
+      return v;
+    });
     // A part whose element is a row of a run-time length (`chunks()`): the
     // row is made in the arm that reads it.
     for (const x of parts)
