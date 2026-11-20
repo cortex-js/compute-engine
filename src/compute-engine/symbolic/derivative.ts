@@ -123,6 +123,19 @@ const MAX_DIFFERENTIATION_DEPTH = 100;
 const MAX_DERIVATIVE_NODES = 25_000;
 
 /**
+ * The largest value, in nodes, of the derivative of `Min` or `Max` of a
+ * list, `At(L′, ArgMin(L))`: the two lists written out.
+ *
+ * It is the largest closed form of a derivative that the compiler accepts
+ * (`CLOSED_SIZE` in `compilation/ir/lower.ts`). The compiler declines a `D`
+ * whose closed form is larger, on every target, while a `D` with no closed
+ * form compiles to a numeric derivative on JavaScript. So a larger value
+ * here would make the compilation of `D(Min(L), x)` decline for a long
+ * list, where it gives a numeric derivative when the rule declines.
+ */
+const MAX_SELECTED_ELEMENT_NODES = 10_000;
+
+/**
  * Node counts, memoized by expression identity. Boxed expressions are
  * immutable, and each differentiation rule reuses its operand instances in
  * the terms it builds, so measuring a result costs O(nodes newly built at
@@ -3441,6 +3454,96 @@ function differentiateNode(
     }
     return accessorOfContainerDerivative(expr, dContainer);
   }
+
+  // `Min` or `Max` of one list of numbers is the element at the position
+  // of the smallest or the largest element, so its derivative is the
+  // derivative of that element:
+  //
+  //     d/dv Min(L) = At(L′, ArgMin(L))
+  //     d/dv Max(L) = At(L′, ArgMax(L))
+  //
+  // The position is an integer, constant between the points where two
+  // elements cross. At such a point the derivative does not exist, and this
+  // form gives the derivative of the first of the equal elements, as the
+  // derivative of a `Which` gives a value at the boundary of two regions.
+  //
+  // The evaluation of `D` writes out the two lists of this form, element by
+  // element, so the rule declines when that value is large:
+  // - A list written with a function (`Apply(k ↦ …, d)`, `Map`) has one
+  //   copy of the body of the function for each element. Its size is known
+  //   only once it is evaluated, which can take long, so the rule declines
+  //   for it with no evaluation. `Min(Apply(k ↦ Which(k = Min(d), 10^9,
+  //   True, k), d))` over 64 distances has 94,000 nodes.
+  // - For any other list, the rule declines when the value of the form has
+  //   more than `MAX_SELECTED_ELEMENT_NODES` nodes.
+  //
+  // The form is built by name in the current scope. Where `ArgMin`,
+  // `ArgMax` or `At` reads a user definition there, the form would call
+  // that definition, so the rule declines (`libraryRuleBlocked()`), as the
+  // rules above do for the operator of the call itself.
+  //
+  // A decline removes the steps recorded for the explanation, as in
+  // `differentiateApplied()`.
+  //
+  // The generic chain rule has no correct form for a list argument
+  // (`isReducedCollectionDerivative()`). `Min` or `Max` with several
+  // arguments is left to it: it declines when one of them is a list.
+  if (
+    (expr.operator === 'Min' || expr.operator === 'Max') &&
+    expr.nops === 1 &&
+    expr.op1.type.matches('list<number>')
+  ) {
+    const list = expr.op1;
+    if (!dependsOnVariable(list, v)) return ce.Zero;
+    if (!list.isPure || list.getSubexpressions('Function').length > 0)
+      return undefined;
+    const selector = expr.operator === 'Min' ? 'ArgMin' : 'ArgMax';
+    const position = ce.function(selector, [list]);
+    if (
+      !isFunction(position, selector) ||
+      libraryRuleBlocked(position, isApplicableDef)
+    )
+      return undefined;
+    const recorded = trace?.length ?? 0;
+    const decline = (): undefined => {
+      if (trace) trace.length = recorded;
+      return undefined;
+    };
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      ce.function('At', [dPlaceholder(list, v), position])
+    );
+    const dList = differentiate(list, v, depth + 1, trace);
+    if (dList === undefined || !dList.isValid) return decline();
+    if (dList.isSame(0)) {
+      decline();
+      return ce.Zero;
+    }
+    if (!dList.type.matches('list<number>')) return decline();
+    const result = ce.function('At', [dList, position]);
+    if (
+      !isFunction(result, 'At') ||
+      libraryRuleBlocked(result, isApplicableDef)
+    )
+      return decline();
+    const written = result.evaluate();
+    if (
+      boundedNodeCount(written, MAX_SELECTED_ELEMENT_NODES) >
+      MAX_SELECTED_ELEMENT_NODES
+    )
+      return decline();
+    return result;
+  }
+
+  // The position of the smallest or the largest element of a list
+  // (`ArgMin(L)`, `ArgMax(L)`) is an integer: it is constant between its
+  // jumps, and its derivative is 0, as for `Floor`. The form with a function
+  // and a domain (`ArgMin(f, D)`) is a point of the domain, not a position.
+  if (
+    (expr.operator === 'ArgMin' || expr.operator === 'ArgMax') &&
+    expr.nops === 1 &&
+    expr.op1.type.matches('list<number>')
+  )
+    return ce.Zero;
 
   // Piecewise definitions (`Which`, and its two-branch form `If`): each value
   // arm holds on its own region, so the derivative is the piecewise function

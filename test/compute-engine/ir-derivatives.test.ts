@@ -296,20 +296,24 @@ const VORONOI = [
 // The numeric derivative of a derivative with no closed form
 //
 
-// The engine has no derivative of `Min`: `D(Min(L), x)` of a list keeps
-// `Derivative(Min, 1)`. The witness is the implicit reader of Tycho's
-// `neyret/lwuwgb9ic5`, `‖∇(Min(…) − Min(…))‖` of two lists of distances.
-const MIN = ['Min', ['List', ['Power', 'x', 2], ['Multiply', 2, 'x']]];
+// The engine has no closed form for the derivative of `Min` of several
+// arguments: `D(Min(a, b), x)` keeps `Derivative(Min, 1, 0)`. (`Min` of one
+// list has one, the derivative of the selected element:
+// `derivative-min-max-of-list.test.ts`.) The corpus form is the implicit
+// reader of Tycho's `neyret/lwuwgb9ic5`, `‖∇(Min(…) − Min(…))‖`, where one
+// `Min` is over a list written with a function, which has no closed form
+// either.
+const MIN = ['Min', ['Power', 'x', 2], ['Multiply', 2, 'x']];
 define('m', [
   'Function',
-  ['Min', ['List', ['Power', 't', 2], ['Multiply', 2, 't']]],
+  ['Min', ['Power', 't', 2], ['Multiply', 2, 't']],
   't',
 ]);
 // prettier-ignore
-define('dm', ['Function', ['D', ['Min', ['List', ['Power', 's', 2], ['Multiply', 's', 'y']]], 's'], 's']);
+define('dm', ['Function', ['D', ['Min', ['Power', 's', 2], ['Multiply', 's', 'y']], 's'], 's']);
 // More than 40 nodes: the existing compiler's forward-mode lowering.
 // prettier-ignore
-define('big', ['Function', ['Min', ['List', ...Array.from({ length: 12 }, (_, k) => ['Power', ['Add', 't', k], 2])]], 't']);
+define('big', ['Function', ['Min', ...Array.from({ length: 12 }, (_, k) => ['Power', ['Add', 't', k], 2])], 't']);
 
 /** The existing compiler's code: the profile's value is its value, bit for
  *  bit (the same helper `_SYS.nd`, of the same function). */
@@ -337,18 +341,18 @@ describe('IR profile, batch G22: the numeric derivative (JavaScript)', () => {
 
   test('in a Sum, with respect to its index, in an arm, in a user function', () => {
     // prettier-ignore
-    sameAsExisting(['Sum', ['D', ['Min', ['List', ['Power', 'x', 'k'], ['Multiply', 2, 'x']]], 'x'], ['Limits', 'k', 1, 3]]);
+    sameAsExisting(['Sum', ['D', ['Min', ['Power', 'x', 'k'], ['Multiply', 2, 'x']], 'x'], ['Limits', 'k', 1, 3]]);
     // prettier-ignore
-    sameAsExisting(['Sum', ['D', ['Min', ['List', ['Power', 'k', 2], ['Multiply', 'k', 'x']]], 'k'], ['Limits', 'k', 1, 3]]);
+    sameAsExisting(['Sum', ['D', ['Min', ['Power', 'k', 2], ['Multiply', 'k', 'x']], 'k'], ['Limits', 'k', 1, 3]]);
     sameAsExisting(['If', ['Less', 'x', 1], ['D', MIN, 'x'], 0]);
     sameAsExisting(['dm', 'x']);
   });
 
   test('declines: a body with an effect, a list body, an order that is not a number', () => {
     // prettier-ignore
-    expect(failure(() => js(['D', ['Min', ['List', ['Multiply', ['Random'], 'x'], 'x']], 'x']))).toMatch(/a derivative with no closed form/);
+    expect(failure(() => js(['D', ['Min', ['Multiply', ['Random'], 'x'], 'x'], 'x']))).toMatch(/a derivative with no closed form/);
     // prettier-ignore
-    expect(failure(() => js(['D', ['Min', ['List', ['Multiply', 'T', 'x'], 'x']], 'x'], { vars: { T: '_.T' } }))).toMatch(/a derivative with an effect/);
+    expect(failure(() => js(['D', ['Min', ['Multiply', 'T', 'x'], 'x'], 'x'], { vars: { T: '_.T' } }))).toMatch(/a derivative with an effect/);
     expect(failure(() => js(['D', ['List', MIN, 'x'], 'x']))).toMatch(
       /a list where a scalar is required/
     );
@@ -365,7 +369,7 @@ describe('IR profile, batch G22: the numeric derivative (JavaScript)', () => {
   test('GLSL and the interval mode decline, with the cause', () => {
     for (const f of [glsl, interval])
       expect(failure(() => f(['D', MIN, 'x']))).toMatch(
-        /D\(Min\(List\(Power\(x, 2\), Multiply\(2, x\)\)\), x\): a derivative with no closed form/
+        /D\(Min\(Power\(x, 2\), Multiply\(2, x\)\), x\): a derivative with no closed form/
       );
   });
 });
@@ -670,9 +674,9 @@ describe('A derivative whose closed form holds the derivative of another functio
       ['Multiply', 't', ['Apply', ['Derivative', 'opaque', 1], 't']],
       't',
     ]);
-    expect(
-      failure(() => js(['Apply', ['Derivative', 'tv', 1], 'x']))
-    ).toMatch(/a derivative with no closed form/);
+    expect(failure(() => js(['Apply', ['Derivative', 'tv', 1], 'x']))).toMatch(
+      /a derivative with no closed form/
+    );
   });
 });
 

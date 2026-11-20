@@ -28,6 +28,18 @@
 //   N=64  D(g, x)     19 ms  number  Add  1,216 nodes
 //   N=64  quotient    657 ms  number  Divide  49,932 nodes
 //   READY
+// Output with the derivative of `Min` of a list as the derivative of the
+// selected element, and with the invariant `Min` of a walk evaluated once
+// (CE-1609), load 4.1 on 18 cores. `D(g, x)` holds the closed form of the
+// smallest distance, and a `D` for the second smallest, whose list is
+// written with a function:
+//   minimal   D(Min([x^2, (x-1)^2]), x)   11 ms  real  At  20 nodes
+//   control   D(Min(x^2, (x-1)^2), x)     9 ms  number  Add  48 nodes
+//   N=20  D(g, x)     34 ms  number  Add  610 nodes
+//   N=20  quotient    100 ms  number  Divide  6,392 nodes
+//   N=64  D(g, x)     41 ms  number  Add  1,842 nodes
+//   N=64  quotient    233 ms  number  Divide  51,184 nodes
+//   READY
 import { performance } from 'node:perf_hooks';
 import { ComputeEngine } from '../../src/compute-engine';
 

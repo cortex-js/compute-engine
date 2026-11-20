@@ -46,6 +46,17 @@
   point of a list of points: `MinBy(P, p ↦ p[2])`. A list of strings, a key
   that is not a real number and the `interval-js` target still decline.
 
+- **The derivative of `Min` or `Max` of a list is the derivative of the
+  selected element**. `D(Min([x^2, (x - 1)^2]), x)` is
+  `At([2x, 2x - 2], ArgMin([x^2, (x - 1)^2]))`: `0.4` at `x = 0.2` and `-0.4`
+  at `x = 0.8`. Where two elements are equal, it is the derivative of the
+  first of them. The derivative of `ArgMin` or `ArgMax` of a list is `0`.
+  Compiled to JavaScript, such a derivative is exact, where it was a numeric
+  derivative, and it now compiles to GLSL. The derivative stays unevaluated
+  for a list written with a function (`Min(Map(f, L))`), for a result of
+  more than 10,000 nodes, and where `ArgMin`, `ArgMax` or `At` has a user
+  definition.
+
 ### Resolved Issues
 
 - **A `Series` at a zero or a pole of the argument of a logarithm no longer
@@ -90,19 +101,20 @@
   `complex` mode, keep the complex value.
 
 - **The derivative of a number computed from a list is a number, not a
-  list** (CE-1602). `D(Min([x^2, (x - 1)^2]), x).evaluate()` gave the list
-  `[2x·Min′(…), (2x − 2)·Min′(…)]` for an expression of type `number`: the
+  list** (CE-1602). `D(Mean([x^2, (x - 1)^2]), x).evaluate()` gave the list
+  `[2x·Mean′(…), (2x − 2)·Mean′(…)]` for an expression of type `number`: the
   chain rule multiplied the derivative of each element by a derivative of
-  `Min`. It now stays `D(Min([x^2, (x - 1)^2]), x)`. This applies to `Min`,
-  `Max`, `Mean`, `Median`, `Norm`, `Variance` and `StandardDeviation` of a
-  list that depends on the variable, and to a function declared
+  `Mean`. It now stays `D(Mean([x^2, (x - 1)^2]), x)`. This applies to
+  `Mean`, `Median`, `Norm`, `Variance` and `StandardDeviation` of a list
+  that depends on the variable, to `Min` and `Max` where they have no closed
+  form (see Improvements), and to a function declared
   `(list<number>) -> number`. An operator applied to each element
   (`D(Sin([x^2, x]), x)`) and `Min` of number arguments
   (`D(Min(x^2, x), x)`) are unchanged. An expression that holds such a
   derivative is much smaller and faster to evaluate: for the distances to 64
   points, `Abs(g) / Sqrt(D(g, x)^2 + D(g, y)^2)`, with `g` the difference of
   the two smallest distances, evaluated to 12.3 million nodes in about 10 s,
-  and now to 50,000 nodes in about 0.7 s.
+  and now to 51,000 nodes in about 0.25 s.
 
 - **A constant of value 0 is not read as a nonzero value by `0/a` and `a^0`**
   (CE-1429). With `ce.declare('z', { value: 0, isConstant: true })`, `0/z` is

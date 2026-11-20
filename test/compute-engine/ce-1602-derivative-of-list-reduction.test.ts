@@ -1,10 +1,14 @@
 /**
  * The derivative of a number that an operator computes from a whole list
- * (`Min`, `Max`, `Mean`, `Norm` of a list) stays a `D`: the chain rule
+ * (`Mean`, `Norm`, `Variance` of a list) stays a `D`: the chain rule
  * `F′(g)·g′` has no correct form when `g` is a list, because the partial
  * derivative is a gradient and the product a dot product. The `Multiply` of
  * the chain rule multiplies each element, and would give a list for the
  * derivative of a number.
+ *
+ * `Min` and `Max` of one list have a rule of their own, the derivative of
+ * the selected element (`derivative-min-max-of-list.test.ts`). It declines
+ * for a list written with a function, as in the corpus form below.
  *
  * Corpus: the Desmos document `neyret/lwuwgb9ic5` (Tycho) draws
  * `|m_2 - m| / sqrt((d/dx (m_2 - m))^2 + (d/dy (m_2 - m))^2)`, where `m` and
@@ -27,20 +31,15 @@ function engine(): ComputeEngine {
 }
 
 describe('CE-1602: the derivative of a number computed from a list', () => {
-  test.each([
-    'Min',
-    'Max',
-    'Mean',
-    'Median',
-    'Norm',
-    'Variance',
-    'StandardDeviation',
-  ])('%s of a list stays a D, and a number', (op) => {
-    const ce = engine();
-    const result = ce.expr(['D', [op, list], 'x'] as never).evaluate();
-    expect(result.json).toEqual(['D', [op, list], 'x']);
-    expect(result.type.matches('number')).toBe(true);
-  });
+  test.each(['Mean', 'Median', 'Norm', 'Variance', 'StandardDeviation'])(
+    '%s of a list stays a D, and a number',
+    (op) => {
+      const ce = engine();
+      const result = ce.expr(['D', [op, list], 'x'] as never).evaluate();
+      expect(result.json).toEqual(['D', [op, list], 'x']);
+      expect(result.type.matches('number')).toBe(true);
+    }
+  );
 
   test('a list among several arguments declines the whole call', () => {
     const ce = engine();
@@ -58,22 +57,22 @@ describe('CE-1602: the derivative of a number computed from a list', () => {
 
   test('the rules around the call still apply', () => {
     const ce = engine();
-    // `d/dx Min(L)^2` is `2·Min(L)·d/dx Min(L)`: the power rule applies, and
-    // only the derivative of `Min(L)` stays a `D`.
+    // `d/dx Mean(L)^2` is `2·Mean(L)·d/dx Mean(L)`: the power rule applies,
+    // and only the derivative of `Mean(L)` stays a `D`.
     const result = ce
-      .expr(['D', ['Power', ['Min', list], 2], 'x'] as never)
+      .expr(['D', ['Power', ['Mean', list], 2], 'x'] as never)
       .evaluate();
     expect(result.operator).toBe('Multiply');
     expect(result.type.matches('number')).toBe(true);
     expect(JSON.stringify(result.json)).toContain(
-      JSON.stringify(['D', ['Min', list], 'x'])
+      JSON.stringify(['D', ['Mean', list], 'x'])
     );
   });
 
   test('a second derivative stays a number', () => {
     const ce = engine();
     const result = ce
-      .expr(['D', ['D', ['Min', list], 'x'], 'x'] as never)
+      .expr(['D', ['D', ['Mean', list], 'x'], 'x'] as never)
       .evaluate();
     expect(result.type.matches('number')).toBe(true);
     expect(JSON.stringify(result.json)).not.toContain('"List",["List"');
@@ -82,10 +81,10 @@ describe('CE-1602: the derivative of a number computed from a list', () => {
   test('the explanation shows no chain-rule step for the declined call', () => {
     const ce = engine();
     const explanation = ce
-      .expr(['Min', list] as never)
+      .expr(['Mean', list] as never)
       .explain('D', { variable: 'x', verbosity: 'verbose' });
-    expect(explanation.result.json).toEqual(['D', ['Min', list], 'x']);
-    // A chain-rule step would show `Apply(Derivative(Min, 1), …)`.
+    expect(explanation.result.json).toEqual(['D', ['Mean', list], 'x']);
+    // A chain-rule step would show `Apply(Derivative(Mean, 1), …)`.
     expect(
       JSON.stringify(explanation.steps.map((step) => step.value.json))
     ).not.toContain('Derivative');
