@@ -218,7 +218,8 @@ function inRelease(fixedIn, tag) {
  * deleted in the working tree and not committed (`uncommitted`). A board
  * close also deletes the file, and it writes the id to `CLOSED.md`: an id in
  * `CLOSED.md` is not a fix and is left out. So is an id whose file exists
- * again. A Tycho issue keeps its file with `state: fixed` until Tycho checks
+ * again, and a Tycho file deleted after the release that held its fix (its
+ * last text says `state: fixed` and a `fixed-in` that the tag contains). A Tycho issue keeps its file with `state: fixed` until Tycho checks
  * the release; `tycho` lists the ones whose `fixed-in` is not in the tag (a
  * commit the tag does not contain, a later version, or a text such as
  * "unreleased").
@@ -274,8 +275,13 @@ function fixedSince(all, closedText) {
     }
     deletedCache = { key, items: [...seen.values()] };
   }
+  // A Tycho issue whose file said `state: fixed` with a `fixed-in` that the
+  // tag contains was released before the tag: Tycho deleted the file after
+  // it checked that release, so the deletion is not a new fix.
+  const releasedBefore = (x) =>
+    x.fields?.state === 'fixed' && inRelease(x.fields['fixed-in'], tag);
   const committed = deletedCache.items.filter(
-    (x) => !closed.has(x.id) && !present.has(x.id)
+    (x) => !closed.has(x.id) && !present.has(x.id) && !releasedBefore(x)
   );
 
   const uncommitted = [];
