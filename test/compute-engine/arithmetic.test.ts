@@ -3541,19 +3541,19 @@ describe('Chop with a tolerance', () => {
 describe('Factorial above the exact digit cap', () => {
   // `Factorial(10^400)` — about 4·10^402 digits — never returned: the bigint
   // product grows with every step, so no step cap bounds it. Above
-  // `MAX_EXACT_FACTORIAL_DIGITS` the exact route stays symbolic and the
-  // numeric route overflows to `+oo`, the float reading of Γ(x+1).
-  test('Factorial(10^400) stays symbolic and numericizes to +oo', () => {
+  // `MAX_EXACT_FACTORIAL_DIGITS` the exact route stays symbolic, and so does
+  // the numeric route: Γ(x+1) is finite but past the exponent range of a
+  // big decimal.
+  test('Factorial(10^400) stays symbolic and numericizes to itself', () => {
     const big = ce.number(10n ** 400n);
     const started = Date.now();
     const exact = ce.box(['Factorial', big]).evaluate();
     expect(exact.operator).toBe('Factorial');
     expect(exact.op1.isSame(big)).toBe(true);
-    expect(ce.box(['Factorial', big]).N().isSame(ce.PositiveInfinity)).toBe(
-      true
-    );
+    const numeric = ce.box(['Factorial', big]).N();
+    expect(numeric.operator).toBe('Factorial');
     // The time depends on the load of the machine, so the limit is asserted
-    // only in a `CE_PERF=1` run. The symbolic and `+oo` checks above do not
+    // only in a `CE_PERF=1` run. The symbolic checks above do not
     // depend on time.
     if (process.env.CE_PERF === '1')
       expect(Date.now() - started).toBeLessThan(2000);

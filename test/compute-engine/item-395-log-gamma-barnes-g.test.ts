@@ -422,9 +422,12 @@ describe('BarnesG at a complex z where G is not a double', () => {
     // 2.1716394650077426444e+16951 + 1.2975684328773405882e+16934i.
     // The imaginary part was dropped as noise.
     const engine = new ComputeEngine();
-    expect(engine.box(['BarnesG', cx(150, 1e-20)]).N().toString()).toBe(
-      '(2.171639465e+16951 + 1.2975684329e+16934i)'
-    );
+    expect(
+      engine
+        .box(['BarnesG', cx(150, 1e-20)])
+        .N()
+        .toString()
+    ).toBe('(2.171639465e+16951 + 1.2975684329e+16934i)');
   });
 
   // Γ shares the route, from ln Γ: mpmath.gamma(mpc(re, im)) at 40 digits.
@@ -658,7 +661,7 @@ describe('BarnesG at a complex z where G is not a double', () => {
   // Past the exponent range of a big decimal (about ±9·10¹⁵ in the decimal
   // exponent) the big-decimal Γ saturates to 0 or infinity. Γ has no zeros,
   // so an underflow to 0 gives no value: the expression stays unevaluated.
-  // An overflow is `+oo`, as a double overflow is ("too large" is true).
+  // An overflow is unevaluated too: the value is finite.
   test.each([
     ['Gamma', -1e15 - 0.5],
     ['Factorial', -1e15 - 0.5],
@@ -672,10 +675,13 @@ describe('BarnesG at a complex z where G is not a double', () => {
   test.each([
     ['Gamma', 1e15 + 0.5],
     ['Factorial', 1e15],
-  ])('%s(%p).N() overflows past the big-decimal range: +oo', (head, x) => {
-    const engine = new ComputeEngine();
-    expect(engine.box([head, x]).N().toString()).toBe('+oo');
-  });
+  ])(
+    '%s(%p).N() overflows past the big-decimal range: unevaluated',
+    (head, x) => {
+      const engine = new ComputeEngine();
+      expect(engine.box([head, x]).N().operator).toBe(head);
+    }
+  );
   test('a complex value past the big-decimal range stays unevaluated', () => {
     const engine = new ComputeEngine();
     expect(engine.box(['Gamma', ['Complex', 1e15, 1]]).N().operator).toBe(

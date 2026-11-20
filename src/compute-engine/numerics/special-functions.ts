@@ -1412,6 +1412,18 @@ export function bigBinomialLogForm(
   k: BigNum,
   prec: number
 ): BigNum | undefined {
+  const value = bigBinomialLogFormCore(ce, n, k, prec);
+  // `exp()` saturates to `+Infinity` or `0` past the BigDecimal exponent
+  // range, but the coefficient is finite and nonzero there: decline.
+  return value !== undefined && !value.isFinite() ? undefined : value;
+}
+
+function bigBinomialLogFormCore(
+  ce: ComputeEngine,
+  n: BigNum,
+  k: BigNum,
+  prec: number
+): BigNum | undefined {
   const nPlus1 = n.add(BigDecimal.ONE, prec);
   const nk = n.sub(k, prec);
   // A negative non-integer `n + 1`: `Γ(n+1)` and one of the two denominator
@@ -1430,7 +1442,7 @@ export function bigBinomialLogForm(
   if (nPlus1.isNegative()) {
     if (n.isInteger()) return undefined;
     if (k.gt(nPlus1)) {
-      const c = bigBinomialLogForm(ce, k.sub(nPlus1, prec), k, prec);
+      const c = bigBinomialLogFormCore(ce, k.sub(nPlus1, prec), k, prec);
       if (c === undefined) return undefined;
       return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
         bigSinPi(nk.add(BigDecimal.ONE, prec), prec)
@@ -1439,7 +1451,7 @@ export function bigBinomialLogForm(
       );
     }
     if (k.lt(nPlus1)) {
-      const c = bigBinomialLogForm(
+      const c = bigBinomialLogFormCore(
         ce,
         k.neg().sub(BigDecimal.ONE, prec),
         nk,
@@ -1484,11 +1496,11 @@ export function bigBinomialLogForm(
         bigLnGammaRatio(ce, sum, small, prec) ??
         bigGammaln(ce, sum, prec).sub(bigGammaln(ce, large, prec), prec);
       const sine = bigSinPi(k.add(BigDecimal.ONE, prec), prec);
-      return bigGammaln(ce, small, prec)
+      const magnitude = bigGammaln(ce, small, prec)
         .sub(lnRatio, prec)
-        .exp(prec)
-        .mul(sine)
-        .div(BigDecimal.pi(prec), prec);
+        .exp(prec);
+      if (magnitude.isZero()) return BigDecimal.NAN;
+      return magnitude.mul(sine).div(BigDecimal.pi(prec), prec);
     }
     const small = k.lt(nk) ? k : nk;
     const large = k.lt(nk) ? nk : k;
@@ -1507,6 +1519,8 @@ export function bigBinomialLogForm(
       smallPlus1.isNegative() &&
       BigInt(smallPlus1.floor().toFixed(0)) % 2n !== 0n;
     const value = lnRatio.sub(bigGammaln(ce, smallPlus1, prec), prec).exp(prec);
+    // A zero from a finite logarithm is an underflow, not a value
+    if (value.isZero()) return BigDecimal.NAN;
     return negativeGamma ? value.neg() : value;
   });
 }
@@ -1577,8 +1591,11 @@ function gammaCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
     );
   }
 
-  // General case
-  return gammalnCore(ce, z, prec).exp(prec);
+  // General case. `exp()` saturates to ±Infinity past the BigDecimal exponent
+  // range (a decimal exponent beyond 2^53), but Γ(z) is finite there: decline
+  // with NaN instead of returning a value a caller could use.
+  const value = gammalnCore(ce, z, prec).exp(prec);
+  return value.isFinite() ? value : BigDecimal.NAN;
 }
 
 function gcdBigint(a: bigint, b: bigint): bigint {
@@ -2028,11 +2045,32 @@ export function bigBeta(
   const s = a.add(b, prec);
   if (s.isInteger() && !s.isPositive() && !a.isInteger() && !b.isInteger())
     return BigDecimal.ZERO;
-  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
+  const direct = withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) =>
     gammaCore(ce, a, prec)
       .mul(gammaCore(ce, b, prec))
       .div(gammaCore(ce, a.add(b, prec), prec), prec)
   );
+  if (direct.isFinite()) return direct;
+  // A Γ past the exponent range makes the quotient NaN while B(a, b) may be
+  // representable. With `large` the larger operand and `small` the other (of
+  // either sign, `large + small > 0`), B = Γ(small)·exp(−(ln Γ(large + small)
+  // − ln Γ(large))), where the difference is `bigLnGammaRatio()`.
+  const [large, small] = a.gte(b) ? [a, b] : [b, a];
+  const sum = large.add(small, prec);
+  if (!large.isPositive() || !sum.isPositive()) return BigDecimal.NAN;
+  return withGuardDigits(prec, SPECIAL_FN_GUARD, (prec) => {
+    const ratio = bigLnGammaRatio(ce, sum, small, prec);
+    if (ratio === undefined) return BigDecimal.NAN;
+    // `small` is not a pole (an integer pair is reduced above)
+    const head = small.isPositive() ? undefined : gammaCore(ce, small, prec);
+    const value = (
+      head === undefined
+        ? gammalnCore(ce, small, prec).sub(ratio, prec)
+        : ratio.neg()
+    ).exp(prec);
+    const result = head === undefined ? value : value.mul(head);
+    return result.isFinite() && !result.isZero() ? result : BigDecimal.NAN;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3826,7 +3864,7 @@ export function bigDirichletEta(
       BigDecimal.TWO.ln(prec)
     );
   }
-  return withGuardDigits(prec, guard, (prec) => {
+  const value = withGuardDigits(prec, guard, (prec) => {
     // 1 − 2^{1−s}
     const factor = BigDecimal.ONE.sub(
       BigDecimal.TWO.pow(BigDecimal.ONE.sub(s, prec), prec),
@@ -3834,6 +3872,8 @@ export function bigDirichletEta(
     );
     return factor.mul(bigZeta(ce, s, prec));
   });
+  // A finite η(s) past the exponent range: Γ(1 − s) in ζ(s) declined.
+  return value.isFinite() ? value : undefined;
 }
 
 /**

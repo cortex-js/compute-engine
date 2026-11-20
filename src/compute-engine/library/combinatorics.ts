@@ -31,6 +31,7 @@ import {
 } from './type-handlers.js';
 import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { apply2, shouldNumericize } from '../boxed-expression/apply.js';
+import { bignumPreferred } from '../boxed-expression/utils.js';
 import {
   infinitePoint,
   isNegativeIntegerLiteral,
@@ -517,7 +518,7 @@ function evaluateBinomial(
     // agree. The big-number Γ quotient is `NaN` when a Γ value overflows
     // (from about `n = 10²⁰`); the log form gives the value there
     // (`Binomial(1e300, 0.5)` ≈ 1.128·10¹⁵⁰).
-    return apply2(nExpr, kExpr, machineBinomial, (n, k) => {
+    const value = apply2(nExpr, kExpr, machineBinomial, (n, k) => {
       // A negative non-integer `k`: the Γ quotient goes through the
       // reflection formula of `Γ(k+1)`, whose sine has no correct digits
       // for a large `|k|`. The log form reduces `k` exactly first.
@@ -540,6 +541,18 @@ function evaluateBinomial(
       if (r.isFinite() && !r.isZero()) return r;
       return bigBinomialLogForm(ce, n, k, prec) ?? r;
     });
+    // Finite real operands whose coefficient is past the exponent range of a
+    // big decimal give `NaN` from the kernels: stay unevaluated.
+    return bignumPreferred(ce) &&
+      isNumber(nExpr) &&
+      isNumber(kExpr) &&
+      !nExpr.isComplex &&
+      !kExpr.isComplex &&
+      value !== undefined &&
+      isNumber(value) &&
+      value.isNaN
+      ? undefined
+      : value;
   }
 
   // Symbolic first argument with a small nonnegative integer second argument:

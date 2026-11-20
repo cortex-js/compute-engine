@@ -1096,11 +1096,12 @@ describe('D2 — inexact arguments numericize under evaluate() (all numeric oper
   });
 
   test('a huge float argument saturates instead of grinding', () => {
-    // Producing `+oo` is the assertion: the magnitude guard short-circuits
+    // Staying unevaluated is the assertion (Γ is finite but past the exponent
+    // range of a big decimal): the magnitude guard short-circuits
     // before any precision-scaled series runs, and a version without the guard
     // does not return a different answer — it does not return. The jest
     // per-test timeout is the backstop for that.
-    expect(ce.box(['Gamma', 1e15 + 0.5]).evaluate().toString()).toEqual('+oo');
+    expect(ce.box(['Gamma', 1e15 + 0.5]).evaluate().operator).toEqual('Gamma');
   });
 
   describe('Gaussian-integer complex literals are exact (isExactNumber, not plain isExact)', () => {

@@ -56,6 +56,18 @@
 
 ### Resolved Issues
 
+- **A finite value past the exponent range of a big decimal stays
+  unevaluated.** A `BigDecimal` keeps its decimal exponent in a JS number, so
+  `exp()` saturates beyond 2^53 and `Gamma(3000000000000001/3)` (about
+  10^(1.5·10^16)) answered `+oo`, `Zeta(-3000000000000001/3)` `-oo` or `~oo`,
+  and `DirichletEta` of it `+oo` or `NaN`, as did `Factorial`; a `Binomial`
+  with such a coefficient answered `+oo`, `~oo` or `0`. They now stay
+  unevaluated, with `evaluate()` and `.N()` alike. `Beta(a, b)` at a large `a`
+  or `b` was `NaN` (a quotient of overflowed `Γ` values) and is now computed
+  from the log-gamma ratio, as `Binomial` is, or declines. Machine precision
+  keeps the double convention (`Gamma(200)` is `+oo`). (#616, PR #617, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 - **`PolyLog` and `LerchPhi` no longer answer in doubles at a precision
   above machine when `z` is too close to the unit circle.** Inside `|z| < 1`
   the arbitrary-precision series gives up past 30,000 terms (about
