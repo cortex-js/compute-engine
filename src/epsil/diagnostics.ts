@@ -126,7 +126,23 @@ export class FatalParsingError extends Error {
   }
 }
 
-export type Fixit = [start: number, end: number, value: string];
+/**
+ * A replacement of the source range `[start, end)` with `value`.
+ *
+ * `caret`, when present, is a range `[caretStart, caretEnd]` (both ends
+ * included) where an editor inserts `value` at the caret in place of the
+ * range, when the caret is in it as the fixit is applied. The fixit of an
+ * unclosed single-line string has one: it covers the text of the string
+ * after its opening delimiter and after its last `\(…)` hole, so a user who
+ * typed `"Buzz` and stopped closes the string where they stopped. A host
+ * without a caret ignores it.
+ */
+export type Fixit = [
+  start: number,
+  end: number,
+  value: string,
+  caret?: [caretStart: number, caretEnd: number],
+];
 
 /**
  * A supplementary explanation attached to a diagnostic: the context that

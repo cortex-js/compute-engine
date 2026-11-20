@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### New Features
+
+- **The fixit of an unclosed Epsil string can close it at the caret**
+  (CE-1520). A `Fixit` has an optional fourth element, a caret range
+  `[start, end]` (both ends included). The fixit of
+  `string-literal-closing-delimiter-expected` for a single-line string or a
+  LaTeX island has one: the text after the opening delimiter and after the
+  last `\(…)` hole. An editor whose caret is in that range inserts the
+  delimiter at the caret: with the caret after `Buzz` in `{ "Buzz| }`, the fix
+  gives `{ "Buzz" }`, and with the caret at the end of `{ "Buzz }|` it gives
+  `{ "Buzz }"`. Outside the range, or in a host without a caret, the fixit
+  inserts at its range as before. A multiline string has no caret range.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues

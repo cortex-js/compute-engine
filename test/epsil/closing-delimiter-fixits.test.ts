@@ -125,3 +125,51 @@ describe('EPSIL FIXIT — unclosed bracket', () => {
     expect(diagnostics[0].fixits).toBeUndefined();
   });
 });
+
+describe('EPSIL FIXIT — unclosed string, at the caret', () => {
+  /** The source after the string fixit, applied as an editor with the caret
+   * at `|` applies it. */
+  function applyAtCaret(marked: string): string {
+    const caret = marked.indexOf('|');
+    const source = marked.slice(0, caret) + marked.slice(caret + 1);
+    const d = parseEpsil(source)[1].find(
+      (d) => (typeof d.message === 'string' ? d.message : d.message[0]) === STRING
+    );
+    const [start, end, text, range] = d!.fixits![0];
+    if (range !== undefined && caret >= range[0] && caret <= range[1])
+      return source.slice(0, caret) + text + source.slice(caret);
+    return source.slice(0, start) + text + source.slice(end);
+  }
+
+  test.each([
+    // The caret in the string: the delimiter goes there.
+    ['if k { "Buzz| }', 'if k { "Buzz" }'],
+    ['let s = "ab|c', 'let s = "ab"c'],
+    ['let s = "|abc', 'let s = ""abc'],
+    ['let t = ##"ab| c', 'let t = ##"ab"## c'],
+    ['let x = $x^2| + 1', 'let x = $x^2$ + 1'],
+    // The caret at the end of the line is in the string: the user typed the
+    // `}` in it.
+    ['if k { "Buzz }|', 'if k { "Buzz }"'],
+    // The caret before the opening delimiter or in a hole: the fixit range.
+    ['let s = |"abc }', 'let s = "abc" }'],
+    ['let s = "a \\(x|) b }', 'let s = "a \\(x) b" }'],
+    // The caret on another line.
+    ['let s = "abc }\nlet |t = 1', 'let s = "abc" }\nlet t = 1'],
+  ])('%j', (marked, expected) => {
+    expect(applyAtCaret(marked)).toBe(expected);
+  });
+
+  test('the caret range is after the last hole', () => {
+    const source = 'f("a \\(x) b';
+    const d = parseEpsil(source)[1].find((d) => d.message[0] === STRING);
+    expect(d!.fixits![0][3]).toEqual([source.indexOf(')') + 1, source.length]);
+  });
+
+  test('a multiline string has no caret range', () => {
+    const d = parseEpsil('let m = """\n  abc\n')[1].find(
+      (d) => d.message[0] === STRING
+    );
+    expect(d!.fixits![0][3]).toBeUndefined();
+  });
+});

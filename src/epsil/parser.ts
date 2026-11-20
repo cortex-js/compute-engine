@@ -1008,7 +1008,12 @@ export class Parser {
    * end of its last `\(…)` hole, or at the end of the line when no such
    * character follows the opening delimiter. A multiline string (`"""`) gets
    * its delimiter on a new line after its last line of text, and a LaTeX
-   * island (`$`) after its last character that is not white space. */
+   * island (`$`) after its last character that is not white space.
+   *
+   * A single-line string and a LaTeX island also get a caret range (the
+   * fourth element of `Fixit`): the text after the opening delimiter and
+   * after the last hole, where an editor inserts the delimiter at the caret
+   * (CE-1520). */
   private closingStringDelimiterFixit(
     delimiter: string,
     token: Token
@@ -1020,6 +1025,10 @@ export class Parser {
     const end = Math.min(token.end, source.length);
     let at = end;
     let text = delimiter;
+    // The positions where the delimiter can go at the caret (`Fixit`): none
+    // for a multiline string, whose delimiter goes on a line of its own.
+    let caret: [number, number] | undefined;
+    if (delimiter === '$') caret = [start + 1, end];
     if (delimiter === '"""' || delimiter === '$') {
       while (at > start && /\s/.test(source[at - 1])) at -= 1;
       if (delimiter === '"""') {
@@ -1045,6 +1054,7 @@ export class Parser {
       )
         last -= 1;
       if (last > contentStart) at = last;
+      caret = [floor, end];
     }
     if (delimiter === '"' || delimiter === '$') {
       let backslashes = 0;
@@ -1054,7 +1064,14 @@ export class Parser {
       if (backslashes % 2 === 1 || (delimiter === '$' && backslashes > 0))
         return undefined;
     }
-    return [this.baseOffset + at, this.baseOffset + at, text];
+    const offset = this.baseOffset;
+    if (caret === undefined) return [offset + at, offset + at, text];
+    return [
+      offset + at,
+      offset + at,
+      text,
+      [offset + caret[0], offset + caret[1]],
+    ];
   }
 
   /** Collect any lexical diagnostics carried by a token. A lexical
