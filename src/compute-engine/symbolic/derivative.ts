@@ -2127,6 +2127,15 @@ function differentiateApplied(
 ): Expression | undefined {
   const ce = fn.engine;
 
+  // A decline removes the steps recorded from here on: the chain-rule step
+  // and the steps of the derivatives of the arguments are not steps of the
+  // result, which is the unevaluated `D`.
+  const recorded = trace?.length ?? 0;
+  const decline = (): undefined => {
+    if (trace) trace.length = recorded;
+    return undefined;
+  };
+
   // Record the (multivariate) chain-rule step against the original
   // expression, with each argument's derivative as a placeholder.
   if (trace && node) {
@@ -2165,7 +2174,8 @@ function differentiateApplied(
       ce._fn('D', [arg, ce.symbol(v)]);
     if (!argPrime.isValid) return undefined;
     if (argPrime.isSame(0)) continue;
-    if (isPointDerivative(arg, argPrime)) return undefined;
+    if (isPointDerivative(arg, argPrime)) return decline();
+    if (isReducedCollectionDerivative(node, arg, argPrime)) return decline();
     const nextOrders = orders.slice();
     nextOrders[i] = (nextOrders[i] ?? 0) + 1;
     const nextDeriv = ce._fn('Derivative', [
@@ -2669,6 +2679,34 @@ function typeMayHoldPoint(t: Type, seen: AliasDescent = undefined): boolean {
  */
 function isPointDerivative(arg: Expression, argPrime: Expression): boolean {
   return isPointValued(arg) || isPointValued(argPrime);
+}
+
+/**
+ * Whether `call`, a call with the argument `arg`, is a number while `arg`,
+ * or `argPrime`, the derivative of `arg`, is a collection: then the chain
+ * rule `F′(g)·g′` has no correct form, and the derivative of the call
+ * declines, as for a point argument (`isPointDerivative()`).
+ *
+ * Such a call reduces the collection to one number (`Min`, `Max`, `Mean`,
+ * `Norm` of a list, or a function declared `(list<number>) -> number`). Its
+ * partial derivative with respect to the collection is a gradient, and its
+ * product with the derivative of the collection is a dot product. The
+ * `Multiply` of the chain rule multiplies each element instead: it would
+ * give the list `[2x·Min′(…), (2x - 2)·Min′(…)]` for the derivative of the
+ * number `Min([x^2, (x - 1)^2])`.
+ *
+ * An operator that is applied to each element of a list (`Sin`, a function
+ * with a number parameter) gives a list, so its call is not a number and the
+ * chain rule applies, element by element. So does a call whose type is not
+ * known (an undeclared function), and a caller that gives no `call`.
+ */
+function isReducedCollectionDerivative(
+  call: Expression | undefined,
+  arg: Expression,
+  argPrime: Expression
+): boolean {
+  if (call === undefined || !call.type.matches('number')) return false;
+  return arg.type.matches('collection') || argPrime.type.matches('collection');
 }
 
 /** Whether the type of `expr` is a point or a list of points. */
@@ -5555,6 +5593,14 @@ function differentiateWithDerivativeKey(
     dependsOnVariable(arg, v) ? partial(i) : undefined
   );
 
+  // A decline removes the steps recorded from here on, as in
+  // `differentiateApplied()`.
+  const recorded = trace?.length ?? 0;
+  const decline = (): undefined => {
+    if (trace) trace.length = recorded;
+    return undefined;
+  };
+
   recordD(trace, expr, v, 'derivative.chain-rule', () => {
     const templateTerms: Expression[] = [];
     args.forEach((arg, i) => {
@@ -5581,13 +5627,16 @@ function differentiateWithDerivativeKey(
     // that the `derivative` key gives is a number `c`: the Jacobian is then
     // `c·I`. A partial that is a point (a gradient), or that the key does
     // not give (the symbolic `Apply(Derivative(F, …), …)`), declines
-    // (`isPointDerivative()`).
+    // (`isPointDerivative()`). For a list argument of an application that
+    // is a number, the product is never correct
+    // (`isReducedCollectionDerivative()`).
     if (
       isPointDerivative(arg, argPrime) &&
       (isPointValued(p) ||
         (isFunction(p, 'Apply') && isFunction(p.op1, 'Derivative')))
     )
-      return undefined;
+      return decline();
+    if (isReducedCollectionDerivative(expr, arg, argPrime)) return decline();
     terms.push(p.mul(argPrime));
   }
   if (terms.length === 0) return ce.Zero;

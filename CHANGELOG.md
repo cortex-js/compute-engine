@@ -31,6 +31,21 @@
   `NaN` where `1 − e²` is negative. A result declared `complex`, and the
   `complex` mode, keep the complex value.
 
+- **The derivative of a number computed from a list is a number, not a
+  list** (CE-1602). `D(Min([x^2, (x - 1)^2]), x).evaluate()` gave the list
+  `[2x·Min′(…), (2x − 2)·Min′(…)]` for an expression of type `number`: the
+  chain rule multiplied the derivative of each element by a derivative of
+  `Min`. It now stays `D(Min([x^2, (x - 1)^2]), x)`. This applies to `Min`,
+  `Max`, `Mean`, `Median`, `Norm`, `Variance` and `StandardDeviation` of a
+  list that depends on the variable, and to a function declared
+  `(list<number>) -> number`. An operator applied to each element
+  (`D(Sin([x^2, x]), x)`) and `Min` of number arguments
+  (`D(Min(x^2, x), x)`) are unchanged. An expression that holds such a
+  derivative is much smaller and faster to evaluate: for the distances to 64
+  points, `Abs(g) / Sqrt(D(g, x)^2 + D(g, y)^2)`, with `g` the difference of
+  the two smallest distances, evaluated to 12.3 million nodes in about 10 s,
+  and now to 50,000 nodes in about 0.7 s.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features

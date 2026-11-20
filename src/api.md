@@ -5084,6 +5084,11 @@ when the partial derivative is a number `c` (the Jacobian is `c·I`). When
 the partial derivative is a point (a gradient) or is not given, the
 derivative of the application stays unevaluated.
 
+When the application is a number and an argument that depends on `v` is
+a list or a point (a function declared `(list<number>) -> number`), the
+partial derivative is a gradient and the product is never correct: the
+derivative of the application stays unevaluated, whatever the key gives.
+
 </MemberCard>
 
 ### BaseDefinition {#basedefinition}
