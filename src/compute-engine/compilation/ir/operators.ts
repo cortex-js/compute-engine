@@ -351,8 +351,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('GreaterEqual', 'chain',    [[[R], B, 'ge']],              { fold: (a: number, b: number) => a >= b }),
   // `Equal` of a list and a scalar threads; of two lists it compares the
   // lists, which declines (`apply()` in `lower.ts`).
-  row('Equal',        'chain',    [[[R], B, 'eq'], [[C], B, 'ceq']], { fold: (a: number, b: number) => a === b }),
-  row('NotEqual',     2,          [[[R, R], B, 'ne'], [[C, C], B, 'cne']], { fold: (a: number, b: number) => a !== b }),
+  row('Equal',        'chain',    [[[R], B, 'eq'], [[C], B, 'ceq'], [[S], B, 'text.eq']], { fold: (a: number, b: number) => a === b }),
+  row('NotEqual',     2,          [[[R, R], B, 'ne'], [[C, C], B, 'cne'], [[S, S], B, 'text.ne']], { fold: (a: number, b: number) => a !== b }),
   row('And',          'variadic', [[[B], B, 'and']],             { fold: (a: boolean, b: boolean) => a && b }),
   row('Or',           'variadic', [[[B], B, 'or']],              { fold: (a: boolean, b: boolean) => a || b }),
   row('Not',          1,          [[[B], B, 'not']],             { fold: (a: boolean) => !a }),
@@ -368,8 +368,14 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // coordinates, a point of NaN.
   row('At',           2,          [[['list', R], 'element', 'atu']], list),
   row('At',           3,          [[['list', R, I], 'element', 'atp']], list),
-  // An element from 0, at an index in range where the lowering puts it.
+  // Of a list of strings (CE-1556): the element, conditioned, or
+  // `undefined` out of range, which only a discharge or the result reads
+  // (`stringListRefusal()` of `index.ts`).
+  row('At',           2,          [[['list', R], 'element', 'text.at']], { ...list, effect: 'may-fail' }),
+  // An element from 0, at an index in range where the lowering puts it;
+  // of a list of strings, conditioned (`text.elem`).
   row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
+  row(undefined,      2,          [[['list', I], 'element', 'text.elem']], list),
   // A list local written in place (`lower.ts`, `README.md`, "Lists"): the
   // array that the local owns, a copy of its value (`copy`); the index from
   // 0 of an index from 1 or from the end of a list of `n` elements, which

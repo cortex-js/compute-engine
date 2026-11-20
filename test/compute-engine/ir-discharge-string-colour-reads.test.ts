@@ -90,18 +90,23 @@ const colours: [string, Json][] = [
 ];
 
 describe('A string read out of range', () => {
-  test.each(strings)('IsMissing of %s declines', (_, read) => {
+  // CE-1556: the read is `text.at`, `undefined` out of range, which the
+  // discharges read.
+  test.each(strings)('IsMissing of %s is True', (_, read) => {
     expect(interpret(['IsMissing', read])).toBe('"True"');
-    expect(compiled(['IsMissing', read])).toBe('declined');
+    expect(compiled(['IsMissing', read])).toBe(true);
   });
-  test.each(strings)('Coalesce of %s declines', (_, read) => {
+  test.each(strings)('Coalesce of %s is the next operand', (_, read) => {
     expect(interpret(['Coalesce', read, "'z'"])).toBe('"z"');
-    expect(compiled(['Coalesce', read, "'z'"])).toBe('declined');
+    expect(compiled(['Coalesce', read, "'z'"])).toBe('z');
   });
-  test.each(strings)('AssertPresent of %s declines', (_, read) => {
-    expect(interpret(['AssertPresent', read])).toContain('expected-present');
-    expect(compiled(['AssertPresent', read])).toBe('declined');
-  });
+  test.each(strings)(
+    'AssertPresent of %s throws expected-present',
+    (_, read) => {
+      expect(interpret(['AssertPresent', read])).toContain('expected-present');
+      expect(compiled(['AssertPresent', read])).toBe('throws expected-present');
+    }
+  );
   test.each(strings)('on GLSL, IsMissing of %s declines', (_, read) => {
     expect(compiled(['IsMissing', read], 'glsl')).toBe('declined');
   });

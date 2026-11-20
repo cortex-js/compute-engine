@@ -67,8 +67,9 @@ when it compiles. A difference that this list does not name is a defect.
   value as present. A colour read out of range refuses after the passes,
   so `IsMissing` of a colour declines, while `Coalesce` and
   `AssertPresent` keep the colour as their value. A string read out of
-  range refuses after the passes too; the test of a string on
-  `javascript` is `undefined`. A point (a tuple of numbers, `tuple<real,
+  range (`At` of a list of strings) is `undefined` on `javascript`, its
+  test; it is read only by a discharge or as the result, and any other
+  read of it refuses after the passes (CE-1556). A point (a tuple of numbers, `tuple<real,
   real>` included) is tested at a discharge with the point
   test, which also reads the point of `NaN` coordinates as absent: no point
   is proved present by its type, as no `real` is, because a read out of
@@ -493,16 +494,30 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript`, `s: string`: the elements of a list of strings that is the
   result (`Characters(s)`, `Reverse(["a", s])`) are JavaScript strings,
   where the interpreter's are character or string values (CE-1548).
-- `javascript` (plausible), `s: string`, `L: list<string>`: a read of an
-  element, `Map`, `Filter`, `Count`, a fold, `Sort`, `Reverse` and the other
-  list operators of a list of strings of run-time length decline
-  (`Count(Characters(s), c -> c == "a")`, `At(L, 1)`); so does a literal list
-  whose reads the passes do not fold (`Reverse(["a", s])` with
-  `constantFold: false`). CE-1556.
+- `javascript` (plausible), `L: list<string>`, `i: integer`, `n: integer`:
+  a read of a list of strings that can be out of range (`At`, `First`,
+  `Last` of an index that is not a constant in range of a constant length)
+  declines everywhere except as the result and in `IsMissing`, `Coalesce`
+  and `AssertPresent`: `ToUpperCase(At(L, i))`, `At(L, i) == "a"`,
+  `Length(First(L))`, `StringJoin([At(L, 1), "x"])`, `[First(L), Last(L)]`,
+  `Map(k -> At(L, k), Range(1, n))`, and a user function that is not
+  inlined whose value is such a read. The remedy is the discharge:
+  `ToUpperCase(Coalesce(At(L, i), ""))`, inside the function for a call.
+  CE-1556.
+- `javascript` (plausible), `s: string`, `L: list<string>`: `Sort(L)`,
+  `Unique(L)`, `Less(s, "b")` and `Max(L)` decline (an order of strings);
+  so do `Contains(L, "x")`, `IndexOf(L, "x")` and `Find` of a list of
+  strings, and `Reduce` or `Fold` of `String` over `Characters(s)` (the
+  reductions read real numbers only).
+- `javascript` (crafted), `L: list<string>`, `i: integer`, `j: integer`:
+  `Coalesce(At(L, i), At(L, j))` declines (its second read can be absent);
+  `Equal(L, "a")` of an input or a list of run-time length declines (an
+  element-wise operation on a list of strings), while `Equal(["a", s], "a")`
+  compiles through the passes and declines with `constantFold: false`.
 - `javascript` (crafted), `L: list<string>`, `b: boolean`: a list of strings
   in an `If`, a `Loop` or a user function that is not inlined declines
-  (`If(b, L, ["x"])`), and so do a list of lists of strings and an input list
-  of strings returned as the result (`L`).
+  (`If(b, L, ["x"])`), and so do a list of lists of strings (`Chunk(L, 2)`)
+  and an input list of strings returned as the result (`L`).
 - `javascript` (crafted), `f: string`: `ColorToString(c, f)` of a format that
   is not a string literal declines, as the other colour operators read a
   space, a gamut or a palette as a literal; so does `ColorToString` of a
@@ -2219,9 +2234,9 @@ A string is a collection of its characters, so a parameter that the body
 reads as a collection has a collection type: in `s ↦ Length(s)`, `s` is a
 `collection`. Compiled code on JavaScript holds a scalar string (an input of
 type `string`, a literal, the text operators: "The string lane" of
-`src/compute-engine/compilation/ir/README.md`) and a list of strings at the
-boundary only (a literal, `Characters(s)`, an input read by `StringJoin`, the
-result), but no collection read of a string, so `g(t)` with
+`src/compute-engine/compilation/ir/README.md`) and a list of strings (a
+literal, `Characters(s)`, a list operation or an input, read by `StringJoin`,
+an element read or as the result), but no collection read of a string, so `g(t)` with
 `g := s ↦ Length(s)` and `t: string`,
 and `g("abc")`, decline (`outside-profile`) and run on the interpreter;
 `Length(t)` compiles. Every other target declines a string.

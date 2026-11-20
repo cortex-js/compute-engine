@@ -18,7 +18,7 @@
 import type { Expression } from '../../global-types.js';
 import { Decline, hostVarOp, lower } from './lower.js';
 import { UNSUPPORTED_MODE } from './lower-context.js';
-import { TEXT_LIST_READS } from './lower-strings.js';
+import { TEXT_LIST_MAKERS, TEXT_LIST_READS } from './lower-strings.js';
 import { readsVarsObject } from '../vars-inputs.js';
 import { passChecksOn, SliceInternalError, verify } from './verify.js';
 import {
@@ -98,7 +98,7 @@ export type Profile = {
   /** The lanes of which no list is held: on GLSL, a list of colours or of
    *  complex numbers (a `vec3` or a `vec2` has no array of its own here);
    *  on JavaScript, a list of lists of rows. A list of strings is admitted
-   *  at the boundary only (`stringListRefusal()`). */
+   *  by the rule of `stringListRefusal()`. */
   readonly scalarLanes: readonly Lane[];
   /** A list of rank 2 is held when its two lengths are constants and its
    *  rows have 2 to 4 elements: on GLSL an array of vectors (`vec2[3]`, a
@@ -287,15 +287,21 @@ export function admits(
 }
 
 /**
- * A list of strings is a value at the boundary of the program (CE-1548): it
- * has rank 1; it is made by a `list` instruction or by `text.chars`
- * (`Characters`), or it is a parameter of the entry; and it is read only as
- * the list operand of `StringJoin` (`TEXT_LIST_READS`), or, when it is not a
- * parameter, it is a result of the entry. A read of an element, a list
- * operation, an arm, a carried value or a call refuses: each would need its
- * own rule for a string (an absent element, an order, an equality). The
- * passes run before, so a list of constant length whose reads they fold is
- * a `list` of its elements.
+ * A list of strings (CE-1548, CE-1556) has rank 1; it is made by a `list`
+ * instruction, by a region of `TEXT_LIST_MAKERS` (`Characters`, a build or
+ * a filter of a list operator), or it is a parameter of the entry; and it is
+ * read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, an
+ * element, `At`), each of which conditions what it reads, or, when it is
+ * not a parameter, it is a result of the entry. An element-wise operation,
+ * an order, an arm, a carried value or a call refuses. The passes run
+ * before, so a list of constant length whose reads they fold is a `list` of
+ * its elements.
+ *
+ * A value of `text.at` is `undefined` out of range, which no other
+ * operation on a string takes: it is used only by `text.isundef`, as the
+ * operand 1 of `text.present`, as the yield of the `else` arm of an `if`
+ * whose condition is `text.isundef` of it (`Coalesce`), or as a result of
+ * the entry. Any other use refuses.
  */
 function stringListRefusal(p: Program): Refusal | undefined {
   const entry = entryOf(p);
@@ -303,9 +309,24 @@ function stringListRefusal(p: Program): Refusal | undefined {
     p.types[v].lane === 'string' && p.types[v].shape.length > 0;
   const refusal: Refusal = {
     cause:
-      'a list of strings other than a literal, Characters, an input read by StringJoin, or the result',
+      'a list of strings other than a literal, Characters, a list operation or an input, read by StringJoin, an element read or as the result',
   };
-  const walk = (r: Region): Refusal | undefined => {
+  const absent: Refusal = {
+    head: 'At',
+    cause:
+      'a string read of a list that can be out of range, other than as the result or in IsMissing, Coalesce or AssertPresent',
+  };
+  // The values of `text.at`, and the operand of each `text.isundef`.
+  const reads = new Set<V>();
+  const tested = new Map<V, V>();
+  const index = (r: Region): void =>
+    r.body.forEach((i) => {
+      if (i.k === 'op' && i.op === 'text.at') reads.add(i.out);
+      if (i.k === 'op' && i.op === 'text.isundef') tested.set(i.out, i.args[0]);
+      regionsOf(i).forEach(index);
+    });
+  p.functions.forEach((f) => index(f.body));
+  const walk = (r: Region, guard?: V): Refusal | undefined => {
     if (r !== entry.body && r.params.some(listOf)) return refusal;
     for (const i of r.body) {
       const made = outsOf(i).filter(listOf);
@@ -313,19 +334,31 @@ function stringListRefusal(p: Program): Refusal | undefined {
         made.some((v) => p.types[v].shape.length !== 1) ||
         (made.length > 0 &&
           i.k !== 'list' &&
-          !(i.k === 'region' && i.op === 'text.chars'))
+          !(i.k === 'region' && TEXT_LIST_MAKERS.includes(i.op)))
       )
         return refusal;
       const read = i.k === 'op' && TEXT_LIST_READS.includes(i.op);
-      if (read && !listOf(i.args[0]))
-        return {
-          head: 'StringJoin',
-          cause: 'StringJoin of a list that is not of strings',
-        };
+      if (read && !listOf(i.args[0])) {
+        const head = i.op.startsWith('text.joinl') ? 'StringJoin' : 'At';
+        return { head, cause: `${head} of a list that is not of strings` };
+      }
       if (argsOf(i).some((v, k) => listOf(v) && !(read && k === 0)))
         return refusal;
-      for (const x of regionsOf(i)) {
-        const m = walk(x);
+      if (
+        argsOf(i).some(
+          (v, k) =>
+            reads.has(v) &&
+            !(i.k === 'op' && i.op === 'text.isundef') &&
+            !(i.k === 'op' && i.op === 'text.present' && k === 1)
+        )
+      )
+        return absent;
+      const regions = regionsOf(i);
+      for (const x of regions) {
+        const m = walk(
+          x,
+          i.k === 'if' && x === i.else ? tested.get(i.cond) : undefined
+        );
         if (m !== undefined) return m;
       }
     }
@@ -335,6 +368,8 @@ function stringListRefusal(p: Program): Refusal | undefined {
       )
     )
       return refusal;
+    if (r.yields.some((v) => reads.has(v) && r !== entry.body && v !== guard))
+      return absent;
     return undefined;
   };
   for (const f of p.functions) {

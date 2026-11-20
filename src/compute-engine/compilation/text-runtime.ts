@@ -9,7 +9,8 @@
  * Every string value of compiled code is conditioned: an input by `ct`
  * (`text.in`), a literal by the engine, a result here. So the helpers read
  * their operands as they are, except the elements of an input list of
- * strings, which only `tjoinl` reads and conditions.
+ * strings, which the entry passes as the host gave them: each read of an
+ * element (`tel`, `tat`) and `tjoinl` conditions them (CE-1556).
  *
  * An operand that the interpreter answers with an error value (a negative
  * or too large count, an empty pad or target) throws a `RangeError` that
@@ -207,4 +208,19 @@ export const TEXT_HELPERS = {
    *  so its elements are conditioned here and not at the entry. */
   tjoinl: (l: readonly string[], sep: string): string =>
     condition(l.map(condition).join(sep)),
+  /** The element of a list of strings at `k` from 0 (`text.elem`, in range
+   *  where the lowering puts it), conditioned (CE-1556). */
+  tel: (l: readonly string[], k: number): string | undefined => {
+    const x = l[k];
+    return x === undefined ? x : condition(x);
+  },
+  /** `At(l, i)` of a list of strings: from 1, from the end when negative,
+   *  conditioned; `undefined` for an index that is 0, not an integer or out
+   *  of range (the interpreter's `Missing`). */
+  tat: (l: readonly string[], i: number): string | undefined => {
+    const k = i > 0 ? i - 1 : l.length + i;
+    return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length
+      ? condition(l[k])
+      : undefined;
+  },
 };

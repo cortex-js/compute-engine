@@ -919,7 +919,7 @@ function lowerOnce(
       slice:
         library &&
         answer === undefined &&
-        !isTextRow(rowOfHead(rows, h)) &&
+        !isTextRow(rowOfHead(rows, h), e) &&
         (CONSTRUCTS.has(h) ||
           REDUCTIONS.has(h) ||
           (rowOfHead(rows, h)?.effect ?? 'effectful') !== 'effectful'),
@@ -1285,6 +1285,16 @@ function lowerOnce(
           b.constant(t.shape[1] as number, 'integer'),
         ]);
       return apply(e, ofOp('atu'), [l, i]);
+    }
+    // Of strings on JavaScript (CE-1556): at a constant index in range of
+    // a constant length the element (`text.elem`), else `text.at`, whose
+    // `undefined` out of range only a discharge or the result reads
+    // (`stringListRefusal()` of `index.ts`).
+    if (flat && t.lane === 'string' && options.javascript && !bigint) {
+      const j = elementIndex(n, k);
+      return j === undefined
+        ? apply(e, ofOp('text.at'), [l, i])
+        : apply(e, ofOp('text.elem'), [l, b.constant(j, 'integer')]);
     }
     return apply(e, 'At', [l, i]);
   };
@@ -2553,7 +2563,8 @@ function lowerOnce(
           return value(f.ops[0], want);
         });
       }
-      // `KroneckerDelta(a, b)` of two numbers is `Boole(a = b)`, and
+      // `KroneckerDelta(a, b)` of two numbers or two strings is
+      // `Boole(a = b)`, and
       // `KroneckerDelta(n)` is `Boole(n = 0)`: the interpreter's 1 when the
       // values are the same, 0 when their difference is a nonzero constant.
       // A list declines (the interpreter does not thread it), and so do
@@ -2567,7 +2578,10 @@ function lowerOnce(
         // Two NaN operands are the same, as `isSame()` reads them; an
         // integer is never NaN.
         const equal = apply(e, 'Equal', [x, y]);
-        if ([x, y].some((v) => isSubLane(type(v).lane, 'integer')))
+        if (
+          [x, y].some((v) => isSubLane(type(v).lane, 'integer')) ||
+          [x, y].every((v) => type(v).lane === 'string')
+        )
           return apply(e, 'Boole', [equal]);
         const nan = (v: V) => apply(e, ofOp('isnan'), [v]);
         const same = apply(e, 'Or', [equal, apply(e, 'And', [nan(x), nan(y)])]);

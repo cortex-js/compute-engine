@@ -110,13 +110,13 @@ describe('string comparisons fail closed', () => {
     }
   });
 
-  test('the CHAINED (n-ary) string equality still declines', () => {
-    // The scalar admission is BINARY-only: the chained form would need the
-    // impure-operand temp binding the numeric path has, for no known consumer.
-    failsClosed(
-      ce.box(['Equal', { str: 'a' }, { str: 'a' }, { str: 'a' }]),
-      '"True"'
-    );
+  test('the CHAINED (n-ary) string equality compiles (CE-1556)', () => {
+    // `text.eq` of each pair, joined by `And`, as the numeric chain.
+    const expr = ce.box(['Equal', { str: 'a' }, { str: 'a' }, { str: 'a' }]);
+    const r = compile(expr, { constantFold: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(true);
+    expect(expr.evaluate().toString()).toBe('"True"');
   });
 
   test('IndexOf with a NESTED-text needle still declines', () => {

@@ -21,25 +21,43 @@ import { decline, type Fn, type Lowering } from './lower-context.js';
 import type { V } from './ir.js';
 import type { OperatorRow } from './operators.js';
 
-/** The operations that read a list of strings: its one use that compiled
- *  code admits besides the result (`admits()` of `index.ts`). Each reads
- *  the list as its first operand and conditions each element. */
+/** The operations that read a list of strings: its uses that compiled
+ *  code admits besides the result (`stringListRefusal()` of `index.ts`).
+ *  Each reads the list as its first operand and conditions each element
+ *  that it reads: `StringJoin`, an element from 0 in range (`text.elem`,
+ *  the reads of `Map`, `Filter`, `Count`, …) and `At` (`text.at`, from 1,
+ *  `undefined` out of range, read only by a discharge or as the result;
+ *  CE-1556). */
 export const TEXT_LIST_READS: readonly string[] = Object.freeze([
   'text.joinl',
   'text.joinl.sep',
+  'text.elem',
+  'text.at',
+]);
+
+/** The regions that make a list of strings besides a `list` instruction:
+ *  `Characters` and the builds and filters of the list operators, whose
+ *  elements are reads of `TEXT_LIST_READS` or present strings (CE-1556). */
+export const TEXT_LIST_MAKERS: readonly string[] = Object.freeze([
+  'text.chars',
+  'build',
+  'filter',
 ]);
 
 /** A static type of text: a string or a character. */
 const isText = (x: Expression): boolean =>
   isSubtype(x.type.type, 'string') || isSubtype(x.type.type, 'character');
 
-/** A row of a string operand or result. A node of one is never evaluated
- *  at compile time (`closedValue()` of `lower.ts`): `N()` gives the
- *  decimal text of a number (`String(1/3)`), where the interpreter gives
- *  its exact text. */
-export const isTextRow = (r: OperatorRow | undefined): boolean =>
-  r?.signatures.some(([a, out]) => out === 'string' || a.includes('string')) ===
-  true;
+/** A row of a string result, or of a string operand when an operand of
+ *  `e` is text (`Equal` of two numbers is not text). A node of one is never
+ *  evaluated at compile time (`closedValue()` of `lower.ts`): `N()` gives
+ *  the decimal text of a number (`String(1/3)`), where the interpreter
+ *  gives its exact text. */
+export const isTextRow = (r: OperatorRow | undefined, e: Fn): boolean =>
+  r?.signatures.some(
+    ([a, out]) =>
+      out === 'string' || (a.includes('string') && e.ops.some(isText))
+  ) === true;
 
 /** The operands of a text operator whose value out of a domain is an error
  *  value of the interpreter: a count of at least that many (and at most

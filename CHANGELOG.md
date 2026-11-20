@@ -70,6 +70,20 @@
 
 ### Resolved Issues
 
+- **The characters of a string and the elements of a list of strings can be
+  counted, read and transformed in compiled JavaScript** (CE-1556). With
+  `s: string` and `L: list<string>`, `Count(Characters(s), c -> c == "a")`,
+  `Map(ToUpperCase, L)`, `Filter(L, p)`, `Any`, `All`, `Reverse`, `Take`,
+  `Drop`, `Rest`, `Most` and the rotations of a list of strings now compile,
+  and so do `Equal`, `NotEqual` and `KroneckerDelta` of two strings. They
+  declined before. Each element is read with the interpreter's text (NFC):
+  `Map(c -> c == "é", L)` is `[True]` for an element written `e` + U+0301.
+  `At(L, i)`, `First(L)` and `Last(L)` compile as the result (`undefined` out
+  of range) and in `IsMissing`, `Coalesce` and `AssertPresent`, which give the
+  interpreter's value at `i = 9` too. Elsewhere such a read declines; write
+  `ToUpperCase(Coalesce(At(L, i), ""))` for `ToUpperCase(At(L, i))`.
+  `Sort`, `Unique` and the orders of strings still decline.
+
 - **`IsMissing` of a string or a colour read out of range no longer compiles
   to `false`.** `IsMissing(At(["a", "b"], i))`, `IsMissing(At(L, i))` of a
   `list<string>` `L` and `IsMissing(At(Characters("ab"), i))` compiled to

@@ -1,10 +1,13 @@
 /**
- * Lists of strings on the javascript target of the IR compiler (CE-1548;
- * README of `src/compute-engine/compilation/ir/`, "The string lane"), and
- * `ColorToString`. A list of strings is a value at the boundary: a literal,
- * `Characters(s)` or an input read by `StringJoin`, or the result. Each
- * program is compiled and compared with `evaluate()`; a program whose value
- * depends on the passes also with `constantFold: false`, where it declines.
+ * Lists of strings on the javascript target of the IR compiler (CE-1548,
+ * CE-1556; README of `src/compute-engine/compilation/ir/`, "The string
+ * lane"), and `ColorToString`. A list of strings is made by a literal,
+ * `Characters(s)`, a list operation or an input; it is read by `StringJoin`,
+ * by an element read, or as the result. A read that can be out of range
+ * (`At`, `First`, `Last`) is used only by a discharge (`IsMissing`,
+ * `Coalesce`, `AssertPresent`) or as the result; elsewhere it declines.
+ * Each program is compiled and compared with `evaluate()`, with the passes
+ * on, with `passes: false` and with `constantFold: false`.
  */
 
 import { compile } from '../../src/compile';
@@ -27,6 +30,10 @@ ce.declare('M', 'list<list<string>>');
 ce.declare('b', 'boolean');
 ce.declare('x', 'real');
 ce.declare('f', 'string');
+ce.declare('i', 'real');
+ce.declare('j', 'real');
+ce.declare('n', 'integer');
+ce.declare('L2', 'list<string^2>');
 ce.assign('C', ce.box(['Rgb', 0, 0.5, 0.25]));
 
 const js = (json: Json, options: object = {}) =>
@@ -65,6 +72,8 @@ function interpreted(json: Json, vars: Vars): unknown {
     .evaluate();
   const read = (x: typeof e): unknown => {
     if (isFunction(x, 'Error')) return 'error';
+    if (x.symbol === 'Missing') return undefined;
+    if (x.symbol === 'True' || x.symbol === 'False') return x.symbol === 'True';
     // A list, also a lazy one (`Reverse`, `Take`).
     if (isFunction(x, 'List') || (x.isCollection && !isString(x)))
       return [...x.each()].map(read);
@@ -196,9 +205,10 @@ describe('a literal list whose reads the passes fold', () => {
     ['Map', ['Map', 'ToUpperCase', lit]],
     ['the result', lit],
   ])('%s', (_, json) => {
-    expect(compiled(json, { s: 'xé' })).toEqual(interpreted(json, { s: 'xé' }));
-    if (json !== lit)
-      expect(declines(json, { constantFold: false })).toBe(true);
+    for (const options of [{}, { passes: false }, { constantFold: false }])
+      expect(compiled(json, { s: 'xé' }, options)).toEqual(
+        interpreted(json, { s: 'xé' })
+      );
   });
 
   test('a user function that returns a list of strings', () => {
@@ -220,16 +230,21 @@ describe('a literal list whose reads the passes fold', () => {
   });
 });
 
-describe('a list of strings of run-time length declines', () => {
+describe('a list of strings of run-time length', () => {
   test.each([
-    ['At(L, 1)', ['At', 'L', 1]],
-    ['Map(ToUpperCase, L)', ['Map', 'ToUpperCase', 'L']],
     ['Sort(L)', ['Sort', 'L']],
-    ['Reverse(Characters(s))', ['Reverse', ['Characters', 's']]],
-    ['At(Characters(s), 1)', ['At', ['Characters', 's'], 1]],
     ['If(b, L, ["x"])', ['If', 'b', 'L', ['List', { str: 'x' }]]],
     ['L', 'L'],
     ['M', ['StringJoin', ['At', 'M', 1]]],
+  ])('declines %s', (_, json) => {
+    expect(declines(json)).toBe(true);
+  });
+
+  test.each([
+    ['At(L, 1)', ['At', 'L', 1]],
+    ['Map(ToUpperCase, L)', ['Map', 'ToUpperCase', 'L']],
+    ['Reverse(Characters(s))', ['Reverse', ['Characters', 's']]],
+    ['At(Characters(s), 1)', ['At', ['Characters', 's'], 1]],
     [
       'Count(Characters(s), c -> c == "a")',
       [
@@ -238,8 +253,9 @@ describe('a list of strings of run-time length declines', () => {
         ['Function', ['Equal', 'c', { str: 'a' }], 'c'],
       ],
     ],
-  ])('%s', (_, json) => {
-    expect(declines(json)).toBe(true);
+  ])('compiles %s (CE-1556)', (_, json) => {
+    const vars = { s: 'abá', L: ['x', 'é'] };
+    expect(compiled(json, vars)).toEqual(interpreted(json, vars));
   });
 });
 
@@ -394,5 +410,424 @@ describe('ColorToString', () => {
     ['a string', ['ColorToString', { str: 'red' }]],
   ])('declines %s', (_, json) => {
     expect(declines(json)).toBe(true);
+  });
+});
+
+// CE-1556: the reads of the elements of a list of strings.
+
+const str = (x: string) => ({ str: x });
+const fn = (body: Json, ...params: string[]) => ['Function', body, ...params];
+const PASSES = [{}, { passes: false }, { constantFold: false }];
+
+/** `json` compiled in each of `PASSES` gives the interpreter's value at
+ *  each of `points`. */
+function agrees(json: Json, points: Vars[]): void {
+  for (const vars of points) {
+    const want = interpreted(json, vars);
+    for (const options of PASSES)
+      expect([vars, options, compiled(json, vars, options)]).toEqual([
+        vars,
+        options,
+        want,
+      ]);
+  }
+}
+
+/** `json` declines in each of `PASSES`, with a message that matches
+ *  `cause` when given. */
+function declinesEverywhere(json: Json, cause?: RegExp): void {
+  for (const options of PASSES) {
+    let m = '';
+    try {
+      js(json, options);
+    } catch (e) {
+      m = (e as Error).message;
+    }
+    expect([options, m !== '' && (cause?.test(m) ?? true)]).toEqual([
+      options,
+      true,
+    ]);
+  }
+}
+
+const DECOMPOSED = ['é', 'áb', 'x'];
+const LENGTHS = [[], ['a'], ['ab', 'c', 'a']];
+
+describe('the witnesses of CE-1556', () => {
+  test('Count(Characters(s), c -> c == "a")', () => {
+    agrees(
+      ['Count', ['Characters', 's'], fn(['Equal', 'c', str('a')], 'c')],
+      [{ s: 'banana' }, { s: '' }, { s: 'áa' }]
+    );
+  });
+
+  test('Count, Map, Filter of L, Map of two lists', () => {
+    const points = [...LENGTHS, DECOMPOSED].map((L) => ({ L, s: 'xyz' }));
+    for (const json of [
+      ['Count', 'L', fn(['NotEqual', 'c', str('a')], 'c')],
+      ['Map', 'ToUpperCase', 'L'],
+      ['Filter', 'L', fn(['StartsWith', 'c', str('a')], 'c')],
+      ['Map', fn(['Equal', 'p', 'q'], 'p', 'q'), 'L', ['Characters', 's']],
+    ])
+      agrees(json, points);
+  });
+
+  test('an input element is conditioned where it is read', () => {
+    const points = [{ L: DECOMPOSED }];
+    for (const json of [
+      ['Map', fn('c', 'c'), 'L'],
+      ['Map', fn(['Equal', 'c', str('é')], 'c'), 'L'],
+      ['Equal', ['Coalesce', ['At', 'L', 1], str('')], str('é')],
+      ['At', 'L', 2],
+    ])
+      agrees(json, points);
+    expect(run(['At', 'L', 1], { L: DECOMPOSED })).toBe('é');
+  });
+});
+
+describe('At, First and Last of a list of strings', () => {
+  const points = [
+    ...[1, -1, 0, 1.5, 3, 4, -3, -4].map((i) => ({ L: ['ab', 'c', 'é'], i })),
+    { L: [], i: 1 },
+  ];
+
+  test('as the result', () => {
+    for (const json of [
+      ['At', 'L', 'i'],
+      ['First', 'L'],
+      ['Last', 'L'],
+    ])
+      agrees(json, points);
+    expect(run(['At', 'L', 'i'], { L: ['a'], i: 2 })).toBeUndefined();
+  });
+
+  test('under IsMissing, Coalesce and AssertPresent', () => {
+    for (const read of [
+      ['At', 'L', 'i'],
+      ['First', 'L'],
+      ['Last', 'L'],
+    ])
+      for (const json of [
+        ['IsMissing', read],
+        ['Coalesce', read, str('z')],
+        ['ToUpperCase', ['Coalesce', read, str('z')]],
+        ['Length', ['Coalesce', read, str('z')]],
+        ['Coalesce', read, ['At', 'L', 1], str('z')],
+        ['AssertPresent', read],
+      ])
+        agrees(json, points);
+  });
+
+  test('AssertPresent out of range throws expected-present', () => {
+    expect(() =>
+      run(['AssertPresent', ['At', 'L', 'i']], { L: [], i: 1 })
+    ).toThrow(/expected-present/);
+  });
+
+  test('a constant index in range of a literal is the element, read anywhere', () => {
+    agrees(['ToUpperCase', ['At', ['List', str('a'), 's'], 2]], [{ s: 'xé' }]);
+  });
+});
+
+describe('a read that can be absent declines, with the Coalesce remedy', () => {
+  const g = new ComputeEngine();
+  g.declare('s', 'string');
+  g.declare('L', 'list<string>');
+  g.declare('i', 'integer');
+  g.declare('n', 'integer');
+  /** `f(t: string, k: integer) := body` (Epsil), then `rest`. */
+  const withF = (body: string, rest: string): Json =>
+    parseEpsil(`function f(t: string, k: integer) { ${body} }\n${rest}`)[0];
+  /** The program as `g` compiles it, `declined` for the refusal of a read
+   *  that can be absent, or the message of another decline. */
+  const at = (json: Json, vars: Vars, options: object = {}): unknown => {
+    let f: (v: unknown) => unknown;
+    try {
+      f = compile(g.box(json as never), { fallback: false, ...options })
+        .run as never;
+    } catch (e) {
+      const m = (e as Error).message;
+      return /a list that can be out of range/.test(m) ? 'declined' : m;
+    }
+    return f(vars);
+  };
+  const bare = (x: Json) => x;
+  const guarded = (x: Json) => ['Coalesce', x, str('')];
+  const witnesses = (read: (x: Json) => Json): [string, Json][] => [
+    [
+      'IsMissing(At(Map(k -> At(L, k), Range(1, n)), 2))',
+      [
+        'IsMissing',
+        ['At', ['Map', fn(read(['At', 'L', 'k']), 'k'), ['Range', 1, 'n']], 2],
+      ],
+    ],
+    [
+      'And(i <= Length(L), StartsWith(At(L, i), "a"))',
+      [
+        'And',
+        ['LessEqual', 'i', ['Length', 'L']],
+        ['StartsWith', read(['At', 'L', 'i']), str('a')],
+      ],
+    ],
+    [
+      'If(i <= Length(L), Length(At(L, i)) > 1, False)',
+      [
+        'If',
+        ['LessEqual', 'i', ['Length', 'L']],
+        ['Greater', ['Length', read(['At', 'L', 'i'])], 1],
+        'False',
+      ],
+    ],
+    [
+      'Block(c := At(L, i), And(i <= Length(L), StartsWith(c, "a")))',
+      [
+        'Block',
+        ['Declare', 'c', "'unknown'", read(['At', 'L', 'i'])],
+        [
+          'And',
+          ['LessEqual', 'i', ['Length', 'L']],
+          ['StartsWith', 'c', str('a')],
+        ],
+      ],
+    ],
+    [
+      'Block(c := At(L, i), And(i <= Length(L), Length(Characters(c)) > 1))',
+      [
+        'Block',
+        ['Declare', 'c', "'unknown'", read(['At', 'L', 'i'])],
+        [
+          'And',
+          ['LessEqual', 'i', ['Length', 'L']],
+          ['Greater', ['Length', ['Characters', 'c']], 1],
+        ],
+      ],
+    ],
+    [
+      'Block(B := Map(k -> At(L, k), Range(1, n)), And(n <= Length(L), StartsWith(StringJoin(B), "a")))',
+      [
+        'Block',
+        [
+          'Declare',
+          'B',
+          "'unknown'",
+          ['Map', fn(read(['At', 'L', 'k']), 'k'), ['Range', 1, 'n']],
+        ],
+        [
+          'And',
+          ['LessEqual', 'n', ['Length', 'L']],
+          ['StartsWith', ['StringJoin', 'B'], str('a')],
+        ],
+      ],
+    ],
+    [
+      'with f(t, k) := At(Characters(t), k), Block(c := f(s, i), And(i <= Length(s), Length(Characters(c)) > 1))',
+      withF(
+        read === bare
+          ? 'At(Characters(t), k)'
+          : 'Coalesce(At(Characters(t), k), "")',
+        'let c = f(s, i)\ni <= Length(s) && Length(Characters(c)) > 1'
+      ),
+    ],
+  ];
+
+  test('Coalesce at a call that is not inlined declines: the callee yields the read', () => {
+    const json = withF(
+      'At(Characters(t), k)',
+      'let c = Coalesce(f(s, i), "")\ni <= Length(s) && Length(Characters(c)) > 1'
+    );
+    for (const options of PASSES)
+      expect([options, at(json, {}, options)]).toEqual([options, 'declined']);
+  });
+
+  test.each(witnesses(bare))('declines %s', (_, json) => {
+    for (const options of PASSES)
+      expect([options, at(json, {}, options)]).toEqual([options, 'declined']);
+  });
+
+  test.each(witnesses(guarded))('compiles %s with Coalesce', (_, json) => {
+    const outside = { L: ['a'], s: 'ab', i: 9, n: 2 };
+    for (const options of PASSES)
+      expect([options, at(json, outside, options)]).toEqual([options, false]);
+    const want =
+      g
+        .box(json as never)
+        .subs({
+          L: g.box(['List', str('ab')] as never),
+          s: g.string('ab'),
+          i: g.number(1),
+          n: g.number(1),
+        } as never)
+        .evaluate().symbol === 'True';
+    for (const options of PASSES)
+      expect([
+        options,
+        at(json, { L: ['ab'], s: 'ab', i: 1, n: 1 }, options),
+      ]).toEqual([options, want]);
+  });
+
+  test.each([
+    ['ToUpperCase(At(L, i))', ['ToUpperCase', ['At', 'L', 'i']]],
+    ['At(L, i) == "a"', ['Equal', ['At', 'L', 'i'], str('a')]],
+    [
+      'StringJoin([At(L, 1), "x"])',
+      ['StringJoin', ['List', ['At', 'L', 1], str('x')]],
+    ],
+    ['[First(L), Last(L)]', ['List', ['First', 'L'], ['Last', 'L']]],
+    [
+      'Coalesce(At(L, i), At(L, j))',
+      ['Coalesce', ['At', 'L', 'i'], ['At', 'L', 'j']],
+    ],
+  ])('declines %s', (_, json) => {
+    declinesEverywhere(json, /a list that can be out of range/);
+  });
+
+  test('Trim, TrimStart and TrimEnd are unchanged', () => {
+    for (const h of ['Trim', 'TrimStart', 'TrimEnd'])
+      agrees([h, str(' a ')], [{}]);
+  });
+});
+
+describe('the structural operators of a list of strings', () => {
+  test.each([
+    ['Reverse', (l: Json) => ['Reverse', l]],
+    ['Take 2', (l: Json) => ['Take', l, 2]],
+    ['Take -2', (l: Json) => ['Take', l, -2]],
+    ['Drop 1', (l: Json) => ['Drop', l, 1]],
+    ['Rest', (l: Json) => ['Rest', l]],
+    ['Most', (l: Json) => ['Most', l]],
+    ['RotateLeft', (l: Json) => ['RotateLeft', l, 1]],
+  ])('%s', (_, f) => {
+    agrees(f(['Characters', 's']), [{ s: '' }, { s: 'é' }, { s: 'ab́c' }]);
+    agrees(
+      f('L'),
+      [...LENGTHS, DECOMPOSED].map((L) => ({ L }))
+    );
+  });
+});
+
+describe('Equal, NotEqual and KroneckerDelta of strings', () => {
+  const points = [
+    { s: 'a', t: 'a' },
+    { s: 'a', t: 'b' },
+    { s: 'é', t: 'é' },
+  ];
+  test.each([
+    ['s == "a"', ['Equal', 's', str('a')]],
+    ['s != "a"', ['NotEqual', 's', str('a')]],
+    ['Equal(s, t, "a")', ['Equal', 's', 't', str('a')]],
+    ['s == "é"', ['Equal', 's', str('é')]],
+    ['KroneckerDelta(s, t)', ['KroneckerDelta', 's', 't']],
+  ])('%s', (_, json) => {
+    agrees(json, points);
+  });
+
+  test('Any and All', () => {
+    for (const json of [
+      ['Any', 'L', fn(['Equal', 'c', str('a')], 'c')],
+      ['All', 'L', fn(['NotEqual', 'c', str('a')], 'c')],
+    ])
+      agrees(
+        json,
+        [...LENGTHS, DECOMPOSED].map((L) => ({ L }))
+      );
+  });
+
+  test('Equal(["a", s], "a"): through scalarize, and declines without the fold', () => {
+    const json = ['Equal', ['List', str('a'), 's'], str('a')];
+    expect(compiled(json, { s: 'b' })).toEqual(interpreted(json, { s: 'b' }));
+    expect(declines(json, { constantFold: false })).toBe(true);
+  });
+});
+
+describe('the orders and the other operators stay declined', () => {
+  test.each([
+    ['Sort(L)', ['Sort', 'L']],
+    ['Unique(L)', ['Unique', 'L']],
+    ['Less(s, "b")', ['Less', 's', str('b')]],
+    ['Max(L)', ['Max', 'L']],
+    ['Contains(L, "x")', ['Contains', 'L', str('x')]],
+    [
+      'Reduce(Characters(s), (a, b) -> String(a, b))',
+      ['Reduce', ['Characters', 's'], fn(['String', 'p', 'q'], 'p', 'q')],
+    ],
+    [
+      'Reduce(Characters(s), (a, b) -> String(a, b), "")',
+      [
+        'Reduce',
+        ['Characters', 's'],
+        fn(['String', 'p', 'q'], 'p', 'q'),
+        str(''),
+      ],
+    ],
+    ['Equal(L, "a")', ['Equal', 'L', str('a')]],
+    ['Equal(L2, "a")', ['Equal', 'L2', str('a')]],
+    ['L', 'L'],
+    ['If(b, L, ["x"])', ['If', 'b', 'L', ['List', str('x')]]],
+    ['Chunk(L, 2)', ['Chunk', 'L', 2]],
+  ])('%s', (_, json) => {
+    declinesEverywhere(json);
+  });
+
+  test.each([
+    [
+      'Count(Characters(s), c -> c == "a")',
+      ['Count', ['Characters', 's'], fn(['Equal', 'c', str('a')], 'c')],
+    ],
+    ['Map(ToUpperCase, L)', ['Map', 'ToUpperCase', 'L']],
+    ['At(L, i)', ['At', 'L', 'i']],
+    ['Coalesce(At(L, i), "z")', ['Coalesce', ['At', 'L', 'i'], str('z')]],
+    ['s == "a"', ['Equal', 's', str('a')]],
+    ['Reverse(Characters(s))', ['Reverse', ['Characters', 's']]],
+  ])('%s declines on glsl and in the bigint mode', (_, json) => {
+    expect(declines(json, { to: 'glsl' })).toBe(true);
+    expect(declines(json, { mode: 'bigint' })).toBe(true);
+  });
+});
+
+describe('the code of a program with no list of strings is unchanged', () => {
+  test.each([
+    [
+      ['And', ['StartsWith', 's', str('a')], ['EndsWith', 's', str('b')]],
+      '(() => {\n  const v1 = _SYS.ct(_.s);\n  return (_SYS.seqat(v1, "a", false) && _SYS.seqat(v1, "b", true));\n})()',
+    ],
+    [
+      ['Sum', ['Length', ['ToUpperCase', 's']], ['Limits', 'k', 1, 'n']],
+      "(() => {\n  const v5 = _SYS.ct(_.s);\n  const v7 = _SYS.tlength(_SYS.tupper(v5));\n  let v10 = 0;\n  const v3_lo = 1, v3_n = Math.floor(_.n - v3_lo) + 1;\n  if (!(v3_n - 1 < 4294967296)) throw new RangeError('a loop of more than 2^32 iterations');\n  for (let v3_i_b = 0, v3_i_e = Math.min(1024, v3_n); v3_i_b < v3_n; _SYS.tick(v3_i_e - v3_i_b), v3_i_b = v3_i_e, v3_i_e = Math.min(v3_i_b + 1024, v3_n)) for (let v3_i = v3_i_b; v3_i < v3_i_e; v3_i++) {\n    const v3 = v3_lo + v3_i;\n    v10 = (v10 + v7);\n  }\n  return v10;\n})()",
+    ],
+  ])('%j', (json, code) => {
+    expect(js(json).code).toBe(code);
+  });
+});
+
+describe('the entry and the workers with element reads', () => {
+  test('a string for L still throws', () => {
+    expect(() => run(['Map', 'ToUpperCase', 'L'], { L: 'ab' })).toThrow();
+  });
+
+  test('a list of strings at the boundary: strings, not shippable', () => {
+    const r = js(['Map', 'ToUpperCase', 'L']);
+    expect(r.strings).toBe(true);
+    expect(r.shippable).toBe(false);
+  });
+
+  test('strings inside only: shippable, each cell of broadcast() the value of run()', () => {
+    const json = [
+      'Count',
+      [
+        'Map',
+        fn(['If', ['Greater', 'k', 2], str('a'), str('b')], 'k'),
+        ['Range', 1, 'n'],
+      ],
+      fn(['Equal', 'c', str('a')], 'c'),
+    ];
+    const r = js(json);
+    expect(r.shippable).toBe(true);
+    const ns = [0, 1, 3, 5];
+    expect(
+      Array.from(r.broadcast!({ n: new Float64Array(ns) }, {}) as never)
+    ).toEqual(ns.map((n) => run(json, { n })));
+    expect(ns.map((n) => run(json, { n }))).toEqual(
+      ns.map((n) => interpreted(json, { n }))
+    );
   });
 });

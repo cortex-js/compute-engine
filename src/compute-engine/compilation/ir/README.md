@@ -737,44 +737,62 @@ conditions its result: `Length` of an operand of static type `string`
 `RegExp(source, flags)` (one constant: the flags of the host, `u` added as the
 interpreter adds it, `/`, the source), `StartsWith`, `EndsWith`,
 `StringCompare`, `String` of strings (of none, one, or several: their texts
-joined) and `StringJoin(s, sep)` of a string `s` (its characters joined by
-`sep`). An operand that the interpreter answers with an error value (a count
+joined), `StringJoin(s, sep)` of a string `s` (its characters joined by
+`sep`), and `Equal` and `NotEqual` of two strings (`text.eq`, `text.ne`:
+`===` of two conditioned texts, the interpreter's equality of strings and
+characters; `KroneckerDelta` is `Boole` of it). An operand that the interpreter answers with an error value (a count
 below 0, or 1 for the count of `StringReplace`, or above 1,000,000; an empty pad
 or target) declines when it is a literal or when the engine proves it out of the
 domain (`TEXT_DOMAINS` of `lower-strings.ts`, which also lowers `StringReplace`
 of a pattern; the spellings are in `print-js-text.ts`); another is checked by
 the helper, which throws a `RangeError` that names the operator (such rows are
-`may-fail`). A node of a text row is never evaluated at compile time
-(`isTextRow()` makes `facts().slice` false): `N()` gives the decimal text of a
+`may-fail`). A node of a text row, or of a row with a string signature whose
+operand is text, is never evaluated at compile time (`isTextRow()` makes
+`facts().slice` false; `Equal` of numbers is evaluated): `N()` gives the decimal text of a
 number (`String(1/3)`), the interpreter its exact text. No pass has a case of
 its own for the lane. Declined: a string on GLSL, in the interval mode and in
-the bigint mode; `Equal` of strings; a string of a `vars` name; `String` of a
+the bigint mode; an order of strings (`Less`, `Sort`); a string of a `vars` name; `String` of a
 number (its text follows the engine's formatting options); a function as the
 replacement of `StringReplace`; a `RegExp` that is not the library operator.
 
-A list of strings (CE-1548) is a value at the boundary of the program, which
-`stringListRefusal()` of `index.ts` checks after the passes: it has rank 1; it
-is made by a `list` instruction or by the region `text.chars`, or it is a
-parameter of the entry; and it is read only as the list operand of `StringJoin`
-(`TEXT_LIST_READS` of `lower-strings.ts`), or, when it is not a parameter, it is
-a result of the entry. `Characters(s)` and `GraphemeClusters(s)` are the region
-`text.chars` (`_SYS.tchars`: the grapheme clusters of `s`, each conditioned),
-whose results are the count of the clusters and the list of that length, so
+A list of strings (CE-1548, CE-1556) is checked by `stringListRefusal()` of
+`index.ts` after the passes: it has rank 1; it is made by a `list` instruction,
+by a region of `TEXT_LIST_MAKERS` of `lower-strings.ts` (`text.chars`, `build`,
+`filter`: `Characters`, `Map`, `Filter`, `Reverse`, `Take` and the other list
+operators that move elements), or it is a parameter of the entry; and it is
+read only as the list operand of `TEXT_LIST_READS` (`StringJoin`, `text.elem`,
+`text.at`), or, when it is not a parameter, it is a result of the entry.
+`Characters(s)` and `GraphemeClusters(s)` are the region `text.chars`
+(`_SYS.tchars`: the grapheme clusters of `s`, each conditioned), whose results
+are the count of the clusters and the list of that length, so
 `Length(Characters(s))` reads the count. `StringJoin(L)` and
 `StringJoin(L, sep)` of a list are `text.joinl` and `text.joinl.sep`
-(`_SYS.tjoinl`: each element conditioned, then joined), so an input list is
-passed as the host gave it, with no walk and no copy at the entry; a string for
-it throws (`plan.lists`). The passes fold the reads of a list of constant length
-(`At` of a constant index, a short `Map`, an inlined user function), so
-`Reverse(["a", s])` compiles to a `list` of its elements; with
-`constantFold: false` its reads remain and it declines. `ListJoin` of a string
-declines: the interpreter spreads its characters, where `source(x, true)` makes
-one element. The elements of a list result are JavaScript strings. Declined (the
-remedy is the interpreter): a read of an element, `Map`, `Filter`, a fold,
-`Sort`, `Reverse` and the other list operators of a list of run-time length (an
-input, `Characters(s)`); a list of strings in an `If`, a `Loop` or a user
-function that is not inlined; a list of lists of strings; an input list returned
-as the result.
+(`_SYS.tjoinl`: each element conditioned, then joined). Each read of an element
+conditions it: `text.elem` (`_SYS.tel`, from 0) is the element of
+`listSource()`, which every list operator reads at an index in range (the
+comment of `listSource()` names each caller), and `text.at` (`_SYS.tat`) is
+`At`, `First` and `Last` (`at()` of `lower.ts`) of an index that is not a
+constant in range of a constant length: from 1, from the end when negative,
+`undefined` when the index is 0, not an integer or out of range. So an input
+list is passed as the host gave it, with no walk and no copy at the entry; a
+string for it throws (`plan.lists`). No string helper takes `undefined`: a
+value of `text.at` is used only by `text.isundef`, as the operand 1 of
+`text.present`, as the yield of the `else` arm of an `if` whose condition is
+`text.isundef` of it (`Coalesce`), or as a result of the entry, and any other
+use refuses ("a string read of a list that can be out of range"; the remedy is
+`Coalesce(At(L, i), "")`). This is a check of the program after the passes,
+not of the passes: no pass makes `text.elem` or `text.at`, and a pass that
+speculates an operation computes on a present string. `scalarize` writes an
+element-wise operation of a short static list (`Equal(["a", s], "a")`) with
+`elem` reads, which `fold` replaces with the elements; with
+`constantFold: false` they remain and refuse. `ListJoin` of a string declines:
+the interpreter spreads its characters, where `source(x, true)` makes one
+element. The elements of a list result are JavaScript strings. Declined (the
+remedy is the interpreter): an order (`Sort`, `Unique`, `Max`), `Contains`,
+`IndexOf`, `Find`, `Reduce` and `Fold` of a list of strings; an element-wise
+operation on one; a list of strings in an `If`, a `Loop` or a user function
+that is not inlined; a list of lists of strings; an input list returned as the
+result.
 
 Code that reads or gives a string, or a list of strings, has `strings: true` and
 `shippable: false`: `broadcast()`, `broadcastAsync()` and the batch loaders of
@@ -2228,8 +2246,9 @@ so its test is `false`. A colour has no absent value either, but its producer
 that can give one, an `at` out of range, refuses only after the passes: the
 constant `false` of `IsMissing` would let `dce` remove it first, so `IsMissing`
 of a colour declines, while `Coalesce` and `AssertPresent` keep the colour as
-their value and the producer still refuses. A string read out of range refuses
-after the passes too (`stringListRefusal()`); its test keeps the read. A point
+their value and the producer still refuses. A string read out of range (`text.at`)
+is `undefined`, which only a discharge or the result reads
+(`stringListRefusal()`); its test keeps the read. A point
 of complex numbers declines. The written symbol `Missing` (of the library)
 is the constant NaN, as a selection that takes no arm; a `Tuple` with it as a
 coordinate declines (the point of NaN coordinates is absent; the interpreter's

@@ -42,6 +42,11 @@ export const TEXT = {
   // A list of strings (CE-1548): its elements, each conditioned, joined.
   'text.joinl': "_SYS.tjoinl($0, '')",
   'text.joinl.sep': '_SYS.tjoinl($0, $1)',
+  // An element (CE-1556): from 0 in range, or `At`'s index; conditioned.
+  'text.elem': '_SYS.tel($0, $1)',
+  'text.at': '_SYS.tat($0, $1)',
+  'text.eq': '($0 === $1)',
+  'text.ne': '($0 !== $1)',
   // `ColorToString` of the channels of a constructor (`javascript-runtime.ts`).
   ...Object.fromEntries(
     COLOR_CHANNEL_SPACES.flatMap((space) =>

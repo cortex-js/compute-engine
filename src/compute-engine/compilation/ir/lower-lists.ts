@@ -211,6 +211,19 @@ export function listLowering(cx: Lowering) {
       return f();
     });
 
+  /** The list `l` as a source. Its element is `elem`, and of a list of
+   *  strings `text.elem`, which conditions it (CE-1556): no absent string
+   *  comes out of it, as every caller reads it at an index in range, the
+   *  index of a build, a filter or a loop over the length (`over()`,
+   *  `reindexed()`, `mapLists()`, `where()`, `quantifier()`, `reduce()`,
+   *  the loops of `Scan`, `Unique`, `ContainsSequence`, `Dot`, `Norm`, a
+   *  `for` loop, `Apply`, `Tuple`, a selection and the threaded calls of
+   *  `lower.ts` and `lower-functions.ts`), that index shifted below a
+   *  length it is tested against (`join()`, `appended()`, `Insert`,
+   *  `ReplaceAt` of `lower.ts`), the indices that `sample` draws, or a constant in
+   *  range (`at()` of `lower.ts`, the rows of a `Chunk`). Two read a
+   *  computed index: `Find` (`s.at(head(kept))`) declines for strings, and
+   *  `elementOf()` reads in a region that is not emitted. */
   const listSource = (l: V): Source => {
     const n = type(l).shape[0];
     // An element of a list of tuples is a tuple.
@@ -218,7 +231,11 @@ export function listLowering(cx: Lowering) {
     return {
       length: typeof n === 'number' ? integer(n) : n.v,
       at: (k) => {
-        const x = b.op('elem', [l, k], elementType(type(l)));
+        const x = b.op(
+          type(l).lane === 'string' ? 'text.elem' : 'elem',
+          [l, k],
+          elementType(type(l))
+        );
         if (axis !== undefined && axis > 0) cx.tuples.set(x, axis - 1);
         return x;
       },
