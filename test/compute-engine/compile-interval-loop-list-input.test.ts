@@ -163,12 +163,18 @@ describe('interval-js: a loop over a literal collection', () => {
     }
   });
 
+  // A restriction of a list arm compiles only where its value is the result
+  // of the program (CE-1564); a loop source reads it, so it declines there.
   test.each([
-    ['restriction', ['If', ['Less', 't', 1], ['List', 1, 2]]],
-    ['If', ['If', ['Less', 't', 1], ['List', 1, 2], 7]],
+    [
+      'restriction',
+      ['If', ['Less', 't', 1], ['List', 1, 2]],
+      'outside-profile',
+    ],
+    ['If', ['If', ['Less', 't', 1], ['List', 1, 2], 7], 'unsettled-shape'],
   ])(
     'a %s source declines: its value is not always an array',
-    (_name, source) => {
+    (_name, source, code) => {
       const ce = new ComputeEngine();
       ce.declare('t', 'real');
       let diagnostic: unknown;
@@ -181,7 +187,7 @@ describe('interval-js: a loop over a literal collection', () => {
         diagnostic = compileDiagnosticOf(e);
       }
       expect(diagnostic).toMatchObject({
-        code: 'unsettled-shape',
+        code,
         operator: 'If',
       });
     }
