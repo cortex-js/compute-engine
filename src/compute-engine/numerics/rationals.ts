@@ -604,6 +604,23 @@ export function rationalizeWithin(
   return [h, k];
 }
 
+/**
+ * The exact rational value of a finite decimal, in lowest terms:
+ * `significand / 10^-exponent`. An integer decimal is returned unchanged.
+ * A decimal with more than `MAX_FRACTION_DIGITS` digits after the point gives
+ * `undefined`: its exact denominator would be too large to build.
+ */
+export function exactDecimalRational(
+  x: BigDecimal
+): BigDecimal | [n: bigint, d: bigint] | undefined {
+  if (x.isInteger()) return x;
+  if (-x.exponent > MAX_FRACTION_DIGITS) return undefined;
+  const n = x.significand;
+  const d = pow10(-x.exponent);
+  const g = bigGcd(n < 0n ? -n : n, d);
+  return [n / g, d / g];
+}
+
 /** Return [factor, root] such that factor * sqrt(root) = sqrt(n)
  * when factor and root are rationals
  */
