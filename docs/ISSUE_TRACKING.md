@@ -388,14 +388,16 @@ whose count reads `n of m`; the lint-error list and Close all ignore them.
   each time an item starts or ends; the header of the script describes it.
 - The items with `state: in-progress`, with their owner and start date.
 - The issues fixed since the last release, that is the newest tag `v<x.y.z>`
-  that HEAD contains. A fix deletes the issue file, so this list comes from
-  git: each `CE-<n>.md` that a commit after the tag deleted, with the commit
-  and the text of the file before the deletion. An id in `CLOSED.md` is left
-  out, because `close` also deletes the file. A second list has the files
-  deleted in the working tree and not committed.
-- The Tycho issues with `state: fixed` whose `fixed-in` is not in the tag: a
-  commit that the tag does not contain, a later version, or a text such as
-  "unreleased".
+  that HEAD contains. First the Tycho issues with `state: fixed` whose fix is
+  not in the tag: a later version in `fixed-in`, a text such as "unreleased",
+  or a commit hash in a `fixed-in` line that a commit after the tag wrote or
+  that is not committed. For a hash, the test is on the commit that wrote the
+  line, because the fix commit can only write the hash of its parent. Then
+  the other fixes: a fix deletes the issue file, so they come from git, each
+  `CE-<n>.md` that a commit after the tag deleted, with the commit and the
+  text of the file before the deletion. An id in `CLOSED.md` is left out,
+  because `close` also deletes the file. A second list has the files deleted
+  in the working tree and not committed.
 - The last batch that ended, with its results.
 
 Each item is a card with the first body line, the `ask` line and controls that

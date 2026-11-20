@@ -186,21 +186,46 @@ function issueAt(rev, p) {
 /** The issue files that commits deleted, read once for each HEAD. */
 let deletedCache = { key: '', items: [] };
 
-/** Whether the fix that `fixed-in` names is in the release `tag`. */
+/**
+ * Whether the fix of the issue file `p`, as it is at the revision `rev`, is
+ * in the release `tag`. A version in `fixed-in` is compared with the tag.
+ * For a commit hash, the test is on the commit that wrote the `fixed-in`
+ * line, not on the hash: a commit cannot name itself, so the fix commit
+ * writes the hash of its parent, which a tag can contain without the fix.
+ * The fix commit writes the line, so the fix is in that commit or before it.
+ * A line that is not committed (`rev` is null: the working tree) is not in
+ * a release.
+ */
 const releasedCache = new Map();
-function inRelease(fixedIn, tag) {
+function inRelease(fixedIn, tag, p, rev) {
   const v = String(fixedIn ?? '')
     .trim()
     .replace(/^v(?=\d)/, '');
   if (VERSION_RE.test(v))
     return compareVersions(v, tag.replace(/^v/, '')) <= 0;
   if (!/^[0-9a-f]{7,40}$/i.test(v)) return false;
-  const key = `${v} ${tag}`;
+  if (!rev) {
+    // The working tree: the line must be the one that HEAD holds.
+    if (issueAt('HEAD', p).fields?.['fixed-in'] !== fixedIn) return false;
+    rev = 'HEAD';
+  }
+  const key = `${p} ${rev} ${tag}`;
   if (!releasedCache.has(key)) {
     let yes = false;
     try {
-      git(['merge-base', '--is-ancestor', v, tag]);
-      yes = true;
+      const writer = git([
+        'log',
+        '-1',
+        '--format=%H',
+        '-G^fixed-in:',
+        rev,
+        '--',
+        p,
+      ]).trim();
+      if (writer) {
+        git(['merge-base', '--is-ancestor', writer, tag]);
+        yes = true;
+      }
     } catch {}
     releasedCache.set(key, yes);
   }
@@ -219,10 +244,12 @@ function inRelease(fixedIn, tag) {
  * close also deletes the file, and it writes the id to `CLOSED.md`: an id in
  * `CLOSED.md` is not a fix and is left out. So is an id whose file exists
  * again, and a Tycho file deleted after the release that held its fix (its
- * last text says `state: fixed` and a `fixed-in` that the tag contains). A Tycho issue keeps its file with `state: fixed` until Tycho checks
- * the release; `tycho` lists the ones whose `fixed-in` is not in the tag (a
- * commit the tag does not contain, a later version, or a text such as
- * "unreleased").
+ * last text says `state: fixed` and a fix that the tag contains, see
+ * `inRelease()`). A Tycho issue keeps its file with `state: fixed` until
+ * Tycho checks the release; `tycho` lists the ones whose fix is not in the
+ * tag (a `fixed-in` line written by a commit the tag does not contain or not
+ * committed, a later version, or a text such as "unreleased"). The Progress
+ * tab shows them in the list of the next release.
  *
  * Null outside a git repository, with no release tag, or when the issue
  * directory is not in the main worktree (`--dir` elsewhere).
@@ -271,7 +298,12 @@ function fixedSince(all, closedText) {
       }
       const id = idOfPath(rel, line);
       if (!id || !commit || seen.has(id)) continue;
-      seen.set(id, { id, commit, ...issueAt(`${commit.hash}^`, line) });
+      seen.set(id, {
+        id,
+        commit,
+        path: line,
+        ...issueAt(`${commit.hash}^`, line),
+      });
     }
     deletedCache = { key, items: [...seen.values()] };
   }
@@ -279,7 +311,8 @@ function fixedSince(all, closedText) {
   // tag contains was released before the tag: Tycho deleted the file after
   // it checked that release, so the deletion is not a new fix.
   const releasedBefore = (x) =>
-    x.fields?.state === 'fixed' && inRelease(x.fields['fixed-in'], tag);
+    x.fields?.state === 'fixed' &&
+    inRelease(x.fields['fixed-in'], tag, x.path, `${x.commit.hash}^`);
   const committed = deletedCache.items.filter(
     (x) => !closed.has(x.id) && !present.has(x.id) && !releasedBefore(x)
   );
@@ -296,7 +329,8 @@ function fixedSince(all, closedText) {
   const tycho = all.issues
     .filter(
       (i) =>
-        i.fields.state === 'fixed' && !inRelease(i.fields['fixed-in'], tag)
+        i.fields.state === 'fixed' &&
+        !inRelease(i.fields['fixed-in'], tag, `${rel}/${i.name}`, null)
     )
     .map((i) => ({ id: i.name.slice(0, -3), note: '' }));
 
@@ -1103,12 +1137,14 @@ function renderProgress(map) {
     html += '<h2>Fixed since the last release</h2><p class="none">Not known: no git repository, no release tag v&lt;x.y.z&gt;, or the issue directory is not in the main worktree.</p>';
   } else {
     const v = esc(f.tag);
-    html += '<h2>Fixed since ' + v + ', in the next release <span class="count">(' + f.committed.length + ')</span></h2>' +
-      '<p class="none">The issue files that commits after ' + v + ' deleted, newest first; closed issues (CLOSED.md) are left out.</p>' +
-      (f.committed.length ? f.committed.map((x) => fixedRow(x, 'fixed in <code title="' + esc(x.commit.hash) + '">' + esc(x.commit.hash.slice(0, 9)) + '</code> ' + esc(x.commit.date) + (x.commit.subject.startsWith(x.id + ':') ? '' : ' · ' + inline(x.commit.subject)))).join('') : '<p class="none">none</p>');
+    const tycho = f.tycho.filter((r) => map.get(r.id));
+    const n = f.committed.length + tycho.length;
+    html += '<h2>Fixed since ' + v + ', in the next release <span class="count">(' + n + ')</span></h2>' +
+      '<p class="none">The Tycho issues with <code>state: fixed</code> whose fix is not in ' + v + ' (Tycho checks each one on the release and then deletes its file), then the issue files that commits after ' + v + ' deleted, newest first; closed issues (CLOSED.md) are left out.</p>' +
+      (n ? tycho.map((r) => card(map.get(r.id), 'fixed, Tycho checks it on the release')).join('') +
+        f.committed.map((x) => fixedRow(x, 'fixed in <code title="' + esc(x.commit.hash) + '">' + esc(x.commit.hash.slice(0, 9)) + '</code> ' + esc(x.commit.date) + (x.commit.subject.startsWith(x.id + ':') ? '' : ' · ' + inline(x.commit.subject)))).join('') : '<p class="none">none</p>');
     html += '<h2>Deleted in the working tree, not committed <span class="count">(' + f.uncommitted.length + ')</span></h2>' +
       (f.uncommitted.length ? f.uncommitted.map((x) => fixedRow(x, 'not committed')).join('') : '<p class="none">none</p>');
-    html += list('Tycho issues fixed after ' + f.tag + " (Tycho checks each one on the release)", f.tycho, map);
   }
   for (const b of p.batches.filter((b) => !b.alive)) html += batchTable(b);
   return html;
