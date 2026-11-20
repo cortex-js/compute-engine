@@ -4,7 +4,7 @@ import { asRational } from '../boxed-expression/numerics.js';
 import { baseOffset } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
-import { isConstantThatMayBeZero } from '../boxed-expression/arithmetic-mul-div.js';
+import { isConstantThatMayBeZero } from '../boxed-expression/maybe-zero.js';
 import { canCombineSameBase } from './simplify-power.js';
 
 /**
@@ -43,10 +43,13 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
   // may simplify/evaluate to 0 (e.g. 1-1) and we want to avoid 0/(1-1) -> 0.
   // Those cases can be handled by an explicit preliminary evaluation.
   // A divisor that is a collection by its type (`L: list<real>`) gives a list
-  // of zeros of its length, not the scalar `0`.
+  // of zeros of its length, not the scalar `0`. A divisor that is a constant
+  // whose value may be zero (`isConstantThatMayBeZero()`) keeps the quotient:
+  // `0/z` with `z` a constant of value 0 is `0/0`.
   if (
     num.isSame(0) &&
     denom.isSame(0) === false &&
+    !isConstantThatMayBeZero(denom) &&
     (isNumber(denom) || denom.symbols.length !== 0) &&
     !isCollectionShaped(denom)
   ) {

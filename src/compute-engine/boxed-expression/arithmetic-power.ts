@@ -40,6 +40,7 @@ import {
 } from './apply.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
 import { staticFact, staticallyTrue } from './static-fact.js';
+import { isConstantThatMayBeZero, isConstantZero } from './maybe-zero.js';
 import {
   isLibraryOperator,
   isShadowedSymbol,
@@ -407,6 +408,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
       // `(a^n)^m` with `n·m = 1` is `a`: `(g(x)^{-1})^{-1}` is `g(x)`, also
       // when `g(x)` is a matrix
       if (isExactLiteral(exponent, 1)) return base;
+      // `(a^n)^0` is `a^0`, with the rules for a zero exponent below:
+      // `(z^2)^0` with `z` a constant of value 0 is `NaN`, as `z^0` is
+      if (fullyCanonical && isExactLiteral(exponent, 0))
+        return canonicalPower(base, exponent);
       return ce._fn('Power', [base, exponent]);
     }
     // Unsafe to combine — leave as nested Power, fall through
@@ -560,6 +565,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // A symbol whose value is `NaN` is left to `evaluate()`, which
     // substitutes the value first (see `canonicalDivide`).
     if (a.isNaN === true && !isNumber(a)) return unchanged();
+    // A constant symbol whose value is the number 0 gives `NaN`, as the
+    // literal `0^0` does: the value of a constant does not change. A constant
+    // whose value may be zero (`isConstantThatMayBeZero()`) keeps the power,
+    // and `evaluate()` decides.
+    if (isConstantZero(a)) return ce.NaN;
+    if (isConstantThatMayBeZero(a)) return unchanged();
     const finite = aIsNum ? staticFact(a, (x) => x.isFinite) : undefined;
     if (finite !== undefined && (finite === false || isExactLiteral(b, 0)))
       // A `NaN`-valued base gives `NaN`; an infinite base is the
@@ -1779,13 +1790,15 @@ export function pow(
   // exponent `0`). The bases are the ones that `canonicalPower` folds for
   // the exact `0`: a number, a symbol or a negation that has a finite value.
   // A literal zero base does not get here: `0^{0.0}` is the indeterminate
-  // form, which `canonicalPower` answers above.
+  // form, which `canonicalPower` answers above. A constant symbol whose value
+  // may be zero keeps the power, as in `canonicalPower`.
   if (
     typeof exp !== 'number' &&
     isNumber(exp) &&
     !exp.isExact &&
     exp.isSame(0) &&
     x.isFinite === true &&
+    !isConstantThatMayBeZero(x) &&
     x.type.matches('number' as NumericPrimitiveType) &&
     (!isFunction(x) || x.operator === 'Negate')
   )

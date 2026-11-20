@@ -6,10 +6,8 @@ import {
   arctan2AtInfinity,
   halfTurnAngle,
 } from '../boxed-expression/trigonometry.js';
-import {
-  isConstantThatMayBeZero,
-  mul,
-} from '../boxed-expression/arithmetic-mul-div.js';
+import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+import { isConstantThatMayBeZero } from '../boxed-expression/maybe-zero.js';
 import { simplifyLogicFunction } from './simplify-logic.js';
 import type { Expression, Rule, RuleStep } from '../global-types.js';
 import {

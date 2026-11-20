@@ -21,7 +21,6 @@ import {
   tensorCellExpression,
 } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
-import { sgn } from './sgn.js';
 import {
   bigFloatBroadcast,
   holdsDoubles,
@@ -100,7 +99,11 @@ import {
   mayBeTensorProductOperand,
   sortProductOperands,
 } from './order.js';
-import { asRadical, isMatrixTyped } from './arithmetic-power.js';
+import {
+  asRadical,
+  canonicalPower,
+  isMatrixTyped,
+} from './arithmetic-power.js';
 import { mayBeMatrixPowerBase, typeMayHoldMatrix } from './matrix-operand.js';
 import {
   flatten,
@@ -115,6 +118,10 @@ import { holdsKindValue } from './residue-class.js';
 import { kindArithmetic } from './kind-dispatch.js';
 import { isMergeable } from './effects-of.js';
 import { staticFact, staticallyTrue } from './static-fact.js';
+import {
+  isConstantThatMayBeZero,
+  isProvablyNonZeroNumerator,
+} from './maybe-zero.js';
 
 /** The operand types a product accepts: a number, an indexed collection of
  * numbers (broadcast), or an absent operand. A factor whose type is disjoint
@@ -193,43 +200,6 @@ function isLiteral(op: Expression, n: number): boolean {
   if (!isNumber(op)) return false;
   if (n !== 0 && !op.isExact) return false;
   return op.isSame(n);
-}
-
-/**
- * Whether the numerator `x` of a quotient by zero is provably not zero, so
- * that `x/0` is a pole and folds to `ComplexInfinity`. A numerator that may be
- * zero keeps the quotient: `x/0` is `0/0`, the indeterminate form, when `x`
- * is 0. With `x: real` and no value, `x/0` stays `x/0` until `x` has a value
- * (user decision of 2026-10-23, ROADMAP CE-95).
- *
- * A number literal other than 0 is not zero (the caller handles the literal
- * 0 and `NaN` first). Any other numerator is not zero when its sign, known
- * from its type and the assumptions, excludes 0: `positive` (`π`,
- * `x^2 + 1` with `x: real`, `e^x`), `negative`, or `not-zero` (a symbol
- * declared `real & !0`, or one with the assumption `d ≠ 0`).
- * A numerator that reads a variable with an assigned value keeps the
- * quotient, because its sign comes from the value that the variable holds
- * now, and a canonical form must not depend on that value: with `a := 5`, a
- * folded `a/0` stayed `ComplexInfinity` after `a := 0`.
- */
-function isProvablyNonZeroNumerator(x: Expression): boolean {
-  if (isNumber(x)) return !x.isNaN && !x.isSame(0);
-  const s = sgn(x);
-  if (s !== 'positive' && s !== 'negative' && s !== 'not-zero') return false;
-  return !hasAssignedVariable(x);
-}
-
-/**
- * Whether `x` is a constant symbol whose value may be zero, so that `x/x` is
- * not `1`: with `z` a constant of value 0, `z/z` is `0/0`, which has no value.
- * The value of a constant does not change, so the canonical form may read it.
- * A constant with no value is not read: `c/c` is `1`, as `x/x` is for a free
- * variable.
- */
-export function isConstantThatMayBeZero(x: Expression): boolean {
-  if (!isSymbol(x) || !x.isConstant) return false;
-  const value = x.value;
-  return value !== undefined && !isProvablyNonZeroNumerator(value);
 }
 
 /**
@@ -693,12 +663,23 @@ export class Product {
     // base to the x^0 → 1 fold — a generic-symbol fold like x/x → 1: `z^0`
     // canonicalizes to 1 even while `z := 0`. Only the literal `0^0` falls
     // through and canonicalizes to NaN.)
+    // A constant symbol whose value may be zero is not a generic symbol
+    // (`isConstantThatMayBeZero()`): with `c` a constant of value 0, `c^0` is
+    // `0^0`. The factor is the canonical power: `NaN` when the value is the
+    // number 0, and otherwise the power, kept as one term.
     // An exact 1 is dropped at any exponent: `exp` is a rational, and 1 to a
     // rational power is 1. The numerator of `(1/x)^2` reaches here as `1`
     // with the exponent 2; kept as a term, it was written as a factor
     // `1\times` next to a float coefficient, which does not fold with it.
     if (isLiteral(term, 1)) return;
-    if (term.isSame(0) === false && exp && isZero(exp)) return;
+    if (term.isSame(0) === false && exp && isZero(exp)) {
+      if (isConstantThatMayBeZero(term)) {
+        const power = canonicalPower(term, this.engine.Zero);
+        if (isNumber(power)) this.mul(power);
+        else this.tallyInOrder(power, [1, 1]);
+      }
+      return;
+    }
     if (isLiteral(term, 0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);
       else this.coefficient = this.engine._numericValue(0);
@@ -2388,6 +2369,10 @@ export function div(num: Expression, denom: number | Expression): Expression {
       // length, as in `canonicalDivide`: the quotient stays, and evaluation
       // broadcasts it.
       if (isCollectionShaped(denom)) return ce._fn('Divide', [num, denom]);
+      // A divisor that is a constant whose value may be zero keeps the
+      // quotient (`isConstantThatMayBeZero()`): `0/z` with `z` a constant of
+      // value 0 is `0/0`, and its evaluation gives `NaN`.
+      if (isConstantThatMayBeZero(denom)) return ce._fn('Divide', [num, denom]);
       // A float `0` numerator is kept (`0.0/∞` is the float `0`), as in the
       // JavaScript-number branch above. A float divisor gives a float `0`
       // (`0/2.5` is `0.0`).

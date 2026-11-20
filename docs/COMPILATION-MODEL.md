@@ -179,6 +179,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   quotient: at `x = 49` it gives `0`, where the interpreter gives `1` (the
   canonical form divides by 49 and gives `1`). `interval-js` gives a
   `singular` enclosure that holds the value.
+- `javascript` and `glsl` (crafted): `z^m` with `z` and `m` two constants
+  of value 0 (`ce.declare('z', { value: 0, isConstant: true })`) gives the
+  complex `NaN` (`{ re: NaN, im: NaN }`, a `vec2` on GLSL), where the
+  interpreter gives the real `NaN`; `x + z^m` is then a complex value. The
+  power `z^0` is `NaN` in the canonical form and compiles to the real `NaN`.
 
 - `javascript` and `interval-js` (crafted): an input declared again in a
   nested scope. With `x: real`, `k(v) := v + x`, then in a pushed scope
@@ -316,6 +321,20 @@ interpreter's value. A line is removed when the case declines or is fixed.
   comparison of a computed value that is zero in exact arithmetic follows
   its rounding: `If(Sin(2πs/P) > 0, 1, 0)` at `s = 2`, `P = −2` gives `1`
   (the sine is `2.449e-16` in doubles); the interpreter gives `0`.
+- `plausible?` — `javascript`, `L: list<real>`, `a: real`: an order of keys
+  is the order of their doubles (`ArgMin`, `ArgMax`, `MinBy`, `MaxBy`,
+  `Ordering` and `Sort` by a key). Keys that are equal in exact arithmetic
+  can round to two doubles: `ArgMin(L, t ↦ |t − a|)` at `L = [0.5, 0.1]`,
+  `a = 0.3` gives `2`, and `MinBy` gives `0.1` (the keys are `0.2` and
+  `0.19999999999999998`); the interpreter computes with the decimals and
+  gives the first of the two equal keys, `1` and `0.5`. Keys that differ can
+  have one double: `ArgMax(L, Tanh)` at `L = [20, 30]` gives `1` (both keys
+  are the double `1`); the interpreter gives `2`.
+- `javascript` and `glsl` (crafted), `L: list<real>`: a value computed from
+  the `0` of `ArgMax` and `ArgMin`, or from the `NaN` of `MaxBy` and `MinBy`,
+  where the interpreter leaves them unevaluated (no element, a `NaN` key):
+  `IsMissing(MaxBy(L, t ↦ −t) + 1)` at `L = []` gives `true`; the interpreter
+  gives `False`. A discharge of `MaxBy` or `MinBy` itself declines.
 - `glsl` (crafted), `x: real`, `y: real`: `Arctan2(y, x)` with
   an operand that is a zero computed as `-0` (`Arctan2(Negate(0·x), y)`) is
   off by π in the software renderer, and has the other sign on a GPU for

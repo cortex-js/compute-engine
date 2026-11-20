@@ -1,6 +1,7 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
+import { isConstantThatMayBeZero } from '../boxed-expression/maybe-zero.js';
 
 /**
  * Infinity simplification rules consolidated from simplify-rules.ts.
@@ -217,7 +218,15 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
 
       // x^0 -> 1 when x is not zero and finite. A float exponent `0.0` (or
       // a float base) gives the float `1`, as `pow()` does for `y^{0.0}`.
-      if (exp.isSame(0) && base.isSame(0) === false && base.isFinite === true) {
+      // Not for a constant whose value may be zero
+      // (`isConstantThatMayBeZero()`): `z^0` with `z` a constant of value 0
+      // is `0^0`.
+      if (
+        exp.isSame(0) &&
+        base.isSame(0) === false &&
+        base.isFinite === true &&
+        !isConstantThatMayBeZero(base)
+      ) {
         return {
           value: hasFloatOperand([base, exp]) ? asFloat(ce.One) : ce.One,
           because: 'x^0 -> 1',

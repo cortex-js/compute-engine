@@ -13,6 +13,7 @@ import { add } from './arithmetic-add.js';
 import { mayBeMatrixValued, typeMayHoldNumber } from './matrix-operand.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { isMergeable } from './effects-of.js';
+import { isConstantThatMayBeZero } from './maybe-zero.js';
 
 const binomials = [
   [1],
@@ -116,7 +117,10 @@ function expandPower(base: Expression, exp: number): Expression | null {
     const expr = expandPower(base, -exp);
     return expr ? expr.inv() : null;
   }
-  if (exp === 0) return ce.One;
+  // A constant symbol whose value may be zero keeps the power
+  // (`isConstantThatMayBeZero()`): `z^0` with `z` a constant of value 0 is
+  // `0^0`.
+  if (exp === 0) return isConstantThatMayBeZero(base) ? null : ce.One;
   if (exp === 1) return expand(base);
   if (isFunction(base, 'Negate')) {
     if (Number.isInteger(exp)) {

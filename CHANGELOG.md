@@ -1,5 +1,51 @@
 ## [Unreleased]
 
+### New Features
+
+- **`epsilHover()` says what the name at an offset of an Epsil source is, and
+  `epsilDefinition()` says where the source declares it** (CE-1589), for the
+  "Show Info" and "Go to Definition" commands of an editor. Both are exported
+  from `@cortex-js/compute-engine/epsil`, parse the source without evaluating
+  it, and take the options of `epsilCompletions()`. The name is resolved in
+  its scope: a name of the source gives its signature or declared type and
+  the doc comment of a `function`, also when it shadows a library name; a
+  library name gives its signature, its description and the address of its
+  entry in the library reference. An offset in the text of a string or in a
+  comment, and a name that nothing defines, give `null`.
+
+  ```ts
+  const source =
+    "/// Twice the sine.\nfunction f(x: real) -> real { 2 * sin(x) }\nlet y = f(1)";
+  epsilHover(ce, source, source.indexOf("f(1)"));
+  // ➔ { range: [71, 72], name: "f", kind: "function",
+  //     detail: "(real) -> real", description: ["Twice the sine."] }
+  epsilDefinition(ce, source, source.indexOf("f(1)"));
+  // ➔ { name: [29, 30], header: [20, 48] }: "f" in "function f(x: real) -> real "
+  epsilDefinition(ce, source, source.indexOf("sin(x)")); // ➔ null: a library name
+  ```
+
+### Improvements
+
+- **`ArgMax`, `ArgMin`, `MaxBy` and `MinBy` compile** (CE-1610). `compile()`
+  declined them on every target ("the operator ArgMax is not supported by the
+  compiler"). They now compile to JavaScript for a list of real numbers, and
+  to GLSL for a list of a stated length, with or without a key function of
+  one parameter:
+
+  ```js
+  ce.declare('L', 'list<real>');
+  ce.declare('a', 'real');
+  const nearest = compile(ce.parse('\\mathrm{ArgMin}(L, t \\mapsto |t - a|)'));
+  nearest.run({ L: [3, 9, 2], a: 8 }); // ➔ 2
+  ```
+
+  As `evaluate()` does, they give the first of several equal keys. Where
+  `evaluate()` leaves the expression unevaluated (an empty list, or a `NaN`
+  key among two elements or more), the compiled `ArgMax` and `ArgMin` give
+  `0`, and `MaxBy` and `MinBy` give `NaN`. `MaxBy` and `MinBy` also give a
+  point of a list of points: `MinBy(P, p ↦ p[2])`. A list of strings, a key
+  that is not a real number and the `interval-js` target still decline.
+
 ### Resolved Issues
 
 - **A colour made from a complex channel compiles again in the complex mode**
@@ -45,6 +91,20 @@
   points, `Abs(g) / Sqrt(D(g, x)^2 + D(g, y)^2)`, with `g` the difference of
   the two smallest distances, evaluated to 12.3 million nodes in about 10 s,
   and now to 50,000 nodes in about 0.7 s.
+
+- **A constant of value 0 is not read as a nonzero value by `0/a` and `a^0`**
+  (CE-1429). With `ce.declare('z', { value: 0, isConstant: true })`, `0/z` is
+  `0/0` and `z^0` is `0^0`, which have no value:
+
+  ```js
+  ce.box(['Divide', 0, 'z']).simplify(); // was 0, now NaN
+  ce.box(['Power', 'z', 0]); // was 1, now NaN
+  ce.parse('x z^0').evaluate(); // was x, now NaN
+  ```
+
+  `evaluate()` already gave `NaN` for the quotient. A constant with a nonzero
+  value (`0/\pi` is `0`, `\pi^0` is `1`), a constant with no value and a
+  variable are unchanged.
 
 ## 0.195.2 _2026-11-20_
 
