@@ -870,7 +870,7 @@ is exact on `bigint` values, with the helpers of `bigint-runtime.ts` (members of
 (`bpow`), `Factorial` (`bfactorial`), `Binomial`, `Choose`, `GCD`, `LCM`
 (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane only), the comparisons,
 `And`, `Or`, `Not`, `If`, `Which`, `Block`, `Sum` and `Product` with integer
-bounds, `List`, `Range`, `Length`, `At` (`bat`), `Map`, `Filter`, `Reduce`,
+bounds, `List`, `Range`, `Length`, `At` (`bat`), `Sort` (`bsort`), `Map`, `Filter`, `Reduce`,
 `Loop`, user functions with integer parameters (declared, as
 `(integer) -> integer`), and a root function literal with integer parameters. A
 closed node is the exact value of `evaluate()` (`N()` of `2^70 + 1` is rounded);

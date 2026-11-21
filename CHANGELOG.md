@@ -2,6 +2,10 @@
 
 ### New Features
 
+- **`Sort` of a list of integers compiles in `mode: 'bigint'`** (#643). The
+  sorted copy is ascending and exact beyond 2^53, as the interpreter's. It
+  declined with "sort.int (the operation sort.int)".
+
 - **The fixit of an unclosed Epsil string can close it at the caret**
   (CE-1520). A `Fixit` has an optional fourth element, a caret range
   `[start, end]` (both ends included). The fixit of
