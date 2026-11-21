@@ -101,6 +101,7 @@ import {
   exactArgumentSources,
   inlineCallParameters,
   literalArgumentsWithDefaults,
+  noteShieldedResult,
   shadowsQualifiedName,
   snapshotRunVariables,
   type ApplyOptions,
@@ -9676,8 +9677,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           spec === undefined
             ? assignedVariableNames(body)
             : holdValuesShieldNames(spec.canonical);
-        return withValueShield(ce, names, () =>
-          body.evaluate({ numericApproximation })
+        // The names stay symbols in the value, also when the value is the
+        // value of a block or a call that ends (`noteShieldedResult`).
+        return noteShieldedResult(
+          withValueShield(ce, names, () =>
+            body.evaluate({ numericApproximation })
+          ),
+          names
         );
       },
     },

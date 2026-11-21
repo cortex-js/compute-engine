@@ -4591,10 +4591,15 @@ export function resolveEscapingLambda(
  * `assignedValue` applies it, so every store of a plain value does: `Assign`
  * to a name, each leaf of a destructuring `Assign` or `Declare`, and
  * `Declare` with a value.
+ *
+ * With `only`, the variables replaced are the locals of `only.scope`, the
+ * names of `only.locals` (`resultOverRunLocals()`), and a function literal
+ * that is not a function value is walked too.
  */
 export function snapshotRunVariables(
   ce: ComputeEngine,
-  value: Expression
+  value: Expression,
+  only?: { scope: Scope; locals: ReadonlyArray<string> }
 ): Expression {
   if ((!isFunction(value) && !isDictionary(value)) || value.isLazyCollection)
     return value;
@@ -4615,7 +4620,13 @@ export function snapshotRunVariables(
   ): Expression | undefined => {
     if (binding === undefined || !('value' in binding)) return undefined;
     const def = binding.value;
-    if (!isFunctionLiteralParameter(def)) {
+    if (only !== undefined) {
+      if (
+        !only.locals.includes(name) ||
+        only.scope.bindings.get(name) !== binding
+      )
+        return undefined;
+    } else if (!isFunctionLiteralParameter(def)) {
       let scope: Scope | null = ce.context.lexicalScope;
       while (scope && scope.bindings.get(name) !== binding)
         scope = scope.parent;
@@ -4656,6 +4667,17 @@ export function snapshotRunVariables(
       !sameBindingDef(binding.value, own)
     )
       return s;
+    // With `only`, the occurrence must be bound to the local itself: a value
+    // made outside the block that names a global `y` keeps it, also when the
+    // block declares a local `y`.
+    if (
+      only !== undefined &&
+      (own === undefined ||
+        binding === undefined ||
+        !('value' in binding) ||
+        !sameBindingDef(binding.value, own))
+    )
+      return s;
     return runValue(s.symbol, binding) ?? s;
   };
   // One memo entry per node and set of shadowed names: a subexpression
@@ -4669,8 +4691,24 @@ export function snapshotRunVariables(
   ): Expression => {
     if (isSymbol(e)) return shadowed?.has(e.symbol) ? e : current(e);
     if (!isFunction(e) && !isDictionary(e)) return e;
+    // With `only`, the names that a `HoldValues` shielded stay symbols in
+    // its value, wherever the value is in the result (`noteShieldedResult`).
+    const shield = only === undefined ? undefined : SHIELDED_RESULTS.get(e);
+    if (shield !== undefined)
+      shadowed = new Set([...(shadowed ?? []), ...shield]);
     if (isFunction(e)) {
-      if (e.operator === 'Function' || e.isLazyCollection) return e;
+      // With `only`, a literal that was not evaluated (a branch of an
+      // undecided `If`) is no function value: its locals are replaced too
+      // (`resultOverRunLocals()`).
+      if (
+        e.operator === 'Function' &&
+        (only === undefined || keepsActivation(e))
+      )
+        return e;
+      // An error is not evaluated again: the expression it holds says
+      // where it failed, with the names the program wrote (`i <= m`).
+      if (only !== undefined && e.operator === 'Error') return e;
+      if (e.isLazyCollection) return e;
       if (e._numericStore !== undefined) return e;
     }
     const key = keyOf(shadowed);
@@ -4732,21 +4770,32 @@ export function snapshotRunVariables(
     // function held now is applied, `Apply(<value of f>, 1)`, so assigning
     // another function to `f` later does not change the stored value. A
     // head bound by an enclosing binder is that binder's variable.
-    const head = shadowed?.has(e.operator)
-      ? undefined
-      : runValue(
-          e.operator,
-          callableBindingInContext(
-            ce,
+    // With `only`, the head must be bound to the local itself: a call of a
+    // function of an enclosing scope that a local declared later shadows
+    // (`Hold(h(b))` before `Declare(h, …)`) keeps its head.
+    const headLocal =
+      only === undefined ? undefined : only.scope.bindings.get(e.operator);
+    const head =
+      shadowed?.has(e.operator) ||
+      (only !== undefined &&
+        (e.valueDefinition === undefined ||
+          headLocal === undefined ||
+          !('value' in headLocal) ||
+          !sameBindingDef(headLocal.value, e.valueDefinition)))
+        ? undefined
+        : runValue(
             e.operator,
-            e.valueDefinition !== undefined
-              ? { value: e.valueDefinition }
-              : e.operatorDefinition !== undefined
-                ? { operator: e.operatorDefinition }
-                : undefined,
-            e
-          )
-        );
+            callableBindingInContext(
+              ce,
+              e.operator,
+              e.valueDefinition !== undefined
+                ? { value: e.valueDefinition }
+                : e.operatorDefinition !== undefined
+                  ? { operator: e.operatorDefinition }
+                  : undefined,
+              e
+            )
+          );
     const result =
       head !== undefined && head.type.matches('function')
         ? ce.function('Apply', [head, ...next], { form })
@@ -4764,6 +4813,122 @@ export function snapshotRunVariables(
     return result;
   };
   return walk(value, undefined);
+}
+
+/**
+ * The value `result` of a call or of a block, with each occurrence of a
+ * local of the current lexical scope (the call frame or the block scope)
+ * replaced with the value that the local holds, as `snapshotRunVariables`
+ * does for a stored value. The names of `except` (the parameters of a call,
+ * which `bindingKeyedSubs` replaces) are left alone.
+ *
+ * A local has no value once its call or block has ended, so a result that
+ * names one in a part that was not evaluated would read nothing later: with
+ * `t` free, `function f(a) { let k = a^2; if t > 0 { k + 1 } else { 0 } }`
+ * gives `If(0 < t, 26, 0)` for `f(5)`, not `If(0 < t, k + 1, 0)`. A
+ * function literal of such a part is not a function value, and its
+ * occurrences are replaced too: `If(c, x ↦ k + x, 0)` gives
+ * `If(c, x ↦ 25 + x, 0)`.
+ *
+ * Left alone:
+ * - A function value and a lazy collection: a closure reads the last value
+ *   of a local that another closure writes, and a lazy collection keeps the
+ *   activation it was made in.
+ * - A result that can write a local (`mayWriteLocal()`):
+ *   `If(c, Block(k += 1, k), 0)`, or a branch that calls a closure that
+ *   writes `k`. Replacing the reads and not the write would give the old
+ *   value of the local after the write.
+ *
+ * Must be called while the scope of the call or of the block is the current
+ * lexical scope.
+ */
+export function resultOverRunLocals(
+  ce: ComputeEngine,
+  result: Expression,
+  except: ReadonlyArray<string> = []
+): Expression {
+  if ((!isFunction(result) && !isDictionary(result)) || result.isLazyCollection)
+    return result;
+  const scope = ce.context.lexicalScope;
+  const shielded = SHIELDED_RESULTS.get(result);
+  const names: string[] = [];
+  for (const [name, binding] of scope.bindings)
+    if (
+      'value' in binding &&
+      !except.includes(name) &&
+      shielded?.includes(name) !== true
+    )
+      names.push(name);
+  if (names.length === 0 || !hasReferencedName(result, names)) return result;
+  if (mayWriteLocal(result, scope, names)) return result;
+  return snapshotRunVariables(ce, result, { scope, locals: names });
+}
+
+/** The values of a `HoldValues`, with the names it shielded
+ * (`noteShieldedResult()`). */
+const SHIELDED_RESULTS = new WeakMap<Expression, ReadonlyArray<string>>();
+
+/**
+ * Record that `result`, the value of a `HoldValues`, names the symbols of
+ * `names` as symbols, and return it. When it is the value of a block or of a
+ * call, the locals of these names keep their names
+ * (`resultOverRunLocals()`): `Block(Declare(y, 'real', 3),
+ * HoldValues(y + 1, y))` is `y + 1`.
+ */
+export function noteShieldedResult(
+  result: Expression,
+  names: ReadonlyArray<string>
+): Expression {
+  if (names.length > 0 && (isFunction(result) || isDictionary(result)))
+    SHIELDED_RESULTS.set(result, names);
+  return result;
+}
+
+/** The operators that write the binding their first operand names. */
+const STORING_OPERATORS: ReadonlySet<string> = new Set([
+  'Assign',
+  'AddTo',
+  'Declare',
+]);
+
+/**
+ * True when evaluating `expr` can write one of `names`, the locals of
+ * `scope`: `expr` holds a storing operator (`STORING_OPERATORS`) whose target
+ * names one of them (a symbol, a destructuring pattern, an element or a
+ * field), or a function that can: a function literal or a function value
+ * in `expr`, or in what a binding of `scope` named in `expr` holds: the
+ * value of a local (`c` or `c()`, a list of closures `fs` read as
+ * `fs[1]()`), or the literal of a function that `scope` defines
+ * (`helper(x) = …`). A function of another scope cannot write a local of
+ * this one except through such a function value. The test is syntactic and
+ * errs on the side of `true`: a nested literal that writes a local of its
+ * own of the same name counts.
+ */
+function mayWriteLocal(
+  expr: Expression,
+  scope: Scope,
+  names: string[]
+): boolean {
+  const seen = new Set<Expression>();
+  // What the binding `name` of `scope` holds, if anything.
+  const held = (name: string): Expression | undefined => {
+    const binding = scope.bindings.get(name);
+    if (binding === undefined) return undefined;
+    return 'value' in binding
+      ? binding.value.storedValue
+      : (binding.operator as { _lambdaLiteral?: Expression })._lambdaLiteral;
+  };
+  const visit = (e: Expression | undefined): boolean => {
+    if (e === undefined || seen.has(e)) return false;
+    seen.add(e);
+    if (isDictionary(e)) return e.keys.some((k) => visit(e.get(k)!));
+    if (isSymbol(e)) return visit(held(e.symbol));
+    if (!isFunction(e)) return false;
+    if (STORING_OPERATORS.has(e.operator) && e.op1?.has(names) === true)
+      return true;
+    return visit(held(e.operator)) || e.ops.some(visit);
+  };
+  return visit(expr);
 }
 
 /** Find a referenced name in a value, including the values of a dictionary.
@@ -7866,6 +8031,9 @@ function makeLambda(
           ce._evalContextStack,
           freshScope
         );
+        // The locals of the body that the result names get their values:
+        // they have none once the call has ended.
+        result = resultOverRunLocals(ce, result);
         if (options?.numericApproximation)
           result = result.evaluate({ numericApproximation: true });
       } finally {
@@ -9297,6 +9465,10 @@ function makeLambda(
             carryLazyViewContexts(unsubstituted, result);
         }
       }
+
+      // The locals of the body that the result names get their values
+      // too: they have none once the call has ended.
+      result = resultOverRunLocals(ce, result, paramNames);
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating
       // the (exactly-evaluated) result HERE, while the function's scope

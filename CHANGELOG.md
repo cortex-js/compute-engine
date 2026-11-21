@@ -197,6 +197,22 @@
   `Reverse(Sort(Reverse(Sort(F(3)))))`, with `F` a user function that returns
   a list, is now `undefined` (was `true`). Its value does not change.
 
+- **The value of a function call or of a block that is not decided yet names
+  the values of its local variables** (CE-1330). With `t` free,
+  `function f(a) { let k = a^2; if t > 0 { k + 1 } else { 0 } }` gives
+  `If(0 < t, 26, 0)` for `f(5)`, where it gave `If(0 < t, k + 1, 0)`, whose
+  `k` had no value once the call had ended: `let r = f(5); let t = 1; r` is
+  now `26`, not `k + 1`. A parameter in the same place already got its value.
+  The same holds for a `do { … }` block, for a sum with a free bound
+  (`sum(k * i * t, i, 1, m)` gives `Sum(25i·t, …)`), and for a function
+  literal that the call did not evaluate: with
+  `f := a ↦ Block(Declare(k, "unknown", a), If(c, x ↦ k + x, x ↦ 0))`, the
+  function of the branch of `f(5)` applied to `1` gives `6` again, where it
+  gave `k + 1` since 0.192.0. A local keeps its name in a function value (a
+  closure reads the last value of the local), in a part that writes the
+  local (`do { k += 1; k }`, or a call of a closure that writes it), in an
+  `Error`, and where `HoldValues` shields it.
+
 ## 0.197.0 _2026-11-21_
 
 ### New Features

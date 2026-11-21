@@ -335,11 +335,10 @@ describe('the application that waits belongs to the literal that answered', () =
     ).toBe(6);
   });
 
-  // Expected failure: the call `h(x)` of the local leaves `w` unevaluated
-  // while `m` has no value, and it stays unevaluated: `r` is `1 + h(2)`,
-  // not 5. Tracked in
-  // docs/plans/2026-11-11-bound-once-evidence/step1-state.md.
-  test.failing('a local annotated function resolves after the call returns', () => {
+  // The call `h(x)` of the local stays unevaluated while `m` has no value;
+  // when `w(m)` ends, the call names the function that the local holds, not
+  // the local (CE-1330).
+  test('a local annotated function resolves after the call returns', () => {
     const w = 'function w(x) { let h = (k: integer) => 2*k\n h(x) + 1 }\n';
     expect(runWith(['m'], w + 'let r = w(m)\nm = 2\nr')).toBe(5);
     expect(errorCode(runWith(['m'], w + 'let r = w(m)\nm = 1.5\nr'))).toBe(
