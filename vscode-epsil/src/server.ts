@@ -318,7 +318,9 @@ connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
 
 // The signatures come from `epsilSignatureHelp()`, the function Tycho's
 // editor calls too. A parameter label is its `[start, end]` range in the
-// signature label. An argument that matches no parameter (`-1`) is sent as
+// signature label. Each signature carries its own active parameter, so the
+// arms of an overload set highlight the parameter of the argument at the
+// cursor in each arm. An argument that matches no parameter (`-1`) is sent as
 // `null` to a client that declares `noActiveParameterSupport`. Otherwise it
 // is sent as an index past the last parameter: VS Code highlights none, but
 // the protocol reads an index out of range as 0, so another client may
@@ -334,6 +336,12 @@ connection.onSignatureHelp(
       document.offsetAt(position)
     );
     if (result === null) return null;
+    const activeParameter = (index: number, parameterCount: number): number =>
+      index >= 0
+        ? index
+        : hasNoActiveParameterCapability
+          ? (null as unknown as number)
+          : parameterCount;
     const active = result.signatures[result.activeSignature];
     return {
       signatures: result.signatures.map((signature) => ({
@@ -341,17 +349,19 @@ connection.onSignatureHelp(
         parameters: signature.parameters.map((parameter) => ({
           label: parameter.range,
         })),
+        activeParameter: activeParameter(
+          signature.activeParameter,
+          signature.parameters.length
+        ),
         ...(signature.documentation === undefined
           ? {}
           : { documentation: signature.documentation }),
       })),
       activeSignature: result.activeSignature,
-      activeParameter:
-        result.activeParameter >= 0
-          ? result.activeParameter
-          : hasNoActiveParameterCapability
-            ? (null as unknown as number)
-            : active.parameters.length,
+      activeParameter: activeParameter(
+        result.activeParameter,
+        active.parameters.length
+      ),
     };
   }
 );

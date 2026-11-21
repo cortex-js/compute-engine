@@ -1047,20 +1047,6 @@ follows, so the list and the run cannot disagree. The VS Code extension
 (`vscode-epsil/src/server.ts`) and Tycho's debugger use it to grey out a
 breakpoint.
 
-### CE-1571. Signature help: an active parameter for each signature
-
-**Status:** ready; capability, S. Approved 2026-11-20.
-
-`epsilSignatureHelp()` (`src/epsil/signature-help.ts`) returns one
-`activeParameter`, the one of `activeSignature`. For a function with several
-signatures (`join`, `slice`, a source function with several clauses) the
-other signatures show no highlighted parameter, or the wrong one when the
-editor applies the shared index to them. The LSP has a per-signature
-`SignatureInformation.activeParameter`: add `activeParameter` to each
-`EpsilSignature` (the value `activeParameterOf()` already computes for every
-candidate), keep the top-level field for the active signature, and pass the
-per-signature value in the VS Code provider (`vscode-epsil/src/server.ts`).
-
 ## Performance
 
 ### CE-624. The interpreter cannot compute a nested integral of a user-function call

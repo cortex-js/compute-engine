@@ -417,6 +417,9 @@ selects the parameter of that name, and a rest or variadic parameter stays
 active for every later argument. An argument past the last parameter gives
 `-1`. A library function whose signature is an overload set has one
 signature per arm; the active signature is the first that has the active
+parameter. Each signature also has its own `activeParameter`, since the arms
+can differ: `epsilSignatureHelp(ce, "slice(s, 1, ", 12)` gives `-1, 2, -1, 2`
+for the four signatures, because the two that take a `span` have no third
 parameter. The VS Code extension serves the same signatures as its
 signature help.
 

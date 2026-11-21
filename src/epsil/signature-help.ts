@@ -59,6 +59,12 @@ export type EpsilSignature = {
   parameters: EpsilSignatureParameter[];
   /** The first line of the library description, for a library function. */
   documentation?: string;
+  /** The index of the active parameter in this signature, or -1 when the
+   * argument at the offset matches none of its parameters. The signatures
+   * of an overload set can differ: in `slice(s, 1, ▮`, the signature
+   * `slice(value, start, end)` has the active parameter 2, and
+   * `slice(value, span)` has none. */
+  activeParameter: number;
 };
 
 /** The signature help at an offset of an Epsil source. */
@@ -73,12 +79,13 @@ export type EpsilSignatureHelp = {
    * when none has it. */
   activeSignature: number;
   /** The index of the active parameter in the active signature, or -1 when
-   * the argument at the offset matches none of its parameters. */
+   * the argument at the offset matches none of its parameters: the
+   * `activeParameter` of `signatures[activeSignature]`. */
   activeParameter: number;
 };
 
 /** A signature with what selects its active parameter. */
-type Candidate = EpsilSignature & {
+type Candidate = Omit<EpsilSignature, 'activeParameter'> & {
   /** Whether the last parameter takes all the remaining arguments. */
   rest: boolean;
 };
@@ -159,7 +166,10 @@ export function epsilSignatureHelp(
   );
   return {
     callee: candidates.callee,
-    signatures: candidates.map(({ rest: _rest, ...signature }) => signature),
+    signatures: candidates.map(({ rest: _rest, ...signature }, i) => ({
+      ...signature,
+      activeParameter: active[i],
+    })),
     activeSignature,
     activeParameter: active[activeSignature],
   };

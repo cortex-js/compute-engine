@@ -33,6 +33,7 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
           label: 'sin(complex | quantity) -> number',
           parameters: [{ type: 'complex | quantity', range: [4, 22] }],
           documentation: 'Sine of an angle.',
+          activeParameter: 0,
         },
       ],
       activeSignature: 0,
@@ -72,6 +73,21 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
     ]);
   });
 
+  test('each signature has its own active parameter', () => {
+    // The signatures with a `span` have no third parameter.
+    const result = help('slice(x, 1, ▮');
+    expect(result?.signatures.map((s) => s.activeParameter)).toEqual([
+      -1, 2, -1, 2,
+    ]);
+    expect(result?.activeParameter).toBe(
+      result?.signatures[result.activeSignature].activeParameter
+    );
+    // A named argument: the parameter of that name in each signature.
+    expect(
+      help('slice(x, start: ▮')?.signatures.map((s) => s.activeParameter)
+    ).toEqual([-1, 1, -1, 1]);
+  });
+
   test('a function of the source, with a default shown as optional', () => {
     const result = help(F + 'f(▮)');
     expect(result).toEqual({
@@ -83,6 +99,7 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
             { name: 'x', type: 'real', range: [2, 9] },
             { name: 'n', type: 'integer', range: [11, 22] },
           ],
+          activeParameter: 0,
         },
       ],
       activeSignature: 0,

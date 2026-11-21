@@ -48,6 +48,20 @@
 
 ### Improvements
 
+- **Each signature that `epsilSignatureHelp()` returns has its own
+  `activeParameter`** (CE-1571). The arms of an overload set can differ, and
+  the one index of the active signature did not apply to the others. In
+  `slice(s, 1, ▮`, the two signatures `slice(value, start, end)` have the
+  active parameter `2`, and the two `slice(value, span)` have none (`-1`).
+  The top-level `activeParameter` is unchanged: it is the one of the active
+  signature. The VS Code extension sends the value of each signature, so
+  each arm highlights its own parameter.
+
+  ```ts
+  epsilSignatureHelp(ce, "slice(s, 1, ", 12).signatures.map((s) => s.activeParameter);
+  // ➔ [-1, 2, -1, 2]
+  ```
+
 - **`ArgMax`, `ArgMin`, `MaxBy` and `MinBy` compile** (CE-1610). `compile()`
   declined them on every target ("the operator ArgMax is not supported by the
   compiler"). They now compile to JavaScript for a list of real numbers, and
