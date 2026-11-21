@@ -25,6 +25,18 @@
   get the protocols, and a case pattern of `match` gets no keyword other
   than `true` and `false`.
 
+### Resolved Issues
+
+- **`Element(1 / (x * Gamma(x + 2)), RealNumbers)` is `True` again under
+  `x > 0`** (#649). Since the `assume()` change of 0.194.2, the type of `x` no
+  longer carries the assumption, and the proof that a quotient is real asked an
+  application operand for its type only. `Gamma(x + 2)` is typed `real`, so
+  the denominator `x * Gamma(x + 2)` could be zero and the quotient was left
+  undecided. The proof now also reads the sign of an application from its
+  operator's `sgn` handler, which asks the assumptions, as it does for a
+  symbol. `evaluate()`, `simplify()`, `ce.verify()` and `isExtendedReal` agree.
+  With `x > -3`, `Element(1 / x, RealNumbers)` stays undecided.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues
