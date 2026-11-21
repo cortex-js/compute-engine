@@ -2,6 +2,13 @@
 
 ### New Features
 
+- **`ReplaceAt` of a list of a run-time length compiles in `mode: 'bigint'`**
+  (#645). `ReplaceAt(Map(z ↦ 0, Range(1, n)), 1, 1)` and a replacement at an
+  index known at run time give the interpreter's list; an index that is 0 or out
+  of range throws `out-of-range`, as in the other modes. It declined with
+  "ReplaceAt at a constant index of a list of a length known at run time
+  (JavaScript only)".
+
 - **The fixit of an unclosed Epsil string can close it at the caret**
   (CE-1520). A `Fixit` has an optional fourth element, a caret range
   `[start, end]` (both ends included). The fixit of
