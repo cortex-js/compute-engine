@@ -12,10 +12,9 @@
 # other checks then run on the formatted tree. `npm run ci:extended` runs
 # the Prettier check too, because a release that the caller says passed
 # `ci:extended` skips this script.
-# A release runs this script before it changes anything else:
-# scripts/release.sh in its first step, and scripts/prepublish-check.sh
-# before the build of a plain `npm publish`. The formatting commit is the
-# only change that it can make.
+# scripts/release.sh runs this script in its first step, before it changes
+# anything else. A plain `npm publish` does not run it. The formatting
+# commit is the only change that it can make.
 #
 # Each check prints one line, and a failing check prints its log
 # (scripts/run-quietly.sh). The script stops at the first failure.

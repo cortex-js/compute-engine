@@ -72,9 +72,16 @@ fi
 # suite on <host> (`ci-nightly.sh run --remote`), with no box lock here, and
 # runs the test files that failed in it again alone there too.
 #
-# `CE_RELEASE_FORCE=1` (`npm run release force`) skips the full suite, and
-# with it the Prettier step and lint of scripts/release-checks.sh. The fast
-# refusals (uncommitted changes, HEAD moved) still apply.
+# `CE_RELEASE_FORCE=1` (`npm run release force`, or `CE_RELEASE_FORCE=1 npm
+# publish`) skips the full suite. The fast refusals (uncommitted changes,
+# HEAD moved) still apply.
+#
+# This script does not run the other checks of `npm run ci` (the Prettier
+# step, lint, the documentation references, the circular imports, the script
+# tests, the corpus pipeline). `npm run release` runs them before it changes
+# the version (scripts/release-checks.sh), and packages the VS Code
+# extension after the upload (scripts/package-vsix.sh). A plain `npm
+# publish` builds, checks the full suite and uploads.
 #
 # The check is skipped in two cases:
 # - In GitHub Actions (`GITHUB_ACTIONS=true`): the publish workflow
@@ -212,20 +219,6 @@ if [ "${1:-}" != "--after-pack" ]; then
 #  if [ "$STATUS" -eq 3 ]; then
 #    echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
 #  fi
-  # The checks of `npm run ci` that the full suite does not run (lint,
-  # documentation references, circular imports, script tests, corpus). They
-  # first format the source with Prettier and commit the files that changed,
-  # so HEAD is recorded after them.
-  # scripts/release.sh runs them before the version change and sets
-  # CE_RELEASE_CHECKS_DONE=1.
-  if [ "${CE_RELEASE_CHECKS_DONE:-}" != "1" ]; then
-    bash scripts/release-checks.sh || {
-      echo ""
-      echo "✗ A release check failed. Nothing was built or published."
-      echo ""
-      exit 1
-    }
-  fi
   git rev-parse HEAD > "$HEAD_FILE"
   exit 0
 fi

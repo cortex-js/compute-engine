@@ -15,7 +15,6 @@
     "roadmap-batch": "node scripts/roadmap-batch.mjs",
     "prepublishOnly": "bash ./scripts/prepublish-check.sh",
     "postpack": "bash ./scripts/prepublish-check.sh --after-pack",
-    "postpublish": "bash ./scripts/package-vsix.sh",
     "test": "bash ./scripts/test.sh",
     "test:nodenext": "node ./test/consumer/nodenext-smoke.mjs",
     "test:js-runtime": "node ./test/consumer/js-runtime-smoke.mjs",

@@ -256,8 +256,8 @@ commit afterwards. It combines with a version: `npm run release -- patch force`.
    references show the release version.
 4. It shows the changed files, asks for confirmation, and commits only those
    files as `<version>`.
-5. `npm publish` (see below), without its VS Code extension step, so that a
-   failure of `npm publish` means that nothing was uploaded.
+5. `npm publish` (see below). It has no step after the upload, so a failure of
+   `npm publish` means that nothing was uploaded.
 6. After the upload, it tags the release commit `v<version>`.
 7. It pushes the release commit to `main` and the tag to `origin` with one
    `git push --atomic`: GitHub gets both or neither. The push names the release
@@ -271,7 +271,8 @@ commit afterwards. It combines with a version: `npm run release -- patch force`.
 When `npm publish` fails, nothing is published, and the release commit stays
 without a tag. Fix the cause, commit, run `npm publish`, then tag the published
 commit and push it with its tag
-(`git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`). When
+(`git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`), and
+package the VS Code extension (`bash scripts/package-vsix.sh`). When
 only step 7 fails, fix the cause and run the push command that the
 script prints. When only step 8 fails, fix the cause and run
 `bash scripts/package-vsix.sh`.
@@ -282,12 +283,15 @@ current holder and for earlier priority entries, not for the other sessions in
 the queue. Agents leave commits and publishing to the user unless explicitly
 instructed otherwise.
 
-`npm publish` checks release eligibility, runs `scripts/release-checks.sh`
-(unless `npm run release` ran it already), performs a clean production build
-with consumer smoke tests, runs the full test suite at HEAD when no passing run
-covers it, uploads the package, and packages the VS Code extension. When you run
+`npm publish` checks release eligibility (the npm login, no uncommitted source
+change), performs a clean production build with consumer smoke tests, runs the
+full test suite at HEAD when no passing run covers it, and uploads the package.
+It does not run `scripts/release-checks.sh` (the Prettier step, lint,
+`check:docs`, `check:deps`, `test:tools`, the corpus pipeline) and it does not
+package the VS Code extension: only `npm run release` does these. When you run
 `npm publish` without `npm run release`, generate the documentation first and
-include it in the release commit.
+include it in the release commit, and run `bash scripts/package-vsix.sh` after
+the upload.
 
 The line that reports the full suite gives the time it took, with the wait for
 the box lock. When the full run fails on at most ten test files and on nothing
@@ -298,9 +302,9 @@ stack depth): the release continues, and the occurrence is written to
 test gets an issue. When a file still fails, or another job failed (the
 typecheck), the publish stops.
 
-`CE_RELEASE_FORCE=1 npm publish` publishes without the full suite, the Prettier
-step and lint. It is what `npm run release force` sets, and it resumes a publish
-that stopped on the full suite.
+`CE_RELEASE_FORCE=1 npm publish` publishes without the full suite: it builds and
+uploads. `npm run release force` sets the same variable, and the command resumes
+a publish that stopped on the full suite.
 
 <details>
 <summary>Local release guard and previously completed validation</summary>
@@ -316,7 +320,8 @@ for an unverified or subsequently changed tree.
 
 The build and the VS Code extension packaging print one line per step. Their
 output goes to a log in `$TMPDIR/compute-engine-publish/`, and a failing step
-prints the end of its log. `CE_VERBOSE=1 npm publish` shows all the output.
+prints the end of its log. `CE_VERBOSE=1` (`CE_VERBOSE=1 npm run release`) shows
+all the output.
 
 </details>
 

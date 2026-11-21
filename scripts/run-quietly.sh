@@ -7,9 +7,8 @@
 # command fails, it prints the last lines of the log and the log path, and
 # exits with the command's exit code.
 #
-# The publish hooks (`prepack`, `postpublish`) use it so that a successful
-# `npm publish` prints only a few lines, while a failure still shows its
-# details.
+# The release scripts and the `prepack` hook use it so that a successful
+# release prints only a few lines, while a failure still shows its details.
 #
 # Set CE_VERBOSE=1 to run the command with its output shown, as before.
 

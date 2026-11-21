@@ -1,27 +1,23 @@
 #! bash
 
-# This script is run by npm as the `postpublish` hook, i.e. automatically
-# after a successful `npm publish` of the engine.
+# Usage: bash scripts/package-vsix.sh
+#
+# Packages the VS Code extension as vscode-epsil/epsil.vsix.
+# scripts/release.sh runs this script as its last step, after it tags and
+# pushes the release. A plain `npm publish` does not run it: after one, run
+# this script by hand, from the tree that was published.
 #
 # The VS Code extension's language server bundles the engine FROM SOURCE at
-# package time, so the .vsix must be built from the exact tree that was just
-# published — running here, right after publish, is what guarantees the
-# extension and the npm package contain the same engine. (The extension's
-# version number was already stamped to the engine version by version.sh at
-# `npm version` time.)
+# package time, so the .vsix must be built from the exact tree that was
+# published: that is what guarantees that the extension and the npm package
+# contain the same engine. (The extension's version number was already
+# stamped to the engine version by version.sh at `npm version` time.)
 #
 # Publishing the .vsix to the marketplace is still a manual step: the
 # publisher web UI needs no token, whereas `vsce publish` and the CI job in
 # .github/workflows/publish.yml require a VSCE_PAT that is not set up yet.
 
 set -e  # exit immediately on error
-
-# scripts/release.sh sets CE_RELEASE_SKIP_VSIX=1 and runs this script itself
-# after it tags the release. Otherwise a failure here makes `npm publish`
-# exit non-zero after the upload, which looks like a failed upload.
-if [ "${CE_RELEASE_SKIP_VSIX:-}" = "1" ]; then
-  exit 0
-fi
 
 cd "$(dirname "$0")/../vscode-epsil"
 

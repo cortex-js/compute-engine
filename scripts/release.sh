@@ -40,10 +40,9 @@
 #      question), then commits them as "<version>".
 #   5. `npm publish`. Its hooks build the package, run the full test suite
 #      at the release commit when no passing run covers it, and upload the
-#      package (scripts/prepublish-check.sh). Its `postpublish` hook, which
-#      packages the VS Code extension, is skipped (CE_RELEASE_SKIP_VSIX=1),
-#      so that a non-zero exit of `npm publish` means the upload did not
-#      happen.
+#      package (scripts/prepublish-check.sh). It has no step after the
+#      upload (step 8 packages the VS Code extension), so a non-zero exit of
+#      `npm publish` means that the upload did not happen.
 #   6. Tags the release commit `v<version>`, only after the upload, so that a
 #      failed publish leaves no tag to move. The tag names the commit made in
 #      step 4, not the HEAD of that moment: another session can commit
@@ -61,6 +60,7 @@
 # the cause, commit, and run `npm publish`, then tag the commit that was
 # published and push it with its tag:
 # `git push --atomic origin <commit>:refs/heads/main refs/tags/v<version>`.
+# Then package the VS Code extension: `bash scripts/package-vsix.sh`.
 
 set -o pipefail
 cd "$(dirname "$0")/.."
@@ -319,8 +319,8 @@ fi
 # shellcheck disable=SC2086 # The file lists are split on purpose.
 PARENT_SHA=$(git rev-parse HEAD)
 # Another session can commit after the checks of step 1, for example while
-# the question waited. The release checks did not see that commit, and
-# CE_RELEASE_CHECKS_DONE=1 below would skip them in the publish check.
+# the question waited. The release checks did not see that commit, and the
+# publish check does not run them.
 if [ "$PARENT_SHA" != "$CHECKED_SHA" ]; then
   echo ""
   echo "✗ HEAD moved from ${CHECKED_SHA:0:9} to ${PARENT_SHA:0:9} after the release checks. Nothing was committed."
@@ -348,11 +348,11 @@ echo "✓ Committed ${RELEASE_SHA:0:9} \"$VERSION\""
 # the connection drops before the registry answers), so the registry decides.
 UPLOAD_MARK="$(git rev-parse --git-dir)/ce-release-upload-mark"
 rm -f "$UPLOAD_MARK"
-if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
+if ! CE_RELEASE_SHA="$RELEASE_SHA" CE_RELEASE_UPLOAD_MARK="$UPLOAD_MARK" npm publish; then
   if [ ! -f "$UPLOAD_MARK" ]; then
     echo ""
     echo "  To publish without the full test suite: CE_RELEASE_FORCE=1 npm publish"
-    fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>', and push it: 'git push --atomic origin <commit>:refs/heads/main refs/tags/$TAG'."
+    fail "✗ npm publish failed before the upload; nothing was published. The release commit ${RELEASE_SHA:0:9} stays. Fix the cause, commit, run 'npm publish', then tag the commit that was published: 'git tag $TAG <commit>', push it: 'git push --atomic origin <commit>:refs/heads/main refs/tags/$TAG', and package the VS Code extension: 'bash scripts/package-vsix.sh'."
   fi
   rm -f "$UPLOAD_MARK"
   # The registry can take several minutes to show a new version: ask every
@@ -368,7 +368,7 @@ if ! CE_RELEASE_SKIP_VSIX=1 CE_RELEASE_CHECKS_DONE=1 CE_RELEASE_SHA="$RELEASE_SH
     sleep 30
   done
   if [ "$FOUND" -ne 1 ]; then
-    fail "✗ The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}', then 'git push --atomic origin $RELEASE_SHA:refs/heads/main refs/tags/$TAG'."
+    fail "✗ The registry does not show $PACKAGE@$VERSION after 10 minutes: the upload most likely failed. The release commit ${RELEASE_SHA:0:9} stays. Run 'npm publish' again, then 'git tag $TAG ${RELEASE_SHA:0:9}', then 'git push --atomic origin $RELEASE_SHA:refs/heads/main refs/tags/$TAG', then 'bash scripts/package-vsix.sh'."
   fi
   echo "✓ The registry shows $PACKAGE@$VERSION: the upload succeeded."
 fi
