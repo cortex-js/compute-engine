@@ -2,6 +2,29 @@
 
 ### New Features
 
+- **`epsilDebugStatements()` lists the statements of an Epsil source at which
+  a debug run of `executeEpsilAsync()` cannot pause** (CE-1570), so that a
+  debugger can grey out a breakpoint that never stops. It is exported from
+  `@cortex-js/compute-engine/epsil`, reads the source without running it, and
+  takes the options of `epsilCompletions()`. Each statement has its `range`,
+  as the debug hooks receive it, and `canPause`. `canPause` is `false` for a
+  statement of a function literal given to the library `map`, `filter`,
+  `takeWhile` or `count`: the engine runs it on the synchronous route, which
+  calls no hook. Every other statement is listed with `canPause: true`, also
+  some that never pause, such as a named function that only `map` applies.
+
+  ```ts
+  const source = "let ys = map(k => do { let t = k + 1; t * 2 }, 1..3)\nsum(ys)";
+  epsilDebugStatements(ce, source).map(
+    (s) => `${s.canPause} ${source.slice(...s.range)}`
+  );
+  // ➔ ["true let ys = map(k => do { let t = k + 1; t * 2 }, 1..3)",
+  //    "false let t = k + 1", "false t * 2", "true sum(ys)"]
+  ```
+
+  The documentation of the debug hooks no longer lists `any` and `all`: the
+  engine awaits their predicate, so a breakpoint in it stops the run.
+
 - **`epsilHover()` says what the name at an offset of an Epsil source is, and
   `epsilDefinition()` says where the source declares it** (CE-1589), for the
   "Show Info" and "Go to Definition" commands of an editor. Both are exported
