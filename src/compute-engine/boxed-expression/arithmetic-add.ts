@@ -178,58 +178,31 @@ export function canonicalAdd(
   // admitted and typed `number | tuple<number, number>`, and the JavaScript
   // compiler trusted that type and emitted scalar code over the tuple, which
   // returned the string "21,2".
-  if (
-    ops.some((x) => isNumericTupleCarrier(x)) &&
-    ops.some((x) => isProvablyScalarNumber(x))
-  )
-    return ce.error(['incompatible-type', 'tuple', 'number']);
-
-  // The same mistake, element by element: a point plus a list of numbers
-  // broadcasts the point over the list, and every element is a
-  // `tuple + number` sum. Rejected here, whether the point, the list or both
-  // are restricted by a condition, because Desmos rejects the whole sum
-  // ("Cannot add a point and a list of numbers") whatever the value of the
-  // condition. Before this, `(0,1) + [10,20,30]` was valid and evaluated to
-  // a list of three errors, and with a restricted point to a list of `NaN`
-  // when the point was absent.
-  if (
-    ops.some((x) => isNumericTupleCarrier(x)) &&
-    ops.some((x) => isProvablyNumberList(x))
-  )
-    return ce.error(['incompatible-type', 'tuple', 'list<number>']);
-
-  // The two mistakes above at once: a point plus an operand declared as a
-  // number or a list of numbers (`u: number | list<number>`) is a
-  // `tuple + number` error when `u` is a number and a `tuple + list<number>`
-  // error when it is a list, so the sum is rejected the same way. Before
-  // this, `(cos a, sin a) + u` was accepted and typed
-  // `list<number> | number | tuple<real, real>`, and every value of it was
-  // an error. A list of points is rejected for the same reason.
-  {
-    const either = ops.find((x) => isProvablyNumberOrNumberList(x));
-    if (either !== undefined) {
-      if (ops.some((x) => isNumericTupleCarrier(x)))
-        return ce.error(['incompatible-type', 'tuple', either.type.toString()]);
-      if (ops.some((x) => isPointListCarrier(x)))
-        return ce.error([
-          'incompatible-type',
-          'list<tuple>',
-          either.type.toString(),
-        ]);
-    }
+  const hasPoint = ops.some(isNumericTupleCarrier);
+  if (hasPoint) {
+    if (ops.some(isProvablyScalarNumber))
+      return ce.error(['incompatible-type', 'tuple', 'number']);
+    if (ops.some(isProvablyNumberList))
+      return ce.error(['incompatible-type', 'tuple', 'list<number>']);
   }
 
-  // The same two mistakes with a LIST of points: the sum applies to each
-  // point, so `[(0,1),(4,5)] + 1` is a list of `tuple + number` sums, and
-  // `[(1,2),(3,4)] + [1,2]` pairs each point with a number. Desmos rejects
-  // both ("Cannot add a list of points and a number", "... and a list of
-  // numbers"), also when the list is restricted by a condition. A list of
-  // points plus a point, or plus another list of points, stays valid.
-  if (ops.some((x) => isPointListCarrier(x))) {
-    if (ops.some((x) => isProvablyScalarNumber(x)))
-      return ce.error(['incompatible-type', 'list<tuple>', 'number']);
-    if (ops.some((x) => isProvablyNumberList(x)))
-      return ce.error(['incompatible-type', 'list<tuple>', 'list<number>']);
+  // A scalar-or-list union is incompatible with either a point or a list
+  // of points. Only ask about the other operands when there is a point.
+  const hasPointList = ops.some(isPointListCarrier);
+  if (hasPoint || hasPointList) {
+    const either = ops.find(isProvablyNumberOrNumberList);
+    if (either !== undefined)
+      return ce.error([
+        'incompatible-type',
+        hasPoint ? 'tuple' : 'list<tuple>',
+        either.type.toString(),
+      ]);
+    if (hasPointList) {
+      if (ops.some(isProvablyScalarNumber))
+        return ce.error(['incompatible-type', 'list<tuple>', 'number']);
+      if (ops.some(isProvablyNumberList))
+        return ce.error(['incompatible-type', 'list<tuple>', 'list<number>']);
+    }
   }
 
   // A sum of several terms that folds down to a lone absent term
