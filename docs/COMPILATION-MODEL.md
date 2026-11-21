@@ -277,6 +277,20 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `glsl` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
   `length(vec2(x, y))`, which squares its operands: `Hypot(1e20, 1e20)` gives
   `Infinity` and `Hypot(1e-25, 1e-25)` gives `0`.
+- `glsl` (crafted), `x: real`, `y: real`: `GCD(x, y)` and `LCM(x, y)` at
+  two integers of which one is 2^31 or more give `NaN` (the shader computes
+  the divisor of two integers on `int`s): at `x = 2^31`, `y = 3` the
+  interpreter gives `1` and `6442450944`.
+- `plausible?` — `glsl`, `x: real`, `y: real`: `GCD(x, y)` and `LCM(x, y)`
+  of two operands with no common divisor above 1e-6 of the larger one. The
+  interpreter's value is then the remainder at which its loop ends, and it
+  changes with the last bit of an operand; the shader computes the
+  remainders in single floats and can end on another one. At the single
+  floats `x = 1.715306043624878`, `y = 8.980745315551758`, `GCD(x, y)` gives
+  `5.6028e-5` and `LCM(x, y)` gives `274945.1` (SwiftShader); the
+  interpreter gives `1.5497e-5` and `994032.4`. Operands that hold integers,
+  and operands with a common divisor far above that bound (`GCD(7.5, 2)`),
+  give the interpreter's value.
 - `glsl` (crafted): a `Which` of 126 clauses or more compiles
   to a shader that WebGL 2 refuses ("Expression too complex"; 124 clauses
   pass), where the interpreter has the value.

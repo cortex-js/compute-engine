@@ -326,8 +326,15 @@ is 0 or small (`HarmonicNumber(0.5, -10)` is 2^-10); r < -24.5 for an n that is
 not an integer from 1 to 256; n below -10^6 for an r other than 1; and where the
 value overflows a single float (`HarmonicNumber(1195.5, -13.9)`). The others
 decline on GLSL. `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd`
-on `int`s. `Hypot` is `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)`
-(the builtin is wrong for a large negative argument); `Sinh`, `Cosh`, `Tanh`,
+on `int`s. `GCD` and `LCM` of reals are `_gpu_ir_rgcd` and `_gpu_ir_rlcm`, the
+interpreter's `realGcd` and `realLcm`: of two operands that hold integers, the
+loop on `int`s (NaN when one is 2^31 or more); of other operands, the
+remainders down to 1e-6 of the larger operand, in single floats. Operands with
+no common divisor above that bound give a remainder of that size, which can be
+another one than the interpreter's (`docs/COMPILATION-MODEL.md`, "Known
+limitations"). `Hypot` is `length(vec2(x, y))`; `Arsinh` is
+`sign(x)·asinh(|x|)` (the builtin is wrong for a large negative argument);
+`Sinh`, `Cosh`, `Tanh`,
 `Arctan` and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are
 builtins or their reciprocals. `FresnelC` and `FresnelS` are the helpers
 `_gpu_ir_fresnelc` and `_gpu_ir_fresnels`: the rational approximations of the

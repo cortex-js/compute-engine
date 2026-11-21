@@ -570,6 +570,11 @@ export const GLSL: Syntax = deepFreeze({
       text: '_gpu_ir_lcm($0, $1)',
       helpers: ['_gpu_ir_gcd', '_gpu_ir_lcm'],
     },
+    'rgcd': { text: '_gpu_ir_rgcd($0, $1)', helpers: ['_gpu_ir_rgcd'] },
+    'rlcm': {
+      text: '_gpu_ir_rlcm($0, $1)',
+      helpers: ['_gpu_ir_rgcd', '_gpu_ir_rlcm'],
+    },
     'binomial': {
       text: '_gpu_ir_binomial($0, $1)',
       helpers: ['_gpu_ir_binomial'],
@@ -943,6 +948,46 @@ export const GLSL: Syntax = deepFreeze({
     _gpu_ir_lcm: `float _gpu_ir_lcm(float a, float b) {
   if (a == 0.0 || b == 0.0) return 0.0;
   return abs(a) / _gpu_ir_gcd(a, b) * abs(b);
+}`,
+    // `GCD` of two reals, as `realGcd` of the interpreter. NaN for an
+    // operand that is not finite, tested by its bits (a compiler may remove
+    // `isnan(x)`). Of two integers, Euclid's algorithm on `int`s; NaN when
+    // one is 2^31 or more, which an `int` does not hold. Of other operands,
+    // the remainders while one is above 1e-6 of the larger operand; the
+    // result is the last divisor, and at most the smaller operand. A
+    // remainder halves in two steps, so 41 steps reach that bound. The
+    // builtin `mod` is enough: its quotient is below 2^24, so it is wrong by
+    // at most one. A quotient that is one too small gives a remainder next
+    // to the divisor, where the exact one is next to 0, and the loop ends on
+    // that divisor two steps later. A quotient that is one too large gives a
+    // negative remainder, and the loop ends on the divisor at once, where
+    // the interpreter goes on to a divisor that is smaller by less than one
+    // ulp of the dividend.
+    _gpu_ir_rgcd: `float _gpu_ir_rgcd(float a, float b) {
+  a = abs(a); b = abs(b);
+  if ((floatBitsToUint(a) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(b) & 0x7FFFFFFFu) >= 0x7F800000u) return ${NAN};
+  if (a == 0.0) return b;
+  if (b == 0.0) return a;
+  if (a == floor(a) && b == floor(b)) {
+    if (max(a, b) >= 2147483648.0) return ${NAN};
+    int x = int(a), y = int(b);
+    for (int i = 0; i < 64 && y != 0; i++) { int t = x % y; x = y; y = t; }
+    return float(x);
+  }
+  float mn = min(a, b), tol = 1e-6 * max(a, b);
+  for (int i = 0; i < 64 && b > tol; i++) { float t = mod(a, b); a = b; b = t; }
+  return min(a, mn);
+}`,
+    // `LCM` of two reals, as `realLcm` of the interpreter: 0 when one is 0,
+    // else |a| / gcd · |b|. Of two integers the quotient is an integer, and
+    // it is rounded to it: a GLSL division need not be correctly rounded.
+    // From 2^23 every float is an integer, and `q + 0.5` would round an odd
+    // one to its even neighbour.
+    _gpu_ir_rlcm: `float _gpu_ir_rlcm(float a, float b) {
+  if (a == 0.0 || b == 0.0) return 0.0;
+  float q = abs(a) / _gpu_ir_rgcd(a, b);
+  if (a == floor(a) && b == floor(b) && q < 8388608.0) q = floor(q + 0.5);
+  return q * abs(b);
 }`,
     // `C(n, k)` of integers, as `binomial()` of the runtime: a negative `k`
     // or `n` is reflected to `C(m, j)` with a sign, then the product

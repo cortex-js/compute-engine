@@ -2,8 +2,9 @@
  * The special functions of the profile `ir` on GLSL (`print-glsl.ts`): the
  * reciprocal inverse trigonometric and hyperbolic functions, `Haversine`,
  * `Erf`, `Erfc`, `Gamma`, `GammaLn`, `Factorial` of a real,
- * `Factorial2`, `Zeta`, `Binomial`, `Choose` and `LCM` of integers,
- * `Heaviside`, `Remainder` (integers and reals), `Smoothstep`,
+ * `Factorial2`, `Zeta`, `Binomial`, `Choose` and `LCM` of integers, `GCD`
+ * and `LCM` of reals, `Heaviside`, `Remainder` (integers and reals),
+ * `Smoothstep`,
  * `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`, `Trigamma` and
  * `BesselJ` of an integer order. `PolyGamma` declines: the deleted GPU
  * helper is NaN where its terms cancel (`PolyGamma(2, -0.5)`), where the
@@ -44,6 +45,8 @@ function exact(v: number) {
 type Case = {
   op: string;
   inputs: string[];
+  /** The program, when it is not `op` applied to the inputs. */
+  json?: unknown;
   points: number[][];
   /** Relative tolerance, and an absolute one for values near 0. */
   rel: number;
@@ -90,6 +93,29 @@ const CASES: Case[] = [
     points: [[5, 2], [10, 3], [20, 10], [-4, 3]] },
   { op: 'LCM', inputs: ['n', 'm'], rel: 0, abs: 0,
     points: [[12, 8], [7, 3], [4, 6], [0, 5], [-4, 6], [1000, 999]] },
+  // Of reals that hold integers, the value is exact, also where a float
+  // division is not (`LCM(406, 7)`) and for an odd quotient from 2^23, which
+  // an addition of 0.5 rounds to an even one (`LCM(8388609, 1)`);
+  // 2147483520 is the largest float below 2^31.
+  { op: 'GCD', inputs: ['x', 'y'], rel: 0, abs: 0,
+    points: [[12, 18], [-12, 8], [0, 5], [5, 0], [0, 0], [17, 5], [406, 7], [1000, 999], [16777216, 3],
+      [2147483520, 2147483392]] },
+  { op: 'LCM', inputs: ['x', 'y'], rel: 0, abs: 0,
+    points: [[12, 18], [-12, 8], [0, 5], [5, 0], [0, 0], [17, 5], [406, 7], [1000, 999], [8388609, 1],
+      [8388607, 1], [16777215, 1], [4194305, 3]] },
+  // Of other reals: operands with a common divisor that is far above 1e-6
+  // of the larger one, where a rounding of the shader cannot change which
+  // remainder ends the loop.
+  { op: 'GCD', inputs: ['x', 'y'], rel: 1e-6, abs: 0,
+    points: [[12.5, 18], [7.5, 2], [-7.5, -2], [1.5, 2.5], [0.75, 0.5], [0.3, 0.1], [123456.75, 0.25], [0, 2.5],
+      [1e30, 0.5], [0.5, 1e30]] },
+  { op: 'LCM', inputs: ['x', 'y'], rel: 1e-6, abs: 0,
+    points: [[12.5, 18], [7.5, 2], [-7.5, -2], [1.5, 2.5], [0.75, 0.5], [0.3, 0.1], [0, 2.5]] },
+  // The colour of the multiplication table mod a slider `z`, which is a
+  // real: at an integer `z` each operand of `GCD` holds an integer.
+  { op: 'GCD', inputs: ['x', 'y', 'z'], rel: 1e-6, abs: 0,
+    json: ['GCD', ['Mod', ['Multiply', ['Floor', ['Multiply', 'z', 'x']], ['Floor', ['Multiply', 'z', 'y']]], 'z'], 'z'],
+    points: [[0.5, 0.5, 6], [0.9, 0.7, 12], [0.34, 0.77, 30], [0.2, 0.8, 7], [0.99, 0.99, 100], [0.5, 0.5, 6.5]] },
   { op: 'Heaviside', inputs: ['x'], rel: 0, abs: 0,
     points: [[-2], [-1e-30], [0], [1e-30], [3]] },
   { op: 'Remainder', inputs: ['n', 'm'], rel: 0, abs: 0,
@@ -119,8 +145,10 @@ const CASES: Case[] = [
       [20, 200], [18, 180], [10, 7], [30, 10]] },
 ];
 
-const compiledGlsl = (c: Case) =>
-  compile(ce.box([c.op, ...c.inputs] as never), IR_GLSL);
+const programOf = (c: Case) =>
+  ce.box((c.json ?? [c.op, ...c.inputs]) as never);
+
+const compiledGlsl = (c: Case) => compile(programOf(c), IR_GLSL);
 
 describe('the special functions compile on GLSL', () => {
   test.each(CASES.map((c) => [c.op, c] as const))('%s', (_, c) => {
@@ -132,11 +160,18 @@ describe('the special functions compile on GLSL', () => {
 /** The value of the interpreter where it is a finite real, else the value
  *  of the compiled JavaScript. */
 function expected(c: Case, point: number[]): number {
-  const v = ce.function(c.op, point.map(exact)).N();
+  const v =
+    c.json === undefined
+      ? ce.function(c.op, point.map(exact)).N()
+      : programOf(c)
+          .subs(
+            Object.fromEntries(c.inputs.map((n, k) => [n, exact(point[k])]))
+          )
+          .N();
   // Past the largest float, the shader's value is ±∞.
   if (Number.isFinite(v.re) && (v.im ?? 0) === 0)
     return Math.abs(v.re) > 3.4028235677973366e38 ? v.re * Infinity : v.re;
-  const js = compile(ce.box([c.op, ...c.inputs] as never), {
+  const js = compile(programOf(c), {
     profile: 'ir',
     fallback: false,
   });

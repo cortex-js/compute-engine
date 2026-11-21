@@ -56,7 +56,7 @@ describe('IR slice: GLSL text', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'colormap', 'atu', 'atp',
       'sort', 'sort.int', 'ordering', 'median',
-      'rbinomial', 'rgcd', 'rlcm', 'fibonacci.int',
+      'rbinomial', 'fibonacci.int',
       'isundef', 'present.int', 'present', 'cpresent', 'present.bool', 'count.int',
       'count.round', 'linspace.count', 'linspace',
       'copy', 'copy.int', 'copy.bool', 'wix', 'get', 'set', 'set.bool', 'getat', 'getatu',
