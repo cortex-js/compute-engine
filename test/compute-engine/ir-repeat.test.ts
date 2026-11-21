@@ -211,6 +211,8 @@ describe('a value that is not pure (CE-1396)', () => {
     ['Product', R(3)],
     ['Sin', R(3)],
     ['ListJoin', R(2), ['List', 9]],
+    // A list of lists: the inner list has the constant length of its count.
+    ['Repeat', R(3), 2],
     // The interpreter keeps a `Map` lazy, past the seed: its `Sum`.
     ['Sum', ['Map', ['Function', ['Multiply', 't', 10], 't'], R(3)]],
     // The draws after the list: none for a count of 0.
@@ -273,7 +275,7 @@ describe('a value that is not pure (CE-1396)', () => {
           /a write in a loop to a local declared outside/
         );
     // The inner list is a build of a run-time length.
-    expect(failure(() => js(['Repeat', R(3), 2]))).toMatch(
+    expect(failure(() => js(['Repeat', R('n'), 2]))).toMatch(
       /a list of lists of run-time length/
     );
   });

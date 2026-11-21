@@ -269,6 +269,13 @@ export type Lowering = {
   value(e: Expression, want?: boolean): V | undefined;
   /** The value of `e`, which must be a scalar. */
   scalar(e: Expression): V;
+  /** The value of `e`, which may be an input or a parameter of the lane
+   *  `rows` (`rowsParams`): a read of such a value is admitted only here,
+   *  where `rows.at` or a parameter of that lane takes it whole; every
+   *  other read declines. */
+  wholeRows(e: Expression): V;
+  /** The inputs and the parameters of the lane `rows`. */
+  readonly rowsParams: Set<V>;
   /** Apply the row `r`, or the row of the library head of that name, to
    *  `args`. */
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;

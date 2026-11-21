@@ -170,6 +170,7 @@ import { prefersJetDerivative } from '../jet-derivative.js';
 import {
   functionLowering,
   inputType,
+  rowsElementLane,
   tupleAxis,
   tupleOrInputType,
 } from './lower-functions.js';
@@ -823,6 +824,11 @@ function lowerOnce(
   if (!isFunction(rootTuple, 'Tuple')) rootTuple = undefined;
   let rootParts: V[] | undefined;
   const tuples = new Map<V, number>();
+  /** The inputs and the parameters of the lane `rows` (a list of lists of
+   *  two lengths not stated, `rowsElementLane()`), and the occurrence of a
+   *  name that `wholeRows()` lowers, the only one that may read one. */
+  const rowsParams = new Set<V>();
+  let rowsRead: Expression | undefined;
   /** `to`, marked a tuple where `from` is one, with the axis `from` has
    *  plus `shift`. */
   const keep = (from: V, to: V, shift = 0): V => {
@@ -1547,6 +1553,17 @@ function lowerOnce(
     return v;
   };
 
+  /** The value of `e`, where a name of the lane `rows` may be read whole
+   *  (`symbol()`). */
+  const wholeRows = (e: Expression): V => {
+    rowsRead = e;
+    try {
+      return value(e)!;
+    } finally {
+      rowsRead = undefined;
+    }
+  };
+
   let lowered = 0;
   const node = (e: Expression, want: boolean): V | undefined => {
     if (++lowered > NODE_LIMIT)
@@ -1740,6 +1757,34 @@ function lowerOnce(
         return replaceAt(e);
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
+        // An element of a list of rows whose lengths can differ (an input
+        // or a parameter of the lane `rows`): `At(At(g, i), j)`, NaN where
+        // an index is out of range of the list or of its row, as `At` of a
+        // number.
+        const outer = e.ops[0];
+        const lane = isFunction(outer, 'At')
+          ? rowsElementLane(outer.ops[0]?.type.type)
+          : undefined;
+        if (
+          lane !== undefined &&
+          isFunction(outer, 'At') &&
+          outer.nops === 2 &&
+          isSymbol(outer.ops[0])
+        ) {
+          const g = wholeRows(outer.ops[0]);
+          if (type(g).lane === 'rows') {
+            const [i, j] = [scalar(outer.ops[1]), scalar(e.ops[1])];
+            if (!isSubLane(type(i).lane, 'real'))
+              decline(outer.ops[1], 'an index that is not a number');
+            if (!isSubLane(type(j).lane, 'real'))
+              decline(e.ops[1], 'an index that is not a number');
+            return b.op(
+              lane === 'integer' ? 'rows.at.int' : 'rows.at',
+              [g, i, j],
+              scalarType(lane)
+            );
+          }
+        }
         // A read of a list local written in place: in order with its writes.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
         // An element of a tuple of tuples (`loop()`): a constant index.
@@ -3489,6 +3534,24 @@ function lowerOnce(
     e: Expression & { symbol: string },
     want: boolean
   ): V | undefined => {
+    const admitted = rowsRead === e;
+    rowsRead = undefined;
+    const v = nameValue(e, want);
+    // A list of rows whose lengths can differ is read by `rows.at` and
+    // passed whole only: `Length`, `Map` or arithmetic of it would read it
+    // as a scalar.
+    if (v !== undefined && rowsParams.has(v) && !admitted)
+      decline(
+        e,
+        `${e.symbol} of type ${engineTypeToString(e.type.type)} other than in an element read ${e.symbol}[i][j] or as an argument of a parameter of that type`
+      );
+    return v;
+  };
+
+  const nameValue = (
+    e: Expression & { symbol: string },
+    want: boolean
+  ): V | undefined => {
     const name = e.symbol;
     if (name === 'Nothing') {
       if (want) decline(e, 'Nothing as a value', POSSIBLE_NOTHING);
@@ -3669,6 +3732,17 @@ function lowerOnce(
     textInput(t) ??
     tupleOrInputType(isUntyped(t) ? 'unknown' : t, cx.wide);
 
+  /** A list of lists of two lengths not stated, on JavaScript: the host's
+   *  array of arrays, held whole on the lane `rows` (`rowsElementLane()`).
+   *  The bigint and the interval modes decline it. Only an input has it: a
+   *  name with a value has the type of its value. */
+  const rowsInput = (
+    t: Type
+  ): { lane: Lane; shape: (number | 'run-time')[] } | undefined =>
+    options.javascript && !bigint && !interval && rowsElementLane(t)
+      ? { lane: 'rows', shape: [] }
+      : undefined;
+
   /** A string input (read once by `text.in`, `input()`), or a list of
    *  strings. */
   const textInput = (t: Type) => {
@@ -3691,7 +3765,7 @@ function lowerOnce(
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
-    const x = inputIR(t);
+    const x = inputIR(t) ?? rowsInput(t);
     return (
       x !== undefined &&
       x.lane === ir.lane &&
@@ -3725,8 +3799,8 @@ function lowerOnce(
       given(name, t);
     }
     const ir = positional
-      ? (textInput(t) ?? tupleOrInputType(t, cx.wide))
-      : inputIR(readAs(t, def));
+      ? (textInput(t) ?? tupleOrInputType(t, cx.wide) ?? rowsInput(t))
+      : (inputIR(readAs(t, def)) ?? rowsInput(t));
     if (ir === undefined && interval && isEnclosureCollection(t))
       decline(e, COLLECTION);
     if (!positional && interval && enclosureInput(t) !== undefined)
@@ -3747,6 +3821,7 @@ function lowerOnce(
       return { v: length };
     });
     const param = b.param(name, { lane: ir.lane, shape });
+    if (ir.lane === 'rows') rowsParams.add(param);
     // A string is read once, as the engine boxes it (`text.in`); a list of
     // strings is read by `StringJoin` only, which conditions its elements.
     const v =
@@ -3919,7 +3994,20 @@ function lowerOnce(
   ): V[] => {
     const r = regionRow(op)!;
     const body = b.region(params, f);
-    const ys = body.yields.map(type);
+    // The element of a build whose length is a constant value (made in
+    // the region, which the result cannot name) has that length.
+    const ys = body.yields.map((y): IRType => {
+      const t = type(y);
+      if (op !== 'build') return t;
+      return {
+        lane: t.lane,
+        shape: t.shape.map((n) => {
+          if (typeof n === 'number') return n;
+          const c = constant(n.v);
+          return c !== undefined && c > 0 ? c : n;
+        }),
+      };
+    });
     const outs = r
       .results(args, ys, [])!
       .map(() => b.newValue(scalarType('real')));
@@ -6093,6 +6181,8 @@ function lowerOnce(
     frames,
     value,
     scalar,
+    wholeRows,
+    rowsParams,
     apply,
     type,
     constant,

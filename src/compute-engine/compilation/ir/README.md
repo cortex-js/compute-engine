@@ -839,7 +839,8 @@ local, a parameter, a positional input) declines: past `maxCollectionSize` the
 interpreter leaves `Chunk` and `Partition(L, p)` of a lazy list unevaluated
 (`Chunk(Range(1, 10001), 2)`).
 
-A value of the lane is admitted only as an entry yield used once
+A value of the lane that `Chunk` or `Partition` makes is admitted only as an
+entry yield used once
 (`Profile.resultOnly` of JavaScript; `Profile.scalarLanes` refuses a list of
 them): a root `Block` that returns it, a local of type `unknown` that holds it,
 `Coalesce` and `AssertPresent` of it, an `If` whose arm `fold` takes, and a root
@@ -854,6 +855,38 @@ argument, arithmetic and comparisons; an `If` between two values of the lane
 twice (`cse` makes one value used twice). `IsMissing` of it is `False`, the
 interpreter's value (with no pass the producer stays, and it declines). No pass
 has a case of its own for the lane.
+
+An input of a list of lists of integers or reals whose two lengths are not
+stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
+`lower-functions.ts`) is of the lane too, on JavaScript only (CE-1607): an input
+read by name, a positional parameter of a root function literal, and a
+parameter of a user function of that type. It is the host's array of arrays,
+whose rows can have different lengths, and it is read in two ways only: the
+element `At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the
+elements; `_atr` of the JavaScript printer, NaN where `i` is out of range of
+`g` or `j` of its row, from the end when negative, as `At` of a number), and an
+argument of a call at a parameter of that lane, which takes it whole. Every
+other read of the name declines (`symbol()` of `lower.ts`, which admits only the
+occurrence that `wholeRows()` lowers): a row `At(g, i)` (`Length` of an absent
+row would give 0, where the interpreter gives `Missing`), `Length(g)`, `Map`
+over `g`, arithmetic, `g` as the result, a binding to a local, an argument of a
+parameter of another type, and a list that the program makes at such a
+parameter (`sq(sq(g))`). A list of lists of booleans, the bigint and the
+interval modes and GLSL decline the input. The entry checks it as a list (a
+string or a typed array is refused), and a batch shares it between its cells.
+
+A user function whose result type is such a list (declared, or inferred from a
+body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
+which must be a list of rank 2 of integers or reals (not of points), of the
+lengths that the body settles: the result is not of the lane `rows`. A `build`
+whose element is a list of a length value that is a constant (the count of
+`Range(1, 32)`, made in the region) has an element of that number of elements
+(`region()` of `lower.ts`), so `Map(i ↦ Map(j ↦ i·j, Range(1, 20)), Range(1, 20))`
+keeps its two loops and is a list of 20 lists of 20; an element of a run-time
+length still declines ("a list of lists of run-time length"). So one step of the
+Game of Life on a 32 × 32 grid, `step(g: list<list<integer>>)` with
+`n = 32`, compiles for a root literal `(g: list<list<integer>>) ↦ step(g)` and
+for `step(G)` with `G` declared `list<list<integer>>`.
 
 Code whose result is of the lane has `rows: true` and `shippable: false`:
 `broadcast()`, `broadcastAsync()` and the batch loaders of the runtime

@@ -257,6 +257,9 @@ export const JS: Syntax = deepFreeze({
     'rows.pair': '[$0, $1]',
     'rows.chunks': '_SYS.chunkCount($0)',
     'rows.size': '_SYS.partitionSize($0)',
+    // An element of an input or a parameter of the lane `rows`.
+    'rows.at': { text: '_atr($0, $1, $2)', helpers: ['_atr'] },
+    'rows.at.int': { text: '_atr($0, $1, $2)', helpers: ['_atr'] },
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',
@@ -376,6 +379,9 @@ export const JS: Syntax = deepFreeze({
     // i), e)` in a list of `n` elements; the interpreter's value of an
     // index that is 0, not an integer or out of range is an error.
     _wix: 'const _wix = (n, i) => { const k = i > 0 ? i - 1 : n + i; if (Number.isInteger(i) && i !== 0 && k >= 0 && k < n) return k; throw new Error(`out-of-range: the index ${i} of a write to a list of ${n} elements`); };',
+    // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
+    // where `i` is out of range of `g` or `j` of its row.
+    _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',
     _atp: 'const _atp = (l, i, n) => { const k = i > 0 ? i - 1 : l.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < l.length ? l[k] : new Array(n).fill(NaN); };',
     // A sorted copy, NaN last, as the interpreter's `Sort`; the indices
     // from 1 of that order, stable, as its `Ordering`.

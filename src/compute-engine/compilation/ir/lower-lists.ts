@@ -887,7 +887,14 @@ export function listLowering(cx: Lowering) {
           const x = s.at(k);
           frame.names.set(name, { v: x, role: 'index' });
           const v = element(x, k);
-          if (lengthValues(type(v)).length > 0)
+          // An element whose length is a constant value (the count of
+          // `Range(1, 32)`) has that length (`region()` of `lower.ts`); a
+          // length of 0 is not a shape of the IR.
+          if (
+            lengthValues(type(v)).some(
+              (n) => filter || !((cx.constant(n) ?? 0) > 0)
+            )
+          )
             decline(e, 'a list of lists of run-time length');
           if (!filter) return [v];
           if (type(v).lane !== 'boolean' || type(v).shape.length > 0)

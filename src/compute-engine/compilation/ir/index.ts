@@ -108,7 +108,8 @@ export type Profile = {
    *  entry, each with the cause of a refusal elsewhere: on GLSL a colour is
    *  an OKLCh `vec3` with no tag of its space, so a conversion to another
    *  space is the program's result only; on JavaScript a list of rows of
-   *  different lengths (the lane `rows`) is read by no operation. */
+   *  different lengths (the lane `rows`) that `Chunk` or `Partition` makes
+   *  is read by no operation (an input of the lane is read by `rows.at`). */
   readonly resultOnly?: Readonly<Record<string, string>>;
   /** The spellings of the IR operations and of the region rows. */
   readonly syntax: Syntax;

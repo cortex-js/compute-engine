@@ -100,6 +100,28 @@ export function inputType(
   return l === undefined ? undefined : { lane: l, shape };
 }
 
+/** The lane of the elements of a list of lists of integers or reals whose
+ *  two lengths are not stated (`list<list<integer>>`), or `undefined`. On
+ *  JavaScript such an input or parameter is the host's array of arrays,
+ *  held whole on the lane `rows`: its rows can have different lengths, so
+ *  the only reader of an element is `At(At(g, i), j)` (`rows.at`), and a
+ *  call passes it whole to a parameter of such a type (README.md, "The
+ *  rows lane"). */
+export function rowsElementLane(t: Type): 'integer' | 'real' | undefined {
+  const free = (x: Type): x is ListType =>
+    typeof x === 'object' &&
+    x.kind === 'list' &&
+    (x.dimensions === undefined || x.dimensions?.join() === '-1');
+  t = present(t);
+  if (!free(t)) return undefined;
+  const inner = present(t.elements);
+  if (!free(inner)) return undefined;
+  const x = present(inner.elements);
+  if (x === 'never' || x === 'unknown' || x === 'any') return undefined;
+  if (isSubtype(x, 'integer')) return 'integer';
+  return isSubtype(x, 'real') ? 'real' : undefined;
+}
+
 /** The tuple types of `t`: a tuple, or a union of tuples. */
 const tupleMembers = (t: Type): TupleType[] | undefined =>
   typeof t !== 'object'
@@ -303,6 +325,10 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
     // (`listMapsAt()`).
     const t =
       typeof d === 'object' && d.kind === 'broadcastable' ? d.elements : d;
+    // A list of lists of two lengths not stated: the host's rows, whole.
+    const element = rowsElementLane(t);
+    if (element !== undefined)
+      return { lane: 'rows' as const, shape: [], element };
     const list = tupleOrInputType(t);
     const s = inputType(t, 'real', true);
     const scalar = s?.shape.length === 0;
@@ -358,13 +384,20 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   const points = list === undefined && r ? pointLength(r) : undefined;
   // A list of elements of no stated type: the shape of the body.
   const shaped = list === undefined && r ? openList(r) : undefined;
+  // A list of lists of two lengths not stated (`list<list<integer>>`): the
+  // body settles both lengths (a list of rank 2, not of the lane `rows`).
+  const grid = r === undefined ? undefined : rowsElementLane(r);
   // Where the interpreter maps a call over a list argument: the signature
   // of the binding, or of the literal for a name declared `function`.
   const mapsAt = listMapsAt(signature ?? literal.type.type);
   const pointsAt = pointsMapAt(signature ?? literal.type.type);
   // A colour result is on the colour lane; a colour parameter declines.
   const result: IRType | undefined =
-    open || list !== undefined || points !== undefined || shaped
+    open ||
+    list !== undefined ||
+    points !== undefined ||
+    shaped ||
+    grid !== undefined
       ? undefined
       : r === 'color'
         ? { lane: 'color', shape: [] }
@@ -379,6 +412,7 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
     open,
     points,
     shaped,
+    grid,
     mapsAt,
     pointsAt,
   };
@@ -446,6 +480,8 @@ type UserFunction = {
      *  stated length of its first argument, or of a parameter that took
      *  the point of its first argument. */
     taken?: string;
+    /** Of the lane `rows`: the lane of the elements. */
+    element?: 'integer' | 'real';
   }[];
   /** The number of parameters of `ir` for `params` (with the lengths). */
   own: number;
@@ -571,7 +607,7 @@ export function functionLowering(
     nanForAbsent: () => boolean
   ): UserFunction => {
     begun += 1;
-    const { names, result, list, tuple, r, open, points, shaped } = sig;
+    const { names, result, list, tuple, r, open, points, shaped, grid } = sig;
     const params = sig.params.map((declared, i) => {
       if (complexAt(declared, args?.[i]))
         return { ...declared, lane: 'complex' as const };
@@ -649,6 +685,7 @@ export function functionLowering(
       );
       const v = param(ir, names[i], { lane: t.lane, shape });
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
+      if (t.lane === 'rows') cx.rowsParams.add(v);
       return v;
     });
     const fn: UserFunction = {
@@ -656,7 +693,11 @@ export function functionLowering(
       params,
       own: (ir.lifted = ir.body.params.length),
       result,
-      list: list !== undefined || points !== undefined || shaped !== undefined,
+      list:
+        list !== undefined ||
+        points !== undefined ||
+        shaped !== undefined ||
+        grid !== undefined,
       mapsAt: sig.mapsAt,
       ir,
       inputs: [],
@@ -707,10 +748,22 @@ export function functionLowering(
     try {
       b.define(ir, () => {
         const body =
-          list || open || points !== undefined || shaped
+          list || open || points !== undefined || shaped || grid
             ? cx.value(literal.ops[0])!
             : cx.scalar(literal.ops[0]);
         const t = type(body);
+        // A list of lists of two lengths not stated: a list of rank 2 of
+        // the lengths that the body settles.
+        if (
+          grid !== undefined &&
+          (t.shape.length !== 2 ||
+            cx.tuples.has(body) ||
+            !isSubLane(t.lane, grid))
+        )
+          decline(
+            literal,
+            `a body of ${e.operator} that is not ${engineTypeToString(r!)} of lengths that the body settles`
+          );
         // A recursive call assumed a real scalar (`call()`): the body must
         // be one, an integer widened.
         if (fn.guess && (t.shape.length > 0 || !isSubLane(t.lane, 'real')))
@@ -841,6 +894,12 @@ export function functionLowering(
     return fn;
   };
 
+  /** The argument `op` of a call, for a parameter of the lane `lane`: at a
+   *  parameter of the lane `rows`, a read that may take a value of that
+   *  lane whole (`Lowering.wholeRows()`). */
+  const argument = (op: Expression, lane: Lane | undefined): V =>
+    lane === 'rows' ? cx.wholeRows(op) : cx.value(op)!;
+
   /** A call of the user function that the head of `e` resolves to, or of
    *  the function of that name being lowered; with `given`, of the values
    *  of its arguments, already lowered. `nanForAbsent`: every reader of
@@ -882,7 +941,7 @@ export function functionLowering(
                   ('point' in p && p.point !== undefined)))
           ))
       )
-        early = e.ops.map((op) => cx.value(op)!);
+        early = e.ops.map((op, i) => argument(op, sig.params[i]?.lane));
       // A list of points there: the call maps, one point per call, each
       // other argument as at any mapped call (`mapOver()`).
       const lowered = early;
@@ -962,7 +1021,7 @@ export function functionLowering(
     let mapped = false;
     const args = e.ops.flatMap((op, i) => {
       const p = fn.params[i];
-      values.push(early?.[i] ?? cx.value(op)!);
+      values.push(early?.[i] ?? argument(op, p?.lane));
       // A list (not a point) that the parameter would take whole, where
       // the interpreter maps the function over it (`listMapsAt()`).
       const axis = cx.tuples.get(values[i]);
@@ -977,6 +1036,25 @@ export function functionLowering(
           `a list argument of ${e.operator} that the parameter ${i + 1}, a list or a point, would take whole (the interpreter maps the function over the list)`
         );
       if (mapped) return [];
+      // A parameter of the lane `rows` takes an input or a parameter of
+      // that lane only, not a list that the program makes.
+      if (p.lane === 'rows' && type(values[i]).lane !== 'rows')
+        decline(
+          op,
+          `an argument of ${e.operator} for the parameter ${i + 1}, a list of lists of two lengths not stated, that is not an input or a parameter of that type`
+        );
+      // The lane does not hold the lane of the elements: a list of lists of
+      // reals at a parameter of lists of integers would put a real on the
+      // integer lane (`rows.at.int`).
+      if (
+        p.lane === 'rows' &&
+        p.element === 'integer' &&
+        rowsElementLane(op.type.type) !== 'integer'
+      )
+        decline(
+          op,
+          `an argument of ${e.operator} of type ${engineTypeToString(op.type.type)} for the parameter ${i + 1} of lists of integers`
+        );
       const v = cx.widen(values[i], p.lane);
       const t = type(v);
       if (

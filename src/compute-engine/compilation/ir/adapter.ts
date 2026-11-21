@@ -450,7 +450,8 @@ function compileIr(
     const i = argumentIndex(entry, k);
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
-    if (t.shape.length > 0) {
+    // A list of rows whose lengths can differ is a list input too.
+    if (t.shape.length > 0 || t.lane === 'rows') {
       shared.push(key);
       if (t.lane === 'string') strings = true;
       if (!checks) return;

@@ -454,6 +454,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['list', 'list'], 'rows', 'rows.pair']], list),
   row(undefined,      1,          [[[I], I, 'rows.chunks']],     { ...list, effect: 'may-fail' }),
   row(undefined,      1,          [[[I], I, 'rows.size']],       { ...list, effect: 'may-fail' }),
+  // The element `At(At(g, i), j)` of an input or a parameter `g` of the
+  // lane `rows` (a list of lists of two lengths not stated, of reals or of
+  // integers), NaN where `i` or `j` is out of range; JavaScript only.
+  row(undefined,      3,          [[['rows', R, R], R, 'rows.at'], [['rows', R, R], I, 'rows.at.int']], list),
   // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
   // whose shape the lowering settles (`lower-matrices.ts`): the determinant
   // of the entries of an `n × n` matrix row by row and `n`; the inverse;

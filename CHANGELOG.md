@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### Improvements
+
+- **A function that takes a list of lists and returns a list of lists compiles
+  to JavaScript** (CE-1607). With `g: list<list<integer>>`, the element read
+  `g[i][j]` compiles, and `g` can be passed whole to a user function with a
+  parameter of that type. One step of the Game of Life,
+  `step(g: list<list<integer>>) = map(i => map(j => nextCell(g, i, j), Range(1, n)), Range(1, n))`
+  with `n = 32`, compiles as `(g: list<list<integer>>) => step(g)`, where it
+  declined before; `run(grid)` returns an array of arrays, and 100 generations
+  take a few milliseconds instead of more than a second for each interpreted
+  generation. An index out of range gives `NaN`. Other reads of such a list
+  (`Length(g)`, `g[1]`, `Map` over `g`) still decline. A `Map` of a `Map` over
+  `Range(1, 20)` also compiles now.
+
 ### Behavior Changes
 
 - **A `\text{…}` that names a unit is a string unless it is part of a unit

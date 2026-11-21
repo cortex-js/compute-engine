@@ -858,8 +858,8 @@ two lists element by element. With
 `L: list<unknown>`, `Sum(L)` declines with `unsettled-shape`, and
 `unsupported` is `["L"]`; the interpreter gives `[4, 6]` for
 `L = [[1, 2], [3, 4]]`. A declared element type does not make this case
-compile: an input of type `list<list<real>>` declines with
-`outside-profile`. When the type settles the shape of the
+compile: `Sum(M)` of an input `M: list<list<real>>` declines with
+`outside-profile` ("Lists of two run-time lengths"). When the type settles the shape of the
 elements, the fold reads the array with no test of its shape, on
 JavaScript and on `interval-js`: with `L: list<real>`, `Sum(L)` is a loop
 that adds `_.L[i]`. The compiler emits no run-time test of a shape
@@ -1515,8 +1515,23 @@ a result as `+∞` tests the real part, not the imaginary part.
 
 ### Lists of two run-time lengths
 
-An input of type `list<list<real>>` declines with `outside-profile`, so the
-interpreter evaluates a fold over rows of unequal length. Two lists of
+The rows of an input of type `list<list<real>>` or `list<list<integer>>` can
+have different lengths. On `javascript` (not in the bigint and interval modes)
+such an input, a positional parameter of a root function literal or a
+parameter of a user function of that type is the host's array of arrays, read
+in two ways only: the element `g[i][j]` (`At(At(g, i), j)`), which is `NaN`
+where an index is out of range of the list or of its row, and an argument of a
+call at a parameter of that type, which takes it whole. Every other read
+declines with `outside-profile`, so the interpreter evaluates a row, a fold or
+a `Map` over rows of unequal length: with `g: list<list<integer>>`,
+`(g) ↦ g[2][1]` at `g = [[1, 2, 3], [4]]` gives `4`, `g[2][3]` gives `NaN`,
+and `Length(g)`, `g[1]` and `Sum(g[1])` decline. A user function whose result
+type is such a list compiles when its body is a list of rank 2 of lengths that
+the body settles: with `n = 32`,
+`step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`
+compiles as `(g: list<list<integer>>) ↦ step(g)` and as `step(G)` with `G`
+declared `list<list<integer>>`, and `run()` returns an array of 32 arrays of
+32 numbers. Its result is not such an input: `step(step(g))` declines. Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with
 `L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
@@ -2117,7 +2132,7 @@ mode a `list<number>` input is read on the real lane: `Mean(L)` compiles,
 and a complex cell is a value outside the type.
 
 A `Power` or a product of a matrix declines ("The compiler"): an input of
-type `list<list<real>>` or `tensor<number>` is outside the profile
+type `list<list<real>>` (read only by `M[i][j]`) or `tensor<number>` is outside the profile
 (`outside-profile`), and an input of the bare type `list` or `list<unknown>`
 declines with `unsettled-shape` (R3). The interpreter gives the matrix power
 or product.
@@ -2481,8 +2496,8 @@ their shape (R2 in "Shapes are settled at compile time";
 literal of one parameter or the name of a library operator (`Map(Sin, L)`);
 it is lowered as the body of the loop that builds the result. A defined
 function given by its name declines ("Function values"). An input of type
-`list<list<real>>` declines, so `Map(t ↦ 2t, M)` over such an `M` runs on
-the interpreter.
+`list<list<real>>` is read only by `M[i][j]` ("Lists of two run-time
+lengths"), so `Map(t ↦ 2t, M)` over such an `M` runs on the interpreter.
 
 An argument on the complex lane at a parameter declared `real` declines
 with `lane-mismatch`: with `p` declared `(real) -> real`, `p(√y)` declines
