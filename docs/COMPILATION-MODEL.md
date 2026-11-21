@@ -193,6 +193,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   code passes one input per name; so does a call inside a function whose
   parameter is `x` (`u(x) := k(0) + g(0) + 100x`, CE-1502).
 
+- `javascript` (crafted): one boxed `If` with no else of a list arm that is
+  both the value of a name and a node of the program. With
+  `r = If(0 ≤ x ≤ 6, x + [0, 4, 2])` boxed once, `C` declared with the value
+  `r`, and the program built from that same object,
+  `Length(C) + Coalesce(At(r, 1), 0)` gives `3` at `x = 7`, where the
+  interpreter gives `Missing`. The program reads `r` only with `At`, so its
+  value where the condition is false is the list of `NaN`, which `Length(C)`
+  then reads. The same program boxed from MathJSON declines (CE-1606).
+
 - `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
@@ -2383,10 +2392,22 @@ condition is a scalar compiles: its value is `NaN` where the condition is
 false (`x\{y > 0\}` at `y = -1`). The value of a restriction of a flat list
 of numbers or of a list of points (`(x·L)\{x > 0\}` with `L: list<real>`)
 is then the list of `NaN` (of points of `NaN`) of the length of the list,
-when the restriction is the result of the program. A compiled list is never
-absent, and the interpreter's value is `Missing`: a restriction of a list
-that an operator reads (`IsMissing`, `Length`, `2·(x·L)\{x > 0\}`) declines,
-and so does a length that the restricted value makes itself
+where no operator can tell that list from an absent one: as the result of
+the program; as the list that `At`, `First` or `Last` reads
+(`At((x·L)\{x > 0\}, 1)` is `NaN`, the absent element; an `At` with a list
+or a `Range` as index gives a list of `NaN`, which must be read in one of
+these ways too); as an operand of
+`Max`, `Min`, or of a `Sum` or a `Product` with no index (`NaN` where the
+interpreter gives `Missing`); and as an operand of arithmetic whose own value
+is read in one of these ways (`2·(x·L)\{x > 0\}` as the result,
+`At(2·(x·L)\{x > 0\}, 1)`). A compiled list is never absent, and the
+interpreter's value is `Missing`: a restriction of a list that another
+operator reads declines (`IsMissing`, `Coalesce`, `AssertPresent`, `Length`,
+`Rest` and the other list operators, a binding, an argument of a function, an
+element of a list, also through arithmetic: `Length(2·(x·L)\{x > 0\})`),
+because the list of `NaN` would give a finite value there (`Length` gives 3
+where the interpreter gives `Missing`). So does a length that the restricted
+value makes itself
 (`Range(1, ⌊x⌋)\{x > 0\}`). A restriction whose condition is a list (an
 element-wise selection, `x\{L > 0\}` with `L: list<real>`) selects position
 by position, as the interpreter (`docs/BROADCAST-MODEL.md`); a restricted

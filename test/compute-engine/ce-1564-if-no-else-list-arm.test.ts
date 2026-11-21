@@ -104,17 +104,17 @@ describe('CE-1564: If with no else of a list arm on JavaScript', () => {
   });
 
   // The interpreter's value is `Missing`: an operator that reads it as
-  // absent would see a present list of NaN.
+  // absent would see a present list of NaN. The readers that cannot tell
+  // the two apart are in `ce-1606-if-no-else-list-arm-readers.test.ts`.
   test.each([
     ['IsMissing', ['IsMissing', ['If', positive, 'L']]],
     ['Coalesce', ['Coalesce', ['If', positive, 'L'], ['List', 7]]],
     ['AssertPresent', ['AssertPresent', ['If', positive, 'L']]],
     ['Length', ['Length', ['If', positive, 'L']]],
     ['Rest', ['Rest', ['If', positive, 'L']]],
-    ['Multiply', ['Multiply', 2, ['If', positive, 'L']]],
   ])('the value read by %s declines', (_, json) => {
     expect(failure(() => js(json))).toMatch(
-      /an If with no else of a list arm whose value an operator reads/
+      /an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction/
     );
   });
 
@@ -126,7 +126,7 @@ describe('CE-1564: If with no else of a list arm on JavaScript', () => {
       r,
     ]);
     expect(failure(() => compile(e, OPTIONS))).toMatch(
-      /an If with no else of a list arm whose value an operator reads/
+      /an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction/
     );
   });
 

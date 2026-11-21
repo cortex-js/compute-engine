@@ -1842,9 +1842,23 @@ of NaN (of points of NaN) of the length of the arm; a length made in the arm
 (`If(0 < x, Range(1, Floor(x)))`) is not visible in the other arm, and declines.
 The interpreter's value there is `Missing`, which `IsMissing`, `Coalesce`,
 `AssertPresent`, `Length` and `Rest` read as absent, and a compiled list is
-never absent: such an `If` compiles only where its value is the result of the
-program (the root, an arm of such an `If` or `Which`, the last expression of
-such a `Block`), and declines where an operator reads it. The conditions, the
+never absent: such an `If` compiles only where no operator can tell the list of
+NaN from an absent list (`nanForAbsent()` of `lower.ts`). These places are: the
+result of the program (the root, an arm of such an `If` or `Which`, the last
+expression of such a `Block`); the list that `First`, `Last`, or `At` with
+indexes that are numbers reads (an element is NaN or a point of NaN, the absent
+element); an operand of `Max`, `Min`, or of a `Sum` or a `Product` with no index
+(the value is NaN); an operand of an operator row, the body of a `Sum` or a
+`Product` with an index, or the list that an `At` with a list or a `Range` as
+index reads, when the value of that call is in one of these places too
+(`At(2·If(0 < x, L), 1)`, not `Length(2·If(0 < x, L))`); and an arm of an `If`
+or a `Which`, or the last expression of a `Block`, whose value is in one of
+these places. In any other place (a discharge, `Length`, `Rest`, another list
+operator, a binding, an argument of a function, an element of a list) it
+declines. One boxed `If` in several places must be in such a place each time,
+and an `If` that is only the value of a name of the engine declines (one boxed
+`If` that is also a node of the program does not: `docs/COMPILATION-MODEL.md`,
+"Known limitations"). The conditions, the
 arms and the default are lowered once, before the build, all of them: the
 interpreter evaluates an arm and a later condition only where the selection
 reaches it, so one that is not pure (an effect, a write to a name, an operation

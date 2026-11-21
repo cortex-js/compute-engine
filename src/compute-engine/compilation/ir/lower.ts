@@ -673,32 +673,92 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
-  // The nodes whose value is the result of the program: the root (the
-  // body of a function literal), an arm of such an `If` or `Which`, the
-  // last expression of such a `Block`. No operator of the program reads
-  // their value, so a list of NaN that stands for an absent list there
-  // (`conditional()`) meets no discharge, `Length` or `Rest`, which must
-  // see it as absent. A node that the program reaches twice (one boxed
-  // expression in two places, `If(IsMissing(r), K, r)`) is not one, nor is
-  // a node under it: each node is visited once.
-  const reached = new Set<Expression>();
-  const reachedTwice = new Set<Expression>();
+  // The calls of the program that have each call as an operand, with the
+  // position of the operand. One boxed expression in two places
+  // (`If(IsMissing(r), K, r)`) has one entry for each place. Each node is
+  // visited once.
+  const readers = new Map<Expression, [reader: Fn, position: number][]>([
+    [root, []],
+  ]);
   const reach = (e: Expression): void => {
-    if (reached.has(e)) return void reachedTwice.add(e);
-    reached.add(e);
-    if (isFunction(e)) e.ops.forEach(reach);
+    if (!isFunction(e)) return;
+    e.ops.forEach((op, i) => {
+      if (!isFunction(op)) return;
+      const known = readers.get(op);
+      if (known !== undefined) return void known.push([e, i]);
+      readers.set(op, [[e, i]]);
+      reach(op);
+    });
   };
   reach(root);
-  const results = new Set<Expression>();
-  const resultOf = (e: Expression): void => {
-    if (results.has(e) || reachedTwice.has(e)) return;
-    results.add(e);
-    if (isFunction(e, 'If')) e.ops.slice(1).forEach(resultOf);
-    else if (isFunction(e, 'Which'))
-      e.ops.forEach((x, i) => i % 2 === 1 && resultOf(x));
-    else if (isFunction(e, 'Block') && e.nops > 0) resultOf(e.ops[e.nops - 1]);
+  // Whether a list of NaN can stand for the absent list that is the value
+  // of the node `e` of the program (`conditional()`): no discharge,
+  // `Length` or `Rest` reads that value, which they must see as absent.
+  // This holds when each place of `e` in the program is one of these:
+  // - the result of the program: the root (the body of a function
+  //   literal), an arm of such an `If` or `Which`, the last expression of
+  //   such a `Block`;
+  // - the list that a `First`, a `Last`, or an `At` whose indexes are
+  //   numbers, of the library reads: an element of the list of NaN is NaN
+  //   (a point of NaN), the absent value of an element of an absent list;
+  // - the list that an `At` with another index (a list, a `Range`) reads,
+  //   when the value of that `At`, a list of NaN, is itself in such a
+  //   place;
+  // - an operand of `Max`, of `Min`, or of a `Sum` or a `Product` with no
+  //   index, of the library: the value is one number, NaN where the
+  //   interpreter gives `Missing`;
+  // - an operand of an operator row of the library (arithmetic, a function
+  //   of numbers, a comparison) or the body of a `Sum` or a `Product` with
+  //   an index, when the value of that call is itself in such a place: the
+  //   call of a list of NaN gives a list too, which the interpreter gives
+  //   as `Missing`;
+  // - an arm of an `If` or a `Which`, or the last expression of a `Block`,
+  //   whose own value is in such a place.
+  // Any other place (a binding, an argument of a function, an element of a
+  // list or of a tuple, another list operator) can give the value to a
+  // reader that tells an absent list from a list of NaN. A node that is not
+  // in the program (the value of a name, an expression of a compile
+  // handler) has no known reader.
+  const unreadAsAbsent = new Map<Expression, boolean>();
+  const nanForAbsent = (e: Expression): boolean => {
+    let known = unreadAsAbsent.get(e);
+    if (known !== undefined) return known;
+    known =
+      readers.get(e)?.every(([reader, i]) => {
+        if (reader === root && reader.operator === 'Function') return i === 0;
+        if (!isLibrary(reader)) return false;
+        switch (reader.operator) {
+          case 'If':
+            return i > 0 && nanForAbsent(reader);
+          case 'Which':
+            return i % 2 === 1 && nanForAbsent(reader);
+          case 'Block':
+            return i === reader.nops - 1 && nanForAbsent(reader);
+          case 'At':
+            // An index that is not proved a number can be a list or a
+            // `Range`: the `At` then gives a list of NaN.
+            return (
+              i === 0 &&
+              (reader.ops
+                .slice(1)
+                .every((k) => isSubtype(k.type.type, 'number')) ||
+                nanForAbsent(reader))
+            );
+          case 'First':
+          case 'Last':
+            return i === 0;
+        }
+        const reduction = REDUCTIONS.get(reader.operator);
+        if (reduction !== undefined && !(reduction.indexed && reader.nops > 1))
+          return true;
+        return (
+          (reduction !== undefined ? i === 0 : rowNode(reader) !== undefined) &&
+          nanForAbsent(reader)
+        );
+      }) ?? false;
+    unreadAsAbsent.set(e, known);
+    return known;
   };
-  resultOf(isFunction(root, 'Function') ? root.ops[0] : root);
   // The names read as inputs of the compilation (of the entry, lifted into
   // a body, `vars`), in the order the lowering reads them, and those that an
   // occurrence or a declaration types (`program()`).
@@ -4139,12 +4199,12 @@ function lowerOnce(
         const [n, m] = t.shape;
         // The interpreter's value is `Missing`, which a discharge, `Length`
         // or `Rest` reads as absent; a list is never absent in compiled
-        // code (`absent()`), so the list of NaN is the value of the result
-        // only.
-        if (!results.has(node))
+        // code (`absent()`), so the list of NaN is the value only where no
+        // such operator can read it (`nanForAbsent()`).
+        if (!nanForAbsent(node))
           decline(
             node,
-            'an If with no else of a list arm whose value an operator reads'
+            'an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction'
           );
         if (typeof n !== 'number' && n.v >= start && !inputLengths.has(n.v))
           decline(
