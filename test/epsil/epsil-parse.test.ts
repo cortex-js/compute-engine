@@ -1989,14 +1989,17 @@ describe('EPSIL PARSING OPERATORS', () => {
     ]);
   });
   test('Range operator `..` (and Unicode `‥`)', () => {
-    expect(validEpsil('1..5')).toStrictEqual(['Range', 1, 5]);
-    expect(validEpsil('1‥5')).toStrictEqual(['Range', 1, 5]);
-    expect(validEpsil('1 .. 5')).toStrictEqual(['Range', 1, 5]);
-    expect(validEpsil('x..y')).toStrictEqual(['Range', 'x', 'y']);
+    // `a..b` is the ascending range `Range(a, b, 1)`, which is empty when
+    // `a > b` (CE-1604); see `range-operator.test.ts`.
+    expect(validEpsil('1..5')).toStrictEqual(['Range', 1, 5, 1]);
+    expect(validEpsil('1‥5')).toStrictEqual(['Range', 1, 5, 1]);
+    expect(validEpsil('1 .. 5')).toStrictEqual(['Range', 1, 5, 1]);
+    expect(validEpsil('x..y')).toStrictEqual(['Range', 'x', 'y', 1]);
     expect(validEpsil('(a + 1)..(b - 1)')).toStrictEqual([
       'Range',
       ['Add', 'a', 1],
       ['Subtract', 'b', 1],
+      1,
     ]);
     // `..` binds looser than `-` (so `1..n-1` is `1..(n-1)`) and tighter than
     // the relational operators (so `k in 1..5` is `k in (1..5)`).
@@ -2004,11 +2007,12 @@ describe('EPSIL PARSING OPERATORS', () => {
       'Range',
       1,
       ['Subtract', 'n', 1],
+      1,
     ]);
     expect(validEpsil('k in 1..5')).toStrictEqual([
       'Element',
       'k',
-      ['Range', 1, 5],
+      ['Range', 1, 5, 1],
     ]);
   });
   test('`..` does not disturb decimal literals', () => {
@@ -2016,7 +2020,7 @@ describe('EPSIL PARSING OPERATORS', () => {
     // range (not `1.` `.5`).
     expect(validEpsil('1.5')).toStrictEqual(1.5);
     expect(validEpsil('3.14')).toStrictEqual(3.14);
-    expect(validEpsil('1..5')).toStrictEqual(['Range', 1, 5]);
+    expect(validEpsil('1..5')).toStrictEqual(['Range', 1, 5, 1]);
   });
 });
 
@@ -2463,7 +2467,7 @@ describe('EPSIL PARSING LIST SPREAD', () => {
   test('the spread operand is a full expression', () => {
     expect(validEpsil('[...(1..4)]')).toStrictEqual([
       'List',
-      ['Spread', ['Range', 1, 4]],
+      ['Spread', ['Range', 1, 4, 1]],
     ]);
     expect(validEpsil('[...Join(xs, ys)]')).toStrictEqual([
       'List',

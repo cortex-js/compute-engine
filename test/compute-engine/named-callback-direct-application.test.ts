@@ -67,7 +67,7 @@ describe('NAMED CALLBACK — DIRECT APPLICATION', () => {
     ['map(pair, [1, 2])', '[[1,1],[2,2]]'],
     // The value of the program is a list of two ranges, as the list literal
     // `[1..2, 1..3]` is; this is the text of such a list.
-    ['map(upTo, [2, 3])', '[Range(1, 2),Range(1, 3)]'],
+    ['map(upTo, [2, 3])', '[Range(1, 2, 1),Range(1, 3, 1)]'],
     ['map(strlen, ["ab", "c"])', '[2,1]'],
     ['map(both, [1, 2], [3, 4])', '[3,8]'],
     ['map(half, [x, 2])', '[1/2 * x,1]'],

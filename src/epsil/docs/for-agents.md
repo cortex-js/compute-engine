@@ -117,7 +117,7 @@ actually happens → write instead:**
 | `xs[0]` for first element | **Silently** yields `NaN` — indexing is **1-based** | `xs[1]`; negative indices work: `xs[-1]` is the last element |
 | `7 // 2` floor division | **Silent wrong value**: `//` starts a comment, so this is just `7` | `floor(7 / 2)` |
 | `7 / 2` integer division | Exact rational `7/2`, not `3` or `3.5` | `floor(7 / 2)` for `3`; `N(7 / 2)` for `3.5` |
-| `range(1, 5)` excludes end | Inert call + did-you-mean; `Range(1, 5)` **includes** 5: `[1,2,3,4,5]` | `Range(1, n)` or `1..n` for 1…n inclusive |
+| `range(1, 5)` excludes end | Inert call + did-you-mean; `Range(1, 5)` **includes** 5: `[1,2,3,4,5]` | `1..n` for 1…n inclusive (empty when `n < 1`) |
 | `x = 5` at top level | Assigns — `=` assigns only as a whole statement with a name on the left | `x == 5` for the equation |
 | `# comment` | Diagnostic (`#` introduces pragmas) | `// comment` or `/* … */` |
 | `def f(x):` / `(x) => …` / `lambda x: …` | Parse diagnostics; `(x) -> …` is recovered with a did-you-mean-`=>` fixit | `f(x) = expr`, `x => expr`, or `function f(x) { … }` |
@@ -263,7 +263,8 @@ search by concept with `epsil doc <keywords>`.
   `sort` (optional comparator — see below), `indexOf`, `join`, `append`,
   `sum`, `mean`, `standardDeviation` (sample, n−1), `map`, `filter`,
   `count(xs)` / `count(xs, v)` / `count(xs, pred)`,
-  `reduce(list, f, init)`, `Range(a, b)` inclusive, `Range(a, b, step)`.
+  `reduce(list, f, init)`, `a..b` inclusive and counting up,
+  `Range(a, b, step)`.
 - **Strings**: `characters`, `stringSplit(s)` (splits on whitespace by
   default), `String(x)`, `join(a, b)` to concatenate strings,
   `StringJoin(xs, sep?)` to join ONE collection with an optional separator
@@ -297,6 +298,10 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
 
 ## Watch Out For
 
+- **`a..b` counts up, `Range(a, b)` counts toward `b`**: `1..n` is empty when
+  `n` is 0, so `for k in 1..n { … }` then runs zero times. The call
+  `Range(1, n)` with no step is `[1, 0]` when `n` is 0. To count down, write
+  the step: `Range(5, 1, -1)`.
 - **Laziness**: `Range`, `map`, `filter`, `take`, `drop`, `join` are
   generators — they enumerate when materialized (indexed, aggregated, or
   iterated), and a deferred mapping function reads variables **at

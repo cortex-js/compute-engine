@@ -88,6 +88,7 @@ export type DiagnosticCode =
   | 'range-pattern-bounds' // a range pattern bound is not a numeric literal
   | 'range-pattern-step' // a stepped / non-binary range in pattern position
   | 'range-pattern-empty' // %0 = lo, %1 = hi — an empty range pattern (lo > hi)
+  | 'range-empty' // (warning) %0 = lo, %1 = hi — `lo..hi` with literal bounds and lo > hi has no element
   | 'invalid-escape-sequence' // %0 = escape sequence char
   | 'invalid-unicode-codepoint-string' // %0 = codepoint string
   | 'invalid-unicode-codepoint-value' // %0 = codepoint

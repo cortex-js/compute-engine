@@ -100,14 +100,17 @@ describe('the value of a program that ends with a lazy collection', () => {
 describe('a lazy collection that is not listed', () => {
   test('a range stays a range', async () => {
     const r = await forms('1..4');
-    expect(r.json).toEqual(['Range', 1, 4]);
-    expect(r.latex).toBe('1..4');
+    // `1..4` is the ascending range `Range(1, 4, 1)`. Its LaTeX writes the
+    // second element: LaTeX `1..4` is `Range(1, 4)`, which counts toward its
+    // end in either direction.
+    expect(r.json).toEqual(['Range', 1, 4, 1]);
+    expect(r.latex).toBe('1..2..4');
   });
 
   test('a list holds a range element as a range', async () => {
     // As a list literal does: `[1..2, 1..3]` is a list of two ranges.
     const r = await forms('map(u => 1..u, [2, 3])');
-    expect(r.json).toEqual(['List', ['Range', 1, 2], ['Range', 1, 3]]);
+    expect(r.json).toEqual(['List', ['Range', 1, 2, 1], ['Range', 1, 3, 1]]);
   });
 
   test('a collection with no last element stays lazy', async () => {
@@ -115,7 +118,7 @@ describe('a lazy collection that is not listed', () => {
     expect(r.json).toEqual([
       'Map',
       ['Function', ['Block', ['Multiply', 2, 'u']], 'u'],
-      ['Range', 1, 'PositiveInfinity'],
+      ['Range', 1, 'PositiveInfinity', 1],
     ]);
     expect(r.text).toBe('[2,4,6,8,10,...]');
   });

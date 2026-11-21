@@ -586,7 +586,7 @@ they show individual statements or nested expressions inside the outer
 | `(a, b)` | `Tuple` |
 | `{k -> v}` | `Dictionary` + `KeyValuePair` |
 | `a -> b` | `KeyValuePair` |
-| `a..b` | `Range` |
+| `a..b` | `Range`, with the step 1 |
 | `f(x)` (bare symbol callee) | `["f", "x"]` |
 | `(expr)(x)` (computed callee) | `Apply` |
 | `xs[i]` | `At` |
@@ -1325,7 +1325,7 @@ let y = do { let t = 3; t + 1 }
 [a, b]          // ["List", "a", "b"]      — [] → ["List"]
 {a, b}          // ["Set", "a", "b"]       — {} → ["Set"]
 (a, b)          // ["Tuple", "a", "b"]
-a..b            // ["Range", "a", "b"]
+a..b            // ["Range", "a", "b", 1]
 ```
 
 A dictionary is a `Dictionary` of `KeyValuePair`s, and an unquoted key becomes

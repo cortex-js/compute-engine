@@ -908,7 +908,7 @@ describe('a collection passed in a self-call types the parameter', () => {
       ce,
       'f3(n, s) = s if n == 0 else f3(n - 1, 1..2)\nf3(1, [0])'
     );
-    expect(r.value?.json).toEqual(['Range', 1, 2]);
+    expect(r.value?.json).toEqual(['Range', 1, 2, 1]);
   });
 
   test('a comprehension in the self-call', () => {

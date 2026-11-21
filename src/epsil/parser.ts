@@ -4564,7 +4564,7 @@ export class Parser {
         );
         break;
       }
-      left = this.combineInfix(op.def, left, right);
+      left = this.combineInfix(op.def, left, right, 'pattern');
     }
 
     return left;
@@ -7993,10 +7993,16 @@ export class Parser {
   private combineInfix(
     def: OperatorDef,
     left: MathJsonExpression,
-    right: MathJsonExpression
+    right: MathJsonExpression,
+    position: 'expression' | 'pattern' = 'expression'
   ): MathJsonExpression {
     const start = this.outerStart(left) ?? 0;
     const end = this.outerEnd(right) ?? this.previousEnd();
+
+    // In a pattern, `lo..hi` is a membership test and keeps its two operands
+    // (see `checkRangePatterns`).
+    if (def.name === 'Range' && position === 'expression')
+      return this.ascendingRange(left, right, start, end);
 
     // The mapsto arrow `params => body`: `left` is a parameter list (a bare
     // symbol, or a parenthesized/tuple list of symbols), `right` is the body.
@@ -8066,6 +8072,51 @@ export class Parser {
     return this.markInfixRelation(
       def,
       this.wrap([def.name, left, right] as MathJsonExpression[], start, end)
+    );
+  }
+
+  /**
+   * The value of `a..b`: `Range(a, b, 1)`, which has no element when `a > b`,
+   * so `for k in 1..n` runs zero times when `n` is 0. The operator `Range`
+   * with no step counts toward its end in either direction
+   * (`docs/COLLECTIONS-MODEL.md`), and a program reaches that rule with the
+   * call: `Range(7, 4)` is `[7, 6, 5, 4]`. The step has no source offsets:
+   * the source does not write it.
+   *
+   * Two literal bounds with `a > b` give the warning `range-empty`, with a
+   * fix-it to the range that counts down, `Range(a, b, -1)`.
+   */
+  private ascendingRange(
+    left: MathJsonExpression,
+    right: MathJsonExpression,
+    start: number,
+    end: number
+  ): MathJsonExpression {
+    const lo = rangeBoundValue(left);
+    const hi = rangeBoundValue(right);
+    if (lo !== undefined && hi !== undefined && lo > hi) {
+      const text = (bound: MathJsonExpression): string =>
+        this.source.slice(
+          this.localStart(bound) ?? start,
+          this.localEnd(bound) ?? end
+        );
+      this.diagnostics.push({
+        severity: 'warning',
+        message: ['range-empty', lo, hi],
+        range: [this.baseOffset + start, this.baseOffset + end],
+        fixits: [
+          [
+            this.baseOffset + start,
+            this.baseOffset + end,
+            `Range(${text(left)}, ${text(right)}, -1)`,
+          ],
+        ],
+      });
+    }
+    return this.wrap(
+      ['Range', left, right, { num: '1' }] as MathJsonExpression[],
+      start,
+      end
     );
   }
 

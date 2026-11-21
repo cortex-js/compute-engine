@@ -108,6 +108,8 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `"${args[0]}" here is an equation, not an assignment, and nothing reads its value; write "do { ${args[0]} }" to assign (a function that writes a variable outside itself also declares the "scope" effect), or "==" to compare`;
     case 'range-pattern-empty':
       return `Range pattern "${args[0]}..${args[1]}" is empty (the lower bound is greater than the upper bound); this case can never match`;
+    case 'range-empty':
+      return `The range "${args[0]}..${args[1]}" is empty: a range written with ".." counts up; write "Range(${args[0]}, ${args[1]}, -1)" to count down`;
     case 'floor-division-comment':
       return `"//" starts a comment, not floor division; use Floor(a / b) for the integer quotient`;
     case 'runtime-error':

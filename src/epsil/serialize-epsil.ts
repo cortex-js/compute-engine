@@ -396,10 +396,6 @@ export function serializeEpsil(
   const OPERATORS: { [name: string]: OperatorInfo } = {};
   for (const def of SHARED_OPERATORS) {
     if (def.name in OPERATORS) continue; // canonical (first) row wins
-    // `Range` has an infix parse spelling (`a..b`) but is serialized in
-    // function-call form `Range(a, b)`: that form also covers the 3-argument
-    // `Range(a, b, step)`, which has no binary infix spelling.
-    if (def.name === 'Range') continue;
     OPERATORS[def.name] = {
       symbol: def.symbol,
       fancySymbol: def.fancySymbol,
@@ -439,6 +435,34 @@ export function serializeEpsil(
     (typeof x === 'number' ||
       isNumberObject(x) ||
       (typeof x === 'string' && matchesNumber(x)));
+
+  // The operator row of a node, or `undefined` for a node that prints as a
+  // call. A `Range` prints as `a..b` only with the literal step 1 that the
+  // parser gives to `a..b`. With no step it counts toward its end in either
+  // direction, and with another step it has no infix spelling: both print as
+  // a call, `Range(a, b)` and `Range(a, b, step)`.
+  const isAscendingRange = (x: MathJsonExpression | null): boolean => {
+    if (x === null || operator(x) !== 'Range' || nops(x) !== 3) return false;
+    // The integer 1 only: `a..b` parses to the integer step, and a step
+    // written `1.0` is not that literal.
+    const step = operand(x, 3);
+    if (step === 1) return true;
+    const text =
+      typeof step === 'string'
+        ? step
+        : isNumberObject(step)
+          ? String(step.num)
+          : null;
+    return text !== null && text.trim() === '1';
+  };
+  const operatorInfo = (
+    x: MathJsonExpression | null
+  ): OperatorInfo | undefined => {
+    if (x === null) return undefined;
+    const name = operator(x);
+    if (name === 'Range' && !isAscendingRange(x)) return undefined;
+    return OPERATORS[name];
+  };
 
   // A negative number literal prints with a leading `-`, which the parser
   // reads as the prefix minus (precedence 90) and folds back into the literal
@@ -494,7 +518,7 @@ export function serializeEpsil(
   ): boolean {
     if (arg === null) return false;
     const argHead = operator(arg);
-    const argOp = OPERATORS[argHead];
+    const argOp = operatorInfo(arg);
     if (argOp) {
       if (argOp.precedence < op.precedence) return true;
       if (argOp.precedence === op.precedence) {
@@ -538,7 +562,7 @@ export function serializeEpsil(
     let node: MathJsonExpression | null = arg;
     while (node !== null && operator(node) === opName) node = operand(node, 1);
     if (node === null) return false;
-    const nodeOp = OPERATORS[operator(node)];
+    const nodeOp = operatorInfo(node);
     return (
       nodeOp !== undefined &&
       !nodeOp.unary &&
@@ -899,7 +923,7 @@ export function serializeEpsil(
       // Parenthesize a base that is itself an operator expression, so the
       // postfix `[…]` binds to the whole thing.
       const baseBlock =
-        OPERATORS[operator(base)] !== undefined
+        operatorInfo(base) !== undefined
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(
@@ -961,7 +985,7 @@ export function serializeEpsil(
       // Parenthesize a base that is itself an operator expression, so the
       // postfix `.name` binds to the whole thing (mirrors `At`).
       const baseBlock =
-        OPERATORS[operator(base)] !== undefined
+        operatorInfo(base) !== undefined
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(baseBlock, fmt.text('.' + name));
@@ -994,7 +1018,7 @@ export function serializeEpsil(
       if (protocol === null || name === null || base === null)
         return serializeGenericFunction(expr);
       const baseBlock =
-        OPERATORS[operator(base)] !== undefined
+        operatorInfo(base) !== undefined
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(
@@ -1017,7 +1041,7 @@ export function serializeEpsil(
       if (base === null || name === null || isNumberLiteral(base))
         return serializeGenericFunction(expr);
       const baseBlock =
-        OPERATORS[operator(base)] !== undefined
+        operatorInfo(base) !== undefined
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(
@@ -1053,7 +1077,7 @@ export function serializeEpsil(
       )
         return serializeGenericFunction(expr);
       const baseBlock =
-        OPERATORS[operator(base)] !== undefined
+        operatorInfo(base) !== undefined
           ? fmt.line('(', serializeExpression(base), ')')
           : serializeExpression(base);
       return fmt.line(
@@ -1779,8 +1803,8 @@ export function serializeEpsil(
       return fmt.line(...parts);
     }
     // A two-operand `Range` in pattern position is the range-membership pattern
-    // `lo..hi` (see the `match` design §8), so it keeps its infix spelling here
-    // even though `Range` serializes in call form in expression position. The
+    // `lo..hi` (see the `match` design §8), so it has the infix spelling here,
+    // where in expression position it prints as the call `Range(lo, hi)`. The
     // `..` is spaced like any other infix operator, which also keeps a negative
     // upper bound (`0 .. -1`) re-parsable — maximal munch would otherwise glue
     // `..-` into one token.
@@ -2524,7 +2548,7 @@ export function serializeEpsil(
     arg: MathJsonExpression | null,
     minPrecedence: number
   ): FormattingBlock {
-    const argOp = OPERATORS[operator(arg)];
+    const argOp = operatorInfo(arg);
     if (argOp && argOp.precedence < minPrecedence)
       return fmt.line('(', serializeExpression(arg), ')');
     return serializeExpression(arg);
@@ -3065,7 +3089,7 @@ export function serializeEpsil(
     const opName = operator(expr);
     if (!opName) return null;
 
-    const op = OPERATORS[opName];
+    const op = operatorInfo(expr);
     if (!op) return null;
     // `MapsTo` prints as `x => body`, which the parser reads as a LAMBDA — a
     // `break`/`continue` boundary. (The parser itself rewrites the node into
@@ -3081,8 +3105,7 @@ export function serializeEpsil(
     if (op.unary) {
       if (nops(expr) !== 1) return null;
       const arg = operand(expr, 1);
-      const argHead = operator(arg);
-      const argOp = OPERATORS[argHead];
+      const argOp = operatorInfo(arg);
       if (argOp && argOp.precedence < op.precedence) {
         return fmt.line(opSymbol, '(', serializeExpression(arg), ')');
       }
@@ -3092,8 +3115,7 @@ export function serializeEpsil(
     if (op.postfix) {
       if (nops(expr) !== 1) return null;
       const arg = operand(expr, 1);
-      const argHead = operator(arg);
-      const argOp = OPERATORS[argHead];
+      const argOp = operatorInfo(arg);
       // Parenthesize an operand that is itself an operator at the same or lower
       // precedence, so the postfix binds to the whole operand and re-parses
       // faithfully. `<=` (not `<`) matters for a nested postfix:
@@ -3111,8 +3133,11 @@ export function serializeEpsil(
     }
 
     // The first operand is the LEFT operand; every later one is a right
-    // operand (a variadic `Add(a, b, c)` chains as `(a + b) + c`).
-    const operandBlocks = operands(expr).map((arg, index) => {
+    // operand (a variadic `Add(a, b, c)` chains as `(a + b) + c`). The step 1
+    // of an ascending range is not written (see `operatorInfo`).
+    const infixOperands =
+      opName === 'Range' ? operands(expr).slice(0, 2) : operands(expr);
+    const operandBlocks = infixOperands.map((arg, index) => {
       if (needsOperandParens(arg, op, opName, index === 0 ? 'left' : 'right'))
         return fmt.line('(', serializeExpression(arg), ')');
       if (opName === 'KeyValuePair' && index === 0)

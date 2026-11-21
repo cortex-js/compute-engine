@@ -18,7 +18,7 @@ is written in lowercase (`simplify`, `solve`, `integrate`, `limit`, `series`,
 `factor`, `expand`) and the Wolfram spelling with a capital works too
 (`simplify`, `solve`); `D`, `N` and the linear-algebra operators keep their
 names; user names are lowercase and shadow a library name by scope; `{k, 1, n}` iterator triples work in `sum`,
-`product`, `integrate`, `D` and `table`; `Range(5)` starts at 1; indexing is
+`product`, `integrate`, `D` and `table`; `1..5` is `Range[5]`; indexing is
 1-based and `-1` is the last element; arithmetic threads over lists the way a
 `Listable` function does.
 
@@ -90,7 +90,7 @@ by exact value, so `0.5 === 1/2` is `True` too.
 | `xs[[-1]]`, `first`, `last`, `rest` | `xs[-1]`, `first(xs)`, `last(xs)`, `rest(xs)` |
 | `xs[[2 ;; 4]]` | `xs[2..4]` |
 | `m[[i, j]]` | `m[i, j]` (or `m[i][j]`) |
-| `Range[5]`, `Range[2, 10, 2]` | `Range(5)` or `1..5`; `Range(2, 10, 2)` |
+| `Range[n]`, `Range[2, 10, 2]` | `1..n` (empty when `n < 1`, as `Range[n]` is); `Range(2, 10, 2)` |
 | `length`, `sort`, `reverse`, `flatten` | same names |
 | `Total[xs]` | `sum(xs)` |
 | `Select[xs, f]` | `filter(xs, f)` |

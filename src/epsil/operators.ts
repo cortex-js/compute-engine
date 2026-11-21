@@ -342,13 +342,15 @@ export const OPERATORS: OperatorDef[] = [
     relational: true,
   },
 
-  // Range `a..b` → `Range(a, b)`. Also spelled with the Unicode two-dot leader
-  // `‥` (U+2025), which the parser normalizes to `..` via `FANCY_UNICODE`.
+  // Range `a..b` → `Range(a, b, 1)`, the ascending range, which is empty when
+  // `a > b` (in a pattern, `lo..hi` → `Range(lo, hi)`, a membership test).
+  // Also spelled with the Unicode two-dot leader `‥` (U+2025), which the
+  // parser normalizes to `..` via `FANCY_UNICODE`.
   // Precedence 65: tighter than the relational operators (60, so `k in 1..5`
   // parses as `k in (1..5)`) yet looser than Add/Subtract (70, so `1..n-1`
-  // parses as `1..(n-1)`). The serializer keeps the function-call spelling
-  // `Range(a, b)` (it also serves 3-argument `Range(a, b, step)`, which has no
-  // infix form), so this row is parser-only — see `serialize-epsil.ts`.
+  // parses as `1..(n-1)`). The serializer prints `Range(a, b, 1)` as `a..b`,
+  // and `Range(a, b)` and `Range(a, b, step)` as calls: with no step a range
+  // counts toward its end in either direction — see `serialize-epsil.ts`.
   {
     name: 'Range',
     symbol: '..',

@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **In Epsil, the range `a..b` counts up, and it is empty when `a` is greater
+  than `b`** (CE-1604). `a..b` is now `Range(a, b, 1)`, so a loop over the
+  first `n` things runs zero times when `n` is 0, as `range` in Python and
+  `1:0` in Julia do:
+
+  ```epsil
+  let n = 0
+  let c = 0
+  for k in 1..n { c = c + 1 }
+  c                // ➔ 0 (was 2: the range was [1, 0])
+  sum(1..n)        // ➔ 0 (was 1)
+  xs[1..n]         // ➔ [] (was the elements at 1 and 0)
+  ```
+
+  To count down, write the step: `Range(7, 4, -1)` is `[7, 6, 5, 4]`. A range
+  with two literal bounds and no element, such as `7..4`, gets the warning
+  `range-empty`, with that call as its fix-it. The call `Range(a, b)` with no
+  step does not change: it counts toward `b` in either direction, in Epsil,
+  in MathJSON and in LaTeX. `serializeEpsil()` writes `Range(a, b, 1)` as
+  `a .. b`, and `Range(a, b)` as a call.
+
 ### New Features
 
 - **`epsilDebugStatements()` lists the statements of an Epsil source at which
@@ -117,6 +140,104 @@
   definition.
 
 ### Resolved Issues
+
+- **An element of an `If` with no else of a list compiles again** (CE-1606).
+  A restriction of a list of curves that `At`, `First` or `Last` reads, that
+  `Max`, `Min` or `Sum` reduces, or that arithmetic changes before one of
+  these reads it, compiles on JavaScript and `interval-js`, and on GLSL for a
+  list of stated length; it compiled in 0.193.0 and declined in 0.194.3 and
+  later. Where the condition is false the element is `NaN`, the value of the
+  interpreter for `At`, `First` and `Last`. `IsMissing`, `Coalesce`, `AssertPresent`,
+  `Length`, `Rest` and the other readers of the list still decline: the
+  interpreter gives `Missing` there, and a compiled list is never absent.
+
+  ```ts
+  ce.declare('x', 'real');
+  const curves = ['If', ['LessEqual', 0, 'x', 6], ['Add', 'x', ['List', 0, 4, 2]]];
+  const f = compile(ce.box(['At', curves, 1]));
+  f.success;          // ➔ true (0.195.2: false)
+  f.run({ x: 1.5 });  // ➔ 1.5
+  f.run({ x: 7 });    // ➔ NaN
+  compile(ce.box(['Length', curves])).success; // ➔ false
+  ```
+
+- **`Expand`, `Factor`, `Together`, `Distribute` and `Solve` of a stored
+  formula no longer use a function's argument in place of a variable of the
+  formula that has the same name** (CE-1455). These operators replace a
+  symbol of their operand by the formula it holds. A variable of that formula
+  is the variable of the scope where the formula was assigned, but it was
+  read by its name where the operator was evaluated: in a function with a
+  parameter of that name, in a block with a local of that name, and in a sum
+  over an index of that name.
+
+  ```js
+  ce.assign('y', ce.parse('(x+1)^2'));
+  ce.assign('f', ce.parse('x \\mapsto \\mathrm{Expand}(y)'));
+  ce.parse('f(2)').evaluate(); // ➔ x^2 + 2x + 1 (0.195.2: 9)
+
+  ce.assign('a', ce.parse('n + 1'));
+  ce.parse('\\sum_{n=1}^{3} \\mathrm{Expand}(n a)').evaluate();
+  // ➔ 6n + 6, as without Expand (0.195.2: 20)
+  ```
+
+  A parameter, a local or an index that the operand itself names is still
+  replaced by its value: with `f := x ↦ Expand(x·y)`, `f(2)` is
+  `2x^2 + 4x + 2`.
+- **A `Series` of `GammaLn` is no longer off by `πi` where `Γ` is negative**
+  (CE-1616). `GammaLn(x)` is `ln|Γ(x)|` for a real `x`, and
+  `Series(GammaLn(x), x, -1, 2)` was `-ln(x + 1) + ln(-1) + …`, the series of
+  `Ln(Gamma(x))`, which is `GammaLn(x) + πi` for `x > -1`. It now stays
+  `Series(...)`, as it does at `0` and at `-2`, and so do the series at `-3`,
+  `Series(GammaLn(x - 1/2) / x, x, 0, 2)` and
+  `Series(GammaLn(-1/x), x, +∞, 2)`, which were off by `πi/x` and by `πi`.
+  `Series(Ln(Gamma(x)), x, -1, 2)` is unchanged, and so is a series of
+  `GammaLn` where `Γ` is known to be positive:
+  `Series(GammaLn(1/x), x, +∞, 1)` is `ln(x) - EulerGamma/x + O(x^(-2))`.
+- **An Epsil program that ends with `map`, `filter` or another finite lazy
+  collection gives the list of its elements** (CE-1601). The value of
+  `executeEpsil()` and `executeEpsilAsync()` was the lazy expression: its
+  text was `[6,7]`, but its `json` and `latex` were the `Map` call, so a
+  notebook cell showed `Map(u ↦ u+1, [5, 6])`. Only a comprehension was
+  listed. The value is now a `List`, a `Set` or a `Dictionary`, and the
+  callback runs once for each element, during the run.
+
+  ```ts
+  const { value } = executeEpsil(ce, 'map(u => u + 1, [5, 6])');
+  value.json;  // ➔ ["List", 6, 7] (0.195.2: ["Map", ["Function", …], ["List", 5, 6]])
+  value.latex; // ➔ \bigl\lbrack6, 7\bigr\rbrack (0.195.2: \mathrm{Map}(u\mapsto u+1, …))
+  ```
+
+  A range (`1..4`), a collection with no last element (`map(f, 1..oo)`) and
+  a collection with more than `ce.maxCollectionSize` elements stay lazy, and
+  so does the value of a statement that is not the last one (`onStatement`
+  receives it). A list of more than 10 elements now prints in full
+  (`map(u => 2 * u, 1..30)` printed `[2,4,6,8,10,...,52,54,56,58,60]`), and
+  an element that is a range prints as `Range(1, 2)`, as in a list literal.
+  When the time limit, the step budget or the recursion limit stops the
+  computation of the elements, the value is `["Error", message, cause]`, as
+  for a statement: a comprehension as the last statement threw a
+  `CancellationError` to the caller, and `statementTimeLimitMs` and the time
+  limit around `executeEpsilAsync()` did not apply to its elements. With
+  `statementTimeLimitMs`, the elements have a second span of that limit.
+- **`GCD` and `LCM` of real numbers compile to GLSL again** (CE-1595). Since
+  0.194.0, `compile(expr, { to: 'glsl' })` declined them when an operand was
+  not of an integer type ("GCD (the operation rgcd) on glsl"), so a heatmap
+  of `\gcd` of a slider value was drawn by the interpreter. A shader now
+  gives the value of `evaluate()` where the operands hold integers, and
+  where they have a common divisor far above 1e-6 of the larger operand
+  (`GCD(7.5, 2)` is `0.5`).
+
+  ```ts
+  ce.declare('x', 'real');
+  ce.declare('y', 'real');
+  compile(ce.box(['GCD', 'x', 'y']), { to: 'glsl' }).code;
+  // ➔ "_gpu_ir_rgcd(x, y)" (0.195.2: declined)
+  ```
+
+  For operands with no such divisor (`GCD(3.14159, 2.71828)`), `evaluate()`
+  gives a small value that changes with the last digit of an operand, and a
+  shader, which computes in single floats, can give another small value. In
+  a shader, two integer operands of which one is 2^31 or more give `NaN`.
 
 - **A `type`, `protocol` or conformance statement of an Epsil program that a
   host runs in a scope of its own is at the top level** (CE-1627). After

@@ -460,18 +460,30 @@ key-value pair where `map` expects a function. That call is not recovered as
 
 ## Ranges: `..` {#ranges}
 
-The range operator is a compact spelling of a two-argument `Range`:
+`a..b` is the range that counts up from `a` to `b` by 1, with both ends
+included. It is the call `Range(a, b, 1)`:
 
 ```epsil
-1..5          // Range(1, 5)
-1..n - 1      // Range(1, n - 1)
-k in 1..5     // k in Range(1, 5)
+1..5          // Range(1, 5, 1): 1, 2, 3, 4, 5
+1..n - 1      // Range(1, n - 1, 1)
+k in 1..5     // k in Range(1, 5, 1)
 ```
 
-It binds tighter than relational operators and more loosely than addition and
-subtraction. The Unicode two-dot leader `‥` is an input alias. Serialization
-uses `Range(a, b)`, and a stepped range continues to use the three-argument
-call `Range(a, b, step)`.
+When `a` is greater than `b`, the range is empty: `for k in 1..n { … }` runs
+zero times when `n` is 0, `sum(1..n)` is then 0, and `xs[1..n]` is `[]`. To
+count down, write a negative step: `Range(5, 1, -1)` is 5, 4, 3, 2, 1. A range
+with two literal bounds that has no element, such as `5..1`, gets the
+`range-empty` warning, with that call as its fix-it.
+
+The call `Range(a, b)` with no step is another range: it counts toward `b` in
+either direction, so `Range(5, 1)` is 5, 4, 3, 2, 1 and `Range(1, 0)` is 1, 0.
+This is the rule of the `Range` operator of MathJSON, and of a range written
+in LaTeX.
+
+`..` binds tighter than relational operators and more loosely than addition
+and subtraction. The Unicode two-dot leader `‥` is an input alias.
+Serialization writes `Range(a, b, 1)` as `a .. b`, and writes `Range(a, b)`
+and a range with another step, `Range(a, b, step)`, as calls.
 
 ## Qualified names: `::` {#qualified-names}
 

@@ -493,14 +493,18 @@ describe('EPSIL MATCH — range patterns (parse)', () => {
     ]);
   });
 
-  test('a range pattern serializes back to `lo .. hi` (call form in expression position)', () => {
+  test('a range pattern serializes back to `lo .. hi`, and so does the range `lo..hi` in expression position', () => {
     const [value] = parseEpsil('match x {\n  1..10 => "in"\n  _ => "out"\n}');
     expect(serializeEpsil(value)).toBe(
       'match x {\n  1 .. 10 => "in"\n  _ => "out"\n}'
     );
-    // Expression position is unchanged: `Range` keeps its call spelling.
-    expect(serializeEpsil(parseEpsil('let xs = 1..10')[0])).toContain(
-      'Range(1, 10)'
+    // In expression position, `1..10` is `Range(1, 10, 1)`, which prints as
+    // `1 .. 10`; the call `Range(1, 10)` keeps its call spelling.
+    expect(serializeEpsil(parseEpsil('let xs = 1..10')[0])).toBe(
+      'let xs = 1 .. 10'
+    );
+    expect(serializeEpsil(parseEpsil('let xs = Range(1, 10)')[0])).toBe(
+      'let xs = Range(1, 10)'
     );
   });
 

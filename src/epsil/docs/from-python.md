@@ -71,7 +71,8 @@ let double = x => 2x
 | `xs[0]` | `xs[1]` — **1-based** |
 | `xs[-1]` | `xs[-1]` |
 | `xs[1:3]` | `xs[2..3]` — 1-based, **inclusive** on both ends |
-| `range(1, 6)` | `1..5` or `Range(1, 5)` — **inclusive** of the end |
+| `range(1, 6)` | `1..5` — **inclusive** of the end, and empty when the end is below the start, as `range` is |
+| `range(5, 0, -1)` | `Range(5, 1, -1)` |
 | `len(xs)` | `length(xs)` |
 | `sorted(xs)` / `sorted(xs, reverse=True)` | `sort(xs)` / `sort(xs, (a, b) => a > b)` |
 | `sum`, `min`, `max`, `any`, `all` | `sum`, `min`, `max`, `any`, `all` |

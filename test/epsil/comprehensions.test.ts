@@ -58,8 +58,8 @@ describe('EPSIL COMPREHENSIONS — parse', () => {
     ).toStrictEqual([
       'Comprehension',
       ['Tuple', 'x', 'y'],
-      ['Element', 'x', ['Range', 1, 3], ['Greater', 'x', 1]],
-      ['Element', 'y', ['Range', 1, 'x'], ['Less', 'y', 'x']],
+      ['Element', 'x', ['Range', 1, 3, 1], ['Greater', 'x', 1]],
+      ['Element', 'y', ['Range', 1, 'x', 1], ['Less', 'y', 'x']],
     ]);
   });
 

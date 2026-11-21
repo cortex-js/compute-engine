@@ -180,7 +180,7 @@ describe('a list literal snapshots a spread lazy collection', () => {
     // range, as it does in `[1..3]`.
     const ranged = run('let xs = [1, 2]\n[...xs, 1..3]').value;
     expect(ranged.nops).toBe(3);
-    expect(ranged.ops![2].json).toEqual(['Range', 1, 3]);
+    expect(ranged.ops![2].json).toEqual(['Range', 1, 3, 1]);
     expect(ranged.ops![2].json).toEqual(run('[1..3]').value.ops![0].json);
   });
 
@@ -203,8 +203,8 @@ describe('a list literal snapshots a spread lazy collection', () => {
     // A nested range element stays a range.
     expect(run('[...map(i => 1..3, 1..2)]').value.json).toEqual([
       'List',
-      ['Range', 1, 3],
-      ['Range', 1, 3],
+      ['Range', 1, 3, 1],
+      ['Range', 1, 3, 1],
     ]);
   });
 });

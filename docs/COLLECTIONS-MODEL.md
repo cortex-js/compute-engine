@@ -197,6 +197,11 @@ rewrite that turns a recursion or a comprehension into `Map(g, Range(s, K))`
 must write the step, or handle the case `s > K` itself (for example with
 `Which(s > K, [], …)`).
 
+The Epsil range `a..b` is `Range(a, b, 1)`: it counts up, and it has no
+element when `a > b`, so `for k in 1..n { … }` runs zero times when `n` is 0.
+The call `Range(a, b)` written in Epsil, and a range written in LaTeX, keep
+the rule of the operator. Decision of the user, 2026-11-20 (CE-1604).
+
 The user decided five rules on 2026-09-29:
 
 - **A read that stops at the iteration limit stays unevaluated.** When an

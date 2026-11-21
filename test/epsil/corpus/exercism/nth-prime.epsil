@@ -1,6 +1,6 @@
-// The n-th prime, by trial division, compared with the library. `2..1` is a
-// descending range, so the trial divisors are cut with `takeWhile` instead.
-isPrimeByTrial(n) = n >= 2 && all(takeWhile(2..n, d => d * d <= n), d => n % d != 0)
+// The n-th prime, by trial division, compared with the library. For n = 2
+// and n = 3 the range of the trial divisors is `2..1`, which has no element.
+isPrimeByTrial(n) = n >= 2 && all(2..floor(sqrt(n)), d => n % d != 0)
 nthPrimeByTrial(n) = do {
   let found = 0
   let k = 1
