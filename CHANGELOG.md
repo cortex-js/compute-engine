@@ -44,6 +44,14 @@
 
 ### Behavior Changes
 
+- **`Expand` leaves a power of a sum as it is when its expansion has more
+  than 4096 terms** (CE-1307). `Expand((x + 1)^4096)` is `(x + 1)^4096`, where
+  it was a sum of 4097 terms, and `Expand((x + y + 1)^90)` is
+  `(x + y + 1)^90`. The same bound applies to the expansion that `simplify()`
+  and the antiderivative search try: `x·(x^65536 + 1)^65536` simplifies to
+  itself, where the simplification did not return. `(x + 1)^4095` still
+  expands.
+
 - **A Document row that defines a recursion with no base case is a row
   error**: when every arm of every function of a recursive component calls a
   function of the component through arithmetic, a list or a tuple, as in
@@ -100,6 +108,11 @@
   string: write `\mathrm{m}`.
 
 ### Resolved Issues
+
+- **The integral of a high power of a polynomial times `e^x` returns**
+  (CE-1307). `\int (x^{65536}+1)^{65536} e^{x}\,dx` stays unevaluated, in
+  less than a second, where the evaluation did not return. See "Behavior
+  Changes" for the bound on `Expand` that makes it return.
 
 - **In a Document, a function row whose parameter is read only as an operand
   of `Join` or `ListJoin` takes a scalar argument as one element**: with
