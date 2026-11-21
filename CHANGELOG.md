@@ -25,6 +25,17 @@
   get the protocols, and a case pattern of `match` gets no keyword other
   than `true` and `false`.
 
+### Resolved Issues
+
+- **Applying a typed let no longer renames the parameters of the enclosing
+  function** (#655). In `acc, k ↦ Apply(v ↦ Map(j ↦ …acc[j]…, …), Map(q ↦
+  acc[q], …))`, the nested `Block` holds the binding of `acc` because its body
+  reads it. The capture check counted that entry as a binder of the `Block`,
+  and as the value of `v` mentions `acc`, it renamed `acc` to `acc_1` there,
+  and nothing substituted the renamed occurrence: a `Fold` with such a step
+  gave `[5, acc_1[2], acc_1_1[3]]`, not `[5, 6, 7]`. An entry that holds the
+  binding of a parameter of an enclosing literal is a read, not a binder.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues

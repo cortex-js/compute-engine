@@ -5323,11 +5323,21 @@ function parameterSubBinds(
     if (isFunction(node, 'Function')) return names;
     const held = !node.isCanonical && node.localScope === undefined;
     const locals = held ? heldBoundNames(node) : blockLocalNames(node);
-    const kept = names.filter(
-      (name) =>
-        locals.includes(name) ||
-        !isParameterEntry(subs, node.localScope?.bindings.get(name), name)
-    );
+    // An entry that holds the binding of a parameter of an enclosing literal
+    // is a read of that parameter, not a binder: a nested `Block` has it when
+    // its body reads the parameter (`acc` in `(acc) ↦ (v ↦ Map(j ↦ acc[j], …))`).
+    // Counting it as a binder renamed `acc` to `acc_1` when the value of `v`
+    // mentioned `acc`, and nothing substituted the renamed occurrences.
+    const kept = names.filter((name) => {
+      if (locals.includes(name)) return true;
+      const entry = node.localScope?.bindings.get(name);
+      if (isParameterEntry(subs, entry, name)) return false;
+      return !(
+        entry !== undefined &&
+        'value' in entry &&
+        isFunctionLiteralParameter(entry.value)
+      );
+    });
     const added = locals.filter((name) => !names.includes(name));
     return kept.length === names.length && added.length === 0
       ? names
