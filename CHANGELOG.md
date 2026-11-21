@@ -1,3 +1,56 @@
+## [Unreleased]
+
+### New Features
+
+- **`createDocumentEnvironment()` prepares a document of LaTeX rows as one
+  unit.** A host passes the complete list of rows, each with a stable `id` and
+  its LaTeX source, and a `DocumentSyntax` that says how to read a row head. The
+  engine finds the head of each row first, then parses each body with the other
+  rows in view: `f(3)` is an application when another row defines `f(x)=x^2+1`,
+  and `L[2]` is an index when another row defines `L=[10,20,30]`. Each call to
+  `prepare()` returns an independent revision. An older revision keeps its own
+  bindings until it is disposed.
+
+  ```ts
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports((declareInput) =>
+    declareInput('s', 'real')
+  );
+  const revision = imports.prepare(rows, syntax, new Set(['W']));
+  ce.expr('a', { scope: revision.scope }).evaluate(); // 10
+  revision.dispose();
+  imports.dispose();
+  environment.dispose();
+  ```
+
+  The types and shapes a revision derives are fixed when it is prepared. The
+  definitions of its rows and imports are read-only: assigning to them,
+  declaring a new name in the revision scope, or changing a type throws a
+  `ConstantAssignmentError`. Only a declared input (`declareInput()`) or a row
+  named in the writable set accepts a value of its type: a `list<integer>` row
+  accepts a longer list, and a `vector<integer^4>` row refuses a list of twelve
+  elements. `revision.collectionWriteError()` tells whether a value is accepted,
+  before the host writes it. The profile and import callbacks must be
+  synchronous.
+
+### Behavior Changes
+
+- **The type, protocol and value-kind registries are read-only while a document
+  environment is live.** `ce.declareType()`, `ce.declareProtocol()`,
+  `ce.declareProtocolImplementation()`, conformance declarations and the
+  registration or removal of an arithmetic value kind throw until the
+  environment, every import factory and every revision made from it are
+  disposed. Declare these before you open the environment. Two revisions that
+  need different types need two engines.
+
+### Resolved Issues
+
+- **`.references` lists the outer name that a declaration's initializer reads**
+  (CE-1575). For
+  `["Block", ["Declare", "d", "'unknown'", ["Add", "d", "n"]], ["Multiply", "d", 2]]`,
+  `.references` was `["n"]` and is now `["d", "n"]`: the initializer reads the
+  outer `d`.
+
 ## 0.196.1 _2026-11-21_
 
 ### Behavior Changes

@@ -1255,7 +1255,8 @@ export interface Parser {
    * resolves (with `type.isUnknown` true).
    */
   resolveSymbol(
-    id: MathJsonSymbol
+    id: MathJsonSymbol,
+    purpose?: 'indexed-base'
   ):
     | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
     | undefined;

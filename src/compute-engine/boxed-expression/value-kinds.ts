@@ -47,6 +47,7 @@ import type { Type, TypeReference } from '../../common/type/types.js';
 import { declarationOf } from '../../common/type/reference.js';
 import { signatureArms, type KindTypeNames } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { assertDocumentRegistryWritable } from '../document-registry-lifetime.js';
 
 /**
  * The kind primitives: the names of the type language that are kind types in
@@ -267,6 +268,7 @@ export function prepareKindRegistration(
   arithmetic: ArithmeticDefinition,
   options: KindRegistrationOptions = {}
 ): KindRegistration {
+  assertDocumentRegistryWritable(ce, 'Value-kind registrations');
   if (
     arithmetic === null ||
     typeof arithmetic !== 'object' ||
@@ -423,6 +425,18 @@ export function registerKind(
     def,
     prepareKindRegistration(ce, name, def.signature.type, arithmetic, options)
   );
+}
+
+/**
+ * Check a registered head before replacing its binding or removing its
+ * dispatch entry. A new binding that shadows the head can still be declared.
+ */
+export function assertKindHeadWritable(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition
+): void {
+  if (registryOf(ce).dispatch.has(def))
+    assertDocumentRegistryWritable(ce, 'Value-kind registrations');
 }
 
 function removeDispatchEntry(

@@ -1,3 +1,5 @@
+import { assertKindHeadWritable } from './value-kinds.js';
+import { assertWritableImport } from './prepared-import-binding.js';
 import { withHiddenValues } from './hidden-values.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
 import { implicitVariableCandidates } from './implicit-variable-rule.js';
@@ -1766,7 +1768,7 @@ export function updateDef(
    * `binding-repair` event below. */
   fresh?: boolean
 ): void {
-  beforeDefinitionWrite(def);
+  assertWritableImport(name, def, 'definition');
   const mutableDef = def as {
     value?: BoxedValueDefinition;
     operator?: BoxedOperatorDefinition;
@@ -1779,6 +1781,12 @@ export function updateDef(
   // (`provisional-application.ts`).
   const supersededValue = mutableDef.value;
   const supersededOperator = mutableDef.operator;
+  if (
+    supersededOperator?.arithmetic !== undefined &&
+    supersededOperator !== newDef
+  )
+    assertKindHeadWritable(ce, supersededOperator);
+  beforeDefinitionWrite(def);
 
   // A definition CONSTRUCTED by this call (as opposed to one the caller
   // passed in already boxed). Only such a half receives the provenance

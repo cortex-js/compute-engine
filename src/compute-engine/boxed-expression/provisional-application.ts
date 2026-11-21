@@ -516,3 +516,8 @@ export function repairProvisionalDependents(
   // waiting definition.
   _repair?.(ce, name, justInstalled, declaredIn, boundIn);
 }
+
+export const preparedCalls = new WeakMap<
+  BoxedValueDefinition,
+  { preparing: boolean } | null
+>();

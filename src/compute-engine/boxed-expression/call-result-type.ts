@@ -1,3 +1,4 @@
+import { preparedCalls } from './provisional-application.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
 import type {
   Expression,
@@ -385,6 +386,31 @@ export function callResultType(
     })
   )
     return 'error';
+  // A function of a prepared Document (`preparedCalls`) keeps its declared
+  // result, except while its group is prepared: then a declared result that
+  // is `unknown` or a list of `unknown` is derived from the body, without the
+  // memo, for a call with an indexed argument.
+  if (binding && 'value' in binding) {
+    const prepared = preparedCalls.get(binding.value);
+    if (prepared !== undefined) {
+      if (
+        !prepared?.preparing ||
+        !hasUnknownIndexedResult(declared) ||
+        !args.some((arg) => isSubtype(arg.type, INDEXED_COLLECTION_SHAPE_TYPE))
+      )
+        return undefined;
+      return callResultTypeOfBinding(
+        engine,
+        args,
+        declared,
+        derive,
+        binding,
+        true,
+        undefined,
+        false
+      );
+    }
+  }
   // A string or a boolean argument of a function whose signature was
   // inferred: the result of the signature can be false for it, and so can
   // the candidate result of a cycle of recursive calls, which was derived
@@ -436,6 +462,22 @@ export function callResultType(
   );
 }
 
+/** The prepared document can settle a result with an unknown list cell
+ * from a caller that supplies indexed arguments. Other result types use the
+ * original contract. */
+function hasUnknownIndexedResult(type: Type): boolean {
+  if (type === 'unknown') return true;
+  if (typeof type === 'string' || type.kind !== 'list') return false;
+  const { elements } = type;
+  return (
+    elements === 'unknown' ||
+    elements === 'any' ||
+    (typeof elements === 'object' &&
+      elements.kind === 'broadcastable' &&
+      elements.elements === 'unknown')
+  );
+}
+
 /** The part of `callResultType` that reads the binding of the called
  * function, after it is resolved. With `skipProvisional`, the candidate
  * result of a cycle of recursive calls is not read. */
@@ -449,7 +491,8 @@ function callResultTypeOfBinding(
   ) => Type | undefined,
   binding: BoxedDefinition | undefined,
   skipProvisional: boolean,
-  declined?: { walk: boolean }
+  declined?: { walk: boolean },
+  memoize = true
 ): Type | undefined {
   // A call of a function of a cycle of calls whose result is verified is
   // typed by the candidate result of that function
@@ -508,7 +551,9 @@ function callResultTypeOfBinding(
     args,
     declared,
     derive,
-    declaredParameterTypes(binding)
+    declaredParameterTypes(binding),
+    undefined,
+    memoize
   );
   if (wide === 'collection')
     return t === undefined || t === 'unknown' ? 'any' : t;
@@ -1813,7 +1858,8 @@ function literalBodyResultType(
     args: readonly OperandDescriptor[]
   ) => Type | undefined,
   declaredParams?: ReadonlyArray<Type>,
-  partialArgCount?: number
+  partialArgCount?: number,
+  memoize = true
 ): Type | undefined {
   const walk = () =>
     literalBodyResultTypeInContext(
@@ -1823,7 +1869,8 @@ function literalBodyResultType(
       declared,
       derive,
       declaredParams,
-      partialArgCount
+      partialArgCount,
+      memoize
     );
   const t = inLiteralScope(engine, literal, walk);
   // A function argument at a parameter that the body does not use as a
@@ -1912,7 +1959,8 @@ function literalBodyResultTypeInContext(
   // Each parameter from this index on has no argument, and its descriptor
   // in `args` is its parameter type. Such a parameter is typed by that
   // type even when it is `unknown`: the caller reads only an `error` result.
-  partialArgCount?: number
+  partialArgCount?: number,
+  memoize = true
 ): Type | undefined {
   // A number literal argument is typed by its tier (`integer`, `real`, …),
   // not by its value: the result of `(x ↦ (2x, x))(3)` is a pair of
@@ -1977,25 +2025,30 @@ function literalBodyResultTypeInContext(
       return undefined;
     env.set(name, describeType(t));
   }
-  const generation = engine._cacheGeneration();
-  let stored = cache.get(engine);
-  if (!stored || stored.generation !== generation) {
-    stored = { generation, literals: new WeakMap() };
-    cache.set(engine, stored);
-  }
-  let results = stored.literals.get(literal);
-  if (!results) {
-    results = new Map();
-    stored.literals.set(literal, results);
+  let results: Map<string, Type | undefined> | undefined;
+  if (memoize) {
+    const generation = engine._cacheGeneration();
+    let stored = cache.get(engine);
+    if (!stored || stored.generation !== generation) {
+      stored = { generation, literals: new WeakMap() };
+      cache.set(engine, stored);
+    }
+    results = stored.literals.get(literal);
+    if (!results) {
+      results = new Map();
+      stored.literals.set(literal, results);
+    }
   }
   // The declared parameter types decide how an absent argument is bound, and
   // one literal can be the value of several functions declared differently.
   const key =
-    [declared, ...args.map((x) => x.type), ...(declaredParams ?? [])]
-      .map((t) => typeToString(t))
-      .join(';') +
-    (partialArgCount === undefined ? '' : `;partial ${partialArgCount}`);
-  if (results.has(key)) {
+    results === undefined
+      ? undefined
+      : [declared, ...args.map((x) => x.type), ...(declaredParams ?? [])]
+          .map((t) => typeToString(t))
+          .join(';') +
+        (partialArgCount === undefined ? '' : `;partial ${partialArgCount}`);
+  if (key !== undefined && results?.has(key)) {
     // A result derived from an answer that depends on the derivations in
     // progress makes the reader depend on them too.
     if (stackDependentResults.get(results)?.has(key))
@@ -2439,6 +2492,7 @@ function literalBodyResultTypeInContext(
       declined || result === undefined || result === 'never'
         ? undefined
         : result;
+    if (key === undefined || results === undefined) return refined;
     // Repeated calls with literal argument types must not retain an unbounded
     // set of entries for one engine generation.
     if (results.size >= 256) results.delete(results.keys().next().value!);

@@ -1,6 +1,13 @@
 import type { Expression } from '../global-types.js';
 import { parseType } from '../../common/type/parse.js';
-import { isAbsentSymbol, isFunction, sym } from './type-guards.js';
+import {
+  isAbsentSymbol,
+  isDictionary,
+  isFunction,
+  isString,
+  isSymbol,
+  sym,
+} from './type-guards.js';
 
 /**
  * The statement that the block operand `op` holds. A return-type annotation
@@ -35,6 +42,48 @@ export function statementDeclaredNames(op: Expression): string[] {
   if (isFunction(target, 'Tuple')) return tuplePatternNames(target);
   const name = sym(target);
   return name === undefined ? [] : [name];
+}
+
+/**
+ * The initial value of the `Declare` with the operands `args` (not
+ * canonical) when the declaration states no type: the positional value
+ * (`Declare(f, "unknown", v)`) or the `value` entry of an attributes
+ * dictionary read from its raw pairs (`let f = v`). Otherwise `undefined`.
+ */
+function rawDeclaredValue(
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  const statesNoType = (op: Expression | undefined): boolean =>
+    op === undefined ||
+    (isString(op) && op.string === 'unknown') ||
+    isSymbol(op, 'unknown');
+  if (args.length >= 3) return statesNoType(args[1]) ? args[2] : undefined;
+  const dict = args[1];
+  if (isDictionary(dict))
+    return statesNoType(dict.get('type')) ? dict.get('value') : undefined;
+  if (!isFunction(dict, 'Dictionary')) return undefined;
+  let value: Expression | undefined;
+  let type: Expression | undefined;
+  for (const pair of dict.ops) {
+    if (!isFunction(pair) || pair.ops.length !== 2) continue;
+    const key = isString(pair.ops[0]) ? pair.ops[0].string : sym(pair.ops[0]);
+    if (key === 'value') value = pair.ops[1];
+    else if (key === 'type') type = pair.ops[1];
+  }
+  return statesNoType(type) ? value : undefined;
+}
+
+/**
+ * A declaration reads the outer binding of its own target in an eager
+ * initializer. The body of a function initializer reads the new local.
+ */
+export function declarationReadsOuterNames(
+  args: ReadonlyArray<Expression>
+): boolean {
+  return (
+    !isFunction(args[2], 'Function') &&
+    !isFunction(rawDeclaredValue(args), 'Function')
+  );
 }
 
 /**

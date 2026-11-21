@@ -402,7 +402,7 @@ export function parseInvalidSymbol(parser: Parser): MathJsonExpression | null {
 export function absorbSubscripts(
   parser: Parser,
   id: string,
-  requireResolution: boolean
+  requireResolution: boolean | (() => boolean)
 ): string {
   while (!parser.atEnd) {
     const currentPeek = parser.peek;
@@ -418,7 +418,13 @@ export function absorbSubscripts(
     const commit = (): boolean => {
       if (suffix === null) return false;
       const candidate = id + '_' + suffix;
-      if (requireResolution && parser.resolveSymbol(candidate) === undefined) {
+      const declines =
+        typeof requireResolution === 'boolean'
+          ? requireResolution && parser.resolveSymbol(candidate) === undefined
+          : parser.resolveSymbol(candidate) === undefined &&
+            requireResolution() &&
+            parser.resolveSymbol(candidate) === undefined;
+      if (declines) {
         // Keep the name that the join would have made: a binder (a sum
         // index, a comprehension variable, a parameter) that is spelled
         // with this subscript is the joined name, not an element access.
@@ -556,6 +562,27 @@ export function absorbSubscripts(
   return id;
 }
 
+/** Resolve exact joined names before asking a draft for the base's kind. */
+export function absorbSymbolSubscripts(parser: Parser, id: string): string {
+  const info = parser.resolveSymbol(id);
+  if (info?.subscriptEvaluate) return id;
+  const isCollection =
+    info?.type.matches(INDEXED_COLLECTION_SHAPE_TYPE) ?? false;
+  const prepare = (parser.options as { _prepareIndexedBase?: unknown })
+    ._prepareIndexedBase;
+  // Exact joined names require no inferred fact about the base.
+  return absorbSubscripts(
+    parser,
+    id,
+    prepare === undefined || isCollection
+      ? isCollection
+      : () =>
+          parser
+            .resolveSymbol(id, 'indexed-base')
+            ?.type.matches(INDEXED_COLLECTION_SHAPE_TYPE) ?? false
+  );
+}
+
 /**
  * Match a symbol.
  *
@@ -576,21 +603,9 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
   //
   if (/^[a-zA-Z]$/.test(parser.peek) || /^\p{XIDS}$/u.test(parser.peek)) {
     const id = parser.nextToken();
+    if (parser.peek !== '_') return id;
 
-    const info = parser.resolveSymbol(id);
-
-    // A symbol with subscriptEvaluate keeps ALL its subscripts as Subscript
-    // expressions: the handler owns the subscript's meaning. Return the bare
-    // symbol, leaving any `_` for the Subscript parselet.
-    if (info?.subscriptEvaluate) return id;
-
-    const isCollection =
-      info?.type.matches(INDEXED_COLLECTION_SHAPE_TYPE) ?? false;
-
-    // Check if followed by subscript(s) - if so, include them in the symbol
-    // name. An indexed-collection base only absorbs a subscript whose joined
-    // name is declared (see `absorbSubscripts()`).
-    return absorbSubscripts(parser, id, isCollection);
+    return absorbSymbolSubscripts(parser, id);
   }
 
   //
@@ -633,15 +648,8 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
       // `Parser.isFunctionTriggerName`); and an indexed-collection base
       // absorbs only a DECLARED joined name, so the element-access reading
       // survives.
-      if (parser.peek === '_' && !parser.isFunctionTriggerName(id)) {
-        const info = parser.resolveSymbol(id);
-        if (!info?.subscriptEvaluate)
-          id = absorbSubscripts(
-            parser,
-            id,
-            info?.type.matches('indexed_collection<any>') ?? false
-          );
-      }
+      if (parser.peek === '_' && !parser.isFunctionTriggerName(id))
+        id = absorbSymbolSubscripts(parser, id);
       return id;
     }
   }

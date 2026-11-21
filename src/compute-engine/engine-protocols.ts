@@ -1,3 +1,4 @@
+import { assertDocumentRegistryWritable } from './document-registry-lifetime.js';
 import { BoxedType } from '../common/type/boxed-type.js';
 import type {
   DeclarationOrigin,
@@ -456,6 +457,7 @@ export function declareProtocolImpl(
     extends?: readonly string[];
   }
 ): void {
+  assertDocumentRegistryWritable(ce);
   if (!isValidTypeName(name))
     throw Error(`The protocol name "${name}" is invalid`);
   if (isReservedProtocolName(name))
@@ -2065,6 +2067,7 @@ export function declareConformance(
     fromStatementRoute?: boolean;
   }
 ): Expression | null {
+  assertDocumentRegistryWritable(ce);
   if (protocolNames.length === 0)
     return ce.error([
       'protocol-conformance-target-invalid',
@@ -4612,6 +4615,7 @@ export function declareProtocolImplementationImpl(
   impl: ProtocolImplementationInput,
   options?: { where?: string }
 ): void {
+  assertDocumentRegistryWritable(ce);
   const whereText = options?.where;
   if (whereText !== undefined && typeof whereText !== 'string')
     throw Error(

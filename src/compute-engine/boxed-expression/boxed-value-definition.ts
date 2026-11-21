@@ -1,3 +1,4 @@
+import { assertWritableImport } from './prepared-import-binding.js';
 import { inStaticTypingView } from '../static-typing-view.js';
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { valueIsHidden } from './hidden-values.js';
@@ -228,6 +229,10 @@ export function prepareValueWhenBoxed(
 ): void {
   VALUE_PREPARATIONS.set(def, prepare);
 }
+
+// A definition object that carries this key with `true` makes a value
+// definition whose declared type is fixed: its value does not infer it.
+export const preparedContractDeclaration = Symbol('prepared-contract');
 
 export class _BoxedValueDefinition
   implements BoxedValueDefinition, ConfigurationChangeListener
@@ -470,6 +475,10 @@ export class _BoxedValueDefinition
     noteDefinitionCreated(ce, this);
     this._engine = ce;
     this.name = name;
+    this._fixedInitializationType =
+      (def as { [preparedContractDeclaration]?: true })[
+        preparedContractDeclaration
+      ] === true;
     // A definition made during a boxing is narrowed by the uses of that
     // boxing (`binding-unit.ts`).
     ce._boxingState.noteDefinitionMade(this);
@@ -562,7 +571,7 @@ export class _BoxedValueDefinition
 
       this._type = new BoxedType(type, ce._typeResolver);
       this.inferredType = def.inferred ?? false;
-      if (!this.inferredType)
+      if (!this.inferredType && !this._fixedInitializationType)
         this._placeholderSkeleton = placeholderSkeletonOf(type);
       if (hasSignaturePlaceholder(type)) this._signatureSkeleton = type;
     }
@@ -578,8 +587,11 @@ export class _BoxedValueDefinition
     noteSymbolValue(this._engine, this._value);
 
     if (this._value) {
-      if (!this._type || this._type.isUnknown) {
-        // Infer the type from the value if no type is specified
+      if (
+        !this._type ||
+        (this._type.isUnknown && !this._fixedInitializationType)
+      ) {
+        // Infer the type when no fixed contract has been specified.
         if (this.isConstant) {
           // If this is a constant, the type is exactly the type of the value
           this._type = this._value.type;
@@ -835,6 +847,7 @@ export class _BoxedValueDefinition
   }
 
   set value(v: Expression | undefined) {
+    assertWritableImport(this.name, this);
     // The value of a definition of a scope that has activations is written
     // in the activation of the evaluation in progress, when there is one. A
     // constant local of a block is written once in each activation.
@@ -1804,6 +1817,7 @@ export class _BoxedValueDefinition
    * and must do so inside its own bracket or inside this thunk.
    * @internal */
   _setType(thunk: () => Type | TypeString | BoxedType): void {
+    assertWritableImport(this.name, this, 'definition');
     beforeDefinitionWrite(this);
     this._engine._withoutFacts(() => this._writeType(thunk()));
   }
@@ -1858,6 +1872,7 @@ export class _BoxedValueDefinition
    * `_placeholderSkeleton`, unlike the public `type` setter above.
    * @internal */
   _setElementRefinement(t: BoxedType): void {
+    assertWritableImport(this.name, this, 'definition');
     beforeDefinitionWrite(this);
     // Fact-blind like every other type write, so that a refinement derived
     // from an assigned value keeps standing after the assumptions change. The
@@ -1964,7 +1979,7 @@ function isSelfReferentialValue(
   name: string,
   value: Expression | undefined | null
 ): boolean {
-  if (!value || !value.symbols.includes(name)) return false;
+  if (!value || isNumber(value) || !value.symbols.includes(name)) return false;
   return mentionsOutsideActivations(name, value);
 }
 

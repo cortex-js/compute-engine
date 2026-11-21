@@ -1,9 +1,11 @@
+import { evaluatePreparedValue } from '../document-preparation/value-pass.js';
 import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
 import { isBeingDefined } from './declared-parameter-result.js';
 import { anyMacroDeclared, expandMacro } from './macro.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import { noteKindTypeDeclaration } from './residue-class.js';
+import { assertWritableImport } from './prepared-import-binding.js';
 import type {
   MathJsonExpression,
   MathJsonSymbol,
@@ -2054,6 +2056,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     if (!this._def)
       throw new Error(`Cannot set value of non-canonical ${this._id}`);
+    // Refuse a write to a sealed binding before the assumptions are cleared.
+    assertWritableImport(this._id, this._def);
 
     //
     // Clear assumptions about this symbol
@@ -2244,6 +2248,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
     if (!this._def)
       throw new Error(`Cannot set type of non-canonical symbol "${this._id}"`);
+    // Refuse a retype of a sealed binding before any state changes below.
+    assertWritableImport(this._id, this._def, 'definition');
 
     if (this._id[0] === '_')
       throw new Error(
@@ -2801,9 +2807,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             expr.evaluate(options) ?? this,
             exact && (() => expr.evaluate(exact) ?? this)
           );
+        const prepared =
+          isValueDef(binding) && binding.value._fixedInitializationType
+            ? evaluatePreparedValue(
+                this.engine,
+                binding.value,
+                expr,
+                options,
+                () => this._dereference(expr, options)
+              )
+            : undefined;
         return this._testedRead(
           expr,
-          this._dereferenceMemoized(expr, options),
+          prepared ?? this._dereferenceMemoized(expr, options),
           exact && (() => this._dereferenceMemoized(expr, exact))
         );
       }

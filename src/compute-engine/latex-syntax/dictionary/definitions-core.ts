@@ -52,7 +52,7 @@ import {
 } from '../delimiter-tables.js';
 import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
-import { absorbSubscripts } from '../parse-symbol.js';
+import { absorbSymbolSubscripts } from '../parse-symbol.js';
 import { continuationRanges } from '../range-provenance.js';
 
 /** Negative-signed-set modifier for a base number set: `\mathbb{Z}^-` is the
@@ -3256,7 +3256,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (
         rhs !== null &&
         ((sym &&
-          parser.resolveSymbol(sym)?.type.matches('indexed_collection<any>')) ||
+          parser
+            .resolveSymbol(sym, 'indexed-base')
+            ?.type.matches('indexed_collection<any>')) ||
           operator(lhs) === 'List')
       ) {
         // Unwrap Delimiter if present (e.g. from comma-separated subscripts)
@@ -5103,11 +5105,7 @@ function absorbPrimeSubscript(
     // joined name is itself declared (both rules live in `absorbSubscripts`).
     if (!info?.subscriptEvaluate) {
       const beforeSubscripts = parser.index;
-      const joined = absorbSubscripts(
-        parser,
-        id,
-        info?.type.matches('indexed_collection<any>') ?? false
-      );
+      const joined = absorbSymbolSubscripts(parser, id);
       if (joined !== id) {
         // The symbol is the joined name: report `x_01` for `x'_{01}`, as
         // the symbol parser does for `x_{01}'`.
@@ -7079,7 +7077,9 @@ function parseAssignStatement(
         (typeof subscript === 'string' && subscript.length === 1));
 
     if (
-      parser.resolveSymbol(baseName)?.type.matches('indexed_collection<any>') ||
+      parser
+        .resolveSymbol(baseName, 'indexed-base')
+        ?.type.matches('indexed_collection<any>') ||
       (!isLocalBindingContext && simpleSequenceLikeSubscript)
     ) {
       // Base is a collection, or this is a top-level sequence-like assignment
@@ -7146,7 +7146,11 @@ function parseAssignStatement(
 
     // In local-binding contexts, if the base is NOT a known collection,
     // treat simple subscripted names as compound symbols for assignment.
-    if (!parser.resolveSymbol(fn)?.type.matches('indexed_collection<any>')) {
+    if (
+      !parser
+        .resolveSymbol(fn, 'indexed-base')
+        ?.type.matches('indexed_collection<any>')
+    ) {
       const sub = operand(lhs, 2);
       const subStr =
         (sub !== null && typeof sub === 'string' ? sub : undefined) ??

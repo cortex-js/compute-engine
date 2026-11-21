@@ -1,3 +1,4 @@
+import { assertDocumentRegistryWritable } from './document-registry-lifetime.js';
 import type {
   Type,
   TypeParameter,
@@ -102,7 +103,11 @@ export function createTypeResolver(host: TypeResolverHost): TypeResolver {
 
     resolve(name: string) {
       const type = host._typeRegistry[name];
-      if (type !== undefined) return type;
+      if (type !== undefined) {
+        // Parsing uses of an unresolved promise records its applied arity.
+        if (type.def === undefined) assertDocumentRegistryWritable(host);
+        return type;
+      }
       // A PROTOCOL in type position. Protocol names are deliberately NOT in the
       // type registry (P8: protocols and types share no names, and a protocol
       // is not a type), so the name misses — and the type layer, which has no
@@ -130,6 +135,7 @@ export function createTypeResolver(host: TypeResolverHost): TypeResolver {
       // drop every capture of it, which is far worse than handing it back.
       // Answering with it is exactly what `resolve()` would have done.
       const existing = host._typeRegistry[name];
+      assertDocumentRegistryWritable(host);
       if (existing !== undefined) return existing;
       const ref: TypeReference = {
         kind: 'reference',

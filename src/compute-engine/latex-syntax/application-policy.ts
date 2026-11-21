@@ -5,7 +5,7 @@ import { continuationRanges } from './range-provenance.js';
 
 type Candidate = Omit<ApplicationContext, 'arguments' | 'ancestors'> & {
   group: MathJsonExpression;
-  fallback: 'apply' | 'predicate' | 'juxtapose';
+  fallback: 'apply' | 'predicate' | 'juxtapose' | 'multiply';
   /** The head that the result holds, when it is not the written name `head`:
    * `Subscript(a, k)` for `a_k(x)` in the body of `\sum_{k=1}^{2}`
    * (`_subscriptBoundIndexes()` in `parse.ts`). The hook still reads the
@@ -115,7 +115,6 @@ export class ApplicationPolicy {
   }
 
   finish(expr: MathJsonExpression): MathJsonExpression {
-    if (!this.resolve) return expr;
     return this.visit(expr, []);
   }
 
@@ -142,13 +141,16 @@ export class ApplicationPolicy {
         { operator: 'InvisibleOperator', operandIndex: 2 },
       ]);
       const args = getSequence(group) ?? [group];
-      const decision = this.resolve!({
-        head: candidate.head,
-        arguments: args,
-        sourceOffsets: candidate.sourceOffsets,
-        headSourceOffsets: candidate.headSourceOffsets,
-        ancestors: context,
-      });
+      const decision =
+        candidate.fallback === 'multiply'
+          ? 'multiply'
+          : this.resolve?.({
+              head: candidate.head,
+              arguments: args,
+              sourceOffsets: candidate.sourceOffsets,
+              headSourceOffsets: candidate.headSourceOffsets,
+              ancestors: context,
+            });
       if (
         decision !== undefined &&
         decision !== 'apply' &&

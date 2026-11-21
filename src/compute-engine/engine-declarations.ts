@@ -1,3 +1,4 @@
+import { assertDocumentRegistryWritable } from './document-registry-lifetime.js';
 import { activationRecordOf } from './boxed-expression/ambient-chain.js';
 import { isPendingCallScope } from './pending-call-scopes.js';
 import { freeNameWasMade } from './binding-unit.js';
@@ -5,6 +6,7 @@ import { noteScopeDeclaration } from './scope-declaration-count.js';
 import { noteKindTypeDeclaration } from './boxed-expression/residue-class.js';
 import {
   arithmeticOf,
+  assertKindHeadWritable,
   commitKindRegistration,
   isRegisteredKindTypeRecord,
   prepareKindRegistration,
@@ -205,6 +207,7 @@ import {
   restParameterIndex,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
+import { assertWritableImport } from './boxed-expression/prepared-import-binding.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
 import {
   isMacroDef,
@@ -556,6 +559,7 @@ export function declareSymbolValue(
   scope?: Scope
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
+  assertWritableImport(name, scope, 'definition');
 
   // State event: `shadowsCallable` must be captured BEFORE the placeholder
   // install below, while the chain still shows any shadowed binding — and
@@ -575,6 +579,7 @@ export function declareSymbolValue(
   beforeScopeWrite(ce, scope, name);
   const fresh = !scope.bindings.has(name);
   const replaced = scope.bindings.get(name);
+  assertWritableImport(name, replaced, 'definition');
 
   // Insert a placeholder in the bindings to handle recursive calls
   // (the value could be a function that references itself)
@@ -724,6 +729,7 @@ export function declareSymbolOperator(
   scope?: Scope
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
+  assertWritableImport(name, scope, 'definition');
 
   // A VALUE KIND (the `arithmetic` field) is checked BEFORE anything is
   // installed, so a refused kind leaves the previous binding as it was: the
@@ -738,6 +744,11 @@ export function declareSymbolOperator(
     previousRecord !== undefined && isOperatorDef(previousRecord)
       ? previousRecord.operator
       : undefined;
+  if (
+    def.arithmetic === undefined &&
+    supersededOperator?.arithmetic !== undefined
+  )
+    assertKindHeadWritable(ce, supersededOperator);
   const kindRegistration =
     def.arithmetic === undefined
       ? undefined
@@ -762,6 +773,7 @@ export function declareSymbolOperator(
   beforeScopeWrite(ce, scope, name);
   const fresh = !scope.bindings.has(name);
   const replaced = scope.bindings.get(name);
+  assertWritableImport(name, replaced, 'definition');
 
   // Insert a placeholder in the bindings to handle recursive calls
   // (the function is not yet defined)
@@ -1061,6 +1073,7 @@ export function declareType(
     origin?: DeclarationOrigin;
   } = {}
 ): void {
+  assertDocumentRegistryWritable(ce);
   // `where` is a reserved word in type strings (the quantifier clause), so it
   // cannot also name a type.
   if (isReservedTypeName(name))
@@ -1721,6 +1734,7 @@ export function declareSumType(
     origin?: DeclarationOrigin;
   } = {}
 ): void {
+  assertDocumentRegistryWritable(ce);
   if (isReservedTypeName(name))
     throw new TypeVariableError(
       'reserved-type-name',
@@ -3012,6 +3026,7 @@ function assertUndeclarable(
   // scope (`loadLibrary()`), and records each binding it installs. The
   // library is checked first, so that the message for `Sin` names the
   // library and not the scope.
+  assertWritableImport(name, scope, 'definition');
   const binding = scope.bindings.get(name);
   const visible = binding ?? lookup(name, scope);
   const provenance = ce._libraryProvenance.get(name);
@@ -3031,6 +3046,8 @@ function assertUndeclarable(
         : `Cannot undeclare "${name}": it is not declared in the current scope. Its declaration is in an enclosing scope, which \`undeclare()\` does not change`
     );
   }
+  if (isOperatorDef(binding) && binding.operator.arithmetic !== undefined)
+    assertKindHeadWritable(ce, binding.operator);
   // The variable of a binder operator (a `Sum` index, a comprehension
   // index, a `D` variable) and a parameter of a function that is being
   // evaluated belong to the expression that declared them. The scope of
@@ -3298,6 +3315,9 @@ function assignNamedValue(
   arg2?: AssignValue,
   options?: AssignFnOptions
 ): IComputeEngine {
+  const previous = ce.lookupDefinition(id);
+  assertWritableImport(id, previous);
+
   // D6 — assignment FULL-REPLACES, so everything `clause-identity.ts` remembers
   // about the binding's current definition record stops being true here. The
   // clause LIST needs no such call: it hangs off the inner operator object and
@@ -3321,7 +3341,7 @@ function assignNamedValue(
     removeAssignedValue(ce, id);
     return ce;
   }
-  clearClauseProvenance(ce.lookupDefinition(id));
+  clearClauseProvenance(previous);
 
   // An object belongs to the engine that constructed it. Checked here as well
   // as in `setSymbolValue` because a first assignment to an undeclared name

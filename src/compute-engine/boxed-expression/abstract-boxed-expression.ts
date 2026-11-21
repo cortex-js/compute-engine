@@ -86,7 +86,11 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
-import { statementDeclaredNames, typedStatement } from './tuple-pattern.js';
+import {
+  declarationReadsOuterNames,
+  statementDeclaredNames,
+  typedStatement,
+} from './tuple-pattern.js';
 import {
   implicitVariableCandidatesFrom,
   isLibraryDefinition,
@@ -1216,13 +1220,10 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   get references(): ReadonlyArray<string> {
-    const defined = new Set<string>();
-    getDefines(this, defined);
     const set = new Set<string>();
     getReferences(this, set, set, new Map(), 'references');
-    const result: string[] = [];
-    for (const s of set) if (!defined.has(s)) result.push(s);
-    return result.sort();
+    for (const name of definitionOnlyNames(this)) set.delete(name);
+    return Array.from(set).sort();
   }
 
   get errors(): ReadonlyArray<Expression> {
@@ -1841,6 +1842,25 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
   getReferences(expr, result, new Set<string>());
 }
 
+type DocumentReferenceNames = {
+  values: ReadonlySet<string>;
+  callables: ReadonlySet<string>;
+};
+
+/** A raw walk knows the draft's accepted head roles before CE owns slots. */
+export function draftReferences(
+  expr: Expression,
+  names: DocumentReferenceNames
+): string[] {
+  const found = new Set<string>();
+  const memo: ReferencesMemo = Object.assign(new Map(), {
+    documentNames: names,
+  });
+  getReferences(expr, found, found, memo, 'references');
+  for (const name of definitionOnlyNames(expr)) found.delete(name);
+  return [...found].sort();
+}
+
 /**
  * The memo of `getReferences`: the free variables and the referenced
  * functions of each function node or dictionary already walked. Only `get`
@@ -1848,6 +1868,7 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
  * walks, without keeping the expressions alive) can be one.
  */
 export type ReferencesMemo = {
+  documentNames?: DocumentReferenceNames;
   get(key: Expression): readonly [Set<string>, Set<string>] | undefined;
   set(key: Expression, value: readonly [Set<string>, Set<string>]): unknown;
 };
@@ -2020,13 +2041,20 @@ function collectReferences(
     // or not (`ReferenceMode`). Only a name of the standard library is left
     // out: the `Add` of `Reduce(L, Add)`.
     if (mode === 'references') {
+      if (
+        memo.documentNames?.values.has(s) &&
+        expr.baseDefinition === undefined
+      ) {
+        freeVars.add(s);
+        return;
+      }
       const bound = expr.valueDefinition ?? expr.operatorDefinition;
       // An unbound occurrence (a raw form) has no definition of its own: the
       // binding its name resolves to says whether it is a constant (a bound
       // constant was left out above).
       // A free name (`isFreeName()`, `binding-unit.ts`) reads the binding
       // that its name resolves to (`readBinding()`), which skips a library
-      // operator that its unit reads as a variable (`N` in `N + 1`).
+      // operator that it reads as a variable (`N` in `N + 1`).
       const looked =
         bound !== undefined
           ? undefined
@@ -2068,8 +2096,8 @@ function collectReferences(
     const own = expr.valueDefinition;
     // A free name (`isFreeName()`, `binding-unit.ts`) reads the binding
     // that its name resolves to (`readBinding()`): never a parameter or the
-    // variable of a binder, and not a library operator that its unit reads
-    // as a variable.
+    // variable of a binder, and not a library operator when the occurrence
+    // was boxed as a variable.
     const def = isFreeName(expr)
       ? readBinding(expr)
       : own === undefined
@@ -2118,7 +2146,12 @@ function collectReferences(
   // predicate a free variable would. It is referenced at *this* level, so it
   // is added directly (an enclosing binder filters it via the inner-set
   // threading below, exactly like a free variable).
-  if (mode === 'references' && isReferencedFunctionHead(expr))
+  if (
+    mode === 'references' &&
+    ((expr.baseDefinition === undefined &&
+      memo.documentNames?.callables.has(expr.operator)) ||
+      isReferencedFunctionHead(expr))
+  )
     refFns.add(expr.operator);
 
   // A `Function` literal `["Function", body, ...params]` binds its trailing
@@ -2151,6 +2184,24 @@ function collectReferences(
     for (let i = 1; i < ops.length; i++) {
       const d = optionalParameterDefault(ops[i]);
       if (d !== undefined) getReferences(d, freeVars, refFns, memo, mode);
+    }
+    return;
+  }
+
+  if (
+    mode === 'references' &&
+    isDeclarationStatement(expr) &&
+    (isSymbol(expr.op1) || isFunction(expr.op1, 'Tuple'))
+  ) {
+    // A declaration target is a write. The enclosing sequence decides
+    // whether a read of the same spelling is local or external.
+    for (let i = 1; i < expr.ops.length; i++) {
+      const op = expr.ops[i];
+      if (isFunction(op, 'Dictionary') && op.operatorDefinition === undefined) {
+        for (const pair of op.ops)
+          if (isFunction(pair, 'KeyValuePair'))
+            getReferences(pair.op2, freeVars, refFns, memo, mode);
+      } else getReferences(op, freeVars, refFns, memo, mode);
     }
     return;
   }
@@ -2230,8 +2281,11 @@ function collectReferences(
       (binderBoundAt(sites, name, i) && flatOwner?.[i] !== name));
   const builder = setBuilderVariables(expr);
   const localVars = new Set<string>(builder?.names);
-  if (bindsStatementTargets(expr))
-    addBlockLocals(expr.ops, expr.localScope, localVars, memo, mode);
+  const block = bindsStatementTargets(expr);
+  if (block) addBlockLocals(expr.ops, expr.localScope, localVars, memo, mode);
+  // A raw sequence may include a duplicate that canonicalization refuses.
+  const declared =
+    block && mode === 'references' ? new Set<string>() : undefined;
 
   const ops = expr.ops;
   for (let i = 0; i < ops.length; i++) {
@@ -2285,13 +2339,32 @@ function collectReferences(
       for (const s of innerFree) freeVars.add(s);
       for (const s of innerRef) refFns.add(s);
     } else {
-      // Filtered PER OPERAND: an index is bound only where it is in scope.
-      for (const s of innerFree)
-        if (!(indexVars.has(s) && boundIn(s, i)) && !localVars.has(s))
-          freeVars.add(s);
-      for (const s of innerRef)
-        if (!(indexVars.has(s) && boundIn(s, i)) && !localVars.has(s))
-          refFns.add(s);
+      const statement = declared ? typedStatement(op) : undefined;
+      let outerNames: readonly string[] | undefined;
+      if (declared && isDeclarationStatement(statement)) {
+        const names = statementDeclaredNames(statement);
+        if (!names.some((name) => declared.has(name))) {
+          for (const name of names) declared.add(name);
+          if (declarationReadsOuterNames(statement.ops)) outerNames = names;
+          else {
+            const scope = expr.localScope;
+            if (scope !== undefined)
+              outerNames = names.filter(
+                (name) =>
+                  (innerFree.has(name) || innerRef.has(name)) &&
+                  readsEnclosingDefinition(statement.ops, scope, name)
+              );
+          }
+        }
+      } else if (declared && isFunction(statement, 'DefineFunction')) {
+        for (const name of statementDeclaredNames(statement))
+          declared.add(name);
+      }
+      const bound = (name: string): boolean =>
+        (indexVars.has(name) && boundIn(name, i)) ||
+        (localVars.has(name) && !outerNames?.includes(name));
+      for (const s of innerFree) if (!bound(s)) freeVars.add(s);
+      for (const s of innerRef) if (!bound(s)) refFns.add(s);
     }
   }
 
@@ -2507,14 +2580,87 @@ function implicitCandidatesInWalk(
   const read = new Set<string>();
   const functions = new Set<string>();
   getReferences(integrand, read, functions, memos.references, 'references');
-  const defined = new Set<string>();
-  getDefines(integrand, defined);
+  const defined = definitionOnlyNames(integrand);
   const references = [...read, ...functions].filter((s) => !defined.has(s));
   return implicitVariableCandidatesFrom(integrand.engine, {
     unknowns,
     references,
     referencedFunctions: functions,
   });
+}
+
+/**
+ * A grouped initializer can lose its delimiters when boxed. Its occurrences
+ * still carry the binding selected in the enclosing scope. Look for that
+ * identity, since a nested binder or the recursive literal can also use the
+ * same spelling.
+ */
+function readsEnclosingDefinition(
+  operands: ReadonlyArray<Expression>,
+  scope: Scope,
+  name: string
+): boolean {
+  let parent = scope.parent;
+  let definition: BoxedBaseDefinition | undefined;
+  while (parent) {
+    const binding = parent.bindings.get(name);
+    if (binding !== undefined) {
+      definition = 'value' in binding ? binding.value : binding.operator;
+      break;
+    }
+    parent = parent.parent;
+  }
+  if (definition === undefined) return false;
+  const pending = operands.slice(1);
+  const visited = new Set<Expression>();
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (visited.has(node)) continue;
+    if (node.baseDefinition === definition) return true;
+    if (isDictionary(node)) {
+      visited.add(node);
+      for (const value of node.values) pending.push(value);
+    } else if (isFunction(node) && node._numericStore === undefined) {
+      visited.add(node);
+      for (const argument of node.ops) pending.push(argument);
+    }
+  }
+  return false;
+}
+
+function isDeclarationStatement(
+  stmt: Expression | undefined
+): stmt is Expression & { ops: ReadonlyArray<Expression> } {
+  return isFunction(stmt, 'Declare') && !isReferencedFunctionHead(stmt);
+}
+
+/**
+ * Standalone definitions still exclude their targets from notebook in-edges.
+ * A block has already filtered its declared locals. Retain the existing
+ * exclusion for assignment targets on the path to the notebook cell, except
+ * for assignments to explicit block locals.
+ */
+function definitionOnlyNames(expr: Expression): Set<string> {
+  const result = new Set<string>();
+  function collect(node: Expression, enclosing?: ReadonlySet<string>): void {
+    if (!isFunction(node)) return;
+    if (!bindsStatementTargets(node)) {
+      const statement = typedStatement(node);
+      if (enclosing && isDeclarationStatement(statement)) return;
+      for (const name of statementDeclaredNames(node))
+        if (!enclosing?.has(name)) result.add(name);
+      return;
+    }
+    const local = new Set(enclosing);
+    for (const child of node.ops) {
+      const statement = typedStatement(child);
+      if (isDeclarationStatement(statement))
+        for (const name of statementDeclaredNames(statement)) local.add(name);
+    }
+    for (const child of node.ops) collect(child, local);
+  }
+  collect(expr);
+  return result;
 }
 
 /**

@@ -4623,7 +4623,8 @@ export class ComputeEngine implements IComputeEngine {
    * Declaration *presence* is the record's presence — a declared symbol with
    * an `unknown` type still resolves.
    */
-  private _resolveSymbolFromScope(
+  /** @internal */
+  _resolveSymbolFromScope(
     id: MathJsonSymbol
   ):
     | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }

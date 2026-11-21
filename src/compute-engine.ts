@@ -300,3 +300,17 @@ export interface ComputeEngineGlobal {
 (globalThis as Record<symbol, unknown>)[
   Symbol.for('io.cortexjs.compute-engine')
 ] = COMPUTE_ENGINE_GLOBAL;
+
+export { createDocumentEnvironment } from './compute-engine/document-preparation/document-environment.js';
+export type {
+  DeclareDocumentInput,
+  DocumentEnvironment,
+  DocumentImports,
+} from './compute-engine/document-preparation/document-environment.js';
+export type {
+  DocumentSourceRow,
+  DocumentSyntax,
+  PreparedDocumentDefinition,
+  PreparedDocumentRevision,
+  PreparedDocumentValuePass,
+} from './compute-engine/document-preparation/prepare-document.js';

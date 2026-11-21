@@ -20,7 +20,7 @@ import type {
 import { LATEX_DICTIONARY } from './dictionary/default-dictionary.js';
 import { indexLatexDictionary } from './dictionary/definitions.js';
 import type { IndexedLatexDictionary } from './dictionary/indexed-types.js';
-import { parse as parseImpl } from './parse.js';
+import { parse as parseImpl, startDefinitionRow } from './parse.js';
 import { serializeLatex as serializeImpl } from './serializer.js';
 import {
   getApplyFunctionStyle,
@@ -341,6 +341,17 @@ export class LatexSyntax {
   ): MathJsonExpression | null {
     const defaults = defaultParseOptions(this._options);
     return parseImpl(latex, this.indexed, { ...defaults, ...options });
+  }
+
+  _startDefinitionRow(
+    tokens: Parameters<typeof startDefinitionRow>[2],
+    options: Partial<ParseLatexOptions>
+  ) {
+    return startDefinitionRow(
+      this.indexed,
+      { ...defaultParseOptions(this._options), ...options },
+      tokens
+    );
   }
 
   /**

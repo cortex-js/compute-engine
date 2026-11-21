@@ -34,6 +34,8 @@ import {
   ParseLatexOptions,
   LatexToken,
   Delimiter,
+  COMPARISON_PRECEDENCE,
+  ASSIGNMENT_PRECEDENCE,
   Terminator,
   Parser,
   INVISIBLE_OP_PRECEDENCE,
@@ -43,11 +45,11 @@ import {
 } from './types.js';
 import type { ParseDiagnostic } from '../types-kernel-serialization.js';
 import { tokenize, tokensToString } from './tokenizer.js';
-import type { DiscardedComment } from './tokenizer.js';
+import type { DiscardedComment, Token } from './tokenizer.js';
 import {
   parseSymbol,
   parseInvalidSymbol,
-  absorbSubscripts,
+  absorbSymbolSubscripts,
 } from './parse-symbol.js';
 import type {
   IndexedLatexDictionary,
@@ -932,6 +934,23 @@ export class _Parser implements Parser {
   readonly options: Readonly<ParseLatexOptions>;
 
   private _applicationPolicy?: ApplicationPolicy;
+  definitionFormals?: SymbolTable;
+
+  private formalApplication(name: string): 'multiply' | undefined {
+    if (this.definitionFormals === undefined) return undefined;
+    for (
+      let table: SymbolTable | null = this.symbolTable;
+      table;
+      table = table.parent
+    ) {
+      const type = table.ids[name];
+      if (type !== undefined)
+        return table === this.definitionFormals && !type.matches('function')
+          ? 'multiply'
+          : undefined;
+    }
+    return undefined;
+  }
 
   resolveApplications(expr: MathJsonExpression): MathJsonExpression {
     return this._applicationPolicy?.finish(expr) ?? expr;
@@ -1608,7 +1627,8 @@ export class _Parser implements Parser {
    * type knowledge (a declared symbol may resolve with an `unknown` type).
    */
   resolveSymbol(
-    id: MathJsonSymbol
+    id: MathJsonSymbol,
+    purpose?: 'indexed-base'
   ):
     | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
     | undefined {
@@ -1619,6 +1639,12 @@ export class _Parser implements Parser {
       table = table.parent;
     }
 
+    if (purpose === 'indexed-base')
+      (
+        this.options as ParseLatexOptions & {
+          _prepareIndexedBase?: (name: string) => void;
+        }
+      )._prepareIndexedBase?.(id);
     const info = this.options.resolveSymbol?.(id);
     if (info === undefined || info === null) return undefined;
 
@@ -1718,37 +1744,50 @@ export class _Parser implements Parser {
     this._exprSpans = ambiguityErrors ? new WeakMap() : null;
     this._primitiveSpans = ambiguityErrors ? [] : null;
 
-    this._positiveInfinityTokens = tokenize(this.options.positiveInfinity);
-    this._negativeInfinityTokens = tokenize(this.options.negativeInfinity);
-    this._notANumberTokens = tokenize(this.options.notANumber);
-    this._decimalSeparatorTokens = tokenize(this.options.decimalSeparator);
+    const numberLexemes = (
+      options as Readonly<ParseLatexOptions> & {
+        _preparedTokens?: PreparedLatexTokens;
+      }
+    )._preparedTokens?.numberLexemes;
+    const lexeme =
+      numberLexemes === undefined
+        ? tokenize
+        : (source: string) => {
+            const retained = numberLexemes.get(source);
+            if (retained !== undefined) return retained;
+            const result = tokenize(source);
+            numberLexemes.set(source, result);
+            return result;
+          };
+    this._positiveInfinityTokens = lexeme(this.options.positiveInfinity);
+    this._negativeInfinityTokens = lexeme(this.options.negativeInfinity);
+    this._notANumberTokens = lexeme(this.options.notANumber);
+    this._decimalSeparatorTokens = lexeme(this.options.decimalSeparator);
 
     this._wholeDigitGroupSeparatorTokens = [];
     this._fractionalDigitGroupSeparatorTokens = [];
     if (this.options.digitGroupSeparator) {
       if (typeof this.options.digitGroupSeparator === 'string') {
-        this._wholeDigitGroupSeparatorTokens = tokenize(
+        this._wholeDigitGroupSeparatorTokens = lexeme(
           this.options.digitGroupSeparator
         );
         this._fractionalDigitGroupSeparatorTokens =
           this._wholeDigitGroupSeparatorTokens;
       } else if (Array.isArray(this.options.digitGroupSeparator)) {
-        this._wholeDigitGroupSeparatorTokens = tokenize(
+        this._wholeDigitGroupSeparatorTokens = lexeme(
           this.options.digitGroupSeparator[0]
         );
-        this._fractionalDigitGroupSeparatorTokens = tokenize(
+        this._fractionalDigitGroupSeparatorTokens = lexeme(
           this.options.digitGroupSeparator[1]
         );
       }
     }
 
-    this._exponentProductTokens = tokenize(this.options.exponentProduct);
-    this._beginExponentMarkerTokens = tokenize(
-      this.options.beginExponentMarker
-    );
-    this._endExponentMarkerTokens = tokenize(this.options.endExponentMarker);
-    this._truncationMarkerTokens = tokenize(this.options.truncationMarker);
-    this._imaginaryUnitTokens = tokenize(this.options.imaginaryUnit);
+    this._exponentProductTokens = lexeme(this.options.exponentProduct);
+    this._beginExponentMarkerTokens = lexeme(this.options.beginExponentMarker);
+    this._endExponentMarkerTokens = lexeme(this.options.endExponentMarker);
+    this._truncationMarkerTokens = lexeme(this.options.truncationMarker);
+    this._imaginaryUnitTokens = lexeme(this.options.imaginaryUnit);
 
     this._numberFormatTokens = {
       decimalSeparatorTokens: this._decimalSeparatorTokens,
@@ -4104,7 +4143,11 @@ export class _Parser implements Parser {
       // path that backtracks below is cleaned up by the index-setter auto-prune.
       if (typeof fn === 'string')
         this.emitSymbolReference(fn, start, this.index);
-      if (typeof fn === 'string' && this.options.resolveApplication) {
+      if (
+        typeof fn === 'string' &&
+        (this.options.resolveApplication ||
+          this.definitionFormals !== undefined)
+      ) {
         // Match the ordinary symbol path before committing the occurrence.
         // The low-level name scanner can spell dictionary aliases differently.
         const scannerEnd = this.index;
@@ -4114,11 +4157,14 @@ export class _Parser implements Parser {
           typeof policyHead === 'string'
             ? this.resolveSymbol(policyHead)
             : undefined;
-        if (
-          typeof policyHead === 'string' &&
-          (info === undefined || info.inferred === true)
-        ) {
-          const candidate = this.parseApplicationCandidate(policyHead, start);
+        if (typeof policyHead === 'string') {
+          const decision = this.formalApplication(policyHead);
+          const candidate =
+            decision !== undefined ||
+            (this.options.resolveApplication &&
+              (info === undefined || info.inferred === true))
+              ? this.parseApplicationCandidate(policyHead, start, decision)
+              : null;
           if (candidate !== null) return candidate;
         }
         this.index = scannerEnd;
@@ -4223,7 +4269,8 @@ export class _Parser implements Parser {
    */
   private parseApplicationCandidate(
     head: MathJsonSymbol,
-    start: number
+    start: number,
+    decision?: 'multiply'
   ): MathJsonExpression | null {
     const headEnd = this.index;
     const fallback = this.isFunctionOperator(head)
@@ -4251,7 +4298,7 @@ export class _Parser implements Parser {
     return this._applicationPolicy.add({
       head,
       group,
-      fallback,
+      fallback: decision ?? fallback,
       sourceOffsets: this.sourceOffsets(start, this.index),
       headSourceOffsets: this.sourceOffsets(start, headEnd),
     });
@@ -4272,11 +4319,14 @@ export class _Parser implements Parser {
     head: MathJsonSymbol,
     start: number
   ): MathJsonExpression | null {
-    if (!this.options.resolveApplication) return null;
-    const info = this.resolveSymbol(head);
-    if (info !== undefined && info.inferred !== true) return null;
+    const decision = this.formalApplication(head);
+    if (decision === undefined) {
+      if (!this.options.resolveApplication) return null;
+      const info = this.resolveSymbol(head);
+      if (info !== undefined && info.inferred !== true) return null;
+    }
     const end = this.index;
-    const candidate = this.parseApplicationCandidate(head, start);
+    const candidate = this.parseApplicationCandidate(head, start, decision);
     if (candidate === null) this.index = end;
     return candidate;
   }
@@ -4315,13 +4365,8 @@ export class _Parser implements Parser {
       // oversight, this branch used to require a declaration for every
       // base).
       if (typeof result === 'string' && this.peek === '_') {
-        const info = this.resolveSymbol(result);
-        if (!info?.subscriptEvaluate) {
-          const joined = absorbSubscripts(
-            this,
-            result,
-            info?.type.matches('indexed_collection<any>') ?? false
-          );
+        if (!this.resolveSymbol(result)?.subscriptEvaluate) {
+          const joined = absorbSymbolSubscripts(this, result);
           // The fold can SYNTHESIZE a name no other path sees (`eta_w`
           // from `\eta_{w}`), so the undeclared-symbol diagnostic must be
           // emitted here for it, exactly as the generic `parseSymbol()`
@@ -5586,13 +5631,7 @@ export class _Parser implements Parser {
       this.peek === '_' &&
       !this.isFunctionTriggerName(symbolName)
     ) {
-      const info = this.resolveSymbol(symbolName);
-      if (!info?.subscriptEvaluate)
-        id = absorbSubscripts(
-          this,
-          symbolName,
-          info?.type.matches('indexed_collection<any>') ?? false
-        );
+      id = absorbSymbolSubscripts(this, symbolName);
     }
 
     // Route the symbol through the shared emission point: a spelled-out
@@ -6315,14 +6354,7 @@ export class _Parser implements Parser {
         subscripts.length === 0
       ) {
         const id = symbolBase!.id;
-        const info = this.resolveSymbol(id);
-        const joined = info?.subscriptEvaluate
-          ? id
-          : absorbSubscripts(
-              this,
-              id,
-              info?.type.matches('indexed_collection<any>') ?? false
-            );
+        const joined = absorbSymbolSubscripts(this, id);
         if (joined !== id) {
           // The symbol is the joined name, not the base: replace the
           // `undeclared-symbol` diagnostic of the base, as the symbol
@@ -6465,7 +6497,7 @@ export class _Parser implements Parser {
       nonEmptySubscripts.length === 1 &&
       operator(nonEmptySubscripts[0]) !== 'Error' &&
       ((baseSymbol !== null &&
-        this.resolveSymbol(baseSymbol)?.type.matches(
+        this.resolveSymbol(baseSymbol, 'indexed-base')?.type.matches(
           'indexed_collection<any>'
         )) ||
         operator(result) === 'List')
@@ -8329,6 +8361,88 @@ function containsError(expr: MathJsonExpression | null | undefined): boolean {
   return false;
 }
 
+type PreparedLatexTokens = {
+  tokens: Token[];
+  inputText: Map<number, string>;
+  tildes: Set<number>;
+  comments: DiscardedComment[];
+  numberLexemes?: Map<string, Token[]>;
+};
+
+function finalizeRawTree(
+  parser: _Parser,
+  expression: MathJsonExpression
+): MathJsonExpression {
+  const applications = parser.resolveApplications(expression);
+  // The range infixes bind above `+` (and, for `..`, above implicit
+  // multiplication and the prefix minus), so a compound first anchor is split:
+  // `n+1..n+10` parses as `Add(n, Range(1, n+10))`. `parseBrackets` repairs
+  // that inside brackets; this pass covers the bare and relation-embedded
+  // forms. Runs on the raw parse output, where a parenthesized range still
+  // carries its `Delimiter` — `n+(1..10)` stays a broadcast add.
+  return normalizeContinuationRanges(applications);
+}
+
+export function startDefinitionRow(
+  dictionary: IndexedLatexDictionary,
+  options: Readonly<ParseLatexOptions>,
+  prepared: PreparedLatexTokens
+) {
+  const parser = new _Parser(
+    prepared.tokens,
+    dictionary,
+    {
+      ...options,
+      _preparedTokens: prepared,
+    } as ParseLatexOptions,
+    prepared.inputText,
+    prepared.tildes
+  );
+  // Definition heads bind more tightly than a relation or assignment.
+  // The ordinary parser still owns any groups inside the head.
+  const head = parser.parseExpression({
+    minPrec: Math.max(COMPARISON_PRECEDENCE, ASSIGNMENT_PRECEDENCE) + 1,
+  });
+  if (head === null) return undefined;
+  parser.skipSpace();
+  const separator = parser.nextToken();
+  if (separator === '=' && parser.peek === '=') return undefined;
+  if (separator === ':' && !parser.match('=')) return undefined;
+  if (
+    separator !== ':' &&
+    separator !== '=' &&
+    separator !== '\\coloneq' &&
+    separator !== '\\coloneqq'
+  )
+    return undefined;
+  const bodyStart = parser.index;
+  let finished = false;
+  return {
+    head,
+    operator: separator === '=' ? ('Equal' as const) : ('Assign' as const),
+    finish(
+      formals: ReadonlyMap<string, TypeString>,
+      formalsAreFactors = false
+    ) {
+      if (finished) throw new Error('Definition row already consumed');
+      finished = true;
+      parser.index = bodyStart;
+      parser.pushSymbolTable();
+      try {
+        for (const [name, type] of formals)
+          parser.addSymbol(name, new BoxedType(type));
+        if (formalsAreFactors) parser.definitionFormals = parser.symbolTable;
+        const body = parser.parseExpression();
+        if (!parser.atEnd || body === null)
+          throw new Error('Incomplete definition body');
+        return finalizeRawTree(parser, body);
+      } finally {
+        parser.popSymbolTable();
+      }
+    },
+  };
+}
+
 /**
  * Parse `latex` into a MathJSON expression, marking any leftover tokens with
  * an `Error` node. This is the core routine, without the trailing-punctuation
@@ -8338,12 +8452,15 @@ function parseCore(
   latex: string,
   dictionary: IndexedLatexDictionary,
   options: Readonly<ParseLatexOptions>,
-  comments?: DiscardedComment[]
+  comments?: DiscardedComment[],
+  prepared?: PreparedLatexTokens
 ): { expr: MathJsonExpression | null; parser: _Parser } {
-  const inputText = new Map<number, string>();
-  const tildes = new Set<number>();
+  const inputText = prepared?.inputText ?? new Map<number, string>();
+  const tildes = prepared?.tildes ?? new Set<number>();
+  if (comments !== undefined && prepared !== undefined)
+    for (const comment of prepared.comments) comments.push(comment);
   const parser = new _Parser(
-    tokenize(latex, [], comments, inputText, tildes),
+    prepared?.tokens ?? tokenize(latex, [], comments, inputText, tildes),
     dictionary,
     options,
     inputText,
@@ -8549,7 +8666,12 @@ export function parse(
     wantDiagnostics || ambiguityChecks ? [] : undefined;
   const recovered: ParseDiagnostic[] = [];
 
-  const primary = parseCore(latex, dictionary, options, comments);
+  const prepared = (
+    options as Readonly<ParseLatexOptions> & {
+      _preparedTokens?: PreparedLatexTokens;
+    }
+  )._preparedTokens;
+  const primary = parseCore(latex, dictionary, options, comments, prepared);
   let expr = primary.expr;
   // The parser whose collected diagnostics (codes 1 & 2) describe the adopted
   // parse. Updated if a trailing-noise retry is adopted below.
@@ -8689,16 +8811,7 @@ export function parse(
   if (expr !== null && adoptedParser._exprSpans !== null)
     expr = ambiguityErrors(expr, adoptedParser, normalizedPercents);
 
-  expr ??= 'Nothing';
-  expr = adoptedParser.resolveApplications(expr);
-
-  // The range infixes bind above `+` (and, for `..`, above implicit
-  // multiplication and the prefix minus), so a compound first anchor is split:
-  // `n+1..n+10` parses as `Add(n, Range(1, n+10))`. `parseBrackets` repairs
-  // that inside brackets; this pass covers the bare and relation-embedded
-  // forms. Runs on the raw parse output, where a parenthesized range still
-  // carries its `Delimiter` — `n+(1..10)` stays a broadcast add.
-  expr = normalizeContinuationRanges(expr);
+  expr = finalizeRawTree(adoptedParser, expr ?? 'Nothing');
 
   // Forward collected diagnostics to the sink before the `preserveLatex` block
   // (which has early returns). Order: symbol/juxtaposition diagnostics from the

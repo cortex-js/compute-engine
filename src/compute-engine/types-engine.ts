@@ -1102,6 +1102,14 @@ export interface IComputeEngine {
    */
   _deadlineFrame?: DeadlineFrame | undefined;
 
+  /** Resolve a symbol for the LaTeX parser in the current lexical scope.
+   * @internal */
+  _resolveSymbolFromScope(
+    id: MathJsonSymbol
+  ):
+    | { type: BoxedType; subscriptEvaluate?: boolean; inferred?: boolean }
+    | undefined;
+
   /** Whether a definition of `id` (a LaTeX assignment `\sin(x) \coloneq 5`, an
    * Epsil definition `Sin(x) := 5`) would replace a function of a library of
    * the engine for every later computation. A function that the host or an

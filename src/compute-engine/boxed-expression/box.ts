@@ -4845,7 +4845,7 @@ function narrowArgsFromInferredSignature(
  * (`p ↦ {p[1] + 1; g(p)}`): index reads do not prove a length, so the
  * parameter takes the tuple of the call (`indexReadTupleExtension()`).
  */
-function oneElementTypeOf(t: Type): Type {
+export function oneElementTypeOf(t: Type): Type {
   if (typeof t !== 'object' || t.kind !== 'tuple' || !isIndexReadTuple(t))
     return t;
   if (t.elements.some((x) => x.name !== undefined)) return t;
