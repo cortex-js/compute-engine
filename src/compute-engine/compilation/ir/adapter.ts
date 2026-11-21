@@ -21,6 +21,7 @@ import type {
   FreeSymbolType,
 } from '../types.js';
 import { isTupleShapedType } from '../../collection-utils.js';
+import { isNumber, isSymbol } from '../../boxed-expression/type-guards.js';
 import {
   bigintBroadcastError,
   checkEntry,
@@ -61,6 +62,7 @@ import {
   entryOf,
   regionsOf,
   scalarType,
+  type Assigned,
   type Lane,
   type Program,
   type Region,
@@ -341,6 +343,56 @@ export function sliceError(e: unknown): unknown {
 }
 
 /**
+ * The `run()` of a function literal that assigns the variables `assigns`
+ * of the engine (`Program.assigns`): each call reads their values in the
+ * engine, gives them to the code after the `arity` arguments, and writes
+ * the values that the code returns after the value of the body back to the
+ * engine, as a call of the interpreter does. A call that throws writes
+ * nothing. A variable that holds no value of its lane (no value, a complex
+ * number for a `number`) throws a `TypeError` before the call.
+ */
+function assigningRun(
+  expr: Expression,
+  assigns: readonly Assigned[],
+  arity: number,
+  call: (args: unknown[]) => unknown,
+  inDigits: <T>(g: () => T) => T
+): (...args: unknown[]) => unknown {
+  const ce = expr.engine;
+  const read = (x: Assigned): number | boolean => {
+    const v = x.definition.value;
+    if (x.lane === 'boolean') {
+      if (isSymbol(v, 'True')) return true;
+      if (isSymbol(v, 'False')) return false;
+    } else {
+      // An exact value (`1/30 * pi`) is read as its machine number.
+      const n = v?.N();
+      if (isNumber(n) && n.im === 0) return n.re;
+    }
+    throw new TypeError(
+      `The variable "${x.name}" that the compiled function assigns holds ` +
+        `${v === undefined ? 'no value' : v.toString()}, not a value of ` +
+        `the lane ${x.lane}.`
+    );
+  };
+  return (...args: unknown[]) =>
+    inDigits(() => {
+      const given = Array.from({ length: arity }, (_, k) => args[k]);
+      const r = call([...given, ...assigns.map(read)]) as unknown[];
+      assigns.forEach((x, k) => {
+        const y = r[k + 1];
+        x.definition.value =
+          typeof y === 'boolean'
+            ? y
+              ? ce.True
+              : ce.False
+            : ce.number(y as number);
+      });
+      return normalizeRunResult(r[0]);
+    });
+}
+
+/**
  * The compilation of `expr` with the profile `'ir'`: a successful result,
  * or a throw of a `CompileDeclineError` (`'outside-profile'` for a decline,
  * `'compile-error'` for an internal error of the slice), or of a
@@ -493,6 +545,7 @@ function compileIr(
           inDigits(() =>
             normalizeRunResult(f(checkEntry(entryPlan, [vars])[0]))
           );
+  const assigns = p.assigns ?? [];
 
   const warnings: CompileDiagnostic[] = slice.warnings.map((w) => ({
     code: w.code,
@@ -503,7 +556,9 @@ function compileIr(
   // when it reads the inputs object. Code of a string input or result has
   // no batch, on a worker or not.
   const code = [slice.preambleOnce, slice.code].join('\n');
+  // A worker has no engine to write the assigned variables to.
   const shippable =
+    assigns.length === 0 &&
     !strings &&
     !rows &&
     Object.values(vars).every(readsVarsObject) &&
@@ -534,9 +589,18 @@ function compileIr(
     reconstructionDigits,
     calling: literal ? 'lambda' : 'expression',
     entryPlan: storeEntryPlan(entryPlan),
-    run: run as CompilationResult<'javascript'>['run'],
+    run: (assigns.length > 0
+      ? assigningRun(
+          expr,
+          assigns,
+          argumentIndex(entry, entry.positional ?? 0) - assigns.length,
+          (args) => f(...(unchecked ? args : checkEntry(entryPlan, args))),
+          inDigits
+        )
+      : run) as CompilationResult<'javascript'>['run'],
     freeSymbols: report.freeSymbols,
     freeSymbolTypes: report.freeSymbolTypes,
+    ...(assigns.length > 0 ? { assigns: assigns.map((x) => x.name) } : {}),
     unsupported: [],
     mode,
     ...(strings ? { strings } : {}),

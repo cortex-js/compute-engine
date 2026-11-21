@@ -13,6 +13,16 @@
   generation. An index out of range gives `NaN`. Other reads of such a list
   (`Length(g)`, `g[1]`, `Map` over `g`) still decline. A `Map` of a `Map` over
   `Range(1, 20)` also compiles now.
+- **A function that assigns a variable it closes over compiles to JavaScript**
+  (CE-1620). With `let s = 0.5`, the timer callback
+  `advance = (t: real) => do { s = s + t / 1000 }` compiles, where it declined
+  before. Each call of `run()` reads `s` in the engine and writes its new value
+  back, as an evaluation of the call does: after `run(16)` three times, `s` is
+  `0.548`. The result lists the variables in `assigns`; its `code` takes their
+  values after the arguments and returns `[value, ...new values]`, for a host
+  that runs the code without the engine. The variable must have a declared type
+  of real, integer or boolean values (`let` declares one). A function that the
+  callback calls and that reads the variable still declines.
 
 ### Behavior Changes
 

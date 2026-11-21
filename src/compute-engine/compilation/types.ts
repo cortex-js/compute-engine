@@ -1266,6 +1266,26 @@ export type CompilationResult<
   freeSymbolTypes?: Record<string, FreeSymbolType>;
 
   /**
+   * JavaScript only. The variables of the engine that a compiled function
+   * literal assigns, such as the state of an animation:
+   * `(t: real) => do { s = s + t / 1000 }` with `let s = 0.5`.
+   *
+   * Each call of `run()` reads their values in the engine and writes their
+   * new values back to the engine, as an evaluation of the call does. A call
+   * that throws writes nothing.
+   *
+   * The `code` takes the value of each of these variables after the
+   * arguments of the function, in this order, and returns an array: the
+   * value of the function, then the new value of each variable. A host that
+   * runs the code without the engine (`load()`) gives the values and keeps
+   * the new ones itself.
+   *
+   * Absent when the function assigns no variable of the engine. Such a
+   * result is not `shippable`.
+   */
+  assigns?: string[];
+
+  /**
    * Operator heads in the expression that this target cannot lower — they have
    * no operator or function mapping and are not one of the structural forms the
    * compiler handles directly. An empty array means every operator was

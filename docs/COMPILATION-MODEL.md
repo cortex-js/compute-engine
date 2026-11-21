@@ -2391,6 +2391,54 @@ with a rest (variadic) parameter is a static error too
 `canonicalFunctionLiteralArguments()` in `function-utils.ts`, and the Epsil
 parser's `default-value-invalid`).
 
+### Variables that a function assigns
+
+A function literal compiled to JavaScript can assign a variable of the
+engine that it closes over, such as the state of an animation:
+
+```js
+executeEpsil(ce, `let s = 0.5
+let advance = (t: real) => do { s = s + t / 1000 }`);
+const result = compile(ce.box('advance').evaluate());
+result.assigns;            // ['s']
+result.run(16);            // NaN: the body ends in an assignment (Nothing)
+ce.box('s').evaluate();    // 0.516
+```
+
+Each call of `run()` reads the value of each variable of `assigns` in the
+engine, runs the code, and writes the new values back to the engine as
+machine numbers, as an evaluation of the call writes them. An exact value
+(`1/30 * pi`, which an interpreted call can write) is read as its machine
+number. A call that throws writes nothing. A variable that holds no value,
+or a complex number for a variable of type `number`, throws a `TypeError`
+before the call, as an input of type `number` does. The `code` takes the value of each variable
+after the arguments and returns an array of the value of the function and
+the new value of each variable: `load()` of the code gives
+`f(16, 0.5)` → `[NaN, 0.516]` and reads no engine. Such a result is not
+`shippable`, and the engine's own compilations (`Map`, the quadrature and the
+other implicit callers) interpret the function: they can compute an element
+a second time.
+
+The variable is a variable of the scope of the compilation, not a local or a
+parameter of the literal, with a declared type whose lane is `real`,
+`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`). These decline:
+
+- another target, `interval-js` and the `bigint` mode;
+- a variable whose type is inferred from its value (`ce.assign('u', 1)`
+  with no declaration): declare its type;
+- a constant, a list, a tuple, a string or a complex variable;
+- a variable with no value at the compilation, and a name of the `vars`,
+  `symbolic` or `inputs` option: it is an input of the host;
+- a value of another lane: `n = n + 0.5` for `n: integer`;
+- a user function that the body calls and that reads the variable
+  (`let get = () => s` and `do { s = s + 1; get() }`), and one that assigns
+  it;
+- an expression that is not a function literal and assigns a variable
+  (`Block(Assign(s, s + 1))`).
+
+A function that only reads a variable still holds its value at the
+compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).
+
 ## Collections
 
 Compiled broadcasting preserves the interpreter's strict lifted regime.

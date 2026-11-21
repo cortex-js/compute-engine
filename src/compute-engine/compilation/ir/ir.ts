@@ -26,6 +26,7 @@
  */
 
 import type { Type } from '../../../common/type/types.js';
+import type { BoxedValueDefinition } from '../../global-types.js';
 
 export type Lane =
   'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string' | 'rows';
@@ -184,6 +185,19 @@ export type Program = {
    *  excludes 0. A value outside its declared type gives an unspecified
    *  result, so the printers may read it (`print.ts`, `nonnegative()`). */
   readonly signs?: ReadonlyMap<V, Sign>;
+  /** The variables of the engine that a root function literal assigns, in
+   *  the order of their parameters: the entry takes the value of each one
+   *  after the arguments, and returns the value of the body followed by the
+   *  value of each one after the body (`assignedNames()` of `lower.ts`). */
+  readonly assigns?: readonly Assigned[];
+};
+
+/** A variable of the engine that a root function literal assigns: its name,
+ *  the definition that the body reads and writes, and its lane. */
+export type Assigned = {
+  readonly name: string;
+  readonly definition: BoxedValueDefinition;
+  readonly lane: Lane;
 };
 
 /** A sign that the declared type of an input proves. */

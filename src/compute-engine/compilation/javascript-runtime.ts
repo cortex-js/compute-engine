@@ -3056,6 +3056,11 @@ export type StoredJavaScript = {
   /** For a lambda with `preambleOnce`: `code` without those definitions. */
   callCode?: string;
   calling?: 'expression' | 'lambda';
+  /** The `assigns` field of the compilation result: the variables that a
+   * lambda assigns. The loaded function takes the value of each one after
+   * its arguments, and returns an array of the value of the lambda and the
+   * new value of each one. The loaders do not read the field. */
+  assigns?: string[];
   /** The digits a negative base's float exponent is read to; 17 when absent. */
   reconstructionDigits?: number;
   /** The input checks and conversions `run()` applies; `load()` applies them. */

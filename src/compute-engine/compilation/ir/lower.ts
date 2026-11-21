@@ -95,6 +95,7 @@ import {
   sameShape,
   scalarType,
   typeToString,
+  type Assigned,
   type IRType,
   type Instr,
   type Lane,
@@ -6243,7 +6244,69 @@ function lowerOnce(
       ...p,
       inputs,
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
+      ...(assigns.length > 0 ? { assigns } : {}),
     };
+  };
+  // The names of the scope of the compilation that a root function literal
+  // assigns (`assignedNames()`).
+  let assigns: Assigned[] = [];
+
+  /** The names that the body of the root function literal `f` assigns (an
+   *  `Assign` or an `AddTo` of the name) where the name is a variable of
+   *  the scope of the compilation, not a local or a parameter of `f`: the
+   *  state that a call of the interpreter changes in the engine (CE-1620).
+   *  Each one is a variable with a declared type of the lane `real`,
+   *  `integer` or `boolean` (`inputType()`), on the plain JavaScript
+   *  target; another one declines. A function that `f` calls and that
+   *  reads such a name declines (`free()`): it would read the value before
+   *  the call. */
+  const assignedNames = (f: Fn): Assigned[] => {
+    const out: Assigned[] = [];
+    // `bound`: the names that a parameter of a function literal or a
+    // `Declare` of a `Block` around `x` binds.
+    const visit = (x: Expression, bound: ReadonlySet<string>): void => {
+      if (!isFunction(x)) return;
+      const binds =
+        x.operator === 'Function'
+          ? x.ops.slice(1).map((p) => parameterName(p) ?? '')
+          : x.operator === 'Block'
+            ? x.ops.flatMap((op) =>
+                isFunction(op, 'Declare') ? patternNames(op.ops[0]) : []
+              )
+            : [];
+      const inner = binds.length > 0 ? new Set([...bound, ...binds]) : bound;
+      const target =
+        x.operator === 'Assign' || x.operator === 'AddTo'
+          ? x.ops[0]
+          : undefined;
+      const targets = isFunction(target, 'Tuple') ? target.ops : [target];
+      for (const t of targets) {
+        if (!isSymbol(t) || inner.has(t.symbol)) continue;
+        if (out.some((s) => s.name === t.symbol)) continue;
+        const h = held(t.symbol);
+        if (h === undefined || h.library) continue;
+        const def = h.definition;
+        const why = (reason: string) =>
+          decline(x, `an assignment of ${t.symbol}, ${reason}`);
+        if (!options.javascript || interval || bigint)
+          why('a variable of the engine, on this target');
+        if (def.isConstant) why('a constant');
+        // A name of `vars`, of `symbolic` or of `inputs` is an input of the
+        // host, whose value the compilation hides.
+        if (options.vars?.includes(t.symbol) || h.value === undefined)
+          why('a name with no value at the compilation, or an input');
+        if (def.inferredType)
+          why('whose type is inferred from its value: declare its type');
+        const ir = inputType(def.type.type);
+        const lane = ir?.shape.length === 0 ? ir.lane : undefined;
+        if (lane !== 'real' && lane !== 'integer' && lane !== 'boolean')
+          return why(`of type ${engineTypeToString(def.type.type)}`);
+        out.push({ name: t.symbol, definition: def, lane });
+      }
+      x.ops.forEach((op) => visit(op, inner));
+    };
+    visit(f, new Set());
+    return out;
   };
   // A root function literal: its parameters, by position, come first. A
   // root name of a library operator is its literal (`operatorLiteral()`).
@@ -6284,7 +6347,31 @@ function lowerOnce(
           );
         input(p, name, declared, true);
       });
-      return value(root.ops[0])!;
+      const states = assignedNames(root);
+      if (states.length === 0) return value(root.ops[0])!;
+      // Each name is a local whose value is a positional parameter after
+      // the arguments, and the code returns the value of the body and the
+      // value of each name after it (`Program.assigns`). The stored value
+      // is hidden while the body is lowered, so that no analysis reads it.
+      for (const s of states) {
+        b.positional += 1;
+        const v = b.param(s.name, scalarType(s.lane));
+        frames[0].names.set(s.name, { v, lane: s.lane, role: 'local' });
+      }
+      assigns = states;
+      const hidden = Object.fromEntries(states.map((s) => [s.name, true]));
+      // A body that ends in an assignment is `Nothing`, which the code gives
+      // as NaN: `do { s = s + 1 }`.
+      const body = root.ops[0];
+      const last = isFunction(body, 'Block') ? body.ops.at(-1) : undefined;
+      const want = !['Assign', 'Declare', 'DefineFunction'].includes(
+        last?.operator ?? ''
+      );
+      const v = withVarsValuesHidden(root, hidden, () => value(body, want));
+      return [
+        want && v !== undefined ? v : b.constant(NaN, 'real'),
+        ...states.map((s) => frames[0].names.get(s.name)!.v),
+      ];
     });
   }
   return program(() => {
