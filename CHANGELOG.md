@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Reduce` and `Fold` by a function literal compile with a list, tuple or
+  Boolean accumulator** (#647). The IR compiler declined a fold whose
+  accumulator was not a real number (`Fold(f, List(0, 1), Range(1, n))`, a
+  Fibonacci pair; a fold that keeps a Boolean flag). It now carries the
+  accumulator through the loop, as a list local written whole: a list or tuple
+  of a stated length is one carried value, and a list of a run-time length
+  (`Map(z -> 0, Range(1, n))`, or `List()` that the body appends to) is
+  carried with its length, on JavaScript only. A step that changes the length
+  of a tuple, GLSL and the interval mode still decline.
+
 ### Improvements
 
 - **A restricted list that a name holds compiles again** (CE-1642). With
