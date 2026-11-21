@@ -235,6 +235,9 @@ const STATISTICS: ReadonlyMap<string, string | undefined> = new Map([
   ['Correlation', 'correlation'],
 ]);
 
+/** The heads that keep a slice of a list as a list. */
+const SLICES = new Set(['Drop', 'Take', 'Rest', 'Most', 'Reverse']);
+
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
@@ -1051,21 +1054,27 @@ export function listLowering(cx: Lowering) {
    *  interpreter's `Join` is a set, and of strings a string: an operand
    *  whose static type is not a list declines. */
   const joinLists = (e: Fn): V => {
-    // The carried accumulator of a fold, read at a run-time index
-    // (`At(acc, k)`), is typed `indexed_collection<number>`; the binding
-    // carries a list.
+    // The carried accumulator of a fold can be typed `indexed_collection<…>`
+    // (read at a run-time index, `At(acc, k)`, or inside a typed let), so a
+    // `Drop` of it is `list | string`. Its binding carries a flat list: the
+    // accumulator, or a slice of it, is a list operand.
     const carried = (name: string): boolean => {
       for (let i = cx.frames.length - 1; i >= 0; i--) {
         const binding = cx.frames[i].names.get(name);
-        if (binding !== undefined) return binding.accumulator === true;
+        if (binding !== undefined)
+          return (
+            binding.accumulator === true && type(binding.v).shape.length === 1
+          );
       }
       return false;
     };
-    const listy = (x: Expression) =>
+    const listy = (x: Expression): boolean =>
       x.type.matches('list') ||
       (isSymbol(x) &&
-        x.type.matches('indexed_collection<number>') &&
-        carried(x.symbol));
+        carried(x.symbol) &&
+        (x.type.matches('indexed_collection<number>') ||
+          x.type.type === 'unknown')) ||
+      (isFunction(x) && SLICES.has(x.operator) && listy(x.ops[0]));
     if (e.nops === 0 || !e.ops.every(listy))
       decline(e, 'Join of other than lists');
     return join(e);

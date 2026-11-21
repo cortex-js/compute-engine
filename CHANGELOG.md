@@ -9,7 +9,9 @@
   accumulator through the loop, as a list local written whole: a list or tuple
   of a stated length is one carried value, and a list of a run-time length
   (`Map(z -> 0, Range(1, n))`, or `List()` that the body appends to) is
-  carried with its length, on JavaScript only. A step that changes the length
+  carried with its length, on JavaScript only. The accumulator, or a `Drop` or
+  `Take` of it, is a list operand of `Join` inside a typed let as outside one.
+  A step that changes the length
   of a tuple, GLSL and the interval mode still decline.
 
 ### Improvements

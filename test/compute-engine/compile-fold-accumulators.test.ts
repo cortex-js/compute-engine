@@ -172,6 +172,59 @@ describe('a list accumulator of a run-time length', () => {
   });
 });
 
+describe('an accumulator read inside a typed let', () => {
+  const letZ = (body: MathJsonExpression): MathJsonExpression => [
+    'Apply',
+    ['Function', body, ['Typed', 'z', "'integer'"]],
+    ['At', 'acc', 1],
+  ];
+  const join: MathJsonExpression = [
+    'Join',
+    ['List', ['At', 'acc', 1], ['At', 'acc', 2]],
+    ['Drop', 'acc', 2],
+    ['List', 0],
+  ];
+  const three = (step: MathJsonExpression, seed: MathJsonExpression) =>
+    [
+      'Fold',
+      ['Function', step, 'acc', 'k'],
+      seed,
+      ['Range', 1, 3, 1],
+    ] as MathJsonExpression;
+  const run = (expr: MathJsonExpression) =>
+    Array.from(
+      (compile(ce.box(expr), { fallback: false }) as any).run({}) as number[]
+    );
+
+  // The interpreter leaves `Drop` of a fold held, so the plain `Join` is the
+  // reference: the hand-computed value is `[1, 2, 3, 4, 0, 0, 0]` less two.
+  it('Join of a slice of the accumulator, as without the let', () => {
+    const drop = (step: MathJsonExpression) =>
+      ['Drop', three(step, ['List', 1, 2, 3, 4]), 2] as MathJsonExpression;
+    expect(run(drop(join))).toEqual([3, 4, 0, 0, 0]);
+    expect(run(drop(letZ(join)))).toEqual([3, 4, 0, 0, 0]);
+    expect(
+      run(drop(letZ(['If', ['Less', ['At', 'acc', 1], 'z'], join, join])))
+    ).toEqual([3, 4, 0, 0, 0]);
+  });
+
+  it('Join of the accumulator grows a list, and agrees with evaluate()', () => {
+    const expr = three(letZ(['Join', 'acc', ['List', 'k']]), ['List', 0]);
+    const { compiled, expected } = both(expr, {});
+    expect(Array.from(compiled as number[])).toEqual(expected);
+    expect(expected).toEqual([0, 1, 2, 3]);
+  });
+
+  it('a tuple that grows through Join still declines', () => {
+    for (const step of [join, letZ(join), letZ(['Join', 'acc', ['List', 'k']])])
+      expect(() =>
+        compile(ce.box(three(step, ['Tuple', 1, 2, 3, 4])), {
+          fallback: false,
+        })
+      ).toThrow();
+  });
+});
+
 describe('a Boolean accumulator', () => {
   const reduce = (op: string, cmp: MathJsonExpression, init: string) =>
     [
