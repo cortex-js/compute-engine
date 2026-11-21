@@ -12,7 +12,6 @@ import {
   operator,
   operands,
   missingIfEmpty,
-  stripText,
   isEmptySequence,
   unhold,
   symbol,
@@ -7338,12 +7337,57 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
       // not a boolean, so a row that keeps it gives `Which` a condition that
       // never holds, and boxing reports an `incompatible-type` error. Map it
       // to `True`, the default clause the notation means.
-      const cond = s ? null : withoutTrailingComma(stripText(row[1]));
+      const cond = s
+        ? null
+        : withoutTrailingComma(withoutTextAnnotations(row[1]));
       result.push(cond === null || cond === 'Nothing' ? 'True' : cond);
       result.push(row[0]);
     }
   }
   return ['Which', ...result];
+}
+
+/**
+ * The condition cell `cond` of a piecewise row without its text annotations.
+ * An annotation (`\text{if }`, `\text{ (strict)}`, `x > 0, \text{strict}`)
+ * is a string juxtaposed with math, that is a string operand of an
+ * `InvisibleOperator`, or a string item of the comma list of the cell, that
+ * is of the `Sequence` of a cell `Delimiter` with the separator `,`: it is
+ * removed. A string operand of any other operator is a value and is kept,
+ * so `m = \text{cubic}` keeps the right operand of its `Equal`, and
+ * `f(\text{a}, x) > 0` keeps the first argument of `f`.
+ */
+function withoutTextAnnotations(
+  cond: MathJsonExpression
+): MathJsonExpression {
+  const body = operand(cond, 1);
+  if (
+    operator(cond) === 'Delimiter' &&
+    operator(body) === 'Sequence' &&
+    stringValue(operand(cond, 2)) === ','
+  )
+    return [
+      'Delimiter',
+      withoutAnnotationOperands(body!, true),
+      ...operands(cond).slice(1),
+    ];
+  return withoutAnnotationOperands(cond, false);
+}
+
+function withoutAnnotationOperands(
+  expr: MathJsonExpression,
+  commaList: boolean
+): MathJsonExpression {
+  const h = operator(expr);
+  if (!h) return expr;
+  const ops = operands(expr);
+  return [
+    h,
+    ...(commaList || h === 'InvisibleOperator'
+      ? ops.filter((x) => stringValue(x) === null)
+      : ops
+    ).map((x) => withoutAnnotationOperands(x, false)),
+  ];
 }
 
 /**

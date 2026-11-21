@@ -66,6 +66,14 @@
 
 ### Resolved Issues
 
+- **A piecewise condition that compares a variable with a word keeps the
+  word** (CE-1632). In
+  `\begin{cases} x^3 & m = \text{cubic} \\ x & \text{otherwise} \end{cases}`,
+  the condition parsed as `Equal(m)`, which is always true, so the first
+  branch was taken for every value of `m`. Now it parses as
+  `Equal(m, "cubic")`. A text annotation next to the condition, such as
+  `\text{if }`, is still removed.
+
 - **An element-wise operation on a list of random draws and a later read of
   the same list use the same draws** (CE-1631). With
   `h = Comprehension(Random(), k ∈ 1..6)`, `h + 10` used one set of draws and

@@ -107,22 +107,6 @@ export function stringValue(
   return expr;
 }
 
-export function stripText(
-  expr: MathJsonExpression | null | undefined
-): MathJsonExpression | null {
-  if (expr === null || expr === undefined || stringValue(expr) !== null)
-    return null;
-
-  const h = operator(expr);
-  if (!h) return expr;
-  return [
-    h,
-    ...operands(expr)
-      .map((x) => stripText(x)!)
-      .filter((x) => x !== null),
-  ];
-}
-
 /**
  * The operator of a function is symbol.
  *
