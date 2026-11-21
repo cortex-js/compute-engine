@@ -17,7 +17,13 @@ module.exports = {
   // A continuous-integration runner has 4 cores: six workers there made
   // tests with a time limit run about eight times slower than alone and
   // fail. `CI` is set by GitHub Actions; `'100%'` is one worker per core.
-  maxWorkers: process.env.CI ? '100%' : 12,
+  // A local run has at most one worker for each 5 GB of memory: a worker of
+  // the full suite holds up to about 1.9 GB, and the other sessions of the
+  // machine need the rest. That is 12 on the 64 GB machine and 6 on univac
+  // (32 GB).
+  maxWorkers: process.env.CI
+    ? '100%'
+    : Math.max(2, Math.min(12, Math.floor(require('os').totalmem() / 5e9))),
   // A worker is replaced, between two test files, when its heap holds more
   // than 1.5 GB. The heap of a worker grows with the files it has run (up to
   // 4 GB); without a limit the 12 workers held 30–32 GB, and with the memory
