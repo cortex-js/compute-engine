@@ -1095,6 +1095,58 @@ describe('Series — GammaLn Stirling asymptotics', () => {
     );
   });
 
+  test('GammaLn(x) at a pole where Γ is negative above it stays unevaluated', () => {
+    // Γ(x) is about −1/(x+1) at −1 and −1/(6(x+3)) at −3, and GammaLn(x) is
+    // ln|Γ(x)|: `−ln(x+1) + ln(−1) + …` is ln(Γ(x)), which is GammaLn(x) + iπ
+    // for x > −1.
+    for (const pole of ['-1', '-3']) {
+      expect(series('\\operatorname{GammaLn}(x)', pole, 2).operator).toBe(
+        'Series'
+      );
+      expect(series(`x\\operatorname{GammaLn}(x)`, pole, 2).operator).toBe(
+        'Series'
+      );
+    }
+  });
+
+  test('GammaLn(u)/x at 0 expands only where Γ(u) is positive at 0', () => {
+    // The quotient has a pole, so GammaLn(u) is expanded as ln(Γ(u)).
+    // Γ(1) = 1 and Γ(−3/2) = 4√π/3 are positive; Γ(−1/2) = −2√π is not, and
+    // ln(Γ(x − 1/2))/x is GammaLn(x − 1/2)/x + iπ/x.
+    for (const u of ['x+1', 'x-\\frac32']) {
+      const f = `\\frac{\\operatorname{GammaLn}(${u})}{x}`;
+      const p = normal(f, '0', 2);
+      for (const xv of [-0.01, 0.01]) {
+        const exact = ce.parse(f).subs({ x: xv }).N();
+        const approx = p.subs({ x: xv }).N();
+        expect(approx.im).toBe(0);
+        expect(Math.abs(approx.re - exact.re)).toBeLessThan(1e-4);
+      }
+    }
+    expect(
+      series('\\frac{\\operatorname{GammaLn}(x-\\frac12)}{x}', '0', 2).operator
+    ).toBe('Series');
+  });
+
+  test('GammaLn of an argument that goes to a pole of Γ at +∞', () => {
+    // Γ(1/x) is about x at +∞, positive: ln(x) − γ/x + …. Γ(−1/x) is about
+    // −x, and `ln(x) + ln(−1) + …` is GammaLn(−1/x) + iπ.
+    const p = normal('\\operatorname{GammaLn}(\\frac1x)', '+\\infty', 2);
+    const exact = ce.function('GammaLn', [ce.number(0.01)]).N().re;
+    const approx = p.subs({ x: 100 }).N();
+    expect(approx.im).toBe(0);
+    expect(Math.abs(approx.re - exact)).toBeLessThan(1e-5);
+    for (const u of ['-\\frac1x', '\\frac1x-1'])
+      expect(
+        series(`\\operatorname{GammaLn}(${u})`, '+\\infty', 2).operator
+      ).toBe('Series');
+    // Γ(−1/3) is negative: `x·ln(Γ(−1/3)) + …` is x·GammaLn(1/x − 1/3) + iπx.
+    expect(
+      series('x\\operatorname{GammaLn}(\\frac1x-\\frac13)', '+\\infty', 1)
+        .operator
+    ).toBe('Series');
+  });
+
   test('ln Γ(x) at −1 expands with exact data', () => {
     // Γ(x) is about −1/(x+1) at −1: −ln(x+1) + iπ + (1 − γ)(x+1) + … holds
     // on both sides. The ψ constant at −1 is −γ + H₁ = 1 − γ.

@@ -1869,13 +1869,21 @@ function isRealOnRealAxis(e: Expression, x: string): boolean {
  * regular points, this only fires at a genuine zero or pole of `g`. A `Series`
  * at a finite point defers when the identity holds for `t > 0` only
  * (`lnHoldsBelow()`).
+ *
+ * With `forGammaLn`, `arg` is `Γ(u)` and the expansion is the one of
+ * `GammaLn(u)`. `GammaLn(u)` is `ln|Γ(u)|` for a real `u`, which is
+ * `ln(Γ(u)) − iπ` where `Γ(u) < 0`, so the expansion defers unless `c₀` is
+ * known to be positive: `GammaLn(x)` at −1, where `Γ(x)` is about
+ * `−1/(x + 1)`, `GammaLn(x − 1/2)/x` at 0, where `Γ(−1/2) = −2√π`, and
+ * `x·GammaLn(1/x − 1/3)` at +∞, where the sign of `Γ(−1/3)` is not known.
  */
 function lnLaurent(
   ce: ComputeEngine,
   arg: Expression,
   x: string,
   x0: Expression,
-  W: number
+  W: number,
+  forGammaLn = false
 ): Laurent | null {
   // `ln(Γ(g))` with `g → ∞` is the log-Γ Stirling asymptotic; delegate so that
   // parsed `\ln\Gamma(x)` behaves like `GammaLn(x)`. Fall through if it declines.
@@ -1896,6 +1904,7 @@ function lnLaurent(
   if (m > inner.hi) return null; // leading term past the reliable window
   const c0 = coeffAt(ce, inner, m);
   if (c0.has(x)) return null; // log-carrying leading coeff (e.g. ln(ln x))
+  if (forGammaLn && c0.isPositive !== true) return null;
   if (bothSides && !lnHoldsBelow(arg, x, inner, m, c0)) return null;
   const d = inner.d;
   if (W * d > MAX_SERIES_ORDER) return null; // window too large — defer
@@ -2226,11 +2235,13 @@ function expandLaurent(
       // Stirling's log-Γ asymptotic when the argument → ∞ at the point.
       const stirling = gammaLnLaurent(ce, ops[0], x, x0, W);
       if (stirling) return stirling;
-      // Otherwise expand as `ln(Γ(u))` through the log-aware path — at a
-      // finite pole of Γ this gives e.g. `GammaLn(x)` at 0 → `−ln x − γx + …`.
+      // Otherwise expand as `ln(Γ(u))` through the log-aware path, where
+      // `Γ(u) > 0` for `t > 0`: `GammaLn(1/x)` at +∞ → `ln x − γ/x + …`. A
+      // `Series` at a finite pole of Γ defers: `ln|Γ(u)|` holds a multiple of
+      // `ln|t|`, which is not `ln(t)` for `t < 0`.
       // No recursion loop: `lnLaurent` only delegates back here when the
       // argument → ∞, which `gammaLnLaurent` just declined.
-      return lnLaurent(ce, ce.function('Gamma', [ops[0]]), x, x0, W);
+      return lnLaurent(ce, ce.function('Gamma', [ops[0]]), x, x0, W, true);
     }
     case 'Log': {
       // `Log(g)` = `Ln(g)/Ln(10)`; `Log(g, b)` (base is the 2nd operand,
