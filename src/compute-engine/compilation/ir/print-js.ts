@@ -470,6 +470,7 @@ export const JS_BIGINT: Syntax = deepFreeze({
     'boole': '($0 ? 1n : 0n)',
     'elem': '$0[Number($1)]',
     'at': '_SYS.bat($0, $1)',
+    'sort.int': '_SYS.bsort($0)',
     'rangecount': '_SYS.brangeCount($0, $1, $2)',
     'rangestep': '($1 >= $0 ? 1n : -1n)',
   },

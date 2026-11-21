@@ -304,6 +304,11 @@ export function bat(list: ReadonlyArray<unknown>, i: bigint): unknown {
   return list[bindex(i, list.length)];
 }
 
+/** `Sort(list)` of integers: a sorted copy, ascending. */
+export function bsort(list: ReadonlyArray<bigint>): bigint[] {
+  return [...list].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 /** The element count of the range `lo..hi` by `step`: `0` for a zero step
  * or a step whose sign does not agree with the direction from `lo` to `hi`.
  * The `bigint` form of `rangeCount` (`numerics/range-count.ts`), which is
@@ -334,5 +339,6 @@ export const BIGINT_HELPERS = {
   bbinomial,
   bfibonacci,
   bat,
+  bsort,
   brangeCount,
 };
