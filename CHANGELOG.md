@@ -84,6 +84,14 @@
 
 ### Resolved Issues
 
+- **In degrees, the numeric value of the angle of `i` is `90`** (CE-1635).
+  With `ce.angularUnit = 'deg'`, `Argument(i).N()` and `Arctan2(1, 0).N()`
+  gave `89.9999999999999999999`, because the angle in radians was rounded and
+  then multiplied by a rounded `180/π`. Now `.N()` of `Arctan2` with exact
+  operands rounds the exact angle in the unit, so the result is `90`, as for
+  `Arcsin(1)`. The same applies in gradians and in turns. A symbol with a
+  known sign also gets a value: with `x > 0`, `Arctan2(x, 0).N()` is `90`.
+
 - **The numeric value of a list divided by a number is correct to the last
   digit** (CE-1634). At 21 digits, `N([1, 2, 3]/3)` gave
   `[0.333…333, 0.666…666, 0.999…999]`, because `1/3` was rounded before it

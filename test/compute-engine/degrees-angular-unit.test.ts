@@ -224,6 +224,52 @@ describe('ARGUMENT IN EVERY ANGULAR UNIT', () => {
     expect(ce.parse('\\arg(x)').evaluate().toString()).toBe('Argument(x)');
   });
 
+  // Under `.N()`, exact operands give the exact angle in the unit before it
+  // is rounded: in degrees the angle of `i` is `90`, not
+  // `89.9999999999999999999` (the float angle in radians times the float
+  // `180/π`).
+  const QUARTER_TURN: Partial<Record<AngularUnit, number>> = {
+    deg: 90,
+    grad: 100,
+    turn: 0.25,
+  };
+  test.each(['deg', 'grad', 'turn'] as AngularUnit[])(
+    '%s: N() of an exact angle on an axis is exact',
+    (unit) => {
+      const ce = engine(unit);
+      const q = QUARTER_TURN[unit]!;
+      expect(ce.box(['Argument', 'ImaginaryUnit']).N().re).toBe(q);
+      expect(ce.box(['Arctan2', 1, 0]).N().re).toBe(q);
+      expect(ce.box(['Arctan2', -1, 0]).N().re).toBe(-q);
+      expect(ce.box(['Arctan2', 0, -1]).N().re).toBe(2 * q);
+      expect(ce.box(['Arctan2', 1, -1]).N().re).toBe(1.5 * q);
+      expect(
+        ce.box(['Equal', ['N', ['Argument', 'ImaginaryUnit']], q]).evaluate()
+          .symbol
+      ).toBe('True');
+    }
+  );
+
+  // A symbol with a known sign has no float angle: the exact angle answers,
+  // in every unit.
+  test.each(UNITS)('%s: N() of Arctan2 of a positive symbol', (unit) => {
+    const ce = engine(unit);
+    ce.assume(ce.parse('x > 0'));
+    const q = unit === 'rad' ? Math.PI / 2 : QUARTER_TURN[unit]!;
+    expect(ce.box(['Arctan2', 'x', 0]).N().re).toBeCloseTo(q, 15);
+    expect(ce.box(['Arctan2', 'x', 'x']).N().re).toBeCloseTo(q / 2, 15);
+    expect(ce.box(['Arctan2', 0, 'x']).N().re).toBe(0);
+  });
+
+  // Without a numeric exact angle, the float angle answers.
+  test('deg: N() of Arctan2 with no special angle, and of a symbol', () => {
+    const ce = engine('deg');
+    expect(ce.box(['Arctan2', 2, 3]).N().toString()).toBe(
+      '33.6900675259797869135'
+    );
+    expect(ce.box(['Arctan2', 'x', 1]).N().toString()).toBe('Arctan2(x, 1)');
+  });
+
   test.each(UNITS)(
     '%s: the angles inside Ln, Sqrt and ComplexRoots stay in radians',
     (unit) => {
