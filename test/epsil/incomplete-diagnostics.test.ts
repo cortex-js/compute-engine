@@ -1,4 +1,5 @@
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { epsilDiagnosticMessage } from '../../src/epsil/diagnostic-message';
 
 //
 // The `incomplete` flag of a parse diagnostic (CE-1522): the parser reached
@@ -102,6 +103,36 @@ describe('EPSIL INCOMPLETE DIAGNOSTICS', () => {
     expect(flagsOf('let s = "x \\(1 +) y')).toEqual([
       'string-literal-closing-delimiter-expected (incomplete)',
       'unexpected-symbol',
+    ]);
+  });
+
+  // A call or a list that ends after its opening bracket or after a comma
+  // misses an expression, and a `for` that ends after its variable misses
+  // its `in` (CE-1630). The end of the input is not an unexpected symbol.
+  test.each([
+    ['[1,', ['expression-expected', 'closing-bracket-expected']],
+    ['[', ['expression-expected', 'closing-bracket-expected']],
+    ['f(', ['expression-expected', 'closing-bracket-expected']],
+    ['f(1,', ['expression-expected', 'closing-bracket-expected']],
+    ['f(\n', ['expression-expected', 'closing-bracket-expected']],
+    ['let f = (', ['expression-expected', 'closing-bracket-expected']],
+    ['for x', ['literal-expected']],
+  ])('%j misses an expression or a keyword', (source, codes) => {
+    expect(flagsOf(source)).toEqual(codes.map((c) => `${c} (incomplete)`));
+    for (const d of parseEpsil(source)[1])
+      expect(epsilDiagnosticMessage(d)).not.toMatch(/Unexpected symbol/);
+  });
+
+  test('the message of a missing expression or keyword', () => {
+    expect(parseEpsil('[1,')[1].map(epsilDiagnosticMessage)).toEqual([
+      'Expected an expression',
+      'Expected closing bracket "]"',
+    ]);
+    expect(parseEpsil('for x')[1].map(epsilDiagnosticMessage)).toEqual([
+      'Expected "in"',
+    ]);
+    expect(parseEpsil('for x y')[1].map(epsilDiagnosticMessage)).toEqual([
+      'Unexpected symbol "y"',
     ]);
   });
 

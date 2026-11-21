@@ -26,6 +26,14 @@
 
 ### Behavior Changes
 
+- **The Epsil REPL waits for the next line after each input that more text at
+  its end can complete** (CE-1630). Before, it waited only for an unclosed
+  bracket, string or comment, and for an operator at the end of the line. Now
+  it also waits for `let`, `while`, `for x in`, `f(x) =`, `if x` and `x.`.
+  Enter `.break` to abandon the input. The diagnostic `expression-expected`
+  now reads `Expected an expression` (was `expression expected`), and
+  `literal-expected` reads `Expected a literal` (was `literal expected`).
+
 - **`\psi^{(m)}(z)` parses as the polygamma function, and `\Phi(z, s, a)` as the
   Lerch transcendent** (CE-1597). `\psi`, `\psi(z)`, `\Phi` and `\Phi(x)` keep
   their reading as a symbol or a function of the user, and a declaration of
@@ -57,6 +65,13 @@
   string: write `\mathrm{m}`.
 
 ### Resolved Issues
+
+- **In Epsil, a list or a call that ends after its opening bracket or after a
+  comma waits for the next line in the REPL** (CE-1630). `[1,`, `f(` and
+  `f(1,` got the message `Unexpected symbol ""`, and the REPL showed it as an
+  error at the first line of a list or a call written on several lines. Now
+  the message is `Expected an expression`, `for x` gets `Expected "in"`, and
+  the REPL waits for the next line.
 
 - **A function declared pure stays pure when a function that it calls gets a
   new body** (CE-1629). With `h` declared `(number) -> number` and

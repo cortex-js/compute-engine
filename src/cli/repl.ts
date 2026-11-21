@@ -377,9 +377,14 @@ export function isRecoverable(
     'unbalanced-verbatim-symbol',
   ]);
 
+  // An error is recoverable when the parser marked it `incomplete` (more text
+  // at the end can remove it: `[1,`, `f(`, `for x`) or when its code is in
+  // the list, which holds the codes that the parser does not mark.
   if (
-    errors.every((diagnostic) =>
-      recoverableCodes.has(diagnosticCode(diagnostic))
+    errors.every(
+      (diagnostic) =>
+        diagnostic.incomplete === true ||
+        recoverableCodes.has(diagnosticCode(diagnostic))
     )
   )
     return true;
