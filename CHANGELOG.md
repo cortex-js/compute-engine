@@ -2,6 +2,14 @@
 
 ### New Features
 
+- **`serializeEpsil` takes a `numberFormat` option** (#653). `serializeEpsil`
+  always grouped digits with `_`, so `3811` printed as `3_811`. Pass
+  `numberFormat: { digitGroup: 0 }` or `numberFormat: { digitGroupSeparator: '' }`
+  to print `3811`. The option is merged over the default number format once
+  per call, and the default is unchanged. Only the grouping and notation fields
+  can be set (`EpsilNumberFormat`), and a separator other than `''` or `_`
+  throws a `RangeError`, so the output always reads back as the same number.
+
 - **The fixit of an unclosed Epsil string can close it at the caret**
   (CE-1520). A `Fixit` has an optional fourth element, a caret range
   `[start, end]` (both ends included). The fixit of
