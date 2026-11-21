@@ -2209,7 +2209,9 @@ operands decline. On JavaScript:
   declines, the empty tuple). Both decline a matrix whose number of rows is
   known at run time only: the interpreter's empty list of rows has rank 1 and
   the shape `(0)`. `Flatten(m)` is the build of the elements row by row (a list
-  is itself, a scalar the list of it). `Reshape(m, Tuple(d1, …, dk))` of
+  is itself, a scalar the list of it); with a depth, a constant non-negative
+  integer or `+oo`, depth 0 is `m` and any other is the same build, as a matrix
+  has one level (another depth declines). `Reshape(m, Tuple(d1, …, dk))` of
   constant positive integers is the nested build of the elements row by row,
   cycled from the first when there are fewer, as the interpreter's; another
   shape (an input, a `List`) declines.

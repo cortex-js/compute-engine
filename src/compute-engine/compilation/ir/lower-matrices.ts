@@ -9,7 +9,11 @@
  * builds of reads of the elements.
  */
 
-import { isFunction, isNumber } from '../../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import type { Expression } from '../../global-types.js';
 import { isSubLane, type Length, type V } from './ir.js';
 import { rowOfHead, rowOfOp } from './operators.js';
@@ -245,7 +249,9 @@ export function matrixLowering(
       h === 'Cross' ||
       h === 'MatrixPower'
         ? 2
-        : 1;
+        : h === 'Flatten' && e.nops === 2
+          ? 2
+          : 1;
     if (e.nops !== arity)
       decline(e, `${h} of ${e.nops} operands is not supported by the compiler`);
     if (h === 'Cross') return cross(e);
@@ -274,8 +280,29 @@ export function matrixLowering(
       cx.tuples.set(v, 0);
       return v;
     }
-    if (h === 'Flatten')
-      return rank === 0 ? cx.list(e, [m]) : rank === 1 ? m : flatten(e, m);
+    if (h === 'Flatten') {
+      // A depth of 0 leaves the rows; any other flattens the one nesting
+      // level a matrix has (`+oo` is complete).
+      const depth =
+        e.nops === 2
+          ? isSymbol(e.ops[1], 'PositiveInfinity')
+            ? Infinity
+            : cx.constant(cx.value(e.ops[1])!)
+          : Infinity;
+      if (
+        depth === undefined ||
+        !(depth === Infinity || (Number.isInteger(depth) && depth >= 0))
+      )
+        decline(
+          e,
+          'Flatten to a depth that is not a constant non-negative integer'
+        );
+      return rank === 0
+        ? cx.list(e, [m])
+        : rank === 1 || depth === 0
+          ? m
+          : flatten(e, m);
+    }
     if (h === 'Transpose' || h === 'ConjugateTranspose')
       return rank < 2 ? m : transpose(e, m);
     if (h === 'Trace') {

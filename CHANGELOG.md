@@ -2,6 +2,12 @@
 
 ### New Features
 
+- **`Flatten` with a depth compiles** (#641). `Flatten(m, 1)` of a matrix, of a
+  list of rows of run-time count, or of a vector, a scalar, and `Flatten(m, 0)`
+  or `Flatten(m, +oo)`, give the interpreter's value; the depth must be a
+  constant non-negative integer or `+oo`. It declined with "Flatten of 2
+  operands is not supported by the compiler".
+
 - **The fixit of an unclosed Epsil string can close it at the caret**
   (CE-1520). A `Fixit` has an optional fourth element, a caret range
   `[start, end]` (both ends included). The fixit of
