@@ -147,6 +147,53 @@
 
 ### Resolved Issues
 
+- **An expression that reads a seeded random list whose length is a variable
+  compiles again** (CE-1614). With `N: integer` and
+  `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, compiling `t + H[2]`
+  to JavaScript declined in 0.194.0 and later ("the value of H, which has an
+  effect"), so a plot that read such a list drew nothing. The compiled code now
+  makes the draws in their `WithRandomSeed`, as when the draws are written in
+  place of `H`, and gives the value of `evaluate()` at each `N`. A symbol
+  still declines when its value draws outside a `WithRandomSeed`, calls a
+  function that draws, or draws at more than one place of one `WithRandomSeed`
+  (`WithRandomSeed(5, Random() + Random())`), where compiled code can make
+  the draws in another order than `evaluate()`.
+- **The statistics of a list, a binomial coefficient over a list, and the
+  comparison of two lists, two points or two booleans compile again**
+  (CE-1532). They compiled in 0.193.0 and declined in 0.194.0 and later.
+  `Mode`, `Quartiles`, `InterquartileRange`, `Skewness` and `Kurtosis` of a
+  list of real numbers, and `Covariance`, `PopulationCovariance` and
+  `Correlation` of two lists, compile to JavaScript; `Binomial` and `Choose`
+  apply to each element of a list on every target. `Equal` and `NotEqual` of
+  two lists or of two tuples of real numbers compile to one boolean, as
+  `evaluate()` gives (the same length, and each element equal), and so do
+  `Equal` and `NotEqual` of two booleans; they compile to JavaScript and
+  `interval-js`, and to GLSL for tuples, booleans and lists of a stated
+  length. The elements are compared exactly, with no tolerance, as every
+  compiled `Equal`.
+
+  ```ts
+  ce.declare('L', 'list<real>');
+  ce.declare('M', 'list<real>');
+  const data = { L: [3, 1, 4, 1, 5, 9, 2, 6], M: [2, 7, 1, 8, 2, 8, 1, 8] };
+  compile(ce.box(['Quartiles', 'L'])).run(data); // ➔ [1.5, 3.5, 5.5]
+  compile(ce.box(['Correlation', 'L', 'M'])).run(data); // ➔ 0.20965531907301213
+  compile(ce.box(['Binomial', 'L', 2])).run(data); // ➔ [3, 0, 6, 0, 10, 36, 1, 15]
+
+  ce.declare('P', 'tuple<real, real>');
+  ce.declare('Q', 'tuple<real, real>');
+  const same = compile(ce.box(['Equal', 'P', 'Q']));
+  same.success; // ➔ true (0.195.2: false)
+  same.run({ P: [1, 2], Q: [1, 2] }); // ➔ true
+  same.run({ P: [1, 2], Q: [1, 3] }); // ➔ false
+  ```
+
+  Where `evaluate()` gives an error (two lists of different lengths for a
+  covariance, fewer than two pairs, a correlation of equal values), the
+  compiled code gives `NaN`. A tuple compared with a list, lists of lists, of
+  points or of booleans, and the statistics on GLSL and `interval-js` still
+  decline.
+
 - **Assignments to a pure function slot reject a function that draws random
   numbers** (CE-1633). The assignment reports an incompatible-type error and
   the slot keeps its previous function. A slot declared to allow random effects

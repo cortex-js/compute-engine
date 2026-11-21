@@ -787,7 +787,7 @@ function valueDefinitionOfOccurrence(
  * `Function` or a `Block` of `expr` is made canonical again in the scope of
  * that binder (`rebuildCall()`), so a free symbol of the value that has the
  * name of the binder's variable becomes that variable: with `a := n + 1`,
- * `Expand(Sum(a·n, Limits(n, 1, 3)))` sums `n·(n + 1)` (`issues/CE-1655.md`).
+ * `Expand(Sum(a·n, Limits(n, 1, 3)))` sums `n·(n + 1)` (`issues/CE-1641.md`).
  */
 export function resolveBoundSymbols(
   expr: Expression,
