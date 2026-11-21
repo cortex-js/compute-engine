@@ -1,11 +1,9 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { IComputeEngine } from '../../src/compute-engine/types-engine';
 import { executeEpsil, executeEpsilAsync } from '../../src/epsil';
 
-// An iteration, or a run of a block, reuses the activation of the previous
-// one when nothing keeps it (`docs/SCOPING-MODEL.md`, "Activations"). Each
-// program below reads a value that a reused activation would overwrite if a
-// keeper were missed: a closure, a lazy collection, a recursive run of the
-// same block, a block local of an earlier run.
+// Closures and scoped expressions keep the activation they were created in.
+// Different iterations and runs of the same block have independent values.
 
 const PROGRAMS: [name: string, source: string, value: unknown][] = [
   [
@@ -75,7 +73,7 @@ const PROGRAMS: [name: string, source: string, value: unknown][] = [
   ],
 ];
 
-describe('ACTIVATION REUSE', () => {
+describe('ACTIVATION LIFETIME', () => {
   test.each(PROGRAMS)('%s', (_name, source, value) => {
     const result = executeEpsil(new ComputeEngine(), source);
     expect(result.value.json).toEqual(value);
@@ -84,5 +82,89 @@ describe('ACTIVATION REUSE', () => {
   test.each(PROGRAMS)('%s, asynchronously', async (_name, source, value) => {
     const result = await executeEpsilAsync(new ComputeEngine(), source);
     expect(result.value.json).toEqual(value);
+  });
+});
+
+describe('HOST SCOPE REENTRY', () => {
+  test('a saved Sum scope retains its own index across iterations', () => {
+    const ce = new ComputeEngine();
+    let saved: IComputeEngine['context']['lexicalScope'] | undefined;
+    const observed: unknown[] = [];
+    ce.declare('Visit', {
+      signature: '(number) -> number',
+      pure: false,
+      evaluate: ([value]) => {
+        if (saved === undefined) saved = ce.context.lexicalScope;
+        else {
+          ce.pushScope(saved);
+          try {
+            observed.push(ce.box('i').evaluate().json);
+          } finally {
+            ce.popScope();
+          }
+        }
+        return value;
+      },
+    });
+
+    const sum = ce.box(['Sum', ['Visit', 'i'], ['Limits', 'i', 1, 3]]);
+    expect(sum.evaluate().json).toBe(6);
+    expect(observed).toEqual([1, 1]);
+  });
+
+  test('popping a nested frame preserves a definition held by the binder', () => {
+    const ce = new ComputeEngine();
+    const disposed: boolean[] = [];
+    ce.declare('Visit', {
+      signature: '(number) -> number',
+      pure: false,
+      evaluate: ([value]) => {
+        if (disposed.length === 0) {
+          ce.declare('HostLocal', { value: 7 });
+          const def = ce.box('HostLocal').valueDefinition!;
+          ce.pushScope(ce.context.lexicalScope, 'call');
+          ce.popScope();
+          disposed.push(def.disposed);
+        }
+        return value;
+      },
+    });
+
+    const sum = ce.box(['Sum', ['Visit', 'i'], ['Limits', 'i', 1, 2]]);
+    expect(sum.evaluate().json).toBe(3);
+    expect(disposed).toEqual([false]);
+  });
+
+  test.each([
+    ['synchronous', executeEpsil],
+    ['asynchronous', executeEpsilAsync],
+  ] as const)('a saved block stack keeps its locals during %s execution', async (_mode, execute) => {
+    const ce = new ComputeEngine();
+    let saved: IComputeEngine['contextStack'] | undefined;
+    const observed: unknown[] = [];
+    ce.declare('Visit', {
+      signature: '(number) -> number',
+      pure: false,
+      evaluate: ([value]) => {
+        if (saved === undefined) saved = ce.contextStack;
+        else {
+          const current = ce.contextStack;
+          ce.contextStack = saved;
+          try {
+            observed.push(ce.box('y').evaluate().json);
+          } finally {
+            ce.contextStack = current;
+          }
+        }
+        return value;
+      },
+    });
+
+    const result = await execute(
+      ce,
+      'for i in 1..3 { let y = 10 * i\n Visit(y) }'
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(observed).toEqual([10, 10]);
   });
 });

@@ -22,7 +22,7 @@ import {
 } from './boxed-expression/binding-tombstone.js';
 import {
   activationValuesOf,
-  releaseActivation,
+  renewIterationActivation,
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
@@ -96,12 +96,21 @@ export function pushEvalContext(
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
-  const context = ce._evalContextStack.pop();
-  discardEvalContext(ce, context);
-  // The next evaluation of the node can reuse the activation
-  // (`releaseActivation()`).
-  if (context !== undefined)
-    releaseActivation(context.lexicalScope, ce._evalContextStack);
+  discardEvalContext(ce, ce._evalContextStack.pop());
+}
+
+/** Move the current binder frame to a new iteration. The new scope holds
+ * the same definitions in a new bindings map. Move the registration of
+ * the frame so a subsequent declaration counts this frame as a holder. */
+export function advanceIterationScope(ce: IComputeEngine, name: string): void {
+  const frame = ce.context;
+  if (frame === undefined) return;
+  const scope = renewIterationActivation(frame.lexicalScope, name);
+  if (scope === undefined) return;
+  const counted = frame._countedDefs !== undefined;
+  if (counted) noteFrameUncounted(frame);
+  (frame as { lexicalScope: Scope }).lexicalScope = scope;
+  if (counted) noteFrameCounted(frame);
 }
 
 /**

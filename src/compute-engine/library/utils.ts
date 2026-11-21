@@ -8,7 +8,7 @@ import type {
 } from '../global-types.js';
 import type { EffectHandlers } from '../types-effects.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
-import { renewIterationActivation } from '../boxed-expression/ambient-chain.js';
+import { advanceIterationScope } from '../engine-scope.js';
 
 import {
   isNumber,
@@ -4840,7 +4840,7 @@ export function assignLoopIndex(
 ): void {
   // Each iteration has its own activation: a function value made in an
   // earlier iteration keeps the value of the index in that iteration.
-  renewIterationActivation(ce._evalContextStack, index);
+  advanceIterationScope(ce, index);
   ce._ephemeralWriteDepth += 1;
   try {
     // A function literal (an element of `[a ↦ a + 1]`) is stored as the

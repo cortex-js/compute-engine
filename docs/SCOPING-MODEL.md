@@ -704,25 +704,11 @@ evaluated (`scopeActivation()`, `holdBodyLocals()`,
 binder variable and a block local are read by following these links from the
 activation of the evaluation in progress (`activationRecordOf()`); there is
 no search of the stack of evaluations in progress. A binder that iterates (a
-loop, `Sum`, `Product`, a comprehension) gives an iteration its own
-activation when something keeps the activation of the previous iteration
-(`renewIterationActivation()`).
-
-Four things keep an activation after its evaluation: a function value made
-in it, a lazy collection made in it, a scoped node made in it (a function
-literal that `Parse` gives in a loop body), and an asynchronous evaluation
-that holds a copy of the stack (`markActivationKept()`). Nothing else reads
-an activation after its evaluation, so an activation that nothing keeps is
-reused: the next iteration writes its values in place, and the pop of a
-block activation lets the next evaluation of the block in the same parent
-reuse the object, with new values (`releaseActivation()`). A released
-activation holds no values, and an activation whose parent is a call frame
-is not released. A reused activation is the activation a new one would be:
-the same parent, the same bindings, and locals with no value.
-
-A host that saves `ce.contextStack` during an evaluation and sets it back
-after the evaluation ended reads no value of the locals and the binder
-variables of that evaluation: their activations were released.
+loop, `Sum`, `Product`, a comprehension) makes one activation per iteration
+(`renewIterationActivation()`). The binder's evaluation frame advances to
+the next activation. `ce.contextStack` copies the array of frames, and those
+frames are shared. A host that wants to re-enter a specific iteration saves
+`ce.context.lexicalScope` and passes it to `ce.pushScope(scope)`.
 
 A function value keeps the activation it was made in. With
 `add(a) := x ↦ x + a`, `g := add(2)` and `h := add(10)`, `g(1)` is `3` and
