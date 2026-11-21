@@ -817,14 +817,31 @@ export function prepareDocument(
                 throw mismatch(contract);
               partial = true;
             }
-            if (contract !== undefined && !partial && !actual.matches(contract))
-              throw new Error(
-                name +
-                  ': ' +
-                  String(actual) +
-                  ' does not match ' +
-                  String(contract)
-              );
+            if (contract !== undefined && !partial) {
+              // The parameters and effects must match the contract. A stated
+              // result is a promise, refused only when disjoint from the
+              // inferred result, as for a partly annotated row. The derived
+              // result of a cyclic row without one is checked strictly.
+              const stated = contract.type;
+              const refused =
+                row.resultType !== undefined &&
+                typeof sig === 'object' &&
+                sig.kind === 'signature' &&
+                typeof stated === 'object' &&
+                stated.kind === 'signature'
+                  ? !actual.matches(
+                      ce.type({ ...stated, result: sig.result })
+                    ) || ce.type(sig.result).isDisjointFrom(stated.result)
+                  : !actual.matches(contract);
+              if (refused)
+                throw new Error(
+                  name +
+                    ': ' +
+                    String(actual) +
+                    ' does not match ' +
+                    String(contract)
+                );
+            }
             if (member.binding === undefined) {
               const closed =
                 contract === undefined

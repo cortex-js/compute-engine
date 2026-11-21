@@ -617,6 +617,64 @@ test('a stated result type or effect is checked when some formals are unannotate
   environment.dispose();
 });
 
+test('a stated result is a promise with or without formal annotations', () => {
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  const sqrtSyntax: DocumentSyntax = {
+    split: () => ({ head: 'f', body: '' }),
+    recognize: () => ({
+      role: 'function',
+      head: { name: 'f', params: ['x'] },
+      bodyJson: ['Sqrt', 'x'],
+    }),
+    normalize: (raw) => raw,
+  };
+  // The inferred result of Sqrt(x) for a real x is complex: not a subtype
+  // of real, but not disjoint from it.
+  for (const formalTypes of [undefined, { x: 'real' }]) {
+    const revision = imports.prepare(
+      [{ id: 'f', latex: 'f', resultType: 'real', formalTypes }],
+      sqrtSyntax
+    );
+    expect(revision.rowErrors.size).toBe(0);
+    expect(
+      ce.expr(['f', 4], { scope: revision.scope }).evaluate().json
+    ).toEqual(2);
+    revision.dispose();
+    expect(() =>
+      imports.prepare(
+        [{ id: 'f', latex: 'f', resultType: 'list<real>', formalTypes }],
+        sqrtSyntax
+      )
+    ).toThrow('does not match');
+  }
+  // A fully annotated row still refuses effects beyond the stated ones.
+  expect(() =>
+    imports.prepare(
+      [
+        {
+          id: 'f',
+          latex: 'f',
+          resultType: 'real',
+          effects: 'pure',
+          formalTypes: { x: 'real' },
+        },
+      ],
+      {
+        ...sqrtSyntax,
+        recognize: () => ({
+          role: 'function',
+          head: { name: 'f', params: ['x'] },
+          bodyJson: ['Add', 'x', ['Random']],
+        }),
+      }
+    )
+  ).toThrow('does not match');
+  imports.dispose();
+  environment.dispose();
+});
+
 test('a field value is checked against its stated value type', () => {
   const ce = new ComputeEngine();
   const environment = createDocumentEnvironment(ce, () => {});
