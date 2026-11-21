@@ -127,8 +127,14 @@ describe('a list literal snapshots a spread lazy collection', () => {
   });
 
   test('an explicit `join` stays a lazy `Join`', () => {
-    const { value } = run('join(take([1, 2, 3], 2), [9])');
-    expect(value.operator).toBe('Join');
+    // The `join` is not the last statement: the value of a program is
+    // listed (`listedFinalValue()` in `src/epsil/execute-epsil.ts`).
+    const ce = new ComputeEngine();
+    const seen: string[] = [];
+    executeEpsil(ce, 'join(take([1, 2, 3], 2), [9])\nnothing', {
+      onStatement: (s) => seen.push(s.value.operator),
+    });
+    expect(seen[0]).toBe('Join');
   });
 
   test('a predicate that fails keeps the view, and the read reports it', () => {

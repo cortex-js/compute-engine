@@ -4020,6 +4020,18 @@ function appliedNames(literal: Expression): ReadonlySet<string> {
 }
 
 /**
+ * True when the statement `stmt` is an assignment or a declaration (also
+ * under the return-type annotation `Typed` of a function body): a statement
+ * with no value. A list of statements that ends with one has the value
+ * `Nothing` (`statementListValue()`), not the value that the statement
+ * binds.
+ */
+export function isBindingStatement(stmt: Expression): boolean {
+  const last = isFunction(stmt, 'Typed') ? stmt.op1 : stmt;
+  return last.operator === 'Assign' || last.operator === 'Declare';
+}
+
+/**
  * The value of a list of statements `ops` whose last evaluated statement
  * gave `result`. An assignment or a declaration is a statement with no
  * value, so a list whose last statement is an `Assign` or a `Declare` (also
@@ -4037,10 +4049,7 @@ function statementListValue(
     return result;
   const lastOp = ops[ops.length - 1];
   if (lastOp === undefined) return result;
-  const last = isFunction(lastOp, 'Typed') ? lastOp.op1 : lastOp;
-  return last.operator === 'Assign' || last.operator === 'Declare'
-    ? ce.Nothing
-    : result;
+  return isBindingStatement(lastOp) ? ce.Nothing : result;
 }
 
 /** The scopes in which a list of statements has run

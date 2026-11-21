@@ -65,7 +65,9 @@ describe('NAMED CALLBACK — DIRECT APPLICATION', () => {
     ['map(half, [1/3, 2^100])', '[1/6,633825300114114700748351602688]'],
     ['map(inv, [0, 1, 2])', '[~oo,1,1/2]'],
     ['map(pair, [1, 2])', '[[1,1],[2,2]]'],
-    ['map(upTo, [2, 3])', '[[1,2],[1,2,3]]'],
+    // The value of the program is a list of two ranges, as the list literal
+    // `[1..2, 1..3]` is; this is the text of such a list.
+    ['map(upTo, [2, 3])', '[Range(1, 2),Range(1, 3)]'],
     ['map(strlen, ["ab", "c"])', '[2,1]'],
     ['map(both, [1, 2], [3, 4])', '[3,8]'],
     ['map(half, [x, 2])', '[1/2 * x,1]'],

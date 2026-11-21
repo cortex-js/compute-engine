@@ -622,11 +622,13 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
   });
 
   test('the Epsil route', () => {
+    // The value of the program is the dictionary of the entries that the
+    // `Filter` keeps, so its type is the type of that literal.
     expect(
       epsil(
         'let d: dictionary<integer> = {"a" -> 1, "b" -> -1}\nfilter(d, (p) => p[2] > 0)'
       )
-    ).toEqual(['{"a" -> 1}', 'dictionary<integer>']);
+    ).toEqual(['{"a" -> 1}', 'record{a: integer}']);
   });
 });
 

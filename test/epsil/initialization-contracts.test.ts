@@ -16,7 +16,7 @@ describe('initialization contract semantic controls', () => {
     ['let x=1; let x=2; x', 1],
     ['let a=h(1); function h(x){x+1}; a', 2],
     ['let f=(x)=>x+1; let old=f; f=(x)=>x+2; [old(1),f(1)]', ['List', 2, 3]],
-    ['let xs=[1,2,3]; while let [h,...]=xs {xs=rest(xs)}; xs', ['Rest', ['Rest', ['Rest', ['List', 1, 2, 3]]]]],
+    ['let xs=[1,2,3]; while let [h,...]=xs {xs=rest(xs)}; xs', ['List']],
     ['let t=0; for x in [1,2,3] {t=t+x}; t', 6],
     ['let x=1; do {let x=2; x}; x', 1],
     ['let a="x"+1; 5', 5],

@@ -25,7 +25,11 @@ import {
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
 import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { EpsilDebugHooks } from '../compute-engine/types-debug.js';
-import { noteStatementSources } from '../common/debug-hook.js';
+import {
+  isDebugHookFailure,
+  noteStatementSources,
+} from '../common/debug-hook.js';
+import { isBindingStatement } from '../compute-engine/function-utils.js';
 
 import {
   DiagnosticNote,
@@ -80,7 +84,10 @@ export interface ExecuteEpsilOptions {
     value: Expression;
     range: [number, number];
   }) => void;
-  /** Independent time limit for each statement, in milliseconds. */
+  /** Independent time limit for each statement, in milliseconds. When the
+   * value of the program is a lazy collection, its elements are computed
+   * after the last statement, in a second span of the same limit: the last
+   * statement and its elements can take up to twice the limit together. */
   statementTimeLimitMs?: number;
 }
 
@@ -100,7 +107,19 @@ export interface ExecuteEpsilAsyncOptions extends ExecuteEpsilOptions {
 
 export interface ExecuteEpsilResult {
   /** The value of the last executed statement (or `Nothing`). Runtime problems
-   * surface here as `["Error", …]` values, never as thrown exceptions. */
+   * surface here as `["Error", …]` values, never as thrown exceptions.
+   *
+   * When the last statement gives a finite lazy collection (`map(…)`,
+   * `filter(…)`, `take(…)`, a comprehension), the value is the list, the
+   * set or the dictionary of its elements, so `json` and `latex` show the
+   * elements: `map(u => u + 1, [5, 6])` gives `["List", 6, 7]`, not the
+   * `Map` expression. These collections stay as they are: a range (`1..4`),
+   * a collection with no last element, a collection with more than
+   * `ce.maxCollectionSize` elements, a collection whose function applies an
+   * operator that has only an asynchronous handler, a collection whose
+   * function has an effect when no bound on the number of its elements is
+   * known before they are computed, and a collection whose elements cannot
+   * be computed. */
   value: Expression;
   /** Parse-time (and a few execution-time) problems: unparseable syntax, gated
    * host pragmas, a `#error` directive — plus a `static-type-error` diagnostic
@@ -379,7 +398,7 @@ function* executeEpsilRun(
     // the lifted limit after the run, so that a lazy collection the program
     // returns can be enumerated by the host in full.
     ce._liftDefaultIterationLimit();
-    return yield* executeEpsilSteps(ce, source, options);
+    return yield* executeEpsilSteps(ce, source, options, runFrame);
   } finally {
     ce._deadlineFrame = runFrame;
     ce._epsilBatchId = enclosingBatch;
@@ -391,7 +410,9 @@ function* executeEpsilRun(
 function* executeEpsilSteps(
   ce: ComputeEngine,
   source: string,
-  options: ExecuteEpsilOptions | undefined
+  options: ExecuteEpsilOptions | undefined,
+  /** The deadline frame of the run, as `executeEpsilRun()` read it. */
+  runFrame: ComputeEngine['_deadlineFrame']
 ): Generator<Expression, ExecuteEpsilResult, Expression> {
   const diagnostics: ParsingDiagnostic[] = [];
 
@@ -531,6 +552,9 @@ function* executeEpsilSteps(
   let valueRange: [number, number] | undefined;
   // The statement whose value is `value`: the last statement that ran.
   let valueStatement: MathJsonExpression | undefined;
+  // The lazy collection that the last statement gave, when `value` holds
+  // what `listedFinalValue()` made of it.
+  let listedView: Expression | undefined;
 
   // Names already surfaced as `unknown-function` — one diagnostic per unknown
   // name per program run, not per occurrence.
@@ -599,11 +623,14 @@ function* executeEpsilSteps(
     diagnostics,
     nestedFailures
   );
-  ce._epsilStatementResultHook = (boxedStmt, result, i, error) => {
-    if (i === undefined) {
-      reportNested(boxedStmt, result);
-      return;
-    }
+  // The report of the top-level statement `i` of the program (an index in
+  // `statements`), which evaluated to `result`.
+  const reportStatement = (
+    boxedStmt: Expression,
+    result: Expression,
+    i: number,
+    error: unknown
+  ): void => {
     const stmt = statements[i];
     value = result;
     const range = statementRange(stmt, source);
@@ -623,9 +650,18 @@ function* executeEpsilSteps(
         ? declarationCode.op2.string
         : undefined;
     const walkFailure = { error: undefined as unknown };
-    if (i === statements.length - 1 && isFunction(value, 'Comprehension')) {
+    // The value of the program is a value, not the call that makes it: a
+    // lazy collection that the last statement gives is listed
+    // (`listedFinalValue()`). A declaration or an assignment has no value
+    // (the program then gives `Nothing`), so its collection is not walked.
+    if (
+      i === statements.length - 1 &&
+      !isBindingStatement(boxedStmt) &&
+      value.isLazyCollection
+    ) {
       const reportedBefore = new Set(nestedFailures.keys());
-      value = listedElement(ce, value, { used: 0, max: ce.maxCollectionSize });
+      listedView = value;
+      value = listedFinalValue(ce, value, runFrame);
       const held = new Set<object>();
       walkValue(walkFailure, () => {
         for (const error of value.errors) held.add(failureKey(error));
@@ -831,11 +867,28 @@ function* executeEpsilSteps(
     });
     nestedFailures.clear();
   };
+  ce._epsilStatementResultHook = (boxedStmt, result, i, error) => {
+    if (i === undefined) {
+      reportNested(boxedStmt, result);
+      return;
+    }
+    // `listedFinalValue()` removes the deadline frame from the engine when
+    // the walk of the final value spends a time or a step budget, so that
+    // the report of the statement is built. The frame is put back here.
+    const frame = ce._deadlineFrame;
+    try {
+      reportStatement(boxedStmt, result, i, error);
+    } finally {
+      ce._deadlineFrame = frame;
+    }
+  };
   try {
     const result = yield program;
     // The shared Program evaluator determines the value (declarations and
-    // assignments as final statements produce Nothing, as in a Block).
-    if (!isFunction(result, 'Comprehension')) value = result;
+    // assignments as final statements produce Nothing, as in a Block). When
+    // that value is the lazy collection that the hook listed, the value of
+    // the program is the list, which `value` holds.
+    if (result !== listedView) value = result;
   } finally {
     ce._epsilStatementTimeLimitMs = savedStatementLimit;
   }
@@ -932,6 +985,87 @@ function* executeEpsilSteps(
     ...(valueRange === undefined ? {} : { valueRange }),
     ...(valueNotes.length === 0 ? {} : { valueNotes }),
   };
+}
+
+/**
+ * The value of a program whose last statement gives the lazy collection
+ * `view`: the list, the set or the dictionary of the elements of `view`, so
+ * that every form of the value (`json`, `latex`, `toString()`) shows the
+ * elements. Without this, the value of `map(u => u + 1, [5, 6])` is the
+ * `Map` call, and a host that writes its LaTeX shows the call, not `[6, 7]`.
+ *
+ * The collection is listed as an element of a list literal is
+ * (`listedElement()`), so `view` is returned unchanged in the same cases: a
+ * `Range`, a collection that is not known to be finite, one whose elements
+ * are more than `ce.maxCollectionSize`, a held conditional, a callback that
+ * applies an operator with only an asynchronous handler, a callback with an
+ * effect when the number of elements is not known without a walk, and a
+ * walk that throws (the host gets the failure when it reads the value). One
+ * difference: a view of a dictionary (`filter(d, p)`) is listed too, into a
+ * `Dictionary`, because the value of a program is a whole value, as the
+ * accumulator of a fold is.
+ *
+ * The walk computes the elements, so it is a part of the evaluation of the
+ * statement, with the same limits. It runs in `runFrame`, the deadline frame
+ * of the run, which is not on the engine after a wait of the asynchronous
+ * route. When the run has a time limit for each statement, the walk runs in
+ * a span of that limit. The span is a second one: the span of the statement
+ * closed before the statement was reported, so the last statement can take
+ * up to twice the limit. The time that the statement has left is not
+ * computed here, because the time that a debugger keeps the program stopped
+ * before the statement is not known here, and it must not count. A walk
+ * that is canceled gives the error value that a canceled statement gives
+ * (`["Error", message, cause]`): a program never throws to its host. The
+ * exception of a debugger hook is thrown again, as the statement loop of
+ * the engine does.
+ *
+ * When the walk spends a time or a step budget, the engine is left with no
+ * deadline frame, as the statement loop of the engine leaves it after a
+ * statement that spends one: an operation that builds the error value or
+ * the report of the statement would otherwise throw at its next check of
+ * the spent budget. The caller puts the frame back. In every other case the
+ * engine has the frame that it had before the call.
+ */
+function listedFinalValue(
+  ce: ComputeEngine,
+  view: Expression,
+  runFrame: ComputeEngine['_deadlineFrame']
+): Expression {
+  const outsideFrame = ce._deadlineFrame;
+  ce._deadlineFrame = runFrame;
+  try {
+    const list = (): Expression =>
+      listedElement(
+        ce,
+        view,
+        { used: 0, max: ce.maxCollectionSize },
+        true,
+        true
+      );
+    const ms = ce._epsilStatementTimeLimitMs;
+    const listed =
+      ms === undefined
+        ? list()
+        : ce.withTimeLimit({ ms, label: 'epsil:statement' }, list);
+    ce._deadlineFrame = outsideFrame;
+    return listed;
+  } catch (e) {
+    if (isDebugHookFailure(e)) {
+      ce._deadlineFrame = outsideFrame;
+      throw e;
+    }
+    ce._deadlineFrame = isTimeoutCancellation(e) ? undefined : outsideFrame;
+    const message = ce.string(e instanceof Error ? e.message : String(e));
+    // The cause that the statement loop of the engine writes
+    // (`programFailureValue()`, `compute-engine/function-utils.ts`).
+    const cause =
+      cancellationCause(e) ??
+      (e instanceof CancellationError ? budgetCauseOf(e) : undefined);
+    return ce._fn(
+      'Error',
+      cause === undefined ? [message] : [message, ce.string(cause)]
+    );
+  }
 }
 
 /** A preparation timeout has no statement value to report through the evaluator. */

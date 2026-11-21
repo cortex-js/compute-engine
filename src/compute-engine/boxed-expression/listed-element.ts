@@ -5,6 +5,7 @@ import type {
 } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
 import { EventLoopPacer } from '../../common/cooperative-steps.js';
+import { isDebugHookFailure } from '../../common/debug-hook.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   collectionSourceOperands,
@@ -295,7 +296,9 @@ export function listingCountUpperBound(
  * elements cannot be computed, when it is neither indexed nor a set (a
  * keyed view), when it is a held conditional (`Which`, `If`: a
  * restricted collection, not a view), when its elements would use more
- * than the rest of the budget, or when the walk throws.
+ * than the rest of the budget, or when the walk throws. Two exceptions of
+ * the walk are thrown again: a cancellation other than an iteration limit,
+ * and the exception of a debugger hook (`isDebugHookFailure()`).
  *
  * With `admitKeyed`, a keyed view (a view typed as a dictionary or a record,
  * such as a `Filter` of a dictionary, or a `Join` or an `Append` that adopts
@@ -369,6 +372,9 @@ export function listedElement(
       e.cause !== 'iteration-limit-exceeded'
     )
       throw e;
+    // A debugger command that unwinds the evaluation from a hook of a
+    // statement of the callback is not a failure of the walk.
+    if (isDebugHookFailure(e)) throw e;
     return x;
   } finally {
     if (reserved !== undefined) budget.used -= reserved - elements.length;

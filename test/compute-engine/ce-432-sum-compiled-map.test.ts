@@ -13,11 +13,19 @@ import {
 // boxing each element. The sum must be the one the element-by-element fold
 // gives: the first element, then `add()` of each later element in order.
 
-/** The engine and the `Map` of an Epsil expression `map(…)`. */
+/** The engine and the `Map` of an Epsil expression `map(…)`. The `map` is
+ * not the last statement of the program, because the value of a program is
+ * the list of the elements. */
 function mapOf(source: string, machine = true): Expression {
   const ce = new ComputeEngine();
   if (machine) ce.precision = 'machine';
-  return executeEpsil(ce, source).value;
+  let map: Expression | undefined;
+  executeEpsil(ce, `${source}\nnothing`, {
+    onStatement: (s) => {
+      if (s.index === 0) map = s.value;
+    },
+  });
+  return map!;
 }
 
 /** The sum that the fold gives for `map`: each element as the walk of the

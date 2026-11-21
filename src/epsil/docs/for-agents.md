@@ -299,23 +299,28 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
 
 - **Laziness**: `Range`, `map`, `filter`, `take`, `drop`, `join` are
   generators — they enumerate when materialized (indexed, aggregated, or
-  iterated; e.g. a `take(xs, 3)` stored inside a tuple stays an unevaluated
-  `Take(...)`), and a deferred mapping function reads variables **at
+  iterated), and a deferred mapping function reads variables **at
   materialization time**. Collection *literals* snapshot their element values
-  immediately, and so does an **assignment**: `let ys = filter(xs, p)` and
+  immediately (`(take(xs, 3), 1)` holds the list of the three elements), and
+  so does an **assignment**: `let ys = filter(xs, p)` and
   `xs = filter(xs, p)` store the list of the elements when the generator is
   finite and reads a variable. A generator with no last element
   (`filter(1..oo, p)`) stays lazy when it is assigned: a variable operand
   gives its value at the assignment, and the inline function reads its
   variables when an element is computed. List a finite part with `listFrom`
-  to keep the elements of that time.
+  to keep the elements of that time. The **value of a program** (its last
+  statement) is listed too when it is a finite generator:
+  `map(u => u + 1, [5, 6])` gives the list `[6, 7]`, in the text, the
+  MathJSON and the LaTeX of the value. A range stays a range.
 - **Output is the engine's textual form, with Epsil symbols**: a string
   prints in quotes (`"florb"`), a boolean as `true`/`false`, the absence
-  markers as `nothing`/`missing`, and a symbol unquoted (`a1`). Derived
-  collections (`Range`, `map`/`filter` results, loop-built lists)
-  preview-elide above 10 elements (`[1,2,3,4,5,...,]`); the value is complete
-  — the CLI's `--json` output materializes the full elements (up to 10,000).
-  Literals print in full.
+  markers as `nothing`/`missing`, and a symbol unquoted (`a1`). A value that
+  is still a lazy collection (a `Range`, a generator with no last element)
+  preview-elides above 10 elements (`[1,2,3,4,5,...,26,27,28,29,30]`,
+  `[2,4,6,8,10,...]`); the value is complete — the CLI's `--json` output
+  materializes the full elements (up to 10,000). Literals print in full,
+  and so does a finite `map`/`filter` result that is the value of the
+  program, because that value is a list.
 - **Arguments are evaluated before a call** — `f(a + 1)` receives the value
   — except for a `hold` function (`hold f(e) = …`), which receives the
   expression as written and evaluates it wherever the body reads it

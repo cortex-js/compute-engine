@@ -178,13 +178,37 @@ describe('a user function named as the callback', () => {
 });
 
 describe('an Epsil program', () => {
-  test('a predicate defined in the program: the display walk fills the memo', () => {
-    const r = executeEpsil(
-      ce,
-      'isEven(n) = tick(n) % 2 == 0\nfilter(1..20, isEven)'
+  /** The lazy collection that the last statement of `source` gives. The
+   * program gets one more statement, because the value of a program is the
+   * list of the elements, not the lazy collection. */
+  function viewOf(source: string): Expression {
+    const values: Expression[] = [];
+    const r = executeEpsil(ce, `${source}\nnothing`, {
+      onStatement: (s) => {
+        values[s.index] = s.value;
+      },
+    });
+    expect(r.diagnostics).toEqual([]);
+    return values[values.length - 2];
+  }
+
+  test('the value of the program: the predicate runs once for each element', () => {
+    const [r, c0] = counting(() =>
+      executeEpsil(ce, 'isEven(n) = tick(n) % 2 == 0\nfilter(1..20, isEven)')
     );
     expect(r.diagnostics).toEqual([]);
-    const value = r.value!;
+    expect(c0).toBe(20);
+    // The value is the list of the elements: the display and the host's
+    // walk run no predicate.
+    const [text, c1] = counting(() => r.value.toString());
+    expect(text).toBe('[2,4,6,8,10,12,14,16,18,20]');
+    const [v2, c2] = counting(() => walk(r.value));
+    expect(v2).toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+    expect(c1 + c2).toBe(0);
+  });
+
+  test('a predicate defined in the program: the display walk fills the memo', () => {
+    const value = viewOf('isEven(n) = tick(n) % 2 == 0\nfilter(1..20, isEven)');
     const [text, c1] = counting(() => value.toString());
     expect(text).toBe('[2,4,6,8,10,12,14,16,18,20]');
     expect(c1).toBe(20);
@@ -214,9 +238,7 @@ describe('an Epsil program', () => {
   });
 
   test('a variable holding a function literal', () => {
-    const r = executeEpsil(ce, 'let f = n => tick(n^2)\nmap(f, 1..10)');
-    expect(r.diagnostics).toEqual([]);
-    const value = r.value!;
+    const value = viewOf('let f = n => tick(n^2)\nmap(f, 1..10)');
     const [v1, c1] = counting(() => walk(value));
     expect(v1).toEqual([1, 4, 9, 16, 25, 36, 49, 64, 81, 100]);
     expect(c1).toBe(10);
@@ -226,12 +248,10 @@ describe('an Epsil program', () => {
   });
 
   test('a variable holding a function literal: reassigning the variable refills', () => {
-    // The program's value is the lazy `Map` itself (a `let` would evaluate
-    // it to a list). The reassignment is a second program on the same
-    // engine, as a host's next cell is.
-    const r = executeEpsil(ce, 'let f = n => tick(n^2)\nmap(f, 1..5)');
-    expect(r.diagnostics).toEqual([]);
-    const value = r.value!;
+    // The value of the `map` statement is the lazy `Map` itself (a `let`
+    // would evaluate it to a list). The reassignment is a second program on
+    // the same engine, as a host's next cell is.
+    const value = viewOf('let f = n => tick(n^2)\nmap(f, 1..5)');
     const [v1, c1] = counting(() => walk(value));
     expect(v1).toEqual([1, 4, 9, 16, 25]);
     expect(c1).toBe(5);

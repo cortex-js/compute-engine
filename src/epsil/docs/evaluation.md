@@ -301,6 +301,23 @@ firsts
 A lazy collection that is not assigned (an argument, an operand) still reads
 program state **at materialization time**, like a generator in Python.
 
+The **value of a program**, that is the value of its last statement, is a
+snapshot too. When the last statement gives a finite lazy collection, the
+program gives the list (or the set, or the dictionary) of its elements, so
+a host that shows the value shows the elements:
+
+```epsil
+map(u => u + 1, [5, 6])
+// ➔ [6, 7]
+```
+
+The elements are computed once, when the program runs. A range (`1..4`)
+stays a range, and a collection with no last element (`map(f, 1..oo)`) or
+with more elements than the
+[materialization cap](/epsil/reference/collections/#the-materialization-cap)
+stays lazy. A lazy collection that a statement other than the last one
+gives is not listed: nothing reads its value.
+
 ```mermaid
 flowchart TD
   rhs["let xs = … or xs = …"] --> lit{"right-hand side<br/>is a literal?"}

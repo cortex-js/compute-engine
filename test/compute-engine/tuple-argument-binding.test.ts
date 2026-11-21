@@ -452,7 +452,8 @@ describe('A STRING ARM OF A UNION SOURCE', () => {
   test.each([
     ['dedup(c)', 'string', '"ab"'],
     ['filter(c, x => true)', 'string', '"aab"'],
-    ['map(x => x, c)', 'list<nothing | unknown>', '["a","a","b"]'],
+    // The value of the program is the list of the elements of the `Map`.
+    ['map(x => x, c)', 'list<character^3>', '["a","a","b"]'],
   ])('the Epsil route: %s', (call, type, value) => {
     const engine = new ComputeEngine();
     const parseLatex = (latex: string): MathJsonExpression =>
