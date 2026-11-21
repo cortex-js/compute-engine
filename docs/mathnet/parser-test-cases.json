@@ -2143,7 +2143,7 @@
   {
    "latex": "\\det(A + 2B) - \\det(B + 2A)",
    "category": "matrix-operator-typing",
-   "observed": "clean",
+   "observed": "'incompatible-type'",
    "source": "2026-07-08 shifted sample pages=16 offset-shift=869"
   },
   {
@@ -2364,5 +2364,5 @@
    "observed": "clean"
   }
  ],
- "lastChecked": "2026-11-06"
+ "lastChecked": "2026-11-21"
 }
