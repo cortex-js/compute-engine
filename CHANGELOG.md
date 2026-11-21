@@ -44,6 +44,15 @@
 
 ### Behavior Changes
 
+- **The text of a range with the step 1 is the Epsil range `a..b`**
+  (CE-1636). `toString()` and the Epsil command line printed a range in a
+  list as a call, which reads as a call that was not evaluated:
+  `[1..2, 1..3]` printed `[Range(1, 2, 1),Range(1, 3, 1)]`, and now prints
+  `[1..2,1..3]`, which Epsil reads back as the same list. A range with no
+  step or with another step still prints as a call, `Range(1, 5)` and
+  `Range(1, 5, 2)`, and a range alone still prints its elements: `1..3`
+  prints `[1,2,3]`.
+
 - **The Epsil REPL waits for the next line after each input that more text at
   its end can complete** (CE-1630). Before, it waited only for an unclosed
   bracket, string or comment, and for an operator at the end of the line. Now

@@ -44,7 +44,7 @@ describe('a list literal lists each finite lazy element', () => {
   });
 
   test('a range element stays a range', () => {
-    expect(run('[1..3, 4]')).toBe('[Range(1, 3, 1),4]');
+    expect(run('[1..3, 4]')).toBe('[1..3,4]');
     const ce = new ComputeEngine();
     expect(ce.parse('[1..3, 4]').evaluate().json).toEqual([
       'List',
@@ -93,9 +93,9 @@ describe('a list literal lists each finite lazy element', () => {
 
   test('an element that is not known to be finite stays lazy', () => {
     expect(run('[filter(1..oo, x => x > 2)]')).toBe(
-      '[Filter(Range(1, +oo, 1), (x) => 2 < x)]'
+      '[Filter(1..oo, (x) => 2 < x)]'
     );
-    expect(run('[1..oo, 4]')).toBe('[Range(1, +oo, 1),4]');
+    expect(run('[1..oo, 4]')).toBe('[1..oo,4]');
   });
 
   test('an element typed as a set becomes a `Set`', () => {
@@ -377,7 +377,7 @@ describe('the asynchronous listing uses the context of its evaluation', () => {
 
 describe('a tuple literal lists each finite lazy element', () => {
   test('a range element of a tuple stays a range', () => {
-    expect(run('(1..3, 4)')).toBe('(Range(1, 3, 1), 4)');
+    expect(run('(1..3, 4)')).toBe('(1..3, 4)');
     const ce = new ComputeEngine();
     expect(ce.box(['Tuple', ['Range', 1, 3], 4]).evaluate().json).toEqual([
       'Tuple',
@@ -429,9 +429,7 @@ describe('a broadcast lists each finite lazy cell', () => {
   });
 
   test('a user function that answers a range: each cell stays a range', () => {
-    expect(run('g(s) = 1..s\ng([2, 3])')).toBe(
-      '[Range(1, 2, 1),Range(1, 3, 1)]'
-    );
+    expect(run('g(s) = 1..s\ng([2, 3])')).toBe('[1..2,1..3]');
     const ce = withRangeFunction();
     expect(ce.box(['k', ['List', 2, 3]]).evaluate().json).toEqual([
       'List',
@@ -529,9 +527,7 @@ describe('a map over the components of a tuple lists each finite lazy cell', () 
   }
 
   test('a function that answers a range, over a tuple: each cell stays a range', () => {
-    expect(run('g(u: integer) = 1..u\ng((2, 3))')).toBe(
-      '(Range(1, 2, 1), Range(1, 3, 1))'
-    );
+    expect(run('g(u: integer) = 1..u\ng((2, 3))')).toBe('(1..2, 1..3)');
     const ce = withTupleMappedFunction('g(u: integer) = 1..u');
     expect(ce.box(['g', ['Tuple', 2, 3]]).evaluate().json).toEqual([
       'Tuple',

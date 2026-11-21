@@ -1018,6 +1018,48 @@ function isParenthesizedGroup(s: string): boolean {
 }
 
 /**
+ * The precedence of `a..b`. Epsil's `..` binds tighter than a comparison and
+ * more loosely than a sum, so `1..n - 1` is `Range(1, n - 1, 1)`. A sum and a
+ * comparison both serialize their operands at the precedence 10, and a range
+ * operand of a sum must be wrapped (`1 + (1..3)`, not `(1 + 1)..3`), so a
+ * range takes the precedence of `<` (9): it is also wrapped as an operand of
+ * a comparison, `(1..3) < 2`, which Epsil reads the same.
+ */
+const RANGE_PRECEDENCE = 9;
+
+/**
+ * A `Range` with the exact integer step 1 as Epsil writes it, `a..b`, or
+ * `undefined` for any other `Range`, which prints as a call.
+ *
+ * Epsil reads `a..b` as `Range(a, b, 1)`, so the text reads back as the same
+ * range. `Range(a, b)` with no step counts toward `b` in either direction,
+ * and a range with another step has no infix spelling: Epsil writes both as
+ * calls (`src/epsil/serialize-epsil.ts`, `isAscendingRange`).
+ */
+function serializeAscendingRange(
+  expr: FnExpr,
+  serialize: AsciiMathSerializer
+): string | undefined {
+  if (expr.nops !== 3) return undefined;
+  const step = expr.ops[2];
+  if (!isNumber(step) || !step.isExact || step.numericValue !== 1)
+    return undefined;
+  const bound = (x: Expression) => serialize(x, RANGE_PRECEDENCE + 1);
+  // Epsil lexes `..` together with an operator character next to it as one
+  // unknown operator (`!..`, `..-`, `..~`). So a start that does not end in
+  // a word character or a closing bracket, and an end that does not start
+  // with a word character or an opening bracket, are wrapped: `(n!)..50`,
+  // `-2..(-n)`. A leading `+` of the end, which does not change the value,
+  // is dropped first: `1..oo`, not `1..(+oo)`.
+  let start = bound(expr.ops[0]);
+  if (!/[\p{L}\p{N}_)\]}"]$/u.test(start)) start = `(${start})`;
+  let end = bound(expr.ops[1]);
+  if (end.startsWith('+')) end = end.slice(1);
+  if (!/^[\p{L}\p{N}_([{"]/u.test(end)) end = `(${end})`;
+  return `${start}..${end}`;
+}
+
+/**
  * Whether `s` is one function call, `name(...)`, whose opening parenthesis is
  * closed by its trailing `)`: `sin(x)` is, `f(a) + g(b)` is not.
  */
@@ -1228,6 +1270,16 @@ export function toAsciiMath(
   // A tensor value is a plain `List` `BoxedFunction` (_kind = 'function').
   //
   const fnExpr = isFunction(expr) ? expr : null;
+  if (
+    fnExpr &&
+    expr.operator === 'Range' &&
+    !(options.operators && Object.hasOwn(options.operators, 'Range')) &&
+    !(options.functions && Object.hasOwn(options.functions, 'Range'))
+  ) {
+    const range = serializeAscendingRange(fnExpr, serialize);
+    if (range !== undefined)
+      return wrap(range, precedence, RANGE_PRECEDENCE);
+  }
   // `Object.assign` onto a null-prototype target, not a spread into a fresh
   // object literal: a spread would rebuild an ordinary object and hand back
   // `Object.prototype`'s members for any head named after one, undoing the
