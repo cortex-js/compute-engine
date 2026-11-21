@@ -450,10 +450,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   ) {
     super(ce, options?.metadata);
 
-    console.assert(
-      isValidSymbol(name),
-      `Invalid symbol "${name}": ${validateSymbol(name)}`
-    );
+    if (!isValidSymbol(name))
+      console.assert(false, `Invalid symbol "${name}": ${validateSymbol(name)}`);
     this._id = name;
     this._def = options?.def;
     if (options?.def !== undefined)
