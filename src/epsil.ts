@@ -36,6 +36,8 @@ export type {
 } from './epsil/signature-help.js';
 export { epsilDefinition, epsilHover } from './epsil/hover.js';
 export type { EpsilDefinition, EpsilHover } from './epsil/hover.js';
+export { epsilDebugStatements } from './epsil/debug-statements.js';
+export type { EpsilDebugStatementSite } from './epsil/debug-statements.js';
 export type { CheckEpsilResult } from './epsil/check-epsil.js';
 export {
   canonicalLibraryName,

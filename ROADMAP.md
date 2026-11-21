@@ -1029,24 +1029,6 @@ third is the one delivered to Tycho.
   every top-level value is returned with its static type. A spec of its own
   first; the opinion of the compiler session is in the spec above.
 
-### CE-1570. List the statements of an Epsil source at which a debug run can pause
-
-**Status:** ready; capability, M. Approved 2026-11-20.
-
-A debugger that sets a breakpoint needs to know whether the statement will
-ever call `beforeStatement` (`EpsilDebugHooks`, `src/compute-engine/types-debug.ts`).
-A statement that runs on the synchronous route calls no hook: a statement of
-a function given to `map`, `filter`, `takeWhile`, `any`, `all` or `count`, of
-a function that an operator calls while it evaluates its operands, of a loop
-body inside `withRandomSeed`. Today the editor cannot mark such a breakpoint
-"not reachable". The capability: a function that takes a parsed source and
-returns the ranges of the statements that can reach a hook (or of those that
-cannot), derived from the same rules that `invokeDebugHookAsync`
-(`src/common/debug-hook.ts`, called from `src/compute-engine/function-utils.ts`)
-follows, so the list and the run cannot disagree. The VS Code extension
-(`vscode-epsil/src/server.ts`) and Tycho's debugger use it to grey out a
-breakpoint.
-
 ## Performance
 
 ### CE-624. The interpreter cannot compute a nested integral of a user-function call

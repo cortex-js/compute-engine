@@ -322,12 +322,49 @@ of other work, on the same engine or on another.
 A statement that the engine evaluates on the synchronous route calls no hook.
 This is the case of a statement of a function that a lazy collection applies
 when it produces an element: a function given to `map`, `filter`,
-`takeWhile`, `any`, `all` or `count`, for example, and of a function called
-in the domain of a `for` (`for x in g(3)`), and of a loop body inside
-`withRandomSeed`, which evaluates its body on the synchronous route. A
-breakpoint in such a body or function does not stop the run. It is also the case of a statement that runs
-after the run ends, when the host reads the elements of a lazy collection
-that the program returned.
+`takeWhile` or `count`, for example (the predicate of `any` and `all` is
+awaited, and calls the hooks), and of a function called in the domain of a
+`for` (`for x in g(3)`), and of a statement in an operand of
+`withRandomSeed`, which evaluates its operands on the synchronous route as
+long as the engine has no operator with only an asynchronous handler (with
+one, an `if` in it is evaluated on the asynchronous route, and its branch
+calls the hooks). A breakpoint in such a body or function does not stop the run. It is also the
+case of a statement that runs after the run ends, when the host reads the
+elements of a lazy collection that the program returned.
+
+`epsilDebugStatements(ce, source)` lists the statements of a source with
+`canPause`: `false` for a statement at which no debug run can call
+`beforeStatement`, so that a debugger can grey out its breakpoint. It reads
+the source without running it. `canPause` is `false` for a statement of a
+function literal written as the function of `map` or the predicate of
+`filter`, `takeWhile` or `count`, except a statement of a function or a
+`hold` written there, which a later statement can call. This holds for the
+library operators only: a `function Map(f, xs)` of the source hides the
+library `Map`, and the statements of its callback can pause. Every other
+statement is listed with `canPause: true`, also some that never pause: a
+named function that only `map` applies (`map(sq, 1..3)`), a function called
+only in the domain of a `for`, a `do` block in a comprehension, a statement
+of `withRandomSeed`. The body of a shorthand function (`any(L, _1 > 1)`) is
+listed as a statement that can pause.
+
+```ts
+const source = `let ys = map(k => do { let t = k + 1; t * 2 }, 1..3)
+withRandomSeed(7, do { let d = random(1..6); d * 10 })
+sum(ys)`;
+for (const s of epsilDebugStatements(ce, source))
+  console.log(s.canPause, source.slice(...s.range));
+// ➔ true let ys = map(k => do { let t = k + 1; t * 2 }, 1..3)
+// ➔ false let t = k + 1
+// ➔ false t * 2
+// ➔ true withRandomSeed(7, do { let d = random(1..6); d * 10 })
+// ➔ true let d = random(1..6)
+// ➔ true d * 10
+// ➔ true sum(ys)
+```
+
+The list describes the hooks of `executeEpsilAsync()`. The statement hook of
+the VS Code debugger, which runs the program with `executeEpsil()` on a
+worker, is called on both routes, so there every statement can pause.
 
 The hooks are installed on the engine for the duration of the run, and a loop
 body is then evaluated on the asynchronous route, which is slower: 200,000

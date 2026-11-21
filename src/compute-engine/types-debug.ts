@@ -66,13 +66,18 @@ export interface EpsilDebugStatement {
  * statement that the engine evaluates on the synchronous route calls no
  * hook. This is the case of a statement of a function that a lazy
  * collection applies when it produces an element (a function given to `map`,
- * `filter`, `takeWhile`, `any`, `all` or `count`), and of a function that an
- * operator calls while it evaluates its operands on the synchronous route (a
- * function called in the domain of a `for`, `for x in g(3)`), and of the body
- * of a loop inside `withRandomSeed`, which evaluates its body on the
- * synchronous route. It is also the
- * case of a statement that runs after the run ends, when the host reads the
- * elements of a lazy collection that the program returned.
+ * `filter`, `takeWhile` or `count`; the predicate of `any` and `all` is
+ * awaited, and calls the hooks), and of a function that an operator calls
+ * while it evaluates its operands on the synchronous route (a function called
+ * in the domain of a `for`, `for x in g(3)`), and of a statement in an operand
+ * of `withRandomSeed`, which evaluates its operands on the synchronous route
+ * as long as the engine has no operator with only an asynchronous handler
+ * (with one, an `if` in it is evaluated on the asynchronous route, and its
+ * branch calls the hooks). It is also the case of a statement that runs
+ * after the run ends, when the host reads the elements of a lazy collection
+ * that the program returned.
+ * `epsilDebugStatements()` lists the statements of a source at which a run
+ * cannot pause.
  *
  * When a hook returns a promise, the run waits until the promise settles:
  * this is how a debugger pauses. When the hook throws, or its promise
