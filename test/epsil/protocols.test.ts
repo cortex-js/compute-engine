@@ -494,6 +494,22 @@ describe('EPSIL PROTOCOL EXECUTION', () => {
     );
   });
 
+  // CE-1627: a direct statement of a program is at the top level also when
+  // the host runs the program in a scope that it pushed (a notebook cell).
+  test('a protocol and a conformance in a pushed scope are at the top level', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const codes = runCodes(
+      ce,
+      `${COMPARABLE}\ntype string is Comparable {\n  function compare(self: Self, other: Self) -> string { "=" }\n}\n"a".compare("b")`
+    );
+    ce.popScope();
+    expect(codes).toEqual([]);
+    expect(
+      ce._protocolRegistry.Comparable.conformances.map((c) => c.targetKey)
+    ).toEqual(['string']);
+  });
+
   test('conformance to a built-in type registers', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, COMPARABLE);

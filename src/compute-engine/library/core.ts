@@ -5052,11 +5052,21 @@ function declareSumTypeStatement(
 /** Declaration placement shared by the type and protocol statement owners. */
 function notAtTopLevel(ce: ComputeEngine): boolean {
   if (isProgramStatement()) return false;
+  // A branch or a loop body has no scope of its own, so this test comes
+  // before the scope test below.
+  if (isInBodyOrBranch()) return true;
+  // The evaluation of a direct statement by the run driver of a program, in
+  // the scope that the program runs in (a scope that the host pushed, too):
+  // the statement is at the top level. A block or a function body that the
+  // statement evaluates has a scope of its own.
+  const state = ce._boxingState;
+  if (
+    state.inProgramStatement &&
+    ce.context.lexicalScope === state.currentOperation()?.startScope
+  )
+    return false;
   const global = ce._evalContextStack[1]?.lexicalScope;
-  return (
-    isInBodyOrBranch() ||
-    (global !== undefined && ce.context.lexicalScope !== global)
-  );
+  return global !== undefined && ce.context.lexicalScope !== global;
 }
 
 /**

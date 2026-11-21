@@ -131,6 +131,11 @@ export class UnitEnvironment {
     return this._program;
   }
 
+  /** The lexical scope when the operation started (see `_startScope`). */
+  get startScope(): object | undefined {
+    return this._startScope;
+  }
+
   get counter(): number {
     return this._counter;
   }

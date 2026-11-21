@@ -95,6 +95,14 @@
 
 ### Resolved Issues
 
+- **A `type`, `protocol` or conformance statement of an Epsil program that a
+  host runs in a scope of its own is at the top level** (CE-1627). After
+  `ce.pushScope()`, as a notebook cell runs, `executeEpsil()` of
+  `type Pt = tuple<x: real, y: real>` gave the error "Type declarations must
+  be at the top level of a program", although the type was declared. The
+  statement now gets no error. A declaration in a block, a function body or a
+  branch still gets it. Types and protocols stay engine-global: a type that a
+  program declares in a pushed scope is still declared after `popScope()`.
 - **In Epsil, a block comment that is not closed gets the error
   `end-of-comment-expected` wherever it starts** (CE-1580).
   `let a = 1 /* note` gave `unexpected-symbol` for `/* note`, and

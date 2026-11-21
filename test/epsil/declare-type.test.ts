@@ -715,6 +715,58 @@ describe('EPSIL TYPE DECLARATIONS ARE TOP-LEVEL ONLY', () => {
     ]);
     expect(r.value.toString()).toBe('point(1, 2)');
   });
+
+  // CE-1627: a direct statement of a program is at the top level also when
+  // the host runs the program in a scope that it pushed (a notebook cell).
+  test('a direct `type` statement in a pushed scope is at the top level', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const r = executeEpsil(
+      ce,
+      'type Pt = tuple<x: real, y: real>\nlet p = Pt(1, 2)\np.x'
+    );
+    ce.popScope();
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(r.value.json).toBe(1);
+  });
+
+  test('a `type` in a block in a pushed scope is not at the top level', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const r = executeEpsil(ce, 'let z = do {\n  type Inner = real\n  1\n}\nz');
+    // The host-built form reaches the check of the evaluate handler.
+    const host = ce
+      .box(['Block', ['DeclareType', 'Inner2', { str: 'real' }]])
+      .evaluate();
+    ce.popScope();
+    expect(r.diagnostics.map((d) => d.message)).toEqual([
+      ['type-declaration-not-top-level', 'Inner'],
+    ]);
+    expect(host.toString()).toContain('invalid-type-declaration');
+    expect(ce._typeRegistry['Inner2']).toBeUndefined();
+  });
+
+  // A branch has no scope of its own: a `DeclareType` in a branch that is
+  // canonicalized while a program statement evaluates is still refused.
+  test.each([false, true])(
+    'a `type` in a held branch of a program statement is not at the top level (pushed scope: %s)',
+    (pushed) => {
+      const ce = new ComputeEngine();
+      if (pushed) ce.pushScope();
+      const v = ce
+        .box([
+          'Program',
+          [
+            'IsError',
+            ['If', 'True', ['DeclareType', 'Inner3', { str: 'real' }], 0],
+          ],
+        ])
+        .evaluate();
+      if (pushed) ce.popScope();
+      expect(v.json).toBe('True');
+      expect(ce._typeRegistry['Inner3']).toBeUndefined();
+    }
+  );
 });
 
 describe('EPSIL TYPE DECLARATION SERIALIZATION', () => {
