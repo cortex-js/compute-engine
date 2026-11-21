@@ -265,8 +265,9 @@ describe('the tuple-consumption rule', () => {
     check(['Abs', ['Tuple', 'x', 1]], points);
   });
   test('any other operator declines a tuple', () => {
-    // `Equal(Tuple(1, 2), List(1, 2))` is False.
-    expect(declined(['Equal', ['Tuple', 'x', 1], ['Tuple', 'x', 1]])).toMatch(
+    // `Equal(Tuple(1, 2), List(1, 2))` is False. Two tuples of numbers are
+    // compared (`ir-statistics-binomial-equality.test.ts`).
+    expect(declined(['Equal', ['Tuple', 'x', 1], ['List', 'x', 1]])).toMatch(
       /Equal of a tuple/
     );
     expect(declined(['Less', ['Tuple', 'x', 1], 3])).toMatch(/Less of a tuple/);

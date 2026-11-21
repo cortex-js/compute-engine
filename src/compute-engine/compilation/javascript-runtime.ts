@@ -101,6 +101,15 @@ import {
   tailReachesInfinity,
 } from '../numerics/divergent-tail.js';
 import { rangeCount } from '../numerics/range-count.js';
+import {
+  correlation,
+  covariance,
+  kurtosis,
+  mode,
+  populationCovariance,
+  quartiles,
+  skewness,
+} from '../numerics/statistics.js';
 import { escapeTime } from '../numerics/fractal-smooth.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import {
@@ -1099,6 +1108,12 @@ function partitionSize(n: number): number {
   return n;
 }
 
+/** An element of `l` is NaN. */
+function holdsNaN(l: Iterable<number>): boolean {
+  for (const x of l) if (x !== x) return true;
+  return false;
+}
+
 export const SYS_HELPERS = {
   // The helpers of `mode: 'bigint'`, which compute with JavaScript
   // `bigint` values and throw a `NonFiniteValue` at a pole
@@ -1412,6 +1427,25 @@ export const SYS_HELPERS = {
   // poles and infinite points (see `binomial()` in
   // `numerics/special-functions.ts`).
   binomial,
+  // The statistics of a list of real numbers, and of two lists read pair
+  // by pair: the interpreter's kernels (`numerics/statistics.ts`). `mode`
+  // and `quartile` (the quartile `k` from 0: the lower one, the median,
+  // the upper one) are NaN when an element is NaN, as the interpreter's
+  // value of a statistic of data with a `NaN`; the sums of the other
+  // kernels carry a NaN element to their result. `skewness` and `kurtosis`
+  // are NaN for an element that is not finite, for no element and for
+  // equal elements. `covariance`, `populationCovariance` and `correlation`
+  // are NaN for lists of two lengths and for fewer than two pairs, and
+  // `correlation` for a list of equal elements, where the interpreter's
+  // value is an error.
+  mode: (l: Iterable<number>): number => (holdsNaN(l) ? NaN : mode(l)),
+  quartile: (l: Iterable<number>, k: 0 | 1 | 2): number =>
+    holdsNaN(l) ? NaN : quartiles(l)[k],
+  skewness,
+  kurtosis,
+  covariance,
+  populationCovariance,
+  correlation,
   // `Chunk(l, k)` and `Partition(l, n)` of a list of numbers or booleans
   // whose rows can have different lengths, as the interpreter's (`Chunk`,
   // `partitionWalk()` of `library/collections.ts`): `k` rows of

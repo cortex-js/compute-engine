@@ -667,7 +667,7 @@ export const DECLINES: Record<string, Json> = {
   'in a loop': ['Block', ['Declare', 't', 'real', 0], ['Sum', ['Block', ['Assign', 't', 'k'], 'k'], ['Limits', 'k', 1, 3]], 't'],
   'symbol with a value that is not': ['Add', 'GoldenRatio', 1],
   'LogGamma': ['LogGamma', 'x'],
-  'Equal of a list': ['If', ['Equal', 'L', 'M'], 1, 2],
+  'Equal of a list': ['If', ['Equal', 'Q', 'L'], 1, 2],
   'canonical form': ['Add', 'p', 1],
   'two types': ['If', ['Less', 'x', 0], 'L', 1],
   'not integer': ['Block', ['Declare', 't', 'integer', 0], ['Assign', 't', 'x'], 't'],

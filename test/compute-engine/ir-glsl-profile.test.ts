@@ -1341,7 +1341,7 @@ describe('IR profile on GLSL: declines', () => {
     const broken = {
       rows: [
         {
-          head: 'Mode',
+          head: 'LogGamma',
           arity: 1 as const,
           signatures: [[['real'], 'real', 'broken']] as never,
           threads: false,
@@ -1351,10 +1351,10 @@ describe('IR profile on GLSL: declines', () => {
       spellings: { broken: { text: 'x', helpers: 1 as never } },
     };
     _withIrProfileTestExtension(broken, () => {
-      expect(declined(['Mode', 'x'])?.code).toBe('compile-error');
+      expect(declined(['LogGamma', 'x'])?.code).toBe('compile-error');
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        const r = compile(ce.box(['Mode', 'x']), {
+        const r = compile(ce.box(['LogGamma', 'x']), {
           to: 'glsl',
           profile: 'ir',
         });

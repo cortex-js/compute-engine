@@ -136,6 +136,14 @@ const ARITY: Readonly<Record<string, readonly number[]>> = Object.freeze({
   RotateLeft: [1, 2],
   RotateRight: [1, 2],
   Median: [1],
+  Mode: [1],
+  Quartiles: [1],
+  InterquartileRange: [1],
+  Skewness: [1],
+  Kurtosis: [1],
+  Covariance: [2],
+  PopulationCovariance: [2],
+  Correlation: [2],
   Sort: [1, 2],
   Ordering: [1],
   Unique: [1],
@@ -209,6 +217,21 @@ const VARIANCES: readonly string[] = [
   'StandardDeviation',
   'PopulationStandardDeviation',
 ];
+
+/** The statistics that are one operation of the runtime (`statistic()`),
+ *  with that operation: of one list of real numbers, and of two. `Quartiles`
+ *  and `InterquartileRange` are made of `quartile1`, `median` and
+ *  `quartile3`. */
+const STATISTICS: ReadonlyMap<string, string | undefined> = new Map([
+  ['Mode', 'mode'],
+  ['Quartiles', undefined],
+  ['InterquartileRange', undefined],
+  ['Skewness', 'skewness'],
+  ['Kurtosis', 'kurtosis'],
+  ['Covariance', 'covariance'],
+  ['PopulationCovariance', 'pcovariance'],
+  ['Correlation', 'correlation'],
+]);
 
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
@@ -1066,15 +1089,19 @@ export function listLowering(cx: Lowering) {
     return cx.apply(x, op('count.int'), [v]);
   };
 
-  /** The value of a real list `x` for `Median` and `Sort`: one list of
-   *  real or integer numbers, not a tuple. */
+  /** The value of a real list `x` for `Median`, `Sort` and the statistics
+   *  of `statistic()`: one list of real or integer numbers, not a tuple
+   *  (for a statistic of two lists, each of them). */
   const reals = (e: Fn, l: V = cx.value(e.ops[0])!): V => {
     if (
       cx.tuples.has(l) ||
       type(l).shape.length !== 1 ||
       !isSubLane(type(l).lane, 'real')
     )
-      decline(e, `${e.operator} of other than one list of real numbers`);
+      decline(
+        e,
+        `${e.operator} of other than ${e.nops === 2 && STATISTICS.has(e.operator) ? 'two lists' : 'one list'} of real numbers`
+      );
     return l;
   };
 
@@ -1634,6 +1661,29 @@ export function listLowering(cx: Lowering) {
       divisor,
     ]);
     return h.endsWith('Deviation') ? cx.apply(e, 'Sqrt', [v]) : v;
+  };
+
+  /** `Mode`, `Quartiles`, `InterquartileRange`, `Skewness` and `Kurtosis`
+   *  of one list of real numbers, and `Covariance`, `PopulationCovariance`
+   *  and `Correlation` of two: the interpreter's kernels, one operation of
+   *  the runtime each (`STATISTICS`). `Quartiles` is the tuple of the lower
+   *  quartile, the median and the upper quartile, and `InterquartileRange`
+   *  the upper quartile less the lower one. Several operands of the first
+   *  five, a scalar operand, a tuple, and one list of pairs for the last
+   *  three decline. */
+  const statistic = (e: Fn): V => {
+    const h = e.operator;
+    const ls = e.ops.map((x) => reals(e, cx.value(x)!));
+    const name = STATISTICS.get(h);
+    if (name !== undefined) return cx.apply(e, op(name), ls);
+    const [lower, upper] = ['quartile1', 'quartile3'].map((q) =>
+      cx.apply(e, op(q), ls)
+    );
+    if (h === 'InterquartileRange')
+      return cx.apply(e, 'Subtract', [upper, lower]);
+    const v = cx.list(e, [lower, cx.apply(e, op('median'), ls), upper]);
+    cx.tuples.set(v, 0);
+    return v;
   };
 
   /** The integer of the count or index `x`: an integer, or a real rounded
@@ -2652,7 +2702,7 @@ export function listLowering(cx: Lowering) {
     if (h === 'Norm') return norm(e);
     if (
       cx.interval &&
-      [
+      ([
         'Median',
         'Sort',
         'Ordering',
@@ -2661,12 +2711,14 @@ export function listLowering(cx: Lowering) {
         'All',
         'Contains',
         'IndexOf',
-      ].includes(h)
+      ].includes(h) ||
+        STATISTICS.has(h))
     )
       decline(e, `${h} on interval-js`);
     if (h === 'Any' || h === 'All') return quantifier(e);
     if (h === 'Contains' || h === 'IndexOf') return search(e);
     if (h === 'Median') return cx.apply(e, op('median'), [reals(e)]);
+    if (STATISTICS.has(h)) return statistic(e);
     if (h === 'Sort' && e.nops === 2) return sortBy(e);
     // A list of strings (CE-1574), for `Sort` and `Unique`.
     const texts = (l: V) =>

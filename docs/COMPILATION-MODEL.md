@@ -1537,7 +1537,12 @@ per sample and a tolerance test costs a subtraction, an absolute value and a
 compare each time, and where the exact answer is the one the reference
 graphing calculators give. The same rule covers the element-wise `Equal`
 of a list (`L = 1` with `L: list<real>` compares each element with
-`===`). `NotEqual` is the
+`===`), and the `Equal` of two lists or of two tuples of real numbers,
+which is one boolean as in the interpreter (the same length, and each element equal to the
+element at its index): with `L: list<real>` and `x: real`,
+`x·L = [0.1, 0.2, 0.3]` at `x = 0.1`, `L = [1, 2, 3]` evaluates to `True`,
+and the compiled code gives `false`, since `0.1 · 3` is
+`0.30000000000000004`. `NotEqual` is the
 negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
 interpreter does. The value of a comparison over an absent operand is not
 specified in compiled code (see "Caveats of compiled code"): with `x, y: real`,

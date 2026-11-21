@@ -435,7 +435,7 @@ describe('IR profile, batch G29: JavaScript', () => {
 
   // prettier-ignore
   test.each([
-    ['Equal of two lists (the interpreter compares them)', ['If', ['Equal', 'K', 'A'], 1, 2], /Equal of a list/],
+    ['Equal of two lists of points (the interpreter compares them)', ['If', ['Equal', 'P', 'P'], 1, 2], /Equal of a tuple/],
     ['a chain of Equal with a list', ['At', 'A', ['Equal', 'K', 1, 1]], /a chain of three or more operands with a list/],
     ['Equal of a list of points and a point', ['Equal', 'P', ['Tuple', 1, 2]], /Equal of a tuple/],
     ['an And of a list with an effect', ['At', 'A', ['And', 'M', gt(['Random'], 0.5)]], /And of a list with an effect/],

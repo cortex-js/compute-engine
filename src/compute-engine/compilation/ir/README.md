@@ -89,7 +89,7 @@ float), a user's `Rational` and one with a host handler decline. Then a
 sub-expression that the slice would lower and that has no free name, no name
 bound by the walk, no effectful operation and no loop is evaluated once with
 `N()` and becomes a literal (`Mod(1, 1/10)` is exactly 0). A closed
-`Mode(List(1, 2, 4))` is not folded, because `Mode` is not in the slice. A
+`Totient(10)` is not folded, because `Totient` is not in the slice. A
 sub-expression whose static type is `error` declines (`Sin(Tuple(w))` of a
 vector `w`, `2·Tuple(L, L)`). A throw of `N()` means "not folded": the node is
 lowered as written, except a `CancellationError`, which propagates. A row that
@@ -1805,7 +1805,8 @@ member (the interpreter's `Missing` or `NaN` member, which keeps nothing, comes
 from forms that decline: a `Which` with no default, a literal `Missing`). The
 rows that make a mask thread as the interpreter's: `Equal` and `NotEqual` of a
 list and a scalar (`L[K = 1]`; of two lists the interpreter compares the lists,
-one boolean, which declines, as a chain of three operands with a list does), and
+one boolean, `equality()` below; a chain of three operands with a list
+declines), and
 `Not`, `And` and `Or` of lists, with a scalar broadcast (`And(False, M)` is a
 list of false); an `And` or an `Or` of a list lowers every operand, and one with
 an effect declines. One exception to "only true and false": an `And` or an `Or`
@@ -1823,6 +1824,30 @@ undecided over the box gives the whole range, as for `Filter`.
 `clamp()`, whose value is undefined there), integers stay integers, and each
 operand threads over a list (`At(L, Clamp(Floor(I), 0, +∞))` is the floored
 index of each element of `I`, NaN below 1).
+
+`Equal` and `NotEqual` of two lists, of two tuples and of two booleans
+(`equality()` of `lower.ts`, CE-1532) have no row signature. Two lists, or two
+tuples, of real numbers are compared as the interpreter compares them: one
+boolean, true when they have the same length and each element equals the
+element at its index. The elements are compared as two numbers are (the exact
+equality of compiled code, no tolerance; a NaN element equals nothing, so
+`Equal(L, L)` of a list with a NaN is false, as the interpreter's). Two stated
+lengths that differ are the constant `false` (`Equal(P, T)` of a point of two
+and a point of three coordinates); two equal stated lengths are the conjunction
+of the comparisons (`(P[0] === Q[0]) && (P[1] === Q[1])`; a loop on GLSL); with
+a run-time length, the code tests the lengths and compares the elements up to
+the shorter list in a loop (JavaScript and the interval mode; GLSL has no list
+of a run-time length). Two booleans are equal when both hold or neither does,
+`(a && b) || (!a && !b)`, with the rows `And`, `Or` and `Not`, so a list of
+booleans and a boolean thread (`Equal(B, b)` is a mask) and the interval mode
+gives the Kleene verdict (`'maybe'` for an undecided operand). `NotEqual` is
+the negation. A chain of booleans is the conjunction of its pairs. Declined: a
+tuple and a list, and a tuple and a scalar (the interpreter gives `False`
+whatever the elements); lists of lists and lists of points; two lists or two
+tuples whose elements are booleans (`Equal(Tuple(True), Tuple(True))`), complex
+numbers, strings or colours; a boolean and a number; and a chain of
+three operands or more with a list or a tuple, whose value in the interpreter
+is not the conjunction of its pairs (`Equal(L, L, 3)` is `False`).
 
 `If` and `Which` of a condition whose static type is a list of booleans
 (`Which(3 < L, 1, True, 0)`) are the interpreter's selection at each position
@@ -1967,6 +1992,29 @@ interpreter's value for every length, also 0:
   underflow (`[1e200, -1e200]`), which the compiled code does not: a known
   limitation, as for `Norm`. Complex elements and a distribution decline. GLSL
   compiles them for a list of a stated length.
+- `Mode(L)`, `Skewness(L)`, `Kurtosis(L)`, `Quartiles(L)` and
+  `InterquartileRange(L)` of one list of real or integer numbers, and
+  `Covariance(L, M)`, `PopulationCovariance(L, M)` and `Correlation(L, M)` of
+  two (`statistic()`, CE-1532; JavaScript only), are the interpreter's kernels
+  of `numerics/statistics.ts`, one operation each (`mode`, `skewness`,
+  `kurtosis`, `quartile1` and `quartile3`, `covariance`, `pcovariance`,
+  `correlation`; members of `_SYS`). `Quartiles` is the tuple of `quartile1`,
+  `median` and `quartile3` (so `At(Quartiles(L), 3)` reads the upper quartile),
+  and `InterquartileRange` is `quartile3 - quartile1`. The mode of several
+  values that occur equally often is the smallest one; a quartile is the median
+  of the lower or of the upper half of the sorted list, without the median of
+  an odd count, and the element itself for a list of one. NaN where the
+  interpreter gives NaN or an error: a NaN element (every statistic); no
+  element; an infinite element, one element or equal elements for `Skewness`
+  and `Kurtosis`; lists of two lengths and fewer than two pairs for the last
+  three; a list of equal elements for `Correlation`. An infinite element is
+  ordered and counted as a number by `Mode` and by the quartiles, as the
+  interpreter's (`Mode([+∞, +∞])` is `+∞`). The interpreter keeps an exact
+  value of exact data (`Covariance([1, 2, 4], [2, 5, 9])` is `16/3`); the
+  compiled value is its numeric value. Declined: several operands or a scalar
+  operand for the first five (the interpreter reads them as the data), one list
+  of pairs for the last three, a tuple, complex elements, GLSL (no spelling of
+  the operations) and the interval mode (`<head> on interval-js`).
 - `Any(L, p)` and `All(L, p)` (`p` a literal of one parameter, a user function
   or a library operator of one operand), and `Any(L)` and `All(L)` of a list of
   booleans, are the count of a `filter` of `L` by `p` (by its elements),
@@ -2103,10 +2151,11 @@ mode declines all of them but `Identity` and `ApplyWhole`
 (`<head> on interval-js`).
 
 In the interval mode every list operator of the first list above compiles except
-`Median`, `Sort`, `Ordering`, `Unique`, `Any`, `All`, `Contains` and `IndexOf`,
-which decline with `<head> on interval-js` (the operations `sort`, `ordering`
-and `median`, and an equality test of two elements, have no spelling of the
-mode). The indices of a build that reorders a list are machine integers
+`Median`, `Sort`, `Ordering`, `Unique`, `Any`, `All`, `Contains`, `IndexOf` and
+the statistics of `statistic()` (`Mode`, `Quartiles`, ..., `Correlation`),
+which decline with `<head> on interval-js` (the operations `sort`, `ordering`,
+`median` and those of the statistics, and an equality test of two elements,
+have no spelling of the mode). The indices of a build that reorders a list are machine integers
 (`_IA.number` of the count), and a built list needs one length, so `Rest`,
 `Most`, `Take` and `Drop` compile for an input of a stated length
 (`list<real^3>`) and a constant count only; of a list of a run-time length (also
@@ -2118,10 +2167,13 @@ deviations from that mean (an enclosure, wider than the range of the variance,
 since each deviation reads its element twice, except where a square overflows: a
 known limitation).
 
-`Binomial(n, k)` and `Choose(n, k)` of integers are `_SYS.binomial` on
-JavaScript (exact below 2^53, the interpreter's value for every pair of
-integers: `Choose(5, 7)` is 0, `Choose(-3, 2)` is 6); a real operand declines,
-and GLSL has no spelling.
+`Binomial(n, k)` and `Choose(n, k)` are `_SYS.binomial` on JavaScript (exact
+below 2^53, the interpreter's value for every pair of integers: `Choose(5, 7)`
+is 0, `Choose(-3, 2)` is 6; of real operands, the interpreter's extension), and
+on GLSL `_gpu_ir_binomial` of integers (a real operand declines there). They
+thread over a list, as the interpreter's (`Binomial(L, 2)`,
+`Choose(n, [1, 2, 3])`), on every target; `GCD` and `LCM`, which the
+interpreter does not thread, decline a list.
 
 ## Tuples
 

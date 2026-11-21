@@ -271,8 +271,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Factorial',    1,          [[[I], I, 'factorial.int'], [[R], R, 'factorial']], { fold: F.factorial }),
   // An integer signature first: the bigint mode spells it. Of reals, the
   // interpreter's extension (`Binomial(2.5, 1.5)`, `GCD(7.5, 2)` is 0.5).
-  row('Binomial',     2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { ...list, fold: binomial }),
-  row('Choose',       2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { ...list, fold: binomial }),
+  // `Binomial` and `Choose` thread over a list, as the interpreter's; `GCD`
+  // and `LCM` do not.
+  row('Binomial',     2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { fold: binomial }),
+  row('Choose',       2,          [[[I, I], I, 'binomial'], [[R, R], R, 'rbinomial']], { fold: binomial }),
   row('GCD',          'variadic', [[[I], I, 'gcd'], [[R], R, 'rgcd']], { ...list, fold: F.gcd }),
   row('LCM',          'variadic', [[[I], I, 'lcm'], [[R], R, 'rlcm']], { ...list, fold: F.lcm }),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
@@ -428,6 +430,19 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[['list'], I, 'text.ordering']], list),
   row(undefined,      1,          [[['list'], I, 'text.ordering.cp']], list),
   row(undefined,      1,          [[['list'], 'real-element', 'median']], list),
+  // The other statistics of one list of real numbers and of two, the
+  // interpreter's kernels of `numerics/statistics.ts` (`README.md`,
+  // "Lists"): the mode, the lower and the upper quartile (`Quartiles`,
+  // `InterquartileRange`), the skewness, the kurtosis, the sample and the
+  // population covariance, and the correlation; JavaScript only.
+  row(undefined,      1,          [[['list'], 'real-element', 'mode']], list),
+  row(undefined,      1,          [[['list'], 'real-element', 'quartile1']], list),
+  row(undefined,      1,          [[['list'], 'real-element', 'quartile3']], list),
+  row(undefined,      1,          [[['list'], 'real-element', 'skewness']], list),
+  row(undefined,      1,          [[['list'], 'real-element', 'kurtosis']], list),
+  row(undefined,      2,          [[['list', 'list'], 'real-element', 'covariance']], list),
+  row(undefined,      2,          [[['list', 'list'], 'real-element', 'pcovariance']], list),
+  row(undefined,      2,          [[['list', 'list'], 'real-element', 'correlation']], list),
   // `Chunk(L, k)` and `Partition(L, n)` whose rows can have different
   // lengths, and the two groups of `Partition(L, p)`: the lane `rows`, a
   // value that is the result of the program only (`README.md`, "The rows

@@ -240,6 +240,15 @@ export const JS: Syntax = deepFreeze({
     'sort': { text: '_sort($0)', helpers: ['_sort'] },
     'ordering': { text: '_ordering($0)', helpers: ['_ordering'] },
     'median': { text: '_median($0)', helpers: ['_median'] },
+    // The interpreter's statistics (`javascript-runtime.ts`).
+    'mode': '_SYS.mode($0)',
+    'quartile1': '_SYS.quartile($0, 0)',
+    'quartile3': '_SYS.quartile($0, 2)',
+    'skewness': '_SYS.skewness($0)',
+    'kurtosis': '_SYS.kurtosis($0)',
+    'covariance': '_SYS.covariance($0, $1)',
+    'pcovariance': '_SYS.populationCovariance($0, $1)',
+    'correlation': '_SYS.correlation($0, $1)',
     // `Chunk` and `Partition` whose rows can have different lengths
     // (`javascript-runtime.ts`), the two groups of a predicate, and the
     // checks of their counts.

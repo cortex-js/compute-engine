@@ -227,6 +227,14 @@ const CONSTRUCTS = new Set([
   'StandardDeviation',
   'PopulationStandardDeviation',
   'Median',
+  'Mode',
+  'Quartiles',
+  'InterquartileRange',
+  'Skewness',
+  'Kurtosis',
+  'Covariance',
+  'PopulationCovariance',
+  'Correlation',
   'Sort',
   'Ordering',
   'Unique',
@@ -1157,6 +1165,13 @@ function lowerOnce(
       );
     const complex = leaves(r, args, node);
     const operation = (given: V[]): V => {
+      // Two booleans, and two lists or two tuples of real numbers, have one
+      // equality (`equality()`); `NotEqual` is its negation.
+      if ((r.head === 'Equal' || r.head === 'NotEqual') && given.length === 2) {
+        const equal = equality(node, given[0], given[1]);
+        if (equal !== undefined)
+          return r.head === 'Equal' ? equal : apply(node, 'Not', [equal]);
+      }
       // A tuple operand: only a row whose value on a tuple is its value on
       // the list of the same elements (`TUPLE_RULES`).
       const tuple = given.find((v) => tuples.has(v));
@@ -1213,7 +1228,8 @@ function lowerOnce(
       }
       const types = given.map(type);
       // `Equal` and `NotEqual` of two lists compare the lists in the
-      // interpreter (one boolean); of a list and a scalar they thread.
+      // interpreter (one boolean); of a list and a scalar they thread. The
+      // two lists that `equality()` does not compare decline.
       if (
         (r.head === 'Equal' || r.head === 'NotEqual') &&
         types.filter((t) => t.shape.length > 0).length > 1
@@ -1255,6 +1271,65 @@ function lowerOnce(
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
     return args.slice(1).reduce((x, y) => operation([x, y]), args[0]);
+  };
+
+  /** `Equal(x, y)` of two booleans, and of two lists or two tuples of real
+   *  numbers, which the row of `Equal` does not compare; `undefined` for
+   *  any other pair, which `apply()` gives to the row or declines.
+   *
+   *  Two booleans are equal when both hold or neither does; a list of
+   *  booleans and a boolean thread, as `And`, `Or` and `Not` do.
+   *
+   *  Two lists, or two tuples, of real numbers are compared as the
+   *  interpreter compares them: one boolean, true when they have the same
+   *  length and each element equals the element at its index, with the
+   *  equality of two numbers (no tolerance, and NaN equals nothing). Not
+   *  compared here: a tuple and a list (the interpreter gives `False`,
+   *  whatever the elements), lists of lists or of tuples, and elements
+   *  that are booleans, complex numbers, strings or colours. */
+  const equality = (node: Expression, x: V, y: V): V | undefined => {
+    const [s, t] = [type(x), type(y)];
+    if (s.shape.length === 0 || t.shape.length === 0) {
+      if (
+        s.lane !== 'boolean' ||
+        t.lane !== 'boolean' ||
+        tuples.has(x) ||
+        tuples.has(y)
+      )
+        return undefined;
+      const not = (v: V) => apply(node, 'Not', [v]);
+      return apply(node, 'Or', [
+        apply(node, 'And', [x, y]),
+        apply(node, 'And', [not(x), not(y)]),
+      ]);
+    }
+    if (
+      !isFunction(node) ||
+      tuples.get(x) !== tuples.get(y) ||
+      s.shape.length !== 1 ||
+      t.shape.length !== 1 ||
+      !isSubLane(s.lane, 'real') ||
+      !isSubLane(t.lane, 'real')
+    )
+      return undefined;
+    const [p, q] = [lists.listSource(x), lists.listSource(y)];
+    const [n, m] = [constant(p.length), constant(q.length)];
+    const stated = n !== undefined && m !== undefined;
+    if (stated && n !== m) return b.constant(false, 'boolean');
+    // Lists of run-time lengths: the elements up to the shorter one, and
+    // the test of the lengths.
+    const length = stated ? p.length : apply(node, 'Min', [p.length, q.length]);
+    const all = lists.reduce(
+      node,
+      rowOfHead(rows, 'And')!,
+      [{ length, at: (k) => apply(node, 'Equal', [p.at(k), q.at(k)]) }],
+      b.constant(true, 'boolean'),
+      undefined,
+      true
+    );
+    return stated
+      ? all
+      : apply(node, 'And', [apply(node, 'Equal', [p.length, q.length]), all]);
   };
 
   /** The Euclidean norm of the point `p` (a tuple of real or integer
@@ -2152,6 +2227,14 @@ function lowerOnce(
       case 'StandardDeviation':
       case 'PopulationStandardDeviation':
       case 'Median':
+      case 'Mode':
+      case 'Quartiles':
+      case 'InterquartileRange':
+      case 'Skewness':
+      case 'Kurtosis':
+      case 'Covariance':
+      case 'PopulationCovariance':
+      case 'Correlation':
       case 'Sort':
       case 'Ordering':
       case 'Unique':
@@ -2794,10 +2877,12 @@ function lowerOnce(
       let prev = value(e.ops[0])!;
       const pair = (i: number) => {
         const v = value(e.ops[i + 1])!;
-        const p = apply(e, r, [prev, v]);
-        // A conditional on a list: `L < 0 < 1`.
-        if (e.nops > 2 && type(p).shape.length > 0)
+        // A conditional on a list (`L < 0 < 1`), and an `Equal` of three
+        // operands with a list or a tuple, whose value in the interpreter
+        // is not the conjunction of its pairs (`Equal(L, L, 3)` is `False`).
+        if (e.nops > 2 && [prev, v].some((x) => type(x).shape.length > 0))
           decline(e, 'a chain of three or more operands with a list');
+        const p = apply(e, r, [prev, v]);
         prev = v;
         return p;
       };
