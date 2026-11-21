@@ -38,6 +38,7 @@ describe('global registration slot', () => {
       sym: 'function',
       compile: 'function',
       canCompile: 'function',
+      createDocumentEnvironment: 'function',
     };
     for (const [name, type] of Object.entries(contract))
       expect(`${name}: ${typeof slot[name]}`).toBe(`${name}: ${type}`);

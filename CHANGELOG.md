@@ -31,7 +31,9 @@
   accepts a longer list, and a `vector<integer^4>` row refuses a list of twelve
   elements. `revision.collectionWriteError()` tells whether a value is accepted,
   before the host writes it. The profile and import callbacks must be
-  synchronous.
+  synchronous. `createDocumentEnvironment` is also in the global registration
+  slot (`globalThis[Symbol.for('io.cortexjs.compute-engine')]`), for a host that
+  discovers the engine at run time.
 
   A row whose content cannot be prepared does not stop the others. The row gets
   a diagnostic in `revision.rowErrors`. A definition that reads it gets

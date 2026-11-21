@@ -50,6 +50,7 @@ _setDefaultEngineFactory(
 );
 
 import { LATEX_DICTIONARY } from './compute-engine/latex-syntax/dictionary/default-dictionary.js';
+import { createDocumentEnvironment } from './compute-engine/document-preparation/document-environment.js';
 export {
   LATEX_DICTIONARY,
   CORE_DICTIONARY,
@@ -247,6 +248,9 @@ const COMPUTE_ENGINE_GLOBAL: ComputeEngineGlobal = {
   // consumer must discover at runtime.
   compile,
   canCompile,
+  // The Document API: a host that discovers CE at runtime prepares its
+  // documents with it.
+  createDocumentEnvironment,
 };
 
 /**
@@ -295,13 +299,14 @@ export interface ComputeEngineGlobal {
   sym: typeof sym;
   compile: typeof compile;
   canCompile: typeof canCompile;
+  createDocumentEnvironment: typeof createDocumentEnvironment;
 }
 
 (globalThis as Record<symbol, unknown>)[
   Symbol.for('io.cortexjs.compute-engine')
 ] = COMPUTE_ENGINE_GLOBAL;
 
-export { createDocumentEnvironment } from './compute-engine/document-preparation/document-environment.js';
+export { createDocumentEnvironment };
 export type {
   DeclareDocumentInput,
   DocumentEnvironment,
