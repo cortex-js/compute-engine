@@ -1446,9 +1446,7 @@ function makeCallbacks(
         const forward = Math.min(t + h, hi[j]);
         const backward = Math.max(t - h, lo[j]);
         let point =
-          forward === t + h || forward - t >= t - backward
-            ? forward
-            : backward;
+          forward === t + h || forward - t >= t - backward ? forward : backward;
         if (point === t) continue;
         rec[pFresh[j]] = point;
         let probe = unit.fn(rec);
