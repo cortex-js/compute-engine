@@ -166,6 +166,152 @@ describe('Statements that call the hooks', () => {
     const { value } = await statementsOf(source);
     expect(value).toBe(String(plain.value));
   });
+
+  test('the last statement of a function with a return type or an effect', async () => {
+    // The return type and the effects wrap the last statement (CE-1625).
+    for (const [definition, body] of [
+      ['function f(t) -> number { let k = t; k + 1 }', ['let k = t', 'k + 1']],
+      ['function f(t) scope { a = a + t; b = b + 1 }', ['a = a + t', 'b = b + 1']],
+      ['function f(t) scope { a = a + t }', ['a = a + t']],
+    ] as const) {
+      const { texts } = await statementsOf(
+        `let a = 0\nlet b = 0\n${definition}\nf(1000)`
+      );
+      for (const statement of body) expect(texts).toContain(statement);
+    }
+  });
+
+  test('a function returned by a call, that uses a parameter of the call', async () => {
+    // The value of `k` is put in the returned function when the call ends
+    // (CE-1626).
+    const { texts, value } = await statementsOf(
+      'function mk(k) { t => do { let z = t + k; let w = z * k; w + k } }\nlet h = mk(2)\nh(5)'
+    );
+    expect(value).toBe('16');
+    expect(texts).toContain('let z = t + k');
+    expect(texts).toContain('let w = z * k');
+    expect(texts).toContain('w + k');
+  });
+});
+
+describe('The source of a statement', () => {
+  /** Run `cells` in order on one engine, the last one with the hooks, and
+   * return, for each statement that called `beforeStatement`, its text in
+   * its source and the index of that source in `cells`. */
+  async function sourcesOf(
+    cells: string[],
+    withUrl = false
+  ): Promise<Array<[text: string, cell: number]>> {
+    const ce = new ComputeEngine();
+    const url = (i: number) => (withUrl ? `cell-${i}` : undefined);
+    for (let i = 0; i < cells.length - 1; i++)
+      expect(executeEpsil(ce, cells[i], { url: url(i) }).diagnostics).toEqual(
+        []
+      );
+    const seen: Array<[string, number]> = [];
+    const last = cells.length - 1;
+    await executeEpsilAsync(ce, cells[last], {
+      url: url(last),
+      debug: {
+        beforeStatement: (at) => {
+          const cell = withUrl
+            ? cells.findIndex((_, i) => url(i) === at.sourceUrl)
+            : cells.indexOf(at.sourceContent!);
+          expect(at.sourceContent).toBe(cells[cell]);
+          seen.push([at.sourceContent!.slice(at.range[0], at.range[1]), cell]);
+        },
+      },
+    });
+    return seen;
+  }
+
+  test('a function of an earlier run has the source of that run', async () => {
+    const seen = await sourcesOf([
+      'let a = 0\nfunction f(t) scope {\n  a = a + t\n  a = a + 1\n}',
+      'f(1000)',
+    ]);
+    expect(seen).toEqual([
+      ['f(1000)', 1],
+      ['a = a + t', 0],
+      ['a = a + 1', 0],
+    ]);
+  });
+
+  test('a function value that a later run applies', async () => {
+    const seen = await sourcesOf([
+      'let a = 0\nlet b = 0\nlet cb = t => do { a = a + t; b = b + 1 }',
+      'cb(1)',
+    ]);
+    expect(seen).toEqual([
+      ['cb(1)', 1],
+      ['a = a + t', 0],
+      ['b = b + 1', 0],
+    ]);
+  });
+
+  test('a function literal of the run passed to a function of an earlier run', async () => {
+    const seen = await sourcesOf([
+      'function apply2(g: (number) -> number, x) { let y = g(x); y + 1 }',
+      'apply2(t => do { let z = t; z * 2 }, 3)',
+    ]);
+    expect(seen).toContainEqual(['let y = g(x)', 0]);
+    expect(seen).toContainEqual(['y + 1', 0]);
+    expect(seen).toContainEqual(['let z = t', 1]);
+    expect(seen).toContainEqual(['z * 2', 1]);
+  });
+
+  test('a function returned by a call of an earlier run, that uses a parameter of the call', async () => {
+    // The value of `k` is put in the statements of the returned function:
+    // they keep the source of the run that wrote them.
+    const seen = await sourcesOf([
+      'function mk(k) { t => do { let z = t + k; z * k } }\nlet h = mk(2)',
+      'h(5)',
+    ]);
+    expect(seen).toContainEqual(['let z = t + k', 0]);
+    expect(seen).toContainEqual(['z * k', 0]);
+  });
+
+  test('a chain of calls through three runs', async () => {
+    const seen = await sourcesOf([
+      'function p(t) { let k = t; k + 1 }',
+      'function q(t) { let j = p(t); j * 2 }',
+      'q(4)',
+    ]);
+    expect(seen).toEqual([
+      ['q(4)', 2],
+      ['let j = p(t)', 1],
+      ['let k = t', 0],
+      ['k + 1', 0],
+      ['j * 2', 1],
+    ]);
+  });
+
+  test('the url of the run tells apart two sources with the same text', async () => {
+    const seen = await sourcesOf(
+      [
+        'function p(t) { let k = t; k + 1 }',
+        'function p(t) { let k = t; k + 1 }',
+        'p(1)',
+      ],
+      true
+    );
+    // The second definition replaces the first.
+    expect(seen).toContainEqual(['let k = t', 1]);
+    expect(seen).not.toContainEqual(['let k = t', 0]);
+  });
+
+  test('a statement of the run has the source of the run and its url', async () => {
+    const ce = new ComputeEngine();
+    const at: EpsilDebugStatement[] = [];
+    await executeEpsilAsync(ce, 'let x = 1\nx + 1', {
+      url: 'cell-7',
+      debug: { beforeStatement: (s) => void at.push(s) },
+    });
+    expect(at.map((s) => [s.sourceContent, s.sourceUrl])).toEqual([
+      ['let x = 1\nx + 1', 'cell-7'],
+      ['let x = 1\nx + 1', 'cell-7'],
+    ]);
+  });
 });
 
 describe('Pausing', () => {

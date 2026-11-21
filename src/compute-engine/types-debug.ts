@@ -11,9 +11,23 @@ export interface EpsilDebugStatement {
   /** The statement, canonical. */
   readonly statement: Expression;
 
-  /** The offsets of the statement in the source of the run: the statement is
-   * `source.slice(start, end)`. */
+  /** The offsets of the statement in the source in which it was written,
+   * `sourceContent`: the statement is `sourceContent.slice(start, end)`. */
   readonly range: readonly [start: number, end: number];
+
+  /** The text of the source in which the statement was written. A
+   * statement of a function that an earlier run of `executeEpsil()` or
+   * `executeEpsilAsync()` defined (a function of an earlier notebook cell, of
+   * a prelude, a function value that a host kept) has the source of that
+   * run, not the source of the run that calls it. A host compares it with
+   * the text of each of its sources. `undefined` when no run of Epsil parsed
+   * the statement (MathJSON that carries `sourceOffsets`). */
+  readonly sourceContent: string | undefined;
+
+  /** The `url` option of the run that parsed the statement
+   * (`ExecuteEpsilOptions.url`), when it had one. It tells apart two sources
+   * with the same text. */
+  readonly sourceUrl: string | undefined;
 
   /** The depth of the evaluation context of the statement: the number of
    * contexts on its context stack. A call adds a context, and so does a
@@ -43,11 +57,14 @@ export interface EpsilDebugStatement {
  * Hooks with which a debugger follows a run of `executeEpsilAsync()`
  * (`ExecuteEpsilAsyncOptions.debug`).
  *
- * The hooks are called for each statement written in the source of the run
- * that is evaluated on the asynchronous route: a top-level statement, and a
+ * The hooks are called for each statement of Epsil source that the run
+ * evaluates on the asynchronous route: a top-level statement, and a
  * statement of a function body, of a loop body, of a branch of `if` or of a
- * `do` block. A statement that the engine evaluates on the synchronous route
- * calls no hook. This is the case of a statement of a function that a lazy
+ * `do` block. A statement of a function that an earlier run defined calls
+ * them too, with the source of that run (`EpsilDebugStatement.sourceContent`
+ * and `sourceUrl`): a debugger shows it in that source, or skips it. A
+ * statement that the engine evaluates on the synchronous route calls no
+ * hook. This is the case of a statement of a function that a lazy
  * collection applies when it produces an element (a function given to `map`,
  * `filter`, `takeWhile`, `any`, `all` or `count`), and of a function that an
  * operator calls while it evaluates its operands on the synchronous route (a

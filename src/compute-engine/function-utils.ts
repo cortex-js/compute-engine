@@ -6,6 +6,7 @@ import {
   invokeDebugHook,
   invokeDebugHookAsync,
   isDebugHookFailure,
+  sourceOfOffsets,
 } from '../common/debug-hook.js';
 import type { EpsilDebugStatement } from './types-debug.js';
 import {
@@ -1394,8 +1395,15 @@ export function canonicalFunctionLiteralArguments(
       : [bodyOp];
     if (statements.length === 0) statements.push(ce.Nothing);
     const lastIdx = statements.length - 1;
-    statements[lastIdx] = ce._fn('Typed', [statements[lastIdx], returnTypeOp], {
+    // The ascription takes the offsets of the statement it wraps: a debugger
+    // stops at a statement that carries them.
+    const wrapped = statements[lastIdx];
+    statements[lastIdx] = ce._fn('Typed', [wrapped, returnTypeOp], {
       canonical: false,
+      metadata:
+        wrapped.sourceOffsets === undefined
+          ? undefined
+          : { sourceOffsets: wrapped.sourceOffsets },
     });
     return ce.function('Block', statements);
   };
@@ -4246,9 +4254,12 @@ function debugStatementOf(
   // (`withPauseSuspended()`).
   const frame = statementFrameOf(ce, stack);
   const clock = debugClockOf(ce, stack);
+  const source = sourceOfOffsets(ce._epsilStatementSources, op.sourceOffsets);
   return {
     statement: op,
     range: op.sourceOffsets!,
+    sourceContent: source?.content,
+    sourceUrl: source?.url,
     depth: contexts.length,
     callDepth: callFrameCount(contexts),
     inScope: <T>(fn: () => T): T =>

@@ -237,7 +237,10 @@ calling thread, debugger or not. When a hook returns a promise,
 the run waits until the promise settles. This is how a debugger pauses, in a
 browser as well as in Node, with no worker and no shared memory.
 
-`at.range` is the `[start, end]` offsets of the statement in the source,
+`at.range` is the `[start, end]` offsets of the statement in the source in
+which it was written, `at.sourceContent` is the text of that source (so
+`at.sourceContent.slice(...at.range)` is the statement), `at.sourceUrl` is the
+`url` option of the run that parsed it,
 `at.callDepth` is the number of function calls in progress (0 at the top
 level: compare call depths to step over or out of a call), `at.depth` is the
 number of its evaluation contexts (a loop body, a block or an `if` branch
@@ -268,6 +271,28 @@ const result = await executeEpsilAsync(ce, source, {
 // ➔ paused at "a + 1", call depth 1, a = 40
 result.value.toString();
 // ➔ "41"
+```
+
+A statement of a function that an earlier run defined calls the hooks too: a
+function of an earlier notebook cell, of a prelude, or a function value that
+the host kept and a later run applies. Its `range` is in the source of the
+earlier run, which `at.sourceContent` and `at.sourceUrl` name. A notebook
+compares `at.sourceContent` with the text of each cell to show the statement
+in its cell, and skips a statement of a source that it does not show. Give
+each run a `url` to tell apart two cells with the same text:
+
+```ts
+executeEpsil(ce, "function f(t) { let k = t * 2; k + 1 }", { url: "cell-1" });
+await executeEpsilAsync(ce, "f(5)", {
+  url: "cell-2",
+  debug: {
+    beforeStatement: (at) =>
+      console.log(at.sourceUrl, at.sourceContent?.slice(...at.range)),
+  },
+});
+// ➔ cell-2 f(5)
+// ➔ cell-1 let k = t * 2
+// ➔ cell-1 k + 1
 ```
 
 When a hook throws, or its promise rejects, the run stops and the promise of

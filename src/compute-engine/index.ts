@@ -24,6 +24,7 @@ import {
   type PauseClock,
 } from '../common/interruptible.js';
 import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
+import type { StatementSources } from '../common/debug-hook.js';
 import { hidePrivateProperties } from '../common/utils.js';
 
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
@@ -715,6 +716,9 @@ export class ComputeEngine implements IComputeEngine {
 
   /** See `IComputeEngine._epsilDebugRun`. @internal */
   _epsilDebugRun: EpsilDebugRun | undefined = undefined;
+
+  /** See `IComputeEngine._epsilStatementSources`. @internal */
+  readonly _epsilStatementSources: StatementSources = new WeakMap();
   _epsilStatementResultHook:
     | ((
         statement: Expression,

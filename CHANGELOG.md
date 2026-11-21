@@ -24,6 +24,28 @@
   epsilDefinition(ce, source, source.indexOf("sin(x)")); // ➔ null: a library name
   ```
 
+- **A statement that a debugger of `executeEpsilAsync()` receives says in
+  which source it was written** (CE-1624). `EpsilDebugStatement` has two new
+  fields: `sourceContent`, the text of that source, and `sourceUrl`, the
+  `url` option of the run that parsed it. A statement of a function that an
+  earlier run defined (a function of an earlier notebook cell, of a prelude)
+  calls the hooks too, and its `range` is in the source of that earlier run,
+  not of the run that calls it. A debugger now shows it there, or skips it:
+
+  ```ts
+  executeEpsil(ce, "function f(t) { let k = t * 2; k + 1 }", { url: "cell-1" });
+  await executeEpsilAsync(ce, "f(5)", {
+    url: "cell-2",
+    debug: {
+      beforeStatement: (at) =>
+        console.log(at.sourceUrl, at.sourceContent?.slice(...at.range)),
+    },
+  });
+  // ➔ cell-2 f(5)
+  // ➔ cell-1 let k = t * 2
+  // ➔ cell-1 k + 1
+  ```
+
 ### Improvements
 
 - **`ArgMax`, `ArgMin`, `MaxBy` and `MinBy` compile** (CE-1610). `compile()`
@@ -59,6 +81,16 @@
 
 ### Resolved Issues
 
+- **A debugger of `executeEpsilAsync()` stops at the last statement of a
+  function that declares a return type or an effect** (CE-1625). In
+  `function f(t) -> number { let k = t; k + 1 }`, the hooks were called for
+  `let k = t` and not for `k + 1`, and `function f(t) scope { a = a + t }`
+  called none. Each statement of the body now calls them.
+- **A debugger of `executeEpsilAsync()` stops at each statement of a function
+  that another function returned** (CE-1626). With
+  `function mk(k) { t => do { let z = t + k; z } }`, `mk(2)(5)` called the
+  hooks for `z` and not for `let z = t + k`: a statement that uses a
+  parameter of `mk` called none. Each statement now calls them.
 - **A `Series` at a zero or a pole of the argument of a logarithm no longer
   gives a series that holds on one side only** (CE-1442).
   `Series(Ln(x^2), x, 0, 3)` was `2ln(x) + O(x^4)`, which is `ln(x²) + 2πi`

@@ -40,6 +40,7 @@ import type {
 import type { EngineBoxingState } from './engine-boxing-state.js';
 import type { UnitEnvironment } from './binding-unit.js';
 import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
+import type { StatementSources } from '../common/debug-hook.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
@@ -1056,6 +1057,14 @@ export interface IComputeEngine {
    * that clock (`evaluateStatementsAsync`).
    * @internal */
   _epsilDebugRun: EpsilDebugRun | undefined;
+
+  /** The source in which each statement of an Epsil program parsed for this
+   * engine was written, keyed by its `sourceOffsets` array. Written by
+   * `executeEpsil` and `executeEpsilAsync` after the parse, read for
+   * `EpsilDebugStatement.sourceContent`. A field of the engine, not a module
+   * variable, for the reason given at `_epsilStatementResultHook`.
+   * @internal */
+  readonly _epsilStatementSources: StatementSources;
 
   /** Called with each statement and its value, after the statement
    * evaluated: a statement of a statement list (a `Block` body, a function

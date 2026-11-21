@@ -1053,6 +1053,19 @@ export function rewriteWithBinders(
     else if (next.every((op, i) => op === ops[i])) result = expr;
     else {
       const ce = expr.engine;
+      // The rebuilt node keeps the offsets of the node it replaces, the same
+      // array: a debugger stops at a statement that carries them, and finds
+      // its source by the array (`sourceOfOffsets()`). A raw or structural
+      // rebuild is a new node and takes them as metadata. A canonical rebuild
+      // can answer one of its operands, a substituted value that a variable
+      // also holds: the offsets go on its result only when that is not one of
+      // the operands (below). A handler that answers a node from deeper
+      // inside an operand still gives it the offsets, as `withSourceOffsets()`
+      // (`box.ts`) does; offsets are advisory metadata.
+      const metadata =
+        expr.sourceOffsets === undefined
+          ? undefined
+          : { sourceOffsets: expr.sourceOffsets };
       // An operand whose only errors are failed cells of a `List` or `Set`
       // literal (`isInvalidNonCollection()` is `false` for it) is a
       // collection value, and canonicalization accepts it: `Map(f, [1, err,
@@ -1076,8 +1089,9 @@ export function rewriteWithBinders(
             ? ce.function(expr.operator, next, {
                 form: 'structural',
                 scope: expr.localScope,
+                metadata,
               })
-            : ce.function(expr.operator, next, { form: 'raw' });
+            : ce.function(expr.operator, next, { form: 'raw', metadata });
       } else {
         const form = expr.isCanonical
           ? 'canonical'
@@ -1088,8 +1102,18 @@ export function rewriteWithBinders(
           ce.function(expr.operator, next, {
             form,
             scope: expr.localScope,
+            metadata: form === 'canonical' ? undefined : metadata,
           })
         );
+        if (
+          form === 'canonical' &&
+          metadata !== undefined &&
+          isFunction(result) &&
+          result.sourceOffsets === undefined &&
+          !next.includes(result)
+        )
+          (result as { sourceOffsets?: [number, number] }).sourceOffsets =
+            metadata.sourceOffsets;
       }
     }
   }

@@ -123,3 +123,54 @@ export function isDebugHookFailure(error: unknown): boolean {
     HOOK_FAILURES.has(error)
   );
 }
+
+/**
+ * The source in which a statement was written: the text that a run of
+ * `executeEpsil()` or `executeEpsilAsync()` parsed, and its `url` option.
+ */
+export type StatementSource = {
+  readonly content: string;
+  readonly url: string | undefined;
+};
+
+/**
+ * The source of each `sourceOffsets` array of the Epsil programs parsed for
+ * an engine (`IComputeEngine._epsilStatementSources`). A site that copies
+ * the offsets of a node to another node passes the same array on, so the
+ * array identifies a place in one source: a statement of a function that an
+ * earlier run defined keeps the source of that run
+ * (`EpsilDebugStatement.sourceContent`).
+ */
+export type StatementSources = WeakMap<object, StatementSource>;
+
+/** Record `source` in `sources` for every `sourceOffsets` array of the
+ * MathJSON tree `tree`. */
+export function noteStatementSources(
+  sources: StatementSources,
+  tree: unknown,
+  source: StatementSource
+): void {
+  const pending: unknown[] = [tree];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== 'object') continue;
+    if (Array.isArray(node)) {
+      for (const x of node) pending.push(x);
+      continue;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'sourceOffsets') {
+        if (Array.isArray(value)) sources.set(value, source);
+      } else pending.push(value);
+    }
+  }
+}
+
+/** The source of the statement whose offsets are `offsets`, when a run
+ * parsed it (`noteStatementSources()`). */
+export function sourceOfOffsets(
+  sources: StatementSources,
+  offsets: object | undefined
+): StatementSource | undefined {
+  return offsets === undefined ? undefined : sources.get(offsets);
+}

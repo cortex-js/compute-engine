@@ -25,6 +25,7 @@ import {
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
 import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { EpsilDebugHooks } from '../compute-engine/types-debug.js';
+import { noteStatementSources } from '../common/debug-hook.js';
 
 import {
   DiagnosticNote,
@@ -421,6 +422,12 @@ function* executeEpsilSteps(
     // raw tree the parser produced is not kept: the diagnostics index the
     // SOURCE, and every node keeps its offsets through the rewrite.
     ast = resolveLibraryNames(parsed, source, ce);
+    // The source of each statement, for a debugger that follows a later run
+    // which calls a function of this one (`EpsilDebugStatement.sourceContent`).
+    noteStatementSources(ce._epsilStatementSources, ast, {
+      content: source,
+      url: options?.url,
+    });
     diagnostics.push(...parseDiagnostics);
   } catch (e) {
     // A `#error` pragma throws a `FatalParsingError`. A cell must NOT throw to
