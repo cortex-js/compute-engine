@@ -3264,12 +3264,18 @@ export function assignFn(
       // against the literal that `arg1` held then. A contract that only the
       // new literal falsifies refuses the assignment, and the rollback puts
       // the previous definition back. The effects by which a contract was
-      // already false before are not this assignment's fault.
+      // already false before are not this assignment's fault. A contract
+      // installed while a head it calls had no definition is trusted, and
+      // is not checked (`docs/EFFECTS-MODEL.md`, "Dependency order").
+      const scan = { skipTrusted: true };
       const falseBefore = new Map(
-        conformanceWideningViolations(ce).map((v) => [v.name, v.exceeding])
+        conformanceWideningViolations(ce, scan).map((v) => [
+          v.name,
+          v.exceeding,
+        ])
       );
       const result = assignNamedValue(ce, arg1, arg2, options);
-      const falsified = conformanceWideningViolations(ce).find((v) => {
+      const falsified = conformanceWideningViolations(ce, scan).find((v) => {
         const before = falseBefore.get(v.name);
         return before === undefined || !isEffectSubset(v.exceeding, before);
       });

@@ -2382,11 +2382,15 @@ export interface WideningViolation {
  * The assignment of a function literal to a name reads the same scan
  * (`assignFn()`, `engine-declarations.ts`): a contract that walks the
  * literal a binding holds is falsified when the binding gets a new one.
+ * That scan passes `skipTrusted`: a contract installed while a head it calls
+ * had no definition is trusted, and the later definition of the head does
+ * not check it (`docs/EFFECTS-MODEL.md`, "Dependency order").
  *
  * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an effect".)
  */
 export function conformanceWideningViolations(
-  ce: IComputeEngine
+  ce: IComputeEngine,
+  options?: { skipTrusted?: boolean }
 ): WideningViolation[] {
   const violations: WideningViolation[] = [];
   const seenNames = new Set<string>();
@@ -2401,7 +2405,12 @@ export function conformanceWideningViolations(
       // One definition record bound under two names is one contract.
       if (seenDefs.has(def)) continue;
       seenDefs.add(def);
-      const violation = contractViolation(ce, name, def);
+      const violation = contractViolation(
+        ce,
+        name,
+        def,
+        options?.skipTrusted ?? false
+      );
       if (violation !== null) violations.push(violation);
     }
     scope = scope.parent;
@@ -2416,13 +2425,19 @@ export function conformanceWideningViolations(
 function contractViolation(
   ce: IComputeEngine,
   name: string,
-  def: BoxedDefinition
+  def: BoxedDefinition,
+  skipTrusted: boolean
 ): WideningViolation | null {
   if (isOperatorDef(def)) {
     const operator = def.operator;
     // No body, no re-derivation: a host operator's declared set describes host
     // code, which no conformance can change.
     if (!operator.effectsDeclared) return null;
+    if (
+      skipTrusted &&
+      (operator as { _contractTrusted?: boolean })._contractTrusted
+    )
+      return null;
     const literal = operator._lambdaLiteral;
     if (literal === undefined) return null;
     // For a CONTRACT definition this getter is the stated set verbatim: a
