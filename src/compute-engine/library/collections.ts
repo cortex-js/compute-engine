@@ -3864,13 +3864,27 @@ function eagerViewSource(xs: Expression): Expression {
  *   (`Sort(xs)`, `Unique(Range(1, n))`, `Tally(Join(a, b))`), provided the
  *   operator is pure and none of its operands is an unevaluated function
  *   application (the requirements of {@link eagerViewSource});
+ * - an eager source with an operand that is a collection of unknown
+ *   finiteness is of unknown finiteness, and is not evaluated;
  * - otherwise the source is evaluated, see {@link eagerViewSource}.
+ *
+ * The rule before the last one keeps the cost of the query linear in the
+ * size of a graph of shared operands. With `z` a `Zip(…, x·z′)` of a
+ * symbol `A` that has no value, the finiteness of `Zip(z, x·z)` would
+ * evaluate `x·z`, and with it each `Zip` below it once for every path to
+ * it: 2^L evaluations for L levels. The rule gives no answer where the
+ * evaluation could give one: when the operand is of unknown finiteness only
+ * because the guards of {@link eagerViewSource} refused to evaluate its own
+ * source, `Sort(Reverse(Sort(F(3))))`, with `F` a user function that returns
+ * a list, is of unknown finiteness. Its value does not change.
  */
 function finitenessOfSource(xs: Expression): boolean | undefined {
   const finite = xs.isFiniteCollection;
   if (finite !== undefined || xs.isCollection || !isFunction(xs)) return finite;
   if (isFiniteCount(xs.count)) return true;
   if (eagerOperandsAreFinite(xs)) return true;
+  if (xs.ops.some((op) => op.isCollection && op.isFiniteCollection === undefined))
+    return undefined;
   return eagerViewSource(xs).isFiniteCollection;
 }
 

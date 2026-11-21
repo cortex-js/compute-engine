@@ -67,6 +67,15 @@
   // ➔ 6n + 6, as without Expand (0.196.1: 20)
   ```
 
+- **An expression that reuses a list through `Zip` many times is built in
+  linear time** (CE-1345). With `A` declared `list<real>`, the 14 levels of
+  `z = Zip(z, x·z)` took about 3 seconds to build, twice as long at each
+  level; they now take a few milliseconds. The finiteness of an eager
+  collection operator that has an operand of unknown finiteness is no longer
+  computed by an evaluation, so the `isFiniteCollection` of
+  `Reverse(Sort(Reverse(Sort(F(3)))))`, with `F` a user function that returns
+  a list, is now `undefined` (was `true`). Its value does not change.
+
 ## 0.197.0 _2026-11-21_
 
 ### New Features
