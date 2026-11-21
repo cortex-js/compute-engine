@@ -21,6 +21,7 @@ import {
   elementType,
   isSubLane,
   lengthValues,
+  mapLengths,
   outsOf,
   recursiveFunctions,
   regionsOf,
@@ -42,6 +43,7 @@ import { isLibraryOperator } from '../../library-shadowing.js';
 import { isTupleOrTupleUnionShapedType } from '../../collection-utils.js';
 import {
   decline,
+  Decline,
   type Fn,
   type Lowering,
   type Source,
@@ -991,7 +993,22 @@ export function listLowering(cx: Lowering) {
    *  interpreter's `Join` is a set, and of strings a string: an operand
    *  whose static type is not a list declines. */
   const joinLists = (e: Fn): V => {
-    if (e.nops === 0 || !e.ops.every((x) => x.type.matches('list')))
+    // The carried accumulator of a fold, read at a run-time index
+    // (`At(acc, k)`), is typed `indexed_collection<number>`; the binding
+    // carries a list.
+    const carried = (name: string): boolean => {
+      for (let i = cx.frames.length - 1; i >= 0; i--) {
+        const binding = cx.frames[i].names.get(name);
+        if (binding !== undefined) return binding.accumulator === true;
+      }
+      return false;
+    };
+    const listy = (x: Expression) =>
+      x.type.matches('list') ||
+      (isSymbol(x) &&
+        x.type.matches('indexed_collection<number>') &&
+        carried(x.symbol));
+    if (e.nops === 0 || !e.ops.every(listy))
       decline(e, 'Join of other than lists');
     return join(e);
   };
@@ -1662,10 +1679,19 @@ export function listLowering(cx: Lowering) {
 
   /** The value of `body` with each name of `names` bound to the value of
    *  the same position in `values`. */
-  const applied = (names: string[], values: V[], body: Expression): V =>
+  const applied = (
+    names: string[],
+    values: V[],
+    body: Expression,
+    accumulator?: number
+  ): V =>
     cx.withFrame(true, (frame) => {
       names.forEach((n, j) =>
-        frame.names.set(n, { v: values[j], role: 'index' })
+        frame.names.set(n, {
+          v: values[j],
+          role: 'index',
+          ...(j === accumulator ? { accumulator: true } : {}),
+        })
       );
       return cx.value(body)!;
     });
@@ -1971,55 +1997,190 @@ export function listLowering(cx: Lowering) {
 
   /** `Reduce(L, f, init)` of a function `f` of two parameters (a literal
    *  or a user function): the left fold from `init`, `f(acc, x)` for each
-   *  element `x` in order, as the interpreter's. Real numbers only; an
-   *  integer `init` keeps the integer lane when every step gives an
-   *  integer. */
+   *  element `x` in order, as the interpreter's. The accumulator is a real
+   *  number, a Boolean, or a flat list of reals, integers or Booleans, or a
+   *  tuple of scalars. An integer `init` keeps the integer lane when every
+   *  step gives an integer.
+   *
+   *  A list or tuple accumulator is a carried value of the loop, as the
+   *  list local written whole of a `Loop` (`wholeLocal()`): of the length
+   *  of `init` when that is stated and every step keeps it, else of a
+   *  run-time length, carried as its length and then the list
+   *  (`README.md`, "Lists"). `List()` has no type, so its lane is the
+   *  body's. */
   const reduceBy = (e: Fn): V => {
     if (cx.interval) decline(e, 'Reduce by a function on interval-js');
     const { names, body } = literalOf(e, e.ops[1], 2);
     const effects = b.effects;
     const s = source(e.ops[0]);
-    const init = cx.scalar(e.ops[2]);
+    const seed = e.ops[2];
+    const empty = isFunction(seed, 'List') && seed.nops === 0;
+    const init = empty ? undefined : cx.value(seed)!;
     if (b.effects > effects)
       decline(e, 'Reduce of a list or an initial value with an effect');
-    const real = (v: V) =>
-      type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
-    if (!real(init))
-      decline(e, 'Reduce from a value that is not a real number');
-    const pass = (lane: Lane) => {
-      const [k, acc] = [
-        b.newValue(scalarType('integer')),
-        b.newValue(scalarType(lane)),
-      ];
-      return b.region([k, acc], () => {
-        const y = applied(names, [acc, s.at(k)], body);
-        if (!real(y))
-          decline(e, 'Reduce by a function whose value is not a real number');
-        return [y];
-      });
-    };
-    let lane = type(init).lane;
-    if (lane === 'integer') {
-      const before = b.effects;
-      const r = pass(lane);
-      b.effects = before;
-      if (type(r.yields[0]).lane !== 'integer') lane = 'real';
+    const it = init === undefined ? undefined : type(init);
+    const tuple = init !== undefined && cx.tuples.get(init) === 0;
+    const kind: 'scalar' | 'list' =
+      it === undefined || it.shape.length === 1 ? 'list' : 'scalar';
+    if (
+      it !== undefined &&
+      (it.shape.length > 1 ||
+        cx.tuples.get(init!) === 1 ||
+        !(isSubLane(it.lane, 'real') || it.lane === 'boolean'))
+    )
+      decline(
+        e,
+        'Reduce from a value that is not a real number, a Boolean, or a flat list or tuple of them'
+      );
+    const fits = (lane: Lane, l: Lane) =>
+      lane === 'boolean' ? l === 'boolean' : isSubLane(l, lane);
+
+    /** The loop over the accumulator of the lane `lane`; `fixed`: a list
+     *  of the length `n` of `init`, carried alone. A step that does not
+     *  keep the lane or the length throws `Mismatch`. */
+    class Mismatch extends Error {
+      constructor(
+        readonly why: string,
+        readonly lane?: Lane
+      ) {
+        super(why);
+      }
     }
-    const body2 = pass(lane);
-    if (type(body2.yields[0]).lane !== lane)
-      decline(e, 'an accumulator that changes lane');
-    const out = b.newValue(scalarType(lane));
+    const pass = (lane: Lane, fixed: number | undefined) => {
+      const k = b.newValue(scalarType('integer'));
+      const n =
+        kind === 'list' && fixed === undefined
+          ? b.newValue(scalarType('integer'))
+          : undefined;
+      const shape =
+        kind === 'scalar' ? [] : fixed !== undefined ? [fixed] : [{ v: n! }];
+      const acc = b.newValue({ lane, shape });
+      if (tuple) cx.tuples.set(acc, 0);
+      const params = n === undefined ? [acc] : [n, acc];
+      const region = b.region([k, ...params], () => {
+        const y = applied(names, [acc, s.at(k)], body, 0);
+        const t = type(y);
+        if (
+          t.shape.length !== shape.length ||
+          (cx.tuples.get(y) === 0) !== tuple
+        )
+          throw new Mismatch(
+            `${e.operator} by a function whose value is not of the accumulator's kind`
+          );
+        if (!fits(lane, t.lane)) throw new Mismatch('a lane', t.lane);
+        if (fixed !== undefined && t.shape[0] !== fixed)
+          throw new Mismatch('a length');
+        if (n === undefined) return [y];
+        const m = t.shape[0];
+        return [typeof m === 'number' ? b.constant(m, 'integer') : m.v, y];
+      });
+      return { region, params };
+    };
+    /** `pass`, on the real lane when an integer one gives reals. */
+    const settle = (lane0: Lane, fixed: number | undefined) => {
+      const before = b.effects;
+      let lane = lane0;
+      if (lane === 'integer') {
+        try {
+          pass(lane, fixed);
+        } catch (m) {
+          if (!(m instanceof Mismatch) || m.lane !== 'real') throw m;
+          lane = 'real';
+        } finally {
+          b.effects = before;
+        }
+      }
+      return { lane, ...pass(lane, fixed) };
+    };
+    const tryAll = (): ReturnType<typeof settle> & { fixed?: number } => {
+      const n0 = it?.shape[0];
+      const fixed = typeof n0 === 'number' && n0 > 0 ? n0 : undefined;
+      const lanes: Lane[] =
+        it !== undefined ? [it.lane] : ['integer', 'boolean'];
+      // A fixed length first; a step that declines or changes it is
+      // retried at a run-time length.
+      const tries = lanes.flatMap((lane) =>
+        (fixed !== undefined && !tuple ? [fixed, undefined] : [fixed]).map(
+          (f) => [lane, f] as const
+        )
+      );
+      let last: unknown;
+      for (const [i, [lane, f]] of tries.entries()) {
+        const before = b.effects;
+        try {
+          return { ...settle(lane, f), fixed: f };
+        } catch (m) {
+          b.effects = before;
+          if (!(m instanceof Mismatch || m instanceof Decline)) throw m;
+          last = m;
+          if (i + 1 === tries.length) {
+            if (m instanceof Decline && !empty) throw m;
+            break;
+          }
+        }
+      }
+      const why = last instanceof Mismatch ? last.why : (last as Error).message;
+      if (last instanceof Mismatch && last.why === 'a lane')
+        decline(e, 'an accumulator that changes lane');
+      if (last instanceof Mismatch && last.why === 'a length')
+        decline(
+          e,
+          `${e.operator} by a function that changes the length of a tuple`
+        );
+      return decline(
+        e,
+        empty
+          ? `${e.operator} from List(), whose element type the body does not fix: ${why}`
+          : why
+      );
+    };
+    const { lane, region, params, fixed } = tryAll();
+    if (
+      kind === 'list' &&
+      fixed === undefined &&
+      (!cx.runtimeLengths || cx.bigint)
+    )
+      decline(
+        e,
+        `${e.operator} of a list of a run-time length (JavaScript only)`
+      );
+    const keepTuple = (from: V, to: V): V => {
+      if (cx.tuples.get(from) === 0) cx.tuples.set(to, 0);
+      return to;
+    };
     const last = cx.apply(e, 'Subtract', [s.length, integer(1)]);
+    // The initial value: an empty list is a build of no element.
+    const start = (): V[] => {
+      if (init === undefined) {
+        const k = b.newValue(scalarType('integer'));
+        const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+        return [
+          integer(0),
+          cx.region('build', [integer(0)], [k], () => [zero], e)[0],
+        ];
+      }
+      if (kind === 'scalar' || fixed !== undefined) return [init];
+      const n = type(init).shape[0];
+      return [typeof n === 'number' ? integer(n) : n.v, init];
+    };
+    const outs: V[] = [];
+    for (const v of params)
+      outs.push(
+        keepTuple(
+          v,
+          b.newValue(mapLengths(type(v), (n) => outs[params.indexOf(n)] ?? n))
+        )
+      );
     b.emit({
       k: 'loop',
-      outs: [out],
+      outs,
       lo: integer(0),
       hi: last,
-      init: [cx.widen(init, lane)],
-      body: body2,
+      init: start(),
+      body: region,
     });
     if (b.effects > effects) decline(e, 'Reduce by a function with an effect');
-    return out;
+    return outs[outs.length - 1];
   };
 
   /** `StartsWith`, `EndsWith` and `ContainsSequence` of two lists of real
