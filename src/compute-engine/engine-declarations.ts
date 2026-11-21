@@ -29,6 +29,7 @@ import {
   isSameStatementReRegistration,
 } from './declaration-origin.js';
 import {
+  conformanceWideningViolations,
   refreshSumConformances,
   resettleTypeConformances,
 } from './engine-protocols.js';
@@ -3252,13 +3253,41 @@ export function assignFn(
   // recursive call, not a call of a function with no body
   // (`unknownCallMayBeRecursive()`, `declared-parameter-result.ts`).
   return whileDefining(ce, arg1, () => {
-    if (arg2 === undefined || !hasProvisionalDependents(ce, arg1))
+    if (arg2 === undefined) return assignNamedValue(ce, arg1, arg2, options);
+    const checkContracts = isFunctionLiteralValue(arg2);
+    if (!checkContracts && !hasProvisionalDependents(ce, arg1))
       return assignNamedValue(ce, arg1, arg2, options);
 
-    return withDependentEffectRollback(ce, () =>
-      assignNamedValue(ce, arg1, arg2, options)
-    );
+    return withDependentEffectRollback(ce, () => {
+      if (!checkContracts) return assignNamedValue(ce, arg1, arg2, options);
+      // A function that states its effects and calls `arg1` was checked
+      // against the literal that `arg1` held then. A contract that only the
+      // new literal falsifies refuses the assignment, and the rollback puts
+      // the previous definition back. The effects by which a contract was
+      // already false before are not this assignment's fault.
+      const falseBefore = new Map(
+        conformanceWideningViolations(ce).map((v) => [v.name, v.exceeding])
+      );
+      const result = assignNamedValue(ce, arg1, arg2, options);
+      const falsified = conformanceWideningViolations(ce).find((v) => {
+        const before = falseBefore.get(v.name);
+        return before === undefined || !isEffectSubset(v.exceeding, before);
+      });
+      if (falsified !== undefined)
+        throw new EffectContractError(
+          falsified.name,
+          falsified.declared,
+          falsified.inferred
+        );
+      return result;
+    });
   });
+}
+
+/** True when `value` is a `Function` literal, boxed or MathJSON. */
+function isFunctionLiteralValue(value: AssignValue): boolean {
+  if (Array.isArray(value)) return value[0] === 'Function';
+  return isExpression(value) && isFunction(value, 'Function');
 }
 
 /** Repair runs after the store. An effects refusal must restore the

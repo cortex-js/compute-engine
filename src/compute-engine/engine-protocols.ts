@@ -2342,7 +2342,7 @@ export function refreshSumConformances(
 
 /** A DECLARED effect contract that a conformance registration has falsified —
  * one entry of the `conformance-widens-declared-contract` diagnostic. */
-interface WideningViolation {
+export interface WideningViolation {
   /** The name the contract-holder is bound to. */
   name: string;
   /** The effect set its own declaration states; `undefined` is the empty set,
@@ -2379,9 +2379,13 @@ interface WideningViolation {
  * posture the install-time annotation check takes for an opaque head
  * (`boxed-operator-definition.ts`).
  *
+ * The assignment of a function literal to a name reads the same scan
+ * (`assignFn()`, `engine-declarations.ts`): a contract that walks the
+ * literal a binding holds is falsified when the binding gets a new one.
+ *
  * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an effect".)
  */
-function conformanceWideningViolations(
+export function conformanceWideningViolations(
   ce: IComputeEngine
 ): WideningViolation[] {
   const violations: WideningViolation[] = [];

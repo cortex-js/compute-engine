@@ -36,6 +36,14 @@
 
 ### Resolved Issues
 
+- **A function declared pure stays pure when a function that it calls gets a
+  new body** (CE-1629). With `h` declared `(number) -> number` and
+  `g` declared `(number) pure -> number` with the body `h(x)`, the assignment
+  `h := x ↦ x + Random()` gave a `g` that returned random values. Now the
+  assignment is refused with an `incompatible-type` error (`ce.assign()`
+  throws), and `h` keeps its previous body. An assignment whose body keeps the
+  stated effects of every function that calls it is accepted.
+
 - **A call of a user function whose body is an `If` with no else of a list
   compiles where `At`, `First`, `Last`, a reduction or arithmetic reads it**
   (CE-1648). With
