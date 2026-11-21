@@ -883,10 +883,12 @@ describe('EPSIL EXECUTE — `===` (Same), structural identity', () => {
     expect(sym('1 === 1.0')).toBe('True');
   });
 
-  test('no tolerance and no numeric evaluation, unlike `==`', () => {
+  test('no numeric evaluation, unlike `==`', () => {
     expect(sym('Sqrt(2) === Sqrt(2)')).toBe('True');
     expect(sym('Sqrt(2) === 1.4142135623730951')).toBe('False');
-    expect(sym('Sqrt(2) == 1.4142135623730951')).toBe('True');
+    // `==` compares the values; `===` compares the structure.
+    expect(sym('1/3 == 0.3333333333333333333333')).toBe('True');
+    expect(sym('1/3 === 0.3333333333333333333333')).toBe('False');
   });
 
   test('strings and lists', () => {

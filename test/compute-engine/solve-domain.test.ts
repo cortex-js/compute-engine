@@ -2207,18 +2207,17 @@ describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
     ).toEqual(['List', ['Divide', 1, 'a']]);
   });
 
-  test('a chain over each domain uses the tolerance of the interpreter', () => {
-    // `Equal(2, 2, 2.0000000000001)` is `True` with the tolerance 1e-10.
-    // The enumeration of a small range checks each element with the chain.
-    // A chain with a float has no answer when the domain cannot be
-    // enumerated: the roots of a link do not show the values that the
-    // chain accepts within the tolerance.
+  test('a chain over each domain is decided with the exact comparison of the interpreter', () => {
+    // `Equal(2, 2, 2.0000000000001)` is `False`: two numbers are compared
+    // exactly. The enumeration of a small range checks each element with the
+    // chain, and no element is a solution. A chain with a float has no answer
+    // when the domain cannot be enumerated.
     const chain: MathJsonExpression = ['Equal', 'x', 2, 2.0000000000001];
     expect(
       solutions(
         ce.box(['Solve', chain, ['Element', 'x', ['Range', -10, 10]]])
       )
-    ).toEqual([2]);
+    ).toEqual([]);
     for (const domain of [
       ['Interval', -10, 10],
       ['Range', -1e9, 1e9],
@@ -2235,16 +2234,11 @@ describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
           ['Element', 'y', ['Range', 0, 3]],
         ])
       )
-    ).toEqual([
-      [0, 2],
-      [1, 1],
-      [2, 0],
-    ]);
+    ).toEqual([]);
   });
 
   test('a root is checked with the whole chain, not link by link', () => {
-    // With the tolerance 1e-10, each adjacent pair is equal, but the chain
-    // compares 2 with each later side, and 2.00000000016 is too far.
+    // The sides of the chain differ, so the chain is False at every element.
     expect(
       ce.box(['Equal', 2, 2, 2.00000000008, 2.00000000016]).evaluate().symbol
     ).toBe('False');
@@ -2328,8 +2322,8 @@ describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
   });
 
   test('a chain with a float is not solved by the exact root of a link', () => {
-    // The root 2.0000000000001 of the first link is not an integer, but the
-    // chain is `True` at x = 2 within the tolerance.
+    // The root 2.0000000000001 of the first link is not an integer, and the
+    // chain is `False` at x = 2: 2 and 2.0000000000001 are different.
     const chain: MathJsonExpression = ['Equal', 'x', 2.0000000000001, 2];
     for (const domain of ['Integers', ['Range', -1e9, 1e9]] as MathJsonExpression[])
       expect(
@@ -2339,7 +2333,7 @@ describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
       solutions(
         ce.box(['Solve', chain, ['Element', 'x', ['Range', -10, 10]]])
       )
-    ).toEqual([2]);
+    ).toEqual([]);
   });
 
   test('a chain over the complex numbers keeps the complex roots', () => {
@@ -2371,9 +2365,10 @@ describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
 });
 
 describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
-  // `Equal(2, 2.0000000000001)` is `True` with the tolerance 1e-10. When the
-  // domain removes the root 2.0000000000001, x = 2 can still satisfy the
-  // equation: the removed root does not prove that there is no solution.
+  // `Equal(2, 2.0000000000001)` is `False`: two numbers are compared exactly.
+  // An element of a finite domain is a solution only if the equation is
+  // `True` at that element. When the domain removes the root 2.0000000000001,
+  // no other element satisfies the equation.
   const eq: MathJsonExpression = ['Equal', 'x', 2.0000000000001];
   const solve = (
     equation: MathJsonExpression,
@@ -2395,17 +2390,21 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
     );
   });
 
-  test('each element within the tolerance of a root is a solution', () => {
+  test('only an element equal to the root is a solution', () => {
     expect(
       solve(['Equal', 'x', 2.5], ['List', 2.5, 2.50000000001]).evaluate().json
-    ).toEqual(['List', 2.5, 2.50000000001]);
-    expect(solutions(solve(eq, ['Set', 2, 5]))).toEqual([2]);
+    ).toEqual(['List', 2.5]);
+    expect(solutions(solve(eq, ['Set', 2, 5]))).toEqual([]);
+    expect(solutions(solve(eq, ['Set', 2, 2.0000000000001]))).toEqual([
+      2.0000000000001,
+    ]);
   });
 
   test('the solutions are elements of the domain, not the root', () => {
-    expect(solve(eq, ['Range', 0, 10, 0.5]).evaluate().json).toEqual([
+    expect(solve(eq, ['Range', 0, 10, 0.5]).evaluate().json).toEqual(['List']);
+    expect(solve(['Equal', 'x', 2.5], ['Range', 0, 10, 0.5]).evaluate().json).toEqual([
       'List',
-      2,
+      2.5,
     ]);
   });
 
@@ -2415,52 +2414,52 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
       ['Multiply', ['Subtract', 'x', 3], ['Subtract', 'x', 2.0000000000001]],
       0,
     ];
-    expect(solutions(solve(product, ['Range', -10, 10]))).toEqual([2, 3]);
+    expect(solutions(solve(product, ['Range', -10, 10]))).toEqual([3]);
     expect(isUnevaluated(solve(product, 'Integers'))).toBe(true);
   });
 
   test('a trig equation and an inequality are enumerated', () => {
     const cosine: MathJsonExpression = ['Equal', ['Cos', 'x'], 0.9999999999999];
-    expect(solutions(solve(cosine, ['Range', -10, 10]))).toEqual([0]);
-    // `4 ≤ 3.9999999999999` is `True` within the tolerance. A compiled
-    // function gave [-1, 0, 1].
+    expect(solutions(solve(cosine, ['Range', -10, 10]))).toEqual([]);
+    // `4 ≤ 3.9999999999999` is `False`: x = ±2 are not solutions.
     const square: MathJsonExpression = [
       'LessEqual',
       ['Power', 'x', 2],
       3.9999999999999,
     ];
-    expect(solutions(solve(square, ['Range', -5, 5]))).toEqual([
-      -2, -1, 0, 1, 2,
-    ]);
+    expect(solutions(solve(square, ['Range', -5, 5]))).toEqual([-1, 0, 1]);
   });
 
   test('a condition and an assumption remove elements', () => {
+    const half: MathJsonExpression = ['Equal', ['Multiply', 0.5, 'x'], 1];
     const conditioned = (cond: MathJsonExpression) =>
-      ce.box(['Solve', eq, ['Element', 'x', ['Range', -10, 10], cond]]);
+      ce.box(['Solve', half, ['Element', 'x', ['Range', -10, 10], cond]]);
     expect(solutions(conditioned(['Greater', 'x', 1]))).toEqual([2]);
     expect(solutions(conditioned(['Greater', 'x', 3]))).toEqual([]);
     ce.pushScope();
     try {
       ce.assume(ce.box(['Greater', 'x', 2.5]));
-      expect(solutions(solve(eq, ['Range', -10, 10]))).toEqual([]);
+      expect(solutions(solve(half, ['Range', -10, 10]))).toEqual([]);
     } finally {
       ce.popScope();
     }
   });
 
   test('the integers near a root are not the solutions', () => {
-    // The root of 10^-12·x = 5·10^-13 is 0.5, but the equation is `True` at
-    // each integer from -99 to 100: the tolerance applies to the values of
-    // the sides. Thus an equation with a float over ℤ gives no answer.
+    // The root of 10^-12·x = 5·10^-13 is 0.5, and the equation is `False` at
+    // each integer. An equation with a float over ℤ gives no answer.
     const flat: MathJsonExpression = ['Equal', ['Multiply', 1e-12, 'x'], 5e-13];
     const r = solutions(solve(flat, ['Range', -200, 200]));
-    expect([r.length, r[0], r[r.length - 1]]).toEqual([200, -99, 100]);
+    expect(r).toEqual([]);
     expect(isUnevaluated(solve(flat, 'Integers'))).toBe(true);
     expect(isUnevaluated(solve(['Equal', 'x', 2.5], 'Integers'))).toBe(true);
   });
 
-  test('a small range is enumerated with the tolerance', () => {
-    expect(solutions(solve(eq, ['Range', -10, 10]))).toEqual([2]);
+  test('a small range is enumerated with the exact comparison', () => {
+    expect(solutions(solve(eq, ['Range', -10, 10]))).toEqual([]);
+    expect(solutions(solve(['Equal', 'x', 2.5], ['Range', -10, 10, 0.5]))).toEqual([
+      2.5,
+    ]);
   });
 
   test('a root that the domain keeps is listed as it is', () => {
@@ -2476,22 +2475,21 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
 
   test('over the real numbers, a root that the domain removes is not replaced', () => {
     // Over a domain of real numbers, the solutions are the exact roots of
-    // the equation with its floats. A value at which the equation is only
-    // `True` within the tolerance is not a solution, so the answer is `[]`
-    // when the domain or the real type removes every exact root. This is
-    // the documented contract of `Solve` (reference page of `Solve`,
-    // "An equation with a decimal number").
+    // the equation with its floats. The answer is `[]` when the domain or
+    // the real type removes every exact root. This is the documented
+    // contract of `Solve` (reference page of `Solve`, "An equation with a
+    // decimal number").
     expect(ce.box(['Equal', 10, 10.0000000000001]).evaluate().json).toBe(
-      'True'
+      'False'
     );
     expect(
       solve(['Equal', 'x', 10.0000000000001], ['Interval', -10, 10]).evaluate()
         .json
     ).toEqual(['List']);
-    // The roots are ±1e-10·i, and the equation is `True` at x = 0.
+    // The roots are ±1e-10·i, and the equation is `False` at x = 0.
     const square: MathJsonExpression = ['Equal', ['Power', 'x', 2], -1e-20];
     expect(ce.box(['Equal', ['Power', 0, 2], -1e-20]).evaluate().json).toBe(
-      'True'
+      'False'
     );
     expect(solve(square, 'RealNumbers').evaluate().json).toEqual(['List']);
   });
@@ -2502,10 +2500,10 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
     ).toEqual(['List']);
   });
 
-  test('x² = 4.0000000001 is true at x = ±2 within the tolerance', () => {
-    // The evaluation gives the residual -1e-10 at x = 2, which is within
-    // the tolerance. The float residual of a compiled function is
-    // -1.00000008e-10, which is not: the enumeration does not use it.
+  test('x² = 4.0000000001 is false at x = ±2', () => {
+    // The evaluation gives the residual -1e-10 at x = 2, which is not zero:
+    // the equation is `False` at x = ±2, and no element of the range is a
+    // solution.
     const square: MathJsonExpression = [
       'Equal',
       ['Power', 'x', 2],
@@ -2513,9 +2511,9 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
     ];
     expect(
       ce.box(['Equal', ['Power', 2, 2], 4.0000000001]).evaluate().symbol
-    ).toBe('True');
+    ).toBe('False');
     expect(isUnevaluated(solve(square, 'Integers'))).toBe(true);
-    expect(solutions(solve(square, ['Range', -10, 10]))).toEqual([-2, 2]);
+    expect(solutions(solve(square, ['Range', -10, 10]))).toEqual([]);
   });
 
   test('an unknown declared integer has no root list', () => {
@@ -2523,20 +2521,20 @@ describe('SOLVE AN EQUATION WITH A FLOAT OVER A DOMAIN', () => {
     try {
       ce.declare('n', 'integer');
       expect(ce.box(['Equal', 'n', 2.0000000000001]).solve('n')).toBeNull();
-      // Each equation is `True` at an integer within the tolerance: n = 2
-      // for the absolute value and for 0.5n = 1, n = 0 for the sine.
+      // The solve gives no list for these equations with a float, whose
+      // unknown is an integer.
       for (const latex of [
         '|n| = 2.0000000000001',
         '\\sin(n) = 0.0000000000001',
         '0.5n = 1',
       ])
         expect(ce.parse(latex).solve('n')).toBeNull();
-      // The float exponent 1.0 is removed before the solve, but the
-      // evaluation of the equation is `True` at n = 2.
+      // The float exponent 1.0 is removed before the solve, and the
+      // evaluation of the equation is `False` at n = 2.
       const power = ce.parse(
         'n^{1.0} = \\frac{20000000000001}{10000000000000}'
       );
-      expect(power.subs({ n: 2 }).evaluate().symbol).toBe('True');
+      expect(power.subs({ n: 2 }).evaluate().symbol).toBe('False');
       expect(power.solve('n')).toBeNull();
     } finally {
       ce.popScope();

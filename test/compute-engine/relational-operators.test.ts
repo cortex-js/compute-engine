@@ -1081,15 +1081,18 @@ describe('Same (Epsil `===`) — total structural identity', () => {
     expect(s(0.5, ['Divide', 1, 2])).toBe('True');
   });
 
-  test('structural, with no tolerance and no numeric evaluation', () => {
+  test('structural, with no numeric evaluation', () => {
     expect(s(['Sqrt', 2], ['Sqrt', 2])).toBe('True');
-    // The radical is NOT evaluated to a float, and no tolerance is applied.
+    // The radical is NOT evaluated to a float.
     expect(s(['Sqrt', 2], 1.4142135623730951)).toBe('False');
-    // ... whereas the tolerant, semantic `Equal` says these ARE equal. This
+    // ... whereas the semantic `Equal` rounds 1/3 and the 22-digit decimal to
+    // the working precision (21 digits) and says they ARE equal. This
     // contrast is the whole point of having both operators.
-    expect(
-      ce.box(['Equal', ['Sqrt', 2], 1.4142135623730951]).evaluate().symbol
-    ).toBe('True');
+    const third = { num: '0.3333333333333333333333' };
+    expect(s(['Divide', 1, 3], third)).toBe('False');
+    expect(ce.box(['Equal', ['Divide', 1, 3], third]).evaluate().symbol).toBe(
+      'True'
+    );
   });
 
   test('TOTAL: two distinct free symbols are False, never inert', () => {

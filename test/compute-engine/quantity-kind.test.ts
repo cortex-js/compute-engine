@@ -257,13 +257,15 @@ describe('TEMPERATURES WITH AN OFFSET (A16)', () => {
 });
 
 describe('COMPARISONS', () => {
-  // CE-508.10 and A7: the tolerance applies in the finer of the two units
-  test('the finer-unit tolerance policy', () => {
+  // CE-508.10 and A7: two quantities compare exactly, after the conversion
+  // to the finer of the two units
+  test('the comparison is exact in the finer unit', () => {
     expect(verdict(['Equal', Q(1, 'm'), Q(100.0000000001, 'cm')])).toBe(
       'False'
     );
     expect(verdict(['Less', Q(1, 'm'), Q(100.0000000001, 'cm')])).toBe('True');
-    expect(verdict(['Equal', Q(1, 'm'), Q(1.000000000001, 'm')])).toBe('True');
+    expect(verdict(['Equal', Q(1, 'm'), Q(1.000000000001, 'm')])).toBe('False');
+    expect(verdict(['Less', Q(1, 'm'), Q(1.000000000001, 'm')])).toBe('True');
   });
 
   test('two quantities of one dimension are ordered after conversion', () => {
@@ -315,10 +317,14 @@ describe('COMPARISONS', () => {
     expect(value(['Max', Q(2, 'm'), Q(2, 's')]).operator).toBe('Max');
   });
 
-  // Section 6: the extrema use the engine tolerance, as the other quantity
+  // Section 6: the extrema use the exact order, as the other quantity
   // comparisons do; a tie keeps the first operand
-  test('the extrema use the engine tolerance', () => {
-    expect(evalStr(['Max', Q(1, 'm'), Q(1.000000000001, 'm')])).toBe('1 m');
+  test('the extrema use the exact order', () => {
+    expect(evalStr(['Max', Q(1, 'm'), Q(1.000000000001, 'm')])).toBe(
+      '1.000000000001 m'
+    );
+    expect(evalStr(['Min', Q(1.000000000001, 'm'), Q(1, 'm')])).toBe('1 m');
+    expect(evalStr(['Max', Q(1, 'm'), Q(100, 'cm')])).toBe('1 m');
   });
 
   // Decision 10: `Clamp` returns `x` when it equals a bound

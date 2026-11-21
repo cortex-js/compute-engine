@@ -2,6 +2,35 @@
 
 ### Breaking Changes
 
+- **The comparisons have no tolerance** (CE-1603). `Equal`, `NotEqual`,
+  `Less`, `LessEqual`, `Greater`, `GreaterEqual` and the methods
+  `.isEqual()`, `.isLess()`, `.isLessEqual()`, `.isGreater()` and
+  `.isGreaterEqual()` compare two numbers exactly: a double as it is, and a
+  big decimal or an exact number at the working precision. Two floats that
+  differed by at most `ce.tolerance` (`1e-10`) were equal, so a test on small
+  numbers gave the wrong answer: `1e-11 > 1e-12` was `False`, and
+  `1.6e-19 = 0` was `True`. `ce.tolerance` is now read only by `Chop`,
+  `ApproxEqual`, `.is()` and the numeric algorithms (`Solve` still accepts a
+  computed root whose residual is within it).
+
+  | Expression                    | Before  | Now     |
+  | ----------------------------- | ------- | ------- |
+  | `1e-11 > 1e-12`               | `False` | `True`  |
+  | `9.5e-11 <= 0`                | `True`  | `False` |
+  | `1.6e-19 = 6.6e-34`           | `True`  | `False` |
+  | `\sqrt{3.5} \cdot \sqrt{3.5} = 3.5` | `True`  | `False` |
+  | `\sin(3.141592653589793) = 0` | `True`  | `False` |
+  | `0.1 + 0.2 = 0.3`             | `True`  | `True`  |
+  | `\frac{1}{10} = 0.1`          | `True`  | `True`  |
+  | `\sin(\pi) = 0`               | `True`  | `True`  |
+
+  To compare two computed values within a tolerance, use `ApproxEqual(a, b)`,
+  `Chop(a - b) = 0`, `|a - b| < \varepsilon`, or `a.is(b)`. Membership in a
+  `Set` or an `Interval`, the number patterns of `match`, `Solve` over a
+  finite domain and the comparison of two quantities follow the same rule:
+  `Solve(x = 2.0000000000001, x \in [-10..10])` is `[]`, and
+  `1\,\mathrm{m} = 1.000000000001\,\mathrm{m}` is `False`.
+
 - **Compound matrix and collection operands require shape information at
   boxing.** A determinant can use a matrix declared by the host or initialized
   in a program. To box an expression such as `Determinant(A + B)` before either

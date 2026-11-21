@@ -66,15 +66,20 @@ silently.
 
 ### `==` vs `===` (Wolfram's `SameQ`) {#equality-vs-sameq}
 
-`==` is the semantic comparison: it evaluates, compares within tolerance, and
-may stay an unresolved *condition* (`x == y` is what you hand to `solve`).
-`===` is `SameQ`: structural identity, no tolerance, and **total** — it always
+`==` is the semantic comparison: it evaluates, compares the values, and may
+stay an unresolved *condition* (`x == y` is what you hand to `solve`). `===`
+is `SameQ`: structural identity, no evaluation, and **total** — it always
 answers `True` or `False`.
 
 ```epsil
-(sqrt(2) == 1.4142135623730951, sqrt(2) === 1.4142135623730951, x === y, 1 === 1.0)
+(sin(pi) == 0, sin(pi) === 0, x === y, 1 === 1.0)
 // ➔ (true, false, false, true)
 ```
+
+Unlike Wolfram's `Equal`, `==` has no tolerance: two floats are equal only
+when they have the same value at the working precision, so
+`1e-11 == 1e-12` is `false` and `1e-11 > 1e-12` is `true`. To compare two
+computed values within a tolerance, write `abs(a - b) < eps`.
 
 One caveat for Wolfram users: `SameQ[1, 1.]` is `False` there, because `1` and
 `1.` are different *kinds* of number. In Epsil `1 === 1.0` is `True` — the

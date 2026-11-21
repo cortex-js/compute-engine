@@ -4,6 +4,7 @@ import {
   sourceOfBoxedRule,
 } from './rules.js';
 import { expand } from './expand.js';
+import { eqWithinTolerance } from './compare.js';
 import type {
   Expression,
   BoxedSubstitution,
@@ -6657,14 +6658,15 @@ function validateRoots(
         return Math.hypot(value.re, value.im) <= ce.tolerance * scale;
     }
 
-    // Important: we want the prover tier (`isIdenticallyEqual()`), not
-    // `is(0)`: the former accounts for tolerance (the latter does not), and a
+    // Important: we want the prover tier, within the engine tolerance
+    // (`eqWithinTolerance()`): the residual at a computed root is a float
+    // that is not 0, and `isIdenticallyEqual(0)` compares a float exactly. A
     // parametric root substituted back leaves free variables, so the residual
     // vanishing is an identity question that needs the free-variable
     // machinery. Cheap `isEqual()` degrades to `undefined` there.
-    if (value.isIdenticallyEqual(0)) return true;
+    if (eqWithinTolerance(value, 0, true)) return true;
 
-    // For a fully numeric value (no unknowns left), `isIdenticallyEqual(0)` is
+    // For a fully numeric value (no unknowns left), that test is
     // definitive: do NOT fall back to symbolic simplification, which may
     // wrongly accept an extraneous root (e.g. simplification rules like
     // `ln(a) + ln(b) → ln(ab)` assume principal domains and can collapse a
@@ -6678,7 +6680,7 @@ function validateRoots(
     // symbolic simplification. An unsimplified `evaluate()` leaves it as a
     // non-zero-looking expression, so without this the valid root would be
     // discarded (issue #300).
-    const zero = value.simplify().isIdenticallyEqual(0);
+    const zero = eqWithinTolerance(value.simplify(), 0, true);
 
     // Three-valued discipline (undefined ≠ false): only a *decidably* extraneous
     // root is pruned. For a guarded (restricted) root the substitute-back check can be
@@ -6707,13 +6709,14 @@ function validateRoots(
     const isDuplicate = uniqueRoots.some(
       // Roots may be parametric (free variables left), so recognizing a
       // duplicate is an identity question: prover tier, not cheap `isEqual()`.
+      // Two computed roots within the engine tolerance are one root.
       // Closed-form roots (`formulaRoots`) that are equal are the same
       // expression (a zero discriminant gives `-b/(2a)` twice), and two
       // different expressions are different roots, so `isSame()` decides:
       // the prover refines two exact constants at increasing precision.
       (existing) =>
         existing.isSame(root) ||
-        (!formulaRoots && existing.isIdenticallyEqual(root))
+        (!formulaRoots && eqWithinTolerance(existing, root, true) === true)
     );
     if (!isDuplicate) uniqueRoots.push(root);
   }

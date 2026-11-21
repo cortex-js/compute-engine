@@ -527,7 +527,7 @@ export function quantityEq(a: Expression, b: Expression): boolean | undefined {
   const x = withEvaluatedMagnitude(a);
   const y = withEvaluatedMagnitude(b);
   const order = compareQuantities(x, y, {
-    tolerance: a.engine.tolerance,
+    tolerance: 0,
     exact: true,
     nominal: true,
   });
@@ -622,11 +622,11 @@ export const QUANTITY_ARITHMETIC: ArithmeticDefinition = {
   // known non-real value are `'unordered'`: the order operators answer
   // `False` for them, as for two complex numbers (`(1 + i) m < 1 m` is
   // `False`, as `1 + i < 1` is), and `Equal` asks `quantityEq()`.
-  compare: (a, b, { engine, tolerance }) => {
+  compare: (a, b, { tolerance }) => {
     const x = comparisonOperand(a);
     const y = comparisonOperand(b);
     const order = compareQuantities(x, y, {
-      tolerance: tolerance ?? engine.tolerance,
+      tolerance: tolerance ?? 0,
       exact: tolerance === undefined,
       nominal: true,
     });

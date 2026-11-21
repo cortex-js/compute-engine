@@ -446,10 +446,10 @@ describe('MATCH — range patterns (membership)', () => {
     expect(m(inOut(10.5))).toBe('"out"');
   });
 
-  it('endpoints compare with the matcher tolerance (leafEquals semantics)', () => {
-    // Just outside an endpoint but within `ce.tolerance` (1e-10) → selected.
-    expect(m(inOut({ num: '0.9999999999999' }))).toBe('"in"');
-    expect(m(inOut({ num: '10.0000000000001' }))).toBe('"in"');
+  it('endpoints compare exactly (leafEquals semantics)', () => {
+    // Just outside an endpoint, by any amount → not selected.
+    expect(m(inOut({ num: '0.9999999999999' }))).toBe('"out"');
+    expect(m(inOut({ num: '10.0000000000001' }))).toBe('"out"');
     // Comfortably outside → not selected.
     expect(m(inOut({ num: '0.99' }))).toBe('"out"');
   });

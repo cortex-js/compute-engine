@@ -64,6 +64,7 @@ import {
 import {
   exactConstantOrder,
   isExactConstantExpression,
+  orderOfNumbers,
 } from '../boxed-expression/compare.js';
 import { exactCompareNumbers } from '../boxed-expression/constraint-subject.js';
 import { asRational } from '../boxed-expression/numerics.js';
@@ -2035,13 +2036,19 @@ function enclosureApply(
 //
 
 /** True when the two points `x` and `y` are equal: exactly for two exact
- * values, within `tolerance` when one of them is a float. */
+ * values, within `tolerance` when one of them is a float (0 unless the
+ * caller compares within a tolerance, as `.is()` does). */
 function samePoint(x: Expression, y: Expression, tolerance: number): boolean {
   if (x.isSame(y)) return true;
   if (isExactEndpoint(x) && isExactEndpoint(y))
     return endpointOrder(x, y) === 0;
   if (infinitySign(x) !== 0 || infinitySign(y) !== 0)
     return infinitySign(x) === infinitySign(y);
+  // With no tolerance, the points are compared as two numbers are
+  // (`orderOfNumbers()`): a double as it is, a big decimal at the working
+  // precision.
+  if (tolerance === 0)
+    return orderOfNumbers(isNumber(x) ? x : x.N(), isNumber(y) ? y : y.N()) === 0;
   const a = isNumber(x) ? x.re : x.N().re;
   const b = isNumber(y) ? y.re : y.N().re;
   return Math.abs(a - b) <= tolerance;
@@ -2065,7 +2072,7 @@ function comparisonOperand(x: KindOperand): Expression {
 function enclosureCompare(
   a: KindOperand,
   b: KindOperand,
-  { engine: ce, tolerance }: ArithmeticContext
+  { tolerance }: ArithmeticContext
 ): -1 | 0 | 1 | '<=' | '>=' | undefined {
   const x = comparisonRange(comparisonOperand(a));
   const y = comparisonRange(comparisonOperand(b));
@@ -2073,7 +2080,7 @@ function enclosureCompare(
   if (
     isPointRange(x) &&
     isPointRange(y) &&
-    samePoint(x.lo, y.lo, tolerance ?? ce.tolerance)
+    samePoint(x.lo, y.lo, tolerance ?? 0)
   )
     return 0;
   if (strictlyLess(x.hi, y.lo)) return -1;
@@ -2096,7 +2103,7 @@ export function enclosureEq(a: Expression, b: Expression): boolean | undefined {
   if (
     isPointRange(x) &&
     isPointRange(y) &&
-    samePoint(x.lo, y.lo, a.engine.tolerance)
+    samePoint(x.lo, y.lo, 0)
   )
     return true;
   if (strictlyLess(x.hi, y.lo) || strictlyLess(y.hi, x.lo)) return false;

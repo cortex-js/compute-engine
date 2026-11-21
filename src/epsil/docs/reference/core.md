@@ -157,15 +157,15 @@ f(a + 1)
 
 ## Comparing expressions
 
-The `==` operator compares **values**. It can use a tolerance, and it
-approximates an exact value when that is necessary. The `===` operator
-compares the expressions as they are **written** (after canonicalization).
-It never uses a tolerance and never reads the value of a declared or assigned
-name.
+The `==` operator compares **values**. It approximates an exact value when
+the other operand is a float, and it uses no tolerance: `1e-12 == 0` is
+`false`. The `===` operator compares the expressions as they are
+**written** (after canonicalization). It never evaluates and never reads the
+value of a declared or assigned name.
 
 ```epsil
-(sqrt(2) == 1.4142135623730951, sqrt(2) === 1.4142135623730951)
-// ➔ (true, false)
+(sin(pi) == 0, sin(pi) === 0, 1e-12 == 0, 1e-12 > 0)
+// ➔ (true, false, false, true)
 ```
 
 ```epsil

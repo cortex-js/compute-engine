@@ -35,6 +35,7 @@ import {
 } from './solve.js';
 import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 import { expand } from './expand.js';
+import { eqWithinTolerance } from './compare.js';
 import { together } from './factor.js';
 import { asRational } from './numerics.js';
 import { interval } from '../numerics/interval.js';
@@ -2868,13 +2869,15 @@ function expandPeriodicRoots(
                 ce.function('Multiply', [ce.number(k), spacing]),
               ])
               .evaluate();
-      // Confirm by exact substitution — guards an imperfect period and never
-      // admits a wrong answer.
+      // Confirm by substitution — guards an imperfect period and never
+      // admits a wrong answer. The residual at a computed member is zero
+      // within the engine tolerance.
       if (
-        predBody
-          .subs({ [unknown]: member })
-          .evaluate()
-          .isIdenticallyEqual(0) !== true
+        eqWithinTolerance(
+          predBody.subs({ [unknown]: member }).evaluate(),
+          0,
+          true
+        ) !== true
       )
         continue;
       out.push(member);
@@ -3105,7 +3108,8 @@ function withFactorFamilies(
     // No family: the scan of the whole product still checks the list.
     if (family === null || family === undefined) continue;
     for (const r of family) {
-      if (out.some((o) => o.isSame(r) || o.isEqual(r) === true)) continue;
+      if (out.some((o) => o.isSame(r) || eqWithinTolerance(o, r, false) === true))
+        continue;
       out.push(r);
       added = true;
     }
@@ -3196,7 +3200,8 @@ function productRootsByFactor(
   for (const { root } of all.sort((p, q) => p.value - q.value)) {
     const residual = predBody.subs({ [unknown]: root }).evaluate();
     if (residual.isNaN === true) continue;
-    const zero = residual.isIdenticallyEqual(0);
+    // The residual at a computed root is zero within the engine tolerance.
+    const zero = eqWithinTolerance(residual, 0, true);
     if (zero === undefined) return null;
     if (zero) roots.push(root);
   }

@@ -155,19 +155,19 @@ describe('CM-P1-3: eq() does not collapse determinable values to a spurious fals
   });
 });
 
-describe('CM-P1-4: cmp() uses one tolerance policy for ordering predicates', () => {
-  test('1 vs 1+1e-11: isEqual true ⇒ isLess/isGreater false, both directions', () => {
+describe('CM-P1-4: cmp() uses one exact policy for the equality and ordering predicates', () => {
+  test('1 vs 1+1e-11: isEqual false, and exactly one of <, =, > holds, both directions', () => {
     const ce = new ComputeEngine();
     const a = ce.number(1);
     const b = ce.number(1 + 1e-11);
-    expect(a.isEqual(b)).toBe(true);
-    // If equal within tolerance, strict ordering must be false.
-    expect(a.isLess(b)).toBe(false);
+    expect(a.isEqual(b)).toBe(false);
+    expect(a.isLess(b)).toBe(true);
     expect(a.isGreater(b)).toBe(false);
     expect(b.isLess(a)).toBe(false);
-    expect(b.isGreater(a)).toBe(false);
-    // Non-strict ordering is true.
+    expect(b.isGreater(a)).toBe(true);
     expect(a.isLessEqual(b)).toBe(true);
+    expect(a.isGreaterEqual(b)).toBe(false);
+    expect(b.isLessEqual(a)).toBe(false);
     expect(b.isGreaterEqual(a)).toBe(true);
   });
 

@@ -216,14 +216,14 @@ function signedMembership(
  * `docs/plans/2026-08-29-boolean-value-types.md` §3.1). A member that is
  * the SAME value (`isSame`) proves `true` for both kinds. A `false` proof
  * must match the evaluated `Element`: a `List` holds by `isSame` only, but
- * a `Set` also admits a number within `engine.tolerance` of a member
+ * a `Set` also admits a number that is equal to a member
  * (`literalSetContains`, `library/collections.ts`), so a number tested
- * against a `Set` with a number member closer than the tolerance keeps
+ * against a `Set` with a number member that has the same double keeps
  * `boolean`. Any other operand shape (a symbol, a range, a type-style
  * membership, a filtered three-operand form) keeps the declared `boolean`. */
 function elementLiteralType(
   ops: ReadonlyArray<OperandDescriptor>,
-  { engine }: TypeHandlerContext
+  _context: TypeHandlerContext
 ): Type {
   if (ops.length !== 2) return 'boolean';
   const [value, collection] = ops;
@@ -263,13 +263,14 @@ function elementLiteralType(
   if (!allDiffer) return 'boolean';
 
   if (isSet && valueLiteral.kind === 'number') {
-    // A `Set` also admits a number within the engine's tolerance of a
-    // member, so a `false` claim has to run that test as well
-    // (`literalSetContains`, `library/collections.ts`). Running it needs a
-    // machine value on both sides: a literal whose exact value no double
-    // holds (an exact rational such as `1/3`, a radical) carries none, and
-    // the near-match cannot be ruled out for it — so the claim is dropped
-    // rather than made without the test.
+    // A `Set` also admits a number that is equal to a member and is not
+    // the same literal (`0.5` and `1/2`), so a `false` claim has to run
+    // that test as well (`literalSetContains`, `library/collections.ts`).
+    // Running it needs a machine value on both sides: a literal whose exact
+    // value no double holds (an exact rational such as `1/3`, a radical)
+    // carries none, and the match cannot be ruled out for it — so the claim
+    // is dropped rather than made without the test. Two values with one
+    // double can be equal, so they keep `boolean` too.
     const v = approxLiteralValue(value, valueLiteral);
     if (v === undefined) return 'boolean';
     for (let i = 0; i < members.length; i++) {
@@ -277,7 +278,7 @@ function elementLiteralType(
       if (ms.kind !== 'number') continue;
       const e = approxLiteralValue(members[i], ms);
       if (e === undefined) return 'boolean';
-      if (Math.abs(e - v) <= engine.tolerance) return 'boolean';
+      if (e === v) return 'boolean';
     }
   }
   return { kind: 'value', value: false };
@@ -2126,10 +2127,11 @@ function boundKleene(
     // Degenerate direction (e.g. x ≥ +∞): cannot be decided here
     return undefined;
   }
-  if (op === 'Less') return x.isLess(b);
-  if (op === 'LessEqual') return x.isLessEqual(b);
-  if (op === 'Greater') return x.isGreater(b);
-  return x.isGreaterEqual(b);
+  // The bound itself, not its double: `2π` is above the double of `2π`.
+  if (op === 'Less') return x.isLess(bound);
+  if (op === 'LessEqual') return x.isLessEqual(bound);
+  if (op === 'Greater') return x.isGreater(bound);
+  return x.isGreaterEqual(bound);
 }
 
 /**

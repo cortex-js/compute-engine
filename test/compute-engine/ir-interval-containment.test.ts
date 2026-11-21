@@ -226,15 +226,6 @@ const MACHINE_CASES: Case[] = CASES.filter((c) => {
  *  the result of the mode. */
 type Miss = { point: Record<string, number>; v: number | boolean; got: unknown };
 
-/** The programs whose comparison the interpreter decides within its
- *  tolerance (1e-10): `1.7999999999999998 < 1.8` is `False`, the mode
- *  compares the doubles. A miss is excused at a point
- *  within the tolerance of 1.8 only. */
-const TOLERANCE: Record<string, (m: Miss) => boolean> = {
-  [`machine ${JSON.stringify(['Less', x, 1.8])}`]: (m) =>
-    Math.abs(m.point.x - 1.8) <= ce.tolerance,
-};
-
 /** The programs whose reference is not the value of the doubles. At `x = -0.35` the
  *  reference of `Remainder(x, 0.7)` reads the exact rational of `x` beside
  *  the decimal of the double 0.7 at the working precision, as every float
@@ -245,7 +236,7 @@ const INTERPRETER_DEFECTS: Record<string, (m: Miss) => boolean> = {
   [`machine ${JSON.stringify(['Remainder', x, 0.7])}`]: (m) =>
     m.point.x === -0.35 && m.v === 0.35,
 };
-const EXCUSED = { ...TOLERANCE, ...INTERPRETER_DEFECTS };
+const EXCUSED = { ...INTERPRETER_DEFECTS };
 
 /** The programs whose containment fails by a kernel of the interval
  *  library: `asec`, `acsc` and `acoth` take one outward step after an

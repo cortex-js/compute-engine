@@ -94,9 +94,9 @@ describe('boolean value types — Equal soundness', () => {
     );
   });
 
-  test('two literals closer than the tolerance are not separated', () => {
-    // The evaluated comparison is tolerance-based, so a proof must not
-    // claim a separation the evaluation would deny.
+  test('two literals 1e-12 apart are separated', () => {
+    // The evaluated comparison is exact, so a proof claims the separation
+    // that the evaluation gives.
     const a = ce.number(0.3);
     const b = ce.number(0.3 + 1e-12);
     for (const h of ['Less', 'Greater', 'Equal', 'NotEqual', 'LessEqual']) {
@@ -105,8 +105,8 @@ describe('boolean value types — Equal soundness', () => {
       const t = typeOf(e);
       if (t !== 'boolean') expect(t === 'true').toBe(v === 'True');
     }
-    expect(typeOf(fn('Equal', [a, b]))).toBe('boolean');
-    expect(typeOf(fn('Less', [a, b]))).toBe('boolean');
+    expect(typeOf(fn('Equal', [a, b]))).toBe('false');
+    expect(typeOf(fn('Less', [a, b]))).toBe('true');
   });
 
   test('Less(NaN, 1) makes no claim', () => {
@@ -145,11 +145,14 @@ describe('boolean value types — connectives and literal predicates', () => {
     expect(typeOf(fn('Element', [ce.number(2), sym('Integers')]))).toBe(
       'boolean'
     );
-    // A `Set` admits a number within the tolerance of a member: no `false`.
+    // A `Set` admits a number equal to a member, and no other number.
     const set = fn('Set', [ce.number(1), ce.number(0.3)]);
     const near = fn('Element', [ce.number(0.3 + 1e-12), set]);
-    expect(typeOf(near)).toBe('boolean');
-    expect(evalOf(near)).toBe('"True"');
+    expect(typeOf(near)).toBe('false');
+    expect(evalOf(near)).toBe('"False"');
+    const member = fn('Element', [ce.number(0.3), set]);
+    expect(typeOf(member)).toBe('true');
+    expect(evalOf(member)).toBe('"True"');
     expect(typeOf(fn('Element', [ce.number(0.5), set]))).toBe('false');
     expect(typeOf(fn('Element', [ce.number(0.3 + 1e-12), list]))).toBe('false');
   });

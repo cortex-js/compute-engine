@@ -768,16 +768,37 @@ export function eqIdentical(
 }
 
 /**
+ * `eq()`, or `eqIdentical()` with `prover`, for a numeric algorithm that
+ * tests a computed value: two constants whose difference is zero within
+ * the engine tolerance are equal, also when one of them is a float. `Solve`
+ * uses it for the residual of an equation at a root that it computed, and
+ * for two computed roots that are one root: the residual of
+ * `sin(2x) = 0` at the float nearest to `π/2` is `1.2·10⁻¹⁶`, not 0.
+ */
+export function eqWithinTolerance(
+  a: Expression,
+  inputB: number | Expression,
+  prover: boolean
+): boolean | undefined {
+  return eqImpl(a, inputB, prover, true);
+}
+
+/**
  * Shared implementation of `eq()` and `eqIdentical()`.
  *
  * When `prover` is false, the free-variable branch (stochastic sampling +
  * expand/simplify fallback) is skipped and the comparison degrades to
  * `undefined` at that point.
+ *
+ * With `withinTolerance`, the difference of two constants is zero within
+ * the engine tolerance, also when one of them is a float
+ * (`eqWithinTolerance()`).
  */
 function eqImpl(
   a: Expression,
   inputB: number | Expression,
-  prover: boolean
+  prover: boolean,
+  withinTolerance = false
 ): boolean | undefined {
   // An OBJECT operand decides by reference identity, and nothing may answer
   // ahead of it — including the two operator `eq` handlers immediately below,
@@ -833,15 +854,19 @@ function eqImpl(
   // definitive `false` in the finiteness branch below (CM-P1-3).
   //
   if (!a.isCanonical) a = a.canonical;
+  // With no tolerance, an expression over symbols with exact values is
+  // compared by its exact value (`exactValueOfExpression()`).
+  if (!withinTolerance) a = exactValueOfExpression(a) ?? a;
   // The operands before `.N()`, for the assumptions database below.
   const aExact = a;
-  a = a.unknowns.length > 0 ? a : a.N();
+  a = valueForEquality(a);
   let b: Expression;
   let bExact: Expression;
   if (typeof inputB === 'number') b = bExact = a.engine.expr(inputB);
   else {
     bExact = inputB.isCanonical ? inputB : inputB.canonical;
-    b = bExact.unknowns.length > 0 ? bExact : bExact.N();
+    if (!withinTolerance) bExact = exactValueOfExpression(bExact) ?? bExact;
+    b = valueForEquality(bExact);
   }
 
   //
@@ -962,7 +987,7 @@ function eqImpl(
         for (const xa of a.each()) {
           const xb = itB.next();
           if (xb.done) return false;
-          const cmp = eqImpl(xa, xb.value, prover);
+          const cmp = eqImpl(xa, xb.value, prover, withinTolerance);
           if (cmp !== true) return cmp;
         }
         return true;
@@ -984,14 +1009,14 @@ function eqImpl(
       return true;
     }
 
-    // If the difference is zero (within tolerance), the expressions are equal
+    // If the difference is zero, the expressions are equal
     if (a.unknowns.length === 0 && b.unknowns.length === 0) {
       // No free variables, so `.N()` already evaluates the difference fully —
       // the intermediate `.simplify()` was redundant and a latent recursion
       // hazard (`eq` is reachable from `isEqual`, which evaluate handlers call).
       if (a.isFinite && b.isFinite)
         return (
-          isZeroWithTolerance(a.sub(b).N()) &&
+          equalValues(a, b, aExact, bExact, withinTolerance) &&
           !exactValuesDiffer(aExact, bExact)
         );
       if (a.isNaN || b.isNaN) return false;
@@ -1062,13 +1087,14 @@ function eqImpl(
   const ce = a.engine;
 
   //
-  // For number literals, we compare the approximate values, that is
-  // we want 0.9 and 9/10 to be considered equal
+  // For number literals, we compare the values at the working precision,
+  // that is we want 0.9 and 9/10 to be considered equal
   //
   if (isNumber(a) && isNumber(b)) {
     if (a.isFinite && b.isFinite)
       return (
-        isZeroWithTolerance(a.sub(b)) && !exactValuesDiffer(aExact, bExact)
+        equalValues(a, b, aExact, bExact, withinTolerance) &&
+        !exactValuesDiffer(aExact, bExact)
       );
     if (a.isNaN || b.isNaN) return false;
     if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
@@ -1232,16 +1258,33 @@ function relationFromSymbolBounds(
 /**
  * The relation between `a` and `b`, or `undefined` when it is not known.
  *
- * Two values that differ by `tolerance` or less are `'='`. The default is
- * the engine tolerance, which the relational predicates (`isLess`,
- * `isGreater`…) use. An ordering that must separate two different numbers
- * however close they are (`Max`, `Sort`) passes `0`: see `exactOrder`.
+ * With no `tolerance`, which is how the relational predicates (`isLess`,
+ * `isGreater`…) call it, two values are compared exactly: `1e-12` is
+ * greater than `0`. An exact number beside a float is compared by its
+ * value at the working precision (`1/10` is equal to `0.1`). The engine
+ * tolerance is used for one case only, two exact operands
+ * (`isExactOperand()`) that the enclosures of `exactConstantOrder()` do
+ * not order: they have no float to compare exactly.
+ *
+ * With a `tolerance` above 0 (a caller that compares within a tolerance,
+ * such as `.is()`), two values that differ by `tolerance` or less are
+ * `'='`. With a `tolerance` of 0, the order is the exact order of `Max`
+ * and `Sort`, which never takes two values for a tie because they agree at
+ * the precision limit: see `exactOrder`.
  */
 export function cmp(
   a: Expression,
   b: number | Expression,
-  tolerance: number = a.engine.tolerance
+  tolerance?: number
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // The exact order of `exactOrder()`.
+  const strict = tolerance === 0;
+  // With no tolerance, an expression over symbols with exact values is
+  // compared by its exact value (`exactValueOfExpression()`).
+  if (tolerance === undefined) {
+    a = exactValueOfExpression(a) ?? a;
+    if (typeof b !== 'number') b = exactValueOfExpression(b) ?? b;
+  }
   // A pair with a value of a value kind whose kind type declares `compare`
   // is ordered by the hooks (`kindCompare()`); a pair that the hooks do not
   // order has no order here. An operand beside a kind value that is not a
@@ -1269,9 +1312,9 @@ export function cmp(
   // working precision plus a few digits, and it decides two values that are
   // well apart. Two values whose enclosures still overlap at the precision
   // limit, and are narrow there, are equal (`'='`; see
-  // `exactConstantOrder()`), except for an exact order (`tolerance` is 0),
-  // which must not take two different numbers for a tie: it goes on with
-  // the steps below. A JavaScript integer `b` is an exact value, and it is
+  // `exactConstantOrder()`), except for an exact order (`strict`), which
+  // must not take two different numbers for a tie: it goes on with the
+  // steps below. A JavaScript integer `b` is an exact value, and it is
   // boxed for this test; any other JavaScript number is a float.
   const exactB =
     typeof b !== 'number'
@@ -1281,16 +1324,26 @@ export function cmp(
         : undefined;
   if (exactB !== undefined && isExactConstantPair(a, exactB)) {
     const order = exactConstantOrder(a, exactB);
-    if (order !== undefined && (order !== 0 || tolerance !== 0))
+    if (order !== undefined && (order !== 0 || !strict))
       return order < 0 ? '<' : order > 0 ? '>' : '=';
   }
-  const c = cmpWithTolerance(a, b, tolerance);
+  // A float beside a number, with no tolerance: the two values at the
+  // working precision (`orderOfValues()`). A function expression is
+  // ordered by its value in `orderByValue()`, after the cheaper tests of
+  // its sign.
+  if (tolerance === undefined && isLiteralValue(a) && isLiteralValue(b)) {
+    const order = orderOfValues(a, b);
+    if (order !== undefined) return order;
+  }
+  const within =
+    tolerance ??
+    (isExactOperand(a) && isExactOperand(b) ? a.engine.tolerance : 0);
+  const c = cmpWithTolerance(a, b, within, strict);
   // Two exact numbers are compared exactly, with no tolerance: `1/3` is
-  // greater than `3333333333333/10¹³`, as the operator `Greater` says. The
-  // tolerance applies only when a float is involved. Outside of the
-  // tolerance the values decide the order correctly, so only a tie is
-  // examined again.
-  if (c !== '=' || tolerance === 0) return c;
+  // greater than `3333333333333/10¹³`, as the operator `Greater` says.
+  // Outside of the tolerance the values decide the order correctly, so only
+  // a tie within a tolerance is examined again.
+  if (c !== '=' || within === 0) return c;
   const order = exactValueOrder(a, b);
   if (order === undefined) return c;
   return order < 0 ? '<' : order > 0 ? '>' : '=';
@@ -1358,11 +1411,14 @@ function exactValueOrder(
 const orderingExactValues = new WeakSet<Expression['engine']>();
 
 /** The relation of `a` and `b` within `tolerance`: see `cmp`, which
- *  compares two exact numbers again with no tolerance. */
+ *  compares two exact numbers again with no tolerance. With a `tolerance`
+ *  of 0, two values are a tie only when they are equal; `strict` is the
+ *  exact order of `exactOrder()`, whose `tolerance` is 0 too. */
 function cmpWithTolerance(
   a: Expression,
   b: number | Expression,
-  tolerance: number
+  tolerance: number,
+  strict: boolean
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
   // A machine value's `isZeroWithTolerance(t)` tests `|x| < t`, which is
   // false for every `x` when `t` is 0. With no tolerance, only a zero is zero.
@@ -1395,9 +1451,7 @@ function cmpWithTolerance(
       b = b.numericValue;
     if (typeof b === 'number') {
       // We could be querying the sign of an EXACT number. A float is
-      // compared with the tolerance by the code below instead: a float
-      // within the tolerance of 0 (`1e-12`) is equal to 0 (`isEqual(0)` is
-      // `true`), so it must not be ordered strictly against 0 (CM-P1-4).
+      // compared by the code below instead.
       if (b === 0 && a.isExact) {
         const s = a.sgn;
         if (s === undefined) return undefined;
@@ -1424,10 +1478,9 @@ function cmpWithTolerance(
       if (av.eq(b, a.engine.precision)) return '=';
       const lt = av.lt(b, a.engine.precision);
       if (lt === undefined) return undefined;
-      // Tolerance-aware equality, consistent with the machine path above and
-      // the symbol branches below: values within tolerance must not be ordered
-      // strictly, or `isEqual` and `isGreater`/`isLess` would both be true
-      // (CM-P1-4).
+      // A tie of the difference, consistent with the machine path above and
+      // the symbol branches below: two values that `isEqual` takes for
+      // equal must not be ordered strictly (CM-P1-4).
       if (isZeroWithin(av.sub(a.engine._numericValue(b), a.engine.precision)))
         return '=';
       return lt ? '<' : '>';
@@ -1447,19 +1500,18 @@ function cmpWithTolerance(
           // We're comparing a (number) to b (symbol).
           //
           // A symbol with a known real value (e.g. Pi, or `x := 1e-12`) is
-          // first compared by that value, with the tolerance: a value
-          // within the tolerance of `a` is equal to it (`isEqual` is
-          // `true`), so the bounds must not order it strictly (CM-P1-4).
-          // The sign of `x := 1e-12` gives the bound `x > 0`, and it made
-          // `0 < x` true while `0 = x` was true too.
+          // first compared by that value (`orderOfDoubles()`): with a
+          // tolerance, a value within the tolerance of `a` is equal to it
+          // (`isEqual` is `true`), so the bounds must not order it strictly
+          // (CM-P1-4).
           const bSymNum = b.re;
           const bHasValue =
             typeof bSymNum === 'number' &&
             Number.isFinite(bSymNum) &&
             b.im === 0;
-          if (bHasValue && tolerance !== 0) {
-            if (Math.abs(aNum - bSymNum) <= tolerance) return '=';
-            return aNum < bSymNum ? '<' : '>';
+          if (bHasValue && !strict) {
+            const o = orderOfDoubles(aNum, bSymNum, tolerance);
+            if (o !== undefined) return o;
           }
 
           // Otherwise, the relation of `b` to `a` that the bounds of `b`
@@ -1482,12 +1534,12 @@ function cmpWithTolerance(
           // With no tolerance, the machine value of the symbol is not
           // enough: `π.re` is the float `3.141592653589793`, which is not
           // `π`. See `orderByValue`.
-          if (bHasValue) return orderByValue(a, b, tolerance) ?? rel;
+          if (bHasValue) return orderByValue(a, b, tolerance, strict) ?? rel;
           if (rel !== undefined) return rel;
         }
         // A signed infinity is ordered against a finite value.
         if (aNum !== undefined && isSignedInfinity(aNum))
-          return orderByValue(a, b, tolerance);
+          return orderByValue(a, b, tolerance, strict);
         return undefined;
       }
       // A function expression (`1 + π`): the branch below that orders a
@@ -1499,7 +1551,7 @@ function cmpWithTolerance(
         // `cmp(b, a)` with `b` a function expression does. The call is to
         // `cmpWithTolerance()`, not `cmp()`: the outer `cmp()` examines a
         // tie again exactly, and it must do so only once.
-        const r = cmpWithTolerance(b, a.isSame(0) ? 0 : a, tolerance);
+        const r = cmpWithTolerance(b, a.isSame(0) ? 0 : a, tolerance, strict);
         if (r === '<') return '>';
         if (r === '>') return '<';
         if (r === '<=') return '>=';
@@ -1520,9 +1572,9 @@ function cmpWithTolerance(
       if (bv.eq(av, a.engine.precision)) return '=';
       const gt = bv.lt(av, a.engine.precision); // is `bv < av`? undefined when unordered (complex)
       if (gt === undefined) return undefined;
-      // Tolerance-aware equality, consistent with the machine and symbol
-      // branches of cmp(): values within tolerance must not be ordered
-      // strictly, or `isEqual` and `isLess` would both be true (CM-P1-4).
+      // A tie of the difference, consistent with the machine and symbol
+      // branches of cmp(): two values that `isEqual` takes for equal must
+      // not be ordered strictly (CM-P1-4).
       if (isZeroWithin(bv.sub(a.engine._numericValue(av), a.engine.precision)))
         return '=';
       return gt ? '>' : '<';
@@ -1541,18 +1593,13 @@ function cmpWithTolerance(
       // We're comparing a (symbol) to b (number).
       //
       // A symbol with a known real value (e.g. Pi, ExponentialE, or
-      // `x := 1e-12`) is first compared by that value, with the tolerance,
-      // as in the number-to-symbol branch above (CM-P1-4).
+      // `x := 1e-12`) is first compared by that value, as in the
+      // number-to-symbol branch above (CM-P1-4).
       const aNum = a.re;
       const aHasValue = !Number.isNaN(aNum) && a.im === 0;
-      if (
-        aHasValue &&
-        tolerance !== 0 &&
-        Number.isFinite(aNum) &&
-        Number.isFinite(b)
-      ) {
-        if (Math.abs(aNum - b) <= tolerance) return '=';
-        return aNum < b ? '<' : '>';
+      if (aHasValue && !strict && Number.isFinite(aNum) && Number.isFinite(b)) {
+        const o = orderOfDoubles(aNum, b, tolerance);
+        if (o !== undefined) return o;
       }
 
       // Otherwise, the relation that the bounds of `a` entail. A strict
@@ -1564,7 +1611,7 @@ function cmpWithTolerance(
       // Fall back to the symbol's known numeric value. With no tolerance,
       // or with a signed infinity, see `orderByValue`.
       if (aHasValue)
-        return orderByValue(a, a.engine.number(b), tolerance) ?? rel;
+        return orderByValue(a, a.engine.number(b), tolerance, strict) ?? rel;
       if (rel !== undefined) return rel;
     }
 
@@ -1579,7 +1626,7 @@ function cmpWithTolerance(
         if (s === 'non-positive') return '<=';
       }
       if (Number.isNaN(b)) return undefined;
-      return orderByValue(a, a.engine.number(b), tolerance);
+      return orderByValue(a, a.engine.number(b), tolerance, strict);
     }
     return undefined;
   }
@@ -1607,7 +1654,7 @@ function cmpWithTolerance(
     const cmp = a.operatorDefinition?.eq?.(a, b);
     if (cmp === true) return '=';
 
-    return orderByValue(a, b, tolerance);
+    return orderByValue(a, b, tolerance, strict);
   }
 
   //
@@ -1633,9 +1680,9 @@ function cmpWithTolerance(
     // Against a number, the relation is the one the bounds of `a` entail.
     //
     // When both sides have a known real value, the values are compared
-    // first, with the tolerance: two values within the tolerance are equal
-    // (`isEqual` is `true`), so the bounds must not order them strictly
-    // (CM-P1-4). The sign of `x := 1e-12` gives the bound `x > 0`.
+    // first (`orderOfDoubles()`): with a tolerance, two values within the
+    // tolerance are equal (`isEqual` is `true`), so the bounds must not
+    // order them strictly (CM-P1-4).
     //
     // Otherwise, a strict relation or an equality from the bounds is final.
     // A weak one (`a ≥ b`) is returned only when the values of the symbols
@@ -1648,12 +1695,12 @@ function cmpWithTolerance(
       !Number.isNaN(aNum) && a.im === 0 && !Number.isNaN(bNum) && bx.im === 0;
     if (
       haveValues &&
-      tolerance !== 0 &&
+      !strict &&
       Number.isFinite(aNum) &&
       Number.isFinite(bNum)
     ) {
-      if (Math.abs(aNum - bNum) <= tolerance) return '=';
-      return aNum < bNum ? '<' : '>';
+      const o = orderOfDoubles(aNum, bNum, tolerance);
+      if (o !== undefined) return o;
     }
 
     let rel: '<' | '<=' | '=' | '>=' | '>' | undefined = undefined;
@@ -1671,7 +1718,7 @@ function cmpWithTolerance(
     // Fall back to the symbol's known numeric value (e.g. Pi, ExponentialE).
     // Only order if both sides are provably real. With no tolerance, or
     // with a signed infinity, see `orderByValue`.
-    if (haveValues) return orderByValue(a, bx, tolerance) ?? rel;
+    if (haveValues) return orderByValue(a, bx, tolerance, strict) ?? rel;
 
     return rel;
   }
@@ -2579,8 +2626,10 @@ function machineSpecialValue(
  *   are `'='`. An operand without a value (`x` in `x < x + 1`) is refused
  *   only when its type is complex and not real.
  * - A signed infinity is ordered against a finite value.
- * - With a tolerance, two values within the tolerance are `'='`.
- * - With no tolerance (`exactOrder`), the order is exact. An exact
+ * - Without `strict`, the order is the sign of the difference at the
+ *   working precision, and two values within `tolerance` are `'='` (with a
+ *   `tolerance` of 0, two values whose difference is 0).
+ * - With `strict` (`exactOrder`), the order is exact. An exact
  *   difference has an exact sign. Otherwise the difference is computed at
  *   the working precision together with a bound on its error
  *   (`approximate`), and the order is known only when the computed
@@ -2596,7 +2645,8 @@ function machineSpecialValue(
 function orderByValue(
   a: Expression,
   b: Expression,
-  tolerance: number
+  tolerance: number,
+  strict: boolean
 ): '<' | '=' | '>' | undefined {
   // Fast order: when the machine value of each operand is correctly rounded
   // and the two are far apart, the machine order is the exact order. This
@@ -2605,7 +2655,7 @@ function orderByValue(
   // its machine value can have the wrong sign, so it takes the bound below.
   // The exception, at machine precision only, is a special function of such
   // a value, with a bound on its error: see `orderOfMachineSpecialValues`.
-  if (tolerance === 0) {
+  if (strict) {
     const am = correctlyRoundedMachineValue(a);
     const bm = correctlyRoundedMachineValue(b);
     if (
@@ -2622,7 +2672,7 @@ function orderByValue(
   // approximation of each one. This comes before `a.sub(b)`, which can
   // round (see `orderOfApproximations`) and which costs more than the
   // approximations that `Sort` keeps for each element.
-  if (tolerance === 0 && a.unknowns.length === 0 && b.unknowns.length === 0) {
+  if (strict && a.unknowns.length === 0 && b.unknowns.length === 0) {
     const order = orderOfApproximations(a, b);
     if (order !== undefined) return order;
   }
@@ -2657,7 +2707,7 @@ function orderByValue(
     !containsInexactLiteral(b);
 
   // An exact difference has an exact sign (`(x + 1) − (x + 2)` is `−1`).
-  if (tolerance === 0 && isNumber(diff0) && diff0.isExact && !diff0.isComplex) {
+  if (strict && isNumber(diff0) && diff0.isExact && !diff0.isComplex) {
     if (diff0.isSame(0)) return '=';
     // A complex value that is not real has no order, also when the
     // imaginary parts cancel in the difference: `z < z + 1` is undecided
@@ -2671,7 +2721,7 @@ function orderByValue(
   // An operand without a value: the order comes from the difference only.
   if (a.unknowns.length > 0 || b.unknowns.length > 0) {
     if (isNonRealComplex(a) || isNonRealComplex(b)) return undefined;
-    if (tolerance === 0)
+    if (strict)
       return roundedDifference ? undefined : signOfApproximation(diff0);
     return orderFromDifference(diff0.N(), tolerance);
   }
@@ -2683,7 +2733,7 @@ function orderByValue(
   if (aN.isComplex || bN.isComplex) {
     // With no tolerance, a computed zero can be the rounding of a value that
     // is not zero, so only an EXACT zero difference is a tie.
-    if (tolerance === 0)
+    if (strict)
       return isNumber(diff0) && diff0.isExact && diff0.isSame(0)
         ? '='
         : undefined;
@@ -2692,7 +2742,8 @@ function orderByValue(
     const d = diff.numericValue;
     if (typeof d === 'number') return d === 0 ? '=' : undefined;
     if (d.isNaN) return undefined;
-    return d.isZeroWithTolerance(tolerance) ? '=' : undefined;
+    const tie = tolerance === 0 ? d.isZero : d.isZeroWithTolerance(tolerance);
+    return tie ? '=' : undefined;
   }
 
   const aInfinite = aN.isFinite === false;
@@ -2704,7 +2755,16 @@ function orderByValue(
     return sa < sb ? '<' : '>';
   }
 
-  if (tolerance > 0) return orderFromDifference(diff0.N(), tolerance);
+  // With no tolerance, the two values at the working precision are
+  // compared, as in `eq()`, so that exactly one of `<`, `=` and `>` holds.
+  if (!strict) {
+    if (tolerance === 0) {
+      const order = orderOfNumbers(aN, bN);
+      if (order === undefined) return undefined;
+      return order < 0 ? '<' : order > 0 ? '>' : '=';
+    }
+    return orderFromDifference(diff0.N(), tolerance);
+  }
   return roundedDifference ? undefined : signOfApproximation(diff0);
 }
 
@@ -3488,11 +3548,250 @@ function containsNaNLeaf(expr: Expression): boolean {
   return false;
 }
 
-function isZeroWithTolerance(expr: Expression): boolean {
-  if (!isNumber(expr)) return false;
-  const n = expr.numericValue;
-  const ce = expr.engine;
-  if (typeof n === 'number') return ce.chop(n) === 0;
-  // The exact big-decimal tolerance: see `cmpWithTolerance`.
-  return n.isZeroWithTolerance(ce._bignumTolerance);
+/**
+ * True when the value of `x` is exact, as far as its form shows: an exact
+ * number literal, an integer given as a JavaScript number, a constant
+ * (`π`), a symbol whose value is an exact number literal, or an exact
+ * constant expression (`√2 + 1`, `isExactConstantExpression()`). A float
+ * literal, a symbol whose value is a float, and an expression that is not a
+ * pure constant (`f(2)`, `x + 1`) are not: their values are compared with no
+ * tolerance (`cmp()`, `eq()`).
+ */
+function isExactOperand(x: number | Expression): boolean {
+  if (typeof x === 'number') return Number.isInteger(x);
+  if (isNumber(x)) return x.isExact;
+  if (isSymbol(x)) return isExactSymbol(x);
+  // A constant declared with a float value (`g := 9.81`) makes `g + 1` a
+  // float.
+  return isExactConstantExpression(x) && hasOnlyExactValues(x);
+}
+
+/**
+ * The exact value of `x` when it is a pure expression over symbols with
+ * exact values (`3y` with `y := 1/3` is `1`, although its value at the
+ * working precision is `0.999…`), and that value is an exact real number
+ * (`exactRealValueOf()`). `undefined` otherwise: `sin(x)` with `x := 1` has
+ * no exact real value, and it is compared as a float. An exact constant
+ * expression (`√2`, with constants only) is compared by its enclosures
+ * instead (`exactConstantOrder()`).
+ */
+function exactValueOfExpression(x: Expression): Expression | undefined {
+  if (!isFunction(x) || x.isPure !== true || x.unknowns.length > 0)
+    return undefined;
+  if (isExactConstantExpression(x) || !hasOnlyExactValues(x)) return undefined;
+  return exactRealValueOf(x);
+}
+
+/** True when every number literal of `x` is exact and every symbol of `x`
+ *  has an exact value (`isExactSymbol()`). */
+function hasOnlyExactValues(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact;
+  if (isSymbol(x)) return isExactSymbol(x);
+  if (isFunction(x)) return x.ops.every(hasOnlyExactValues);
+  return false;
+}
+
+/**
+ * True when the value of the symbol `x` is exact: a constant whose value is
+ * held until `.N()` (`π`, `e`: its value is the float of an exact number),
+ * or a symbol whose value is an exact number or an exact constant
+ * expression. A constant declared with a float value (`g := 9.81`) is not.
+ * The definition of a function expression of `isExactOperand()` is the
+ * same, see `hasOnlyExactValues()`.
+ */
+export function isExactSymbol(x: Expression): boolean {
+  if (!isSymbol(x)) return false;
+  if (x.isConstant === true && x.valueDefinition?.holdUntil === 'N')
+    return true;
+  const v = x.value;
+  if (v === undefined) return false;
+  return isNumber(v) ? v.isExact : isExactConstantExpression(v);
+}
+
+/**
+ * The order of the finite doubles `x` and `y` of two values, or `undefined`
+ * when the doubles do not decide it. With a `tolerance` above 0, two doubles
+ * within the tolerance are a tie. With a `tolerance` of 0, the doubles
+ * decide only when they are well apart: a double has 16 digits, so `π` and
+ * the 21-digit float `3.14159265358979323846` have the same one, and their
+ * order comes from their big decimals (`orderByValue()`).
+ */
+function orderOfDoubles(
+  x: number,
+  y: number,
+  tolerance: number
+): '<' | '=' | '>' | undefined {
+  if (tolerance > 0) {
+    if (Math.abs(x - y) <= tolerance) return '=';
+    return x < y ? '<' : '>';
+  }
+  const apart =
+    Math.abs(x - y) > 1e-12 * Math.max(Math.abs(x), Math.abs(y), 1e-300);
+  return apart ? (x < y ? '<' : '>') : undefined;
+}
+
+/**
+ * True when the values `x` and `y` (the operands `a` and `b` after `.N()`)
+ * are equal.
+ *
+ * - Two exact operands (`isExactOperand()`), and a caller that compares
+ *   within the tolerance (`eqWithinTolerance()`): the difference is zero
+ *   within the engine tolerance. `eq()` reaches this test for two exact
+ *   operands only when the enclosures of `exactConstantOrder()` do not
+ *   order them, and it then examines the tie again (`exactValuesDiffer()`).
+ * - Otherwise, with no tolerance: two numbers are equal when their values
+ *   at the working precision are (`valueAtWorkingPrecision()`), part by
+ *   part, and any other pair when its difference is 0.
+ */
+function equalValues(
+  x: Expression,
+  y: Expression,
+  a: Expression,
+  b: Expression,
+  withinTolerance: boolean
+): boolean {
+  const ce = x.engine;
+  if (withinTolerance || (isExactOperand(a) && isExactOperand(b))) {
+    const diff = x.sub(y).N();
+    if (!isNumber(diff)) return false;
+    const n = diff.numericValue;
+    if (typeof n === 'number') return ce.chop(n) === 0;
+    // The exact big-decimal tolerance: see `cmpWithTolerance`.
+    return n.isZeroWithTolerance(ce._bignumTolerance);
+  }
+  if (isNumber(x) && isNumber(y)) {
+    const parts = (v: Expression): [BigDecimal, BigDecimal] | undefined => {
+      const re = valueAtWorkingPrecision(v, 're');
+      const im = valueAtWorkingPrecision(v, 'im');
+      return re === undefined || im === undefined ? undefined : [re, im];
+    };
+    const p = parts(x);
+    const q = parts(y);
+    if (p !== undefined && q !== undefined)
+      return p[0].eq(q[0]) && p[1].eq(q[1]);
+  }
+  const diff = x.sub(y).N();
+  if (!isNumber(diff)) return false;
+  const n = diff.numericValue;
+  return typeof n === 'number' ? n === 0 : n.isZero;
+}
+
+/**
+ * The value of the canonical operand `x` that `eq()` compares: `x` itself
+ * when it has unknowns, its exact evaluation when it is a pure collection
+ * of exact values (`[1, 2, 3]/3` is `[1/3, 2/3, 1]`: under `.N()` its last
+ * element is `0.999…`, and the elements are compared with no tolerance),
+ * and `x.N()` otherwise.
+ */
+function valueForEquality(x: Expression): Expression {
+  if (x.unknowns.length > 0) return x;
+  // `isCollection` is false for `Multiply(1/3, [1, 2, 3])`: its type is
+  // read instead.
+  if (
+    isFunction(x) &&
+    x.type.matches('indexed_collection<any>') &&
+    x.isPure === true &&
+    hasOnlyExactValues(x)
+  )
+    return x.evaluate();
+  return x.N();
+}
+
+/**
+ * True when `x` is a number literal, a JavaScript number, or a symbol whose
+ * value is a number literal or that is a constant (`π`): an operand whose
+ * value `cmp()` reads at once, with no evaluation.
+ */
+function isLiteralValue(x: number | Expression): boolean {
+  if (typeof x === 'number') return true;
+  if (isNumber(x)) return true;
+  if (!isSymbol(x)) return false;
+  if (x.isConstant === true) return true;
+  const v = x.value;
+  return v !== undefined && isNumber(v);
+}
+
+/**
+ * The order of the values of `a` and `b` with no tolerance: each value is
+ * read at the working precision (`valueAtWorkingPrecision()`), and the two
+ * big decimals are compared exactly. So `1/10` is equal to `0.1`, `π` is
+ * equal to the float `3.14159265358979323846` at 21 digits, and `1e-12` is
+ * greater than `0`. `undefined` when the two operands are exact
+ * (`isExactOperand()`), which `cmp()` orders by their exact values, and
+ * when a value is not a finite real number.
+ */
+function orderOfValues(
+  a: number | Expression,
+  b: number | Expression
+): '<' | '=' | '>' | undefined {
+  if (isExactOperand(a) && isExactOperand(b)) return undefined;
+  const x = valueOfOperand(a);
+  if (x === undefined) return undefined;
+  const y = valueOfOperand(b);
+  if (y === undefined) return undefined;
+  const c = x.cmp(y);
+  return c < 0 ? '<' : c > 0 ? '>' : '=';
+}
+
+/**
+ * The order of the real number literals `x` and `y` with no tolerance: two
+ * exact numbers by their exact values (`exactCompareNumbers()`), any other
+ * pair by their values at the working precision
+ * (`valueAtWorkingPrecision()`), as `cmp()` orders them. `undefined` when a
+ * value is not a finite real number.
+ */
+export function orderOfNumbers(
+  x: Expression,
+  y: Expression
+): -1 | 0 | 1 | undefined {
+  if (!isNumber(x) || !isNumber(y)) return undefined;
+  if (x.isComplex || y.isComplex) return undefined;
+  if (x.isFinite !== true || y.isFinite !== true) return undefined;
+  if (x.isExact && y.isExact) return exactCompareNumbers(x, y);
+  const u = valueAtWorkingPrecision(x, 're');
+  const v = valueAtWorkingPrecision(y, 're');
+  if (u === undefined || v === undefined) return undefined;
+  const c = u.cmp(v);
+  return c < 0 ? -1 : c > 0 ? 1 : 0;
+}
+
+/** The real value of the operand `x` of `orderOfValues()` at the working
+ *  precision, or `undefined` when it is not a finite real number. */
+function valueOfOperand(x: number | Expression): BigDecimal | undefined {
+  if (typeof x === 'number')
+    return Number.isFinite(x) ? new BigDecimal(x) : undefined;
+  if (isObject(x)) return undefined;
+  let v: Expression | undefined = x;
+  if (isSymbol(x)) v = x.isConstant === true ? x.N() : x.value;
+  if (v === undefined || !isNumber(v)) return undefined;
+  if (v.isComplex || v.isFinite !== true) return undefined;
+  return valueAtWorkingPrecision(v, 're');
+}
+
+/**
+ * The real or imaginary part of the number `v`, as a big decimal: a double
+ * as it is, any other value rounded to the working precision. A double is
+ * the value of a machine computation, and it is compared as it is: at
+ * 21 digits, `0.1 + 0.2` in doubles is `0.30000000000000004`, which is not
+ * `0.3`. A big decimal (`.N()` of `π` holds a few guard digits) and an exact
+ * number are rounded to the working precision, which is the precision of
+ * their values. `undefined` for a part that is not finite.
+ */
+function valueAtWorkingPrecision(
+  v: Expression,
+  part: 're' | 'im'
+): BigDecimal | undefined {
+  if (!isNumber(v)) return undefined;
+  const nv = v.numericValue;
+  if (typeof nv === 'number') {
+    if (part === 'im') return BigDecimal.ZERO;
+    return Number.isFinite(nv) ? new BigDecimal(nv) : undefined;
+  }
+  const prec = Math.max(v.engine.precision, MACHINE_PRECISION);
+  const big = part === 're' ? nv.bignumReAt(prec) : nv.bignumImAt(prec);
+  if (big === undefined) {
+    const d = part === 're' ? nv.re : nv.im;
+    return Number.isFinite(d) ? new BigDecimal(d) : undefined;
+  }
+  return big.isFinite() ? big.toPrecision(Math.floor(prec)) : undefined;
 }

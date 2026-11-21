@@ -32,6 +32,7 @@ import {
   eq,
   eqIdentical,
   isExactConstantExpression,
+  isExactSymbol,
 } from '../boxed-expression/compare.js';
 import { holdsDoubles } from '../boxed-expression/machine-broadcast.js';
 import {
@@ -945,6 +946,15 @@ function decideEqual(
 ): Expression | undefined {
   if (!Array.isArray(chain)) return chain;
   const ops = chain;
+  // Two collections under `.N()`: their exact cells (`exactCellComparison()`).
+  const exact = exactCellComparison(
+    ce,
+    'Equal',
+    ops,
+    numericApproximation,
+    rawOps
+  );
+  if (exact !== undefined) return exact;
   // Element-wise broadcast when an operand evaluated to a collection, so a
   // named list behaves like a literal one: `x^2+y^2 = R^2` broadcasts to a
   // list of `Equal`s, matching the inequality operators (which already
@@ -955,7 +965,7 @@ function decideEqual(
   // same two collections re-enters this handler (`skipBroadcastForVectorOps`
   // enforces the same rule for the engine-level broadcast).
   if (broadcastableComparisonOperands(ops)) {
-    const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
+    const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation, rawOps);
     if (bc) return bc;
   }
   // An operand that is not a collection value yet (`X` declared
@@ -1063,12 +1073,21 @@ function decideNotEqual(
     if (pairs.some((p) => isSymbol(p, 'False'))) return ce.False;
     return ce._fn('And', pairs).evaluate({ numericApproximation });
   }
+  // Under `.N()`, the exact cells of a collection operand, as for `Equal`.
+  const exact = exactCellComparison(
+    ce,
+    'NotEqual',
+    ops,
+    numericApproximation,
+    rawOps
+  );
+  if (exact !== undefined) return exact;
   // Broadcast over a list operand that only appeared after evaluation (e.g.
   // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
   // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
   // a scalar boolean and would otherwise recurse).
   if (broadcastableComparisonOperands(ops)) {
-    const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation);
+    const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation, rawOps);
     if (bc) return bc;
   }
   // As for `Equal`: an unresolved collection operand comes first.
@@ -1160,7 +1179,7 @@ function decideLess(
   const ops = chain;
   // Element-wise broadcast when an operand evaluated to a collection (e.g.
   // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
-  const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
+  const bc = broadcastComparison(ce, 'Less', ops, numericApproximation, rawOps);
   if (bc) return bc;
   // An undefined operand makes the comparison `False`: `NaN` is unordered
   // (IEEE), and an absent operand reads as `NaN` (`readComparisonAbsence`).
@@ -1249,7 +1268,7 @@ function decideLessEqual(
   if (!Array.isArray(chain)) return chain;
   const ops = chain;
   // Element-wise broadcast when an operand evaluated to a collection.
-  const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation);
+  const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation, rawOps);
   if (bc) return bc;
   // An undefined operand (`NaN`, or an absent value read as `NaN`) makes
   // the comparison `False`. See `Less`.
@@ -1390,7 +1409,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('Equal', comparisonResultType, ops, engine.tolerance),
+        comparisonType('Equal', comparisonResultType, ops),
         engine._typeResolver
       ),
 
@@ -1645,7 +1664,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('NotEqual', comparisonResultType, ops, engine.tolerance),
+        comparisonType('NotEqual', comparisonResultType, ops),
         engine._typeResolver
       ),
 
@@ -1725,7 +1744,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('Less', () => 'boolean', ops, engine.tolerance),
+        comparisonType('Less', () => 'boolean', ops),
         engine._typeResolver
       ),
 
@@ -1754,7 +1773,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   Greater: {
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('Greater', () => 'boolean', ops, engine.tolerance),
+        comparisonType('Greater', () => 'boolean', ops),
         engine._typeResolver
       ),
     description: 'Greater-than comparison (strictly greater than).',
@@ -1797,7 +1816,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('LessEqual', () => 'boolean', ops, engine.tolerance),
+        comparisonType('LessEqual', () => 'boolean', ops),
         engine._typeResolver
       ),
 
@@ -1826,7 +1845,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
   GreaterEqual: {
     type: (ops, { engine }) =>
       BoxedType.forResult(
-        comparisonType('GreaterEqual', () => 'boolean', ops, engine.tolerance),
+        comparisonType('GreaterEqual', () => 'boolean', ops),
         engine._typeResolver
       ),
     description: 'Greater-than-or-equal comparison (greater than or equal to).',
@@ -2092,8 +2111,7 @@ type ComparisonHead =
  */
 function comparisonValueType(
   head: ComparisonHead,
-  ops: ReadonlyArray<OperandDescriptor>,
-  tolerance: number
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type | undefined {
   if (ops.length !== 2) return undefined;
   const [a, b] = ops;
@@ -2108,18 +2126,14 @@ function comparisonValueType(
   if (ia === undefined || ib === undefined) return undefined;
   const c = compareIntervals(ia, ib);
   if (c === undefined) return undefined;
-  // The evaluated comparison is TOLERANCE-based: `Less(0.3, 0.3 + 1e-12)`
-  // evaluates `False` and `Equal` of the pair evaluates `True`, because
-  // two numbers closer than `engine.tolerance` count as equal. A claim
-  // that the operands are SEPARATED (`Less` is `true`, `Equal` is
-  // `false`) therefore needs the gap between the two ranges to exceed
-  // the tolerance in force when the type is derived; the non-strict
-  // claims (`LessEqual` is `true` when `a` ends where `b` starts) agree
-  // with the tolerant evaluation as they stand.
-  const tol = tolerance;
+  // The evaluated comparison has no tolerance: `Less(0.3, 0.3 + 1e-12)`
+  // evaluates `True`. The bounds of a range are doubles, and two values
+  // can have one double (`π` and a 21-digit float of it), so a claim that
+  // the operands are SEPARATED (`Less` is `true`, `Equal` is `false`)
+  // needs a gap between the two ranges.
   const eq = c === 'equal';
-  const lt = c === 'less' && ib.lo - ia.hi > tol;
-  const gt = c === 'greater' && ia.lo - ib.hi > tol;
+  const lt = c === 'less' && ib.lo - ia.hi > 0;
+  const gt = c === 'greater' && ia.lo - ib.hi > 0;
   const le = eq || c === 'less' || c === 'lessOrEqual';
   const ge = eq || c === 'greater' || c === 'greaterOrEqual';
   switch (head) {
@@ -2140,9 +2154,8 @@ function comparisonValueType(
 
 /** Equality of two operands decided WITHOUT intervals: the same symbol
  * (NaN-free by type), or two number literals with the SAME value. Two
- * literals with different values are left to the interval proof, which
- * applies the tolerance gate (`comparisonValueType`): `0.3` and
- * `0.3 + 1e-12` are different values but evaluate as equal. */
+ * literals with different values are left to the interval proof
+ * (`comparisonValueType`). */
 function literalEquality(
   a: OperandDescriptor,
   b: OperandDescriptor
@@ -2166,8 +2179,7 @@ function literalEquality(
 function comparisonType(
   head: ComparisonHead,
   base: (ops: ReadonlyArray<OperandDescriptor>) => Type,
-  ops: ReadonlyArray<OperandDescriptor>,
-  tolerance: number
+  ops: ReadonlyArray<OperandDescriptor>
 ): Type {
   if (ops.some(mayBeAbsentOperand)) return 'boolean';
   const t = base(ops);
@@ -2178,7 +2190,7 @@ function comparisonType(
   // `False`: no VALUE type is read from its type. With
   // `xs: list<integer<1..10>>`, `At(xs, i) > 0` is `boolean`, not `true`.
   if (ops.some(descriptorMayHoldRestriction)) return 'boolean';
-  return comparisonValueType(head, ops, tolerance) ?? 'boolean';
+  return comparisonValueType(head, ops) ?? 'boolean';
 }
 
 /**
@@ -2589,7 +2601,8 @@ function broadcastComparison(
   ce: ComputeEngine,
   operator: string,
   ops: ReadonlyArray<Expression>,
-  numericApproximation: boolean | undefined
+  numericApproximation: boolean | undefined,
+  rawOps?: ReadonlyArray<Expression>
 ): Expression | undefined {
   // Tuples are excluded, matching the pre-evaluation broadcast (step 2 in
   // boxed-function): a `Tuple` is an atomic value, never mapped over. Without
@@ -2627,7 +2640,64 @@ function broadcastComparison(
     if (mismatch) return mismatch;
     return undefined;
   }
+  const exact = exactCellComparison(
+    ce,
+    operator,
+    ops,
+    numericApproximation,
+    rawOps
+  );
+  if (exact !== undefined) return exact;
   return ce._fn(operator, ops).evaluate({ numericApproximation });
+}
+
+/**
+ * Under `.N()`, a comparison with a collection operand whose operands are
+ * written with exact numbers and constants only (`hasOnlyExactNumbers()`) is
+ * decided on its exact cells, as a pair of exact operands is
+ * (`exactPairAtNearTie()`): at 21 digits, the third cell of `Range(1, 3)/3`
+ * under `.N()` is `0.999999999999999999999`, and its exact value is `1`, so
+ * `Range(1, 3)/3 < 1` is `[True, True, False]`, and `Range(1, 3)/3` is equal
+ * to `[1/3, 2/3, 1]`. A comparison has no tolerance, so the float cells would
+ * give another answer. `undefined` when the rule does not apply.
+ */
+function exactCellComparison(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined,
+  rawOps: ReadonlyArray<Expression> | undefined
+): Expression | undefined {
+  if (numericApproximation !== true || rawOps === undefined) return undefined;
+  if (rawOps.length !== ops.length) return undefined;
+  if (!ops.some((op) => op.isCollection)) return undefined;
+  if (!rawOps.every(hasOnlyExactNumbers)) return undefined;
+  const result = ce._fn(operator, [...rawOps]).evaluate();
+  // Only a decided answer: an exact comparison that stays undecided leaves
+  // the float cells to decide.
+  return isDecided(result) ? result : undefined;
+}
+
+/** True when `x` is `True` or `False`, or a finite collection of them
+ *  (a list, or a lazy collection of more than 100 elements). */
+function isDecided(x: Expression): boolean {
+  if (isSymbol(x, 'True') || isSymbol(x, 'False')) return true;
+  if (isFunction(x, 'List')) return x.ops.every(isDecided);
+  if (x.isCollection !== true || x.isFiniteCollection !== true) return false;
+  for (const e of x.each()) if (!isDecided(e)) return false;
+  return true;
+}
+
+/** True when `x` is pure, every number literal of `x` is exact and every
+ *  symbol of `x` has an exact value (`π`, `L := [1, 2, 3]`,
+ *  `isExactSymbol()`): its value is exact, and evaluating it again gives the
+ *  same value. A call that draws a random number is not pure. */
+function hasOnlyExactNumbers(x: Expression): boolean {
+  if (x.isPure !== true) return false;
+  if (isNumber(x)) return x.isExact;
+  if (isSymbol(x)) return isExactSymbol(x);
+  if (isFunction(x)) return x.ops.every(hasOnlyExactNumbers);
+  return false;
 }
 
 /**

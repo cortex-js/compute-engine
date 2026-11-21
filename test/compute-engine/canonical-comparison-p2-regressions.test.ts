@@ -169,19 +169,27 @@ describe('#15: isSame primitive overload matches the boxed path', () => {
 // #16 — collection isEqual is tolerance-aware element-wise; the three
 //       comparison methods are deliberate and documented around NaN.
 //
-describe('#16: tensor/list isEqual uses element-wise tolerance', () => {
+describe('#16: tensor/list isEqual compares the elements exactly', () => {
   const ce = new ComputeEngine();
 
-  test('near-equal float vectors are isEqual within tolerance', () => {
+  test('float vectors that differ by 1e-11 are not isEqual', () => {
     expect(
       ce.box(['List', 1, 2, 3]).isEqual(ce.box(['List', 1, 2, 3.00000000001]))
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  test('near-equal float matrices are isEqual within tolerance', () => {
+  test('float matrices that differ by 1e-11 are not isEqual', () => {
     const a = ce.box(['List', ['List', 1, 2], ['List', 3, 4]]);
     const b = ce.box(['List', ['List', 1, 2], ['List', 3, 4.00000000001]]);
-    expect(a.isEqual(b)).toBe(true);
+    expect(a.isEqual(b)).toBe(false);
+  });
+
+  test('equal values in two spellings are isEqual', () => {
+    expect(
+      ce
+        .box(['List', 0.5, 2])
+        .isEqual(ce.box(['List', ['Divide', 1, 2], 2]))
+    ).toBe(true);
   });
 
   test('distinct vectors are not equal', () => {

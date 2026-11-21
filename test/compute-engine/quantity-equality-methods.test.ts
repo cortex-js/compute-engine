@@ -415,16 +415,16 @@ describe('EXACT AND FLOAT MAGNITUDES', () => {
     expect(relation('Less', a, b)).toBe('True');
   });
 
-  // A float magnitude compares within the engine tolerance
-  test('float magnitude within the tolerance', () => {
+  // A float magnitude is compared as it is; only `.is()` uses the tolerance
+  test('float magnitude 10⁻¹¹ above', () => {
     const a = q(1, 'km');
     const b = q(1000.00000000001, 'm');
-    expect(a.isEqual(b)).toBe(true);
-    expect(b.isEqual(a)).toBe(true);
-    expect(a.isLess(b)).toBe(false);
-    expect(relation('Equal', a, b)).toBe('True');
-    expect(relation('NotEqual', a, b)).toBe('False');
-    expect(relation('Less', a, b)).toBe('False');
+    expect(a.isEqual(b)).toBe(false);
+    expect(b.isEqual(a)).toBe(false);
+    expect(a.isLess(b)).toBe(true);
+    expect(relation('Equal', a, b)).toBe('False');
+    expect(relation('NotEqual', a, b)).toBe('True');
+    expect(relation('Less', a, b)).toBe('True');
     expect(a.is(b)).toBe(true);
   });
 
@@ -631,14 +631,14 @@ describe('QUANTITY COMPARISON WITH NO ROUNDING', () => {
     expect(evalStr(['Less', c, 5000000000])).toBe('True');
   });
 
-  // Two big decimal floats are equal within the tolerance (`isEqual`), and
-  // the extrema use the same order: a tie keeps the first operand
+  // Two big decimals with 21 significant digits that differ in the last digit
+  // are different, and the extrema use the same order.
   test('big decimal magnitudes', () => {
     const a = Q({ num: '1.00000000000000000001' }, 'm');
     const b = Q({ num: '1.00000000000000000002' }, 'm');
-    expect(evalStr(['Min', b, a])).toBe(evalStr(b));
-    expect(evalStr(['Max', a, b])).toBe(evalStr(a));
-    expect(ce.box(a).evaluate().isEqual(ce.box(b).evaluate())).toBe(true);
+    expect(evalStr(['Min', b, a])).toBe(evalStr(a));
+    expect(evalStr(['Max', a, b])).toBe(evalStr(b));
+    expect(ce.box(a).evaluate().isEqual(ce.box(b).evaluate())).toBe(false);
   });
 
   // Under `.N()`, the exact magnitude decides, as for two numbers

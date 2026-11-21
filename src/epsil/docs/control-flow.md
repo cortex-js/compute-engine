@@ -700,9 +700,9 @@ match x {
 }
 ```
 
-Both endpoints are included, and they are compared with the same tolerance
-`match` uses for every other number leaf, so a subject a hair outside an
-endpoint still selects the case. Only a number **on the real line** matches: a
+Both endpoints are included, and they are compared exactly, as `match`
+compares every other number leaf: a subject a hair outside an endpoint does
+not select the case. Only a number **on the real line** matches: a
 symbol, a collection, a string, a complex number with a nonzero imaginary part
 and `NaN` all fall through to the next case.
 

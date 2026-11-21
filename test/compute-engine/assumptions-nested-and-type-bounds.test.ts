@@ -290,11 +290,10 @@ describe('COMPARISONS READ THE TYPE BOUNDS', () => {
   });
 });
 
-describe('A VALUE WITHIN THE TOLERANCE IS NOT ORDERED STRICTLY', () => {
-  // Two values that differ by less than the engine tolerance are equal for
-  // `isEqual`, so `isGreater`/`isLess` must not order them strictly. The
-  // sign of such a value (`positive` for `1e-12`) must not override the
-  // tolerance test. An exact value is compared exactly, with no tolerance.
+describe('A TINY FLOAT VALUE IS ORDERED STRICTLY', () => {
+  // A float is compared as it is, with no tolerance: `1e-12` is greater
+  // than 0, and `-1e-12` is less than 0. The sign of such a value
+  // (`positive` for `1e-12`) agrees with the order.
   const verdicts = (ce: ComputeEngine, v: ReturnType<ComputeEngine['box']>) => {
     const z = ce.Zero;
     return {
@@ -308,39 +307,49 @@ describe('A VALUE WITHIN THE TOLERANCE IS NOT ORDERED STRICTLY', () => {
       zeroEq: z.isEqual(v),
     };
   };
-  const tie = {
-    gt: false,
+  const positive = {
+    gt: true,
     ge: true,
     lt: false,
-    le: true,
-    eq: true,
-    zeroLess: false,
+    le: false,
+    eq: false,
+    zeroLess: true,
     zeroGreater: false,
-    zeroEq: true,
+    zeroEq: false,
+  };
+  const negative = {
+    gt: false,
+    ge: false,
+    lt: true,
+    le: true,
+    eq: false,
+    zeroLess: false,
+    zeroGreater: true,
+    zeroEq: false,
   };
 
   test('a symbol with a tiny float value', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 1e-12);
     ce.assign('y', -1e-12);
-    expect(verdicts(ce, ce.symbol('x'))).toEqual(tie);
-    expect(verdicts(ce, ce.symbol('y'))).toEqual(tie);
-    expect(ce.box(['Less', 0, 'x']).evaluate().symbol).toBe('False');
-    expect(ce.box(['Greater', 'x', 0]).evaluate().symbol).toBe('False');
-    expect(ce.box(['Equal', 'x', 0]).evaluate().symbol).toBe('True');
+    expect(verdicts(ce, ce.symbol('x'))).toEqual(positive);
+    expect(verdicts(ce, ce.symbol('y'))).toEqual(negative);
+    expect(ce.box(['Less', 0, 'x']).evaluate().symbol).toBe('True');
+    expect(ce.box(['Greater', 'x', 0]).evaluate().symbol).toBe('True');
+    expect(ce.box(['Equal', 'x', 0]).evaluate().symbol).toBe('False');
   });
 
   test('a symbol with a tiny float value and a positive type', () => {
     const ce = new ComputeEngine();
     ce.declare('x', { type: 'real<0<..>', value: 1e-12 });
-    expect(verdicts(ce, ce.symbol('x'))).toEqual(tie);
+    expect(verdicts(ce, ce.symbol('x'))).toEqual(positive);
   });
 
   test('a tiny float literal answers as a symbol with that value', () => {
     const ce = new ComputeEngine();
-    expect(verdicts(ce, ce.number(1e-12))).toEqual(tie);
-    expect(verdicts(ce, ce.number(-1e-12))).toEqual(tie);
-    expect(ce.box(['Less', 0, 1e-12]).evaluate().symbol).toBe('False');
+    expect(verdicts(ce, ce.number(1e-12))).toEqual(positive);
+    expect(verdicts(ce, ce.number(-1e-12))).toEqual(negative);
+    expect(ce.box(['Less', 0, 1e-12]).evaluate().symbol).toBe('True');
   });
 
   test('an exact tiny value is ordered exactly', () => {

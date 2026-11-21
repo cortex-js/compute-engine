@@ -14,7 +14,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 // precision writes the module-global `BigDecimal.precision`.
 //
 
-// π·(1 − 2.7e-12): below N(Pi) by 8.4e-12, inside the default tolerance.
+// π·(1 − 2.7e-12): below N(Pi) by 8.4e-12, inside the default tolerance, and
+// different from N(Pi) for the comparison operators.
 const R = [
   'Multiply',
   'Pi',
@@ -30,10 +31,10 @@ describe('tolerance default', () => {
     expect(ce.tolerance).toBe(1e-10);
   });
 
-  test('the default compares two 40-digit values 8.4e-12 apart as equal', () => {
+  test('the comparison operators do not use it: two 40-digit values 8.4e-12 apart differ', () => {
     const ce = new ComputeEngine({ precision: 40 });
-    expect(ce.box(['Equal', ['N', 'Pi'], R]).evaluate().json).toBe('True');
-    expect(ce.box(['LessEqual', ['N', 'Pi'], R]).evaluate().json).toBe('True');
+    expect(ce.box(['Equal', ['N', 'Pi'], R]).evaluate().json).toBe('False');
+    expect(ce.box(['LessEqual', ['N', 'Pi'], R]).evaluate().json).toBe('False');
   });
 });
 
@@ -80,8 +81,9 @@ describe("tolerance 'auto'", () => {
     // The float getter cannot hold 1e-398: it is the smallest positive float.
     expect(ce.tolerance).toBe(Number.MIN_VALUE);
     expect(ce._bignumTolerance.toString()).toBe('1e-398');
-    // Two 400-digit values 1e-399 apart are equal; 1e-397 apart they are not.
-    const near = ['Add', ['N', 'Pi'], ['Power', 10, -399]];
+    // The comparison operators round to 400 digits and compare exactly: a
+    // difference of 1e-401 is below the rounding, 1e-397 is not.
+    const near = ['Add', ['N', 'Pi'], ['Power', 10, -401]];
     const far = ['Add', ['N', 'Pi'], ['Power', 10, -397]];
     expect(ce.box(['Equal', ['N', 'Pi'], near]).evaluate().json).toBe('True');
     expect(ce.box(['Equal', ['N', 'Pi'], far]).evaluate().json).toBe('False');

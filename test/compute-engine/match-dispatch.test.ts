@@ -187,18 +187,30 @@ describe('MATCH ladder — segmentation preserves first-match-wins', () => {
 // ─── Faithfulness of the fast tiers vs the tier-3 reference ──────────────────
 
 describe('MATCH ladder — number equality follows the matcher (isEqual)', () => {
-  it('an exact 1/3 matches a float pattern within tolerance (as tier 3 does)', () => {
+  it('an exact 1/3 matches a decimal pattern that equals it at the working precision (as tier 3 does)', () => {
+    // This engine works at 100 digits: the decimal has 101 digits.
     const expr: MathJsonExpression = [
       'Match',
       ['Rational', 1, 3],
-      ['MatchCase', 0.3333333333333333, { str: 'hit' }],
+      ['MatchCase', { num: '0.' + '3'.repeat(101) }, { str: 'hit' }],
       ['MatchCase', '_', { str: 'miss' }],
     ];
     expect(ladder(expr)).toBe('"hit"');
     expect(ladder(expr)).toBe(reference(expr));
   });
 
-  it('a near-integer float subject dispatches to an integer constant via the fallback scan', () => {
+  it('an exact 1/3 does not match the nearest double (as tier 3 does)', () => {
+    const expr: MathJsonExpression = [
+      'Match',
+      ['Rational', 1, 3],
+      ['MatchCase', 0.3333333333333333, { str: 'hit' }],
+      ['MatchCase', '_', { str: 'miss' }],
+    ];
+    expect(ladder(expr)).toBe('"miss"');
+    expect(ladder(expr)).toBe(reference(expr));
+  });
+
+  it('a near-integer float subject does not dispatch to the integer constant via the fallback scan', () => {
     const expr: MathJsonExpression = [
       'Match',
       2.0000000001,
@@ -206,7 +218,7 @@ describe('MATCH ladder — number equality follows the matcher (isEqual)', () =>
       ['MatchCase', 2, { str: 'b' }],
       ['MatchCase', '_', { str: 'no' }],
     ];
-    expect(ladder(expr)).toBe('"b"');
+    expect(ladder(expr)).toBe('"no"');
     expect(ladder(expr)).toBe(reference(expr));
   });
 });

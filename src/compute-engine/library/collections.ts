@@ -13596,15 +13596,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // of indeterminate numeric type.
         if (typeMembership(target, 'number') === false) return false;
 
-        // Concrete numeric target: decide by direct numeric comparison.
-        // This is more than a fast path: it refutes non-real targets
-        // (`im !== 0`), and it uses exact IEEE endpoint comparisons rather
-        // than the tolerance-based symbolic comparisons below. (The
-        // symbolic comparisons used to mishandle infinite endpoints, e.g.
-        // `-∞ > -∞` — fixed in `cmp()` — but the exact endpoint semantics
-        // still differ from the tolerance-based path.)
+        // Concrete numeric target: decide by direct numeric comparison of
+        // the doubles. This is more than a fast path: it refutes non-real
+        // targets (`im !== 0`). A target whose double is the double of an
+        // endpoint is compared with the endpoint as written, below: the
+        // double of `2π` is below `2π`.
         const t = target.re;
-        if (!Number.isNaN(t)) {
+        // An infinite target is not a real number: the test below refutes it.
+        const atEndpoint =
+          Number.isFinite(t) && (t === int.start || t === int.end);
+        if (!Number.isNaN(t) && (!atEndpoint || target.im !== 0)) {
           if (target.im !== 0) return false;
           // An infinite endpoint marks unbounded EXTENT; it does not name a
           // last element. An `Interval` is a set of real numbers and ±∞ is
@@ -13616,13 +13617,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return intervalContains(int, t);
         }
 
+        // The endpoints as written, not their doubles: `2π` is above the
+        // double of `2π`. A known set (`RealNumbers`) has its doubles only.
+        const [lo, hi] = intervalEndpointExpressions(expr) ?? [
+          int.start,
+          int.end,
+        ];
         const aboveLower = int.openStart
-          ? target.isGreater(int.start)
-          : target.isGreaterEqual(int.start);
+          ? target.isGreater(lo)
+          : target.isGreaterEqual(lo);
         if (aboveLower === false) return false;
         const belowUpper = int.openEnd
-          ? target.isLess(int.end)
-          : target.isLessEqual(int.end);
+          ? target.isLess(hi)
+          : target.isLessEqual(hi);
         if (belowUpper === false) return false;
         // A target that is provably within both bounds is comparable,
         // hence real: membership is entailed.
@@ -24459,6 +24466,17 @@ function literalSetContains(
     }
   }
   return indeterminate ? undefined : false;
+}
+
+/** The endpoints of an `Interval` expression as written, without their
+ *  `Open` or `Closed` marker, or `undefined` for another expression. */
+function intervalEndpointExpressions(
+  expr: Expression
+): [Expression, Expression] | undefined {
+  if (!isFunction(expr, 'Interval') || expr.nops !== 2) return undefined;
+  const unwrap = (x: Expression): Expression =>
+    isFunction(x, 'Open') || isFunction(x, 'Closed') ? x.op1 : x;
+  return [unwrap(expr.op1), unwrap(expr.op2)];
 }
 
 /**

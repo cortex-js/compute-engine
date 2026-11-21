@@ -298,6 +298,11 @@ sort([3, 1, 4, 1, 5], (a, b) => a > b)
 
 ## Watch Out For
 
+- **Comparisons have no tolerance**: `==`, `<`, `<=`, `>`, `>=` and `!=`
+  compare two numbers exactly, at the working precision, so `1e-11 > 1e-12`
+  is `true` and `sqrt(3.5) * sqrt(3.5) == 3.5` is `false`. Compare two
+  computed values with `abs(a - b) < eps`, or remove a small part with
+  `chop`.
 - **`a..b` counts up, `Range(a, b)` counts toward `b`**: `1..n` is empty when
   `n` is 0, so `for k in 1..n { … }` then runs zero times. The call
   `Range(1, n)` with no step is `[1, 0]` when `n` is 0. To count down, write

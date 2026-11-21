@@ -1,8 +1,5 @@
 import type { Expression } from '../global-types.js';
-import {
-  exactCompareNumbers,
-  isExactRealLiteral,
-} from '../boxed-expression/constraint-subject.js';
+import { isExactRealLiteral } from '../boxed-expression/constraint-subject.js';
 import {
   isAbsentSymbol,
   isCharacter,
@@ -14,6 +11,7 @@ import {
 import {
   exactConstantOrder,
   isExactConstantExpression,
+  orderOfNumbers,
 } from '../boxed-expression/compare.js';
 import { isMeasurement } from './measurement-arithmetic.js';
 import { type DecodedUnit, decodedUnit, describeUnit } from './units.js';
@@ -438,9 +436,9 @@ function orderByConversion(
 }
 
 /**
- * The order of the two real values `u` and `v`, with no rounding: two number
- * literals by their values (`exactCompareNumbers()`, an exact number or the
- * full representation of a float), two exact values of which one is an
+ * The order of the two real values `u` and `v`, with no tolerance: two
+ * number literals by their values (`orderOfNumbers()`: two exact numbers
+ * exactly, a float at the working precision), two exact values of which one is an
  * exact constant expression by enclosures at a raised precision
  * (`exactConstantOrder()`). Two values within `tolerance` of each other are
  * a tie: `v − tolerance ≤ u ≤ v + tolerance`, with `tolerance` read as the
@@ -464,9 +462,11 @@ function orderWithin(
   return within ? 0 : order;
 }
 
-/** See `orderWithin()`. */
+/** See `orderWithin()`. Two exact numbers are ordered by their exact
+ *  values; a float beside a number is ordered at the working precision, as
+ *  two numbers without units are (`orderOfNumbers()`). */
 function orderOf(u: Expression, v: Expression): -1 | 0 | 1 | undefined {
-  if (isNumber(u) && isNumber(v)) return exactCompareNumbers(u, v);
+  if (isNumber(u) && isNumber(v)) return orderOfNumbers(u, v);
   if (isExactMagnitude(u) && isExactMagnitude(v))
     return exactConstantOrder(u, v);
   return undefined;

@@ -9,7 +9,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // so `Max(1e-12, 2e-12)` answered `1e-12`. The compiled `Math.max` was
 // already exact, so the interpreter and the compiled code disagreed.
 //
-// Equality (`isEqual`, `Equal`) keeps the tolerance: the controls below.
+// Equality (`isEqual`, `Equal`) has no tolerance either (CE-1603): the
+// controls below.
 //
 // The expected values are hand calculations: 2e-12 > 1e-12, and
 // 1/3 = 0.333333333333… > 0.33333333333.
@@ -192,10 +193,12 @@ describe('SIGNED ZERO', () => {
   });
 });
 
-describe('EQUALITY KEEPS THE ENGINE TOLERANCE', () => {
+describe('EQUALITY OF TWO FLOATS IS EXACT', () => {
   test('isEqual and Equal', () => {
-    expect(ce.box(1e-12).isEqual(ce.box(2e-12))).toBe(true);
-    expect(ce.box(['Equal', 1e-12, 2e-12]).evaluate().symbol).toBe('True');
+    expect(ce.box(1e-12).isEqual(ce.box(2e-12))).toBe(false);
+    expect(ce.box(['Equal', 1e-12, 2e-12]).evaluate().symbol).toBe('False');
+    expect(ce.box(['Less', 1e-12, 2e-12]).evaluate().symbol).toBe('True');
+    expect(ce.box(2e-12).isEqual(ce.box(2e-12))).toBe(true);
   });
 });
 

@@ -1888,9 +1888,12 @@ export interface IComputeEngine {
   set precision(p: number | 'machine' | 'auto');
   get precision(): number;
 
-  /** The absolute tolerance of the comparisons that involve a float, and of
-   * `chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
-   * recomputed at each precision change. */
+  /** The absolute tolerance of `chop()`, of `.is()`, of `ApproxEqual` and of
+   * the numeric algorithms (the residual test of `Solve`). The comparison
+   * operators and the methods `.isEqual()`, `.isLess()` and the others do
+   * not use it: they compare two numbers exactly, at the working precision.
+   * A number is kept as set; `'auto'` is `10^(-precision + 2)`, recomputed
+   * at each precision change. */
   set tolerance(v: number | 'auto');
   get tolerance(): number;
 

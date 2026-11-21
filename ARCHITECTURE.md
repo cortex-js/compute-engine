@@ -1003,7 +1003,8 @@ Two limits of the rule:
   `10^−(working + 50)` times its largest term is taken to be 0
   (`(√2 + √3)² − 5 − 2√6 + 10⁻¹⁵⁰` has `Sign` `0` under `.N()`). An enclosure
   that is still WIDE at the limit decides nothing, and the caller keeps its
-  previous answer (the tolerance comparison, or the float). An exact order
+  previous answer (the comparison of the values at the working precision, or
+  the float). An exact order
   (tolerance 0, used by `Max`, sorting and `Abs`) never accepts "equal at the
   limit". The bound is sound only for operators whose kernels `approximate()`
   covers; any other operator gives no bound, and the result stays undecided.
@@ -1059,18 +1060,30 @@ for two different tolerances:
      `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until 2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
-   `Equal`, the relational operators, `.is()`, and the `Chop` operator. It
-   applies only when a float is involved: two EXACT numbers (integers,
-   rationals, rational multiples of a square root) are compared exactly, with no
-   tolerance, by the operators `Equal`, `NotEqual`, `Less`, `LessEqual`,
-   `Greater`, `GreaterEqual` and by the methods `.isEqual()`, `.isLess()`,
-   `.isLessEqual()`, `.isGreater()`, `.isGreaterEqual()` (user decision
-   2026-09-30). Before, `Equal` used the tolerance while `Less` sometimes did
-   not, so `1/2 − 10⁻³⁰` and `1/2` were both "equal" and "less than". Exactly
-   one of `<`, `=`, `>` now holds for two exact numbers, as in Mathematica
-   (`1/3 == 3333333333333/10^13` is `False` there). A float stands for a value
-   known only to its precision, so `1/10 = 0.1` is `True`. `.is()` keeps the
-   tolerance for exact numbers too: it is the loose check for external callers.
+   `.is()`, `ApproxEqual`, the `Chop` operator and the numeric algorithms
+   (`Solve` accepts a computed root whose residual is within it,
+   `eqWithinTolerance()` in `boxed-expression/compare.ts`). The comparisons do
+   not use it (user decision 2026-11-20, CE-1603): the operators `Equal`,
+   `NotEqual`, `Less`, `LessEqual`, `Greater`, `GreaterEqual` and the methods
+   `.isEqual()`, `.isLess()`, `.isLessEqual()`, `.isGreater()`,
+   `.isGreaterEqual()` compare two numbers exactly. Two EXACT numbers
+   (integers, rationals, rational multiples of a square root, exact constant
+   expressions) are compared by their exact values. A number beside a float
+   is compared at the working precision: a double as it is, a big decimal or
+   an exact number rounded to the working precision (`valueAtWorkingPrecision()`
+   in `boxed-expression/compare.ts`), so `1/10 = 0.1` and
+   `π = 3.14159265358979323846` (21 digits) are `True`, `π > 3.141592653589793`
+   (the double) is `True`, and `1e-12 > 0` is `True`. A pure expression over
+   symbols with exact values is compared by its exact value when it has one
+   (`3y` with `y := 1/3` is equal to `1`; `exactValueOfExpression()`), and a
+   pure collection of exact values by its exact elements. Exactly one of `<`,
+   `=`, `>` holds for two real numbers. An exact constant expression whose
+   enclosures do not separate it from another exact value at the precision
+   limit is equal to it (`ln 6 = ln 2 + ln 3`), see "Rounding functions" above.
+   Under `.N()`, a comparison of exact operands near a tie is decided by their
+   exact values (`exactPairAtNearTie()` in `library/relational-operator.ts`),
+   also cell by cell for a list. `.is()` keeps the tolerance for exact numbers
+   too: it is the loose check for external callers.
 
 The invariant for complex values:
 
@@ -1333,16 +1346,16 @@ semantics:
   does. When an explicit `tolerance` is given, always compares numerically.
 
 - **`.isEqual(v)`** — Arithmetic equality (the `Equal` / `=` tier). Cheap:
-  evaluates the operands, compares structurally, then compares the difference
-  against zero within the engine tolerance when neither side has unknowns. No
-  expand, no simplify, no sampling. Returns `undefined` when undecided — in
-  particular for an identity in free variables (`sin²x + cos²x` vs `1`), which
-  is `.isIdenticallyEqual()`'s job, not this one's. **Two EXACT numbers
-  (integers, rationals, rational·√r) are compared exactly, with no tolerance** —
-  by `.isEqual()`/`.isLess()`/… and by the `Equal`/`Less`/… operators alike
-  (user-decided 2026-09-30): `1/3` vs `3333333333333/10^13` is not equal. The
-  tolerance applies only when a float is involved (`1/10 = 0.1` is `True`).
-  `.is()` keeps the tolerance.
+  evaluates the operands, compares structurally, then compares the values
+  when neither side has unknowns. No expand, no simplify, no sampling.
+  Returns `undefined` when undecided — in particular for an identity in free
+  variables (`sin²x + cos²x` vs `1`), which is `.isIdenticallyEqual()`'s job,
+  not this one's. **The comparison has no tolerance**, in
+  `.isEqual()`/`.isLess()`/… and in the `Equal`/`Less`/… operators alike
+  (user decisions 2026-09-30 and 2026-11-20, CE-1603): two exact numbers are
+  compared exactly (`1/3` vs `3333333333333/10^13` is not equal), and a float
+  is compared with the other value at the working precision (see "Comparison
+  tolerance" above). `.is()` keeps the tolerance.
 
 - **`.isIdenticallyEqual(v)`** — Full identity in all free variables (the
   `IdenticallyEqual` / `\equiv` tier). Everything `.isEqual()` does, plus the

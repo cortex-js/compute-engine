@@ -431,10 +431,10 @@ describe('A CONSTANT AGAINST THE NEAREST FLOAT', () => {
     expect(evaluate(['Max', x, ['Add', 1, 'Pi']]).toString()).toBe('1 + pi');
   });
 
-  test('the relational predicates keep the engine tolerance', () => {
-    // With the default tolerance, `π` and its nearest float are equal.
-    expect(ce.box('Pi').isEqual(PI)).toBe(true);
-    expect(ce.box('Pi').isGreater(PI)).toBe(false);
+  test('the relational predicates compare a float as it is', () => {
+    // A float is used as it is: the nearest float is below `π`.
+    expect(ce.box('Pi').isEqual(PI)).toBe(false);
+    expect(ce.box('Pi').isGreater(PI)).toBe(true);
   });
 });
 

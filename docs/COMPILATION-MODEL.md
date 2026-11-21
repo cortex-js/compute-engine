@@ -1525,17 +1525,16 @@ lengths (`P, Q: list<tuple<real, real>>`): `P + Q` at lengths that differ
 gives a list as long as `P` on `javascript`, or throws a `TypeError` when `Q`
 is the shorter list.
 
-A second value carve-out is ruled (compiled-equality ruling, 2026-09-09):
-compiled `Equal` and `NotEqual` on numeric operands are EXACT, the IEEE 754
-comparison (`===` on JavaScript, `==` on the shader targets),
-with no tolerance. The interpreter compares two numbers within
-`engine.tolerance`, so with `x, y: real`, `x + y = 0.3` evaluates to `True`
-at `x = 0.1`, `y = 0.2`, and the compiled code gives `false` (a closed
-`0.1 + 0.2 = 0.3` is evaluated by the interpreter when the code is
-generated, and gives `true`). The compiled lanes serve plot kernels, where every comparison runs
-per sample and a tolerance test costs a subtraction, an absolute value and a
-compare each time, and where the exact answer is the one the reference
-graphing calculators give. The same rule covers the element-wise `Equal`
+Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
+comparison (`===` on JavaScript, `==` on the shader targets), with no
+tolerance, as in the interpreter, which compares two numbers exactly at its
+working precision (CE-1603). The values differ only by the precision of the
+target: with `x, y: real`, `x + y = 0.3` evaluates to `True` at `x = 0.1`,
+`y = 0.2`, because the interpreter adds the decimals at 21 digits, and the
+compiled code gives `false`, because the double sum is
+`0.30000000000000004` (a closed `0.1 + 0.2 = 0.3` is evaluated by the
+interpreter when the code is generated, and gives `true`). The same rule
+covers the element-wise `Equal`
 of a list (`L = 1` with `L: list<real>` compares each element with
 `===`), and the `Equal` of two lists or of two tuples of real numbers,
 which is one boolean as in the interpreter (the same length, and each element equal to the
@@ -1908,8 +1907,9 @@ that double (an integer, `1/4`), and otherwise `entire` (`Gamma(0.3)`, a
 quadrature, `1/3`: no double is the value); a boolean is `'true'` or
 `'false'` only when every number it is computed from is exact (an input
 counts as the double it was given), and otherwise `'maybe'`, since the
-interpreter compares with a tolerance (`Gamma(0.3) < 2.991568987687591` reads
-as `False`); and an absent value is `empty`. Over an input wider than a point,
+interpreter compares the values at its working precision, not their doubles
+(`Gamma(0.3) < 2.991568987687591` is `True` at 21 digits); and an absent
+value is `empty`. Over an input wider than a point,
 and for an expression that draws a random number, a number is `entire` and
 a boolean `'maybe'`.
 
@@ -2856,9 +2856,9 @@ that may be an enclosure: its body would be lowered by the rules of a real
    compiled code has no identity information, so `_IA.equal(c, c)` and
    `_IA.lessEqual(c, c)` are `'maybe'` for an enclosure that is not a
    point.
-2. **No engine tolerance.** The interpreter compares two float points
-   within the engine tolerance; the compiled comparisons compare doubles
-   exactly, as the `javascript` target does for numbers. Elsewhere the
+2. **Doubles, not the working precision.** The interpreter compares two
+   points exactly at its working precision; the compiled comparisons compare
+   doubles exactly, as the `javascript` target does for numbers. Elsewhere the
    compiled answer is the target's three-valued one: `'maybe'` where the
    interpreter stays unevaluated, `'true'` for the touching `LessEqual`
    that the interpreter answers `True` too.

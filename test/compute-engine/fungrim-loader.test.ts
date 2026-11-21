@@ -2394,11 +2394,13 @@ describe('identities with an angle operator apply only in radians', () => {
       const simplified = expr.simplify();
       // The radian identity is not applied. A constant application may
       // still fold to its value in degrees (`Argument(i)` is `90`), which
-      // the numeric comparison below accepts.
+      // the numeric comparison below accepts. The values are compared within
+      // the tolerance (`.is()`): `Argument(i).N()` in degrees has a wrong
+      // last digit (CE-1635).
       expect(simplified.toString()).not.toBe(expected);
-      expect(
-        simplified.subs(sample()).N().isEqual(expr.subs(sample()).N())
-      ).toBe(true);
+      expect(simplified.subs(sample()).N().is(expr.subs(sample()).N())).toBe(
+        true
+      );
     }
   );
 
