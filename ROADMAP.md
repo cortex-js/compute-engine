@@ -1031,7 +1031,7 @@ third is the one delivered to Tycho.
 
 ### CE-1570. List the statements of an Epsil source at which a debug run can pause
 
-**Status:** waits for user (approval); capability, M.
+**Status:** ready; capability, M. Approved 2026-11-20.
 
 A debugger that sets a breakpoint needs to know whether the statement will
 ever call `beforeStatement` (`EpsilDebugHooks`, `src/compute-engine/types-debug.ts`).
@@ -1049,7 +1049,7 @@ breakpoint.
 
 ### CE-1571. Signature help: an active parameter for each signature
 
-**Status:** waits for user (approval); capability, S.
+**Status:** ready; capability, S. Approved 2026-11-20.
 
 `epsilSignatureHelp()` (`src/epsil/signature-help.ts`) returns one
 `activeParameter`, the one of `activeSignature`. For a function with several
