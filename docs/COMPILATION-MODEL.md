@@ -1584,8 +1584,14 @@ interpreter gives `[True, False]`; the compiled cell is a value computed from
 an absent operand, which the caveats of compiled code leave unspecified. A
 branch condition compiles to the same code as the comparison. A condition
 whose static type admits a value that is not a boolean declines (R5), and so
-does a condition that is a list (an element-wise selection). `Boole` and
-`KroneckerDelta` have no lowering and decline.
+does a condition that is a list (an element-wise selection). `Boole` of a
+boolean gives 1 or 0: with `x: real`, `Boole(x < 1)` compiles to
+`((_.x < 1) ? 1 : 0)` on JavaScript and to `((x < 1.0) ? 1.0 : 0.0)` on GLSL,
+and `Boole` of a list of booleans gives a list. `KroneckerDelta(a, b)` of two
+scalars compiles as `Boole(Equal(a, b))`, and `KroneckerDelta(n)` as
+`Boole(Equal(n, 0))`. A list operand of `KroneckerDelta`, three operands or
+more, and both operators on `interval-js` decline. The rule is in
+`src/compute-engine/compilation/ir/README.md`, "The contracts".
 
 A consumer that needs tolerant equality evaluates through the interpreter, or
 asks for a compile option; none exists today.
