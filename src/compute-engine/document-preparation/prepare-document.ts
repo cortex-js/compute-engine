@@ -1,6 +1,8 @@
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { widenAll } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 import type {
   BoxedValueDefinition,
   Expression,
@@ -33,9 +35,14 @@ import { makePreparedValuePass } from './value-pass.js';
 import { isLibraryDefinition } from '../boxed-expression/implicit-variable-rule.js';
 import {
   isContinuationOperand,
+  isDictionary,
   isFunction,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import {
+  functionLiteralParameterNames,
+  optionalParameterTarget,
+} from '../boxed-expression/function-literal.js';
 import { isLibraryOperator } from '../library-shadowing.js';
 
 type Head = { name: string; params: readonly string[] };
@@ -59,6 +66,42 @@ export interface PreparedDocumentDefinition {
   readonly body: Expression;
   readonly references: readonly string[];
   readonly fieldParameters?: readonly string[];
+  /**
+   * Advisory argument types of a function row, one entry per parameter: the
+   * join of the static types of the arguments at that position in every call
+   * of the function from the bodies of the revision's definition rows (value
+   * rows and function rows that are not errors; formula rows and the rows
+   * that read a field axis are not canonicalized by prepare and give no
+   * evidence). Each argument type is widened: a number becomes
+   * `real`, or `number` when it may be complex, and a list, a set or a tuple
+   * keeps its shape and its lengths (`[1, 2, 3]` gives `vector<real^3>`). The
+   * join is the type join of the engine, so a point at one call and a list
+   * of points at another give their union.
+   *
+   * An entry is `undefined` when the function has no call, when the type of
+   * one call's argument at that position is `never` or an error, or is or
+   * has a part (an element, a field) that is `unknown` or `any`, or,
+   * for every entry, when one call has another number of arguments or a
+   * spread argument. A parameter passed on has the type that its function
+   * infers for it, usually open: in `g(q) = d(q)`, `q` is
+   * `collection<any> | tuple`, so the entry of `d` is `undefined`. A call of
+   * a function from its own body is a call site too. Every entry is
+   * `undefined` when the function's name is read as a value, not called
+   * (`Map(L, d)`, `f(d)`). The operands of `Hold` and `Quote` are not read.
+   * A parameter of a function literal with the function's name shadows it;
+   * a local of a `Block` with that name does not, so a call of such a local
+   * counts as a call of the function. The variable of a binder with the
+   * function's name (`Sum(h, Limits(h, 1, 3))`) does not shadow it either:
+   * it reads as the function used as a value, and every entry is
+   * `undefined`.
+   *
+   * The field is advisory. It does not change the function's contract: no
+   * call is refused, and no row is an error, because of it. A host may use
+   * it to declare the inputs of a root compile or to classify a row. Code
+   * that the host compiles with these types is correct only for calls whose
+   * arguments have those types.
+   */
+  readonly callSiteTypes?: readonly (string | undefined)[];
 }
 
 export interface PreparedDocumentValuePass {
@@ -313,6 +356,37 @@ function returnArms(body: Expression): (Expression | undefined)[] {
 }
 
 /**
+ * The base arms of a parsed function body: its return arms, read as
+ * `returnArms` reads a canonical body, that name no member of the recursive
+ * component anywhere, as an operator or as a symbol. An arm with no
+ * expression is not a base arm.
+ */
+function baseArms(
+  body: MathJsonExpression,
+  component: ReadonlySet<string>
+): MathJsonExpression[] {
+  const mentions = (expr: MathJsonExpression): boolean => {
+    if (component.has(symbol(expr) ?? operator(expr))) return true;
+    if (Array.isArray(expr) && typeof expr[0] !== 'string' && mentions(expr[0]))
+      return true;
+    return operands(expr).some(mentions);
+  };
+  const arms: MathJsonExpression[] = [];
+  const pending = [body];
+  while (pending.length > 0) {
+    const arm = pending.pop()!;
+    const head = operator(arm);
+    const args = operands(arm);
+    if (head === 'Block' && args.length === 1) pending.push(args[0]);
+    else if (head === 'Which')
+      for (let i = 1; i < args.length; i += 2) pending.push(args[i]);
+    else if (head === 'If') pending.push(...args.slice(1, 3));
+    else if (!mentions(arm)) arms.push(arm);
+  }
+  return arms;
+}
+
+/**
  * Whether evaluating `expr` certainly makes a call that `isCertainCall`
  * accepts. Only the operands of a strict operator are followed: a call under
  * any other operator, a conditional, a short-circuit or a binder may not run.
@@ -370,6 +444,171 @@ function isJoinOperandOnly(body: Expression, name: string): boolean {
     return true;
   };
   return visit(body) && read;
+}
+
+/**
+ * The type of an argument at a call site, widened as `callSiteTypes`
+ * documents: a literal or a ranged number becomes `real`, or `number` when
+ * it may be complex, a string or a boolean value becomes its kind, and a
+ * list, a set or a tuple keeps its shape and its lengths.
+ */
+function widenArgumentType(ce: IComputeEngine, t: Type): Type {
+  if (typeof t === 'object') {
+    if (t.kind === 'list' || t.kind === 'set')
+      return { ...t, elements: widenArgumentType(ce, t.elements) };
+    if (t.kind === 'tuple')
+      return {
+        ...t,
+        elements: t.elements.map((e) => ({
+          ...e,
+          type: widenArgumentType(ce, e.type),
+        })),
+      };
+    if (t.kind === 'union')
+      return { ...t, types: t.types.map((x) => widenArgumentType(ce, x)) };
+  }
+  const bt = ce.type(t);
+  if (bt.matches('real')) return 'real';
+  if (bt.matches('number')) return 'number';
+  if (bt.matches('string') || bt.matches('character')) return 'string';
+  if (bt.matches('boolean')) return 'boolean';
+  return t;
+}
+
+/**
+ * Whether `t` is `unknown` or `any`, or has such a part: an element, a
+ * member, a field or a signature slot. A transparent alias counts as open,
+ * since it can name such a type; a nominal reference does not.
+ */
+function hasOpenPart(t: Type): boolean {
+  if (typeof t === 'string') return t === 'unknown' || t === 'any';
+  switch (t.kind) {
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return hasOpenPart(t.elements);
+    case 'dictionary':
+      return hasOpenPart(t.values);
+    case 'tuple':
+      return t.elements.some((e) => hasOpenPart(e.type));
+    case 'record':
+    case 'object':
+      return Object.values(t.elements).some(hasOpenPart);
+    case 'union':
+    case 'intersection':
+      return t.types.some(hasOpenPart);
+    case 'negation':
+      return hasOpenPart(t.type);
+    case 'reference':
+      return t.alias === true;
+    case 'signature':
+      return (
+        hasOpenPart(t.result) ||
+        [
+          ...(t.args ?? []),
+          ...(t.optArgs ?? []),
+          ...(t.variadicArg ? [t.variadicArg] : []),
+        ].some((e) => hasOpenPart(e.type))
+      );
+    default:
+      return false;
+  }
+}
+
+/**
+ * The `callSiteTypes` of each function in `arities`, from one walk over the
+ * canonical `bodies`. A call of a function under a `Function` literal one of
+ * whose parameters has the function's name is not a call of it. A function
+ * whose name is read as a value (`Map(L, d)`, `f(d)`) has no evidence. The
+ * operands of `Hold` and `Quote` are not walked.
+ */
+function callSiteTypes(
+  ce: IComputeEngine,
+  bodies: readonly Expression[],
+  arities: ReadonlyMap<string, number>
+): Map<string, (string | undefined)[]> {
+  // `null` marks a position, or a whole function, with no usable evidence.
+  const evidence = new Map<string, (Type[] | null)[] | null>();
+  for (const [name, arity] of arities)
+    evidence.set(
+      name,
+      Array.from({ length: arity }, () => [])
+    );
+  const pending: { expr: Expression; shadowed: ReadonlySet<string> }[] =
+    bodies.map((expr) => ({ expr, shadowed: new Set<string>() }));
+  while (pending.length > 0) {
+    const { expr, shadowed } = pending.pop()!;
+    if (isDictionary(expr)) {
+      for (const value of expr.values) pending.push({ expr: value, shadowed });
+      continue;
+    }
+    if (isSymbol(expr)) {
+      // A function read as a value can be called with any argument.
+      if (arities.has(expr.symbol) && !shadowed.has(expr.symbol))
+        evidence.set(expr.symbol, null);
+      continue;
+    }
+    if (!isFunction(expr)) continue;
+    const library = isLibraryOperator(expr);
+    if (library && (expr.operator === 'Hold' || expr.operator === 'Quote'))
+      continue;
+    let inner = shadowed;
+    let operands = expr.ops;
+    if (library && expr.operator === 'Function') {
+      // The parameters are bindings, not reads.
+      operands = expr.ops.slice(0, 1);
+      const params = expr.ops
+        .slice(1)
+        .flatMap((op) =>
+          functionLiteralParameterNames(optionalParameterTarget(op))
+        );
+      if (params.some((name) => arities.has(name)))
+        inner = new Set([...shadowed, ...params]);
+    }
+    const slots = shadowed.has(expr.operator)
+      ? undefined
+      : evidence.get(expr.operator);
+    if (slots === null) {
+      // The function already has a call with no usable argument list.
+    } else if (slots !== undefined) {
+      if (
+        expr.nops !== slots.length ||
+        expr.ops.some(
+          (arg) => arg.operator === 'Spread' || arg.operator === 'Sequence'
+        )
+      )
+        evidence.set(expr.operator, null);
+      else
+        expr.ops.forEach((arg, i) => {
+          const types = slots[i];
+          if (types === null) return;
+          const type = arg.type.type;
+          if (
+            hasOpenPart(type) ||
+            type === 'never' ||
+            arg.type.matches('error')
+          )
+            slots[i] = null;
+          else types.push(widenArgumentType(ce, type));
+        });
+    }
+    for (const op of operands) pending.push({ expr: op, shadowed: inner });
+  }
+  const result = new Map<string, (string | undefined)[]>();
+  for (const [name, arity] of arities) {
+    const slots = evidence.get(name)!;
+    result.set(
+      name,
+      Array.from({ length: arity }, (_, i) => {
+        const types = slots?.[i];
+        if (!types || types.length === 0) return undefined;
+        return ce.type(widenAll(types) as Type).toString();
+      })
+    );
+  }
+  return result;
 }
 
 export function prepareDocument(
@@ -713,7 +952,11 @@ export function prepareDocument(
           references.set(name, all);
           return all.filter((ref) => declarations.has(ref));
         },
-        (group, cyclic) => {
+        function settle(
+          group: readonly string[],
+          cyclic: boolean,
+          guesses?: ReadonlyMap<string, Type>
+        ): void {
           for (const name of group) {
             const invalid = references.get(name)!.find((ref) => {
               const declaration = declarations.get(ref);
@@ -860,6 +1103,57 @@ export function prepareDocument(
               );
             });
           }
+          // A cyclic member with no stated result is first checked against
+          // a guessed result: the join of the types of its base arms, the
+          // return arms that name no member of the component, widened as a
+          // local is (`widenLocalType`: a numeric type becomes `number`, a
+          // list loses its lengths). A guess that is or has a part that is
+          // `unknown` or `any` (`list<unknown>` from a base arm `[]`) is not
+          // made. The strict check of the bodies below then confirms the
+          // guesses inductively. When any check refuses the guessed
+          // component, it is settled again as if there were no guesses
+          // (`unknown`, or `list<any>` for a list recursion), so a guess
+          // never refuses a call in the component, or a member, that is
+          // accepted without it. A later row can still be refused when a
+          // type it states is disjoint from a confirmed result, but only
+          // when the program is already ill-typed.
+          if (cyclic && guesses === undefined) {
+            const component = new Set(group);
+            const guessed = new Map<string, Type>();
+            for (const name of group) {
+              const { row, head } = declarations.get(name)!;
+              if (row.resultType !== undefined) continue;
+              const arms = baseArms(parsed.get(row.id)!, component).map(
+                (arm) =>
+                  ce.box(['Function', arm, ...formals(head.params, row, true)])
+                    .type.type
+              );
+              if (
+                arms.length === 0 ||
+                arms.some(
+                  (sig) => typeof sig !== 'object' || sig.kind !== 'signature'
+                )
+              )
+                continue;
+              const joined = widenAll(
+                arms.map((sig) => (sig as { result: Type }).result)
+              );
+              const guess = widenLocalType(ce, joined as Type);
+              if (hasOpenPart(guess) || ce.type(guess).matches('error'))
+                continue;
+              guessed.set(name, guess);
+            }
+            if (guessed.size > 0) return settle(group, cyclic, guessed);
+          }
+          const reject = (failed: string, invalid: Expression) => {
+            if (guesses === undefined || guesses.size === 0)
+              return rejectComponent(group, failed, invalid);
+            // A raw delete, as `rejectComponent` does: the scope being
+            // prepared is not a counted frame, so no holder count is kept,
+            // and `undeclare` would send engine-wide redefine events.
+            for (const name of group) scope.bindings.delete(name);
+            return settle(group, cyclic, new Map());
+          };
           const checked = group.map(
             (
               name
@@ -887,7 +1181,12 @@ export function prepareDocument(
               ') ' +
               effects +
               ' -> ' +
-              (row.resultType ?? (inferListResult ? 'list<any>' : 'unknown'));
+              (row.resultType ??
+                (guesses?.has(name)
+                  ? typeToString(guesses.get(name)!)
+                  : inferListResult
+                    ? 'list<any>'
+                    : 'unknown'));
             member.contract = ce.type(signature);
             if (cyclic) {
               const binding = installClosedType(name, member.contract, true);
@@ -906,7 +1205,7 @@ export function prepareDocument(
               contract !== undefined
             );
             let body = ce.box(['Function', rhs, ...parameters]);
-            if (!body.isValid) return rejectComponent(group, name, body);
+            if (!body.isValid) return reject(name, body);
             // Read-only position evidence can guide a stable input contract
             // without committing the draft to a specific tuple width.
             // A parameter read only as an operand of a join is any value: the
@@ -938,7 +1237,7 @@ export function prepareDocument(
               );
               if (changed) {
                 body = ce.box(['Function', rhs, ...normalized]);
-                if (!body.isValid) return rejectComponent(group, name, body);
+                if (!body.isValid) return reject(name, body);
               }
             }
             const actual = body.type;
@@ -972,7 +1271,7 @@ export function prepareDocument(
               if (row.effects !== undefined) {
                 const stated = ce.type(withArrowEffects(sig, effects ?? []));
                 if (!actual.matches(stated))
-                  return rejectComponent(group, name, mismatch(stated));
+                  return reject(name, mismatch(stated));
               }
               const result =
                 row.resultType === undefined
@@ -993,7 +1292,7 @@ export function prepareDocument(
                 row.resultType !== undefined &&
                 ce.type(sig.result).isDisjointFrom(result)
               )
-                return rejectComponent(group, name, mismatch(contract));
+                return reject(name, mismatch(contract));
               partial = true;
             }
             if (contract !== undefined && !partial) {
@@ -1013,8 +1312,7 @@ export function prepareDocument(
                     ) || ce.type(sig.result).isDisjointFrom(stated.result)
                   : !actual.matches(contract);
               if (refused)
-                return rejectComponent(
-                  group,
+                return reject(
                   name,
                   ce.error(
                     name +
@@ -1043,8 +1341,7 @@ export function prepareDocument(
             }
             const provisional = provisionalLiteral(body);
             if (provisional !== undefined)
-              return rejectComponent(
-                group,
+              return reject(
                 name,
                 ce.error(
                   name +
@@ -1087,8 +1384,7 @@ export function prepareDocument(
               );
             });
             if (!hasBaseArm)
-              return rejectComponent(
-                group,
+              return reject(
                 group[0],
                 ce.error('Recursive definition with no base case: ' + group[0])
               );
@@ -1138,6 +1434,20 @@ export function prepareDocument(
           cursors.size === 0,
         'Document preparation lost a row'
       );
+      const callSites = callSiteTypes(
+        ce,
+        [...declarations]
+          .filter(
+            ([name, { row }]) =>
+              !rowErrors.has(row.id) && !fieldParameters.has(name)
+          )
+          .map(([name]) => bodies.get(name)!),
+        new Map(
+          [...declarations]
+            .filter(([, { row }]) => row.role === 'function')
+            .map(([name, { head }]) => [name, head.params.length])
+        )
+      );
       const preparedDefinitions: PreparedDocumentDefinition[] = [
         ...declarations,
       ].map(([name, item]) => ({
@@ -1150,6 +1460,9 @@ export function prepareDocument(
         references: references.get(name)!,
         ...(fieldParameters.has(name)
           ? { fieldParameters: fieldParameters.get(name)! }
+          : {}),
+        ...(item.row.role === 'function'
+          ? { callSiteTypes: callSites.get(name)! }
           : {}),
       }));
       function isWritableRow(name: string): boolean {

@@ -1223,3 +1223,328 @@ describe('a parameter read only as a join operand', () => {
     environment.dispose();
   });
 });
+
+describe('the result of a recursive function with no stated result', () => {
+  type Json = Parameters<DocumentSyntax['normalize']>[0];
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  afterAll(() => {
+    imports.dispose();
+    environment.dispose();
+  });
+  // Each row is a function definition given as the JSON of its body.
+  const prepare = (defs: Record<string, [string[], Json]>) =>
+    imports.prepare(
+      Object.keys(defs).map((id) => ({ id, latex: id })),
+      {
+        split: () => ({ head: 'f', body: '' }),
+        recognize: (row) => ({
+          role: 'function',
+          head: { name: row.id, params: defs[row.id][0] },
+          bodyJson: defs[row.id][1],
+        }),
+        normalize: (raw) => raw,
+      }
+    );
+  const typeOf = (revision: { scope: InspectableScope }, name: string) =>
+    ce.expr(name, { scope: revision.scope }).type.toString();
+  const call = (revision: { scope: InspectableScope }, expr: Json) =>
+    JSON.stringify(ce.expr(expr, { scope: revision.scope }).evaluate().json);
+  const step = (name: string, ...args: Json[]): Json => [
+    name,
+    ['Subtract', args[0], 1],
+    ...args.slice(1),
+  ];
+  const cases = (k: string, base: Json, recursive: Json): Json => [
+    'Which',
+    ['LessEqual', k, 0],
+    base,
+    'True',
+    recursive,
+  ];
+
+  test('is the join of its base arms, widened, when the body confirms it', () => {
+    const revision = prepare({
+      r: [
+        ['n'],
+        cases('n', ['Tuple', 0, 0], ['Add', step('r', 'n'), ['Tuple', 1, 1]]),
+      ],
+      s: [
+        ['n'],
+        cases('n', ['Tuple', 0, 0], ['Add', step('s', 'n'), ['Tuple', 'n', 1]]),
+      ],
+      C: [
+        ['k', 'q'],
+        cases(
+          'k',
+          ['Tuple', 0, 0],
+          ['Add', step('C', 'k', 'q'), ['Tuple', 'q', 'q']]
+        ),
+      ],
+      z: [['n'], cases('n', 1, ['Multiply', step('z', 'n'), 'ImaginaryUnit'])],
+      f: [['n'], cases('n', 1, ['Multiply', 'n', step('f', 'n')])],
+      M: [
+        ['n'],
+        cases('n', ['List', 0], ['Join', step('M', 'n'), ['List', 'n']]),
+      ],
+      e: [['n'], cases('n', 1, step('o', 'n'))],
+      o: [['n'], cases('n', 0, step('e', 'n'))],
+    });
+    expect(revision.rowErrors.size).toBe(0);
+    expect(typeOf(revision, 'r')).toBe(
+      '(unknown) any -> tuple<number, number>'
+    );
+    expect(call(revision, ['r', 3])).toBe('["Tuple",3,3]');
+    expect(typeOf(revision, 's')).toBe(
+      '(unknown) any -> tuple<number, number>'
+    );
+    expect(call(revision, ['s', 3])).toBe('["Tuple",6,3]');
+    expect(typeOf(revision, 'C')).toBe(
+      '(unknown, unknown) any -> tuple<number, number>'
+    );
+    expect(call(revision, ['C', 2, 3])).toBe('["Tuple",6,6]');
+    expect(typeOf(revision, 'z')).toBe('(unknown) any -> number');
+    expect(call(revision, ['z', 3])).toBe('["Complex",0,-1]');
+    expect(typeOf(revision, 'f')).toBe('(unknown) any -> number');
+    expect(call(revision, ['f', 3])).toBe('6');
+    expect(typeOf(revision, 'M')).toBe('(unknown) any -> list<number>');
+    expect(call(revision, ['M', 2])).toBe('["List",0,1,2]');
+    expect(typeOf(revision, 'e')).toBe('(unknown) any -> number');
+    expect(typeOf(revision, 'o')).toBe('(unknown) any -> number');
+    expect(call(revision, ['e', 3])).toBe('0');
+    revision.dispose();
+  });
+
+  test('stays open when no guess is made or the body refuses it', () => {
+    const revision = prepare({
+      // The base arm is a parameter: the guess would be `unknown`.
+      P: [
+        ['k', 'q'],
+        cases('k', 'q', ['Add', step('P', 'k', 'q'), ['Tuple', 1, 2]]),
+      ],
+      // `(0, 0) + q` with `q` unknown is not a `tuple<number, number>`.
+      B: [
+        ['k', 'q'],
+        cases('k', ['Tuple', 0, 0], ['Add', step('B', 'k', 'q'), 'q']),
+      ],
+      // A list recursion keeps `list<any>`: `[]` gives the open guess
+      // `list<unknown>`.
+      L: [
+        ['n'],
+        cases('n', ['List'], ['ListJoin', step('L', 'n'), ['List', 'n']]),
+      ],
+    });
+    expect(revision.rowErrors.size).toBe(0);
+    expect(typeOf(revision, 'P')).toBe('(unknown, unknown) any -> unknown');
+    expect(call(revision, ['P', 3, ['Tuple', 1, 1]])).toBe('["Tuple",4,7]');
+    expect(typeOf(revision, 'B')).toBe('(unknown, unknown) any -> unknown');
+    expect(call(revision, ['B', 2, ['Tuple', 1, 3]])).toBe('["Tuple",2,6]');
+    expect(typeOf(revision, 'L')).toBe('(unknown) any -> list<any>');
+    expect(call(revision, ['L', 3])).toBe('["List",1,2,3]');
+    revision.dispose();
+  });
+});
+
+describe('call-site types', () => {
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  afterAll(() => {
+    imports.dispose();
+    environment.dispose();
+  });
+  const callSiteTypes = (input: DocumentSourceRow[]) => {
+    const revision = imports.prepare(input, latexSyntax(ce));
+    expect(revision.rowErrors.size).toBe(0);
+    const result = Object.fromEntries(
+      revision.definitions.map((d) => [d.name, d.callSiteTypes])
+    );
+    revision.dispose();
+    return result;
+  };
+  const d = { id: 'd', latex: 'd(p)=\\sqrt{p.x^2+p.y^2}' };
+  const h = { id: 'h', latex: 'h(v)=v' };
+
+  test('join the widened argument types of every call', () => {
+    const points = [
+      d,
+      { id: 'A', latex: 'A=d((3,4))' },
+      { id: 'B', latex: 'B=d((1,2))' },
+    ];
+    expect(callSiteTypes(points)).toEqual({
+      d: ['tuple<real, real>'],
+      A: undefined,
+      B: undefined,
+    });
+    // A point and a list of points give their union.
+    expect(
+      callSiteTypes([...points, { id: 'C', latex: 'C=d([(3,4),(6,8)])' }]).d
+    ).toEqual(['list<tuple<real, real>^2> | tuple<real, real>']);
+    // A list keeps its length; two lengths give the type join.
+    expect(callSiteTypes([h, { id: 'A', latex: 'A=h([1,2,3])' }]).h).toEqual([
+      'vector<real^3>',
+    ]);
+    expect(
+      callSiteTypes([
+        h,
+        { id: 'A', latex: 'A=h([1,2,3])' },
+        { id: 'B', latex: 'B=h([1,2])' },
+      ]).h
+    ).toEqual(['vector<real^2> | vector<real^3>']);
+    // A number that may be complex is a `number`.
+    expect(
+      callSiteTypes([
+        h,
+        { id: 'A', latex: 'A=h(2.5)' },
+        { id: 'B', latex: 'B=h(i)' },
+      ]).h
+    ).toEqual(['number']);
+  });
+
+  test('is undefined with no call or with an open argument', () => {
+    expect(callSiteTypes([d]).d).toEqual([undefined]);
+    // `q` is inferred as `collection<any> | tuple`, which has an open part.
+    expect(
+      callSiteTypes([
+        d,
+        { id: 'g', latex: 'g(q)=d(q)' },
+        { id: 'E', latex: 'E=g((1,1))' },
+      ])
+    ).toEqual({ d: [undefined], g: ['tuple<real, real>'], E: undefined });
+  });
+
+  test('read a typed formal as shadowing the function of its name', () => {
+    // The call `f(1)` in `g` calls the formal `f`, not the row `f`.
+    expect(
+      callSiteTypes([
+        { id: 'f', latex: 'f(x)=x' },
+        { id: 'A', latex: 'A=f((1,2))' },
+        {
+          id: 'g',
+          latex: 'g(f)=f(1)',
+          formalTypes: { f: '(real) -> real' },
+        },
+      ]).f
+    ).toEqual(['tuple<real, real>']);
+  });
+
+  describe('of rows given as JSON', () => {
+    type Json = Parameters<DocumentSyntax['normalize']>[0];
+    const h: [string[], Json] = [['v'], 'v'];
+    // A row with parameters is a function, a row without is a value.
+    const jsonCallSiteTypes = (defs: Record<string, [string[], Json]>) => {
+      const revision = imports.prepare(
+        Object.keys(defs).map((id) => ({ id, latex: id })),
+        {
+          split: () => ({ head: 'f', body: '' }),
+          recognize: (row) => ({
+            role: defs[row.id][0].length > 0 ? 'function' : 'value',
+            head: { name: row.id, params: defs[row.id][0] },
+            bodyJson: defs[row.id][1],
+          }),
+          normalize: (raw) => raw,
+        }
+      );
+      expect(revision.rowErrors.size).toBe(0);
+      const result = revision.definitions.find(
+        (d) => d.name === 'h'
+      )!.callSiteTypes;
+      revision.dispose();
+      return result;
+    };
+    const point: [string[], Json] = [[], ['h', ['Tuple', 1, 2]]];
+
+    test('are undefined when the function is read as a value', () => {
+      expect(
+        jsonCallSiteTypes({ h, k: [['u'], 'u'], A: point, B: [[], ['k', 'h']] })
+      ).toEqual([undefined]);
+    });
+
+    test('read the operands of a document function named Hold', () => {
+      // `Hold` is a row of the document, not the library operator: `h` is
+      // read as a value.
+      expect(
+        jsonCallSiteTypes({
+          h,
+          Hold: [['y'], 'y'],
+          A: point,
+          B: [[], ['Hold', 'h']],
+        })
+      ).toEqual([undefined]);
+    });
+
+    test('skip the operands of Hold', () => {
+      expect(
+        jsonCallSiteTypes({ h, A: point, B: [[], ['Hold', ['h', 'x']]] })
+      ).toEqual(['tuple<real, real>']);
+    });
+
+    test('read the values of a dictionary', () => {
+      expect(
+        jsonCallSiteTypes({
+          h,
+          A: [[], ['Dictionary', ['KeyValuePair', "'k'", ['h', 1]]]],
+        })
+      ).toEqual(['real']);
+    });
+
+    test('are undefined for a record with an open field named name', () => {
+      const record = (value: Json): [string[], Json] => [
+        [],
+        ['h', ['Dictionary', ['KeyValuePair', "'name'", value]]],
+      ];
+      expect(jsonCallSiteTypes({ h, A: record('x') })).toEqual([undefined]);
+      expect(jsonCallSiteTypes({ h, A: record(1) })).toEqual([
+        'record{name: integer}',
+      ]);
+    });
+  });
+
+  test('are undefined for an argument of a transparent alias type', () => {
+    // The registries are read-only while a Document is live: an engine of
+    // its own declares the alias first.
+    const engine = new ComputeEngine();
+    engine.declareType('OpenRows', 'list<any>', { alias: true });
+    const env = createDocumentEnvironment(engine, () => {});
+    const imp = env.createImports(() => {});
+    const bodies: Record<string, [string[], unknown]> = {
+      h: [['v'], 'v'],
+      g: [['q'], ['h', 'q']],
+    };
+    const revision = imp.prepare(
+      [
+        { id: 'h', latex: 'h' },
+        { id: 'g', latex: 'g', formalTypes: { q: 'OpenRows' } },
+      ],
+      {
+        split: () => ({ head: 'f', body: '' }),
+        recognize: (row) => ({
+          role: 'function',
+          head: { name: row.id, params: bodies[row.id][0] },
+          bodyJson: bodies[row.id][1] as never,
+        }),
+        normalize: (raw) => raw,
+      }
+    );
+    expect(revision.rowErrors.size).toBe(0);
+    expect(
+      revision.definitions.find((d) => d.name === 'h')!.callSiteTypes
+    ).toEqual([undefined]);
+    revision.dispose();
+    imp.dispose();
+    env.dispose();
+  });
+
+  test('do not change the contract of the function', () => {
+    const revision = imports.prepare(
+      [h, { id: 'A', latex: 'A=h(2)' }],
+      latexSyntax(ce)
+    );
+    expect(revision.definitions[0].callSiteTypes).toEqual(['real']);
+    expect(
+      ce.parse('h("ab")', { scope: revision.scope }).evaluate().json
+    ).toEqual("'ab'");
+    revision.dispose();
+  });
+});
