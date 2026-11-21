@@ -14470,15 +14470,18 @@ function* assignSteps(
   // host `ce.assign` keeps throwing.
   try {
     const binding = ce.lookupDefinition(symbolName);
+    // A Function assigned to a fixed arrow still needs ce.assign's
+    // signature reconciliation and effect check before the slot is written.
     if (
       binding !== undefined &&
       isValueDef(binding) &&
       binding.value._programVariable &&
-      (binding.value._fixedInitializationType ||
-        !(
-          isFunction(val, 'Function') &&
-          containsSignatureArm(binding.value.type.type)
-        ))
+      !(
+        isFunction(val, 'Function') &&
+        (binding.value._fixedInitializationType
+          ? signatureArms(binding.value.type.type) !== undefined
+          : containsSignatureArm(binding.value.type.type))
+      )
     ) {
       const local = binding.value;
       if (local.isConstant || isDeclaredLocal(local)) {

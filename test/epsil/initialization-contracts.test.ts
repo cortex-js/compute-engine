@@ -201,3 +201,53 @@ describe('written bare parameters keep an unknown contract', () => {
     expect(fn.type.toString()).toContain('unknown');
   });
 });
+
+describe.each([
+  ['sync', executeEpsil],
+  ['async', executeEpsilAsync],
+] as const)('Program callable replacement (%s)', (_, execute) => {
+  const replacement = 'h = x => x + random()';
+
+  test('a pure slot rejects a random replacement and retains its value', async () => {
+    const ce = new ComputeEngine();
+    const source = [
+      'let h: (number) pure -> number = x => 2x',
+      replacement,
+      'h(3)',
+    ].join('\n');
+    const result = await execute(ce, source);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        message: [
+          'runtime-error',
+          'expected `pure effects`, got `random effects`',
+          '',
+          'incompatible-type',
+        ],
+        range: [
+          source.indexOf(replacement),
+          source.indexOf(replacement) + replacement.length,
+        ],
+      }),
+    ]);
+    expect(result.value.json).toBe(6);
+    expect(ce.box(['h', 3]).evaluate().json).toBe(6);
+    expect(ce.box('h').type.toString()).toBe('(number) pure -> number');
+  });
+
+  test('a slot allowing random effects accepts the replacement', async () => {
+    const ce = new ComputeEngine();
+    const result = await execute(
+      ce,
+      [
+        'let h: (number) random -> number = x => 2x',
+        replacement,
+        'h(3)',
+      ].join('\n')
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value.re).toBeGreaterThanOrEqual(3);
+    expect(result.value.re).toBeLessThan(4);
+    expect(ce.box('h').type.toString()).toBe('(number) random -> number');
+  });
+});

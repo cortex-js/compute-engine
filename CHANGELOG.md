@@ -141,6 +141,11 @@
 
 ### Resolved Issues
 
+- **Assignments to a pure function slot reject a function that draws random
+  numbers** (CE-1633). The assignment reports an incompatible-type error and
+  the slot keeps its previous function. A slot declared to allow random effects
+  can still accept the replacement.
+
 - **An element of an `If` with no else of a list compiles again** (CE-1606).
   A restriction of a list of curves that `At`, `First` or `Last` reads, that
   `Max`, `Min` or `Sum` reduces, or that arithmetic changes before one of
