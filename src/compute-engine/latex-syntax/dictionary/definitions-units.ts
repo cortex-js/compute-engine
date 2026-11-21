@@ -36,8 +36,10 @@ import type {
   Parser,
   Serializer,
   ExpressionParseHandler,
+  Terminator,
 } from '../types.js';
 import { joinLatex } from '../tokenizer.js';
+import { parseTextRun } from './definitions-core.js';
 import {
   getUnitDimension,
   parseUnitDSL,
@@ -475,6 +477,34 @@ const parseUnitExpression: ExpressionParseHandler = (
   return ['__unit__', unit];
 };
 
+/**
+ * The parse handler of `\text{...}`. A `\text{...}` that names a unit, with
+ * no exponent after it, is `['__unit__', unit, text]`, where `text` is the
+ * string that `\text{...}` gives when it is not a unit. The parser keeps the
+ * unit only when the `\text{...}` is an operand of a juxtaposition, a
+ * product, a quotient, a power or a root, and otherwise replaces it with the
+ * string
+ * (`settleTextUnits()` in `parse.ts`): `5\,\text{A}` is a quantity, and
+ * `\{\text{A}, \text{B}\}` is a set of two strings.
+ */
+const parseTextUnitExpression: ExpressionParseHandler = (
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null => {
+  const start = parser.index;
+  const unit = parseUnitExpression(parser, until);
+  if (unit === null || operator(operand(unit, 1)) === 'Power') return unit;
+  const end = parser.index;
+  parser.index = start;
+  const text = parseTextRun(parser);
+  const sameGroup = parser.index === end;
+  parser.index = end;
+  // A styled run (`\text{\textbf{m}}`) is not a plain string: it stays a
+  // unit.
+  if (!sameGroup || typeof text !== 'string') return unit;
+  return ['__unit__', operand(unit, 1)!, text];
+};
+
 // ---------------------------------------------------------------------------
 // Serialization helpers
 // ---------------------------------------------------------------------------
@@ -823,7 +853,7 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
   {
     latexTrigger: '\\text',
     kind: 'expression',
-    parse: parseUnitExpression,
+    parse: parseTextUnitExpression,
   },
 
   // -- siunitx commands --

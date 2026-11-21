@@ -8491,7 +8491,58 @@ function parseCore(
     expr = items.length === 1 ? items[0] : ['Sequence', ...items];
   }
 
+  if (expr !== null && latex.includes('\\text')) expr = settleTextUnits(expr);
+
   return { expr, parser };
+}
+
+/** The operators whose operand can be a unit written `\text{...}`. */
+const TEXT_UNIT_PARENTS = new Set([
+  'InvisibleOperator',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+]);
+
+/**
+ * Settle each `\text{...}` that names a unit, `['__unit__', unit, text]`
+ * (see `parseTextUnitExpression()` in `definitions-units.ts`). As an operand
+ * of a juxtaposition, a product, a quotient, a power or a root, it is the
+ * unit `['__unit__', unit]`: `5\,\text{A}` is the quantity 5 A,
+ * `2\text{ USD}/\text{lb}` a quotient by the pound, and
+ * `\text{V}/\sqrt{\text{Hz}}` a quotient by a root of the hertz. Elsewhere it
+ * is its text, as any other `\text{...}`: `\{\text{A}, \text{B}\}` is a set
+ * of two strings, and `m = \text{A}` compares with the string `"A"`.
+ */
+function settleTextUnits(
+  expr: MathJsonExpression,
+  parent: string | null = null
+): MathJsonExpression {
+  if (!Array.isArray(expr) || expr.length === 0) return expr;
+  const [op, ...args] = expr as MathJsonExpression[];
+  if (op === '__unit__' && args.length === 2) {
+    if (parent !== null && TEXT_UNIT_PARENTS.has(parent))
+      return ['__unit__', args[0]];
+    return args[1];
+  }
+  // A style (`x \large\text{ cm}`) does not change the meaning: the operand of
+  // `Annotated` is settled by the operator around it. So are parentheses
+  // (`(\text{s})^{-1}`), except in a juxtaposition: `f(\text{m})` is a call
+  // with the string `"m"`, as `f(\text{X})` is with `"X"`. In a list in
+  // parentheses, `(\text{A}, \text{B})`, the parent of each element is the
+  // `Sequence`.
+  let name = typeof op === 'string' ? op : null;
+  if (op === 'Annotated') name = parent;
+  else if (op === 'Delimiter' && parent !== 'InvisibleOperator') name = parent;
+  let changed = false;
+  const result = args.map((x) => {
+    const y = settleTextUnits(x, name);
+    if (y !== x) changed = true;
+    return y;
+  });
+  return changed ? ([op, ...result] as MathJsonExpression) : expr;
 }
 
 /** The elements of `expr` when it is a function expression, as an array or

@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A `\text{…}` that names a unit is a string unless it is part of a unit
+  expression** (CE-1644). A `\text{…}` is a unit after a number, and as an
+  operand of a product, a quotient, a power or a root:
+  `5\,\text{A}`, `2\text{ USD}/\text{lb}` and `\text{V}/\sqrt{\text{Hz}}` are
+  unchanged. Everywhere else it is a string, as a `\text{…}` that names no unit
+  is. Write `\mathrm{…}` for a unit by itself.
+
+  ```js
+  ce.parse('\\{\\text{A}, \\text{B}, \\text{C}\\}').json;
+  // ➔ ["Set", "'C'", "'B'", "'A'"] (was ["Set", "A", "C", "'B'"])
+  ce.parse('m = \\text{A}').json;
+  // ➔ ["Equal", "m", "'A'"] (was ["Equal", "m", "A"])
+  ```
+
+  A comparison with a unit name written `\text{…}`, such as
+  `\operatorname{QuantityUnit}(5\,\text{m}) = \text{m}`, now compares with a
+  string: write `\mathrm{m}`.
+
 ### Resolved Issues
 
 - **A call of a user function whose body is an `If` with no else of a list

@@ -177,3 +177,74 @@ describe('Leibniz-notation guard (blocklist gates the exponent fold)', () => {
     ).toContain('"D"');
   });
 });
+
+describe('A `\\text{...}` that names a unit, with no magnitude', () => {
+  // CE-1644. A `\text{...}` is a unit only as an operand of a juxtaposition,
+  // a product, a quotient or a power. Elsewhere it is a string, as a
+  // `\text{...}` that names no unit is.
+  const parse = (s: string) => engine.parse(s).json;
+
+  test('a set of one-letter names is a set of strings', () => {
+    const expr = engine.parse(String.raw`\{\text{A}, \text{B}, \text{C}\}`);
+    const [op, ...elements] = expr.json as unknown as string[];
+    expect(op).toBe('Set');
+    expect(elements.sort()).toEqual(["'A'", "'B'", "'C'"]);
+    expect(expr.type.toString()).toBe('set<string>');
+  });
+
+  test('a list of unit names is a list of strings', () => {
+    expect(parse(String.raw`[\text{s}, \text{h}, \text{min}]`)).toEqual([
+      'List',
+      "'s'",
+      "'h'",
+      "'min'",
+    ]);
+  });
+
+  test('a bare `\\text{A}` and a comparison with it read the string', () => {
+    expect(parse(String.raw`\text{A}`)).toEqual("'A'");
+    expect(parse(String.raw`m = \text{A}`)).toEqual(['Equal', 'm', "'A'"]);
+  });
+
+  test('a magnitude before it still gives a quantity', () => {
+    expect(parse(String.raw`5\,\text{A}`)).toEqual(['Quantity', 5, 'A']);
+    expect(parse(String.raw`5\text{ A}`)).toEqual(['Quantity', 5, 'A']);
+  });
+
+  test('a unit in a quotient stays a unit', () => {
+    expect(
+      engine
+        .parse(String.raw`6\text{ USD} / (2\text{ USD}/\text{lb})`)
+        .evaluate().json
+    ).toEqual(['Multiply', 3, 'lb']);
+  });
+
+  test('a unit under a root or in parentheses stays a unit', () => {
+    expect(
+      engine.parse(String.raw`5\,\text{nV}/\sqrt{\text{Hz}}`).evaluate().operator
+    ).toBe('Quantity');
+    expect(parse(String.raw`(\text{s})^{-1}`)).toEqual(['Divide', 1, 's']);
+    expect(parse(String.raw`x \large\text{ cm}`)).toEqual([
+      'Multiply',
+      'x',
+      ['Annotated', 'cm', { dict: { size: 6 } }],
+    ]);
+  });
+
+  test('the argument of a call is a string, whether it names a unit or not', () => {
+    expect(parse(String.raw`f(\text{m})`)).toEqual(['f', "'m'"]);
+    expect(parse(String.raw`f(\text{X})`)).toEqual(['f', "'X'"]);
+  });
+
+  test('a unit name as the target of UnitConvert still converts', () => {
+    expect(
+      engine
+        .parse(String.raw`\operatorname{UnitConvert}(5\,\text{km}, \text{m})`)
+        .evaluate().json
+    ).toEqual(['Quantity', 5000, 'm']);
+  });
+
+  test('`\\mathrm{A}` is unchanged', () => {
+    expect(parse(String.raw`\mathrm{A}`)).toEqual('A');
+  });
+});

@@ -735,11 +735,14 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
   // InvisibleOperator canonical detects this wrapper and produces
   // ['Quantity', number, unit].  If the marker reaches canonicalization
   // without InvisibleOperator (e.g. standalone `\mathrm{cm}`), unwrap it
-  // to just the unit expression.
+  // to just the unit expression. The second operand of a marker made by
+  // `\text{...}` is its text; the parser replaces such a marker with the
+  // text, or drops the text (`settleTextUnits()` in `parse.ts`), so a marker
+  // that keeps it is read as the unit.
   __unit__: {
-    signature: '(value) -> value',
+    signature: '(value, value?) -> value',
     canonical: (args, { engine: ce }) => {
-      if (args.length === 1) return args[0].canonical;
+      if (args.length === 1 || args.length === 2) return args[0].canonical;
       return ce.error('incompatible-type');
     },
   },
