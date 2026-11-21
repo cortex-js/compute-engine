@@ -515,6 +515,9 @@ export class Parser {
   private readonly isLibraryFunction?: (name: string) => boolean;
 
   private tokens: Token[];
+  /** The token of a block comment that the source does not close, which the
+   * constructor removed from `tokens`. `parseProgram` reports it. */
+  private readonly unclosedComment: Token | null = null;
   private pos = 0;
   /** Current recursive `parseExpression` depth, bounded by
    * `MAX_EXPRESSION_NESTING`. A string interpolation is parsed by a SEPARATE
@@ -846,6 +849,25 @@ export class Parser {
       },
     };
     this.tokens = tokenize(source, this.deadline);
+    // A block comment that is not closed runs to the end of the source. The
+    // parser reads it as a comment, which is valid after any token, and not
+    // as a token that a statement cannot contain: the parse is the one of
+    // the same source with the comment closed, and `parseProgram` adds
+    // `end-of-comment-expected`. The `EOF` token takes the flags that the
+    // closed comment would give it.
+    const comment = this.tokens[this.tokens.length - 2];
+    if (
+      comment?.type === 'ERROR' &&
+      comment.diagnostics?.includes('end-of-comment-expected')
+    ) {
+      const eof = this.tokens[this.tokens.length - 1];
+      this.tokens.splice(-2, 2, {
+        ...eof,
+        precededByWhitespace: comment.precededByWhitespace,
+        precededByLinebreak: comment.precededByLinebreak,
+      });
+      this.unclosedComment = comment;
+    }
   }
 
   //
@@ -925,7 +947,7 @@ export class Parser {
     if (code === 'type-annotation-error') return start >= (last?.end ?? 0);
     // The parser reports the last token itself: an infix operator after an
     // operand, that waits for its right operand (`let a = 1 +`, `x in`), or
-    // an unclosed comment after code (`1 /* note`). An infix operator where
+    // an unclosed string after code (`1 "abc`). An infix operator where
     // an operand starts (`let a = *`) stays an error.
     if (code === 'unexpected-symbol' && this.current === last) {
       const token = this.current;
@@ -1170,6 +1192,8 @@ export class Parser {
     } catch (error) {
       if (error === EXPRESSION_NESTING_ABORT) return null;
       throw error;
+    } finally {
+      if (this.unclosedComment !== null) this.harvest(this.unclosedComment);
     }
   }
 

@@ -24,8 +24,7 @@ describe('EPSIL INCOMPLETE DIAGNOSTICS', () => {
     ['let m = """\n  abc', ['string-literal-closing-delimiter-expected']],
     ['let s = "', ['string-literal-opening-delimiter-expected']],
     ['/* note', ['end-of-comment-expected']],
-    // An unclosed comment after code is an unexpected token.
-    ['1 /* note', ['unexpected-symbol']],
+    ['1 /* note', ['end-of-comment-expected']],
     // An unclosed bracket, also before a comment.
     ['f(1', ['closing-bracket-expected']],
     ['f(1 // note', ['closing-bracket-expected']],
@@ -108,5 +107,93 @@ describe('EPSIL INCOMPLETE DIAGNOSTICS', () => {
 
   test('a source without an error has no diagnostic', () => {
     expect(flagsOf('let s = "abc"\nf(1)')).toEqual([]);
+  });
+});
+
+//
+// A block comment that the source does not close (CE-1580). A comment is
+// valid after any token, so the parser reads the source as it reads the same
+// source with the comment closed, and adds one `end-of-comment-expected`.
+//
+
+/** `value` without the `sourceOffsets` of its nodes. */
+function withoutOffsets(value: unknown): unknown {
+  return JSON.parse(
+    JSON.stringify(value, (key, x) => (key === 'sourceOffsets' ? undefined : x))
+  );
+}
+
+describe('EPSIL UNCLOSED BLOCK COMMENT', () => {
+  test('after a statement, the only diagnostic is the one of the comment', () => {
+    const [value, diagnostics] = parseEpsil('let a = 1 /* note');
+    expect(diagnostics.map((d) => [d.message, d.range, d.incomplete])).toEqual([
+      ['end-of-comment-expected', [10, 17], true],
+    ]);
+    expect(value).toEqual(parseEpsil('let a = 1')[0]);
+  });
+
+  test('in an unclosed bracket, the bracket goes before the comment', () => {
+    const [, diagnostics] = parseEpsil('f(1 /* x');
+    expect(
+      diagnostics.map((d) => [d.message, d.range, d.incomplete, d.fixits])
+    ).toEqual([
+      [['closing-bracket-expected', ')'], [1, 2], true, [[3, 3, ')']]],
+      ['end-of-comment-expected', [4, 8], true, undefined],
+    ]);
+  });
+
+  test.each([
+    // After a complete statement.
+    'x.y /* a',
+    'f(x) /* a',
+    'let x: integer /* a',
+    'for x in xs { 1 } /* a',
+    'let a = 1 /** doc',
+    'let a = 1 /* a /* b */',
+    'let a = 1 /* a\nlet b = 2',
+    'let a = 1\n/* a',
+    // In an unclosed bracket.
+    '[1 /* a',
+    '(1 /* a',
+    'a[1 /* a',
+    'f(1, /* a',
+    'if c { a /* a',
+    'if c { a /* a }',
+    'match v { 1 => 2 /* a',
+    '[x for x in xs /* a',
+    // Where the next part of a statement is expected.
+    '1 + /* a',
+    '1 +\n/* a',
+    'let /* a',
+    'let x: /* a',
+    'if a /* a',
+    'for x /* a',
+    'function f(x) /* a',
+    'f(x) = /* a',
+    'a. /* a',
+    // After another error.
+    'f(1 2 /* a',
+    '1 ) /* a',
+    'let a = 1 2 /* a',
+    '- /* a',
+  ])('%j gets the diagnostics of the closed comment and one more', (source) => {
+    const closed = source + ' */';
+    expect(flagsOf(source)).toEqual([
+      ...flagsOf(closed),
+      'end-of-comment-expected (incomplete)',
+    ]);
+    expect(withoutOffsets(parseEpsil(source)[0])).toEqual(
+      withoutOffsets(parseEpsil(closed)[0])
+    );
+  });
+
+  test('in a closed hole of a string, the comment is not incomplete', () => {
+    expect(flagsOf('"a \\(1 /* x) b"')).toEqual(['end-of-comment-expected']);
+  });
+
+  test('an unclosed string after code stays an unexpected token', () => {
+    expect(flagsOf('let a = 1 "abc')).toEqual([
+      'unexpected-symbol (incomplete)',
+    ]);
   });
 });

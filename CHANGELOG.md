@@ -95,6 +95,14 @@
 
 ### Resolved Issues
 
+- **In Epsil, a block comment that is not closed gets the error
+  `end-of-comment-expected` wherever it starts** (CE-1580).
+  `let a = 1 /* note` gave `unexpected-symbol` for `/* note`, and
+  `let /* note` and `f(1 2 /* note` gave no error for the comment. The source
+  now gets the errors of the same source with the comment closed, then
+  `end-of-comment-expected` with `incomplete: true`. For `f(1 /* note`, the
+  fixit of `closing-bracket-expected` puts the `)` before the comment, and
+  the Epsil REPL waits for the next line.
 - **A debugger of `executeEpsilAsync()` stops at the last statement of a
   function that declares a return type or an effect** (CE-1625). In
   `function f(t) -> number { let k = t; k + 1 }`, the hooks were called for
@@ -2294,6 +2302,11 @@
   `'ir'` both give it.
 
 ### Bug Fixes
+
+- **A rejected function assignment preserves the previous callable** (CE-1463).
+  If rebuilding a dependent detects an effects mismatch, `Assign` returns
+  the error and `ce.assign()` throws. Later calls continue to use the
+  previous definitions.
 
 - **`Integrate` and `D` use the closed form of the density and the
   distribution function of a continuous distribution.**

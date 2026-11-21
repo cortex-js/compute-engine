@@ -97,6 +97,12 @@ describe('EPSIL FIXIT — unclosed bracket', () => {
     expect(codesOf(fixed!)).toEqual([]);
   });
 
+  test('the insertion goes before an unclosed comment', () => {
+    const { fixed } = applyFixit('f(1, 2 /* note', BRACKET);
+    expect(fixed).toBe('f(1, 2) /* note');
+    expect(codesOf(fixed!)).toEqual(['end-of-comment-expected']);
+  });
+
   test('each of two unclosed brackets gets the insertion at the end', () => {
     const [, diagnostics] = parseEpsil('h(g(1');
     expect(diagnostics.map((d) => d.fixits)).toEqual([

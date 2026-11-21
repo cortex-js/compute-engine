@@ -351,8 +351,8 @@ epsil> x^2
 The REPL keeps one session, so top-level declarations and assignments persist
 between inputs. `.clear` starts a fresh session and clears that state.
 
-Unclosed blocks, collections, strings, and expressions ending with an operator
-continue at a secondary prompt:
+Unclosed blocks, collections, strings, block comments, and expressions ending
+with an operator continue at a secondary prompt:
 
 ```text
 epsil> if x > 0 {

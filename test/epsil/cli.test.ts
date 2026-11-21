@@ -1149,12 +1149,16 @@ describe('Epsil CLI evaluation', () => {
 describe('Epsil CLI multiline input', () => {
   const session = makeEpsilSession(0);
 
-  test.each(['if (true) {', '[1, 2', '"unfinished', '1 +'])(
-    'treats %p as recoverable',
-    (source) => {
-      expect(isRecoverable(source, session.parse(source))).toBe(true);
-    }
-  );
+  test.each([
+    'if (true) {',
+    '[1, 2',
+    '"unfinished',
+    '1 +',
+    'let a = 1 /* note',
+    'f(1 /* note',
+  ])('treats %p as recoverable', (source) => {
+    expect(isRecoverable(source, session.parse(source))).toBe(true);
+  });
 
   test('does not continue after an ordinary syntax error', () => {
     const source = '1 @ 2';
