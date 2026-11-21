@@ -66,6 +66,14 @@
 
 ### Resolved Issues
 
+- **An element-wise operation on a list of random draws and a later read of
+  the same list use the same draws** (CE-1631). With
+  `h = Comprehension(Random(), k ∈ 1..6)`, `h + 10` used one set of draws and
+  a later read of `h` drew again, so the first element of `h + 10` was not the
+  first element of `h` plus 10. An operation that reads every element of the
+  list (`Add`, `Mod`, `Power` and the other element-wise operators) now ends
+  its walk of the list, and the list keeps these draws for each later read.
+
 - **In Epsil, a list or a call that ends after its opening bracket or after a
   comma waits for the next line in the REPL** (CE-1630). `[1,`, `f(` and
   `f(1,` got the message `Unexpected symbol ""`, and the REPL showed it as an

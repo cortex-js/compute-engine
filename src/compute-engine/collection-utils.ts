@@ -4781,9 +4781,13 @@ export function broadcastOverIndexedCollections(
 
   // Broadcast length = the participating collections' common length. Bail
   // (stay inert) if any length is not statically known.
+  // The lengths are kept: a walk that gives `n` elements is finished at the
+  // end (`finishWalks`).
+  const lengths = xs.map((x) => (isBroadcast(x) ? smallCount(x) : undefined));
   let n = Infinity;
-  for (const c of cols) {
-    const len = smallCount(c);
+  for (let k = 0; k < xs.length; k++) {
+    if (!isBroadcast(xs[k])) continue;
+    const len = lengths[k];
     if (len === undefined || len < 0) return undefined;
     if (len < n) n = len;
   }
@@ -4835,6 +4839,10 @@ export function broadcastOverIndexedCollections(
     }
     results.push(ce._fn(operator, args).evaluate(options));
   }
+  finishWalks(
+    iters,
+    lengths.map((len) => len === n)
+  );
   return ce._fn('List', results);
 }
 
@@ -5731,6 +5739,25 @@ export function zipBroadcast(
 }
 
 /**
+ * Pull once more from each iterator of `iters` for which `full[k]` is true:
+ * the caller has taken from it as many elements as the count of its
+ * collection. The pull lets the walk observe its end, and a walk that
+ * observes its end commits its elements as the element memo of the
+ * collection (`collection-element-memo.ts`). Without it the walk stays
+ * suspended, and the next read of the same collection walks it again: for a
+ * collection of random draws, `Add(h, 10)` and a later read of `h` then used
+ * different draws. An iterator of a longer or unknown-length collection is
+ * left as it is, so a shortest-zip consumer does not compute an element that
+ * it does not use.
+ */
+function finishWalks(
+  iters: ReadonlyArray<Iterator<Expression> | undefined>,
+  full: ReadonlyArray<boolean>
+): void {
+  for (let k = 0; k < iters.length; k++) if (full[k]) iters[k]?.next();
+}
+
+/**
  * Zips together multiple collections into a single iterator.
  *
  * Example:
@@ -5781,9 +5808,10 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
   // compares a `bigint` and a `number` correctly; `Math.min()` throws for a
   // `bigint`. Reading such a count as unknown gave it the fallback length 1,
   // and the zip stopped after one row.
-  const shortest = items.reduce<number | bigint>((min, x) => {
-    const n = zipParticipates(x) ? (x.count ?? 1) : Infinity;
-    return n < min ? n : min;
+  const counts = items.map((x) => (zipParticipates(x) ? x.count : Infinity));
+  const shortest = counts.reduce<number | bigint>((min, n) => {
+    const m = n ?? 1;
+    return m < min ? m : min;
   }, Infinity);
 
   // When no item supplies cells, every item is repeated and the zip would
@@ -5835,6 +5863,15 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
       if (values.some((x) => x.done === true || x.value === undefined))
         return { done: true, value: undefined };
       count += 1;
+      // The last row: an item whose known count is `shortest` has given
+      // every element, so its walk is finished (see `finishWalks`). A
+      // `bigint` count is above `Number.MAX_SAFE_INTEGER`, so a zip with
+      // such a `shortest` never reaches its last row.
+      if (count === shortest)
+        finishWalks(
+          iterators,
+          counts.map((n) => n === shortest)
+        );
       return { done: false, value: values.map((x) => x.value!) };
     },
   };
