@@ -1913,11 +1913,14 @@ index reads, when the value of that call is in one of these places too
 or a `Which`, or the last expression of a `Block`, whose value is in one of
 these places. In any other place (a discharge, `Length`, `Rest`, another list
 operator, a binding, an argument of a function, an element of a list) it
-declines. One boxed `If` in several places must be in such a place each time,
-and an `If` that is only the value of a name of the engine declines (one boxed
-`If` that is also a node of the program does not: `docs/COMPILATION-MODEL.md`,
-"Known limitations"). The conditions, the arms and the default are lowered once,
-before the build, all of them: the interpreter evaluates an arm and a later
+declines. One boxed `If` in several places must be in such a place each time.
+The value of a name that the program reads (`expression()`) is in such a place
+when each occurrence of the name in the program is (`readers` holds the
+symbols too), and no value of another name and no body of a user function that
+the program reaches has the name (`heldAsAbsent()`); a new name that holds the
+value, or a read of it from another value, checks again each `If` of the
+entry whose list of NaN was already accepted (`nanAccepted`). The conditions,
+the arms and the default are lowered once, before the build, all of them: the interpreter evaluates an arm and a later
 condition only where the selection reaches it, so one that is not pure (an
 effect, a write to a name, an operation that can throw such as `AssertPresent`,
 a loop, a recursive call) declines. Two exceptions (CE-1562). A `Range` arm is

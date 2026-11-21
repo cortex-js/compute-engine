@@ -193,15 +193,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   code passes one input per name; so does a call inside a function whose
   parameter is `x` (`u(x) := k(0) + g(0) + 100x`, CE-1502).
 
-- `javascript` (crafted): one boxed `If` with no else of a list arm that is
-  both the value of a name and a node of the program. With
-  `r = If(0 ≤ x ≤ 6, x + [0, 4, 2])` boxed once, `C` declared with the value
-  `r`, and the program built from that same object,
-  `Length(C) + Coalesce(At(r, 1), 0)` gives `3` at `x = 7`, where the
-  interpreter gives `Missing`. The program reads `r` only with `At`, so its
-  value where the condition is false is the list of `NaN`, which `Length(C)`
-  then reads. The same program boxed from MathJSON declines (CE-1606).
-
 - `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
@@ -2540,9 +2531,14 @@ operator reads declines (`IsMissing`, `Coalesce`, `AssertPresent`, `Length`,
 `Rest` and the other list operators, a binding, an argument of a function, an
 element of a list, also through arithmetic: `Length(2·(x·L)\{x > 0\})`),
 because the list of `NaN` would give a finite value there (`Length` gives 3
-where the interpreter gives `Missing`). So does a length that the restricted
-value makes itself
-(`Range(1, ⌊x⌋)\{x > 0\}`). A restriction whose condition is a list (an
+where the interpreter gives `Missing`). A restriction that is the value of a
+name (`C` declared with the value `If(0 ≤ x ≤ 6, x + [0, 4, 2])`) compiles
+where each occurrence of the name in the program is in one of these places
+(`At(C, 1)` is `NaN` at `x = 7`); it declines when the program also reads the
+name in another way (`At(C, 1) + Length(C)`), and when the value of another
+name or the body of a user function that the program reaches has the name
+(`M` with the value `At(C, 1)`, `g(t) ≔ t + At(C, 1)`). A length that the
+restricted value makes itself (`Range(1, ⌊x⌋)\{x > 0\}`) declines too. A restriction whose condition is a list (an
 element-wise selection, `x\{L > 0\}` with `L: list<real>`) selects position
 by position, as the interpreter (`docs/BROADCAST-MODEL.md`); a restricted
 list is read to the shorter of the condition and the list.

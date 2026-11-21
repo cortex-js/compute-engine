@@ -2,6 +2,14 @@
 
 ### Improvements
 
+- **A restricted list that a name holds compiles again** (CE-1642). With
+  `C` declared with the value `If(0 ≤ x ≤ 6, x + [0, 4, 2])`, `At(C, 1)`
+  compiles to JavaScript and to `interval-js`, and gives `NaN` (the empty
+  interval) where the condition is false; `C` alone gives the list of `NaN`
+  there. Both compiled in 0.193.0 and decline in 0.197.0. A program that also reads `C` with
+  `Length`, a discharge such as `IsMissing`, or from the value of another name
+  or the body of a user function still declines, because the interpreter gives
+  `Missing` there.
 - **A function that takes a list of lists and returns a list of lists compiles
   to JavaScript** (CE-1607). With `g: list<list<integer>>`, the element read
   `g[i][j]` compiles, and `g` can be passed whole to a user function with a

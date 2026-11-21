@@ -726,17 +726,17 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
-  // The calls of the program that have each call as an operand, with the
-  // position of the operand. One boxed expression in two places
-  // (`If(IsMissing(r), K, r)`) has one entry for each place. Each node is
-  // visited once.
+  // The calls of the program that have each call or each symbol as an
+  // operand, with the position of the operand. One boxed expression in two
+  // places (`If(IsMissing(r), K, r)`) has one entry for each place. Each
+  // node is visited once.
   const readers = new Map<Expression, [reader: Fn, position: number][]>([
     [root, []],
   ]);
   const reach = (e: Expression): void => {
     if (!isFunction(e)) return;
     e.ops.forEach((op, i) => {
-      if (!isFunction(op)) return;
+      if (!isFunction(op) && !isSymbol(op)) return;
       const known = readers.get(op);
       if (known !== undefined) return void known.push([e, i]);
       readers.set(op, [[e, i]]);
@@ -771,13 +771,44 @@ function lowerOnce(
   // - the body of a user function being lowered, when each call that its IR
   //   function serves is itself in such a place (`bodies`, `call()` of
   //   `lower-functions.ts`); the places in the body are known once a call
-  //   of the function is lowered (`reachBody()`).
+  //   of the function is lowered (`reachBody()`);
+  // - the value of a name that the program reads (`expression()`), when
+  //   each occurrence of that name in the program is itself in such a
+  //   place, and no value of another name and no body of a user function
+  //   that the program reaches has the name (`heldAsAbsent()`); the places
+  //   in the value are known once the value is lowered.
   // Any other place (a binding, an argument of a function, an element of a
   // list or of a tuple, another list operator) can give the value to a
-  // reader that tells an absent list from a list of NaN. A node that is not
-  // in the program (the value of a name, an expression of a compile
-  // handler) has no known reader.
+  // reader that tells an absent list from a list of NaN. Another node that
+  // is not in the program (an expression of a compile handler) has no known
+  // reader.
   const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
+  // For each held value that `expression()` lowers, the names that hold it,
+  // and whether one of them is read other than by a node of the program
+  // (in the value of another name, in an expression of a compile handler).
+  const holders = new Map<Expression, { names: Set<string>; other: boolean }>();
+  // The names that a value or a body that the program reaches has
+  // (`calledNames()`), found once.
+  let namesReached: Set<string> | undefined;
+  const heldAsAbsent = (h: { names: Set<string>; other: boolean }) => {
+    if (h.other) return false;
+    namesReached ??= calledNames(root);
+    const elsewhere = namesReached;
+    return [...h.names].every(
+      (n) =>
+        !elsewhere.has(n) &&
+        [...readers.keys()].every((x) => !isSymbol(x, n) || nanForAbsent(x))
+    );
+  };
+  // The nodes whose value is a list of NaN for an absent list
+  // (`conditional()`), checked again when a held value adds places
+  // (`expression()`).
+  const nanAccepted = new Set<Expression>();
+  const declineNanList = (node: Expression): never =>
+    decline(
+      node,
+      'an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction'
+    );
   const reached = new Set<Expression>();
   // A body adds places to the nodes that it shares with the program.
   const reachBody = (body: Expression) => {
@@ -797,8 +828,9 @@ function lowerOnce(
     }
     let known = body === undefined ? unreadAsAbsent.get(e) : undefined;
     if (known !== undefined) return known;
+    const h = holders.get(e);
     known =
-      (readers.get(e) ?? (body ? [] : undefined))?.every(([reader, i]) => {
+      (readers.get(e) ?? (body || h ? [] : undefined))?.every(([reader, i]) => {
         if (reader === root && reader.operator === 'Function') return i === 0;
         if (!isLibrary(reader)) return false;
         switch (reader.operator) {
@@ -832,6 +864,7 @@ function lowerOnce(
           nanForAbsent(reader)
         );
       }) ?? false;
+    if (h !== undefined && !heldAsAbsent(h)) known = false;
     if (bodies.size === 0) unreadAsAbsent.set(e, known);
     return known;
   };
@@ -3488,6 +3521,20 @@ function lowerOnce(
     };
     const why = facts(v).writes.size > 0 ? 'a write' : reason(v, []);
     if (why) decline(e, `the value of ${name}, which reads ${why}`);
+    // The places of `v` and of its nodes (`nanForAbsent()`): a new name
+    // that holds `v`, or a read that is not a node of the program, adds
+    // places to a node whose list of NaN can already be lowered.
+    let h = holders.get(v);
+    if (h === undefined)
+      holders.set(v, (h = { names: new Set(), other: false }));
+    const other = !readers.has(e);
+    if (!h.names.has(name) || (other && !h.other)) {
+      h.names.add(name);
+      h.other ||= other;
+      reachBody(v);
+      unreadAsAbsent.clear();
+      for (const x of nanAccepted) if (!nanForAbsent(x)) declineNanList(x);
+    }
     // The instructions of `v` are those that its lowering adds to the
     // region that is open here.
     const [effects, start] = [b.effects, b.current().body.length];
@@ -4449,11 +4496,11 @@ function lowerOnce(
         // or `Rest` reads as absent; a list is never absent in compiled
         // code (`absent()`), so the list of NaN is the value only where no
         // such operator can read it (`nanForAbsent()`).
-        if (!nanForAbsent(node))
-          decline(
-            node,
-            'an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction'
-          );
+        if (!nanForAbsent(node)) declineNanList(node);
+        // A node of a body is accepted for the calls of the body
+        // (`bodies`), which a later held value does not change: a name that
+        // a reached body reads is never a holder (`heldAsAbsent()`).
+        if (bodies.size === 0) nanAccepted.add(node);
         if (typeof n !== 'number' && n.v >= start && !inputLengths.has(n.v))
           decline(
             node,
