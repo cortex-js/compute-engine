@@ -785,20 +785,27 @@ function valueDefinitionOfOccurrence(
  * scope where `y` was assigned, also when the caller is evaluated in a
  * function, a block or a sum that has a parameter, a local or an index `x`.
  *
- * Not handled: a binder inside `expr`. A value placed under a `Sum`, a
- * `Function` or a `Block` of `expr` is made canonical again in the scope of
- * that binder (`rebuildCall()`), so a free symbol of the value that has the
- * name of the binder's variable becomes that variable: with `a := n + 1`,
- * `Expand(Sum(a·n, Limits(n, 1, 3)))` sums `n·(n + 1)` (`issues/CE-1641.md`).
+ * A symbol under a binder of `expr` (a `Sum`, a `Function`, a `Block`) is
+ * not replaced when its resolved value has a free symbol (`freeSymbolNames()`)
+ * with the name of a variable of an enclosing binder: the value would be made
+ * canonical again in the scope of that binder (`rebuildCall()`), and the
+ * symbol would become the variable. With `a := n + 1`,
+ * `Expand(Sum(a·n, Limits(n, 1, 3)))` keeps `a`, and the sum is `6n + 6`.
+ * `betaReduceLambda()` makes the same test before it inlines a body.
  */
 export function resolveBoundSymbols(
   expr: Expression,
   protect: ReadonlySet<string>,
-  seen: Set<string> = new Set()
+  seen: Set<string> = new Set(),
+  /** The variables of the binders of the original `expr` that enclose
+   * `expr`. They are not replaced, as the names of `protect`, and a symbol
+   * whose resolved value reads one of them is not replaced either. */
+  binderNames: ReadonlySet<string> = EMPTY_NAME_SET
 ): Expression {
   if (isSymbol(expr)) {
     const name = expr.symbol;
-    if (protect.has(name) || seen.has(name)) return expr;
+    if (protect.has(name) || binderNames.has(name) || seen.has(name))
+      return expr;
     const def = valueDefinitionOfOccurrence(expr);
     if (def === undefined) return expr;
     // A constant held until a numeric approximation (`Pi`, `ExponentialE`)
@@ -809,8 +816,12 @@ export function resolveBoundSymbols(
     const value = def.value;
     if (value === undefined || value === null) return expr;
     seen.add(name);
-    const resolved = resolveBoundSymbols(value, protect, seen);
+    const resolved = resolveBoundSymbols(value, protect, seen, binderNames);
     seen.delete(name);
+    if (binderNames.size > 0) {
+      for (const free of freeSymbolNames(resolved))
+        if (binderNames.has(free)) return expr;
+    }
     return resolved;
   }
 
@@ -819,23 +830,24 @@ export function resolveBoundSymbols(
   // Binder-awareness: a `Function` literal, `Block`, `Sum`, etc. binds its own
   // variables. Those must NOT be resolved to a same-named GLOBAL value —
   // `Simplify(x ↦ x + 1)` with `x := 5` must stay `x ↦ x + 1`, not corrupt the
-  // body's bound `x` into `5`. Extend the protected set with the locally-bound
-  // names before descending. (`localScope` covers `Block`/`Sum`/`Product`/…;
-  // a `Function`'s parameters live in its operand slots, not its scope.)
-  // A bound name protects the operands it is IN SCOPE in
+  // body's bound `x` into `5`. Extend the set of binder names with the
+  // locally-bound names before descending. (`localScope` covers
+  // `Block`/`Sum`/`Product`/…; a `Function`'s parameters live in its operand
+  // slots, not its scope.)
+  // A bound name is a binder name in the operands it is IN SCOPE in
   // (`boundVariableNamesInOperand`): an iterator clause's index does not
   // protect an earlier clause's collection or guard, where the name denotes
   // the enclosing binding.
   const bound = boundVariableNames(expr);
   // The clause ordering is read once per node, not once per operand.
   const binders = bound.length ? declaredBinders(expr, 'post') : undefined;
-  const protectIn = (i: number): ReadonlySet<string> => {
-    if (!bound.length) return protect;
+  const bindersIn = (i: number): ReadonlySet<string> => {
+    if (!bound.length) return binderNames;
     const here =
       binders === undefined
         ? bound
         : boundVariableNamesInOperand(expr, i, binders);
-    return here.length ? new Set([...protect, ...here]) : protect;
+    return here.length ? new Set([...binderNames, ...here]) : binderNames;
   };
 
   const ops = expr.ops;
@@ -845,10 +857,10 @@ export function resolveBoundSymbols(
     // (`ownIndexClause()`, `binding-sites.ts`).
     const own = ownIndexClauseAt(expr, i, binders);
     if (own !== undefined)
-      return mapOwnIndexClause(op, own, protect, protectIn(i), (o, p) =>
-        resolveBoundSymbols(o, p ?? protect, seen)
+      return mapOwnIndexClause(op, own, binderNames, bindersIn(i), (o, b) =>
+        resolveBoundSymbols(o, protect, seen, b ?? binderNames)
       );
-    return resolveBoundSymbols(op, protectIn(i), seen);
+    return resolveBoundSymbols(op, protect, seen, bindersIn(i));
   });
   if (resolved.every((op, i) => op === ops[i])) return expr;
   return rebuildCall(expr, resolved);

@@ -12,6 +12,19 @@
   a declared result type. A call that `Length`, `Rest`, `IsMissing`, `Coalesce`
   or another function reads still declines.
 
+- **`Expand`, `Factor` and the other transformers no longer use the index of a
+  sum, or the parameter of a function, of their operand in place of a variable
+  of the same name in a stored formula** (CE-1641). When the operand holds a
+  sum, a function or a block, a symbol under it whose formula names the
+  variable of that sum, function or block now stays as written, and the
+  transformer does not expand into it.
+
+  ```js
+  ce.assign('a', ce.parse('n + 1'));
+  ce.parse('\\mathrm{Expand}(\\sum_{n=1}^{3} n a)').evaluate().evaluate();
+  // ➔ 6n + 6, as without Expand (0.196.1: 20)
+  ```
+
 ## 0.197.0 _2026-11-21_
 
 ### New Features
