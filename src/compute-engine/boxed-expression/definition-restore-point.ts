@@ -64,7 +64,7 @@ export class DefinitionRestorePoint {
 
   constructor(
     private readonly _engine: object,
-    private readonly _scope: Scope
+    private readonly _scope?: Scope
   ) {}
 
   /** Record the writes on the definitions of the engine from now on, until
@@ -152,6 +152,10 @@ export class DefinitionRestorePoint {
     return !this._created.has(def);
   }
 
+  get enclosing(): DefinitionRestorePoint | undefined {
+    return this._enclosing;
+  }
+
   _hasScope(scope: Scope): boolean {
     for (let s: Scope | null | undefined = scope; s; s = s.parent)
       if (s === this._scope) return true;
@@ -204,7 +208,9 @@ export class DefinitionRestorePoint {
  * restore point does not record it. Called by the constructors of the
  * definitions. */
 export function noteDefinitionCreated(ce: object, def: object): void {
-  if (OPEN > 0) ACTIVE.get(ce)?._noteCreated(def);
+  if (OPEN === 0) return;
+  for (let point = ACTIVE.get(ce); point !== undefined; point = point.enclosing)
+    point._noteCreated(def);
 }
 
 /** Record `def` (a binding record or one of its halves) in the open restore
@@ -214,16 +220,25 @@ export function beforeDefinitionWrite(def: object): void {
   // A half has a name; a binding record has none.
   if (!('name' in def)) {
     const record = def as { value?: object; operator?: object };
-    const point = ACTIVE.get(engineOf(record.value ?? record.operator ?? {}));
-    if (point === undefined) return;
-    if (
-      (record.value !== undefined && point._isOutside(record.value)) ||
-      (record.operator !== undefined && point._isOutside(record.operator))
-    )
-      point._addBinding(def as BoxedDefinition);
+    for (
+      let point = ACTIVE.get(engineOf(record.value ?? record.operator ?? {}));
+      point !== undefined;
+      point = point.enclosing
+    ) {
+      if (
+        (record.value !== undefined && point._isOutside(record.value)) ||
+        (record.operator !== undefined && point._isOutside(record.operator))
+      )
+        point._addBinding(def as BoxedDefinition);
+    }
   } else {
-    const point = ACTIVE.get(engineOf(def));
-    if (point?._isOutside(def)) point._addHalf(def as unknown as Half);
+    for (
+      let point = ACTIVE.get(engineOf(def));
+      point !== undefined;
+      point = point.enclosing
+    ) {
+      if (point._isOutside(def)) point._addHalf(def as unknown as Half);
+    }
   }
 }
 
@@ -232,9 +247,9 @@ export function beforeDefinitionWrite(def: object): void {
  * scope outlives the point. */
 export function beforeScopeWrite(ce: object, scope: Scope, name: string): void {
   if (OPEN === 0 || RESTORING) return;
-  const point = ACTIVE.get(ce);
-  if (point !== undefined && !point._hasScope(scope))
-    point._addScopeEntry(scope, name);
+  for (let point = ACTIVE.get(ce); point !== undefined; point = point.enclosing) {
+    if (!point._hasScope(scope)) point._addScopeEntry(scope, name);
+  }
 }
 
 /** Put back the entry of a definition in `table` with the definition. A

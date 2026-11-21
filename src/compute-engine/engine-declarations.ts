@@ -80,6 +80,7 @@ import {
   assertSingleArmPolytype,
   EffectContractError,
   inferFunctionLiteralEffects,
+  isEffectContractError,
   matchesDeclaredTypeAxes,
   storeAdmission,
   hasSignaturePlaceholder,
@@ -169,6 +170,7 @@ import { isInferredTypedParameter } from './boxed-expression/inferred-annotation
 import {
   hasProvisionalDependents,
   provisionalLiteral,
+  provisionalRegistryRollbackPoint,
   registerProvisionalDependents,
   repairProvisionalDependents,
   scopeOfBinding,
@@ -212,7 +214,10 @@ import {
 } from './boxed-expression/macro.js';
 import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import { hostCollectionSource } from './boxed-expression/shared-evaluation-memo.js';
-import { beforeScopeWrite } from './boxed-expression/definition-restore-point.js';
+import {
+  beforeScopeWrite,
+  DefinitionRestorePoint,
+} from './boxed-expression/definition-restore-point.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -861,47 +866,59 @@ export function setSymbolValue(
   const def = lookup(id, ce.context.lexicalScope);
   if (!def) throw new Error(`Unknown symbol "${id}"`);
 
-  if (isValueDef(def)) {
-    // State event: emitted by the value SETTER below (`value-write`); the
-    // extra G bump on the next line is the enumerated double-bump collapse
-    // of the parity gate (design §8) — advancement-invisible, no second
-    // event.
-    def.value.value = value;
-    // The declared-signature reconciliation paths (§6.3) store a `Function`
-    // literal through here rather than through `updateDef`, so this is where a
-    // function-typed value definition joins the forward-reference mechanism:
-    // its own body may carry a provisional reading (register it), and `id`
-    // becoming callable re-derives every body that read `id` as a
-    // multiplication operand (`boxed-expression/provisional-application.ts`).
-    // The repairs below re-derive only the definitions that can see this
-    // binding: those made in the scope that holds it, in a scope under it,
-    // or in a scope above it (a function that assigns a local of its own
-    // body). `lookup()` reads the scopes in the static view inside a type
-    // computation, so the record may be in no scope of the plain chain; the
-    // repair then takes every waiting definition.
-    const bindingScope = hasProvisionalDependents(ce, id)
-      ? scopeOfBinding(
-          ce.context.lexicalScope,
-          id,
-          (binding) => binding === def
-        )
-      : undefined;
-    if (def.value.type.matches('function')) {
-      registerProvisionalDependents(ce, value, def.value);
-      // `def.value` is what was just installed for `id`: a recursive literal
-      // waits on its own name, and must not be re-derived against itself.
-      repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
-    } else if (!def.value.type.isUnknown) {
-      // A value that is not a function: a body that APPLIED `id` while it had
-      // no definition is re-derived and reads the product instead (see the
-      // same step in `updateDef`). A no-op when nothing waits on `id`.
-      repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
-    }
-    return;
-  }
+  if (!isValueDef(def))
+    throw new Error(`Cannot assign a value to operator symbol "${id}"`);
 
-  // Operator definition: cannot set a plain value on an operator symbol
-  throw new Error(`Cannot assign a value to operator symbol "${id}"`);
+  const repair = hasProvisionalDependents(ce, id);
+  if (repair)
+    withDependentEffectRollback(ce, () =>
+      storeValueAndRepair(ce, id, def, value, true)
+    );
+  else storeValueAndRepair(ce, id, def, value, false);
+}
+
+function storeValueAndRepair(
+  ce: IComputeEngine,
+  id: MathJsonSymbol,
+  def: { value: BoxedValueDefinition },
+  value: Expression | undefined,
+  repair: boolean
+): void {
+  // State event: emitted by the value SETTER below (`value-write`); the
+  // extra G bump on the next line is the enumerated double-bump collapse
+  // of the parity gate (design §8) — advancement-invisible, no second
+  // event.
+  def.value.value = value;
+  // The declared-signature reconciliation paths (§6.3) store a `Function`
+  // literal through here rather than through `updateDef`, so this is where a
+  // function-typed value definition joins the forward-reference mechanism:
+  // its own body may carry a provisional reading (register it), and `id`
+  // becoming callable re-derives every body that read `id` as a
+  // multiplication operand (`boxed-expression/provisional-application.ts`).
+  // The repairs below re-derive only the definitions that can see this
+  // binding: those made in the scope that holds it, in a scope under it,
+  // or in a scope above it (a function that assigns a local of its own
+  // body). `lookup()` reads the scopes in the static view inside a type
+  // computation, so the record may be in no scope of the plain chain; the
+  // repair then takes every waiting definition.
+  const bindingScope = repair
+    ? scopeOfBinding(
+        ce.context.lexicalScope,
+        id,
+        (binding) => binding === def
+      )
+    : undefined;
+  if (def.value.type.matches('function')) {
+    registerProvisionalDependents(ce, value, def.value);
+    // `def.value` is what was just installed for `id`: a recursive literal
+    // waits on its own name, and must not be re-derived against itself.
+    repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
+  } else if (!def.value.type.isUnknown) {
+    // A value that is not a function: a body that APPLIED `id` while it had
+    // no definition is re-derived and reads the product instead (see the
+    // same step in `updateDef`). A no-op when nothing waits on `id`.
+    repairProvisionalDependents(ce, id, def.value, undefined, bindingScope);
+  }
 }
 
 /**
@@ -3221,9 +3238,38 @@ export function assignFn(
   // read from the type of its body. A call of the name in that body is a
   // recursive call, not a call of a function with no body
   // (`unknownCallMayBeRecursive()`, `declared-parameter-result.ts`).
-  return whileDefining(ce, arg1, () =>
-    assignNamedValue(ce, arg1, arg2, options)
-  );
+  return whileDefining(ce, arg1, () => {
+    if (arg2 === undefined || !hasProvisionalDependents(ce, arg1))
+      return assignNamedValue(ce, arg1, arg2, options);
+
+    return withDependentEffectRollback(ce, () =>
+      assignNamedValue(ce, arg1, arg2, options)
+    );
+  });
+}
+
+/** Repair runs after the store. An effects refusal must restore the
+ * callable that the dependent's contract was checked against. */
+function withDependentEffectRollback<T>(ce: IComputeEngine, write: () => T): T {
+  const definitions = new DefinitionRestorePoint(ce);
+  const restoreRegistry = provisionalRegistryRollbackPoint(ce);
+  definitions.open();
+  try {
+    return write();
+  } catch (error) {
+    if (isEffectContractError(error)) {
+      const restored = definitions.recorded;
+      try {
+        definitions.restore();
+      } finally {
+        restoreRegistry();
+        if (restored) ce._noteStateEvent({ kind: 'binding-repair' });
+      }
+    }
+    throw error;
+  } finally {
+    definitions.close();
+  }
 }
 
 /**

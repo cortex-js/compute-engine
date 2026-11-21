@@ -1982,6 +1982,18 @@ let REBUILD_COUNTS: WeakMap<ProvisionalDependent, number> | undefined;
  * definition of a name it waits on still retries it. */
 const MAX_REBUILDS_PER_WAVE = 2;
 
+/** An effects refusal takes precedence: assignment must roll back even
+ * when another dependent already reported an invalid body. */
+function rememberRebuildError(
+  first: { error: unknown } | undefined,
+  error: unknown
+): { error: unknown } {
+  if (first === undefined ||
+      (isEffectContractError(error) && !isEffectContractError(first.error)))
+    return { error };
+  return first;
+}
+
 /**
  * `name` just became callable: re-derive every definition whose body read
  * `name` as a multiplication operand, from the raw operands recorded at
@@ -2046,7 +2058,7 @@ export function repairProvisionalDependents(
               entry.boundIn
             );
           } catch (error) {
-            firstError ??= { error };
+            firstError = rememberRebuildError(firstError, error);
           }
         }
       }
@@ -2219,12 +2231,11 @@ function repairWave(
           rebuilt !== undefined && error instanceof Error
             ? errorValue(rebuilt)
             : undefined;
-        firstError ??= {
-          error:
-            bodyError !== undefined
-              ? new DependentRebuildError(bodyError, (error as Error).message)
-              : error,
-        };
+        const failure =
+          bodyError !== undefined && !isEffectContractError(error)
+            ? new DependentRebuildError(bodyError, (error as Error).message)
+            : error;
+        firstError = rememberRebuildError(firstError, failure);
         // The previous body is kept for a later retry, but it must not give
         // a value: a definition made now has the invalid rebuilt body. The
         // test is on the body itself, not on `bodyError`: `errorValue()`
@@ -2263,7 +2274,7 @@ function repairWave(
           scopeOfDependent(ce, entry.name, entry.def, entry.home)
         );
       } catch (error) {
-        firstError ??= { error };
+        firstError = rememberRebuildError(firstError, error);
       }
     }
   } finally {

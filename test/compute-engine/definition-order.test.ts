@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { DefinitionRestorePoint } from '../../src/compute-engine/boxed-expression/definition-restore-point';
 import { takeProvisionalDependents } from '../../src/compute-engine/boxed-expression/provisional-application';
 
 // Definition order must not change semantics (Tycho 0.100.0 adoption item 1).
@@ -639,3 +640,58 @@ describe('definition order does not change semantics', () => {
     });
   });
 });
+
+test.each(['Assign', 'host', 'enclosing restore point'] as const)(
+  'a rejected dependent effects change is atomic through %s',
+  (route) => {
+    const ce = new ComputeEngine();
+    const twice = ['Multiply', 2, 'x'] as const;
+    ce.box(['Assign', 'h', ['Function', twice, 'x']]).evaluate();
+    ce.declare('flexible', {
+      signature: '(number) any -> number',
+      evaluate: ce.box(['Function', ['h', 'x'], 'x']),
+    });
+    ce.declare('g', {
+      signature: '(number) pure -> number',
+      evaluate: ce.box(['Function', ['h', 'x'], 'x']),
+    });
+    const oldHelper = ce.lookupDefinition('h');
+    const oldCall = ce.box(['g', 3]);
+    expect(oldCall.evaluate().json).toBe(6);
+    const random = ['Function', ['Add', 'x', ['Random']], 'x'] as const;
+
+    const refuse = () => {
+      if (route === 'host') {
+        expect(() => ce.assign('h', ce.box(random))).toThrow();
+      } else {
+        const result = ce.box(['Assign', 'h', random]).evaluate();
+        expect(result.operator).toBe('Error');
+        expect(JSON.stringify(result.json)).toContain('random effects');
+      }
+      expect(ce.lookupDefinition('h')).toBe(oldHelper);
+      expect(oldCall.evaluate().json).toBe(6);
+      expect(ce.box(['flexible', 3]).evaluate().json).toBe(6);
+      expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+      expect(ce.box(['h', 3]).evaluate().json).toBe(6);
+    };
+
+    const checkpoint =
+      route === 'enclosing restore point' ? new DefinitionRestorePoint(ce) : undefined;
+    checkpoint?.open();
+    try {
+      refuse();
+      refuse();
+      ce.assign('h', ce.box(['Function', ['Multiply', 4, 'x'], 'x']));
+      expect(oldCall.evaluate().json).toBe(12);
+      expect(ce.box(['flexible', 3]).evaluate().json).toBe(12);
+    } finally {
+      checkpoint?.restore();
+    }
+    if (checkpoint !== undefined) {
+      // A real caller advances the cache generations after restoring.
+      ce._noteStateEvent({ kind: 'binding-repair' });
+      expect(oldCall.evaluate().json).toBe(6);
+      expect(ce.box(['flexible', 3]).evaluate().json).toBe(6);
+    }
+  }
+);
