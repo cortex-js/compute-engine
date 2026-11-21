@@ -5,6 +5,7 @@ import {
   noObjectDepsCollector,
   recordObjectRead,
 } from './boxed-expression/object-deps.js';
+import type { DepRef } from './boxed-expression/object-deps.js';
 import type { Scope } from './types-kernel-evaluation.js';
 import {
   beforeDefinitionWrite,
@@ -617,8 +618,13 @@ class UnitReadToken {
    * (`stampObjectDepsAtEnd()`, `object-deps.ts`). */
   readonly _readAgainAtEnd = true;
 
-  /** See `VersionedObject._ref` (`object-deps.ts`). */
-  readonly _ref = new WeakRef(this);
+  /** A dependency holds the token strongly (`DepRef`, `object-deps.ts`):
+   * the token is its own reference. */
+  readonly _ref: DepRef = this;
+
+  deref(): this {
+    return this;
+  }
 
   get _version(): number {
     if (this._variable)

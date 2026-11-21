@@ -1024,17 +1024,18 @@ export function canonicalFunctionLiteralArguments(
   // The outermost literal being boxed holds `startingTypes` until it
   // returns. A body whose first boxing was discarded in it starts at the
   // types that boxing found and is boxed once, unless the caller gives types.
-  if (startingTypes === undefined)
+  if (!literalBoxingActive)
     try {
-      startingTypes = new WeakMap();
+      literalBoxingActive = true;
       return canonicalFunctionLiteralArguments(ce, ops, options);
     } finally {
+      literalBoxingActive = false;
       startingTypes = undefined;
     }
   const known =
     options?.secondBoxing === true || options?.inferredParamTypes
       ? undefined
-      : startingTypes.get(ops[0]);
+      : startingTypes?.get(ops[0]);
   if (known !== undefined)
     return canonicalFunctionLiteralArguments(ce, ops, {
       ...options,
@@ -1434,7 +1435,7 @@ export function canonicalFunctionLiteralArguments(
   if (boxAgain !== undefined) {
     ce._boxingState.undoJournalsTo(firstBoxing!.marks);
     firstBoxing!.restore();
-    startingTypes!.set(rawOps[0], boxAgain);
+    (startingTypes ??= new WeakMap()).set(rawOps[0], boxAgain);
     return canonicalFunctionLiteralArguments(ce, rawOps, {
       ...options,
       inferredParamTypes: new Map([
@@ -1705,6 +1706,10 @@ export function canonicalFunctionLiteralArguments(
  * operand of a literal whose first boxing was discarded, the types its
  * parameters start at in a second boxing (`typesToBoxAgain()`). */
 let startingTypes: WeakMap<object, ReadonlyMap<string, Type>> | undefined;
+
+/** True while a literal is boxed. The map `startingTypes` is made at the
+ * first discarded boxing, which few literals have, not at each literal. */
+let literalBoxingActive = false;
 
 /**
  * The bare parameters of a literal (no annotation, not a rest or
