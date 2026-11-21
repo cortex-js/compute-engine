@@ -226,6 +226,12 @@ An operator was written with whitespace on one side only — `a+ b`. An operator
 
 The spacing rule is what lets line breaks alone separate statements: the parser decides where an expression ends from the spacing, so a program without semicolons still parses exactly one way. The same abutment idea splits postfix from prefix `!`: `x!` (abutting) is Factorial, while `x !y` ends the expression `x` and starts the prefix Not `!y`.
 
+## `range-empty`
+
+A range written with `..` has two literal bounds, and the first is greater than the second: `5..1`. The range `a..b` counts up from `a` by 1, so this one has no element: a `for` loop over it does not run, and a slice with it is the empty list.
+
+To count down, write the step: `Range(5, 1, -1)` is 5, 4, 3, 2, 1. The quick fix writes this call. The call `Range(5, 1)` with no step counts down too: a `Range` with no step counts toward its end in either direction.
+
 ## `duplicate-dictionary-key`
 
 A dictionary literal repeats a key: in `{"a" -> 1, "a" -> 2}` the second entry conflicts with the first. Within one uninterrupted run of literal entries, keys are unique by construction — a repeated key there is a typo or a leftover, never an override, so it is reported instead of silently picking one of the two values. (Under error recovery the FIRST entry is the one that remains.)

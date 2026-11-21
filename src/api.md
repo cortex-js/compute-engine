@@ -654,9 +654,12 @@ get tolerance(): number
 set tolerance(v: number | "auto"): void
 ```
 
-The absolute tolerance of the comparisons that involve a float, and of
-`chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
-recomputed at each precision change.
+The absolute tolerance of `chop()`, of `.is()`, of `ApproxEqual` and of
+the numeric algorithms (the residual test of `Solve`). The comparison
+operators and the methods `.isEqual()`, `.isLess()` and the others do
+not use it: they compare two numbers exactly, at the working precision.
+A number is kept as set; `'auto'` is `10^(-precision + 2)`, recomputed
+at each precision change.
 
 </MemberCard>
 
@@ -12492,7 +12495,6 @@ type InferenceWriteEvent = {
   binding: BoxedDefinition;
   target:   | BoxedValueDefinition
      | BoxedOperatorDefinition;
-  valueDef: BoxedValueDefinition;
   from: BoxedType;
   to: BoxedType;
   kind: "inferred";
@@ -12501,7 +12503,7 @@ type InferenceWriteEvent = {
 
 One write of inference evidence onto a definition, as delivered to
 `IComputeEngine._noteInferenceWrite` — the single emission point whose
-subscribers are the provenance history, the fresh-inference set, and the
+subscribers are the provenance history and the
 narrowing sink. See `docs/TYPE-SYSTEM.md`
 (phase 1).
 
@@ -13282,9 +13284,12 @@ get tolerance(): number
 set tolerance(v: number | "auto"): void
 ```
 
-The absolute tolerance of the comparisons that involve a float, and of
-`chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
-recomputed at each precision change.
+The absolute tolerance of `chop()`, of `.is()`, of `ApproxEqual` and of
+the numeric algorithms (the residual test of `Solve`). The comparison
+operators and the methods `.isEqual()`, `.isLess()` and the others do
+not use it: they compare two numbers exactly, at the working precision.
+A number is kept as set; `'auto'` is `10^(-precision + 2)`, recomputed
+at each precision change.
 
 </MemberCard>
 
