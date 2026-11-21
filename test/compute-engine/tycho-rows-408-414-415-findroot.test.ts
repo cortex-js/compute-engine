@@ -54,6 +54,54 @@ const findRoot = (
 const oneParam = (equation: unknown, start = 1): Expression =>
   findRoot(['List', equation], ['List', ['Tuple', 'a', start]]);
 
+describe('CE-1646: a symbolic list reduction without a derivative', () => {
+  test.each(['Mean', 'Median'])('FindRoot uses finite differences for %s', (head) => {
+    const rec = oneParam([
+      'Equal',
+      6,
+      [head, ['List', 'a', ['Multiply', 2, 'a']]],
+    ]);
+    expect(flag(rec, 'converged')).toBe(true);
+    expect(param(rec, 'a')).toBeCloseTo(4, 8);
+  });
+
+  test('finite differences stay within a parameter box narrower than the nominal step', () => {
+    const equation = [
+      'Equal',
+      0,
+      [
+        'Mean',
+        [
+          'List',
+          ['Sqrt', 'a'],
+          ['Negate', ['Sqrt', ['Subtract', 1e-10, 'a']]],
+        ],
+      ],
+    ];
+    const rec = findRoot(
+      ['List', equation],
+      ['List', ['Tuple', 'a', 2.5e-11, 0, 1e-10]]
+    );
+    expect(flag(rec, 'converged')).toBe(true);
+    expect(param(rec, 'a') / 1e-10).toBeCloseTo(0.5, 6);
+  });
+
+  test('a singular clipped endpoint can use an interior probe', () => {
+    const equation = [
+      'Equal',
+      0.25,
+      ['Mean', ['List', ['Multiply', 1e10, 'a'], ['Divide', 1e-14, 'a']]],
+    ];
+    const rec = findRoot(
+      ['List', equation],
+      ['List', ['Tuple', 'a', 1e-10, 0, 1e-10]]
+    );
+    expect(flag(rec, 'converged')).toBe(true);
+    const root = (0.5 + Math.sqrt(0.25 - 4e-4)) / 2;
+    expect(param(rec, 'a') / 1e-10).toBeCloseTo(root, 8);
+  });
+});
+
 describe('row 414: `converged` is true only at a root', () => {
   test('a^2 + 1 = 0 has no real root: converged false, stationary true', () => {
     const rec = oneParam(['Equal', ['Add', ['Square', 'a'], 1], 0]);

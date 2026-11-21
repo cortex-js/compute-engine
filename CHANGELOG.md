@@ -6,6 +6,13 @@
   re-enters the scope it saved on the first iteration of a sum, it reads the
   first iteration's index even while the second iteration runs.
 
+### Resolved Issues
+
+- **`FindRoot` can solve equations involving list reductions whose symbolic
+  derivative is unavailable** (CE-1646). The equation `Mean([a, 2a]) = 6`
+  converges to `a = 4` from a start of `a = 1`. Numeric derivative probes
+  respect the parameter bounds.
+
 ## 0.196.0 _2026-11-21_
 
 ### Breaking Changes

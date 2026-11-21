@@ -764,14 +764,19 @@ function* prepareUnitSteps(
   for (const pf of paramFresh) {
     const d = differentiate(renamed, pf);
     // Fall back to finite differences when the column cannot be differentiated
-    // symbolically, or when the derivative is left as an un-evaluable
-    // `Derivative(…)` placeholder (e.g. `∂Zeta(b·x)/∂b`).
+    // symbolically, or when it contains an unresolved `Derivative`
+    // (e.g. `∂Zeta(b·x)/∂b`) or `D` (e.g. `D(Mean([a, 2a]), a)`).
     // An invalid derivative is a rule that produced a type error (the
     // generic chain rule over an accessor of a point gave a product of a
     // tuple and a number, Tycho row 415): it would compile to a column of
     // NaN that stops the solver at its start, so it takes the finite
     // difference too.
-    if (d === undefined || !d.isValid || d.has('Derivative')) {
+    if (
+      d === undefined ||
+      !d.isValid ||
+      d.has('Derivative') ||
+      (d.has('D') && d.getSubexpressions('D').length > 0)
+    ) {
       deriv.push(null);
       derivStored.push(undefined);
       derivUnknowns.push(null);
@@ -1433,24 +1438,40 @@ function makeCallbacks(
       } else {
         // Finite difference for this column only. The step is scaled to
         // the parameter magnitude (no underflow near θⱼ = 0), and the
-        // probe stays inside `[lo, hi]`: forward unless that overshoots
-        // `hi[j]`, and if the first probe is non-finite (a box-guarded
-        // model can NaN at an infeasible point) retry the other direction.
+        // probe stays inside `[lo, hi]`: use a full forward step when
+        // possible, otherwise take the larger available step. If the
+        // first probe is non-finite, retry in the other direction.
         const t = theta[j];
         const h = Math.sqrt(Number.EPSILON) * Math.max(1, Math.abs(t));
-        let step = t + h <= hi[j] ? h : -h;
-        rec[pFresh[j]] = t + step;
+        const forward = Math.min(t + h, hi[j]);
+        const backward = Math.max(t - h, lo[j]);
+        let point =
+          forward === t + h || forward - t >= t - backward
+            ? forward
+            : backward;
+        if (point === t) continue;
+        rec[pFresh[j]] = point;
         let probe = unit.fn(rec);
         if (!Number.isFinite(probe)) {
-          const alt = -step;
-          if (t + alt <= hi[j] && t + alt >= lo[j]) {
-            step = alt;
-            rec[pFresh[j]] = t + step;
+          const alt = point > t ? backward : forward;
+          if (alt !== t) {
+            point = alt;
+            rec[pFresh[j]] = point;
+            probe = unit.fn(rec);
+          }
+        }
+        if (!Number.isFinite(probe) && (point === lo[j] || point === hi[j])) {
+          // A clipped step can land on a singular endpoint. Retry inside
+          // the box when there is a representable point between them.
+          const interior = t + (point - t) / 2;
+          if (interior !== t && interior !== point) {
+            point = interior;
+            rec[pFresh[j]] = point;
             probe = unit.fn(rec);
           }
         }
         rec[pFresh[j]] = t;
-        jr[j] = (probe - base) / step;
+        jr[j] = (probe - base) / (point - t);
       }
     }
     return jr;
