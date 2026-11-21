@@ -732,6 +732,36 @@ function inlineLambdaApplications(
 }
 
 /**
+ * The value definition that the symbol occurrence `sym` reads its stored
+ * value from, or `undefined` when it reads none (a free name with no
+ * definition, a name bound to an operator).
+ *
+ * An occurrence reads the binding it was boxed with, whatever the scope it
+ * is read in (`docs/SCOPING-MODEL.md`, "Free names"): the definition that
+ * its home chain gives, or, for a free name, the definition that its name
+ * resolves to from its home scope (`_readDefinition()`). A parameter, the
+ * variable of a binder and a local of a block read their own definition,
+ * whose value is the value of the activation of the evaluation in progress.
+ * `homeResolution()` (`effects-of.ts`) reads a symbol the same way.
+ *
+ * A symbol that is not canonical has no binding: it is read by its name in
+ * the current scope.
+ */
+function valueDefinitionOfOccurrence(
+  sym: Expression & { symbol: string }
+): BoxedValueDefinition | undefined {
+  if (!sym.isCanonical) {
+    const named = sym.engine.lookupDefinition(sym.symbol);
+    return isValueDef(named) ? named.value : undefined;
+  }
+  const read = (
+    sym as unknown as { _readDefinition?(): BoxedDefinition | undefined }
+  )._readDefinition?.();
+  if (read !== undefined) return isValueDef(read) ? read.value : undefined;
+  return sym.valueDefinition;
+}
+
+/**
  * Replace symbols bound to a value by that value, except for the names in
  * `protect`.
  *
@@ -746,6 +776,18 @@ function inlineLambdaApplications(
  * would fold `w` away). `protect` holds the unknowns, so the variable being
  * solved for is never substituted, and `seen` stops a self-referential or
  * mutually-referential binding from looping.
+ *
+ * Each symbol is read through the binding of its occurrence
+ * (`valueDefinitionOfOccurrence()`), not by its name in the scope of the
+ * caller: with `y := Sin(x)`, the `x` of the value of `y` is the `x` of the
+ * scope where `y` was assigned, also when the caller is evaluated in a
+ * function, a block or a sum that has a parameter, a local or an index `x`.
+ *
+ * Not handled: a binder inside `expr`. A value placed under a `Sum`, a
+ * `Function` or a `Block` of `expr` is made canonical again in the scope of
+ * that binder (`rebuildCall()`), so a free symbol of the value that has the
+ * name of the binder's variable becomes that variable: with `a := n + 1`,
+ * `Expand(Sum(a·n, Limits(n, 1, 3)))` sums `n·(n + 1)` (`issues/CE-1655.md`).
  */
 export function resolveBoundSymbols(
   expr: Expression,
@@ -755,14 +797,14 @@ export function resolveBoundSymbols(
   if (isSymbol(expr)) {
     const name = expr.symbol;
     if (protect.has(name) || seen.has(name)) return expr;
-    const def = expr.engine.lookupDefinition(name);
-    if (!isValueDef(def)) return expr;
+    const def = valueDefinitionOfOccurrence(expr);
+    if (def === undefined) return expr;
     // A constant held until a numeric approximation (`Pi`, `ExponentialE`)
     // stays symbolic, as `evaluate()` keeps it: its value is a float, and
     // replacing it turns an exact root such as `ln(3)` into a float and
     // hides the shape `e^(bx)` from the solver.
-    if (def.value.holdUntil === 'N') return expr;
-    const value = def.value.value;
+    if (def.holdUntil === 'N') return expr;
+    const value = def.value;
     if (value === undefined || value === null) return expr;
     seen.add(name);
     const resolved = resolveBoundSymbols(value, protect, seen);
