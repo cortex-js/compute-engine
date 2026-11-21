@@ -2539,8 +2539,19 @@ library's constants, with a literal count of a draw or a `Range` of at most
 `MAX_FOLD_EXPANDED_NODES`), such as
 `a := WithRandomSeed(7, RandomChoice([0, 1), 3))`, a seeded list of Desmos, give
 their interpreter value as a literal, a real or a list of reals, under the same
-conditions. A held value that reads another name or calls a user function still
-declines: a host can supply that name at run time. Otherwise:
+conditions. Every other held value is lowered as written in place, and of its
+effects only the draws of a random frame that it holds are accepted, when the
+frame has one draw site evaluated once (a frame of the next paragraph that has
+no warning): `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded
+list whose length reads the input `N`, is that frame at each read of `H`, a
+function of `N` (`drawSites()` of `lower.ts`). The frame starts its draws at
+its seed, so the seed can read an input too (`WithRandomSeed(N, Random())`).
+A held value still declines when it draws outside a frame
+(`L := Random() + N`), draws its seed, reads a name of `vars`, calls a user
+function that draws, or holds a frame of the warning `seeded-draw-order`
+(`WithRandomSeed(5, Random() + Random())`), whose draws can differ from the
+interpreter's. On GLSL, which has no random frame, the frame declines.
+Otherwise:
 
 A `WithRandomSeed` frame whose body has one draw site evaluated once (not under
 a loop, a `Map`, `Filter`, `Sum` or `Product` body, or a call of an effectful

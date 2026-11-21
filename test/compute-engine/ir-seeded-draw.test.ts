@@ -3,8 +3,8 @@
  * RandomChoice([0, 1), 3))`, draws over literals under a number as the
  * seed, is the same at every call: it compiles as the interpreter's value, a
  * literal. Written in place, the draws run in their seeded frame. A held
- * value that reads a name with a value or calls a user function declines,
- * as before; one with another effect (`Print`) is not evaluated at compile
+ * value that reads a name of `vars` or calls a user function that draws
+ * declines; one with another effect (`Print`) is not evaluated at compile
  * time.
  */
 
@@ -209,11 +209,13 @@ describe('CE-1524, a value of seeded draws', () => {
         ['RandomSample', ['Range', 1, 3e5], 3e5],
       ] as never)
     );
+    // The draws stay in their frame, which has one draw site: the value is
+    // the interpreter's (the least of a sample of every element).
     const start = Date.now();
-    expect(() =>
-      compile(ce.box(['Add', 'x', ['Min', 'big']] as never), IR)
-    ).toThrow(/Could not compile/);
+    const r = compile(ce.box(['Add', 'x', ['Min', 'big']] as never), IR);
     expect(Date.now() - start).toBeLessThan(200);
+    expect(r.code).toMatch(/withRandomSeed/);
+    expect(r.run!({ x: 0.5 } as never)).toBe(1.5);
   });
 
   test('a name whose value has another effect is not evaluated at compile time', () => {
@@ -255,5 +257,147 @@ describe('CE-1524, a value of seeded draws', () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+/**
+ * CE-1614: a held value whose draws read an input, `H := WithRandomSeed(139128,
+ * RandomChoice([0, 1), 4N))` with a slider `N`, is not the same at every call,
+ * so it is not a literal: it compiles as written in place, a random frame.
+ * The frame starts its draws at its seed, so the value depends only on `N`.
+ * A held value with another effect declines, and so does one whose frame can
+ * make other draws than the interpreter's (the frames of the warning
+ * `seeded-draw-order`).
+ */
+describe('CE-1614, a value of seeded draws that reads an input', () => {
+  const UNIT = ['Interval', 0, ['Open', 1]];
+  const choice = (seed: unknown, count: unknown) => [
+    'WithRandomSeed',
+    seed,
+    ['RandomChoice', UNIT, count],
+  ];
+  const DEFINITIONS: Record<string, unknown> = {
+    // The two values of the issue (Tycho's `cf56wfb4cm` and `hztlhoa5ea`).
+    H: choice(139128, ['Multiply', 4, 'N']),
+    R: [
+      'Which',
+      ['Less', 0.5, choice(626421, ['Power', 'N', 2])],
+      1,
+      'True',
+      -1,
+    ],
+    seedIsInput: ['WithRandomSeed', 'N', ['Random']],
+    readsH: ['Multiply', 2, ['At', 'H', 'N']],
+    sample: ['WithRandomSeed', 5, ['RandomSample', ['Range', 1, 'N'], 2]],
+    double: ['Function', ['Multiply', 2, 'u'], 'u'],
+    countByFunction: choice(3, ['double', 'N']),
+    liveDraw: ['Add', ['Random'], 'N'],
+    seedIsDraw: ['WithRandomSeed', ['Random'], ['Random']],
+    frameOfLiveDraw: ['WithRandomSeed', 3, ['Add', 'liveDraw', 1]],
+    drawPerElement: [
+      'WithRandomSeed',
+      5,
+      [
+        'Map',
+        ['Function', ['Multiply', 'k', ['Random']], 'k'],
+        ['Range', 1, 'N'],
+      ],
+    ],
+    twoSites: ['WithRandomSeed', 5, ['Add', ['Random'], ['Random']]],
+    scaledDraw: ['Function', ['Multiply', 'u', ['Random']], 'u'],
+    drawInFunction: ['WithRandomSeed', 3, ['scaledDraw', 'N']],
+  };
+  /** An engine with the definitions; `N` holds a value for the interpreter
+   *  and is an input for the compiler. */
+  const engine = (N?: number) => {
+    const e = new ComputeEngine();
+    e.declare('N', 'integer<1..30>');
+    e.declare('t', 'real');
+    if (N !== undefined) e.assign('N', N);
+    for (const [name, json] of Object.entries(DEFINITIONS))
+      e.assign(name, e.box(json as never));
+    return e;
+  };
+  const ce = engine();
+  const interpreted = (json: unknown, t: number, N: number) => {
+    const v = engine(N)
+      .box(json as never)
+      .subs({ t })
+      .evaluate()
+      .N();
+    return isNumber(v) ? v.re : NaN;
+  };
+
+  test.each([
+    ['an element of the list', ['Add', 't', ['At', 'H', 2]]],
+    ['its last element', ['Add', 't', ['At', 'H', ['Multiply', 4, 'N']]]],
+    ['two reads of the name', ['Add', ['At', 'H', 2], ['At', 'H', 'N']]],
+    ['a selection of the draws', ['Add', 't', ['Sum', 'R']]],
+    ['a seed that is an input', ['Add', 't', 'seedIsInput']],
+    ['a value that reads the name', ['Add', 't', 'readsH']],
+    ['a sample', ['Add', 't', ['Sum', 'sample']]],
+    ['a count by a user function', ['Add', 't', ['Sum', 'countByFunction']]],
+    [
+      'a read at each pass of a sum',
+      ['Sum', ['At', 'H', 'k'], ['Limits', 'k', 1, 'N']],
+    ],
+    [
+      'a read in a frame of the program',
+      ['WithRandomSeed', 1, ['Add', ['At', 'H', 1], ['Random']]],
+    ],
+  ])('%s gives the interpreter value at each N', (_, json) => {
+    const r = compile(ce.box(json as never), IR);
+    expect(r.success).toBe(true);
+    expect(r.warnings ?? []).toEqual([]);
+    for (const N of [3, 5]) {
+      const want = interpreted(json, 0.25, N);
+      expect(Number.isFinite(want)).toBe(true);
+      expect(r.run!({ t: 0.25, N } as never)).toBeCloseTo(want, 12);
+    }
+  });
+
+  test('the draws run in their frame, and the name is a dependency', () => {
+    const deps = new Set<string>();
+    const r = compile(ce.box(['Add', 't', ['At', 'H', 2]] as never), {
+      ...IR,
+      symbolDeps: deps,
+    } as never);
+    expect(r.code).toMatch(/withRandomSeed\(139128/);
+    expect(r.freeSymbols).toEqual(['t', 'N']);
+    expect([...deps]).toEqual(['H']);
+  });
+
+  test.each([
+    ['a draw outside a frame', ['Add', 't', 'liveDraw']],
+    ['a seed that is a draw', ['Add', 't', 'seedIsDraw']],
+    [
+      'a frame that reads a name whose value draws',
+      ['Add', 't', 'frameOfLiveDraw'],
+    ],
+    ['a draw at each element', ['Add', 't', ['Sum', 'drawPerElement']]],
+    ['two draw sites in one frame', ['Add', 't', 'twoSites']],
+    ['a draw in a user function', ['Add', 't', 'drawInFunction']],
+  ])('%s declines', (_, json) => {
+    expect(() => compile(ce.box(json as never), IR)).toThrow(
+      /the value of \w+, which has an effect/
+    );
+  });
+
+  test('a declined frame is one whose draws can differ in place', () => {
+    // Written in place, such a frame compiles with the warning: the held
+    // value declines so that its value stays the interpreter's.
+    for (const name of ['drawPerElement', 'twoSites']) {
+      const r = compile(ce.box(DEFINITIONS[name] as never), IR);
+      expect(r.warnings?.map((w) => w.code)).toEqual(['seeded-draw-order']);
+    }
+  });
+
+  test('glsl has no random frame', () => {
+    expect(() =>
+      compile(ce.box(['Add', 't', ['At', 'H', 2]] as never), {
+        ...IR,
+        to: 'glsl',
+      })
+    ).toThrow(/WithRandomSeed on glsl/);
   });
 });

@@ -545,14 +545,17 @@ function lowerOnce(
   const ce = root.engine;
   const bigint = options.mode === 'bigint';
   const interval = options.mode === 'interval';
+  /** `i` changes or reads state by itself: an operation or a region of an
+   *  effectful row, or a call of an effectful function. */
+  const effectful = (i: Instr): boolean =>
+    i.k === 'op'
+      ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
+      : i.k === 'call'
+        ? fns.effect(i.fn) === 'effectful'
+        : i.k === 'region' && regionRow(i.op)?.effect === 'effectful';
   const b = new Builder(
     (op) => rowOfOp(rows, op)?.row.effect === 'pure',
-    (i) =>
-      i.k === 'op'
-        ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
-        : i.k === 'call'
-          ? fns.effect(i.fn) === 'effectful'
-          : i.k === 'region' && regionRow(i.op)?.effect === 'effectful',
+    effectful,
     (i) =>
       i.k === 'op'
         ? rowOfOp(rows, i.op)?.row.effect !== 'pure'
@@ -3295,13 +3298,14 @@ function lowerOnce(
 
   /** The held value `v` of the name `name`, which is not a literal, lowered
    *  where `e` reads it. It declines when `v` reads `name` again, has an
-   *  effect, or has another rank or lane than the type of `e`, and when a
-   *  name that `v` reads (outside a function literal of `v` that binds it,
-   *  and outside the body and the condition of a clause of a `Sum`, a
-   *  `Product` or a `Comprehension` of `v` that binds it as its index)
-   *  is bound here other than as an input, or has another binding here
-   *  than in `v` with a value in one of the two (the interpreter reads the
-   *  bindings of `v`). */
+   *  effect other than the one draw of a random frame of `v`
+   *  (`drawSites()`), or has another rank or lane than the type of `e`,
+   *  and when a name that `v` reads (outside a function literal of `v`
+   *  that binds it, and outside the body and the condition of a clause of
+   *  a `Sum`, a `Product` or a `Comprehension` of `v` that binds it as its
+   *  index) is bound here other than as an input, or has another binding
+   *  here than in `v` with a value in one of the two (the interpreter reads
+   *  the bindings of `v`). */
   const expression = (e: Expression, name: string, v: Expression): V => {
     // A node shared by several paths is walked once per set of names that
     // the function literals around it bind.
@@ -3370,7 +3374,9 @@ function lowerOnce(
     };
     const why = facts(v).writes.size > 0 ? 'a write' : reason(v, []);
     if (why) decline(e, `the value of ${name}, which reads ${why}`);
-    const effects = b.effects;
+    // The instructions of `v` are those that its lowering adds to the
+    // region that is open here.
+    const [effects, start] = [b.effects, b.current().body.length];
     expanding.add(name);
     let x: V;
     try {
@@ -3378,7 +3384,7 @@ function lowerOnce(
     } finally {
       expanding.delete(name);
     }
-    if (b.effects !== effects)
+    if (b.effects !== effects && drawSites(b.current().body.slice(start)) > 0)
       decline(e, `the value of ${name}, which has an effect`);
     const t = inputIR(e.type.type);
     if (
@@ -6019,15 +6025,41 @@ function lowerOnce(
     return undefined;
   };
 
+  /** `i` draws from the random frame that it runs in. */
+  const drawSite = (i: Instr): boolean =>
+    (i.k === 'op' && (i.op === 'draw' || i.op === 'shuffle')) ||
+    (i.k === 'region' && (i.op === 'choice' || i.op === 'sample'));
+
   /** Whether the region `r` draws or holds a random frame. */
   const draws = (r: Region): boolean =>
     r.body.some(
       (i) =>
-        (i.k === 'op' && (i.op === 'draw' || i.op === 'shuffle')) ||
-        (i.k === 'region' &&
-          (i.op === 'seeded' || i.op === 'choice' || i.op === 'sample')) ||
+        drawSite(i) ||
+        (i.k === 'region' && i.op === 'seeded') ||
         regionsOf(i).some(draws)
     );
+
+  /** The number of draw sites of the instructions `is` that are outside the
+   *  random frames that `is` holds; `Infinity` when `is` has another effect
+   *  (a read of a `vars` name, a call of an effectful function), a draw in
+   *  a loop or in a per-element body (`repeated`), or a frame of more than
+   *  one site. A frame of one site evaluated once starts its draws at its
+   *  seed and makes the interpreter's draws, so its values depend only on
+   *  the values that it reads: `WithRandomSeed(7, RandomChoice([0, 1), 4N))`
+   *  is a function of `N`. The other frames are those of the warning
+   *  `seeded-draw-order` (`seededWarnings()` of `index.ts`), whose draws can
+   *  differ from the interpreter's. */
+  const drawSites = (is: readonly Instr[], repeated = false): number =>
+    is.reduce((n, i) => {
+      if (i.k === 'region' && i.op === 'seeded')
+        return drawSites(i.regions[0].body) <= 1 ? n : Infinity;
+      const own = !effectful(i) ? 0 : drawSite(i) && !repeated ? 1 : Infinity;
+      const inner = repeated || i.k === 'loop' || i.k === 'region';
+      return regionsOf(i).reduce(
+        (m, r) => m + drawSites(r.body, inner),
+        n + own
+      );
+    }, 0);
 
   const cx: Lowering = {
     b,
