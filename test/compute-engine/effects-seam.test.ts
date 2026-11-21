@@ -52,7 +52,10 @@ function sourceFiles(): [string, string][] {
       if (statSync(p).isDirectory()) walk(p);
       else if (entry.endsWith('.ts'))
         out.push([
-          p.slice(SRC.length + 1).split(sep).join('/'),
+          p
+            .slice(SRC.length + 1)
+            .split(sep)
+            .join('/'),
           readFileSync(p, 'utf-8'),
         ]);
     }
@@ -103,6 +106,11 @@ describe('The Function-literal construction seam is the only builder', () => {
       // operand's arrow through `refineDeclaredPlaceholders`; it never
       // builds one.
       'compute-engine/boxed-expression/validate.ts',
+      // Document preparation installs a function row's contract. With
+      // `withArrowEffects` it puts on the body's inferred signature either the
+      // host's stated effects or the effects that the walk gave the body's own
+      // `.type`; it RUNS no walk and computes no effect set of its own.
+      'compute-engine/document-preparation/prepare-document.ts',
       'compute-engine/engine-declarations.ts',
       // The provisional re-derivation checks a rebuilt VALUE-bound literal
       // against its declared effects contract (`installRebuiltLiteral`): it

@@ -14,10 +14,8 @@ import { LatexSyntax } from '../latex-syntax/latex-syntax.js';
 import type { ParseLatexOptions } from '../latex-syntax/types.js';
 import { tokenize } from '../latex-syntax/tokenizer.js';
 import type { DiscardedComment } from '../latex-syntax/tokenizer.js';
-import {
-  signatureEffects,
-  withArrowEffects,
-} from '../boxed-expression/effects-inference.js';
+import { signatureEffects } from '../../common/type/utils.js';
+import { withArrowEffects } from '../boxed-expression/effects-inference.js';
 import {
   preparedContractDeclaration,
   widenLocalType,
