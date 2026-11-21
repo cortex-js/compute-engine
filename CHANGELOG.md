@@ -25,6 +25,17 @@
   get the protocols, and a case pattern of `match` gets no keyword other
   than `true` and `false`.
 
+### Resolved Issues
+
+- **`Sum` and `Product` of one term that is not a number stay unevaluated**
+  (#651). `Sum(b)` and `Product(b)` with no indexing set returned `b` for any
+  `b` without a free variable, so `Sum(Subset(5, [1, 3, 4]))` evaluated to the
+  `Subset`, and `Product(True)` to `True` (`Sum(True)` was an
+  `incompatible-type` error). The term is its own sum only when its type can be
+  a number; otherwise the operator stays unevaluated, as it does for a symbol
+  of that type. `Sum(7)`, `Sum(Pi)`, `Sum(Missing)` and `Sum(Tuple(1, 2))` are
+  unchanged.
+
 ## 0.195.1 _2026-11-20_
 
 ### Resolved Issues

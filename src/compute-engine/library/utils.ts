@@ -5344,6 +5344,10 @@ export function* reduceBigOp<T>(
       return NON_ENUMERABLE_DOMAIN;
     if (value.unknowns.some((name) => name !== 'Missing'))
       return new UnindexedBody(value);
+    // A term that cannot be a number is not its own sum:
+    // `Sum(Subset(5, [1, 3, 4]))` answered the `Subset`. `Missing` folds to itself.
+    if (!value.type.matches('number') && !isSymbol(value, 'Missing'))
+      return NON_ENUMERABLE_DOMAIN;
     let folded = fn(initial, value);
     if (isThenable(folded)) folded = yield folded;
     return folded ?? undefined;
