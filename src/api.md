@@ -8671,7 +8671,7 @@ it is the name `m_n_0`, the index of the outer sum.
 ##### Parser.resolveSymbol() {#resolvesymbol}
 
 ```ts
-resolveSymbol(id): 
+resolveSymbol(id, purpose?): 
   | {
   type: BoxedType;
   subscriptEvaluate: boolean;
@@ -8695,6 +8695,10 @@ resolves (with `type.isUnknown` true).
 ####### id
 
 `string`
+
+####### purpose?
+
+`"indexed-base"`
 
 </MemberCard>
 
