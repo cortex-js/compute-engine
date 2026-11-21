@@ -191,7 +191,6 @@ describe('empty point-list validation', () => {
           false,
           false,
           undefined,
-          undefined,
           { mapsPointLists: true }
         );
       expect(validate(ce.box(['List']))).toBeNull();

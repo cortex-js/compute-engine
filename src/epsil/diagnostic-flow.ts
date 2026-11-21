@@ -175,7 +175,6 @@ export function diagnosticFlow(ce: ComputeEngine, program: Expression) {
         definition.lazy,
         definition.broadcastable,
         undefined,
-        undefined,
         {
           noInference: true,
           diagnostic: true,
@@ -198,7 +197,6 @@ export function diagnosticFlow(ce: ComputeEngine, program: Expression) {
           signature,
           undefined,
           threadableGate(signature, paramsAreScalar(signature)),
-          undefined,
           undefined,
           {
             noInference: true,

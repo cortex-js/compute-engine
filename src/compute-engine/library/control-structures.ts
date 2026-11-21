@@ -6083,9 +6083,8 @@ function canonicalLoopLike(
       }
     };
     // The binding site is AUTHORITATIVE for the index's type: the element
-    // type is evidence from the collection, not a guess. The helper also
-    // takes the binding out of the fresh-inference set, so a body use that
-    // contradicts the element type is an error (`bindIndexAuthoritatively`,
+    // type comes from the collection. A body use that contradicts it is
+    // an error (`bindIndexAuthoritatively`,
     // `library/utils.ts`).
     ce._withoutFacts(() =>
       bindFromElement(currentElementType(), (binding, type) =>

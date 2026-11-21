@@ -2,15 +2,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json';
 
-// Tycho item 321. When an `unknown` symbol is an operand of arithmetic that
-// is the argument of a parameter which accepts a matrix (the `collection<any>`
-// data parameter of `Histogram`), bottom-up inference first types the symbol
-// `number`, and then the matrix inference repair in `validate.ts` retypes it
-// `matrix` if the arithmetic has a plan for it. The plan accepted a scalar
-// factor of a `Multiply` but no scalar term of an `Add`, and had no branch for
-// `Divide`, so `P + 0.5` and `(P - 0.5)/√(…)` kept `P: number` and the
-// argument was an `incompatible-type` error.
-
+// Tycho item 321. The Histogram workload uses arithmetic over known data
+// columns. A free compound operand does not establish a column contract.
 const MIX: MathJsonExpression = [
   'Add',
   ['Multiply', ['Delimiter', ['Subtract', 1, 'v']], 'P_0'],
@@ -68,16 +61,16 @@ function occurrenceType(e: Expression, name: string): string | undefined {
   return undefined;
 }
 
-function freshEngine(): ComputeEngine {
+function freshEngine(type: 'list<number>' | 'unknown' = 'list<number>'): ComputeEngine {
   const ce = new ComputeEngine();
-  ce.declare('P_0', 'unknown');
-  ce.declare('P_1', 'unknown');
+  ce.declare('P_0', type);
+  ce.declare('P_1', type);
   ce.declare('v', 'real');
   return ce;
 }
 
-describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', () => {
-  test.each(CASES)('%s is valid', (_name, json) => {
+describe('Tycho 321: arithmetic over typed data in a collection slot', () => {
+  test.each(CASES)('%s accepts known list operands', (_name, json) => {
     const ce = freshEngine();
     const expr = ce.box(json);
     expect(expr.isValid).toBe(true);
@@ -95,13 +88,8 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     expect(occurrenceType(e2, 'P_0')).toBe('list<number>');
   });
 
-  // Only a CONSTANT term of a sum is taken as a scalar. A term with a free
-  // variable is not, so that `Det(A + B)` stays invalid after an earlier
-  // `A + 1` inferred `A: number` (pinned as P2 in
-  // `matrix-operator-typing.test.ts`). A declared real term is therefore not
-  // repaired either.
-  test('a sum with a declared real term is not repaired', () => {
-    const ce = freshEngine();
+  test('an unspecified compound data operand is refused', () => {
+    const ce = freshEngine('unknown');
     const expr = ce.box(['Histogram', ['Subtract', 'P_0', 'v'], 2]);
     expect(expr.isValid).toBe(false);
     expect(occurrenceType(expr, 'P_0')).toBe('number');
@@ -118,15 +106,15 @@ describe('Tycho 321: arithmetic over an unknown symbol in a collection slot', ()
     expect(occurrenceType(expr, 'P_0')).toBe('list<number>');
   });
 
-  test('a matrix-consuming operator gets the same repair: Determinant(A + 1)', () => {
+  test('a determinant accepts scalar addition to a declared matrix', () => {
     const ce = new ComputeEngine();
-    ce.declare('A', 'unknown');
+    ce.declare('A', 'matrix');
     const expr = ce.box(['Determinant', ['Add', 'A', 1]]);
     expect(expr.isValid).toBe(true);
     expect(occurrenceType(expr, 'A')).toBe('matrix');
   });
 
-  test('a term with the symbol but no plan still fails closed', () => {
+  test('an unknown compound determinant operand stays numeric and is refused', () => {
     const ce = new ComputeEngine();
     ce.declare('A', 'unknown');
     const expr = ce.box(['Determinant', ['Add', 'A', ['Sin', 'A']]]);

@@ -1646,14 +1646,13 @@ parameters of the enclosing literals (`ce._saveParameterRequirements()`), and
 the provisional captures, which do not reach the enclosing literal. It does
 not put back a narrowing written directly on a definition that the root
 construction made outside the literal (the index of an enclosing `Sum`, a
-local of an enclosing block), with its `SCALAR_USES_MAP` entry and its
-membership of `_freshlyInferred`. No program is known where
-one of these changes a type or a value.
+local of an enclosing block), with its `SCALAR_USES_MAP` entry. No
+program is known where this changes a type or a value.
 
 A parameter of a literal being boxed whose number type came only from uses
 that map over a collection counts as untyped where a slot requires a
 collection that can hold numbers (`isUntypedAtCollectionSlot()`,
-`validate.ts`): argument validation (before the matrix repair and in the
+`validate.ts`): argument validation (in the
 admission of an overloaded arm), the source slots of the lazy collection
 operators, `Length`, `Join` and a spread, the one-operand `Sum` and
 `Product`, the domain of `ArgMax`/`ArgMin` and the iterated operand of a
@@ -1661,6 +1660,13 @@ loop. The use then gives the parameter the type of the slot
 (`narrowInferredType()`): `x ↦ (x + x, Length(x))` is typed
 `(x: collection) -> …` and `x ↦ (x + x, Sort(x))` is typed
 `(x: indexed_collection<any>) -> …`, as when the collection use comes first.
+
+A direct matrix parameter can supply a type requirement for an untyped
+symbol. A matrix parameter does not retype the free operands of a compound
+argument. For example, `Determinant(A + B)` requires matrix shape evidence
+from the operand types or values in scope. A matrix declaration for `A`
+and a scalar declaration for `B` suffice because addition broadcasts the
+scalar over the matrix.
 
 An operation (`evaluate()`, `simplify()`, `subs()`, `compile()`, …) writes its
 requirements in an environment of its own, which reads the environments of

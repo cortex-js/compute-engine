@@ -794,7 +794,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             opDef.signature.type,
             false,
             true,
-            undefined,
             (i) => opDef.stripsMissingAt(i),
             {
               operatorName: 'Arctan',

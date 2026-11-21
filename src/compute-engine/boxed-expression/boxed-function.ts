@@ -1192,7 +1192,7 @@ export class BoxedFunction
    * `ops` is set when the operands of the call are not the operands as
    * boxed before the check: the check against the old definition can
    * replace an operand (a one-cluster string becomes a `character` at a
-   * `character` parameter, matrix inference repairs an operand). The call is
+   * `character` parameter, a bare operator devolves to a variable). The call is
    * boxed again from `ops`, so that the new definition checks the operands
    * as written, not the operands that the old definition replaced. `ops`
    * is also set when the call received the default value of a parameter

@@ -309,7 +309,7 @@ export function solveArmOverActuals(
 
   // The LOOSEST reading of each parameter: every variable read as `any`. An
   // operand that fails even this is admitted provisionally at best (deferred
-  // overlap, value-component tri-state, matrix repair, devolution), and every
+  // overlap, value-component tri-state, devolution), and every
   // provisional admission contributes NO bound (§4.5).
   //
   // This is an ADMISSION domain, not a disjointness one: at an INVARIANT

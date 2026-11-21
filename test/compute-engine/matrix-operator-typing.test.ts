@@ -1,5 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
-import { expectTypeBetween } from '../utils';
+import { ComputeEngine, isFunction } from '../../src/compute-engine';
 
 /** The type of the first occurrence of the symbol `name` in `expr`. Boxing
  * declares nothing, so a type inferred from a use is read on the
@@ -49,10 +48,18 @@ describe('Matrix-operator typing (declared symbols)', () => {
     expect(e.type.toString()).toBe('matrix');
   });
 
-  test('matrix × matrix → matrix', () => {
-    const e = engine().parse('XY');
-    expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('matrix');
+  test('matrix × matrix preserves shape and the written product order', () => {
+    const ce = engine();
+    const xy = ce.parse('XY');
+    const yx = ce.parse('YX');
+    expect(xy.isValid).toBe(true);
+    expect(yx.isValid).toBe(true);
+    expect(xy.type.toString()).toBe('matrix');
+    expect(yx.type.toString()).toBe('matrix');
+    ce.assign('X', ['List', ['List', 1, 2], ['List', 3, 4]]);
+    ce.assign('Y', ['List', ['List', 2, 0], ['List', 0, 1]]);
+    expect(xy.evaluate().json).toEqual(['List', ['List', 2, 2], ['List', 6, 4]]);
+    expect(yx.evaluate().json).toEqual(['List', ['List', 2, 4], ['List', 3, 4]]);
   });
 
   test('det(matrix × matrix) is valid and typed number', () => {
@@ -136,13 +143,18 @@ describe('Matrix-operator typing (declared symbols)', () => {
 });
 
 describe('Matrix-operator typing (undeclared symbols)', () => {
-  test('det(A+2B) repairs fresh bottom-up numeric inference', () => {
+  test('an unspecified sum does not establish a determinant operand shape', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('\\det(A+2B)');
-    expect(e.isValid).toBe(true);
-    expect(e.type.toString()).toBe('number');
-    expect(occurrenceType(e, 'A')).toBe('matrix');
-    expect(occurrenceType(e, 'B')).toBe('matrix');
+    expect(e.isValid).toBe(false);
+    expect(e.type.toString()).toBe('error');
+    if (!isFunction(e) || !isFunction(e.op1))
+      throw new Error('Expected a determinant with an error operand');
+    expect(e.op1.op1.json).toEqual([
+      'ErrorCode', "'incompatible-type'", "'matrix'", "'number'",
+    ]);
+    expect(ce.lookupDefinition('A')).toBeUndefined();
+    expect(ce.lookupDefinition('B')).toBeUndefined();
   });
 
   test('does not rewrite an inference made by an earlier expression', () => {
@@ -165,7 +177,8 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
   test('(2)(3) types integer and evaluates to 6', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('(2)(3)');
-    expectTypeBetween(e, { atMost: 'integer' });
+    expect(e.type.toString()).not.toMatch(/\bnever\b/);
+    expect(e.type.matches('integer')).toBe(true);
     expect(e.evaluate().toString()).toBe('6');
   });
 
@@ -175,25 +188,24 @@ describe('Multiply numeric typing (regression — must be unchanged)', () => {
   });
 });
 
-/**
- * Fresh-matrix-inference repair — the P1–P11 behavior matrix (probe-verified
- * 2026-07-18, pinned when the repair's provenance moved from an eager
- * inferred-symbol snapshot to the forward log recorded by
- * `BoxedSymbol._infer()`). Each test
- * uses a fresh engine: the repair retypes symbols for the engine's lifetime.
- */
-describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
+describe('Matrix parameter validation', () => {
   const sym = (ce: ComputeEngine, name: string) => ce.box(name).type.toString();
 
-  test('P1: Det(A+B), both fresh → valid, both matrix', () => {
-    const ce = new ComputeEngine();
-    const e = ce.box(['Determinant', ['Add', 'A', 'B']]);
-    expect(e.isValid).toBe(true);
-    expect(occurrenceType(e, 'A')).toBe('matrix');
-    expect(occurrenceType(e, 'B')).toBe('matrix');
-  });
+  test.each([true, false])(
+    'a matrix plus a scalar is a valid determinant operand (matrix first: %s)',
+    (matrixFirst) => {
+      const ce = new ComputeEngine();
+      ce.assign('A', matrixFirst ? ['List', ['List', 1, 2], ['List', 3, 4]] : 1);
+      ce.assign('B', matrixFirst ? 1 : ['List', ['List', 2, 0], ['List', 0, 1]]);
+      const e = ce.parse('\\det(A+2B)');
+      expect(e.isValid).toBe(true);
+      if (!isFunction(e)) throw new Error('Expected a determinant call');
+      expect(e.op1.type.toString()).toBe('matrix<integer^(2x2)>');
+      expect(e.evaluate().json).toBe(matrixFirst ? -2 : 14);
+    }
+  );
 
-  test('P2: prior numeric inference wins — invalid, A stays number', () => {
+  test('committed numeric evidence stays numeric after a rejected determinant', () => {
     const ce = new ComputeEngine();
     // The inference of the earlier
     // expression is in its unit until `ce.infer()` commits it.
@@ -204,7 +216,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(sym(ce, 'A')).toBe('number');
   });
 
-  test('P3: Det(a·A), both fresh → ambiguous product never guessed', () => {
+  test('an unspecified product cannot supply the matrix parameter', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Determinant', ['Multiply', 'a', 'A']]);
     expect(e.isValid).toBe(false);
@@ -212,28 +224,33 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(occurrenceType(e, 'A')).toBe('number');
   });
 
-  test('P4: Det(2·A) → literal scalar is unambiguous, A matrix', () => {
+  test('scaling a known matrix preserves its matrix shape', () => {
     const ce = new ComputeEngine();
+    ce.declare('A', 'matrix');
     const e = ce.box(['Determinant', ['Multiply', 2, 'A']]);
     expect(e.isValid).toBe(true);
     expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
-  test('P5: Negate / integer Power / Subtract forms all promote', () => {
+  test('negation, integer power, and subtraction preserve known matrix shape', () => {
     {
       const ce = new ComputeEngine();
+      ce.declare('A', 'matrix');
       const e = ce.box(['Determinant', ['Negate', 'A']]);
       expect(e.isValid).toBe(true);
       expect(occurrenceType(e, 'A')).toBe('matrix');
     }
     {
       const ce = new ComputeEngine();
+      ce.declare('A', 'matrix');
       const e = ce.box(['Determinant', ['Power', 'A', 2]]);
       expect(e.isValid).toBe(true);
       expect(occurrenceType(e, 'A')).toBe('matrix');
     }
     {
       const ce = new ComputeEngine();
+      ce.declare('A', 'matrix');
+      ce.declare('B', 'matrix');
       const e = ce.box(['Determinant', ['Subtract', 'A', 'B']]);
       expect(e.isValid).toBe(true);
       expect(occurrenceType(e, 'A')).toBe('matrix');
@@ -241,7 +258,8 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     }
   });
 
-  test('P6: non-strict engine — no repair, fresh symbols infer number', () => {
+
+  test('non-strict boxing retains ordinary numeric evidence', () => {
     const ce = new ComputeEngine();
     ce.strict = false;
     const e = ce.box(['Determinant', ['Add', 'A', 'B']]);
@@ -249,11 +267,11 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(occurrenceType(e, 'A')).toBe('number');
   });
 
-  test('P7: nested sub-operator — Det(Dot(u,v)): inner signature governs, no matrix promotion', () => {
+  test('Dot keeps its own argument types when its scalar result is refused', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Determinant', ['Dot', 'u', 'v']]);
     // Dot returns a scalar, so the outer Determinant(matrix) mismatches; the
-    // repair must not promote u/v — they carry Dot's own parameter typing,
+    // u/v carry Dot's own parameter typing,
     // which admits a point as well as a vector or matrix (`Dot` is the
     // sanctioned spelling of the point inner product, Tycho item 158).
     expect(e.isValid).toBe(false);
@@ -268,7 +286,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(occurrenceType(e, 'v')).toBe('list<tuple> | matrix | tuple | vector');
   });
 
-  test('P8: Det(A·M) with declared M: matrix — no unnecessary promotion', () => {
+  test('an existing matrix supplies the shape for a scalar product', () => {
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix');
     const e = ce.box(['Determinant', ['Multiply', 'A', 'M']]);
@@ -276,7 +294,7 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(occurrenceType(e, 'A')).toBe('number');
   });
 
-  test('P9: Det(A·v) with declared v: vector — failed repair rolls A back to number', () => {
+  test('a scaled vector is refused without changing scalar evidence', () => {
     const ce = new ComputeEngine();
     ce.declare('v', 'vector');
     const e = ce.box(['Determinant', ['Multiply', 'A', 'v']]);
@@ -284,38 +302,44 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(occurrenceType(e, 'A')).toBe('number');
   });
 
-  test('P10: Det(A/A) — argument folds to 1, invalid, A ends number', () => {
-    // The argument folds to `1`, so no occurrence of `A` is left; the failed
-    // repair leaves no definition of `A` either.
+  test('a folded scalar quotient is refused without declaring its name', () => {
+    // The argument folds to `1`, so no occurrence of `A` is left; boxing leaves no
+    // definition of `A`.
     const ce = new ComputeEngine();
     expect(ce.box(['Determinant', ['Divide', 'A', 'A']]).isValid).toBe(false);
     expect(ce.lookupDefinition('A')).toBeUndefined();
   });
 
-  test('P11: Det(f(A)) — A never enters numeric inference, not force-typed', () => {
+  test('an opaque standalone call leaves its argument unknown', () => {
     const ce = new ComputeEngine();
     const e = ce.box(['Determinant', ['f', 'A']]);
     expect(e.isValid).toBe(true);
     expect(occurrenceType(e, 'A')).toBe('unknown');
   });
 
-  test('supplied optional argument still repairs (CharacteristicPolynomial)', () => {
+  test('supplied optional argument preserves a matrix input (CharacteristicPolynomial)', () => {
     const ce = new ComputeEngine();
+    ce.declare('A', 'matrix');
+    ce.declare('B', 'matrix');
     const e = ce.box(['CharacteristicPolynomial', ['Add', 'A', 'B'], 'x']);
     expect(e.isValid).toBe(true);
     expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
-  test('union parameter (matrix|vector) still repairs (LinearSolve)', () => {
+  test('union parameter (matrix|vector) admits a known matrix (LinearSolve)', () => {
     const ce = new ComputeEngine();
+    ce.declare('A', 'matrix');
+    ce.declare('B', 'matrix');
     ce.declare('M', 'matrix');
     const e = ce.box(['LinearSolve', 'M', ['Add', 'A', 'B']]);
     expect(e.isValid).toBe(true);
     expect(occurrenceType(e, 'A')).toBe('matrix');
   });
 
-  test('non-plannable term excludes only itself: Det(A + Cos(t)·B)', () => {
+  test('a scalar function does not change the types of matrix summands', () => {
     const ce = new ComputeEngine();
+    ce.declare('A', 'matrix');
+    ce.declare('B', 'matrix');
     const e = ce.box([
       'Determinant',
       ['Add', 'A', ['Multiply', ['Cos', 't'], 'B']],
@@ -375,21 +399,19 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     ).toBe('[1,2]');
   });
 
-  test('a fresh numeric guess beside a collection-typed symbol is still repaired', () => {
-    // `B` is narrowed to `collection` by `Length`; `A` is guessed numeric by
-    // `Multiply` and repaired to `matrix` by `Determinant`.
+  test('an explicit matrix formal is independent of inferred collection evidence', () => {
     const ce = new ComputeEngine();
     const f = ce.box([
       'Function',
       ['Block', ['Length', 'B'], ['Determinant', ['Multiply', 2, 'A']]],
-      'A',
+      ['Typed', 'A', "'matrix'"],
       'B',
     ]);
     expect(f.isValid).toBe(true);
     expect(f.type.toString()).toBe('(A: matrix, B: collection) -> number');
   });
 
-  test('a collection-typed symbol at a matrix parameter is narrowed, not repaired', () => {
+  test('a matrix parameter narrows previous collection evidence', () => {
     // Ordinary inference narrows `collection` to `matrix`.
     const ce = new ComputeEngine();
     const f = ce.box([
@@ -402,11 +424,8 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
   });
 });
 
-describe('Fresh-matrix repair — phase 2a slot restore (docs/TYPE-SYSTEM.md)', () => {
-  test('failure leg: the replaced entries are put back (no phantom matrix type)', () => {
-    // The repair replaces the entries of the unit's environment and writes
-    // no definition; when the repaired form is refused, it puts the entries
-    // back.
+describe('Rejected matrix operands and definition slot restore', () => {
+  test('a rejected matrix operand keeps the types of its occurrences', () => {
     const ce = new ComputeEngine();
     const e = ce.parse('\\det(\\frac{A}{B})');
     expect(e.isValid).toBe(false);

@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, isFunction, isSymbol } from '../../src/compute-engine';
 
 /**
  * Boxing recurses once per level of the MathJSON tree, so the number of stack
@@ -72,7 +72,7 @@ describe('boxing stack frames per nesting level', () => {
       const expr = ce.box(nest(n), { form });
       // A raw box does not run the handler; canonicalize explicitly so the
       // probe fires at every level of the raw-built tree too.
-      if (form === 'raw') expr.canonical;
+      if (form === 'raw') void expr.canonical;
       return depthAtLeaf;
     };
     const a = measure(20);
@@ -96,49 +96,21 @@ describe('boxing stack frames per nesting level', () => {
     expect(f).toBeLessThan(13);
   });
 
-  // The frame trim boxes nested operands through `boxInternal()` directly,
-  // skipping `box()`'s inference-transaction bracket. That is only a no-op
-  // when a transaction is already open: `ce.box()` opens one at the root, but
-  // `ce.function()` roots a construction WITHOUT opening one, so each of its
-  // top-level operands must still get its own bracket. Both are pinned by
-  // counting the outermost openings of the transaction (`_inferenceTxDepth`
-  // going from 0 to 1); a guard that only checked `isRootActive` would make
-  // the `ce.function()` counts 0.
-  function countOutermostBrackets(ce: ComputeEngine): () => number {
-    let depth = (ce as any)._inferenceTxDepth as number;
-    let opened = 0;
-    Object.defineProperty(ce, '_inferenceTxDepth', {
-      configurable: true,
-      get: () => depth,
-      set: (v: number) => {
-        if (depth === 0 && v === 1) opened += 1;
-        depth = v;
-      },
-    });
-    return () => opened;
-  }
-
-  test('a ce.box() root opens exactly one boxing bracket for the whole tree', () => {
+  test('ce.function boxes multiple deep raw operands canonically', () => {
     const ce = new ComputeEngine();
-    let d: any = 'x';
-    for (let i = 0; i < 30; i++) d = ['Sin', d];
-    const opened = countOutermostBrackets(ce);
-    ce.box(d);
-    expect(opened()).toBe(1);
-  });
-
-  test('a ce.function() root still opens one boxing bracket per top-level operand', () => {
-    const ce = new ComputeEngine();
-    const deep = () => {
-      let d: any = 'x';
-      for (let i = 0; i < 30; i++) d = ['Sin', d];
-      return d;
-    };
-    const opened = countOutermostBrackets(ce);
-    ce.function('Sin', [deep()]);
-    expect(opened()).toBe(1);
-    ce.function('Tuple', [deep(), deep(), deep()]);
-    expect(opened()).toBe(4);
+    let raw: any = 'x';
+    for (let i = 0; i < 200; i++) raw = ['Sin', raw];
+    const tuple = ce.function('Tuple', [raw, raw, raw]);
+    if (!isFunction(tuple, 'Tuple')) throw new Error('Expected a Tuple');
+    expect(tuple.nops).toBe(3);
+    for (const operand of tuple.ops) {
+      let term = operand;
+      for (let i = 0; i < 200; i++) {
+        if (!isFunction(term, 'Sin')) throw new Error('Expected a Sin term');
+        term = term.op1;
+      }
+      expect(isSymbol(term) && term.symbol).toBe('x');
+    }
   });
 
   test('a 300-deep Sin nest boxes canonically', () => {

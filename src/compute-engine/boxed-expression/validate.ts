@@ -26,7 +26,6 @@ import {
   functionLiteralBody,
   functionLiteralDeclaredSignature,
   functionLiteralParameterType,
-  isFunctionLiteralParameter,
   optionalParameterTarget,
   restParameterSignatureTail,
   signatureArgumentsOfSlots,
@@ -132,16 +131,10 @@ import type {
   IComputeEngine as ComputeEngine,
   Scope,
   BoxedOperatorDefinition,
-  BoxedValueDefinition,
-  TypeProvenanceEntry,
-  ParameterRequirement,
-  ParameterRecord,
 } from '../global-types.js';
-import { recordTypeProvenance } from './type-provenance.js';
 import { fuzzyStringMatch } from '../../common/fuzzy-string-match.js';
 import { isOperatorDef, isValueDef } from './utils.js';
 import { isWildcard } from './pattern-utils.js';
-import { isScratchBinding } from '../scratch-scopes.js';
 import { isTensorValue } from './tensor-view.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
@@ -155,10 +148,8 @@ import {
   containsContinuationOperand,
   hasInferredType,
   isFreeName,
-  freeBinding,
   resolvedValueDefinition,
 } from './type-guards.js';
-import type { UnitEnvironment } from '../binding-unit.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
 import { smallCount } from './collection-count.js';
 import {
@@ -729,7 +720,7 @@ export function isMappedNumberParameter(expr: Expression): boolean {
  * collection: its type is `unknown`, or it is a mapped number parameter
  * (`isMappedNumberParameter()`) and `slot` can hold numbers. The
  * collection operators that narrow an untyped operand themselves use this
- * test, and so does argument validation, before the matrix repair. The
+ * test, and so does argument validation. The
  * narrowing then gives `expr` the requirement of the slot
  * (`narrowInferredType()`): the order of the uses does not decide whether
  * the parameter is a collection (CE-1270).
@@ -2727,8 +2718,7 @@ function armParamAt(
  * does not mask the correctly-sized arm's remaining positions. Only when NO
  * eligible arm accepts is the error minted, against the union of the arms'
  * parameters at the first universally-refuted position (§4.4:
- * "incompatible-type against the declared union"). No boxing-pass window:
- * nothing here writes.
+ * "incompatible-type against the declared union"). This check writes no state.
  *
  * Arity is deliberately not re-checked as such: boxing normalizes it, and a
  * `Spread` call re-boxes after splicing (`_spliceSpreadOps`), which re-runs
@@ -3944,10 +3934,8 @@ export interface ValidateArgumentsInternals {
    * (`refusesAbsentArgument`). */
   refusesAbsentAt?: (index: number) => boolean;
   /** Repair-free TRIAL mode: this call is an overload arm's trial
-   * (`EngineBoxingState.withTrial()`). The two construction-level repairs
-   * are admitted by their write-free preconditions and NOT executed
-   * (`devolveUnappliedOperator` would declare a shadow and request a
-   * rebuild; `repairFreshMatrixInference` would retype symbols and re-box),
+   * (`EngineBoxingState.withTrial()`). `devolveUnappliedOperator` is admitted by its write-free precondition
+   * without declaring a shadow or requesting a rebuild,
    * and the final operand inference is skipped. The winning arm's REAL
    * validation, outside the trial, performs any repairs and the inference,
    * exactly once. */
@@ -4274,7 +4262,6 @@ export function validateArguments(
    * elementwise, so a sibling slot that binds its argument whole is validated
    * as usual (`docs/plans/2026-08-08-broadcastable-param-semantics.md`). */
   threadable?: Threadable,
-  freshlyInferred?: ReadonlySet<BoxedValueDefinition>,
   /** Strip-before-validate (§3.B of the missing-value typing design): for a
    * position where this predicate returns `true`, an operand carrying a
    * `missing` arm is admitted when its stripped type still matches the
@@ -4357,9 +4344,8 @@ export function validateArguments(
       threadable,
       couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
       stripMissing,
-      freshMatrixRepair: (op: Expression, param: Type) =>
-        (!op.type.isUnknown && isUntypedAtCollectionSlot(op, param)) ||
-        couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
+      untypedAtCollectionSlot: (op: Expression, param: Type) =>
+        !op.type.isUnknown && isUntypedAtCollectionSlot(op, param),
       // The provisional admission of a symbol with an inferred type at a
       // collection parameter, which full validation performs for a library
       // operator (see `isProvisionalCollectionOperand`).
@@ -4386,7 +4372,6 @@ export function validateArguments(
           declared,
           lazy,
           threadable,
-          freshlyInferred,
           stripMissing,
           {
             trial: true,
@@ -5061,34 +5046,13 @@ export function validateArguments(
         continue;
       }
       if (internals?.trial) {
-        // TRIAL mode: the two construction-level repairs are admitted by
-        // their write-free preconditions and NOT executed — a repair
-        // entangles state that a trial must leave as it was (the
-        // devolve shadow participates in the boxing-state rebuild loop; the
-        // matrix repair re-boxes). A precondition is not a proof: the
-        // winning arm's REAL validation runs the repair and may fail where
-        // the trial admitted — that failure surfaces as the call's error,
-        // with no second chance, byte-identical to the filter-era behavior.
-        if (couldRepairFreshMatrixInference(ce, op, param, freshlyInferred)) {
-          result.push(op);
-          continue;
-        }
+        // A trial admits a bare operator by the write-free precondition.
+        // Only the winning arm can request a rebuild of the construction.
         if (isRepairableOperatorSymbol(ce, op)) {
           result.push(op);
           continue;
         }
       } else {
-        const repaired = repairFreshMatrixInference(
-          ce,
-          op,
-          param,
-          freshlyInferred
-        );
-        if (repaired) {
-          result.push(repaired);
-          substituted = true;
-          continue;
-        }
         // A bare uppercase symbol bound to a standard-library operator (`N`,
         // `D`) used where a value is required almost always means a variable
         // (`N \equiv 1 \pmod k`): devolve it to an unknown symbol, mirroring
@@ -5367,44 +5331,20 @@ export function validateArguments(
         i += 1;
         continue;
       }
-      // The two repairs that rewrite an operand at construction time — a
-      // fresh matrix inference re-boxed against the parameter, and a bare
-      // single-letter builtin (`N`, `D`) devolved to a variable — run here
-      // exactly as they do for a required parameter. A trial validation
-      // admits an operand by the repair's write-free precondition without
-      // running it; a real validation runs the repair. An optional slot sees
-      // the same operands a required slot does: `Range(1, N)` puts the bare
-      // builtin `N` in the optional upper bound, and `N` must become a
-      // variable there as it does in `Range(N)` or `N + 1`.
+      // `Range(1, N)` must devolve the bare builtin `N` in an optional
+      // slot just as `Range(N)` does in a required slot.
       if (!op.type.isUnknown && isUntypedAtCollectionSlot(op, param)) {
         result.push(op);
         i += 1;
         continue;
       }
       if (internals?.trial) {
-        if (couldRepairFreshMatrixInference(ce, op, param, freshlyInferred)) {
-          result.push(op);
-          i += 1;
-          continue;
-        }
         if (isRepairableOperatorSymbol(ce, op)) {
           result.push(op);
           i += 1;
           continue;
         }
       } else {
-        const repaired = repairFreshMatrixInference(
-          ce,
-          op,
-          param,
-          freshlyInferred
-        );
-        if (repaired) {
-          result.push(repaired);
-          substituted = true;
-          i += 1;
-          continue;
-        }
         const devolved = devolveUnappliedOperator(ce, op);
         if (devolved !== null) {
           result.push(devolved);
@@ -5629,40 +5569,17 @@ export function validateArguments(
           deferredIdx.add(result.length - 1);
           continue;
         }
-        // The two repairs that rewrite an operand at construction time (a
-        // fresh matrix inference re-boxed against the parameter, a bare
-        // single-letter builtin devolved to a variable) run for a variadic
-        // operand as they do for a required or optional one: a trial
-        // validation admits by the write-free precondition, a real validation
-        // runs the repair. `Max(1, N)` puts the bare builtin `N` in the
-        // variadic tail.
+        // `Max(1, N)` places the bare builtin `N` in a variadic slot.
         if (!op.type.isUnknown && isUntypedAtCollectionSlot(op, varParam)) {
           result.push(op);
           continue;
         }
         if (internals?.trial) {
-          if (
-            couldRepairFreshMatrixInference(ce, op, varParam, freshlyInferred)
-          ) {
-            result.push(op);
-            continue;
-          }
           if (isRepairableOperatorSymbol(ce, op)) {
             result.push(op);
             continue;
           }
         } else {
-          const repaired = repairFreshMatrixInference(
-            ce,
-            op,
-            varParam,
-            freshlyInferred
-          );
-          if (repaired) {
-            result.push(repaired);
-            substituted = true;
-            continue;
-          }
           const devolved = devolveUnappliedOperator(ce, op);
           if (devolved !== null) {
             result.push(devolved);
@@ -5934,578 +5851,6 @@ export function validateArguments(
     }
   });
   return substituted ? result : null;
-}
-
-// The two targets of `freshInferenceTarget`, boxed once when the module
-// loads. They have no type resolver: `matches()` reads the resolver only to
-// parse a type STRING argument, and `freshInferenceTarget` passes a `Type`.
-const MATRIX_BOXED_TYPE = new BoxedType('matrix');
-const LIST_OF_NUMBERS_BOXED_TYPE = new BoxedType('list<number>');
-
-/**
- * The collection type that the repair below gives its symbols for this
- * parameter, or `undefined` when the repair does not apply. It is `matrix`
- * when a `matrix` argument satisfies the parameter. Otherwise it is
- * `list<number>` when a list of numbers satisfies it: the data parameter of
- * the statistics operators (`list<number> | set<number> | tuple`) refuses a
- * matrix (ROADMAP CE-13), and the symbol in `Histogram(P + 0.5, 1/100)` is a
- * list of data (Tycho item 321).
- *
- * The test is "would an argument of that type satisfy the parameter", not
- * "is the parameter that type". The direction matters for a UNION parameter
- * (`LinearSolve`'s `matrix | vector`): a union is assignable to `R` only when
- * EVERY arm is, so `matrix | vector` does not match `matrix`, while `matrix`
- * *is* assignable to `matrix | vector`. The reversed spelling silently
- * declined the repair for every union-typed parameter.
- */
-function freshInferenceTarget(
-  expected: Type
-): 'matrix' | 'list<number>' | undefined {
-  if (MATRIX_BOXED_TYPE.matches(expected)) return 'matrix';
-  if (LIST_OF_NUMBERS_BOXED_TYPE.matches(expected)) return 'list<number>';
-  return undefined;
-}
-
-/**
- * The **write-free** precondition of {@link repairFreshMatrixInference}: true
- * when the repair could apply to this operand/parameter pair.
- *
- * The repair itself mutates definitions, re-boxes, and rolls back on failure,
- * so overload resolution — which must not write (§4.2 of the overload design)
- * — cannot run it to find out. It consults this instead. Deliberately
- * conservative in the ADMITTING direction: it checks the repair's own
- * entry gates (a `matrix`-ish parameter, at least one fresh eligible symbol,
- * and a non-empty structural plan) but not whether the re-box would actually
- * produce a conforming type. An arm kept on a repair that then fails is handed
- * to full validation, which produces the error — exactly what happens for a
- * plain signature. Refusing to model the repair at all would be worse: an
- * operand a plain signature repairs and accepts would silently match no arm.
- */
-function couldRepairFreshMatrixInference(
-  ce: ComputeEngine,
-  op: Expression,
-  expected: Type,
-  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
-): boolean {
-  if (!freshlyInferred || !freshInferenceTarget(expected)) return false;
-
-  const eligible = new Set<string>();
-  for (const name of op.freeVariables) {
-    const site = unitRepairSite(ce, op, name);
-    if (site !== undefined) {
-      if (site.eligible) eligible.add(name);
-      continue;
-    }
-    const def = ce.lookupDefinition(name);
-    if (!def || !isValueDef(def) || !def.value.inferredType) continue;
-    // Keep these tests in step with `repairFreshMatrixInference`, which
-    // explains them: a parameter is not retyped, and a symbol already typed
-    // as a collection or as text is not a numeric guess, so it is not
-    // eligible.
-    if (isFunctionLiteralParameter(def.value)) continue;
-    if (hasNonNumericShapeEvidence(def.value.type.type)) continue;
-    if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
-      eligible.add(name);
-  }
-  if (eligible.size === 0) return false;
-
-  const names = matrixInferencePlan(op, eligible);
-  return names !== null && names.size > 0;
-}
-
-/** The type of a text value: a `string` or a `character`. */
-const TEXT_TYPE: Type = Object.freeze({
-  kind: 'union',
-  types: ['string', 'character'],
-}) as Type;
-
-/**
- * True when an inferred type is a collection type or a text type
- * (`string`, `character`, or a union of the two). Such a type is evidence of
- * the symbol's shape, not a numeric guess, so the fresh-matrix repair must not
- * retype the symbol. Shared by {@link couldRepairFreshMatrixInference} and
- * {@link repairFreshMatrixInference} so that the two tests stay the same.
- */
-function hasNonNumericShapeEvidence(type: Type): boolean {
-  return isSubtype(type, COLLECTION_SHAPE_TYPE) || isSubtype(type, TEXT_TYPE);
-}
-
-/**
- * Where the fresh-matrix repair retypes a name whose requirements are in a
- * unit environment (`binding-unit.ts`).
- * - `env`: the environment that the write goes in: that of the trial in
- *   progress, else of the operation in progress (rule 8 of
- *   `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), else of the
- *   occurrence (rule 6).
- * - `key`: the key of the entry: the home scope of a free name, or the value
- *   definition of the occurrence.
- * - `eligible`: the entry is a fresh numeric guess, as `freshlyInferred`
- *   states it for a definition: the root construction in progress wrote it,
- *   or the name has no entry yet, and the occurrence's type (rule 4) is not a
- *   collection or a text type (`hasNonNumericShapeEvidence()`). An entry
- *   that an earlier boxing wrote is not retyped: that boxing's evidence
- *   stays, and its expression keeps its type.
- */
-type UnitRepairSite = {
-  env: UnitEnvironment | undefined;
-  key: object;
-  eligible: boolean;
-  /** For a parameter of a function literal being boxed: the record of the
-   * literal, which holds the entry (`ParameterRecord`). */
-  literal?: ParameterRecord;
-};
-
-/**
- * The entry of a unit environment that
- * the fresh-matrix repair retypes for the name `name` of `op`
- * (`UnitRepairSite`), or `undefined` when the repair retypes the definition
- * of the name.
- *
- * Boxing writes no definition (rule 1 of
- * `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): the requirements of
- * a free name, and of a name whose definition has an inferred type or the type
- * `unknown`, are entries of the environment (rule 2), and the type of an
- * occurrence reads them (rule 4). The repair replaces that entry. The uses
- * of a parameter of a function literal write entries too
- * (`BoxedSymbol._inferOnParameter()`). A definition that the root
- * construction made in a scope that it created (the index of a `Sum`, a
- * local of a block) is still narrowed by its uses
- * (`BoxedSymbol._unitWriteScope()`): its uses wrote no entry, and the repair
- * retypes that definition.
- */
-function unitRepairSite(
-  ce: ComputeEngine,
-  op: Expression,
-  name: string
-): UnitRepairSite | undefined {
-  const occurrence = symbolOccurrence(op, name);
-  if (occurrence === undefined) return undefined;
-  const sym = occurrence as Expression & {
-    _env?: UnitEnvironment;
-    _homeScope?: object;
-  };
-  const free = isFreeName(sym);
-  let key: object | undefined;
-  if (free) {
-    // A free name that a later declaration with an explicit type resolves
-    // to reads that type (rule 4.1): no entry changes it.
-    const resolved = freeBinding(sym);
-    if (
-      resolved !== undefined &&
-      (!isValueDef(resolved) ||
-        (!resolved.value.inferredType && !resolved.value.type.isUnknown))
-    )
-      return { env: undefined, key: sym, eligible: false };
-    key = sym._homeScope;
-  } else {
-    const def = sym.valueDefinition;
-    if (def === undefined || (!def.inferredType && !def.type.isUnknown))
-      return undefined;
-    // A definition with a concrete inferred type that the root construction
-    // in progress did not make was typed before it, by `ce.infer()`, an
-    // assignment or an evaluation (boxing writes no definition, rule 1). It
-    // is the evidence of an earlier expression, as an entry that an earlier
-    // boxing wrote: the repair does not retype the name.
-    if (!def.declaredType.isUnknown && !ce._boxingState.isDefinitionMade(def))
-      return { env: undefined, key: def, eligible: false };
-    key = def;
-  }
-  if (key === undefined) return undefined;
-
-  const state = ce._boxingState;
-  const trial = state.trialEnvironment();
-  // The uses of a parameter of a function literal being boxed write in the
-  // environment of the literal (`BoxedSymbol._inferOnParameter()`).
-  const literal = free
-    ? undefined
-    : ce._parameterRecord(key as BoxedValueDefinition);
-  const operation =
-    literal === undefined ? state.currentOperation() : undefined;
-  const own = literal?.env ?? sym._env;
-  const entry =
-    trial?.lookup(key, name) ??
-    operation?.lookup(key, name) ??
-    own?.lookup(key, name);
-  // The uses of a definition wrote on the definition, not in an
-  // environment.
-  if (!free && entry === undefined) return undefined;
-
-  const env = trial ?? operation ?? own;
-  // The failure leg of the repair undoes its writes through the journal that
-  // a root construction opens (`EngineBoxingState.noteUnitWrite()`).
-  if (env === undefined || !state.isRootActive)
-    return { env: undefined, key, eligible: false };
-  const fresh =
-    entry === undefined ||
-    trial?.get(key, name) !== undefined ||
-    operation?.journaledEntry(key, name) === true ||
-    own?.journaledEntry(key, name) === true;
-  return {
-    env,
-    key,
-    eligible: fresh && !hasNonNumericShapeEvidence(sym.type.type),
-    literal,
-  };
-}
-
-/**
- * The first free occurrence of the symbol `name` in `expr`, depth first. An
- * operand whose scope binds `name` (the parameter of a function literal, the
- * index of a `Sum`) is not entered: its occurrences are another variable.
- */
-function symbolOccurrence(
-  expr: Expression,
-  name: string
-): Expression | undefined {
-  if (isSymbol(expr)) return expr.symbol === name ? expr : undefined;
-  if (!isFunction(expr)) return undefined;
-  const scope = expr.localScope;
-  if (
-    scope !== undefined &&
-    (scope.bindings.has(name) || scope.binderNames?.has(name) === true)
-  )
-    return undefined;
-  for (const operand of expr.ops) {
-    const found = symbolOccurrence(operand, name);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-
-/**
- * Repair bottom-up numeric inference when a matrix-consuming operator gives
- * the enclosing context that was unavailable to Add/Multiply. Only symbols
- * first inferred while canonicalizing this argument are eligible. The repair
- * is deliberately structural and fail-closed: an ambiguous product such as
- * `a A` (both names fresh) is not guessed.
- *
- * Its write-free entry gates are factored into
- * {@link couldRepairFreshMatrixInference} so overload resolution can consult
- * them without mutating; keep the two in step.
- */
-function repairFreshMatrixInference(
-  ce: ComputeEngine,
-  op: Expression,
-  expected: Type,
-  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
-): Expression | null {
-  const targetType = freshInferenceTarget(expected);
-  if (!freshlyInferred || !targetType) return null;
-
-  const eligible = new Set<string>();
-  // The names whose entry of a unit
-  // environment the repair replaces (`unitRepairSite()`).
-  const sites = new Map<string, UnitRepairSite>();
-  for (const name of op.freeVariables) {
-    const site = unitRepairSite(ce, op, name);
-    if (site !== undefined) {
-      if (site.eligible) {
-        eligible.add(name);
-        sites.set(name, site);
-      }
-      continue;
-    }
-    const def = ce.lookupDefinition(name);
-    if (!def || !isValueDef(def) || !def.value.inferredType) continue;
-    // A parameter of a function literal is not retyped on its definition: its
-    // uses write in the environment of the unit, and the repair replaces
-    // that entry above (decision D18 of
-    // `docs/plans/2026-11-11-bound-once-spec.md`). A parameter with no entry
-    // yet has no numeric guess to repair.
-    if (isFunctionLiteralParameter(def.value)) continue;
-    // "Fresh" = the definition's type was first inferred (unknown → concrete)
-    // during this boxing operation — the forward log recorded by
-    // `BoxedSymbol._infer()` — or is still unknown (never inferred; the
-    // previous snapshot-based provenance excluded unknown-typed definitions
-    // from "inferred before", making them always eligible). Keying on the
-    // definition's identity rather than its name also means a symbol whose
-    // fresh inner-scope definition has been popped, and which now resolves to
-    // an outer definition inferred before this box, is correctly ineligible.
-    //
-    // A symbol whose current type is already a collection type is NOT
-    // eligible, even when that type is fresh. The repair exists to correct a
-    // NUMERIC guess that `Add` or `Multiply` made bottom-up, before the
-    // enclosing matrix operator gave them the context. A collection type is
-    // collection evidence, not such a guess: `Length(xs)` narrows an untyped
-    // `xs` to `collection`, and a later `First(xs)` in the same boxing
-    // (parameter `indexed_collection<any>`) must not then retype `xs` as
-    // `matrix`, which made `First(xs)` a row (`vector`) and refused a later
-    // `Filter(xs, x => x < p)`. Such an operand is left to the ordinary
-    // admission and inference instead. The test uses the `<any>` shape top,
-    // so that a collection of any element type, absence markers included,
-    // is excluded.
-    //
-    // A symbol typed as text (`string`, `character`, or their union) is not
-    // eligible either, for the same reason: a use at a text parameter
-    // (`ToUpperCase(s)` types an untyped `s` as `character | string`) is
-    // evidence that the symbol is text, and text is never a matrix. Without
-    // this test, a later `Determinant(s)` in the same boxing retyped `s` as
-    // `matrix`. The `character | string` union needs this explicit test
-    // because `character` is not a collection.
-    if (hasNonNumericShapeEvidence(def.value.type.type)) continue;
-    if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
-      eligible.add(name);
-  }
-  if (eligible.size === 0) return null;
-
-  const names = matrixInferencePlan(op, eligible);
-  if (!names || names.size === 0) return null;
-
-  // Per-name repair-local records for an EXACT failure-leg restore (phase 2a
-  // of docs/TYPE-SYSTEM.md). Three families:
-  // - `snapshots`: the coupled type/value slots, restored setter-bypassing
-  //   via `_restoreTypeSlots` — the old restore wrote through the `type`
-  //   setter, which allocates fresh `BoxedType`s (defeating identity-keyed
-  //   caches) and, when the previous type was `unknown` (eligible above),
-  //   WIPED the definition's assigned value.
-  // - `histories`: the provenance array as it stood before the write — the
-  //   write below records a provenance entry, and a failed repair must leave
-  //   the history byte-identical (including a cap-displaced entry, which the
-  //   slice preserves wholesale).
-  // - `freshlyAdded`: definitions this repair itself added to
-  //   `_freshlyInferred` (an `unknown` → `matrix` transition during a boxing
-  //   pass), removed again on failure so a rolled-back repair leaves no
-  //   phantom repair eligibility.
-  // The narrowing sink is notified only on the SUCCESS path (below): sink
-  // retraction would be needed otherwise: an entry recorded at write time for a repair the failure leg then undoes would report a
-  // narrowing that never took effect — but a SUCCESSFUL repair permanently
-  // narrows an (possibly enclosing) definition, and a contained parse's
-  // `scope.narrowings()` must see that.
-  // The repair must never execute in the trial of an overload arm (phase
-  // 2c), which admits repairs by their write-free precondition
-  // (`couldRepairFreshMatrixInference`) without running them; the winning
-  // arm re-validates for real, outside the trial. The Epsil static checking
-  // pass legitimately reaches this repair: it puts back the definitions of
-  // enclosing scopes that it wrote (`DefinitionRestorePoint`).
-  console.assert(
-    !inTrial(ce),
-    'repairFreshMatrixInference must not run in trial (repair-free) validation'
-  );
-
-  const snapshots = new Map<string, unknown>();
-  const histories = new Map<string, TypeProvenanceEntry[] | undefined>();
-  const beforeTypes = new Map<string, BoxedType>();
-  const freshlyAdded: BoxedValueDefinition[] = [];
-  // True while every repaired definition is a binding under a registered
-  // scratch scope (`scratch-scopes.ts`). The inference events below are then
-  // flagged `scratch`: no cache that outlives the computation owning that
-  // scope can depend on the bindings, so the events leave the versions such
-  // caches key on alone (see "Scratch events" in the documentation of
-  // `axisMaskOf`). One binding outside a scratch scope keeps the full
-  // advance.
-  let allScratch = true;
-  // For each environment that the
-  // repair writes in, the length of its journal before the first write. The
-  // failure leg undoes the writes after it: the entries that the repair
-  // replaced, and the requirements that the discarded re-box wrote. A write
-  // in an environment sends no engine-wide event (rule 9 of
-  // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), so the events
-  // below are sent only for a write on a definition.
-  const marks = new Map<UnitEnvironment, number>();
-  // The literal being boxed writes the entry of a parameter on its
-  // definition when its boxing ends (`BoxedSymbol._inferOnParameter()`), so
-  // it records the entry that the repair replaces too. For each record of
-  // requirements that the repair changes, its content before the repair:
-  // the failure leg puts it back, with the records of the discarded re-box.
-  const parameterRecords = new Map<
-    Map<BoxedValueDefinition, ParameterRequirement>,
-    Map<BoxedValueDefinition, ParameterRequirement>
-  >();
-  let definitionWrites = false;
-  for (const name of names) {
-    const site = sites.get(name);
-    if (site !== undefined) {
-      const env = site.env!;
-      ce._boxingState.noteUnitWrite(env);
-      if (!marks.has(env)) marks.set(env, env.journalLength());
-      const entry = ce.type(targetType);
-      env.set(site.key, name, entry);
-      const parameter = site.key as BoxedValueDefinition;
-      const requirements =
-        ce._boxingState.trialEnvironment() === undefined
-          ? site.literal?.requirements
-          : undefined;
-      if (requirements !== undefined) {
-        if (!parameterRecords.has(requirements))
-          parameterRecords.set(requirements, new Map(requirements));
-        requirements.set(parameter, {
-          type: entry,
-          cause: {
-            operator: op.operator,
-            ops: isFunction(op) ? op.ops : [],
-            expr: op,
-          },
-          // The repair replaces a numeric guess.
-          numeric: requirements.get(parameter)?.numeric,
-        });
-      }
-      continue;
-    }
-    definitionWrites = true;
-    const def = ce.lookupDefinition(name);
-    if (!def || !isValueDef(def) || !def.value.inferredType) return null;
-    if (!isScratchBinding(ce, def)) allScratch = false;
-    snapshots.set(name, def.value._typeSlotSnapshot());
-    histories.set(name, def.value._typeProvenance?.slice());
-    beforeTypes.set(name, def.value.type);
-    const wasUnknown = def.value.type.isUnknown;
-    def.value._setType(() => ce.type(targetType));
-    // Freeze the contextual assignment during re-canonicalization so the
-    // numeric fast path cannot immediately narrow it back to `real`.
-    def.value.inferredType = false;
-    // The write is now channel-visible where it matters: provenance (the
-    // matrix inference is evidence, with the operand as its cause) and the
-    // fresh-inference set (matching `_noteInferenceWrite`'s condition).
-    recordTypeProvenance(def.value, {
-      type: def.value.type,
-      kind: 'inferred',
-      axis: 'type',
-      cause: op,
-    });
-    if (
-      wasUnknown &&
-      ce._inferenceTxDepth > 0 &&
-      !ce._freshlyInferred?.has(def.value)
-    ) {
-      const set = (ce._freshlyInferred ??= new Set());
-      set.add(def.value);
-      freshlyAdded.push(def.value);
-    }
-  }
-  if (definitionWrites)
-    ce._noteStateEvent({
-      kind: 'inference',
-      ...(allScratch ? { scratch: true } : {}),
-    });
-
-  const repaired = ce.box(op.json);
-  if (repaired.type.matches(expected)) {
-    const sink = ce._narrowingSink;
-    for (const name of names) {
-      if (sites.has(name)) continue;
-      const def = ce.lookupDefinition(name);
-      if (def && isValueDef(def)) {
-        def.value.inferredType = true;
-        // Report the COMMITTED net transition to a contained parse's
-        // narrowing capture — only now, when the write is permanent.
-        if (sink !== undefined)
-          sink._recordNarrowing(
-            name,
-            def,
-            beforeTypes.get(name)!,
-            def.value.type
-          );
-      }
-    }
-    return repaired;
-  }
-
-  for (const name of names) {
-    if (sites.has(name)) continue;
-    const def = ce.lookupDefinition(name);
-    if (def && isValueDef(def)) {
-      def.value._restoreTypeSlots(snapshots.get(name));
-      def.value._typeProvenance = histories.get(name);
-    }
-  }
-  for (const [env, mark] of marks) env.undoJournal(mark);
-  for (const [requirements, before] of parameterRecords) {
-    requirements.clear();
-    for (const [parameter, type] of before) requirements.set(parameter, type);
-  }
-  for (const fresh of freshlyAdded) ce._freshlyInferred?.delete(fresh);
-  if (definitionWrites)
-    ce._noteStateEvent({
-      kind: 'inference',
-      ...(allScratch ? { scratch: true } : {}),
-    });
-  return null;
-}
-
-function matrixInferencePlan(
-  expr: Expression,
-  eligible: ReadonlySet<string>
-): Set<string> | null {
-  if (isSymbol(expr))
-    return eligible.has(expr.symbol) ? new Set([expr.symbol]) : null;
-
-  if (!isFunction(expr)) return null;
-
-  if (expr.operator === 'Negate')
-    return matrixInferencePlan(expr.op1, eligible);
-
-  if (expr.operator === 'Add' || expr.operator === 'Subtract') {
-    // A sum is a matrix when at least one term is a matrix: `Add`
-    // broadcasts a scalar term over the cells of a matrix term, and the
-    // `Add` type handler types `matrix + scalar` as `matrix`. So a constant
-    // numeric term (no free variables, such as the `0.5` of `P + 0.5`) is a
-    // scalar that the sum accepts, the same way a literal factor is accepted
-    // by the `Multiply` branch below. Before this, such a term made the whole
-    // plan fail, so `Histogram(P + 0.5, …)` kept the `number` type that
-    // bottom-up inference gave `P`, while `Histogram(2P, …)` was repaired.
-    // A term with a free variable and no plan still makes the plan fail:
-    // `sin(P)` because its symbol cannot be both a matrix and a scalar
-    // operand, and a symbol that an earlier boxing already inferred `number`
-    // (`Det(A + B)` after `A + 1`) because that earlier numeric use of `A`
-    // is kept as the stronger evidence.
-    const result = new Set<string>();
-    for (const term of expr.ops) {
-      const plan = matrixInferencePlan(term, eligible);
-      if (!plan) {
-        if (
-          term.freeVariables.length === 0 &&
-          isScalarTermOutsidePlan(term, eligible)
-        )
-          continue;
-        return null;
-      }
-      for (const name of plan) result.add(name);
-    }
-    return result.size > 0 ? result : null;
-  }
-
-  // A quotient with a scalar denominator is a matrix when its numerator is:
-  // `Divide` broadcasts over the cells of the numerator. The canonical form
-  // of `(P - 0.5)/√(…)` keeps the `Divide`, so without this branch the plan
-  // of such a quotient failed. A denominator that contains an eligible
-  // symbol is not accepted: a matrix denominator is not a cell-wise
-  // quotient. A denominator with other free variables (`√(v² + 1)` with a
-  // declared real `v`) is accepted, as the `Multiply` branch accepts a
-  // scalar factor that is not eligible.
-  if (expr.operator === 'Divide' && expr.nops === 2) {
-    if (!isScalarTermOutsidePlan(expr.op2, eligible)) return null;
-    return matrixInferencePlan(expr.op1, eligible);
-  }
-
-  if (expr.operator === 'Multiply') {
-    const candidates = expr.ops
-      .map((factor) => matrixInferencePlan(factor, eligible))
-      .filter((x): x is Set<string> => x !== null);
-    // Numeric literals and already-declared scalar factors may scale the one
-    // matrix factor. More than one candidate is underdetermined (`a A`).
-    if (candidates.length !== 1) return null;
-    return candidates[0];
-  }
-
-  if (expr.operator === 'Power' && expr.op2?.isInteger === true)
-    return matrixInferencePlan(expr.op1, eligible);
-
-  return null;
-}
-
-/**
- * True when `term` is a number-typed operand that contains none of the
- * `eligible` symbols. The matrix inference plan accepts such a term as a
- * scalar beside a matrix term of a sum, or as the denominator of a
- * quotient, because the result of either operation is then still a matrix.
- */
-function isScalarTermOutsidePlan(
-  term: Expression,
-  eligible: ReadonlySet<string>
-): boolean {
-  if (!term.type.matches('number')) return false;
-  for (const name of term.freeVariables) if (eligible.has(name)) return false;
-  return true;
 }
 
 /** Recursively examine the symbols and operators and for any

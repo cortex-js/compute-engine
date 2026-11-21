@@ -4228,15 +4228,6 @@ function boundMayNotBeNumber(bound: Expression): boolean {
  * inference state event, the same-type no-op that preserves `BoxedType`
  * identity).
  *
- * The write lands in the fresh-inference set, which exists for one repair —
- * `repairFreshMatrixInference` (`boxed-expression/validate.ts`) rewrites a
- * symbol the scalar fast path guessed `real` for to `matrix` when a later
- * operand slot wants a collection. Left in the set, the binder took that
- * repair: `[q.x + 1 for q in L]` over `L: list<number>` boxed VALID with
- * `q: matrix`, while `PointX(q)` over a `number`-typed `q` is a type error
- * anywhere else. Removing the binding from the set makes a body use that
- * contradicts the element type an error.
- *
  * Callers: `canonicalIndexingSet` below (a `Sum`/`Product` `Element` clause)
  * and `canonicalLoopLike` (`library/control-structures.ts`, a `Loop` or
  * `Comprehension` clause).
@@ -4256,9 +4247,6 @@ export function bindIndexAuthoritatively(
   // `1`, and the sum was the integer `2`.
   noteKindTypeDeclaration(ce, type);
   binding._infer(() => type, 'narrow');
-  const def = binding.valueDefinition;
-  const fresh = ce._freshlyInferred;
-  if (def !== undefined) fresh?.delete(def);
 }
 
 /**

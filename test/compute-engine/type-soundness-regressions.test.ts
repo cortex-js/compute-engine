@@ -465,15 +465,15 @@ describe('Tycho item 92 — a union is assignable only when EVERY arm is', () =>
     );
   });
 
-  it('a matrix-accepting UNION parameter still drives matrix repair', () => {
-    // `LinearSolve`'s first parameter is `matrix | vector`: the repair asks
-    // whether a matrix would satisfy the parameter, not whether the parameter
-    // is itself a matrix.
+  it('a matrix-accepting union admits a known matrix right-hand side', () => {
     const engine = new ComputeEngine();
-    engine.declare('M', 'matrix');
-    expect(engine.box(['LinearSolve', 'M', ['Add', 'A', 'B']]).isValid).toBe(
-      true
-    );
+    engine.assign('M', ['List', ['List', 1, 0], ['List', 0, 1]]);
+    engine.assign('A', ['List', ['List', 1, 2], ['List', 3, 4]]);
+    engine.assign('B', ['List', ['List', 2, 0], ['List', 0, 1]]);
+    const known = engine.box(['LinearSolve', 'M', ['Add', 'A', 'B']]);
+    expect(known.isValid).toBe(true);
+    expect(known.evaluate().json).toEqual(['List', ['List', 3, 2], ['List', 3, 5]]);
+    expect(engine.box(['LinearSolve', 'M', ['Add', 'U', 'V']]).isValid).toBe(false);
   });
 });
 

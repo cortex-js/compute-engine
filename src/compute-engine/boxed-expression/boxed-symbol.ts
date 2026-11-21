@@ -1849,15 +1849,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             ...(isScratchBinding(this.engine, def) ? { scratch: true } : {}),
           });
         }
-        // Single emission point for the write's passive observers: the
-        // provenance history, the fresh-inference set (unknown → concrete
-        // during a boxing, for the fresh-matrix-inference repair), and the
-        // narrowing sink (`InspectableScope.narrowings()`).
+        // Record provenance and report narrowing at the write site.
         this.engine._noteInferenceWrite({
           name: this._id,
           binding: def,
           target: def.value,
-          valueDef: def.value,
           from: previousType,
           to: inferred,
           kind: 'inferred',
@@ -1914,12 +1910,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         callableAfter: containsSignatureArm(newType.type),
       });
       // `updateDef` swapped the binding's halves in place: the write landed
-      // on the NEW value definition the swap installed, so provenance is
-      // recorded there (falling back to the original operator half only if
-      // the swap somehow left no value half). `valueDef` is deliberately NOT
-      // passed: the fresh-inference set never tracked this swap path (the
-      // pre-swap signature is never the `unknown` type), and the emission
-      // must not change that.
+      // on the new value definition, which carries the type provenance.
       this.engine._noteInferenceWrite({
         name: this._id,
         binding: def,

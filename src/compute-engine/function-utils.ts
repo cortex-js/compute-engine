@@ -272,8 +272,7 @@ type ValidateArgumentsFn = (
   ops: ReadonlyArray<Expression>,
   signature: Type,
   lazy?: boolean,
-  threadable?: boolean,
-  freshlyInferred?: ReadonlySet<BoxedValueDefinition>
+  threadable?: boolean
 ) => ReadonlyArray<Expression> | null;
 
 let _validateArguments: ValidateArgumentsFn | undefined;

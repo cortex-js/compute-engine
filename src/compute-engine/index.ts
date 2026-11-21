@@ -149,8 +149,6 @@ import { BigNumericValue } from './numeric-value/big-numeric-value.js';
 import { MachineNumericValue } from './numeric-value/machine-numeric-value.js';
 
 import {
-  beginInferenceTransaction,
-  endInferenceTransaction,
   box,
   boxFunction,
   optionsToInternal,
@@ -1023,17 +1021,6 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
-  /** See `IComputeEngine._withBoxingPassWindow`.
-   * @internal */
-  _withBoxingPassWindow<T>(fn: () => T): T {
-    beginInferenceTransaction(this);
-    try {
-      return fn();
-    } finally {
-      endInferenceTransaction(this);
-    }
-  }
-
   /** See `IComputeEngine.declareProtocol`. Throws on error, including on
    * re-declaration (P5) — the Epsil statement route replaces instead. */
   declareProtocol(
@@ -1507,11 +1494,6 @@ export class ComputeEngine implements IComputeEngine {
     this._configurationLifecycle.noteStateEvent(event);
   }
 
-  /** Depth of nested top-level boxing operations (see
-   * `beginInferenceTransaction` in `box.ts`).
-   * @internal
-   */
-  _inferenceTxDepth = 0;
   _hasAsyncOnlyOperator = false;
 
   /** When true, a scope being discarded tombstones its value definitions and
@@ -1582,14 +1564,6 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
-  /** Value definitions whose type was first inferred (unknown → concrete)
-   * during the current top-level boxing operation — forward-computed
-   * provenance for the fresh-matrix-inference repair. Lazily allocated by
-   * `_noteInferenceWrite()`; reset when the outermost boxing ends.
-   * @internal
-   */
-  _freshlyInferred: Set<BoxedValueDefinition> | null = null;
-
   /** The operator expression being canonicalized, recorded as the `cause` of
    * provenance entries — see `IComputeEngine._inferenceCause`. Installed
    * with save/restore around `makeCanonicalFunction` (`box.ts`), so nested
@@ -1625,11 +1599,8 @@ export class ComputeEngine implements IComputeEngine {
 
   /** The inference-write choke point — see
    * `IComputeEngine._noteInferenceWrite`. Subscribers, in order: the
-   * provenance history on the written definition, the fresh-inference set
-   * (unknown → concrete transitions during a boxing, consumed by the
-   * fresh-matrix-inference repair in `box.ts`), and the narrowing sink
-   * (writes onto definitions outside a contained scope, reported back to
-   * `InspectableScope.narrowings()`).
+   * provenance history and the narrowing sink for writes outside a
+   * contained scope (`InspectableScope.narrowings()`).
    * @internal */
   _noteInferenceWrite(event: InferenceWriteEvent): void {
     // The cause is materialized lazily: canonicalization is hot and stores
@@ -1649,14 +1620,6 @@ export class ComputeEngine implements IComputeEngine {
       axis: 'type',
       cause: ctx?.expr,
     });
-
-    if (
-      event.valueDef !== undefined &&
-      event.from.isUnknown &&
-      this._inferenceTxDepth > 0
-    ) {
-      (this._freshlyInferred ??= new Set()).add(event.valueDef);
-    }
 
     this._narrowingSink?._recordNarrowing(
       event.name,
@@ -4510,7 +4473,6 @@ export class ComputeEngine implements IComputeEngine {
 
     const outerOracle = this._activeSymbolOracle;
     this._activeSymbolOracle = userResolve;
-    beginInferenceTransaction(this);
     try {
       const result = syntax.parse(latex, {
         tolerance: this.tolerance,
@@ -4651,7 +4613,6 @@ export class ComputeEngine implements IComputeEngine {
       return boxed;
     } finally {
       this._activeSymbolOracle = outerOracle;
-      endInferenceTransaction(this);
     }
   }
 

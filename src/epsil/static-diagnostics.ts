@@ -522,8 +522,6 @@ export function staticDiagnostics(
   // so is the registry of value kinds.
   const rollbackRegistry = provisionalRegistryRollbackPoint(ce);
   const rollbackKinds = kindRegistryRollbackPoint(ce);
-  const freshlyInferred =
-    ce._freshlyInferred === null ? null : new Set(ce._freshlyInferred);
   const typeVersion = ce._typeVersion;
   // The engine requires the depth counter IN ADDITION to the frame name (so a
   // host `pushScope(undefined, 'epsil:static-check')` cannot forge the
@@ -566,14 +564,9 @@ export function staticDiagnostics(
     // environment, as a run has (rule 10 of
     // `docs/plans/2026-11-09-binding-units-slice-1-spec.md`): each statement
     // is boxed in it, so a later statement reads what an earlier one
-    // required. It is discarded when the check ends. Its boxing-pass window
-    // spans the per-statement `ce.box()` windows; when the check runs
-    // inside another window, the fresh inferences of that window are put
-    // back as they were.
+    // required. The environment is discarded when the check ends.
     return ce._withProgramEnvironment(() =>
-      ce._withBoxingPassWindow(() =>
-        canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
-      )
+      canonicalizationDiagnostics(ce, ast, source, into, options?.effects)
     );
   } catch (error) {
     bodyFailed = true;
@@ -594,7 +587,6 @@ export function staticDiagnostics(
     run(() => ce.popScope());
     ce._factSuppressionDepth -= 1;
     ce._staticTypeCheckDepth -= 1;
-    if (ce._inferenceTxDepth > 0) ce._freshlyInferred = freshlyInferred;
     run(rollbackTypes);
     run(rollbackProtocols);
     run(rollbackRegistry);

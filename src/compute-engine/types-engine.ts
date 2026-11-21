@@ -223,7 +223,7 @@ export type ProtocolMember =
 /**
  * One write of inference evidence onto a definition, as delivered to
  * `IComputeEngine._noteInferenceWrite` — the single emission point whose
- * subscribers are the provenance history, the fresh-inference set, and the
+ * subscribers are the provenance history and the
  * narrowing sink. See `docs/TYPE-SYSTEM.md`
  * (phase 1).
  */
@@ -235,10 +235,6 @@ export type InferenceWriteEvent = {
   /** The definition object the write landed on — the carrier of the
    * `_typeProvenance` history. Exactly one of the two definition shapes. */
   target: BoxedValueDefinition | BoxedOperatorDefinition;
-  /** The value definition written, when the write was on a value binding —
-   * what the fresh-inference set (`_freshlyInferred`) tracks. Omitted for
-   * signature writes on operator definitions. */
-  valueDef?: BoxedValueDefinition;
   /** The type before the write. */
   from: BoxedType;
   /** The type the write installed. */
@@ -886,15 +882,6 @@ export interface IComputeEngine {
       >
     | undefined;
 
-  /**
-   * Run `fn` inside one boxing-pass window (the `_inferenceTxDepth` /
-   * `_freshlyInferred` lifecycle that `box()` and `parse()` open around
-   * themselves). For a caller — the Epsil static checking pass — whose
-   * boxing spans several `box()` calls: the per-statement `box()` windows
-   * nest inside it.
-   * @internal */
-  _withBoxingPassWindow<T>(fn: () => T): T;
-
   /** Declare a protocol (Appendix A "Host API"). Throws on error, including
    * on re-declaration — the Epsil statement route replaces instead (P5).
    *
@@ -1516,11 +1503,6 @@ export interface IComputeEngine {
    * @internal */
   _noteStateEvent(event: StateEvent): void;
 
-  /** Depth of nested top-level boxing operations (see
-   * `beginInferenceTransaction` in `box.ts`).
-   * @internal */
-  _inferenceTxDepth: number;
-
   /** Set once an operator with only an `evaluateAsync` handler has been
    * defined on this engine. Until then the asynchronous route has no
    * asynchronous-only application to await inside a held operand and skips
@@ -1585,19 +1567,11 @@ export interface IComputeEngine {
    * @internal */
   _withProgramEnvironment<T>(fn: () => T): T;
 
-  /** Value definitions whose type was first inferred (unknown → concrete)
-   * during the current top-level boxing operation — the forward-computed
-   * provenance for `repairFreshMatrixInference`'s eligibility. Lazily
-   * allocated; `null` when empty or no boxing is in progress.
-   * @internal */
-  _freshlyInferred: Set<BoxedValueDefinition> | null;
-
   /** The single emission point for a write of inference evidence onto a
    * definition's type (or an operator definition's signature). Every
    * subscriber of "a definition's type was changed by inference" hangs off
    * this call: the provenance history (`_typeProvenance`), the
-   * fresh-inference set (`_freshlyInferred`), and the narrowing sink
-   * (`_narrowingSink`). Callers emit only for writes that actually changed
+   * narrowing sink (`_narrowingSink`). Callers emit only for writes that actually changed
    * the type — no-op re-inferences are skipped at the write site. This is
    * deliberately NOT `_noteStateEvent`: that channel is the sole writer of
    * the cache-invalidation axes and stays payload-free; this one is passive

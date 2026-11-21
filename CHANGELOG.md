@@ -2,6 +2,12 @@
 
 ### Breaking Changes
 
+- **Compound matrix and collection operands require shape information at
+  boxing.** A determinant can use a matrix declared by the host or initialized
+  in a program. To box an expression such as `Determinant(A + B)` before either
+  value is available, declare the matrix operands first. The engine no longer
+  revises the types of symbols inside the sum after boxing the operand.
+
 - **In Epsil, the range `a..b` counts up, and it is empty when `a` is greater
   than `b`** (CE-1604). `a..b` is now `Range(a, b, 1)`, so a loop over the
   first `n` things runs zero times when `n` is 0, as `range` in Python and

@@ -348,42 +348,19 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     for (const e of repairs) expect(e).toMatchObject({ scratch: true });
   });
 
-  test('the matrix repair of free names writes no binding, in a scratch scope or not', () => {
-    // `\det(P + 2Q)` reads the free `P` and `Q` as matrices. The repair
-    // writes in the environment of the boxing: it declares no binding, in
-    // the scratch scope or outside one, and sends no inference event.
-    const matrixInference = (events: StateEvent[]) =>
-      events.filter(
-        (e) =>
-          e.kind === 'inference' && e.valueType !== true
-      );
-    const check = (
-      ce: ComputeEngine,
-      det: ReturnType<ComputeEngine['parse']>
-    ) => {
-      expect(det.isValid).toBe(true);
-      expect(det.op1.ops!.map((op) => op.type.toString())).toEqual([
-        'matrix',
-        'matrix',
-      ]);
+  test('unspecified matrix operands leave no scratch or ambient binding', () => {
+    const check = (ce: ComputeEngine) => {
+      const determinant = ce.parse('\\det(P+2Q)');
+      expect(determinant.isValid).toBe(false);
       expect(ce.lookupDefinition('P')).toBeUndefined();
       expect(ce.lookupDefinition('Q')).toBeUndefined();
     };
     const scratch = new ComputeEngine();
     const scope = newScope(scratch);
-    const inside = eventsOf(scratch, () =>
-      check(
-        scratch,
-        inScratch(scratch, scope, () => scratch.parse('\\det(P+2Q)'))
-      )
-    );
+    const events = eventsOf(scratch, () => inScratch(scratch, scope, () => check(scratch)));
     expect([...scope.bindings.keys()]).toEqual([]);
-    expect(matrixInference(inside)).toEqual([]);
-    const plain = new ComputeEngine();
-    const outside = eventsOf(plain, () =>
-      check(plain, plain.parse('\\det(P+2Q)'))
-    );
-    expect(matrixInference(outside)).toEqual([]);
+    expect(events.filter((e) => e.kind === 'inference' && e.valueType !== true)).toEqual([]);
+    check(new ComputeEngine());
   });
 
   test('a fresh declaration advances the definition version only through a rebuild', () => {

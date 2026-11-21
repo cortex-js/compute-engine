@@ -220,7 +220,7 @@ describe('RULE 11: ce.infer()', () => {
     expect(ce2.box('w').type.toString()).toBe('infinity');
   });
 
-  test('the fresh-matrix repair does not retype a name that ce.infer() typed', () => {
+  test('ce.infer commits numeric evidence without retyping the name in a matrix slot', () => {
     const ce = engine();
     const a = ce.box(['Add', 'A', 1]);
     a.evaluate();
@@ -229,13 +229,14 @@ describe('RULE 11: ce.infer()', () => {
     const det = ce.box(['Determinant', ['Add', 'A', 'B']]);
     expect(det.isValid).toBe(false);
     expect(inferredType(ce, 'A')).toBe('number (inferred)');
-    // A name that only an earlier unit required is still repaired: the
-    // requirement of that unit is not committed.
+
     const other = engine();
     other.box(['Add', 'A', 1]).evaluate();
-    const repaired = other.box(['Determinant', ['Add', 'A', 'B']]);
-    expect(repaired.isValid).toBe(true);
-    expect(typeOf(repaired, 'A')).toBe('matrix');
+    expect(other.lookupDefinition('A')).toBeUndefined();
+    const direct = other.box(['Determinant', 'A']);
+    expect(direct.isValid).toBe(true);
+    expect(typeOf(direct, 'A')).toBe('matrix');
+    expect(other.lookupDefinition('A')).toBeUndefined();
   });
 
   test('a home scope that was popped', () => {

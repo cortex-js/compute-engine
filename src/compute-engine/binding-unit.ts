@@ -418,18 +418,6 @@ export class UnitEnvironment {
     this._journal?.push({ entries, name, previous: entries.get(name), type });
   }
 
-  /** True when the open journal holds a write on the type entry for `name`
-   * under `key`: the root construction in progress wrote that entry
-   * (`EngineBoxingState.noteUnitWrite()`). The fresh-matrix repair
-   * (`validate.ts`) retypes only such an entry. */
-  journaledEntry(key: object, name: string): boolean {
-    const entries = this._types?.get(key);
-    if (this._journal === undefined || entries === undefined) return false;
-    return this._journal.some(
-      (w) => w.type && w.entries === entries && w.name === name
-    );
-  }
-
   /**
    * True when the unit reads `name`, a name of a library operator, as a
    * variable in the scope `scope` (`N` in `N + 1`). The resolution of a free

@@ -1583,7 +1583,6 @@ function validateAgainstDeclaration(
     op.signature.type,
     false,
     false,
-    undefined,
     stripMissing ? (i) => op.stripsMissingAt(i) : undefined,
     resolutionOut === undefined ? undefined : { resolutionOut }
   );
@@ -3481,7 +3480,7 @@ function canonicalFunctionSlot(
   // a later `missingBehavior` declaration silently ignored at this seam.
   const adjusted =
     sig && opDef
-      ? validateArguments(ce, args, sig, false, false, undefined, (i) =>
+      ? validateArguments(ce, args, sig, false, false, (i) =>
           opDef.stripsMissingAt(i)
         )
       : undefined;
@@ -17558,7 +17557,6 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         AT_SIGNATURE,
         false,
         false,
-        undefined,
         () => true
       );
 
@@ -25118,15 +25116,7 @@ function canonicalJoin(
   // boxing route admits it: `Join` and `ListJoin` propagate absence, and the
   // evaluation answers `Missing` (`wrapScalarJoinOperand`).
   const args =
-    validateArguments(
-      ce,
-      ops,
-      JOIN_SIGNATURE,
-      false,
-      false,
-      undefined,
-      () => true
-    ) ?? ops;
+    validateArguments(ce, ops, JOIN_SIGNATURE, false, false, () => true) ?? ops;
   // An invalid operand is kept in place: it is an error operand (a failed
   // validation, a failed computation), or a collection literal that keeps a
   // failed cell (`docs/ERROR-MODEL.md` §3). The splice of a same-head

@@ -1302,14 +1302,8 @@ export function exactGroupDefinitions(
       if (def === undefined) return engine._fn('GroupMatrix', xs);
       return engine._fn(
         'GroupMatrix',
-        validateArguments(
-          engine,
-          xs,
-          def.signature.type,
-          false,
-          false,
-          undefined,
-          (i) => def.stripsMissingAt(i)
+        validateArguments(engine, xs, def.signature.type, false, false, (i) =>
+          def.stripsMissingAt(i)
         ) ?? xs
       );
     },

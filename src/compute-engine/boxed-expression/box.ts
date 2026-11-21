@@ -339,19 +339,9 @@ export function _setBoxingDevolveThreshold(depth: number): number {
  * MathJSON tree, and the frames per level bound how deep a tree can be boxed
  * before `RangeError: Maximum call stack size exceeded` (see `box()`).
  *
- * Two savings. (1) When this construction is already inside a root boxing
- * pass — the inference transaction is open (`_inferenceTxDepth > 0`) AND a
- * root repair is active — both brackets that `box()` puts around
- * `boxInternal()` are no-ops (a nested `beginInferenceTransaction` does not
- * clear `_freshlyInferred` at its end; `withDevolveRepair` with the root
- * active just calls its builder), so `boxInternal()` is called directly. When
- * either bracket is not open — a construction that started at `ce.function()`
- * boxes its first operand with no transaction open — the operand goes through
- * `box()` exactly as before, so the transaction's clearing semantics are
- * unchanged. (2) A `for` loop replaces `Array.prototype.map` and its
- * callback, two frames per level — which is why this is not written as
- * `ops.map(...)`. The choice between `boxInternal` and
- * `box` is made once, before the loop.
+ * When a root repair is already active, call `boxInternal()` directly:
+ * `withDevolveRepair()` would just call its builder. The loop also avoids
+ * the callback frame from `Array.prototype.map` at each level.
  *
  * The two hottest sites (`boxFunctionInternal`'s non-canonical tail and
  * `applyOperatorDefinition`'s canonical operands) inline this loop rather than
@@ -366,10 +356,7 @@ function boxOperands(
     scope?: Scope;
   }
 ): Expression[] {
-  const boxOne =
-    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
-      ? boxInternal
-      : box;
+  const boxOne = ce._boxingState.isRootActive ? boxInternal : box;
   const result: Expression[] = [];
   for (const x of ops) result.push(boxOne(ce, x, options));
   return result;
@@ -1153,10 +1140,7 @@ function boxFunctionInternal(
     unboundSymbols: options.unboundSymbols,
     hidden: options.hidden,
   };
-  const boxOne =
-    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
-      ? boxInternal
-      : box;
+  const boxOne = ce._boxingState.isRootActive ? boxInternal : box;
   const boxedOps: Expression[] = [];
   for (const x of ops) boxedOps.push(boxOne(ce, x, operandOptions));
   return canonicalForm(
@@ -1510,9 +1494,11 @@ function preboxDeepOperands(
         // loops this stands in for make (`boxFunctionInternal` and
         // `applyOperatorDefinition`).
         frame.boxed.push(
-          (ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
-            ? boxInternal
-            : box)(ce, op, frame.options)
+          (ce._boxingState.isRootActive ? boxInternal : box)(
+            ce,
+            op,
+            frame.options
+          )
         );
         frame.index += 1;
         continue;
@@ -1556,25 +1542,6 @@ function preboxDeepOperands(
  * Note that this function should only be called from `ce.expr()`
  *
  */
-
-/**
- * Mark the start of a (possibly nested) boxing operation. While at least one
- * is in progress, `BoxedSymbol._infer()` records every value definition whose
- * type transitions unknown → concrete into `ce._freshlyInferred` — the
- * forward-computed provenance for `repairFreshMatrixInference`'s "first
- * inferred while canonicalizing this argument" eligibility test. This
- * replaced an eager snapshot of all inferred symbols (a walk over every
- * binding in every scope, per outermost box) that dominated the per-call
- * cost of small operations engine-wide.
- */
-export function beginInferenceTransaction(ce: ComputeEngine): void {
-  ce._inferenceTxDepth += 1;
-}
-
-export function endInferenceTransaction(ce: ComputeEngine): void {
-  ce._inferenceTxDepth -= 1;
-  if (ce._inferenceTxDepth === 0) ce._freshlyInferred = null;
-}
 
 /**
  * True when the boxing validation seam can admit the call without running
@@ -1698,8 +1665,6 @@ function allParamsNumeric(ce: ComputeEngine, signature: Type): boolean {
   );
 }
 
-const EMPTY_FRESHLY_INFERRED: ReadonlySet<BoxedValueDefinition> = new Set();
-
 /** Stringify an offending input for an error's context, truncating if huge.
  *  Never throws (JSON.stringify can fail on bigint or circular values). */
 function stringifyForError(value: unknown): string {
@@ -1788,24 +1753,19 @@ export function box(
     hidden?: HiddenBinders;
   }
 ): Expression {
-  beginInferenceTransaction(ce);
-  try {
-    // Once a root repair is active (i.e. this is an operand of an enclosing
-    // construction), `withDevolveRepair` degenerates to calling `build()`.
-    // Skip the wrappers: boxing recurses once per level of the MathJSON tree,
-    // and the number of stack frames per level bounds how deep a tree can be
-    // boxed at all (a left-nested `Subtract` chain from parsing `1-2-3-…`, or
-    // `Sin(Sin(…))`, overflows the stack past a few hundred levels).
-    if (ce._boxingState.isRootActive) return boxInternal(ce, expr, options);
-    // A construction that starts here starts at the root of the JS stack too,
-    // so the nesting counter starts over (see `boxingDepth`).
-    boxingDepth = 0;
-    return withDevolveRepair(ce, options?.scope, () =>
-      boxInternal(ce, expr, options)
-    );
-  } finally {
-    endInferenceTransaction(ce);
-  }
+  // Once a root repair is active (i.e. this is an operand of an enclosing
+  // construction), `withDevolveRepair` degenerates to calling `build()`.
+  // Skip the wrappers: boxing recurses once per level of the MathJSON tree,
+  // and the number of stack frames per level bounds how deep a tree can be
+  // boxed at all (a left-nested `Subtract` chain from parsing `1-2-3-…`, or
+  // `Sin(Sin(…))`, overflows the stack past a few hundred levels).
+  if (ce._boxingState.isRootActive) return boxInternal(ce, expr, options);
+  // A construction that starts here starts at the root of the JS stack too,
+  // so the nesting counter starts over (see `boxingDepth`).
+  boxingDepth = 0;
+  return withDevolveRepair(ce, options?.scope, () =>
+    boxInternal(ce, expr, options)
+  );
 }
 
 /**
@@ -2189,10 +2149,7 @@ function boxRawOperands(
   ops: ReadonlyArray<ExpressionInput>
 ): Expression[] {
   if (ce._macroCount === 0) return boxOperands(ce, ops, RAW_OPERAND);
-  const boxOne =
-    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
-      ? boxInternal
-      : box;
+  const boxOne = ce._boxingState.isRootActive ? boxInternal : box;
   const result: Expression[] = [];
   for (const op of ops) {
     const before = ce._macroSuspects;
@@ -3323,7 +3280,6 @@ export function validatedLiteralApplicationOperands(
     undefined,
     threadableGate(checkedType, paramsAreScalar(checkedType)),
     undefined,
-    undefined,
     {
       operatorName: 'Apply',
       mapsPointLists: true,
@@ -3653,7 +3609,6 @@ function declinedCallOperands(
       opDef._validationSignature ?? opDef.signature.type,
       false,
       threadableGate(opDef.signature.type, opDef.broadcastable === true),
-      undefined,
       undefined,
       {
         resolutionOut,
@@ -4533,7 +4488,6 @@ function makeCanonicalFunctionCore(
           paramsAreScalar(pinned ? checkedType : valueType)
         ),
         undefined,
-        undefined,
         {
           resolutionOut: valueResolutionOut,
           operatorName: name,
@@ -5314,7 +5268,6 @@ function applyOperatorDefinition(
             // per position — see the value-definition site above.
             threadableGate(opDef.signature.type, opDef.broadcastable === true),
             undefined,
-            undefined,
             {
               resolutionOut: lazyResolutionOut,
               operatorName: name,
@@ -5340,10 +5293,7 @@ function applyOperatorDefinition(
   // are here — so it neither goes through the public `ce.expr()` (five
   // frames of scope re-installation) nor through `Array.prototype.map` and
   // a callback, nor through the helper itself.
-  const boxOne =
-    ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
-      ? boxInternal
-      : box;
+  const boxOne = ce._boxingState.isRootActive ? boxInternal : box;
   const xs: Expression[] = [];
   if (opDef.operands === undefined) for (const x of ops) xs.push(boxOne(ce, x));
   else {
@@ -5490,7 +5440,7 @@ function applyOperatorDefinition(
         ) {
           // The validation runs in CHECK-ONLY mode: every verdict, repair
           // and substitution of the plain path — an unapplied operator
-          // symbol devolved to a variable, a fresh matrix inference, a
+          // symbol devolved to a variable, a
           // string literal narrowed to a character — but none of its
           // inference on a valueless symbol. The head's own handler has
           // typed what it types (`Sin(x)` gives `x` the `number` of its
@@ -5503,9 +5453,6 @@ function applyOperatorDefinition(
             opDef.signature.type,
             opDef.lazy,
             threadableGate(opDef.signature.type, opDef.broadcastable === true),
-            ce._inferenceTxDepth > 0
-              ? (ce._freshlyInferred ?? EMPTY_FRESHLY_INFERRED)
-              : undefined,
             (i) => opDef.stripsMissingAt(i),
             {
               resolutionOut: seamResolution,
@@ -5648,12 +5595,6 @@ function applyOperatorDefinition(
         // Declared-`broadcastable<T>` slots are threadable by declaration, per
         // position — see the value-definition site above.
         threadableGate(opDef.signature.type, opDef.broadcastable === true),
-        // The repair is enabled whenever a boxing operation is in progress
-        // (matching the old always-present snapshot); an empty log means "no
-        // fresh inference happened", not "repair disabled".
-        ce._inferenceTxDepth > 0
-          ? (ce._freshlyInferred ?? EMPTY_FRESHLY_INFERRED)
-          : undefined,
         // Strip-before-validate (§3.B): a `propagate`/`handle` operator admits
         // an absent (`Missing`) or possibly-absent (`T | missing`) operand in a
         // stripped position; the runtime gate carries the absence. A function

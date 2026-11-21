@@ -2026,7 +2026,6 @@ function validateSetArguments(
     typeof signature === 'string' ? parseType(signature) : signature,
     false,
     false,
-    undefined,
     stripMissing
   );
   if (!validated) return args;

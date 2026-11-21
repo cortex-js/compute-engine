@@ -1,4 +1,4 @@
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, isFunction } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
@@ -192,31 +192,15 @@ describe('a comprehension binder is typed by its binding site, authoritatively',
     ).toEqual(['List', 6, 8]);
   });
 
-  test('the binding-site rule removes the binder from the fresh-inference set', () => {
-    // Inside one boxing-pass window, the element-type write adds the binder
-    // to the fresh-inference set and the binding-site rule removes it again.
-    const ce2 = new ComputeEngine();
-    ce2.declare('L', 'list<number>');
-    ce2._withBoxingPassWindow(() => {
-      const e = ce2.box([
-        'Comprehension',
-        ['Add', 'q', 1],
-        ['Element', 'q', 'L'],
-      ] as never);
-      const def = e.ops![1].ops![0].valueDefinition;
-      expect(def).toBeDefined();
-      expect(ce2._freshlyInferred?.has(def as never) ?? false).toBe(false);
-    });
-  });
-
-  test('the fresh-matrix repair still applies to a genuinely guessed symbol', () => {
-    // `a · M` with `a` undeclared: the scalar fast path guesses `real` for
-    // `a`, and the matrix-consuming context repairs it. Unaffected by the
-    // binder rule.
-    const ce2 = new ComputeEngine();
-    ce2.declare('M', 'matrix');
-    const e = ce2.box(['Determinant', ['Multiply', 'a', 'M']] as never);
+  test('a declared scalar scales a matrix without changing its type', () => {
+    const ce = new ComputeEngine();
+    ce.declare('M', 'matrix');
+    ce.declare('a', 'number');
+    const e = ce.box(['Determinant', ['Multiply', 'a', 'M']]);
     expect(e.isValid).toBe(true);
+    if (!isFunction(e, 'Determinant')) throw new Error('Expected a determinant');
+    expect(e.op1.type.toString()).toBe('matrix');
+    expect(ce.box('a').type.toString()).toBe('number');
   });
 });
 

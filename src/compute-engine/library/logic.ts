@@ -166,9 +166,6 @@ function canonicalShortCircuit(
         false,
         // `broadcastable: true` — every position threads element-wise.
         true,
-        ce._inferenceTxDepth > 0
-          ? (ce._freshlyInferred ?? new Set())
-          : undefined,
         (i) => opDef.stripsMissingAt(i)
       );
       if (adjusted) args = adjusted;

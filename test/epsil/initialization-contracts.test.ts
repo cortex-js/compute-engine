@@ -1,5 +1,5 @@
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, isFunction } from '../../src/compute-engine';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { resolveLibraryNames } from '../../src/epsil/resolve-library-names';
 import { executeEpsil, executeEpsilAsync } from '../../src/epsil/execute-epsil';
@@ -249,5 +249,69 @@ describe.each([
     expect(result.value.re).toBeGreaterThanOrEqual(3);
     expect(result.value.re).toBeLessThan(4);
     expect(ce.box('h').type.toString()).toBe('(number) random -> number');
+  });
+});
+
+describe('matrix initialization and forward calls', () => {
+  test.each([
+    [
+      'a Program initializer calls a later typed function',
+      [
+        'let answer = f([[1, 2], [3, 4]])',
+        'function f(A: matrix) -> number { determinant(2 * A) }',
+        'answer',
+      ].join('\n'),
+      -8,
+      true,
+    ],
+    [
+      'Block locals supply matrix shape during boxing',
+      [
+        'do {',
+        '  let A: matrix = [[1, 2], [3, 4]]',
+        '  let B: matrix = [[2, 0], [0, 1]]',
+        '  determinant(A + 2 * B)',
+        '}',
+      ].join('\n'),
+      24,
+      false,
+    ],
+    [
+      'Block functions can call a typed sibling declared later',
+      [
+        'do {',
+        '  function forward(A: matrix) -> number { later(A) }',
+        '  function later(A: matrix) -> number { determinant(2 * A) }',
+        '  forward([[1, 2], [3, 4]])',
+        '}',
+      ].join('\n'),
+      -8,
+      false,
+    ],
+  ])('%s', async (_name, source, expected, publishesAnswer) => {
+    for (const execute of [executeEpsil, executeEpsilAsync]) {
+      const ce = new ComputeEngine();
+      const result = await execute(ce, source);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.value.json).toBe(expected);
+      expect(ce.lookupDefinition('A')).toBeUndefined();
+      expect(ce.lookupDefinition('B')).toBeUndefined();
+      expect(ce.lookupDefinition('later')).toBeUndefined();
+      expect(ce.lookupDefinition('answer') !== undefined).toBe(publishesAnswer);
+    }
+  });
+
+  test('a typed but uninitialized matrix still produces a runtime error', async () => {
+    for (const execute of [executeEpsil, executeEpsilAsync]) {
+      const ce = new ComputeEngine();
+      const { value } = await execute(ce, 'do { let A: matrix; determinant(A) }');
+      if (!isFunction(value, 'Error')) throw new Error('Expected an Error');
+      expect(value.op1.json).toEqual([
+        'ErrorCode',
+        "'read-before-initialization'",
+        "'A'",
+      ]);
+      expect(ce.lookupDefinition('A')).toBeUndefined();
+    }
   });
 });

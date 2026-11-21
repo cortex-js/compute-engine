@@ -424,8 +424,8 @@ export interface AdmissionPolicies {
   couldBeUnkeyedCollection?: (op: Expression) => boolean;
   /** Strip-before-validate eligibility, per operand index (§3.B). */
   stripMissing?: (index: number) => boolean;
-  /** Write-free precondition of the fresh-matrix-inference repair. */
-  freshMatrixRepair?: (op: Expression, param: Type) => boolean;
+  /** A symbol whose collection requirement is supplied by this parameter. */
+  untypedAtCollectionSlot?: (op: Expression, param: Type) => boolean;
   /** True when full validation admits `op` at `param` provisionally because
    * the type of the symbol `op` was inferred, not declared (a symbol at a
    * collection parameter of a library operator, see
@@ -572,7 +572,7 @@ function prefilterAdmits(
   if (policies?.stripMissing?.(index) && typeContainsMissing(op.type.type))
     return true;
   if (isRepairableOperatorSymbol(ce, op)) return true;
-  if (policies?.freshMatrixRepair?.(op, param)) return true;
+  if (policies?.untypedAtCollectionSlot?.(op, param)) return true;
   if (policies?.provisionalOperand?.(op, param)) return true;
   // A bare parameter typed only by its index reads (`p[1] + 1` gives
   // `tuple<number>`) at a parameter that requires a LONGER tuple
