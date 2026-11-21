@@ -1850,7 +1850,9 @@ function isRealOnRealAxis(e: Expression, x: string): boolean {
   if (op === 'Power') {
     const positiveBase = !e.op1.has(x) && e.op1.isPositive === true;
     if (asSmallInteger(e.op2) === null && !positiveBase) return false;
-  } else if (REAL_UNARY_OPERATORS.has(op) ? e.nops !== 1 : !ANALYTIC_OPERATORS.has(op))
+  } else if (
+    REAL_UNARY_OPERATORS.has(op) ? e.nops !== 1 : !ANALYTIC_OPERATORS.has(op)
+  )
     return false;
   return e.ops.every((operand) => isRealOnRealAxis(operand, x));
 }

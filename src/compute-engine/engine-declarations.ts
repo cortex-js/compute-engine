@@ -902,11 +902,7 @@ function storeValueAndRepair(
   // computation, so the record may be in no scope of the plain chain; the
   // repair then takes every waiting definition.
   const bindingScope = repair
-    ? scopeOfBinding(
-        ce.context.lexicalScope,
-        id,
-        (binding) => binding === def
-      )
+    ? scopeOfBinding(ce.context.lexicalScope, id, (binding) => binding === def)
     : undefined;
   if (def.value.type.matches('function')) {
     registerProvisionalDependents(ce, value, def.value);

@@ -338,12 +338,12 @@ export function listLowering(cx: Lowering) {
     const [a, z] = ints ? [cx.constant(lo)!, cx.constant(hi)!] : [0, 0];
     const step =
       given ??
-      (ints ? integer(z >= a ? 1 : -1) : cx.apply(e, op('rangestep'), [lo, hi]));
+      (ints
+        ? integer(z >= a ? 1 : -1)
+        : cx.apply(e, op('rangestep'), [lo, hi]));
     const length = ints
       ? integer(
-          Number(
-            brangeCount(BigInt(a), BigInt(z), BigInt(cx.constant(step)!))
-          )
+          Number(brangeCount(BigInt(a), BigInt(z), BigInt(cx.constant(step)!)))
         )
       : cx.apply(e, op('rangecount'), [lo, hi, step]);
     const at = (k: V) =>

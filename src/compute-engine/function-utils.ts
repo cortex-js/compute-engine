@@ -1989,8 +1989,10 @@ function rememberRebuildError(
   first: { error: unknown } | undefined,
   error: unknown
 ): { error: unknown } {
-  if (first === undefined ||
-      (isEffectContractError(error) && !isEffectContractError(first.error)))
+  if (
+    first === undefined ||
+    (isEffectContractError(error) && !isEffectContractError(first.error))
+  )
     return { error };
   return first;
 }

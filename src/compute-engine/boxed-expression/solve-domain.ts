@@ -3108,7 +3108,9 @@ function withFactorFamilies(
     // No family: the scan of the whole product still checks the list.
     if (family === null || family === undefined) continue;
     for (const r of family) {
-      if (out.some((o) => o.isSame(r) || eqWithinTolerance(o, r, false) === true))
+      if (
+        out.some((o) => o.isSame(r) || eqWithinTolerance(o, r, false) === true)
+      )
         continue;
       out.push(r);
       added = true;

@@ -2048,7 +2048,9 @@ function samePoint(x: Expression, y: Expression, tolerance: number): boolean {
   // (`orderOfNumbers()`): a double as it is, a big decimal at the working
   // precision.
   if (tolerance === 0)
-    return orderOfNumbers(isNumber(x) ? x : x.N(), isNumber(y) ? y : y.N()) === 0;
+    return (
+      orderOfNumbers(isNumber(x) ? x : x.N(), isNumber(y) ? y : y.N()) === 0
+    );
   const a = isNumber(x) ? x.re : x.N().re;
   const b = isNumber(y) ? y.re : y.N().re;
   return Math.abs(a - b) <= tolerance;
@@ -2100,11 +2102,7 @@ export function enclosureEq(a: Expression, b: Expression): boolean | undefined {
   const x = comparisonRange(a);
   const y = comparisonRange(b);
   if (x === undefined || y === undefined) return undefined;
-  if (
-    isPointRange(x) &&
-    isPointRange(y) &&
-    samePoint(x.lo, y.lo, 0)
-  )
+  if (isPointRange(x) && isPointRange(y) && samePoint(x.lo, y.lo, 0))
     return true;
   if (strictlyLess(x.hi, y.lo) || strictlyLess(y.hi, x.lo)) return false;
   return undefined;

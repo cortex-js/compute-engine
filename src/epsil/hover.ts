@@ -89,10 +89,7 @@ type SourceOptions = {
  * statements they head. Each is an ordinary name elsewhere (`let type = 5`). */
 const CONTEXTUAL_HEADS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['let', new Set(['Declare'])],
-  [
-    'type',
-    new Set(['DeclareType', 'DeclareSumType', 'DeclareConformance']),
-  ],
+  ['type', new Set(['DeclareType', 'DeclareSumType', 'DeclareConformance'])],
   ['parallel', new Set(['ParallelLoop', 'ParallelComprehension'])],
 ]);
 
@@ -274,8 +271,7 @@ function nameAt(
       binderSitesOf(ce, node, source, members, isBound, declaration),
   });
   const group = groups.find(
-    (g) =>
-      g.name === name && g.occurrences.some((o) => o.start === token.start)
+    (g) => g.name === name && g.occurrences.some((o) => o.start === token.start)
   );
 
   const scope = tokens[index - 1];

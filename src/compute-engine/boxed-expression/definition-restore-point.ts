@@ -247,7 +247,11 @@ export function beforeDefinitionWrite(def: object): void {
  * scope outlives the point. */
 export function beforeScopeWrite(ce: object, scope: Scope, name: string): void {
   if (OPEN === 0 || RESTORING) return;
-  for (let point = ACTIVE.get(ce); point !== undefined; point = point.enclosing) {
+  for (
+    let point = ACTIVE.get(ce);
+    point !== undefined;
+    point = point.enclosing
+  ) {
     if (!point._hasScope(scope)) point._addScopeEntry(scope, name);
   }
 }

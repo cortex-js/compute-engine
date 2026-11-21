@@ -965,7 +965,13 @@ function decideEqual(
   // same two collections re-enters this handler (`skipBroadcastForVectorOps`
   // enforces the same rule for the engine-level broadcast).
   if (broadcastableComparisonOperands(ops)) {
-    const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation, rawOps);
+    const bc = broadcastComparison(
+      ce,
+      'Equal',
+      ops,
+      numericApproximation,
+      rawOps
+    );
     if (bc) return bc;
   }
   // An operand that is not a collection value yet (`X` declared
@@ -1087,7 +1093,13 @@ function decideNotEqual(
   // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
   // a scalar boolean and would otherwise recurse).
   if (broadcastableComparisonOperands(ops)) {
-    const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation, rawOps);
+    const bc = broadcastComparison(
+      ce,
+      'NotEqual',
+      ops,
+      numericApproximation,
+      rawOps
+    );
     if (bc) return bc;
   }
   // As for `Equal`: an unresolved collection operand comes first.
@@ -1268,7 +1280,13 @@ function decideLessEqual(
   if (!Array.isArray(chain)) return chain;
   const ops = chain;
   // Element-wise broadcast when an operand evaluated to a collection.
-  const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation, rawOps);
+  const bc = broadcastComparison(
+    ce,
+    'LessEqual',
+    ops,
+    numericApproximation,
+    rawOps
+  );
   if (bc) return bc;
   // An undefined operand (`NaN`, or an absent value read as `NaN`) makes
   // the comparison `False`. See `Less`.

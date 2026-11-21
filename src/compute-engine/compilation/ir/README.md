@@ -328,22 +328,21 @@ value overflows a single float (`HarmonicNumber(1195.5, -13.9)`). The others
 decline on GLSL. `GCD` of integers (`GCD(Round(a), Round(b))`) is `_gpu_ir_gcd`
 on `int`s. `GCD` and `LCM` of reals are `_gpu_ir_rgcd` and `_gpu_ir_rlcm`, the
 interpreter's `realGcd` and `realLcm`: of two operands that hold integers, the
-loop on `int`s (NaN when one is 2^31 or more); of other operands, the
-remainders down to 1e-6 of the larger operand, in single floats. Operands with
-no common divisor above that bound give a remainder of that size, which can be
-another one than the interpreter's (`docs/COMPILATION-MODEL.md`, "Known
-limitations"). `Hypot` is `length(vec2(x, y))`; `Arsinh` is
-`sign(x)·asinh(|x|)` (the builtin is wrong for a large negative argument);
-`Sinh`, `Cosh`, `Tanh`,
-`Arctan` and the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are
-builtins or their reciprocals. `FresnelC` and `FresnelS` are the helpers
-`_gpu_ir_fresnelc` and `_gpu_ir_fresnels`: the rational approximations of the
-JavaScript kernels, each table a `float[12]` padded with zeros (GLSL converts no
-array size), the phase πx²/2 reduced mod 2π from x = n + r, and its sine and
-cosine Taylor polynomials (a renderer's `sin` can be wrong by 1e-5); ±1/2 from
-|x| = 10^7. `Sinc` is its Taylor polynomial of degree 8 below |x| = 0.5 (error
-2e-11), and `sin(x) / x` above. The other real functions (`Erf`, `Gamma`,
-`Zeta`, `Arccot`, `Arcsec`, ...) decline there.
+loop on `int`s (NaN when one is 2^31 or more); of other operands, the remainders
+down to 1e-6 of the larger operand, in single floats. Operands with no common
+divisor above that bound give a remainder of that size, which can be another one
+than the interpreter's (`docs/COMPILATION-MODEL.md`, "Known limitations").
+`Hypot` is `length(vec2(x, y))`; `Arsinh` is `sign(x)·asinh(|x|)` (the builtin
+is wrong for a large negative argument); `Sinh`, `Cosh`, `Tanh`, `Arctan` and
+the reciprocal rows (`Sec`, `Csc`, `Coth`, `Sech`, `Csch`) are builtins or their
+reciprocals. `FresnelC` and `FresnelS` are the helpers `_gpu_ir_fresnelc` and
+`_gpu_ir_fresnels`: the rational approximations of the JavaScript kernels, each
+table a `float[12]` padded with zeros (GLSL converts no array size), the phase
+πx²/2 reduced mod 2π from x = n + r, and its sine and cosine Taylor polynomials
+(a renderer's `sin` can be wrong by 1e-5); ±1/2 from |x| = 10^7. `Sinc` is its
+Taylor polynomial of degree 8 below |x| = 0.5 (error 2e-11), and `sin(x) / x`
+above. The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`,
+...) decline there.
 
 `Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
 divisor). For a divisor of 1 it computes `x - floor(x)`, the same double with no
@@ -1428,21 +1427,22 @@ elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a
 to 64 (`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
 element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
 `Map(f, List(a, b, c))`). A `Range` of integer constant operands is a source of
-a constant length, its exact count (`Min(Comprehension((x - k)², Element(k,
-Range(1, 16))))` is a `float[16]`); not with `constantFold: false`. The
-elements of such builds in one program are at most 4,096; past that, a
-`Filter`, a `Range` of a run-time length, of a real operand or of no element,
-and a list of a run-time length, the build declines on GLSL. The short lists:
-on JavaScript (the interval mode included; not in the bigint and complex
-modes), a list of a constant length of 1 to 16 elements (`MAX_UNROLLED_LIST` of `index.ts`, the option `unrollBuilds` of
-the lowering and of the passes; GLSL keeps its 64 for builds) is written out. A
-build over a source of such a length, and a list that `built()` makes (a
-`Range`, a `Comprehension` of several clauses), is the list of its elements, as
-on GLSL; on JavaScript a build whose body has an effect (a draw) keeps its loop,
-as a sum written out does, so that a draw stays one site of its frame and the
-warnings are the loop's. A reduction of such a list is folded through the sums
-written out (below), from the value the loop starts from. One exception: for
-`Sum`, `Product`, `Max` and `Min` (`reduction()`), when that value is still the
+a constant length, its exact count
+(`Min(Comprehension((x - k)², Element(k, Range(1, 16))))` is a `float[16]`); not
+with `constantFold: false`. The elements of such builds in one program are at
+most 4,096; past that, a `Filter`, a `Range` of a run-time length, of a real
+operand or of no element, and a list of a run-time length, the build declines on
+GLSL. The short lists: on JavaScript (the interval mode included; not in the
+bigint and complex modes), a list of a constant length of 1 to 16 elements
+(`MAX_UNROLLED_LIST` of `index.ts`, the option `unrollBuilds` of the lowering
+and of the passes; GLSL keeps its 64 for builds) is written out. A build over a
+source of such a length, and a list that `built()` makes (a `Range`, a
+`Comprehension` of several clauses), is the list of its elements, as on GLSL; on
+JavaScript a build whose body has an effect (a draw) keeps its loop, as a sum
+written out does, so that a draw stays one site of its frame and the warnings
+are the loop's. A reduction of such a list is folded through the sums written
+out (below), from the value the loop starts from. One exception: for `Sum`,
+`Product`, `Max` and `Min` (`reduction()`), when that value is still the
 identity (no scalar operand and no list before this one), and the loop's
 accumulator has the lane of the first element, the fold starts at the first
 element: in the interval mode `Sum(L)` of `L: list<real^3>` is `(L₁ + L₂) + L₃`.
@@ -1806,48 +1806,48 @@ from forms that decline: a `Which` with no default, a literal `Missing`). The
 rows that make a mask thread as the interpreter's: `Equal` and `NotEqual` of a
 list and a scalar (`L[K = 1]`; of two lists the interpreter compares the lists,
 one boolean, `equality()` below; a chain of three operands with a list
-declines), and
-`Not`, `And` and `Or` of lists, with a scalar broadcast (`And(False, M)` is a
-list of false); an `And` or an `Or` of a list lowers every operand, and one with
-an effect declines. One exception to "only true and false": an `And` or an `Or`
-of lists whose run-time lengths differ (an `incompatible-dimensions` error of
-the interpreter, so unspecified) has the first operand's length, with
-`undefined` past the shorter list. `Not` of a tuple of booleans
-(`Not(Tuple(p, q))`) is the tuple of the negations, as the interpreter's. A mask
-or a base of a mask with an effect declines: the interpreter reads a lazy base
-at the kept positions only (`At(Map(k ↦ k + Random(), A), M)` draws twice for
-two kept positions). On GLSL a list of booleans of a stated length is a `bvec`
-(`Or(M3, L3 > x)`), and the filter declines; in the interval mode a mask element
-undecided over the box gives the whole range, as for `Filter`.
-`Clamp(x, lo, hi)` is `ElementMin(ElementMax(x, lo), hi)`, the interpreter's
-`min(max(x, lo), hi)`: `hi` when `lo > hi` (on GLSL `min(max(…))`, not
-`clamp()`, whose value is undefined there), integers stay integers, and each
-operand threads over a list (`At(L, Clamp(Floor(I), 0, +∞))` is the floored
-index of each element of `I`, NaN below 1).
+declines), and `Not`, `And` and `Or` of lists, with a scalar broadcast
+(`And(False, M)` is a list of false); an `And` or an `Or` of a list lowers every
+operand, and one with an effect declines. One exception to "only true and
+false": an `And` or an `Or` of lists whose run-time lengths differ (an
+`incompatible-dimensions` error of the interpreter, so unspecified) has the
+first operand's length, with `undefined` past the shorter list. `Not` of a tuple
+of booleans (`Not(Tuple(p, q))`) is the tuple of the negations, as the
+interpreter's. A mask or a base of a mask with an effect declines: the
+interpreter reads a lazy base at the kept positions only
+(`At(Map(k ↦ k + Random(), A), M)` draws twice for two kept positions). On GLSL
+a list of booleans of a stated length is a `bvec` (`Or(M3, L3 > x)`), and the
+filter declines; in the interval mode a mask element undecided over the box
+gives the whole range, as for `Filter`. `Clamp(x, lo, hi)` is
+`ElementMin(ElementMax(x, lo), hi)`, the interpreter's `min(max(x, lo), hi)`:
+`hi` when `lo > hi` (on GLSL `min(max(…))`, not `clamp()`, whose value is
+undefined there), integers stay integers, and each operand threads over a list
+(`At(L, Clamp(Floor(I), 0, +∞))` is the floored index of each element of `I`,
+NaN below 1).
 
 `Equal` and `NotEqual` of two lists, of two tuples and of two booleans
 (`equality()` of `lower.ts`, CE-1532) have no row signature. Two lists, or two
 tuples, of real numbers are compared as the interpreter compares them: one
-boolean, true when they have the same length and each element equals the
-element at its index. The elements are compared as two numbers are (the exact
-equality of compiled code, no tolerance; a NaN element equals nothing, so
-`Equal(L, L)` of a list with a NaN is false, as the interpreter's). Two stated
-lengths that differ are the constant `false` (`Equal(P, T)` of a point of two
-and a point of three coordinates); two equal stated lengths are the conjunction
-of the comparisons (`(P[0] === Q[0]) && (P[1] === Q[1])`; a loop on GLSL); with
-a run-time length, the code tests the lengths and compares the elements up to
-the shorter list in a loop (JavaScript and the interval mode; GLSL has no list
-of a run-time length). Two booleans are equal when both hold or neither does,
+boolean, true when they have the same length and each element equals the element
+at its index. The elements are compared as two numbers are (the exact equality
+of compiled code, no tolerance; a NaN element equals nothing, so `Equal(L, L)`
+of a list with a NaN is false, as the interpreter's). Two stated lengths that
+differ are the constant `false` (`Equal(P, T)` of a point of two and a point of
+three coordinates); two equal stated lengths are the conjunction of the
+comparisons (`(P[0] === Q[0]) && (P[1] === Q[1])`; a loop on GLSL); with a
+run-time length, the code tests the lengths and compares the elements up to the
+shorter list in a loop (JavaScript and the interval mode; GLSL has no list of a
+run-time length). Two booleans are equal when both hold or neither does,
 `(a && b) || (!a && !b)`, with the rows `And`, `Or` and `Not`, so a list of
 booleans and a boolean thread (`Equal(B, b)` is a mask) and the interval mode
-gives the Kleene verdict (`'maybe'` for an undecided operand). `NotEqual` is
-the negation. A chain of booleans is the conjunction of its pairs. Declined: a
-tuple and a list, and a tuple and a scalar (the interpreter gives `False`
-whatever the elements); lists of lists and lists of points; two lists or two
-tuples whose elements are booleans (`Equal(Tuple(True), Tuple(True))`), complex
-numbers, strings or colours; a boolean and a number; and a chain of
-three operands or more with a list or a tuple, whose value in the interpreter
-is not the conjunction of its pairs (`Equal(L, L, 3)` is `False`).
+gives the Kleene verdict (`'maybe'` for an undecided operand). `NotEqual` is the
+negation. A chain of booleans is the conjunction of its pairs. Declined: a tuple
+and a list, and a tuple and a scalar (the interpreter gives `False` whatever the
+elements); lists of lists and lists of points; two lists or two tuples whose
+elements are booleans (`Equal(Tuple(True), Tuple(True))`), complex numbers,
+strings or colours; a boolean and a number; and a chain of three operands or
+more with a list or a tuple, whose value in the interpreter is not the
+conjunction of its pairs (`Equal(L, L, 3)` is `False`).
 
 `If` and `Which` of a condition whose static type is a list of booleans
 (`Which(3 < L, 1, True, 0)`) are the interpreter's selection at each position
@@ -1883,31 +1883,30 @@ operator, a binding, an argument of a function, an element of a list) it
 declines. One boxed `If` in several places must be in such a place each time,
 and an `If` that is only the value of a name of the engine declines (one boxed
 `If` that is also a node of the program does not: `docs/COMPILATION-MODEL.md`,
-"Known limitations"). The conditions, the
-arms and the default are lowered once, before the build, all of them: the
-interpreter evaluates an arm and a later condition only where the selection
-reaches it, so one that is not pure (an effect, a write to a name, an operation
-that can throw such as `AssertPresent`, a loop, a recursive call) declines. Two
-exceptions (CE-1562). A `Range` arm is read at each position (`lo + k·step`) and
-is never built. A list that an arm or a later condition builds (`Map`, `At` of a
-list of indexes) is accepted when it has the length of the first condition, or,
-in a later condition with no scalar condition before it, the length of that
-condition: a build fails only at 2^32 elements or more, the first condition
-exists, and the interpreter evaluates every list condition up to the first
-scalar condition that holds. A build of another length in an arm declines
-(`Which(3 < L, Max(Range(1, x)), True, 0)`). The first condition reached must be
-a list: a scalar condition before it selects its arm whole when it holds, a
-value of another shape (its static type is a union), and declines. Arms are all
-numbers or booleans (with a clause `True`: without one, the interpreter gives
-`Missing`) and flat lists of them, or all points of numbers and lists of points
-(on GLSL a list of points of a constant length is an array of vectors, below;
-another declines). Stated lengths that differ decline (the canonical form
-already gives `incompatible-dimensions` for most); lists of two run-time lengths
-are an error of the interpreter (`incompatible-dimensions` for `Which` and for
-`If` with an `else`), so the value is unspecified: a list as long as the first
-condition, never an arm whole (CE-1238). On GLSL a stated length writes the
-selection out (`vec3` of three conditionals); a run-time length declines. The
-interval mode declines it.
+"Known limitations"). The conditions, the arms and the default are lowered once,
+before the build, all of them: the interpreter evaluates an arm and a later
+condition only where the selection reaches it, so one that is not pure (an
+effect, a write to a name, an operation that can throw such as `AssertPresent`,
+a loop, a recursive call) declines. Two exceptions (CE-1562). A `Range` arm is
+read at each position (`lo + k·step`) and is never built. A list that an arm or
+a later condition builds (`Map`, `At` of a list of indexes) is accepted when it
+has the length of the first condition, or, in a later condition with no scalar
+condition before it, the length of that condition: a build fails only at 2^32
+elements or more, the first condition exists, and the interpreter evaluates
+every list condition up to the first scalar condition that holds. A build of
+another length in an arm declines (`Which(3 < L, Max(Range(1, x)), True, 0)`).
+The first condition reached must be a list: a scalar condition before it selects
+its arm whole when it holds, a value of another shape (its static type is a
+union), and declines. Arms are all numbers or booleans (with a clause `True`:
+without one, the interpreter gives `Missing`) and flat lists of them, or all
+points of numbers and lists of points (on GLSL a list of points of a constant
+length is an array of vectors, below; another declines). Stated lengths that
+differ decline (the canonical form already gives `incompatible-dimensions` for
+most); lists of two run-time lengths are an error of the interpreter
+(`incompatible-dimensions` for `Which` and for `If` with an `else`), so the
+value is unspecified: a list as long as the first condition, never an arm whole
+(CE-1238). On GLSL a stated length writes the selection out (`vec3` of three
+conditionals); a run-time length declines. The interval mode declines it.
 
 `RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
 `RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region
@@ -2002,19 +2001,19 @@ interpreter's value for every length, also 0:
   `median` and `quartile3` (so `At(Quartiles(L), 3)` reads the upper quartile),
   and `InterquartileRange` is `quartile3 - quartile1`. The mode of several
   values that occur equally often is the smallest one; a quartile is the median
-  of the lower or of the upper half of the sorted list, without the median of
-  an odd count, and the element itself for a list of one. NaN where the
-  interpreter gives NaN or an error: a NaN element (every statistic); no
-  element; an infinite element, one element or equal elements for `Skewness`
-  and `Kurtosis`; lists of two lengths and fewer than two pairs for the last
-  three; a list of equal elements for `Correlation`. An infinite element is
-  ordered and counted as a number by `Mode` and by the quartiles, as the
-  interpreter's (`Mode([+∞, +∞])` is `+∞`). The interpreter keeps an exact
-  value of exact data (`Covariance([1, 2, 4], [2, 5, 9])` is `16/3`); the
-  compiled value is its numeric value. Declined: several operands or a scalar
-  operand for the first five (the interpreter reads them as the data), one list
-  of pairs for the last three, a tuple, complex elements, GLSL (no spelling of
-  the operations) and the interval mode (`<head> on interval-js`).
+  of the lower or of the upper half of the sorted list, without the median of an
+  odd count, and the element itself for a list of one. NaN where the interpreter
+  gives NaN or an error: a NaN element (every statistic); no element; an
+  infinite element, one element or equal elements for `Skewness` and `Kurtosis`;
+  lists of two lengths and fewer than two pairs for the last three; a list of
+  equal elements for `Correlation`. An infinite element is ordered and counted
+  as a number by `Mode` and by the quartiles, as the interpreter's
+  (`Mode([+∞, +∞])` is `+∞`). The interpreter keeps an exact value of exact data
+  (`Covariance([1, 2, 4], [2, 5, 9])` is `16/3`); the compiled value is its
+  numeric value. Declined: several operands or a scalar operand for the first
+  five (the interpreter reads them as the data), one list of pairs for the last
+  three, a tuple, complex elements, GLSL (no spelling of the operations) and the
+  interval mode (`<head> on interval-js`).
 - `Any(L, p)` and `All(L, p)` (`p` a literal of one parameter, a user function
   or a library operator of one operand), and `Any(L)` and `All(L)` of a list of
   booleans, are the count of a `filter` of `L` by `p` (by its elements),
@@ -2152,12 +2151,12 @@ mode declines all of them but `Identity` and `ApplyWhole`
 
 In the interval mode every list operator of the first list above compiles except
 `Median`, `Sort`, `Ordering`, `Unique`, `Any`, `All`, `Contains`, `IndexOf` and
-the statistics of `statistic()` (`Mode`, `Quartiles`, ..., `Correlation`),
-which decline with `<head> on interval-js` (the operations `sort`, `ordering`,
-`median` and those of the statistics, and an equality test of two elements,
-have no spelling of the mode). The indices of a build that reorders a list are machine integers
-(`_IA.number` of the count), and a built list needs one length, so `Rest`,
-`Most`, `Take` and `Drop` compile for an input of a stated length
+the statistics of `statistic()` (`Mode`, `Quartiles`, ..., `Correlation`), which
+decline with `<head> on interval-js` (the operations `sort`, `ordering`,
+`median` and those of the statistics, and an equality test of two elements, have
+no spelling of the mode). The indices of a build that reorders a list are
+machine integers (`_IA.number` of the count), and a built list needs one length,
+so `Rest`, `Most`, `Take` and `Drop` compile for an input of a stated length
 (`list<real^3>`) and a constant count only; of a list of a run-time length (also
 a `Range`), and of a run-time count of `Take` and `Drop`, they decline
 (`a list whose length is not one number`); a count that is a box with more than
@@ -2172,8 +2171,8 @@ below 2^53, the interpreter's value for every pair of integers: `Choose(5, 7)`
 is 0, `Choose(-3, 2)` is 6; of real operands, the interpreter's extension), and
 on GLSL `_gpu_ir_binomial` of integers (a real operand declines there). They
 thread over a list, as the interpreter's (`Binomial(L, 2)`,
-`Choose(n, [1, 2, 3])`), on every target; `GCD` and `LCM`, which the
-interpreter does not thread, decline a list.
+`Choose(n, [1, 2, 3])`), on every target; `GCD` and `LCM`, which the interpreter
+does not thread, decline a list.
 
 ## Tuples
 
@@ -2544,11 +2543,11 @@ effects only the draws of a random frame that it holds are accepted, when the
 frame has one draw site evaluated once (a frame of the next paragraph that has
 no warning): `H := WithRandomSeed(139128, RandomChoice([0, 1), 4N))`, a seeded
 list whose length reads the input `N`, is that frame at each read of `H`, a
-function of `N` (`drawSites()` of `lower.ts`). The frame starts its draws at
-its seed, so the seed can read an input too (`WithRandomSeed(N, Random())`).
-A held value still declines when it draws outside a frame
-(`L := Random() + N`), draws its seed, reads a name of `vars`, calls a user
-function that draws, or holds a frame of the warning `seeded-draw-order`
+function of `N` (`drawSites()` of `lower.ts`). The frame starts its draws at its
+seed, so the seed can read an input too (`WithRandomSeed(N, Random())`). A held
+value still declines when it draws outside a frame (`L := Random() + N`), draws
+its seed, reads a name of `vars`, calls a user function that draws, or holds a
+frame of the warning `seeded-draw-order`
 (`WithRandomSeed(5, Random() + Random())`), whose draws can differ from the
 interpreter's. On GLSL, which has no random frame, the frame declines.
 Otherwise:
@@ -2812,19 +2811,19 @@ result of no stated type (none, `unknown`, `number`, `any`, `value`, a
 `list<…> | number | tuple` for `Sqrt(PointX(p)^2 + PointY(p)^2)`) is the type of
 the body. An assignment narrows a declared `unknown` result to the type of the
 body, `value` for `Dot(p(u, v), PointList(u, v))` with `u, v` of no stated type
-(CE-1497). In `mode: 'strict'`, an `unknown` result that an assignment
-narrows to a complex scalar (`(real) -> unknown` reports `(real) -> complex`
-for `w ↦ sin(w)·√(1 − e²)` with `e: real`) is the type of the body too: a real
-body stays on the real lane, as it does in place, so `(F(t), t)` is a point
-on GLSL (CE-1588). A result declared `complex` is a complex. The result is a
-scalar, or a point (a tuple of real or integer
-numbers, `Function(Block(PointList(x, y)), x, y)`), and the result of a call is
-then a tuple; a result that is a tuple of such elements or of real or integer
-scalars (`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`)
-takes a point body of that length; a list body declines, except with no result
-at all (a function value declared with the bare type `function`): its list body
-is taken as for `list<unknown>` below, with the same conditions. A result that
-is a list of elements of no stated type (`list<unknown>`, `list<unknown^3>`,
+(CE-1497). In `mode: 'strict'`, an `unknown` result that an assignment narrows
+to a complex scalar (`(real) -> unknown` reports `(real) -> complex` for
+`w ↦ sin(w)·√(1 − e²)` with `e: real`) is the type of the body too: a real body
+stays on the real lane, as it does in place, so `(F(t), t)` is a point on GLSL
+(CE-1588). A result declared `complex` is a complex. The result is a scalar, or
+a point (a tuple of real or integer numbers,
+`Function(Block(PointList(x, y)), x, y)`), and the result of a call is then a
+tuple; a result that is a tuple of such elements or of real or integer scalars
+(`tuple<unknown, unknown>`, `tuple<number, unknown>`, `tuple<any, any>`) takes a
+point body of that length; a list body declines, except with no result at all (a
+function value declared with the bare type `function`): its list body is taken
+as for `list<unknown>` below, with the same conditions. A result that is a list
+of elements of no stated type (`list<unknown>`, `list<unknown^3>`,
 `list<tuple<unknown, unknown>^9>`, as the engine infers it for parameters of no
 stated type: `v(a, b) := [a, b]`) is the shape of the body, lowered with the
 parameter types of the first call: a flat list of numbers or booleans, or a list
