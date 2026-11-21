@@ -8423,7 +8423,7 @@ export function startDefinitionRow(
     finish(
       formals: ReadonlyMap<string, TypeString>,
       formalsAreFactors = false
-    ) {
+    ): MathJsonExpression | null {
       if (finished) throw new Error('Definition row already consumed');
       finished = true;
       parser.index = bodyStart;
@@ -8433,8 +8433,8 @@ export function startDefinitionRow(
           parser.addSymbol(name, new BoxedType(type));
         if (formalsAreFactors) parser.definitionFormals = parser.symbolTable;
         const body = parser.parseExpression();
-        if (!parser.atEnd || body === null)
-          throw new Error('Incomplete definition body');
+        // The caller reports a body that does not reach the end of the row.
+        if (!parser.atEnd || body === null) return null;
         return finalizeRawTree(parser, body);
       } finally {
         parser.popSymbolTable();

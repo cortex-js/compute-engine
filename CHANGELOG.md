@@ -33,6 +33,15 @@
   before the host writes it. The profile and import callbacks must be
   synchronous.
 
+  A row whose content cannot be prepared does not stop the others. The row gets
+  a diagnostic in `revision.rowErrors`. A definition that reads it gets
+  `invalid-document-dependency`, and a formula row that reads it evaluates to
+  the error. This holds for a row still being typed (`f(x)=` or `f(x)=x+1&`), a
+  cycle (`a=b_1` with `b=a_1`) and a body whose type contradicts its stated
+  type. Every row keeps an entry in `revision.rawRows`. `prepare()` throws only
+  when the host breaks its contract, for example with two rows of the same `id`,
+  or when a time limit or step budget expires.
+
 ### Behavior Changes
 
 - **The type, protocol and value-kind registries are read-only while a document

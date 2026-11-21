@@ -71,6 +71,9 @@ export interface PreparedDocumentRevision {
    * a new revision to change definitions.
    */
   readonly scope: InspectableScope;
+  /** The parsed entry of every input row, by row ID. A rejected row keeps
+   * its parsed entry when it has one, and otherwise has its diagnostic.
+   * `rowErrors` holds the diagnostic of each rejected row. */
   readonly rawRows: ReadonlyMap<string, MathJsonExpression>;
   readonly rowReferences: ReadonlyMap<string, readonly string[]>;
   readonly rowErrors: ReadonlyMap<string, Expression>;
@@ -96,6 +99,11 @@ export interface DocumentSyntax {
   ):
     | (Recognition & {
         body?: string;
+        /** The row's entry in `rawRows` when the row is recognized without
+         * `raw`. Without one, an accepted row's entry is the parse of the
+         * whole row with the document's heads resolved (`f(x)` reads as the
+         * application `["f", "x"]`), and a rejected row's entry is its
+         * diagnostic. */
         rawEntry?: MathJsonExpression;
         bodyJson?: MathJsonExpression;
       })
@@ -278,13 +286,23 @@ export function prepareDocument(
       const numberLexemes = new Map<string, string[]>();
       const sources = new Map(rows.map((row) => [row.id, row.latex]));
       const declarations = new Map<string, DefinitionRow>();
-      const cursors = new Map<string, () => MathJsonExpression>();
+      // A cursor returns the body, or the message of a row-content failure.
+      const cursors = new Map<
+        string,
+        () => MathJsonExpression | { failure: string }
+      >();
       const parsed = new Map<string, MathJsonExpression>();
       const rawRows = new Map<string, MathJsonExpression>();
+      const unparsedEntries: DraftRow[] = [];
       const bodies = new Map<string, ReturnType<typeof ce.box>>();
       const fieldParameters = new Map<string, readonly string[]>();
       const rowReferences = new Map<string, readonly string[]>();
       const rowErrors = new Map<string, Expression>();
+      // The document values that a row asked for as indexed bases and that
+      // were rejected or still being prepared. The parser can absorb the
+      // subscript of such a base into a name, so the row's references need
+      // not show these edges. An unfinished base is an initialization cycle.
+      const indexedBases = new Map<string, Set<string>>();
 
       function rowOptions(
         row: DraftRow,
@@ -297,7 +315,7 @@ export function prepareDocument(
           _prepareIndexedBase: (name: string) => {
             if (!inBody() || formals().includes(name)) return;
             const declaration = declarations.get(name);
-            if (declaration?.row.role !== 'value' || bodies.has(name)) return;
+            if (declaration?.row.role !== 'value') return;
             // With this document dialect, an atomic subscript in the base's
             // own initializer is a name. Explicit indexing still reads the base.
             if (
@@ -306,10 +324,13 @@ export function prepareDocument(
             )
               return;
             graph.prepare(name);
-            if (!bodies.has(name))
-              throw new Error(
-                'Indexed base needs unfinished declaration: ' + name
-              );
+            // A finished, valid base adds no edge: under `ownValueSubscripts`
+            // the joined name can be a document variable of its own.
+            if (bodies.has(name) && !rowErrors.has(declaration.row.id)) return;
+            let bases = indexedBases.get(row.id);
+            if (bases === undefined)
+              indexedBases.set(row.id, (bases = new Set()));
+            bases.add(name);
           },
           resolveSymbol: (name: string) => {
             if (inBody() && formals().includes(name))
@@ -369,18 +390,19 @@ export function prepareDocument(
                   ),
                   syntax.formalsAreFactors
                 );
-                invariant(body !== null, 'Empty definition body: ' + row.id);
+                if (body === null)
+                  return { failure: 'Incomplete definition body' };
                 const entry = syntax.normalize([
                   state.operator,
                   state.head,
                   body,
                 ]);
+                // The confirming call sees the declarations of later rows,
+                // so the text of another row can change the host's answer.
                 const confirmed = syntax.recognize(row, declarations, entry);
-                invariant(
-                  sameHead(initial, confirmed),
-                  'Definition head changed: ' + row.id
-                );
                 rawRows.set(row.id, entry);
+                if (!sameHead(initial, confirmed))
+                  return { failure: 'Definition head changed' };
                 return syntax.normalize(body);
               });
             }
@@ -389,14 +411,22 @@ export function prepareDocument(
           const fallback = syntax.recognize(row, declarations);
           if (fallback !== undefined) {
             recognized = fallback;
-            sources.set(row.id, fallback.body ?? proposed.body);
+            const body = fallback.body ?? proposed.body;
+            sources.set(row.id, body);
+            // Without an entry from the host, the row's own parse is its
+            // entry, made once the document is prepared.
             if (fallback.rawEntry !== undefined)
               rawRows.set(row.id, fallback.rawEntry);
+            else unparsedEntries.push(row);
             if (fallback.bodyJson !== undefined)
               parsed.set(
                 row.id,
                 syntax.lowerBody?.(fallback.bodyJson, row) ?? fallback.bodyJson
               );
+            // As on the definition path, a blank body is incomplete. The
+            // declaration is rejected when its component settles.
+            else if (body.trim() === '')
+              parsed.set(row.id, ce.error('Incomplete definition body').json);
           }
         }
         if (recognized === undefined) continue;
@@ -425,8 +455,17 @@ export function prepareDocument(
         const resume = cursors.get(row.id);
         cursors.delete(row.id);
         let raw: MathJsonExpression;
-        if (resume !== undefined) raw = resume();
-        else {
+        if (resume !== undefined) {
+          const body = resume();
+          if (typeof body === 'object' && body !== null && 'failure' in body) {
+            // The declaration is rejected when its component settles.
+            const diagnostic = ce.error(body.failure);
+            if (!rawRows.has(row.id)) rawRows.set(row.id, diagnostic.json);
+            parsed.set(row.id, diagnostic.json);
+            return diagnostic.json;
+          }
+          raw = body;
+        } else {
           const options = {
             ...rowOptions(
               row,
@@ -524,8 +563,13 @@ export function prepareDocument(
             ce.declare(name, { type: 'error', value: diagnostic });
           }
           rowErrors.set(row.id, diagnostic);
+          if (!rawRows.has(row.id)) rawRows.set(row.id, diagnostic.json);
           bodies.set(name, diagnostic);
         }
+      }
+      function withIndexedBases(row: DraftRow, refs: readonly string[]) {
+        const bases = indexedBases.get(row.id);
+        return bases === undefined ? refs : [...new Set([...refs, ...bases])];
       }
       const graph = demandComponents(
         (name) => {
@@ -550,8 +594,9 @@ export function prepareDocument(
               installClosedType(reference, syntax.ownValueSubscripts, false);
             }
           }
-          references.set(name, refs);
-          return refs.filter((ref) => declarations.has(ref));
+          const all = withIndexedBases(row, refs);
+          references.set(name, all);
+          return all.filter((ref) => declarations.has(ref));
         },
         (group, cyclic) => {
           for (const name of group) {
@@ -624,8 +669,12 @@ export function prepareDocument(
                 field.kind === 'signature' &&
                 !ce.type(field.result).matches(first.row.valueType)
               )
-                throw new Error(
-                  name + ': initializer does not match ' + first.row.valueType
+                return rejectComponent(
+                  group,
+                  name,
+                  ce.error(
+                    name + ': initializer does not match ' + first.row.valueType
+                  )
                 );
               const helperBinding = installClosedType(
                 helper,
@@ -651,8 +700,14 @@ export function prepareDocument(
               first.row.valueType !== undefined &&
               !expr.type.matches(first.row.valueType)
             )
-              throw new Error(
-                group[0] + ': initializer does not match ' + first.row.valueType
+              return rejectComponent(
+                group,
+                group[0],
+                ce.error(
+                  group[0] +
+                    ': initializer does not match ' +
+                    first.row.valueType
+                )
               );
             const definition = {
               type,
@@ -778,7 +833,7 @@ export function prepareDocument(
               sig.kind === 'signature'
             ) {
               const mismatch = (stated: BoxedType) =>
-                new Error(
+                ce.error(
                   name +
                     ': ' +
                     String(actual) +
@@ -793,7 +848,8 @@ export function prepareDocument(
                     ) ?? []);
               if (row.effects !== undefined) {
                 const stated = ce.type(withArrowEffects(sig, effects ?? []));
-                if (!actual.matches(stated)) throw mismatch(stated);
+                if (!actual.matches(stated))
+                  return rejectComponent(group, name, mismatch(stated));
               }
               const result =
                 row.resultType === undefined
@@ -814,7 +870,7 @@ export function prepareDocument(
                 row.resultType !== undefined &&
                 ce.type(sig.result).isDisjointFrom(result)
               )
-                throw mismatch(contract);
+                return rejectComponent(group, name, mismatch(contract));
               partial = true;
             }
             if (contract !== undefined && !partial) {
@@ -834,12 +890,16 @@ export function prepareDocument(
                     ) || ce.type(sig.result).isDisjointFrom(stated.result)
                   : !actual.matches(contract);
               if (refused)
-                throw new Error(
-                  name +
-                    ': ' +
-                    String(actual) +
-                    ' does not match ' +
-                    String(contract)
+                return rejectComponent(
+                  group,
+                  name,
+                  ce.error(
+                    name +
+                      ': ' +
+                      String(actual) +
+                      ' does not match ' +
+                      String(contract)
+                  )
                 );
             }
             if (member.binding === undefined) {
@@ -860,10 +920,14 @@ export function prepareDocument(
             }
             const provisional = provisionalLiteral(body);
             if (provisional !== undefined)
-              throw new Error(
-                name +
-                  ': provisional heads ' +
-                  [...provisional.heads].join(', ')
+              return rejectComponent(
+                group,
+                name,
+                ce.error(
+                  name +
+                    ': provisional heads ' +
+                    [...provisional.heads].join(', ')
+                )
               );
             member.body = body;
           }
@@ -888,12 +952,25 @@ export function prepareDocument(
       for (const row of rows) {
         if (row.role !== 'formula') continue;
         const raw = readRow(row);
-        rowReferences.set(row.id, rawReferences(raw));
+        rowReferences.set(row.id, withIndexedBases(row, rawReferences(raw)));
       }
       for (const [name, { row }] of declarations)
         rowReferences.set(row.id, references.get(name)!);
+      for (const row of unparsedEntries) {
+        if (rawRows.has(row.id)) continue;
+        const entry = latex.parse(
+          row.latex,
+          rowOptions(
+            row,
+            () => false,
+            () => []
+          )
+        );
+        rawRows.set(row.id, syntax.normalize(entry ?? 'Nothing'));
+      }
       invariant(
         parsed.size === rows.length &&
+          rawRows.size === rows.length &&
           rowReferences.size === rows.length &&
           bodies.size === declarations.size &&
           cursors.size === 0,

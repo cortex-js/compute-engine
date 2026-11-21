@@ -2,10 +2,15 @@ import {
   ComputeEngine,
   createDocumentEnvironment,
   type DeclareDocumentInput,
+  type DocumentImports,
+  type DocumentSourceRow,
   type DocumentSyntax,
   type InspectableScope,
 } from '../../src/compute-engine';
 import { ConstantAssignmentError } from '../../src/compute-engine/constant-assignment-error';
+
+const operatorOf = (json: unknown) =>
+  Array.isArray(json) ? json[0] : undefined;
 
 const syntax: DocumentSyntax = {
   split: (source) =>
@@ -20,6 +25,22 @@ const syntax: DocumentSyntax = {
 const rows = (n: number) => [
   { id: 'v', latex: 'v=' + n, valueType: 'list<number>' },
 ];
+/** Prepare `input` and return the JSON of the row error of `id`. */
+const rowError = (
+  imports: DocumentImports,
+  input: DocumentSourceRow[],
+  documentSyntax: DocumentSyntax,
+  id: string
+) => {
+  const revision = imports.prepare(input, documentSyntax);
+  // Every input row has a raw entry, also a rejected fallback row.
+  expect([...revision.rawRows.keys()].sort()).toEqual(
+    input.map((row) => row.id).sort()
+  );
+  const error = revision.rowErrors.get(id)?.json;
+  revision.dispose();
+  return JSON.stringify(error);
+};
 
 test('disposing a factory leaves its existing children alive until they close', () => {
   const ce = new ComputeEngine();
@@ -579,18 +600,22 @@ test('a stated result type or effect is checked when some formals are unannotate
     }),
     normalize: (raw) => raw,
   });
-  expect(() =>
-    imports.prepare(
+  expect(
+    rowError(
+      imports,
       [{ id: 'f', latex: 'f', effects: 'pure' }],
-      fnSyntax(['Add', 'x', ['Random']])
+      fnSyntax(['Add', 'x', ['Random']]),
+      'f'
     )
-  ).toThrow('does not match');
-  expect(() =>
-    imports.prepare(
+  ).toContain('does not match');
+  expect(
+    rowError(
+      imports,
       [{ id: 'f', latex: 'f', resultType: 'list<number>' }],
-      fnSyntax(['Add', 'x', 1])
+      fnSyntax(['Add', 'x', 1]),
+      'f'
     )
-  ).toThrow('does not match');
+  ).toContain('does not match');
   const ok = imports.prepare(
     [{ id: 'f', latex: 'f', effects: 'pure', resultType: 'number' }],
     fnSyntax(['Add', 'x', 1])
@@ -642,16 +667,19 @@ test('a stated result is a promise with or without formal annotations', () => {
       ce.expr(['f', 4], { scope: revision.scope }).evaluate().json
     ).toEqual(2);
     revision.dispose();
-    expect(() =>
-      imports.prepare(
+    expect(
+      rowError(
+        imports,
         [{ id: 'f', latex: 'f', resultType: 'list<real>', formalTypes }],
-        sqrtSyntax
+        sqrtSyntax,
+        'f'
       )
-    ).toThrow('does not match');
+    ).toContain('does not match');
   }
   // A fully annotated row still refuses effects beyond the stated ones.
-  expect(() =>
-    imports.prepare(
+  expect(
+    rowError(
+      imports,
       [
         {
           id: 'f',
@@ -668,9 +696,10 @@ test('a stated result is a promise with or without formal annotations', () => {
           head: { name: 'f', params: ['x'] },
           bodyJson: ['Add', 'x', ['Random']],
         }),
-      }
+      },
+      'f'
     )
-  ).toThrow('does not match');
+  ).toContain('does not match');
   imports.dispose();
   environment.dispose();
 });
@@ -688,12 +717,14 @@ test('a field value is checked against its stated value type', () => {
       bodyJson: 'x',
     }),
   };
-  expect(() =>
-    imports.prepare(
+  expect(
+    rowError(
+      imports,
       [{ id: 'v', latex: 'v=', valueType: 'list<number>' }],
-      fieldSyntax
+      fieldSyntax,
+      'v'
     )
-  ).toThrow('v: initializer does not match list<number>');
+  ).toContain('v: initializer does not match list<number>');
   const ok = imports.prepare(
     [{ id: 'v', latex: 'v=', valueType: 'real' }],
     fieldSyntax
@@ -702,4 +733,249 @@ test('a field value is checked against its stated value type', () => {
   ok.dispose();
   imports.dispose();
   environment.dispose();
+});
+
+// Rows parsed by the CE LaTeX parser through the fast definition path.
+// `f(x)` has the raw head `["InvisibleOperator", "f", ["Delimiter", "x"]]`.
+const latexSyntax = (ce: ComputeEngine): DocumentSyntax => ({
+  split(source) {
+    const i = source.indexOf('=');
+    return i <= 0
+      ? undefined
+      : { head: source.slice(0, i), body: source.slice(i + 1) };
+  },
+  recognize(row, _names, raw) {
+    const entry = raw ?? ce.parse(row.latex, { form: 'raw' }).json;
+    if (!Array.isArray(entry) || entry.length !== 3) return undefined;
+    const head = entry[1];
+    if (typeof head === 'string')
+      return { role: 'value', head: { name: head, params: [] } };
+    if (
+      Array.isArray(head) &&
+      head[0] === 'InvisibleOperator' &&
+      typeof head[1] === 'string' &&
+      Array.isArray(head[2]) &&
+      head[2][0] === 'Delimiter'
+    ) {
+      const params = head[2].slice(1);
+      if (params.every((p) => typeof p === 'string'))
+        return {
+          role: 'function',
+          head: { name: head[1], params: params as string[] },
+        };
+    }
+    return undefined;
+  },
+  normalize: (raw) => raw,
+});
+
+describe('row content errors are reported per row', () => {
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  afterAll(() => {
+    imports.dispose();
+    environment.dispose();
+  });
+  const prepare = (input: DocumentSourceRow[], writable?: Set<string>) => {
+    const revision = imports.prepare(input, latexSyntax(ce), writable);
+    // Every input row has a raw entry, also an error row.
+    expect([...revision.rawRows.keys()].sort()).toEqual(
+      input.map((row) => row.id).sort()
+    );
+    return revision;
+  };
+  const error = (
+    revision: ReturnType<typeof prepare>,
+    id: string
+  ): string | undefined => {
+    const diagnostic = revision.rowErrors.get(id);
+    return diagnostic === undefined
+      ? undefined
+      : JSON.stringify(diagnostic.json);
+  };
+  const value = (revision: ReturnType<typeof prepare>, expr: string) =>
+    ce.parse(expr, { scope: revision.scope }).evaluate().json;
+
+  test('a valid row recognized without a raw entry has its own parse', () => {
+    // The comma at depth 0 sends `h` to the fallback recognition, and this
+    // host returns no `rawEntry` there.
+    const revision = prepare([
+      { id: 'h', latex: 'h=\\{1,2\\}' },
+      { id: 'g', latex: 'g(x)=x' },
+    ]);
+    expect(revision.rowErrors.size).toBe(0);
+    expect(operatorOf(revision.rawRows.get('h'))).toBe('Equal');
+    revision.dispose();
+  });
+
+  test('a head that a later row changes is a row error', () => {
+    // This host reads `f` as a function only once `g` is declared, so the
+    // confirming call (which sees the later row `g`) gives another head.
+    const base = latexSyntax(ce);
+    const headSyntax: DocumentSyntax = {
+      ...base,
+      recognize(row, names, raw) {
+        const found = base.recognize(row, names, raw);
+        if (found?.head.name !== 'f' || names.has('g')) return found;
+        return { role: 'value', head: { name: 'f', params: [] } };
+      },
+    };
+    const rows: DocumentSourceRow[] = [
+      { id: 'f', latex: 'f(x)=x+1' },
+      { id: 'g', latex: 'g=1' },
+    ];
+    const revision = imports.prepare(rows, headSyntax);
+    expect([...revision.rawRows.keys()].sort()).toEqual(['f', 'g']);
+    expect(error(revision, 'f')).toContain('Definition head changed');
+    // The row keeps its parsed entry, not the diagnostic.
+    expect(operatorOf(revision.rawRows.get('f'))).toBe('Equal');
+    expect(error(revision, 'g')).toBeUndefined();
+    expect(value(revision, 'g')).toBe(1);
+    revision.dispose();
+  });
+
+  test('a value cycle through a subscript rejects its component', () => {
+    const revision = prepare([
+      { id: 'a', latex: 'a=b_1' },
+      { id: 'b', latex: 'b=a_1' },
+      { id: 'c', latex: 'c=2' },
+      { id: 'd', latex: 'd=a_1' },
+    ]);
+    expect(error(revision, 'b')).toContain('Value initialization cycle');
+    expect(error(revision, 'a')).toContain('invalid-document-dependency');
+    expect(error(revision, 'd')).toContain('invalid-document-dependency');
+    expect(revision.rowReferences.get('d')).toContain('a');
+    expect(error(revision, 'c')).toBeUndefined();
+    expect(value(revision, 'c')).toBe(2);
+    revision.dispose();
+  });
+
+  test('a reader of a rejected indexed base gets a dependency error', () => {
+    for (const base of [
+      { id: 'L', latex: 'L=[1,2]', valueType: 'string' },
+      { id: 'L', latex: 'L=[1,2]+&' },
+    ]) {
+      const revision = prepare([{ id: 'y', latex: 'y=L_1' }, base]);
+      expect(error(revision, 'L')).toBeDefined();
+      expect(error(revision, 'y')).toContain('invalid-document-dependency');
+      expect(revision.rowReferences.get('y')).toContain('L');
+      revision.dispose();
+    }
+  });
+
+  test('a valid indexed base absorbed into a name adds no reference', () => {
+    const revision = prepare([
+      { id: 'a', latex: 'a=1' },
+      { id: 'y', latex: 'y=a_1' },
+    ]);
+    expect(revision.rowErrors.size).toBe(0);
+    expect(revision.rowReferences.get('y')).not.toContain('a');
+    revision.dispose();
+  });
+
+  test('a blank definition body is a row error on both parse paths', () => {
+    // `f(x)=` has an empty split body and takes the recognition path;
+    // `f(x)= ` takes the definition parser.
+    for (const latex of ['f(x)=', 'f(x)= ']) {
+      const revision = prepare([
+        { id: 'f', latex },
+        { id: 'g', latex: 'g=1' },
+      ]);
+      expect(error(revision, 'f')).toContain('Incomplete definition body');
+      expect(error(revision, 'g')).toBeUndefined();
+      expect(value(revision, 'g')).toBe(1);
+      revision.dispose();
+    }
+  });
+
+  test('a body that the definition parser cannot finish is a row error', () => {
+    for (const body of ['x+1&', ' ']) {
+      const revision = prepare([
+        { id: 'f', latex: 'f(x)=' + body },
+        { id: 'g', latex: 'g(x)=2x' },
+        { id: 'h', latex: 'h(x)=f(x)' },
+      ]);
+      expect(error(revision, 'f')).toContain('Incomplete definition body');
+      expect(JSON.stringify(revision.rawRows.get('f'))).toContain(
+        'Incomplete definition body'
+      );
+      expect(error(revision, 'h')).toContain('invalid-document-dependency');
+      expect(error(revision, 'g')).toBeUndefined();
+      expect(value(revision, 'g(3)')).toBe(6);
+      revision.dispose();
+    }
+  });
+
+  test('a body that contradicts its stated type rejects the row and its readers', () => {
+    const fn = prepare([
+      { id: 'f', latex: 'f(x)=x+1', resultType: 'list<number>' },
+      { id: 'c', latex: 'c=f(1)' },
+      { id: 'd', latex: 'd=2' },
+    ]);
+    expect(error(fn, 'f')).toContain('does not match');
+    expect(error(fn, 'c')).toContain('invalid-document-dependency');
+    expect(value(fn, 'd')).toBe(2);
+    fn.dispose();
+    const v = prepare([
+      { id: 'a', latex: 'a=1', valueType: 'string' },
+      { id: 'c', latex: 'c=a+1' },
+      { id: 'd', latex: 'd=2' },
+    ]);
+    expect(error(v, 'a')).toContain('a: initializer does not match string');
+    expect(error(v, 'c')).toContain('invalid-document-dependency');
+    expect(value(v, 'd')).toBe(2);
+    v.dispose();
+  });
+
+  test('a body that applies an undeclared function is a row error', () => {
+    const revision = prepare([
+      { id: 'g', latex: 'g(t)=2h(t)' },
+      { id: 'c', latex: 'c=2' },
+    ]);
+    expect(error(revision, 'g')).toContain('provisional heads h');
+    expect(value(revision, 'c')).toBe(2);
+    revision.dispose();
+  });
+
+  test('a reader of an error row sees no value of an earlier revision', () => {
+    const good = prepare([
+      { id: 'a', latex: 'a=1' },
+      { id: 'c', latex: 'c=a+1' },
+    ]);
+    expect(value(good, 'c')).toBe(2);
+    const bad = prepare([
+      { id: 'a', latex: 'a=1', valueType: 'string' },
+      { id: 'c', latex: 'c=a+1' },
+    ]);
+    expect(error(bad, 'c')).toContain('invalid-document-dependency');
+    expect(value(bad, 'c')).not.toBe(2);
+    expect(value(bad, 'a')).not.toBe(1);
+    expect(value(good, 'c')).toBe(2);
+    bad.dispose();
+    good.dispose();
+  });
+
+  test('an error row refuses a held value, also when it is writable', () => {
+    const revision = prepare(
+      [
+        { id: 'a', latex: 'a=b_1' },
+        { id: 'b', latex: 'b=a_1' },
+        { id: 'v', latex: 'v=1', valueType: 'string' },
+      ],
+      new Set(['a', 'b', 'v'])
+    );
+    const held = ce.box(5);
+    for (const name of ['a', 'b', 'v']) {
+      expect(typeof revision.collectionWriteError(name, held)).toBe('string');
+      ce.pushScope(revision.scope);
+      try {
+        expect(() => ce.assign(name, held)).toThrow(ConstantAssignmentError);
+      } finally {
+        ce.popScope();
+      }
+      expect(value(revision, name)).not.toBe(5);
+    }
+    revision.dispose();
+  });
 });
