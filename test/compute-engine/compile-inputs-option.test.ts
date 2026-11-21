@@ -114,7 +114,22 @@ describe('COMPILE the inputs option', () => {
     ).toBe(true);
   });
 
+  // A function of the host whose result is typed `any` has no settled shape,
+  // so its call declines (`docs/COMPILATION-MODEL.md`, "Functions of the
+  // host") and the result is the interpreter fallback.
   test('the interpreter fallback evaluates with the inputs', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L2', {
+      signature: '(real) -> any',
+      evaluate: ([x]: [{ mul(y: unknown): unknown }]) => x.mul(ce.number(2)),
+    } as never);
+    const expr = ce.box(['Add', ['L2', 'x'], 1]);
+    const result = compile(expr, { inputs: { x: 'real' } });
+    expect(result.success).toBe(false);
+    expect(run(result, { x: 3 })).toBe(7);
+  });
+
+  test('a function of the host typed `(real) -> real` compiles with the inputs', () => {
     const ce = new ComputeEngine();
     ce.declare('L2', {
       signature: '(real) -> real',
@@ -122,8 +137,9 @@ describe('COMPILE the inputs option', () => {
     } as never);
     const expr = ce.box(['Add', ['L2', 'x'], 1]);
     const result = compile(expr, { inputs: { x: 'real' } });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
     expect(run(result, { x: 3 })).toBe(7);
+    expect(expr.subs({ x: 3 }).evaluate().re).toBe(7);
   });
 
   test('the interpreter fallback gives the input to a called body too', () => {
@@ -134,7 +150,7 @@ describe('COMPILE the inputs option', () => {
     ce.assign('a', 4);
     ce.parse('f(t) := a t').evaluate();
     ce.declare('L2', {
-      signature: '(real) -> real',
+      signature: '(real) -> any',
       evaluate: ([x]: [{ mul(y: unknown): unknown }]) => x.mul(ce.number(2)),
     } as never);
     const expr = ce.box(['Add', ['f', 2], ['L2', 'a']]);
