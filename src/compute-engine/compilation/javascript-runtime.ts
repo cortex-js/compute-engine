@@ -3093,6 +3093,10 @@ export type StoredJavaScript = {
    * the batch loaders refuse such code, whatever its `shippable` field
    * (`refuseStoredValueKinds`). */
   valueKinds?: string[];
+  /** The `hostCalls` field of the compilation result: the functions of the
+   * host that the code calls in the engine that compiled it. `load()` and
+   * the batch loaders refuse such code (`refuseStoredValueKinds`). */
+  hostCalls?: string[];
   /** The `shippable` field of the compilation result. `loadBroadcastAsync()`
    * sends a batch to a worker only when it is `true`: without it, every
    * batch runs on the calling thread (`reason: 'not-shippable'`). */
@@ -3437,6 +3441,8 @@ export function createSysRuntime(
             stored.valueKinds === undefined
               ? undefined
               : [...stored.valueKinds],
+          hostCalls:
+            stored.hostCalls === undefined ? undefined : [...stored.hostCalls],
         };
         // The slice loop of the calling thread. It also checks the stored
         // code (its runtime version; a lambda is refused), before any batch.
@@ -3551,6 +3557,11 @@ function refuseStoredValueKinds(
   stored: StoredJavaScript,
   batch: boolean
 ): void {
+  const hosts = stored.hostCalls;
+  if (hosts !== undefined && hosts.length > 0)
+    throw new Error(
+      `The stored code calls the function${hosts.length > 1 ? 's' : ''} ${hosts.map((h) => `"${h}"`).join(', ')} of the host in the engine that compiled it: it cannot be loaded. Run it with the \`run()\` of the compilation result.`
+    );
   const kinds = stored.valueKinds;
   if (kinds === undefined || kinds.length === 0) return;
   if (batch) throw kindBroadcastError(kinds);

@@ -67,10 +67,13 @@ export function implicitCompile(
     const result = withCapturedCallBindings(ce, expr, () =>
       ce._compile(expr, { ...options, fallback: false, entryChecks: false })
     );
-    // A function that assigns a variable of the engine (`assigns`) is
-    // interpreted: a caller can compute an element again with the
-    // interpreter, which would assign the variable a second time.
-    return result.assigns === undefined ? result : undefined;
+    // A function that assigns a variable of the engine (`assigns`), or that
+    // calls a function of the host (`hostCalls`), is interpreted: a caller
+    // can compute an element again with the interpreter, which would assign
+    // the variable or call the host function a second time.
+    return result.assigns === undefined && result.hostCalls === undefined
+      ? result
+      : undefined;
   } catch (e) {
     if (e instanceof EvalError) {
       ce.jit = 'off';

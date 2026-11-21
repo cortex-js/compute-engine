@@ -688,7 +688,7 @@ describe('COMPILE SUM/PRODUCT: A BOUND THAT IS NOT PURE', () => {
     const expr = engine.box(['Sum', 'j', ['Limits', 'j', 1, ['g', 2]]] as any);
     expect(expr.evaluate().operator).toBe('Sum');
     expect(() => compile(expr, { to: 'javascript', fallback: false })).toThrow(
-      /g\(2\): g is not the library operator here/
+      /g\(2\): a bound that is not pure/
     );
   });
 

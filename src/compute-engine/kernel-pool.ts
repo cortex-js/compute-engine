@@ -1063,6 +1063,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool, CallPool {
       batch: stored.batch,
       booleanInputs: stored.booleanInputs,
       valueKinds: stored.valueKinds,
+      hostCalls: stored.hostCalls,
     };
     slot.worker.postMessage({
       type: 'load',

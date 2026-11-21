@@ -2466,6 +2466,15 @@ over `[2, 4]` is `partial` over `[0, 3]` (the hull with `empty` keeps the mark
 
 ## Effects
 
+A call of a function of the host (a definition with an `evaluate` function
+that is not of the library, `isHostDefinition()` of `lower.ts`) is the
+effectful operation `call.host<k>` (`hostCall()`), whose row and spelling
+`_SYS.hosts[k](…)` `sliceProgram()` adds after the lowering
+(`Program.hosts`); the lowering reads an operation with no row as
+effectful. `_SYS.hosts` is bound to the engine (`runtimeOf()` of
+`print-js.ts`), so such a program has no pool loop and is not `shippable`
+(`docs/COMPILATION-MODEL.md`, "Functions of the host").
+
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
 the same or an equal node that dominates it, and by `cse` for a call and for an

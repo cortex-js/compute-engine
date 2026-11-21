@@ -79,6 +79,10 @@ export interface StoredKernel {
    * makes (`CompilationResult.valueKinds`). The worker refuses such code,
    * as `createJavaScriptRuntime().load()` does. */
   valueKinds?: string[];
+  /** The functions of the host that the code calls in the engine that
+   * compiled it (`CompilationResult.hostCalls`). The worker refuses such
+   * code, as `createJavaScriptRuntime().load()` does. */
+  hostCalls?: string[];
 }
 
 /** The inputs of a batch in wire form: the names and, in the same order, a

@@ -96,6 +96,7 @@ import {
   scalarType,
   typeToString,
   type Assigned,
+  type HostCall,
   type IRType,
   type Instr,
   type Lane,
@@ -126,6 +127,7 @@ import {
   isUntyped,
   LANE_MISMATCH,
   POSSIBLE_NOTHING,
+  type DeclineReason,
   STATIC_TYPE_ERROR,
   text,
   TUPLE_RULES,
@@ -459,6 +461,41 @@ export type LowerOptions = {
  *  lane `lane`: an effectful operation, spelled as the host's text. */
 export const hostVarOp = (k: number, lane: Lane) => `host${k}.${lane}`;
 
+/** The IR operation of a call of the function of the host of index `k`
+ *  (`Program.hosts`): an effectful operation, spelled as a call of
+ *  `_SYS.hosts[k]`. */
+export const hostCallOp = (k: number) => `call.host${k}`;
+
+/** At most this many arguments in a call of a function of the host: the
+ *  largest arity of an IR operation. */
+const MAX_HOST_ARGUMENTS = 4;
+
+/** A definition that the host gave with `ce.declare()` and an `evaluate`
+ *  function: not of the library, not a function literal (`userBinding()`),
+ *  not a definition with clauses, not the dispatcher of a protocol method,
+ *  and not lazy. */
+function isHostDefinition(e: Fn): boolean {
+  const def = e.operatorDefinition as
+    | {
+        evaluate?: unknown;
+        lazy?: boolean;
+        _standardLibrary?: boolean;
+        _isLambda?: boolean;
+        _isMultiClause?: boolean;
+        _protocolDispatcher?: unknown;
+      }
+    | undefined;
+  return (
+    def !== undefined &&
+    typeof def.evaluate === 'function' &&
+    def.lazy !== true &&
+    def._standardLibrary !== true &&
+    def._isLambda !== true &&
+    def._isMultiClause !== true &&
+    def._protocolDispatcher === undefined
+  );
+}
+
 /** A use of a list local written in place that it cannot have
  *  (`inPlace()` of `lower()`). */
 type Misuse = 'write' | 'read' | undefined;
@@ -548,10 +585,13 @@ function lowerOnce(
   const bigint = options.mode === 'bigint';
   const interval = options.mode === 'interval';
   /** `i` changes or reads state by itself: an operation or a region of an
-   *  effectful row, or a call of an effectful function. */
+   *  effectful row, or a call of an effectful function. An operation with
+   *  no row is effectful, as in `effects.ts`: the call of a function of the
+   *  host (`hostCall()`), whose row `sliceProgram()` adds after the
+   *  lowering. */
   const effectful = (i: Instr): boolean =>
     i.k === 'op'
-      ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
+      ? (rowOfOp(rows, i.op)?.row.effect ?? 'effectful') === 'effectful'
       : i.k === 'call'
         ? fns.effect(i.fn) === 'effectful'
         : i.k === 'region' && regionRow(i.op)?.effect === 'effectful';
@@ -1621,13 +1661,15 @@ function lowerOnce(
     // A closed form is computed with the library's operators.
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
-    if (!isLibraryOperator(e as never, e.operator))
+    if (!isLibraryOperator(e as never, e.operator)) {
+      if (isHostDefinition(e)) return hostCall(e, want);
       decline(
         e,
         e.operatorDefinition === undefined && e.valueDefinition === undefined
           ? `${e.operator} is an unknown operator (no definition)`
           : `${e.operator} is not the library operator here (a user definition)`
       );
+    }
     // The value kind `enclosure` (`lower-enclosure.ts`): a collection of
     // enclosures declines; a node that may read or make one is lowered by
     // the kind, before a closed node is evaluated.
@@ -6245,11 +6287,105 @@ function lowerOnce(
       inputs,
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),
+      ...(hosts.length > 0 ? { hosts } : {}),
     };
   };
   // The names of the scope of the compilation that a root function literal
   // assigns (`assignedNames()`).
   let assigns: Assigned[] = [];
+  // The functions of the host that the program calls (`hostCall()`).
+  const hosts: HostCall[] = [];
+
+  /** The value of `e`, a call of a function that the host declared with an
+   *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
+   *  operation that calls the interpreter for the call at run time
+   *  (`_SYS.hosts` of `print-js.ts`), at each evaluation of `e`, in the
+   *  order of the program. Each argument is a scalar of the lane `real`,
+   *  `integer`, `boolean` or `string`, at most `MAX_HOST_ARGUMENTS` of them.
+   *  The static type of the call is `real`, `integer` or `boolean`, the
+   *  lane of the value, or `nothing`, which the code reads only as the value
+   *  of the root function literal (NaN there, as the interpreter's `Nothing`
+   *  is). Plain JavaScript only: the shader targets cannot call the host,
+   *  the interval and `bigint` modes have no lane of its values. A function
+   *  that assigns a variable of the engine (`assignedNames()`) declines: the
+   *  host function would read the variable before the code writes it back. */
+  const hostCall = (e: Fn, want: boolean): V | undefined => {
+    const name = e.operator;
+    const why = (reason: string, code?: DeclineReason): never =>
+      decline(e, `a call of the function ${name} of the host, ${reason}`, code);
+    if (!options.javascript || interval || bigint) why('on this target');
+    if (assigns.length > 0)
+      why('in a function that assigns a variable of the engine');
+    if (e.nops > MAX_HOST_ARGUMENTS)
+      why(`with more than ${MAX_HOST_ARGUMENTS} arguments`);
+    const t = e.type.type;
+    const result: Lane | 'nothing' | undefined = isSubtype(t, 'nothing')
+      ? 'nothing'
+      : isSubtype(t, 'boolean')
+        ? 'boolean'
+        : isSubtype(t, 'integer')
+          ? 'integer'
+          : isSubtype(t, 'real')
+            ? 'real'
+            : undefined;
+    if (result === undefined)
+      why(
+        `of type ${engineTypeToString(t)}, not real, integer, boolean or nothing`
+      );
+    // The value of the root function literal, or the last operand of a
+    // `Block` that is: a `Nothing` read as NaN.
+    const atRoot = (x: Expression): boolean => {
+      const places = readers.get(x) ?? [];
+      return (
+        places.length > 0 &&
+        places.every(
+          ([r, i]) =>
+            (r === root && r.operator === 'Function' && i === 0) ||
+            (r.operator === 'Block' && i === r.nops - 1 && atRoot(r))
+        )
+      );
+    };
+    if (result === 'nothing' && want && !atRoot(e))
+      why('whose value Nothing is read', POSSIBLE_NOTHING);
+    const args = e.ops.map((op) => {
+      const v = value(op)!;
+      const a = type(v);
+      if (
+        a.shape.length > 0 ||
+        tuples.has(v) ||
+        !['real', 'integer', 'boolean', 'string'].includes(a.lane)
+      )
+        why(
+          `with an argument of type ${typeToString(a)}, not a real, an integer, a boolean or a string`
+        );
+      return v;
+    });
+    const lanes = args.map((v) => type(v).lane);
+    const def = e.operatorDefinition!;
+    let k = hosts.findIndex(
+      (h) =>
+        h.definition === def &&
+        h.result === result &&
+        h.args.length === lanes.length &&
+        h.args.every((l, j) => l === lanes[j])
+    );
+    if (k < 0) {
+      k = hosts.length;
+      hosts.push({
+        name,
+        call: e,
+        definition: def,
+        args: lanes,
+        result: result!,
+      });
+    }
+    const v = b.op(
+      hostCallOp(k),
+      args,
+      scalarType(result === 'nothing' ? 'real' : result!)
+    );
+    return result === 'nothing' && !want ? undefined : v;
+  };
 
   /** The names that the body of the root function literal `f` assigns (an
    *  `Assign` or an `AddTo` of the name) where the name is a variable of

@@ -23,6 +23,16 @@
   that runs the code without the engine. The variable must have a declared type
   of real, integer or boolean values (`let` declares one). A function that the
   callback calls and that reads the variable still declines.
+- **Compiled JavaScript calls a function that the host declared with an
+  `evaluate` function** (CE-1621). With
+  `ce.declare("hostDraw", { signature: "(real) -> nothing", evaluate })`, the
+  timer callback `(t: real) => hostDraw(t / 1000)` compiles, where it declined
+  before. Each call in the code evaluates the call in the engine, at each
+  evaluation and in the order of the program. The result lists the functions
+  in `hostCalls`, and is not `shippable`. The arguments must be real numbers,
+  integers, booleans or strings (at most four), and the result type `real`,
+  `integer`, `boolean` or `nothing`. A function that builds a `Figure` of a
+  drawing library still declines (CE-1652).
 
 ### Behavior Changes
 

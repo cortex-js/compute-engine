@@ -556,9 +556,12 @@ function compileIr(
   // when it reads the inputs object. Code of a string input or result has
   // no batch, on a worker or not.
   const code = [slice.preambleOnce, slice.code].join('\n');
-  // A worker has no engine to write the assigned variables to.
+  // A worker has no engine to write the assigned variables to, nor to call
+  // the functions of the host in.
+  const hostCalls = [...new Set((p.hosts ?? []).map((h) => h.name))];
   const shippable =
     assigns.length === 0 &&
+    hostCalls.length === 0 &&
     !strings &&
     !rows &&
     Object.values(vars).every(readsVarsObject) &&
@@ -601,6 +604,7 @@ function compileIr(
     freeSymbols: report.freeSymbols,
     freeSymbolTypes: report.freeSymbolTypes,
     ...(assigns.length > 0 ? { assigns: assigns.map((x) => x.name) } : {}),
+    ...(hostCalls.length > 0 ? { hostCalls } : {}),
     unsupported: [],
     mode,
     ...(strings ? { strings } : {}),

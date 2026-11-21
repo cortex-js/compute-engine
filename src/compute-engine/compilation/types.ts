@@ -1286,6 +1286,21 @@ export type CompilationResult<
   assigns?: string[];
 
   /**
+   * JavaScript only. The functions of the host that the compiled code
+   * calls: functions declared with `ce.declare()` and an `evaluate`
+   * function, such as `ce.declare("hostDraw", { signature: "(real) ->
+   * nothing", evaluate })`.
+   *
+   * Each call in the code evaluates the call in the engine, as the
+   * interpreter does, at each evaluation of the call and in the order of
+   * the program. The code reads the engine for these calls, so `load()` and
+   * the batch loaders refuse it, and such a result is not `shippable`.
+   *
+   * Absent when the code calls no function of the host.
+   */
+  hostCalls?: string[];
+
+  /**
    * Operator heads in the expression that this target cannot lower — they have
    * no operator or function mapping and are not one of the structural forms the
    * compiler handles directly. An empty array means every operator was

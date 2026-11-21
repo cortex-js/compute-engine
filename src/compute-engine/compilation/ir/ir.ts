@@ -26,7 +26,11 @@
  */
 
 import type { Type } from '../../../common/type/types.js';
-import type { BoxedValueDefinition } from '../../global-types.js';
+import type {
+  BoxedOperatorDefinition,
+  BoxedValueDefinition,
+  Expression,
+} from '../../global-types.js';
 
 export type Lane =
   'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string' | 'rows';
@@ -190,6 +194,23 @@ export type Program = {
    *  after the arguments, and returns the value of the body followed by the
    *  value of each one after the body (`assignedNames()` of `lower.ts`). */
   readonly assigns?: readonly Assigned[];
+  /** The functions of the host that the program calls, by index: the
+   *  operation `hostCallOp(k)` of `lower.ts` calls the entry `k`
+   *  (`hostCall()` of `lower.ts`). */
+  readonly hosts?: readonly HostCall[];
+};
+
+/** A call of a function that the host declared with an `evaluate`
+ *  function (CE-1621): its name, a call of the program (which the code
+ *  rebuilds over the values of the arguments, bound to the same
+ *  definition), that definition, the lane of each argument, and the lane
+ *  of its value, or `nothing` for a value that the code does not read. */
+export type HostCall = {
+  readonly name: string;
+  readonly call: Expression;
+  readonly definition: BoxedOperatorDefinition;
+  readonly args: readonly Lane[];
+  readonly result: Lane | 'nothing';
 };
 
 /** A variable of the engine that a root function literal assigns: its name,

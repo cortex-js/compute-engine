@@ -379,6 +379,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(3, 0.9834569781146947)`. Its `Map` is a lazy view and `Length` draws
   nothing, where the compiled `Map` builds every element. The result carries
   the warning `seeded-draw-order`. A `Comprehension` with an effect declines.
+- `javascript` (crafted), `t: real`, `hostSq` a function of the host:
+  `First(Map(x ↦ hostSq(x t), [1, 2, 3]))` at `t = 2` gives `4`, as the
+  interpreter does, and calls `hostSq` three times; the interpreter calls it
+  once. Its `Map` is a lazy view that evaluates only the positions read,
+  where the compiled `Map` builds every element ("Functions of the host").
 - `javascript` (crafted), `D: list<real>`: the root `Tuple` is
   recognised by node identity, so one node `t = Tuple(D, a)`, made with
   `ce.function()`, that is both the root result and an operand in the block
@@ -2438,6 +2443,61 @@ parameter of the literal, with a declared type whose lane is `real`,
 
 A function that only reads a variable still holds its value at the
 compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).
+
+### Functions of the host
+
+Compiled JavaScript calls a function that the host declared with
+`ce.declare()` and an `evaluate` function, such as the `draw` of a notebook:
+
+```js
+ce.declare('hostDraw', {
+  signature: '(real) -> nothing',
+  evaluate: (ops) => { record(ops[0].re); return ce.symbol('Nothing'); },
+});
+executeEpsil(ce, 'let tick = (t: real) => hostDraw(t / 1000)');
+const result = compile(ce.box('tick').evaluate());
+result.hostCalls;          // ['hostDraw']
+result.run(16);            // NaN: the value Nothing; record(0.016) ran
+```
+
+Each call in the code evaluates the call in the engine, as the interpreter
+evaluates it, at each evaluation and in the order of the program: two equal
+calls are two calls, a call in a `Sum` is made at each pass, and a call
+with constant arguments is made when the code runs, not when it is
+compiled. One exception: a `Map` builds every element, so a call in its
+callback is made for each element, also where the interpreter's lazy `Map`
+reads fewer positions (`First`, `At`, `Length` of the `Map`; "Known
+limitations"). The value is read on the lane of the static type of the
+call: a machine number (an exact value such as `Sqrt(3)` is read as its
+number; NaN for a value that is not a real number, and for a call that
+`evaluate` leaves unevaluated, which is not evaluated again), a boolean (a
+`TypeError` for another value), or nothing. The code calls the definition
+that the call was bound to, also where the engine holds another definition
+of the name when the code runs (a scope pushed later). The `code` calls the
+engine, so `load()` and the batch loaders refuse it with an error that names
+the functions, and the result is not `shippable`. The
+engine's own compilations (`Map`, the quadrature and the other implicit
+callers) interpret the function, as for `assigns`.
+
+A function of the host is a definition with an `evaluate` function that is
+not of the library, not lazy, and not a function literal, a definition with
+clauses or a method of a protocol (those are the program's own functions).
+These decline:
+
+- another target, `interval-js` and the `bigint` mode;
+- an argument that is not a real, an integer, a boolean or a string (a list,
+  a tuple, a complex number), and more than four arguments;
+- a static type of the call other than `real`, `integer`, `boolean` or
+  `nothing`: `(real) -> any` gives no settled shape (R3);
+- a value `nothing` read anywhere but as the value of the root function
+  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read;
+- a call in a function that assigns a variable of the engine
+  (`do { s = s + t; hostDraw(s) }`): the host function could read the
+  variable before the code writes it back.
+
+A function that builds a value of a type of the program (the `Figure` of a
+drawing library, a tuple of a string, lists and fields typed `any`) has no
+settled shape, and declines (R3).
 
 ## Collections
 
