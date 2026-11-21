@@ -1,0 +1,53 @@
+# Binding workstream performance review
+
+November 20, 2026
+
+The goal is to match or exceed Compute Engine 0.186.0 on boxing and evaluation, preserve workloads that are already faster, and delete code from both CE and Tycho. **The main remaining CE gaps are standalone polynomial and function boxing, and repeated evaluation of small Programs.** The current private Document build beat the historical 0.186.0 deployment on terrain open, edit, and slider redraws. On the common large-document workload, it beat published 0.195.1.
+
+## What changed
+
+Two changes on local CE `main` removed **1,631 net production lines**. Program and Block now fix binding contracts at initialization (`92cd16dd9`, −786 lines). Matrix and collection boxing now requires shape evidence for compound operands (`adcfe196a`, −845 lines). That second change deleted the pass that could reinterpret earlier numeric guesses, rebox the operand, and roll back its inference. A host can declare `A` and `B` as matrices before boxing `Determinant(A+B)`. A Program can supply the shape through its initializers. Assumptions are separate from static expression types (`cbd971112`). We also landed smaller boxing changes in `Add` and symbol construction, and fixed callable assignment checks and ensured that rejected writes preserve the previous implementation (CE-1463 and CE-1633). [Binding plan](../plans/2026-11-16-prepared-binding-replacement.md) · [Matrix validation and benchmark](</private/tmp/ce-binding-delegated-2026-11-20/ce-matrix-integrated-review.md>)
+
+The private rebuild-based Document port moves head discovery, source preparation, and binding into CE. Tycho keeps its dialect, rendering, and application state. Document inputs have fixed writable contracts, and imports are read-only after publication. The private Tycho port removes roughly **9,600 production lines**. Type checking, nine Chromium redraw cases, and the Othello and Gomoku list-writing actions passed on the current port. [CE and Tycho deletion estimates](</private/tmp/ce-document-main-composition.KpLTw32a/REPORT.md>) · [Current Tycho verification](</private/tmp/ce-binding-delegated-2026-11-20/tycho-current-explicit-inputs.md>)
+
+## Remaining CE performance gaps
+
+The boxed-expression comparison used six paired production runs on Node 26.13.0 and V8 14.6. The CE candidate is the landed matrix deletion on top of the earlier binding work. A positive percentage means more elapsed time. These are medians of the paired ratios. [Raw benchmark directory](</private/tmp/ce-matrix-deletion-integrated.Yygqgc4C>)
+
+| Workload | Against 0.186.0 | Against the same-base CE control |
+| --- | ---: | ---: |
+| Box the free polynomial `x² + 1` | +22.1% | −0.6% |
+| Box the scalar function `x ↦ x² + 1` | +31.8% | −1.9% |
+| Repeated Program `N()` for a 100-iteration accumulator | +12.2% | −0.9% |
+| Evaluate a saved `Apply` | −67.0% | −6.8% |
+| Run `N()` on a saved `Apply` | −71.7% | +0.2% |
+
+The same-base results varied across rotations. They support keeping the repair deletion for maintainability and leave the historical gaps open. V8 Inspector sampled 638.9 MB of allocations on the control and 644.2 MB on the candidate over 30,000 boxes. That single sample measures allocation traffic and includes objects that were collected. [Profiles and methodology](</private/tmp/ce-binding-delegated-2026-11-20/ce-matrix-integrated-review.md>)
+
+- **Boxing.** Earlier release profiles showed extra work in unit-dependent type reads, including read tokens for misses, and extra allocation in Function and Block preparation. A trial that avoided copying empty parameter requirement maps removed one Map and one restore callback per function box. Its speedup was within duplicate-control variation. The larger opportunity is to have prepared expressions read finalized contracts directly, then measure how many token, map, and cache operations disappear on the normal route. [Boxing profile](</private/tmp/ce-box-profile.ybgU69/REPORT.md>) · [Parameter snapshot trial](</private/tmp/ce-surviving-snapshot.mSRgwP/REPORT.md>)
+- **Repeated Program evaluation.** An earlier matched profile attributed roughly 69–80 µs per 100-iteration run to activation creation and scope-chain work on modern CE. The instrumented run counted 1,608 Map constructions on modern CE and 1,311 on 0.186.0. Removing one redundant WeakSet write per iteration did not give a repeatable gain. The larger opportunity is to reduce work for iterations whose scopes cannot escape and preserve distinct scopes for closures that capture an index. [Loop attribution and trial](</private/tmp/ce-repeat-loop-profile.SEiaLX/REPORT.md>)
+
+The private Program publication prototype with the broader deletion patch beat 0.186.0 by **9.2%** on warm accumulator `N()` and **4.2%** on function boxing in six paired rotations. Polynomial boxing still took **10.5%** longer. The prototype’s warm loop comparison with its matching private control ranged from **5.8% faster to 6.5% slower**, so the experiment does not isolate a publication speedup. It used a private control containing deletions beyond local main. [Program publication measurements](</private/tmp/ce-binding-delegated-2026-11-20/ce-program-redeclaration-publication.md>)
+
+On a fresh accumulator Program, the same prototype took **6.3%** longer to box and **15.1%** less time for first `N()` than 0.186.0. On the nominal-type and protocol-default fixture, first `N()` took **14.9%** longer than its matching private control, with a slowdown in all six pairs. Combined boxing and first `N()` increased **2.6%**. Preparation alone showed no consistent difference, so the observed penalty is in the first evaluation phase. [First-evaluation measurements](</private/tmp/ce-binding-delegated-2026-11-20/ce-program-redeclaration-publication.md>)
+
+## Tycho measurements
+
+Four accepted exact-frame rotations compared the current private Document port with the historical 0.186.0 deployment, published 0.195.1, and the previous prepared build. Each rotation checked the rendered crop and served bundle identity. The 0.186.0 comparison uses its historical Graph Paper host and measures deployment-level latency. The percentages below use paired ratios. [Timing protocol and raw results](</private/tmp/ce-binding-delegated-2026-11-20/tycho-current-explicit-inputs-timing.md>)
+
+| Terrain case | Current median | Against 0.186.0 | Against 0.195.1 | Against previous prepared build |
+| --- | ---: | ---: | ---: | ---: |
+| Open to first correct frame | 1,728 ms | −7.9% | −7.9% | +2.9% |
+| Edit to first correct frame | 630 ms | −13.7% | −17.6% | −0.1% |
+| Slider Enter to first correct frame | 319 ms | −47.4% | −50.0% | +1.5% |
+
+On the common 362-series large-document edit, the median time to the first correct frame was **7.02 s**, down **14.9%** from 0.195.1 and **0.2%** from the previous prepared build over three accepted rotations. The full 391-series edit took **7.34 s**, up **0.8%** from the previous prepared build over two rotations. There is no comparable 0.186.0 measurement for either large-document case. [Accepted rotations and frame timings](</private/tmp/ce-binding-delegated-2026-11-20/tycho-current-explicit-inputs/timing/runs/paired.GCC2tPH9>)
+
+The separate live-slider probe kept one registration and one series push after two uniform writes. On the same current prepared build, Othello’s interpreted legal-move call was **2.0% faster** than published 0.195.1 in six paired rotations, within the **4.1%** median difference between duplicate controls. All 600 timed and warmup calls returned the expected four legal moves. The timings invoke the bundled interpreter. The separate host test verified the board-writing action. [Slider gate](</private/tmp/ce-binding-delegated-2026-11-20/tycho-current-explicit-inputs.md>) · [Othello timing and correctness](</private/tmp/ce-binding-delegated-2026-11-20/tycho-current-othello-timing.md>)
+
+## Before adoption
+
+1. **Finish the combined CE and Tycho measurements.** Compare the exact combined candidate against 0.186.0 and the current controls. Include fresh boxing, repeated `evaluate()` and `N()`, saved Apply, and Tycho’s first-correct-frame and live-uniform cases. Keep V8 CPU and allocation profiles separate from wall-clock runs.
+2. **Validate Document independently and resolve standalone replacement.** A private Document-only patch on `281e9c65e` preserves current standalone behavior, including CE-1463, and settles prepared callables without registering provisional dependents in the checked cases. It adds 1,186 net CE production lines and bypasses legacy repair on that path. Global repair remains. The broader CE composition adds 106 net lines relative to `adcfe196a` and deletes the reverse registry and dependent reboxing. It also rejects effect-widening standalone writes even when the host omitted effect annotations and no caller depends on the old effects. That semantic difference still needs resolution. The separate Program publication proof preserves old callable handles and live protocol defaults. [Document-only review](</private/tmp/ce-binding-delegated-2026-11-20/ce-adoption-document-only-sidecar.md>) · [Combined CE review](</private/tmp/ce-binding-delegated-2026-11-20/ce-adoption-adcfe196a-review.md>) · [Program publication proof](</private/tmp/ce-binding-delegated-2026-11-20/ce-program-redeclaration-publication.md>)
+
+The matrix commit’s nightly run passed 2,009 suites and all 4,085 snapshots. Chromium was interrupted during the remaining zeta case. The follow-up rendered all **389** original inputs in batches of 12 using the same driver and numeric tolerances, and every case passed. The candidate and control produced byte-identical inputs and expected values. This verifies the numeric result and leaves the original unbatched nightly invocation incomplete. [Nightly evidence](</private/tmp/ce-binding-delegated-2026-11-20/ce-matrix-integrated-review.md>) · [Batched WebGL result](</private/tmp/ce-matrix-deletion-integrated.Yygqgc4C/zeta-render-batched.log>)
