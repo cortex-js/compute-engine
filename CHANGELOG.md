@@ -16,6 +16,18 @@
 
 ### Behavior Changes
 
+- **`\psi^{(m)}(z)` parses as the polygamma function, and `\Phi(z, s, a)` as the
+  Lerch transcendent** (CE-1597). `\psi`, `\psi(z)`, `\Phi` and `\Phi(x)` keep
+  their reading as a symbol or a function of the user, and a declaration of
+  `psi` or `Phi` keeps its own reading.
+
+  ```js
+  ce.parse('\\psi^{(1)}(1)').json;
+  // ➔ ["PolyGamma", 1, 1] (was "psi")
+  ce.parse('\\Phi(1, 2, 1)').json;
+  // ➔ ["LerchPhi", 1, 2, 1] (was ["Phi", 1, 2, 1])
+  ```
+
 - **A `\text{…}` that names a unit is a string unless it is part of a unit
   expression** (CE-1644). A `\text{…}` is a unit after a number, and as an
   operand of a product, a quotient, a power or a root:
