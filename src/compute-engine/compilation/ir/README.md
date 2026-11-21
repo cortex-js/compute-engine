@@ -840,40 +840,39 @@ interpreter leaves `Chunk` and `Partition(L, p)` of a lazy list unevaluated
 (`Chunk(Range(1, 10001), 2)`).
 
 A value of the lane that `Chunk` or `Partition` makes is admitted only as an
-entry yield used once
-(`Profile.resultOnly` of JavaScript; `Profile.scalarLanes` refuses a list of
-them): a root `Block` that returns it, a local of type `unknown` that holds it,
-`Coalesce` and `AssertPresent` of it, an `If` whose arm `fold` takes, and a root
-`Tuple` of it and an element of another shape (`Tuple(Chunk(L, 2), L)`, a
-multi-result entry). Every other reader checks its lane and declines, finds no
-signature, or makes a value that the use check refuses: `Rank`, `Shape`,
-`Flatten`, `Transpose`, `Max`, `Sum`, `First`, `ListJoin`, `PointList`, `List`,
-`Length` of a local that holds it, a call of a user function with it as an
-argument, arithmetic and comparisons; an `If` between two values of the lane
-(`If(x > 0, Chunk(L, 2), Chunk(L, 3))`), a `Tuple` of it and a scalar
-(`Tuple(Chunk(L, 2), x)`: "elements of two types") and a `Tuple` of the value
-twice (`cse` makes one value used twice). `IsMissing` of it is `False`, the
-interpreter's value (with no pass the producer stays, and it declines). No pass
-has a case of its own for the lane.
+entry yield used once (`Profile.resultOnly` of JavaScript; `Profile.scalarLanes`
+refuses a list of them): a root `Block` that returns it, a local of type
+`unknown` that holds it, `Coalesce` and `AssertPresent` of it, an `If` whose arm
+`fold` takes, and a root `Tuple` of it and an element of another shape
+(`Tuple(Chunk(L, 2), L)`, a multi-result entry). Every other reader checks its
+lane and declines, finds no signature, or makes a value that the use check
+refuses: `Rank`, `Shape`, `Flatten`, `Transpose`, `Max`, `Sum`, `First`,
+`ListJoin`, `PointList`, `List`, `Length` of a local that holds it, a call of a
+user function with it as an argument, arithmetic and comparisons; an `If`
+between two values of the lane (`If(x > 0, Chunk(L, 2), Chunk(L, 3))`), a
+`Tuple` of it and a scalar (`Tuple(Chunk(L, 2), x)`: "elements of two types")
+and a `Tuple` of the value twice (`cse` makes one value used twice). `IsMissing`
+of it is `False`, the interpreter's value (with no pass the producer stays, and
+it declines). No pass has a case of its own for the lane.
 
 An input of a list of lists of integers or reals whose two lengths are not
 stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
 `lower-functions.ts`) is of the lane too, on JavaScript only (CE-1607): an input
-read by name, a positional parameter of a root function literal, and a
-parameter of a user function of that type. It is the host's array of arrays,
-whose rows can have different lengths, and it is read in two ways only: the
-element `At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the
-elements; `_atr` of the JavaScript printer, NaN where `i` is out of range of
-`g` or `j` of its row, from the end when negative, as `At` of a number), and an
-argument of a call at a parameter of that lane, which takes it whole. Every
-other read of the name declines (`symbol()` of `lower.ts`, which admits only the
-occurrence that `wholeRows()` lowers): a row `At(g, i)` (`Length` of an absent
-row would give 0, where the interpreter gives `Missing`), `Length(g)`, `Map`
-over `g`, arithmetic, `g` as the result, a binding to a local, an argument of a
-parameter of another type, and a list that the program makes at such a
-parameter (`sq(sq(g))`). A list of lists of booleans, the bigint and the
-interval modes and GLSL decline the input. The entry checks it as a list (a
-string or a typed array is refused), and a batch shares it between its cells.
+read by name, a positional parameter of a root function literal, and a parameter
+of a user function of that type. It is the host's array of arrays, whose rows
+can have different lengths, and it is read in two ways only: the element
+`At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the elements; `_atr`
+of the JavaScript printer, NaN where `i` is out of range of `g` or `j` of its
+row, from the end when negative, as `At` of a number), and an argument of a call
+at a parameter of that lane, which takes it whole. Every other read of the name
+declines (`symbol()` of `lower.ts`, which admits only the occurrence that
+`wholeRows()` lowers): a row `At(g, i)` (`Length` of an absent row would give 0,
+where the interpreter gives `Missing`), `Length(g)`, `Map` over `g`, arithmetic,
+`g` as the result, a binding to a local, an argument of a parameter of another
+type, and a list that the program makes at such a parameter (`sq(sq(g))`). A
+list of lists of booleans, the bigint and the interval modes and GLSL decline
+the input. The entry checks it as a list (a string or a typed array is refused),
+and a batch shares it between its cells.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
@@ -881,12 +880,13 @@ which must be a list of rank 2 of integers or reals (not of points), of the
 lengths that the body settles: the result is not of the lane `rows`. A `build`
 whose element is a list of a length value that is a constant (the count of
 `Range(1, 32)`, made in the region) has an element of that number of elements
-(`region()` of `lower.ts`), so `Map(i ↦ Map(j ↦ i·j, Range(1, 20)), Range(1, 20))`
-keeps its two loops and is a list of 20 lists of 20; an element of a run-time
-length still declines ("a list of lists of run-time length"). So one step of the
-Game of Life on a 32 × 32 grid, `step(g: list<list<integer>>)` with
-`n = 32`, compiles for a root literal `(g: list<list<integer>>) ↦ step(g)` and
-for `step(G)` with `G` declared `list<list<integer>>`.
+(`region()` of `lower.ts`), so
+`Map(i ↦ Map(j ↦ i·j, Range(1, 20)), Range(1, 20))` keeps its two loops and is a
+list of 20 lists of 20; an element of a run-time length still declines ("a list
+of lists of run-time length"). So one step of the Game of Life on a 32 × 32
+grid, `step(g: list<list<integer>>)` with `n = 32`, compiles for a root literal
+`(g: list<list<integer>>) ↦ step(g)` and for `step(G)` with `G` declared
+`list<list<integer>>`.
 
 Code whose result is of the lane has `rows: true` and `shippable: false`:
 `broadcast()`, `broadcastAsync()` and the batch loaders of the runtime
@@ -1915,34 +1915,35 @@ these places. In any other place (a discharge, `Length`, `Rest`, another list
 operator, a binding, an argument of a function, an element of a list) it
 declines. One boxed `If` in several places must be in such a place each time.
 The value of a name that the program reads (`expression()`) is in such a place
-when each occurrence of the name in the program is (`readers` holds the
-symbols too), and no value of another name and no body of a user function that
-the program reaches has the name (`heldAsAbsent()`); a new name that holds the
-value, or a read of it from another value, checks again each `If` of the
-entry whose list of NaN was already accepted (`nanAccepted`). The conditions,
-the arms and the default are lowered once, before the build, all of them: the interpreter evaluates an arm and a later
-condition only where the selection reaches it, so one that is not pure (an
-effect, a write to a name, an operation that can throw such as `AssertPresent`,
-a loop, a recursive call) declines. Two exceptions (CE-1562). A `Range` arm is
-read at each position (`lo + k·step`) and is never built. A list that an arm or
-a later condition builds (`Map`, `At` of a list of indexes) is accepted when it
-has the length of the first condition, or, in a later condition with no scalar
-condition before it, the length of that condition: a build fails only at 2^32
-elements or more, the first condition exists, and the interpreter evaluates
-every list condition up to the first scalar condition that holds. A build of
-another length in an arm declines (`Which(3 < L, Max(Range(1, x)), True, 0)`).
-The first condition reached must be a list: a scalar condition before it selects
-its arm whole when it holds, a value of another shape (its static type is a
-union), and declines. Arms are all numbers or booleans (with a clause `True`:
-without one, the interpreter gives `Missing`) and flat lists of them, or all
-points of numbers and lists of points (on GLSL a list of points of a constant
-length is an array of vectors, below; another declines). Stated lengths that
-differ decline (the canonical form already gives `incompatible-dimensions` for
-most); lists of two run-time lengths are an error of the interpreter
-(`incompatible-dimensions` for `Which` and for `If` with an `else`), so the
-value is unspecified: a list as long as the first condition, never an arm whole
-(CE-1238). On GLSL a stated length writes the selection out (`vec3` of three
-conditionals); a run-time length declines. The interval mode declines it.
+when each occurrence of the name in the program is (`readers` holds the symbols
+too), and no value of another name and no body of a user function that the
+program reaches has the name (`heldAsAbsent()`); a new name that holds the
+value, or a read of it from another value, checks again each `If` of the entry
+whose list of NaN was already accepted (`nanAccepted`). The conditions, the arms
+and the default are lowered once, before the build, all of them: the interpreter
+evaluates an arm and a later condition only where the selection reaches it, so
+one that is not pure (an effect, a write to a name, an operation that can throw
+such as `AssertPresent`, a loop, a recursive call) declines. Two exceptions
+(CE-1562). A `Range` arm is read at each position (`lo + k·step`) and is never
+built. A list that an arm or a later condition builds (`Map`, `At` of a list of
+indexes) is accepted when it has the length of the first condition, or, in a
+later condition with no scalar condition before it, the length of that
+condition: a build fails only at 2^32 elements or more, the first condition
+exists, and the interpreter evaluates every list condition up to the first
+scalar condition that holds. A build of another length in an arm declines
+(`Which(3 < L, Max(Range(1, x)), True, 0)`). The first condition reached must be
+a list: a scalar condition before it selects its arm whole when it holds, a
+value of another shape (its static type is a union), and declines. Arms are all
+numbers or booleans (with a clause `True`: without one, the interpreter gives
+`Missing`) and flat lists of them, or all points of numbers and lists of points
+(on GLSL a list of points of a constant length is an array of vectors, below;
+another declines). Stated lengths that differ decline (the canonical form
+already gives `incompatible-dimensions` for most); lists of two run-time lengths
+are an error of the interpreter (`incompatible-dimensions` for `Which` and for
+`If` with an `else`), so the value is unspecified: a list as long as the first
+condition, never an arm whole (CE-1238). On GLSL a stated length writes the
+selection out (`vec3` of three conditionals); a run-time length declines. The
+interval mode declines it.
 
 `RandomShuffle(L)` of a list of numbers is `_SYS.shuffle`, and
 `RandomChoice(Interval(0, 1), n)` (either end open or closed) is the region
@@ -2469,14 +2470,14 @@ over `[2, 4]` is `partial` over `[0, 3]` (the hull with `empty` keeps the mark
 
 ## Effects
 
-A call of a function of the host (a definition with an `evaluate` function
-that is not of the library, `isHostDefinition()` of `lower.ts`) is the
-effectful operation `call.host<k>` (`hostCall()`), whose row and spelling
-`_SYS.hosts[k](…)` `sliceProgram()` adds after the lowering
-(`Program.hosts`); the lowering reads an operation with no row as
-effectful. `_SYS.hosts` is bound to the engine (`runtimeOf()` of
-`print-js.ts`), so such a program has no pool loop and is not `shippable`
-(`docs/COMPILATION-MODEL.md`, "Functions of the host").
+A call of a function of the host (a definition with an `evaluate` function that
+is not of the library, `isHostDefinition()` of `lower.ts`) is the effectful
+operation `call.host<k>` (`hostCall()`), whose row and spelling
+`_SYS.hosts[k](…)` `sliceProgram()` adds after the lowering (`Program.hosts`);
+the lowering reads an operation with no row as effectful. `_SYS.hosts` is bound
+to the engine (`runtimeOf()` of `print-js.ts`), so such a program has no pool
+loop and is not `shippable` (`docs/COMPILATION-MODEL.md`, "Functions of the
+host").
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
@@ -3419,9 +3420,9 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   in the engine before the call and writes the new values back after it
   (`assigningRun()` of `adapter.ts`); the result is not `shippable`, and
   `implicitCompile()` gives no result for it. Another target, the interval and
-  `bigint` modes, an inferred type, a constant and another lane decline; so
-  does a user function that the body calls and that reads the name (`free()`:
-  the name is a local of the entry). A warning of a random frame is in `warnings`
+  `bigint` modes, an inferred type, a constant and another lane decline; so does
+  a user function that the body calls and that reads the name (`free()`: the
+  name is a local of the entry). A warning of a random frame is in `warnings`
   (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

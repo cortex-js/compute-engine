@@ -1277,8 +1277,7 @@ export function toAsciiMath(
     !(options.functions && Object.hasOwn(options.functions, 'Range'))
   ) {
     const range = serializeAscendingRange(fnExpr, serialize);
-    if (range !== undefined)
-      return wrap(range, precedence, RANGE_PRECEDENCE);
+    if (range !== undefined) return wrap(range, precedence, RANGE_PRECEDENCE);
   }
   // `Object.assign` onto a null-prototype target, not a spread into a fresh
   // object literal: a spread would rebuild an ordinary object and hand back
