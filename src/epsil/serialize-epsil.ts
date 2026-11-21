@@ -137,6 +137,11 @@ const PERMISSIVE_TYPE_RESOLVER: TypeResolver = {
  * cell's `let sin = 3`, a host `ce.declare`). The CLI passes the engine's
  * `lookupDefinition`. A name `isBound` reports bound keeps its MathJSON
  * spelling.
+ *
+ * @param options.numberFormat - Overrides of the grouping and notation of
+ * numbers (`EpsilNumberFormat`), merged over `NUMBER_FORMATTING_OPTIONS`:
+ * `digitGroup: 0` or `digitGroupSeparator: ''` writes `3811` for `3_811`. A
+ * separator other than `''` or `_` throws a `RangeError`.
  */
 /** The superscript form of each ASCII digit and of `-`, read off the lexer's
  * table so the serializer writes exactly what the parser reads. */
@@ -146,16 +151,43 @@ const SUPERSCRIPT_OF = new Map<string, string>(
     .map(([code, ascii]) => [ascii, String.fromCodePoint(code)])
 );
 
+/** The number format fields a caller may change: the rest are Epsil syntax
+ * (decimal separator, exponent markers, the spelling of `Infinity`). */
+export type EpsilNumberFormat = Partial<
+  Pick<
+    NumberSerializationFormat,
+    'digitGroup' | 'digitGroupSeparator' | 'notation' | 'avoidExponentsInRange'
+  >
+>;
+
+function resolveNumberFormat(
+  override: EpsilNumberFormat | undefined
+): NumberSerializationFormat {
+  if (!override) return NUMBER_FORMATTING_OPTIONS;
+  const format = { ...NUMBER_FORMATTING_OPTIONS, ...override };
+  // Epsil reads only `_` between digits: `3,811` is two operands.
+  const separators = Array.isArray(format.digitGroupSeparator)
+    ? format.digitGroupSeparator
+    : [format.digitGroupSeparator];
+  if (separators.some((s) => s !== '' && s !== '_'))
+    throw new RangeError(
+      "serializeEpsil: numberFormat.digitGroupSeparator must be '' or '_'"
+    );
+  return format;
+}
+
 export function serializeEpsil(
   expr: MathJsonExpression,
   options?: PartialFormattingOptions & {
     fancySymbols?: boolean;
     libraryNames?: 'epsil' | 'mathjson';
     isBound?: (name: string) => boolean;
+    numberFormat?: EpsilNumberFormat;
     /** @internal Deadline inherited from a host engine span. */
     deadline?: DeadlineFrame;
   }
 ): string {
+  const numberFormat = resolveNumberFormat(options?.numberFormat);
   // The names written and bound in the expression, collected once on first
   // use (see `collectNames`).
   let names: ExpressionNames | undefined;
@@ -295,7 +327,7 @@ export function serializeEpsil(
         isNumberObject(expr) ||
         (typeof expr === 'string' && matchesNumber(expr)))
     ) {
-      const num = serializeNumber(expr, NUMBER_FORMATTING_OPTIONS);
+      const num = serializeNumber(expr, numberFormat);
       if (num) body = fmt.text(num);
     }
 
@@ -705,11 +737,11 @@ export function serializeEpsil(
         // Base-10 notation, nothing special
         // @todo: we could do a wrap with a \ continuation character at the end
         // of the line
-        return fmt.text(serializeNumber(arg1, NUMBER_FORMATTING_OPTIONS));
+        return fmt.text(serializeNumber(arg1, numberFormat));
       }
       if (base === 16) {
         if (!Number.isFinite(value)) {
-          return fmt.text(serializeNumber(arg1, NUMBER_FORMATTING_OPTIONS));
+          return fmt.text(serializeNumber(arg1, numberFormat));
         }
         if (Number.isInteger(value)) {
           // Integer to hex
@@ -1128,9 +1160,7 @@ export function serializeEpsil(
       if (nops(expr) !== 1) return serializeGenericFunction(expr);
       const arg = operand(expr, 1);
       if (isNumberLiteral(arg))
-        return fmt.text(
-          negateNumberString(serializeNumber(arg, NUMBER_FORMATTING_OPTIONS))
-        );
+        return fmt.text(negateNumberString(serializeNumber(arg, numberFormat)));
       return serializeOperator(expr) ?? serializeGenericFunction(expr);
     },
 
@@ -1148,7 +1178,7 @@ export function serializeEpsil(
       if (args.length === 2 && isNumberLiteral(args[0])) {
         const symName = symbol(args[1]);
         if (symName !== null) {
-          const numStr = serializeNumber(args[0], NUMBER_FORMATTING_OPTIONS);
+          const numStr = serializeNumber(args[0], numberFormat);
           if (canJuxtapose(numStr, symName)) return fmt.text(numStr + symName);
         }
       }
@@ -1846,8 +1876,7 @@ export function serializeEpsil(
       return fmt.line('== ', fmt.text(escapeSymbol(s)));
     }
 
-    if (isNumberLiteral(p))
-      return fmt.text(serializeNumber(p, NUMBER_FORMATTING_OPTIONS));
+    if (isNumberLiteral(p)) return fmt.text(serializeNumber(p, numberFormat));
     if (typeof p === 'object' && p !== null && 'str' in p)
       return serializeString((p as { str: string }).str);
     const sv =
