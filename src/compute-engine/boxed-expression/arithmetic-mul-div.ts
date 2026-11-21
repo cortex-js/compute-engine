@@ -3511,7 +3511,7 @@ function mulImpl(
  * the unrounded digits of both factors (`√2·π` came out with 50 digits), so
  * it is numericized first, as before.
  */
-function isExactRealLiteral(x: Expression): boolean {
+export function isExactRationalLiteral(x: Expression): boolean {
   if (!isNumber(x)) return false;
   const nv = x.numericValue;
   if (typeof nv === 'number') return Number.isInteger(nv);
@@ -3547,7 +3547,7 @@ export function isOutOfDoubleRangeLiteral(x: Expression): boolean {
  * Whether `x` is a number literal with an exact real value: an integer, a
  * rational, or a rational multiple of a square root (`√2/10^400`). This is
  * the test for the factors that `foldOutOfDoubleRange()` can use. It is wider
- * than `isExactRealLiteral()`, which excludes the radicals of an ordinary
+ * than `isExactRationalLiteral()`, which excludes the radicals of an ordinary
  * product.
  */
 function isExactRealValue(x: Expression): boolean {
@@ -3830,7 +3830,7 @@ export function mulNEvaluated(
   // coefficient that `expandProducts` could rebuild into a `Divide`
   // (`(1/3)·(1/x)` under `.N()` is `0.333…/x`, not `1/(3x)`).
   let exactFactors = xs.map((x, i) =>
-    !numeric?.[i] && isExactRealLiteral(x) ? x : undefined
+    !numeric?.[i] && isExactRationalLiteral(x) ? x : undefined
   );
   const originals = xs;
   xs = xs.map((x, i) => (numeric?.[i] ? x : x.N()));
@@ -3930,7 +3930,9 @@ export function mulNEvaluated(
     ? xs.map((x, i) => exactFactors[i] ?? x)
     : xs;
   const floatLiteral = (r: Expression): Expression =>
-    isExactRealLiteral(r) || (isNumber(r) && !bignumPreferred(ce)) ? r.N() : r;
+    isExactRationalLiteral(r) || (isNumber(r) && !bignumPreferred(ce))
+      ? r.N()
+      : r;
   // Without a factor that `expandProducts` reads specially
   // (`expandProductsChanges`), its fold builds, at each step, the product of
   // the factors that `Product` builds here once, as `mulImpl` does. The fold
@@ -4290,10 +4292,16 @@ function mulTensors(
   // integrals tried each antiderivative once more (ROADMAP CE-604).
   // `withAbsentCells` maps an operand read with `NaN` cells to the operand
   // with its `Missing` cells, for the element-wise product below.
+  // On the `.N()` route, an exact integer or rational literal stays exact:
+  // each cell product (`mulN`) folds it with the cell before it rounds, as the
+  // scalar product does. Floated first, `1/3` was rounded and then multiplied
+  // by each cell, and `[1, 2, 3]/3` gave `0.999…9` for its last cell.
   const withAbsentCells = new Map<Expression, Expression>();
   const evaluated = xs.map((op) => {
     const value = numericApproximation
-      ? op.N()
+      ? isExactRationalLiteral(op)
+        ? op
+        : op.N()
       : operandsAreValues
         ? op
         : op.evaluate();
@@ -4461,8 +4469,20 @@ function mulTensors(
   // Combine the scalar factors (these are commutative). Through `multiply`,
   // not the `.mul()` method: the method always distributes, which would
   // open `(x+1)·2` into `2x + 2` before it ever reached a cell.
+  // Exact literal scalars are combined exactly on the `.N()` route too (`mulN`
+  // floats its product), so that the cell products fold the exact value with
+  // each exact cell. Beside tensors of floats only, the scalar is floated, as
+  // before: a float cell is already rounded, and the double and big-decimal
+  // kernels of `scaleTensor()` decline an exact rational scalar, so a long
+  // list of floats divided by 3 went through a boxed product for each cell.
   const scalar: Expression | null =
-    scalars.length === 0 ? null : multiply(...scalars);
+    scalars.length === 0
+      ? null
+      : numericApproximation &&
+          scalars.every(isExactRationalLiteral) &&
+          tensors.some(hasExactCell)
+        ? mul(...scalars)
+        : multiply(...scalars);
   // Each scalar factor is in `evaluated`: a value of the caller, or the
   // result of the evaluation above (or `NaN` for an absence marker).
   if (scalars.length === 1 && scalar === scalars[0]) valueScalar = scalar;
@@ -4566,7 +4586,7 @@ function mulTensors(
   // Apply the combined scalar factor.
   if (scalar !== null && !isLiteral(scalar, 1)) {
     product = isTensorValue(product)
-      ? scaleTensor(ce, product, scalar, multiplyCell)
+      ? scaleTensor(ce, product, scalar, multiplyCell, numericApproximation)
       : multiply(scalar, product);
   }
   if (absentCells !== undefined && isFunction(product, 'List')) {
@@ -4577,6 +4597,63 @@ function mulTensors(
     );
   }
   return product;
+}
+
+/**
+ * `scalar · vector` under `.N()` for an exact rational `scalar` `p/q` and a
+ * vector of exact integers (`values`), or `undefined` when a condition fails.
+ * Each cell product is the exact rational `v·p/q`, approximated: an exact
+ * integer when `q` divides `v·p`, and otherwise its float. An element with a
+ * fraction part (a float) declines.
+ *
+ * At machine precision, with `v·p` and `q` safe integers, the double
+ * `(v·p)/q` is that value: one division of two doubles that hold the
+ * integers exactly, rounded once. Above machine precision, each cell is the
+ * `.N()` of the rational `v·p/q`, as the scalar product gives it
+ * (`mulNEvaluated()`), without the fold of a product for each cell.
+ */
+function scaleExactIntegersByRational(
+  ce: ComputeEngine,
+  values: ReadonlyArray<number>,
+  scalar: Expression
+): Expression | undefined {
+  const r = asRational(scalar);
+  if (r === undefined) return undefined;
+  const p = Number(r[0]);
+  const q = Number(r[1]);
+  if (!Number.isSafeInteger(p) || !Number.isSafeInteger(q) || q <= 1)
+    return undefined;
+  const big = bignumPreferred(ce);
+  const out = new Array<number>(values.length);
+  const cells: Expression[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!Number.isInteger(v)) return undefined;
+    const n = v * p;
+    if (!Number.isSafeInteger(n)) return undefined;
+    if (big) cells.push(ce.number([n, q]).N());
+    else {
+      const c = n / q;
+      // `-0` is stored as `0`, as the `array` of a list stores it.
+      out[i] = c === 0 ? 0 : c;
+    }
+  }
+  return big ? ce.function('List', cells) : ce._list(out, false);
+}
+
+/**
+ * Whether the tensor value `x` has a cell that is not a float number literal
+ * (an exact number, or a symbolic cell). A list of machine numbers is read
+ * from its doubles (`array`), without boxing its elements: an element with a
+ * fraction part is a float, and an element with an integer value is exact
+ * when `_machineFloats` is `false`.
+ */
+function hasExactCell(x: Expression): boolean {
+  if (!isFunction(x, 'List')) return !isNumber(x) || x.isExact;
+  const floats = x._machineFloats;
+  if (floats !== undefined)
+    return floats === false && (x.array?.some(Number.isInteger) ?? false);
+  return x.ops.some(hasExactCell);
 }
 
 /**
@@ -4623,7 +4700,8 @@ function mulTensors(
 function scaleMachineVector(
   ce: ComputeEngine,
   vector: Expression,
-  scalar: Expression
+  scalar: Expression,
+  numericApproximation: boolean
 ): Expression | undefined {
   if (!isFunction(vector, 'List')) return undefined;
   if (bignumPreferred(ce)) {
@@ -4633,11 +4711,21 @@ function scaleMachineVector(
   // `true` when the integer-valued elements are floats (`[0.5, 2.0]`)
   const vectorFloats = vector._machineFloats;
   if (vectorFloats === undefined) return undefined;
-  const k = machineNumberOf(scalar);
-  if (k === undefined || !Number.isFinite(k) || isExactNonInteger(scalar, k))
-    return undefined;
   const values = vector.array;
   if (values === undefined) return undefined;
+  // An exact scalar that is not a safe integer (`1/3`, `1/2`): its product
+  // with each cell is exact, and `evaluate()` keeps it exact. Under `.N()`,
+  // see `scaleExactIntegersByRational()`.
+  const k = machineNumberOf(scalar);
+  if (
+    isNumber(scalar) &&
+    scalar.isExact &&
+    (k === undefined || isExactNonInteger(scalar, k))
+  )
+    return numericApproximation && vectorFloats === false
+      ? scaleExactIntegersByRational(ce, values, scalar)
+      : undefined;
+  if (k === undefined || !Number.isFinite(k)) return undefined;
   const floatsAreDoubles =
     !bignumPreferred(ce) && isStoredAsDouble(scalar) && holdsDoubles(vector);
   const exactIntegerScalar =
@@ -4682,7 +4770,8 @@ function scaleTensor(
   ce: ComputeEngine,
   tensor: Expression,
   scalar: Expression,
-  multiply: (...xs: ReadonlyArray<Expression>) => Expression
+  multiply: (...xs: ReadonlyArray<Expression>) => Expression,
+  numericApproximation: boolean
 ): Expression {
   const shape = tensor.shape;
 
@@ -4690,7 +4779,7 @@ function scaleTensor(
   // packed tensor: packing boxes every element of a list that holds its
   // numbers unboxed.
   if (shape.length === 1) {
-    const scaled = scaleMachineVector(ce, tensor, scalar);
+    const scaled = scaleMachineVector(ce, tensor, scalar, numericApproximation);
     if (scaled !== undefined) return scaled;
   }
 
@@ -4741,7 +4830,7 @@ function scaleTensor(
       'List',
       tensor.ops.map((x) =>
         isTensorValue(x)
-          ? scaleTensor(ce, x, scalar, multiply)
+          ? scaleTensor(ce, x, scalar, multiply, numericApproximation)
           : multiply(scalar, x)
       )
     );

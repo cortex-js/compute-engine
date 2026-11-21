@@ -20,8 +20,12 @@
  * "Loops and the runtime").
  */
 
-import type { IComputeEngine as ComputeEngine } from '../../global-types.js';
+import type {
+  IComputeEngine as ComputeEngine,
+  Expression,
+} from '../../global-types.js';
 import { isCancellationError } from '../../interval/run-support.js';
+import { isNumber, isSymbol } from '../../boxed-expression/type-guards.js';
 import {
   createSysRuntime,
   engineRuntimeSource,
@@ -36,6 +40,7 @@ import {
   recursiveFunctions,
   regionsOf,
   useIndex,
+  type HostCall,
   type Instr,
   type Program,
   type Region,
@@ -534,11 +539,70 @@ export type JavaScriptResult = {
 
 /** The runtime `_SYS` of the code: over the engine `ce` (its draws, its
  *  random frame and its deadline, read at each call), or with no engine,
- *  that of `createJavaScriptRuntime()`. */
-export function runtimeOf(ce?: ComputeEngine): SysHelpers {
-  return ce === undefined
-    ? createSysRuntime()
-    : makeSysHelpers(engineRuntimeSource(ce));
+ *  that of `createJavaScriptRuntime()`. With `hosts`, the functions of the
+ *  host that the code calls, as `_SYS.hosts` (`hostCaller()`). */
+export function runtimeOf(
+  ce?: ComputeEngine,
+  hosts?: readonly HostCall[]
+): SysHelpers {
+  if (ce === undefined) {
+    if (hosts !== undefined)
+      throw new Error('slice: a call of a function of the host with no engine');
+    return createSysRuntime();
+  }
+  const sys = makeSysHelpers(engineRuntimeSource(ce));
+  if (hosts !== undefined)
+    Object.defineProperty(sys, 'hosts', {
+      value: Object.freeze(hosts.map((h) => hostCaller(ce, h))),
+    });
+  return sys;
+}
+
+/**
+ * The function that the code calls for a call of the function `h` of the
+ * host (`hostCall()` of `lower.ts`): it boxes each argument (a number, a
+ * boolean or a string), evaluates the call in the engine, as the
+ * interpreter evaluates it, and gives its value on the lane of `h`: a
+ * machine number (NaN for a value that is not a real number), a boolean
+ * (a `TypeError` for another value), or NaN for `nothing`, whose value the
+ * code does not read. The call is bound to the definition of the call of
+ * the program (`_withSameBinding()`), whatever the scope of the engine is
+ * when the code runs.
+ */
+function hostCaller(
+  ce: ComputeEngine,
+  h: HostCall
+): (...args: unknown[]) => number | boolean {
+  const call = h.call as unknown as {
+    _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
+  };
+  return (...args) => {
+    const ops = args.map((x, k) =>
+      h.args[k] === 'boolean'
+        ? x
+          ? ce.True
+          : ce.False
+        : h.args[k] === 'string'
+          ? ce.string(x as string)
+          : ce.number(x as number)
+    );
+    const value = call._withSameBinding(ops).evaluate();
+    if (h.result === 'nothing') return NaN;
+    if (h.result === 'boolean') {
+      if (isSymbol(value, 'True')) return true;
+      if (isSymbol(value, 'False')) return false;
+      throw new TypeError(
+        `The function "${h.name}" of the host gives ${value.toString()}, ` +
+          `not a boolean.`
+      );
+    }
+    // A value that still holds a call of the function (one that `evaluate`
+    // left unevaluated) is not read: its `N()` would call the host function
+    // again. An exact value (`Sqrt(3)`, `2Pi`) is read as its machine number.
+    if (!isNumber(value) && value.has(h.name)) return NaN;
+    const n = value.N();
+    return isNumber(n) && n.im === 0 ? n.re : NaN;
+  };
 }
 
 /** The lists of constants (and of such lists) of at least 16 constants in
@@ -696,7 +760,7 @@ export function printJavaScript(
   // The construction of `load()` of `createJavaScriptRuntime()`.
   const make = (): JavaScriptResult['run'] => {
     try {
-      const sys = runtimeOf(ce);
+      const sys = runtimeOf(ce, p.hosts);
       return (
         literal
           ? twoStageRunner(sys, preambleOnce, [], `return (${code});`)()

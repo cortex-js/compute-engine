@@ -977,50 +977,31 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         // A float operand makes the angle a float, as `Arctan(0.5)` is:
         // `Arctan2(0.0, 1)` is the float `0`, and `Arctan2(0.0, -1)` the
-        // float `3.14…`, not the exact `π` of the exact branches below.
-        if (numericApproximation || hasFloatOperand([y, x]))
-          return radiansToAngle(
+        // float `3.14…`, not the exact `π` of `exactArctan2()`.
+        const floatAngle = () =>
+          radiansToAngle(
             apply2(y, x, Math.atan2, (a, b) =>
               BigDecimal.atan2(a, b, ce.precision)
             )
           );
+        if (hasFloatOperand([y, x])) return floatAngle();
 
-        // See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
-        // Three-valued discipline throughout: only act on an === true / ===
-        // false sign, never on an undefined one (which stays symbolic).
-        if (y.isSame(0) && x.isSame(0)) return ce.Zero;
-        // Each exact value below holds `halfTurn`, except when `x > 0`: then
-        // the value is `0` or `Arctan(y/x)`, and `Arctan` has its own rule for
-        // a user value of `Pi`. When `halfTurn` is π and a user binding gives
-        // `Pi` another value, the call stays symbolic (`holdsShadowedPi()`).
-        if (x.isPositive !== true && holdsShadowedPi(ce, halfTurn))
-          return undefined;
-        if (y.isSame(0)) {
-          if (x.isPositive === true) return ce.Zero;
-          if (x.isNegative === true) return halfTurn;
-          return undefined;
+        if (!numericApproximation) return exactArctan2(y, x, halfTurn, ce);
+        // Under `.N()` in a unit other than radians, exact operands take the
+        // exact angle in that unit before it is rounded: the float angle in
+        // radians times the float `180/π` gives `Arctan2(1, 0)` in degrees as
+        // `89.99…9`, not `90`. In radians the float angle needs no
+        // conversion, so it answers first. The exact angle also answers for
+        // a symbol with a known sign (`x > 0` gives `Arctan2(x, 0) = 90`),
+        // which has no float angle. Without a numeric exact angle (a sign is
+        // not known), the float angle answers.
+        if (ce.angularUnit === 'rad') {
+          const float = floatAngle();
+          if (float !== undefined) return float;
         }
-        // x = 0 (and y ≠ 0): the angle is ±π/2
-        if (x.isSame(0)) {
-          if (y.isPositive === true) return halfTurn.div(2);
-          if (y.isNegative === true) return halfTurn.div(-2);
-          return undefined;
-        }
-
-        // General case: apply the quadrant correction to the principal value
-        // (the `Arctan` result is already in the current angular unit).
-        //   atan2(y, x) = atan(y/x)        if x > 0
-        //               = atan(y/x) + π    if x < 0 and y ≥ 0
-        //               = atan(y/x) − π    if x < 0 and y < 0
-        if (x.isPositive === true)
-          return ce.function('Arctan', [y.div(x)]).evaluate();
-        if (x.isNegative === true) {
-          const principal = ce.function('Arctan', [y.div(x)]).evaluate();
-          if (y.isNonNegative === true) return principal.add(halfTurn);
-          if (y.isNegative === true) return principal.sub(halfTurn);
-        }
-        // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
-        return undefined;
+        const exact = exactArctan2(y, x, halfTurn, ce)?.N();
+        if (exact !== undefined && isNumber(exact)) return exact;
+        return floatAngle();
       }),
     },
 
@@ -2146,6 +2127,55 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
  */
 function holdsShadowedPi(ce: IComputeEngine, v: Expression): boolean {
   return v.has('Pi') && shadowsLibraryName(ce, 'Pi');
+}
+
+/**
+ * The exact value of `Arctan2(y, x)` for finite, exact, real operands, in the
+ * current angular unit (`halfTurn` is the half turn in that unit), or
+ * `undefined` when a sign that the value depends on is not known, or when
+ * the value holds a shadowed `Pi` (`holdsShadowedPi()`).
+ *
+ * See https://en.wikipedia.org/wiki/Argument_(complex_analysis)#Realizations_of_the_function_in_computer_languages
+ */
+function exactArctan2(
+  y: Expression,
+  x: Expression,
+  halfTurn: Expression,
+  ce: IComputeEngine
+): Expression | undefined {
+  // Three-valued discipline throughout: only act on an === true / === false
+  // sign, never on an undefined one (which stays symbolic).
+  if (y.isSame(0) && x.isSame(0)) return ce.Zero;
+  // Each exact value below holds `halfTurn`, except when `x > 0`: then the
+  // value is `0` or `Arctan(y/x)`, and `Arctan` has its own rule for a user
+  // value of `Pi`.
+  if (x.isPositive !== true && holdsShadowedPi(ce, halfTurn)) return undefined;
+  if (y.isSame(0)) {
+    if (x.isPositive === true) return ce.Zero;
+    if (x.isNegative === true) return halfTurn;
+    return undefined;
+  }
+  // x = 0 (and y ≠ 0): the angle is ±π/2
+  if (x.isSame(0)) {
+    if (y.isPositive === true) return halfTurn.div(2);
+    if (y.isNegative === true) return halfTurn.div(-2);
+    return undefined;
+  }
+
+  // General case: apply the quadrant correction to the principal value
+  // (the `Arctan` result is already in the current angular unit).
+  //   atan2(y, x) = atan(y/x)        if x > 0
+  //               = atan(y/x) + π    if x < 0 and y ≥ 0
+  //               = atan(y/x) − π    if x < 0 and y < 0
+  if (x.isPositive === true)
+    return ce.function('Arctan', [y.div(x)]).evaluate();
+  if (x.isNegative === true) {
+    const principal = ce.function('Arctan', [y.div(x)]).evaluate();
+    if (y.isNonNegative === true) return principal.add(halfTurn);
+    if (y.isNegative === true) return principal.sub(halfTurn);
+  }
+  // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
+  return undefined;
 }
 
 /**

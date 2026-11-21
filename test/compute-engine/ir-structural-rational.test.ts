@@ -181,9 +181,10 @@ describe('IR: Rational of two integer literals in the structural form', () => {
       });
       const e = structural(WITNESS);
       expect(interpreter(e, { x: 1 })).toBe(267);
-      expect(failure(() => compile(e, { fallback: false }))).toMatch(
-        /Rational is not the library operator here/
-      );
+      // The code calls the definition of the host (CE-1621).
+      const result = compile(e, { fallback: false });
+      expect(result.hostCalls).toEqual(['Rational']);
+      expect((result.run as (a: object) => number)({ x: 1 })).toBe(267);
     } finally {
       ce.popScope();
     }

@@ -1156,6 +1156,12 @@ describe('Epsil CLI multiline input', () => {
     '1 +',
     'let a = 1 /* note',
     'f(1 /* note',
+    '[1,',
+    '[',
+    'f(',
+    'f(1,',
+    'f(\n',
+    'for x',
   ])('treats %p as recoverable', (source) => {
     expect(isRecoverable(source, session.parse(source))).toBe(true);
   });
@@ -1164,6 +1170,13 @@ describe('Epsil CLI multiline input', () => {
     const source = '1 @ 2';
     expect(isRecoverable(source, session.parse(source))).toBe(false);
   });
+
+  test.each(['[,', 'f(,', 'for x y'])(
+    'does not continue %p, which more text cannot fix',
+    (source) => {
+      expect(isRecoverable(source, session.parse(source))).toBe(false);
+    }
+  );
 });
 
 describe('Epsil CLI --compile', () => {

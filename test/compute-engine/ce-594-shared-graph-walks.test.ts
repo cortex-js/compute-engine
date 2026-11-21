@@ -92,3 +92,45 @@ describe('CE-594.1: the name search of a recursive literal', () => {
     );
   });
 });
+
+describe('CE-1345: a list reused through Zip', () => {
+  test('a Zip of a list and a product of the list, nested 30 deep, is built in linear time', () => {
+    // The type of `x·z` asks whether `z = Zip(z′, x·z′)` is finite, and the
+    // finiteness of the source `x·z′` evaluated it, with every `Zip` below
+    // it once for each path: 2^30 evaluations.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('A', 'list<real>');
+    const [z, ms] = timed(() => {
+      let z: Expression = ce.symbol('A');
+      for (let i = 0; i < DEPTH; i++)
+        z = ce.function('Zip', [z, ce.function('Multiply', [ce.symbol('x'), z])]);
+      return z;
+    });
+    expect(z.type.matches('list')).toBe(true);
+    expect(z.isFiniteCollection).toBeUndefined();
+    if (process.env.CE_PERF === '1') expect(ms).toBeLessThan(2000);
+  });
+
+  test('a Zip of a finite list and a product of it is still finite', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('B', ce.box(['List', 1, 2, 3]));
+    const z = ce.box(['Zip', 'B', ['Multiply', 'x', 'B']]);
+    expect(z.isFiniteCollection).toBe(true);
+    expect(z.count).toBe(3);
+    expect(z.evaluate().toString()).toBe('[(1, x),(2, 2x),(3, 3x)]');
+  });
+
+  test('an eager source over a view of unknown finiteness is not evaluated for its finiteness', () => {
+    // `Reverse(Sort(F(3)))` is of unknown finiteness: the guards of
+    // `eagerViewSource` do not evaluate `Sort(F(3))`. So the finiteness of
+    // the outer `Sort` is unknown too, and the values do not change.
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.box(['Function', ['List', 'k', 1, 2], 'k']));
+    const e = ce.box(['Reverse', ['Sort', ['Reverse', ['Sort', ['F', 3]]]]]);
+    expect(e.isFiniteCollection).toBeUndefined();
+    expect(e.evaluate().toString()).toBe('[3,2,1]');
+    expect(ce.box(['Sum', e]).evaluate().toString()).toBe('6');
+  });
+});

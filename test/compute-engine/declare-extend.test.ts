@@ -446,8 +446,10 @@ describe('declare extend: a standard-library operator stays a library operator',
     expect(ce.box(['D', ['Sin', 'x'], 'x']).evaluate().toString()).toBe('0');
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
+      // The code calls the handler (CE-1621).
       const f = compile(ce.box(['Sin', 'y']));
-      expect(f.success).toBe(false);
+      expect(f.success).toBe(true);
+      expect(f.hostCalls).toEqual(['Sin']);
       expect(f.run!({ y: 1 })).toBe(7);
     } finally {
       warn.mockRestore();

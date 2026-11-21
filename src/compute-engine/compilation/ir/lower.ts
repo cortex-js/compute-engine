@@ -95,6 +95,8 @@ import {
   sameShape,
   scalarType,
   typeToString,
+  type Assigned,
+  type HostCall,
   type IRType,
   type Instr,
   type Lane,
@@ -125,6 +127,7 @@ import {
   isUntyped,
   LANE_MISMATCH,
   POSSIBLE_NOTHING,
+  type DeclineReason,
   STATIC_TYPE_ERROR,
   text,
   TUPLE_RULES,
@@ -458,6 +461,41 @@ export type LowerOptions = {
  *  lane `lane`: an effectful operation, spelled as the host's text. */
 export const hostVarOp = (k: number, lane: Lane) => `host${k}.${lane}`;
 
+/** The IR operation of a call of the function of the host of index `k`
+ *  (`Program.hosts`): an effectful operation, spelled as a call of
+ *  `_SYS.hosts[k]`. */
+export const hostCallOp = (k: number) => `call.host${k}`;
+
+/** At most this many arguments in a call of a function of the host: the
+ *  largest arity of an IR operation. */
+const MAX_HOST_ARGUMENTS = 4;
+
+/** A definition that the host gave with `ce.declare()` and an `evaluate`
+ *  function: not of the library, not a function literal (`userBinding()`),
+ *  not a definition with clauses, not the dispatcher of a protocol method,
+ *  and not lazy. */
+function isHostDefinition(e: Fn): boolean {
+  const def = e.operatorDefinition as
+    | {
+        evaluate?: unknown;
+        lazy?: boolean;
+        _standardLibrary?: boolean;
+        _isLambda?: boolean;
+        _isMultiClause?: boolean;
+        _protocolDispatcher?: unknown;
+      }
+    | undefined;
+  return (
+    def !== undefined &&
+    typeof def.evaluate === 'function' &&
+    def.lazy !== true &&
+    def._standardLibrary !== true &&
+    def._isLambda !== true &&
+    def._isMultiClause !== true &&
+    def._protocolDispatcher === undefined
+  );
+}
+
 /** A use of a list local written in place that it cannot have
  *  (`inPlace()` of `lower()`). */
 type Misuse = 'write' | 'read' | undefined;
@@ -547,10 +585,13 @@ function lowerOnce(
   const bigint = options.mode === 'bigint';
   const interval = options.mode === 'interval';
   /** `i` changes or reads state by itself: an operation or a region of an
-   *  effectful row, or a call of an effectful function. */
+   *  effectful row, or a call of an effectful function. An operation with
+   *  no row is effectful, as in `effects.ts`: the call of a function of the
+   *  host (`hostCall()`), whose row `sliceProgram()` adds after the
+   *  lowering. */
   const effectful = (i: Instr): boolean =>
     i.k === 'op'
-      ? rowOfOp(rows, i.op)?.row.effect === 'effectful'
+      ? (rowOfOp(rows, i.op)?.row.effect ?? 'effectful') === 'effectful'
       : i.k === 'call'
         ? fns.effect(i.fn) === 'effectful'
         : i.k === 'region' && regionRow(i.op)?.effect === 'effectful';
@@ -685,17 +726,17 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
-  // The calls of the program that have each call as an operand, with the
-  // position of the operand. One boxed expression in two places
-  // (`If(IsMissing(r), K, r)`) has one entry for each place. Each node is
-  // visited once.
+  // The calls of the program that have each call or each symbol as an
+  // operand, with the position of the operand. One boxed expression in two
+  // places (`If(IsMissing(r), K, r)`) has one entry for each place. Each
+  // node is visited once.
   const readers = new Map<Expression, [reader: Fn, position: number][]>([
     [root, []],
   ]);
   const reach = (e: Expression): void => {
     if (!isFunction(e)) return;
     e.ops.forEach((op, i) => {
-      if (!isFunction(op)) return;
+      if (!isFunction(op) && !isSymbol(op)) return;
       const known = readers.get(op);
       if (known !== undefined) return void known.push([e, i]);
       readers.set(op, [[e, i]]);
@@ -730,13 +771,44 @@ function lowerOnce(
   // - the body of a user function being lowered, when each call that its IR
   //   function serves is itself in such a place (`bodies`, `call()` of
   //   `lower-functions.ts`); the places in the body are known once a call
-  //   of the function is lowered (`reachBody()`).
+  //   of the function is lowered (`reachBody()`);
+  // - the value of a name that the program reads (`expression()`), when
+  //   each occurrence of that name in the program is itself in such a
+  //   place, and no value of another name and no body of a user function
+  //   that the program reaches has the name (`heldAsAbsent()`); the places
+  //   in the value are known once the value is lowered.
   // Any other place (a binding, an argument of a function, an element of a
   // list or of a tuple, another list operator) can give the value to a
-  // reader that tells an absent list from a list of NaN. A node that is not
-  // in the program (the value of a name, an expression of a compile
-  // handler) has no known reader.
+  // reader that tells an absent list from a list of NaN. Another node that
+  // is not in the program (an expression of a compile handler) has no known
+  // reader.
   const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
+  // For each held value that `expression()` lowers, the names that hold it,
+  // and whether one of them is read other than by a node of the program
+  // (in the value of another name, in an expression of a compile handler).
+  const holders = new Map<Expression, { names: Set<string>; other: boolean }>();
+  // The names that a value or a body that the program reaches has
+  // (`calledNames()`), found once.
+  let namesReached: Set<string> | undefined;
+  const heldAsAbsent = (h: { names: Set<string>; other: boolean }) => {
+    if (h.other) return false;
+    namesReached ??= calledNames(root);
+    const elsewhere = namesReached;
+    return [...h.names].every(
+      (n) =>
+        !elsewhere.has(n) &&
+        [...readers.keys()].every((x) => !isSymbol(x, n) || nanForAbsent(x))
+    );
+  };
+  // The nodes whose value is a list of NaN for an absent list
+  // (`conditional()`), checked again when a held value adds places
+  // (`expression()`).
+  const nanAccepted = new Set<Expression>();
+  const declineNanList = (node: Expression): never =>
+    decline(
+      node,
+      'an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction'
+    );
   const reached = new Set<Expression>();
   // A body adds places to the nodes that it shares with the program.
   const reachBody = (body: Expression) => {
@@ -756,8 +828,9 @@ function lowerOnce(
     }
     let known = body === undefined ? unreadAsAbsent.get(e) : undefined;
     if (known !== undefined) return known;
+    const h = holders.get(e);
     known =
-      (readers.get(e) ?? (body ? [] : undefined))?.every(([reader, i]) => {
+      (readers.get(e) ?? (body || h ? [] : undefined))?.every(([reader, i]) => {
         if (reader === root && reader.operator === 'Function') return i === 0;
         if (!isLibrary(reader)) return false;
         switch (reader.operator) {
@@ -791,6 +864,7 @@ function lowerOnce(
           nanForAbsent(reader)
         );
       }) ?? false;
+    if (h !== undefined && !heldAsAbsent(h)) known = false;
     if (bodies.size === 0) unreadAsAbsent.set(e, known);
     return known;
   };
@@ -1620,13 +1694,15 @@ function lowerOnce(
     // A closed form is computed with the library's operators.
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
-    if (!isLibraryOperator(e as never, e.operator))
+    if (!isLibraryOperator(e as never, e.operator)) {
+      if (isHostDefinition(e)) return hostCall(e, want);
       decline(
         e,
         e.operatorDefinition === undefined && e.valueDefinition === undefined
           ? `${e.operator} is an unknown operator (no definition)`
           : `${e.operator} is not the library operator here (a user definition)`
       );
+    }
     // The value kind `enclosure` (`lower-enclosure.ts`): a collection of
     // enclosures declines; a node that may read or make one is lowered by
     // the kind, before a closed node is evaluated.
@@ -3445,6 +3521,20 @@ function lowerOnce(
     };
     const why = facts(v).writes.size > 0 ? 'a write' : reason(v, []);
     if (why) decline(e, `the value of ${name}, which reads ${why}`);
+    // The places of `v` and of its nodes (`nanForAbsent()`): a new name
+    // that holds `v`, or a read that is not a node of the program, adds
+    // places to a node whose list of NaN can already be lowered.
+    let h = holders.get(v);
+    if (h === undefined)
+      holders.set(v, (h = { names: new Set(), other: false }));
+    const other = !readers.has(e);
+    if (!h.names.has(name) || (other && !h.other)) {
+      h.names.add(name);
+      h.other ||= other;
+      reachBody(v);
+      unreadAsAbsent.clear();
+      for (const x of nanAccepted) if (!nanForAbsent(x)) declineNanList(x);
+    }
     // The instructions of `v` are those that its lowering adds to the
     // region that is open here.
     const [effects, start] = [b.effects, b.current().body.length];
@@ -4406,11 +4496,11 @@ function lowerOnce(
         // or `Rest` reads as absent; a list is never absent in compiled
         // code (`absent()`), so the list of NaN is the value only where no
         // such operator can read it (`nanForAbsent()`).
-        if (!nanForAbsent(node))
-          decline(
-            node,
-            'an If with no else of a list arm whose value is read by other than At, First, Last, an arithmetic operator or a reduction'
-          );
+        if (!nanForAbsent(node)) declineNanList(node);
+        // A node of a body is accepted for the calls of the body
+        // (`bodies`), which a later held value does not change: a name that
+        // a reached body reads is never a holder (`heldAsAbsent()`).
+        if (bodies.size === 0) nanAccepted.add(node);
         if (typeof n !== 'number' && n.v >= start && !inputLengths.has(n.v))
           decline(
             node,
@@ -6243,7 +6333,163 @@ function lowerOnce(
       ...p,
       inputs,
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
+      ...(assigns.length > 0 ? { assigns } : {}),
+      ...(hosts.length > 0 ? { hosts } : {}),
     };
+  };
+  // The names of the scope of the compilation that a root function literal
+  // assigns (`assignedNames()`).
+  let assigns: Assigned[] = [];
+  // The functions of the host that the program calls (`hostCall()`).
+  const hosts: HostCall[] = [];
+
+  /** The value of `e`, a call of a function that the host declared with an
+   *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
+   *  operation that calls the interpreter for the call at run time
+   *  (`_SYS.hosts` of `print-js.ts`), at each evaluation of `e`, in the
+   *  order of the program. Each argument is a scalar of the lane `real`,
+   *  `integer`, `boolean` or `string`, at most `MAX_HOST_ARGUMENTS` of them.
+   *  The static type of the call is `real`, `integer` or `boolean`, the
+   *  lane of the value, or `nothing`, which the code reads only as the value
+   *  of the root function literal (NaN there, as the interpreter's `Nothing`
+   *  is). Plain JavaScript only: the shader targets cannot call the host,
+   *  the interval and `bigint` modes have no lane of its values. A function
+   *  that assigns a variable of the engine (`assignedNames()`) declines: the
+   *  host function would read the variable before the code writes it back. */
+  const hostCall = (e: Fn, want: boolean): V | undefined => {
+    const name = e.operator;
+    const why = (reason: string, code?: DeclineReason): never =>
+      decline(e, `a call of the function ${name} of the host, ${reason}`, code);
+    if (!options.javascript || interval || bigint) why('on this target');
+    if (assigns.length > 0)
+      why('in a function that assigns a variable of the engine');
+    if (e.nops > MAX_HOST_ARGUMENTS)
+      why(`with more than ${MAX_HOST_ARGUMENTS} arguments`);
+    const t = e.type.type;
+    const result: Lane | 'nothing' | undefined = isSubtype(t, 'nothing')
+      ? 'nothing'
+      : isSubtype(t, 'boolean')
+        ? 'boolean'
+        : isSubtype(t, 'integer')
+          ? 'integer'
+          : isSubtype(t, 'real')
+            ? 'real'
+            : undefined;
+    if (result === undefined)
+      why(
+        `of type ${engineTypeToString(t)}, not real, integer, boolean or nothing`
+      );
+    // The value of the root function literal, or the last operand of a
+    // `Block` that is: a `Nothing` read as NaN.
+    const atRoot = (x: Expression): boolean => {
+      const places = readers.get(x) ?? [];
+      return (
+        places.length > 0 &&
+        places.every(
+          ([r, i]) =>
+            (r === root && r.operator === 'Function' && i === 0) ||
+            (r.operator === 'Block' && i === r.nops - 1 && atRoot(r))
+        )
+      );
+    };
+    if (result === 'nothing' && want && !atRoot(e))
+      why('whose value Nothing is read', POSSIBLE_NOTHING);
+    const args = e.ops.map((op) => {
+      const v = value(op)!;
+      const a = type(v);
+      if (
+        a.shape.length > 0 ||
+        tuples.has(v) ||
+        !['real', 'integer', 'boolean', 'string'].includes(a.lane)
+      )
+        why(
+          `with an argument of type ${typeToString(a)}, not a real, an integer, a boolean or a string`
+        );
+      return v;
+    });
+    const lanes = args.map((v) => type(v).lane);
+    const def = e.operatorDefinition!;
+    let k = hosts.findIndex(
+      (h) =>
+        h.definition === def &&
+        h.result === result &&
+        h.args.length === lanes.length &&
+        h.args.every((l, j) => l === lanes[j])
+    );
+    if (k < 0) {
+      k = hosts.length;
+      hosts.push({
+        name,
+        call: e,
+        definition: def,
+        args: lanes,
+        result: result!,
+      });
+    }
+    const v = b.op(
+      hostCallOp(k),
+      args,
+      scalarType(result === 'nothing' ? 'real' : result!)
+    );
+    return result === 'nothing' && !want ? undefined : v;
+  };
+
+  /** The names that the body of the root function literal `f` assigns (an
+   *  `Assign` or an `AddTo` of the name) where the name is a variable of
+   *  the scope of the compilation, not a local or a parameter of `f`: the
+   *  state that a call of the interpreter changes in the engine (CE-1620).
+   *  Each one is a variable with a declared type of the lane `real`,
+   *  `integer` or `boolean` (`inputType()`), on the plain JavaScript
+   *  target; another one declines. A function that `f` calls and that
+   *  reads such a name declines (`free()`): it would read the value before
+   *  the call. */
+  const assignedNames = (f: Fn): Assigned[] => {
+    const out: Assigned[] = [];
+    // `bound`: the names that a parameter of a function literal or a
+    // `Declare` of a `Block` around `x` binds.
+    const visit = (x: Expression, bound: ReadonlySet<string>): void => {
+      if (!isFunction(x)) return;
+      const binds =
+        x.operator === 'Function'
+          ? x.ops.slice(1).map((p) => parameterName(p) ?? '')
+          : x.operator === 'Block'
+            ? x.ops.flatMap((op) =>
+                isFunction(op, 'Declare') ? patternNames(op.ops[0]) : []
+              )
+            : [];
+      const inner = binds.length > 0 ? new Set([...bound, ...binds]) : bound;
+      const target =
+        x.operator === 'Assign' || x.operator === 'AddTo'
+          ? x.ops[0]
+          : undefined;
+      const targets = isFunction(target, 'Tuple') ? target.ops : [target];
+      for (const t of targets) {
+        if (!isSymbol(t) || inner.has(t.symbol)) continue;
+        if (out.some((s) => s.name === t.symbol)) continue;
+        const h = held(t.symbol);
+        if (h === undefined || h.library) continue;
+        const def = h.definition;
+        const why = (reason: string) =>
+          decline(x, `an assignment of ${t.symbol}, ${reason}`);
+        if (!options.javascript || interval || bigint)
+          why('a variable of the engine, on this target');
+        if (def.isConstant) why('a constant');
+        // A name of `vars`, of `symbolic` or of `inputs` is an input of the
+        // host, whose value the compilation hides.
+        if (options.vars?.includes(t.symbol) || h.value === undefined)
+          why('a name with no value at the compilation, or an input');
+        if (def.inferredType)
+          why('whose type is inferred from its value: declare its type');
+        const ir = inputType(def.type.type);
+        const lane = ir?.shape.length === 0 ? ir.lane : undefined;
+        if (lane !== 'real' && lane !== 'integer' && lane !== 'boolean')
+          return why(`of type ${engineTypeToString(def.type.type)}`);
+        out.push({ name: t.symbol, definition: def, lane });
+      }
+      x.ops.forEach((op) => visit(op, inner));
+    };
+    visit(f, new Set());
+    return out;
   };
   // A root function literal: its parameters, by position, come first. A
   // root name of a library operator is its literal (`operatorLiteral()`).
@@ -6284,7 +6530,31 @@ function lowerOnce(
           );
         input(p, name, declared, true);
       });
-      return value(root.ops[0])!;
+      const states = assignedNames(root);
+      if (states.length === 0) return value(root.ops[0])!;
+      // Each name is a local whose value is a positional parameter after
+      // the arguments, and the code returns the value of the body and the
+      // value of each name after it (`Program.assigns`). The stored value
+      // is hidden while the body is lowered, so that no analysis reads it.
+      for (const s of states) {
+        b.positional += 1;
+        const v = b.param(s.name, scalarType(s.lane));
+        frames[0].names.set(s.name, { v, lane: s.lane, role: 'local' });
+      }
+      assigns = states;
+      const hidden = Object.fromEntries(states.map((s) => [s.name, true]));
+      // A body that ends in an assignment is `Nothing`, which the code gives
+      // as NaN: `do { s = s + 1 }`.
+      const body = root.ops[0];
+      const last = isFunction(body, 'Block') ? body.ops.at(-1) : undefined;
+      const want = !['Assign', 'Declare', 'DefineFunction'].includes(
+        last?.operator ?? ''
+      );
+      const v = withVarsValuesHidden(root, hidden, () => value(body, want));
+      return [
+        want && v !== undefined ? v : b.constant(NaN, 'real'),
+        ...states.map((s) => frames[0].names.get(s.name)!.v),
+      ];
     });
   }
   return program(() => {

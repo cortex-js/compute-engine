@@ -406,7 +406,13 @@ import { replace } from './rules.js';
 import { negate } from './negate.js';
 import { simplifyValueBlind } from './simplify.js';
 import { explainExpression } from './explain.js';
-import { canonicalMultiply, mul, div, Product } from './arithmetic-mul-div.js';
+import {
+  canonicalMultiply,
+  mul,
+  div,
+  Product,
+  isExactRationalLiteral,
+} from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
 import { pow } from './arithmetic-power.js';
 import {
@@ -13552,9 +13558,46 @@ function evaluateBroadcastLiftsOnce(
   // reached each cell as a float put the cell on the wrong side of a jump:
   // `Floor([1], 1/3).N()` was `[0.999…]` where `Floor(1, 1/3).N()` is `1`,
   // and `Mod([1], 1/3).N()` was `[1e-21]` where `Mod(1, 1/3).N()` is `0`.
-  return isExactJumpLift(options, operator)
-    ? withExactScalarOperands(lifted, ops)
+  if (isExactJumpLift(options, operator))
+    return withExactScalarOperands(lifted, ops);
+  return isExactProductLift(options, operator)
+    ? withExactLiteralOperands(lifted, ops)
     : lifted;
+}
+
+/**
+ * Whether `evaluateBroadcastLiftsOnce` puts the exact number literals back
+ * (`withExactLiteralOperands`): for a broadcast of `Multiply` under `.N()`.
+ * Each cell is a scalar product, and its `.N()` folds an exact integer or
+ * rational literal with the other factors before it rounds
+ * (`mulNEvaluated()`). With the literal approximated first, the rounding of
+ * `1/3` was multiplied by each cell: `Range(1, 3)/3` gave `0.999…9` for its
+ * last cell, where `(1/3)·3` gives `1`.
+ */
+function isExactProductLift(
+  options: Partial<EvaluateOptions> | undefined,
+  operator: string
+): boolean {
+  return options?.numericApproximation === true && operator === 'Multiply';
+}
+
+/**
+ * `operands` with each operand whose original (in `originals`) is an exact
+ * integer or rational number literal put back as that literal. A radical is
+ * left approximated, as the scalar product approximates it first.
+ */
+function withExactLiteralOperands(
+  operands: ReadonlyArray<Expression>,
+  originals: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  return operands.map((x, i) => {
+    const original = originals[i];
+    return isNumber(x) &&
+      original !== undefined &&
+      isExactRationalLiteral(original)
+      ? original
+      : x;
+  });
 }
 
 /**
@@ -13870,9 +13913,12 @@ async function evaluateBroadcastLiftsOnceAsync(
             )
     )
   );
-  // The exact scalar lifts of a jump operator, as in the sync mirror.
-  return isExactJumpLift(options, operator)
-    ? withExactScalarOperands(lifted, ops)
+  // The exact scalar lifts of a jump operator, and the exact literal lifts of
+  // a product, as in the sync mirror.
+  if (isExactJumpLift(options, operator))
+    return withExactScalarOperands(lifted, ops);
+  return isExactProductLift(options, operator)
+    ? withExactLiteralOperands(lifted, ops)
     : lifted;
 }
 

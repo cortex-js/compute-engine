@@ -107,12 +107,23 @@ describe('a redeclared If', () => {
   );
 
   test('a copy with `lazy: false`', () => {
+    // The copy is not lazy and has an `evaluate` handler, so it is a
+    // function of the host (CE-1621): the code is not the library `If`, it
+    // calls the copy with the values of the three operands, as the
+    // interpreter does for a definition that is not lazy.
     const assertion = jest
       .spyOn(console, 'assert')
       .mockImplementation(() => {});
     try {
       const ce = engineWithCopy('If', { lazy: false });
-      expect(compiled(ce, IF).success).toBe(false);
+      const f = compiled(ce, IF);
+      expect(f.success).toBe(true);
+      expect(f.hostCalls).toEqual(['If']);
+      const expr = ce.box(IF as any);
+      for (const x of [0.7, -0.7]) {
+        ce.assign('x', x);
+        expect(f.run({ x })).toBeCloseTo(expr.evaluate().re, 12);
+      }
     } finally {
       assertion.mockRestore();
     }

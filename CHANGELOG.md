@@ -2,6 +2,14 @@
 
 ### Improvements
 
+- **A restricted list that a name holds compiles again** (CE-1642). With
+  `C` declared with the value `If(0 ≤ x ≤ 6, x + [0, 4, 2])`, `At(C, 1)`
+  compiles to JavaScript and to `interval-js`, and gives `NaN` (the empty
+  interval) where the condition is false; `C` alone gives the list of `NaN`
+  there. Both compiled in 0.193.0 and decline in 0.197.0. A program that also reads `C` with
+  `Length`, a discharge such as `IsMissing`, or from the value of another name
+  or the body of a user function still declines, because the interpreter gives
+  `Missing` there.
 - **A function that takes a list of lists and returns a list of lists compiles
   to JavaScript** (CE-1607). With `g: list<list<integer>>`, the element read
   `g[i][j]` compiles, and `g` can be passed whole to a user function with a
@@ -13,6 +21,26 @@
   generation. An index out of range gives `NaN`. Other reads of such a list
   (`Length(g)`, `g[1]`, `Map` over `g`) still decline. A `Map` of a `Map` over
   `Range(1, 20)` also compiles now.
+- **A function that assigns a variable it closes over compiles to JavaScript**
+  (CE-1620). With `let s = 0.5`, the timer callback
+  `advance = (t: real) => do { s = s + t / 1000 }` compiles, where it declined
+  before. Each call of `run()` reads `s` in the engine and writes its new value
+  back, as an evaluation of the call does: after `run(16)` three times, `s` is
+  `0.548`. The result lists the variables in `assigns`; its `code` takes their
+  values after the arguments and returns `[value, ...new values]`, for a host
+  that runs the code without the engine. The variable must have a declared type
+  of real, integer or boolean values (`let` declares one). A function that the
+  callback calls and that reads the variable still declines.
+- **Compiled JavaScript calls a function that the host declared with an
+  `evaluate` function** (CE-1621). With
+  `ce.declare("hostDraw", { signature: "(real) -> nothing", evaluate })`, the
+  timer callback `(t: real) => hostDraw(t / 1000)` compiles, where it declined
+  before. Each call in the code evaluates the call in the engine, at each
+  evaluation and in the order of the program. The result lists the functions
+  in `hostCalls`, and is not `shippable`. The arguments must be real numbers,
+  integers, booleans or strings (at most four), and the result type `real`,
+  `integer`, `boolean` or `nothing`. A function that builds a `Figure` of a
+  drawing library still declines (CE-1652).
 
 ### Behavior Changes
 
@@ -23,6 +51,35 @@
   `Recursive definition with no base case: f`, its readers have
   `invalid-document-dependency`, and a call gives that error instead of
   throwing `Recursion limit exceeded`.
+
+- **The text of a range with the step 1 is the Epsil range `a..b`**
+  (CE-1636). `toString()` and the Epsil command line printed a range in a
+  list as a call, which reads as a call that was not evaluated:
+  `[1..2, 1..3]` printed `[Range(1, 2, 1),Range(1, 3, 1)]`, and now prints
+  `[1..2,1..3]`, which Epsil reads back as the same list. A range with no
+  step or with another step still prints as a call, `Range(1, 5)` and
+  `Range(1, 5, 2)`, and a range alone still prints its elements: `1..3`
+  prints `[1,2,3]`.
+
+- **The Epsil REPL waits for the next line after each input that more text at
+  its end can complete** (CE-1630). Before, it waited only for an unclosed
+  bracket, string or comment, and for an operator at the end of the line. Now
+  it also waits for `let`, `while`, `for x in`, `f(x) =`, `if x` and `x.`.
+  Enter `.break` to abandon the input. The diagnostic `expression-expected`
+  now reads `Expected an expression` (was `expression expected`), and
+  `literal-expected` reads `Expected a literal` (was `literal expected`).
+
+- **`\psi^{(m)}(z)` parses as the polygamma function, and `\Phi(z, s, a)` as the
+  Lerch transcendent** (CE-1597). `\psi`, `\psi(z)`, `\Phi` and `\Phi(x)` keep
+  their reading as a symbol or a function of the user, and a declaration of
+  `psi` or `Phi` keeps its own reading.
+
+  ```js
+  ce.parse('\\psi^{(1)}(1)').json;
+  // ➔ ["PolyGamma", 1, 1] (was "psi")
+  ce.parse('\\Phi(1, 2, 1)').json;
+  // ➔ ["LerchPhi", 1, 2, 1] (was ["Phi", 1, 2, 1])
+  ```
 
 - **A `\text{…}` that names a unit is a string unless it is part of a unit
   expression** (CE-1644). A `\text{…}` is a unit after a number, and as an
@@ -49,6 +106,52 @@
   `f(y) = ListJoin([1, 2], y)`, `f(7)` is `[1, 2, 7]`, where it was an
   `incompatible-type` error, and `f([3, 4])` is still `[1, 2, 3, 4]`.
 
+- **In degrees, the numeric value of the angle of `i` is `90`** (CE-1635).
+  With `ce.angularUnit = 'deg'`, `Argument(i).N()` and `Arctan2(1, 0).N()`
+  gave `89.9999999999999999999`, because the angle in radians was rounded and
+  then multiplied by a rounded `180/π`. Now `.N()` of `Arctan2` with exact
+  operands rounds the exact angle in the unit, so the result is `90`, as for
+  `Arcsin(1)`. The same applies in gradians and in turns. A symbol with a
+  known sign also gets a value: with `x > 0`, `Arctan2(x, 0).N()` is `90`.
+
+- **The numeric value of a list divided by a number is correct to the last
+  digit** (CE-1634). At 21 digits, `N([1, 2, 3]/3)` gave
+  `[0.333…333, 0.666…666, 0.999…999]`, because `1/3` was rounded before it
+  multiplied each element. Now each element is the exact product, rounded
+  once, as for a single number: `[0.333…333, 0.666…667, 1]`. The same applies
+  to a matrix and to a range (`Range(1, 3)/3`).
+
+- **A piecewise condition that compares a variable with a word keeps the
+  word** (CE-1632). In
+  `\begin{cases} x^3 & m = \text{cubic} \\ x & \text{otherwise} \end{cases}`,
+  the condition parsed as `Equal(m)`, which is always true, so the first
+  branch was taken for every value of `m`. Now it parses as
+  `Equal(m, "cubic")`. A text annotation next to the condition, such as
+  `\text{if }`, is still removed.
+
+- **An element-wise operation on a list of random draws and a later read of
+  the same list use the same draws** (CE-1631). With
+  `h = Comprehension(Random(), k ∈ 1..6)`, `h + 10` used one set of draws and
+  a later read of `h` drew again, so the first element of `h + 10` was not the
+  first element of `h` plus 10. An operation that reads every element of the
+  list (`Add`, `Mod`, `Power` and the other element-wise operators) now ends
+  its walk of the list, and the list keeps these draws for each later read.
+
+- **In Epsil, a list or a call that ends after its opening bracket or after a
+  comma waits for the next line in the REPL** (CE-1630). `[1,`, `f(` and
+  `f(1,` got the message `Unexpected symbol ""`, and the REPL showed it as an
+  error at the first line of a list or a call written on several lines. Now
+  the message is `Expected an expression`, `for x` gets `Expected "in"`, and
+  the REPL waits for the next line.
+
+- **A function declared pure stays pure when a function that it calls gets a
+  new body** (CE-1629). With `h` declared `(number) -> number` and
+  `g` declared `(number) pure -> number` with the body `h(x)`, the assignment
+  `h := x ↦ x + Random()` gave a `g` that returned random values. Now the
+  assignment is refused with an `incompatible-type` error (`ce.assign()`
+  throws), and `h` keeps its previous body. An assignment whose body keeps the
+  stated effects of every function that calls it is accepted.
+
 - **A call of a user function whose body is an `If` with no else of a list
   compiles where `At`, `First`, `Last`, a reduction or arithmetic reads it**
   (CE-1648). With
@@ -71,6 +174,15 @@
   ce.parse('\\mathrm{Expand}(\\sum_{n=1}^{3} n a)').evaluate().evaluate();
   // ➔ 6n + 6, as without Expand (0.196.1: 20)
   ```
+
+- **An expression that reuses a list through `Zip` many times is built in
+  linear time** (CE-1345). With `A` declared `list<real>`, the 14 levels of
+  `z = Zip(z, x·z)` took about 3 seconds to build, twice as long at each
+  level; they now take a few milliseconds. The finiteness of an eager
+  collection operator that has an operand of unknown finiteness is no longer
+  computed by an evaluation, so the `isFiniteCollection` of
+  `Reverse(Sort(Reverse(Sort(F(3)))))`, with `F` a user function that returns
+  a list, is now `undefined` (was `true`). Its value does not change.
 
 ## 0.197.0 _2026-11-21_
 

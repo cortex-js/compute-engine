@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
 
 describe('WHICH', () => {
@@ -53,5 +54,65 @@ describe('WHICH', () => {
         '\\begin{cases}x & x>0 \\\\ \\operatorname{Nothing} & \\text{otherwise}\\end{cases}'
       ).json
     ).toEqual(['Which', ['Less', 0, 'x'], 'x', 'True', 'Nothing']);
+  });
+
+  // CE-1632: a string operand of a relation in a condition is a value, not
+  // an annotation, and is kept.
+  test('A relation with a text operand in a condition keeps the operand', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('m', 'string');
+    ce2.declare('x', 'real');
+    const cases = (cond: string) =>
+      `\\begin{cases} x^3 & ${cond} \\\\ x & \\text{otherwise} \\end{cases}`;
+    const expected = [
+      'Which',
+      ['Equal', 'm', "'cubic'"],
+      ['Power', 'x', 3],
+      'True',
+      'x',
+    ];
+    expect(ce2.parse(cases('m = \\text{cubic}')).json).toEqual(expected);
+    expect(ce2.parse(cases('\\text{if } m = \\text{cubic}')).json).toEqual(
+      expected
+    );
+    expect(ce2.parse(cases('m \\ne \\text{lin}')).json).toEqual([
+      'Which',
+      ['NotEqual', 'm', "'lin'"],
+      ['Power', 'x', 3],
+      'True',
+      'x',
+    ]);
+    // A string in a tuple or in the arguments of a call is a value too.
+    expect(ce2.parse(cases('(m, n) = (\\text{a}, \\text{b})')).json).toEqual([
+      'Which',
+      ['Equal', ['Tuple', 'm', 'n'], ['Tuple', "'a'", "'b'"]],
+      ['Power', 'x', 3],
+      'True',
+      'x',
+    ]);
+    expect(ce2.parse(cases('f(\\text{a}, x) > 0')).json).toEqual([
+      'Which',
+      ['Less', 0, ['f', "'a'", 'x']],
+      ['Power', 'x', 3],
+      'True',
+      'x',
+    ]);
+    // A text annotation juxtaposed with math, or after a comma, is still
+    // removed.
+    for (const cond of ['x > 0 \\text{ (strict)}', 'x > 0, \\text{strict}'])
+      expect(ce2.parse(cases(cond)).json).toEqual([
+        'Which',
+        ['Less', 0, 'x'],
+        ['Power', 'x', 3],
+        'True',
+        'x',
+      ]);
+
+    const expr = ce2.parse(cases('m = \\text{cubic}'));
+    ce2.assign('x', 2);
+    ce2.assign('m', ce2.expr({ str: 'lin' }));
+    expect(expr.evaluate().json).toEqual(2);
+    ce2.assign('m', ce2.expr({ str: 'cubic' }));
+    expect(expr.evaluate().json).toEqual(8);
   });
 });

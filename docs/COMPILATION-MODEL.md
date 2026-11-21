@@ -193,15 +193,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   code passes one input per name; so does a call inside a function whose
   parameter is `x` (`u(x) := k(0) + g(0) + 100x`, CE-1502).
 
-- `javascript` (crafted): one boxed `If` with no else of a list arm that is
-  both the value of a name and a node of the program. With
-  `r = If(0 ≤ x ≤ 6, x + [0, 4, 2])` boxed once, `C` declared with the value
-  `r`, and the program built from that same object,
-  `Length(C) + Coalesce(At(r, 1), 0)` gives `3` at `x = 7`, where the
-  interpreter gives `Missing`. The program reads `r` only with `At`, so its
-  value where the condition is false is the list of `NaN`, which `Length(C)`
-  then reads. The same program boxed from MathJSON declines (CE-1606).
-
 - `plausible?` — `javascript` and `interval-js`, `x: real`,
   `y: real`: `D(x^y, x)` at `x = 0`, `y = 1`. The interpreter gives `1`. The
   compiled derivative is the general form `y·x^(y - 1)`, whose factor is
@@ -379,6 +370,11 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(3, 0.9834569781146947)`. Its `Map` is a lazy view and `Length` draws
   nothing, where the compiled `Map` builds every element. The result carries
   the warning `seeded-draw-order`. A `Comprehension` with an effect declines.
+- `javascript` (crafted), `t: real`, `hostSq` a function of the host:
+  `First(Map(x ↦ hostSq(x t), [1, 2, 3]))` at `t = 2` gives `4`, as the
+  interpreter does, and calls `hostSq` three times; the interpreter calls it
+  once. Its `Map` is a lazy view that evaluates only the positions read,
+  where the compiled `Map` builds every element ("Functions of the host").
 - `javascript` (crafted), `D: list<real>`: the root `Tuple` is
   recognised by node identity, so one node `t = Tuple(D, a)`, made with
   `ce.function()`, that is both the root result and an operand in the block
@@ -1579,8 +1575,14 @@ interpreter gives `[True, False]`; the compiled cell is a value computed from
 an absent operand, which the caveats of compiled code leave unspecified. A
 branch condition compiles to the same code as the comparison. A condition
 whose static type admits a value that is not a boolean declines (R5), and so
-does a condition that is a list (an element-wise selection). `Boole` and
-`KroneckerDelta` have no lowering and decline.
+does a condition that is a list (an element-wise selection). `Boole` of a
+boolean gives 1 or 0: with `x: real`, `Boole(x < 1)` compiles to
+`((_.x < 1) ? 1 : 0)` on JavaScript and to `((x < 1.0) ? 1.0 : 0.0)` on GLSL,
+and `Boole` of a list of booleans gives a list. `KroneckerDelta(a, b)` of two
+scalars compiles as `Boole(Equal(a, b))`, and `KroneckerDelta(n)` as
+`Boole(Equal(n, 0))`. A list operand of `KroneckerDelta`, three operands or
+more, and both operators on `interval-js` decline. The rule is in
+`src/compute-engine/compilation/ir/README.md`, "The contracts".
 
 A consumer that needs tolerant equality evaluates through the interpreter, or
 asks for a compile option; none exists today.
@@ -2391,6 +2393,109 @@ with a rest (variadic) parameter is a static error too
 `canonicalFunctionLiteralArguments()` in `function-utils.ts`, and the Epsil
 parser's `default-value-invalid`).
 
+### Variables that a function assigns
+
+A function literal compiled to JavaScript can assign a variable of the
+engine that it closes over, such as the state of an animation:
+
+```js
+executeEpsil(ce, `let s = 0.5
+let advance = (t: real) => do { s = s + t / 1000 }`);
+const result = compile(ce.box('advance').evaluate());
+result.assigns;            // ['s']
+result.run(16);            // NaN: the body ends in an assignment (Nothing)
+ce.box('s').evaluate();    // 0.516
+```
+
+Each call of `run()` reads the value of each variable of `assigns` in the
+engine, runs the code, and writes the new values back to the engine as
+machine numbers, as an evaluation of the call writes them. An exact value
+(`1/30 * pi`, which an interpreted call can write) is read as its machine
+number. A call that throws writes nothing. A variable that holds no value,
+or a complex number for a variable of type `number`, throws a `TypeError`
+before the call, as an input of type `number` does. The `code` takes the value of each variable
+after the arguments and returns an array of the value of the function and
+the new value of each variable: `load()` of the code gives
+`f(16, 0.5)` → `[NaN, 0.516]` and reads no engine. Such a result is not
+`shippable`, and the engine's own compilations (`Map`, the quadrature and the
+other implicit callers) interpret the function: they can compute an element
+a second time.
+
+The variable is a variable of the scope of the compilation, not a local or a
+parameter of the literal, with a declared type whose lane is `real`,
+`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`). These decline:
+
+- another target, `interval-js` and the `bigint` mode;
+- a variable whose type is inferred from its value (`ce.assign('u', 1)`
+  with no declaration): declare its type;
+- a constant, a list, a tuple, a string or a complex variable;
+- a variable with no value at the compilation, and a name of the `vars`,
+  `symbolic` or `inputs` option: it is an input of the host;
+- a value of another lane: `n = n + 0.5` for `n: integer`;
+- a user function that the body calls and that reads the variable
+  (`let get = () => s` and `do { s = s + 1; get() }`), and one that assigns
+  it;
+- an expression that is not a function literal and assigns a variable
+  (`Block(Assign(s, s + 1))`).
+
+A function that only reads a variable still holds its value at the
+compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).
+
+### Functions of the host
+
+Compiled JavaScript calls a function that the host declared with
+`ce.declare()` and an `evaluate` function, such as the `draw` of a notebook:
+
+```js
+ce.declare('hostDraw', {
+  signature: '(real) -> nothing',
+  evaluate: (ops) => { record(ops[0].re); return ce.symbol('Nothing'); },
+});
+executeEpsil(ce, 'let tick = (t: real) => hostDraw(t / 1000)');
+const result = compile(ce.box('tick').evaluate());
+result.hostCalls;          // ['hostDraw']
+result.run(16);            // NaN: the value Nothing; record(0.016) ran
+```
+
+Each call in the code evaluates the call in the engine, as the interpreter
+evaluates it, at each evaluation and in the order of the program: two equal
+calls are two calls, a call in a `Sum` is made at each pass, and a call
+with constant arguments is made when the code runs, not when it is
+compiled. One exception: a `Map` builds every element, so a call in its
+callback is made for each element, also where the interpreter's lazy `Map`
+reads fewer positions (`First`, `At`, `Length` of the `Map`; "Known
+limitations"). The value is read on the lane of the static type of the
+call: a machine number (an exact value such as `Sqrt(3)` is read as its
+number; NaN for a value that is not a real number, and for a call that
+`evaluate` leaves unevaluated, which is not evaluated again), a boolean (a
+`TypeError` for another value), or nothing. The code calls the definition
+that the call was bound to, also where the engine holds another definition
+of the name when the code runs (a scope pushed later). The `code` calls the
+engine, so `load()` and the batch loaders refuse it with an error that names
+the functions, and the result is not `shippable`. The
+engine's own compilations (`Map`, the quadrature and the other implicit
+callers) interpret the function, as for `assigns`.
+
+A function of the host is a definition with an `evaluate` function that is
+not of the library, not lazy, and not a function literal, a definition with
+clauses or a method of a protocol (those are the program's own functions).
+These decline:
+
+- another target, `interval-js` and the `bigint` mode;
+- an argument that is not a real, an integer, a boolean or a string (a list,
+  a tuple, a complex number), and more than four arguments;
+- a static type of the call other than `real`, `integer`, `boolean` or
+  `nothing`: `(real) -> any` gives no settled shape (R3);
+- a value `nothing` read anywhere but as the value of the root function
+  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read;
+- a call in a function that assigns a variable of the engine
+  (`do { s = s + t; hostDraw(s) }`): the host function could read the
+  variable before the code writes it back.
+
+A function that builds a value of a type of the program (the `Figure` of a
+drawing library, a tuple of a string, lists and fields typed `any`) has no
+settled shape, and declines (R3).
+
 ## Collections
 
 Compiled broadcasting preserves the interpreter's strict lifted regime.
@@ -2426,9 +2531,14 @@ operator reads declines (`IsMissing`, `Coalesce`, `AssertPresent`, `Length`,
 `Rest` and the other list operators, a binding, an argument of a function, an
 element of a list, also through arithmetic: `Length(2·(x·L)\{x > 0\})`),
 because the list of `NaN` would give a finite value there (`Length` gives 3
-where the interpreter gives `Missing`). So does a length that the restricted
-value makes itself
-(`Range(1, ⌊x⌋)\{x > 0\}`). A restriction whose condition is a list (an
+where the interpreter gives `Missing`). A restriction that is the value of a
+name (`C` declared with the value `If(0 ≤ x ≤ 6, x + [0, 4, 2])`) compiles
+where each occurrence of the name in the program is in one of these places
+(`At(C, 1)` is `NaN` at `x = 7`); it declines when the program also reads the
+name in another way (`At(C, 1) + Length(C)`), and when the value of another
+name or the body of a user function that the program reaches has the name
+(`M` with the value `At(C, 1)`, `g(t) ≔ t + At(C, 1)`). A length that the
+restricted value makes itself (`Range(1, ⌊x⌋)\{x > 0\}`) declines too. A restriction whose condition is a list (an
 element-wise selection, `x\{L > 0\}` with `L: list<real>`) selects position
 by position, as the interpreter (`docs/BROADCAST-MODEL.md`); a restricted
 list is read to the shorter of the condition and the list.

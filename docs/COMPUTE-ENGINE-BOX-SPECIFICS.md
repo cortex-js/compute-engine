@@ -30,7 +30,9 @@ checkout before review.
 
 ## §2 Worker limits and the box lock
 
-Jest defaults to 12 local workers. Set a smaller limit for targeted runs:
+Jest defaults to one local worker for each 5 GB of memory, at most 12
+(`config/jest.config.cjs`): 12 on the 64 GB machine, 6 on univac. Set a smaller
+limit for targeted runs:
 
 | Run           | Command                    |
 | ------------- | -------------------------- |

@@ -3701,6 +3701,51 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'function',
     parse: 'Zeta',
   },
+  // Polygamma function: `\psi^{(m)}(z)` is `PolyGamma(m, z)`. Only the
+  // parenthesized superscript followed by one argument in parentheses makes
+  // the call. `\psi`, `\psi(z)` and `\psi^2(x)` keep the generic reading,
+  // because `\psi` is also a common variable or function (a wave function).
+  // The entry declines when `psi` is declared, so a declared function `\psi`
+  // keeps the Lagrange derivative reading of `\psi^{(m)}(z)` and a declared
+  // variable keeps its own reading. For the same reason `PolyGamma`
+  // serializes as `\mathrm{PolyGamma}(m, z)`: `\psi^{(m)}(z)` would read
+  // back as another expression in an engine where `psi` is declared, and
+  // the serializer does not know the declarations.
+  {
+    latexTrigger: ['\\psi'],
+    kind: 'function',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      if (parser.resolveSymbol('psi') !== undefined) return null;
+      parser.skipSpace();
+      if (!parser.match('^')) return null;
+      const sup = parser.parseGroup();
+      // `^{(m)}` is a `Delimiter` with one operand and the default `()`
+      // fences; a `Delimiter` with a second operand has other fences or
+      // separators (`^{[m]}`, `^{(m, n)}`).
+      if (operator(sup) !== 'Delimiter' || nops(sup) !== 1) return null;
+      const order = operand(sup, 1);
+      if (order === null || operator(order) === 'Sequence') return null;
+      parser.skipSpace();
+      const args = parser.parseArguments('enclosure');
+      if (args === null || args.length !== 1) return null;
+      return ['PolyGamma', order, args[0]] as MathJsonExpression;
+    },
+  },
+  // Lerch transcendent: `\Phi(z, s, a)` with three arguments is
+  // `LerchPhi(z, s, a)`. With another number of arguments, `\Phi` keeps the
+  // generic reading (`\Phi(x)` is often the normal distribution function),
+  // and the entry declines when `Phi` is declared. `LerchPhi` serializes as
+  // `\mathrm{LerchPhi}(z, s, a)`, for the reason given for `PolyGamma`.
+  {
+    latexTrigger: ['\\Phi'],
+    kind: 'function',
+    parse: (parser: Parser): MathJsonExpression | null => {
+      if (parser.resolveSymbol('Phi') !== undefined) return null;
+      const args = parser.parseArguments('enclosure');
+      if (args === null || args.length !== 3) return null;
+      return ['LerchPhi', ...args] as MathJsonExpression;
+    },
+  },
   // Beta function - \Beta parses to Beta function when followed by arguments
   // Note: \Beta without arguments is handled by definitions-symbols.ts as Greek letter.
   // `\Beta` is not a real LaTeX command (capital beta is roman, not a

@@ -175,9 +175,10 @@ describe('compile() reads the definition of the call', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const result = compile(u) as any;
-      // The compiler has no lowering for the handler: the call declines,
-      // and the result falls back to the interpreter.
-      expect(result.success).toBe(false);
+      // The code calls the handler of the definition that the call is bound
+      // to (CE-1621), not the library Sqrt.
+      expect(result.success).toBe(true);
+      expect(result.hostCalls).toEqual(['Sqrt']);
       expect(result.run({ y: 4 })).toBe(104);
     } finally {
       warn.mockRestore();

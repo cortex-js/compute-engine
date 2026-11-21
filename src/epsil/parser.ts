@@ -930,7 +930,31 @@ export class Parser {
       if (fixit !== undefined) diagnostic.fixits = [fixit];
     }
     if (this.isIncomplete(message, start)) diagnostic.incomplete = true;
+    // Two parse levels can report the same error at the same place
+    // (`let f = (` reports the missing expression in the parentheses and the
+    // missing value of the `let`): keep one. Only the last diagnostics are
+    // compared, so a long list of errors costs no quadratic time.
+    if (this.repeatsRecentDiagnostic(diagnostic)) return;
     this.diagnostics.push(diagnostic);
+  }
+
+  /** Whether one of the last diagnostics has the severity, the message and
+   * the range of `diagnostic`. */
+  private repeatsRecentDiagnostic(diagnostic: ParsingDiagnostic): boolean {
+    const key = JSON.stringify(diagnostic.message);
+    const [start, end] = diagnostic.range;
+    const first = Math.max(0, this.diagnostics.length - 4);
+    for (let i = this.diagnostics.length - 1; i >= first; i--) {
+      const other = this.diagnostics[i];
+      if (
+        other.severity === diagnostic.severity &&
+        other.range[0] === start &&
+        other.range[1] === end &&
+        JSON.stringify(other.message) === key
+      )
+        return true;
+    }
+    return false;
   }
 
   /** Whether the diagnostic `message` that the parser reports at the (local)
@@ -3934,7 +3958,9 @@ export class Parser {
     // the `Element` infix operator).
     if (!(this.check('SYMBOL') && this.current.text === 'in')) {
       this.error(
-        ['unexpected-symbol', this.current.text],
+        this.check('EOF')
+          ? ['literal-expected', 'in']
+          : ['unexpected-symbol', this.current.text],
         this.current.start,
         this.current.end
       );
@@ -6923,10 +6949,13 @@ export class Parser {
       this.advance();
   }
 
-  /** Emit exactly one diagnostic for an unexpected token. */
+  /** Emit exactly one diagnostic for an unexpected token. The end of the
+   * input (`[1,`, `f(`) is a missing expression, not a symbol. */
   private reportUnexpected(token: Token): void {
     if (token.diagnostics && token.diagnostics.length > 0) {
       this.harvest(token);
+    } else if (token.type === 'EOF') {
+      this.error(['expression-expected'], token.start, token.end);
     } else {
       this.error(['unexpected-symbol', token.text], token.start, token.end);
     }

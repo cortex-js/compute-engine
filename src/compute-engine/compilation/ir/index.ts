@@ -16,7 +16,7 @@
  */
 
 import type { Expression } from '../../global-types.js';
-import { Decline, hostVarOp, lower } from './lower.js';
+import { Decline, hostCallOp, hostVarOp, lower } from './lower.js';
 import { UNSUPPORTED_MODE } from './lower-context.js';
 import { TEXT_LIST_MAKERS, TEXT_LIST_READS } from './lower-strings.js';
 import { readsVarsObject } from '../vars-inputs.js';
@@ -557,15 +557,50 @@ function holdStorage(p: Program, names: readonly string[]): string | undefined {
   return refusal;
 }
 
-/** The rows and the syntax of one compilation: those of `extend`, and a
- *  row per name of `vars`, of one operation per lane. */
-function tables(options: SliceOptions): {
+/** The rows and the syntax of one compilation: those of `extend`, a row
+ *  per name of `vars`, of one operation per lane, and a row per function
+ *  of the host that the program `p` calls (`Program.hosts`), of one
+ *  effectful operation spelled as a call of `_SYS.hosts[k]`. */
+function tables(
+  options: SliceOptions,
+  p?: Program
+): {
   rows: readonly OperatorRow[];
   syntax: Syntax;
 } {
   const lanes = ['real', 'integer', 'boolean'] as const;
   const vars = Object.values(options.vars ?? {});
-  const { extend } = options;
+  const hosts = p?.hosts ?? [];
+  const extend: Extension | undefined =
+    hosts.length === 0
+      ? options.extend
+      : {
+          ...options.extend,
+          rows: [
+            ...(options.extend?.rows ?? []),
+            ...hosts.map((h, k) => ({
+              arity: h.args.length as 0 | 1 | 2 | 3 | 4,
+              signatures: [
+                [
+                  h.args,
+                  h.result === 'nothing' ? 'real' : h.result,
+                  hostCallOp(k),
+                ] as const,
+              ],
+              threads: false,
+              effect: 'effectful' as const,
+            })),
+          ],
+          spellings: {
+            ...options.extend?.spellings,
+            ...Object.fromEntries(
+              hosts.map((h, k) => [
+                hostCallOp(k),
+                `_SYS.hosts[${k}](${h.args.map((_, j) => `$${j}`).join(', ')})`,
+              ])
+            ),
+          },
+        };
   const interval = options.mode === 'interval';
   const base =
     options.mode === 'bigint'
@@ -622,7 +657,7 @@ export function sliceProgram(
       undefined,
       UNSUPPORTED_MODE
     );
-  const { rows, syntax } = tables(options);
+  let { rows, syntax } = tables(options);
   // Sums and short lists written out: JavaScript, the interval mode
   // included, not the bigint and complex modes (README, "Lists").
   let unroll =
@@ -670,6 +705,8 @@ export function sliceProgram(
     unroll = sums = false;
     p = lower(expr, rows, { ...lowering, unrollSums: 0, unrollBuilds: 0 });
   }
+  // The rows of the functions of the host that the program calls.
+  if (p.hosts !== undefined) ({ rows, syntax } = tables(options, p));
   // The checks of the lowering and of each pass (`setPassChecks()`); the
   // program after the passes is verified in any case, below.
   const checks = passChecksOn();
@@ -800,13 +837,15 @@ export function compileSlice(
   const p = sliceProgram(expr, options);
   const held = options.storage && holdStorage(p, options.storage);
   if (held) throw new Decline('program', `${held} on ${options.target}`);
-  const { rows, syntax } = tables(options);
+  const { rows, syntax } = tables(options, p);
   // The `parallel for` loops that `runAsync()` can send to the worker pool:
   // JavaScript in the default mode, with no `iterationBudget` (one count of
   // passes for a call, which workers cannot share), for an expression (a
-  // root function literal has no `runAsync()`). `run()` does not change.
+  // root function literal has no `runAsync()`), and with no call of a
+  // function of the host (a worker has no engine). `run()` does not change.
   const pool =
     options.target === 'javascript' &&
+    p.hosts === undefined &&
     (options.mode ?? 'strict') === 'strict' &&
     options.iterationBudget === undefined &&
     entryOf(p).literal !== true

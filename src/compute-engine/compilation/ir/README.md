@@ -1913,11 +1913,14 @@ index reads, when the value of that call is in one of these places too
 or a `Which`, or the last expression of a `Block`, whose value is in one of
 these places. In any other place (a discharge, `Length`, `Rest`, another list
 operator, a binding, an argument of a function, an element of a list) it
-declines. One boxed `If` in several places must be in such a place each time,
-and an `If` that is only the value of a name of the engine declines (one boxed
-`If` that is also a node of the program does not: `docs/COMPILATION-MODEL.md`,
-"Known limitations"). The conditions, the arms and the default are lowered once,
-before the build, all of them: the interpreter evaluates an arm and a later
+declines. One boxed `If` in several places must be in such a place each time.
+The value of a name that the program reads (`expression()`) is in such a place
+when each occurrence of the name in the program is (`readers` holds the
+symbols too), and no value of another name and no body of a user function that
+the program reaches has the name (`heldAsAbsent()`); a new name that holds the
+value, or a read of it from another value, checks again each `If` of the
+entry whose list of NaN was already accepted (`nanAccepted`). The conditions,
+the arms and the default are lowered once, before the build, all of them: the interpreter evaluates an arm and a later
 condition only where the selection reaches it, so one that is not pure (an
 effect, a write to a name, an operation that can throw such as `AssertPresent`,
 a loop, a recursive call) declines. Two exceptions (CE-1562). A `Range` arm is
@@ -2465,6 +2468,15 @@ over `[2, 4]` is `partial` over `[0, 3]` (the hull with `empty` keeps the mark
 `entire`, and `x` otherwise, already `partial` where it is `'maybe'`.
 
 ## Effects
+
+A call of a function of the host (a definition with an `evaluate` function
+that is not of the library, `isHostDefinition()` of `lower.ts`) is the
+effectful operation `call.host<k>` (`hostCall()`), whose row and spelling
+`_SYS.hosts[k](…)` `sliceProgram()` adds after the lowering
+(`Program.hosts`); the lowering reads an operation with no row as
+effectful. `_SYS.hosts` is bound to the engine (`runtimeOf()` of
+`print-js.ts`), so such a program has no pool loop and is not `shippable`
+(`docs/COMPILATION-MODEL.md`, "Functions of the host").
 
 `pure` (merged, removed, moved, folded, evaluated where it was not written),
 `may-fail` (removed when unused; shared by the lowering with an evaluation of
@@ -3395,7 +3407,21 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   is a `lambda` too. A literal whose body reads a free name declines: that
   convention has no object for it (`compileSlice()` itself takes one after the
   arguments). The inputs of an expression are in `freeSymbols` and
-  `varsObjectRefs`. A warning of a random frame is in `warnings`
+  `varsObjectRefs`. A root literal that assigns a variable of the scope of the
+  compilation (`s = s + t` with `s` a variable of the engine, not a local or a
+  parameter of the literal; `assignedNames()` of `lower.ts`) has the name in
+  `assigns` (`Program.assigns`): on the plain JavaScript target, for a variable
+  of a declared type of the lane `real`, `integer` or `boolean`, the name is a
+  local whose value is a positional parameter after the arguments, its stored
+  value is hidden while the body is lowered (`withVarsValuesHidden()`), and the
+  entry returns the array of the value of the body (NaN for a body that ends in
+  an assignment) and the value of each name after it. `run()` reads each value
+  in the engine before the call and writes the new values back after it
+  (`assigningRun()` of `adapter.ts`); the result is not `shippable`, and
+  `implicitCompile()` gives no result for it. Another target, the interval and
+  `bigint` modes, an inferred type, a constant and another lane decline; so
+  does a user function that the body calls and that reads the name (`free()`:
+  the name is a local of the entry). A warning of a random frame is in `warnings`
   (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

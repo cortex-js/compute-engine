@@ -695,3 +695,101 @@ test.each(['Assign', 'host', 'enclosing restore point'] as const)(
     }
   }
 );
+
+// A function that states its effects is checked against the literal that a
+// helper it calls holds. A new literal of the helper that falsifies the
+// contract is refused, as for a helper that is an operator (CE-1629).
+describe('an assignment that falsifies a stated effect contract', () => {
+  const twice = ['Function', ['Multiply', 2, 'x'], 'x'] as const;
+  const random = ['Function', ['Add', 'x', ['Random']], 'x'] as const;
+
+  const helpers = {
+    'a declared value': (ce: ComputeEngine) => {
+      ce.declare('h', '(number) -> number');
+      ce.box(['Assign', 'h', twice]).evaluate();
+    },
+    'a value declared with its literal': (ce: ComputeEngine) =>
+      ce.declare('h', { type: '(number) -> number', value: ce.box(twice) }),
+    'an operator with a declared signature': (ce: ComputeEngine) =>
+      ce.declare('h', {
+        signature: '(number) -> number',
+        evaluate: ce.box(twice),
+      }),
+  };
+  const callers = {
+    'an operator': (ce: ComputeEngine, body: unknown) =>
+      ce.declare('g', {
+        signature: '(number) pure -> number',
+        evaluate: ce.box(['Function', body as any, 'x']),
+      }),
+    'a value': (ce: ComputeEngine, body: unknown) =>
+      ce.declare('g', {
+        type: '(number) pure -> number',
+        value: ce.box(['Function', body as any, 'x']),
+      }),
+    'a declared value then assigned': (ce: ComputeEngine, body: unknown) => {
+      ce.declare('g', '(number) pure -> number');
+      ce.assign('g', ce.box(['Function', body as any, 'x']));
+    },
+  };
+
+  for (const [helper, makeHelper] of Object.entries(helpers))
+    for (const [caller, makeCaller] of Object.entries(callers))
+      test(`helper: ${helper}, caller: ${caller}`, () => {
+        const ce = new ComputeEngine();
+        makeHelper(ce);
+        makeCaller(ce, ['h', 'x']);
+        expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+
+        const result = ce.box(['Assign', 'h', random]).evaluate();
+        expect(result.operator).toBe('Error');
+        expect(JSON.stringify(result.json)).toContain('random effects');
+        expect(() => ce.assign('h', ce.box(random))).toThrow(
+          /declared effects `pure`/
+        );
+        expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+        expect(ce.box(['h', 3]).evaluate().json).toBe(6);
+        expect(ce.lookupDefinition('g')!.operator?.pure ?? true).toBe(true);
+
+        // A pure literal is accepted.
+        ce.assign('h', ce.box(['Function', ['Multiply', 4, 'x'], 'x']));
+        expect(ce.box(['g', 3]).evaluate().json).toBe(12);
+      });
+
+  test('through a helper that calls the helper', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    ce.declare('k', '(number) -> number');
+    ce.assign('k', ce.box(['Function', ['h', 'x'], 'x']));
+    callers['an operator'](ce, ['k', 'x']);
+    const result = ce.box(['Assign', 'h', random]).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+  });
+
+  test('a contract that admits the effect accepts the literal', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    ce.declare('g', {
+      signature: '(number) random -> number',
+      evaluate: ce.box(['Function', ['h', 'x'], 'x']),
+    });
+    const result = ce.box(['Assign', 'h', random]).evaluate();
+    expect(result.operator).toBe('Function');
+    expect(ce.box(['h', 3]).evaluate().operator).not.toBe('Error');
+  });
+
+  test('a contract that was false before does not refuse the assignment', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    callers['an operator'](ce, ['h', 'x']);
+    // A write that does not check the contract.
+    ce._setSymbolValue('h', ce.box(random));
+    const result = ce.box(['Assign', 'h', twice]).evaluate();
+    expect(result.operator).toBe('Function');
+    ce.declare('m', '(number) -> number');
+    expect(ce.box(['Assign', 'm', random]).evaluate().operator).toBe(
+      'Function'
+    );
+  });
+});
