@@ -76,6 +76,13 @@
 
 ### Resolved Issues
 
+- **The numeric value of a list divided by a number is correct to the last
+  digit** (CE-1634). At 21 digits, `N([1, 2, 3]/3)` gave
+  `[0.333…333, 0.666…666, 0.999…999]`, because `1/3` was rounded before it
+  multiplied each element. Now each element is the exact product, rounded
+  once, as for a single number: `[0.333…333, 0.666…667, 1]`. The same applies
+  to a matrix and to a range (`Range(1, 3)/3`).
+
 - **A piecewise condition that compares a variable with a word keeps the
   word** (CE-1632). In
   `\begin{cases} x^3 & m = \text{cubic} \\ x & \text{otherwise} \end{cases}`,
