@@ -1643,7 +1643,8 @@ index of a list of stated length is a constant; one that is 0 or out of range
 declines (the interpreter leaves `ReplaceAt` unevaluated). An index known at run
 time is `wix` (it throws `out-of-range` for an index that is 0, out of range or
 not an integer, where the interpreter gives an unevaluated form or an error), on
-JavaScript only: GLSL, the interval mode and the `bigint` mode decline it. On
+JavaScript only (`bwix` in the `bigint` mode): GLSL and the interval mode
+decline it. On
 GLSL, which builds no list, a constant index of a list of a constant length is
 the list of its elements. A boolean value in a list of numbers, or the reverse,
 and a complex value decline; so do several indexes (`ReplaceAt(M, i, j, v)`).
