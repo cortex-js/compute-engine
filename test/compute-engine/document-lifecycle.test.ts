@@ -261,6 +261,112 @@ test('one redraw shares reads, rejects async callbacks and takes fresh inputs in
   environment.dispose();
 });
 
+describe('a new pass draws again from a random lazy collection at any depth', () => {
+  // Twenty draws: two passes give the same list with probability 0.
+  const draws = [
+    'Comprehension',
+    ['Random'],
+    ['Element', 'n', ['Range', 1, 20]],
+  ];
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  /** The elements of `H` in two reads of each of two passes. */
+  const passes = (body: unknown, g: unknown = 0) => {
+    const revision = imports.prepare(
+      [
+        { id: 'G', latex: 'G' },
+        { id: 'H', latex: 'H' },
+      ],
+      {
+        split: (source) => ({ head: source, body: '' }),
+        recognize: (row) => ({
+          role: 'value',
+          head: { name: row.id, params: [] },
+          bodyJson: (row.id === 'G' ? g : body) as never,
+        }),
+        normalize: (raw) => raw,
+      }
+    );
+    expect(revision.rowErrors.size).toBe(0);
+    const read = () =>
+      [...ce.expr('H', { scope: revision.scope }).evaluate().each()].map(
+        (x) => x.N().re
+      );
+    const result = [0, 1].map(() => {
+      const pass = revision.createValuePass(new Set(['H']));
+      return [pass.run(read), pass.run(read)];
+    });
+    revision.dispose();
+    return result;
+  };
+  afterAll(() => {
+    imports.dispose();
+    environment.dispose();
+  });
+
+  test.each([
+    [
+      'ListJoin of a range and a comprehension',
+      ['ListJoin', ['Range', 1, 3], draws],
+    ],
+    ['ListJoin of two comprehensions', ['ListJoin', draws, draws]],
+    ['Reverse of a comprehension', ['Reverse', draws]],
+  ])('%s', (_, body) => {
+    const [[a, b], [c, d]] = passes(body);
+    expect(b).toEqual(a);
+    expect(d).toEqual(c);
+    expect(c).not.toEqual(a);
+    expect(c.slice(-20)).not.toEqual(a.slice(-20));
+  });
+
+  test('a value that holds the collection of a row outside the pass', () => {
+    const [[a, b], [c, d]] = passes(['Reverse', 'G'], draws);
+    expect(b).toEqual(a);
+    expect(d).toEqual(c);
+    expect(c).not.toEqual(a);
+  });
+
+  test('one pass shares the draws of a row among the rows that read it', () => {
+    const revision = imports.prepare(
+      [
+        { id: 'G', latex: 'G' },
+        { id: 'H', latex: 'H' },
+        { id: 'J', latex: 'J' },
+      ],
+      {
+        split: (source) => ({ head: source, body: '' }),
+        recognize: (row) => ({
+          role: 'value',
+          head: { name: row.id, params: [] },
+          bodyJson: (row.id === 'G'
+            ? draws
+            : row.id === 'H'
+              ? ['Reverse', 'G']
+              : ['ListJoin', 'G', 'G']) as never,
+        }),
+        normalize: (raw) => raw,
+      }
+    );
+    expect(revision.rowErrors.size).toBe(0);
+    const elements = (name: string) =>
+      [...ce.expr(name, { scope: revision.scope }).evaluate().each()].map(
+        (x) => x.N().re
+      );
+    // G, H and J in one pass: H reverses G's draws, and J joins them twice.
+    const pass = revision.createValuePass(new Set(['G', 'H', 'J']));
+    const [g, h, j] = pass.run(() => ['G', 'H', 'J'].map(elements));
+    expect(h).toEqual([...g].reverse());
+    expect(j).toEqual([...g, ...g]);
+    // Only J in the pass: its two operands are one draw set.
+    const alone = revision
+      .createValuePass(new Set(['J']))
+      .run(() => elements('J'));
+    expect(alone.slice(20)).toEqual(alone.slice(0, 20));
+    revision.dispose();
+  });
+});
+
 test('failed profile and import initialization cannot publish a type or constructor', () => {
   const ce = new ComputeEngine();
   const registryError = /Type and protocol registries are read-only/;
@@ -977,5 +1083,143 @@ describe('row content errors are reported per row', () => {
       expect(value(revision, name)).not.toBe(5);
     }
     revision.dispose();
+  });
+
+  test('a recursion with no base case is a row error', () => {
+    for (const { input, failed, dependent } of [
+      {
+        input: [{ id: 'f', latex: 'f(x)=f(x-1)+1' }],
+        failed: 'f',
+        dependent: undefined,
+      },
+      {
+        input: [
+          { id: 'f', latex: 'f(x)=g(x)+1' },
+          { id: 'g', latex: 'g(x)=f(x)' },
+        ],
+        failed: 'g',
+        dependent: 'f',
+      },
+    ]) {
+      const revision = prepare([...input, { id: 'y', latex: 'y=f(2)' }]);
+      expect(error(revision, failed)).toContain(
+        'Recursive definition with no base case: ' + failed
+      );
+      if (dependent !== undefined)
+        expect(error(revision, dependent)).toContain(
+          'invalid-document-dependency'
+        );
+      expect(error(revision, 'y')).toContain('invalid-document-dependency');
+      // A call is an error value, not a recursion-limit throw.
+      expect(operatorOf(value(revision, 'f(3)'))).toBe('Error');
+      revision.dispose();
+    }
+  });
+
+  test('a recursion with an arm that may not recurse is accepted', () => {
+    for (const [latex, result] of [
+      [
+        'f(n)=\\begin{cases}1&n\\le0\\\\n f(n-1)&\\text{otherwise}\\end{cases}',
+        6,
+      ],
+      // The call is under a short-circuit `And`.
+      ['f(x)=x>0\\land f(x-1)', 'False'],
+      // The call is under the binder of a `Sum`.
+      ['f(x)=1+\\sum_{k=1}^{x-1}f(k)', 4],
+      ['f(x)=x^2', 9],
+    ] as const) {
+      const revision = prepare([{ id: 'f', latex }]);
+      expect(revision.rowErrors.size).toBe(0);
+      expect(value(revision, 'f(3)')).toBe(result);
+      revision.dispose();
+    }
+    // The only call is under `Hold`, which is not a strict operator.
+    const holdSyntax: DocumentSyntax = {
+      split: () => ({ head: 'f', body: '' }),
+      recognize: () => ({
+        role: 'function',
+        head: { name: 'f', params: ['x'] },
+        bodyJson: ['Hold', ['f', ['Subtract', 'x', 1]]],
+      }),
+      normalize: (raw) => raw,
+    };
+    const revision = imports.prepare([{ id: 'f', latex: 'f' }], holdSyntax);
+    expect(revision.rowErrors.size).toBe(0);
+    expect(operatorOf(value(revision, 'f(3)'))).toBe('Hold');
+    revision.dispose();
+  });
+});
+
+describe('a parameter read only as a join operand', () => {
+  type Json = Parameters<DocumentSyntax['normalize']>[0];
+  const joinSyntax = (bodyJson: Json): DocumentSyntax => ({
+    split: () => ({ head: 'f', body: '' }),
+    recognize: () => ({
+      role: 'function',
+      head: { name: 'f', params: ['y'] },
+      bodyJson,
+    }),
+    normalize: (raw) => raw,
+  });
+  const call = (revision: { scope: InspectableScope }, arg: unknown) =>
+    JSON.stringify(
+      ce.expr(['f', arg as Json], { scope: revision.scope }).evaluate().json
+    );
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  // A join takes a scalar operand as one element, so the parameter is any
+  // value: a scalar argument is admitted, and a list argument is spliced,
+  // not broadcast over.
+  for (const head of ['ListJoin', 'Join']) {
+    test(head + ': a scalar is one element and a list is spliced', () => {
+      const environment = createDocumentEnvironment(ce, () => {});
+      const imports = environment.createImports(() => {});
+      for (const extra of [{}, { resultType: 'list<any>' }]) {
+        const revision = imports.prepare(
+          [{ id: 'f', latex: 'f', ...extra }],
+          joinSyntax([head, ['List', 1, 2], 'y'])
+        );
+        expect(revision.rowErrors.size).toBe(0);
+        expect(call(revision, 7)).toBe('["List",1,2,7]');
+        expect(call(revision, ['List', 3, 4])).toBe('["List",1,2,3,4]');
+        revision.dispose();
+      }
+      imports.dispose();
+      environment.dispose();
+    });
+  }
+
+  test('a spread parameter takes a scalar argument', () => {
+    const environment = createDocumentEnvironment(ce, () => {});
+    const imports = environment.createImports(() => {});
+    const revision = imports.prepare(
+      [{ id: 'f', latex: 'f' }],
+      joinSyntax(['List', ['Spread', 'y'], 0])
+    );
+    expect(call(revision, 5)).toBe('["List",5,0]');
+    expect(call(revision, ['List', 9])).toBe('["List",9,0]');
+    revision.dispose();
+    imports.dispose();
+    environment.dispose();
+  });
+
+  test('a parameter that another operator reads keeps its inferred type', () => {
+    const environment = createDocumentEnvironment(ce, () => {});
+    const imports = environment.createImports(() => {});
+    const revision = imports.prepare(
+      [{ id: 'f', latex: 'f' }],
+      joinSyntax(['ListJoin', ['List', 1, 2], 'y', ['Length', 'y']])
+    );
+    expect(ce.expr('f', { scope: revision.scope }).type.toString()).toBe(
+      '(y: collection) -> list<any>'
+    );
+    expect(call(revision, 7)).toContain('incompatible-type');
+    expect(call(revision, ['List', 3, 4])).toBe('["List",1,2,3,4,2]');
+    revision.dispose();
+    imports.dispose();
+    environment.dispose();
   });
 });

@@ -2814,7 +2814,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
                 binding.value,
                 expr,
                 options,
-                () => this._dereference(expr, options)
+                (value) => this._dereference(value, options)
               )
             : undefined;
         return this._testedRead(

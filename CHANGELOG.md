@@ -16,6 +16,14 @@
 
 ### Behavior Changes
 
+- **A Document row that defines a recursion with no base case is a row
+  error**: when every arm of every function of a recursive component calls a
+  function of the component through arithmetic, a list or a tuple, as in
+  `f(x)=f(x-1)+1`, the row has the error
+  `Recursive definition with no base case: f`, its readers have
+  `invalid-document-dependency`, and a call gives that error instead of
+  throwing `Recursion limit exceeded`.
+
 - **A `\text{…}` that names a unit is a string unless it is part of a unit
   expression** (CE-1644). A `\text{…}` is a unit after a number, and as an
   operand of a product, a quotient, a power or a root:
@@ -35,6 +43,11 @@
   string: write `\mathrm{m}`.
 
 ### Resolved Issues
+
+- **In a Document, a function row whose parameter is read only as an operand
+  of `Join` or `ListJoin` takes a scalar argument as one element**: with
+  `f(y) = ListJoin([1, 2], y)`, `f(7)` is `[1, 2, 7]`, where it was an
+  `incompatible-type` error, and `f([3, 4])` is still `[1, 2, 3, 4]`.
 
 - **A call of a user function whose body is an `If` with no else of a list
   compiles where `At`, `First`, `Last`, a reduction or arithmetic reads it**

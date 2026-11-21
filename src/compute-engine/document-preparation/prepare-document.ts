@@ -4,6 +4,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import type {
   BoxedValueDefinition,
   Expression,
+  FunctionInterface,
   IComputeEngine,
   InspectableScope,
   Scope,
@@ -30,6 +31,12 @@ import {
 import { demandComponents } from './demand-components.js';
 import { makePreparedValuePass } from './value-pass.js';
 import { isLibraryDefinition } from '../boxed-expression/implicit-variable-rule.js';
+import {
+  isContinuationOperand,
+  isFunction,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
+import { isLibraryOperator } from '../library-shadowing.js';
 
 type Head = { name: string; params: readonly string[] };
 type Role = 'function' | 'value';
@@ -74,6 +81,12 @@ export interface PreparedDocumentRevision {
    * `rowErrors` holds the diagnostic of each rejected row. */
   readonly rawRows: ReadonlyMap<string, MathJsonExpression>;
   readonly rowReferences: ReadonlyMap<string, readonly string[]>;
+  /** The diagnostic of each rejected row, by row ID. A recursive component
+   * in which every return arm of every function certainly calls a function
+   * of the component (through arithmetic, a list, a tuple or such a call) is
+   * rejected with `Recursive definition with no base case: <name>`; a call
+   * under a conditional arm, a short-circuit, a binder or any other operator
+   * may not run, and its arm is a base case. */
   readonly rowErrors: ReadonlyMap<string, Expression>;
   readonly definitions: readonly PreparedDocumentDefinition[];
   /** Start after input writes. Use this pass only for the current redraw. */
@@ -253,6 +266,110 @@ function hasListReturn(
     return false;
   }
   return true;
+}
+
+/**
+ * The operators that evaluate every operand whenever they are evaluated. A
+ * call to a component member under one of them runs whenever its arm runs.
+ */
+const STRICT_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'List',
+  'Tuple',
+]);
+
+/**
+ * The return arms of a canonical function body: the arms of a `Which` or an
+ * `If`, followed into nested ones and into a `Block` of one expression, or
+ * the body itself. `undefined` stands for the arm with no expression: a
+ * `Which` with no `True` default, or an `If` with no else.
+ */
+function returnArms(body: Expression): (Expression | undefined)[] {
+  const arms: (Expression | undefined)[] = [];
+  const pending = [body];
+  while (pending.length > 0) {
+    const arm = pending.pop()!;
+    // The canonical body of a function literal is a `Block`.
+    if (isFunction(arm, 'Block') && arm.nops === 1) pending.push(arm.op1);
+    else if (isFunction(arm, 'Which')) {
+      const ops = arm.ops;
+      for (let i = 1; i < ops.length; i += 2) pending.push(ops[i]);
+      if (ops.length % 2 !== 0 || !isSymbol(ops[ops.length - 2], 'True'))
+        arms.push(undefined);
+    } else if (isFunction(arm, 'If')) {
+      pending.push(...arm.ops.slice(1, 3));
+      if (arm.nops < 3) arms.push(undefined);
+    } else arms.push(arm);
+  }
+  return arms;
+}
+
+/**
+ * Whether evaluating `expr` certainly makes a call that `isCertainCall`
+ * accepts. Only the operands of a strict operator are followed: a call under
+ * any other operator, a conditional, a short-circuit or a binder may not run.
+ * A strict operator name that the document or a formal shadows is not strict.
+ */
+function hasCertainCall(
+  expr: Expression,
+  shadowed: (name: string) => boolean,
+  isCertainCall: (call: Expression & FunctionInterface) => boolean
+): boolean {
+  const pending = [expr];
+  while (pending.length > 0) {
+    const term = pending.pop()!;
+    if (!isFunction(term)) continue;
+    if (isCertainCall(term)) return true;
+    const head = term.operator;
+    if (
+      !STRICT_OPERATORS.has(head) ||
+      shadowed(head) ||
+      !isLibraryOperator(term)
+    )
+      continue;
+    // An `Add` or a `Multiply` with an ellipsis stays unevaluated.
+    if (
+      (head === 'Add' || head === 'Multiply') &&
+      term.ops.some((op) => isContinuationOperand(op))
+    )
+      continue;
+    pending.push(...term.ops);
+  }
+  return false;
+}
+
+/**
+ * Whether the parameter `name` is read in `body`, and every read of it is an
+ * operand of a library `Join` or `ListJoin`. Such a parameter is inferred as
+ * `collection<any>`, the signature that a join validates its operands
+ * against, but a join also takes a scalar operand as one element:
+ * `ListJoin([1, 2], 7)` is `[1, 2, 7]`. A read in another position
+ * (`ListJoin([1, 2], y) + y`) keeps the inferred type.
+ */
+function isJoinOperandOnly(body: Expression, name: string): boolean {
+  let read = false;
+  const visit = (expr: Expression): boolean => {
+    if (!isFunction(expr)) return true;
+    const join =
+      (expr.operator === 'Join' || expr.operator === 'ListJoin') &&
+      isLibraryOperator(expr);
+    for (const op of expr.ops) {
+      if (isSymbol(op, name)) {
+        if (!join) return false;
+        read = true;
+      } else if (!visit(op)) return false;
+    }
+    return true;
+  };
+  return visit(body) && read;
 }
 
 export function prepareDocument(
@@ -792,10 +909,11 @@ export function prepareDocument(
             if (!body.isValid) return rejectComponent(group, name, body);
             // Read-only position evidence can guide a stable input contract
             // without committing the draft to a specific tuple width.
+            // A parameter read only as an operand of a join is any value: the
+            // join takes a scalar operand as one element.
             const inferred = body.type.type;
             if (
               contract === undefined &&
-              row.resultType === undefined &&
               typeof inferred === 'object' &&
               inferred.kind === 'signature'
             ) {
@@ -805,7 +923,14 @@ export function prepareDocument(
                   const slot = inferred.args?.[i]?.type;
                   if (typeof parameter !== 'string' || slot === undefined)
                     return parameter;
-                  const open = oneElementTypeOf(slot);
+                  const open =
+                    typeToString(slot) === 'collection<any>' &&
+                    isFunction(body) &&
+                    isJoinOperandOnly(body.ops[0], parameter)
+                      ? 'any'
+                      : row.resultType === undefined
+                        ? oneElementTypeOf(slot)
+                        : slot;
                   if (open === slot) return parameter;
                   changed = true;
                   return ['Typed', parameter, "'" + typeToString(open) + "'"];
@@ -928,6 +1053,45 @@ export function prepareDocument(
                 )
               );
             member.body = body;
+          }
+          // A recursion with no base case never returns a value: refuse it
+          // here rather than let each call exceed the recursion limit.
+          if (cyclic) {
+            const isCertainCall = (call: Expression & FunctionInterface) => {
+              const callee = declarations.get(call.operator);
+              if (callee === undefined || !group.includes(call.operator))
+                return false;
+              const { row, head } = callee;
+              return (
+                head.params.length === call.nops &&
+                call.ops.every((arg, i) => {
+                  if (arg.operator === 'Spread' || arg.operator === 'Sequence')
+                    return false;
+                  const stated = row.formalTypes?.[head.params[i]];
+                  return stated === undefined || arg.type.matches(stated);
+                })
+              );
+            };
+            const hasBaseArm = checked.some(({ name, body }) => {
+              const params = declarations.get(name)!.head.params;
+              const shadowed = (head: string) =>
+                params.includes(head) || declarations.has(head);
+              const formalCall = (call: Expression & FunctionInterface) =>
+                !params.includes(call.operator) && isCertainCall(call);
+              return returnArms(
+                isFunction(body, 'Function') ? body.op1 : body!
+              ).some(
+                (arm) =>
+                  arm === undefined ||
+                  !hasCertainCall(arm, shadowed, formalCall)
+              );
+            });
+            if (!hasBaseArm)
+              return rejectComponent(
+                group,
+                group[0],
+                ce.error('Recursive definition with no base case: ' + group[0])
+              );
           }
           // No callable receives its body until every body in the group is checked.
           for (const { name, binding, body } of checked) {
