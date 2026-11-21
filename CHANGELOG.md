@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A call of a user function whose body is an `If` with no else of a list
+  compiles where `At`, `First`, `Last`, a reduction or arithmetic reads it**
+  (CE-1648). With
+  `C(w) = If(0 ≤ w ≤ 6, w + [0, 4, 2])`, `At(C(x), 1)` and
+  `Max(C(x)[1], C(x)[2], C(x)[3])` compile on JavaScript and `interval-js` and
+  give `NaN` where the condition is false, as the inline `If` does since
+  0.196.0. This also applies through a function that calls `C`, and to a body of
+  a declared result type. A call that `Length`, `Rest`, `IsMissing`, `Coalesce`
+  or another function reads still declines.
+
 ## 0.197.0 _2026-11-21_
 
 ### New Features

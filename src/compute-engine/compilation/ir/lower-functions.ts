@@ -480,6 +480,10 @@ type UserFunction = {
   };
   /** The first call that took `declared` while the body is lowered. */
   assumed?: Fn;
+  /** The calls made while the body is lowered (recursive calls), and
+   *  whether every reader of each reads a list of NaN as an absent list
+   *  (`call()`). */
+  recursive: [call: Fn, nanForAbsent: () => boolean][];
 };
 
 export function functionLowering(
@@ -563,7 +567,8 @@ export function functionLowering(
     key: object,
     literal: Fn,
     sig: ReturnType<typeof signatureTypes>,
-    args?: V[]
+    args: V[] | undefined,
+    nanForAbsent: () => boolean
   ): UserFunction => {
     begun += 1;
     const { names, result, list, tuple, r, open, points, shaped } = sig;
@@ -660,10 +665,14 @@ export function functionLowering(
       called: false,
       self: [],
       declared: list && { lane: list.lane, shape: list.shape, tuple },
+      recursive: [],
     };
     let variants = functions.get(key);
     if (variants === undefined) functions.set(key, (variants = new Map()));
-    variants.set(laneKey(sig, args), fn);
+    // While the body is lowered, the function is the one of the lane
+    // (`call()`); after, the one of its kind of call, or of both kinds.
+    const lane = laneKey(sig, args);
+    variants.set(lane + '?', fn);
     // The function of this name being lowered, if any (another lane of
     // the same binding, `laneKey()`): restored after this one.
     const before = pending.get(e.operator);
@@ -679,6 +688,22 @@ export function functionLowering(
     });
     const caller = cx.inFunction;
     cx.inFunction = e.operator;
+    // The kind of the call is found only where the body relies on it. A
+    // kind that depends on itself (a call of another lane in the body, whose
+    // readers lead back to the body) is `false`.
+    const prior = cx.bodies.get(literal.ops[0]);
+    let nan: boolean | undefined;
+    const reads = {
+      nan: () => {
+        if (nan === undefined) {
+          nan = false;
+          nan = nanForAbsent();
+        }
+        return nan;
+      },
+      read: false,
+    };
+    cx.bodies.set(literal.ops[0], reads);
     try {
       b.define(ir, () => {
         const body =
@@ -769,10 +794,28 @@ export function functionLowering(
           );
         return [v];
       });
+      // A body that relies on a list of NaN for its absent value cannot
+      // serve its recursive call whose reader tells the two apart.
+      if (reads.read && reads.nan())
+        for (const [c, alike] of fn.recursive)
+          if (!alike())
+            decline(
+              c,
+              `a recursive call of ${e.operator} whose value can be an absent list, read by other than At, First, Last, an arithmetic operator or a reduction`
+            );
     } finally {
       cx.frames.splice(0, cx.frames.length, ...outer);
       cx.inFunction = caller;
+      if (prior === undefined) cx.bodies.delete(literal.ops[0]);
+      else cx.bodies.set(literal.ops[0], prior);
     }
+    // A body whose lowering did not rely on the kind of its call serves
+    // both kinds.
+    variants.delete(lane + '?');
+    for (const k of reads.read
+      ? [lane + (reads.nan() ? 'n' : '')]
+      : [lane, lane + 'n'])
+      if (!variants.has(k)) variants.set(k, fn);
     // A length value of the body that is a constant is its number: a call
     // then has one result of that length.
     if (fn.result === undefined) {
@@ -800,11 +843,16 @@ export function functionLowering(
 
   /** A call of the user function that the head of `e` resolves to, or of
    *  the function of that name being lowered; with `given`, of the values
-   *  of its arguments, already lowered. */
+   *  of its arguments, already lowered. `nanForAbsent`: every reader of
+   *  the value of `e` reads a list of NaN as an absent list. A body that
+   *  holds an `If` with no else has one IR function for such calls and one
+   *  for the others, where the `If` declines (`conditional()` of
+   *  `lower.ts`). */
   const call = (
     e: Fn,
     binding?: { key: object; literal: Fn },
-    given?: V[]
+    given?: V[],
+    nanForAbsent: () => boolean = () => false
   ): number => {
     let fn = (binding ? undefined : pending.get(e.operator)) as UserFunction;
     // Without run-time lengths, the arguments of the first call are lowered
@@ -877,11 +925,27 @@ export function functionLowering(
           }
         );
       }
-      // An argument can hold the first call of the same function.
-      fn =
-        functions.get(binding.key)?.get(laneKey(sig, early)) ??
-        define(e, binding.key, binding.literal, sig, early);
+      // A call in the body being lowered (a recursive call) calls that IR
+      // function, whatever its reader (`tells`); another call calls the one
+      // for its kind of reader (`define()`). An argument can hold the first
+      // call of the same function.
+      const variants = functions.get(binding.key);
+      const lane = laneKey(sig, early);
+      const both = variants?.get(lane);
+      fn = variants?.get(lane + '?') as UserFunction;
+      if (fn === undefined)
+        if (variants?.get(lane + 'n') === both)
+          fn =
+            both ??
+            define(e, binding.key, binding.literal, sig, early, nanForAbsent);
+        else {
+          const nan = nanForAbsent();
+          fn =
+            variants?.get(lane + (nan ? 'n' : '')) ??
+            define(e, binding.key, binding.literal, sig, early, () => nan);
+        }
     }
+    if (lowering.has(fn)) fn.recursive.push([e, nanForAbsent]);
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
     // A call back to a lane of the function that another lane of it hides

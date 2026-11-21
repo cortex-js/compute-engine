@@ -723,19 +723,40 @@ function lowerOnce(
   //   an index, when the value of that call is itself in such a place: the
   //   call of a list of NaN gives a list too, which the interpreter gives
   //   as `Missing`;
-  // - an arm of an `If` or a `Which`, or the last expression of a `Block`,
-  //   whose own value is in such a place.
+  // - an arm of an `If` or a `Which`, the last expression of a `Block`, or
+  //   the value of a `Typed` (a body of a declared result), whose own value
+  //   is in such a place;
+  // - the body of a user function being lowered, when each call that its IR
+  //   function serves is itself in such a place (`bodies`, `call()` of
+  //   `lower-functions.ts`); the places in the body are known once a call
+  //   of the function is lowered (`reachBody()`).
   // Any other place (a binding, an argument of a function, an element of a
   // list or of a tuple, another list operator) can give the value to a
   // reader that tells an absent list from a list of NaN. A node that is not
   // in the program (the value of a name, an expression of a compile
   // handler) has no known reader.
+  const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
+  const reached = new Set<Expression>();
+  // A body adds places to the nodes that it shares with the program.
+  const reachBody = (body: Expression) => {
+    if (reached.has(body)) return;
+    reached.add(body);
+    reach(body);
+    unreadAsAbsent.clear();
+  };
+  // A value found while a body is lowered can depend on `bodies`, and is
+  // not kept; one found with no body lowered is the same or `false` there.
   const unreadAsAbsent = new Map<Expression, boolean>();
   const nanForAbsent = (e: Expression): boolean => {
-    let known = unreadAsAbsent.get(e);
+    const body = bodies.get(e);
+    if (body !== undefined) {
+      body.read = true;
+      if (!body.nan()) return false;
+    }
+    let known = body === undefined ? unreadAsAbsent.get(e) : undefined;
     if (known !== undefined) return known;
     known =
-      readers.get(e)?.every(([reader, i]) => {
+      (readers.get(e) ?? (body ? [] : undefined))?.every(([reader, i]) => {
         if (reader === root && reader.operator === 'Function') return i === 0;
         if (!isLibrary(reader)) return false;
         switch (reader.operator) {
@@ -745,6 +766,8 @@ function lowerOnce(
             return i % 2 === 1 && nanForAbsent(reader);
           case 'Block':
             return i === reader.nops - 1 && nanForAbsent(reader);
+          case 'Typed':
+            return i === 0 && nanForAbsent(reader);
           case 'At':
             // An index that is not proved a number can be a list or a
             // `Range`: the `At` then gives a list of NaN.
@@ -767,7 +790,7 @@ function lowerOnce(
           nanForAbsent(reader)
         );
       }) ?? false;
-    unreadAsAbsent.set(e, known);
+    if (bodies.size === 0) unreadAsAbsent.set(e, known);
     return known;
   };
   // The names read as inputs of the compilation (of the entry, lifted into
@@ -1568,7 +1591,10 @@ function lowerOnce(
       );
       if (refused !== undefined) decline(e, refused);
     }
-    if (user !== undefined || fns.recursive(e)) return fns.call(e, user);
+    if (user !== undefined || fns.recursive(e)) {
+      if (user !== undefined) reachBody(user.literal.ops[0]);
+      return fns.call(e, user, undefined, () => nanForAbsent(e));
+    }
     // A host's handler (of a library head, or of a host operator): its
     // expression is lowered in place of `e`.
     const answer = handled(e);
@@ -6102,6 +6128,7 @@ function lowerOnce(
       return r.yields[0];
     },
     tuples,
+    bodies,
   };
   const lists = listLowering(cx);
   const matrices = matrixLowering(cx, lists);
