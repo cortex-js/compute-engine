@@ -1,4 +1,8 @@
-import { activationRecordOf, isActivatedDefinition } from './ambient-chain.js';
+import {
+  activationRecordOf,
+  isActivatedDefinition,
+  keepStackActivations,
+} from './ambient-chain.js';
 import { isDeclaredLocal } from './declared-local.js';
 import { isBeingDefined } from './declared-parameter-result.js';
 import { anyMacroDeclared, expandMacro } from './macro.js';
@@ -2906,6 +2910,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       this.engine,
       options?._contextStack
     );
+    keepStackActivations(stack);
     // The evaluation is an operation
     // (rule 8 of `docs/plans/2026-11-09-binding-units-slice-1-spec.md`), as
     // in `BoxedFunction.evaluateAsync()`.

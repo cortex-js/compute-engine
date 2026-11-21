@@ -59,7 +59,11 @@ import {
   hasAsyncOnlyApplication,
 } from './async-only-descendants.js';
 import { callbackSlots } from './callback-slots.js';
-import { equivalentChains, scopeActivation } from './ambient-chain.js';
+import {
+  equivalentChains,
+  keepStackActivations,
+  scopeActivation,
+} from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
   bindsWholeAtInferredPointParameter,
@@ -6478,12 +6482,13 @@ export class BoxedFunction
       return Promise.resolve(this);
     let evaluation = asyncEvaluationOf(options?._contextStack);
     let contextStack = options?._contextStack;
-    if (evaluation === undefined)
+    if (evaluation === undefined) {
       ({ stack: contextStack, evaluation } = beginAsyncEvaluation(
         this.engine,
         contextStack
       ));
-    else contextStack = joinAsyncEvaluation(this.engine, contextStack!);
+      keepStackActivations(contextStack);
+    } else contextStack = joinAsyncEvaluation(this.engine, contextStack!);
     // A lazy collection is evaluated in the activation it was made in, as
     // in `evaluate()` (`lazy-view-context.ts`). The new stack stays a part
     // of this evaluation.

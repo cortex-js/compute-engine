@@ -14,6 +14,24 @@ const activatedTemplates = new WeakSet<Scope>();
 // its value in this evaluation of the node.
 const activationValues = new WeakMap<Scope, Map<object, unknown>>();
 
+// The scopes on the chain of parents of an activation that a function value,
+// a lazy collection, a scoped node or an asynchronous evaluation keeps
+// (`markActivationKept()`). Only a kept activation outlives the evaluation
+// that pushed it, so only a kept activation of a loop needs a new one for
+// the next iteration (`renewIterationActivation()`).
+const keptScopes = new WeakSet<Scope>();
+
+// For each parent, and for each scope, an activation of the scope with that
+// parent that the pop of its frame released (`releaseActivation()`). The
+// next activation of the scope in that parent is this object when it would
+// be equal to it: the same bindings. Both maps are weak: a released
+// activation keeps neither a parent nor a scope that nothing else holds.
+const idleActivations = new WeakMap<Scope, WeakMap<Scope, Scope>>();
+
+// The values of a released activation: none. Nothing reads them, and the
+// values of the last evaluation are not kept (`releaseActivation()`).
+const RELEASED_VALUES = new Map<object, unknown>();
+
 // A static definition of a scope that has had an activation: its value is
 // read and written in an activation (`activationRecordOf()`). A field of the
 // definition, not a side table: it is read at each read of a value.
@@ -189,11 +207,6 @@ export function scopeActivation(
   parent: Scope | null | undefined,
   scope: Scope
 ): Scope {
-  const result: Scope = {
-    ...scope,
-    parent: parent ?? scope.parent,
-    bindings: new Map(scope.bindings),
-  };
   const values = new Map<object, unknown>();
   for (const [name, binding] of scope.bindings) {
     if (!('value' in binding)) continue;
@@ -211,8 +224,89 @@ export function scopeActivation(
     )
       values.set(def, undefined);
   }
+  const live = parent ?? scope.parent;
+  const released = live != null ? idleActivations.get(live) : undefined;
+  const idle = released?.get(scope);
+  if (idle !== undefined) {
+    released!.delete(scope);
+    if (
+      idle.parent === live &&
+      idle.noAutoDeclare === scope.noAutoDeclare &&
+      idle.binderNames === scope.binderNames &&
+      sameEntries(idle.bindings, scope.bindings)
+    ) {
+      activationValues.set(idle, values);
+      return idle;
+    }
+  }
+  const result: Scope = {
+    ...scope,
+    parent: live,
+    bindings: new Map(scope.bindings),
+  };
   registerScopeActivation(result, scope, values);
   return result;
+}
+
+/** True when the maps `a` and `b` have the same entries. */
+function sameEntries<K, V>(a: Map<K, V>, b: Map<K, V>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
+}
+
+/**
+ * Release `scope`, an activation whose frame was popped from `stack`: the
+ * next activation of its template in the same parent can be the same object,
+ * with new values (`scopeActivation()`). The released activation holds no
+ * values. These activations are not released:
+ * - one that a function value, a lazy collection, a scoped node or an
+ *   asynchronous evaluation keeps (`markActivationKept()`);
+ * - one that a frame of `stack` still has;
+ * - one whose parent is a call frame: the next evaluation is in another
+ *   call, with another frame.
+ */
+export function releaseActivation(
+  scope: Scope,
+  stack: ReadonlyArray<{ lexicalScope: Scope }>
+): void {
+  const template = scopeTemplates.get(scope);
+  if (template === undefined || keptScopes.has(scope)) return;
+  const parent = scope.parent;
+  if (parent == null || frameBodies.has(parent)) return;
+  for (const frame of stack) if (frame.lexicalScope === scope) return;
+  activationValues.set(scope, RELEASED_VALUES);
+  let released = idleActivations.get(parent);
+  if (released === undefined)
+    idleActivations.set(parent, (released = new WeakMap()));
+  released.set(template, scope);
+}
+
+/**
+ * Record that `scope`, an activation, outlives the evaluation that pushed
+ * it: a function value keeps it as the parent of the scope of its body, a
+ * lazy collection as its record, a scoped node made by an evaluation on the
+ * chain of parents of its scope (`noteNodeScope()`), or an asynchronous
+ * evaluation on a copy of the stack. Every scope on its chain of parents is kept too. The parent of
+ * a scope does not change, so a kept scope has kept parents, and the walk
+ * stops at the first scope that is kept already.
+ */
+export function markActivationKept(scope: Scope | null | undefined): void {
+  for (let s = scope; s != null && !keptScopes.has(s); s = s.parent)
+    keptScopes.add(s);
+}
+
+/**
+ * Keep the activation of each frame of `stack`, the copy of the context
+ * stack that an asynchronous evaluation runs on (`beginAsyncEvaluation()`,
+ * `beginAsyncStatement()`): the evaluation can run after the frames that it
+ * shares with the stack it copied are popped (`markActivationKept()`).
+ */
+export function keepStackActivations(
+  stack: ReadonlyArray<{ lexicalScope: Scope }> | undefined
+): void {
+  if (stack === undefined) return;
+  for (const frame of stack) markActivationKept(frame.lexicalScope);
 }
 
 /**
@@ -222,6 +316,10 @@ export function scopeActivation(
  * same template, with the same parent, whose values start as a copy of the
  * previous ones. A function value made in the previous iteration keeps the
  * previous activation, and so the value of `name` in that iteration.
+ *
+ * An activation that no function value keeps (`markActivationKept()`) is
+ * read by nothing after this iteration, so the next iteration writes its
+ * values in place.
  */
 export function renewIterationActivation(
   stack: ReadonlyArray<{ lexicalScope: Scope }>,
@@ -229,7 +327,7 @@ export function renewIterationActivation(
 ): void {
   const top = stack[stack.length - 1];
   const scope = top?.lexicalScope;
-  if (scope === undefined) return;
+  if (scope === undefined || !keptScopes.has(scope)) return;
   const template = scopeTemplates.get(scope);
   const values = activationValues.get(scope);
   if (template === undefined || values === undefined) return;

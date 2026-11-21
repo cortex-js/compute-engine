@@ -22,6 +22,7 @@ import {
 } from './boxed-expression/binding-tombstone.js';
 import {
   activationValuesOf,
+  releaseActivation,
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
@@ -95,7 +96,12 @@ export function pushEvalContext(
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
-  discardEvalContext(ce, ce._evalContextStack.pop());
+  const context = ce._evalContextStack.pop();
+  discardEvalContext(ce, context);
+  // The next evaluation of the node can reuse the activation
+  // (`releaseActivation()`).
+  if (context !== undefined)
+    releaseActivation(context.lexicalScope, ce._evalContextStack);
 }
 
 /**

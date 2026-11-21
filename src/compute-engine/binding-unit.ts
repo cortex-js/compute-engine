@@ -42,6 +42,14 @@ import {
 export class UnitEnvironment {
   private _types: Map<object, Map<string, BoxedType>> | undefined = undefined;
 
+  /** The tokens of the reads by the occurrences of this environment
+   * (`unitReadToken()`), by key and by name. A map of the environment, not
+   * a weak map keyed on it: a root construction makes a new environment,
+   * and the keys are the home scopes and the definitions that its
+   * occurrences hold. */
+  _readTokens: Map<object, Map<string, UnitReadTokenPair>> | undefined =
+    undefined;
+
   /** For an entry whose type is a scalar numeric type: true when every use
    * that required a number was an operand of an operator that maps over a
    * collection. The same record as `SCALAR_USES_MAP` (`boxed-symbol.ts`) for
@@ -623,12 +631,16 @@ class UnitReadToken {
   }
 }
 
-/** For each occurrence environment (or, for an occurrence with none, the
- * read context), each key and each name, its two tokens: the read of the
- * entry and the read of the variable record. */
-const unitReadTokens = new WeakMap<
+/** For a key and a name, its two tokens: the read of the entry and the
+ * read of the variable record. */
+type UnitReadTokenPair = [UnitReadToken?, UnitReadToken?];
+
+/** For each read context, the tokens of the reads by an occurrence with no
+ * environment, by key and by name. The tokens of an occurrence with an
+ * environment are kept by the environment (`UnitEnvironment._readTokens`). */
+const contextReadTokens = new WeakMap<
   object,
-  WeakMap<object, Map<string, [UnitReadToken?, UnitReadToken?]>>
+  WeakMap<object, Map<string, UnitReadTokenPair>>
 >();
 
 /** The token of a read (see `UnitReadToken`), made at the first read. */
@@ -639,9 +651,16 @@ function unitReadToken(
   name: string,
   variable: boolean
 ): UnitReadToken {
-  const owner: object = env ?? context;
-  let byKey = unitReadTokens.get(owner);
-  if (byKey === undefined) unitReadTokens.set(owner, (byKey = new WeakMap()));
+  let byKey:
+    | Map<object, Map<string, UnitReadTokenPair>>
+    | WeakMap<object, Map<string, UnitReadTokenPair>>
+    | undefined;
+  if (env !== undefined) byKey = env._readTokens ??= new Map();
+  else {
+    byKey = contextReadTokens.get(context);
+    if (byKey === undefined)
+      contextReadTokens.set(context, (byKey = new WeakMap()));
+  }
   let byName = byKey.get(key);
   if (byName === undefined) byKey.set(key, (byName = new Map()));
   let pair = byName.get(name);

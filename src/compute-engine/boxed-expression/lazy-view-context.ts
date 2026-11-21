@@ -14,7 +14,11 @@
 
 import type { Expression, IComputeEngine, Scope } from '../global-types.js';
 import { isDictionary, isFunction, isSymbol } from './type-guards.js';
-import { holdsActivation, isActivatedDefinition } from './ambient-chain.js';
+import {
+  holdsActivation,
+  isActivatedDefinition,
+  markActivationKept,
+} from './ambient-chain.js';
 
 /** One frame of the engine's evaluation-context stack. */
 type EvalContext = IComputeEngine['_evalContextStack'][number];
@@ -43,6 +47,7 @@ const CANONICALIZED_COUNT = new WeakMap<Scope, number>();
  * a view to adopt (`noteLazyViewCanonicalized`). */
 function setRecord(expr: Expression, record: Scope | null): void {
   RECORDS.set(expr, record);
+  markActivationKept(record);
   recordSerial += 1;
   const frame = CANONICALIZED_IN.get(expr);
   if (frame === undefined) return;
@@ -54,9 +59,16 @@ function setRecord(expr: Expression, record: Scope | null): void {
  * loop, a comprehension, a big operator, any other scoped node). The
  * constructor of the node calls it, once, so the creation of a closure in
  * the node finds the mark (`isNodeScope`). A scope that the host pushes
- * (`ce.pushScope()`) and the frame of a call are not the scope of a node. */
+ * (`ce.pushScope()`) and the frame of a call are not the scope of a node.
+ *
+ * A node made by an evaluation (a function literal that `Parse` gives, the
+ * rebuild of a scoped operand) can have a scope whose chain of parents holds
+ * an activation: a later read of the node, an application of the literal,
+ * reads the values of that activation, so the node keeps it
+ * (`markActivationKept()`). */
 export function noteNodeScope(scope: Scope): void {
   NODE_SCOPES.add(scope);
+  if (holdsActivation(scope.parent)) markActivationKept(scope.parent);
 }
 
 /** True when `scope` is the local scope of an expression node

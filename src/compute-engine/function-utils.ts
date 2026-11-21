@@ -126,6 +126,8 @@ import {
   chainContains,
   activationOnLinks,
   functionValueTemplateOf,
+  keepStackActivations,
+  markActivationKept,
   registerCallFrame,
   registerFunctionValueScope,
   scopeActivation,
@@ -4112,6 +4114,7 @@ export async function evaluateStatementsAsync(
       program && i > 0 && contextStack !== undefined
         ? beginAsyncStatement(contextStack)
         : contextStack;
+    if (stack !== contextStack) keepStackActivations(stack);
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       invokeDebugHook(() => debugStatementHook!(op));
     // The hooks of a debugger that follows a run of `executeEpsilAsync()`
@@ -7114,6 +7117,7 @@ export function captureNestedLocals(
   )
     return undefined;
   const valueScope: Scope = { ...scope, parent: live };
+  markActivationKept(live);
   registerFunctionValueScope(valueScope, scope);
   const body = ce._fn('Block', block.ops, {
     scope: valueScope,

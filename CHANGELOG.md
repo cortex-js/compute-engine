@@ -471,6 +471,13 @@
   1,060 ms and takes about 270 ms, and 64 elements about 530 ms and now
   150 ms. The values are the same.
 
+- **A loop, and a block evaluated again, allocate less when no closure or
+  lazy collection keeps their variables.** An Epsil program that sums
+  `2i` for `i` in `1..100` with `N()` took about 900 µs and takes about
+  780 µs. Boxing `x^2 + 1` takes about 7% less time, and boxing
+  `x ↦ x^2 + 1` about 5% less. The values are the same: a function made in
+  an iteration still keeps the value of the index in that iteration.
+
 ## 0.195.2 _2026-11-20_
 
 ### New Features
