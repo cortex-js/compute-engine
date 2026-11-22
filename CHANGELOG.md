@@ -104,6 +104,18 @@
   the interpreter's value (#639, reported by
   [enumeratio](https://github.com/enumeratio)).
 
+- **A `list<list<integer>>` or `list<list<real>>` input is read row by row in
+  compiled code.** Its rows can have different lengths, and compiled code read
+  only its elements `g[i][j]`: `Map(r ↦ Length(r), g)`,
+  `Map(r ↦ Reduce(r, Add, 0), g)`, `Length(g)` and `Count(g)` declined. On
+  JavaScript, `Map` whose value for a row is not a list, `Length`, `Count`,
+  `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over such an input or parameter
+  now compile, and read each row of the host's array in place. A row at an
+  index known only at run time, a `Map` or a `Filter` that gives a list of
+  rows, a tuple that holds such a list, a typed `Apply` parameter of that type
+  and a list of lists of run-time length built in the program still decline
+  (#638, reported by [enumeratio](https://github.com/enumeratio)).
+
 ### Resolved Issues
 
 - **Under `.N()`, the guard digits of an exact operand grow with its nearness

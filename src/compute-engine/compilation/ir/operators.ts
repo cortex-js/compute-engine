@@ -458,6 +458,12 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // lane `rows` (a list of lists of two lengths not stated, of reals or of
   // integers), NaN where `i` or `j` is out of range; JavaScript only.
   row(undefined,      3,          [[['rows', R, R], R, 'rows.at'], [['rows', R, R], I, 'rows.at.int']], list),
+  // The same value read row by row (`chunks()` of `lower-lists.ts`): the
+  // count of its rows, the length of the row `i`, and the element `j` of
+  // that row, each index from 0 and in range.
+  row(undefined,      1,          [[['rows'], I, 'rows.count']], list),
+  row(undefined,      2,          [[['rows', I], I, 'rows.len']], list),
+  row(undefined,      3,          [[['rows', I, I], R, 'rows.get'], [['rows', I, I], I, 'rows.get.int']], list),
   // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
   // whose shape the lowering settles (`lower-matrices.ts`): the determinant
   // of the entries of an `n × n` matrix row by row and `n`; the inverse;

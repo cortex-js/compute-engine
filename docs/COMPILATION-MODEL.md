@@ -1523,13 +1523,17 @@ The rows of an input of type `list<list<real>>` or `list<list<integer>>` can
 have different lengths. On `javascript` (not in the bigint and interval modes)
 such an input, a positional parameter of a root function literal or a
 parameter of a user function of that type is the host's array of arrays, read
-in two ways only: the element `g[i][j]` (`At(At(g, i), j)`), which is `NaN`
-where an index is out of range of the list or of its row, and an argument of a
-call at a parameter of that type, which takes it whole. Every other read
-declines with `outside-profile`, so the interpreter evaluates a row, a fold or
-a `Map` over rows of unequal length: with `g: list<list<integer>>`,
-`(g) ↦ g[2][1]` at `g = [[1, 2, 3], [4]]` gives `4`, `g[2][3]` gives `NaN`,
-and `Length(g)`, `g[1]` and `Sum(g[1])` decline. A user function whose result
+in three ways: the element `g[i][j]` (`At(At(g, i), j)`), which is `NaN`
+where an index is out of range of the list or of its row; row by row, by a
+reader of a list that reads each row where it reads it (`Map` whose value for
+a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`, `Fold`,
+`Reduce`; #638); and an argument of a call at a parameter of that type, which
+takes it whole. Every other read declines with `outside-profile`, so the
+interpreter evaluates it: with `g: list<list<integer>>`, `(g) ↦ g[2][1]` at
+`g = [[1, 2, 3], [4]]` gives `4`, `g[2][3]` gives `NaN`, `Length(g)` gives 2
+and `Map(r ↦ Reduce(r, Add, 0), g)` gives `[6, 4]`, while the row `g[1]` (at a
+count of rows known at run time), `Sum(g[1])` and `Map(r ↦ 2r, g)` (a list of
+rows) decline. A user function whose result
 type is such a list compiles when its body is a list of rank 2 of lengths that
 the body settles: with `n = 32`,
 `step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`

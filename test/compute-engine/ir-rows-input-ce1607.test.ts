@@ -5,9 +5,10 @@
  * target (README of `src/compute-engine/compilation/ir/`, "The rows lane").
  *
  * The value is the host's array of arrays, whose rows can have different
- * lengths. Its one reader is the element `At(At(g, i), j)`, NaN where an
- * index is out of range; a call passes it whole to a parameter of such a
- * type. Every other read declines. A user function whose result type is
+ * lengths. It is read by the element `At(At(g, i), j)`, NaN where an
+ * index is out of range, and row by row by the readers of a list (#638); a
+ * call passes it whole to a parameter of such a type. Every other read
+ * declines. A user function whose result type is
  * such a list compiles when its body is a list of rank 2 of lengths that
  * the body settles (`Map` of a `Map` over `Range(1, n)` of a constant `n`).
  */
@@ -122,9 +123,7 @@ describe('CE-1607: the element of a list of rows of different lengths', () => {
   });
 
   test('passed whole to a parameter of a user function', () => {
-    expect(compiled(epsil('(g: list<list<integer>>) => twice(g)'))(J)).toBe(
-      4
-    );
+    expect(compiled(epsil('(g: list<list<integer>>) => twice(g)'))(J)).toBe(4);
     expect(
       compiled(epsil('(g: list<list<integer>>) => sq(g)'))([
         [1, 2],
@@ -139,25 +138,30 @@ describe('CE-1607: the element of a list of rows of different lengths', () => {
 
 describe('CE-1607: every other read declines', () => {
   const READ = 'other than in an element read';
-  test.each([
-    ['g'],
-    ['Length(g)'],
-    ['g[1]'],
-    ['Length(g[1])'],
-    ['sum(g[1])'],
-    ['g + 1'],
-    ['map(r => r, g)'],
-    ['untyped(g)'],
-  ])('%s', (body) => {
+  test.each([['g'], ['g + 1'], ['untyped(g)']])('%s', (body) => {
     expect(declined(epsil(`(g: list<list<integer>>) => ${body}`))).toContain(
       READ
     );
   });
 
+  // The rows are read one by one by `Length`, `Map` and the other readers
+  // of a list (#638, `ir-rows-input-readers.test.ts`); a row at an index
+  // known at run time, and a list of the rows, still decline.
+  test.each([
+    ['g[1]', 'at an index other than a constant'],
+    ['Length(g[1])', 'at an index other than a constant'],
+    ['sum(g[1])', 'at an index other than a constant'],
+    ['map(r => r, g)', 'a list of lists of run-time length'],
+  ])('%s', (body, why) => {
+    expect(declined(epsil(`(g: list<list<integer>>) => ${body}`))).toContain(
+      why
+    );
+  });
+
   test('a list that the program makes, at a parameter of that type', () => {
-    expect(
-      declined(epsil('(g: list<list<integer>>) => sq(sq(g))'))
-    ).toContain('that is not an input or a parameter of that type');
+    expect(declined(epsil('(g: list<list<integer>>) => sq(sq(g))'))).toContain(
+      'that is not an input or a parameter of that type'
+    );
   });
 
   test('a list of lists of reals at a parameter of lists of integers', () => {
@@ -168,14 +172,14 @@ describe('CE-1607: every other read declines', () => {
 
   test('an input read whole beside an element read', () => {
     expect(
-      declined(ce.box(['Add', ['At', ['At', 'G', 1], 1], ['Length', 'G']]))
+      declined(ce.box(['Add', ['At', ['At', 'G', 1], 1], ['Add', 'G', 1]]))
     ).toContain(READ);
   });
 
   test('a list of lists of booleans', () => {
-    expect(
-      declined(epsil('(g: list<list<boolean>>) => g[1][1]'))
-    ).toContain('the input g of type list<list<boolean>>');
+    expect(declined(epsil('(g: list<list<boolean>>) => g[1][1]'))).toContain(
+      'the input g of type list<list<boolean>>'
+    );
   });
 
   test.each([
@@ -193,7 +197,11 @@ describe('CE-1607: a list of lists of a constant inner length', () => {
   test('a Map of a Map over Range(1, 20) keeps its loops', () => {
     const e = ce.box([
       'Map',
-      ['Function', ['Map', ['Function', ['Multiply', 'i', 'j'], 'j'], ['Range', 1, 20]], 'i'],
+      [
+        'Function',
+        ['Map', ['Function', ['Multiply', 'i', 'j'], 'j'], ['Range', 1, 20]],
+        'i',
+      ],
       ['Range', 1, 20],
     ]);
     const result = compile(e, { to: 'javascript', fallback: false });
@@ -210,7 +218,11 @@ describe('CE-1607: a list of lists of a constant inner length', () => {
   test('an inner list of no element declines', () => {
     const e = ce.box([
       'Map',
-      ['Function', ['Map', ['Function', ['Multiply', 'i', 'j'], 'j'], ['Range', 1, 0, 1]], 'i'],
+      [
+        'Function',
+        ['Map', ['Function', ['Multiply', 'i', 'j'], 'j'], ['Range', 1, 0, 1]],
+        'i',
+      ],
       ['Range', 1, 20],
     ]);
     expect(declined(e)).toContain('a list of lists of run-time length');

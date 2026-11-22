@@ -872,19 +872,26 @@ stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
 `lower-functions.ts`) is of the lane too, on JavaScript only (CE-1607): an input
 read by name, a positional parameter of a root function literal, and a parameter
 of a user function of that type. It is the host's array of arrays, whose rows
-can have different lengths, and it is read in two ways only: the element
+can have different lengths, and it is read in three ways: the element
 `At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the elements; `_atr`
 of the JavaScript printer, NaN where `i` is out of range of `g` or `j` of its
-row, from the end when negative, as `At` of a number), and an argument of a call
-at a parameter of that lane, which takes it whole. Every other read of the name
-declines (`symbol()` of `lower.ts`, which admits only the occurrence that
-`wholeRows()` lowers): a row `At(g, i)` (`Length` of an absent row would give 0,
-where the interpreter gives `Missing`), `Length(g)`, `Map` over `g`, arithmetic,
-`g` as the result, a binding to a local, an argument of a parameter of another
-type, and a list that the program makes at such a parameter (`sq(sq(g))`). A
-list of lists of booleans, the bigint and the interval modes and GLSL decline
-the input. The entry checks it as a list (a string or a typed array is refused),
-and a batch shares it between its cells.
+row, from the end when negative, as `At` of a number); row by row, as the rows
+of a `Chunk` (`chunks()` of `lower-lists.ts`, #638): the count of the rows is
+`rows.count` (`g.length`) and the row `i` the build of `rows.len`
+(`g[i].length`) elements `rows.get` or `rows.get.int` (`g[i][j]`), each index
+from 0 in range, so `Map` whose value for a row is not a list, `Length`,
+`Count`, `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over `g` read it; and an
+argument of a call at a parameter of that lane, which takes it whole. Every
+other read of the name declines (`symbol()` of `lower.ts`, which admits only the
+occurrence that `wholeRows()` lowers): a row `At(g, i)` other than at a constant
+index in range of a constant count (`Length` of an absent row would give 0,
+where the interpreter gives `Missing`), a `Map` or a `Filter` whose value is a
+list of rows ("a list of lists of run-time length"), arithmetic, `g` as the
+result, a binding to a local, an argument of a parameter of another type, and a
+list that the program makes at such a parameter (`sq(sq(g))`). A list of lists
+of booleans, the bigint and the interval modes and GLSL decline the input. The
+entry checks it as a list (a string or a typed array is refused), and a batch
+shares it between its cells.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,

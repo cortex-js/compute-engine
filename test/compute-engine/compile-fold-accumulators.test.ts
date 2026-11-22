@@ -374,11 +374,25 @@ describe('an accumulator seeded from the first element', () => {
     expect(() => c.run({ T: [] })).toThrow(/out-of-range/);
   });
 
-  it('an element that is a list declines', () => {
-    expect(() =>
-      compile(ce3.box(['Reduce', 'M', f(['Add', 'a', 'x'])]), {
-        fallback: false,
-      })
-    ).toThrow(/list<list<real>>/);
+  // The rows of `M: list<list<real>>` are read one by one (#638): the
+  // first row seeds a list accumulator of a run-time length. Rows of two
+  // lengths under `Add` give an unspecified value (the interpreter gives an
+  // error), as two lists of run-time lengths that differ do.
+  it('a row accumulator agrees with evaluate()', () => {
+    const expr: MathJsonExpression = ['Reduce', 'M', f(['Add', 'a', 'x'])];
+    const c = compile(ce3.box(expr), { fallback: false }) as any;
+    for (const M of [
+      [
+        [1, -2],
+        [3, 4],
+      ],
+      [[1, 2, 3]],
+    ]) {
+      const r = expected(expr, 'M', [
+        'List',
+        ...M.map((row) => ['List', ...row]),
+      ]);
+      expect(Array.from(c.run({ M }))).toEqual(r.ops!.map((x) => x.re));
+    }
   });
 });

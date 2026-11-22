@@ -265,6 +265,11 @@ export const JS: Syntax = deepFreeze({
     // An element of an input or a parameter of the lane `rows`.
     'rows.at': { text: '_atr($0, $1, $2)', helpers: ['_atr'] },
     'rows.at.int': { text: '_atr($0, $1, $2)', helpers: ['_atr'] },
+    // The same value read row by row, at indices in range.
+    'rows.count': '$0.length',
+    'rows.len': '$0[$1].length',
+    'rows.get': '$0[$1][$2]',
+    'rows.get.int': '$0[$1][$2]',
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',

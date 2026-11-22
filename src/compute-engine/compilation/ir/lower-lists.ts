@@ -2044,6 +2044,32 @@ export function listLowering(cx: Lowering) {
     | V
     | { source: () => Source; rows: () => V; groups?: readonly V[] }
     | undefined => {
+    // An input or a parameter of the lane `rows` (a list of lists of two
+    // lengths not stated, `rowsElementLane()`): its rows, each read where
+    // it is read, a build over the elements of the host's row.
+    const lane = isSymbol(e) ? cx.rowsElementLane(e.type.type) : undefined;
+    if (lane !== undefined && !cx.interval) {
+      const g = cx.wholeRows(e);
+      if (type(g).lane !== 'rows') return undefined;
+      const get = lane === 'integer' ? 'rows.get.int' : 'rows.get';
+      return {
+        source: () => ({
+          length: b.op('rows.count', [g], scalarType('integer')),
+          at: (i) => {
+            const n = b.op('rows.len', [g, i], scalarType('integer'));
+            const k = b.newValue(scalarType('integer'));
+            return cx.region(
+              'build',
+              [n],
+              [k],
+              () => [b.op(get, [g, i, k], scalarType(lane))],
+              e
+            )[0];
+          },
+        }),
+        rows: () => g,
+      };
+    }
     if (
       cx.interval ||
       !isFunction(e) ||

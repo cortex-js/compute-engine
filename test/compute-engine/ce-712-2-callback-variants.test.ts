@@ -251,7 +251,7 @@ describe('an element with no settled shape declines (rule R3)', () => {
     expect(ce.box(expr as never).subs({ M: ce.box(INPUTS.M as never) } as never).evaluate().toString()).toBe('[4,2]');
     const r = compile(ce.box(expr as never), { constantFold: false } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('outside-profile');
+    expect(r.diagnostic?.code).toBe('unsettled-shape');
   });
 
 });

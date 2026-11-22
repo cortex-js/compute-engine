@@ -1919,8 +1919,9 @@ function lowerOnce(
         }
         const effects = b.effects;
         // A row of a `Chunk` or a `Partition` whose rows can have different
-        // lengths (`lists.chunks()`): at a constant index in range of a
-        // constant count only.
+        // lengths, or of an input or a parameter of the lane `rows`
+        // (`lists.chunks()`): at a constant index in range of a constant
+        // count only.
         const rows = lists.chunks(e.ops[0]);
         if (rows !== undefined && typeof rows !== 'number') {
           const s = rows.source();
@@ -1931,7 +1932,7 @@ function lowerOnce(
           if (k === undefined)
             decline(
               e,
-              'At of a Chunk or a Partition whose rows can have different lengths, at an index other than a constant in range of a constant count'
+              'At of a Chunk or a Partition whose rows can have different lengths, or of a list<list<…>> input or parameter, at an index other than a constant in range of a constant count'
             );
           return rows.groups?.[k] ?? s.at(b.constant(k, 'integer'));
         }
@@ -6336,6 +6337,7 @@ function lowerOnce(
     scalar,
     wholeRows,
     rowsParams,
+    rowsElementLane,
     apply,
     type,
     constant,
