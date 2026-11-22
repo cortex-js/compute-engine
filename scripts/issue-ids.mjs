@@ -46,8 +46,13 @@ const NEXT = path.join(STATE_DIR, 'next');
 const RESERVE_FILE = path.join(STATE_DIR, 'reserve.json');
 const LOCK = path.join(STATE_DIR, 'lock');
 
-/** The repo path on the master, for the ssh command (`~` is its home). */
-const MASTER_SCRIPT = '~/dev/compute-engine/scripts/issue-ids.mjs';
+/**
+ * The repo path on the master, for the ssh command, which runs in Git Bash
+ * on Windows. `~` is `/Users/arno` there, which Git Bash then turns into a
+ * path under its own install folder; `$USERPROFILE` is the Windows home
+ * (`C:\Users\arno`), which it passes as it is.
+ */
+const MASTER_SCRIPT = '"$USERPROFILE/dev/compute-engine/scripts/issue-ids.mjs"';
 
 /**
  * The Windows side of univac. Its WSL has the same host name, and a home of
