@@ -1272,12 +1272,19 @@ function mergeCheck(rev) {
   // An id that exists at the base was taken before the two sides split.
   const atBase = new Set([
     ...ids(
-      git('ls-tree', '--name-only', base, ':(top)issues/'),
+      // `--full-name`: ls-tree prints paths relative to the current
+      // directory otherwise.
+      git('ls-tree', '--name-only', '--full-name', base, ':(top)issues/'),
       /^issues\/CE-(\d+)\.md$/gm
     ),
     ...ids(show(base, 'issues/CLOSED.md'), /^- CE-(\d+) /gm),
     ...ids(show(base, 'ROADMAP.md'), /^### CE-(\d+)\./gm),
   ]);
+  const TEMPLATE_SUMMARY = (
+    (template(0).split(/^---$/m)[2] ?? '')
+      .split('\n')
+      .find((l) => l.trim() !== '') ?? ''
+  ).trim();
   /**
    * id → what took it: an issue file, by the first line of its body (the
    * sentence of what the user sees, which later edits keep), a CLOSED.md
@@ -1298,8 +1305,18 @@ function mergeCheck(rev) {
       const m = /^issues\/CE-(\d+)\.md$/.exec(f);
       if (!m) continue;
       const body = show(side, f).split(/^---$/m)[2] ?? '';
-      const summary = body.split('\n').find((l) => l.trim() !== '') ?? '';
-      add(Number(m[1]), `an issue file: ${summary.trim().slice(0, 100)}`);
+      const summary = (
+        body.split('\n').find((l) => l.trim() !== '') ?? ''
+      ).trim();
+      // An empty summary, or the template's, names no item: the file is
+      // then compared by its content, so two such files are two items.
+      const placeholder = summary === '' || summary === TEMPLATE_SUMMARY;
+      add(
+        Number(m[1]),
+        placeholder
+          ? `an issue file with no summary (${git('rev-parse', `${side}:${f}`).slice(0, 12)})`
+          : `an issue file: ${summary.slice(0, 100)}`
+      );
     }
     for (const [file, re] of [
       ['issues/CLOSED.md', /^\+- CE-(\d+) /],
