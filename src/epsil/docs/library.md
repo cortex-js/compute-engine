@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 726 functions and constants of the standard library, by category.
+The 734 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -35,7 +35,7 @@ To search the library by concept rather than by name, use
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 12 definitions · [full reference](/epsil/reference/combinatorics/)
-- [Number theory](#number-theory) — 62 definitions · [full reference](/epsil/reference/number-theory/)
+- [Number theory](#number-theory) — 70 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 19 definitions · [full reference](/epsil/reference/special-functions/)
 - [Linear algebra](#linear-algebra) — 46 definitions · [full reference](/epsil/reference/linear-algebra/)
 - [Statistics](#statistics) — 35 definitions · [full reference](/epsil/reference/statistics/)
@@ -641,7 +641,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `algebraicGenerator` | `AlgebraicGenerator` | `(list<number>) -> number` | An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. |
+| `algebraicGenerator` | `AlgebraicGenerator` | `(list<number>) -> number` | Deprecated: `AlgebraicGenerator(List(c₀, …, cₙ))` is `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root of an irreducible polynomial with no complex embedding selected. |
 | `apart` | `Apart` | `(value, symbol?) -> value` | Alias for PartialFraction. |
 | `cancel` | `Cancel` | `(value, symbol?) -> value` | Cancel common polynomial factors in the numerator and denominator of a rational expression. |
 | `coefficientList` | `CoefficientList` | `(value, symbol?) -> list<value>` | Return the list of coefficients of a polynomial, from highest to lowest degree. |
@@ -685,6 +685,8 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
+| `algebraicNumberNorm` | `AlgebraicNumberNorm` | `(number) -> number` | The norm of a over ℚ in the field ℚ(a): (−1)ᵈ times its minimal polynomial’s constant term over its leading one. |
+| `algebraicNumberTrace` | `AlgebraicNumberTrace` | `(number) -> number` | The trace of a over ℚ in the field ℚ(a): minus its minimal polynomial’s second coefficient over its leading one. |
 | `bernoulliB` | `BernoulliB` | `(integer) -> rational` | Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. |
 | `carmichaelLambda` | `CarmichaelLambda` | `(integer) -> integer` | Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. |
 | `catalanNumber` | `CatalanNumber` | `(real) -> number` | Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`. |
@@ -707,6 +709,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `integerDigits` | `IntegerDigits` | `(integer, integer?, integer?) -> list<integer>` | Return the digits of `n` in the given `base` (default 10), most-significant first. |
 | `integerSqrt` | `IntegerSqrt` | `(integer) -> integer` | Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. |
 | `isAbundant` | `IsAbundant` | `(integer) -> boolean` | True if n is an abundant number (sum of divisors &gt; 2n). |
+| `isAlgebraicInteger` | `IsAlgebraicInteger` | `(number) -> boolean` | Whether a is an algebraic integer: a root of a monic polynomial over ℤ. |
 | `isCenteredSquare` | `IsCenteredSquare` | `(integer) -> boolean` | True if n is a centered square number, n = t² + (t + 1)² for an integer t ≥ 0: 1, 5, 13, 25, 41, ... |
 | `isHappy` | `IsHappy` | `(integer) -> boolean` | True if n is a happy number, a number which eventually reaches 1 when the number is replaced by the sum of the square of each digit |
 | `isOctahedral` | `IsOctahedral` | `(integer) -> boolean` | True if n is an octahedral number. |
@@ -719,6 +722,7 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `legendreSymbol` | `LegendreSymbol` | `(integer, integer) -> integer` | The Legendre symbol (a/p) for an odd prime `p`. |
 | `lucas` | `Lucas` | `(integer) -> integer` | `Lucas` is an alias for `LucasL`, which is the preferred name. |
 | `lucasL` | `LucasL` | `(integer) -> integer` | Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. |
+| `minimalPolynomial` | `MinimalPolynomial` | `(number, any) -> expression` | The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient. |
 | `modularInverse` | `ModularInverse` | `(integer, integer) -> integer` | Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. |
 | `moebiusMu` | `MoebiusMu` | `(integer) -> integer` | Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square &gt; 1, otherwise (-1) raised to the number of distinct prime factors. |
 | `multiplicativeOrder` | `MultiplicativeOrder` | `(integer, integer, list<integer>?) -> integer` | The multiplicative order of `a` modulo `n`: the smallest `k > 0` such that `a^k ≡ 1 (mod n)`. |
@@ -726,8 +730,12 @@ The [Number theory reference](/epsil/reference/number-theory/) has the full desc
 | `nextPrime` | `NextPrime` | `(real, integer?) -> integer` | Return the smallest prime greater than `n`. |
 | `notDivides` | `NotDivides` | `(integer, integer) -> boolean` | `NotDivides(a, b)` returns `True` if `a` does not divide `b`, corresponding to the notation `a ∤ b`. |
 | `nthPrime` | `NthPrime` | `(integer) -> integer` | Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, … |
+| `numberFieldDiscriminant` | `NumberFieldDiscriminant` | `(number) -> integer` | The discriminant of the field ℚ(a): of its ring of integers. |
+| `numberFieldIntegralBasis` | `NumberFieldIntegralBasis` | `(number) -> list<number>` | A ℤ-basis of the ring of integers of ℚ(a), written on the powers of the generator read (the radical or root a is written in), as Wolfram writes it. |
+| `numberFieldSignature` | `NumberFieldSignature` | `(number) -> list<integer>` | The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones. |
 | `partitionsP` | `PartitionsP` | `(integer) -> integer` | `PartitionsP` is an alias for `NPartition`, which is the preferred name. |
 | `partitionsQ` | `PartitionsQ` | `(integer) -> integer` | Number of partitions of n into distinct parts (equivalently, into odd parts), q(n); it is 0 for n &lt; 0. |
+| `polynomialRoot` | `PolynomialRoot` | `(any, any, integer?) -> number` | The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). |
 | `powerMod` | `PowerMod` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> integer \| list<integer>` | Return `a^b mod m` (modular exponentiation). |
 | `powerModList` | `PowerModList` | `(list<rational> \| rational, list<rational> \| rational, integer \| list<integer>) -> list<integer> \| list<list<integer>>` | Return the sorted list of every `x` in [0, m) with `x^r ≡ a^s (mod m)`, for the exponent `s/r`. |
 | `primeFactors` | `PrimeFactors` | `(integer) -> list<integer>` | Return the sorted list of distinct prime factors of an integer `n`. |
