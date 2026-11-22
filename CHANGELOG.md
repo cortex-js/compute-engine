@@ -23,6 +23,22 @@
 
 ### Resolved Issues
 
+- **Under `.N()`, the guard digits of an exact operand grow with its nearness
+  to a pole and, for some functions, with its size.** An exact operand was
+  read with 10 guard digits, too few past a condition number of 10^10:
+  at 30 digits, `Gamma(3000000001/3)` was 7 units off in the last digit,
+  `Zeta(-3000000001/3)` 2 units, `Binomial` of two operands near
+  10^15 lost 5 of 30 digits, and `Beta(1/3, -13/3 + 10^-29)` had 11 correct
+  digits of 30. Near a pole, one digit is added per power of ten of the
+  distance of an operand, or of `a + b` for `Beta` and `n - k` for
+  `Binomial`, to the pole, computed from the exact operands; this is for the
+  gamma family, `Beta`, `Binomial` and `HurwitzZeta`. For `Gamma`,
+  `Factorial`, `Zeta`, `DirichletEta`, `HurwitzZeta`, `Binomial` and `e^x`,
+  whose condition number grows with the operand, one digit is added per
+  power of ten of the operand above 100. Past 500 added digits the
+  expression stays unevaluated: `Gamma(10^600 + 1/3)` (#618, contributed by
+  [enumeratio](https://github.com/enumeratio) in PR #619).
+
 - **`Reduce(L, f)` with no initial value compiles when `f` is a function
   literal.** The first element is the seed and the fold runs over the rest, as
   the interpreter does: `Reduce(Range(1, n), (a, b) => a * b)` is `n!`, and

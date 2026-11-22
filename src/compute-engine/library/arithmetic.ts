@@ -547,7 +547,14 @@ import {
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
-import { guardDigitsN } from './exact-operands-under-n.js';
+import {
+  guardDigitsBetaN,
+  guardDigitsGammaN,
+  guardDigitsN,
+  guardDigitsPoleN,
+  guardDigitsSizeN,
+  guardDigitsSizePoleN,
+} from './exact-operands-under-n.js';
 import {
   evaluateGammaBetween,
   evaluateIncompleteBeta,
@@ -9507,7 +9514,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             : undefined,
       canonical: (args, { engine }) =>
         engine._fn('Factorial', [...checkArity(engine, args, 1)]),
-      evaluate: guardDigitsN(([x], { numericApproximation }) => {
+      evaluate: guardDigitsGammaN(([x], { numericApproximation }) => {
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
@@ -10032,7 +10039,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? 'unsigned'
               : undefined
           : undefined,
-      evaluate: guardDigitsN(evaluateGamma),
+      evaluate: guardDigitsGammaN(evaluateGamma),
       // The exact positive-integer branch of `evaluateGamma` runs the
       // big-integer product of `Factorial`, which can take seconds below the
       // exact-digit cap (`Gamma(100001)`). The synchronous product reads the
@@ -10063,7 +10070,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // keeps its own head — as the synchronous handler answers.
           return isNumber(shifted) ? shifted : undefined;
         }
-        return guardDigitsN(evaluateGamma)(ops, options);
+        return guardDigitsGammaN(evaluateGamma)(ops, options);
       },
     },
 
@@ -10084,7 +10091,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
 
-      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN((ops, { numericApproximation, engine }) => {
         const x = ops[0];
         // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
         // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
@@ -10134,7 +10141,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           gammaPoleTypeOnTypes(ops[0]),
           context.engine._typeResolver
         ),
-      evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(0, x, engine);
         if (special !== undefined) return special;
         if (!numericApproximation) {
@@ -10173,7 +10180,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           gammaPoleTypeOnTypes(ops[0]),
           context.engine._typeResolver
         ),
-      evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(1, x, engine);
         if (special !== undefined) return special;
         if (!numericApproximation) {
@@ -10264,7 +10271,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: guardDigitsN(([n, x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN(([n, x], { numericApproximation, engine }) => {
         const order = asSmallInteger(n);
         const special = polygammaValueAtExceptionalPoint(order, x, engine);
         if (special !== undefined) return special;
@@ -10364,7 +10371,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsSizeN((ops, { numericApproximation, engine }) => {
         // Hurwitz zeta ζ(s,a) — Wolfram's `Zeta[s,a]`, the same function
         // `HurwitzZeta` below declares under its own name.
         if (ops.length === 2)
@@ -10484,7 +10491,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A float operand gives a float result, also for the exact special
       // values (`HurwitzZeta(0.0, 2)` is the float `-1.5`, not `-3/2`).
       evaluate: floatResultIfFloatOperand(
-        guardDigitsN((ops, { numericApproximation, engine }) => {
+        guardDigitsSizePoleN((ops, { numericApproximation, engine }) => {
           if (ops.length !== 2) return undefined;
           return evaluateHurwitzZeta(
             engine,
@@ -10529,7 +10536,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | infinity) -> number',
       examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
       nanBehavior: 'propagate',
-      evaluate: guardDigitsN((ops, { numericApproximation, engine }) =>
+      evaluate: guardDigitsSizeN((ops, { numericApproximation, engine }) =>
         ops.length === 1
           ? evaluateDirichletEta(engine, ops[0], numericApproximation)
           : undefined
@@ -10654,7 +10661,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: guardDigitsN((ops, options) => {
+      evaluate: guardDigitsBetaN((ops, options) => {
         if (ops.length > 2) return evaluateIncompleteBeta(options, ops);
         const [a, b] = ops;
         const { numericApproximation, engine } = options;
@@ -13483,7 +13490,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
-      evaluate: guardDigitsN(
+      evaluate: guardDigitsSizeN(
         ([x, n], { numericApproximation, engine, expression }) => {
           // Non-lazy operator: operands arrive already evaluated by the driver
           // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
@@ -13593,7 +13600,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // imaginary exponent (`e^{i·10^{20}·π}`) only when the base is the
         // float of `e` at the working precision.
         (original, index) =>
-          !(index === 0 && isSymbol(original, 'ExponentialE'))
+          !(index === 0 && isSymbol(original, 'ExponentialE')),
+        // Only `e^x` is ill conditioned at a large operand (condition |x|);
+        // `x^n` with an exact `x` is not (`Sqrt(10^600 + 1/3)`).
+        (expression) =>
+          isFunction(expression) && isSymbol(expression.op1, 'ExponentialE')
       ),
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
       // when x < 0, only defined if n is an integer
