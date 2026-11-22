@@ -4856,19 +4856,27 @@ function addTypeOnTypes(
     // The join is neutral in `unknown`, and it kept the integer components
     // of the point. So the numeric components of each point are widened to
     // `number`, as the scalar and the list routes widen their cells.
-    const opaque = args.some(
-      (x) =>
-        !typeCouldBeNumericTuple(x.type) &&
-        (x.type === 'unknown' ||
-          (factsOf(x.type).belowNumber &&
-            !isProvenScalarNumberOperand(x, engine)))
-    );
+    //
+    // Such an operand adds no arm of its own to the sum: a number beside a
+    // point has no sum (the evaluation is an `incompatible-type` error), so
+    // the value is a point when the operand holds one. With `y: unknown`,
+    // `(1, 2) + y` is typed `tuple<number, number>`, as `(1, 2)·y` is. The
+    // join kept the operand's `number`, and typed the sum
+    // `number | tuple<number, number>` (CE-1319).
+    const isOpaque = (x: OperandDescriptor): boolean =>
+      !typeCouldBeNumericTuple(x.type) &&
+      (x.type === 'unknown' ||
+        (factsOf(x.type).belowNumber &&
+          !isProvenScalarNumberOperand(x, engine)));
+    const opaque = args.some(isOpaque);
     return widenAll(
-      args.map((x) => {
-        const t = stripNumericRanges(x.type);
-        if (!opaque || !typeCouldBeNumericTuple(t)) return t;
-        return mapProductCells(t, (c) => widen(c, 'number')) ?? t;
-      })
+      args
+        .filter((x) => !isOpaque(x))
+        .map((x) => {
+          const t = stripNumericRanges(x.type);
+          if (!opaque || !typeCouldBeNumericTuple(t)) return t;
+          return mapProductCells(t, (c) => widen(c, 'number')) ?? t;
+        })
     );
   }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps

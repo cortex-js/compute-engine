@@ -3539,6 +3539,54 @@ export class ComputeEngine implements IComputeEngine {
     return this._shadowFrame(name)?.defs.get(name);
   }
 
+  /** See `IComputeEngine._enclosingParameterDef`. A binding that the body
+   * has not made yet is declared in the body scope of the literal (the
+   * scope whose parent is the boundary of its frame), with the annotated
+   * type, or else the inferred type the caller supplied, or `unknown`, and
+   * cached on the frame, so the later references of the body reuse it
+   * (`engine-expression-entrypoints.ts`). @internal */
+  _enclosingParameterDef(
+    name: string,
+    from: Scope
+  ): { def: BoxedDefinition; body: Scope } | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const frame = stack[i];
+      if (!frame.functionLiteral || !frame.names.has(name)) continue;
+      let body: Scope | undefined;
+      for (let s: Scope | null | undefined = from; s; s = s.parent)
+        if (s.parent === frame.boundary) {
+          body = s;
+          break;
+        }
+      if (body === undefined) return undefined;
+      const bodyScope = body;
+      const cached = frame.defs.get(name);
+      if (cached !== undefined) return { def: cached, body: bodyScope };
+      while (body.noAutoDeclare && body.parent) body = body.parent;
+      const existing = body.bindings.get(name);
+      const declared = frame.types?.get(name);
+      const def =
+        existing ??
+        this._declareSymbolValue(
+          name,
+          declared !== undefined
+            ? { type: declared, inferred: false }
+            : {
+                type: frame.inferredTypes?.get(name) ?? 'unknown',
+                inferred: true,
+              },
+          body
+        );
+      frame.defs.set(name, def);
+      if (existing === undefined && 'value' in def)
+        frame.record?.created.add(def.value);
+      if ('value' in def) markFunctionLiteralParameter(this, def.value);
+      return { def, body: bodyScope };
+    }
+    return undefined;
+  }
+
   /** Cache the binding auto-declared for an active shadowed parameter, so later
    * references reuse it. `created` is true when the caller declared the
    * binding now, false when it reuses a binding that existed before.

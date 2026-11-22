@@ -68,13 +68,14 @@ describe('a function literal over a list<any>', () => {
 
 describe('a point beside an operand whose number type is not stated', () => {
   // The other operand can hold a point with components of any number type,
-  // or a number, so the components of the result are `number`. Before, the
-  // integer components of the point were kept (ROADMAP CE-373).
+  // so the components of the result are `number`. A number there has no
+  // sum with a point, and adds no arm (CE-1319). Before, the integer
+  // components of the point were kept (ROADMAP CE-373).
   test('a sum with an operand typed unknown', () => {
     const ce = new ComputeEngine();
     ce.declare('q', 'unknown');
     const sum = ce.box(['Add', ['Tuple', 1, 2], 'q']);
-    expect(sum.type.toString()).toBe('number | tuple<number, number>');
+    expect(sum.type.toString()).toBe('tuple<number, number>');
     ce.assign('q', ce.box(['Tuple', 0.5, 0.5]));
     const value = sum.evaluate();
     expect(value.toString()).toBe('(1.5, 2.5)');

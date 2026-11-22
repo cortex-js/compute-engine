@@ -275,9 +275,7 @@ describe('a union with a tuple arm beside a list of numbers is typed arm by arm'
     const ce2 = new ComputeEngine();
     const lit = ce2.box(['Function', ['Add', 'q', ['Tuple', 1, 2]], 'q']);
     expect(lit.isValid).toBe(true);
-    expect(String(lit.type)).toBe(
-      '(q: unknown) -> number | tuple<number, number>'
-    );
+    expect(String(lit.type)).toBe('(q: unknown) -> tuple<number, number>');
   });
 
   test('the Add type handler rejects a tuple beside a number on types alone', () => {

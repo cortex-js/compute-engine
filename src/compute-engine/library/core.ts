@@ -836,12 +836,23 @@ function withOuterNames<T>(
       outer.set(name, priorProgram);
       continue;
     }
-    for (let s = scope.parent; s; s = s.parent) {
-      const found = s.bindings.get(name);
-      if (found === undefined) continue;
-      outer.set(name, found);
-      break;
+    // A parameter of a function literal whose body holds the block may have
+    // no binding in a scope yet, or one in a sibling scope (a bare
+    // parameter is bound where it is first read): with
+    // `u ↦ Block(Block(Declare(u, u + 1), u))`, the walk found no `u`, and
+    // `u + 1` read the local (CE-1702). So the walk stops at the body scope
+    // of that literal, and the parameter is the outer binding when no block
+    // in between declares the name.
+    const parameter = scope.parent
+      ? ce._enclosingParameterDef(name, scope.parent)
+      : undefined;
+    let found: BoxedDefinition | undefined;
+    for (let s = scope.parent; s && found === undefined; s = s.parent) {
+      found = s.bindings.get(name);
+      if (s === parameter?.body) break;
     }
+    const outerDef = found ?? parameter?.def;
+    if (outerDef !== undefined) outer.set(name, outerDef);
   }
   if (outer.size === 0) return build();
   // The names are shadowed in the block (`canonicalBlock()`): a frame of the

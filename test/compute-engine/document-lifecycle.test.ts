@@ -1459,7 +1459,8 @@ describe('the result of a recursive function with no stated result', () => {
         ['k', 'q'],
         cases('k', 'q', ['Add', step('P', 'k', 'q'), ['Tuple', 1, 2]]),
       ],
-      // `(0, 0) + q` with `q` unknown is not a `tuple<number, number>`.
+      // `(0, 0) + q` with `q` unknown is a `tuple<number, number>`: a number
+      // `q` has no sum with a point (CE-1319). So the guess holds.
       B: [
         ['k', 'q'],
         cases('k', ['Tuple', 0, 0], ['Add', step('B', 'k', 'q'), 'q']),
@@ -1474,7 +1475,9 @@ describe('the result of a recursive function with no stated result', () => {
     expect(revision.rowErrors.size).toBe(0);
     expect(typeOf(revision, 'P')).toBe('(unknown, unknown) any -> unknown');
     expect(call(revision, ['P', 3, ['Tuple', 1, 1]])).toBe('["Tuple",4,7]');
-    expect(typeOf(revision, 'B')).toBe('(unknown, unknown) any -> unknown');
+    expect(typeOf(revision, 'B')).toBe(
+      '(unknown, unknown) any -> tuple<number, number>'
+    );
     expect(call(revision, ['B', 2, ['Tuple', 1, 3]])).toBe('["Tuple",2,6]');
     expect(typeOf(revision, 'L')).toBe('(unknown) any -> list<any>');
     expect(call(revision, ['L', 3])).toBe('["List",1,2,3]');

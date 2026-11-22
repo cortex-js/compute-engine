@@ -182,6 +182,28 @@
 
 ### Resolved Issues
 
+- **A point plus a name of unknown type is typed as a point** (CE-1319). With
+  `y` undeclared, `(1, 2) + y` is typed `tuple<number, number>`; it was
+  `number | tuple<number, number>`, although a number plus a point is an
+  error. So `q ↦ q + (1, 2)` is typed `(q: unknown) -> tuple<number, number>`,
+  as `q ↦ q·(1, 2)` already was.
+
+- **The value of a `Declare` in a nested block reads the parameter of the
+  same name** (CE-1702). `u ↦ Block(Block(Declare(u, u + 1), u))` applied to
+  `2` is `3`, and so is the same body written with a `Delimiter` around the
+  inner block; it was the formula `u + 1`, because the value read the new
+  local, which had no value yet. A `Declare` of the parameter's name in the
+  body's own block is still the error `variable-redeclaration`. A block in between that declares
+  the name is closer than the parameter, and a global of the same name is
+  not read.
+
+- **A function that passes its argument whole to another function and also
+  uses it as a number reports a result that holds a list** (CE-1701). With
+  `S(x) = Mean(x)` and `T(x) = S(x) + x`, `T` is typed
+  `-> broadcastable<number>`, and `T([1, 2, 6])` is typed `vector<3>`; it was
+  `-> number` and `number`, while the value is `[4, 5, 9]`. A function with a default value or a rest
+  parameter is typed `-> any` in this case.
+
 - **A subscript made of letters stays one symbol when one of its letters
   names a macro** (CE-1657). After `ce.declare('P', { macro: ['Add', 't', 1] })`,
   `I_{Past}` is the symbol `I_Past`, as it is with no macro; it was
