@@ -60,6 +60,18 @@
   `any`, but can refuse one whose argument only has an open part: `[q]`, of
   type `list<unknown>`, against `tuple<real, real>`.
 
+### Resolved Issues
+
+- **A compiled `run()` that falls back to the interpreter in a Document
+  revision takes the value of a free name.** When a compilation declined,
+  `run({ Q: 4 })` of an expression boxed in a prepared Document revision scope
+  threw `ConstantAssignmentError`, because the fallback declared `Q` in the
+  sealed revision. The value is now substituted into the expression and no
+  name is declared, so `Expand(K + Q)` with the row `K = 3` gives `7`, as the
+  compiled `K + Q` does. A run argument that names a published row is still
+  refused. A row or a function row whose own value reads `Q` does not see the
+  substituted value (`docs/COMPILATION-MODEL.md`, known limitations).
+
 ## 0.197.1 _2026-11-21_
 
 ### Improvements

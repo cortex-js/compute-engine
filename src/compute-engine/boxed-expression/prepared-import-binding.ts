@@ -25,6 +25,14 @@ export function sealPreparedNamespace(
   }
 }
 
+/**
+ * True for a scope that `sealPreparedNamespace()` sealed: no name can be
+ * declared in it.
+ */
+export function isSealedPreparedNamespace(scope: Scope): boolean {
+  return writeAdmissions.get(scope) === 'none';
+}
+
 export function assertWritableImport(
   name: string,
   binding: object | undefined,

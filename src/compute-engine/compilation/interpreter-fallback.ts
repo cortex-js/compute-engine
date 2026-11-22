@@ -8,6 +8,7 @@ import type { BoxedDefinition, Expression, Scope } from '../global-types.js';
 import { isValueDef } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { withBindingValuesFn } from '../engine-declarations.js';
+import { isSealedPreparedNamespace } from '../boxed-expression/prepared-import-binding.js';
 import {
   collectionElementType,
   resolveTypeAlias,
@@ -544,10 +545,15 @@ function interpreterRun(
   // The binding record that the occurrence of `k` reads, or `undefined`.
   // With `declare`, a name with no definition is declared in the scope that
   // it resolves from: the home scope of a free name, `buildScope` for a
-  // name of a held operand.
+  // name of a held operand. A sealed prepared namespace (the scope of a
+  // Document revision) refuses every declaration: such a name is declared
+  // nowhere, and `sealed` receives it when `expr` itself reads it
+  // (`fallbackRun` substitutes its value); otherwise it is ignored, as a
+  // name that the expression does not read.
   const bindingOf = (
     k: string,
-    declare: boolean
+    declare: boolean,
+    sealed?: Set<string>
   ): BoxedDefinition | undefined => {
     const sym = freeOccurrences.get(k) as
       | (Expression & {
@@ -564,8 +570,27 @@ function interpreterRun(
     if (found !== undefined || !declare || home === undefined) return found;
     let scope: Scope = home;
     while (scope.noAutoDeclare && scope.parent) scope = scope.parent;
+    if (isSealedPreparedNamespace(scope)) {
+      if (ownNamesRead().has(k)) sealed?.add(k);
+      return undefined;
+    }
     ce._declareSymbolValue(k, { type: 'unknown', inferred: true }, scope);
     return resolve();
+  };
+  // The names that `expr` itself reads from outside itself, also in a held
+  // operand (`Expand` holds its operand and evaluates it): the names of
+  // `namesRead()` without those it reaches through a value or a function
+  // body. Made on first use.
+  let ownNames: Set<string> | undefined;
+  const ownNamesRead = (): Set<string> => {
+    if (ownNames !== undefined) return ownNames;
+    const names = new Set<string>();
+    rewriteWithBinders(expr, (sym, shadowed) => {
+      if (!shadowed?.has(sym.symbol)) names.add(sym.symbol);
+      return sym;
+    });
+    ownNames = names;
+    return names;
   };
   // The declared type of a free symbol of `expr`, when it has one — the
   // value given by `run` below must admit the argument value under that
@@ -611,12 +636,23 @@ function interpreterRun(
     // read is ignored.
     const values: Record<string, Expression> = {};
     const bindings: { name: string; record: BoxedDefinition }[] = [];
+    // The inputs with no definition whose declaration a sealed namespace
+    // refuses: their values are substituted in `expr` (`subs()` leaves a
+    // name that a binder of `expr` binds), and no name is declared. The
+    // value of a definition that `expr` reads, and the body of a function
+    // it calls, are not substituted: with a published row `g = Q + 1` or
+    // `f(x) = x + Q`, `run({ Q: 4 })` of `Expand(g)` or `Expand(f(2))`
+    // gives `null` where the compiled code gives `5` or `6` (known
+    // limitations, `docs/COMPILATION-MODEL.md`).
+    const sealed = new Set<string>();
+    const substituted: Record<string, Expression> = Object.create(null);
     if (vars && typeof vars === 'object')
       for (const [k, v] of Object.entries(vars)) {
-        const record = bindingOf(k, true);
-        if (record === undefined) continue;
-        bindings.push({ name: k, record });
-        values[k] = isComplexArg(v)
+        const record = bindingOf(k, true, sealed);
+        if (record === undefined && !sealed.has(k)) continue;
+        if (record !== undefined) bindings.push({ name: k, record });
+        const target = record === undefined ? substituted : values;
+        target[k] = isComplexArg(v)
           ? ce.number(ce.complex(v.re, v.im))
           : isColorArg(v)
             ? boxArg(v)
@@ -632,7 +668,11 @@ function interpreterRun(
       }
     return ce._inScope(buildScope, () =>
       withBindingValuesFn(ce, bindings, values, () => {
-        const value = expr.evaluate();
+        // Each such run rebuilds `expr` with `subs()`: the cost of not
+        // declaring in a sealed namespace.
+        const value = (
+          sealed.size === 0 ? expr : expr.subs(substituted)
+        ).evaluate();
         observe?.(value);
         return interpretedRunValue(value, expr.type.type);
       })

@@ -1,5 +1,6 @@
 import {
   ComputeEngine,
+  compile,
   createDocumentEnvironment,
   type DeclareDocumentInput,
   type DocumentImports,
@@ -689,6 +690,92 @@ test('a refused retype or value write of a sealed binding leaves its assumptions
     imports.dispose();
     environment.dispose();
   }
+});
+
+test('the interpreter fallback of a declined compilation runs with free inputs in a revision scope', () => {
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports(() => {});
+  const rowSyntax: DocumentSyntax = {
+    split: (source) => {
+      const i = source.indexOf('=');
+      return i <= 0
+        ? undefined
+        : { head: source.slice(0, i), body: source.slice(i + 1) };
+    },
+    recognize: (row) => ({
+      role: 'value',
+      head: { name: row.latex.slice(0, row.latex.indexOf('=')), params: [] },
+    }),
+    normalize: (raw) => raw,
+  };
+  const revision = imports.prepare(
+    [
+      { id: 'K', latex: 'K=3' },
+      { id: 'p', latex: 'p=[10,20,30]' },
+    ],
+    rowSyntax
+  );
+  expect(revision.rowErrors.size).toBe(0);
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  ce.pushScope(revision.scope);
+  try {
+    // `Expand` makes each compilation decline: `run` is the interpreter.
+    const declined = (json: unknown) => {
+      const result = compile(ce.box(json as never), { to: 'javascript' });
+      expect(result.success).toBe(false);
+      return result.run as (vars: Record<string, unknown>) => unknown;
+    };
+    // A free input that is not a row is substituted, as a compiled run
+    // reads it, and no name is declared.
+    expect(declined(['Expand', ['Add', 'K', 'Q']])({ Q: 4 })).toBe(7);
+    expect(declined(['Expand', ['At', 'p', 's']])({ s: 2 })).toBe(20);
+    expect(
+      declined(['Expand', ['Add', ['At', 'L', 2], 'K']])({ L: [5, 6, 7] })
+    ).toBe(9);
+    // An input named `__proto__` is a name like any other.
+    expect(
+      declined(['Expand', ['Add', 'K', '__proto__']])(
+        JSON.parse('{"__proto__": 4}')
+      )
+    ).toBe(7);
+    // The variable of a binder of the same name is not substituted.
+    expect(
+      declined(['Expand', ['Add', 'Q', ['Sum', 'Q', ['Limits', 'Q', 1, 3]]]])({
+        Q: 10,
+      })
+    ).toBe(16);
+    // A row read with no run argument.
+    expect(declined(['Expand', ['Add', 'K', 1]])({})).toBe(4);
+    // A run argument does not write a published row.
+    expect(() => declined(['Expand', ['Add', 'K', 1]])({ K: 5 })).toThrow(
+      ConstantAssignmentError
+    );
+    expect(() =>
+      declined(['Expand', ['At', 'p', 's']])({ p: [1, 2, 3], s: 2 })
+    ).toThrow(ConstantAssignmentError);
+  } finally {
+    ce.popScope();
+    warn.mockRestore();
+  }
+  // No scope of the revision chain, the system scope included, holds a
+  // declaration of the inputs.
+  let root = revision.scope;
+  for (
+    let scope: typeof revision.scope | null = revision.scope;
+    scope;
+    scope = scope.parent
+  ) {
+    root = scope;
+    for (const name of ['Q', 's', 'L'])
+      expect(scope.bindings.has(name)).toBe(false);
+  }
+  ce.assign('Q', 9);
+  expect(ce.context.lexicalScope.bindings.has('Q')).toBe(true);
+  expect(root.bindings.has('Q')).toBe(false);
+  revision.dispose();
+  imports.dispose();
+  environment.dispose();
 });
 
 test('a stated result type or effect is checked when some formals are unannotated', () => {

@@ -576,6 +576,15 @@ interpreter's value. A line is removed when the case declines or is fixed.
   declines ("Chunk of a list of other than numbers or booleans"); the
   interpreter gives the rows of points. Of a list of complex numbers or of
   colours it declines too (crafted).
+- `plausible?` — `javascript`, a prepared Document revision with the row
+  `g = Q + 1` or the function row `f(x) = x + Q`, and no declaration of `Q`:
+  the interpreter fallback of a declined compilation substitutes a run
+  argument for a free name into the expression only, so `run({ Q: 4 })` of
+  `Expand(g)` or `Expand(f(2))` gives `null`, where the compiled `g` gives
+  `5` and the compiled `f(2)` gives `6`. Declaring `Q` as an input of the
+  imports does not help yet: the fallback gives `null` for a declared input
+  read through a published row too (CE-1666); once that is fixed, the
+  declaration is the remedy.
 
 ## `parallel for` and `runAsync()`
 
