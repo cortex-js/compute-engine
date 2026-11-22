@@ -1044,27 +1044,52 @@ function pipeStageWithImplicitTopic(
   topic: Expression
 ): Expression | undefined {
   if (!isFunction(rhs)) return undefined;
-  const name = rhs.operator;
+  let name = rhs.operator;
   if (name === 'Function') return undefined;
   // A slot inside a nested `Function` literal belongs to that literal, so a
   // stage such as `["Map", ["Function", ["Add", "_", 1]]]` has no slot of its
   // own and still receives the topic as its missing operand.
   if (freeAnonymousSlots(rhs).size > 0) return undefined;
+  // A call of a library function by its qualified name (`std::take(2)` in
+  // Epsil, `Apply(Module(take), 2)`) is the call of that function: the same
+  // gate and slot rule, and the stage keeps its `Module` callee (CE-1699).
+  let written = rhs.ops;
+  let module: Expression | undefined;
+  if (name === 'Apply' && isFunction(rhs.ops[0], 'Module')) {
+    const qualified = rhs.ops[0];
+    const library =
+      qualified.nops === 1 ? libraryNameOf(ce, qualified.ops[0]) : undefined;
+    if (library === undefined) return undefined;
+    name = library;
+    module = qualified;
+    written = rhs.ops.slice(1);
+  }
   const def = ce.lookupDefinition(name);
   const opDef =
     def !== undefined && 'operator' in def ? def.operator : undefined;
   const arms = signatureArms(opDef?.signature.type);
   if (arms === undefined) return undefined;
-  if (!implicitTopicArityFits(arms, rhs.nops)) return undefined;
+  if (!implicitTopicArityFits(arms, written.length)) return undefined;
   const at = implicitTopicSlot(
     arms,
     topic.type,
-    rhs.ops.map((op) => op.type)
+    written.map((op) => op.type)
   );
 
-  const args = [...rhs.ops];
+  const args = [...written];
   args.splice(at, 0, ce.symbol('_', { canonical: false }));
+  if (module !== undefined)
+    return ce._fn('Apply', [module, ...args], { canonical: false });
   return ce._fn(name, args, { canonical: false });
+}
+
+/** The name of the library function that `Module(x)` names, or `undefined`
+ * when `x` is not a name of the library. */
+function libraryNameOf(ce: ComputeEngine, x: Expression): string | undefined {
+  const name = sym(x);
+  if (name === undefined) return undefined;
+  const library = ce._librarySymbol(name);
+  return isSymbol(library) ? library.symbol : undefined;
 }
 
 /**

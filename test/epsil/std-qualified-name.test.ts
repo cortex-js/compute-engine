@@ -355,3 +355,24 @@ describe('the separator of a qualified name', () => {
     expect(parsed('std∷pi')[1]).toEqual(['unexpected-symbol']);
   });
 });
+
+describe('a pipe into a std:: call', () => {
+  // `xs |> std::take(2)` is `xs |> take(2)`: the piped value is the
+  // implicit argument of the library function (CE-1699).
+  const run = (source: string): string =>
+    executeEpsil(new ComputeEngine(), source).value.toString();
+
+  test('the piped value takes the slot of the library function', () => {
+    expect(run('let xs = [1, 2, 3]\nxs |> std::take(2)')).toBe('[1,2]');
+    expect(run('"abc" |> std::take(2)')).toBe('"ab"');
+    expect(run('[3, 1, 2] |> std::sort()')).toBe('[1,2,3]');
+  });
+
+  test('a function of the program with the same name is not called', () => {
+    expect(
+      run(
+        'function take(a, b) { "mine" }\nlet xs = [1, 2, 3]\nxs |> std::take(2)'
+      )
+    ).toBe('[1,2]');
+  });
+});

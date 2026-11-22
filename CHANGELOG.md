@@ -26,6 +26,11 @@
 
 ### Resolved Issues
 
+- **Epsil: a pipe into a `std::` call passes the piped value as into the
+  plain call** (CE-1699). `xs |> std::take(2)` is `xs |> take(2)`; it was an
+  `incompatible-type` error. Signature help marks the piped parameter there
+  too.
+
 - **Epsil: the error for an unclosed string names its closing delimiter,
   without a backslash** (CE-1659). `print("Hello` gives `Expected closing
   string delimiter '"'` (it was `"\""`), and `#"ab` gives `'"#'` (it named

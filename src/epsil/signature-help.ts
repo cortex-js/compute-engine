@@ -258,20 +258,36 @@ function markPipedTopic(
   index: number,
   underscore: string | undefined
 ): void {
+  // The call `head(…)`, or the call of a library function by its qualified
+  // name, `std::head(…)`, which is `Apply(Module(head), …)` (CE-1699).
+  const isQualifiedCall = (node: MathJsonExpression): boolean => {
+    if (operator(node) !== 'Apply') return false;
+    const module = operand(node, 1);
+    if (operator(module) !== 'Module') return false;
+    const name = operand(module, 1);
+    return (
+      symbol(name) === head &&
+      (spanOf(node)?.[0] === headStart || spanOf(name)?.[0] === headStart)
+    );
+  };
   const found = innermostNode(
     context.ast,
-    (node) => operator(node) === head && spanOf(node)?.[0] === headStart
+    (node) =>
+      (operator(node) === head && spanOf(node)?.[0] === headStart) ||
+      isQualifiedCall(node)
   );
   if (found?.parent === undefined) return;
   const { node, parent, index: position } = found;
   if (operator(parent) !== 'Pipe' || position !== 1) return;
-  if (underscore !== undefined && symbol(operands(node)[index]) === underscore)
+  const call: MathJsonExpression =
+    operator(node) === 'Apply' ? [head, ...operands(node).slice(1)] : node;
+  if (underscore !== undefined && symbol(operands(call)[index]) === underscore)
     return;
   const slots = pipedTopicSlots(
     context,
     operand(parent, 1),
-    node,
-    index < operands(node).length ? index : undefined
+    call,
+    index < operands(call).length ? index : undefined
   );
   if (slots === undefined || slots.length !== candidates.length) return;
   candidates.forEach((candidate, i) => {
