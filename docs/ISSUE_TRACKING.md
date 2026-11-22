@@ -22,8 +22,17 @@ decision replaces the default.
 | GitHub issues                                       | reports from external users                                                  | external users; an agent mirrors an accepted report into `issues/` |
 
 `ROADMAP.md` holds features, performance work and workstreams, not issues. The
-two files share one counter: `issues/NEXT.md` gives the next `CE-<n>` number
-for an issue file and for a ROADMAP entry. Tycho's `COMPUTE_ENGINE.md` holds the
+two files share one counter: a `CE-<n>` number for an issue file comes from
+`node scripts/issues.mjs new`, and one for a ROADMAP entry from
+`node scripts/issues.mjs id`. The machines that file issues share it: the
+master counter is on univac, and another machine takes its numbers there over
+ssh, with a reserve of a few numbers for when univac cannot be reached
+(`scripts/issue-ids.mjs`). `issues/NEXT.md` records the next number that this
+copy of the repository knows, so a number read from it by hand can be the one
+that another machine took. After a pull or a merge,
+`node scripts/issues.mjs merge-check` lists the issue files that both sides
+added: two issues with one number, of which a merge keeps one file without a
+conflict. Tycho's `COMPUTE_ENGINE.md` holds the
 reference material on how Tycho uses the engine, and
 `COMPUTE_ENGINE_CHECKLIST.md` holds the steps of an adoption. Tycho files its
 requests to CE as files in `issues/`, in this repository.
@@ -63,8 +72,11 @@ What happens to a file when the work ends:
 ## The issue file
 
 One file per issue, `issues/CE-<n>.md`. `node scripts/issues.mjs new` creates
-the file from a template with the next number, prints its path, and increases
-`issues/NEXT.md`. A number is never reused, also not the number of a closed
+the file from a template with the next number of the shared counter, prints
+its path, and increases `issues/NEXT.md`. With univac out of reach and the
+reserve empty, it refuses, because a number made up locally is how two issues
+got one number: name the defect in the report and file it later. A number is
+never reused, also not the number of a closed
 issue.
 
 The file is a header of fixed fields, then a short body. The header is what the
@@ -353,7 +365,9 @@ has no dependency.
 | `set <id> <field> <value>`   | changes one header field (a date field takes `today`) and writes `updated`; it refuses an unknown value, an empty required field, `state: close` without `close-reason`, and `in-progress` |
 | `flag <id> +name` / `-name`  | adds or removes one flag                                                                                                       |
 | `start <id> <owner>`         | sets `in-progress`, `owner` and `started`; refuses an item that is not `open` or `investigate`, a P4, `needs-review`, or any item while a confirmed P0 is open |
-| `new`                        | creates `issues/CE-<n>.md` from the template with the next id, prints the path, and increases `issues/NEXT.md`                 |
+| `new`                        | creates `issues/CE-<n>.md` from the template with the next id of the shared counter, prints the path, and increases `issues/NEXT.md` |
+| `id`                         | takes the next id of the shared counter without a file (the number of a ROADMAP entry), and increases `issues/NEXT.md`         |
+| `merge-check [<rev>]`        | the issue files that both sides of the merge in progress, or of the merge commit `rev`, added or changed; exit 1 when one was added on both sides |
 | `close <id> <reason>`        | removes the file and writes the line to `CLOSED.md`                                                                            |
 | `close --all`                | the same for every file with `state: close`; the reason is the `close-reason` field                                            |
 

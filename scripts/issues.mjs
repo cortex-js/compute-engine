@@ -14,6 +14,9 @@
  *   node scripts/issues.mjs flag <id> +f | -f     adds or removes one flag
  *   node scripts/issues.mjs start <id> <owner>    sets in-progress, owner and the start date
  *   node scripts/issues.mjs new                   creates the next file from the template, prints its path
+ *                                                 (the id comes from the shared counter, `scripts/issue-ids.mjs`)
+ *   node scripts/issues.mjs id                    takes the next id without a file (a ROADMAP entry)
+ *   node scripts/issues.mjs merge-check [<rev>]   the issue files that both sides of a merge added or changed
  *   node scripts/issues.mjs close <id> <reason…>  removes the file, one line to CLOSED.md
  *   node scripts/issues.mjs close --all           the same for every `state: close` file
  *
@@ -35,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { allocateId } from './issue-ids.mjs';
 
 const SCRIPT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1165,7 +1169,8 @@ function startIssue(id, owner) {
   ]);
 }
 
-function newIssue() {
+/** `new`, or with `withoutFile` the `id` command (the number of a ROADMAP entry). */
+function newIssue(withoutFile = false) {
   const next = readNext();
   if (next === null) fail(`no ${path.join(opts.dir, NEXT_FILE)}`);
   const fileMax = Math.max(
@@ -1174,13 +1179,90 @@ function newIssue() {
       .readdirSync(opts.dir)
       .map((n) => idNumber(n.replace(/\.md$/, '')) ?? 0)
   );
-  const n = Math.max(next, roadmapMax() + 1, fileMax + 1, closedMax() + 1);
+  const min = Math.max(next, roadmapMax() + 1, fileMax + 1, closedMax() + 1);
+  // The id comes from the master counter that the machines share
+  // (`scripts/issue-ids.mjs`): `NEXT.md` alone gives the same number on two
+  // machines.
+  let n;
+  try {
+    n = allocateId(
+      min,
+      (k) =>
+        !fs.existsSync(path.join(opts.dir, `CE-${k}.md`)) && k > closedMax()
+    );
+  } catch (err) {
+    fail(err.message);
+  }
+  const after = Math.max(min, n + 1);
+  fs.writeFileSync(path.join(opts.dir, NEXT_FILE), `${after}\n`);
+  if (withoutFile) {
+    console.log(`CE-${n}\n${NEXT_FILE} is now ${after}.`);
+    return;
+  }
   const file = path.join(opts.dir, `CE-${n}.md`);
-  fs.writeFileSync(path.join(opts.dir, NEXT_FILE), `${n + 1}\n`);
   fs.writeFileSync(file, template(n), { flag: 'wx' });
   console.log(
-    `${file}\n${NEXT_FILE} is now ${n + 1}. Fill in the header and the body, then run lint.`
+    `${file}\n${NEXT_FILE} is now ${after}. Fill in the header and the body, then run lint.`
   );
+}
+
+/**
+ * The issue files that both sides of a merge added or changed: the merge in
+ * progress (`MERGE_HEAD`), or the merge commit `rev` (default `HEAD`). Two
+ * sides that add the same `CE-<n>.md` gave one number to two issues, and a
+ * merge that keeps one file loses the other one without a conflict marker.
+ * Exit 1 when a file was added on both sides.
+ */
+function mergeCheck(rev) {
+  const git = (...a) =>
+    execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim();
+  let ours;
+  let theirs;
+  try {
+    git('rev-parse', '--verify', '-q', 'MERGE_HEAD');
+    [ours, theirs] = ['HEAD', 'MERGE_HEAD'];
+  } catch {
+    const m = rev ?? 'HEAD';
+    try {
+      git('rev-parse', '--verify', '-q', `${m}^2`);
+    } catch {
+      fail(`${m} is not a merge commit, and no merge is in progress`);
+    }
+    [ours, theirs] = [`${m}^1`, `${m}^2`];
+  }
+  const base = git('merge-base', ours, theirs);
+  const changed = (side, filter) =>
+    new Set(
+      git(
+        'diff',
+        '--name-only',
+        `--diff-filter=${filter}`,
+        base,
+        side,
+        '--',
+        'issues/'
+      )
+        .split('\n')
+        .filter((f) => /^issues\/CE-\d+\.md$/.test(f))
+    );
+  const addedOurs = changed(ours, 'A');
+  const addedBoth = [...changed(theirs, 'A')].filter((f) => addedOurs.has(f));
+  const modifiedOurs = changed(ours, 'M');
+  const modifiedBoth = [...changed(theirs, 'M')].filter((f) =>
+    modifiedOurs.has(f)
+  );
+  for (const f of addedBoth)
+    console.log(
+      `${f}: error: added on both sides, so two issues have one id; give one of them a new id with \`new\``
+    );
+  for (const f of modifiedBoth)
+    console.log(
+      `${f}: changed on both sides; check that the merge kept both changes`
+    );
+  console.log(
+    `${ours} and ${theirs}: ${addedBoth.length} added on both sides, ${modifiedBoth.length} changed on both sides`
+  );
+  process.exit(addedBoth.length ? 1 : 0);
 }
 
 function template(n) {
@@ -1314,6 +1396,12 @@ function run(command, args) {
     }
     case 'new':
       newIssue();
+      break;
+    case 'id':
+      newIssue(true);
+      break;
+    case 'merge-check':
+      mergeCheck(args[0]);
       break;
     case 'close': {
       const { issues } = loadAll();
