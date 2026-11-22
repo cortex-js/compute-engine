@@ -637,3 +637,574 @@ describe('EPSIL COMPLETION: ONLY WHAT THE GRAMMAR ADMITS', () => {
     expect(item(result, 'type')?.insertText).toBe('`type`');
   });
 });
+
+describe('EPSIL COMPLETION: FIT', () => {
+  const fit = (result: EpsilCompletions, label: string) =>
+    item(result, label)?.fit;
+  const program =
+    'const A : matrix = identityMatrix(4)\nconst another = 5\nconst anumber: integer = 3\n';
+
+  test('a result broader than the expected type, or a union with an arm that fits, may fit', () => {
+    const result = complete('determinant(▮');
+    expect(result.expectedType).toBe('matrix');
+    for (const name of [
+      'transpose',
+      'conjugateTranspose',
+      'diagonal',
+      'hadamardProduct',
+    ])
+      expect(fit(result, name)).toBe('maybe');
+    expect(item(result, 'adjugateMatrix')).toMatchObject({
+      rank: 3,
+      fit: 'match',
+    });
+    // A broadcastable function maps over a matrix (`determinant(abs(A))`),
+    // and a call of `isPrime` gives a matrix of booleans at best.
+    expect(fit(result, 'abs')).toBe('maybe');
+    expect(fit(result, 'tan')).toBe('maybe');
+    expect(fit(result, 'isPrime')).toBe('never');
+    // A generic result is judged by its bound.
+    expect(fit(result, 'reverse')).toBe('maybe');
+  });
+
+  test('within a rank, the names that may fit come before those that cannot', () => {
+    const result = complete('determinant(▮');
+    const rank5 = result.items.filter((i) => i.rank === 5).map((i) => i.fit);
+    expect(rank5).toEqual(
+      [...rank5].sort(
+        (a, b) => (a === 'never' ? 1 : 0) - (b === 'never' ? 1 : 0)
+      )
+    );
+    expect(rank5).toContain('never');
+  });
+
+  test('a name of the source with a literal value has the type of the value', () => {
+    const result = complete(program + 'inverse(a▮');
+    expect(item(result, 'A')).toMatchObject({ rank: 2, fit: 'match' });
+    expect(item(result, 'anumber')).toMatchObject({ rank: 4, fit: 'never' });
+    expect(item(result, 'another')).toMatchObject({
+      rank: 4,
+      fit: 'never',
+      detail: 'integer',
+    });
+    // A `let` takes the wider type of a local, which a later assignment
+    // keeps.
+    const lets = complete('let x = 5\nlet l = [1, 2]\nlet s = "a"\n▮');
+    expect(item(lets, 'x')?.detail).toBe('number');
+    expect(item(lets, 'l')?.detail).toBe('list<number>');
+    expect(item(lets, 's')?.detail).toBe('string');
+    expect(item(lets, 'x')?.fit).toBeUndefined();
+    // Any other value gives no type.
+    expect(item(complete('let y = sin(1)\n▮'), 'y')?.detail).toBeUndefined();
+  });
+
+  test('the right side of |> expects a function of the left side', () => {
+    const result = complete(program + 'A |> inv▮');
+    expect(result.expectedType).toBe('(matrix) -> any');
+    expect(item(result, 'inverse')).toMatchObject({ rank: 3, fit: 'match' });
+    // A call `inverseFunction(g)` gives a function: `A |> inverseFunction(g)`.
+    expect(fit(result, 'inverseFunction')).toBe('maybe');
+    // A broadcastable function of a real maps over the matrix.
+    expect(fit(result, 'inverseHaversine')).toBe('maybe');
+    // `A` is a matrix, not a function.
+    expect(fit(complete(program + 'A |> ▮'), 'A')).toBe('never');
+  });
+
+  test('a function argument is judged by its signature', () => {
+    expect(fit(complete('filter([1, 2], is▮'), 'isPrime')).toBe('match');
+    // An unbound type variable may be anything.
+    expect(fit(complete('filter(xs, is▮'), 'isPrime')).toBe('maybe');
+    const source = complete(
+      'function g(m: matrix) -> matrix { m }\nfunction h(a, b) { a }\nconst A: matrix = identityMatrix(2)\nA |> ▮'
+    );
+    expect(item(source, 'g')).toMatchObject({ rank: 2, fit: 'match' });
+    // `h` takes two arguments: `A |> h(b)` is `h(A, b)`.
+    expect(fit(source, 'h')).toBe('maybe');
+  });
+
+  test('the right side of |> admits a function that takes more arguments', () => {
+    const result = complete('[3, 1, 2] |> ▮');
+    for (const name of ['take', 'map', 'filter'])
+      expect(fit(result, name)).not.toBe('never');
+    // With a left side of no static type, the expected type is `function`.
+    expect(complete('xs |> ▮').expectedType).toBe('function');
+  });
+
+  test('a name of a function type may be called where a value is expected', () => {
+    const result = complete(
+      'function apply(f: (matrix) -> matrix, A: matrix) { determinant(▮'
+    );
+    expect(item(result, 'f')).toMatchObject({ rank: 2, fit: 'match' });
+  });
+
+  test('a function argument must take the optional arguments of the expected signature', () => {
+    const result = complete(
+      'function k(f: (real, real?) -> real) { f(1) }\n' +
+        'function u(x: real) pure -> real { x }\n' +
+        'function o(x: real, y: real = 0) pure -> real { x }\n' +
+        'function b(x: real, y: string) pure -> real { x }\n' +
+        'k(▮'
+    );
+    expect(item(result, 'o')).toMatchObject({ rank: 2, fit: 'match' });
+    // `u` cannot take a second argument, which `k` may pass.
+    expect(fit(result, 'u')).toBe('maybe');
+    // The second parameter of `b` does not admit a real, which `k` may pass.
+    expect(fit(result, 'b')).toBe('maybe');
+  });
+
+  test('a function argument must have the effects that the expected signature admits', () => {
+    const result = complete(
+      'function k(f: (real) pure -> real) { f(1) }\n' +
+        'function p(x: real) pure -> real { x }\n' +
+        'function r(x: real) random -> real { x }\n' +
+        'function w(x: real) -> real { x }\n' +
+        'k(▮'
+    );
+    expect(fit(result, 'p')).toBe('match');
+    expect(fit(result, 'r')).toBe('never');
+    // The effects of `w` are not declared.
+    expect(fit(result, 'w')).toBe('maybe');
+  });
+
+  test('a function whose result may be a function may be called where a function is expected', () => {
+    expect(
+      fit(
+        complete('const A: matrix = identityMatrix(2)\nA |> ▮'),
+        'inverseFunction'
+      )
+    ).not.toBe('never');
+    expect(fit(complete('[1, 2] |> ▮'), 'derivative')).not.toBe('never');
+    const result = complete(
+      'function mk(n: integer) -> function { n }\n' +
+        'function z(x: integer) pure -> string { "" }\n' +
+        'filter([1, 2], ▮'
+    );
+    expect(fit(result, 'mk')).toBe('maybe');
+    // A string is not a function.
+    expect(fit(result, 'z')).toBe('never');
+  });
+
+  test('a union with a function arm admits a function', () => {
+    const result = complete(
+      'function f(x: real) pure -> real { x }\n' +
+        'function s(x: string) pure -> real { x }\n' +
+        'let cb: function | nothing = ▮'
+    );
+    expect(fit(result, 'f')).toBe('match');
+    const typed = complete(
+      'function f(x: real) pure -> real { x }\n' +
+        'function s(x: string) pure -> real { 0 }\n' +
+        'let cb: ((real) -> real) | nothing = ▮'
+    );
+    expect(fit(typed, 'f')).toBe('match');
+    expect(fit(typed, 's')).toBe('never');
+  });
+
+  test('a transparent alias of a signature is unfolded', () => {
+    const engine = new ComputeEngine();
+    engine.declareType('Predicate', '(integer) pure -> boolean', {
+      alias: true,
+    });
+    const source =
+      'function p(x: integer) pure -> boolean { true }\n' +
+      'function r(x: integer) random -> boolean { true }\n' +
+      'let q: Predicate = ▮';
+    const result = epsilCompletions(
+      engine,
+      source.replace('▮', ''),
+      source.indexOf('▮'),
+      { typeNames: ['Predicate'] }
+    );
+    expect(result.expectedType).toBe('Predicate');
+    expect(fit(result, 'p')).toBe('match');
+    expect(fit(result, 'r')).toBe('never');
+  });
+
+  test('a callback of a function with a variadic list of sources may take more arguments', () => {
+    const result = complete(
+      'function combine(a: integer, b: string) pure -> integer { a }\n' +
+        'map(▮, [1, 2], ["x", "y"])'
+    );
+    expect(fit(result, 'combine')).toBe('maybe');
+    // `map` calls `one` with two arguments here.
+    expect(
+      fit(
+        complete(
+          'function one(a: integer) pure -> integer { a }\nmap(▮, [1, 2], ["x", "y"])'
+        ),
+        'one'
+      )
+    ).toBe('maybe');
+    // The type of the callback is bound from the second source, but `xs`
+    // may hold strings.
+    expect(
+      fit(
+        complete(
+          'function combine(a: string, b: integer) pure -> integer { b }\n' +
+            'function run(xs) { map(▮, xs, [1, 2]) }'
+        ),
+        'combine'
+      )
+    ).not.toBe('never');
+    // `filter` calls its predicate with one argument.
+    expect(
+      fit(
+        complete(
+          'function two(a: integer, b: integer) pure -> boolean { true }\nfilter([1, 2], ▮'
+        ),
+        'two'
+      )
+    ).toBe('never');
+  });
+
+  test('the variadic tail of the expected signature fills the further parameters', () => {
+    const result = complete(
+      'function k(f: (integer+) -> boolean) { f(1) }\n' +
+        'function run(h: (integer, string*) -> boolean, g: (integer*) -> boolean) { k(▮'
+    );
+    // A call `h(1, 2)` passes an integer to `string*`.
+    expect(fit(result, 'h')).toBe('maybe');
+    expect(fit(result, 'g')).toBe('match');
+  });
+
+  test('a union of function types matches only when each arm does', () => {
+    const result = complete(
+      'function t(p: ((integer) any -> boolean) | ((string) any -> boolean)) { filter([1, 2], ▮'
+    );
+    expect(fit(result, 'p')).toBe('maybe');
+  });
+
+  test('an operand of a broadcastable operator admits a list', () => {
+    const result = complete('const A: matrix = identityMatrix(2)\nA * ▮');
+    expect(fit(result, 'A')).not.toBe('never');
+  });
+
+  test('a keyword and a likely value have no fit', () => {
+    const result = complete('let a: integer = ▮');
+    expect(fit(result, '0')).toBeUndefined();
+    expect(fit(result, 'if')).toBeUndefined();
+    expect(fit(complete('let b = ▮'), 'sin')).toBeUndefined();
+  });
+});
+
+describe('EPSIL COMPLETION: MEMBERS', () => {
+  const SHAPES = `protocol Shape {
+  function area(self: Self) -> number
+  function scale(self: Self, k: number) -> Self
+}
+protocol Labeled extends Shape { readonly label: string }
+type Circle = tuple<r: number> is Shape {
+  function area(self: Circle) -> number { Pi * self.r^2 }
+  function scale(self: Circle, k: number) -> Circle { Circle(self.r * k) }
+}
+type Tag = record{name: string} is Labeled {
+  function area(self: Tag) -> number { 0 }
+  function scale(self: Tag, k: number) -> Tag { self }
+  get label(self) -> string { self.name }
+}
+const c: Circle = Circle(1)
+const p: record{x: real, y: real, tag: string} = {x -> 1, y -> 2, tag -> "a"}
+`;
+
+  test('a tuple lists its named elements and its protocol functions', () => {
+    const result = complete(SHAPES + 'c.▮');
+    expect(result.items.map((i) => [i.label, i.kind, i.detail, i.insertText]))
+      .toMatchInlineSnapshot(`
+      [
+        [
+          "area",
+          "function",
+          "() -> number",
+          "area()",
+        ],
+        [
+          "r",
+          "variable",
+          "number",
+          undefined,
+        ],
+        [
+          "scale",
+          "function",
+          "(k: number) -> Circle",
+          undefined,
+        ],
+      ]
+    `);
+  });
+
+  test('a record lists its fields, with their types', () => {
+    const result = complete(SHAPES + 'p.▮');
+    expect(result.items.map((i) => [i.label, i.detail])).toEqual([
+      ['tag', 'string'],
+      ['x', 'real'],
+      ['y', 'real'],
+    ]);
+  });
+
+  test('the word after the dot filters the members', () => {
+    expect(labels(complete(SHAPES + 'p.t▮'))).toEqual(['tag']);
+  });
+
+  test('a readonly property of a protocol, and the members of its parents', () => {
+    const result = complete(SHAPES + 'const t: Tag = Tag({name -> "a"})\nt.▮');
+    expect(result.items.map((i) => [i.label, i.detail])).toEqual([
+      ['area', '() -> number'],
+      ['label', 'string'],
+      ['name', 'string'],
+      ['scale', '(k: number) -> Tag'],
+    ]);
+  });
+
+  test('a conformance of a primitive type', () => {
+    const result = complete(
+      'protocol Signed { readonly sign: string }\n' +
+        'type number is Signed {\n' +
+        '  get sign(self) -> string { if (self < 0) { "-" } else { "+" } }\n' +
+        '}\n' +
+        'let x = -12\nx.▮'
+    );
+    expect(result.items.map((i) => [i.label, i.detail])).toEqual([
+      ['sign', 'string'],
+    ]);
+  });
+
+  test('a chain reads the type of the field before the dot', () => {
+    const result = complete(
+      'const a: record{b: record{u: integer, v: string}} = {b -> {u -> 1, v -> "s"}}\na.b.▮'
+    );
+    expect(result.items.map((i) => [i.label, i.detail])).toEqual([
+      ['u', 'integer'],
+      ['v', 'string'],
+    ]);
+  });
+
+  test('a receiver whose type is not known has no items', () => {
+    expect(complete('let q = f(3)\nq.▮').items).toEqual([]);
+    expect(complete('zz.▮').items).toEqual([]);
+  });
+
+  test('before `(`, a function member is inserted as its name', () => {
+    expect(item(complete(SHAPES + 'c.ar▮()'), 'area')?.insertText).toBe(
+      undefined
+    );
+  });
+
+  test('a member in an argument fits the type of the parameter', () => {
+    // `sqrt` takes `complex | infinity`, which `number` (with `NaN`) is not
+    // a subtype of.
+    const sqrt = complete(SHAPES + 'sqrt(c.▮');
+    expect(sqrt.expectedType).toBe('complex | infinity');
+    expect(item(sqrt, 'area')?.fit).toBe('maybe');
+    expect(item(sqrt, 'scale')?.fit).toBe('never');
+    const h = complete(SHAPES + 'function h(x: number) -> number { x }\nh(c.▮');
+    expect(h.expectedType).toBe('number');
+    expect(item(h, 'area')?.fit).toBe('match');
+    expect(item(h, 'r')?.fit).toBe('match');
+    expect(item(h, 'scale')?.fit).toBe('never');
+  });
+
+  const members = (source: string) =>
+    complete(source).items.map((i) => [i.label, i.detail]);
+
+  test('an object type lists its fields, and its protocol properties', () => {
+    const PERSON =
+      'type Person = object{first: string, last: string}\n' +
+      'const p: Person = Person(first: "a", last: "b")\n';
+    expect(members(PERSON + 'p.▮')).toEqual([
+      ['first', 'string'],
+      ['last', 'string'],
+    ]);
+    expect(
+      members(
+        'protocol Nameable { readwrite name: string }\n' +
+          'type Person = object{first: string, last: string} is Nameable {\n' +
+          '  get name(self) -> string { self.first }\n' +
+          '  set name(self, v: string) { }\n' +
+          '}\n' +
+          'const p: Person = Person(first: "a", last: "b")\np.▮'
+      )
+    ).toEqual([
+      ['first', 'string'],
+      ['last', 'string'],
+      ['name', 'string'],
+    ]);
+  });
+
+  test('a nominal type over a conforming type does not conform', () => {
+    // `w.area()` is `protocol-implementation-missing`; the layout is read
+    // through the nominal type.
+    expect(
+      members(
+        'protocol Shape { function area(self: Self) -> number }\n' +
+          'type Circle = tuple<r: number> is Shape {\n' +
+          '  function area(self: Circle) -> number { self.r }\n' +
+          '}\n' +
+          'type Wrapped = Circle\n' +
+          'const w: Wrapped = Wrapped(Circle(1))\nw.▮'
+      )
+    ).toEqual([['r', 'number']]);
+  });
+
+  test('a transparent alias inherits the conformance of a supertype', () => {
+    expect(
+      members(
+        'protocol Signed { readonly sign: string }\n' +
+          'type number is Signed {\n' +
+          '  get sign(self) -> string { "+" }\n' +
+          '}\n' +
+          'type alias Scalar = real\n' +
+          'const s: Scalar = 2\ns.▮'
+      )
+    ).toEqual([['sign', 'string']]);
+  });
+
+  test('a conditional conformance applies when the clause holds', () => {
+    const SUMMABLE =
+      'protocol Summable { function total(self: Self) -> number }\n' +
+      'type list<T> is Summable where T: number {\n' +
+      '  function total(self: Self) -> number { sum(self) }\n' +
+      '}\n' +
+      'const xs: list<real> = [1, 2]\n' +
+      'const ys: list<string> = ["a"]\n';
+    expect(members(SUMMABLE + 'xs.▮')).toEqual([['total', '() -> number']]);
+    expect(members(SUMMABLE + 'ys.▮')).toEqual([]);
+  });
+
+  test('a call of a field that holds a function', () => {
+    expect(
+      members(
+        'function mk() -> record{x: integer} { {x -> 1} }\n' +
+          'const r: record{make: () -> record{x: integer}} = {make -> mk}\n' +
+          'r.make().▮'
+      )
+    ).toEqual([['x', 'integer']]);
+  });
+
+  test('a variant of a sum type has its payload and its conformances', () => {
+    expect(
+      members(
+        'protocol Area { function area(self: Self) -> number }\n' +
+          'type shape = circle(r: number) | square(s: number)\n' +
+          'type shape is Area {\n' +
+          '  function area(self: Self) -> number {\n' +
+          '    match self {\n' +
+          '      circle(r) => 3 * r * r\n' +
+          '      square(s) => s * s\n' +
+          '    }\n' +
+          '  }\n' +
+          '}\n' +
+          'const q: square = square(3)\nq.▮'
+      )
+    ).toEqual([
+      ['area', '() -> number'],
+      ['s', 'number'],
+    ]);
+  });
+
+  test('a function that two protocols declare is left out', () => {
+    // `t.f()` is `protocol-call-ambiguous`.
+    expect(
+      members(
+        'protocol A { function f(self: Self) -> number }\n' +
+          'protocol B { function f(self: Self) -> string }\n' +
+          'type T = tuple<v: number> is A & B\n' +
+          'type T is A { function f(self: Self) -> number { 1 } }\n' +
+          'type T is B { function f(self: Self) -> string { "a" } }\n' +
+          'const t: T = T(1)\nt.▮'
+      )
+    ).toEqual([['v', 'number']]);
+  });
+
+  test('a function that two protocols declare is left out, also when one target is more specific', () => {
+    // `x.f()` is 2: the engine takes the conformance of `integer`.
+    expect(
+      members(
+        'protocol A { function f(self: Self) -> number }\n' +
+          'protocol B { function f(self: Self) -> number }\n' +
+          'type number is A { function f(self: Self) -> number { 1 } }\n' +
+          'type integer is B { function f(self: Self) -> number { 2 } }\n' +
+          'const x: integer = 3\nx.▮'
+      )
+    ).toEqual([]);
+  });
+
+  test('a function inherited through a parent protocol counts its declaring protocol', () => {
+    // `x.f()` is `protocol-call-ambiguous`.
+    expect(
+      members(
+        'protocol A { function f(self: Self) -> number }\n' +
+          'protocol B { function f(self: Self) -> number }\n' +
+          'protocol C extends A {}\n' +
+          'type number is A { function f(self: Self) -> number { 1 } }\n' +
+          'type number is B { function f(self: Self) -> number { 2 } }\n' +
+          'type integer is C\n' +
+          'const x: integer = 3\nx.▮'
+      )
+    ).toEqual([]);
+  });
+
+  test('a function reached directly and through a child protocol has one owner', () => {
+    // `t.f()` is 1: `C` adds no declaration of `f`.
+    expect(
+      members(
+        'protocol A { function f(self: Self) -> number }\n' +
+          'protocol C extends A {}\n' +
+          'type T = tuple<v: number>\n' +
+          'type T is A { function f(self: Self) -> number { 1 } }\n' +
+          'type T is C\n' +
+          'const t: T = T(1)\nt.▮'
+      )
+    ).toEqual([
+      ['f', '() -> number'],
+      ['v', 'number'],
+    ]);
+  });
+
+  test('a name that is a property of one protocol and a function of another is the property', () => {
+    const SOURCE =
+      'protocol A { function label(self: Self) -> number }\n' +
+      'protocol B { readonly label: string }\n' +
+      'type T = tuple<v: number>\n' +
+      'type T is A { function label(self: Self) -> number { 1 } }\n' +
+      'type T is B { get label(self) -> string { "b" } }\n' +
+      'const t: T = T(1)\n';
+    expect(
+      executeEpsil(new ComputeEngine(), SOURCE + 't.label').value.json
+    ).toBe("'b'");
+    const result = complete(SOURCE + 't.▮');
+    expect(result.items.map((i) => [i.label, i.kind, i.detail])).toEqual([
+      ['label', 'variable', 'string'],
+      ['v', 'variable', 'number'],
+    ]);
+  });
+
+  test('a property that two protocols declare is left out', () => {
+    // `t.label` is `protocol-property-ambiguous`.
+    expect(
+      members(
+        'protocol A { readonly label: string }\n' +
+          'protocol B { readonly label: string }\n' +
+          'type T = tuple<v: number>\n' +
+          'type T is A { get label(self) -> string { "a" } }\n' +
+          'type T is B { get label(self) -> string { "b" } }\n' +
+          'const t: T = T(1)\nt.▮'
+      )
+    ).toEqual([['v', 'number']]);
+  });
+
+  test('a clause that names a protocol holds through a conformance', () => {
+    // `xs.total()` is 3; `ys.total()` is `protocol-implementation-missing`.
+    const SUMMABLE =
+      'protocol P { function g(self: Self) -> number }\n' +
+      'protocol S { function total(self: Self) -> number }\n' +
+      'type real is P { function g(self: Self) -> number { 1 } }\n' +
+      'type list<T> is S where T is P {\n' +
+      '  function total(self: Self) -> number { sum(self) }\n' +
+      '}\n' +
+      'const xs: list<real> = [1, 2]\n' +
+      'const ys: list<string> = ["a"]\n';
+    expect(members(SUMMABLE + 'xs.▮')).toEqual([['total', '() -> number']]);
+    expect(members(SUMMABLE + 'ys.▮')).toEqual([]);
+  });
+});

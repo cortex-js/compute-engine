@@ -272,6 +272,7 @@ describe('EPSIL HOVER: KEYWORDS', () => {
       range: [13, 17],
       name: 'type',
       kind: 'variable',
+      detail: 'number',
     });
   });
 
@@ -280,6 +281,7 @@ describe('EPSIL HOVER: KEYWORDS', () => {
       range: [16, 23],
       name: 'while',
       kind: 'variable',
+      detail: 'number',
     });
   });
 });

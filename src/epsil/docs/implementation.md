@@ -414,7 +414,7 @@ const result = epsilCompletions(ce, source, source.length);
 result.range;        // ➔ [41, 43]: the word "co"
 result.replaceEnd;   // ➔ 43: the end of the word under the offset
 result.expectedType; // ➔ "integer"
-result.items[0];     // ➔ { label: "count", kind: "variable", rank: 2, detail: "integer" }
+result.items[0];     // ➔ { label: "count", kind: "variable", rank: 2, detail: "integer", fit: "match" }
 result.items[1].label; // ➔ "countIf": a library function returning an integer
 ```
 
@@ -422,8 +422,60 @@ The items match the word typed, ignoring case, and come sorted by `rank`:
 1 for the likely values, 2 and 3 for the names of the source and of the
 library whose type matches the expected type, 4 and 5 for the other names,
 6 for the keywords. A statement that does not parse yet (`if ▮`) has no
-expected type: its items are the names and the keywords. The VS Code
-extension serves the same items as its completions.
+expected type: its items are the names and the keywords.
+
+When there is an expected type, each name item has a `fit`: `"match"` when
+its value is always of the type (ranks 2 and 3), `"never"` when it can never
+be, `"maybe"` otherwise: a broader type (`transpose` returns a `value`), a
+union with an arm that fits, a generic result, or a name whose type is not
+known. In ranks 4 and 5 the `"maybe"` items come first, and a host may hide
+the `"never"` items. A function name is judged by the result of a call; where
+a function is expected (a callback, the right side of `|>`, a union with a
+function arm such as `function | nothing`) it is judged by its signature: it
+must take the arguments and return a value of the result type. A function
+whose result may be a function may fit too, since the result of a call is
+passed (`xs |> f(y)`). At the right side of `|>` a function that takes more
+arguments may fit (`xs |> take(2)` is `take(xs, 2)`), and so may a callback
+of `map`, which takes one argument per source (`map(f, xs, ys)`). An
+argument of a function that maps over a list (`abs`, `*`, a function of the
+source) admits a list of the expected type too. A `let` or a `const` with a
+literal value has the type of the value: `const n = 5` is an `integer`,
+`let x = 5` a `number`.
+
+```ts
+const source = "const A: matrix = identityMatrix(2)\nA |> inv";
+const result = epsilCompletions(ce, source, source.length);
+result.expectedType; // ➔ "(matrix) -> any"
+result.items.map((i) => [i.label, i.fit]);
+// ➔ [["inverse", "match"], ["inverseFunction", "maybe"],
+//    ["inverseHaversine", "maybe"]]
+```
+
+After `.`, the items are the members of the value before the dot, and no
+other name: the fields of a record or of an `object` type and the named
+elements of a tuple, with their types; the properties of the protocols that
+its type conforms to, with their types; and the function members of those
+protocols, with their signature without the receiver. A function member
+with no other parameter is inserted as a call (`area()`). The type of the
+value comes from the declared or literal type of a name, also a type of the
+source, or from the field before it (`a.b.`). When that type is not known,
+there are no items. In an argument (`sqrt(c.▮`) the expected type is the
+type of the parameter, and each member has a `fit`; a function member is
+judged by the result of a call.
+
+```ts
+const source = `protocol Shape { function area(self: Self) -> number }
+type Circle = tuple<r: number> is Shape {
+  function area(self: Circle) -> number { Pi * self.r^2 }
+}
+const c: Circle = Circle(1)
+c.`;
+const result = epsilCompletions(ce, source, source.length);
+result.items.map((i) => [i.label, i.detail, i.insertText]);
+// ➔ [["area", "() -> number", "area()"], ["r", "number", undefined]]
+```
+
+The VS Code extension serves the same items as its completions.
 
 Each library item also has a `description`: the paragraphs of the library
 description, which the hover of the name shows.

@@ -8,10 +8,32 @@ import {
   symbol,
 } from '../math-json/utils.js';
 import { isValidSymbol } from '../math-json/symbols.js';
-import type { FunctionSignature, Type } from '../common/type/types.js';
-import { parseType } from '../common/type/parse.js';
+import type {
+  EffectSet,
+  FunctionSignature,
+  Type,
+} from '../common/type/types.js';
+import { isEffectSubset } from '../common/type/effects.js';
+import { substituteTypeVariables } from '../common/type/instantiate.js';
+import { conditionalTargetInstance } from '../common/type/conditional-conformance.js';
+import { parseType, type ParseTypeOptions } from '../common/type/parse.js';
 import { PRIMITIVE_TYPES } from '../common/type/primitive.js';
+import { typesOverlap } from '../common/type/reduce.js';
 import { typeToString } from '../common/type/serialize.js';
+import { resolveTypeReference } from '../common/type/subtype.js';
+import {
+  collectionElementType,
+  resolveTypeAlias,
+  signatureArms,
+} from '../common/type/utils.js';
+import { widenValueTypes } from '../common/type/widen-value.js';
+import { widenLocalType } from '../compute-engine/boxed-expression/boxed-value-definition.js';
+import { isOperatorDef } from '../compute-engine/boxed-expression/definition-guards.js';
+import {
+  protocolFunctionMemberOwners,
+  protocolPropertyTypeOfReceiver,
+} from '../compute-engine/engine-protocols.js';
+import type { ProtocolMember } from '../compute-engine/types-engine.js';
 
 import {
   isBreak,
@@ -83,9 +105,22 @@ export type EpsilCompletionItem = {
    * the hover of the name shows. */
   description?: string[];
   /** Smaller first: 0 fix-its, 1 likely values, 2 names of the source whose
-   * type matches the expected type, 3 library names whose type matches, 4
-   * other names of the source, 5 other library names, 6 keywords. */
+   * type matches the expected type (`fit` is `'match'`), 3 library names
+   * whose type matches, 4 other names of the source, 5 other library names,
+   * 6 keywords. In rank 4 and 5, the names that may fit come before those
+   * that cannot (`fit`). */
   rank: number;
+  /** How the name fits the expected type, for a name item when
+   * `expectedType` is set: `'match'` when its value is always of the type
+   * that the position admits, `'never'` when it can never be, `'maybe'`
+   * otherwise (a broader type such as `value`, a union with an arm that
+   * fits, a generic result, a name whose type is not known). A function
+   * name is judged by the result of a call, or, where the position expects
+   * a function (`filter(xs, ▮`, `x |> ▮`), by its signature. A position
+   * that maps a function over a list (a broadcastable operator, a function
+   * of the source) admits a list of the expected type too. A host may hide
+   * the names that are `'never'`. */
+  fit?: 'match' | 'maybe' | 'never';
 };
 
 /** The completions at an offset of an Epsil source. */
@@ -100,7 +135,8 @@ export type EpsilCompletions = {
   /** The type expected at the offset, when the context gives one. */
   expectedType?: string;
   /** The items whose label starts with the word being typed, ignoring case,
-   * sorted by `rank`, then locals before globals, then label. */
+   * sorted by `rank`, then the names that may fit before those that cannot
+   * (`fit`), then locals before globals, then label. */
   items: EpsilCompletionItem[];
 };
 
@@ -172,7 +208,27 @@ export type Declaration =
       resultStart?: number;
     }
   | { kind: 'type'; detail: string }
-  | { kind: 'protocol' };
+  | { kind: 'protocol' }
+  /** A `let` or a `const` with no type and a literal value (`let a = 5`):
+   * its type is the type of the value, widened as the engine widens it
+   * (`declarationDetail`). */
+  | { kind: 'literal'; value: MathJsonExpression; constant: boolean };
+
+/** How a candidate name fits the expected type (`EpsilCompletionItem.fit`). */
+type Fit = 'match' | 'maybe' | 'never';
+
+/** A function as a candidate where a function is expected: its positional
+ * parameters (the required ones first; the last one is the element of the
+ * rest parameter when `rest` is set), the number of required parameters,
+ * its result and the effects of a call (`[]` when pure, `null` when not
+ * known). `undefined` is a type that is not known. */
+type Callable = {
+  params: (Type | undefined)[];
+  required: number;
+  rest: boolean;
+  result: Type | undefined;
+  effects: EffectSet | null;
+};
 
 /** A library name as an item, computed once per engine. */
 type LibraryEntry = {
@@ -181,8 +237,14 @@ type LibraryEntry = {
   detail?: string;
   documentation?: string;
   description?: string[];
-  /** The result type of a function, the type of a constant. */
+  /** The type of a constant. */
   type?: Type;
+  /** The signatures of a function: one, or the arms of an overload set. */
+  arms?: readonly FunctionSignature[];
+  /** Whether `arms` are the arms of a union: the function is one of them. */
+  union?: boolean;
+  /** Whether the function maps over a list argument. */
+  broadcastable?: boolean;
 };
 
 const LIBRARY_ENTRIES = new WeakMap<ComputeEngine, LibraryEntry[]>();
@@ -325,7 +387,12 @@ export function epsilCompletions(
     return { range, replaceEnd, items: finish(items, prefix) };
   }
 
-  const path = findHole(ast, placeholder, start);
+  // After `.`, the hole is the name of a `Field` or of a `MemberCall`: the
+  // path ends at that node, whose value is the member.
+  const path =
+    slot.kind === 'member'
+      ? findMemberHole(ast, placeholder)
+      : findHole(ast, placeholder, start);
   const statementStart =
     path === undefined
       ? isStatementStart(source, before, start)
@@ -334,6 +401,18 @@ export function epsilCompletions(
         );
 
   const visible = visibleBindings(groups, placeholder, start);
+  // A variant of a sum type of the source is a type too (`const q: square`).
+  const typeNames = new Set([
+    ...(options?.typeNames ?? []),
+    ...sourceTypes.keys(),
+    ...[...sourceTypes.values()].flatMap((declared) =>
+      declared.kind === 'sum'
+        ? declared.variants
+            .filter((v) => v.payload !== undefined)
+            .map((v) => v.name)
+        : []
+    ),
+  ]);
 
   const context: Context = {
     ce,
@@ -343,6 +422,8 @@ export function epsilCompletions(
     visible,
     declarations,
     sourceTypes,
+    text,
+    typeNames,
   };
   let expectedType =
     path === undefined
@@ -350,6 +431,111 @@ export function epsilCompletions(
       : expectedTypeAt(context, path.nodes.length - 1);
   if (expectedType !== undefined && UNINFORMATIVE_TYPES.has(expectedType))
     expectedType = undefined;
+  // The type that the position admits, for the fit of each name: `undefined`
+  // when the expected type is a type of the source that the engine does not
+  // know.
+  const admitted =
+    path === undefined || expectedType === undefined
+      ? undefined
+      : admittedTypeAt(context, path.nodes.length - 1, expectedType);
+  // Whether the position is the right side of `|>`, where a function may be
+  // called with more arguments than the left side (`fitOfCallable`).
+  const pipe =
+    expectedType !== undefined &&
+    path !== undefined &&
+    path.nodes.length >= 2 &&
+    operator(path.nodes[path.nodes.length - 2]) === 'Pipe';
+  // Whether the position is a callback of a library function that takes a
+  // variadic list of sources (`map(f, xs, ys)` calls `f` with one argument
+  // per source), where the callback may take more arguments than its
+  // declared signature (`fitOfFunction`).
+  const library =
+    expectedType === undefined ||
+    path === undefined ||
+    path.nodes.length < 2 ||
+    context.visible.has(operator(path.nodes[path.nodes.length - 2]))
+      ? undefined
+      : libraryParameterAt(context, path.nodes.length - 1);
+  const variadic = library?.signature.variadicArg?.type;
+  const openArity =
+    library !== undefined &&
+    variadic !== undefined &&
+    !isFunctionType(variadic) &&
+    isFunctionType(library.parameter);
+  // The fit of a name whose type is the type string `type` of the source. A
+  // name of a function type where a value is expected may be called
+  // (`determinant(f(A))`): it fits by the result of a call too.
+  const fitOfText = (type: string | undefined): Fit => {
+    if (type === undefined) return 'maybe';
+    if (type === expectedType) return 'match';
+    const t = parseTypeString(ce, type);
+    if (t === undefined || admitted === undefined) return 'maybe';
+    const fit = fitValue(ce, t, admitted, { pipe, openArity });
+    if (isFunctionType(admitted) || !isFunctionType(t)) return fit;
+    const arms = signatureArms(t);
+    if (arms === undefined) return bestFit(fit, 'maybe');
+    return bestFit(
+      fit,
+      fitOfFunction(ce, arms.map(callableOf), false, admitted, {
+        union: typeof t === 'object' && t.kind === 'union',
+      })
+    );
+  };
+
+  // After `.`, the members of the value before the dot, and no other name:
+  // none when its type is not known.
+  if (slot.kind === 'member') {
+    const node = path?.nodes[path.nodes.length - 1] ?? null;
+    const receiver =
+      path === undefined
+        ? undefined
+        : receiverTypeOf(context, operand(node, 1));
+    // Before `(` (`c.ar▮()`), a function member is inserted as its name.
+    const called = operator(node) === 'MemberCall';
+    // A member of a type of the source that the engine does not know cannot
+    // fit when the body of that type cannot.
+    const fitOfMember = (type: Type | undefined): Fit => {
+      if (type === undefined) return 'maybe';
+      const fit = fitOfText(typeToString(type));
+      if (fit !== 'maybe' || admitted === undefined) return fit;
+      const body = sourceTypeBody(context, type);
+      return body !== undefined &&
+        fitValue(ce, body, admitted, { pipe, openArity }) === 'never'
+        ? 'never'
+        : fit;
+    };
+    for (const member of receiver === undefined
+      ? []
+      : membersOf(context, receiver)) {
+      // A function member is judged by the result of a call.
+      const fit =
+        expectedType === undefined
+          ? undefined
+          : fitOfMember(
+              member.kind === 'function' ? member.result : member.type
+            );
+      const spelling = escapeSymbol(member.name);
+      items.push({
+        label: member.name,
+        kind: member.kind === 'function' ? 'function' : 'variable',
+        rank: fit === 'match' ? 2 : 4,
+        tier: 0,
+        ...(member.kind === 'function' && member.arity === 0 && !called
+          ? { insertText: `${spelling}()` }
+          : spelling === member.name
+            ? {}
+            : { insertText: spelling }),
+        detail: member.detail,
+        ...(fit === undefined ? {} : { fit }),
+      });
+    }
+    return {
+      range,
+      replaceEnd,
+      ...(expectedType === undefined ? {} : { expectedType }),
+      items: finish(items, prefix),
+    };
+  }
 
   // 1. Likely values of the expected type.
   if (expectedType !== undefined)
@@ -358,10 +544,6 @@ export function epsilCompletions(
 
   // 2. Names of the source visible at the offset.
   const textLength = text.length;
-  const typeNames = new Set([
-    ...(options?.typeNames ?? []),
-    ...sourceTypes.keys(),
-  ]);
   for (const group of visible.values()) {
     const declaration = declarationOf(group, declarations);
     const kind: EpsilCompletionItem['kind'] =
@@ -376,21 +558,33 @@ export function epsilCompletions(
       text,
       typeNames
     );
-    const matches =
-      expectedType !== undefined &&
-      kind !== 'type' &&
-      type !== undefined &&
-      typeMatches(ce, type, expectedType);
+    // A function of the source maps over a list argument whose elements
+    // are of a parameter type: it is a broadcast candidate.
+    const fit: Fit | undefined =
+      expectedType === undefined
+        ? undefined
+        : kind === 'type'
+          ? 'maybe'
+          : declaration?.kind === 'function' && admitted !== undefined
+            ? fitOfFunction(
+                ce,
+                [sourceCallable(ce, declaration, text, typeNames)],
+                true,
+                admitted,
+                { pipe, openArity }
+              )
+            : fitOfText(type);
     const local = group.scope[0] !== 0 || group.scope[1] !== textLength;
     // A name that needs backticks (`` `while` ``) is inserted with them.
     const spelling = escapeSymbol(group.name);
     items.push({
       label: group.name,
       kind,
-      rank: matches ? 2 : 4,
+      rank: fit === 'match' ? 2 : 4,
       tier: local ? 0 : 1,
       ...(spelling === group.name ? {} : { insertText: spelling }),
       ...(detail === undefined ? {} : { detail }),
+      ...(fit === undefined ? {} : { fit }),
     });
   }
 
@@ -403,12 +597,12 @@ export function epsilCompletions(
       if (visible.has(variant.name)) continue;
       const spelling = escapeSymbol(variant.name);
       const payload = variant.payload;
-      const matches =
-        expectedType !== undefined && typeMatches(ce, sum, expectedType);
+      const fit = expectedType === undefined ? undefined : fitOfText(sum);
       items.push({
         label: variant.name,
         kind: 'function',
-        rank: matches ? 2 : 4,
+        rank: fit === 'match' ? 2 : 4,
+        ...(fit === undefined ? {} : { fit }),
         tier: 1,
         ...(payload?.length === 0
           ? { insertText: `${spelling}()` }
@@ -424,14 +618,27 @@ export function epsilCompletions(
   // 3. Library names, unless a name of the source shadows them.
   for (const entry of libraryEntries(ce)) {
     if (visible.has(entry.label)) continue;
-    const matches =
-      expectedType !== undefined &&
-      entry.type !== undefined &&
-      typeMatches(ce, entry.type, expectedType);
+    const fit: Fit | undefined =
+      expectedType === undefined
+        ? undefined
+        : admitted === undefined
+          ? 'maybe'
+          : entry.arms !== undefined
+            ? fitOfFunction(
+                ce,
+                entry.arms.map(callableOf),
+                entry.broadcastable === true,
+                admitted,
+                { union: entry.union === true, pipe, openArity }
+              )
+            : entry.type !== undefined
+              ? fitValue(ce, entry.type, admitted, { pipe, openArity })
+              : 'maybe';
     items.push({
       label: entry.label,
       kind: entry.kind,
-      rank: matches ? 3 : 5,
+      rank: fit === 'match' ? 3 : 5,
+      ...(fit === undefined ? {} : { fit }),
       tier: 0,
       ...(entry.detail === undefined ? {} : { detail: entry.detail }),
       ...(entry.documentation === undefined
@@ -444,20 +651,18 @@ export function epsilCompletions(
   }
 
   // 4. Keywords. At the start of a statement an expression is valid too.
-  // A case pattern admits the literal keywords only; a member name after `.`
-  // none; after the block of an `if`, `else` continues the statement.
+  // A case pattern admits the literal keywords only; after the block of an
+  // `if`, `else` continues the statement.
   const keywords: Iterable<string> =
     slot.kind === 'pattern'
       ? ['false', 'true']
-      : slot.kind === 'member'
-        ? []
-        : statementStart || slot.kind === 'statement-or-else'
-          ? new Set([
-              ...STATEMENT_KEYWORDS,
-              ...EXPRESSION_KEYWORDS,
-              ...(slot.kind === 'statement-or-else' ? ['else'] : []),
-            ])
-          : EXPRESSION_KEYWORDS;
+      : statementStart || slot.kind === 'statement-or-else'
+        ? new Set([
+            ...STATEMENT_KEYWORDS,
+            ...EXPRESSION_KEYWORDS,
+            ...(slot.kind === 'statement-or-else' ? ['else'] : []),
+          ])
+        : EXPRESSION_KEYWORDS;
   // A name of the source hides a keyword only when it inserts the same text:
   // `` `while` `` does not hide `while`.
   for (const keyword of keywords)
@@ -556,6 +761,7 @@ function finish(
     .sort(
       (a, b) =>
         a.rank - b.rank ||
+        Number(a.fit === 'never') - Number(b.fit === 'never') ||
         a.tier - b.tier ||
         (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)
     )
@@ -1243,6 +1449,33 @@ export function findHole(
   return visit(ast, -1) ? { nodes, indices } : undefined;
 }
 
+/** The path from the root to the `Field` or the `MemberCall` whose member
+ * name is the placeholder (`a.▮` parses as `Field(a, "▮")`), as `findHole`
+ * gives it. */
+function findMemberHole(
+  ast: MathJsonExpression | null,
+  placeholder: string
+): HolePath | undefined {
+  if (ast === null) return undefined;
+  const nodes: MathJsonExpression[] = [];
+  const indices: number[] = [];
+  const visit = (node: MathJsonExpression, index: number): boolean => {
+    nodes.push(node);
+    indices.push(index);
+    if (
+      (operator(node) === 'Field' || operator(node) === 'MemberCall') &&
+      stringValue(operand(node, 2)) === placeholder
+    )
+      return true;
+    const ops = operands(node);
+    for (let i = 0; i < ops.length; i += 1) if (visit(ops[i], i)) return true;
+    nodes.pop();
+    indices.pop();
+    return false;
+  };
+  return visit(ast, -1) ? { nodes, indices } : undefined;
+}
+
 export function spanOf(
   node: MathJsonExpression | null
 ): [number, number] | undefined {
@@ -1259,6 +1492,10 @@ type Context = {
   visible: ReadonlyMap<string, BindingGroup>;
   declarations: ReadonlyMap<number, Declaration>;
   sourceTypes: ReadonlyMap<string, SourceType>;
+  /** The source with the hole, that the tree was parsed from. */
+  text: string;
+  /** The types of the source and of the `typeNames` option. */
+  typeNames: ReadonlySet<string>;
 };
 
 /**
@@ -1269,7 +1506,10 @@ type Context = {
  * - an argument of a call of a function of the source: the type of its
  *   parameter, when it has one;
  * - an argument of a call of a library function: the parameter type of its
- *   signature.
+ *   signature;
+ * - the right side of `|>`: a function of one argument of the type of the
+ *   left side (`x |> f` is `f(x)`), `function` when the left side has no
+ *   static type.
  */
 function expectedTypeAt(context: Context, k: number): string | undefined {
   if (k < 1) return undefined;
@@ -1277,6 +1517,17 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
   const parent = nodes[k - 1];
   const index = context.indices[k];
   const head = operator(parent);
+
+  if (head === 'Pipe') {
+    if (index !== 1) return undefined;
+    const left = staticTypeOf(context, operand(parent, 1));
+    if (left === undefined) return 'function';
+    return typeToString({
+      kind: 'signature',
+      args: [{ type: left }],
+      result: 'any',
+    });
+  }
 
   if (head === 'KeyValuePair') {
     const declare = nodes[k - 3];
@@ -1342,19 +1593,669 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
   }
 
   // A library function: the parameter type of its signature.
+  const parameter = libraryParameterAt(context, k)?.parameter;
+  return parameter === undefined ? undefined : typeToString(parameter);
+}
+
+/** The library function called by `nodes[k - 1]`, its signature, and the
+ * declared type of the parameter of `nodes[k]`. */
+function libraryParameterAt(
+  context: Context,
+  k: number
+): { name: string; signature: FunctionSignature; parameter: Type } | undefined {
+  const { ce } = context;
+  const head = operator(context.nodes[k - 1]);
+  const index = context.indices[k];
   const name =
     ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
   const signature =
     name === undefined ? undefined : ce.operatorInfo(name)?.signature?.type;
-  if (typeof signature !== 'object' || signature.kind !== 'signature')
+  if (
+    name === undefined ||
+    typeof signature !== 'object' ||
+    signature.kind !== 'signature'
+  )
     return undefined;
+  const parameter = parameterAt(signature, index);
+  return parameter === undefined ? undefined : { name, signature, parameter };
+}
+
+/** The type of the parameter at `index` of a signature. */
+function parameterAt(
+  signature: FunctionSignature,
+  index: number
+): Type | undefined {
   const args = signature.args ?? [];
   const optArgs = signature.optArgs ?? [];
-  const parameter =
+  return (
     args[index] ??
     optArgs[index - args.length] ??
-    (index >= args.length + optArgs.length ? signature.variadicArg : undefined);
-  return parameter === undefined ? undefined : typeToString(parameter.type);
+    (index >= args.length + optArgs.length ? signature.variadicArg : undefined)
+  )?.type;
+}
+
+/**
+ * The type that `nodes[k]` admits, for the fit of a name: the expected type
+ * (`expectedTypeAt`), with three changes.
+ *
+ * - The right side of `|>` admits a function of the left side (`unknown`
+ *   when it has no static type) of any effects.
+ * - A type variable of the signature of a library function is bound from
+ *   the static type of the other arguments, where one is a variable
+ *   parameter or the element of a collection parameter
+ *   (`filter([1, 2], ▮` admits `(integer) any -> boolean`); a variable left
+ *   unbound is `unknown`.
+ * - An argument of a broadcastable library function, or of a function of
+ *   the source, admits a list of the type too (`A * A` with a matrix `A`):
+ *   the call maps over it. A function type is not mapped over.
+ *
+ * `undefined` when the expected type does not parse (a type of the source
+ * that the engine does not know).
+ */
+function admittedTypeAt(
+  context: Context,
+  k: number,
+  expected: string
+): Type | undefined {
+  const { ce } = context;
+  const parent = context.nodes[k - 1];
+  const head = operator(parent);
+  let type: Type | undefined;
+  let broadcast = false;
+  // The heads that `expectedTypeAt` reads before the library functions.
+  if (head === 'Pipe')
+    // `x |> f` admits a function of the left side, of any effects.
+    type = {
+      kind: 'signature',
+      args: [{ type: staticTypeOf(context, operand(parent, 1)) ?? 'unknown' }],
+      result: 'any',
+      effects: 'any',
+    };
+  else if (
+    ['KeyValuePair', 'List', 'Assign', 'Program', ''].includes(head) ||
+    GRAMMAR_CONSTRUCTS.has(head)
+  )
+    type = parseTypeString(ce, expected);
+  else if (
+    head === 'NamedArgument' ||
+    context.visible.get(head)?.kind === 'function'
+  ) {
+    type = parseTypeString(ce, expected);
+    broadcast = true;
+  } else {
+    const library = libraryParameterAt(context, k);
+    if (library === undefined) type = parseTypeString(ce, expected);
+    else {
+      type = library.parameter;
+      const { signature } = library;
+      if (signature.typeParams !== undefined) {
+        const bindings: Record<string, Type> = {};
+        operands(parent).forEach((arg, j) => {
+          if (j === context.indices[k]) return;
+          const param = parameterAt(signature, j);
+          const argType = staticTypeOf(context, arg);
+          if (param === undefined || argType === undefined) return;
+          if (typeof param !== 'object') return;
+          if (param.kind === 'variable') bindings[param.name] ??= argType;
+          else if (
+            (param.kind === 'collection' ||
+              param.kind === 'indexed_collection' ||
+              param.kind === 'list' ||
+              param.kind === 'set') &&
+            typeof param.elements === 'object' &&
+            param.elements.kind === 'variable'
+          ) {
+            const element = collectionElementType(argType);
+            if (element !== undefined)
+              bindings[param.elements.name] ??= element;
+          }
+        });
+        for (const p of signature.typeParams) bindings[p.name] ??= 'unknown';
+        type = substituteTypeVariables(type, bindings);
+      }
+      broadcast = isBroadcastable(ce, library.name);
+    }
+  }
+  if (type === undefined) return undefined;
+  return broadcast && !isFunctionType(type)
+    ? { kind: 'broadcastable', elements: type }
+    : type;
+}
+
+/** Whether a library operator maps over a list argument. */
+function isBroadcastable(ce: ComputeEngine, name: string): boolean {
+  const def = ce.lookupDefinition(name);
+  return isOperatorDef(def) && def.operator.broadcastable;
+}
+
+/** Whether a type is `function` or a signature (an overload set, a union of
+ * signatures), also through a transparent alias. */
+function isFunctionType(type: Type): boolean {
+  const t = resolveTypeAlias(type);
+  return t === 'function' || signatureArms(t) !== undefined;
+}
+
+/** The arms of a union that are function types when the union has other
+ * arms too (`function | nothing`); `undefined` otherwise. A value of the
+ * union fits one of its arms. */
+function functionArmsOf(type: Type): Type[] | undefined {
+  if (
+    typeof type !== 'object' ||
+    type.kind !== 'union' ||
+    signatureArms(type) !== undefined
+  )
+    return undefined;
+  const arms = type.types.map(resolveTypeAlias).filter(isFunctionType);
+  return arms.length > 0 ? arms : undefined;
+}
+
+/**
+ * The static type of an expression of the source, when the source gives it
+ * simply: a literal (`5` is `integer`, `[1, 2]` is `vector<integer^2>`), a
+ * name of the source with a type (`declarationDetail`), a call of a library
+ * function with one signature that is not generic and does not map over its
+ * arguments. `undefined` otherwise.
+ */
+function staticTypeOf(
+  context: Context,
+  node: MathJsonExpression | null
+): Type | undefined {
+  const { ce } = context;
+  if (node === null) return undefined;
+  if (isLiteral(node)) {
+    const text = literalTypeText(ce, node, true);
+    return text === undefined ? undefined : parseTypeString(ce, text);
+  }
+  const name = symbol(node);
+  if (name !== null) {
+    const group = context.visible.get(name);
+    if (group === undefined || group.kind === 'function') return undefined;
+    const { type } = declarationDetail(
+      ce,
+      declarationOf(group, context.declarations),
+      context.text,
+      context.typeNames
+    );
+    return type === undefined ? undefined : parseTypeString(ce, type);
+  }
+  const head = operator(node);
+  if (head === '' || context.visible.has(head)) return undefined;
+  const library =
+    ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
+  const signature =
+    library === undefined
+      ? undefined
+      : ce.operatorInfo(library)?.signature?.type;
+  if (
+    library === undefined ||
+    typeof signature !== 'object' ||
+    signature.kind !== 'signature' ||
+    signature.typeParams !== undefined ||
+    isBroadcastable(ce, library)
+  )
+    return undefined;
+  return signature.result;
+}
+
+/** A member of a value, an item after `.`: a field of a record or of an
+ * `object` type, a named element of a tuple, or a property or a function of
+ * a protocol that the type of the value conforms to. `type` is the type of
+ * a read and `result` the result of a call of a function, `undefined` when
+ * not known; `arity` is the number of parameters of a function after the
+ * receiver, `undefined` when not known. */
+type Member =
+  | {
+      kind: 'field';
+      name: string;
+      type: Type | undefined;
+      detail: string;
+      /** A protocol property listed in place of a protocol function of the
+       * same name: `x.name()` calls the function, not the property's value,
+       * so the call has no type here. */
+      noCall?: true;
+    }
+  | {
+      kind: 'function';
+      name: string;
+      result: Type | undefined;
+      arity: number | undefined;
+      detail: string;
+    };
+
+/**
+ * The type of the receiver of a member (the expression before `.`): the
+ * declared or literal type of a name of the source, which may be a type of
+ * the source, the type of a member of a receiver (`a.b`, `a.f()`), else
+ * `staticTypeOf`.
+ */
+function receiverTypeOf(
+  context: Context,
+  node: MathJsonExpression | null
+): Type | undefined {
+  const head = operator(node);
+  if (head === 'Field' || head === 'MemberCall') {
+    const base = receiverTypeOf(context, operand(node, 1));
+    const name = stringValue(operand(node, 2));
+    if (base === undefined || name === null) return undefined;
+    // A function member is reached by a call only (`c.area` is an error).
+    const member = membersOf(context, base).find((m) => m.name === name);
+    if (member === undefined) return undefined;
+    if (member.kind === 'function')
+      return head === 'MemberCall' ? member.result : undefined;
+    if (head === 'Field') return member.type;
+    if (member.noCall) return undefined;
+    // A call of a field that holds a function (`r.make()`): its result.
+    const signature =
+      member.type === undefined ? undefined : resolveTypeAlias(member.type);
+    return typeof signature === 'object' && signature.kind === 'signature'
+      ? signature.result
+      : undefined;
+  }
+  const name = symbol(node);
+  if (name !== null) {
+    const group = context.visible.get(name);
+    if (group === undefined || group.kind === 'function') return undefined;
+    const { type } = declarationDetail(
+      context.ce,
+      declarationOf(group, context.declarations),
+      context.text,
+      context.typeNames
+    );
+    return type === undefined
+      ? undefined
+      : parseSourceType(context.ce, type, context.typeNames);
+  }
+  return staticTypeOf(context, node);
+}
+
+/** The body of a reference to a type that the source declares and the
+ * engine does not know: the declared body, or the payload of a variant of a
+ * sum type of the source (`square(s: number)` is `tuple<s: number>`). */
+function sourceTypeBody(context: Context, type: Type): Type | undefined {
+  if (typeof type !== 'object' || type.kind !== 'reference') return undefined;
+  if (type.def !== undefined) return undefined;
+  const declared = context.sourceTypes.get(type.name);
+  if (declared === undefined) {
+    const payload = sourceVariantPayload(context.sourceTypes, type.name);
+    return payload?.length === 1
+      ? parseSourceType(context.ce, payload[0], context.typeNames)
+      : undefined;
+  }
+  if (declared.kind === 'sum') return undefined;
+  // Only the body of a nominal type may be an `object{…}` layout.
+  return parseSourceType(
+    context.ce,
+    declared.body,
+    context.typeNames,
+    declared.kind === 'nominal' ? { allowObjectType: true } : undefined
+  );
+}
+
+/** The payload of a variant of a sum type of the source, `undefined` when
+ * `name` is not one (a variant known only from the `sumVariants` option has
+ * no payload here). A payload of several fields is one tuple type string. */
+function sourceVariantPayload(
+  sourceTypes: ReadonlyMap<string, SourceType>,
+  name: string
+): string[] | undefined {
+  for (const declared of sourceTypes.values())
+    if (declared.kind === 'sum')
+      for (const variant of declared.variants)
+        if (variant.name === name && variant.payload !== undefined)
+          return variant.payload;
+  return undefined;
+}
+
+/**
+ * The members of a value of type `type`, fields first: the fields of a
+ * record or of an `object` type, the named elements of a tuple, through an
+ * alias or a nominal type of the source or of the engine; then the
+ * properties and the functions of the protocols the type conforms to. A
+ * field hides a protocol member of the same name (`c.area()` reads a field
+ * `area` first). A function member leaves out its receiver: `c.scale(2)` is
+ * `scale(c, 2)`.
+ *
+ * The conformances are those of the source (`type T is P`, with the parents
+ * of `P`), to a protocol of the source or of the engine, and those that the
+ * engine holds for a type that it knows (a host declaration). A conformance
+ * of the source applies through a transparent alias and to a subtype, not
+ * through a nominal type (`type Wrapped = Circle` does not conform as
+ * `Circle` does); a conformance to a sum type applies to each of its
+ * variants. A conditional conformance (`type list<T> is P where T: number`)
+ * applies when the receiver matches its head and the argument satisfies the
+ * clause, as the engine decides it; a clause that names a protocol holds
+ * when an unconditional conformance to that protocol covers the argument
+ * (a conditional one is not followed, and gives no member).
+ *
+ * A member is listed only when exactly one protocol declares it among the
+ * protocols of the conformances that apply, even where the engine
+ * dispatches to the more specific one (`type number is A` and `type integer
+ * is B`, both declaring `f`: an `integer` lists no `f`). The properties and
+ * the functions are counted apart, as the engine resolves a read and a call
+ * apart; a name listed as both is listed as the property, which a `.` with
+ * no parentheses reads.
+ */
+function membersOf(context: Context, type: Type): Member[] {
+  const { ce } = context;
+  const members: Member[] = [];
+  const seen = new Set<string>();
+  const add = (member: Member) => {
+    if (seen.has(member.name)) return;
+    seen.add(member.name);
+    members.push(member);
+  };
+
+  // The fields are those of the layout, through the aliases and the nominal
+  // types. A conformance names the type along its transparent aliases, up to
+  // and including the first nominal type (`identity`).
+  const names = new Set<string>([typeToString(type)]);
+  let identity: Type = type;
+  let nominal = false;
+  let body: Type = type;
+  for (let i = 0; i < 16; i += 1) {
+    body = resolveTypeAlias(body);
+    if (!nominal) identity = body;
+    if (typeof body !== 'object' || body.kind !== 'reference') break;
+    if (!nominal) names.add(body.name);
+    if (
+      !(body.def !== undefined
+        ? body.alias
+        : context.sourceTypes.get(body.name)?.kind === 'alias')
+    )
+      nominal = true;
+    const next =
+      body.def !== undefined
+        ? resolveTypeReference(body)
+        : sourceTypeBody(context, body);
+    if (next === undefined) break;
+    body = next;
+  }
+  if (typeof body === 'object') {
+    if (body.kind === 'record' || body.kind === 'object')
+      for (const [name, t] of Object.entries(body.elements))
+        add({ kind: 'field', name, type: t, detail: typeToString(t) });
+    else if (body.kind === 'tuple')
+      for (const element of body.elements)
+        if (element.name !== undefined)
+          add({
+            kind: 'field',
+            name: element.name,
+            type: element.type,
+            detail: typeToString(element.type),
+          });
+  }
+
+  // `Self` in a requirement is the type of the receiver.
+  const self = typeToString(type);
+  const addRequirement = (name: string, requirement: ProtocolMember) => {
+    if (requirement.kind !== 'function') {
+      const text = requirement.type.replace(/\bSelf\b/g, self);
+      add({
+        kind: 'field',
+        name,
+        type: parseSourceType(ce, text, context.typeNames),
+        detail: text,
+      });
+      return;
+    }
+    const text = requirement.signature.replace(/\bSelf\b/g, self);
+    const signature = parseSourceType(ce, text, context.typeNames);
+    if (
+      typeof signature !== 'object' ||
+      signature.kind !== 'signature' ||
+      (signature.args?.length ?? 0) === 0
+    ) {
+      add({
+        kind: 'function',
+        name,
+        result: undefined,
+        arity: undefined,
+        detail: text,
+      });
+      return;
+    }
+    const rest: FunctionSignature = {
+      ...signature,
+      args: signature.args!.slice(1),
+    };
+    add({
+      kind: 'function',
+      name,
+      result: signature.result,
+      arity:
+        rest.args!.length +
+        (rest.optArgs?.length ?? 0) +
+        (rest.variadicArg === undefined ? 0 : 1),
+      detail: typeToString(rest),
+    });
+  };
+
+  // The protocols and the conformances of the source.
+  const protocols = new Map<
+    string,
+    { members: [string, ProtocolMember][]; parents: string[] }
+  >();
+  const conformances: {
+    target: string;
+    protocols: string[];
+    where: string | undefined;
+  }[] = [];
+  for (const statement of operands(context.ast)) {
+    const head = operator(statement);
+    if (head === 'DeclareProtocol') {
+      const name = symbol(operand(statement, 1));
+      if (name === null) continue;
+      const requirements: [string, ProtocolMember][] = [];
+      for (const kv of operands(operand(statement, 2))) {
+        const member = symbol(operand(kv, 1));
+        const kind = stringValue(operand(operand(kv, 2), 1));
+        const text = stringValue(operand(operand(kv, 2), 2));
+        if (member === null || text === null) continue;
+        if (kind === 'function')
+          requirements.push([member, { kind, signature: text }]);
+        else if (kind === 'readonly' || kind === 'readwrite')
+          requirements.push([member, { kind, type: text }]);
+      }
+      protocols.set(name, {
+        members: requirements,
+        parents: operands(operand(statement, 3))
+          .map(symbol)
+          .filter((p) => p !== null),
+      });
+    } else if (head === 'DeclareConformance') {
+      const target = stringValue(operand(statement, 1));
+      if (target !== null)
+        conformances.push({
+          target,
+          protocols: operands(operand(statement, 2))
+            .map(symbol)
+            .filter((p) => p !== null),
+          where: stringValue(operand(statement, 3)) ?? undefined,
+        });
+    }
+  }
+  // Whether an unconditional conformance to `protocol` covers `type`: one
+  // of the source, to `protocol` or to a protocol that extends it, or one
+  // that the engine holds. A conditional conformance is not followed.
+  const extendsProtocol = (
+    name: string,
+    protocol: string,
+    depth = 0
+  ): boolean =>
+    name === protocol ||
+    (depth < 16 &&
+      (
+        protocols.get(name)?.parents ??
+        ce._protocolRegistry[name]?.extends ??
+        []
+      ).some((parent) => extendsProtocol(parent, protocol, depth + 1)));
+  const covers = (type: Type, protocol: string): boolean => {
+    const text = typeToString(type);
+    for (const conformance of conformances) {
+      if (conformance.where !== undefined) continue;
+      if (!conformance.protocols.some((p) => extendsProtocol(p, protocol)))
+        continue;
+      if (conformance.target === text) return true;
+      const sum = context.sourceTypes.get(conformance.target);
+      if (
+        sum?.kind === 'sum' &&
+        sum.variants.some((variant) => variant.name === text)
+      )
+        return true;
+      const t = parseTypeString(ce, conformance.target);
+      if (t !== undefined && subtypeOf(ce, type, t) === true) return true;
+    }
+    if (protocols.has(protocol)) return false;
+    return (ce._protocolRegistry[protocol]?.conformances ?? []).some(
+      (edge) =>
+        edge.where === undefined && subtypeOf(ce, type, edge.target) === true
+    );
+  };
+  // Whether a conformance of the source applies to the receiver.
+  const conformsTo = (target: string, where: string | undefined): boolean => {
+    if (where === undefined) {
+      if (names.has(target)) return true;
+      const sum = context.sourceTypes.get(target);
+      if (
+        sum?.kind === 'sum' &&
+        sum.variants.some((variant) => names.has(variant.name))
+      )
+        return true;
+      const engine = parseTypeString(ce, target);
+      return engine !== undefined && subtypeOf(ce, identity, engine) === true;
+    }
+    // The head and the clause, parsed as the engine does (a carrier
+    // signature binds the variables of the head).
+    const carrier = parseSourceType(
+      ce,
+      `(self: ${target}) -> nothing ${where}`,
+      context.typeNames
+    );
+    if (
+      typeof carrier !== 'object' ||
+      carrier.kind !== 'signature' ||
+      carrier.args?.[0] === undefined ||
+      carrier.typeParams === undefined
+    )
+      return false;
+    try {
+      return (
+        conditionalTargetInstance(
+          carrier.args[0].type,
+          carrier.typeParams,
+          identity,
+          covers
+        ) !== null
+      );
+    } catch {
+      return false;
+    }
+  };
+  // The properties and the functions by name, with the protocols that
+  // declare each one and their requirement.
+  const properties = new Map<string, Map<string, ProtocolMember>>();
+  const functions = new Map<string, Map<string, ProtocolMember>>();
+  const require = (
+    protocol: string,
+    name: string,
+    requirement: ProtocolMember
+  ) => {
+    const byName = requirement.kind === 'function' ? functions : properties;
+    const owners = byName.get(name) ?? new Map<string, ProtocolMember>();
+    owners.set(protocol, requirement);
+    byName.set(name, owners);
+  };
+  const visit = (protocol: string, visited: Set<string>) => {
+    if (visited.has(protocol)) return;
+    visited.add(protocol);
+    const declared = protocols.get(protocol);
+    const record =
+      declared === undefined ? ce._protocolRegistry[protocol] : undefined;
+    for (const [name, requirement] of declared?.members ??
+      Object.entries(record?.members ?? {}))
+      require(protocol, name, requirement);
+    for (const parent of declared?.parents ?? record?.extends ?? [])
+      visit(parent, visited);
+  };
+  for (const conformance of conformances) {
+    if (!conformsTo(conformance.target, conformance.where)) continue;
+    const visited = new Set<string>();
+    for (const protocol of conformance.protocols) visit(protocol, visited);
+  }
+
+  // The conformances that the engine holds, for a type that it knows. Here
+  // the engine's dispatch gives the owners of a function
+  // (`protocolFunctionMemberOwners` keeps the most specific edges only), so
+  // a member that the same declarations in the source leave out can be
+  // listed: the engine's answer is the call's real dispatch.
+  if (parseTypeString(ce, typeToString(identity)) !== undefined)
+    for (const record of Object.values(ce._protocolRegistry)) {
+      if (protocols.has(record.name)) continue;
+      for (const [name, requirement] of Object.entries(record.members)) {
+        try {
+          const applies =
+            requirement.kind === 'function'
+              ? protocolFunctionMemberOwners(ce, identity, name).includes(
+                  record.name
+                )
+              : !['error', 'unknown', undefined].includes(
+                  protocolPropertyTypeOfReceiver(ce, identity, name, record) as
+                    string | undefined
+                );
+          if (applies) require(record.name, name, requirement);
+        } catch {
+          // A type that the engine cannot compare: no member.
+        }
+      }
+    }
+  // The properties first: `add` keeps the first member of a name.
+  for (const byName of [properties, functions])
+    for (const [name, owners] of byName)
+      if (owners.size === 1) addRequirement(name, [...owners.values()][0]);
+  for (const member of members)
+    if (
+      member.kind === 'field' &&
+      functions.has(member.name) &&
+      properties.has(member.name)
+    )
+      member.noCall = true;
+  return members;
+}
+
+/** Whether a node is a literal whose type the engine gives: a number, a
+ * string, `true`, `false`, or a list of these that is not empty. */
+function isLiteral(node: MathJsonExpression | null): boolean {
+  if (typeof node === 'number' || isNumberNode(node)) return true;
+  if (typeof node === 'object' && node !== null && 'str' in node) return true;
+  const name = symbol(node);
+  if (name === 'True' || name === 'False') return true;
+  if (operator(node) !== 'List') return false;
+  const elements = operands(node);
+  return elements.length > 0 && elements.every(isLiteral);
+}
+
+function isNumberNode(node: MathJsonExpression | null): boolean {
+  return typeof node === 'object' && node !== null && 'num' in node;
+}
+
+/** The type of a literal, as the engine types the value of a declaration
+ * with no type: a `const` takes the type of the value with its literal
+ * values widened (`5` is `integer`, `[1, 2]` is `vector<integer^2>`), a
+ * `let` the wider type of a local (`number`, `list<number>`), which a later
+ * assignment keeps. */
+function literalTypeText(
+  ce: ComputeEngine,
+  value: MathJsonExpression,
+  constant: boolean
+): string | undefined {
+  try {
+    const type = ce.expr(value).type.type;
+    return typeToString(
+      constant ? widenValueTypes(type) : widenLocalType(ce, type)
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /** The likely values of a type, as source text. */
@@ -1470,43 +2371,376 @@ export function parseTypeString(
  * `typeNames` (the types the source declares and those of the `typeNames`
  * option, which the engine does not know) resolved to a reference by name,
  * as in the parser. A reference with type arguments (`Box<real>`) does not
- * parse: the reference does not record the type parameters. */
+ * parse: the reference does not record the type parameters. `options` are
+ * those of `parseType` (`allowObjectType` for the body of a nominal type). */
 export function parseSourceType(
   ce: ComputeEngine,
   text: string,
-  typeNames: ReadonlySet<string>
+  typeNames: ReadonlySet<string>,
+  options?: ParseTypeOptions
 ): Type | undefined {
   const type = parseTypeString(ce, text);
-  if (type !== undefined || typeNames.size === 0) return type;
+  if (type !== undefined || (typeNames.size === 0 && options === undefined))
+    return type;
   try {
-    return parseType(text, {
-      get names(): string[] {
-        return [...typeNames];
+    return parseType(
+      text,
+      {
+        get names(): string[] {
+          return [...typeNames];
+        },
+        forward: () => undefined,
+        resolve: (name) =>
+          typeNames.has(name)
+            ? { kind: 'reference', name, alias: false, def: undefined }
+            : undefined,
       },
-      forward: () => undefined,
-      resolve: (name) =>
-        typeNames.has(name)
-          ? { kind: 'reference', name, alias: false, def: undefined }
-          : undefined,
-    });
+      undefined,
+      options
+    );
   } catch {
     return undefined;
   }
 }
 
-/** Whether a value of type `type` is a value of type `expected`. A type of
- * the source that the engine does not know matches by name only. */
-function typeMatches(
-  ce: ComputeEngine,
-  type: string | Type,
-  expected: string
-): boolean {
-  if (type === expected) return true;
+const FIT_ORDER: Readonly<Record<Fit, number>> = {
+  match: 0,
+  maybe: 1,
+  never: 2,
+};
+
+const worstFit = (a: Fit, b: Fit): Fit =>
+  FIT_ORDER[a] >= FIT_ORDER[b] ? a : b;
+const bestFit = (a: Fit, b: Fit): Fit => (FIT_ORDER[a] <= FIT_ORDER[b] ? a : b);
+
+/** Whether `a` is a subtype of `b`; `undefined` when the engine cannot
+ * tell (a type it does not know). */
+function subtypeOf(ce: ComputeEngine, a: Type, b: Type): boolean | undefined {
   try {
-    return ce.type(type).matches(ce.type(expected));
+    return ce.type(a).matches(ce.type(b));
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/** Whether a value can be of both types; `undefined` when the engine cannot
+ * tell. */
+function typesMayOverlap(a: Type, b: Type): boolean | undefined {
+  try {
+    return typesOverlap(a, b);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The list of `type`, mapped over by a broadcast call, or `type` itself
+ * for a function type. */
+function broadcastOf(type: Type): Type {
+  return isFunctionType(type)
+    ? type
+    : { kind: 'broadcastable', elements: type };
+}
+
+/**
+ * How a value of type `type` fits the type `expected`: `'match'` when it is
+ * a subtype, `'never'` when no value has both types, `'maybe'` otherwise (a
+ * broader type such as `value`, a union with an arm that fits, an overlap of
+ * two numeric ranges) and when the engine cannot tell. A function type
+ * where a function is expected is judged by its signature (`fitOfCallable`),
+ * also where a union expects a function in one of its arms
+ * (`function | nothing`). A transparent alias is unfolded. `options` are
+ * those of `fitOfFunction`.
+ */
+function fitValue(
+  ce: ComputeEngine,
+  type: Type,
+  expected: Type,
+  options?: { pipe?: boolean; openArity?: boolean }
+): Fit {
+  type = resolveTypeAlias(type);
+  expected = resolveTypeAlias(expected);
+  const arms = signatureArms(type);
+  const mixed = arms !== undefined && functionArmsOf(expected) !== undefined;
+  if (arms !== undefined && signatureArms(expected) !== undefined)
+    return fitOfFunction(ce, arms.map(callableOf), false, expected, {
+      ...options,
+      union: typeof type === 'object' && type.kind === 'union',
+    });
+  const subtype = subtypeOf(ce, type, expected);
+  const fit: Fit =
+    subtype === undefined
+      ? 'maybe'
+      : subtype
+        ? 'match'
+        : typesMayOverlap(type, expected) === false
+          ? 'never'
+          : 'maybe';
+  if (!mixed) return fit;
+  return bestFit(
+    fit,
+    fitOfFunction(ce, arms.map(callableOf), false, expected, {
+      ...options,
+      union: typeof type === 'object' && type.kind === 'union',
+    })
+  );
+}
+
+/**
+ * How a function name fits the type `expected`. `arms` are its signatures
+ * (an overload set has several, a union of signatures is one of its arms),
+ * `broadcast` whether it maps over a list argument, `union` whether `arms`
+ * are the arms of a union, and `pipe` whether the name is at the right side
+ * of `|>`.
+ *
+ * Where a function is expected (`expected` is a signature, a union or an
+ * intersection of signatures, or `function`), the name is passed: its
+ * signature is compared (`fitOfCallable`). An overload set fits by its best
+ * arm; a union is `'match'` when every arm matches and `'never'` when every
+ * arm is. Elsewhere the name is called, and its fit is that of the result of
+ * a call: `'match'` when the result of every arm matches, `'never'` when the
+ * result of no arm can fit, also as a list of a broadcast call. A union with
+ * a function arm and other arms (`function | nothing`) takes the best of the
+ * two. A transparent alias of `expected` is unfolded.
+ *
+ * A function whose result may be a function (or is not known) is not
+ * `'never'` where a function is expected: the result of a call is passed
+ * (`xs |> f(y)`, `filter(xs, mk(3))`). With `openArity` (a callback of a
+ * library function that takes a variadic list of sources, `map(f, xs, ys)`),
+ * the callback is called with one argument per source, of the type of its
+ * source, not with the arguments of its declared signature: a function is
+ * `'maybe'` at best, and `'never'` only for its effects or its result.
+ */
+function fitOfFunction(
+  ce: ComputeEngine,
+  arms: readonly Callable[],
+  broadcast: boolean,
+  expected: Type,
+  options?: { union?: boolean; pipe?: boolean; openArity?: boolean }
+): Fit {
+  if (arms.length === 0) return 'maybe';
+  expected = resolveTypeAlias(expected);
+  if (expected === 'function') return 'match';
+  const expectedArms = signatureArms(expected);
+  if (expectedArms === undefined) {
+    const fits = arms.map((arm) => {
+      if (arm.result === undefined) return 'maybe';
+      const fit = fitValue(ce, arm.result, expected);
+      if (fit !== 'never' || !broadcast) return fit;
+      return fitValue(ce, broadcastOf(arm.result), expected) === 'never'
+        ? 'never'
+        : 'maybe';
+    });
+    const called = fitOfAll(fits);
+    const functionArms = functionArmsOf(expected);
+    if (functionArms === undefined) return called;
+    return functionArms
+      .map((arm) => fitOfFunction(ce, arms, broadcast, arm, options))
+      .reduce(bestFit, called);
+  }
+  const fitOfArm = (x: FunctionSignature) => {
+    const fits = arms.map((arm) => {
+      const fit = fitOfCallable(
+        ce,
+        arm,
+        broadcast,
+        x,
+        options?.pipe === true,
+        options?.openArity === true
+      );
+      if (fit !== 'never') return fit;
+      const result =
+        arm.result === undefined ? undefined : resolveTypeAlias(arm.result);
+      return result === undefined ||
+        typesMayOverlap(result, 'function') !== false
+        ? 'maybe'
+        : 'never';
+    });
+    return options?.union === true ? fitOfAll(fits) : fits.reduce(bestFit);
+  };
+  const fits = expectedArms.map(fitOfArm);
+  return typeof expected === 'object' && expected.kind === 'intersection'
+    ? fits.reduce(worstFit)
+    : fits.reduce(bestFit);
+}
+
+/** The fit of a value that may be any of several values with these fits:
+ * `'match'` when they all match, `'never'` when none can. */
+function fitOfAll(fits: readonly Fit[]): Fit {
+  if (fits.every((f) => f === 'match')) return 'match';
+  if (fits.every((f) => f === 'never')) return 'never';
+  return 'maybe';
+}
+
+/**
+ * How a function fits where a function of signature `x` is expected: it is
+ * called with the arguments that `x` admits, so it must take the required
+ * ones (with its optional and rest parameters), each of its parameters must
+ * admit the argument of `x` (contravariant), its result must fit the result
+ * of `x`, and its effects must be a subset of those of `x`. A function that
+ * cannot take an optional or a variadic argument of `x`, or whose parameter
+ * may not admit it, is `'maybe'`: the caller may never pass it. An argument
+ * that a broadcast function maps over (a list of the parameter type) gives a
+ * list as the result.
+ *
+ * At the right side of `|>` (`pipe`), the call takes more arguments than the
+ * left side (`xs |> take(2)` is `take(xs, 2)`): a function that is
+ * `'never'` by this comparison is `'maybe'` when one of its parameters may
+ * admit the left side. With `openArity`, a function is `'maybe'` at best
+ * (`fitOfFunction`).
+ */
+function fitOfCallable(
+  ce: ComputeEngine,
+  callable: Callable,
+  broadcast: boolean,
+  x: FunctionSignature,
+  pipe = false,
+  openArity = false
+): Fit {
+  const fit = fitOfCall(ce, callable, broadcast, x, openArity);
+  if (fit !== 'never' || !pipe) return fit;
+  const left = x.args?.[0]?.type ?? 'unknown';
+  const admits = callable.params.some(
+    (param) =>
+      param === undefined ||
+      typesMayOverlap(left, param) !== false ||
+      (broadcast &&
+        !isFunctionType(param) &&
+        typesMayOverlap(left, broadcastOf(param)) !== false)
+  );
+  return admits ? 'maybe' : 'never';
+}
+
+/** The comparison of `fitOfCallable`, without the rule of `|>`. */
+function fitOfCall(
+  ce: ComputeEngine,
+  callable: Callable,
+  broadcast: boolean,
+  x: FunctionSignature,
+  openArity: boolean
+): Fit {
+  const { params } = callable;
+  // The arguments that `x` may pass, in order: the required ones, the
+  // optional ones, then one for the variadic ones.
+  const variadicMin = x.variadicArg !== undefined && x.variadicMin === 1;
+  const positions = [
+    ...(x.args ?? []).map((a) => ({ type: a.type, optional: false })),
+    ...(x.optArgs ?? []).map((a) => ({ type: a.type, optional: true })),
+    ...(x.variadicArg === undefined
+      ? []
+      : [{ type: x.variadicArg.type, optional: !variadicMin }]),
+  ];
+  // The shortest call of `x`, and the longest (`Infinity` when variadic).
+  const shortest = positions.filter((p) => !p.optional).length;
+  const longest = x.variadicArg === undefined ? positions.length : Infinity;
+  if (callable.required > longest && !openArity) return 'never';
+  if (!callable.rest && shortest > params.length) return 'never';
+  let fit: Fit = callable.required > longest ? 'maybe' : 'match';
+  // A call of `x` that the function cannot take: too few arguments, or
+  // more than it has parameters.
+  if (callable.required > shortest) fit = 'maybe';
+  if (!callable.rest && longest > params.length) fit = 'maybe';
+  // The effects of the function must be a subset of those of `x`
+  // (`isSubtype` of two signatures).
+  if (callable.effects === null) {
+    if (x.effects !== 'any') fit = 'maybe';
+  } else if (!isEffectSubset(callable.effects, x.effects)) return 'never';
+  let mapped = false;
+  for (const [i, { type: argument, optional }] of positions.entries()) {
+    if (i >= params.length && !callable.rest) break;
+    let param = i < params.length ? params[i] : params[params.length - 1];
+    if (param === undefined) {
+      fit = worstFit(fit, 'maybe');
+      continue;
+    }
+    if (subtypeOf(ce, argument, param) === true) continue;
+    if (broadcast && !isFunctionType(param)) {
+      param = broadcastOf(param);
+      mapped = true;
+      if (subtypeOf(ce, argument, param) === true) continue;
+    }
+    if (!optional && !openArity && typesMayOverlap(argument, param) === false)
+      return 'never';
+    fit = worstFit(fit, 'maybe');
+  }
+  // The variadic tail of `x` may fill the further parameters of the
+  // function: each of them must admit it.
+  if (x.variadicArg !== undefined)
+    for (let i = positions.length; i < params.length; i++) {
+      const param = params[i];
+      if (
+        param === undefined ||
+        subtypeOf(ce, x.variadicArg.type, param) !== true
+      )
+        fit = worstFit(fit, 'maybe');
+    }
+  // With `openArity`, the number and the types of the arguments of a call
+  // are not those of `x`: one per source, each of the type of its source.
+  if (openArity) fit = worstFit(fit, 'maybe');
+  if (callable.result === undefined) return worstFit(fit, 'maybe');
+  const result = mapped ? broadcastOf(callable.result) : callable.result;
+  return worstFit(fit, fitValue(ce, result, x.result));
+}
+
+/** A signature as a `Callable`. A type variable of a generic signature is
+ * replaced by its bound (`any` when it has none): the widest type of a
+ * parameter and of the result. */
+function callableOf(signature: FunctionSignature): Callable {
+  let s = signature;
+  if (signature.typeParams !== undefined) {
+    const { typeParams, ...rest } = signature;
+    const bindings: Record<string, Type> = {};
+    for (const p of typeParams)
+      bindings[p.name] = p.bound ?? (p.kind === 'value' ? 'integer' : 'any');
+    s = substituteTypeVariables(rest, bindings) as FunctionSignature;
+  }
+  const params: (Type | undefined)[] = [
+    ...(s.args ?? []),
+    ...(s.optArgs ?? []),
+  ].map((e) => e.type);
+  if (s.variadicArg !== undefined) params.push(s.variadicArg.type);
+  return {
+    params,
+    required:
+      (s.args?.length ?? 0) +
+      (s.variadicArg !== undefined && s.variadicMin === 1 ? 1 : 0),
+    rest: s.variadicArg !== undefined,
+    result: s.result,
+    effects: s.effects ?? [],
+  };
+}
+
+/** A `function` of the source as a `Callable`. A parameter or a result with
+ * no type, or with a type that the engine does not know, is not known; so
+ * is the element of a rest parameter, and so are the effects when the
+ * definition does not declare them (`function f(x) random -> real`). */
+function sourceCallable(
+  ce: ComputeEngine,
+  declaration: Extract<Declaration, { kind: 'function' }>,
+  text: string,
+  typeNames: ReadonlySet<string>
+): Callable {
+  const { params, result } = functionSignatureParts(
+    ce,
+    declaration,
+    text,
+    typeNames
+  );
+  const types = params.map((p, i) =>
+    p === undefined || (declaration.rest && i === params.length - 1)
+      ? undefined
+      : parseTypeString(ce, p)
+  );
+  return {
+    params: types,
+    required: params.filter(
+      (_, i) =>
+        !declaration.optional[i] &&
+        !(declaration.rest && i === params.length - 1)
+    ).length,
+    rest: declaration.rest,
+    result: result === undefined ? undefined : parseTypeString(ce, result),
+    effects: fullSignature(ce, declaration, text, typeNames)?.effects ?? null,
+  };
 }
 
 /** The ascription of a `function` definition when it is a full signature
@@ -1577,9 +2811,11 @@ export function functionSignatureParts(
 }
 
 /** What an editor shows for a declaration of the source (`detail`): the
- * declared type of a variable or of a parameter, the signature of a
- * `function` (`(real, integer?) -> real`), the body of a `type`. `type` is
- * the type of a use of the name, when the declaration gives it: the declared
+ * declared type of a variable or of a parameter, the type of the literal
+ * value of a variable with no type (`let a = 5` is `number`, `const a = 5`
+ * is `integer`, see `literalTypeText`), the signature of a `function`
+ * (`(real, integer?) -> real`), the body of a `type`. `type` is the type of
+ * a use of the name, when the declaration gives it: the declared or literal
  * type of a value, the result type of a function. `text` is the source that
  * the declaration was parsed from, and `typeNames` are the types of the
  * source and of the `typeNames` option (see `functionSignatureParts`). */
@@ -1591,6 +2827,10 @@ export function declarationDetail(
 ): { detail?: string; type?: string } {
   if (declaration?.kind === 'value')
     return { detail: declaration.type, type: declaration.type };
+  if (declaration?.kind === 'literal') {
+    const type = literalTypeText(ce, declaration.value, declaration.constant);
+    return type === undefined ? {} : { detail: type, type };
+  }
   if (declaration?.kind === 'function') {
     const { params, tail, result } = functionSignatureParts(
       ce,
@@ -1621,7 +2861,8 @@ export function declarationOf(
 
 /** What the source declares about each name, keyed by the start offset of
  * the name in its declaration: the type of a `let` or of a parameter, the
- * parameter and result types of a `function`, the body of a `type`. */
+ * literal value of a `let` with no type, the parameter and result types of a
+ * `function`, the body of a `type`. */
 export function collectDeclarations(
   ast: MathJsonExpression | null
 ): Map<number, Declaration> {
@@ -1652,6 +2893,25 @@ export function collectDeclarations(
     if (head === 'Declare' || head === 'Typed') {
       const type = stringValue(operand(node, 2));
       if (type !== null) record(operand(node, 1), { kind: 'value', type });
+      else if (head === 'Declare') {
+        // `let a = 5`: the attributes of the declaration hold its value.
+        const attribute = (key: string) =>
+          operand(
+            operands(operand(node, 2)).find(
+              (kv) =>
+                operator(kv) === 'KeyValuePair' &&
+                symbol(operand(kv, 1)) === key
+            ) ?? null,
+            2
+          );
+        const value = attribute('value');
+        if (operator(operand(node, 2)) === 'Dictionary' && isLiteral(value))
+          record(operand(node, 1), {
+            kind: 'literal',
+            value: value!,
+            constant: symbol(attribute('constant')) === 'True',
+          });
+      }
     } else if (head === 'DefineFunction') {
       const fn = operand(node, 2);
       if (operator(fn) === 'Function') {
@@ -1747,10 +3007,12 @@ function libraryEntries(ce: ComputeEngine): LibraryEntry[] {
     if (entry === undefined) continue;
     const isFunction = entry.kind === 'function' || entry.kind === 'opaque';
     let type: Type | undefined;
+    let arms: readonly FunctionSignature[] | undefined;
+    let union = false;
     if (isFunction) {
       const signature = ce.operatorInfo(name)?.signature?.type;
-      if (typeof signature === 'object' && signature.kind === 'signature')
-        type = signature.result;
+      arms = signatureArms(signature);
+      union = typeof signature === 'object' && signature.kind === 'union';
     } else type = ce.symbolInfo(name)?.type.type;
     const documentation = entry.description?.[0]?.split('\n')[0]?.trim();
     entries.push({
@@ -1764,6 +3026,11 @@ function libraryEntries(ce: ComputeEngine): LibraryEntry[] {
         ? {}
         : { description: entry.description }),
       ...(type === undefined ? {} : { type }),
+      ...(arms === undefined ? {} : { arms }),
+      ...(union ? { union } : {}),
+      ...(isFunction && isBroadcastable(ce, name)
+        ? { broadcastable: true }
+        : {}),
     });
   }
   LIBRARY_ENTRIES.set(ce, entries);

@@ -1,3 +1,65 @@
+## [Unreleased]
+
+### New Features
+
+- **Each completion item tells how the name fits the expected type** (CE-1661).
+  When `epsilCompletions()` gives an `expectedType`, each name item has a
+  `fit`: `'match'` when its value is always of that type, `'never'` when it can
+  never be, and `'maybe'` otherwise. At `determinant(`, `adjugateMatrix` is
+  `'match'`, `transpose` (which returns a `value`) and `hadamardProduct`
+  (`matrix | vector`) are `'maybe'`, and `isPrime` is `'never'`. A host can
+  hide the `'never'` items. The ranks keep their meaning; within ranks 4 and 5
+  the `'maybe'` items now come before the `'never'` items.
+
+### Improvements
+
+- **A completion where a function is expected compares signatures**
+  (CE-1661). At `filter([1, 2], ▮`, `isPrime` fits, since it takes an integer
+  and returns a boolean; before, it was compared by its result with the
+  callback type and ranked with the names that do not fit. After `|>` the
+  expected type is a function of the left side: with `A: matrix`, `A |> ▮`
+  expects `(matrix) -> any` (was `function`) and `inverse` fits;
+  `inverseFunction` may fit, since `A |> inverseFunction(g)` passes the
+  function that a call gives. A union with a function arm
+  (`function | nothing`) and a transparent alias of a signature are judged
+  the same way, and a callback of `map`, which takes one argument per source,
+  may take more arguments than its declared signature.
+- **A completion admits a list where the call maps over one** (CE-1661). At
+  `A * ▮` with `A: matrix`, `A` fits (`A * A` is a matrix product); at
+  `determinant(▮`, `abs` may fit, since `abs(A)` is a matrix.
+- **A `let` or a `const` with a literal value has a type in completions and
+  hover** (CE-1661). With `const n = 5`, the item of `n` has the detail
+  `integer`, and with `let x = 5`, `number` (the type the engine gives the
+  variable). Before, both had no detail.
+- **After `.`, a completion lists the members of the value before the dot**
+  (CE-1663). With `const c: Circle` of a type `tuple<r: number>` that conforms
+  to a protocol `Shape` with the functions `area` and `scale`, `c.` offers
+  `area` (inserted as `area()`, detail `() -> number`), `r` (`number`) and
+  `scale` (`(k: number) -> Circle`). A record offers its fields, an `object`
+  type its fields, and a protocol property its type. The type of the value comes
+  from its declaration, also through a field (`a.b.`). When that type is not
+  known, there are no items. Before, `c.` offered every name of the source and
+  of the library, and none of the members. In an argument (`sqrt(c.`), each
+  member has a `fit` for the type of the parameter: there, `scale`, which
+  returns a `Circle`, is `'never'`.
+- **The call-site types of a Document function read the formula rows, and
+  skip an open argument.** `PreparedDocumentDefinition.callSiteTypes` now
+  also reads the calls in formula rows, such as the plot row
+  `(P(t,(1,0)))`. Prepare canonicalizes such a row only to read the types of
+  its arguments, in a scope of its own that it then discards: the row gives no
+  definition and no row error, and a row that is not valid gives no evidence.
+  An argument that reads a field axis, such as the axis `t`, or a field value
+  is open. Another free name has the type of the input that the host declared
+  with that name, and is otherwise open. An argument whose
+  type is open (`unknown`, `any`, or a type with such a part) no longer makes
+  the entry `undefined`: it is ignored, and the entry is the join of the
+  other calls' argument types. With `P(k, q)` called only from its own body
+  and from that plot row, `callSiteTypes` was `["number", undefined]` and is
+  now `["number", "tuple<real, real>"]`. A host that declares such an entry as
+  a formal type still accepts a call whose argument is typed `unknown` or
+  `any`, but can refuse one whose argument only has an open part: `[q]`, of
+  type `list<unknown>`, against `tuple<real, real>`.
+
 ## 0.197.1 _2026-11-21_
 
 ### Improvements
