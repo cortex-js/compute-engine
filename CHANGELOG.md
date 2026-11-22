@@ -47,6 +47,19 @@
   mode (#643 and #645, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+- **`Element` of a quotient reads the assumptions on its denominator.** Under
+  `assume(x > 0)`, `Element(1/(x·Gamma(x+2)), RealNumbers)` stayed undecided:
+  the type of a quotient is derived from its operands' types, and
+  `Gamma(x+2)`, typed `real`, is positive only by its sign handler, which the
+  proof did not read. It does now, so the denominator is known not to be zero
+  (#649, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`Sum` and `Product` of one term that is not a number stay unevaluated.**
+  With no indexing set, `Sum(Subset(5, [1, 3, 4]))` and `Product(True)` gave
+  the term, and `Sum(True)` was an `incompatible-type` error. `Sum(7)`,
+  `Sum(Pi)` and `Sum(Missing)` are unchanged (#651, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
