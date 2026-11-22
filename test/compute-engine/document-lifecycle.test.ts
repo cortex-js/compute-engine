@@ -1641,6 +1641,17 @@ describe('call-site types', () => {
       ).toEqual(['tuple<real, real>']);
     });
 
+    test('join the arms of a union that widen to the same type', () => {
+      // `(1.5, 2, 0)` and `(1, 2.5, 3)` have different literal types that
+      // both widen to `tuple<real, real, real>`.
+      expect(
+        jsonCallSiteTypes({
+          h,
+          A: [[], ['h', ['List', ['Tuple', 1.5, 2, 0], ['Tuple', 1, 2.5, 3]]]],
+        })
+      ).toEqual(['list<tuple<real, real, real>^2>']);
+    });
+
     test('read the values of a dictionary', () => {
       expect(
         jsonCallSiteTypes({

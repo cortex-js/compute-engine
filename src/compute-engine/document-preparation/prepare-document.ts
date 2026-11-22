@@ -484,8 +484,10 @@ function widenArgumentType(ce: IComputeEngine, t: Type): Type {
           type: widenArgumentType(ce, e.type),
         })),
       };
+    // The widened arms are joined again: `tuple<real, real, integer> |
+    // tuple<integer, real, real>` is `tuple<real, real, real>`.
     if (t.kind === 'union')
-      return { ...t, types: t.types.map((x) => widenArgumentType(ce, x)) };
+      return widenAll(t.types.map((x) => widenArgumentType(ce, x))) as Type;
   }
   const bt = ce.type(t);
   if (bt.matches('real')) return 'real';
