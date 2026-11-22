@@ -304,6 +304,23 @@ export function bat(list: ReadonlyArray<unknown>, i: bigint): unknown {
   return list[bindex(i, list.length)];
 }
 
+/** The position from 0 of the index `i` (from 1, from the end when
+ * negative) of a write to a list of `n` elements: `wix` of the double mode.
+ * An index that is 0 or out of range throws, where the interpreter leaves
+ * the form unevaluated. */
+export function bwix(n: bigint, i: bigint): bigint {
+  const k = i > 0n ? i - 1n : n + i;
+  if (i !== 0n && k >= 0n && k < n) return k;
+  throw new Error(
+    `out-of-range: the index ${i} of a write to a list of ${n} elements`
+  );
+}
+
+/** `Sort(list)` of integers: a sorted copy, ascending. */
+export function bsort(list: ReadonlyArray<bigint>): bigint[] {
+  return [...list].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 /** The element count of the range `lo..hi` by `step`: `0` for a zero step
  * or a step whose sign does not agree with the direction from `lo` to `hi`.
  * The `bigint` form of `rangeCount` (`numerics/range-count.ts`), which is
@@ -334,5 +351,7 @@ export const BIGINT_HELPERS = {
   bbinomial,
   bfibonacci,
   bat,
+  bsort,
+  bwix,
   brangeCount,
 };

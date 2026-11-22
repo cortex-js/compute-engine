@@ -16,6 +16,24 @@
   resolves the member; `xs.take(` stays `null`, since a library function is
   not a member. The active parameter skips the implicit parameter
   (`xs |> take(` and `c.scale(` are at their second parameter).
+- **`serializeEpsil` takes a `numberFormat` option for the digit grouping.**
+  `serializeEpsil(3811)` is `3_811`, and
+  `serializeEpsil(3811, { numberFormat: { digitGroup: 0 } })` is `3811`;
+  `digitGroupSeparator: ''` does the same. Epsil reads only `_` between
+  digits, so another separator throws a `RangeError`. The type
+  `EpsilNumberFormat` is exported from the Epsil entry (#653, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+- **The permutation statistics that depend on the degree n take a
+  `PermutationAction(n)`.** A `Permutation` keeps its normalized form (trailing
+  fixed points dropped), so equal permutations stay structurally the same.
+  `PermutationCycles(p, PermutationAction(n))` lists every cycle on 1..n, the
+  fixed points as 1-cycles; without the action it is unchanged. The new
+  `PermutationFixedPoints(p, PermutationAction(n))` gives the fixed points,
+  and `PermutationImages(p, PermutationAction(n))` the one-line form padded to
+  n: for `Permutation([2, 1, 3])` in degree 4, `[3, 4]` and `[2, 1, 3, 4]`. A
+  permutation that moves a point above n is
+  `Error("permutation-outside-action")` (#622, contributed by
+  [enumeratio](https://github.com/enumeratio)).
 
 ### Resolved Issues
 
@@ -23,6 +41,64 @@
   `let c = Circle(1)` (no type annotation), completion at `c.` lists the
   members of `Circle`, and `c.scale(` has signature help; before, both were
   empty unless `c` was declared `c: Circle`.
+
+- **`Reduce(L, f)` with no initial value compiles when `f` is a function
+  literal.** The first element is the seed and the fold runs over the rest, as
+  the interpreter does: `Reduce(Range(1, n), (a, b) => a * b)` is `n!`, and
+  `Reduce(L, (a, b) => a - b)` folds from the left. Of an empty list the
+  interpreter gives no value, so the compiled code throws `out-of-range`
+  (#630, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **A function value that reads a parameter of the enclosing function keeps
+  it when another argument mentions the same name.**
+  `Apply(a ↦ Apply(v ↦ Map(j ↦ v[j] + a, 1..2), Map(q ↦ a + q, 1..2)), 10)`
+  was `[a_1 + 11, a_1 + 12]`, and is `[21, 22]` again; a `Fold` whose step
+  applies such a typed let gave `[5, At(acc_1, 2), At(acc_1_1, 3)]`, and gives
+  `[5, 6, 7]`. The scope of a nested `Block` holds the binding of each
+  enclosing parameter its body reads, and the capture check took that entry
+  for a binder and renamed the parameter there (#632 and #655, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`Rationalize(x, 0)` of a float is the exact rational of its decimal.** A
+  zero tolerance gave the convergent of the default tolerance, so
+  `Rationalize(3.141592653589793, 0)` was `80143857/25510582` while a
+  tolerance of `1e-30` gave the exact value. Now `Rationalize(0.1, 0)` is
+  `1/10`, and the result at 0 is the result at a tiny tolerance. The decimal
+  is the one the number holds at working precision; the binary double is not
+  used (#634, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`ReplaceAll` applies a pattern rule wherever it matches, not only at the
+  root.** `ReplaceAll(Sin(x^2) + 1, x^2 -> y)` is `Sin(y) + 1`. The expression
+  is visited from the top: at each part the first rule that matches replaces
+  it, and the replacement is not searched again, as `expr /. rules` does in
+  Wolfram, so `ReplaceAll([g(a), k(b)], {g(_a) -> k(_a), k(_a) -> g(_a)})` is
+  `[k(a), g(b)]` (#636, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`Flatten(m, d)` compiles when the depth is a constant non-negative integer
+  or `+oo`.** A matrix has one nesting level, so depth 0 is the matrix itself
+  and any other depth is the list of its elements row by row; another depth
+  declines (#641, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`Sort` of integers and `ReplaceAt` at a run-time position compile in the
+  `bigint` mode.** `Sort(L)` gives a sorted copy of the list of `bigint`
+  values, and `ReplaceAt(L, i, v)` with an index known at run time throws
+  `out-of-range` for an index that is 0 or out of range, as in the double
+  mode (#643 and #645, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **`Element` of a quotient reads the assumptions on its denominator.** Under
+  `assume(x > 0)`, `Element(1/(x·Gamma(x+2)), RealNumbers)` stayed undecided:
+  the type of a quotient is derived from its operands' types, and
+  `Gamma(x+2)`, typed `real`, is positive only by its sign handler, which the
+  proof did not read. It does now, so the denominator is known not to be zero
+  (#649, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`Sum` and `Product` of one term that is not a number stay unevaluated.**
+  With no indexing set, `Sum(Subset(5, [1, 3, 4]))` and `Product(True)` gave
+  the term, and `Sum(True)` was an `incompatible-type` error. `Sum(7)`,
+  `Sum(Pi)` and `Sum(Missing)` are unchanged (#651, contributed by
+  [enumeratio](https://github.com/enumeratio)).
 
 ## 0.198.1 _2026-11-21_
 

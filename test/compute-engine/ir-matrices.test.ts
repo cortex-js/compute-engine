@@ -236,6 +236,40 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
     ['Flatten', ['Flatten', 'B'], [{ B: B2 }]],
     ['Flatten, rows of run-time count', ['Flatten', 'P'], [{ P: P1 }]],
     ['Flatten of a vector', ['Flatten', 'L'], [{ L: [1, 2] }]],
+    ['Flatten to depth 1', ['Flatten', 'B', 1], [{ B: B2 }]],
+    ['Flatten to depth 0', ['Flatten', 'B', 0], [{ B: B2 }]],
+    ['Flatten to a depth past the nesting', ['Flatten', 'B', 5], [{ B: B1 }]],
+    [
+      'Flatten to an infinite depth',
+      ['Flatten', 'B', { num: '+Infinity' }],
+      [{ B: B1 }],
+    ],
+    [
+      'Flatten of rows of run-time count to depth 1',
+      ['Flatten', 'P', 1],
+      [{ P: P1 }, { P: [[7, 8]] }],
+    ],
+    [
+      'Flatten to depth 0, rows of run-time count',
+      ['Flatten', 'P', 0],
+      [{ P: P1 }],
+    ],
+    [
+      'Flatten of a vector to depth 1',
+      ['Flatten', 'L', 1],
+      [{ L: [1, 2] }, { L: [] }],
+    ],
+    ['Flatten of a vector to depth 0', ['Flatten', 'L', 0], [{ L: [1, 2] }]],
+    ['Flatten of a scalar to depth 1', ['Flatten', 'x', 1], [{ x: 2 }]],
+    [
+      'Flatten of a map of pairs to depth 1',
+      [
+        'Flatten',
+        ['Map', ['Function', ['List', 'i', 'i'], 'i'], ['Range', 1, 'n']],
+        1,
+      ],
+      [{ n: 1 }, { n: 3 }],
+    ],
     [
       'Reshape to a row',
       ['Reshape', 'L', ['Tuple', 1, 5]],
@@ -422,6 +456,8 @@ describe('MATRIX OPERATORS: DECLINES', () => {
     [['Cross', 'U', 'V'], /a tuple and a list/],
     [['Cross', 'L', 'L'], /two vectors of three real numbers/],
     [['Shape', 'x'], /empty tuple/],
+    [['Flatten', 'B', 'n'], /depth that is not a constant/],
+    [['Flatten', 'B', -1], /depth that is not a constant/],
     // An empty list of rows has rank 1 and the shape `(0)` in the
     // interpreter, so a number of rows known at run time only settles
     // neither.

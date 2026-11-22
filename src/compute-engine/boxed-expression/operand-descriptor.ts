@@ -564,7 +564,10 @@ export function describe(
 }
 
 /** A proof descriptor reads signs from the occurrence's refined type.
- * Numeric values also supply literal evidence such as parity. */
+ * Numeric values also supply literal evidence such as parity. An application
+ * also reads its operator's `sgn` handler, which asks the assumptions about
+ * its operands: `Gamma(x + 2)` is `real` as a type, and positive only by that
+ * handler, which a quotient needs to rule out a zero denominator. */
 export function describeForProof(
   op: Expression,
   type: Type
@@ -574,6 +577,7 @@ export function describeForProof(
     const value = op.value;
     if (value && isNumber(value)) return describe(value);
   }
+  if (isFunction(op)) return describe(op, type);
   return describeType(type);
 }
 

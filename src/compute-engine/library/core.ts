@@ -10013,7 +10013,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (Object.keys(substitution).length > 0)
           result = result.subs(substitution);
         if (patternRules.length > 0)
-          result = result.replace(patternRules) ?? result;
+          result = replaceTopDown(result, patternRules);
 
         return result.evaluate();
       },
@@ -13622,6 +13622,26 @@ function isUnicodeScalarSource(expr: Expression): boolean {
   const count = expr.count;
   if (count !== undefined && n < count) return false;
   return true;
+}
+
+/**
+ * `expr /. rules` for pattern rules: top-down, at each part the first rule
+ * that matches replaces it and the replacement is not searched again; a part
+ * that no rule matches has its operands visited. (`replace()` with
+ * `recursive` goes bottom-up, one rule at a time over the whole tree, so a
+ * later rule would see an earlier rule's output.)
+ */
+function replaceTopDown(expr: Expression, rules: Rule[]): Expression {
+  const hit = expr.replace(rules, { once: true });
+  if (hit !== null) return hit;
+  if (!isFunction(expr)) return expr;
+  let changed = false;
+  const ops = expr.ops.map((op) => {
+    const r = replaceTopDown(op, rules);
+    if (r !== op) changed = true;
+    return r;
+  });
+  return changed ? expr.engine.function(expr.operator, ops) : expr;
 }
 
 /** A finite, non-negative integer: the only number that can be a code point. */

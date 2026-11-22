@@ -2211,9 +2211,10 @@ arithmetic of integers (`Add`, `Subtract`, `Negate`, `Multiply`, `Abs`,
 nonnegative, `Factorial`, `Binomial`, `Choose`, `GCD`, `LCM`, `Fibonacci`),
 the comparisons (also a chain, `0 < n < m`), `And`, `Or`, `Not`, `If` with
 an else, `Which` with a `True` clause, `Block`, `Sum` and `Product` with
-integer bounds, `List`, `Range`, `Length`, `At`, `Map`, `Filter`, `Reduce`,
-`Loop` and user functions with integer parameters compile. A loop counts
-with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)` is exact at any `n`.
+integer bounds, `List`, `Range`, `Length`, `At`, `Sort`, `Map`, `Filter`,
+`Reduce`, `ReplaceAt`, `Loop` and user functions with integer parameters
+compile. A loop counts with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)`
+is exact at any `n`.
 
 **What declines.** A node off the integer lane declines with the code
 `'bigint-lane'`; an operator that the mode does not spell declines with

@@ -2167,15 +2167,20 @@ export function listLowering(cx: Lowering) {
 
   /** `Reduce(L, f, init)` of a function `f` of two parameters (a literal
    *  or a user function): the left fold from `init`, `f(acc, x)` for each
-   *  element `x` in order, as the interpreter's. Real numbers only; an
-   *  integer `init` keeps the integer lane when every step gives an
-   *  integer. */
+   *  element `x` in order, as the interpreter's. With no `init` the first
+   *  element is the seed and the fold runs over the rest; of an empty list
+   *  the interpreter gives no value, so the compiled code throws (`wix`).
+   *  Real numbers only; an integer `init` keeps the integer lane when every
+   *  step gives an integer. */
   const reduceBy = (e: Fn): V => {
     if (cx.interval) decline(e, 'Reduce by a function on interval-js');
     const { names, body } = literalOf(e, e.ops[1], 2);
     const effects = b.effects;
     const s = source(e.ops[0]);
-    const init = cx.scalar(e.ops[2]);
+    const seedless = e.nops === 2;
+    const init = seedless
+      ? s.at(position(e, s.length, e.engine.One))
+      : cx.scalar(e.ops[2]);
     if (b.effects > effects)
       decline(e, 'Reduce of a list or an initial value with an effect');
     const real = (v: V) =>
@@ -2209,7 +2214,7 @@ export function listLowering(cx: Lowering) {
     b.emit({
       k: 'loop',
       outs: [out],
-      lo: integer(0),
+      lo: integer(seedless ? 1 : 0),
       hi: last,
       init: [cx.widen(init, lane)],
       body: body2,

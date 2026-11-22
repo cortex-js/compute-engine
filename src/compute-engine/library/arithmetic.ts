@@ -195,7 +195,11 @@ import {
   floorModDouble,
   MACHINE_PRECISION,
 } from '../numerics/numeric.js';
-import { rationalize, rationalizeWithin } from '../numerics/rationals.js';
+import {
+  exactDecimalRational,
+  rationalize,
+  rationalizeWithin,
+} from '../numerics/rationals.js';
 import { lambertWComplex } from '../numerics/lambert-w-complex.js';
 import type { NumberLiteralInterface } from '../types-expression.js';
 import { isComposite, isPrime } from '../boxed-expression/predicates.js';
@@ -13710,7 +13714,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // from its value at working precision, so the tolerance holds for
           // that value: `Rationalize(Sqrt(2), 10^-25)` at 21 digits is
           // within `10^-25` of the 21-digit decimal, not of `√2`. A zero
-          // tolerance is no tolerance.
+          // tolerance is the exact value of that decimal (`Rationalize(0.1,
+          // 0)` is `1/10`), so the result does not jump at 0.
           if (tol.re > 0 || tol.bignumRe?.isPositive()) {
             const x = asRational(ops[0]) ?? f.bignumRe ?? new BigDecimal(f.re);
             const t =
@@ -13723,7 +13728,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               return r === undefined ? undefined : ce.number(r);
             }
           }
-          return ce.number(rationalize(f.re));
+          const x =
+            asRational(ops[0]) ?? f.bignumRe ?? new BigDecimal(String(f.re));
+          if (Array.isArray(x)) return ce.number(x);
+          if (!x.isFinite()) return undefined;
+          const r = exactDecimalRational(x);
+          return r === undefined ? undefined : ce.number(r);
         }
         return ce.number(rationalize(f.re));
       },
