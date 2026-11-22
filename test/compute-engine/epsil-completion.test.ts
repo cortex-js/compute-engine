@@ -1208,3 +1208,188 @@ const p: record{x: real, y: real, tag: string} = {x -> 1, y -> 2, tag -> "a"}
     expect(members(SUMMABLE + 'ys.▮')).toEqual([]);
   });
 });
+
+describe('EPSIL COMPLETION: SNIPPETS', () => {
+  const snippet = (source: string, label: string) =>
+    item(complete(source), label)?.snippet;
+
+  /** Whether `text` is one line with no `{`, `}`, `$`, `#` or `\` outside
+   * its fields `${n:…}` and `${0}`. */
+  function isSafeSnippet(text: string): boolean {
+    if (/[\n\r\u2028\u2029]/.test(text)) return false;
+    const rest = text.replace(/\$\{[1-9]\d*:[^{}$#\\]*\}|\$\{0\}/g, '');
+    return !/[{}$#\\]/.test(rest);
+  }
+
+  test('a library function has one field per required parameter', () => {
+    expect(snippet('tak▮', 'take')).toBe('take(${1:xs}, ${2:count})${0}');
+    expect(item(complete('tak▮'), 'take')?.insertText).toBeUndefined();
+  });
+
+  test('an optional parameter has no field', () => {
+    expect(snippet('function g(a: real, b: integer = 2) { a }\ng▮', 'g')).toBe(
+      'g(${1:a})${0}'
+    );
+  });
+
+  test('a function with no required parameter has no snippet', () => {
+    expect(item(complete('function z() { 1 }\nz▮'), 'z')).not.toHaveProperty(
+      'snippet'
+    );
+    const SHAPE =
+      'protocol Shape { function area(self: Self) -> number }\n' +
+      'type Sq = tuple<s: number> is Shape {\n' +
+      '  function area(self: Sq) -> number { self.s^2 }\n' +
+      '}\n' +
+      'const q: Sq = Sq(1)\nq.▮';
+    const area = item(complete(SHAPE), 'area');
+    expect(area?.insertText).toBe('area()');
+    expect(area).not.toHaveProperty('snippet');
+  });
+
+  test('before `(`, no snippet', () => {
+    expect(snippet('tak▮(xs, 2)', 'take')).toBeUndefined();
+    expect(snippet('tak▮ \t(xs, 2)', 'take')).toBeUndefined();
+    expect(snippet('tak▮\n(xs, 2)', 'take')).toBe(
+      'take(${1:xs}, ${2:count})${0}'
+    );
+  });
+
+  test('where a function value is expected, no snippet', () => {
+    expect(
+      snippet(
+        'function k(f: (real) -> real) { f(1) }\n' +
+          'function p(x: real) { x }\nk(p▮)',
+        'p'
+      )
+    ).toBeUndefined();
+    expect(snippet('filter([1, 2], isPr▮', 'isPrime')).toBeUndefined();
+    expect(
+      item(complete('let g: (real) -> real = (x) -> x\ng▮'), 'g')
+    ).not.toHaveProperty('snippet');
+  });
+
+  test('a function defined several times', () => {
+    expect(
+      snippet(
+        'function f(x: real) { x }\nfunction f(x: real, y: real) { x+y }\nf▮',
+        'f'
+      )
+    ).toBeUndefined();
+    expect(
+      snippet('function f(x: real) { x }\nfunction f(y: string) { y }\nf▮', 'f')
+    ).toBe('f(${1:x})${0}');
+  });
+
+  test('after `|>`, the field of the piped value is left out', () => {
+    const XS = 'const xs: list<integer> = [1, 2]\n';
+    expect(snippet(XS + 'xs |> tak▮', 'take')).toBe('take(${1:count})${0}');
+    // `xs |> fold(f, initial)` is `fold(f, initial, xs)`
+    expect(snippet(XS + 'xs |> fol▮', 'fold')).toBe(
+      'fold(${1:reducer}, ${2:initial})${0}'
+    );
+    // `[1, 2] |> map(f)` is `map(f, [1, 2])`: the collection is the rest
+    // parameter, which has no field
+    expect(snippet('[1, 2] |> ma▮', 'map')).toBe('map(${1:mapping})${0}');
+    // With no static type of the piped value, the slot is not known
+    expect(snippet('ys |> tak▮', 'take')).toBeUndefined();
+    const h = item(complete('function h(x: real) { x }\n3 |> h▮'), 'h');
+    expect(h).not.toHaveProperty('snippet');
+    expect(h?.insertText).toBeUndefined();
+  });
+
+  test('in a call after `|>`, the piped value fills a slot', () => {
+    // `1..10 |> filter(p)` is `filter(1..10, p)`
+    const filtered = item(complete('1..10 |> filter(isPr▮)'), 'isPrime');
+    expect(filtered).not.toHaveProperty('snippet');
+    expect(filtered?.fit).toBe('match');
+    // `[1, 2] |> map(f)` is `map(f, [1, 2])`
+    expect(snippet('[1, 2] |> map(isPr▮)', 'isPrime')).toBeUndefined();
+    expect(complete('[1, 2] |> map(isPr▮)').expectedType).toBe('(T) any -> U');
+    // `Take` is an overload set, `Quantile` has one signature
+    expect(complete('[0.1, 0.5] |> quantile(▮').expectedType).toBe(
+      'real<0..1>'
+    );
+    expect(complete('[0.1, 0.5] |> quantile(_, ▮').expectedType).toBe(
+      'real<0..1>'
+    );
+    expect(complete('[0.1, 0.5] |> quantile(▮, 0.5)').expectedType).toBe(
+      'collection<any> | distribution'
+    );
+    const K =
+      'function k(n: integer, f: (real) -> real) { f(n) }\n' +
+      'function p(x: real) { x }\n';
+    expect(complete(K + '3 |> k(▮').expectedType).toBe('(real) -> real');
+    expect(snippet(K + '3 |> k(p▮)', 'p')).toBeUndefined();
+    // With no static type of the piped value, the slot is not known
+    expect(complete('xs |> quantile(▮').expectedType).toBeUndefined();
+  });
+
+  test('an alias of a function type, or an optional callback, is passed', () => {
+    const P = 'function p(x: real) { x }\n';
+    expect(
+      snippet(
+        P + 'type alias F = (real) -> real\nfunction k(f: F) { f(1) }\nk(p▮)',
+        'p'
+      )
+    ).toBeUndefined();
+    expect(
+      snippet(P + 'let g: ((real) -> real) | nothing = p▮', 'p')
+    ).toBeUndefined();
+    expect(snippet(P + 'let g: ((real) -> real) | real = p▮', 'p')).toBe(
+      'p(${1:x})${0}'
+    );
+  });
+
+  test('a protocol function member leaves out its receiver', () => {
+    const SHAPE =
+      'protocol Shape { function scale(self: Self, k: number) -> Self }\n' +
+      'type Sq = tuple<s: number> is Shape {\n' +
+      '  function scale(self: Sq, k: number) -> Sq { Sq(self.s * k) }\n' +
+      '}\n' +
+      'const q: Sq = Sq(1)\n';
+    expect(snippet(SHAPE + 'q.▮', 'scale')).toBe('scale(${1:k})${0}');
+    expect(snippet(SHAPE + 'q.sc▮()', 'scale')).toBeUndefined();
+    expect(snippet(SHAPE + 'q.sc▮ (2)', 'scale')).toBeUndefined();
+  });
+
+  test('a variant constructor has a field per payload element', () => {
+    const source = 'type shape = circle(r: real) | sq(real, real) | dot\n';
+    expect(snippet(source + 'let a = ▮', 'circle')).toBe('circle(${1:r})${0}');
+    expect(snippet(source + 'let a = ▮', 'sq')).toBe(
+      'sq(${1:real}, ${2:real})${0}'
+    );
+    expect(item(complete(source + 'let a = ▮'), 'dot')).not.toHaveProperty(
+      'snippet'
+    );
+  });
+
+  test('two parameters of the same name have distinct numbers', () => {
+    expect(snippet('function d(x: real, x: real) { x }\nd▮', 'd')).toBe(
+      'd(${1:x}, ${2:x})${0}'
+    );
+  });
+
+  test('a type with braces as the default text gives way to `arg<n>`', () => {
+    const source =
+      'protocol Moves { function shift(self: Self, record{x: real}) -> Self }\n' +
+      'type Pt = tuple<x: real> is Moves {\n' +
+      '  function shift(self: Pt, d: record{x: real}) -> Pt { self }\n' +
+      '}\n' +
+      'const p: Pt = Pt(1)\np.▮';
+    expect(snippet(source, 'shift')).toBe('shift(${1:arg1})${0}');
+  });
+
+  test('an overload set whose arities differ has no snippet', () => {
+    // `slice(value, span)` and `slice(value, start, end)`
+    expect(item(complete('sli▮'), 'slice')).not.toHaveProperty('snippet');
+  });
+
+  test('every snippet is one line with no stray field characters', () => {
+    for (const source of ['▮', 'take(▮'])
+      for (const { snippet } of complete(source).items)
+        if (snippet !== undefined)
+          expect([snippet, isSafeSnippet(snippet)]).toEqual([snippet, true]);
+    expect(isSafeSnippet('f(${1:record{x: real}})${0}')).toBe(false);
+  });
+});

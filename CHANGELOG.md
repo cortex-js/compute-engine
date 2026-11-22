@@ -19,6 +19,19 @@
   (`matrix | vector`) are `'maybe'`, and `isPrime` is `'never'`. A host can
   hide the `'never'` items. The ranks keep their meaning; within ranks 4 and 5
   the `'maybe'` items now come before the `'never'` items.
+- **A completion item of a function inserts the call with argument fields**
+  (CE-1664.7). An item of a function with a required parameter has a
+  `snippet`, in the syntax of LSP and of CodeMirror's `snippet()`: at `tak`,
+  `take` has `take(${1:xs}, ${2:count})${0}`, and after `xs |>` it has
+  `take(${1:count})${0}`. Each required parameter is a field, with its name
+  (or its type) as default text; optional and rest parameters have none. A
+  function member after `.` leaves out its receiver, and a variant constructor
+  has a field per payload element. There is no snippet before a `(`, where
+  a function value is expected (`filter(xs, isPr`; after `|>` there is one),
+  for a function with no required parameter, or for an overload set whose
+  signatures differ in their number of required parameters. `insertText`
+  keeps its value. The VS Code extension sends the snippet as a snippet to a
+  client that supports snippets.
 
 ### Improvements
 

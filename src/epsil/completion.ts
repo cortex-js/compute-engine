@@ -95,6 +95,15 @@ export type EpsilCompletionItem = {
   /** The text inserted over the `range` of the completions, when it differs
    * from `label`. A fix-it has `edits` instead. */
   insertText?: string;
+  /** The call that a function item inserts, as a snippet in the syntax of
+   * LSP and of CodeMirror's `snippet()`: one numbered field per required
+   * parameter, whose default text is the name of the parameter (its type
+   * when it has none), then the final caret (`take(${1:xs}, ${2:count})${0}`).
+   * Only for a function with a required parameter, and not before a `(`;
+   * after `|>` the first argument is left out. One line, with no `{`, `}`,
+   * `$`, `#` or `\` outside the fields. An editor that does not take snippets
+   * inserts `insertText` (or `label`). */
+  snippet?: string;
   /** The edits of a fix-it, as `[start, end, text]` offsets of the source. */
   edits?: [start: number, end: number, text: string][];
   /** A signature (`(real, integer) -> real`) or a type. */
@@ -438,6 +447,51 @@ export function epsilCompletions(
     path === undefined || expectedType === undefined
       ? undefined
       : admittedTypeAt(context, path.nodes.length - 1, expectedType);
+  // A call inserts a snippet, except before `(` (`take▮(xs)`, `take▮ (xs)`),
+  // and where a function value is expected (`filter(xs, isPr▮)`): the name is
+  // passed there, not called. After `|>` (`xs |> take`), the left side fills
+  // the slot that the `Pipe` handler gives it (`pipedTopicField`), and the
+  // snippet has no field for it; no snippet when that slot is not known.
+  const called = /^[ \t]*\(/.test(source.slice(end));
+  const piped =
+    path !== undefined &&
+    path.nodes.length >= 2 &&
+    operator(path.nodes[path.nodes.length - 2]) === 'Pipe' &&
+    path.indices[path.indices.length - 1] === 1;
+  const expected =
+    admitted ??
+    (expectedType === undefined
+      ? undefined
+      : parseSourceType(ce, expectedType, typeNames));
+  const passed =
+    !piped && expected !== undefined && expectsFunction(context, expected);
+  const left =
+    piped && path !== undefined
+      ? operand(path.nodes[path.nodes.length - 2], 1)
+      : null;
+  // `callables` are the signatures of the function, for the slot of the
+  // piped value: without them, no snippet after `|>`.
+  const snippetOf = (
+    spelling: string,
+    required: readonly Parameter[] | undefined,
+    callables?: readonly Callable[]
+  ): { snippet?: string } => {
+    if (called || passed || required === undefined) return {};
+    let fields: readonly Parameter[] | undefined = required;
+    if (piped) {
+      const topic =
+        callables === undefined
+          ? undefined
+          : pipedTopicField(context, left, callables, required.length);
+      fields =
+        topic === undefined
+          ? undefined
+          : required.filter((_, i) => i !== topic);
+    }
+    const snippet =
+      fields === undefined ? undefined : callSnippet(spelling, fields);
+    return snippet === undefined ? {} : { snippet };
+  };
   // Whether the position is the right side of `|>`, where a function may be
   // called with more arguments than the left side (`fitOfCallable`).
   const pipe =
@@ -491,7 +545,7 @@ export function epsilCompletions(
         ? undefined
         : receiverTypeOf(context, operand(node, 1));
     // Before `(` (`c.ar▮()`), a function member is inserted as its name.
-    const called = operator(node) === 'MemberCall';
+    const memberCall = operator(node) === 'MemberCall';
     // A member of a type of the source that the engine does not know cannot
     // fit when the body of that type cannot.
     const fitOfMember = (type: Type | undefined): Fit => {
@@ -515,16 +569,21 @@ export function epsilCompletions(
               member.kind === 'function' ? member.result : member.type
             );
       const spelling = escapeSymbol(member.name);
+      const snippet =
+        member.kind === 'function' && !memberCall
+          ? snippetOf(spelling, member.required).snippet
+          : undefined;
       items.push({
         label: member.name,
         kind: member.kind === 'function' ? 'function' : 'variable',
         rank: fit === 'match' ? 2 : 4,
         tier: 0,
-        ...(member.kind === 'function' && member.arity === 0 && !called
+        ...(member.kind === 'function' && member.arity === 0 && !memberCall
           ? { insertText: `${spelling}()` }
           : spelling === member.name
             ? {}
             : { insertText: spelling }),
+        ...(snippet === undefined ? {} : { snippet }),
         detail: member.detail,
         ...(fit === undefined ? {} : { fit }),
       });
@@ -583,6 +642,13 @@ export function epsilCompletions(
       rank: fit === 'match' ? 2 : 4,
       tier: local ? 0 : 1,
       ...(spelling === group.name ? {} : { insertText: spelling }),
+      ...(declaration?.kind === 'function'
+        ? snippetOf(
+            spelling,
+            sourceParameters(ce, group, declarations, text, typeNames),
+            [sourceCallable(ce, declaration, text, typeNames)]
+          )
+        : {}),
       ...(detail === undefined ? {} : { detail }),
       ...(fit === undefined ? {} : { fit }),
     });
@@ -609,6 +675,7 @@ export function epsilCompletions(
           : spelling === variant.name
             ? {}
             : { insertText: spelling }),
+        ...snippetOf(spelling, payloadParameters(context, payload)),
         detail:
           payload === undefined ? sum : `(${payload.join(', ')}) -> ${sum}`,
       });
@@ -640,6 +707,11 @@ export function epsilCompletions(
       rank: fit === 'match' ? 3 : 5,
       ...(fit === undefined ? {} : { fit }),
       tier: 0,
+      ...snippetOf(
+        entry.label,
+        libraryParameters(entry),
+        entry.arms?.map(callableOf)
+      ),
       ...(entry.detail === undefined ? {} : { detail: entry.detail }),
       ...(entry.documentation === undefined
         ? {}
@@ -1587,9 +1659,26 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
   const group = context.visible.get(head);
   if (group !== undefined) {
     const declaration = declarationOf(group, context.declarations);
-    return declaration?.kind === 'function'
-      ? declaration.params[index]
-      : undefined;
+    if (declaration?.kind !== 'function') return undefined;
+    const params = declaration.params.map((p, i) =>
+      p === undefined ||
+      (declaration.rest && i === declaration.params.length - 1)
+        ? undefined
+        : parseTypeString(ce, p)
+    );
+    const required = declaration.optional.filter(
+      (optional, i) =>
+        !optional && !(declaration.rest && i === params.length - 1)
+    ).length;
+    const topic = implicitTopicSlot(
+      context,
+      k,
+      params,
+      required,
+      declaration.rest
+    );
+    if (topic === null) return undefined;
+    return declaration.params[slotOfOperand(index, topic)];
   }
 
   // A library function: the parameter type of its signature.
@@ -1598,11 +1687,19 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
 }
 
 /** The library function called by `nodes[k - 1]`, its signature, and the
- * declared type of the parameter of `nodes[k]`. */
+ * declared type of the parameter of `nodes[k]`. `topic` is the slot that
+ * the piped value fills (`implicitTopicSlot`). */
 function libraryParameterAt(
   context: Context,
   k: number
-): { name: string; signature: FunctionSignature; parameter: Type } | undefined {
+):
+  | {
+      name: string;
+      signature: FunctionSignature;
+      parameter: Type;
+      topic: number | undefined;
+    }
+  | undefined {
   const { ce } = context;
   const head = operator(context.nodes[k - 1]);
   const index = context.indices[k];
@@ -1616,8 +1713,177 @@ function libraryParameterAt(
     signature.kind !== 'signature'
   )
     return undefined;
-  const parameter = parameterAt(signature, index);
-  return parameter === undefined ? undefined : { name, signature, parameter };
+  // The type variables are replaced by their bounds, for the fit of the
+  // piped value only.
+  const bounds: Record<string, Type> = {};
+  for (const p of signature.typeParams ?? []) bounds[p.name] = p.bound ?? 'any';
+  const params = [
+    ...(signature.args ?? []),
+    ...(signature.optArgs ?? []),
+    ...(signature.variadicArg === undefined ? [] : [signature.variadicArg]),
+  ].map((p) => substituteTypeVariables(p.type, bounds));
+  const topic = implicitTopicSlot(
+    context,
+    k,
+    params,
+    (signature.args?.length ?? 0) +
+      (signature.variadicArg === undefined ? 0 : (signature.variadicMin ?? 0)),
+    signature.variadicArg !== undefined
+  );
+  if (topic === null) return undefined;
+  const parameter = parameterAt(signature, slotOfOperand(index, topic));
+  return parameter === undefined
+    ? undefined
+    : { name, signature, parameter, topic };
+}
+
+/**
+ * The slot that the piped value fills in the call `nodes[k - 1]`, when the
+ * call is the right side of `|>`, has no `_` operand and misses a required
+ * argument: `xs |> filter(p)` is `filter(xs, p)`, and `xs |> map(f)` is
+ * `map(f, xs)`. The operands from that slot on bind the next parameter
+ * (`slotOfOperand`). `params` are the parameter types of the callee, the
+ * variadic one last (`undefined` when not known), and `required` its number
+ * of required arguments.
+ *
+ * The slot is that of the `Pipe` handler (`implicitTopicSlot` in
+ * `library/core.ts`) for a callee with one signature, when the operand at
+ * the hole fits the slot it binds: `topicSlotOf`. `null` when that slot is
+ * not known. `undefined` when the call does not take the piped value as an
+ * implicit argument.
+ */
+function implicitTopicSlot(
+  context: Context,
+  k: number,
+  params: (Type | undefined)[],
+  required: number,
+  variadic: boolean
+): number | null | undefined {
+  if (k < 2) return undefined;
+  const pipe = context.nodes[k - 2];
+  const call = context.nodes[k - 1];
+  if (operator(pipe) !== 'Pipe' || context.indices[k - 1] !== 1)
+    return undefined;
+  const written = operands(call);
+  const n = written.length;
+  if (written.some((arg) => symbol(arg) === '_')) return undefined;
+  if (n >= required || (!variadic && n + 1 > params.length)) return undefined;
+  const slot = topicSlotOf(
+    context,
+    operand(pipe, 1),
+    written,
+    context.indices[k],
+    params
+  );
+  return slot === 'none' ? null : slot;
+}
+
+/**
+ * The slot that the piped value `topic` fills in a call of the operands
+ * `written` (`null` for an operand not written yet, of unknown type) to a
+ * signature with the parameter types `params` (the variadic one last;
+ * `undefined` when not known).
+ *
+ * The `Pipe` handler takes the last slot where the piped value and every
+ * written operand fit: a subtype of the parameter (`matches`), a function
+ * at a signature parameter, an operand of unknown type at any parameter.
+ * Here, a value whose static type cannot overlap the type of the parameter
+ * does not fit, and the operand at `hole` fits any slot. The last slot
+ * where every value may fit is the slot of the handler when, at that slot,
+ * the static type of the piped value and of each written operand other
+ * than `hole` and `null` is a subtype of the parameter, or a function type
+ * at a signature parameter: every later slot has a value that cannot fit.
+ * That slot is returned; `null` when such a test fails or cannot be made
+ * (a value or a parameter with no known type), since the handler may then
+ * take an earlier slot; `'none'` when no slot may fit.
+ */
+function topicSlotOf(
+  context: Context,
+  topic: MathJsonExpression | null,
+  written: readonly (MathJsonExpression | null)[],
+  hole: number | undefined,
+  params: readonly (Type | undefined)[]
+): number | null | 'none' {
+  const fits = (
+    node: MathJsonExpression | null,
+    param: Type | undefined
+  ): boolean => {
+    const type = staticTypeOf(context, node);
+    if (param === undefined || type === undefined) return true;
+    if (isFunctionType(type) && isFunctionType(param)) return true;
+    return typesMayOverlap(type, param) !== false;
+  };
+  const accepts = (
+    node: MathJsonExpression | null,
+    param: Type | undefined
+  ): boolean => {
+    const type = staticTypeOf(context, node);
+    if (param === undefined || type === undefined) return false;
+    if (isFunctionType(type) && signatureArms(param) !== undefined) return true;
+    return subtypeOf(context.ce, type, param) === true;
+  };
+  const last = params.length - 1;
+  const paramOf = (j: number, i: number): Type | undefined =>
+    params[Math.min(slotOfOperand(j, i), last)];
+  for (let i = Math.min(last, written.length); i >= 0; i -= 1)
+    if (
+      fits(topic, params[i]) &&
+      written.every((arg, j) => j === hole || fits(arg, paramOf(j, i)))
+    )
+      return accepts(topic, params[i]) &&
+        written.every(
+          (arg, j) => j === hole || arg === null || accepts(arg, paramOf(j, i))
+        )
+        ? i
+        : null;
+  return 'none';
+}
+
+/**
+ * The field that the piped value `topic` fills in the snippet of a call
+ * after `|>`, whose `m` fields are the required parameters of a function
+ * with the signatures `callables`. The `Pipe` handler tries the signatures
+ * in order and gives the piped value its slot in the call written with the
+ * other fields (`topicSlotOf`, the fields of unknown type): `xs |> take` is
+ * `take(count)`, and the field `xs` is left out; `xs |> fold` is
+ * `fold(reducer, initial)`, and the collection is left out. `m` when the
+ * piped value fills the slot after the fields (`[1, 2] |> map` is
+ * `map(mapping)`, the collection is the rest parameter). `undefined` when
+ * the slot is not known, or when neither call takes the piped value as an
+ * implicit argument.
+ */
+function pipedTopicField(
+  context: Context,
+  topic: MathJsonExpression | null,
+  callables: readonly Callable[],
+  m: number
+): number | undefined {
+  // The call without the field of the piped value, then the call with every
+  // field.
+  for (const n of [m - 1, m]) {
+    if (n < 0 || callables.some((c) => n >= c.required)) continue;
+    let slot: number | null | 'none' = 'none';
+    for (const c of callables) {
+      if (!c.rest && n + 1 > c.params.length) continue;
+      slot = topicSlotOf(
+        context,
+        topic,
+        new Array<null>(n).fill(null),
+        undefined,
+        c.params
+      );
+      if (slot !== 'none') break;
+    }
+    if (slot === null) return undefined;
+    if (slot !== 'none') return n === m - 1 || slot === m ? slot : undefined;
+  }
+  return undefined;
+}
+
+/** The parameter slot of operand `j` of a call where the piped value fills
+ * the slot `topic` (`implicitTopicSlot`). */
+function slotOfOperand(j: number, topic: number | undefined): number {
+  return topic !== undefined && j >= topic ? j + 1 : j;
 }
 
 /** The type of the parameter at `index` of a signature. */
@@ -1690,9 +1956,21 @@ function admittedTypeAt(
       const { signature } = library;
       if (signature.typeParams !== undefined) {
         const bindings: Record<string, Type> = {};
-        operands(parent).forEach((arg, j) => {
-          if (j === context.indices[k]) return;
-          const param = parameterAt(signature, j);
+        // The operands, and the piped value at its slot.
+        const args = operands(parent).map((arg, j) => ({
+          arg: arg as MathJsonExpression | null,
+          slot: slotOfOperand(j, library.topic),
+          hole: j === context.indices[k],
+        }));
+        if (library.topic !== undefined)
+          args.push({
+            arg: operand(context.nodes[k - 2], 1),
+            slot: library.topic,
+            hole: false,
+          });
+        args.forEach(({ arg, slot, hole }) => {
+          if (hole) return;
+          const param = parameterAt(signature, slot);
           const argType = staticTypeOf(context, arg);
           if (param === undefined || argType === undefined) return;
           if (typeof param !== 'object') return;
@@ -1733,6 +2011,44 @@ function isBroadcastable(ce: ComputeEngine, name: string): boolean {
 function isFunctionType(type: Type): boolean {
   const t = resolveTypeAlias(type);
   return t === 'function' || signatureArms(t) !== undefined;
+}
+
+/** Whether a position that admits `type` expects a function value, where a
+ * call of a name cannot fit: a function type, or a union of function types
+ * and `nothing` (`((real) -> real) | nothing`). An alias is unfolded, also
+ * one that only the source declares (`type F = (real) -> real`). */
+function expectsFunction(context: Context, type: Type): boolean {
+  const unfold = (t: Type): Type => {
+    for (let i = 0; i < 16; i += 1) {
+      t = resolveTypeAlias(t);
+      if (
+        typeof t !== 'object' ||
+        t.kind !== 'reference' ||
+        t.def !== undefined
+      )
+        break;
+      const declared = context.sourceTypes.get(t.name);
+      const body =
+        declared?.kind === 'alias'
+          ? parseSourceType(context.ce, declared.body, context.typeNames)
+          : undefined;
+      if (body === undefined) break;
+      t = body;
+    }
+    return t;
+  };
+  let t = unfold(type);
+  // A broadcastable parameter admits a list of the type too, which a call of
+  // a function name does not give either.
+  if (typeof t === 'object' && t.kind === 'broadcastable')
+    t = unfold(t.elements);
+  if (isFunctionType(t)) return true;
+  if (typeof t !== 'object' || t.kind !== 'union') return false;
+  const arms = t.types.map(unfold);
+  return (
+    arms.some(isFunctionType) &&
+    arms.every((arm) => isFunctionType(arm) || arm === 'nothing')
+  );
 }
 
 /** The arms of a union that are function types when the union has other
@@ -1819,6 +2135,9 @@ type Member =
       name: string;
       result: Type | undefined;
       arity: number | undefined;
+      /** The required parameters after the receiver, for a snippet:
+       * `undefined` when the signature is not known. */
+      required: Parameter[] | undefined;
       detail: string;
     };
 
@@ -2010,6 +2329,7 @@ function membersOf(context: Context, type: Type): Member[] {
         name,
         result: undefined,
         arity: undefined,
+        required: undefined,
         detail: text,
       });
       return;
@@ -2026,6 +2346,7 @@ function membersOf(context: Context, type: Type): Member[] {
         rest.args!.length +
         (rest.optArgs?.length ?? 0) +
         (rest.variadicArg === undefined ? 0 : 1),
+      required: parametersOf(rest),
       detail: typeToString(rest),
     });
   };
@@ -2741,6 +3062,110 @@ function sourceCallable(
     result: result === undefined ? undefined : parseTypeString(ce, result),
     effects: fullSignature(ce, declaration, text, typeNames)?.effects ?? null,
   };
+}
+
+/** A parameter of a call, for a snippet: its name and its type, when they
+ * are known. */
+type Parameter = { name?: string; type?: string };
+
+/** The characters that a snippet holds only in its field syntax, and the
+ * line breaks. */
+const SNIPPET_UNSAFE = /[{}$#\\\n\r\u2028\u2029]/;
+
+/** The snippet of a call of `spelling` with the `required` parameters:
+ * `undefined` when there is none. The default text of a field is the name of
+ * the parameter, else its type, else `arg<n>`: a text that holds a
+ * character of `SNIPPET_UNSAFE` is skipped. */
+function callSnippet(
+  spelling: string,
+  required: readonly Parameter[]
+): string | undefined {
+  if (required.length === 0 || SNIPPET_UNSAFE.test(spelling)) return undefined;
+  const safe = (text: string | undefined): text is string =>
+    text !== undefined && text !== '' && !SNIPPET_UNSAFE.test(text);
+  const fields = required.map(({ name, type }, i) => {
+    const label = safe(name) ? name : safe(type) ? type : `arg${i + 1}`;
+    return `\${${i + 1}:${label}}`;
+  });
+  return `${spelling}(${fields.join(', ')})\${0}`;
+}
+
+/** The required parameters of a signature. */
+function parametersOf(signature: FunctionSignature): Parameter[] {
+  return (signature.args ?? []).map((e) => ({
+    ...(e.name === undefined ? {} : { name: e.name }),
+    type: typeToString(e.type),
+  }));
+}
+
+/** The required parameters of a library function, from its first signature.
+ * An overload set whose signatures differ in the number of required
+ * parameters has no single call to insert: `undefined`. The count agrees
+ * after `|>` too then, since each signature loses the same first argument. */
+function libraryParameters(entry: LibraryEntry): Parameter[] | undefined {
+  const arms = entry.arms;
+  if (arms === undefined || arms.length === 0) return undefined;
+  const count = arms[0].args?.length ?? 0;
+  if (arms.some((arm) => (arm.args?.length ?? 0) !== count)) return undefined;
+  return parametersOf(arms[0]);
+}
+
+/** The required parameters of a `function` of the source: not those with a
+ * default value, nor the rest parameter. A function defined several times
+ * (clauses or overloads) has them from its first definition, and
+ * `undefined` when its definitions differ in the number of required
+ * parameters (as `libraryParameters`). */
+function sourceParameters(
+  ce: ComputeEngine,
+  group: BindingGroup,
+  declarations: ReadonlyMap<number, Declaration>,
+  text: string,
+  typeNames: ReadonlySet<string>
+): Parameter[] | undefined {
+  let first: Parameter[] | undefined;
+  for (const occurrence of group.occurrences) {
+    if (occurrence.role !== 'definition') continue;
+    const declaration = declarations.get(occurrence.start);
+    if (declaration?.kind !== 'function') continue;
+    const { params } = functionSignatureParts(ce, declaration, text, typeNames);
+    const required: Parameter[] = [];
+    params.forEach((type, i) => {
+      if (declaration.optional[i]) return;
+      if (declaration.rest && i === params.length - 1) return;
+      const name = declaration.names[i];
+      required.push({
+        ...(name === undefined ? {} : { name }),
+        ...(type === undefined ? {} : { type }),
+      });
+    });
+    if (first === undefined) first = required;
+    else if (required.length !== first.length) return undefined;
+  }
+  return first;
+}
+
+/** The parameters of the constructor of a variant: the elements of its
+ * payload tuple, with their names when the declaration gives them
+ * (`circle(r: real)`). `undefined` for a variant known only from the
+ * options, whose payload is not known, or a payload that does not parse. */
+function payloadParameters(
+  context: Context,
+  payload: readonly string[] | undefined
+): Parameter[] | undefined {
+  if (payload === undefined) return undefined;
+  const parameters: Parameter[] = [];
+  for (const text of payload) {
+    const type = parseSourceType(context.ce, text, context.typeNames);
+    if (type === undefined) return undefined;
+    if (typeof type === 'object' && type.kind === 'tuple')
+      for (const element of type.elements)
+        parameters.push({
+          ...(element.name === undefined ? {} : { name: element.name }),
+          type: typeToString(element.type),
+        });
+    else parameters.push({ type: text });
+  }
+  return parameters;
 }
 
 /** The ascription of a `function` definition when it is a full signature

@@ -436,8 +436,11 @@ must take the arguments and return a value of the result type. A function
 whose result may be a function may fit too, since the result of a call is
 passed (`xs |> f(y)`). At the right side of `|>` a function that takes more
 arguments may fit (`xs |> take(2)` is `take(xs, 2)`), and so may a callback
-of `map`, which takes one argument per source (`map(f, xs, ys)`). An
-argument of a function that maps over a list (`abs`, `*`, a function of the
+of `map`, which takes one argument per source (`map(f, xs, ys)`). In a
+call at the right side of `|>` with no `_`, an argument expects the type of
+the parameter it binds once the piped value fills its slot: in
+`1..10 |> filter(▮)` the predicate, in `[1, 2] |> map(▮)` the mapping
+function. An argument of a function that maps over a list (`abs`, `*`, a function of the
 source) admits a list of the expected type too. A `let` or a `const` with a
 literal value has the type of the value: `const n = 5` is an `integer`,
 `let x = 5` a `number`.
@@ -475,7 +478,33 @@ result.items.map((i) => [i.label, i.detail, i.insertText]);
 // ➔ [["area", "() -> number", "area()"], ["r", "number", undefined]]
 ```
 
-The VS Code extension serves the same items as its completions.
+A function item with a required parameter (a library function, a function
+of the source, a variant constructor with a payload, a function member after
+`.`) also has a `snippet`: the call, with one numbered field per required
+parameter in the syntax of LSP and of CodeMirror's `snippet()`. The default
+text of a field is the name of the parameter, or its type when it has none;
+a name or a type with a `{`, `}`, `$`, `#`, `\` or a line break is skipped,
+for the type or for `arg1`, `arg2`, .... Optional and rest parameters have
+no field. After `|>` the field of the slot that the piped value fills is
+left out (`xs |> fold` gives `fold(${1:reducer}, ${2:initial})${0}`, as
+`xs |> fold(f, 0)` is `fold(f, 0, xs)`); there is no snippet when that slot
+is not known, as when the left side has no static type. A function member
+leaves out its receiver. There is no snippet before a `(` (also after spaces
+or tabs), where a function value is expected (`filter(xs, isPrime)`, also an
+optional one, `((real) -> real) | nothing`; not after `|>`), for a function with no required parameter left, and for an
+overload set, or a function of the source defined several times, whose
+definitions differ in the number of required parameters. `insertText` stays
+the plain text, for an editor that does not take snippets.
+
+```ts
+const source = "let xs = [1, 2, 3]\nxs |> tak";
+const result = epsilCompletions(ce, source, source.length);
+result.items.find((i) => i.label === "take")?.snippet;
+// ➔ "take(${1:count})${0}"   (at `tak` alone: "take(${1:xs}, ${2:count})${0}")
+```
+
+The VS Code extension serves the same items as its completions, and sends a
+`snippet` as a snippet to a client that supports snippets.
 
 Each library item also has a `description`: the paragraphs of the library
 description, which the hover of the name shows.
