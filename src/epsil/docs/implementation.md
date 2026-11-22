@@ -608,6 +608,70 @@ serializeEpsil(["Sin", "x"], { libraryNames: "mathjson" });
 // ➔ "Sin(x)"
 ```
 
+### Syntax highlighting
+
+The entry `@cortex-js/compute-engine/epsil-highlight` colors Epsil source. It
+contains no engine and no parser, and imports nothing, so an editor bundle can
+load it alone. Its token boundaries are those of the Epsil lexer.
+
+`epsilStreamParser` is a CodeMirror 6 stream parser:
+
+```js
+import { StreamLanguage } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
+import { epsilStreamParser } from '@cortex-js/compute-engine/epsil-highlight';
+
+const epsil = StreamLanguage.define({
+  ...epsilStreamParser,
+  tokenTable: {
+    latex: tags.special(tags.string),
+    rawString: tags.special(tags.string),
+    functionName: tags.function(tags.variableName),
+  },
+});
+```
+
+`epsilHighlightTokens(source)` returns the styled ranges of a source, for
+rendering outside an editor. White space has no range:
+
+```js
+epsilHighlightTokens('let x = f(2)');
+// ➔ [
+//   { start: 0, end: 3, style: 'definitionKeyword' },
+//   { start: 4, end: 5, style: 'variableName' },
+//   { start: 6, end: 7, style: 'operator' },
+//   { start: 8, end: 9, style: 'functionName' },
+//   { start: 9, end: 10, style: 'paren' },
+//   { start: 10, end: 11, style: 'number' },
+//   { start: 11, end: 12, style: 'paren' },
+// ]
+```
+
+The styles are `@lezer/highlight` tag names, plus three names of its own:
+
+| Style | Source |
+| :--- | :--- |
+| `controlKeyword` | `if`, `else`, `for`, `while`, `do`, `match`, `break`, `continue`, `parallel` |
+| `definitionKeyword` | `let`, `const`, `function`, `type`, `alias`, `protocol`, `where`, `readonly`, `readwrite` |
+| `operatorKeyword` | `in`, `is` |
+| `bool` | `true`, `false`, `True`, `False` |
+| `atom` | `NaN`, `Infinity`, `oo`, `Nothing`, `Missing`, … and the glyph constants `π`, `ℝ`, `∞`, … |
+| `number`, `operator`, `paren`, `squareBracket`, `brace`, `separator` | numbers, operators (with superscripts, subscripts and the glyphs `∫ ∑ ∏`), brackets, `,` and `;` |
+| `string`, `escape` | a string; its escape sequences and the `\(` and `)` of an interpolation, whose inner code has the styles of code |
+| `comment`, `docComment` | `//` and nested `/* */` comments; `///` and `/** */` doc comments |
+| `meta` | a `#pragma` and the `#!` line |
+| `namespace` | `std` in `std::name` |
+| `variableName` | a name |
+| `invalid` | an escape sequence or a character that the lexer refuses |
+| `functionName` | a name directly followed by `(`, which is always a call |
+| `latex` | a `$…$` island |
+| `rawString` | a `#"…"#` string |
+
+A word such as `let`, `type` or `is` is a keyword only when a name follows it
+on the same line: in `let type = 5`, `type` is a `variableName`. A block
+comment, a `"""` string and a `$…$` island can span lines; the stream parser
+carries them from one line to the next.
+
 ## How Epsil lowers to MathJSON
 
 The examples in this section omit the `sourceOffsets` metadata that every

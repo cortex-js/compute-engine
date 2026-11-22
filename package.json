@@ -141,6 +141,11 @@
       "import": "./dist/esm-min/epsil.js",
       "default": "./dist/esm-min/epsil.js"
     },
+    "./epsil-highlight": {
+      "types": "./dist/types/epsil-highlight.d.ts",
+      "import": "./dist/esm-min/epsil-highlight.js",
+      "default": "./dist/esm-min/epsil-highlight.js"
+    },
     "./cli": {
       "import": "./dist/esm-min/cli/epsil.js",
       "default": "./dist/esm-min/cli/epsil.js"

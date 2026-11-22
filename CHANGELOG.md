@@ -2,6 +2,15 @@
 
 ### New Features
 
+- **The entry `@cortex-js/compute-engine/epsil-highlight` colors Epsil
+  source.** It imports nothing (no engine, no parser), so an editor bundle can
+  load it alone. `epsilStreamParser` is a CodeMirror 6 stream parser, for
+  `StreamLanguage.define()`; `epsilHighlightTokens(source)` returns the styled
+  ranges of a source. The token boundaries are those of the Epsil lexer, and
+  nested block comments, `"""` strings and `$…$` islands that span lines are
+  carried from line to line. `epsilHighlightTokens('let x = f(2)')` styles
+  `let` as `definitionKeyword`, `x` as `variableName` and `f` as
+  `functionName`.
 - **Each completion item tells how the name fits the expected type** (CE-1661).
   When `epsilCompletions()` gives an `expectedType`, each name item has a
   `fit`: `'match'` when its value is always of that type, `'never'` when it can

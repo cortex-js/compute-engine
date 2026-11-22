@@ -39,6 +39,7 @@ const ENTRIES = {
   interval: ['ok', 'point'],
   numerics: ['NumericValue'],
   runtime: ['createJavaScriptRuntime', 'runtimeVersion'],
+  'epsil-highlight': ['epsilStreamParser', 'epsilHighlightTokens'],
   identities: ['loadIdentities'],
   'integration-rules': ['loadIntegrationRules'],
   'group-theory': ['loadGroupTheory'],
@@ -82,7 +83,7 @@ if (compileChunks.size === 0)
   fail('compile.js imports no chunk; it bundles its own engine');
 if (![...coreChunks].some((c) => compileChunks.has(c)))
   fail('core.js and compile.js import no common chunk');
-for (const name of ['runtime', 'kernel-worker']) {
+for (const name of ['runtime', 'kernel-worker', 'epsil-highlight']) {
   if (chunksOf(name).size !== 0) fail(`${name}.js must be self-contained`);
 }
 
