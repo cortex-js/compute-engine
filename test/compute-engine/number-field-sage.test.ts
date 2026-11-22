@@ -149,13 +149,23 @@ describe('the roots of a polynomial', () => {
     ]);
   });
 
-  test('roots with one real part that is not a proved tie are declined', () => {
-    // x⁴ + 5x² + 4: the pairs ±i and ±2i share the real part 0, which is proved.
+  test('pairs with one real part: by |imaginary part|, each conjugate pair together', () => {
+    // x⁴ + 5x² + 4: the pairs ±i and ±2i share the real part 0, which is
+    // proved. As Wolfram's `Root`: −i, i, −2i, 2i.
     expect(orderedRoots([4n, 0n, 5n, 0n, 1n])?.map((z) => z.im)).toEqual([
-      expect.closeTo(-2, 12),
       expect.closeTo(-1, 12),
       expect.closeTo(1, 12),
+      expect.closeTo(-2, 12),
       expect.closeTo(2, 12),
+    ]);
+    // (x² − 2x + 2)(x² − 2x + 5): 1 − i, 1 + i, 1 − 2i, 1 + 2i.
+    expect(
+      orderedRoots([10n, -14n, 11n, -4n, 1n])?.map((z) => [z.re, z.im])
+    ).toEqual([
+      [expect.closeTo(1, 12), expect.closeTo(-1, 12)],
+      [expect.closeTo(1, 12), expect.closeTo(1, 12)],
+      [expect.closeTo(1, 12), expect.closeTo(-2, 12)],
+      [expect.closeTo(1, 12), expect.closeTo(2, 12)],
     ]);
   });
 });

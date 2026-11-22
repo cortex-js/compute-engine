@@ -62,8 +62,10 @@
 
   `PolynomialRoot(p, x, k)` is Mathematica's `Root[Function[x, p], k]`: the
   `k`-th root of the polynomial `p` in the bound variable `x`, real roots
-  first in increasing order, then complex roots by real part and then
-  imaginary part. The roots are numbered only when disks around them prove
+  first in increasing order, then complex roots by real part, each conjugate
+  pair together with the lower one first, as Mathematica does: the roots of
+  `(x² − 2x + 2)(x² − 2x + 5)` are `1 − i`, `1 + i`, `1 − 2i`, `1 + 2i`.
+  The roots are numbered only when disks around them prove
   their separation and the order of their real parts; otherwise the call
   stays unevaluated. The root of a quadratic is a radical; the root of a
   cubic or higher stays `PolynomialRoot` until `N()`, which gives it for any

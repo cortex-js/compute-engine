@@ -1,5 +1,6 @@
 // The complex roots of a squarefree polynomial over ℤ in Wolfram's order (the real roots
-// increasing, then the complex ones by real part and then imaginary part), each enclosed in a
+// increasing, then the complex ones by real part, each conjugate pair together with the lower
+// one first, and pairs with one real part by |imaginary part|), each enclosed in a
 // disk that provably holds that root and no other. The roots start from `aberthRoots`, are
 // refined by Newton's method in exact Gaussian-integer fixed point, and are numbered only when
 // the disks prove the order; otherwise the roots are declined (`undefined`).
@@ -307,9 +308,10 @@ function attempt(
     }
     const cluster = uppers.slice(start, end);
     if (cluster.length > 1 && !isTie(f, cluster, places)) return undefined;
-    // In a tie the order is by imaginary part: the disks are disjoint, so their centres' order is the roots'.
-    const both = cluster.flatMap((d) => [d, { ...d, im: -d.im }]);
-    ordered.push(...both.sort((a, b) => (a.im < b.im ? -1 : 1)));
+    // In a tie, as Wolfram's `Root`: by |imaginary part|, each conjugate pair together, the
+    // lower one first. The disks are disjoint, so their centres' order is the roots'.
+    const byHeight = [...cluster].sort((a, b) => (a.im < b.im ? -1 : 1));
+    ordered.push(...byHeight.flatMap((d) => [{ ...d, im: -d.im }, d]));
     start = end;
   }
   return ordered;
