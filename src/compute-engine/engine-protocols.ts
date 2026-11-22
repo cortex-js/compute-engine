@@ -2382,9 +2382,11 @@ export interface WideningViolation {
  * The assignment of a function literal to a name reads the same scan
  * (`assignFn()`, `engine-declarations.ts`): a contract that walks the
  * literal a binding holds is falsified when the binding gets a new one.
- * That scan passes `skipTrusted`: a contract installed while a head it calls
- * had no definition is trusted, and the later definition of the head does
- * not check it (`docs/EFFECTS-MODEL.md`, "Dependency order").
+ * That scan alone passes `skipTrusted`: a contract installed while one of the
+ * heads it calls had no definition is trusted for all of its heads, and an
+ * assignment to any of them does not check it (`docs/EFFECTS-MODEL.md`,
+ * "Dependency order"). The scans of a conformance registration check every
+ * contract, trusted or not.
  *
  * (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is an effect".)
  */

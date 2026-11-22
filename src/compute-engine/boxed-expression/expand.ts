@@ -102,6 +102,31 @@ function mayBeMatrixTerm(x: Expression): boolean {
  */
 const MAX_ORDERED_EXPANSION_TERMS = 1024;
 
+/**
+ * The most terms that the multinomial expansion of a power of a sum
+ * produces. A power with more terms is left as it is: each term computes a
+ * coefficient of up to `n` digits in `O(n)` big-integer steps, so
+ * `(x^65536 + 1)^65536` (65537 terms of about 20,000 digits) did not return,
+ * from `expand()` or from a `simplify()` that tries it. The expansion of
+ * `(x + 1)^4000` takes about 1.3 s.
+ */
+const MAX_MULTINOMIAL_EXPANSION_TERMS = 4096;
+
+/**
+ * The number of terms of the multinomial expansion of the power `exp` of a
+ * sum of `m` terms, `C(exp + m − 1, m − 1)`, or `Infinity` once it exceeds
+ * {@link MAX_MULTINOMIAL_EXPANSION_TERMS}.
+ */
+function multinomialTermCount(m: number, exp: number): number {
+  const k = Math.min(m - 1, exp);
+  let count = 1;
+  for (let i = 1; i <= k; i += 1) {
+    count = (count * (exp + m - 1 - k + i)) / i;
+    if (count > MAX_MULTINOMIAL_EXPANSION_TERMS) return Infinity;
+  }
+  return count;
+}
+
 /** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
  * The expression must be a power of a sum of terms.
  * The power must be a positive integer.
@@ -185,17 +210,19 @@ function expandPower(base: Expression, exp: number): Expression | null {
   // (a + b + c)^3 = (a + b + c) (a + b + c) (a + b + c) = a^3 + b^3 + c^3 + 3a^2b + 3a^2c + 3b^2a + 3b^2c + 3c^2a + 3c^2b + 6abc
 
   const terms = base.ops;
+  if (multinomialTermCount(terms.length, exp) > MAX_MULTINOMIAL_EXPANSION_TERMS)
+    return null;
   const it = powers(terms.length, exp);
 
   const result: Expression[] = [];
   const deadline = ce._deadline;
   let count = 0;
   for (const val of it) {
-    // A high power of a sum enumerates a multinomial with `C(exp+m-1, m-1)`
-    // terms — e.g. `(a+b+c)^350` is ~6·10⁴ — so this loop can run for many
-    // seconds. Checkpoint the engine deadline (stride-amortized) so a runaway
-    // expansion honors the `withTimeLimit` span instead of stalling (e.g.
-    // the compiler's symbolic-antiderivative attempt on `(trinomial)^p`).
+    // The loop makes at most `MAX_MULTINOMIAL_EXPANSION_TERMS` terms, but the
+    // big-integer coefficients of a binomial with a high exponent make it
+    // slow: `(x + 1)^4000` takes about 1.3 s. Checkpoint the engine deadline
+    // (stride-amortized) so that the expansion honors the `withTimeLimit`
+    // span (e.g. the compiler's symbolic-antiderivative attempt).
     if ((++count & 0xff) === 0) checkDeadline(deadline);
     const product = [ce.number(multinomialCoefficient(val))];
     for (let i = 0; i < val.length; i += 1) {

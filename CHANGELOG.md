@@ -60,6 +60,19 @@
   `any`, but can refuse one whose argument only has an open part: `[q]`, of
   type `list<unknown>`, against `tuple<real, real>`.
 
+### Performance
+
+- **An iteration with `max` of an angle evaluates in milliseconds** (CE-1359).
+  `Arctan2` with a float operand now gives a float also when the other operand
+  is an exact expression: `Arctan2(Cos(Pi/60), 0.5)` is `1.1066…`, where it
+  stayed unevaluated. And `Max`, `Min` and `Sort` now order an exact value that
+  holds `Arctan2`: `Max(Arctan2(1/2, -Sin(Arctan(1/2))), 1.5)` is
+  `Arctan2(1/2, -Sin(Arctan(1/2)))`, where it stayed unevaluated. A function
+  whose body is a loop of 12 passes over such values kept a `Max` expression
+  that grew at each pass, and
+  took about 5 seconds to evaluate at one point. It now takes about 15 ms, and
+  about 130 ms for the first point.
+
 ### Resolved Issues
 
 - **A compiled `run()` that falls back to the interpreter in a Document
@@ -80,6 +93,19 @@
   `null`. They now give `5` and `6`, as the compiled `g` and `f(2)` do. The
   same held reads outside a Document gave `NaN` and now give the value too.
   `freeSymbols` of such a fallback now lists the input.
+- **A sum over a view whose source has an effect runs the effect once**
+  (CE-1428). With `x := 0`,
+  `Sum(Map(k ↦ k + 1, Sort(Block(x := x + 1, [x, x]))))` is `4` and `x` is
+  `1`, where the sum was `8` and `x` was `4`: each read of the view by the
+  reducer evaluated the source again. `Product` and `Reduce`, and a view over
+  such a view (`Sum(Filter(Map(f, Sort(…)), p))`), are corrected too.
+- **A real solution with a square root of a parameter has a condition**
+  (CE-1593). `Solve(x^2 = a, x ∈ RealNumbers)` is
+  `[If(0 ≤ a, √a), If(0 ≤ a, -√a)]`, where it was `[√a, -√a]`, which is not
+  real for `a < 0`. With the assumption `a > 0` the result is `[√a, -√a]`, and
+  with `a < 0` it is `[]`. Over a domain such as `Integers`, or when no such
+  condition is found, the `Solve` stays unevaluated: `x^4 = a` over the real
+  numbers gave the four roots, `i·∜a` included.
 
 ## 0.197.1 _2026-11-21_
 
@@ -147,6 +173,14 @@
 
 ### Behavior Changes
 
+- **`Expand` leaves a power of a sum as it is when its expansion has more
+  than 4096 terms** (CE-1307). `Expand((x + 1)^4096)` is `(x + 1)^4096`, where
+  it was a sum of 4097 terms, and `Expand((x + y + 1)^90)` is
+  `(x + y + 1)^90`. The same bound applies to the expansion that `simplify()`
+  and the antiderivative search try: `x·(x^65536 + 1)^65536` simplifies to
+  itself, where the simplification did not return. `(x + 1)^4095` still
+  expands.
+
 - **A Document row that defines a recursion with no base case is a row
   error**: when every arm of every function of a recursive component calls a
   function of the component through arithmetic, a list or a tuple, as in
@@ -203,6 +237,11 @@
   string: write `\mathrm{m}`.
 
 ### Resolved Issues
+
+- **The integral of a high power of a polynomial times `e^x` returns**
+  (CE-1307). `\int (x^{65536}+1)^{65536} e^{x}\,dx` stays unevaluated, in
+  less than a second, where the evaluation did not return. See "Behavior
+  Changes" for the bound on `Expand` that makes it return.
 
 - **In a Document, a function row whose parameter is read only as an operand
   of `Join` or `ListJoin` takes a scalar argument as one element**: with
@@ -286,6 +325,22 @@
   computed by an evaluation, so the `isFiniteCollection` of
   `Reverse(Sort(Reverse(Sort(F(3)))))`, with `F` a user function that returns
   a list, is now `undefined` (was `true`). Its value does not change.
+
+- **The value of a function call or of a block that is not decided yet names
+  the values of its local variables** (CE-1330). With `t` free,
+  `function f(a) { let k = a^2; if t > 0 { k + 1 } else { 0 } }` gives
+  `If(0 < t, 26, 0)` for `f(5)`, where it gave `If(0 < t, k + 1, 0)`, whose
+  `k` had no value once the call had ended: `let r = f(5); let t = 1; r` is
+  now `26`, not `k + 1`. A parameter in the same place already got its value.
+  The same holds for a `do { … }` block, for a sum with a free bound
+  (`sum(k * i * t, i, 1, m)` gives `Sum(25i·t, …)`), and for a function
+  literal that the call did not evaluate: with
+  `f := a ↦ Block(Declare(k, "unknown", a), If(c, x ↦ k + x, x ↦ 0))`, the
+  function of the branch of `f(5)` applied to `1` gives `6` again, where it
+  gave `k + 1` since 0.192.0. A local keeps its name in a function value (a
+  closure reads the last value of the local), in a part that writes the
+  local (`do { k += 1; k }`, or a call of a closure that writes it), in an
+  `Error`, and where `HoldValues` shields it.
 
 ## 0.197.0 _2026-11-21_
 

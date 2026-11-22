@@ -23,6 +23,7 @@ import {
   evaluateStatements,
   evaluateStatementsAsync,
   resolveEscapingLambda,
+  resultOverRunLocals,
 } from '../function-utils.js';
 import type { CallbackSupply } from '../boxed-expression/callback-arity.js';
 import { canonicalCallbackOperand } from './collections.js';
@@ -4057,17 +4058,30 @@ function evaluateBlock(
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
 
-  return lazyResultOverLocalValues(
+  return leaveBlock(
     ce,
-    resolveEscapingLambda(
+    evaluateStatements(
       ce,
-      evaluateStatements(
-        ce,
-        ops,
-        numericApproximation ? { numericApproximation: true } : undefined,
-        false
-      )
+      ops,
+      numericApproximation ? { numericApproximation: true } : undefined,
+      false
     )
+  );
+}
+
+/**
+ * The value of a block whose statements gave `result`, with the names of
+ * the locals of the block that it still holds replaced, since a local has
+ * no value after its block: a lazy collection over a local reads the value
+ * of the local (`lazyResultOverLocalValues`), and another part of the
+ * result that was not evaluated names the value (`resultOverRunLocals`).
+ *
+ * Must be called while the scope of the block is the current lexical scope.
+ */
+function leaveBlock(ce: ComputeEngine, result: Expression): Expression {
+  return resultOverRunLocals(
+    ce,
+    lazyResultOverLocalValues(ce, resolveEscapingLambda(ce, result))
   );
 }
 
@@ -4166,12 +4180,10 @@ async function evaluateBlockAsync(
     options._precisionWindow,
     program
   );
-  // `resolveEscapingLambda` and `lazyResultOverLocalValues` read the block
-  // scope as the current lexical scope. They run after an `await`, so the
-  // context stack of this evaluation (which holds the block scope) must be
-  // put in place explicitly.
-  const leave = (): Expression =>
-    lazyResultOverLocalValues(ce, resolveEscapingLambda(ce, result));
+  // `leaveBlock` reads the block scope as the current lexical scope. It runs
+  // after an `await`, so the context stack of this evaluation (which holds
+  // the block scope) must be put in place explicitly.
+  const leave = (): Expression => leaveBlock(ce, result);
   return options._effects === undefined
     ? leave()
     : runWithEvaluationEffects(

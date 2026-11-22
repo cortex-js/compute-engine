@@ -58,6 +58,9 @@ exhaust the memory of the box (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §2).
 Release the lock only after the harness's completion notice of the run or the
 exit code in its log, never on a line you wrote yourself, because a run that
 is still going without the lock competes with the next holder.
+Give `npm test` a Jest option only in its long form (`npm test -- --maxWorkers=4`),
+because `scripts/test.sh` reads a short one such as `-w 4` as a test path and
+then runs only the files whose path matches it.
 
 ## Steps
 

@@ -18,7 +18,11 @@ import type {
 } from '../global-types.js';
 import { isFunction, isNumber, sym } from './type-guards.js';
 import { rewriteWithBinders } from './binders.js';
-import { isRestriction, restrictionParts } from './conditional-value.js';
+import {
+  conditionalValue,
+  isRestriction,
+  restrictionParts,
+} from './conditional-value.js';
 import {
   collectBinderNames,
   defaultUnknown,
@@ -30,6 +34,7 @@ import {
 } from './utils.js';
 import {
   findUnivariateRoots,
+  realRootGuard,
   unknownType,
   withExactIntegerExponents,
 } from './solve.js';
@@ -1524,9 +1529,15 @@ export function solveOverDomain(
     ) {
       const realRoots = symbolicRoots(ce, ceq, unknown, 'number');
       if (realRoots.length > 0) {
-        const inDomain = realRoots.filter((r) =>
-          keepInDomain(ce, domain, unknown, r, condition)
+        const inDomain = polynomialRootsInDomain(
+          ce,
+          domain,
+          unknown,
+          realRoots,
+          condition,
+          sideConditions.length > 0
         );
+        if (inDomain === undefined) return undefined;
         return filterSide([...filterRootsByAssumptions(ce, inDomain, unknown)]);
       }
     }
@@ -4960,6 +4971,23 @@ const FILTERABLE_ASSUMPTION_OPS = new Set([
 ]);
 
 /**
+ * The assumptions in effect that constrain only `unknown`, with an operator
+ * of `FILTERABLE_ASSUMPTION_OPS` (see `filterRootsByAssumptions()`).
+ */
+function unknownAssumptions(ce: ComputeEngine, unknown: string): Expression[] {
+  const relevant: Expression[] = [];
+  for (const [a, records] of contextAssumptions(ce).entries()) {
+    if (!isFactTrue(records)) continue;
+    const op = a.operator;
+    if (!op || !FILTERABLE_ASSUMPTION_OPS.has(op)) continue;
+    const free = a.unknowns;
+    if (free.length !== 1 || free[0] !== unknown) continue;
+    relevant.push(a);
+  }
+  return relevant;
+}
+
+/**
  * Drop roots that a stored assumption definitely rules out.
  *
  * For each assumption in the current context whose ONLY free symbol is
@@ -4982,18 +5010,7 @@ export function filterRootsByAssumptions(
   roots: ReadonlyArray<Expression>,
   unknown: string
 ): ReadonlyArray<Expression> {
-  const assumptions = contextAssumptions(ce);
-
-  // Collect (once) the assumptions that constrain ONLY the unknown.
-  const relevant: Expression[] = [];
-  for (const [a, records] of assumptions.entries()) {
-    if (!isFactTrue(records)) continue;
-    const op = a.operator;
-    if (!op || !FILTERABLE_ASSUMPTION_OPS.has(op)) continue;
-    const free = a.unknowns;
-    if (free.length !== 1 || free[0] !== unknown) continue;
-    relevant.push(a);
-  }
+  const relevant = unknownAssumptions(ce, unknown);
   if (relevant.length === 0) return roots;
 
   return roots.filter((root) => {
@@ -5019,21 +5036,94 @@ function keepInDomain(
   condition: Expression | undefined
 ): boolean {
   const value = root.evaluate();
-  let contained = domain.contains(value);
+  if (domainMembership(domain, value) === false) return false;
+  if (condition && conditionValue(condition, unknown, value) === false)
+    return false;
+  return true;
+}
+
+/**
+ * Whether the evaluated root `value` is an element of `domain`: `true` or
+ * `false` when this is decided, `undefined` otherwise.
+ */
+function domainMembership(
+  domain: Expression,
+  value: Expression
+): boolean | undefined {
+  const contained = domain.contains(value);
+  if (contained !== undefined) return contained;
   // A concrete-valued root that the (exact) membership test cannot decide —
   // e.g. an expanded periodic root `2π` against an integer `Range`'s step grid,
   // which `contains` leaves `undefined` for a symbolic target — is decided
   // numerically. The numeric fallback only flips an `undefined` when the value
   // is a finite real number; a truly symbolic value (with free variables) still
-  // yields `NaN` and stays kept, per the conservative posture.
-  if (contained === undefined) {
-    const n = value.N();
-    if (Number.isFinite(n.re) && n.im === 0) contained = domain.contains(n);
+  // yields `NaN` and is not decided.
+  const n = value.N();
+  if (Number.isFinite(n.re) && n.im === 0) return domain.contains(n);
+  return undefined;
+}
+
+/**
+ * The roots `roots` of a polynomial equation in `unknown`, which the root
+ * finder gave for an unknown of type `number` (the complex roots included),
+ * that are in `domain` and satisfy `condition`. A root whose membership is
+ * decided false is removed, and a root whose membership is decided true is
+ * kept.
+ *
+ * A root with a parameter whose membership is not decided is not kept as
+ * it is: `x² = a` has the roots `√a` and `-√a`, which are not real for
+ * `a < 0`. Over the real line (`RealNumbers`, or an interval from -∞ to +∞),
+ * the root is kept with the condition on its parameters that holds where it
+ * is real (`realRootGuard()`): `If(0 ≤ a, √a)`. The condition goes through
+ * `conditionalValue()`, thus an assumption that decides it gives the bare
+ * root (`a > 0`) or removes the root (`a < 0`). Over another domain, or when
+ * no such condition is found, the result is `undefined`: there is no answer,
+ * and the `Solve` stays unevaluated.
+ *
+ * The guard states only where the root is real. Thus a guarded root also
+ * needs each other constraint on the unknown to be decided true at the root:
+ * `condition`, and each assumption that constrains only the unknown. When
+ * one of them is not decided (`x² = a` with the condition `x < -5`), or when
+ * the `Solve` has side conditions (`hasSideConditions`), the result is
+ * `undefined`.
+ */
+function polynomialRootsInDomain(
+  ce: ComputeEngine,
+  domain: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>,
+  condition: Expression | undefined,
+  hasSideConditions: boolean
+): Expression[] | undefined {
+  const realLine =
+    isPrincipalValueDomain(domain) && sym(domain) !== 'ComplexNumbers';
+  const result: Expression[] = [];
+  for (const root of roots) {
+    const value = root.evaluate();
+    const contained = domainMembership(domain, value);
+    if (contained === false) continue;
+    const satisfies =
+      condition === undefined || conditionValue(condition, unknown, value);
+    if (satisfies === false) continue;
+    if (contained === true) {
+      result.push(root);
+      continue;
+    }
+    if (
+      !realLine ||
+      satisfies !== true ||
+      hasSideConditions ||
+      unknownAssumptions(ce, unknown).some(
+        (a) => sym(a.subs({ [unknown]: value }).evaluate()) !== 'True'
+      )
+    )
+      return undefined;
+    const guard = realRootGuard(value);
+    if (guard === undefined) return undefined;
+    const guarded = conditionalValue(ce, root, guard);
+    if (guarded !== null) result.push(guarded);
   }
-  if (contained === false) return false;
-  if (condition && conditionValue(condition, unknown, value) === false)
-    return false;
-  return true;
+  return result;
 }
 
 /**
