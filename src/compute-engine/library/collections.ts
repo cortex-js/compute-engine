@@ -8968,11 +8968,20 @@ function canonicalMemberCall(
   // hands back a plain value binding when nothing applicable exists), a
   // protocol PROPERTY of that name is read (it may hold a function the
   // parentheses then call), and an invalid receiver keeps its own error.
+  // In an Epsil batch the name can be the Epsil spelling of a library
+  // function (`xs.sort()`), which has no engine binding of its own: the
+  // function it stands for (`Sort`) is the known function. A binding of
+  // the name (`let sort = 3`) shadows that function.
+  const twin = def === undefined ? ce._epsilLibraryName?.(name) : undefined;
+  const known =
+    twin === undefined
+      ? def
+      : lookupApplicable(twin, ce.context.lexicalScope, ce);
   if (
     rt === 'none' &&
     base.isValid &&
-    def !== undefined &&
-    isApplicableDef(def) &&
+    known !== undefined &&
+    isApplicableDef(known) &&
     protocolPropertyTypeOfReceiver(ce, t, name) === undefined
   )
     return ce.error(

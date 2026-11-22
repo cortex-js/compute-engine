@@ -1317,7 +1317,8 @@ await scenario('completion', undefined, async (c) => {
   check(
     'the items match the word typed, the source name first',
     labels[0] === 'count' &&
-      labels.every((label) => label.toLowerCase().startsWith('co')),
+      labels.includes('cos') &&
+      labels.every((label) => label.toLowerCase().startsWith('c')),
     JSON.stringify(labels)
   );
   const count = items[0];
@@ -1340,6 +1341,28 @@ await scenario('completion', undefined, async (c) => {
         (item, i) => i === 0 || items[i - 1].sortText < item.sortText
       ),
     JSON.stringify(cos)
+  );
+});
+
+await scenario('completion of a fix-it', undefined, async (c) => {
+  // The fix-it that adds the missing cases of a `match`.
+  const source =
+    'type Color = red | green\nfunction f(c: Color) -> integer {\n  match c {\n    red() => 1\n    \n  }\n}';
+  await c.open(URI, source);
+  const items = await c.request('textDocument/completion', {
+    textDocument: { uri: URI },
+    position: { line: 4, character: 4 },
+  });
+  const fixit = items.find((item) => item.label === 'add the missing cases');
+  check(
+    'a fix-it item inserts its edit, not its label',
+    fixit?.textEdit?.newText === 'green() => nothing' &&
+      fixit.textEdit.range.start.line === 4 &&
+      fixit.textEdit.range.start.character === 4 &&
+      fixit.textEdit.range.end.character === 4 &&
+      fixit.filterText === '' &&
+      fixit.additionalTextEdits === undefined,
+    JSON.stringify(fixit)
   );
 });
 

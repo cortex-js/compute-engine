@@ -6,6 +6,7 @@ import {
   type DocumentImports,
   type DocumentSourceRow,
   type DocumentSyntax,
+  type Expression,
   type InspectableScope,
 } from '../../src/compute-engine';
 import { ConstantAssignmentError } from '../../src/compute-engine/constant-assignment-error';
@@ -1912,5 +1913,257 @@ describe('call-site types', () => {
       ce.parse('h("ab")', { scope: revision.scope }).evaluate().json
     ).toEqual("'ab'");
     revision.dispose();
+  });
+});
+
+describe('rows given as the JSON of their bodies, over the axes x and y', () => {
+  type Json = Parameters<DocumentSyntax['normalize']>[0];
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports((input) => {
+    input('x', 'real');
+    input('y', 'real');
+  });
+  afterAll(() => {
+    imports.dispose();
+    environment.dispose();
+  });
+  // A row with parameters is a function definition, one without a value.
+  const prepare = (
+    defs: Record<string, [string[], Json]>,
+    stated: Partial<DocumentSourceRow> = {}
+  ) =>
+    imports.prepare(
+      Object.keys(defs).map((id) => ({ id, latex: id, ...stated })),
+      {
+        split: (source) =>
+          source in defs ? { head: source, body: '' } : undefined,
+        recognize: (row) => ({
+          role: defs[row.id][0].length === 0 ? 'value' : 'function',
+          head: { name: row.id, params: defs[row.id][0] },
+          bodyJson: defs[row.id][1],
+        }),
+        normalize: (raw) => raw,
+        fieldAxes: new Set(['x', 'y']),
+      }
+    );
+  const errors = (revision: { rowErrors: ReadonlyMap<string, Expression> }) =>
+    JSON.stringify([...revision.rowErrors].map(([id, e]) => [id, e.json]));
+  const value = (revision: { scope: InspectableScope }, expr: Json) =>
+    JSON.stringify(ce.expr(expr, { scope: revision.scope }).evaluate().json);
+  const n1 = (name: string, ...args: Json[]): Json => [
+    name,
+    ['Subtract', 'n', 1],
+    ...args,
+  ];
+  const cases = (base: Json, recursive: Json): Json => [
+    'Which',
+    ['Equal', 'n', 0],
+    base,
+    'True',
+    recursive,
+  ];
+
+  describe('a recursive function with no stated types', () => {
+    test('binds when the body narrows a parameter (CE-1692)', () => {
+      const revision = prepare({
+        // `g(P)` reads `P` as a point: `P` is `collection<any> | tuple`.
+        g: [['P'], ['Multiply', ['PointX', 'P'], ['Tuple', 1, 0]]],
+        f: [
+          ['P', 'n'],
+          cases(
+            ['Tuple', 0, 0],
+            ['Add', ['g', 'P'], ['f', 'P', ['Subtract', 'n', 1]]]
+          ),
+        ],
+        c: [[], ['f', ['Tuple', 1, 2], 2]],
+        a: [
+          ['p'],
+          [
+            'Which',
+            ['Equal', ['PointX', 'p'], 0],
+            0,
+            'True',
+            ['b', ['Tuple', ['Subtract', ['PointX', 'p'], 1], 0]],
+          ],
+        ],
+        b: [['q'], ['Add', ['a', 'q'], ['PointX', 'q']]],
+        d: [[], ['a', ['Tuple', 3, 5]]],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['f', ['Tuple', 1, 2], 2])).toBe('["Tuple",2,0]');
+      expect(value(revision, 'c')).toBe('["Tuple",2,0]');
+      expect(value(revision, 'd')).toBe('3');
+      revision.dispose();
+    });
+
+    test('takes a list argument whole when the body consumes it (CE-1692)', () => {
+      const revision = prepare({
+        K: [['n', 'x'], cases(['Mean', 'x'], n1('K', 'x'))],
+        c: [[], ['K', 3, ['List', 1, 2, 6]]],
+      });
+      expect(errors(revision)).toBe('[]');
+      // Not `[1, 2, 6]`: the list is not broadcast over `x`.
+      expect(value(revision, ['K', 0, ['List', 1, 2, 6]])).toBe('3');
+      expect(value(revision, 'c')).toBe('3');
+      revision.dispose();
+    });
+
+    test('opens a parameter that index reads type as a tuple', () => {
+      // `p[1]` types `p` as `tuple<number>`; the contract takes the indexed
+      // collection, as for a function that is not recursive.
+      const revision = prepare({
+        I: [['n', 'p'], cases(0, ['Add', ['At', 'p', 1], n1('I', 'p')])],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['I', 3, ['List', 5, 6]])).toBe('15');
+      expect(value(revision, ['I', 3, ['Tuple', 5, 6]])).toBe('15');
+      revision.dispose();
+    });
+
+    test('binds a cycle of three members that each narrow a parameter', () => {
+      // Each member's check refuses its own parameter, so the retry takes
+      // more than one round.
+      const step = (next: string): unknown => [
+        'Which',
+        ['Equal', 'n', 0],
+        0,
+        'True',
+        ['Add', [next, 'p', ['Subtract', 'n', 1]], ['PointX', 'p']],
+      ];
+      const revision = prepare({
+        a: [['p', 'n'], step('b')],
+        b: [['p', 'n'], step('c')],
+        c: [['p', 'n'], step('a')],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['a', ['Tuple', 2, 7], 3])).toBe('6');
+      revision.dispose();
+    });
+
+    test('a list at the other parameter is not mapped over (pinned)', () => {
+      // The narrowed `P` admits a list, so the call is not mapped over the
+      // list at `n`, and `n = 0` never holds for the whole list: the
+      // recursion limit is reached. A stated `list<number>` at `P` does the
+      // same on 0.198.0.
+      const revision = prepare({
+        g: [['P'], ['Multiply', ['PointX', 'P'], ['Tuple', 1, 0]]],
+        f: [
+          ['P', 'n'],
+          cases(
+            ['Tuple', 0, 0],
+            ['Add', ['g', 'P'], ['f', 'P', ['Subtract', 'n', 1]]]
+          ),
+        ],
+      });
+      expect(() =>
+        value(revision, ['f', ['Tuple', 1, 2], ['List', 1, 2]])
+      ).toThrow(/Recursion limit/);
+      revision.dispose();
+    });
+
+    test('with no base case is still a row error', () => {
+      const revision = prepare({
+        a: [['p'], ['b', 'p']],
+        b: [['q'], ['Add', ['a', 'q'], ['PointX', 'q']]],
+      });
+      expect(errors(revision)).toContain(
+        'Recursive definition with no base case: b'
+      );
+      revision.dispose();
+    });
+
+    test('is refused when a stated type is disjoint from the body', () => {
+      const K: [string[], Json] = [
+        ['n', 'x'],
+        cases(['Mean', 'x'], ['Add', n1('K', 'x'), 1]),
+      ];
+      for (const stated of [
+        { resultType: 'string' },
+        { formalTypes: { x: 'string' } },
+      ]) {
+        const revision = prepare({ K }, stated);
+        expect(errors(revision)).toContain('incompatible-type');
+        revision.dispose();
+      }
+      const revision = prepare({ K }, { formalTypes: { x: 'list<number>' } });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['K', 2, ['List', 1, 2, 6]])).toBe('5');
+      revision.dispose();
+    });
+  });
+
+  describe('a Block that declares the axes as locals (CE-1693)', () => {
+    const d: [string[], Json] = [[], ['Add', 'x', 'y']];
+    const declare = (axis: string, values: number[]): Json => [
+      'Declare',
+      axis,
+      "'unknown'",
+      ['List', ...values],
+    ];
+
+    test('reads no axis through a field macro', () => {
+      const revision = prepare({
+        d,
+        A: [
+          [],
+          [
+            'Delimiter',
+            ['Block', declare('x', [1, 2]), declare('y', [3, 4]), 'd'],
+          ],
+        ],
+        B: [[], ['Add', 'A', 1]],
+        L: [[], ['Length', 'A']],
+        g: [['s'], ['Multiply', ['At', 'A', 1], 's']],
+        G: [[], ['g', 2]],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(
+        Object.fromEntries(
+          revision.definitions.map((def) => [def.name, def.fieldParameters])
+        )
+      ).toEqual({
+        d: ['x', 'y'],
+        A: undefined,
+        B: undefined,
+        L: undefined,
+        g: undefined,
+        G: undefined,
+      });
+      expect(value(revision, 'A')).toBe('["List",4,6]');
+      expect(value(revision, 'B')).toBe('["List",5,7]');
+      expect(value(revision, 'L')).toBe('2');
+      expect(value(revision, 'G')).toBe('8');
+      revision.dispose();
+    });
+
+    test('keeps an axis that is not declared before the read', () => {
+      const revision = prepare({
+        d,
+        // `y` is not declared.
+        A: [[], ['Block', declare('x', [1, 2]), 'd']],
+        // A nested Block declares `y`.
+        C: [
+          [],
+          ['Block', declare('x', [1, 2]), ['Block', declare('y', [3, 4]), 'd']],
+        ],
+        // One read is outside the Block.
+        E: [
+          [],
+          [
+            'Add',
+            'd',
+            ['Block', declare('x', [1, 2]), declare('y', [3, 4]), 'd'],
+          ],
+        ],
+      });
+      expect(
+        Object.fromEntries(
+          revision.definitions.map((def) => [def.name, def.fieldParameters])
+        )
+      ).toEqual({ d: ['x', 'y'], A: ['y'], C: undefined, E: ['x', 'y'] });
+      expect(value(revision, 'C')).toBe('["List",4,6]');
+      revision.dispose();
+    });
   });
 });

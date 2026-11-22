@@ -391,10 +391,26 @@ around the placeholder. The items are:
 
 The type expected at the offset comes from the value of a typed `let`, the
 parameter of a called function (of the source or of the library), the
-element type of a list, or the type of an assigned variable. After `:` in a
+element type of a list, or the type of an assigned variable. The condition
+of `if`, of `a if c else b` and of `while` expects `boolean`, the collection
+of `for x in` (also in a comprehension) expects `collection`, and an operand
+of `+` whose other operands are numbers or tensors of numbers expects
+`number | quantity`, a list of them included: `+` also adds two tuples, so
+with another operand there is no expected type. The other arithmetic
+operators (`-`, `*`, `/`, `^`, a unary minus) expect the parameter type of
+their signature or a quantity (`number | quantity` at `A * ▮`, which admits
+the matrix `A` too), and a comparison expects none. After `:` in a
 declaration or a parameter, after `->` of a function header, after
 `type name =` and after `is` of a type test, the items are the type names
 instead.
+
+```ts
+const source = "let b = true\nlet n = 5\nif  {}";
+const result = epsilCompletions(ce, source, source.length - 3);
+result.expectedType; // ➔ "boolean"
+result.items.filter((i) => i.kind === "variable").map((i) => [i.label, i.fit]);
+// ➔ [["b", "match"], ["n", "never"]]
+```
 
 Every item is valid where it is offered. Where the grammar takes a new name
 (`let ▮`, `for ▮`) or no word (`let a ▮`, `let a: integer ▮`), there are no
@@ -418,18 +434,54 @@ result.items[0];     // ➔ { label: "count", kind: "variable", rank: 2, detail:
 result.items[1].label; // ➔ "countIf": a library function returning an integer
 ```
 
-The items match the word typed, ignoring case, and come sorted by `rank`:
+The items match the word typed, ignoring case. The labels that start with
+the word come first. For a name and a word of two characters or more, the
+labels whose humps the word matches follow (each character continues a hump
+or starts a later one: `idM` gives `identityMatrix`, `invH` gives
+`inverseHaversine`, `mc` gives `max_count`), then the labels that hold the
+characters of the word in order from their first character (`ivs` gives
+`inverse`). A fix-it, a keyword and a likely value match by prefix only.
+
+```ts
+const source = "let b = isM";
+const result = epsilCompletions(ce, source, source.length);
+result.items.map((i) => i.label);
+// ➔ ["isMatch", "isMissing", "isSquareMatrix", "isCompatibleUnit", ...]
+result.items[0].matchRanges; // ➔ undefined: a prefix match
+result.items[2].matchRanges; // ➔ [[0, 2], [8, 9]]: "is" and "M"
+result.items[3].matchRanges; // ➔ [[0, 2], [4, 5]]: "is" and "m"
+```
+
+`isMatch` and `isMissing` start with `isM`, `isSquareMatrix` matches its
+humps, `isCompatibleUnit` is a subsequence. A hump or subsequence item has
+`matchRanges`, the characters of its label that the word matched (offsets
+into the label, end excluded, adjacent characters in one range), so that an
+editor can show them in bold; a prefix item has none, as its first
+`range[1] - range[0]` characters matched. Of the ways a word matches the
+humps, the one with the fewest ranges is chosen (`imat` on
+`identityMatrixAt` gives `i` and `Mat`); in a subsequence, each character
+is at its first place after the one before. Within each of the three, the
+items come sorted by `rank`:
 1 for the likely values, 2 and 3 for the names of the source and of the
 library whose type matches the expected type, 4 and 5 for the other names,
-6 for the keywords. A statement that does not parse yet (`if ▮`) has no
-expected type: its items are the names and the keywords.
+6 for the keywords. A condition of `if` or `while`, or the collection of a
+`for … in`, that ends its line before its block is typed (`if ▮`,
+`} else if ▮`, `for i in ▮`) is parsed with an empty block after it, and has
+its expected type. Another statement that does not parse yet
+(`let y = 1 if ▮`) has no expected type: its items are the names and the
+keywords.
 
-When there is an expected type, each name item has a `fit`: `"match"` when
-its value is always of the type (ranks 2 and 3), `"never"` when it can never
-be, `"maybe"` otherwise: a broader type (`transpose` returns a `value`), a
-union with an arm that fits, a generic result, or a name whose type is not
-known. In ranks 4 and 5 the `"maybe"` items come first, and a host may hide
-the `"never"` items. A function name is judged by the result of a call; where
+When there is an expected type, each name item and each value item (a
+likely value, `true`, `false`) has a `fit`: `"match"` when its value is
+always of the type (ranks 2 and 3), `"never"` when it can never be,
+`"maybe"` otherwise: a broader type (`transpose` returns a `value`), a union
+with an arm that fits, a generic result, or a name whose type is not known.
+Where a number is expected, the non-finite values (NaN, the infinities) do
+not count against `"match"`: a `number` matches `complex`. A value is judged
+by the type of its literal (`true` is a `boolean`); the other keywords
+(`if`, `let`) have no `fit`. In ranks 4 and 5 the `"maybe"` items come
+first, and a host may hide the `"never"` items. A function name is judged
+by the result of a call; where
 a function is expected (a callback, the right side of `|>`, a union with a
 function arm such as `function | nothing`) it is judged by its signature: it
 must take the arguments and return a value of the result type. A function
@@ -441,9 +493,20 @@ call at the right side of `|>` with no `_`, an argument expects the type of
 the parameter it binds once the piped value fills its slot: in
 `1..10 |> filter(▮)` the predicate, in `[1, 2] |> map(▮)` the mapping
 function. An argument of a function that maps over a list (`abs`, `*`, a function of the
-source) admits a list of the expected type too. A `let` or a `const` with a
+source) admits a list of the expected type too, and a tuple may fit there,
+since the call maps over its elements (`sin((1, 2))`). A `let` or a `const` with a
 literal value has the type of the value: `const n = 5` is an `integer`,
 `let x = 5` a `number`.
+
+```ts
+const source = "let x = 2\nlet y = sin(";
+const result = epsilCompletions(ce, source, source.length);
+result.expectedType; // ➔ "complex | quantity"
+result.items
+  .filter((i) => ["x", "abs", "true", "if"].includes(i.label))
+  .map((i) => [i.label, i.fit]);
+// ➔ [["x", "match"], ["abs", "match"], ["if", undefined], ["true", "never"]]
+```
 
 ```ts
 const source = "const A: matrix = identityMatrix(2)\nA |> inv";
@@ -451,7 +514,7 @@ const result = epsilCompletions(ce, source, source.length);
 result.expectedType; // ➔ "(matrix) -> any"
 result.items.map((i) => [i.label, i.fit]);
 // ➔ [["inverse", "match"], ["inverseFunction", "maybe"],
-//    ["inverseHaversine", "maybe"]]
+//    ["inverseHaversine", "maybe"], ["interval", "never"]]
 ```
 
 After `.`, the items are the members of the value before the dot, and no
@@ -501,6 +564,69 @@ const source = "let xs = [1, 2, 3]\nxs |> tak";
 const result = epsilCompletions(ce, source, source.length);
 result.items.find((i) => i.label === "take")?.snippet;
 // ➔ "take(${1:count})${0}"   (at `tak` alone: "take(${1:xs}, ${2:count})${0}")
+```
+
+At a key of a record literal whose expected type is a record type, also
+through an alias (the value of a typed `let` or `const`, an argument, the
+value of a field of a record literal), the items are the fields that the
+literal does not write yet, in the order of the type with the optional fields
+last, and no other name. Each is inserted as `name -> ` (as `name` before an
+`->`), with its type as `detail`, and a `?` for an optional field. After
+`x -> ` the expected type is the type of the field `x`. A nominal type does
+not admit a literal, so its fields are not offered.
+
+```ts
+const source = "const p: record{x: real, y: real, label: string?} = {x -> 1, ";
+const result = epsilCompletions(ce, source, source.length);
+result.items.map((i) => [i.label, i.insertText, i.detail]);
+// ➔ [["y", "y -> ", "real"], ["label", "label -> ", "string?"]]
+```
+
+At a case pattern of a `match` whose subject is of a sum type of the source
+(also through an alias, an application of a generic sum type, or a union of
+variants), the items are the variants that no other case of the `match`
+matches unconditionally, in the order of the declaration, each inserted as a
+pattern with one binding per field of its payload, and no other name or
+keyword. A catch-all case (`_`, `otherwise`, a bare binding) leaves no item. A
+fix-it item, `add the missing cases`, replaces the word at the offset with one
+case `<pattern> => nothing` per missing variant, on a line each at the
+indentation of the offset.
+
+```ts
+const source =
+  "type Color = red | green | circle(r: real)\n" +
+  "function f(c: Color) {\n  match c {\n    green() => 1\n    ";
+const result = epsilCompletions(ce, source, source.length);
+result.items.map((i) => [i.label, i.insertText ?? i.edits]);
+// ➔ [["add the missing cases", [[99, 99, "red() => nothing\n    circle(r) => nothing"]]],
+//    ["red", "red()"], ["circle", "circle(r)"]]
+```
+
+At the start of an argument of a call (after `(` or `,`), when the call
+resolves through a declaration with parameter names (a function of the
+source, a library function whose signature names its parameters, a variable
+whose declared type is a signature that names them), the first items are
+the names of the parameters that no argument fills yet, by position or by
+name, inserted as `name: `, with the parameter type as `detail`, and of rank
+0; the other items follow. A rest parameter is not offered. After a named
+argument only the names are offered, since a positional argument cannot
+follow one. In an overload set, or a function of the source defined several
+times, a name is offered when every signature that can still match the call
+has it, and it has a `detail` when they agree on its type. No name is offered
+when no named call could be valid: a positional argument after the offset, a
+required parameter with no name that is not filled, after `|>` a slot of the
+piped value that is not known or that comes after the hole (`xs |> fold(`
+puts it last). After `name: ` the expected type is the type of that
+parameter.
+
+```ts
+const source =
+  "function interest(principal: number, rate: number, years: integer = 1) -> number {\n" +
+  "  principal * rate * years\n}\n" +
+  "interest(rate: 0.05, ";
+const result = epsilCompletions(ce, source, source.length);
+result.items.map((i) => [i.label, i.insertText, i.detail]);
+// ➔ [["principal", "principal: ", "number"], ["years", "years: ", "integer"]]
 ```
 
 The VS Code extension serves the same items as its completions, and sends a

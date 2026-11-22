@@ -304,6 +304,8 @@ An object, or a value of a declared type, also has a fixed list of fields; the m
 
 The dot reaches the MEMBERS of a value: its fields, its protocol properties, and — with parentheses — its protocol functions. \`c.area()\` calls the protocol function \`area\` with \`c\` as its first argument, and is the same call as \`area(c)\`. A library function or a plain user function is not a member of anything, so it is not reached this way: write the call directly, \`Sort(xs)\`, or pipe the value into it, \`xs |> Sort\`. Pipelines are the spelling for chaining such functions: \`xs |> Sort |> Reverse\`.
 
+The diagnostic has a fixit that rewrites the call. A call with no arguments becomes a pipe: \`xs.sort()\` becomes \`xs |> sort\`. A call with arguments becomes the direct call, with the receiver first: \`xs.take(2)\` becomes \`take(xs, 2)\`; when the receiver cannot be the first argument, it is piped, so \`xs.map(x => x + 1)\` becomes \`xs |> map(x => x + 1)\`. In a chain, the fixit of an inner call is the direct call: \`xs.sort().reverse()\` becomes \`sort(xs).reverse()\`, then \`sort(xs) |> reverse\`.
+
 To make a function callable with the dot, declare it in a \`protocol\` and conform the type to that protocol.`,
 
   'protocol-declaration-not-top-level': `A \`protocol\` statement appears inside a block or a function body. Protocols, like types, are engine-global (see \`epsil doc type-declaration-not-top-level\`), so protocol declarations are legal only at the top level of a program.`,

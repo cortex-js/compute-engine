@@ -81,6 +81,48 @@
   `Sum(Pi)` and `Sum(Missing)` are unchanged (#651, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+## 0.198.1 _2026-11-21_
+
+### New Features
+
+- **A completion item says which characters of its label matched**
+  (CE-1695). A hump or subsequence item has `matchRanges`, offsets into
+  `label`, end excluded, sorted, with adjacent characters in one range, so an
+  editor can show them in bold: at `idM`, `identityMatrix` has
+  `[[0, 2], [8, 9]]`, and at `ivs`, `inverse` has `[[0, 1], [2, 3], [5, 6]]`.
+  A prefix item has no `matchRanges`: its first `range[1] - range[0]`
+  characters matched.
+
+### Improvements
+
+- **A completion item's `fit` is more precise** (CE-1694). Where a number is
+  expected, the non-finite values (NaN, the infinities) no longer count
+  against `'match'`: after `let x = 2`, at `sin(` the name `x` (a `number`)
+  and the functions `abs` and `sqrt` (which return a `number`) are `'match'`,
+  where they were `'maybe'`. `'match'` now means "always of the expected
+  type, apart from NaN and the infinities". A value item has a `fit` too,
+  judged by the type of its literal: the likely values (`0`, `""`) and the
+  keywords `true` and `false`. At `determinant(`, `true` is `'never'`; at
+  `if `, it is `'match'`. The other keywords (`if`, `let`) have no `fit`.
+
+### Resolved Issues
+
+- **A recursive Document function whose body narrows a parameter binds**
+  (CE-1692). With no stated types, a recursion that reads a point (`p.x`) or
+  consumes a list (`mean(x)`) was a row error, "… does not match (unknown) any
+  -> unknown", and every row that called it had no value. Its parameters now
+  take the types that the body infers, as for a function that is not recursive,
+  so a list argument at such a parameter is passed whole: with
+  `K(0,x) = mean(x)` and `K(n,x) = K(n-1,x)`, `K(3,[1,2,6])` is `3`, and with
+  `g(P) = P.x (1,0)`, `f(P,n) = g(P) + f(P,n-1)` and the base clause `(0,0)`,
+  `f((1,2),2)` is `(2,0)`.
+- **A Document value row that declares the field axes as locals is a value**
+  (CE-1693). With the field row `d = x + y`, the row
+  `A = (x := [1,2]; y := [3,4]; d)` is the list `[4, 6]`, but it had the field
+  parameters `x` and `y`, so a host drew it and the rows that read it as fields.
+  A read of a field row inside a `Block` that declares an axis before the read
+  no longer counts as a read of that axis.
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
@@ -115,9 +157,68 @@
   signatures differ in their number of required parameters. `insertText`
   keeps its value. The VS Code extension sends the snippet as a snippet to a
   client that supports snippets.
+- **A completion in a record literal offers the fields of its type**
+  (CE-1664.1). At `const p: record{x: real, y: real} = {`, the items of
+  `epsilCompletions()` are `x` and `y`, inserted as `x -> ` and `y -> `, with
+  their types as `detail`, and no other name; a field already written is left
+  out, and an optional field comes last with a `?` in its `detail`. After
+  `{x -> ` the expected type is `real`, the type of the field. This holds for
+  a record type reached through an alias, for an argument whose parameter is
+  a record type (`f({`), and for a nested literal (`{p -> {`). A nominal type
+  does not admit a literal, and a literal with no expected record type gets
+  the names, as before.
+- **A completion at a case of a `match` on a sum type offers the variants
+  that no case covers** (CE-1664.2). In `function f(c: Color) { match c {`,
+  with `type Color = red | green | circle(r: real)`, the items of
+  `epsilCompletions()` are `red`, `green` and `circle`, inserted as `red()`,
+  `green()` and `circle(r)` (one binding per field of the payload, `_` for a
+  field with no name), and no other name and no keyword. A variant that a case
+  matches unconditionally (`green() => …`, `circle(x) | red() => …`,
+  `x: circle => …`) is left out, and a catch-all case (`_`, `otherwise`, a bare
+  binding) leaves none. A fix-it item, `add the missing cases`, inserts one
+  case `<pattern> => nothing` per missing variant, a line each. This holds for
+  a sum type reached through an alias, for a generic sum type (`opt<integer>`),
+  and for a union of variants (`c: red | circle`). A subject of any other
+  type, a nominal type whose body is a sum included, gets the items as before.
+- **A completion at an argument of a call offers the parameter names**
+  (CE-1664.3). At `take(xs, `, the first item of `epsilCompletions()` is
+  `count`, inserted as `count: `, with the type `number` as `detail`; the
+  other items follow as before. The names are those of the declaration that
+  the call resolves through: a function of the source, a library function
+  whose signature names its parameters, or a variable whose declared type is
+  a signature that names them. A parameter already filled, by position or by
+  name, and a rest parameter are left out. After a named argument
+  (`interest(rate: 0.05, `) only the names are offered, since a positional
+  argument cannot follow it. In an overload set, a name is offered when every
+  signature that can still match the call has it. After `|>` the parameter of
+  the piped value is left out, and no name is offered when its slot is not
+  known or comes after the named arguments (`xs |> fold(`). After `count: `,
+  the expected type is the type of `count`, also for a library function and
+  a variable with a declared signature.
 
 ### Improvements
 
+- **A completion matches the humps of a camelCase name** (CE-1664.6). The
+  items of `epsilCompletions()` were the labels that start with the typed
+  word. A word of two characters or more now also matches a name whose humps
+  it gives: `idM` gives `identityMatrix`, `invH` gives `inverseHaversine` and
+  `mc` gives `max_count`, then a name that holds its characters in order from
+  its first character (`ivs` gives `inverse`). These matches come after the
+  prefix matches, in the same order of `rank`: at `isM`, `isMatch` and
+  `isMissing` come first, then `isSquareMatrix`, then `isCompatibleUnit`. A
+  fixit, a keyword and a likely value match by prefix only.
+- **A dotted call of a library function has a fixit** (CE-1664.5). The
+  `dot-call-not-a-protocol-function` diagnostic of `checkEpsil()` rewrites the
+  call: `xs.sort()` becomes `xs |> sort`, and `g(3).sort()` becomes
+  `g(3) |> sort`. A call with arguments becomes the direct call, with the
+  receiver as the first argument: `xs.take(2)` becomes `take(xs, 2)`. When
+  the receiver cannot be the first argument, the call becomes a pipe, which
+  puts the receiver where its type fits: `xs.map(x => x + 1)` becomes
+  `xs |> map(x => x + 1)`. Inside a larger expression a pipe would need
+  parentheses, so `xs.sort().reverse()` becomes `sort(xs).reverse()`, and the
+  next fixit `sort(xs) |> reverse`. The Epsil spelling of a library function
+  now gives this diagnostic too: `xs.sort()` was reported only when it ran,
+  as an `incompatible-type` error of `Field`.
 - **A completion where a function is expected compares signatures**
   (CE-1661). At `filter([1, 2], ▮`, `isPrime` fits, since it takes an integer
   and returns a boolean; before, it was compared by its result with the
@@ -129,6 +230,19 @@
   (`function | nothing`) and a transparent alias of a signature are judged
   the same way, and a callback of `map`, which takes one argument per source,
   may take more arguments than its declared signature.
+- **A completion knows the expected type of a condition, of a loop
+  collection and of an arithmetic operand** (CE-1664.4, CE-1686). At `if ▮`
+  and at `x if ▮ else y` the expected type is `boolean`, and with `n = 5`, `n`
+  is `'never'`; at `for i in ▮`, also in a comprehension, it is `collection`:
+  a list, a matrix, a string, a tuple and a record fit, a number does not.
+  `if ▮`, `while ▮` and `for i in ▮` have it before their block is typed. At
+  `1 + ▮`, when every other operand is a number or a tensor of numbers, it is
+  `number | quantity`, so a matrix fits and a string or a boolean does not;
+  with another operand (a tuple, a string, a name of no known type) there is
+  still no expected type. The other arithmetic operands admit a quantity too
+  (`A * ▮` expects `number | quantity`; was `number`), and a tuple, which a
+  call maps over (`2 * (1, 2)`, `sin((1, 2))`), may fit where it was
+  `'never'`.
 - **A completion admits a list where the call maps over one** (CE-1661). At
   `A * ▮` with `A: matrix`, `A` fits (`A * A` is a matrix product); at
   `determinant(▮`, `abs` may fit, since `abs(A)` is a matrix.
