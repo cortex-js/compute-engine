@@ -263,6 +263,36 @@
   `Sum(Pi)` and `Sum(Missing)` are unchanged (#651, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+- **`Limits` takes a step.** `["Limits", "i", 1, 4, 2]` is the iterator
+  `{i, 1, 4, 2}` of Wolfram: `["Sum", "i", ["Limits", "i", 1, 4, 2]]` is
+  `1 + 3 = 4`. The step was dropped without a diagnostic, and the sum was 10.
+  A big operator reads a stepped clause as `["Element", "i", ["Range", 1, 4,
+  2]]`, as it already read `["Tuple", "i", 1, 4, 2]`, and the LaTeX is
+  `\sum_{i\in 1..3..4}i`. A sum or a product over a range enumerates the
+  values of `Range`: over an empty range, such as `Range(5, 1, 2)` or
+  `Range(1, 4, 0)`, the sum is 0 and the product 1, and a step that is not an
+  integer (`Range(1, 4, 0.5)`) gives a value; before, both stayed
+  unevaluated.
+  A stepped clause does not compile; the compiled function falls back to the
+  interpreter. `NDSolve` has no use for a step, and stays unevaluated with a
+  stepped `Limits` (#517, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **The LaTeX of `Boole` reads back as `Boole`.** `["Boole", "P"]` was
+  written `\lbrack P\rbrack`, which reads back as `["List", "P"]`, and so was
+  any operand that is not a relation, such as `["IsPrime", "n"]`. Such an
+  operand is now written `\operatorname{Boole}(P)`; a relation keeps the
+  Iverson bracket, `[x>0]` (#517, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **The partial canonical form `InvisibleOperator` of an applied function
+  literal is the `Apply`.** `ce.parse("(x\mapsto x^2)(a)", { canonical:
+  ["InvisibleOperator"] })` was `["Multiply", ["Apply", …, "a"]]`, a product
+  of one factor, and the curried `(x\mapsto y\mapsto x^{y})(a)\lhd b` gave a
+  `Multiply` with an `incompatible-type` error. Both are now an `Apply`, as
+  in the full canonical form (#517, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.1 _2026-11-21_
 
 ### New Features
