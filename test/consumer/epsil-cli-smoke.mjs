@@ -21,7 +21,9 @@ const PACKAGE_VERSION = JSON.parse(
 ).version;
 
 if (!existsSync(CLI)) fail(`${CLI} not found. Run the production build first.`);
-if ((statSync(CLI).mode & 0o111) === 0) fail('CLI bundle is not executable.');
+// Windows has no execute bit: Node reports every file as 0o666 there.
+if (process.platform !== 'win32' && (statSync(CLI).mode & 0o111) === 0)
+  fail('CLI bundle is not executable.');
 
 expectRun(['--version'], { stdout: `${PACKAGE_VERSION}\n` });
 expectRun(['-e', 'let x = 1/2\nx + 1'], { stdout: '3/2\n' });
