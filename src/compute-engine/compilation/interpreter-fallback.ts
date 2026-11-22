@@ -5,7 +5,7 @@
 // `interpreterRun()`.
 
 import type { BoxedDefinition, Expression, Scope } from '../global-types.js';
-import { isValueDef } from '../boxed-expression/utils.js';
+import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { withBindingValuesFn } from '../engine-declarations.js';
 import { isSealedPreparedNamespace } from '../boxed-expression/prepared-import-binding.js';
@@ -93,6 +93,17 @@ export function namesRead(
   skipBodies?: (name: string) => boolean
 ): Map<string, Expression & { symbol: string }> {
   const freeOccurrences = new Map<string, Expression & { symbol: string }>();
+  // A held occurrence (not canonical) is bound to no definition: the
+  // interpreter reads the definition of its name in the scope of the call
+  // (`definitionRead()`), so its value or body is followed from there
+  // (`Expand(g)` with `g := Q + 1` reads `Q`). This over-approximates: a
+  // held name is followed as a read also where the operator that holds it
+  // does not evaluate it (`Hold(g)`, the index of a held `Sum`), which only
+  // reports an extra input, and every held occurrence, also one in a
+  // followed body, is resolved from the scope of the call.
+  const scope = callerScopeOf(expr.engine);
+  const heldDefinition = (e: Expression, name: string) =>
+    e.isCanonical ? undefined : definitionRead(e, name, scope);
   const followed = new Set<object>();
   const pending: Expression[] = [];
   const follow = (def: object | undefined, source: () => unknown): void => {
@@ -109,7 +120,9 @@ export function namesRead(
         const seen = freeOccurrences.get(sym.symbol);
         if (seen === undefined || (!seen.isCanonical && sym.isCanonical))
           freeOccurrences.set(sym.symbol, sym);
-        const def = sym.valueDefinition;
+        const held = heldDefinition(sym, sym.symbol);
+        const def =
+          sym.valueDefinition ?? (isValueDef(held) ? held.value : undefined);
         if (def !== undefined && !def.isConstant) follow(def, () => def.value);
         return sym;
       },
@@ -119,9 +132,13 @@ export function namesRead(
       (app, _ops, shadowed) => {
         if (shadowed?.has(app.operator)) return undefined;
         if (skipBodies?.(app.operator) === true) return undefined;
-        const op = app.operatorDefinition;
+        const held = heldDefinition(app, app.operator);
+        const op =
+          app.operatorDefinition ??
+          (isOperatorDef(held) ? held.operator : undefined);
         follow(op, () => op?._lambdaLiteral);
-        const value = app.valueDefinition;
+        const value =
+          app.valueDefinition ?? (isValueDef(held) ? held.value : undefined);
         if (value !== undefined && !value.isConstant)
           follow(value, () => value.value);
         return undefined;
@@ -641,9 +658,10 @@ function interpreterRun(
     // name that a binder of `expr` binds), and no name is declared. The
     // value of a definition that `expr` reads, and the body of a function
     // it calls, are not substituted: with a published row `g = Q + 1` or
-    // `f(x) = x + Q`, `run({ Q: 4 })` of `Expand(g)` or `Expand(f(2))`
-    // gives `null` where the compiled code gives `5` or `6` (known
-    // limitations, `docs/COMPILATION-MODEL.md`).
+    // `f(x) = x + Q` and `Q` undeclared, `run({ Q: 4 })` of `Expand(g)` or
+    // `Expand(f(2))` gives `null` where the compiled code gives `5` or `6`
+    // (known limitations, `docs/COMPILATION-MODEL.md`). Declaring `Q` as an
+    // input gives the value: `namesRead()` follows a held name (CE-1666).
     const sealed = new Set<string>();
     const substituted: Record<string, Expression> = Object.create(null);
     if (vars && typeof vars === 'object')

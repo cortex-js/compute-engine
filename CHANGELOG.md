@@ -71,6 +71,15 @@
   compiled `K + Q` does. A run argument that names a published row is still
   refused. A row or a function row whose own value reads `Q` does not see the
   substituted value (`docs/COMPILATION-MODEL.md`, known limitations).
+- **A compiled `run()` that falls back to the interpreter reads an input
+  through a row** (CE-1666). When a compilation declined, an input read only
+  through the value of a row or the body of a function row inside a held
+  operand was not found, so its run value was never bound: in a Document
+  revision with the declared input `Q` and the rows `g = Q + 1` and
+  `f(x) = x + Q`, `run({ Q: 4 })` of `Expand(g)` and `Expand(f(2))` gave
+  `null`. They now give `5` and `6`, as the compiled `g` and `f(2)` do. The
+  same held reads outside a Document gave `NaN` and now give the value too.
+  `freeSymbols` of such a fallback now lists the input.
 
 ## 0.197.1 _2026-11-21_
 

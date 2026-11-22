@@ -581,10 +581,9 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the interpreter fallback of a declined compilation substitutes a run
   argument for a free name into the expression only, so `run({ Q: 4 })` of
   `Expand(g)` or `Expand(f(2))` gives `null`, where the compiled `g` gives
-  `5` and the compiled `f(2)` gives `6`. Declaring `Q` as an input of the
-  imports does not help yet: the fallback gives `null` for a declared input
-  read through a published row too (CE-1666); once that is fixed, the
-  declaration is the remedy.
+  `5` and the compiled `f(2)` gives `6`. The remedy is to declare `Q` as an
+  input of the imports (`input('Q', 'real')`): the fallback then gives `5`
+  and `6` (CE-1666).
 
 ## `parallel for` and `runAsync()`
 

@@ -778,6 +778,54 @@ test('the interpreter fallback of a declined compilation runs with free inputs i
   environment.dispose();
 });
 
+test('the interpreter fallback of a declined compilation reads a declared input through a row', () => {
+  const ce = new ComputeEngine();
+  const environment = createDocumentEnvironment(ce, () => {});
+  const imports = environment.createImports((input) => input('Q', 'real'));
+  const revision = imports.prepare(
+    [
+      { id: 'g', latex: 'g=Q+1' },
+      { id: 'h', latex: 'h=2g' },
+      { id: 'w', latex: 'w=Q+3' },
+      { id: 'f', latex: 'f(x)=x+Q' },
+    ],
+    latexSyntax(ce),
+    new Set(['w'])
+  );
+  expect(revision.rowErrors.size).toBe(0);
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  ce.pushScope(revision.scope);
+  try {
+    const runOf = (json: unknown, success: boolean) => {
+      const result = compile(ce.box(json as never), { to: 'javascript' });
+      expect(result.success).toBe(success);
+      return result.run as (vars: Record<string, unknown>) => unknown;
+    };
+    // `Expand` makes each compilation decline: its `run` is the
+    // interpreter, and gives the value of the compiled run.
+    for (const [body, q4, q10] of [
+      [['Add', 'g', 0], 5, 11],
+      [['Add', 'h', 0], 10, 22],
+      [['Add', 'w', 0], 7, 13],
+      [['f', 2], 6, 12],
+    ] as const) {
+      const compiled = runOf(body, true);
+      const declined = runOf(['Expand', body], false);
+      expect(compiled({ Q: 4 })).toBe(q4);
+      expect(declined({ Q: 4 })).toBe(q4);
+      // A second run with another value is not served the first one.
+      expect(compiled({ Q: 10 })).toBe(q10);
+      expect(declined({ Q: 10 })).toBe(q10);
+    }
+  } finally {
+    ce.popScope();
+    warn.mockRestore();
+  }
+  revision.dispose();
+  imports.dispose();
+  environment.dispose();
+});
+
 test('a stated result type or effect is checked when some formals are unannotated', () => {
   const ce = new ComputeEngine();
   const environment = createDocumentEnvironment(ce, () => {});
