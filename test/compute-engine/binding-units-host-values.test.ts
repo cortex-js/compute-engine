@@ -94,7 +94,7 @@ describe('a name declared unknown reads as a free name', () => {
       const ce = engine();
       if (declare) ce.declare('q', 'unknown');
       const sum = ce.box(['Add', ['Tuple', 1, 2], 'q']);
-      expect(sum.type.toString()).toBe('number | tuple<number, number>');
+      expect(sum.type.toString()).toBe('tuple<number, number>');
     }
   );
 });

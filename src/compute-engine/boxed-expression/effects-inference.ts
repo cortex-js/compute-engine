@@ -4,6 +4,8 @@ import type {
   FunctionSignature,
   Type,
 } from '../../common/type/types.js';
+import { resultUnderDeclaredParameters } from './declared-parameter-result.js';
+import { widen as widenTypes } from '../../common/type/subtype.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { withStaticTypingView } from '../static-typing-view.js';
 import {
@@ -2047,7 +2049,7 @@ export function functionLiteralParameterSignature(
 export function functionLiteralParameterSlots(
   expr: Expression,
   body: Expression
-): { name?: string; type: Type }[] | undefined {
+): { name?: string; type: Type; lifted?: boolean }[] | undefined {
   const params = functionLiteralParameters(expr);
   // Parameter slots: an annotated param carries its declared type, named
   // (`x: integer`); a bare param is `unknown` and keeps its name, so that a
@@ -2082,17 +2084,95 @@ export function functionLiteralParameterSlots(
       paramOps[i] === undefined
         ? undefined
         : optionalParameterTarget(paramOps[i]);
-    const inferred =
-      inferredCollectionParameterType(target) ??
-      wholeCollectionParameterType(target, body) ??
-      forwardedCollectionParameterType(target, body);
+    const selfEvidence = inferredCollectionParameterType(target);
+    const lifted =
+      selfEvidence === undefined
+        ? (wholeCollectionParameterType(target, body) ??
+          forwardedCollectionParameterType(target, body))
+        : undefined;
     const name =
       paramOps[i] !== undefined
         ? inferredSignatureParameterName(paramOps[i])
         : undefined;
-    const type = inferred ?? ('unknown' as Type);
-    return name !== undefined ? { name, type } : { type };
+    const type = selfEvidence ?? lifted ?? ('unknown' as Type);
+    // `lifted`: the slot takes a collection the body was not typed with
+    // (`liftedSlotsResult` in `functionLiteralSignatureType`).
+    const slot = name !== undefined ? { name, type } : { type };
+    return lifted !== undefined ? { ...slot, lifted: true } : slot;
   });
+}
+
+/** The number of `liftedSlotsResult` calls that are typing a body again. */
+let liftDepth = 0;
+
+/**
+ * The result `result` of the function literal `literal`, joined with the
+ * result of its body under the types of its `lifted` slots: the slots that
+ * take a collection the body was not typed with (a parameter passed whole
+ * to another function, `wholeCollectionParameterType`). The body was typed
+ * with such a parameter at the arm its own uses give, and a list there can
+ * change the result. With `S(x) := Mean(x)` and `T(x) := S(x) + x`, the body
+ * of `T` is a `number` for a number `x`, and `T([1, 2, 6])` is the list
+ * `[4, 5, 9]` (CE-1701). The body is typed again with the lifted slots
+ * stamped on its parameters (`resultUnderDeclaredParameters`), as the body
+ * `Mean(x) + x` written directly is typed. `result` when no slot is lifted.
+ */
+export function liftedSlotsResult(
+  literal: Expression,
+  slots: ReadonlyArray<{ type: Type; lifted?: boolean }> | undefined,
+  result: Type
+): Type {
+  // An open result (`unknown`, a recursive function with no guess) stays
+  // open.
+  if (result === 'unknown' || !isFunction(literal, 'Function')) return result;
+  // Only a parameter that the body typed as a scalar: a body that reads it
+  // as a collection itself (`Mean(x) + x`) was typed with that arm.
+  const params = literal.ops.slice(1);
+  const lifts = (a: { lifted?: boolean }, i: number): boolean => {
+    if (a.lifted !== true || params[i] === undefined) return false;
+    const target = optionalParameterTarget(params[i]);
+    return isSymbol(target) && isScalarType(target.type.type);
+  };
+  if (slots === undefined || !slots.some(lifts)) return result;
+  // A literal met while another is typed again is not typed again itself:
+  // a chain of literals that each pass their parameter whole to the next
+  // (`a1 ↦ (a0 ↦ Map(…, a0))(a1)`, …) typed each body again at every level
+  // above it, and the time doubled with each level. Its result is `any`,
+  // which holds every value.
+  if (liftDepth > 0) return 'any';
+  // The body is typed again with the COLLECTION arms of the slot only
+  // (`collection<number>` of `collection<number> | value`): `result`
+  // already describes the scalar arm, and a `value` arm would make every
+  // operation on the parameter `value`.
+  const collectionArms = (t: Type): Type => {
+    const r = resolveTypeAlias(t);
+    if (typeof r !== 'object' || r.kind !== 'union') return t;
+    const arms = r.types.filter((m) => isSubtype(m, 'collection'));
+    return arms.length === 0
+      ? t
+      : arms.length === 1
+        ? arms[0]
+        : { kind: 'union', types: arms };
+  };
+  let lifted: Type | undefined;
+  liftDepth += 1;
+  try {
+    lifted = resultUnderDeclaredParameters(literal.engine, literal, {
+      kind: 'signature',
+      args: slots.map((a, i) =>
+        lifts(a, i) ? { type: collectionArms(a.type) } : { type: 'unknown' }
+      ),
+      result: 'unknown',
+    });
+  } finally {
+    liftDepth -= 1;
+  }
+  // A literal that cannot be typed again with its slots stamped (a
+  // parameter with a default value, a rest parameter) gives `any`: the body
+  // is not typed under the collection, and `result` does not hold it.
+  if (lifted === undefined) return 'any';
+  if (isSubtype(lifted, result)) return result;
+  return widenTypes(result, lifted);
 }
 
 export function functionLiteralSignatureType(expr: Expression): Type {
@@ -2193,6 +2273,9 @@ export function functionLiteralSignatureType(expr: Expression): Type {
 
   if (ascribedReturn === undefined)
     bodyType = joinEarlyReturnTypes(derivedBodyExpr, args, bodyType);
+
+  if (ascribedReturn === undefined && declaredSignature === undefined)
+    bodyType = liftedSlotsResult(expr, args, bodyType);
 
   const effects = functionLiteralArrowEffects(expr);
 

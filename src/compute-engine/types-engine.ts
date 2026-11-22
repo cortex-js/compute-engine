@@ -2593,6 +2593,17 @@ export interface IComputeEngine {
   /** The binding already auto-declared for an active shadowed parameter during
    * the current body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined;
+  /** The binding of `name` as a parameter of the innermost function literal
+   * being boxed whose parameters include it, read from the scope `from`:
+   * the binding that a reference to the parameter there would have,
+   * declared now when the body has no reference to it yet, and the body
+   * scope of the literal. Frames of `Block` locals pushed after that
+   * literal are skipped. `undefined` when no such literal is on the scope
+   * chain of `from`. @internal */
+  _enclosingParameterDef(
+    name: string,
+    from: Scope
+  ): { def: BoxedDefinition; body: Scope } | undefined;
   /** Cache the binding auto-declared for an active shadowed parameter so later
    * references reuse it. `created` is true when the caller declared the
    * binding now, false when it reuses a binding that existed before.

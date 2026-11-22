@@ -41,6 +41,7 @@ import {
   namedLiteralSignatureType,
   selfCallCollectionParameterTypes,
   wholeCollectionParameterType,
+  liftedSlotsResult,
   signatureEffects,
   stripArrowEffects,
   refineDeclaredPlaceholders,
@@ -2536,12 +2537,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           const slots = fixedParams.map((p, i) => {
             const name = inferredSignatureParameterName(p);
             const target = optionalParameterTarget(p);
-            const type: Type =
-              inferredCollectionParameterType(target) ??
-              selfCallTypes[i] ??
-              wholeCollectionParameterType(target, body) ??
-              'unknown';
-            return name !== undefined ? { name, type } : { type };
+            const evidence =
+              inferredCollectionParameterType(target) ?? selfCallTypes[i];
+            const lifted =
+              evidence === undefined
+                ? wholeCollectionParameterType(target, body)
+                : undefined;
+            const type: Type = evidence ?? lifted ?? 'unknown';
+            const slot = name !== undefined ? { name, type } : { type };
+            return lifted !== undefined ? { ...slot, lifted: true } : slot;
           });
           const signature: Type = {
             kind: 'signature',
@@ -2572,10 +2576,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // (`joinEarlyReturnTypes`): `g(y) := Block(If(y > 1,
             // Return((y, y))), y + 1)` returns a pair for `y = 2`, so its
             // result is `number | tuple<number, number>`, not `number`.
-            result: joinEarlyReturnTypes(
-              body,
+            // A slot that takes a collection the body was not typed with
+            // joins the body's result under it (`liftedSlotsResult`,
+            // CE-1701).
+            result: liftedSlotsResult(
+              boxedFn,
               slots,
-              signatureResultType(body, params, body.type.type)
+              joinEarlyReturnTypes(
+                body,
+                slots,
+                signatureResultType(body, params, body.type.type)
+              )
             ),
           };
           return new BoxedType(signature, this.engine._typeResolver);
