@@ -2098,7 +2098,176 @@ export const REAL_FUNCTIONS = Object.freeze({
     Number.isFinite(n) && Math.abs(n) > Number.MAX_SAFE_INTEGER
       ? false
       : isPrimeRuntime(n),
+  // The number-theory functions of an integer, with the interpreter's
+  // values (`library/number-theory.ts`); see `primeFactorExponents`.
+  moebiusmu: (n: number): number => {
+    const e = primeFactorExponents('MoebiusMu', n);
+    if (e === undefined) return NaN;
+    if (e.some((k) => k > 1)) return 0;
+    return e.length % 2 === 0 ? 1 : -1;
+  },
+  primenu: (n: number): number =>
+    primeFactorExponents('PrimeNu', n)?.length ?? NaN,
+  primeomega: (n: number): number =>
+    primeFactorExponents('PrimeOmega', n)?.reduce((a, k) => a + k, 0) ?? NaN,
+  // φ(0) = 0 and φ(−n) = φ(n), as the interpreter's `Totient`.
+  totient: (n: number): number => {
+    if (n === 0) return 0;
+    if (!Number.isInteger(n)) return NaN;
+    let m = Math.abs(integerOperand('Totient', n));
+    let phi = m;
+    for (const p of primeFactorsOf(m)) phi = (phi / p) * (p - 1);
+    return phi;
+  },
+  primepi: (x: number): number => primePi(x),
+  nthprime: (n: number): number => nthPrime(n),
 });
+
+/**
+ * The exponents of the prime factors of the integer `n`, its sign ignored:
+ * `[]` for 1, and `undefined` for 0, `NaN` and a non-integer, where the
+ * interpreter leaves the call unevaluated (compiled code gives `NaN`). An
+ * operand beyond the safe integer range throws (`integerOperand`).
+ */
+function primeFactorExponents(
+  operator: string,
+  n: number
+): number[] | undefined {
+  if (!Number.isInteger(n)) return undefined;
+  const m = Math.abs(integerOperand(operator, n));
+  if (m === 0) return undefined;
+  const exponents: number[] = [];
+  let rest = m;
+  for (const p of primeFactorsOf(m)) {
+    let k = 0;
+    while (rest % p === 0) {
+      rest /= p;
+      k += 1;
+    }
+    exponents.push(k);
+  }
+  return exponents;
+}
+
+/** The distinct prime factors of the positive safe integer `m`, by trial
+ *  division. The division stops when the rest is prime (`isPrimeNumber`),
+ *  so a large prime factor costs one primality test, not a division by
+ *  every odd number below its square root. */
+function primeFactorsOf(m: number): number[] {
+  const primes: number[] = [];
+  let rest = m;
+  if (rest % 2 === 0) {
+    primes.push(2);
+    while (rest % 2 === 0) rest /= 2;
+  }
+  // The rest is tested when it changes, not at each divisor.
+  let restIsPrime = rest > 1 && isPrimeNumber(rest);
+  for (let d = 3; !restIsPrime && d * d <= rest; d += 2) {
+    if (rest % d !== 0) continue;
+    primes.push(d);
+    while (rest % d === 0) rest /= d;
+    restIsPrime = rest > 1 && isPrimeNumber(rest);
+  }
+  if (rest > 1) primes.push(rest);
+  return primes;
+}
+
+/**
+ * The bound of the sieve of `primePi` and `nthPrime`: the interpreter scans
+ * at most 10⁷ odd numbers (`MAX_VALUE_SCALED_ITERATIONS` of
+ * `library/number-theory.ts`), checked every 1,024 of them, so it gives an
+ * error once it reaches 20,000,769, and the compiled code throws there. The
+ * sieve is kept for the life of the process: about 20 MB at the bound.
+ */
+const SIEVE_LIMIT = 20_000_768;
+/** The number of primes up to `SIEVE_LIMIT`. */
+const PRIMES_TO_LIMIT = 1_270_660;
+/** The primes counted below each multiple of `SIEVE_BLOCK`. */
+const SIEVE_BLOCK = 256;
+let sieve: { composite: Uint8Array; before: Uint32Array; size: number } = {
+  composite: new Uint8Array(0),
+  before: new Uint32Array(1),
+  size: 0,
+};
+
+/** The sieve, grown to hold `n`: a plot calls `PrimePi` once for each
+ *  sample, so the sieve is kept and grown by doubling. */
+function sieveTo(n: number): typeof sieve {
+  if (n < sieve.size) return sieve;
+  const size = Math.min(SIEVE_LIMIT + 1, Math.max(2 * n, 1 << 16));
+  const composite = new Uint8Array(size);
+  composite[0] = 1;
+  if (size > 1) composite[1] = 1;
+  for (let p = 2; p * p < size; p++) {
+    if (composite[p]) continue;
+    for (let q = p * p; q < size; q += p) composite[q] = 1;
+  }
+  const before = new Uint32Array(Math.ceil(size / SIEVE_BLOCK) + 1);
+  let count = 0;
+  for (let i = 0; i < size; i++) {
+    if (i % SIEVE_BLOCK === 0) before[i / SIEVE_BLOCK] = count;
+    if (!composite[i]) count += 1;
+  }
+  // The last entry counts every prime of the sieve.
+  before[before.length - 1] = count;
+  sieve = { composite, before, size };
+  return sieve;
+}
+
+/** The interpreter's `PrimePi(x)`: the number of primes up to `⌊x⌋`, `NaN`
+ *  for an operand that is not finite. */
+function primePi(x: number): number {
+  if (!Number.isFinite(x)) return NaN;
+  const n = Math.floor(x);
+  if (n < 2) return 0;
+  if (n > SIEVE_LIMIT)
+    throw new RangeError(
+      `PrimePi: ${n} is beyond the bound of compiled code (${SIEVE_LIMIT}); ` +
+        `the interpreter gives an error there too`
+    );
+  const s = sieveTo(n);
+  const block = Math.floor(n / SIEVE_BLOCK);
+  let count = s.before[block];
+  for (let i = block * SIEVE_BLOCK; i <= n; i++) if (!s.composite[i]) count++;
+  return count;
+}
+
+/** The interpreter's `NthPrime(n)`: the `n`th prime, 1-based; `NaN` for
+ *  `n < 1` and for a non-integer, where the interpreter leaves the call
+ *  unevaluated. */
+function nthPrime(n: number): number {
+  if (!Number.isInteger(n) || n < 1) return NaN;
+  if (n > PRIMES_TO_LIMIT)
+    throw new RangeError(
+      `NthPrime: the prime ${n} is beyond the bound of compiled code ` +
+        `(${SIEVE_LIMIT}); the interpreter gives an error there too`
+    );
+  // The `n`th prime is less than n·(ln n + ln ln n) for n ≥ 6.
+  const bound =
+    n < 6 ? 16 : Math.ceil(n * (Math.log(n) + Math.log(Math.log(n))));
+  const s = sieveTo(Math.min(bound, SIEVE_LIMIT));
+  const blocks = s.before.length - 1;
+  if (s.before[blocks] < n)
+    throw new RangeError(
+      `NthPrime: the prime ${n} is beyond the bound of compiled code ` +
+        `(${SIEVE_LIMIT}); the interpreter gives an error there too`
+    );
+  // The last block whose count of the primes before it is less than `n`.
+  let lo = 0;
+  let hi = blocks - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (s.before[mid] < n) lo = mid;
+    else hi = mid - 1;
+  }
+  let count = s.before[lo];
+  for (let i = lo * SIEVE_BLOCK; i < s.size; i++) {
+    if (s.composite[i]) continue;
+    count += 1;
+    if (count === n) return i;
+  }
+  return NaN;
+}
 
 /**
  * The interpreter's `Remainder(x, y)`: `x - y·n` for the integer `n`

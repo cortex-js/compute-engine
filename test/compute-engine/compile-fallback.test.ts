@@ -65,15 +65,15 @@ describe('Compilation fallback — lambda calling convention', () => {
   });
 
   test('realistic fallback: lambda body uses an uncompilable built-in', () => {
-    // `Totient` has no JavaScript compiler handler (compilation throws) but
-    // the interpreter evaluates it — so this genuinely exercises the fallback
-    // without relying on an unregistered target. Totient(9) = 6.
+    // `PartitionsP` has no JavaScript compiler handler (compilation throws)
+    // but the interpreter evaluates it — so this genuinely exercises the
+    // fallback without relying on an unregistered target. PartitionsP(9) = 30.
     const r = compile(
-      ce.expr(['Function', ['Add', ['Totient', 'x'], 'y'], 'x', 'y'])
+      ce.expr(['Function', ['Add', ['PartitionsP', 'x'], 'y'], 'x', 'y'])
     );
     expect(r.success).toBe(false);
     expect(r.calling).toBe('lambda');
-    expect(r.run!(9, 100)).toBe(106);
+    expect(r.run!(9, 100)).toBe(130);
   });
 
   test('non-lambda expression keeps the expression calling convention', () => {

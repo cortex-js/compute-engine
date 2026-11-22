@@ -221,11 +221,12 @@ describe('a nested conversion is CORRECT, not declined', () => {
 });
 
 describe('the interpreter fallback answers the same color object', () => {
-  // `Totient` evaluates in the interpreter and has no JavaScript lowering, so
-  // a color built from it declines and runs through the fallback. Before the
-  // fallback could serialize a color it answered a scalar `NaN` for every such
-  // expression, because `.re` of a color head is `NaN`.
-  const DECLINING = ['Rgb', ['Divide', ['Totient', 10], 100], 0, 0];
+  // `PartitionsP` evaluates in the interpreter and has no JavaScript
+  // lowering, so a color built from it declines and runs through the
+  // fallback. Before the fallback could serialize a color it answered a
+  // scalar `NaN` for every such expression, because `.re` of a color head is
+  // `NaN`.
+  const DECLINING = ['Rgb', ['Divide', ['PartitionsP', 10], 100], 0, 0];
 
   test('a declined color expression runs to the interpreter color', () => {
     const ce = new ComputeEngine();
@@ -233,7 +234,7 @@ describe('the interpreter fallback answers the same color object', () => {
     expect(compiled.success).toBe(false);
     expect(compiled.run()).toEqual({
       space: 'rgb',
-      c0: 0.04,
+      c0: 0.42,
       c1: 0,
       c2: 0,
       alpha: undefined,
@@ -257,13 +258,13 @@ describe('the interpreter fallback answers the same color object', () => {
   test('the fallback normalizes alpha the way the compiled route does', () => {
     const ce = new ComputeEngine();
     const withAlpha: any = compile(
-      ce.box(['Rgb', ['Divide', ['Totient', 10], 100], 0, 0, 0.5]),
+      ce.box(['Rgb', ['Divide', ['PartitionsP', 10], 100], 0, 0, 0.5]),
       NO_FOLD as any
     );
     expect(withAlpha.success).toBe(false);
     expect(withAlpha.run().alpha).toBeCloseTo(0.5, 9);
     const opaque: any = compile(
-      ce.box(['Rgb', ['Divide', ['Totient', 10], 100], 0, 0, 1]),
+      ce.box(['Rgb', ['Divide', ['PartitionsP', 10], 100], 0, 0, 1]),
       NO_FOLD as any
     );
     expect(opaque.run().alpha).toBeUndefined();
@@ -271,9 +272,10 @@ describe('the interpreter fallback answers the same color object', () => {
 });
 
 describe('the interpreter fallback CONSUMES a color object', () => {
-  // `Totient` evaluates in the interpreter and has no JavaScript lowering, so
-  // an expression using it declines and runs through the fallback.
-  const DECLINING_CHANNEL = ['Divide', ['Totient', 10], 100];
+  // `PartitionsP` evaluates in the interpreter and has no JavaScript
+  // lowering, so an expression using it declines and runs through the
+  // fallback.
+  const DECLINING_CHANNEL = ['Divide', ['PartitionsP', 10], 100];
 
   test('a color from one runner is a `vars` value for a declining one', () => {
     const ce = new ComputeEngine();

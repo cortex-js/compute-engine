@@ -1643,6 +1643,14 @@ value of the double, an unspecified value. `Mod(n!, 7)` at `n = 25` gives
 value (`Mod(2^60 + 1, 3)` is `2`). The remedy for the host is the `bigint`
 mode.
 
+`IsPrime`, `MoebiusMu`, `PrimeNu`, `PrimeOmega` and `Totient` read the
+factors of their operand, so they throw a `RangeError` for an operand
+beyond that range instead of answering for the double. `PrimePi` and
+`NthPrime` throw past 20,000,768, where the interpreter gives an error (it
+scans at most 10⁷ odd numbers, checked every 1,024). Where the interpreter
+leaves the call unevaluated (`MoebiusMu(0)`, `NthPrime(0)`), the compiled
+value is `NaN`. The `bigint` mode does not spell these operators.
+
 The `bigint` mode of the JavaScript target (`compile(expr, { mode:
 'bigint' })`, "Compile modes") is exact beyond this range. It computes every
 integer value of an integer-typed expression as a `bigint`, so `Mod(n, 10)`

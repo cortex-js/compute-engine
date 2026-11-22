@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Improvements
+
+- **`MoebiusMu`, `PrimePi`, `PrimeNu`, `PrimeOmega`, `Totient` and `NthPrime`
+  compile on JavaScript** (CE-1704), with the interpreter's values. They
+  declined, so a curve that used one, such as the Möbius sum
+  `Sum(MoebiusMu(m)/m · li(x^(1/m)), Limits(m, 1, ⌊log₂ x⌋))`, ran in the
+  interpreter. An operand beyond the safe integer range throws a
+  `RangeError`, as for `IsPrime`, and `PrimePi` and `NthPrime` throw past
+  20,000,768, where the interpreter gives an error.
+
 ### Resolved Issues
 
 - **A point plus a name of unknown type is typed as a point** (CE-1319). With

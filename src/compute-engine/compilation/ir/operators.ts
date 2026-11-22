@@ -341,6 +341,16 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('LambertW',     2,          [[[R, I], R, 'lambertwk']],    { fold: F.lambertwk, ...domain }),
   row('Fibonacci',    1,          [[[I], I, 'fibonacci.int'], [[R], R, 'fibonacci']], { fold: F.fibonacci }),
   row('IsPrime',      1,          [[[R], B, 'isprime']],         { fold: F.isprime }),
+  // The number-theory functions of an integer (`PrimePi` of a real), on the
+  // double of the operand: an operand beyond the safe integer range throws,
+  // as `IsPrime` does, so they are `may-fail` and are not moved out of a
+  // loop that can run zero times.
+  row('MoebiusMu',    1,          [[[R], I, 'moebiusmu']],       { fold: F.moebiusmu, effect: 'may-fail' }),
+  row('PrimeNu',      1,          [[[R], I, 'primenu']],         { fold: F.primenu, effect: 'may-fail' }),
+  row('PrimeOmega',   1,          [[[R], I, 'primeomega']],      { fold: F.primeomega, effect: 'may-fail' }),
+  row('Totient',      1,          [[[R], I, 'totient']],         { fold: F.totient, effect: 'may-fail' }),
+  row('PrimePi',      1,          [[[R], I, 'primepi']],         { fold: F.primepi, effect: 'may-fail' }),
+  row('NthPrime',     1,          [[[R], I, 'nthprime']],        { fold: F.nthprime, effect: 'may-fail' }),
   // `Max` of a list is its largest element: a reduction, not threaded.
   row('Max',          'variadic', arith('max', 1),               { fold: Math.max, ...list }),
   row('Min',          'variadic', arith('min', 1),               { fold: Math.min, ...list }),
