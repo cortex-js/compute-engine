@@ -26,6 +26,15 @@
 
 ### Resolved Issues
 
+- **Epsil: the error for an unclosed string names its closing delimiter,
+  without a backslash** (CE-1659). `print("Hello` gives `Expected closing
+  string delimiter '"'` (it was `"\""`), and `#"ab` gives `'"#'` (it named
+  the opening `#"`).
+
+- **Epsil: the type error for a value at a declaration quotes the value once,
+  as it is written** (CE-1660). `const A : matrix = onesMatrix` gives `The
+  value "onesMatrix" of type …`; it was `""OnesMatrix""`.
+
 - **Epsil: a field of a value whose type is defined as another declared type
   is read through both types** (CE-1667). With `type Circle = tuple<r:
   number>` and `type Wrapped = Circle`, `Wrapped(Circle(2)).r + 1` is `3`; it

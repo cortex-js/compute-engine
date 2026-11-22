@@ -22,13 +22,25 @@ describe('epsilDiagnosticMessage', () => {
   test('a syntax error is a sentence', () => {
     expect(messages('foo(1')).toEqual(['Expected closing bracket ")"']);
     expect(messages('let s = "abc')).toEqual([
-      'Expected closing string delimiter "\\""',
+      `Expected closing string delimiter '"'`,
+    ]);
+    // An extended string names its closing delimiter (CE-1659).
+    expect(messages('let s = #"abc')).toEqual([
+      `Expected closing string delimiter '"#'`,
+    ]);
+    expect(messages('let s = ##"abc')).toEqual([
+      `Expected closing string delimiter '"##'`,
     ]);
   });
 
   test('a static type error has its label and the source', () => {
     expect(messages('let x: real = "a"')).toEqual([
-      'Type error: The value ""a"" of type "string" is not compatible with the declared type "real" in `let x: real = "a"`',
+      'Type error: The value "a" of type "string" is not compatible with the declared type "real" in `let x: real = "a"`',
+    ]);
+    // A function name used as a value is quoted once, as it is typed
+    // (CE-1660).
+    expect(messages('const A : matrix = onesMatrix')).toEqual([
+      'Type error: The value "onesMatrix" of type "(integer, integer?) -> matrix" is not compatible with the declared type "matrix" in `const A: matrix = onesMatrix`',
     ]);
   });
 

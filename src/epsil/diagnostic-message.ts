@@ -134,8 +134,13 @@ export function epsilDiagnosticMessage(diagnostic: ParsingDiagnostic): string {
       return `Host pragma "${args[0]}" is disabled`;
     case 'closing-bracket-expected':
       return `Expected closing bracket "${args[0]}"`;
-    case 'string-literal-closing-delimiter-expected':
-      return `Expected closing string delimiter ${JSON.stringify(args[0])}`;
+    case 'string-literal-closing-delimiter-expected': {
+      // The lexer names an extended string by its opening delimiter (`##"`);
+      // the closing one is its reverse (`"##`). Between single quotes, so
+      // that a `"` needs no escape (CE-1659).
+      const closing = [...String(args[0])].reverse().join('');
+      return `Expected closing string delimiter '${closing}'`;
+    }
     case 'match-case-separator':
       return `Match cases are separated by a newline or ";", not a comma`;
     case 'if-let-equal-expected':
