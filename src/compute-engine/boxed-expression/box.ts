@@ -1,4 +1,5 @@
 import { Complex } from 'complex.js';
+import { isSealedImportValue } from './prepared-import-binding.js';
 import { isLibraryOperator, shadowsLibraryName } from '../library-shadowing.js';
 import { canonicalBranch } from '../statement-position.js';
 import { BigDecimal } from '../../big-decimal/index.js';
@@ -4461,8 +4462,17 @@ function makeCanonicalFunctionCore(
         narrowArgsFromInferredSignature(assignedType, boxedOps);
     }
 
+    // A sealed import whose value cannot change is not waited on: no
+    // definition can supersede its value, so the call is final. A Document
+    // row that applies such an import (declared `function`, with a
+    // `Function` literal value) was refused with `provisional heads`
+    // (CE-1705).
     if (wildcardCallee || inferredFunctionValue) {
-      if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
+      if (
+        isProvisionalCaptureOpen() &&
+        hasNarrowableArg(boxedOps) &&
+        !isSealedImportValue(def.value)
+      )
         noteProvisionalCall(name);
     }
 

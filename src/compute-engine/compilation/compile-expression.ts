@@ -28,6 +28,7 @@ import {
   compileInputNames,
   symbolicInputsRead,
   withSymbolicInputs,
+  withTypedInputs,
 } from './vars-inputs.js';
 import { compileWithIrProfile, type IR_OPTIONS } from './ir/adapter.js';
 import { compileWithIrProfileGlsl } from './ir/adapter-glsl.js';
@@ -288,7 +289,12 @@ function withCompileInputs<O extends CompileExpressionOptions, X>(
   };
   const scope = compilationScope(expr, compileInputNames(rest));
   if (isCompileDeclineError(scope)) return scope;
-  const run = (): X | CompileDeclineError => {
+  const types = new Map(
+    names.map((name) => [name, ce.type(inputs[name]).type])
+  );
+  const run = (): X | CompileDeclineError =>
+    withTypedInputs(types, () => runWithInputs());
+  const runWithInputs = (): X | CompileDeclineError => {
     ce.pushScope();
     try {
       const occurrences: Record<string, Expression> = {};

@@ -12,6 +12,19 @@
 
 ### Resolved Issues
 
+- **A Document row can call an import declared `unknown` or `function`**
+  (CE-1705). With an import `f` declared `function` and given the value
+  `t ↦ 2t`, the row `g(x) = f(x) + 1` is prepared, and `g(2)` is `5`. It was
+  refused with `provisional heads f`: the call waited for a later definition
+  of `f`, which a sealed import cannot get.
+
+- **A formula row read through a function row is an `inputs` name of a
+  compilation** (CE-1706). With the rows `k = 2x_w` and `X(x, y) = kx/y`,
+  `X(x, y)` compiled to GLSL with `inputs: { k: 'real' }` and
+  `vars: { k: 'u_k', … }` reads the uniform `u_k`. It declined: `k` "has no
+  declared type". The type that `inputs` gives must fit in the type of the
+  row (`real` or `integer` for `k`); another type still declines.
+
 - **A point plus a name of unknown type is typed as a point** (CE-1319). With
   `y` undeclared, `(1, 2) + y` is typed `tuple<number, number>`; it was
   `number | tuple<number, number>`, although a number plus a point is an
@@ -23,16 +36,16 @@
   `2` is `3`, and so is the same body written with a `Delimiter` around the
   inner block; it was the formula `u + 1`, because the value read the new
   local, which had no value yet. A `Declare` of the parameter's name in the
-  body's own block is still the error `variable-redeclaration`. A block in between that declares
-  the name is closer than the parameter, and a global of the same name is
-  not read.
+  body's own block is still the error `variable-redeclaration`. A block in
+  between that declares the name is closer than the parameter, and a global
+  of the same name is not read.
 
 - **A function that passes its argument whole to another function and also
   uses it as a number reports a result that holds a list** (CE-1701). With
   `S(x) = Mean(x)` and `T(x) = S(x) + x`, `T` is typed
   `-> broadcastable<number>`, and `T([1, 2, 6])` is typed `vector<3>`; it was
-  `-> number` and `number`, while the value is `[4, 5, 9]`. A function with a default value or a rest
-  parameter is typed `-> any` in this case.
+  `-> number` and `number`, while the value is `[4, 5, 9]`. A function with a
+  default value or a rest parameter is typed `-> any` in this case.
 
 ## 0.199.0 _2026-11-22_
 

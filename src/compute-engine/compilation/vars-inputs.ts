@@ -13,6 +13,54 @@ import {
   withDeclaredTypeOnly,
   withShieldedValues,
 } from '../boxed-expression/constraint-subject.js';
+import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
+
+/**
+ * The names of the `inputs` option of the compilation in progress, each
+ * with the type the host gave it (`withTypedInputs()`), or `undefined`.
+ */
+let typedInputs: ReadonlyMap<string, Type> | undefined;
+
+/**
+ * Run `fn` (one compilation) with the names of the `inputs` option and their
+ * types in force: a definition of such a name that a called body reads, with
+ * a type inferred from its value, is an input when the given type fits in
+ * that type (`isTypedInputValue()`).
+ */
+export function withTypedInputs<T>(
+  types: ReadonlyMap<string, Type>,
+  fn: () => T
+): T {
+  const saved = typedInputs;
+  typedInputs = types;
+  try {
+    return fn();
+  } finally {
+    typedInputs = saved;
+  }
+}
+
+/**
+ * Whether `v`, a definition of `name` whose type was inferred from its value,
+ * is an input of the compilation in progress: `name` is a name of the
+ * `inputs` option, and the type given there is a subtype of the type of `v`,
+ * so the body that reads `v`, which was typed with the type of `v`, holds
+ * every value the host can give. A Document row bound to a formula
+ * (`k = 2x_w`, typed `real`) read through a function row (`X(x, y) = kx/y`)
+ * is such a definition (CE-1706). Its value is then hidden with its type
+ * kept (`withShieldedValues()`).
+ */
+function isTypedInputValue(name: string, v: BoxedValueDefinition): boolean {
+  const given = typedInputs?.get(name);
+  return (
+    given !== undefined &&
+    v.inferredType &&
+    !v.isConstant &&
+    v.storedValue?.operator !== 'Function' &&
+    isSubtype(given, v.type.type)
+  );
+}
 
 /**
  * Whether the `vars` text `text` is a read of the vars object (`_.name` or
@@ -84,15 +132,36 @@ export function withVarsValuesHidden<T>(
   if (vars === undefined) return fn();
   let hidden: [BoxedValueDefinition, Expression][] | undefined;
   let shielded: Set<BoxedValueDefinition> | undefined;
+  let typedShield: Set<BoxedValueDefinition> | undefined;
   const ce = expr.engine;
   const assumed = contextAssumedValues(ce);
-  for (const v of inputDefinitions(expr, Object.keys(vars)).keys()) {
+  for (const [v, name] of inputDefinitions(expr, Object.keys(vars))) {
+    // A definition with an inferred type that is a typed input: its value is
+    // shielded, so its type, which depends on the value, is kept.
+    if (isTypedInputValue(name, v)) {
+      (typedShield ??= new Set()).add(v);
+      continue;
+    }
     if (v.isConstant || v.inferredType) continue;
     // A value an assumption puts in force (`assume(a = 4)`): shielded.
     if (assumed.has(v)) (shielded ??= new Set()).add(v);
     const stored = v.storedValue;
     if (stored === undefined || stored.operator === 'Function') continue;
     (hidden ??= []).push([v, stored]);
+  }
+  if (typedShield !== undefined) {
+    const values = typedShield;
+    const inner = fn;
+    // An `assumption` state event on entry and on exit moves the cache
+    // generation, as for the shield of an assumed value below.
+    fn = () => {
+      ce._noteStateEvent({ kind: 'assumption' });
+      try {
+        return withShieldedValues(values, inner);
+      } finally {
+        ce._noteStateEvent({ kind: 'assumption' });
+      }
+    };
   }
   if (hidden === undefined && shielded === undefined) return fn();
   const shield = shielded;
@@ -144,11 +213,13 @@ function reachedInputDefinitions(
     seen.add(value);
     const stored = value.storedValue;
     // The value of an input is hidden, and not read, when its type is
-    // declared and it is not a function literal (`withVarsValuesHidden()`).
+    // declared and it is not a function literal (`withVarsValuesHidden()`),
+    // and when its type was inferred but the `inputs` option gives a subtype
+    // of it (`isTypedInputValue()`).
     if (
       names.has(name) &&
-      !value.inferredType &&
-      stored?.operator !== 'Function'
+      stored?.operator !== 'Function' &&
+      (!value.inferredType || isTypedInputValue(name, value))
     )
       return;
     push(stored);
@@ -271,6 +342,7 @@ export function symbolicInputsRead(
   }
   for (const [v, name] of definitions) {
     if (!read.has(name)) continue;
+    if (isTypedInputValue(name, v)) continue;
     const stored = v.isConstant ? undefined : v.storedValue;
     const holdsFunction = stored?.operator === 'Function';
     if (!v.isConstant && !holdsFunction) {

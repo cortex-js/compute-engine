@@ -778,7 +778,12 @@ to `_.n * _.x` with `inputs: { n: 'real' }`. The other names keep the
 definitions they were boxed with. A body that the expression calls reads
 the input too; when the body was written with a declaration of the name, it
 keeps the type of that declaration (a slider declared `real<-10..10>` and
-given as `real` is typed with the range inside the body). A name of
+given as `real` is typed with the range inside the body). When the body
+reads a definition whose type was inferred from its value (a Document row
+bound to a formula, `k = 2x_w`, typed `real`), that value is hidden for the
+compilation and the type kept, if the given type is a subtype of it: with
+`X(x, y) = kx/y`, `X(x, y)` with `inputs: { k: 'real' }` reads the input
+`k`; with `inputs: { k: 'list<real>' }` it declines (CE-1706). A name of
 `inputs` that such a body reads as a constant, or that is a function,
 declines, as a name of `symbolic` does: a constant has no value to leave
 out. The message names the option `inputs`, and `diagnostic.binding` is the

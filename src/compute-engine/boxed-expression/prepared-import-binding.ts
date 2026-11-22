@@ -26,6 +26,15 @@ export function sealPreparedNamespace(
 }
 
 /**
+ * True for a binding, or the value definition of one, that
+ * `sealPreparedNamespace()` sealed with no value write admitted: its value
+ * cannot change.
+ */
+export function isSealedImportValue(binding: object | undefined): boolean {
+  return binding !== undefined && writeAdmissions.get(binding) === 'none';
+}
+
+/**
  * True for a scope that `sealPreparedNamespace()` sealed: no name can be
  * declared in it.
  */
