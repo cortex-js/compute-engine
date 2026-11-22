@@ -3703,10 +3703,10 @@ function lowerOnce(
     // its block, after its last write.
     if (known?.binding.role === 'list' && known.binding !== whole)
       return listCopy(known.binding.v, known.binding.lane!);
-    if (known?.binding.parts)
-      known.binding.role === 'input'
-        ? partsDecline(e, name)
-        : decline(e, 'a tuple of tuples');
+    if (known?.binding.parts) {
+      if (known.binding.role === 'input') partsDecline(e, name);
+      decline(e, 'a tuple of tuples');
+    }
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
