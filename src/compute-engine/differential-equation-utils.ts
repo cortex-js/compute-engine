@@ -327,7 +327,9 @@ function prepareODE(
   const names = dependentNames(dependent);
   if (!names) return undefined;
 
-  if (!isFunction(limits, 'Limits')) return undefined;
+  // A step (`Limits(t, 0, 1, 0.1)`) is the step of a big operator's index,
+  // not of the solver: the solver does not read it, so it declines.
+  if (!isFunction(limits, 'Limits') || limits.nops > 3) return undefined;
   const independentName = sym(limits.op1);
   if (!independentName) return undefined;
 

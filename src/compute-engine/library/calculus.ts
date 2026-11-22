@@ -10019,14 +10019,17 @@ volumes
     // (not to be confused with Limit, which calculates the limit of a
     // function at a point)
     // It is a convenient function that prevents the first argument (the index)
-    // from being canonicalized
+    // from being canonicalized.
+    // The optional fourth operand is the step of a big operator's index, as
+    // in the Wolfram iterator `{i, imin, imax, di}`.
     Limits: {
       description: 'Limits of a function',
       complexity: 5000,
       broadcastable: false,
 
       lazy: true,
-      signature: '(index:symbol, lower:value, upper:value) -> tuple',
+      signature:
+        '(index:symbol, lower:value, upper:value, step:value?) -> tuple',
       canonical: (ops, { engine }) => canonicalLimits(ops, { engine }) ?? null,
     },
   },

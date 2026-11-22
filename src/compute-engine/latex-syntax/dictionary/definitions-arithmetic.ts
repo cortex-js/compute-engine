@@ -5443,6 +5443,23 @@ function serializeIndexingSet(
   if (indexExpr !== null && operator(indexExpr) === 'Hold')
     indexExpr = operand(indexExpr, 1);
 
+  // A stepped clause, `Limits(i, 1, 10, 2)` or `Tuple(i, 1, 10, 2)`, has no
+  // `_{i=1}^{10}` spelling. It is written as the `Element(i, Range(1, 10,
+  // 2))` clause that its canonical form is, `i\in 1..3..10`, which reads
+  // back as that clause.
+  const step = operands(indexingSet)[3] ?? null;
+  if (step !== null && indexExpr !== null && symbol(indexExpr) !== null)
+    return serializeIndexingSet(serializer, [
+      'Element',
+      indexExpr,
+      [
+        'Range',
+        operand(indexingSet, 2) ?? 'Nothing',
+        operand(indexingSet, 3) ?? 'Nothing',
+        step,
+      ],
+    ]);
+
   const lowerExpr = sanitizeLimitOperand(operand(indexingSet, 2));
   const upperExpr = sanitizeLimitOperand(operand(indexingSet, 3));
 

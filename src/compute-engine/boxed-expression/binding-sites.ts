@@ -240,6 +240,10 @@ function clauseIndex(op: Expression): Expression | undefined {
  * upper bound is `+∞`). A ranged index lets the body type more precisely:
  * `√(1 − ((k − 0.5)/40)²)` over `Limits(k, 1, 40)` is `real`, not `complex`.
  * Any other clause, or a `type` other than `integer`, keeps `type` unchanged.
+ * A stepped clause (`Limits(k, 1, 10, 2)`, `Tuple(k, 1, 10, 2)`) is a
+ * `Range`, and its index is left untyped (`undefined`), as the index of an
+ * `Element` clause is: `canonicalIndexingSet()` (`library/utils.ts`) types it
+ * from the elements of the range, which are real for `Range(1, 4, 0.5)`.
  *
  * `ops` are all the operands of the binder. When one of them ASSIGNS the
  * index (`Sum(Block(Assign(k, k + 1), k), Limits(k, 1, 2))`), the index can
@@ -253,6 +257,7 @@ function rangeIndexType(
   flatIndexes: ReadonlySet<number>
 ): TypeString | undefined {
   if (type !== 'integer' || !isFunction(op)) return type;
+  if (op.operator === 'Limits' && op.nops === 4) return undefined;
   if (op.operator === 'Limits')
     return rangeIndexTypeOf(
       op.ops[0],
@@ -280,8 +285,8 @@ function rangeIndexType(
  * `Limits(k, 1, 16)`; `Triple(k, 1, 16)`, the held iterator set
  * `{k, 1, 16}` and the parenthesized tuple `(k, 1, 16)` are read the same
  * way. The two-operand specification `{k, 16}` is `k` from 1 to 16, as in
- * Mathematica. With a fourth operand (a step), the clause is a `Range` and
- * is not typed here.
+ * Mathematica. With a fourth operand (a step), the clause is a `Range`, and
+ * its index is left untyped, as {@link rangeIndexType} describes.
  */
 function iteratorSpecIndexType(
   spec: ReadonlyArray<Expression>,
@@ -300,6 +305,7 @@ function iteratorSpecIndexType(
     );
   if (spec.length === 3)
     return rangeIndexTypeOf(spec[0], spec[1], spec[2], type, ops, flatIndexes);
+  if (spec.length === 4) return undefined;
   return type;
 }
 

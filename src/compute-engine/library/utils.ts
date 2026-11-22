@@ -4115,7 +4115,7 @@ export function canonicalLimits(
         lower = ops[0].canonical;
         upper = ops[1].canonical;
       }
-    } else if (ops.length === 3) {
+    } else if (ops.length === 3 || ops.length === 4) {
       index = ops[0] ?? ce.Nothing;
       lower = ops[1]?.canonical ?? ce.Nothing;
       upper = ops[2]?.canonical ?? ce.Nothing;
@@ -4124,6 +4124,11 @@ export function canonicalLimits(
 
     if (!isSymbol(index)) index = ce.typeError('symbol', index.type, index);
 
+    // `["Limits", "i", 1, 10, 2]`: the fourth operand is the step, as in the
+    // Wolfram iterator `{i, imin, imax, di}`. A big operator reads a stepped
+    // clause as `Element(i, Range(1, 10, 2))` (`canonicalIndexingSet()`).
+    if (ops.length === 4)
+      return ce._fn('Limits', [index, lower, upper, ops[3].canonical]);
     return ce._fn('Limits', [index, lower, upper]);
   }
   return null;
@@ -4359,6 +4364,9 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   // canonicalizing its operands) so re-canonicalization paths (like `subs`)
   // preserve the bounds.
   if (isFunction(expr, 'Limits')) {
+    // A stepped clause, `Limits(i, lo, hi, step)`, is the `Range` form, as
+    // the stepped `Tuple` and `Set` spellings below are.
+    if (expr.nops === 4) return steppedIndexingSet(expr.ops);
     // Explicitly declare the index BEFORE canonicalizing the bounds.
     // This ensures the index lands in the current (BigOp) scope even when
     // noAutoDeclare is set, so bounds like 'M' (which are free variables)
@@ -4396,22 +4404,13 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     const idx = setOps[0];
     if (!idx || !isSymbol(idx) || setOps.length < 2 || setOps.length > 4)
       return undefined;
+    // With a step, use the Range/Element form, as for a stepped `Limits`.
+    if (setOps.length === 4) return steppedIndexingSet(setOps);
     if (
       idx.symbol !== 'Nothing' &&
       !ce.context.lexicalScope.bindings.has(idx.symbol)
     )
       ce.declare(idx.symbol, 'integer');
-    if (setOps.length === 4) {
-      // With a step, use the Range/Element form: `Limits` has no step slot.
-      return ce.function('Element', [
-        idx.canonical,
-        ce.function('Range', [
-          setOps[1].canonical,
-          setOps[2].canonical,
-          setOps[3].canonical,
-        ]),
-      ]);
-    }
     // `{i, lo, hi}` → `Limits(i, lo, hi)` — same result as the `Tuple`/
     // `Element` forms, and (unlike Range) preserves symbolic bounds.
     if (setOps.length === 2)
@@ -4443,25 +4442,8 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
     // including its arity guard, so the two spellings are interchangeable.
     const tupleOps = expr.ops;
     if (tupleOps.length > 4) return undefined;
-    if (tupleOps.length === 4) {
-      let idx = tupleOps[0];
-      if (isFunction(idx, 'Hold')) idx = idx.op1;
-      if (!isSymbol(idx)) return undefined;
-      if (
-        idx.symbol !== 'Nothing' &&
-        !ce.context.lexicalScope.bindings.has(idx.symbol)
-      )
-        ce.declare(idx.symbol, 'integer');
-      // With a step, use the Range/Element form: `Limits` has no step slot.
-      return ce.function('Element', [
-        idx.canonical,
-        ce.function('Range', [
-          tupleOps[1].canonical,
-          tupleOps[2].canonical,
-          tupleOps[3].canonical,
-        ]),
-      ]);
-    }
+    // With a step, use the Range/Element form, as for a stepped `Limits`.
+    if (tupleOps.length === 4) return steppedIndexingSet(tupleOps);
     index = expr.op1;
     if (
       tupleOps.length === 2 &&
@@ -4499,6 +4481,33 @@ export function canonicalIndexingSet(expr: Expression): Expression | undefined {
   if (upper) return ce.function('Limits', [index, ce.One, upper]);
   if (lower) return ce.function('Limits', [index, lower]);
   return ce.function('Limits', [index]);
+}
+
+/**
+ * The canonical form of the stepped clause whose operands are
+ * `[index, lower, upper, step]` (`Limits(i, 1, 10, 2)`, `Tuple(i, 1, 10, 2)`
+ * or the held `Set` `{i, 1, 10, 2}`): the `Element` clause
+ * `Element(i, Range(1, 10, 2))`, canonicalized as `canonicalIndexingSet()`
+ * canonicalizes an `Element` clause. Its index takes the element type of the
+ * range, so a step that is not an integer (`Range(1, 4, 0.5)`) gives a real
+ * index. The binder hook leaves such an index untyped
+ * (`rangeIndexType()`, `boxed-expression/binding-sites.ts`). `undefined` when
+ * the index is not a symbol.
+ */
+function steppedIndexingSet(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  let idx = ops[0];
+  if (isFunction(idx, 'Hold')) idx = idx.op1;
+  if (!isSymbol(idx)) return undefined;
+  const ce = idx.engine;
+  return canonicalIndexingSet(
+    ce._fn(
+      'Element',
+      [idx, ce._fn('Range', [ops[1], ops[2], ops[3]], { canonical: false })],
+      { canonical: false }
+    )
+  );
 }
 
 export function canonicalBigop(
