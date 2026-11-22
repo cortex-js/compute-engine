@@ -1348,3 +1348,53 @@ describe('ce.macroNames (CE-1324)', () => {
     expect(ce.box('B').json).toEqual('B');
   });
 });
+
+describe('a letter of a compound symbol names a macro (CE-1657)', () => {
+  const withP = () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', { macro: ['Add', 't', 1] });
+    return ce;
+  };
+
+  test('the letters of a subscript join into one name', () => {
+    const ce = withP();
+    expect(ce.parse('I_{Past}=3').json).toEqual(['Equal', 'I_Past', 3]);
+    expect(ce.parse('I_{Past}+1').json).toEqual(['Add', 'I_Past', 1]);
+    expect(ce.box(['Subscript', 'I', 'P']).json).toBe('I_P');
+    expect(ce.box(['Subscript', 'P', 'a']).json).toBe('P_a');
+    expect(
+      ce.box(['Subscript', 'I', ['InvisibleOperator', 'P', 'a', 2]]).json
+    ).toBe('I_Pa2');
+  });
+
+  test('the macro outside the name is expanded', () => {
+    const ce = withP();
+    expect(ce.parse('P+I_{Past}').json).toEqual(['Add', 'I_Past', 't', 1]);
+  });
+
+  test('the index of a list base is a value, and expands the macro', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', { macro: 2 });
+    ce.declare('L', 'list<integer>');
+    expect(ce.box(['Subscript', 'L', 'P']).json).toEqual(['At', 'L', 2]);
+    expect(ce.box(['Subscript', 'Integers', 'P']).json).toEqual([
+      'QuotientRing',
+      'Integers',
+      2,
+    ]);
+  });
+
+  test('an index that is an expression expands the macro', () => {
+    const ce = withP();
+    expect(ce.parse('I_{P+1}').json).toEqual([
+      'Subscript',
+      'I',
+      ['Add', 't', 2],
+    ]);
+    expect(ce.parse('I_{(Pa)}').json).toEqual([
+      'Subscript',
+      'I',
+      ['Multiply', 'a', ['Add', 't', 1]],
+    ]);
+  });
+});
