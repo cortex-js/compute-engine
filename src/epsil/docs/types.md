@@ -548,6 +548,17 @@ p.x + p.y
 // ➔ 7
 ```
 
+A type defined as another declared type has the fields of that type, and
+the accessor reads them through both layers:
+
+```epsil-live
+type circle = tuple<r: number>
+type wrapped = circle
+let w = wrapped(circle(2))
+w.r + 1
+// ➔ 3
+```
+
 On a dictionary, `d.x` is exactly `d["x"]`, absent-key behavior included.
 On a record, a field that the type does not list is refused (see
 [records and dictionaries](#records-and-dictionaries)).

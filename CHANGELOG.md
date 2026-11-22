@@ -26,6 +26,11 @@
 
 ### Resolved Issues
 
+- **Epsil: a field of a value whose type is defined as another declared type
+  is read through both types** (CE-1667). With `type Circle = tuple<r:
+  number>` and `type Wrapped = Circle`, `Wrapped(Circle(2)).r + 1` is `3`; it
+  was `1 + Circle(2)`, with no diagnostic.
+
 - **The numeric value of a product with a list of fractions is the value of
   each scalar product** (CE-1653). `N(3·[1/3, 2/3])` is `[1, 2]`; it was
   `[0.999…9, 2.000…1]`, because each fraction was rounded before the

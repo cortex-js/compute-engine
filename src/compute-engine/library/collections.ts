@@ -8716,6 +8716,36 @@ const MAX_ABSENCE_MARKER_PROBE = 10;
  * list, an unnamed tuple, a scalar-bodied nominal…) — a static defect at a
  * `Field` site, per the design ruling. `undefined` = genuinely indeterminate
  * (`unknown`, an unresolved reference, an algebraic type) — stay symbolic. */
+/**
+ * The value under the layers of a nominal type whose definition is another
+ * nominal type: `Circle(2)` for `Wrapped(Circle(2))` with `type Wrapped =
+ * Circle`. A layer is stepped through only when the value is the tagged
+ * application of that type, with one operand; a transparent alias in a
+ * definition is read through. Any other value is returned as it is.
+ */
+function innerNominalValue(value: Expression): Expression {
+  let t = value.type.type;
+  const seen = new Set<string>();
+  while (
+    typeof t === 'object' &&
+    t.kind === 'reference' &&
+    !t.alias &&
+    !seen.has(t.name) &&
+    isFunction(value) &&
+    value.operator === t.name &&
+    value.nops === 1
+  ) {
+    seen.add(t.name);
+    let def = t.def;
+    while (typeof def === 'object' && def.kind === 'reference' && def.alias)
+      def = def.def;
+    if (typeof def !== 'object' || def.kind !== 'reference') break;
+    value = value.ops[0];
+    t = def;
+  }
+  return value;
+}
+
 function fieldBearingType(
   t: Type
 ): RecordType | ObjectType | TupleType | DictionaryType | 'none' | undefined {
@@ -17007,6 +17037,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // than guessing from the layout; the branch above answers as soon as a
       // real object arrives.
       if (rt.kind === 'object') return undefined;
+
+      // A value of a nominal type defined as another nominal type
+      // (`type Wrapped = Circle`) holds the inner value: its fields are read
+      // there, as the static type reads them through both layers (CE-1667).
+      if (rt.kind === 'record' || rt.kind === 'tuple')
+        base = innerNominalValue(base);
 
       if (rt.kind === 'record') {
         // A tagged nominal value: the payload is the single dictionary
