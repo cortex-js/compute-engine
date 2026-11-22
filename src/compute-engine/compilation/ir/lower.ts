@@ -176,6 +176,7 @@ import {
   rowsElementLane,
   tupleAxis,
   tupleOrInputType,
+  tupleParts,
 } from './lower-functions.js';
 import {
   COLLECTION,
@@ -903,6 +904,17 @@ function lowerOnce(
    *  name that `wholeRows()` lowers, the only one that may read one. */
   const rowsParams = new Set<V>();
   let rowsRead: Expression | undefined;
+  /** The value that stands for a tuple input read part by part
+   *  (`tupleParts()`, `input()`), which has no value of its own, and the
+   *  occurrence of its name that a part read (`At`) lowers, the only one
+   *  that may read it. */
+  const partsInputs = new Set<V>();
+  let partsRead: Expression | undefined;
+  const partsDecline = (e: Expression, name: string): never =>
+    decline(
+      e,
+      `${name}, a tuple whose parts have different lanes, other than in a read of a part at a constant index`
+    );
   /** `to`, marked a tuple where `from` is one, with the axis `from` has
    *  plus `shift`. */
   const keep = (from: V, to: V, shift = 0): V => {
@@ -1861,20 +1873,32 @@ function lowerOnce(
             );
           }
         }
+        // The first read of a tuple input read part by part makes its
+        // binding (`input()`).
+        if (
+          isSymbol(e.ops[0]) &&
+          lookup(e.ops[0].symbol) === undefined &&
+          tupleParts(e.ops[0].type.type, cx.wide) !== undefined
+        ) {
+          partsRead = e.ops[0];
+          symbol(e.ops[0], true);
+        }
         // A read of a list local written in place: in order with its writes.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
-        // An element of a tuple of tuples (`loop()`): a constant index.
+        // An element of a tuple of tuples (`loop()`), or a part of a tuple
+        // input read part by part: a constant index.
         const parts = owned?.binding.parts;
         if (parts !== undefined) {
+          const what =
+            owned!.binding.role === 'input'
+              ? 'a tuple whose parts have different lanes'
+              : 'a tuple of tuples';
           const j = e.ops[1].re;
           if (!isNumber(e.ops[1]) || !Number.isInteger(j))
-            decline(
-              e,
-              'At of a tuple of tuples at an index that is not a constant'
-            );
+            decline(e, `At of ${what} at an index that is not a constant`);
           const x = parts[j > 0 ? j - 1 : parts.length + j];
           if (x === undefined)
-            decline(e, 'At of a tuple of tuples at an index out of range');
+            decline(e, `At of ${what} at an index out of range`);
           return x;
         }
         if (owned?.binding.role === 'list') {
@@ -1895,8 +1919,9 @@ function lowerOnce(
         }
         const effects = b.effects;
         // A row of a `Chunk` or a `Partition` whose rows can have different
-        // lengths (`lists.chunks()`): at a constant index in range of a
-        // constant count only.
+        // lengths, or of an input or a parameter of the lane `rows`
+        // (`lists.chunks()`): at a constant index in range of a constant
+        // count only.
         const rows = lists.chunks(e.ops[0]);
         if (rows !== undefined && typeof rows !== 'number') {
           const s = rows.source();
@@ -1907,7 +1932,7 @@ function lowerOnce(
           if (k === undefined)
             decline(
               e,
-              'At of a Chunk or a Partition whose rows can have different lengths, at an index other than a constant in range of a constant count'
+              'At of a Chunk or a Partition whose rows can have different lengths, or of a list<list<…>> input or parameter, at an index other than a constant in range of a constant count'
             );
           return rows.groups?.[k] ?? s.at(b.constant(k, 'integer'));
         }
@@ -3628,7 +3653,11 @@ function lowerOnce(
   ): V | undefined => {
     const admitted = rowsRead === e;
     rowsRead = undefined;
+    const part = partsRead === e;
+    partsRead = undefined;
     const v = nameValue(e, want);
+    if (v !== undefined && partsInputs.has(v) && !part)
+      partsDecline(e, e.symbol);
     // A list of rows whose lengths can differ is read by `rows.at` and
     // passed whole only: `Length`, `Map` or arithmetic of it would read it
     // as a scalar.
@@ -3654,10 +3683,13 @@ function lowerOnce(
     // where the name had another declaration) declines.
     if (
       known?.binding.role === 'input' &&
-      !sameInput(
-        type(known.binding.v),
-        readAs(e.type.type, resolvedValueDefinition(e))
-      )
+      !(known.binding.parts !== undefined
+        ? tupleParts(e.type.type, cx.wide)?.join() ===
+          known.binding.parts.map((x) => type(x).lane).join()
+        : sameInput(
+            type(known.binding.v),
+            readAs(e.type.type, resolvedValueDefinition(e))
+          ))
     )
       decline(
         e,
@@ -3671,7 +3703,10 @@ function lowerOnce(
     // its block, after its last write.
     if (known?.binding.role === 'list' && known.binding !== whole)
       return listCopy(known.binding.v, known.binding.lane!);
-    if (known?.binding.parts) decline(e, 'a tuple of tuples');
+    if (known?.binding.parts)
+      known.binding.role === 'input'
+        ? partsDecline(e, name)
+        : decline(e, 'a tuple of tuples');
     if (known) return known.binding.v;
     const k = options.vars?.indexOf(name) ?? -1;
     if (k >= 0) {
@@ -3793,6 +3828,7 @@ function lowerOnce(
       known = outer;
     }
     note(name, t);
+    if (known?.parts !== undefined) partsDecline(e, name);
     if (known !== undefined) return known.v;
     const k = options.vars?.indexOf(name) ?? -1;
     // A `vars` name (`symbol()`): its text, read here at the entry.
@@ -3897,6 +3933,32 @@ function lowerOnce(
       decline(e, COLLECTION);
     if (!positional && interval && enclosureInput(t) !== undefined)
       enclosure = true;
+    // A tuple whose parts have different lanes (`tuple<string, integer>`),
+    // on JavaScript: a parameter of the entry for each part, read by `At`
+    // at a constant index only (`partsRead`).
+    const lanes =
+      ir === undefined &&
+      !positional &&
+      !b.literal &&
+      options.javascript &&
+      !bigint &&
+      !interval
+        ? tupleParts(t, cx.wide)
+        : undefined;
+    if (lanes !== undefined) {
+      const parts = lanes.map((lane, j) => {
+        const param = b.param(name, scalarType(lane), false, j);
+        return lane === 'string'
+          ? b.entryOp('text.in', [param], scalarType('string'))
+          : param;
+      });
+      // No instruction defines it: a read of it that escapes the checks
+      // fails the verification of the program.
+      const v = b.newValue({ lane: 'string', shape: [lanes.length] });
+      partsInputs.add(v);
+      frames[0].names.set(name, { v, role: 'input', parts });
+      return v;
+    }
     // Named by the input, not by its declaration `Typed(…)`.
     if (ir === undefined)
       throw new Decline(
@@ -6275,6 +6337,7 @@ function lowerOnce(
     scalar,
     wholeRows,
     rowsParams,
+    rowsElementLane,
     apply,
     type,
     constant,
@@ -6291,6 +6354,7 @@ function lowerOnce(
     fold: options.fold !== false,
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
+    bigint,
     unrollSums: options.unrollSums ?? 0,
     unrollBuilds: options.unrollBuilds ?? 0,
     attempted: options.attempted ?? (() => {}),

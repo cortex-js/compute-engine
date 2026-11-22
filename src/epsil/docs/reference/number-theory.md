@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 62 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 70 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -20,6 +20,18 @@ it has none), with its signature in the engine's type syntax. The
 category.
 
 ## Definitions
+
+### algebraicNumberNorm
+
+MathJSON `AlgebraicNumberNorm` · `(number) -> number`
+
+The norm of a over ℚ in the field ℚ(a): (−1)ᵈ times its minimal polynomial’s constant term over its leading one.
+
+### algebraicNumberTrace
+
+MathJSON `AlgebraicNumberTrace` · `(number) -> number`
+
+The trace of a over ℚ in the field ℚ(a): minus its minimal polynomial’s second coefficient over its leading one.
 
 ### bernoulliB
 
@@ -328,6 +340,12 @@ MathJSON `IsAbundant` · `(integer) -> boolean`
 
 True if n is an abundant number (sum of divisors &gt; 2n).
 
+### isAlgebraicInteger
+
+MathJSON `IsAlgebraicInteger` · `(number) -> boolean`
+
+Whether a is an algebraic integer: a root of a monic polynomial over ℤ.
+
 ### isCenteredSquare
 
 MathJSON `IsCenteredSquare` · `(integer) -> boolean`
@@ -430,6 +448,12 @@ lucasL(10)
 // ➔ 123
 ```
 
+### minimalPolynomial
+
+MathJSON `MinimalPolynomial` · `(number, any) -> expression`
+
+The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient.
+
 ### modularInverse
 
 MathJSON `ModularInverse` · `(integer, integer) -> integer`
@@ -517,6 +541,24 @@ nthPrime(10)
 // ➔ 29
 ```
 
+### numberFieldDiscriminant
+
+MathJSON `NumberFieldDiscriminant` · `(number) -> integer`
+
+The discriminant of the field ℚ(a): of its ring of integers.
+
+### numberFieldIntegralBasis
+
+MathJSON `NumberFieldIntegralBasis` · `(number) -> list<number>`
+
+A ℤ-basis of the ring of integers of ℚ(a), written on the powers of the generator read (the radical or root a is written in), as Wolfram writes it.
+
+### numberFieldSignature
+
+MathJSON `NumberFieldSignature` · `(number) -> list<integer>`
+
+The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones.
+
 ### partitionsP
 
 MathJSON `PartitionsP` · `(integer) -> integer`
@@ -538,6 +580,12 @@ Number of partitions of n into distinct parts (equivalently, into odd parts), q(
 partitionsQ(10)
 // ➔ 10
 ```
+
+### polynomialRoot
+
+MathJSON `PolynomialRoot` · `(any, any, integer?) -> number`
+
+The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `PolynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `PolynomialRoot` until `N()`. Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2
 
 ### powerMod
 

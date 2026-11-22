@@ -66,6 +66,9 @@ export type Syntax = {
   positional(name: string, index: number): string;
   /** The length of the input whose read is `list`. */
   length(list: string): string;
+  /** The part `index` of the tuple `tuple`, an input read part by part
+   *  (`IRFunction.partOf`). */
+  part?(tuple: string, index: number): string;
   /** The value of an input or a positional parameter of the entry of type
    *  `type`, from its read `text`. Absent: the read. */
   read?(text: string, type: IRType): string;
@@ -292,10 +295,12 @@ export function printProgram(
   const positional = entry.positional ?? 0;
   entry.body.params.forEach((v, k) => {
     const name = entry.paramNames[k];
-    const input =
+    const part = entry.partOf?.[k];
+    const whole =
       k < positional
         ? syntax.positional(name, argumentIndex(entry, k))
         : syntax.input(name, k);
+    const input = part === undefined ? whole : syntax.part!(whole, part);
     names.set(
       v,
       entry.lengthOf[k]

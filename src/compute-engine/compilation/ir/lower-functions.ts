@@ -185,6 +185,47 @@ export function tupleOrInputType(
     : { lane, shape: [n] };
 }
 
+/** The lane of each part of a tuple of scalars whose parts are not all of
+ *  one lane, a string among them (`tuple<string, integer>`), or
+ *  `undefined`: the lanes `string`, `integer`, `real` and `boolean`, an
+ *  integer among reals at one position of a union of tuples being a real.
+ *  On JavaScript such an input is read part by part (`partOf`), each part
+ *  on its lane: the compiled code reads a part at a constant index only. */
+export function tupleParts(
+  t: Type,
+  wide: 'real' | 'complex' = 'real'
+): Lane[] | undefined {
+  const members = tupleMembers(present(t));
+  if (members === undefined) return undefined;
+  const n = members[0].elements.length;
+  if (n === 0 || members.some((m) => m.elements.length !== n)) return undefined;
+  const lanes: Lane[] = [];
+  for (let j = 0; j < n; j++) {
+    const at = new Set(
+      members.map((m) => {
+        const x = m.elements[j].type;
+        const ir = x === 'unknown' ? undefined : inputType(x, wide, true);
+        return ir?.shape.length === 0 ? ir.lane : undefined;
+      })
+    );
+    const lane =
+      at.size === 1
+        ? [...at][0]
+        : at.size === 2 && at.has('real') && at.has('integer')
+          ? 'real'
+          : undefined;
+    if (
+      lane !== 'string' &&
+      lane !== 'integer' &&
+      lane !== 'real' &&
+      lane !== 'boolean'
+    )
+      return undefined;
+    lanes.push(lane);
+  }
+  return lanes.includes('string') ? lanes : undefined;
+}
+
 /** A union of one type and `nan` or `missing` members is that type
  *  (`missing | rational`, `integer | nan` is an integer, `nan | number`,
  *  `complex | nan`): the compiled

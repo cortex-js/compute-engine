@@ -51,7 +51,7 @@ import {
 import { checkDeadline } from '../../common/interruptible.js';
 import { kleeneEvery } from '../../common/kleene.js';
 import { isMergeable } from '../boxed-expression/effects-of.js';
-import { guardDigitsN } from './exact-operands-under-n.js';
+import { guardDigitsBinomialN } from './exact-operands-under-n.js';
 import {
   collectionContains,
   enumerableFromAllSources,
@@ -432,8 +432,11 @@ function binomialType(
   return 'number';
 }
 
-/** The `evaluate` handler of `Binomial` and `Choose`. */
-const evaluateBinomialHandler = guardDigitsN(
+/**
+ * The `evaluate` handler of `Binomial` and `Choose`. Its Gamma quotient
+ * has a condition number that grows with the operands (`Binomial(n, n/2)`).
+ */
+const evaluateBinomialHandler = guardDigitsBinomialN(
   ([n, k], { numericApproximation, engine: ce, expression }) => {
     // Exact operands as written; a float operand keeps its own value.
     const written =

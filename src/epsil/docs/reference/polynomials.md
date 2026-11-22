@@ -25,7 +25,7 @@ category.
 
 MathJSON `AlgebraicGenerator` · `(list<number>) -> number`
 
-An abstract generator of Q[t]/(m), specified by ascending rational coefficients of an irreducible polynomial m. No complex embedding is selected.
+Deprecated: `AlgebraicGenerator(List(c₀, …, cₙ))` is `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root of an irreducible polynomial with no complex embedding selected.
 
 ### apart
 

@@ -236,6 +236,8 @@ export type Binding = {
     readonly widen?: Expression;
   };
   parts?: readonly V[];
+  /** The carried accumulator of a `Reduce` by a function literal. */
+  accumulator?: boolean;
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };
@@ -276,6 +278,9 @@ export type Lowering = {
   wholeRows(e: Expression): V;
   /** The inputs and the parameters of the lane `rows`. */
   readonly rowsParams: Set<V>;
+  /** The lane of the elements of a value of the engine type `t` that is of
+   *  the lane `rows` as an input or a parameter (`rowsElementLane()`). */
+  rowsElementLane(t: Type): 'integer' | 'real' | undefined;
   /** Apply the row `r`, or the row of the library head of that name, to
    *  `args`. */
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;
@@ -329,6 +334,8 @@ export type Lowering = {
   readonly budget?: number;
   /** The target holds a list of a run-time length (`LowerOptions`). */
   readonly runtimeLengths: boolean;
+  /** The `bigint` mode. */
+  readonly bigint: boolean;
   /** The most passes of a `Sum` or a `Product` of constant bounds that is
    *  written out (`LowerOptions`). */
   readonly unrollSums: number;

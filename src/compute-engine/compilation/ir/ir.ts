@@ -148,6 +148,10 @@ export type IRFunction = {
    *  `lengthOf` parameter is the length of the input of that name. */
   readonly paramNames: string[];
   readonly lengthOf: boolean[];
+  /** The entry: a parameter with a `partOf` index is the part of that index
+   *  of the input of its name, a tuple whose parts have different lanes
+   *  (`tupleParts()`, JavaScript only). */
+  readonly partOf?: (number | undefined)[];
   /** The first `positional` parameters of the entry are passed by position
    *  (the parameters of a root function literal, with the length of a list
    *  of run-time length before it); the others are inputs. */
@@ -465,6 +469,7 @@ export class Builder {
   private open: Region[] = [];
   private readonly paramNames: string[] = [];
   private readonly lengthOf: boolean[] = [];
+  private readonly partOf: (number | undefined)[] = [];
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
   effects = 0;
@@ -513,6 +518,9 @@ export class Builder {
       name: 'main',
       paramNames: this.paramNames,
       lengthOf: this.lengthOf,
+      ...(this.partOf.some((j) => j !== undefined)
+        ? { partOf: this.partOf }
+        : {}),
       positional: this.positional,
       literal: this.literal,
       ...(tuple ? { tuple } : {}),
@@ -568,12 +576,14 @@ export class Builder {
     this.current().body.push(i);
   }
 
-  /** A parameter of the entry: the input `name`, or its length. */
-  param(name: string, type: IRType, lengthOf = false): V {
+  /** A parameter of the entry: the input `name`, its length, or its part
+   *  of the index `part`. */
+  param(name: string, type: IRType, lengthOf = false, part?: number): V {
     const v = this.newValue(type);
     this.open[0].params.push(v);
     this.paramNames.push(name);
     this.lengthOf.push(lengthOf);
+    this.partOf.push(part);
     return v;
   }
 

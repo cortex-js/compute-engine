@@ -127,7 +127,7 @@ import {
   expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
-import { guardDigitsN } from './exact-operands-under-n.js';
+import { guardDigitsN, guardDigitsPoleN } from './exact-operands-under-n.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).
@@ -297,7 +297,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: guardDigitsN(([z], { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN(([z], { numericApproximation, engine }) => {
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
           return engine.PositiveInfinity;
         const infinite = infiniteGammaFamilyValue(z, engine);

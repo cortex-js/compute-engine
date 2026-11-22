@@ -771,6 +771,18 @@ and in the bigint mode; a string of a `vars` name; `String` of a number (its
 text follows the engine's formatting options); a function as the replacement of
 `StringReplace`; a `RegExp` that is not the library operator.
 
+A tuple input whose parts are strings and numbers or Booleans
+(`tuple<string, integer>`, `tupleParts()` of `lower-functions.ts`; #640) is read
+part by part on JavaScript: the entry has a parameter for each part, of the lane
+of that part, marked with its index in `IRFunction.partOf` and printed `_.T[j]`
+(a string part through `text.in`). The binding of the name holds the parts
+(`Binding.parts`), and `At(T, k)` of a constant `k` (from 1, or from the end
+when negative) reads one; any other read of the name (`T`, `Length(T)`,
+`At(T, n)`, an argument of a call, a read in a user function) declines. The
+entry plan checks the input once, as a list (`plan.lists`), and its `lowered` is
+`point`. GLSL, the interval and the bigint modes, a positional parameter and a
+parameter of a user function of that type decline.
+
 A list of strings (CE-1548, CE-1556) is checked by `stringListRefusal()` of
 `index.ts` after the passes: it has rank 1; it is made by a `list` instruction,
 by a region of `TEXT_LIST_MAKERS` of `lower-strings.ts` (`text.chars`, `build`,
@@ -860,19 +872,26 @@ stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
 `lower-functions.ts`) is of the lane too, on JavaScript only (CE-1607): an input
 read by name, a positional parameter of a root function literal, and a parameter
 of a user function of that type. It is the host's array of arrays, whose rows
-can have different lengths, and it is read in two ways only: the element
+can have different lengths, and it is read in three ways: the element
 `At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the elements; `_atr`
 of the JavaScript printer, NaN where `i` is out of range of `g` or `j` of its
-row, from the end when negative, as `At` of a number), and an argument of a call
-at a parameter of that lane, which takes it whole. Every other read of the name
-declines (`symbol()` of `lower.ts`, which admits only the occurrence that
-`wholeRows()` lowers): a row `At(g, i)` (`Length` of an absent row would give 0,
-where the interpreter gives `Missing`), `Length(g)`, `Map` over `g`, arithmetic,
-`g` as the result, a binding to a local, an argument of a parameter of another
-type, and a list that the program makes at such a parameter (`sq(sq(g))`). A
-list of lists of booleans, the bigint and the interval modes and GLSL decline
-the input. The entry checks it as a list (a string or a typed array is refused),
-and a batch shares it between its cells.
+row, from the end when negative, as `At` of a number); row by row, as the rows
+of a `Chunk` (`chunks()` of `lower-lists.ts`, #638): the count of the rows is
+`rows.count` (`g.length`) and the row `i` the build of `rows.len`
+(`g[i].length`) elements `rows.get` or `rows.get.int` (`g[i][j]`), each index
+from 0 in range, so `Map` whose value for a row is not a list, `Length`,
+`Count`, `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over `g` read it; and an
+argument of a call at a parameter of that lane, which takes it whole. Every
+other read of the name declines (`symbol()` of `lower.ts`, which admits only the
+occurrence that `wholeRows()` lowers): a row `At(g, i)` other than at a constant
+index in range of a constant count (`Length` of an absent row would give 0,
+where the interpreter gives `Missing`), a `Map` or a `Filter` whose value is a
+list of rows ("a list of lists of run-time length"), arithmetic, `g` as the
+result, a binding to a local, an argument of a parameter of another type, and a
+list that the program makes at such a parameter (`sq(sq(g))`). A list of lists
+of booleans, the bigint and the interval modes and GLSL decline the input. The
+entry checks it as a list (a string or a typed array is refused), and a batch
+shares it between its cells.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
@@ -2160,9 +2179,18 @@ built the same way, with the interpreter's value for every length, also 0:
   region `iterate` over the length of `L`: the element `k` is `f(acc, L[k])`,
   and without `x0` the first element is `L[0]`. `Reduce(L, f, x0)` of a function
   literal or a user function of two parameters is a counted loop of
-  `f(acc, L[k])` from `x0`. Real numbers only; an integer start keeps the
-  integer lane when every step gives an integer (a trial lowering, not emitted,
-  as for `Iterate`).
+  `f(acc, L[k])` from `x0`; `Reduce(L, f)` seeds it with `L[0]` and runs from
+  the second element (of an empty list it throws `out-of-range`, where the
+  interpreter gives `Nothing`). An integer start keeps the integer lane when
+  every step gives an integer (a trial lowering, not emitted, as for `Iterate`).
+  The accumulator of `Reduce` can also be a Boolean (a boolean carried value), a
+  flat list of reals, integers or Booleans, or a tuple of scalars: the loop
+  carries it as it carries a list local written whole ("Lists"). A list of a
+  stated length, a tuple always, is one carried value of that length, which
+  every step must keep; otherwise (a `Map` of a run-time length, or `List()`,
+  whose element type is the body's, found by a trial lowering) it is carried as
+  its length then the list, on JavaScript only (not GLSL, not the `bigint`
+  mode). The interval mode declines every `Reduce` by a function.
 - `Tabulate(f, n1, …, nd)` (also `Table` of one index from 1) is the nested
   builds of `f(i1, …, id)` at the indices from 1; a count below 1 is empty, a
   real count is tested at run time (`count.int`), the inner counts must be

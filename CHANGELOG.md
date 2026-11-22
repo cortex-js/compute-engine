@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`AlgebraicGenerator(List(c₀, …, cₙ))` is deprecated: it is
+  `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root with no
+  embedding.** It stays for one release as an alias that canonicalizes to
+  `PolynomialRoot`, so `AlgebraicGenerator(List(-2, 0, 1))` is now
+  `PolynomialRoot(t² − 2, t)`, and
+  `Factor(x² − 2, x, AlgebraicGenerator(List(-2, 0, 1)))` prints its factors
+  with `PolynomialRoot(t² − 2, t)`. `PolynomialRoot(p, x, k)`, with an index,
+  is the `k`-th root, one particular complex number (PR #493, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#492](https://github.com/cortex-js/compute-engine/issues/492)).
+
 ### New Features
 
 - **Signature help marks optional, rest and implicit parameters, and covers
@@ -34,6 +47,90 @@
   permutation that moves a point above n is
   `Error("permutation-outside-action")` (#622, contributed by
   [enumeratio](https://github.com/enumeratio)).
+- **Algebraic numbers: minimal polynomials, norms and traces, and the ring of
+  integers of the field a number generates.** `MinimalPolynomial(1 + ∛2, x)`
+  is `x³ − 3x² + 3x − 3`, `MinimalPolynomial(1/(1 + √2), x)` is
+  `x² + 2x − 1`, `IsAlgebraicInteger((1 + √−5)/2)` is `False`,
+  `AlgebraicNumberNorm(1 + √2)` is `−1` and `AlgebraicNumberTrace(1 + √2)` is
+  `2`. `NumberFieldDiscriminant(∛19)` is `−1083`,
+  `NumberFieldIntegralBasis(∛19)` is `[1, ∛19, (1 + ∛19 + ∛19²)/3]` and
+  `NumberFieldSignature(∛2)` is `[1, 1]`. The field invariants are those of
+  the field ℚ(a) that the argument generates, also when it is a proper
+  subfield (`NumberFieldDiscriminant(PolynomialRoot(x⁴ − 2, x, 1)²)` is `8`),
+  and a rational generates ℚ. Under `N()` the argument is read exactly and
+  the answer is approximated.
+
+  `PolynomialRoot(p, x, k)` is Mathematica's `Root[Function[x, p], k]`: the
+  `k`-th root of the polynomial `p` in the bound variable `x`, real roots
+  first in increasing order, then complex roots by real part, each conjugate
+  pair together with the lower one first, as Mathematica does: the roots of
+  `(x² − 2x + 2)(x² − 2x + 5)` are `1 − i`, `1 + i`, `1 − 2i`, `1 + 2i`.
+  The roots are numbered only when disks around them prove
+  their separation and the order of their real parts; otherwise the call
+  stays unevaluated. The root of a quadratic is a radical; the root of a
+  cubic or higher stays `PolynomialRoot` until `N()`, which gives it for any
+  degree. `PolynomialRoot(p, x)` with no index is the abstract root of an
+  irreducible `p`, with no embedding. `Root` is still the n-th root.
+
+  An argument is read as a polynomial in one generator: a radical of a
+  rational (`Root(-2, 3)` is the real cube root, as everywhere in the engine,
+  and `Root(-2, 6)` the principal sixth root), `i`, the golden ratio or a
+  `PolynomialRoot`, with sums, products, powers and quotients. Several
+  numbered roots of one irreducible polynomial are read in its splitting
+  field: `MinimalPolynomial(PolynomialRoot(x³ − 2, x, 1) + PolynomialRoot(x³ −
+  2, x, 2), x)` is `x³ + 2`. Anything else, such as `√2 + √3` or `π`, a field
+  of degree above 12, or a polynomial whose irreducibility the factorization
+  does not prove, stays unevaluated, with its argument as written. The ring
+  of integers comes from Eisenstein's criterion and Round 2 (Cohen, _A Course
+  in Computational Algebraic Number Theory_, §6.1–6.2), under the engine's
+  deadline; the field arithmetic, characteristic polynomials and
+  discriminants are those of the number-field code of `Factor`. The new
+  operators are not compiled (PR #493, contributed by
+  [enumeratio](https://github.com/enumeratio), fixes
+  [#492](https://github.com/cortex-js/compute-engine/issues/492)).
+
+- **`Reduce` and `Fold` by a function literal compile with a list, tuple or
+  Boolean accumulator.** The compiler declined a fold whose accumulator was not
+  a real number: `Fold((acc, k) => [acc[2], acc[1] + acc[2]], [0, 1], 1..n)`, a
+  Fibonacci pair, or a fold that keeps a Boolean flag. The loop now carries the
+  accumulator: a list or tuple of a stated length is one carried value, and a
+  list of a run-time length (`Map(z => 0, 1..n)`, or `List()` that the body
+  appends to) is carried with its length, on JavaScript only. With no initial
+  value, `Reduce(L, f)` seeds the accumulator from the first element, so a list
+  of Booleans or of points folds too. A step that changes the length of a tuple,
+  a list of points or a matrix as accumulator, GLSL and the interval mode still
+  decline (#647, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **A tuple input whose parts are strings and numbers compiles on
+  JavaScript.** With `T` declared `tuple<string, integer>`,
+  `If(T[1] = "A", 2·T[2], T[2] + 1)` declined ("the input T of type
+  tuple<string, integer>"); it compiles, and `run({ T: ['A', 3] })` is `6`.
+  The compiled code reads each part at a constant index; a read of the whole
+  tuple, of its length or of a part at a run-time index, a function that reads
+  it or takes it as an argument, GLSL, the interval mode and the `bigint` mode
+  still decline. A `list<any>` input stays refused (#640, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **The recursive form that compiles is documented.** A function literal
+  applied to itself (`Apply(f, f, L)` with `f = (self, t) ↦ …self(self, …)…`)
+  still declines: its argument `self` is a function value passed to a
+  function. Written as a named function with a declared signature,
+  `s := t ↦ If(Length(t) = 0, 0, First(t) + s(Rest(t)))` with `s` declared
+  `(list<integer>) -> integer`, the recursion compiles on JavaScript and gives
+  the interpreter's value (#639, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **A `list<list<integer>>` or `list<list<real>>` input is read row by row in
+  compiled code.** Its rows can have different lengths, and compiled code read
+  only its elements `g[i][j]`: `Map(r ↦ Length(r), g)`,
+  `Map(r ↦ Reduce(r, Add, 0), g)`, `Length(g)` and `Count(g)` declined. On
+  JavaScript, `Map` whose value for a row is not a list, `Length`, `Count`,
+  `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over such an input or parameter
+  now compile, and read each row of the host's array in place. A row at an
+  index known only at run time, a `Map` or a `Filter` that gives a list of
+  rows, a tuple that holds such a list, a typed `Apply` parameter of that type
+  and a list of lists of run-time length built in the program still decline
+  (#638, reported by [enumeratio](https://github.com/enumeratio)).
 
 ### Resolved Issues
 
@@ -46,6 +143,23 @@
   same `S`, `T(x) = S(x) + x` now gives `[4, 5, 9]` for `[1, 2, 6]`, as a plain
   `ce.assign()` did, where it gave `[2, 4, 12]`. A callee that maps its argument
   (`Sin`, or a name that holds `Norm`) still maps it.
+
+- **Under `.N()`, the guard digits of an exact operand grow with its nearness
+  to a pole and, for some functions, with its size.** An exact operand was
+  read with 10 guard digits, too few past a condition number of 10^10:
+  at 30 digits, `Gamma(3000000001/3)` was 7 units off in the last digit,
+  `Zeta(-3000000001/3)` 2 units, `Binomial` of two operands near
+  10^15 lost 5 of 30 digits, and `Beta(1/3, -13/3 + 10^-29)` had 11 correct
+  digits of 30. Near a pole, one digit is added per power of ten of the
+  distance of an operand, or of `a + b` for `Beta` and `n - k` for
+  `Binomial`, to the pole, computed from the exact operands; this is for the
+  gamma family, `Beta`, `Binomial` and `HurwitzZeta`. For `Gamma`,
+  `Factorial`, `Zeta`, `DirichletEta`, `HurwitzZeta`, `Binomial` and `e^x`,
+  whose condition number grows with the operand, one digit is added per
+  power of ten of the operand above 100. Past 500 added digits the
+  expression stays unevaluated: `Gamma(10^600 + 1/3)` (#618, contributed by
+  [enumeratio](https://github.com/enumeratio) in PR #619).
+
 - **Members after a dot are listed for a value made by a constructor.** After
   `let c = Circle(1)` (no type annotation), completion at `c.` lists the
   members of `Circle`, and `c.scale(` has signature help; before, both were

@@ -136,7 +136,8 @@ algebraic expressions. Unsupported shorthands remain unevaluated.
 
 ## General algebraic fields
 
-The single new operation is `AlgebraicGenerator(coefficients)`. Its argument is
+The single new operation was `AlgebraicGenerator(coefficients)`, now a deprecated
+alias of `PolynomialRoot(p, t)` (`p` the polynomial with those coefficients). Its argument is
 a `List` of exact rational coefficients in ascending degree order. For example,
 `AlgebraicGenerator([-2, 0, 0, 1])` denotes the abstract generator α satisfying
 α³ − 2 = 0. A general quintic field can use
