@@ -73,6 +73,18 @@
   [enumeratio](https://github.com/enumeratio), fixes
   [#492](https://github.com/cortex-js/compute-engine/issues/492)).
 
+- **`Reduce` and `Fold` by a function literal compile with a list, tuple or
+  Boolean accumulator.** The compiler declined a fold whose accumulator was not
+  a real number: `Fold((acc, k) => [acc[2], acc[1] + acc[2]], [0, 1], 1..n)`, a
+  Fibonacci pair, or a fold that keeps a Boolean flag. The loop now carries the
+  accumulator: a list or tuple of a stated length is one carried value, and a
+  list of a run-time length (`Map(z => 0, 1..n)`, or `List()` that the body
+  appends to) is carried with its length, on JavaScript only. With no initial
+  value, `Reduce(L, f)` seeds the accumulator from the first element, so a list
+  of Booleans or of points folds too. A step that changes the length of a tuple,
+  a list of points or a matrix as accumulator, GLSL and the interval mode still
+  decline (#647, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ### Resolved Issues
 
 - **Under `.N()`, the guard digits of an exact operand grow with its nearness

@@ -6291,6 +6291,7 @@ function lowerOnce(
     fold: options.fold !== false,
     budget: options.iterationBudget,
     runtimeLengths: options.runtimeLengths ?? true,
+    bigint,
     unrollSums: options.unrollSums ?? 0,
     unrollBuilds: options.unrollBuilds ?? 0,
     attempted: options.attempted ?? (() => {}),
