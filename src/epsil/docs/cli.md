@@ -387,9 +387,11 @@ The value of the last statement is written to standard output. Diagnostics are
 written to standard error with their source location and an excerpt:
 
 ```text
-1:4 error: Unexpected symbol "+"
+error: Unexpected symbol "+"
+ --> 1:3
+  |
 1 | 1 +
-       ^
+  |   ^
 ```
 
 The process exits with:
