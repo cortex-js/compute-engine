@@ -1253,15 +1253,42 @@ function mergeCheck(rev) {
     [ours, theirs] = [`${m}^1`, `${m}^2`];
   }
   const base = git('merge-base', ours, theirs);
-  // `--no-renames`: a new file must not be paired with a deleted one.
+  // `--no-renames`: a new file must not be paired with a deleted one. The
+  // paths are from the top of the worktree (`:(top)`), wherever it runs.
   const diff = (side, options, path) =>
-    git('diff', '--no-renames', ...options, base, side, '--', path);
-  /** id → the additions that took it, each as a string to compare. */
+    git('diff', '--no-renames', ...options, base, side, '--', `:(top)${path}`);
+  const show = (rev, path) => {
+    try {
+      return execFileSync('git', ['show', `${rev}:${path}`], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return '';
+    }
+  };
+  const ids = (text, re) => [...text.matchAll(re)].map((m) => Number(m[1]));
+  // An id that exists at the base was taken before the two sides split.
+  const atBase = new Set([
+    ...ids(
+      git('ls-tree', '--name-only', base, ':(top)issues/'),
+      /^issues\/CE-(\d+)\.md$/gm
+    ),
+    ...ids(show(base, 'issues/CLOSED.md'), /^- CE-(\d+) /gm),
+    ...ids(show(base, 'ROADMAP.md'), /^### CE-(\d+)\./gm),
+  ]);
+  /**
+   * id → what took it: an issue file, by the first line of its body (the
+   * sentence of what the user sees, which later edits keep), a CLOSED.md
+   * line, or a ROADMAP heading.
+   */
   const taken = (side) => {
-    const ids = new Map();
+    const found = new Map();
     const add = (id, what) => {
-      if (!ids.has(id)) ids.set(id, new Set());
-      ids.get(id).add(what);
+      if (atBase.has(id)) return;
+      if (!found.has(id)) found.set(id, new Set());
+      found.get(id).add(what);
     };
     for (const f of diff(
       side,
@@ -1269,7 +1296,10 @@ function mergeCheck(rev) {
       'issues/'
     ).split('\n')) {
       const m = /^issues\/CE-(\d+)\.md$/.exec(f);
-      if (m) add(Number(m[1]), `file ${git('rev-parse', `${side}:${f}`)}`);
+      if (!m) continue;
+      const body = show(side, f).split(/^---$/m)[2] ?? '';
+      const summary = body.split('\n').find((l) => l.trim() !== '') ?? '';
+      add(Number(m[1]), `an issue file: ${summary.trim().slice(0, 100)}`);
     }
     for (const [file, re] of [
       ['issues/CLOSED.md', /^\+- CE-(\d+) /],
@@ -1277,9 +1307,9 @@ function mergeCheck(rev) {
     ])
       for (const line of diff(side, ['-U0'], file).split('\n')) {
         const m = re.exec(line);
-        if (m) add(Number(m[1]), `${file}: ${line.slice(1)}`);
+        if (m) add(Number(m[1]), `${file}: ${line.slice(1, 120)}`);
       }
-    return ids;
+    return found;
   };
   const ourIds = taken(ours);
   const theirIds = taken(theirs);
@@ -1287,13 +1317,19 @@ function mergeCheck(rev) {
   const both = [...theirIds.keys()]
     .filter((id) => ourIds.has(id) && !same(ourIds.get(id), theirIds.get(id)))
     .sort((a, b) => a - b);
-  const where = (s) =>
-    [...s].map((w) => (w.startsWith('file ') ? 'an issue file' : w)).join('; ');
-  for (const id of both)
+  const kinds = (s) => new Set([...s].map((w) => w.split(':')[0]));
+  for (const id of both) {
+    const [a, b] = [ourIds.get(id), theirIds.get(id)];
+    // An issue file on one side and its CLOSED.md line on the other can be
+    // one item that one side closed.
+    const maybeOne = !same(kinds(a), kinds(b))
+      ? ' (one item if one side closed or moved it)'
+      : '';
     console.log(
-      `CE-${id}: error: taken on both sides (${ours}: ${where(ourIds.get(id))}; ${theirs}: ${where(theirIds.get(id))}); ` +
+      `CE-${id}: error: taken on both sides${maybeOne}; ${ours}: ${[...a].join('; ')}; ${theirs}: ${[...b].join('; ')}; ` +
         'give one of the two items a new id with `new` or `id`'
     );
+  }
   const modified = (side) =>
     new Set(
       diff(side, ['--name-only', '--diff-filter=M'], 'issues/')
