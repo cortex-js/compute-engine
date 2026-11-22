@@ -388,7 +388,7 @@ export const JS: Syntax = deepFreeze({
     // The index from 0 of the write `ReplaceAt(L, i, v)` or `AddTo(At(L,
     // i), e)` in a list of `n` elements; the interpreter's value of an
     // index that is 0, not an integer or out of range is an error.
-    _wix: 'const _wix = (n, i) => { const k = i > 0 ? i - 1 : n + i; if (Number.isInteger(i) && i !== 0 && k >= 0 && k < n) return k; throw new Error(`out-of-range: the index ${i} of a write to a list of ${n} elements`); };',
+    _wix: 'const _wix = (n, i) => { const k = i > 0 ? i - 1 : n + i; if (Number.isInteger(i) && i !== 0 && k >= 0 && k < n) return k; throw new Error(`out-of-range: the index ${i} of a list of ${n} elements`); };',
     // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
     // where `i` is out of range of `g` or `j` of its row.
     _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',

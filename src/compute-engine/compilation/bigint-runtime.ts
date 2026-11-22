@@ -305,14 +305,15 @@ export function bat(list: ReadonlyArray<unknown>, i: bigint): unknown {
 }
 
 /** The position from 0 of the index `i` (from 1, from the end when
- * negative) of a write to a list of `n` elements: `wix` of the double mode.
+ * negative) of a list of `n` elements, for a read or a write: `wix` of
+ * the double mode.
  * An index that is 0 or out of range throws, where the interpreter leaves
  * the form unevaluated. */
 export function bwix(n: bigint, i: bigint): bigint {
   const k = i > 0n ? i - 1n : n + i;
   if (i !== 0n && k >= 0n && k < n) return k;
   throw new Error(
-    `out-of-range: the index ${i} of a write to a list of ${n} elements`
+    `out-of-range: the index ${i} of a list of ${n} elements`
   );
 }
 
