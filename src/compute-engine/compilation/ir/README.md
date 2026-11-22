@@ -771,6 +771,18 @@ and in the bigint mode; a string of a `vars` name; `String` of a number (its
 text follows the engine's formatting options); a function as the replacement of
 `StringReplace`; a `RegExp` that is not the library operator.
 
+A tuple input whose parts are strings and numbers or Booleans
+(`tuple<string, integer>`, `tupleParts()` of `lower-functions.ts`; #640) is read
+part by part on JavaScript: the entry has a parameter for each part, of the lane
+of that part, marked with its index in `IRFunction.partOf` and printed `_.T[j]`
+(a string part through `text.in`). The binding of the name holds the parts
+(`Binding.parts`), and `At(T, k)` of a constant `k` (from 1, or from the end
+when negative) reads one; any other read of the name (`T`, `Length(T)`,
+`At(T, n)`, an argument of a call, a read in a user function) declines. The
+entry plan checks the input once, as a list (`plan.lists`), and its `lowered` is
+`point`. GLSL, the interval and the bigint modes, a positional parameter and a
+parameter of a user function of that type decline.
+
 A list of strings (CE-1548, CE-1556) is checked by `stringListRefusal()` of
 `index.ts` after the passes: it has rank 1; it is made by a `list` instruction,
 by a region of `TEXT_LIST_MAKERS` of `lower-strings.ts` (`text.chars`, `build`,

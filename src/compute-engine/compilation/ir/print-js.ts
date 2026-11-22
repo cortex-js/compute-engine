@@ -427,6 +427,7 @@ export const JS: Syntax = deepFreeze({
     IDENTIFIER.test(name) ? `_.${name}` : `_[${JSON.stringify(name)}]`,
   positional: (_name, k) => `a${k}`,
   length: (list) => `${list}.length`,
+  part: (tuple, index) => `${tuple}[${index}]`,
   list: (elements) => `[${elements.join(', ')}]`,
   // An array of the length, filled in index order by a `for` loop: an
   // expression, so a function called at once.

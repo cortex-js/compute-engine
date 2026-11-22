@@ -272,6 +272,8 @@ export function runnerLowered(
     const k = entry.paramNames.findIndex(
       (n, j) => n === name && !entry.lengthOf[j]
     );
+    // A tuple read part by part.
+    if (entry.partOf?.[k] !== undefined) return 'point';
     const t =
       k >= 0
         ? p.types[entry.body.params[k]]
@@ -467,7 +469,12 @@ function compileIr(
 
   const entry = entryOf(p);
   const literal = entry.literal === true;
-  const inputs = entryInputs(p, options, (k) => !entry.lengthOf[k]);
+  // A tuple read part by part is one input, at its first part.
+  const inputs = entryInputs(
+    p,
+    options,
+    (k) => !entry.lengthOf[k] && (entry.partOf?.[k] ?? 0) === 0
+  );
 
   // The entry plan of a loader of stored code (`checkEntry()` of
   // `javascript-runtime.ts`), which `run()` applies too (README, "Selecting
@@ -502,6 +509,18 @@ function compileIr(
     const i = argumentIndex(entry, k);
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
+    // A tuple read part by part (`partOf`) is an array input, checked once,
+    // at its first part; a string part is checked by its read (`text.in`).
+    const part = entry.partOf?.[k];
+    if (part !== undefined) {
+      if (t.lane === 'string') strings = true;
+      if (part > 0) return;
+      shared.push(key);
+      if (!checks) return;
+      plan.lists.push(key);
+      plan.strings.set(key, `"${name}"`);
+      return;
+    }
     // A list of rows whose lengths can differ is a list input too.
     if (t.shape.length > 0 || t.lane === 'rows') {
       shared.push(key);

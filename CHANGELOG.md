@@ -85,6 +85,16 @@
   a list of points or a matrix as accumulator, GLSL and the interval mode still
   decline (#647, contributed by [enumeratio](https://github.com/enumeratio)).
 
+- **A tuple input whose parts are strings and numbers compiles on
+  JavaScript.** With `T` declared `tuple<string, integer>`,
+  `If(T[1] = "A", 2·T[2], T[2] + 1)` declined ("the input T of type
+  tuple<string, integer>"); it compiles, and `run({ T: ['A', 3] })` is `6`.
+  The compiled code reads each part at a constant index; a read of the whole
+  tuple, of its length or of a part at a run-time index, a function that reads
+  it or takes it as an argument, GLSL, the interval mode and the `bigint` mode
+  still decline. A `list<any>` input stays refused (#640, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
 ### Resolved Issues
 
 - **Under `.N()`, the guard digits of an exact operand grow with its nearness
