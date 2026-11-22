@@ -27,6 +27,14 @@
   is the one the number holds at working precision; the binary double is not
   used (#634, contributed by [enumeratio](https://github.com/enumeratio)).
 
+- **`ReplaceAll` applies a pattern rule wherever it matches, not only at the
+  root.** `ReplaceAll(Sin(x^2) + 1, x^2 -> y)` is `Sin(y) + 1`. The expression
+  is visited from the top: at each part the first rule that matches replaces
+  it, and the replacement is not searched again, as `expr /. rules` does in
+  Wolfram, so `ReplaceAll([g(a), k(b)], {g(_a) -> k(_a), k(_a) -> g(_a)})` is
+  `[k(a), g(b)]` (#636, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
