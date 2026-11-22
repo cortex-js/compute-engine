@@ -21,11 +21,14 @@ import { parseType, type ParseTypeOptions } from '../common/type/parse.js';
 import { PRIMITIVE_TYPES } from '../common/type/primitive.js';
 import { typesOverlap } from '../common/type/reduce.js';
 import { typeToString } from '../common/type/serialize.js';
-import { resolveTypeReference } from '../common/type/subtype.js';
+import { narrow, resolveTypeReference } from '../common/type/subtype.js';
 import {
   collectionElementType,
+  descendIntoConstructor,
   resolveTypeAlias,
   signatureArms,
+  unfoldAliasOnDescent,
+  type AliasDescent,
 } from '../common/type/utils.js';
 import { widenValueTypes } from '../common/type/widen-value.js';
 import { widenLocalType } from '../compute-engine/boxed-expression/boxed-value-definition.js';
@@ -105,7 +108,10 @@ export type EpsilCompletionItem = {
    * `$`, `#` or `\` outside the fields. An editor that does not take snippets
    * inserts `insertText` (or `label`). */
   snippet?: string;
-  /** The edits of a fix-it, as `[start, end, text]` offsets of the source. */
+  /** The edits of a fix-it, as `[start, end, text]`: offsets into the whole
+   * source given to `epsilCompletions`, `end` excluded, as for `range`.
+   * The edits do not overlap and all refer to that source: a host applies
+   * them as one change. */
   edits?: [start: number, end: number, text: string][];
   /** A signature (`(real, integer) -> real`) or a type. */
   detail?: string;
@@ -121,13 +127,17 @@ export type EpsilCompletionItem = {
    * 6 keywords. In rank 4 and 5, the names that may fit come before those
    * that cannot (`fit`). */
   rank: number;
-  /** How the name fits the expected type, for a name item when
-   * `expectedType` is set: `'match'` when its value is always of the type
-   * that the position admits, `'never'` when it can never be, `'maybe'`
-   * otherwise (a broader type such as `value`, a union with an arm that
-   * fits, a generic result, a name whose type is not known). A function
-   * name is judged by the result of a call, or, where the position expects
-   * a function (`filter(xs, ▮`, `x |> ▮`), by its signature. A position
+  /** How the item fits the expected type, for a name item and a value item
+   * (a likely value, `true`, `false`) when `expectedType` is set: `'match'`
+   * when its value is always of the type that the position admits, apart
+   * from the non-finite values (NaN, the infinities) where a number is
+   * expected (a `number` matches `complex`), `'never'` when it can never
+   * be, `'maybe'` otherwise (a broader type such as `value`, a union with an
+   * arm that fits, a generic result, a name whose type is not known). A
+   * value is judged by the type of its literal (`true` is `boolean`). The
+   * other keywords (`if`, `let`) have no fit. A function name is judged by
+   * the result of a call, or, where the position expects a function
+   * (`filter(xs, ▮`, `x |> ▮`), by its signature. A position
    * that maps a function over a list (a broadcastable operator, a function
    * of the source) admits a list of the expected type too. A host may hide
    * the names that are `'never'`. */
@@ -176,6 +186,9 @@ const STATEMENT_KEYWORDS = [
 
 /** Keywords that start an expression. */
 const EXPRESSION_KEYWORDS = ['false', 'if', 'match', 'true'];
+
+/** The keywords that are values. */
+const LITERAL_KEYWORDS: ReadonlySet<string> = new Set(['false', 'true']);
 
 /** Expected types that do not narrow the items. */
 const UNINFORMATIVE_TYPES: ReadonlySet<string> = new Set([
@@ -566,6 +579,32 @@ export function epsilCompletions(
     );
   };
 
+  // The fit of a literal value (`0`, `""`, `true`), by the type of the
+  // literal (`0` is `0`, `true` is `boolean`). A likely value that is
+  // not a literal (`green()`, `(0, "")`, `[]`) is built from the expected
+  // type: it matches.
+  const fitOfLiteral = (label: string): Fit => {
+    let node: MathJsonExpression | null = null;
+    try {
+      [node] = parseEpsil(label);
+    } catch {
+      return 'maybe';
+    }
+    // The parse is a `Program` of one statement.
+    if (operator(node) === 'Program') node = operand(node, 1);
+    if (node === null || !isLiteral(node)) return 'match';
+    // The type of the value itself (`0`, a subtype of `real<0..1>`), not
+    // its widened type.
+    if (admitted === undefined) return 'maybe';
+    let type: Type;
+    try {
+      type = ce.expr(node).type.type;
+    } catch {
+      return 'maybe';
+    }
+    return fitValue(ce, type, admitted, { pipe, openArity });
+  };
+
   // After `.`, the members of the value before the dot, and no other name:
   // none when its type is not known.
   if (slot.kind === 'member') {
@@ -697,7 +736,13 @@ export function epsilCompletions(
   // 1. Likely values of the expected type.
   if (expectedType !== undefined)
     for (const value of likelyValues(context, expectedType, 0))
-      items.push({ label: value, kind: 'value', rank: 1, tier: 0 });
+      items.push({
+        label: value,
+        kind: 'value',
+        rank: 1,
+        tier: 0,
+        fit: fitOfLiteral(value),
+      });
 
   // 2. Names of the source visible at the offset.
   const textLength = text.length;
@@ -834,10 +879,19 @@ export function epsilCompletions(
           ])
         : EXPRESSION_KEYWORDS;
   // A name of the source hides a keyword only when it inserts the same text:
-  // `` `while` `` does not hide `while`.
+  // `` `while` `` does not hide `while`. A literal keyword (`true`) is a
+  // value, with a fit; the other keywords have none.
   for (const keyword of keywords)
     if (!visible.has(keyword) || escapeSymbol(keyword) !== keyword)
-      items.push({ label: keyword, kind: 'keyword', rank: 6, tier: 0 });
+      items.push({
+        label: keyword,
+        kind: 'keyword',
+        rank: 6,
+        tier: 0,
+        ...(expectedType !== undefined && LITERAL_KEYWORDS.has(keyword)
+          ? { fit: fitOfLiteral(keyword) }
+          : {}),
+      });
 
   return {
     range,
@@ -3923,9 +3977,11 @@ function broadcastOf(type: Type): Type {
  * How a value of type `type` fits the type `expected`: `'match'` when it is
  * a subtype, `'never'` when no value has both types, `'maybe'` otherwise (a
  * broader type such as `value`, a union with an arm that fits, an overlap of
- * two numeric ranges) and when the engine cannot tell. A function type
- * where a function is expected is judged by its signature (`fitOfCallable`),
- * also where a union expects a function in one of its arms
+ * two numeric ranges) and when the engine cannot tell. Where a number is
+ * expected, the non-finite values of `type` (NaN, the infinities) do not
+ * count against `'match'` (`finitePart`): `number` matches `complex`. A
+ * function type where a function is expected is judged by its signature
+ * (`fitOfCallable`), also where a union expects a function in one of its arms
  * (`function | nothing`). A transparent alias is unfolded. A tuple where a
  * broadcast call expects `broadcastable<T>` is `'maybe'` at worst, unless
  * `tupleBroadcast` is `false`. The other `options` are those of
@@ -3946,7 +4002,16 @@ function fitValue(
       ...options,
       union: typeof type === 'object' && type.kind === 'union',
     });
-  const subtype = subtypeOf(ce, type, expected);
+  let subtype = subtypeOf(ce, type, expected);
+  if (subtype === false && typesMayOverlap(expected, 'complex') === true) {
+    const finite = finitePart(ce, type);
+    if (
+      finite !== undefined &&
+      finite !== ALIAS_CYCLE &&
+      subtypeOf(ce, finite, expected) === true
+    )
+      subtype = true;
+  }
   let fit: Fit =
     subtype === undefined
       ? 'maybe'
@@ -3975,6 +4040,58 @@ function fitValue(
       union: typeof type === 'object' && type.kind === 'union',
     })
   );
+}
+
+/** The non-finite values: NaN and the infinities (`+oo`, `-oo`, `~oo`). */
+const NON_FINITE_TYPE: Type = { kind: 'union', types: ['nan', 'infinity'] };
+
+/** The result of `finitePart` when a transparent alias reaches itself. */
+const ALIAS_CYCLE = Symbol('alias cycle');
+
+/**
+ * `type` without its non-finite values (NaN, the infinities), for the fit
+ * of a value where a number is expected: a scalar arm with only non-finite
+ * values is dropped, a numeric arm that holds some is narrowed to `complex`
+ * (`number` is `complex`, `real | +oo` is `real`). The elements of a list or
+ * of a `broadcastable` are narrowed too, for a broadcastable expected type
+ * (`sin(`): a collection arm keeps its shape, unchanged when its elements
+ * have no finite part (`real | list<nan>` stays so). `undefined` when every
+ * value is non-finite. `ALIAS_CYCLE` when a transparent alias reaches
+ * itself on the descent: the caller keeps the plain result.
+ */
+function finitePart(
+  ce: ComputeEngine,
+  type: Type,
+  seen: AliasDescent = undefined
+): Type | undefined | typeof ALIAS_CYCLE {
+  const unfolded = unfoldAliasOnDescent(type, seen);
+  if (unfolded === undefined) return ALIAS_CYCLE;
+  const t = unfolded.type;
+  seen = unfolded.seen;
+  if (subtypeOf(ce, t, NON_FINITE_TYPE) === true) return undefined;
+  if (typeof t === 'object') {
+    if (t.kind === 'union') {
+      const arms: Type[] = [];
+      for (const arm of t.types) {
+        const finite = finitePart(ce, arm, seen);
+        if (finite === ALIAS_CYCLE) return ALIAS_CYCLE;
+        if (finite !== undefined) arms.push(finite);
+      }
+      if (arms.length === 0) return undefined;
+      return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+    }
+    if (t.kind === 'broadcastable' || t.kind === 'list') {
+      const elements = finitePart(ce, t.elements, descendIntoConstructor(seen));
+      if (elements === ALIAS_CYCLE) return ALIAS_CYCLE;
+      return elements === undefined ? t : { ...t, elements };
+    }
+  }
+  if (
+    subtypeOf(ce, t, 'number') === true &&
+    typesMayOverlap(t, NON_FINITE_TYPE) === true
+  )
+    return narrow(t, 'complex');
+  return t;
 }
 
 /** Whether a type is a tuple, or a union with a tuple arm, also through a

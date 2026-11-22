@@ -461,12 +461,17 @@ its expected type. Another statement that does not parse yet
 (`let y = 1 if ▮`) has no expected type: its items are the names and the
 keywords.
 
-When there is an expected type, each name item has a `fit`: `"match"` when
-its value is always of the type (ranks 2 and 3), `"never"` when it can never
-be, `"maybe"` otherwise: a broader type (`transpose` returns a `value`), a
-union with an arm that fits, a generic result, or a name whose type is not
-known. In ranks 4 and 5 the `"maybe"` items come first, and a host may hide
-the `"never"` items. A function name is judged by the result of a call; where
+When there is an expected type, each name item and each value item (a
+likely value, `true`, `false`) has a `fit`: `"match"` when its value is
+always of the type (ranks 2 and 3), `"never"` when it can never be,
+`"maybe"` otherwise: a broader type (`transpose` returns a `value`), a union
+with an arm that fits, a generic result, or a name whose type is not known.
+Where a number is expected, the non-finite values (NaN, the infinities) do
+not count against `"match"`: a `number` matches `complex`. A value is judged
+by the type of its literal (`true` is a `boolean`); the other keywords
+(`if`, `let`) have no `fit`. In ranks 4 and 5 the `"maybe"` items come
+first, and a host may hide the `"never"` items. A function name is judged
+by the result of a call; where
 a function is expected (a callback, the right side of `|>`, a union with a
 function arm such as `function | nothing`) it is judged by its signature: it
 must take the arguments and return a value of the result type. A function
@@ -484,12 +489,22 @@ literal value has the type of the value: `const n = 5` is an `integer`,
 `let x = 5` a `number`.
 
 ```ts
+const source = "let x = 2\nlet y = sin(";
+const result = epsilCompletions(ce, source, source.length);
+result.expectedType; // ➔ "complex | quantity"
+result.items
+  .filter((i) => ["x", "abs", "true", "if"].includes(i.label))
+  .map((i) => [i.label, i.fit]);
+// ➔ [["x", "match"], ["abs", "match"], ["if", undefined], ["true", "never"]]
+```
+
+```ts
 const source = "const A: matrix = identityMatrix(2)\nA |> inv";
 const result = epsilCompletions(ce, source, source.length);
 result.expectedType; // ➔ "(matrix) -> any"
 result.items.map((i) => [i.label, i.fit]);
 // ➔ [["inverse", "match"], ["inverseFunction", "maybe"],
-//    ["inverseHaversine", "maybe"]]
+//    ["inverseHaversine", "maybe"], ["interval", "never"]]
 ```
 
 After `.`, the items are the members of the value before the dot, and no

@@ -899,11 +899,84 @@ describe('EPSIL COMPLETION: FIT', () => {
     expect(fit(result, 'A')).not.toBe('never');
   });
 
-  test('a keyword and a likely value have no fit', () => {
+  test('a keyword that is not a value has no fit', () => {
     const result = complete('let a: integer = ▮');
-    expect(fit(result, '0')).toBeUndefined();
     expect(fit(result, 'if')).toBeUndefined();
+    expect(fit(result, 'match')).toBeUndefined();
     expect(fit(complete('let b = ▮'), 'sin')).toBeUndefined();
+    expect(fit(complete('let b = ▮'), 'true')).toBeUndefined();
+  });
+
+  // CE-1694: a value item has a fit, by the type of its literal.
+  test('a likely value and a literal keyword have a fit', () => {
+    const integer = complete('let a: integer = ▮');
+    expect(fit(integer, '0')).toBe('match');
+    expect(fit(integer, 'true')).toBe('never');
+    expect(fit(complete('let s: string = ▮'), '""')).toBe('match');
+    const condition = complete('let b = true\nif ▮');
+    expect(condition.expectedType).toBe('boolean');
+    expect(item(condition, 'true')).toMatchObject({
+      kind: 'value',
+      fit: 'match',
+    });
+    expect(fit(condition, 'false')).toBe('match');
+    const det = complete('let m = [[1, 2], [3, 4]]\nlet d = determinant(▮');
+    expect(det.expectedType).toBe('matrix');
+    expect(fit(det, 'true')).toBe('never');
+    expect(fit(det, 'false')).toBe('never');
+    // No likely value of a matrix is `0`.
+    expect(item(det, '0')).toBeUndefined();
+    expect(fit(det, 'if')).toBeUndefined();
+  });
+
+  // CE-1694, decision (b): NaN and the infinities do not count against
+  // `'match'` where a number is expected.
+  test('the non-finite values of a number do not count against a match', () => {
+    const sin = complete('let x = 2\nlet y = sin(▮');
+    expect(sin.expectedType).toBe('complex | quantity');
+    for (const name of ['x', 'abs', 'sqrt'])
+      expect(fit(sin, name)).toBe('match');
+    expect(fit(complete('let x = 2\nsin(▮'), 'x')).toBe('match');
+    expect(fit(complete('let s = "a"\nlet y = sin(▮'), 's')).toBe('never');
+    // Where a number is not expected, nothing changes: `abs` maps over a
+    // matrix (`determinant(abs(A))` is valid), `isPrime` gives booleans.
+    const det = complete('let m = [[1, 2], [3, 4]]\nlet d = determinant(▮');
+    expect(fit(det, 'abs')).toBe('maybe');
+    expect(fit(det, 'isPrime')).toBe('never');
+    // A finite numeric type is still compared as it is: `number` is not a
+    // `real`.
+    expect(
+      fit(complete('let x = 2\nfunction f(t: real) -> real { t }\nf(▮'), 'x')
+    ).toBe('maybe');
+    // A list arm keeps its shape when its elements are all non-finite.
+    expect(
+      fit(complete('let v: real | list<nan>\nlet z: complex = ▮'), 'v')
+    ).toBe('maybe');
+  });
+
+  test('a likely value is judged by its own type, not its widened type', () => {
+    const real = complete('function f(t: real<0..1>) -> real { 1 }\nf(▮');
+    expect(real.expectedType).toBe('real<0..1>');
+    expect(fit(real, '0')).toBe('match');
+    const integer = complete(
+      'function f(t: integer<-5..5>) -> real { 1 }\nf(▮'
+    );
+    expect(fit(integer, '0')).toBe('match');
+  });
+
+  test('a recursive alias at a numeric position does not overflow', () => {
+    const engine = new ComputeEngine();
+    engine.declareType('Nest', 'list<Nest> | integer', { alias: true });
+    const source = 'let n: Nest\nsin(▮';
+    const result = epsilCompletions(
+      engine,
+      source.replace('▮', ''),
+      source.indexOf('▮'),
+      { typeNames: ['Nest'] }
+    );
+    expect(result.expectedType).toBe('complex | quantity');
+    expect(item(result, 'n')?.detail).toBe('Nest');
+    expect(fit(result, 'n')).toBe('maybe');
   });
 });
 
@@ -1011,11 +1084,11 @@ const p: record{x: real, y: real, tag: string} = {x -> 1, y -> 2, tag -> "a"}
   });
 
   test('a member in an argument fits the type of the parameter', () => {
-    // `sqrt` takes `complex | infinity`, which `number` (with `NaN`) is not
-    // a subtype of.
+    // `sqrt` takes `complex | infinity`: the `NaN` of `number` does not
+    // count against a match (CE-1694).
     const sqrt = complete(SHAPES + 'sqrt(c.▮');
     expect(sqrt.expectedType).toBe('complex | infinity');
-    expect(item(sqrt, 'area')?.fit).toBe('maybe');
+    expect(item(sqrt, 'area')?.fit).toBe('match');
     expect(item(sqrt, 'scale')?.fit).toBe('never');
     const h = complete(SHAPES + 'function h(x: number) -> number { x }\nh(c.▮');
     expect(h.expectedType).toBe('number');
@@ -2012,8 +2085,10 @@ describe('EPSIL COMPLETION: EXPECTED TYPES OF COMMON POSITIONS', () => {
   test('an exponent expects the type of the signature of ^', () => {
     const result = at('n ^ ▮');
     expect(result.expectedType).toBe('complex | signed_infinity | quantity');
-    expect(fit(result, 'n')).toBe('maybe');
-    expect(fit(result, 'A')).toBe('maybe');
+    // The `NaN` of `number` does not count against a match (CE-1694), also
+    // in the elements of a matrix that `^` maps over.
+    expect(fit(result, 'n')).toBe('match');
+    expect(fit(result, 'A')).toBe('match');
     expect(codes('n ^ A')).toEqual([]);
     for (const name of ['s', 'b']) {
       expect(fit(result, name)).toBe('never');

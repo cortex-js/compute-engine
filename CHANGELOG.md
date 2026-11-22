@@ -1,3 +1,17 @@
+## [Unreleased]
+
+### Improvements
+
+- **A completion item's `fit` is more precise** (CE-1694). Where a number is
+  expected, the non-finite values (NaN, the infinities) no longer count
+  against `'match'`: after `let x = 2`, at `sin(` the name `x` (a `number`)
+  and the functions `abs` and `sqrt` (which return a `number`) are `'match'`,
+  where they were `'maybe'`. `'match'` now means "always of the expected
+  type, apart from NaN and the infinities". A value item has a `fit` too,
+  judged by the type of its literal: the likely values (`0`, `""`) and the
+  keywords `true` and `false`. At `determinant(`, `true` is `'never'`; at
+  `if `, it is `'match'`. The other keywords (`if`, `let`) have no `fit`.
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
