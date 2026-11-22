@@ -911,11 +911,7 @@ export function functionLowering(
         // range, a list of no element where the interpreter gives
         // `Missing`, which a call would not tell apart.
         const n = type(v).shape[0];
-        if (
-          n !== undefined &&
-          typeof n !== 'number' &&
-          cx.rowLengths.has(n.v)
-        )
+        if (n !== undefined && typeof n !== 'number' && cx.rowLengths.has(n.v))
           decline(
             literal,
             `a row at an index known at run time as the result of ${e.operator}`

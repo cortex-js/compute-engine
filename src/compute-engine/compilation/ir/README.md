@@ -777,10 +777,10 @@ whose parts include a list of reals or integers of a run-time length or a list
 of lists of the lane `rows` (`tuple<list<integer>, list<integer>>`,
 `tuple<integer, list<list<integer>>>`; #638), is read part by part on
 JavaScript: the entry has a parameter for each part, of the lane of that part,
-marked with its index in `IRFunction.partOf` and printed `_.T[j]` (a string
-part through `text.in`; a list part has a parameter of its length too,
-`_.T[j].length`, and a part of the lane `rows` is read as an input of that
-lane, `chunks()` of `lower-lists.ts`). The binding of the name holds the parts
+marked with its index in `IRFunction.partOf` and printed `_.T[j]` (a string part
+through `text.in`; a list part has a parameter of its length too,
+`_.T[j].length`, and a part of the lane `rows` is read as an input of that lane,
+`chunks()` of `lower-lists.ts`). The binding of the name holds the parts
 (`Binding.parts`), and `At(T, k)` of a constant `k` (from 1, or from the end
 when negative) reads one; any other read of the name (`T`, `Length(T)`,
 `At(T, n)`, an argument of a call, a read in a user function) declines. The
@@ -875,48 +875,46 @@ it declines). No pass has a case of its own for the lane.
 An input of a list of lists of integers or reals whose two lengths are not
 stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
 `lower-functions.ts`) is of the lane too, on JavaScript only (CE-1607): an input
-read by name, a positional parameter of a root function literal, a parameter
-of a user function of that type, such an input that a user function reads
+read by name, a positional parameter of a root function literal, a parameter of
+a user function of that type, such an input that a user function reads
 (`capture()`, #638), a part of a tuple input read part by part (above), and a
 typed parameter of `Apply`, which binds its argument whole as a parameter of a
-user function does. It is the host's array of arrays, whose rows
-can have different lengths, and it is read in four ways: the element
-`At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the elements; `_atr`
-of the JavaScript printer, NaN where `i` is out of range of `g` or `j` of its
-row, from the end when negative, as `At` of a number); row by row, as the rows
-of a `Chunk` (`chunks()` of `lower-lists.ts`, #638): the count of the rows is
-`rows.count` (`g.length`) and the row `i` the build of `rows.len`
-(`g[i].length`) elements `rows.get` or `rows.get.int` (`g[i][j]`), each index
-from 0 in range, so `Map` whose value for a row is not a list, `Length`,
-`Count`, `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over `g` read it; the row
-`At(g, i)` at an index known at run time (`row()` of `chunks()`): `rows.row`
-(`_rowr`) is the index from 0 of the row, from the end when `i` is negative,
--1 out of range, and the row is the build of `rows.rowlen` (`_lenr`, 0 at -1)
-elements `rows.get`, so `At`, `First` and `Last` of an element of an absent row
-are NaN; and an argument of a call at a parameter of that lane, which takes it
-whole. The interpreter's absent row is `Missing`, and `Length` of it is
-`Missing`: `rowLengths` of `lower.ts` maps the count of the build to
-`rows.rowlen.nan` (NaN at -1), which `Length` reads (also of a local that holds
-the row, of its `Reverse`, which keeps the count, and of its `Rest`, whose
-count `lower-lists.ts` maps too) and `absent()` tests, so `IsMissing` and
-`Coalesce` give the interpreter's value. An `If` or a `Coalesce` of such a row
-maps the count that its join makes to the `rows.rowlen.nan` of the arm taken
-(`branch()`). `AssertPresent` of the row and the row as the result
+user function does. It is the host's array of arrays, whose rows can have
+different lengths, and it is read in four ways: the element `At(At(g, i), j)`
+(`rows.at`, `rows.at.int` on the lane of the elements; `_atr` of the JavaScript
+printer, NaN where `i` is out of range of `g` or `j` of its row, from the end
+when negative, as `At` of a number); row by row, as the rows of a `Chunk`
+(`chunks()` of `lower-lists.ts`, #638): the count of the rows is `rows.count`
+(`g.length`) and the row `i` the build of `rows.len` (`g[i].length`) elements
+`rows.get` or `rows.get.int` (`g[i][j]`), each index from 0 in range, so `Map`
+whose value for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`,
+`Fold` and `Reduce` over `g` read it; the row `At(g, i)` at an index known at
+run time (`row()` of `chunks()`): `rows.row` (`_rowr`) is the index from 0 of
+the row, from the end when `i` is negative, -1 out of range, and the row is the
+build of `rows.rowlen` (`_lenr`, 0 at -1) elements `rows.get`, so `At`, `First`
+and `Last` of an element of an absent row are NaN; and an argument of a call at
+a parameter of that lane, which takes it whole. The interpreter's absent row is
+`Missing`, and `Length` of it is `Missing`: `rowLengths` of `lower.ts` maps the
+count of the build to `rows.rowlen.nan` (NaN at -1), which `Length` reads (also
+of a local that holds the row, of its `Reverse`, which keeps the count, and of
+its `Rest`, whose count `lower-lists.ts` maps too) and `absent()` tests, so
+`IsMissing` and `Coalesce` give the interpreter's value. An `If` or a `Coalesce`
+of such a row maps the count that its join makes to the `rows.rowlen.nan` of the
+arm taken (`branch()`). `AssertPresent` of the row and the row as the result
 (`result()`) or as the value of a user function's body (`fr := (g, k) ↦ g[k]`),
 a list of no element where the interpreter gives `Missing`, decline; so does a
 row carried by a loop (`carry` of `loop()`, `start` and the step of
 `reduceBy()`), whose carried count is a new value that `rowLengths` does not
-name; a reducer of an absent row is unspecified (`Sum` gives 0).
-A row of a `Chunk` or a `Partition` is read at a constant index in range of a
-constant count only. Every
-other read of the name declines (`symbol()` of `lower.ts`, which admits only the
-occurrence that `wholeRows()` lowers): a `Map` or a `Filter` whose value is a
-list of rows ("a list of lists of run-time length"), arithmetic, `g` as the
-result, a binding to a local, an argument of a parameter of another type, and a
-list that the program makes at such a parameter (`sq(sq(g))`). A list of lists
-of booleans, the bigint and the interval modes and GLSL decline the input. The
-entry checks it as a list (a string or a typed array is refused), and a batch
-shares it between its cells.
+name; a reducer of an absent row is unspecified (`Sum` gives 0). A row of a
+`Chunk` or a `Partition` is read at a constant index in range of a constant
+count only. Every other read of the name declines (`symbol()` of `lower.ts`,
+which admits only the occurrence that `wholeRows()` lowers): a `Map` or a
+`Filter` whose value is a list of rows ("a list of lists of run-time length"),
+arithmetic, `g` as the result, a binding to a local, an argument of a parameter
+of another type, and a list that the program makes at such a parameter
+(`sq(sq(g))`). A list of lists of booleans, the bigint and the interval modes
+and GLSL decline the input. The entry checks it as a list (a string or a typed
+array is refused), and a batch shares it between its cells.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,

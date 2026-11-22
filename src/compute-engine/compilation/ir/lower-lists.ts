@@ -2080,8 +2080,7 @@ export function listLowering(cx: Lowering) {
       return {
         source: () => ({
           length: b.op('rows.count', [g], scalarType('integer')),
-          at: (i) =>
-            built(i, b.op('rows.len', [g, i], scalarType('integer'))),
+          at: (i) => built(i, b.op('rows.len', [g, i], scalarType('integer'))),
         }),
         rows: () => g,
         // Out of range the row is a build of no element, so `At`, `First`
