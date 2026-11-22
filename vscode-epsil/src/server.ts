@@ -293,16 +293,21 @@ const COMPLETION_KINDS: Record<
 // A client with `insertReplaceSupport` also gets the whole word under the
 // cursor (`range[0]` to `replaceEnd`) as the range to replace. An item with a
 // `snippet` (a call with its argument fields) is sent as a snippet to a
-// client with `snippetSupport`.
+// client with `snippetSupport`. A fix-it (`edits`) is sent with its edit that
+// holds the cursor on one line as the text edit, as LSP requires, its other
+// edits as `additionalTextEdits`, which must not overlap it, and the text of
+// that edit before the cursor as `filterText`, so that the client keeps it.
+// The fix-it is offered at the position of the request only: a character
+// typed after it no longer matches that `filterText`, and the client drops
+// the item until it asks again. A fix-it with no such edit, or with
+// overlapping edits, is not sent.
 connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
   const document = documents.get(textDocument.uri);
   if (document === undefined) return [];
   hoverEngine ??= new ComputeEngine();
-  const result = epsilCompletions(
-    hoverEngine,
-    document.getText(),
-    document.offsetAt(position)
-  );
+  const text = document.getText();
+  const offset = document.offsetAt(position);
+  const result = epsilCompletions(hoverEngine, text, offset);
   const range = {
     start: document.positionAt(result.range[0]),
     end: document.positionAt(result.range[1]),
@@ -311,24 +316,58 @@ connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
     start: range.start,
     end: document.positionAt(result.replaceEnd),
   };
-  return result.items.map((item, index) => {
-    const snippet = hasSnippetCapability ? item.snippet : undefined;
-    const newText = snippet ?? item.insertText ?? item.label;
-    return {
+  const toEdit = ([start, end, newText]: [number, number, string]) => ({
+    range: {
+      start: document.positionAt(start),
+      end: document.positionAt(end),
+    },
+    newText,
+  });
+  return result.items.flatMap((item, index): CompletionItem[] => {
+    const common = {
       label: item.label,
       kind: COMPLETION_KINDS[item.kind],
       ...(item.detail === undefined ? {} : { detail: item.detail }),
       ...(item.documentation === undefined
         ? {}
         : { documentation: item.documentation }),
-      sortText: `${item.rank}-${String(index).padStart(5, '0')}`,
-      ...(snippet === undefined
-        ? {}
-        : { insertTextFormat: InsertTextFormat.Snippet }),
-      textEdit: hasInsertReplaceCapability
-        ? { insert: range, replace, newText }
-        : { range, newText },
+      sortText: String(index).padStart(5, '0'),
     };
+    if (item.edits !== undefined) {
+      const main = item.edits.find(
+        ([start, end]) =>
+          start <= offset &&
+          offset <= end &&
+          !/[\n\r]/.test(text.slice(start, end))
+      );
+      if (main === undefined) return [];
+      const others = item.edits.filter((e) => e !== main);
+      if (others.some(([start, end]) => start < main[1] && main[0] < end))
+        return [];
+      return [
+        {
+          ...common,
+          filterText: text.slice(main[0], offset),
+          textEdit: toEdit(main),
+          ...(others.length === 0
+            ? {}
+            : { additionalTextEdits: others.map(toEdit) }),
+        },
+      ];
+    }
+    const snippet = hasSnippetCapability ? item.snippet : undefined;
+    const newText = snippet ?? item.insertText ?? item.label;
+    return [
+      {
+        ...common,
+        ...(snippet === undefined
+          ? {}
+          : { insertTextFormat: InsertTextFormat.Snippet }),
+        textEdit: hasInsertReplaceCapability
+          ? { insert: range, replace, newText }
+          : { range, newText },
+      },
+    ];
   });
 });
 

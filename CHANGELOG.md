@@ -32,9 +32,68 @@
   signatures differ in their number of required parameters. `insertText`
   keeps its value. The VS Code extension sends the snippet as a snippet to a
   client that supports snippets.
+- **A completion in a record literal offers the fields of its type**
+  (CE-1664.1). At `const p: record{x: real, y: real} = {`, the items of
+  `epsilCompletions()` are `x` and `y`, inserted as `x -> ` and `y -> `, with
+  their types as `detail`, and no other name; a field already written is left
+  out, and an optional field comes last with a `?` in its `detail`. After
+  `{x -> ` the expected type is `real`, the type of the field. This holds for
+  a record type reached through an alias, for an argument whose parameter is
+  a record type (`f({`), and for a nested literal (`{p -> {`). A nominal type
+  does not admit a literal, and a literal with no expected record type gets
+  the names, as before.
+- **A completion at a case of a `match` on a sum type offers the variants
+  that no case covers** (CE-1664.2). In `function f(c: Color) { match c {`,
+  with `type Color = red | green | circle(r: real)`, the items of
+  `epsilCompletions()` are `red`, `green` and `circle`, inserted as `red()`,
+  `green()` and `circle(r)` (one binding per field of the payload, `_` for a
+  field with no name), and no other name and no keyword. A variant that a case
+  matches unconditionally (`green() => …`, `circle(x) | red() => …`,
+  `x: circle => …`) is left out, and a catch-all case (`_`, `otherwise`, a bare
+  binding) leaves none. A fix-it item, `add the missing cases`, inserts one
+  case `<pattern> => nothing` per missing variant, a line each. This holds for
+  a sum type reached through an alias, for a generic sum type (`opt<integer>`),
+  and for a union of variants (`c: red | circle`). A subject of any other
+  type, a nominal type whose body is a sum included, gets the items as before.
+- **A completion at an argument of a call offers the parameter names**
+  (CE-1664.3). At `take(xs, `, the first item of `epsilCompletions()` is
+  `count`, inserted as `count: `, with the type `number` as `detail`; the
+  other items follow as before. The names are those of the declaration that
+  the call resolves through: a function of the source, a library function
+  whose signature names its parameters, or a variable whose declared type is
+  a signature that names them. A parameter already filled, by position or by
+  name, and a rest parameter are left out. After a named argument
+  (`interest(rate: 0.05, `) only the names are offered, since a positional
+  argument cannot follow it. In an overload set, a name is offered when every
+  signature that can still match the call has it. After `|>` the parameter of
+  the piped value is left out, and no name is offered when its slot is not
+  known or comes after the named arguments (`xs |> fold(`). After `count: `,
+  the expected type is the type of `count`, also for a library function and
+  a variable with a declared signature.
 
 ### Improvements
 
+- **A completion matches the humps of a camelCase name** (CE-1664.6). The
+  items of `epsilCompletions()` were the labels that start with the typed
+  word. A word of two characters or more now also matches a name whose humps
+  it gives: `idM` gives `identityMatrix`, `invH` gives `inverseHaversine` and
+  `mc` gives `max_count`, then a name that holds its characters in order from
+  its first character (`ivs` gives `inverse`). These matches come after the
+  prefix matches, in the same order of `rank`: at `isM`, `isMatch` and
+  `isMissing` come first, then `isSquareMatrix`, then `isCompatibleUnit`. A
+  fixit, a keyword and a likely value match by prefix only.
+- **A dotted call of a library function has a fixit** (CE-1664.5). The
+  `dot-call-not-a-protocol-function` diagnostic of `checkEpsil()` rewrites the
+  call: `xs.sort()` becomes `xs |> sort`, and `g(3).sort()` becomes
+  `g(3) |> sort`. A call with arguments becomes the direct call, with the
+  receiver as the first argument: `xs.take(2)` becomes `take(xs, 2)`. When
+  the receiver cannot be the first argument, the call becomes a pipe, which
+  puts the receiver where its type fits: `xs.map(x => x + 1)` becomes
+  `xs |> map(x => x + 1)`. Inside a larger expression a pipe would need
+  parentheses, so `xs.sort().reverse()` becomes `sort(xs).reverse()`, and the
+  next fixit `sort(xs) |> reverse`. The Epsil spelling of a library function
+  now gives this diagnostic too: `xs.sort()` was reported only when it ran,
+  as an `incompatible-type` error of `Field`.
 - **A completion where a function is expected compares signatures**
   (CE-1661). At `filter([1, 2], ▮`, `isPrime` fits, since it takes an integer
   and returns a boolean; before, it was compared by its result with the
@@ -46,6 +105,19 @@
   (`function | nothing`) and a transparent alias of a signature are judged
   the same way, and a callback of `map`, which takes one argument per source,
   may take more arguments than its declared signature.
+- **A completion knows the expected type of a condition, of a loop
+  collection and of an arithmetic operand** (CE-1664.4, CE-1686). At `if ▮`
+  and at `x if ▮ else y` the expected type is `boolean`, and with `n = 5`, `n`
+  is `'never'`; at `for i in ▮`, also in a comprehension, it is `collection`:
+  a list, a matrix, a string, a tuple and a record fit, a number does not.
+  `if ▮`, `while ▮` and `for i in ▮` have it before their block is typed. At
+  `1 + ▮`, when every other operand is a number or a tensor of numbers, it is
+  `number | quantity`, so a matrix fits and a string or a boolean does not;
+  with another operand (a tuple, a string, a name of no known type) there is
+  still no expected type. The other arithmetic operands admit a quantity too
+  (`A * ▮` expects `number | quantity`; was `number`), and a tuple, which a
+  call maps over (`2 * (1, 2)`, `sin((1, 2))`), may fit where it was
+  `'never'`.
 - **A completion admits a list where the call maps over one** (CE-1661). At
   `A * ▮` with `A: matrix`, `A` fits (`A * A` is a matrix product); at
   `determinant(▮`, `abs` may fit, since `abs(A)` is a matrix.

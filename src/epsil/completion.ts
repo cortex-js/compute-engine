@@ -13,6 +13,7 @@ import type {
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
+import { isOptionalField } from '../common/type/types.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import { substituteTypeVariables } from '../common/type/instantiate.js';
 import { conditionalTargetInstance } from '../common/type/conditional-conformance.js';
@@ -113,7 +114,8 @@ export type EpsilCompletionItem = {
   /** The paragraphs of the library description, for a library name: what
    * the hover of the name shows. */
   description?: string[];
-  /** Smaller first: 0 fix-its, 1 likely values, 2 names of the source whose
+  /** Smaller first: 0 fix-its and the parameter names of a call
+   * (`count: `), 1 likely values, 2 names of the source whose
    * type matches the expected type (`fit` is `'match'`), 3 library names
    * whose type matches, 4 other names of the source, 5 other library names,
    * 6 keywords. In rank 4 and 5, the names that may fit come before those
@@ -143,9 +145,15 @@ export type EpsilCompletions = {
   replaceEnd: number;
   /** The type expected at the offset, when the context gives one. */
   expectedType?: string;
-  /** The items whose label starts with the word being typed, ignoring case,
-   * sorted by `rank`, then the names that may fit before those that cannot
-   * (`fit`), then locals before globals, then label. */
+  /** The items whose label matches the word being typed, ignoring case:
+   * first those whose label starts with the word, then, for a name and a
+   * word of two characters or more, those whose humps the word matches
+   * (`idM` gives `identityMatrix`, `invH` gives `inverseHaversine`: each
+   * character continues a hump or starts a later one), then those that hold
+   * the characters of the word in order from their first character (`ivs`
+   * gives `inverse`). Within each of the three, the items are sorted by
+   * `rank`, then the names that may fit before those that cannot (`fit`),
+   * then locals before globals, then label. */
   items: EpsilCompletionItem[];
 };
 
@@ -175,6 +183,14 @@ const UNINFORMATIVE_TYPES: ReadonlySet<string> = new Set([
   'unknown',
   'expression',
   'value',
+]);
+
+/** The heads whose `Element` operands are `for … in` clauses. */
+const LOOP_HEADS: ReadonlySet<string> = new Set([
+  'Loop',
+  'ParallelLoop',
+  'Comprehension',
+  'ParallelComprehension',
 ]);
 
 /** Whether a code point continues a name, by the lexer's rule (`scanSymbol`):
@@ -268,7 +284,10 @@ const LIBRARY_ENTRIES = new WeakMap<ComputeEngine, LibraryEntry[]>();
  * declaration or a parameter, after `->` of a function header, after
  * `type name =` and after `is` of a type test, the items are the type names
  * instead. Where the grammar takes a new name or no word, there are no items;
- * where it takes one keyword (`for i ▮`), that keyword.
+ * where it takes one keyword (`for i ▮`), that keyword. At the start of an
+ * argument of a call whose callee declares parameter names, the names not
+ * supplied yet come first (`count: `), and only them after a named argument
+ * (`namedArgumentsAt`).
  *
  * The options are those of `parseEpsil()`: the type, protocol and sum
  * variant names that the source may use without declaring them.
@@ -317,7 +336,18 @@ export function epsilCompletions(
     return { range, replaceEnd, items: [] };
   const before = tokens.filter((t) => t.type !== 'EOF' && t.end <= start);
 
-  const { text, placeholder, ast } = parseWithHole(source, start, end, options);
+  let { text, placeholder, ast } = parseWithHole(source, start, end, options);
+  // `if ▮`, `while ▮` and `for x in ▮` do not parse before their block is
+  // typed: parse again with an empty block after the hole.
+  if (
+    findHole(ast, placeholder, start) === undefined &&
+    beforeMissingBlock(source, start, end)
+  ) {
+    const block = `${source.slice(0, end)} {}${source.slice(end)}`;
+    const retry = parseWithHole(block, start, end, options);
+    if (findHole(retry.ast, retry.placeholder, start) !== undefined)
+      ({ text, placeholder, ast } = retry);
+  }
   const groups = documentBindings(ast, text);
   const declarations = collectDeclarations(ast);
   const sourceTypes = collectSourceTypes(ast, options?.sumVariants);
@@ -553,8 +583,14 @@ export function epsilCompletions(
       const fit = fitOfText(typeToString(type));
       if (fit !== 'maybe' || admitted === undefined) return fit;
       const body = sourceTypeBody(context, type);
+      // A type of the source is not a tuple that a call maps over, also when
+      // its body is one (`sqrt(c)` with `c: Circle` is an error).
       return body !== undefined &&
-        fitValue(ce, body, admitted, { pipe, openArity }) === 'never'
+        fitValue(ce, body, admitted, {
+          pipe,
+          openArity,
+          tupleBroadcast: false,
+        }) === 'never'
         ? 'never'
         : fit;
     };
@@ -594,6 +630,68 @@ export function epsilCompletions(
       ...(expectedType === undefined ? {} : { expectedType }),
       items: finish(items, prefix),
     };
+  }
+
+  // At a case pattern of a `match` whose subject is of a sum type of the
+  // source, the variants that no case covers, a fix-it that adds a case for
+  // each, and no other item: no name, no literal keyword.
+  if (slot.kind === 'pattern') {
+    const variants = matchVariantItems(context, source, start, end, options);
+    if (variants !== undefined) {
+      items.push(...variants);
+      return { range, replaceEnd, items: finish(items, prefix) };
+    }
+  }
+
+  // At a key of a record literal whose expected type is a record
+  // (`const r: record{x: real} = {▮`), the fields not written yet, and no
+  // other name. A literal with no such expected type gets the names.
+  const brace = recordKeyBrace(before);
+  if (brace !== undefined) {
+    const fields = recordLiteralFields(context, brace, placeholder);
+    if (fields !== undefined) {
+      // Before an `->` (`{▮ -> 1}`), the name only.
+      const arrow = /^\s*->/.test(source.slice(end));
+      fields.forEach((field, i) => {
+        const spelling = escapeSymbol(field.name);
+        const text = arrow ? spelling : `${spelling} -> `;
+        items.push({
+          label: field.name,
+          kind: 'variable',
+          rank: 2,
+          // In the order of the type, the optional fields last.
+          tier: field.optional ? fields.length + i : i,
+          ...(text === field.name ? {} : { insertText: text }),
+          detail: `${typeToString(field.type)}${field.optional ? '?' : ''}`,
+        });
+      });
+      return { range, replaceEnd, items: finish(items, prefix) };
+    }
+  }
+
+  // At the start of an argument of a call whose callee declares parameter
+  // names (`take(xs, ▮`), the names not supplied yet, inserted as
+  // `count: `, before every other item. After a named argument only a named
+  // argument may follow: the names, and no other item.
+  const named =
+    path !== undefined &&
+    path.nodes.length >= 2 &&
+    argumentCallee(before) === operator(path.nodes[path.nodes.length - 2])
+      ? namedArgumentsAt(context, path.nodes.length - 1)
+      : undefined;
+  if (named !== undefined) {
+    named.names.forEach(({ name, type }, i) =>
+      items.push({
+        label: name,
+        kind: 'variable',
+        rank: 0,
+        // In the order of the declaration.
+        tier: i,
+        insertText: `${escapeSymbol(name)}: `,
+        ...(type === undefined ? {} : { detail: type }),
+      })
+    );
+    if (named.only) return { range, replaceEnd, items: finish(items, prefix) };
   }
 
   // 1. Likely values of the expected type.
@@ -821,22 +919,28 @@ export function visibleBindings(
   return visible;
 }
 
-/** Keep the items that match `prefix`, sort them and drop the sort tier. */
+/**
+ * Keep the items that match `prefix`, sort them and drop the sort tier.
+ * The prefix matches come first, then the hump matches, then the
+ * subsequence matches (`matchClass`).
+ */
 function finish(
   items: (EpsilCompletionItem & { tier: number })[],
   prefix: string
 ): EpsilCompletionItem[] {
-  const lower = prefix.toLowerCase();
   const seen = new Set<string>();
   return items
-    .filter((item) => item.label.toLowerCase().startsWith(lower))
+    .map((item) => ({ item, match: matchClass(item, prefix) }))
+    .filter(({ match }) => match >= 0)
     .sort(
-      (a, b) =>
+      ({ item: a, match: ma }, { item: b, match: mb }) =>
+        ma - mb ||
         a.rank - b.rank ||
         Number(a.fit === 'never') - Number(b.fit === 'never') ||
         a.tier - b.tier ||
         (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)
     )
+    .map(({ item }) => item)
     .filter((item) => {
       // A text offered twice (a keyword that is also a likely value, such
       // as `true`) keeps its first, best-ranked item.
@@ -846,6 +950,116 @@ function finish(
       return true;
     })
     .map(({ tier: _tier, ...item }) => item);
+}
+
+/**
+ * How the label of `item` matches the word `prefix`, ignoring case: 0 when
+ * it starts with the word, 1 when the word matches its humps, 2 when the
+ * word is a subsequence of it that starts at its first character, -1 when
+ * it does not match. A word of one character, a fix-it, a keyword and a
+ * likely value match by prefix only.
+ */
+function matchClass(item: EpsilCompletionItem, prefix: string): number {
+  const label = item.label;
+  if (label.toLowerCase().startsWith(prefix.toLowerCase())) return 0;
+  if (
+    prefix.length < 2 ||
+    item.kind === 'fixit' ||
+    item.kind === 'keyword' ||
+    item.kind === 'value'
+  )
+    return -1;
+  if (matchesHumps(label, prefix)) return 1;
+  return matchesSubsequence(label, prefix) ? 2 : -1;
+}
+
+/** Whether the character `a` is `b`, ignoring case. */
+function sameLetter(a: string, b: string): boolean {
+  return a === b || a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Whether a hump of `label` starts at `i`: its first character, an
+ * uppercase letter after a character that is not one (`identityMatrix`),
+ * the last uppercase letter of a run before a lowercase letter
+ * (`HTMLParser`), the first digit of a run (`log10`), and a character after
+ * an `_` (`max_value`).
+ */
+function isHumpStart(label: string, i: number): boolean {
+  if (i === 0) return true;
+  const c = label[i];
+  const before = label[i - 1];
+  if (c === '_') return false;
+  if (before === '_') return true;
+  if (isDigit(c)) return !isDigit(before);
+  if (!isUpper(c)) return false;
+  if (!isUpper(before)) return true;
+  const after = label[i + 1];
+  return after !== undefined && isLower(after);
+}
+
+function isDigit(c: string): boolean {
+  return c >= '0' && c <= '9';
+}
+
+function isUpper(c: string): boolean {
+  return c !== c.toLowerCase() && c === c.toUpperCase();
+}
+
+function isLower(c: string): boolean {
+  return c !== c.toUpperCase() && c === c.toLowerCase();
+}
+
+/**
+ * Whether `word` matches the humps of `label`, ignoring case: its first
+ * character is the first character of the label, and each next character
+ * continues the current hump or starts a later one (`idM` and `iM` match
+ * `identityMatrix`, `invH` matches `inverseHaversine`). The reachable
+ * positions after each character are kept, so that `abc` matches `abBc`;
+ * the cost is the length of the label times the length of the word.
+ */
+function matchesHumps(label: string, word: string): boolean {
+  const n = label.length;
+  if (n === 0 || !sameLetter(label[0], word[0])) return false;
+  const humps: number[] = [];
+  for (let i = 0; i < n; i++) if (isHumpStart(label, i)) humps.push(i);
+  // `next[p]`: whether the next character of the word may be at `p`.
+  let next = new Uint8Array(n + 1);
+  next[1] = 1;
+  let first = 1;
+  for (let k = 1; k < word.length; k++) {
+    const c = word[k];
+    const reached = new Uint8Array(n + 1);
+    let least = n + 1;
+    // Continue the current hump.
+    for (let p = first; p < n; p++)
+      if (next[p] === 1 && sameLetter(label[p], c)) {
+        reached[p + 1] = 1;
+        least = Math.min(least, p + 1);
+      }
+    // Start a later hump.
+    for (const q of humps)
+      if (q >= first && sameLetter(label[q], c)) {
+        reached[q + 1] = 1;
+        least = Math.min(least, q + 1);
+      }
+    if (least > n) return false;
+    next = reached;
+    first = least;
+  }
+  return true;
+}
+
+/**
+ * Whether the characters of `word` are in `label` in order, ignoring case,
+ * the first one at the start of the label.
+ */
+function matchesSubsequence(label: string, word: string): boolean {
+  if (label.length === 0 || !sameLetter(label[0], word[0])) return false;
+  let k = 1;
+  for (let i = 1; i < label.length && k < word.length; i++)
+    if (sameLetter(label[i], word[k])) k += 1;
+  return k === word.length;
 }
 
 /** Whether `start` is inside a string, a LaTeX island or a comment. */
@@ -1004,6 +1218,33 @@ function openingParen(before: readonly Token[], i: number): number {
   return -1;
 }
 
+/** The callee of the call whose argument starts after the last token of
+ * `before`, a `(` or a `,`: the name written before the `(` of the call
+ * with no whitespace (verbatim or not). `undefined` for any other bracket,
+ * the parameters of a `function` header, a member call and a name qualified
+ * by `::`. */
+function argumentCallee(before: readonly Token[]): string | undefined {
+  const last = before.length - 1;
+  const type = before[last]?.type;
+  if (type !== 'OPEN_PAREN' && type !== 'COMMA') return undefined;
+  const paren = openingParen(before, last);
+  const token = before[paren - 1];
+  if (
+    paren < 1 ||
+    before[paren].precededByWhitespace ||
+    isFunctionHeader(before, paren)
+  )
+    return undefined;
+  const previous = before[paren - 2];
+  if (
+    previous?.type === 'OPERATOR' &&
+    (previous.text === '.' || previous.text === '::')
+  )
+    return undefined;
+  if (token.type === 'VERBATIM_SYMBOL') return token.value;
+  return token.type === 'SYMBOL' ? token.text : undefined;
+}
+
 /** Whether the `(` at `paren` opens the parameters of `function name(`. As
  * in the parser, the name may be verbatim. */
 export function isFunctionHeader(
@@ -1016,6 +1257,38 @@ export function isFunctionHeader(
       before[paren - 1].type === 'VERBATIM_SYMBOL') &&
     before[paren - 2].type === 'SYMBOL' &&
     before[paren - 2].text === 'function'
+  );
+}
+
+/** Whether the word `[start, end]` ends its line and is in the condition of
+ * an `if` or a `while`, or the collection of a `for … in`, whose block is not
+ * written yet (`if b && ▮`, `} else if ▮`, `for i in ▮`). */
+function beforeMissingBlock(
+  source: string,
+  start: number,
+  end: number
+): boolean {
+  const lineStart =
+    Math.max(
+      source.lastIndexOf('\n', start - 1),
+      source.lastIndexOf('\r', start - 1)
+    ) + 1;
+  const lineEnd = source.slice(end).search(/[\n\r]/);
+  const after =
+    lineEnd < 0 ? source.slice(end) : source.slice(end, end + lineEnd);
+  if (after.trim() !== '') return false;
+  const line = source.slice(lineStart, start);
+  // The statement starts after the last `;` or unclosed `{` of the line.
+  let from = 0;
+  const open: number[] = [];
+  for (let i = 0; i < line.length; i += 1) {
+    if (line[i] === '{') open.push(i + 1);
+    else if (line[i] === '}') open.pop();
+    else if (line[i] === ';') from = i + 1;
+  }
+  const statement = line.slice(Math.max(from, open[open.length - 1] ?? 0));
+  return /(?:^\s*|\}\s*else\s+)(?:if|while|(?:parallel\s+)?for\s+[^{}]*?\s+in)\s+[^{}]*$/.test(
+    statement
   );
 }
 
@@ -1322,6 +1595,415 @@ function slotAt(source: string, before: readonly Token[], start: number): Slot {
   return { kind: 'default' };
 }
 
+/** The offset of the `{` of the set or dictionary literal whose key is
+ * at the end of `before`: after the `{` or after a `,` at its depth. */
+function recordKeyBrace(before: readonly Token[]): number | undefined {
+  const n = before.length;
+  const open = innermostOpen(before, n - 1);
+  if (
+    open < 0 ||
+    before[open].type !== 'OPEN_BRACE' ||
+    !isCollectionBrace(before, open)
+  )
+    return undefined;
+  const last = before[n - 1];
+  return last === before[open] || last.type === 'COMMA'
+    ? before[open].start
+    : undefined;
+}
+
+/** The fields of the record literal at `brace` that it does not write yet,
+ * `undefined` when its expected type is not a record (`recordFieldsOf`).
+ * The literal is the innermost `Dictionary` or `Set` (`{▮`) of the tree
+ * that starts at `brace`; a key that is the placeholder is not written. */
+function recordLiteralFields(
+  context: Context,
+  brace: number,
+  placeholder: string
+): { name: string; type: Type; optional: boolean }[] | undefined {
+  const nodes: MathJsonExpression[] = [];
+  const indices: number[] = [];
+  const visit = (node: MathJsonExpression, index: number): boolean => {
+    nodes.push(node);
+    indices.push(index);
+    const ops = operands(node);
+    for (let i = 0; i < ops.length; i += 1) if (visit(ops[i], i)) return true;
+    if (
+      ['Dictionary', 'Set'].includes(operator(node)) &&
+      spanOf(node)?.[0] === brace
+    )
+      return true;
+    nodes.pop();
+    indices.pop();
+    return false;
+  };
+  if (context.ast === null || !visit(context.ast, -1)) return undefined;
+  const expected = expectedTypeAt(
+    { ...context, nodes, indices },
+    nodes.length - 1
+  );
+  if (expected === undefined) return undefined;
+  const fields = recordFieldsOf(
+    context,
+    parseSourceType(context.ce, expected, context.typeNames)
+  );
+  if (fields === undefined) return undefined;
+  const literal = nodes[nodes.length - 1];
+  const written = new Set<string>();
+  if (operator(literal) === 'Dictionary')
+    for (const pair of operands(literal)) {
+      const key = stringValue(operand(pair, 1));
+      if (operator(pair) === 'KeyValuePair' && key !== null) written.add(key);
+    }
+  written.delete(placeholder);
+  return fields.filter((field) => !written.has(field.name));
+}
+
+/** A variant of a sum type of the source, with the sum that declares it. */
+type SourceVariant = {
+  name: string;
+  payload: string[] | undefined;
+  sum: string;
+};
+
+/**
+ * The items at the case pattern of a `match` at `start`, `undefined` when
+ * the type of its subject is not a sum type of the source (`variantsOf`):
+ * each variant that no other case of the `match` covers (`caseCoverage`),
+ * inserted as its pattern (`variantPattern`), in the order of the
+ * declaration, then the fix-it that adds a case for each of them. None
+ * when a case before the offset covers every variant (`_`, `otherwise`, a
+ * bare binding); a catch-all after it covers none of them, and leaves out
+ * the fix-it. Before a `(`, a variant is inserted as its name.
+ *
+ * The `match` is read from the source without the word at the offset, so
+ * that the cases after the offset are in the tree; when that source does
+ * not parse into a `match` around the offset, from the parse with the hole.
+ */
+function matchVariantItems(
+  context: Context,
+  source: string,
+  start: number,
+  end: number,
+  options:
+    | {
+        typeNames?: readonly string[];
+        sumVariants?: Readonly<Record<string, string>>;
+      }
+    | undefined
+): (EpsilCompletionItem & { tier: number })[] | undefined {
+  let tree: MathJsonExpression | null = null;
+  try {
+    [tree] = parseEpsil(source.slice(0, start) + source.slice(end), undefined, {
+      typeNames: options?.typeNames,
+      sumVariants: options?.sumVariants,
+    });
+  } catch {
+    // A `#error` pragma throws: no tree.
+  }
+  const node =
+    innermostMatchAt(tree, start) ?? innermostMatchAt(context.ast, start);
+  if (node === undefined) return undefined;
+  const [subject, ...cases] = operands(node);
+  const type = receiverTypeOf(context, subject ?? null);
+  const variants =
+    type === undefined
+      ? genericSumVariants(context, subject ?? null)
+      : variantsOf(context, type);
+  if (variants === undefined) return undefined;
+
+  const covered = new Set<string>();
+  let catchAll = false;
+  for (const c of cases) {
+    const span = spanOf(c);
+    // The case at the offset is the one being written.
+    if (span !== undefined && span[0] <= start && start <= span[1]) continue;
+    const cover = caseCoverage(context, c, variants);
+    if (cover === 'all') {
+      // A catch-all after the offset is the default below the specific
+      // cases being written: it covers no variant of the list.
+      if (span === undefined || span[0] < start) return [];
+      catchAll = true;
+      continue;
+    }
+    for (const name of cover) covered.add(name);
+  }
+  const missing = variants.filter((v) => !covered.has(v.name));
+  if (missing.length === 0) return [];
+
+  const patterns = missing.map((v) => variantPattern(context, v));
+  // Before a `(` (`re▮()`), the name only.
+  const called = /^[ \t]*\(/.test(source.slice(end));
+  const items: (EpsilCompletionItem & { tier: number })[] = missing.map(
+    (variant, i) => {
+      const insert = called ? escapeSymbol(variant.name) : patterns[i];
+      return {
+        label: variant.name,
+        kind: 'function',
+        rank: 2,
+        tier: i,
+        ...(insert === variant.name ? {} : { insertText: insert }),
+        detail: variant.sum,
+      };
+    }
+  );
+  // With a catch-all, the `match` is exhaustive: no fix-it.
+  const edit = catchAll
+    ? undefined
+    : missingCasesEdit(source, start, end, patterns);
+  if (edit !== undefined)
+    items.push({
+      label: 'add the missing cases',
+      kind: 'fixit',
+      rank: 0,
+      tier: 0,
+      edits: [edit],
+      detail: patterns.join(', '),
+    });
+  return items;
+}
+
+/** The innermost `Match` of `tree` whose span holds `offset`, past its
+ * start. */
+function innermostMatchAt(
+  tree: MathJsonExpression | null,
+  offset: number
+): MathJsonExpression | undefined {
+  if (tree === null) return undefined;
+  const span = spanOf(tree);
+  if (span !== undefined && !(span[0] < offset && offset <= span[1]))
+    return undefined;
+  for (const op of operands(tree)) {
+    const inner = innermostMatchAt(op, offset);
+    if (inner !== undefined) return inner;
+  }
+  return operator(tree) === 'Match' && span !== undefined ? tree : undefined;
+}
+
+/**
+ * The variants that a value of type `type` may be, in the order of their
+ * declaration: those of a sum type of the source, through the transparent
+ * aliases (`identity` of `layoutOf`); a variant of the source; a union of
+ * variants of the source (`red | green`, also the body of a sum type that
+ * the engine knows, whose variants come from the `sumVariants` option).
+ * `undefined` for any other type, a nominal type whose body is a sum
+ * included: its values are matched by its own constructor (`P(c)`).
+ */
+function variantsOf(context: Context, type: Type): SourceVariant[] | undefined {
+  const { identity } = layoutOf(context, type);
+  const variantNamed = (name: string): SourceVariant | undefined => {
+    for (const [sum, declared] of context.sourceTypes)
+      if (declared.kind === 'sum') {
+        const variant = declared.variants.find((v) => v.name === name);
+        if (variant !== undefined) return { ...variant, sum };
+      }
+    return undefined;
+  };
+  if (typeof identity !== 'object') return undefined;
+  if (identity.kind === 'reference') {
+    const declared = context.sourceTypes.get(identity.name);
+    if (declared?.kind === 'sum')
+      return declared.variants.map((v) => ({ ...v, sum: identity.name }));
+    const variant = variantNamed(identity.name);
+    return variant === undefined ? undefined : [variant];
+  }
+  if (identity.kind === 'union') {
+    const variants: SourceVariant[] = [];
+    for (const member of identity.types) {
+      const variant =
+        typeof member === 'object' && member.kind === 'reference'
+          ? variantNamed(member.name)
+          : undefined;
+      if (variant === undefined) return undefined;
+      variants.push(variant);
+    }
+    return variants;
+  }
+  return undefined;
+}
+
+/**
+ * The variants among `variants` that the case `c` of a `match` matches
+ * unconditionally, `'all'` for a catch-all, as the lint of exhaustiveness
+ * reads a case (`match-exhaustiveness.ts`), from the names of the source
+ * only: a wildcard or a bare binding (`_`, `x`, `otherwise`); a
+ * constructor pattern whose operands are all wildcards (`circle(r)`,
+ * `circle(...)`) and whose count fits the payload; a typed binding (`x:
+ * circle`, `x: Color`); or-alternatives of those. A case with any other
+ * guard covers nothing.
+ */
+function caseCoverage(
+  context: Context,
+  c: MathJsonExpression,
+  variants: readonly SourceVariant[]
+): 'all' | string[] {
+  if (operator(c) !== 'MatchCase') return [];
+  const ops = operands(c);
+  const pattern = ops[0];
+  let guard = ops.length === 3 ? ops[1] : null;
+  if (pattern === undefined) return [];
+  if (guard !== null && symbol(guard) === 'True') guard = null;
+  if (guard !== null) {
+    // The typed binding `x: T` is the binding with the implicit guard
+    // `MatchesType(x, TypeFrom("T"))`.
+    const name = symbol(pattern);
+    const test = operand(guard, 2);
+    const typeText = stringValue(operand(test, 1));
+    if (
+      name === null ||
+      operator(guard) !== 'MatchesType' ||
+      symbol(operand(guard, 1)) !== name.replace(/^_+/, '') ||
+      operator(test) !== 'TypeFrom' ||
+      typeText === null
+    )
+      return [];
+    if (['any', 'unknown', 'expression'].includes(typeText.trim()))
+      return 'all';
+    const type = parseSourceType(context.ce, typeText, context.typeNames);
+    const bound = type === undefined ? undefined : variantsOf(context, type);
+    if (bound === undefined) return [];
+    const names = new Set(bound.map((v) => v.name));
+    return variants.every((v) => names.has(v.name)) ? 'all' : [...names];
+  }
+  return patternCoverage(context, pattern, variants);
+}
+
+/** The variants that `pattern`, with no guard, matches (`caseCoverage`). */
+function patternCoverage(
+  context: Context,
+  pattern: MathJsonExpression,
+  variants: readonly SourceVariant[]
+): 'all' | string[] {
+  const s = symbol(pattern);
+  if (s !== null) return s.startsWith('_') && !s.startsWith('__') ? 'all' : [];
+  const head = operator(pattern);
+  if (head === 'Alternatives') {
+    const names: string[] = [];
+    for (const arm of operands(pattern)) {
+      const cover = patternCoverage(context, arm, variants);
+      if (cover === 'all') return 'all';
+      names.push(...cover);
+    }
+    return names;
+  }
+  const variant = variants.find((v) => v.name === head);
+  if (variant === undefined) return [];
+  const args = operands(pattern);
+  const wildcard = (x: MathJsonExpression) => symbol(x)?.startsWith('_');
+  if (!args.every(wildcard)) return [];
+  const rest = args.some((x) => symbol(x)?.startsWith('__'));
+  const fixed = args.filter((x) => !symbol(x)?.startsWith('__')).length;
+  const arity = payloadFields(context, variant.payload)?.length;
+  if (arity !== undefined && (rest ? fixed > arity : fixed !== arity))
+    return [];
+  return [variant.name];
+}
+
+/**
+ * The variants of the sum type of the source that a name is declared with
+ * an application of (`o: opt<integer>`), whose type does not parse here:
+ * `undefined` for any other subject.
+ */
+function genericSumVariants(
+  context: Context,
+  subject: MathJsonExpression | null
+): SourceVariant[] | undefined {
+  const name = symbol(subject);
+  const group = name === null ? undefined : context.visible.get(name);
+  if (group === undefined || group.kind === 'function') return undefined;
+  const { type } = declarationDetail(
+    context.ce,
+    declarationOf(group, context.declarations),
+    context.text,
+    context.typeNames
+  );
+  const sum =
+    type === undefined ? undefined : /^\s*([^<\s]+)\s*</.exec(type)?.[1];
+  const declared = sum === undefined ? undefined : context.sourceTypes.get(sum);
+  return declared?.kind === 'sum'
+    ? declared.variants.map((v) => ({ ...v, sum: sum! }))
+    : undefined;
+}
+
+/** The fields of the payload of a variant (`payloadParameters`). A payload
+ * that names a type parameter of a generic sum type (`some(v: T)`) is read
+ * with each of its words as a type name, for the names of its fields. */
+function payloadFields(
+  context: Context,
+  payload: readonly string[] | undefined
+): Parameter[] | undefined {
+  const parameters = payloadParameters(context, payload);
+  if (parameters !== undefined || payload === undefined) return parameters;
+  const words = payload.flatMap(
+    (text) => text.match(/[\p{L}_][\p{L}\p{N}_]*/gu) ?? []
+  );
+  return payloadParameters(
+    { ...context, typeNames: new Set([...context.typeNames, ...words]) },
+    payload
+  );
+}
+
+/** The pattern of a case that covers `variant`: its constructor with a
+ * binding per field of its payload, named as the field (`circle(r)`), `_`
+ * for a field with no name, and `(...)` when the payload is not known (a
+ * variant known only from the `sumVariants` option, a payload whose type
+ * does not parse, such as one of a type parameter). */
+function variantPattern(context: Context, variant: SourceVariant): string {
+  const parameters = payloadFields(context, variant.payload);
+  const args =
+    parameters === undefined
+      ? '...'
+      : parameters
+          .map((p) => (p.name === undefined ? '_' : escapeSymbol(p.name)))
+          .join(', ');
+  return `${escapeSymbol(variant.name)}(${args})`;
+}
+
+/**
+ * The edit of the fix-it that adds a case `<pattern> => nothing` for each of
+ * `patterns`, over the word at `[start, end]`: one per line at the
+ * indentation of the offset when it starts its line; after the `{` of the
+ * `match` on its line, one per line, indented by two spaces more than that
+ * line, and the rest of the line (`}`) on a line of its own; else (after a
+ * `;`), on the line, separated by `; `. `undefined` when the rest of the
+ * line after the word is not empty and does not start with `;` or `}`
+ * (`▮ => 1`): the cases would take the text of the case being written.
+ */
+function missingCasesEdit(
+  source: string,
+  start: number,
+  end: number,
+  patterns: readonly string[]
+): [number, number, string] | undefined {
+  const cases = patterns.map((p) => `${p} => nothing`);
+  const rest = /^[^\n\r]*/.exec(source.slice(end))![0];
+  const next = rest.trimStart();
+  if (next !== '' && !next.startsWith(';') && !next.startsWith('}'))
+    return undefined;
+  const lineStart =
+    Math.max(
+      source.lastIndexOf('\n', start - 1),
+      source.lastIndexOf('\r', start - 1)
+    ) + 1;
+  const linePrefix = source.slice(lineStart, start);
+  if (/^[ \t]*$/.test(linePrefix))
+    return [start, end, cases.join(`\n${linePrefix}`)];
+  const lineIndent = /^[ \t]*/.exec(linePrefix)![0];
+  if (linePrefix.trimEnd().endsWith('{')) {
+    // The blanks after the `{` are replaced too.
+    const from = start - (linePrefix.length - linePrefix.trimEnd().length);
+    const inner = `${lineIndent}  `;
+    const text = `\n${inner}${cases.join(`\n${inner}`)}`;
+    if (rest.trim() === '') return [from, end, text];
+    const blank = /^[ \t]*/.exec(rest)![0].length;
+    return [from, end + blank, `${text}\n${lineIndent}`];
+  }
+  const text = cases.join('; ');
+  if (next.startsWith('}'))
+    return [start, end, rest === next ? `${text} ` : text];
+  return [start, end, text];
+}
+
 /** Whether `before[i]` ends an operand: a name that is not a keyword, a
  * number, a string, a literal, or a closing parenthesis or bracket. */
 function endsOperand(before: readonly Token[], i: number): boolean {
@@ -1574,11 +2256,21 @@ type Context = {
  * The type expected for `nodes[k]`, from its parent:
  * - the value of a `let` with a type: that type;
  * - an element of a list whose expected type is `list<T>`: `T`;
+ * - the value of a field of a record literal whose expected type is a
+ *   record type (`recordFieldsOf`): the type of the field;
  * - the value of an assignment to a declared variable: its type;
  * - an argument of a call of a function of the source: the type of its
  *   parameter, when it has one;
  * - an argument of a call of a library function: the parameter type of its
  *   signature;
+ * - the value of a named argument (`f(n: ▮)`): the type of the parameter of
+ *   that name (`namedParameterAt`);
+ * - the condition of `if`: `boolean`;
+ * - the collection of `for x in ▮`: `collection`;
+ * - an operand of `+`: `number | quantity` when every other operand is a
+ *   number or a tensor of numbers;
+ * - an operand of `-`, `*`, `/`, `^` and of a unary minus: the parameter
+ *   type of the signature, or a quantity;
  * - the right side of `|>`: a function of one argument of the type of the
  *   left side (`x |> f` is `f(x)`), `function` when the left side has no
  *   static type.
@@ -1602,6 +2294,21 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
   }
 
   if (head === 'KeyValuePair') {
+    // The value of a field of a record literal (`{x -> ▮`): the type of the
+    // field, when the literal expects a record type.
+    const key = stringValue(operand(parent, 1));
+    if (key !== null && operator(nodes[k - 2]) === 'Dictionary') {
+      if (index !== 1) return undefined;
+      const literal = expectedTypeAt(context, k - 2);
+      const field =
+        literal === undefined
+          ? undefined
+          : recordFieldsOf(
+              context,
+              parseSourceType(ce, literal, context.typeNames)
+            )?.find((f) => f.name === key);
+      return field === undefined ? undefined : typeToString(field.type);
+    }
     const declare = nodes[k - 3];
     if (
       index !== 1 ||
@@ -1637,19 +2344,44 @@ function expectedTypeAt(context: Context, k: number): string | undefined {
     return declaration?.kind === 'value' ? declaration.type : undefined;
   }
 
-  // A named argument of a call of a function of the source (`f(n: ▮)`): the
-  // type of the parameter of that name.
-  if (head === 'NamedArgument') {
-    const label = stringValue(operand(parent, 1));
-    const group = context.visible.get(operator(nodes[k - 2]));
-    const declaration =
-      group === undefined
-        ? undefined
-        : declarationOf(group, context.declarations);
-    if (index !== 1 || label === null || declaration?.kind !== 'function')
-      return undefined;
-    const i = declaration.names.indexOf(label);
-    return i < 0 ? undefined : declaration.params[i];
+  // A named argument of a call (`f(n: ▮)`): the type of the parameter of
+  // that name (`namedParameterAt`).
+  if (head === 'NamedArgument')
+    return index === 1 ? namedParameterAt(context, k)?.type : undefined;
+
+  // The condition of `if` and of `a if c else b`. (The condition of `while`
+  // is the operand of a `Not`, typed by its signature.)
+  if (head === 'If') return index === 0 ? 'boolean' : undefined;
+
+  // The collection of a `for … in` clause, of a loop or a comprehension.
+  if (
+    head === 'Element' &&
+    index === 1 &&
+    context.indices[k - 1] >= 1 &&
+    LOOP_HEADS.has(operator(nodes[k - 2]))
+  )
+    return 'collection';
+
+  // An operand of `+`: a number or a quantity (or a list of them, by the
+  // broadcast) when every other operand is a number or a tensor of numbers.
+  // `1 + Quantity(3, "m")` is valid: it stays `3 m + 1`. `+` also adds two
+  // tuples of numbers, and its signature admits any value: with another
+  // operand of any other type, or of no static type, no expected type.
+  if (head === 'Add') {
+    const others = operands(parent).filter((_, j) => j !== index);
+    return others.length > 0 && others.every((op) => isNumeric(context, op))
+      ? 'number | quantity'
+      : undefined;
+  }
+
+  // An operand of `-`, `*`, `/`, `^` and of a unary minus: the parameter
+  // type of the signature, and a quantity, which the handlers take too
+  // (`2 * Quantity(3, "m")` is `6 m`).
+  if (ARITHMETIC_HEADS.has(head)) {
+    const parameter = libraryParameterAt(context, k)?.parameter;
+    if (parameter === undefined) return undefined;
+    const text = typeToString(parameter);
+    return /\bquantity\b/.test(text) ? text : `${text} | quantity`;
   }
 
   if (head === '' || GRAMMAR_CONSTRUCTS.has(head) || head === 'Program')
@@ -1900,6 +2632,357 @@ function parameterAt(
   )?.type;
 }
 
+/** A parameter of a callee, for its named arguments. */
+type CalleeParameter = {
+  name?: string;
+  /** The declared type, as the source writes it, or as the engine writes the
+   * type of a signature. */
+  type?: string;
+  /** The type for the slot of the piped value (`implicitTopicSlot`): a type
+   * variable of a signature is replaced by its bound. */
+  slotType?: Type;
+  /** The type that the argument admits: a type variable of a signature is
+   * `unknown`. */
+  admitted?: Type;
+  optional: boolean;
+  /** Whether a named argument may leave the parameter out when it is
+   * optional: a parameter with a default value. An optional parameter of a
+   * signature (`number?`) has none: naming a later parameter leaves a hole
+   * (`argument-optional-skipped`). */
+  skippable: boolean;
+};
+
+/** One signature of a callee, for its named arguments: the parameters
+ * before the rest parameter, the number of required arguments, and whether
+ * there is a rest parameter, with the type of its element and the number of
+ * arguments it requires. A rest parameter cannot be filled by name, so a
+ * named call cannot complete a signature whose rest parameter requires an
+ * argument (`collection<T>+`). */
+type CalleeArm = {
+  params: CalleeParameter[];
+  required: number;
+  rest: boolean;
+  restType?: Type;
+  restMin: number;
+};
+
+/**
+ * The signatures of the callee `head` when a call may pass it arguments by
+ * name: the rule of `normalizeNamedArguments()`, the names of the
+ * declaration that the call resolves through.
+ *
+ * - A `function` of the source: one signature per definition.
+ * - A variable whose declared type is a signature or an overload set, also
+ *   through an alias, with at least one parameter name. Only the declared
+ *   type counts (`valueCalleeSignature()`): a variable with no declared
+ *   type, a lambda bound by `:=`, gives `undefined`.
+ * - A library function: the arms of its signature. A union of signatures
+ *   gives `undefined`: the function is one of them.
+ *
+ * `broadcastable` tells whether a call maps over a list argument, and
+ * `topic` whether the callee takes the piped value as an implicit argument
+ * after `|>` (the `Pipe` handler does so for an operator only, not for a
+ * variable).
+ */
+function namedCallee(
+  context: Context,
+  head: string
+): { arms: CalleeArm[]; broadcastable: boolean; topic: boolean } | undefined {
+  const { ce } = context;
+  const group = context.visible.get(head);
+  if (group?.kind === 'function') {
+    const arms = group.occurrences
+      .filter((o) => o.role === 'definition')
+      .map((o) => context.declarations.get(o.start))
+      .filter(
+        (d): d is Extract<Declaration, { kind: 'function' }> =>
+          d?.kind === 'function'
+      )
+      .map((declaration) => sourceArm(ce, declaration));
+    return arms.length === 0
+      ? undefined
+      : { arms, broadcastable: true, topic: true };
+  }
+  if (group !== undefined) {
+    const declaration = declarationOf(group, context.declarations);
+    if (declaration?.kind !== 'value') return undefined;
+    let type = parseSourceType(ce, declaration.type, context.typeNames);
+    const seen = new Set<string>();
+    while (typeof type === 'object' && type.kind === 'reference') {
+      const declared = context.sourceTypes.get(type.name);
+      if (declared?.kind !== 'alias' || seen.has(type.name)) break;
+      seen.add(type.name);
+      type = parseSourceType(ce, declared.body, context.typeNames);
+    }
+    const resolved =
+      typeof type === 'object' && type.kind === 'reference'
+        ? resolveTypeReference(type)
+        : type;
+    if (typeof resolved !== 'object' || resolved.kind === 'union')
+      return undefined;
+    const signatures = signatureArms(resolved);
+    if (
+      signatures === undefined ||
+      !signatures.some((s) =>
+        [...(s.args ?? []), ...(s.optArgs ?? [])].some(
+          (e) => e.name !== undefined
+        )
+      )
+    )
+      return undefined;
+    return {
+      arms: signatures.map(signatureArm),
+      broadcastable: false,
+      topic: false,
+    };
+  }
+  const name =
+    ce.operatorInfo(head) !== undefined ? head : canonicalLibraryName(head);
+  // The normalization of named arguments leaves out `Apply`: its first
+  // parameter is the callee, whose names a name matches
+  // (`boxed-expression/box.ts`). A named call of `Complex` is an error
+  // (CE-1689).
+  if (name === 'Apply' || name === 'Complex') return undefined;
+  const type =
+    name === undefined ? undefined : ce.operatorInfo(name)?.signature?.type;
+  if (name === undefined || typeof type !== 'object' || type.kind === 'union')
+    return undefined;
+  const signatures = signatureArms(type);
+  return signatures === undefined
+    ? undefined
+    : {
+        arms: signatures.map(signatureArm),
+        broadcastable: isBroadcastable(ce, name),
+        topic: true,
+      };
+}
+
+/** A definition of a `function` of the source as a `CalleeArm`. */
+function sourceArm(
+  ce: ComputeEngine,
+  declaration: Extract<Declaration, { kind: 'function' }>
+): CalleeArm {
+  const n = declaration.params.length - (declaration.rest ? 1 : 0);
+  const params = declaration.params.slice(0, n).map((type, i) => {
+    const parsed = type === undefined ? undefined : parseTypeString(ce, type);
+    const name = declaration.names[i];
+    return {
+      ...(name === undefined ? {} : { name }),
+      ...(type === undefined ? {} : { type }),
+      ...(parsed === undefined ? {} : { slotType: parsed, admitted: parsed }),
+      optional: declaration.optional[i],
+      skippable: declaration.optional[i],
+    };
+  });
+  return {
+    params,
+    required: params.filter((p) => !p.optional).length,
+    rest: declaration.rest,
+    restMin: 0,
+  };
+}
+
+/** A signature as a `CalleeArm`. */
+function signatureArm(signature: FunctionSignature): CalleeArm {
+  const bounds: Record<string, Type> = {};
+  const unknowns: Record<string, Type> = {};
+  for (const p of signature.typeParams ?? []) {
+    bounds[p.name] = p.bound ?? 'any';
+    unknowns[p.name] = 'unknown';
+  }
+  const parameter = (
+    element: { name?: string; type: Type },
+    optional: boolean
+  ): CalleeParameter => ({
+    ...(element.name === undefined ? {} : { name: element.name }),
+    type: typeToString(element.type),
+    slotType: substituteTypeVariables(element.type, bounds),
+    admitted: substituteTypeVariables(element.type, unknowns),
+    optional,
+    skippable: false,
+  });
+  const variadic = signature.variadicArg;
+  return {
+    params: [
+      ...(signature.args ?? []).map((e) => parameter(e, false)),
+      ...(signature.optArgs ?? []).map((e) => parameter(e, true)),
+    ],
+    required:
+      (signature.args?.length ?? 0) +
+      (variadic === undefined ? 0 : (signature.variadicMin ?? 0)),
+    rest: variadic !== undefined,
+    restMin: variadic === undefined ? 0 : (signature.variadicMin ?? 0),
+    ...(variadic === undefined
+      ? {}
+      : { restType: substituteTypeVariables(variadic.type, bounds) }),
+  };
+}
+
+/**
+ * The parameter names to offer at the argument `nodes[k]` (the hole) of the
+ * call `nodes[k - 1]`, and whether only they are valid there (`only`: a
+ * named argument comes before the hole, and a positional argument may not
+ * follow it). `undefined` when the callee takes no names (`namedCallee`), or
+ * when a name at the hole cannot be valid: a positional argument after the
+ * hole, a spread argument, after `|>` a callee that does not take the piped
+ * value or a slot of the piped value that is not known (`implicitTopicSlot`).
+ *
+ * A name is offered for a parameter that no argument fills, by position or
+ * by name, and that is not the rest parameter. In an overload set, or for a
+ * function of the source with several definitions, a name is offered when
+ * every signature that can still match the call has it: one that takes the
+ * positional arguments and has every name written. A signature that cannot
+ * be completed by names offers none: a required parameter with no name that
+ * no positional argument fills (`xs |> sort(order: f)` leaves the first
+ * parameter of `sort` empty), positional arguments that reach the rest
+ * parameter, a rest parameter that requires an argument (`map`: a named
+ * call fills no rest parameter), the piped value in a slot after the hole (`xs |> fold(▮` puts
+ * it last, after the named arguments: `argument-order-invalid`). An optional
+ * parameter of a signature is not offered after an optional parameter with
+ * no name and no default that is not filled (`argument-optional-skipped`).
+ * The type of a name is the type of its parameter when the signatures agree.
+ */
+function namedArgumentsAt(
+  context: Context,
+  k: number
+): { names: { name: string; type?: string }[]; only: boolean } | undefined {
+  const { nodes, indices } = context;
+  const callee = namedCallee(context, operator(nodes[k - 1]));
+  if (callee === undefined) return undefined;
+  const written = operands(nodes[k - 1]);
+  const hole = indices[k];
+  const isNamed = (arg: MathJsonExpression | null) =>
+    operator(arg) === 'NamedArgument';
+  if (written.some((arg) => operator(arg) === 'Spread')) return undefined;
+  if (written.slice(hole + 1).some((arg) => !isNamed(arg))) return undefined;
+  const positional = written.slice(0, hole).filter((a) => !isNamed(a)).length;
+  const firstNamed = written.findIndex(isNamed);
+  const only = firstNamed >= 0 && firstNamed < hole;
+  // A positional argument after a named one: the call is not valid.
+  if (only && positional > firstNamed) return undefined;
+  const labels = written
+    .filter((arg, j) => j !== hole && isNamed(arg))
+    .map((arg) => stringValue(operand(arg, 1)));
+  if (labels.some((label) => label === null)) return undefined;
+  const piped =
+    k >= 2 && operator(nodes[k - 2]) === 'Pipe' && indices[k - 1] === 1;
+  if (piped && !callee.topic) return undefined;
+  // Whether the piped value is an implicit argument, as the `Pipe` handler
+  // decides (`pipeStageWithImplicitTopic` in `library/core.ts`): the call
+  // has no `_` and is incomplete under every signature. Its slot is then
+  // that of `topicSlotOf` in each signature.
+  const implicit =
+    piped &&
+    !written.some((arg) => symbol(arg) === '_') &&
+    callee.arms.every((arm) => written.length < arm.required);
+
+  // The names that each signature that can still match offers.
+  const offers: Map<string, string | undefined>[] = [];
+  // Whether a signature can still match the call, named or not.
+  let matched = false;
+  for (const arm of callee.arms) {
+    let topic: number | undefined;
+    if (implicit) {
+      if (!arm.rest && written.length + 1 > arm.params.length) continue;
+      const slot = topicSlotOf(
+        context,
+        operand(nodes[k - 2], 1),
+        written,
+        hole,
+        [
+          ...arm.params.map((p) => p.slotType),
+          ...(arm.rest ? [arm.restType] : []),
+        ]
+      );
+      // A signature where the piped value fits no slot cannot match.
+      if (slot === 'none') continue;
+      if (slot === null) return undefined;
+      topic = slot;
+    }
+    const filled = new Set<number>();
+    for (let j = 0; j < positional; j += 1) filled.add(slotOfOperand(j, topic));
+    if (topic !== undefined) filled.add(topic);
+    const overflow = [...filled].some((i) => i >= arm.params.length);
+    if (overflow && !arm.rest) continue;
+    const names = arm.params.map((p) => p.name);
+    const slots = labels.map((label) => names.indexOf(label!));
+    if (slots.some((i) => i < 0 || filled.has(i))) continue;
+    for (const i of slots) filled.add(i);
+    // A named call never fills a required rest, so it never matches such
+    // a signature: leave it out of the intersection, which would otherwise
+    // hide the names of another signature that a named call can match.
+    matched = true;
+    if (arm.restMin > 0) continue;
+    const offer = new Map<string, string | undefined>();
+    offers.push(offer);
+    if (overflow || (topic !== undefined && topic > positional)) continue;
+    if (
+      arm.params.some(
+        (p, i) => p.name === undefined && !p.optional && !filled.has(i)
+      )
+    )
+      continue;
+    arm.params.forEach((p, i) => {
+      if (p.name === undefined || filled.has(i)) return;
+      const gap = arm.params
+        .slice(0, i)
+        .some(
+          (q, j) =>
+            q.optional && !q.skippable && q.name === undefined && !filled.has(j)
+        );
+      if (p.optional && gap) return;
+      offer.set(p.name, p.type);
+    });
+  }
+  if (!matched) return undefined;
+  const names: { name: string; type?: string }[] = [];
+  if (offers.length === 0) return { names, only };
+  for (const [name, type] of offers[0]) {
+    if (!offers.every((offer) => offer.has(name))) continue;
+    const agree = offers.every((offer) => offer.get(name) === type);
+    names.push({ name, ...(agree && type !== undefined ? { type } : {}) });
+  }
+  return { names, only };
+}
+
+/**
+ * The parameter of the named argument `nodes[k - 1]` of the call
+ * `nodes[k - 2]`, whose value is `nodes[k]`: its type and the type that the
+ * value admits, from the signatures of the callee (`namedCallee`) that have
+ * a parameter of that name and the names of the other named arguments.
+ * `undefined` when there is none, or when they disagree about the type.
+ */
+function namedParameterAt(
+  context: Context,
+  k: number
+): { type?: string; admitted?: Type; broadcastable: boolean } | undefined {
+  if (k < 2) return undefined;
+  const { nodes, indices } = context;
+  const label = stringValue(operand(nodes[k - 1], 1));
+  const callee =
+    label === null ? undefined : namedCallee(context, operator(nodes[k - 2]));
+  if (callee === undefined) return undefined;
+  const others = operands(nodes[k - 2])
+    .filter(
+      (arg, j) => j !== indices[k - 1] && operator(arg) === 'NamedArgument'
+    )
+    .map((arg) => stringValue(operand(arg, 1)));
+  const parameters = callee.arms
+    .filter((arm) =>
+      others.every((name) => arm.params.some((p) => p.name === name))
+    )
+    .map((arm) => arm.params.find((p) => p.name === label))
+    .filter((p) => p !== undefined);
+  const [first] = parameters;
+  if (first === undefined || parameters.some((p) => p.type !== first.type))
+    return undefined;
+  return {
+    ...(first.type === undefined ? {} : { type: first.type }),
+    ...(first.admitted === undefined ? {} : { admitted: first.admitted }),
+    broadcastable: callee.broadcastable,
+  };
+}
+
 /**
  * The type that `nodes[k]` admits, for the fit of a name: the expected type
  * (`expectedTypeAt`), with three changes.
@@ -1938,14 +3021,21 @@ function admittedTypeAt(
       effects: 'any',
     };
   else if (
-    ['KeyValuePair', 'List', 'Assign', 'Program', ''].includes(head) ||
+    ['KeyValuePair', 'List', 'Assign', 'Program', '', 'If', 'Element'].includes(
+      head
+    ) ||
     GRAMMAR_CONSTRUCTS.has(head)
   )
     type = parseTypeString(ce, expected);
-  else if (
-    head === 'NamedArgument' ||
-    context.visible.get(head)?.kind === 'function'
-  ) {
+  else if (ARITHMETIC_HEADS.has(head)) {
+    // `1 + ▮` admits a list of numbers too (`1 + [1, 2]`), and a quantity.
+    type = parseTypeString(ce, expected);
+    broadcast = true;
+  } else if (head === 'NamedArgument') {
+    const named = namedParameterAt(context, k);
+    type = named?.admitted ?? parseTypeString(ce, expected);
+    broadcast = named?.broadcastable ?? false;
+  } else if (context.visible.get(head)?.kind === 'function') {
     type = parseTypeString(ce, expected);
     broadcast = true;
   } else {
@@ -2113,6 +3203,38 @@ function staticTypeOf(
   return signature.result;
 }
 
+/** The arithmetic operators whose value is a number or a tensor of numbers
+ * when every operand is one (`isNumeric`). */
+const ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+]);
+
+/** Whether the value of `node` is a number or a tensor of numbers
+ * (`matrix`, `list<integer>`), by its static type or, for an arithmetic
+ * operator (`a + b`), by its operands. A tuple of numbers is not. */
+function isNumeric(context: Context, node: MathJsonExpression | null): boolean {
+  const { ce } = context;
+  const type = staticTypeOf(context, node);
+  if (type !== undefined) {
+    const tensor = parseTypeString(ce, 'tensor<number>');
+    return (
+      subtypeOf(ce, type, 'number') === true ||
+      (tensor !== undefined && subtypeOf(ce, type, tensor) === true)
+    );
+  }
+  const ops = operands(node);
+  return (
+    ARITHMETIC_HEADS.has(operator(node)) &&
+    ops.length > 0 &&
+    ops.every((op) => isNumeric(context, op))
+  );
+}
+
 /** A member of a value, an item after `.`: a field of a record or of an
  * `object` type, a named element of a tuple, or a property or a function of
  * a protocol that the type of the value conforms to. `type` is the type of
@@ -2226,6 +3348,65 @@ function sourceVariantPayload(
 }
 
 /**
+ * The layout of a value of type `type`: its body through the aliases and
+ * the nominal types of the source and of the engine (`body`), the names of
+ * the type along its transparent aliases up to and including the first
+ * nominal type (`names`), and the type that a conformance names
+ * (`identity`): the type at the last of these names, which is the body of
+ * a chain of transparent aliases.
+ */
+function layoutOf(
+  context: Context,
+  type: Type
+): { body: Type; names: Set<string>; identity: Type } {
+  const names = new Set<string>([typeToString(type)]);
+  let identity: Type = type;
+  let nominal = false;
+  let body: Type = type;
+  for (let i = 0; i < 16; i += 1) {
+    body = resolveTypeAlias(body);
+    if (!nominal) identity = body;
+    if (typeof body !== 'object' || body.kind !== 'reference') break;
+    if (!nominal) names.add(body.name);
+    if (
+      !(body.def !== undefined
+        ? body.alias
+        : context.sourceTypes.get(body.name)?.kind === 'alias')
+    )
+      nominal = true;
+    const next =
+      body.def !== undefined
+        ? resolveTypeReference(body)
+        : sourceTypeBody(context, body);
+    if (next === undefined) break;
+    body = next;
+  }
+  return { body, names, identity };
+}
+
+/**
+ * The fields of a record literal whose expected type is `type`, in the
+ * order of the type: those of a record type, through the transparent
+ * aliases (`identity` of `layoutOf`). `undefined` for any other type: a
+ * nominal type, whose body may be a record or an `object{…}` layout, does
+ * not admit a literal (`const r: P = {x -> 1}` is `incompatible-type`).
+ */
+function recordFieldsOf(
+  context: Context,
+  type: Type | undefined
+): { name: string; type: Type; optional: boolean }[] | undefined {
+  if (type === undefined) return undefined;
+  const { identity } = layoutOf(context, type);
+  if (typeof identity !== 'object' || identity.kind !== 'record')
+    return undefined;
+  return Object.entries(identity.elements).map(([name, t]) => ({
+    name,
+    type: t,
+    optional: isOptionalField(identity, name),
+  }));
+}
+
+/**
  * The members of a value of type `type`, fields first: the fields of a
  * record or of an `object` type, the named elements of a tuple, through an
  * alias or a nominal type of the source or of the engine; then the
@@ -2264,31 +3445,7 @@ function membersOf(context: Context, type: Type): Member[] {
     members.push(member);
   };
 
-  // The fields are those of the layout, through the aliases and the nominal
-  // types. A conformance names the type along its transparent aliases, up to
-  // and including the first nominal type (`identity`).
-  const names = new Set<string>([typeToString(type)]);
-  let identity: Type = type;
-  let nominal = false;
-  let body: Type = type;
-  for (let i = 0; i < 16; i += 1) {
-    body = resolveTypeAlias(body);
-    if (!nominal) identity = body;
-    if (typeof body !== 'object' || body.kind !== 'reference') break;
-    if (!nominal) names.add(body.name);
-    if (
-      !(body.def !== undefined
-        ? body.alias
-        : context.sourceTypes.get(body.name)?.kind === 'alias')
-    )
-      nominal = true;
-    const next =
-      body.def !== undefined
-        ? resolveTypeReference(body)
-        : sourceTypeBody(context, body);
-    if (next === undefined) break;
-    body = next;
-  }
+  const { body, names, identity } = layoutOf(context, type);
   if (typeof body === 'object') {
     if (body.kind === 'record' || body.kind === 'object')
       for (const [name, t] of Object.entries(body.elements))
@@ -2769,14 +3926,16 @@ function broadcastOf(type: Type): Type {
  * two numeric ranges) and when the engine cannot tell. A function type
  * where a function is expected is judged by its signature (`fitOfCallable`),
  * also where a union expects a function in one of its arms
- * (`function | nothing`). A transparent alias is unfolded. `options` are
- * those of `fitOfFunction`.
+ * (`function | nothing`). A transparent alias is unfolded. A tuple where a
+ * broadcast call expects `broadcastable<T>` is `'maybe'` at worst, unless
+ * `tupleBroadcast` is `false`. The other `options` are those of
+ * `fitOfFunction`.
  */
 function fitValue(
   ce: ComputeEngine,
   type: Type,
   expected: Type,
-  options?: { pipe?: boolean; openArity?: boolean }
+  options?: { pipe?: boolean; openArity?: boolean; tupleBroadcast?: boolean }
 ): Fit {
   type = resolveTypeAlias(type);
   expected = resolveTypeAlias(expected);
@@ -2788,7 +3947,7 @@ function fitValue(
       union: typeof type === 'object' && type.kind === 'union',
     });
   const subtype = subtypeOf(ce, type, expected);
-  const fit: Fit =
+  let fit: Fit =
     subtype === undefined
       ? 'maybe'
       : subtype
@@ -2796,6 +3955,18 @@ function fitValue(
         : typesMayOverlap(type, expected) === false
           ? 'never'
           : 'maybe';
+  // A broadcast call maps over a tuple too, element by element
+  // (`sin((1, 2))`, `2 * (1, 2)`), which `broadcastable<T>` does not show: a
+  // tuple may fit. `tupleBroadcast` is `false` for the body of a type of the
+  // source, which is not mapped over.
+  if (
+    fit === 'never' &&
+    options?.tupleBroadcast !== false &&
+    typeof expected === 'object' &&
+    expected.kind === 'broadcastable' &&
+    hasTupleArm(type)
+  )
+    fit = 'maybe';
   if (!mixed) return fit;
   return bestFit(
     fit,
@@ -2804,6 +3975,16 @@ function fitValue(
       union: typeof type === 'object' && type.kind === 'union',
     })
   );
+}
+
+/** Whether a type is a tuple, or a union with a tuple arm, also through a
+ * transparent alias. */
+function hasTupleArm(type: Type): boolean {
+  const t = resolveTypeAlias(type);
+  if (t === 'tuple') return true;
+  if (typeof t !== 'object') return false;
+  if (t.kind === 'tuple') return true;
+  return t.kind === 'union' && t.types.some(hasTupleArm);
 }
 
 /**

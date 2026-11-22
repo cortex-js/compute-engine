@@ -21,6 +21,7 @@ import type {
 import {
   isGroupedTypeText,
   isWildcardFunctionType,
+  signatureArms,
   signatureEffects,
   resolveTypeAlias,
   stripMissingFromType,
@@ -30,7 +31,10 @@ import { isSubtype } from '../common/type/subtype.js';
 import { typesOverlap } from '../common/type/reduce.js';
 import { parseType } from '../common/type/parse.js';
 import { typeToString } from '../common/type/serialize.js';
-import { isPolymorphicType } from '../common/type/instantiate.js';
+import {
+  isPolymorphicType,
+  substituteTypeVariables,
+} from '../common/type/instantiate.js';
 
 // Type-only import: like `execute-epsil.ts`, this module never statically
 // imports the engine — the engine is injected at call time.
@@ -62,7 +66,7 @@ import {
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
 
-import type { ParsingDiagnostic } from './diagnostics.js';
+import type { Fixit, ParsingDiagnostic } from './diagnostics.js';
 import {
   documentBindings,
   occurrenceAt,
@@ -1118,6 +1122,22 @@ function canonicalizationDiagnostics(
             range: [...firstDeclaration],
           });
         if (notes.length > 0) diagnostic.notes = notes;
+        if (code === 'dot-call-not-a-protocol-function') {
+          // Payload: [name, receiver type].
+          const name = stringValue(operand(operand(error, 1), 2));
+          const receiverType = stringValue(operand(operand(error, 1), 3));
+          const fixit =
+            name === null
+              ? undefined
+              : dotCallFixit(
+                  statement,
+                  [from, to],
+                  name,
+                  source,
+                  !receiverMissesFirstSlot(ce, name, receiverType)
+                );
+          if (fixit !== undefined) diagnostic.fixits = [fixit];
+        }
         // Path-2 refinement (user-ruled 2026-08-23): when the mismatch is
         // only POSSIBLE — the faulted operand is a symbol whose recorded
         // assignment evidence merely OVERLAPS the expected type (`number`
@@ -2724,6 +2744,136 @@ function ruleAtFunctionSlot(
   };
   if (arrow !== undefined) diagnostic.fixits = [[arrow[0], arrow[1], '=>']];
   return { diagnostic, anchors, keyName: symbol(key)! };
+}
+
+/**
+ * Whether a value of the type `receiverType` (a type string) cannot fill the
+ * first parameter of the function `name` (an Epsil spelling or an engine
+ * name): the first parameter type of each signature arm, with its type
+ * variables replaced by their bounds, has no value in common with it. For
+ * `Map`, whose first parameter is the function, a list cannot. `false` when
+ * the function or the type is not known.
+ */
+function receiverMissesFirstSlot(
+  ce: ComputeEngine,
+  name: string,
+  receiverType: string | null
+): boolean {
+  if (receiverType === null) return false;
+  const receiver = parseType(receiverType, ce._typeResolver);
+  const operatorName =
+    ce.operatorInfo(name) !== undefined ? name : ce._epsilLibraryName?.(name);
+  const signature =
+    operatorName === undefined
+      ? undefined
+      : ce.operatorInfo(operatorName)?.signature?.type;
+  const arms = signature === undefined ? undefined : signatureArms(signature);
+  if (receiver === undefined || arms === undefined || arms.length === 0)
+    return false;
+  return arms.every((arm) => {
+    const first = arm.args?.[0] ?? arm.optArgs?.[0] ?? arm.variadicArg;
+    if (first === undefined) return true;
+    const bounds: Record<string, Type> = {};
+    for (const p of arm.typeParams ?? []) bounds[p.name] = p.bound ?? 'any';
+    return !typesOverlap(receiver, substituteTypeVariables(first.type, bounds));
+  });
+}
+
+/**
+ * The fixit of a `dot-call-not-a-protocol-function` diagnostic at
+ * `[from, to)`: the dotted call `recv.f(args)` of `statement` with the
+ * member `name`, rewritten to a call that the dot does not reach for.
+ *
+ * - With no arguments, and where a pipe needs no parentheses (a statement,
+ *   or the value of a `let`, a `const` or an assignment), the pipe
+ *   `recv |> f`.
+ * - Otherwise the direct call `f(recv, args)`, the call that a dot-call of
+ *   a protocol function means. A pipe with arguments puts the piped value
+ *   in the slot that its type fits, which is not always the first one, and
+ *   a pipe inside a larger expression needs parentheses
+ *   (`xs.sort().reverse()` is `sort(xs).reverse()`, not
+ *   `xs |> sort.reverse()`).
+ * - With arguments, when the receiver cannot fill the first parameter
+ *   (`firstSlotFits` is `false`: `xs.map(x => x + 1)`, where the first
+ *   parameter of `Map` is the function), the pipe `recv |> f(args)`, which
+ *   puts the receiver in the slot that its type fits (`map(x => x + 1, xs)`),
+ *   in parentheses where a pipe needs them.
+ *
+ * The receiver, the name and the arguments are the source text as written.
+ * `undefined` when the call is not found in the source.
+ */
+function dotCallFixit(
+  statement: MathJsonExpression,
+  [from, to]: [number, number],
+  name: string,
+  source: string,
+  firstSlotFits: boolean
+): Fixit | undefined {
+  // The `MemberCall` node of the diagnostic and its parent: the node whose
+  // range is the diagnostic's, or else the one call of `name` inside it.
+  let found: [MathJsonExpression, MathJsonExpression[]] | undefined;
+  const candidates: [MathJsonExpression, MathJsonExpression[]][] = [];
+  const visit = (
+    node: MathJsonExpression,
+    ancestors: MathJsonExpression[]
+  ): void => {
+    if (found !== undefined || operator(node) === '') return;
+    if (
+      operator(node) === 'MemberCall' &&
+      stringValue(operand(node, 2)) === name
+    ) {
+      const range = sourceRangeOf(node);
+      if (range !== undefined && range[0] === from && range[1] === to) {
+        found = [node, ancestors];
+        return;
+      }
+      if (range !== undefined && range[0] >= from && range[1] <= to)
+        candidates.push([node, ancestors]);
+    }
+    for (const op of operands(node)) visit(op, [node, ...ancestors]);
+  };
+  visit(statement, []);
+  found ??= candidates.length === 1 ? candidates[0] : undefined;
+  if (found === undefined) return undefined;
+  const [node, [parent, grandparent, greatGrandparent]] = found;
+  const range = sourceRangeOf(node)!;
+  const receiverRange = sourceRangeOf(operand(node, 1));
+  if (receiverRange === undefined || source[range[1] - 1] !== ')')
+    return undefined;
+  // The text between the receiver and the end of the call is the closing
+  // parentheses of a parenthesized receiver, the dot, the name and the
+  // argument list (`(xs) . sort(2)`).
+  const tail = /^[\s)]*\.\s*([^\s(]+)\s*\(/.exec(
+    source.slice(receiverRange[1], range[1])
+  );
+  if (tail === null) return undefined;
+  const receiver = source.slice(
+    range[0],
+    receiverRange[1] + tail[0].indexOf('.')
+  );
+  const callee = tail[1];
+  const args = source
+    .slice(receiverRange[1] + tail[0].length, range[1] - 1)
+    .trim();
+  // No parent: the call is the statement.
+  const parentHead = parent === undefined ? 'Program' : operator(parent);
+  const pipeFits =
+    parentHead === 'Program' ||
+    parentHead === 'Block' ||
+    (parentHead === 'Assign' && operand(parent, 2) === node) ||
+    (parentHead === 'KeyValuePair' &&
+      symbol(operand(parent, 1)) === 'value' &&
+      operator(grandparent ?? null) === 'Dictionary' &&
+      operator(greatGrandparent ?? null) === 'Declare');
+  let value: string;
+  if (args === '')
+    value = pipeFits ? `${receiver} |> ${callee}` : `${callee}(${receiver})`;
+  else if (firstSlotFits) value = `${callee}(${receiver}, ${args})`;
+  else {
+    value = `${receiver} |> ${callee}(${args})`;
+    if (!pipeFits) value = `(${value})`;
+  }
+  return [range[0], range[1], value];
 }
 
 /**

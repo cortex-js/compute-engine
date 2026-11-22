@@ -1,5 +1,6 @@
 import { operand } from '../../src/math-json/utils';
 import { ComputeEngine } from '../../src/compute-engine';
+import { checkEpsil } from '../../src/epsil/check-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
@@ -72,7 +73,9 @@ function parse(source: string): unknown {
   const [ast, diags] = parseEpsil(source);
   expect(diags).toEqual([]);
   return JSON.parse(
-    JSON.stringify(operand(ast, 1), (k, v) => (k === 'sourceOffsets' ? undefined : v))
+    JSON.stringify(operand(ast, 1), (k, v) =>
+      k === 'sourceOffsets' ? undefined : v
+    )
   );
 }
 
@@ -398,9 +401,112 @@ describe('the qualified call `Shape.area(c)` is unchanged', () => {
     });
     const ce = engine();
     const [ast] = parseEpsil('Shape.area(c)');
-    expect(ce.box(ast!).op1.toString()).toBe('Apply(Field("Shape", "area"), c)');
+    expect(ce.box(ast!).op1.toString()).toBe(
+      'Apply(Field("Shape", "area"), c)'
+    );
     expect(run('Shape.area(c)').value).toBe('pi');
     expect(run('Shape.scale(c, k: 4)').value).toBe('Circle(4)');
+  });
+});
+
+describe('the fixit of `dot-call-not-a-protocol-function`', () => {
+  /** The program after the fixit of its first
+   * `dot-call-not-a-protocol-function` diagnostic is applied, or `undefined`
+   * when the program has no such diagnostic. */
+  function fix(ce: ComputeEngine, source: string): string | undefined {
+    const diagnostic = checkEpsil(ce, source).diagnostics.find(
+      (d) => d.code === 'dot-call-not-a-protocol-function'
+    );
+    if (diagnostic === undefined) return undefined;
+    expect(diagnostic.fixits).toHaveLength(1);
+    const [start, end, value] = diagnostic.fixits![0];
+    return source.slice(0, start) + value + source.slice(end);
+  }
+
+  /** The program after each fixit is applied in turn, checked with no
+   * diagnostic left, and its value. */
+  function fixAll(source: string): { fixed: string; value: string } {
+    const ce = new ComputeEngine();
+    let fixed = source;
+    for (let next = fix(ce, fixed); next !== undefined; next = fix(ce, next))
+      fixed = next;
+    expect(checkEpsil(ce, fixed).diagnostics).toEqual([]);
+    return { fixed, value: executeEpsil(ce, fixed).value.toString() };
+  }
+
+  test('`xs.sort()` is `xs |> sort`', () => {
+    expect(fixAll('let xs = [3, 1, 2]; xs.sort()')).toEqual({
+      fixed: 'let xs = [3, 1, 2]; xs |> sort',
+      value: '[1,2,3]',
+    });
+    // The library name and a user function too.
+    expect(fixAll('let xs = [3, 1, 2]; xs.Sort()').fixed).toBe(
+      'let xs = [3, 1, 2]; xs |> Sort'
+    );
+    expect(
+      fixAll('function double(x: number) { 2 * x }; let y = 3; y.double()')
+    ).toEqual({
+      fixed: 'function double(x: number) { 2 * x }; let y = 3; y |> double',
+      value: '6',
+    });
+  });
+
+  test('a binding that shadows the Epsil library name has no fixit', () => {
+    // `sort` names the value 3, not `Sort`: no fixit pipes into it.
+    const ce = new ComputeEngine();
+    const source = 'let xs = [3, 1, 2]; let sort = 3; xs.sort()';
+    expect(fix(ce, source)).toBe(undefined);
+    expect(checkEpsil(ce, source).diagnostics.map((d) => d.code)).not.toContain(
+      'dot-call-not-a-protocol-function'
+    );
+  });
+
+  test('a call with arguments is the direct call: `xs.take(2)` is `take(xs, 2)`', () => {
+    expect(fixAll('let xs = [3, 1, 2]; xs.take(2)')).toEqual({
+      fixed: 'let xs = [3, 1, 2]; take(xs, 2)',
+      value: '[3,1]',
+    });
+  });
+
+  test('a receiver that does not fit the first parameter is piped', () => {
+    // The first parameter of `Map` is the function, and the pipe puts the
+    // list in the slot that its type fits.
+    expect(fixAll('let xs = [3, 1, 2]; xs.map(x => x + 1)')).toEqual({
+      fixed: 'let xs = [3, 1, 2]; xs |> map(x => x + 1)',
+      value: '[4,2,3]',
+    });
+  });
+
+  test('a call as the receiver', () => {
+    expect(fixAll('function g(x: number) { [x, 1] }; g(3).sort()')).toEqual({
+      fixed: 'function g(x: number) { [x, 1] }; g(3) |> sort',
+      value: '[1,3]',
+    });
+  });
+
+  test('a chain: each fixit is correct on its own', () => {
+    const source = 'let xs = [3, 1, 2]; xs.sort().reverse()';
+    // A pipe inside the chain would need parentheses: the inner call is the
+    // direct call.
+    const first = fix(new ComputeEngine(), source);
+    expect(first).toBe('let xs = [3, 1, 2]; sort(xs).reverse()');
+    expect(fixAll(source)).toEqual({
+      fixed: 'let xs = [3, 1, 2]; sort(xs) |> reverse',
+      value: '[3,2,1]',
+    });
+  });
+
+  test('in a function body, a `let` and an operand', () => {
+    expect(
+      fixAll('function f(ys: list<number>) { ys.sort() }; f([2, 1])').fixed
+    ).toBe('function f(ys: list<number>) { ys |> sort }; f([2, 1])');
+    expect(fixAll('let xs = [3, 1, 2]; let y = xs.sort(); y').fixed).toBe(
+      'let xs = [3, 1, 2]; let y = xs |> sort; y'
+    );
+    expect(fixAll('let xs = [3, 1, 2]; xs.sort() + 1')).toEqual({
+      fixed: 'let xs = [3, 1, 2]; sort(xs) + 1',
+      value: '[2,3,4]',
+    });
   });
 });
 

@@ -3,6 +3,7 @@ import {
   epsilCompletions,
   type EpsilCompletions,
 } from '../../src/epsil/completion';
+import { checkEpsil } from '../../src/epsil/check-epsil';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 
@@ -113,10 +114,28 @@ describe('EPSIL COMPLETION: CONTEXT', () => {
   });
 
   test('a dropped statement gets names and keywords, with no expected type', () => {
-    const result = complete('let k = 1\nif ▮');
+    const result = complete('let k = 1\nlet y = 1 if ▮');
     expect(result.expectedType).toBeUndefined();
-    expect(labels(result, 'variable')).toEqual(['k']);
+    expect(labels(result, 'variable')).toContain('k');
     expect(labels(result, 'keyword')).toEqual(['false', 'if', 'match', 'true']);
+  });
+
+  test('a condition with no block yet is parsed with an empty block', () => {
+    const result = complete('let k = 1\nif ▮');
+    expect(result.expectedType).toBe('boolean');
+    expect(labels(result, 'value')).toEqual(['false', 'true']);
+    expect(item(result, 'k')?.fit).toBe('never');
+    expect(labels(result, 'keyword')).toEqual(['if', 'match']);
+    // The word typed after `if` is still matched against the keywords.
+    expect(labels(complete('let k = 1\nif i▮'), 'keyword')).toEqual(['if']);
+    expect(complete('let b = true\nwhile b && ▮').expectedType).toBe('boolean');
+    expect(complete('if true { 1 } else if ▮').expectedType).toBe('boolean');
+    expect(complete('function g() { if ▮').expectedType).toBe('boolean');
+    expect(complete('for i in ▮').expectedType).toBe('collection');
+    expect(complete('parallel for i in ▮').expectedType).toBe('collection');
+    // Not after a postfix `if`, nor with text after the hole on its line.
+    expect(complete('let y = 1 if ▮').expectedType).toBeUndefined();
+    expect(complete('if ▮ 2').expectedType).toBeUndefined();
   });
 
   test('the start of a statement offers the statement keywords', () => {
@@ -360,10 +379,11 @@ describe('EPSIL COMPLETION: RANKING AND FILTERING', () => {
   test('the items match the word typed, ignoring case', () => {
     const result = complete('let alpha = 1\nlet Alright = 2\nAL▮');
     expect(result.range).toEqual([30, 32]);
-    expect(labels(result).every((l) => l.toLowerCase().startsWith('al'))).toBe(
-      true
-    );
-    expect(labels(result)).toEqual(
+    // The labels that start with the word come first; the matches beyond
+    // a prefix follow them.
+    const starts = labels(result).map((l) => l.toLowerCase().startsWith('al'));
+    expect(starts).toEqual([...starts].sort((a, b) => Number(b) - Number(a)));
+    expect(labels(result).filter((_, i) => starts[i])).toEqual(
       expect.arrayContaining(['alpha', 'Alright'])
     );
   });
@@ -389,7 +409,7 @@ describe('EPSIL COMPLETION: SPELLING', () => {
 
   test('a name in backticks does not hide the keyword of the same text', () => {
     const result = complete('let `while` = 1\nwh▮');
-    expect(result.items).toEqual([
+    expect(result.items.slice(0, 2)).toEqual([
       expect.objectContaining({ label: 'while', insertText: '`while`' }),
       expect.objectContaining({ label: 'while', kind: 'keyword' }),
     ]);
@@ -1391,5 +1411,685 @@ describe('EPSIL COMPLETION: SNIPPETS', () => {
         if (snippet !== undefined)
           expect([snippet, isSafeSnippet(snippet)]).toEqual([snippet, true]);
     expect(isSafeSnippet('f(${1:record{x: real}})${0}')).toBe(false);
+  });
+});
+
+describe('EPSIL COMPLETION: RECORD LITERAL FIELDS', () => {
+  /** The `[label, insertText, detail]` of each item at the `▮`. */
+  function fields(source: string): [string, string | undefined, string?][] {
+    return complete(source).items.map((i) => [i.label, i.insertText, i.detail]);
+  }
+
+  test('a key of a declared record offers its fields, and no other name', () => {
+    expect(fields('const r: record{x: real, y: real} = {▮')).toEqual([
+      ['x', 'x -> ', 'real'],
+      ['y', 'y -> ', 'real'],
+    ]);
+    expect(complete('const r: record{x: real} = {▮').expectedType).toBe(
+      undefined
+    );
+  });
+
+  test('the fields already written are left out', () => {
+    expect(fields('const r: record{x: real, y: real} = {x -> 1, ▮')).toEqual([
+      ['y', 'y -> ', 'real'],
+    ]);
+    expect(fields('const r: record{x: real, y: real} = {▮, y -> 2}')).toEqual([
+      ['x', 'x -> ', 'real'],
+    ]);
+    expect(
+      fields('const r: record{x: real, y: real} = {x -> 1, y -> 2, ▮')
+    ).toEqual([]);
+  });
+
+  test('an optional field is listed last, with a `?`', () => {
+    expect(fields('const r: record{y: string?, x: real} = {▮')).toEqual([
+      ['x', 'x -> ', 'real'],
+      ['y', 'y -> ', 'string?'],
+    ]);
+  });
+
+  test('before an `->` the name is inserted alone', () => {
+    expect(fields('const r: record{x: real} = {▮ -> 1}')).toEqual([
+      ['x', undefined, 'real'],
+    ]);
+  });
+
+  test('the value of a field expects the type of the field', () => {
+    const result = complete(
+      'const n = 2\nconst s = "a"\nconst r: record{x: real, y: real} = {x -> ▮'
+    );
+    expect(result.expectedType).toBe('real');
+    expect(item(result, 'n')?.fit).toBe('match');
+    expect(item(result, 's')?.fit).toBe('never');
+  });
+
+  test('a literal with no expected record type offers the names', () => {
+    const result = complete('const n = 2\nconst r = {▮');
+    expect(result.expectedType).toBe(undefined);
+    expect(labels(result)).toContain('n');
+    expect(labels(result)).toContain('abs');
+    expect(
+      labels(complete('let d: dictionary<integer> = {a -> 1, ▮'))
+    ).toContain('abs');
+  });
+
+  test('a nested literal offers the fields of its field', () => {
+    expect(
+      fields(
+        'const r: record{p: record{a: real, b: integer}, q: real} = {p -> {▮'
+      )
+    ).toEqual([
+      ['a', 'a -> ', 'real'],
+      ['b', 'b -> ', 'integer'],
+    ]);
+    expect(
+      complete('const r: record{p: record{a: real}} = {p -> {a -> ▮')
+        .expectedType
+    ).toBe('real');
+  });
+
+  test('an argument of a call expects the record type of the parameter', () => {
+    const source = 'function f(r: record{x: real, w: string}) { r.x }\n';
+    expect(fields(`${source}f({▮`)).toEqual([
+      ['x', 'x -> ', 'real'],
+      ['w', 'w -> ', 'string'],
+    ]);
+    expect(complete(`${source}f({x -> 1, w -> ▮`).expectedType).toBe('string');
+  });
+
+  test('an alias of a record type offers its fields', () => {
+    expect(fields('type alias P = record{x: real}\nconst r: P = {▮')).toEqual([
+      ['x', 'x -> ', 'real'],
+    ]);
+  });
+
+  test('a nominal type with a record body does not admit a literal', () => {
+    // `const r: P = {x -> 1}` is an `incompatible-type` error.
+    const result = complete('type P = record{x: real}\nconst r: P = {▮');
+    expect(labels(result)).not.toContain('x');
+    expect(labels(result)).toContain('abs');
+  });
+});
+
+describe('EPSIL COMPLETION: MATCH VARIANTS', () => {
+  const COLOR =
+    'type Color = red | green | circle(r: real) | pair(real, integer)\n';
+
+  /** The `[label, insertText]` of each variant item at the `▮`. */
+  function variants(source: string): [string, string | undefined][] {
+    return complete(source)
+      .items.filter((i) => i.kind !== 'fixit')
+      .map((i) => [i.label, i.insertText]);
+  }
+
+  /** The source after the edits of the fix-it at the `▮`. */
+  function fixed(source: string): string | undefined {
+    const fixit = complete(source).items.find((i) => i.kind === 'fixit');
+    if (fixit === undefined) return undefined;
+    let text = source.replace('▮', '');
+    for (const [start, end, insert] of [...fixit.edits!].sort(
+      (a, b) => b[0] - a[0]
+    ))
+      text = text.slice(0, start) + insert + text.slice(end);
+    return text;
+  }
+
+  test('the first case offers every variant, and no other item', () => {
+    const source = `${COLOR}function f(c: Color) {\n  match c {\n    ▮\n  }\n}`;
+    expect(variants(source)).toEqual([
+      ['red', 'red()'],
+      ['green', 'green()'],
+      ['circle', 'circle(r)'],
+      ['pair', 'pair(_, _)'],
+    ]);
+    expect(labels(complete(source), 'keyword')).toEqual([]);
+  });
+
+  test('the variants that a case covers are left out', () => {
+    expect(
+      variants(
+        `${COLOR}function f(c: Color) {\n  match c {\n    red() => 1\n    ▮\n    circle(x) => 2\n  }\n}`
+      )
+    ).toEqual([
+      ['green', 'green()'],
+      ['pair', 'pair(_, _)'],
+    ]);
+    // An or-pattern and a typed binding cover; a case with a literal
+    // operand or a guard does not.
+    expect(
+      variants(
+        `${COLOR}let c: Color = red()\nmatch c {\n  red() | green() => 1\n  x: pair => 2\n  circle(0) => 3\n  circle(r) if r > 1 => 4\n  ▮\n}`
+      )
+    ).toEqual([['circle', 'circle(r)']]);
+  });
+
+  test('a wildcard case before the offset covers every variant', () => {
+    for (const wildcard of ['_', 'otherwise', 'other'])
+      expect(
+        complete(
+          `${COLOR}function f(c: Color) {\n  match c {\n    red() => 1\n    ${wildcard} => 2\n    ▮\n  }\n}`
+        ).items
+      ).toEqual([]);
+  });
+
+  test('a wildcard case after the offset covers no variant, and leaves out the fix-it', () => {
+    for (const wildcard of ['_', 'otherwise', 'other']) {
+      const source = `${COLOR}function f(c: Color) {\n  match c {\n    red() => 1\n    ▮\n    ${wildcard} => 2\n  }\n}`;
+      expect(variants(source)).toEqual([
+        ['green', 'green()'],
+        ['circle', 'circle(r)'],
+        ['pair', 'pair(_, _)'],
+      ]);
+      expect(labels(complete(source), 'fixit')).toEqual([]);
+    }
+  });
+
+  test('before a `(`, a variant is inserted as its name', () => {
+    expect(
+      variants(
+        `${COLOR}function f(c: Color) {\n  match c {\n    re▮() => 1\n  }\n}`
+      )
+    ).toEqual([['red', undefined]]);
+    expect(
+      variants(
+        `${COLOR}function f(c: Color) {\n  match c {\n    ci▮ (x) => 1\n  }\n}`
+      )
+    ).toEqual([['circle', undefined]]);
+  });
+
+  test('a case with a body has no fix-it, and its variants are offered', () => {
+    const source = `${COLOR}function f(c: Color) -> integer {\n  match c {\n    ▮ => 1\n  }\n}`;
+    expect(labels(complete(source), 'fixit')).toEqual([]);
+    const red = complete(source).items.find((i) => i.label === 'red')!;
+    const at = source.indexOf('▮');
+    expect(
+      source.slice(0, at) + red.insertText + source.slice(at + 1)
+    ).toContain('red() => 1');
+  });
+
+  test('a variant is inserted with a binding per field of its payload', () => {
+    const shape =
+      'type shape = dot | rect(w: real, h: real) | poly(list<real>)\n';
+    expect(
+      variants(`${shape}function f(s: shape) {\n  match s {\n    ▮\n  }\n}`)
+    ).toEqual([
+      ['dot', 'dot()'],
+      ['rect', 'rect(w, h)'],
+      ['poly', 'poly(_)'],
+    ]);
+    // A generic sum type, and an alias of a sum type.
+    expect(
+      variants(
+        'type opt<T> = some(v: T) | none\nfunction f(o: opt<integer>) {\n  match o {\n    ▮\n  }\n}'
+      )
+    ).toEqual([
+      ['some', 'some(v)'],
+      ['none', 'none()'],
+    ]);
+    expect(
+      variants(
+        `${shape}type alias S = shape\nfunction f(s: S) {\n  match s {\n    rect(a, b) => 1\n    ▮\n  }\n}`
+      )
+    ).toEqual([
+      ['dot', 'dot()'],
+      ['poly', 'poly(_)'],
+    ]);
+  });
+
+  test('the fix-it adds a case for each missing variant, and the program checks', () => {
+    const source = `${COLOR}function f(c: Color) -> integer {\n  match c {\n    green() => 1\n    ▮\n  }\n}`;
+    const fixit = complete(source).items[0];
+    expect(fixit).toMatchObject({
+      label: 'add the missing cases',
+      kind: 'fixit',
+      rank: 0,
+    });
+    expect(fixit.edits).toEqual([
+      [
+        source.indexOf('▮'),
+        source.indexOf('▮'),
+        'red() => nothing\n    circle(r) => nothing\n    pair(_, _) => nothing',
+      ],
+    ]);
+    for (const at of [
+      source,
+      `${COLOR}function f(c: Color) -> integer {\n  match c { ▮ }\n}`,
+      `${COLOR}function f(c: Color) -> integer {\n  match c { green() => 1; ▮}\n}`,
+    ]) {
+      const program = fixed(at)!;
+      expect(checkEpsil(ce, program).diagnostics).toEqual([]);
+    }
+    expect(
+      fixed(`${COLOR}function f(c: Color) -> integer {\n  match c { ▮ }\n}`)
+    ).toBe(
+      `${COLOR}function f(c: Color) -> integer {\n  match c {\n    red() => nothing\n    green() => nothing\n    circle(r) => nothing\n    pair(_, _) => nothing\n  }\n}`
+    );
+    // No variant missing: no fix-it.
+    expect(
+      fixed(
+        `${COLOR}function f(c: Color) {\n  match c {\n    red() | green() => 1\n    circle(r) => 2\n    pair(a, b) => 3\n    ▮\n  }\n}`
+      )
+    ).toBe(undefined);
+  });
+
+  test('a subject that is not of a sum type of the source keeps the pattern items', () => {
+    for (const source of [
+      'function f(c: integer) {\n  match c {\n    ▮\n  }\n}',
+      'match x {\n  ▮',
+      // A nominal type whose body is a sum is matched by its constructor.
+      `${COLOR}type P = Color\nfunction f(c: P) {\n  match c {\n    ▮\n  }\n}`,
+    ]) {
+      const result = complete(source);
+      expect(labels(result, 'keyword')).toEqual(['false', 'true']);
+      expect(labels(result, 'fixit')).toEqual([]);
+      expect(labels(result)).toContain('abs');
+    }
+  });
+});
+
+describe('EPSIL COMPLETION: NAMED ARGUMENTS', () => {
+  const INTEREST =
+    'function interest(principal: number, rate: number, years: integer = 1) -> number {\n  principal * rate * years\n}\n';
+  const XS = 'let xs = [1, 2, 3]\n';
+
+  /** The `[label, insertText, detail]` of each parameter-name item at the
+   * `▮` (rank 0). */
+  function names(source: string): [string, string | undefined, string?][] {
+    return complete(source)
+      .items.filter((i) => i.rank === 0)
+      .map((i) => [i.label, i.insertText, i.detail]);
+  }
+
+  /** The diagnostic codes of a program. */
+  function codes(program: string): string[] {
+    return checkEpsil(ce, program).diagnostics.map((d) => d.code);
+  }
+
+  test('an argument of a function of the source offers its parameter names first', () => {
+    expect(codes(`${INTEREST}interest(principal: 1000, rate: 0.05)`)).toEqual(
+      []
+    );
+    const result = complete(`${INTEREST}interest(▮`);
+    expect(names(`${INTEREST}interest(▮`)).toEqual([
+      ['principal', 'principal: ', 'number'],
+      ['rate', 'rate: ', 'number'],
+      ['years', 'years: ', 'integer'],
+    ]);
+    expect(result.items[0]).toMatchObject({
+      label: 'principal',
+      kind: 'variable',
+    });
+    // The other items follow: the expected type is that of the position.
+    expect(result.expectedType).toBe('number');
+    expect(labels(result, 'value')).toEqual(['0']);
+    expect(labels(result)).toContain('abs');
+  });
+
+  test('a library function with parameter names offers them', () => {
+    expect(codes(`${XS}take(xs, count: 2)`)).toEqual([]);
+    expect(names(`${XS}take(xs, ▮`)).toEqual([['count', 'count: ', 'number']]);
+    expect(names(`${XS}take(xs, co▮`)).toEqual([
+      ['count', 'count: ', 'number'],
+    ]);
+    // The arms of `sort` give `order` two types: no detail.
+    expect(codes('sort([3, 1], order: (a, b) => a < b)')).toEqual([]);
+    expect(names('sort([3, 1], ▮')).toEqual([['order', 'order: ', undefined]]);
+    // The parameter of `sqrt` has no name.
+    expect(names('sqrt(▮')).toEqual([]);
+  });
+
+  test('a signature whose rest parameter requires an argument offers no names', () => {
+    // A named call fills no rest parameter: `collection<T>+` of `map`
+    // cannot be filled.
+    expect(names('map(▮')).toEqual([]);
+    expect(names('map(x => x, ▮')).toEqual([]);
+    // A named call of `complex` is an error (CE-1689).
+    expect(names('complex(▮')).toEqual([]);
+  });
+
+  test('a signature with a required rest does not hide the names of another', () => {
+    const G =
+      'function f(g: ((x: real, real+) -> real) & ((x: real) -> real)) {\n  ';
+    expect(codes(`${G}g(x: 1)\n}`)).toEqual([]);
+    expect(names(`${G}g(▮\n}`)).toEqual([['x', 'x: ', 'real']]);
+  });
+
+  test('a variable declared with a signature that names its parameters offers them', () => {
+    const G = 'let g: (x: number, y: number) -> number = (x, y) => x + y\n';
+    expect(codes(`${G}g(1, y: 2)`)).toEqual([]);
+    expect(names(`${G}g(1, ▮`)).toEqual([['y', 'y: ', 'number']]);
+    expect(
+      names('function f(g: (x: real, y: real) -> real) { g(1, ▮ }')
+    ).toEqual([['y', 'y: ', 'real']]);
+  });
+
+  test('a parameter filled by position or by name is left out', () => {
+    expect(codes(`${INTEREST}interest(1000, years: 2, rate: 0.05)`)).toEqual(
+      []
+    );
+    expect(names(`${INTEREST}interest(1000, ▮`)).toEqual([
+      ['rate', 'rate: ', 'number'],
+      ['years', 'years: ', 'integer'],
+    ]);
+    expect(names(`${INTEREST}interest(▮, rate: 0.05)`)).toEqual([
+      ['principal', 'principal: ', 'number'],
+      ['years', 'years: ', 'integer'],
+    ]);
+    // A positional argument after the offset would follow a named one.
+    expect(codes(`${INTEREST}interest(rate: 0.05, 1000)`)).toEqual([
+      'argument-order-invalid',
+    ]);
+    expect(names(`${INTEREST}interest(▮, 0.05)`)).toEqual([]);
+  });
+
+  test('after a named argument, only the names', () => {
+    const result = complete(`${INTEREST}interest(rate: 0.05, ▮`);
+    expect(result.items.map((i) => i.label)).toEqual(['principal', 'years']);
+    expect(result.expectedType).toBe(undefined);
+    expect(labels(complete(`${INTEREST}interest(1000, years: 2, ▮`))).toEqual([
+      'rate',
+    ]);
+    expect(complete(`${XS}take(xs, count: 1, ▮`).items).toEqual([]);
+  });
+
+  test('the value of a named argument expects the type of its parameter', () => {
+    expect(complete(`${INTEREST}interest(years: ▮`).expectedType).toBe(
+      'integer'
+    );
+    expect(complete(`${INTEREST}interest(1000, rate: ▮`).expectedType).toBe(
+      'number'
+    );
+    const result = complete(
+      `const n = 2\nconst s = "a"\n${XS}take(xs, count: ▮`
+    );
+    expect(result.expectedType).toBe('number');
+    expect(item(result, 'n')?.fit).toBe('match');
+    expect(item(result, 's')?.fit).toBe('never');
+    expect(
+      complete('let g: (x: number, y: string) -> number = (x, y) => x\ng(y: ▮')
+        .expectedType
+    ).toBe('string');
+  });
+
+  test('a callee whose declaration gives no parameter names offers none', () => {
+    const signature = 'let h: (number, number) -> number = (x, y) => x + y\n';
+    expect(codes(`${signature}h(1, y: 2)`)).toEqual([
+      'argument-names-unavailable',
+    ]);
+    expect(names(`${signature}h(1, ▮`)).toEqual([]);
+    expect(labels(complete(`${signature}h(1, ▮`))).toContain('abs');
+    // A variable with no declared type. In a function body a call by name
+    // is an error; at the top level the engine reads the names of the value
+    // (CE-1681), but only a declared type counts here.
+    const body = 'function m() -> number {\n  let h = (x, y) => x + y\n  h(1, ';
+    expect(codes(`${body}y: 2)\n}`)).toEqual(['argument-names-unavailable']);
+    expect(names(`${body}▮`)).toEqual([]);
+    expect(names('let h = (x, y) => x + y\nh(1, ▮')).toEqual([]);
+  });
+
+  test('an optional parameter with no name and no default blocks the later names', () => {
+    expect(
+      codes(
+        'let g: (x: number, y: number?, z: number?) -> number = (x, y, z) => x\ng(1, z: 2)'
+      )
+    ).toEqual(['argument-optional-skipped']);
+    expect(
+      names(
+        'let g: (x: number, number?, z: number?) -> number = (x, y, z) => x\ng(1, ▮'
+      )
+    ).toEqual([]);
+    // A parameter with a default value can be skipped.
+    expect(
+      codes(
+        'function f(a: real, b: integer = 2, c: integer = 3) { a }\nf(1, c: 2)'
+      )
+    ).toEqual([]);
+    expect(
+      names('function f(a: real, b: integer = 2, c: integer = 3) { a }\nf(1, ▮')
+    ).toEqual([
+      ['b', 'b: ', 'integer'],
+      ['c', 'c: ', 'integer'],
+    ]);
+  });
+
+  test('an overload set offers the names that every matching signature has', () => {
+    const H =
+      'function h(a: real, b: real) { a }\nfunction h(a: string, b: integer) { 1 }\n';
+    expect(codes(`${H}h(1, b: 2)`)).toEqual([]);
+    // The arms disagree about the type of `b`: no detail, no expected type.
+    expect(names(`${H}h(1, ▮`)).toEqual([['b', 'b: ', undefined]]);
+    expect(complete(`${H}h(1, b: ▮`).expectedType).toBe(undefined);
+    // A third arm without `b`: no name.
+    expect(names(`${H}function h(a: string, c: real) { 1 }\nh(1, ▮`)).toEqual(
+      []
+    );
+    // A name written selects the arms that have it.
+    const C =
+      'function h(a: real, b: real) { a }\nfunction h(a: string, c: integer) { 1 }\n';
+    expect(codes(`${C}h(c: 1, a: "x")`)).toEqual([]);
+    expect(names(`${C}h(c: 1, ▮`)).toEqual([['a', 'a: ', 'string']]);
+    expect(complete(`${C}h(c: ▮`).expectedType).toBe('integer');
+    // `slice(value, span)` and `slice(value, start, end)` share no name left.
+    expect(names('slice([1, 2, 3], ▮')).toEqual([]);
+  });
+
+  test('after `|>` the slot of the piped value is not offered', () => {
+    expect(codes(`${XS}xs |> take(count: 1)`)).toEqual([]);
+    expect(names(`${XS}xs |> take(▮`)).toEqual([
+      ['count', 'count: ', 'number'],
+    ]);
+    // The piped value fills the last slot of `fold`, after the named
+    // arguments, and of `f`: a name there is `argument-order-invalid`.
+    expect(
+      codes(`${XS}xs |> fold(reducer: (a, b) => a + b, initial: 0)`)
+    ).toEqual(['argument-order-invalid']);
+    expect(names(`${XS}xs |> fold(▮`)).toEqual([]);
+    expect(names('function f(a: real, b: integer) { a }\n1 |> f(▮')).toEqual(
+      []
+    );
+    // The slot is not known when the left side has no static type.
+    expect(names('ys |> take(▮')).toEqual([]);
+    // A complete call does not take the piped value as an argument.
+    expect(names(`${XS}xs |> take(xs, ▮`)).toEqual([
+      ['count', 'count: ', 'number'],
+    ]);
+  });
+
+  test('a position that is not the start of an argument offers no name', () => {
+    expect(names(`${XS}take(xs, 1 + ▮`)).toEqual([]);
+    expect(names(`${XS}take (xs, ▮`)).toEqual([]);
+    expect(names(`${INTEREST}[interest(1), ▮`)).toEqual([]);
+  });
+});
+
+describe('EPSIL COMPLETION: EXPECTED TYPES OF COMMON POSITIONS', () => {
+  const VARS =
+    'let b = true\nlet n = 5\nlet s = "a"\nlet xs = [1, 2]\nlet q: tuple<real, real> = (1, 2)\nconst A: matrix = identityMatrix(2)\nlet d: quantity = Quantity(3, "m")\n';
+
+  /** The completions at the `▮` of `source`, after the variables. */
+  const at = (source: string) => complete(VARS + source);
+  const fit = (result: EpsilCompletions, label: string) =>
+    item(result, label)?.fit;
+
+  /** The diagnostic codes of a program, after the variables. */
+  function codes(program: string): string[] {
+    return checkEpsil(ce, VARS + program).diagnostics.map((d) => d.code);
+  }
+
+  /** The operator of the value of a program, after the variables. */
+  function run(program: string): string {
+    return executeEpsil(new ComputeEngine(), VARS + program).value.operator;
+  }
+
+  test('the condition of if expects a boolean', () => {
+    for (const source of ['if ▮ { 1 } else { 2 }', '1 if ▮ else 2']) {
+      const result = at(source);
+      expect(result.expectedType).toBe('boolean');
+      expect(fit(result, 'b')).toBe('match');
+      expect(fit(result, 'isPrime')).toBe('match');
+      for (const name of ['n', 's', 'xs', 'A']) {
+        expect(fit(result, name)).toBe('never');
+        expect(codes(source.replace('▮', name))).toEqual(['incompatible-type']);
+      }
+    }
+    expect(codes('if b { 1 } else { 2 }')).toEqual([]);
+  });
+
+  test('the condition of while expects a boolean', () => {
+    const result = at('while ▮ { 1 }');
+    expect(result.expectedType).toBe('boolean');
+    expect(fit(result, 'b')).toBe('match');
+    expect(fit(result, 'n')).toBe('never');
+    expect(codes('while n { 1 }')).toEqual(['incompatible-type']);
+  });
+
+  test('the collection of for … in expects a collection', () => {
+    for (const source of [
+      'for i in ▮ { 1 }',
+      'parallel for i in ▮ { 1 }',
+      '[i for i in ▮]',
+    ]) {
+      const result = at(source);
+      expect(result.expectedType).toBe('collection');
+      // A list, a matrix, a string and a tuple are iterated.
+      for (const name of ['xs', 'A', 's', 'q'])
+        expect(fit(result, name)).toBe('match');
+      expect(fit(result, 'n')).toBe('never');
+      expect(fit(result, 'b')).toBe('never');
+    }
+    expect(codes('let t = 0\nfor i in xs { t = t + i }\nt')).toEqual([]);
+    expect(
+      executeEpsil(
+        new ComputeEngine(),
+        VARS + 'let t = 0\nfor c in s { t = t + 1 }\nt'
+      ).value.json
+    ).toBe(1);
+    // A comprehension over a number or a boolean is an error. (A `for` loop
+    // over one runs no iteration and reports nothing: CE-1682.)
+    expect(run('[i for i in n]')).toBe('Error');
+    expect(run('[i for i in b]')).toBe('Error');
+  });
+
+  test('an operand of + with a numeric other operand expects a number', () => {
+    for (const source of ['1 + ▮', '▮ + 1', '1 + 2 + ▮', 'A + ▮']) {
+      const result = at(source);
+      expect(result.expectedType).toBe('number | quantity');
+      // A list or a matrix is added element by element.
+      for (const name of ['n', 'xs', 'A', 'd'])
+        expect(fit(result, name)).toBe('match');
+      for (const name of ['s', 'b']) {
+        expect(fit(result, name)).toBe('never');
+        expect(codes(source.replace('▮', name))).toEqual(['incompatible-type']);
+      }
+      // A tuple may fit where a call maps over its operands (`2 * q`),
+      // although `1 + q` is an error.
+      expect(fit(result, 'q')).toBe('maybe');
+    }
+    expect(codes('1 + d')).toEqual([]);
+    expect(codes('A + xs')).toEqual([]);
+    // `+` adds two tuples, and its signature admits any value: no expected
+    // type where the other operand is not a number.
+    expect(codes('q + q')).toEqual([]);
+    expect(at('q + ▮').expectedType).toBeUndefined();
+    expect(at('s + ▮').expectedType).toBeUndefined();
+    expect(at('x + ▮').expectedType).toBeUndefined();
+  });
+
+  test('an operand of * with a matrix admits a matrix and a number', () => {
+    const result = at('A * ▮');
+    expect(result.expectedType).toBe('number | quantity');
+    expect(fit(result, 'A')).toBe('match');
+    expect(fit(result, 'n')).toBe('match');
+    expect(fit(result, 'd')).toBe('match');
+    expect(codes('A * A')).toEqual([]);
+    expect(codes('A * n')).toEqual([]);
+    expect(codes('A * d')).toEqual([]);
+    expect(fit(result, 's')).toBe('never');
+    expect(codes('A * s')).toEqual(['incompatible-type']);
+  });
+
+  test('an exponent expects the type of the signature of ^', () => {
+    const result = at('n ^ ▮');
+    expect(result.expectedType).toBe('complex | signed_infinity | quantity');
+    expect(fit(result, 'n')).toBe('maybe');
+    expect(fit(result, 'A')).toBe('maybe');
+    expect(codes('n ^ A')).toEqual([]);
+    for (const name of ['s', 'b']) {
+      expect(fit(result, name)).toBe('never');
+      expect(codes(`n ^ ${name}`)).toEqual(['incompatible-type']);
+    }
+  });
+
+  test('an arithmetic operand admits a quantity, and a tuple may fit', () => {
+    for (const source of ['2 * ▮', '2 - ▮', '2 / ▮', '-▮', '2 ^ ▮']) {
+      const result = at(source);
+      expect(result.expectedType).toMatch(/\| quantity$/);
+      expect(fit(result, 'd')).toBe('match');
+      expect(codes(source.replace('▮', 'd'))).toEqual([]);
+      expect(fit(result, 'q')).toBe('maybe');
+      for (const name of ['s', 'b']) {
+        expect(fit(result, name)).toBe('never');
+        expect(codes(source.replace('▮', name))).toEqual(['incompatible-type']);
+      }
+    }
+    // A call maps over the elements of a tuple.
+    for (const program of ['2 * q', '-q', '2 ^ q', 'sin(q)'])
+      expect(run(program)).toBe('Tuple');
+    expect(fit(at('sin(▮'), 'q')).toBe('maybe');
+    // `2 - q` and `2 / q` are errors, which `maybe` allows.
+    expect(run('2 - q')).toBe('Error');
+    expect(run('2 / q')).toBe('Error');
+  });
+
+  test('a comparison expects no type', () => {
+    // `n < s` is not an error: it stays unevaluated.
+    expect(codes('n < s')).toEqual([]);
+    expect(at('n < ▮').expectedType).toBeUndefined();
+    expect(at('n == ▮').expectedType).toBeUndefined();
+  });
+});
+
+describe('EPSIL COMPLETION: MATCHING BEYOND A PREFIX', () => {
+  test('the capitals of a camelCase name', () => {
+    expect(labels(complete('idM▮'))).toEqual(['identityMatrix']);
+    expect(labels(complete('invH▮'))).toEqual(['inverseHaversine']);
+  });
+
+  test('a prefix match ranks before a hump match', () => {
+    expect(labels(complete('isM▮')).slice(0, 3)).toEqual([
+      'isMatch',
+      'isMissing',
+      'isSquareMatrix',
+    ]);
+  });
+
+  test('a subsequence from the first character ranks after a hump match', () => {
+    expect(labels(complete('ivs▮'))).toEqual([
+      'inverse',
+      'inverseFunction',
+      'inverseHaversine',
+    ]);
+    const result = labels(complete('let ivSum = 1\nlet invest = 2\nivs▮'));
+    expect(result.slice(0, 2)).toEqual(['ivSum', 'invest']);
+  });
+
+  test('a word of one character matches by prefix only', () => {
+    const result = labels(complete('let xa = 1\nlet yx = 2\nlet b = x▮'));
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((l) => l.toLowerCase().startsWith('x'))).toBe(true);
+  });
+
+  test('the match ignores case', () => {
+    expect(labels(complete('IDM▮'))).toEqual(['identityMatrix']);
+    expect(labels(complete('INVH▮'))).toEqual(['inverseHaversine']);
+  });
+
+  test('a camelCase name of the source', () => {
+    const result = complete('let maxValue = 1\nlet max_count = 2\nlet b = mV▮');
+    expect(labels(result, 'variable')).toEqual(['maxValue']);
+    expect(
+      labels(complete('let max_count = 2\nlet b = mc▮'), 'variable')
+    ).toEqual(['max_count']);
   });
 });
