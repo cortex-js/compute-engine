@@ -19,6 +19,14 @@
   for a binder and renamed the parameter there (#632 and #655, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+- **`Rationalize(x, 0)` of a float is the exact rational of its decimal.** A
+  zero tolerance gave the convergent of the default tolerance, so
+  `Rationalize(3.141592653589793, 0)` was `80143857/25510582` while a
+  tolerance of `1e-30` gave the exact value. Now `Rationalize(0.1, 0)` is
+  `1/10`, and the result at 0 is the result at a tiny tolerance. The decimal
+  is the one the number holds at working precision; the binary double is not
+  used (#634, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
