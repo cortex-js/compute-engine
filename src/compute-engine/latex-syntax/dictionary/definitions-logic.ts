@@ -20,6 +20,7 @@ import type { MathJsonExpression } from '../../../math-json.js';
 import { DEFINITIONS_INEQUALITIES } from './definitions-relational-operators.js';
 import { isRelationalOperator } from '../utils.js';
 import { chainComparison } from '../comparison-chain.js';
+import { joinLatex } from '../tokenizer.js';
 
 // See https://en.wikipedia.org/wiki/List_of_logic_symbols
 //
@@ -731,10 +732,21 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '[',
     closeTrigger: ']',
-    // serialize: (serializer: Serializer, expr: MathJsonExpression) => {
-    //   const args = ops(expr);
-    //   return `[${serializer.serialize(arg)}]`;
-    // },
+    // The bracket is written only around a relation, the only operand that
+    // `parse` below reads as `Boole`: `[P]` and `[\mathrm{IsPrime}(n)]` read
+    // back as a `List`. Any other operand is written
+    // `\operatorname{Boole}(P)`.
+    serialize: (serializer: Serializer, expr: MathJsonExpression) => {
+      const arg = operand(expr, 1);
+      const h = arg === null ? null : operator(arg);
+      if (
+        nops(expr) === 1 &&
+        h &&
+        DEFINITIONS_INEQUALITIES.some((x) => x.name === h)
+      )
+        return joinLatex(['\\lbrack', serializer.serialize(arg), '\\rbrack']);
+      return `\\operatorname{Boole}${serializer.wrapArguments(expr)}`;
+    },
     parse: (_parser: Parser, body: MathJsonExpression) => {
       const h = operator(body);
       if (!h) return null;
