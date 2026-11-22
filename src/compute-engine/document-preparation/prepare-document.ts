@@ -119,7 +119,11 @@ export interface PreparedDocumentDefinition {
    * call is refused, and no row is an error, because of it. A host may use
    * it to declare the inputs of a root compile or to classify a row. Code
    * that the host compiles with these types is correct only for calls whose
-   * arguments have those types.
+   * arguments have those types. An entry given back as the parameter's
+   * `formalTypes` can change the function's meaning: a type that admits a
+   * list (`list<real>`, a union with a list) binds a list argument whole,
+   * where the untyped parameter maps the call over its elements
+   * (`docs/BROADCAST-MODEL.md`). A scalar or tuple entry keeps the meaning.
    */
   readonly callSiteTypes?: readonly (string | undefined)[];
 }
