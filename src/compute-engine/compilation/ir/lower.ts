@@ -904,6 +904,18 @@ function lowerOnce(
    *  name that `wholeRows()` lowers, the only one that may read one. */
   const rowsParams = new Set<V>();
   let rowsRead: Expression | undefined;
+  /** The count of the elements of a row `At(g, i)` of such a name at an
+   *  index known at run time (0 where `i` is out of range), and the value
+   *  of `Length` of the row (NaN there, the interpreter's `Missing`). */
+  const rowLengths = new Map<V, V>();
+  /** The value of `Length` of a row in `rowLengths`, NaN where it is
+   *  absent, or `undefined` for another value. */
+  const rowLength = (v: V): V | undefined => {
+    const n = type(v).shape[0];
+    return n === undefined || typeof n === 'number'
+      ? undefined
+      : rowLengths.get(n.v);
+  };
   /** The value that stands for a tuple input read part by part
    *  (`tupleParts()`, `input()`), which has no value of its own, and the
    *  occurrence of its name that a part read (`At`) lowers, the only one
@@ -1919,22 +1931,28 @@ function lowerOnce(
         }
         const effects = b.effects;
         // A row of a `Chunk` or a `Partition` whose rows can have different
-        // lengths, or of an input or a parameter of the lane `rows`
-        // (`lists.chunks()`): at a constant index in range of a constant
-        // count only.
+        // lengths (`lists.chunks()`): at a constant index in range of a
+        // constant count only. Of an input or a parameter of the lane
+        // `rows`, also at another index (`row()`), where `Length` of the
+        // row is NaN out of range (`rowLengths`).
         const rows = lists.chunks(e.ops[0]);
         if (rows !== undefined && typeof rows !== 'number') {
           const s = rows.source();
-          const k = elementIndex(
-            constant(s.length),
-            constant(scalar(e.ops[1]))
-          );
-          if (k === undefined)
+          const i = scalar(e.ops[1]);
+          const k = elementIndex(constant(s.length), constant(i));
+          if (k !== undefined)
+            return rows.groups?.[k] ?? s.at(b.constant(k, 'integer'));
+          if (rows.row === undefined)
             decline(
               e,
-              'At of a Chunk or a Partition whose rows can have different lengths, or of a list<list<…>> input or parameter, at an index other than a constant in range of a constant count'
+              'At of a Chunk or a Partition whose rows can have different lengths, at an index other than a constant in range of a constant count'
             );
-          return rows.groups?.[k] ?? s.at(b.constant(k, 'integer'));
+          if (!isSubLane(type(i).lane, 'real'))
+            decline(e.ops[1], 'an index that is not a number');
+          const r = rows.row(i);
+          const n = type(r.row).shape[0];
+          if (typeof n !== 'number') rowLengths.set(n.v, r.length);
+          return r.row;
         }
         const [l, i] = [rows ?? value(e.ops[0])!, value(e.ops[1])!];
         const t = type(l);
@@ -2385,7 +2403,9 @@ function lowerOnce(
           if (type(s).lane !== 'string') decline(e, 'Length of a non-string');
           return apply(e, ofOp('text.length'), [s]);
         }
-        return lists.source(e.ops[0], false, true).length;
+        // Of a row at an index known at run time: NaN where it is absent.
+        const s = lists.source(e.ops[0], false, true);
+        return rowLengths.get(s.length) ?? s.length;
       }
       case 'Count':
       case 'IsEmpty':
@@ -2797,8 +2817,9 @@ function lowerOnce(
             'Apply of a value that is not a function literal of one parameter per argument'
           );
         // The IR type of each typed parameter, from the literal's signature:
-        // a scalar, or a list or a tuple of numbers. A union (`real |
-        // list<real>`) and another type decline.
+        // a scalar, or a list or a tuple of numbers, or on JavaScript a list
+        // of lists of two lengths not stated (`rowsInput()`). A union
+        // (`real | list<real>`) and another type decline.
         const sig = f.type.type;
         const declared = f.ops.slice(1).map((p, i) => {
           if (!isFunction(p, 'Typed')) return undefined;
@@ -2806,7 +2827,10 @@ function lowerOnce(
             typeof sig === 'object' && sig.kind === 'signature'
               ? sig.args?.[i]?.type
               : undefined;
-          const ir = t === undefined ? undefined : tupleOrInputType(t, cx.wide);
+          const ir =
+            t === undefined
+              ? undefined
+              : (tupleOrInputType(t, cx.wide) ?? rowsInput(t));
           if (t === undefined || ir === undefined)
             decline(
               p,
@@ -2830,6 +2854,26 @@ function lowerOnce(
         const whole = declared.map((d) => (d?.shape.length ?? 0) > 0);
         const values = args.map((a, i) => {
           const d = declared[i];
+          // A parameter of the lane `rows` binds an input or a parameter of
+          // that lane whole, as a parameter of a user function does: of
+          // lists of integers, one of lists of integers only.
+          if (d?.lane === 'rows') {
+            const raw = wholeRows(a);
+            if (type(raw).lane !== 'rows')
+              decline(
+                a,
+                `an argument of Apply for the parameter ${names[i]}, a list of lists of two lengths not stated, that is not an input or a parameter of that type`
+              );
+            if (
+              rowsElementLane(d.t) === 'integer' &&
+              rowsElementLane(a.type.type) !== 'integer'
+            )
+              decline(
+                a,
+                `an argument of Apply of type ${engineTypeToString(a.type.type)} for the parameter ${names[i]} of lists of integers`
+              );
+            return raw;
+          }
           // The checks read the argument before it is widened to the lane
           // of its parameter, so a widening cannot hide a mismatch.
           const raw = value(a)!;
@@ -3684,8 +3728,12 @@ function lowerOnce(
     if (
       known?.binding.role === 'input' &&
       !(known.binding.parts !== undefined
-        ? tupleParts(e.type.type, cx.wide)?.join() ===
-          known.binding.parts.map((x) => type(x).lane).join()
+        ? tupleParts(e.type.type, cx.wide)
+            ?.map((p) => `${p.lane}${p.list ? '[]' : ''}`)
+            .join() ===
+          known.binding.parts
+            .map((x) => `${type(x).lane}${type(x).shape.length ? '[]' : ''}`)
+            .join()
         : sameInput(
             type(known.binding.v),
             readAs(e.type.type, resolvedValueDefinition(e))
@@ -3934,8 +3982,11 @@ function lowerOnce(
     if (!positional && interval && enclosureInput(t) !== undefined)
       enclosure = true;
     // A tuple whose parts have different lanes (`tuple<string, integer>`),
-    // on JavaScript: a parameter of the entry for each part, read by `At`
-    // at a constant index only (`partsRead`).
+    // or a list among them (`tuple<integer, list<list<integer>>>`), on
+    // JavaScript: a parameter of the entry for each part, read by `At` at
+    // a constant index only (`partsRead`); a list of a run-time length has
+    // a parameter of its length too, and a list of the lane `rows` is read
+    // as such an input.
     const lanes =
       ir === undefined &&
       !positional &&
@@ -3946,8 +3997,14 @@ function lowerOnce(
         ? tupleParts(t, cx.wide)
         : undefined;
     if (lanes !== undefined) {
-      const parts = lanes.map((lane, j) => {
+      const parts = lanes.map(({ lane, list }, j) => {
+        if (list) {
+          const length = b.param(name, scalarType('integer'), true, j);
+          inputLengths.add(length);
+          return b.param(name, { lane, shape: [{ v: length }] }, false, j);
+        }
         const param = b.param(name, scalarType(lane), false, j);
+        if (lane === 'rows') rowsParams.add(param);
         return lane === 'string'
           ? b.entryOp('text.in', [param], scalarType('string'))
           : param;
@@ -4073,8 +4130,15 @@ function lowerOnce(
           (whole !== undefined && n.length === 1 && lane?.lane === 'boolean'))
       ) {
         const k = stated(n[0]);
+        const [p, q] = [rowLength(x), rowLength(y)];
         // A stated length is at least 1: two empty arms keep the form below.
-        if (k !== undefined && k > 0 && k === stated(m[0]))
+        if (
+          k !== undefined &&
+          k > 0 &&
+          k === stated(m[0]) &&
+          p === undefined &&
+          q === undefined
+        )
           t = { lane: lane!.lane, shape: [k, ...inner] };
         else {
           if (interval || !options.runtimeLengths)
@@ -4091,11 +4155,18 @@ function lowerOnce(
           };
           a.region.yields.push(length(a.region, n[0]));
           c.region.yields.push(length(c.region, m[0]));
-          outs.push(b.newValue(scalarType('integer')));
-          t = {
-            lane: lane!.lane,
-            shape: [{ v: outs[outs.length - 1] }, ...inner],
-          };
+          const l = b.newValue(scalarType('integer'));
+          outs.push(l);
+          // A row that can be absent (`rowLengths`) in an arm: the value of
+          // `Length` of the arm taken is a result too, NaN where that row
+          // is absent.
+          if (p !== undefined || q !== undefined) {
+            a.region.yields.push(p ?? length(a.region, n[0]));
+            c.region.yields.push(q ?? length(c.region, m[0]));
+            outs.push(b.newValue(scalarType('integer')));
+            rowLengths.set(l, outs[outs.length - 1]);
+          }
+          t = { lane: lane!.lane, shape: [{ v: l }, ...inner] };
         }
       }
       // Arms of two ranks, or a tuple and a list, have no settled shape;
@@ -4724,6 +4795,9 @@ function lowerOnce(
       (t.lane === 'string' || (t.lane === 'boolean' && options.javascript))
     )
       return apply(node, ofOp('isundef'), [v]);
+    // A row at an index known at run time: absent where its `Length` is.
+    const length = rowLength(v);
+    if (length !== undefined) return nan(length);
     if (
       t.shape.length === 0 &&
       t.lane === 'color' &&
@@ -4767,6 +4841,8 @@ function lowerOnce(
    *  throw where `v` is absent (the interpreter gives the error
    *  `expected-present`); a value that can be absent declines on GLSL. */
   const present = (e: Fn, v: V): V => {
+    if (rowLength(v) !== undefined)
+      decline(e, 'AssertPresent of a row at an index known at run time');
     const m = absent(e, e.ops[0], v);
     if (b.constants.get(m) === false) return v;
     if (!options.javascript && !interval)
@@ -5261,6 +5337,11 @@ function lowerOnce(
     const exit = done ? { exit: slots - 1 } : {};
     const carry = (x: Binding): V[] => {
       if (x.whole === undefined) return [x.v];
+      // The carried length is a new value, which `rowLengths` does not
+      // name: a row that can be absent would read as present after the
+      // loop.
+      if (rowLength(x.v) !== undefined)
+        decline(e, 'a row at an index known at run time carried by a loop');
       const n = type(x.v).shape[0];
       return [typeof n === 'number' ? b.constant(n, 'integer') : n.v, x.v];
     };
@@ -6337,6 +6418,7 @@ function lowerOnce(
     scalar,
     wholeRows,
     rowsParams,
+    rowLengths,
     rowsElementLane,
     apply,
     type,
@@ -6382,6 +6464,16 @@ function lowerOnce(
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));
+
+  /** The result of the entry, `v` or its parts: a row at an index known at
+   *  run time declines, since out of range it is a list of no element where
+   *  the interpreter gives `Missing`. */
+  const result = <T extends V | V[]>(v: T): T => {
+    for (const x of Array.isArray(v) ? v : [v])
+      if (rowLength(x) !== undefined)
+        decline(root, 'a row at an index known at run time as the result');
+    return v;
+  };
 
   /** The program of the entry `f`, refused when an input that it reads has
    *  no type at any occurrence (`seen`, `typed`). A decline of the lowering
@@ -6597,7 +6689,7 @@ function lowerOnce(
         input(p, name, declared, true);
       });
       const states = assignedNames(root);
-      if (states.length === 0) return value(root.ops[0])!;
+      if (states.length === 0) return result(value(root.ops[0])!);
       // Each name is a local whose value is a positional parameter after
       // the arguments, and the code returns the value of the body and the
       // value of each name after it (`Program.assigns`). The stored value
@@ -6618,14 +6710,14 @@ function lowerOnce(
       );
       const v = withVarsValuesHidden(root, hidden, () => value(body, want));
       return [
-        want && v !== undefined ? v : b.constant(NaN, 'real'),
+        want && v !== undefined ? result(v) : b.constant(NaN, 'real'),
         ...states.map((s) => frames[0].names.get(s.name)!.v),
       ];
     });
   }
   return program(() => {
     const v = value(root)!;
-    return rootParts ?? v;
+    return result(rootParts ?? v);
   });
 }
 

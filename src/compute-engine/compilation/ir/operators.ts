@@ -464,6 +464,14 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      1,          [[['rows'], I, 'rows.count']], list),
   row(undefined,      2,          [[['rows', I], I, 'rows.len']], list),
   row(undefined,      3,          [[['rows', I, I], R, 'rows.get'], [['rows', I, I], I, 'rows.get.int']], list),
+  // The row `At(g, i)` at an index known at run time: the index of the
+  // row from 0 (from the end when `i` is negative), -1 where `i` is out of
+  // range; the length of the row at that index, 0 at -1 (the count of the
+  // elements read), and NaN at -1 (the value of `Length`, the absent value
+  // of the interpreter's `Missing`).
+  row(undefined,      2,          [[['rows', R], I, 'rows.row']], list),
+  row(undefined,      2,          [[['rows', I], I, 'rows.rowlen']], list),
+  row(undefined,      2,          [[['rows', I], I, 'rows.rowlen.nan']], list),
   // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
   // whose shape the lowering settles (`lower-matrices.ts`): the determinant
   // of the entries of an `n × n` matrix row by row and `n`; the inverse;

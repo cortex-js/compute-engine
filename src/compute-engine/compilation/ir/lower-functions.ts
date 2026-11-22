@@ -185,27 +185,38 @@ export function tupleOrInputType(
     : { lane, shape: [n] };
 }
 
-/** The lane of each part of a tuple of scalars whose parts are not all of
- *  one lane, a string among them (`tuple<string, integer>`), or
- *  `undefined`: the lanes `string`, `integer`, `real` and `boolean`, an
- *  integer among reals at one position of a union of tuples being a real.
- *  On JavaScript such an input is read part by part (`partOf`), each part
- *  on its lane: the compiled code reads a part at a constant index only. */
+/** The lane of each part of a tuple whose parts are not all scalars of
+ *  one lane, a string or a list among them (`tuple<string, integer>`,
+ *  `tuple<integer, list<list<integer>>>`), or `undefined`: a scalar of the
+ *  lane `string`, `integer`, `real` or `boolean`, an integer among reals at
+ *  one position of a union of tuples being a real; a list of reals or
+ *  integers of a run-time length (`list`); a list of lists of two lengths
+ *  not stated, of the lane `rows` (`rowsElementLane()`). On JavaScript such
+ *  an input is read part by part (`partOf`), each part on its lane: the
+ *  compiled code reads a part at a constant index only. */
 export function tupleParts(
   t: Type,
   wide: 'real' | 'complex' = 'real'
-): Lane[] | undefined {
+): { lane: Lane; list: boolean }[] | undefined {
   const members = tupleMembers(present(t));
   if (members === undefined) return undefined;
   const n = members[0].elements.length;
   if (n === 0 || members.some((m) => m.elements.length !== n)) return undefined;
-  const lanes: Lane[] = [];
+  const parts: { lane: Lane; list: boolean }[] = [];
   for (let j = 0; j < n; j++) {
     const at = new Set(
       members.map((m) => {
         const x = m.elements[j].type;
-        const ir = x === 'unknown' ? undefined : inputType(x, wide, true);
-        return ir?.shape.length === 0 ? ir.lane : undefined;
+        if (x === 'unknown') return undefined;
+        const rows = rowsElementLane(x);
+        if (rows !== undefined) return `rows ${rows}`;
+        const ir = inputType(x, wide, true);
+        if (ir?.shape.length === 0) return ir.lane;
+        return ir?.shape.length === 1 &&
+          ir.shape[0] === 'run-time' &&
+          (ir.lane === 'integer' || ir.lane === 'real')
+          ? `list ${ir.lane}`
+          : undefined;
       })
     );
     const lane =
@@ -213,17 +224,25 @@ export function tupleParts(
         ? [...at][0]
         : at.size === 2 && at.has('real') && at.has('integer')
           ? 'real'
-          : undefined;
-    if (
-      lane !== 'string' &&
-      lane !== 'integer' &&
-      lane !== 'real' &&
-      lane !== 'boolean'
+          : at.size === 2 && at.has('list real') && at.has('list integer')
+            ? 'list real'
+            : undefined;
+    if (lane === 'rows integer' || lane === 'rows real')
+      parts.push({ lane: 'rows', list: false });
+    else if (lane === 'list integer' || lane === 'list real')
+      parts.push({ lane: lane.slice(5) as Lane, list: true });
+    else if (
+      lane === 'string' ||
+      lane === 'integer' ||
+      lane === 'real' ||
+      lane === 'boolean'
     )
-      return undefined;
-    lanes.push(lane);
+      parts.push({ lane, list: false });
+    else return undefined;
   }
-  return lanes.includes('string') ? lanes : undefined;
+  return parts.some((p) => p.lane === 'string' || p.lane === 'rows' || p.list)
+    ? parts
+    : undefined;
 }
 
 /** A union of one type and `nan` or `missing` members is that type
@@ -886,6 +905,19 @@ export function functionLowering(
             literal,
             `a body of ${e.operator} that is not ${typeToString(fn.result)}`
           );
+        // A row at an index known at run time (`cx.rowLengths`): out of
+        // range, a list of no element where the interpreter gives
+        // `Missing`, which a call would not tell apart.
+        const n = type(v).shape[0];
+        if (
+          n !== undefined &&
+          typeof n !== 'number' &&
+          cx.rowLengths.has(n.v)
+        )
+          decline(
+            literal,
+            `a row at an index known at run time as the result of ${e.operator}`
+          );
         return [v];
       });
       // A body that relies on a list of NaN for its absent value cannot
@@ -1361,8 +1393,13 @@ export function functionLowering(
         `a recursive call of ${fn.ir.source}, which reads the input ${name} (a function on a cycle of calls through another function reads no input)`
       );
     // A scalar, or a list or a tuple (a point) of reals or integers of a
-    // stated length.
-    const ir = tupleOrInputType(isUntyped(read) ? 'unknown' : read, cx.wide);
+    // stated length, or a list of lists of two lengths not stated (the lane
+    // `rows`, as a parameter of that type; the entry's input, which each
+    // call passes, declines it on a target or in a mode without the lane).
+    const ir =
+      !cx.interval && !cx.bigint && cx.rowsElementLane(read) !== undefined
+        ? { lane: 'rows' as const, shape: [] }
+        : tupleOrInputType(isUntyped(read) ? 'unknown' : read, cx.wide);
     if (
       ir === undefined ||
       ir.shape.length > 1 ||
@@ -1375,6 +1412,7 @@ export function functionLowering(
         hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
       );
     const v = param(fn.ir, name, ir as IRType);
+    if (ir.lane === 'rows') cx.rowsParams.add(v);
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.inputs.push(t);
     fn.defs.push(def);

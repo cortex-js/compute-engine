@@ -270,6 +270,10 @@ export const JS: Syntax = deepFreeze({
     'rows.len': '$0[$1].length',
     'rows.get': '$0[$1][$2]',
     'rows.get.int': '$0[$1][$2]',
+    // The row at an index known at run time.
+    'rows.row': { text: '_rowr($0, $1)', helpers: ['_rowr'] },
+    'rows.rowlen': { text: '_lenr($0, $1, 0)', helpers: ['_lenr'] },
+    'rows.rowlen.nan': { text: '_lenr($0, $1, NaN)', helpers: ['_lenr'] },
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',
@@ -389,6 +393,12 @@ export const JS: Syntax = deepFreeze({
     // i), e)` in a list of `n` elements; the interpreter's value of an
     // index that is 0, not an integer or out of range is an error.
     _wix: 'const _wix = (n, i) => { const k = i > 0 ? i - 1 : n + i; if (Number.isInteger(i) && i !== 0 && k >= 0 && k < n) return k; throw new Error(`out-of-range: the index ${i} of a list of ${n} elements`); };',
+    // The index from 0 of the row `At(g, i)` of a list of rows whose
+    // lengths can differ, -1 where `i` is out of range; the length of the
+    // row at that index, `absent` at -1.
+    _rowr:
+      'const _rowr = (g, i) => { const k = i > 0 ? i - 1 : g.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length ? k : -1; };',
+    _lenr: 'const _lenr = (g, k, absent) => (k < 0 ? absent : g[k].length);',
     // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
     // where `i` is out of range of `g` or `j` of its row.
     _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',
