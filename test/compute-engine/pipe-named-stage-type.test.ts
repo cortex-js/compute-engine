@@ -113,7 +113,7 @@ describe('the Epsil static check', () => {
   test('reports a declaration the piped call cannot satisfy', () => {
     const r = run('let s: string = 16 |> sqrt\ns');
     expect(r.diagnostics.join('\n')).toMatch(
-      /static-type-error The value "Pipe\(16, sqrt\)" of type "real<0<\.\.>" is not compatible with the declared type "string"/
+      /static-type-error The value "16 \|> sqrt" of type "real<0<\.\.>" is not compatible with the declared type "string"/
     );
   });
 
