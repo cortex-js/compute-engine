@@ -3265,8 +3265,9 @@ export function assignFn(
       // new literal falsifies refuses the assignment, and the rollback puts
       // the previous definition back. The effects by which a contract was
       // already false before are not this assignment's fault. A contract
-      // installed while a head it calls had no definition is trusted, and
-      // is not checked (`docs/EFFECTS-MODEL.md`, "Dependency order").
+      // installed while one of the heads it calls had no definition is
+      // trusted for all of its heads, and this scan does not check it
+      // (`docs/EFFECTS-MODEL.md`, "Dependency order").
       const scan = { skipTrusted: true };
       const falseBefore = new Map(
         conformanceWideningViolations(ce, scan).map((v) => [
