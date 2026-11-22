@@ -516,7 +516,8 @@ describe('SOLVE: FAMILIES OF ROOTS OF A PERIODIC EQUATION', () => {
 
   test('the alternatives of an Or give the union of their families', () => {
     expect(solve('\\sin(x) = 0 \\lor x = 2').toString()).toBe('[2,pi * ArbitraryInteger(1)]');
-    expect(solve('\\sin(x) = 2 \\lor x = 2').toString()).toBe('[2]');
+    // `sin(x) = 2` has complex roots: `[2]` is not all the roots (#526)
+    expect(solve('\\sin(x) = 2 \\lor x = 2').operator).toBe('Solve');
   });
 
   test('the unknown outside a trig function of a quotient gives no answer', () => {
@@ -638,7 +639,9 @@ describe('SINE AND COSINE OF A MULTIPLE OF THE UNKNOWN', () => {
     expect(r.nops).toBe(9);
   });
 
-  test('an equation with no root stays empty', () => {
-    expect(solve('\\cos(2x)+3=0').toString()).toBe('[]');
+  test('an equation with no real root is empty over the real numbers', () => {
+    expect(solve('\\cos(2x)+3=0', 'x\\in\\R').toString()).toBe('[]');
+    // With no domain, the roots are complex (#526)
+    expect(solve('\\cos(2x)+3=0').operator).toBe('Solve');
   });
 });

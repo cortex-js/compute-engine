@@ -1360,7 +1360,11 @@ describe('explain: a solve with no complete answer', () => {
   });
 
   test('a decided empty list is still the answer', () => {
-    const ex = ce.parse('e^x=-1').explain('solve', { variable: 'x' });
+    // `e^x = 0` has no root, real or complex. `e^x = -1` has the complex
+    // roots `(2k + 1)·π·i`, and has no answer with no domain (#526).
+    const ex = ce.parse('e^x=0').explain('solve', { variable: 'x' });
     expect(ex.result.toString()).toBe('[]');
+    const complex = ce.parse('e^x=-1').explain('solve', { variable: 'x' });
+    expect(complex.result.operator).toBe('Solve');
   });
 });

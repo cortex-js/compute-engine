@@ -367,6 +367,13 @@ function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
  *   a rejection was not decided (the residual of the root of
  *   `√(x + a) = -x` cannot be proved zero for a free `a`), `Solve` stays
  *   unevaluated.
+ * - A rejection that holds over the real numbers only is not a decision for
+ *   an unknown whose type is not declared real (no domain): `sin(x) = 2`
+ *   and `e^x = -1` have no real root, but they have complex roots
+ *   (`stats.complexRootRemoved`, see `findUnivariateRoots()`), and
+ *   `cos(sin(x)) = 0` has complex roots where `sin(x) = ±π/2`. `Solve`
+ *   stays unevaluated. For an unknown declared `real`, or with `realDomain`
+ *   (the caller solves over `RealNumbers`), the answer is `[]`.
  * - When no strategy of the root finder applied, the empty list is not a
  *   proof: the equation can have roots that the solver cannot find
  *   (`a·x⁵ + x + 1 = 0`, `sin(x) = x³ + eˣ`). `Solve` stays unevaluated.
@@ -393,8 +400,14 @@ export function emptyRootsAnswer(
   ce: ComputeEngine,
   equation: Expression,
   x: string,
-  stats: { candidates: boolean; undecided: boolean; userRule?: boolean },
-  conditioned: boolean
+  stats: {
+    candidates: boolean;
+    undecided: boolean;
+    userRule?: boolean;
+    complexRootRemoved?: boolean;
+  },
+  conditioned: boolean,
+  realDomain = false
 ): Expression | undefined {
   // A chain `a = b = c` holds when each pair of adjacent sides is equal: it
   // is an identity when every pair is one, and a contradiction when one
@@ -420,6 +433,9 @@ export function emptyRootsAnswer(
       return undefined;
     }
   }
+  // The proofs below show that there is no real root.
+  const realUnknown = realDomain || unknownType(ce, x).matches('real');
+  if (stats.complexRootRemoved && !realUnknown) return undefined;
   // A candidate of a root template that the host added to `ce.solveRules`
   // (`stats.userRule`) that the check rejected does not show that there is
   // no root: the template can be wrong.
@@ -430,6 +446,7 @@ export function emptyRootsAnswer(
   // that it has no real root (`periodicRootsComplete()`). Here `|sin(x)| ≤ 1`,
   // and `cos(u) = 0` needs `|u| ≥ π/2`.
   if (
+    realUnknown &&
     equationHasNestedPeriodicHead(equation, x) &&
     !equationHasNonInvertibleHead(equation, x) &&
     periodicRootsComplete(ce, equation, x, [])
@@ -1555,7 +1572,14 @@ export function solveOverDomain(
       isPrincipalValueDomain(domain) &&
       partialRootListReason(ceq, unknown, roots, stats) === undefined
     ) {
-      const answer = emptyRootsAnswer(ce, ceq, unknown, stats, true);
+      const answer = emptyRootsAnswer(
+        ce,
+        ceq,
+        unknown,
+        stats,
+        true,
+        sym(domain) !== 'ComplexNumbers'
+      );
       if (isFunction(answer, 'List') && answer.nops === 0) return [];
     }
   }

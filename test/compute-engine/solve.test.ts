@@ -6,6 +6,15 @@ function expr(s: string) {
   return engine.parse(s);
 }
 
+// With no domain, an equation with no real root can have complex roots
+// (`sin(x) = 2`): `solve()` is `null` (#526). For an unknown declared
+// `real`, the empty list is the answer.
+function solveReal(s: string) {
+  const real = new ComputeEngine();
+  real.declare('x', 'real');
+  return real.parse(s).solve('x');
+}
+
 describe('SOLVING A QUADRATIC EQUATION', () => {
   const ce = engine;
 
@@ -706,17 +715,16 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   });
 
   test('should return empty for sin(x) = 2 (no real solution)', () => {
-    const e = expr('\\sin(x) = 2');
-    const result = e.solve('x');
-    // sin(x) can only be in [-1, 1]
-    expect(result).toEqual([]);
+    // sin(x) can only be in [-1, 1] for a real x
+    expect(solveReal('\\sin(x) = 2')).toEqual([]);
+    // `π/2 ± i·ln(2 + √3)` are complex roots
+    expect(expr('\\sin(x) = 2').solve('x')).toBeNull();
   });
 
   test('should return empty for cos(x) = -2 (no real solution)', () => {
-    const e = expr('\\cos(x) = -2');
-    const result = e.solve('x');
-    // cos(x) can only be in [-1, 1]
-    expect(result).toEqual([]);
+    // cos(x) can only be in [-1, 1] for a real x
+    expect(solveReal('\\cos(x) = -2')).toEqual([]);
+    expect(expr('\\cos(x) = -2').solve('x')).toBeNull();
   });
 
   // R28b regression: inverse trig/hyperbolic functions now numericize to
@@ -726,8 +734,9 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
   // `NumericValue` instances (`typeof val === 'number'` was false for the
   // `ExactNumericValue` −2), silently admitting any exact out-of-range ratio.
   test('should return empty for tanh(x) = 2 (no real solution)', () => {
-    // tanh(x) can only be in (-1, 1)
-    expect(expr('\\tanh(x) = 2').solve('x')).toEqual([]);
+    // tanh(x) can only be in (-1, 1) for a real x
+    expect(solveReal('\\tanh(x) = 2')).toEqual([]);
+    expect(expr('\\tanh(x) = 2').solve('x')).toBeNull();
   });
 
   test('should return empty for tanh(x) = 1 (pole, not a root)', () => {
@@ -736,7 +745,8 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
 
   test('should return empty for cosh(x) = 1/2 (no real solution)', () => {
     // cosh(x) ≥ 1 over the reals
-    expect(expr('\\cosh(x) = \\frac{1}{2}').solve('x')).toEqual([]);
+    expect(solveReal('\\cosh(x) = \\frac{1}{2}')).toEqual([]);
+    expect(expr('\\cosh(x) = \\frac{1}{2}').solve('x')).toBeNull();
   });
 
   test('sin(x) = a wraps symbolic ratios in a validity guard (restriction)', () => {
@@ -2815,8 +2825,9 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
 
   test('an alternative with no answer gives no answer for the Or', () => {
     noAnswer('x=1 \\lor e^x=x+2');
-    // Two alternatives with no root: the empty list is the answer.
-    expect(solveOp('e^x=-1 \\lor e^x=-2').toString()).toBe('[]');
+    // Two alternatives with no real root: they have complex roots, and
+    // there is no answer (#526).
+    noAnswer('e^x=-1 \\lor e^x=-2');
   });
 
   test('a trig function of a non-linear argument gives no answer', () => {
@@ -2856,8 +2867,10 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
       checkedRoots('\\cos(3x-1)=\\frac12', (x) => Math.cos(3 * x - 1) - 0.5)
         .length
     ).toBe(2);
-    // No real root: a decision
-    expect(ce.parse('\\sin(2x)=2').solve('x')).toEqual([]);
+    // No real root: a decision for a real x. With no domain, the roots are
+    // complex (#526).
+    expect(solveReal('\\sin(2x)=2')).toEqual([]);
+    expect(ce.parse('\\sin(2x)=2').solve('x')).toBeNull();
   });
 
   test('a linear trig argument in degrees', () => {
@@ -2958,11 +2971,13 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
       expect(roots[0]).toBeCloseTo(root, 12);
     }
     // An exponential with a positive base is positive: no real root, a
-    // decision
-    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0', '10^{x+1}=0']) {
-      expect(ce.parse(latex).solve('x')).toEqual([]);
-      expect(solveOp(latex).toString()).toBe('[]');
-    }
+    // decision for a real x. With no domain, `e^{x+1}=-2` has complex roots
+    // (#526), and `10^{x+1}=0` has no root.
+    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0', '10^{x+1}=0'])
+      expect(solveReal(latex)).toEqual([]);
+    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0']) noAnswer(latex);
+    expect(ce.parse('10^{x+1}=0').solve('x')).toEqual([]);
+    expect(solveOp('10^{x+1}=0').toString()).toBe('[]');
     // The sign of the value is not known: no answer
     noAnswer('e^{x+1}=a');
   });
@@ -3222,10 +3237,10 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
   });
 
   test('an exponential whose roots are not real has no real root', () => {
-    // e^(x²) ≥ 1 and 2^(x² + 1) ≥ 2 for each real x
-    expect(ce.parse('e^{x^2}=\\frac12').solve('x')).toEqual([]);
-    expect(ce.parse('2^{x^2+1}=1').solve('x')).toEqual([]);
-    expect(solveOp(ce, 'e^{x^2}=\\frac12').toString()).toBe('[]');
+    // e^(x²) ≥ 1 and 2^(x² + 1) ≥ 2 for each real x. With no domain, the
+    // roots `±i·√(ln 2)` are complex roots, and there is no answer (#526).
+    noAnswer(ce, 'e^{x^2}=\\frac12');
+    noAnswer(ce, '2^{x^2+1}=1');
     const r = Math.sqrt(Math.log(2));
     expect(checkedRoots(ce, 'e^{x^2}=2', (x) => Math.exp(x * x) - 2)).toEqual(
       [-r, r].map((v) => expect.closeTo(v, 12))
@@ -3233,7 +3248,8 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
     expect(checkedRoots(ce, 'e^{x+1}=2', (x) => Math.exp(x + 1) - 2)).toEqual([
       expect.closeTo(Math.log(2) - 1, 12),
     ]);
-    expect(ce.parse('e^{x+1}=-2').solve('x')).toEqual([]);
+    expect(solveReal('e^{x+1}=-2')).toEqual([]);
+    noAnswer(ce, 'e^{x+1}=-2');
   });
 
   test('an unknown that can be complex: no answer from the real strategies', () => {
