@@ -4328,10 +4328,17 @@ function mulTensors(
   // A list literal of such literals (a vector or a matrix of fractions)
   // stays exact too, for the same reason: `3·[1/3, 2/3]` is `[1, 2]`, where
   // rounding each fraction first gave `0.999…9` (CE-1653).
+  // Only when every factor is exact: beside a float or an irrational factor
+  // the cell is rounded first, as before, which is what the scalar product
+  // gives there.
+  const allExact = xs.every(
+    (x) => isExactRationalLiteral(x) || isExactRationalListLiteral(x)
+  );
   const withAbsentCells = new Map<Expression, Expression>();
   const evaluated = xs.map((op) => {
     const value = numericApproximation
-      ? isExactRationalLiteral(op) || isExactRationalListLiteral(op)
+      ? isExactRationalLiteral(op) ||
+        (allExact && isExactRationalListLiteral(op))
         ? op
         : op.N()
       : operandsAreValues
@@ -4596,9 +4603,13 @@ function mulTensors(
       continue;
     }
 
-    const next = ce
+    const exactNext = ce
       .function('MatrixMultiply', [product, nextTensor])
       .evaluate();
+    // On the `.N()` route a matrix of exact cells (fractions kept exact
+    // above) has an exact product: it is rounded once here (CE-1653).
+    const next =
+      numericApproximation && exactNext.isValid ? exactNext.N() : exactNext;
     // Incompatible dimensions: the product of two matrices is the matrix
     // product, so it is the error `MatrixMultiply` answers for the same
     // operands (`incompatible-dimensions`), not an inert product. Another

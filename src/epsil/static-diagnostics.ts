@@ -2482,9 +2482,9 @@ function declaredTypeMismatch(
   }
 
   // The value as Epsil source (`onesMatrix`, not the canonical `OnesMatrix`),
-  // quoted once: a string snippet carries its own quotes (CE-1660).
+  // quoted once: the snippet of a string carries its own quotes (CE-1660).
   const snippet = epsilSnippet(value.json);
-  const shown = snippet.startsWith('"') ? snippet : `"${snippet}"`;
+  const shown = isString(value) ? snippet : `"${snippet}"`;
   const lead = `The value ${shown} of type "${value.type}" is not compatible with the declared type "${declared}"`;
   const hint = unboundSignatureHint(value, declared);
   return {

@@ -538,7 +538,10 @@ function bigCellColumnOf(
     if ((i & BIG_DEADLINE_STRIDE) === BIG_DEADLINE_STRIDE)
       checkDeadline(ce._deadlineFrame);
     const value = bigCellValueOf(elements[i]);
-    if (value === undefined) return undefined;
+    // A column holds no denominator: an element that is a fraction declines
+    // the kernel (only a scalar operand can be a fraction).
+    if (value === undefined || value.denominator !== undefined)
+      return undefined;
     decimals[i] = value.decimal;
     floats[i] = value.float;
   }

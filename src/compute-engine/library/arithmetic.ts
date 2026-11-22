@@ -217,6 +217,7 @@ import {
   isOutOfDoubleRangeLiteral,
   cellProductOperandIsValue,
   isExactRationalListLiteral,
+  isExactRationalLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   INTEGER_CLAUSE_ROLE,
@@ -19571,8 +19572,13 @@ function mulEvaluatedOperands(
     // is passed exact: the tensor kernel folds each cell with the scalar
     // factors before it rounds, so `3·[1/3, 2/3]` is `[1, 2]`, not
     // `[0.999…9, 2.000…1]` (CE-1653).
+    // Only when every factor is such a literal or an exact number: beside a
+    // float or an irrational factor, the list is rounded first, as before.
+    const allExact = ops.every(
+      (op) => isExactRationalLiteral(op) || isExactRationalListLiteral(op)
+    );
     const factors = ops.map((op, i) =>
-      raw[i] || isExactRationalListLiteral(op) ? op : evaluated[i]
+      raw[i] || (allExact && isExactRationalListLiteral(op)) ? op : evaluated[i]
     );
     // A pure operand whose float is 0 or ±∞ can have an exact value
     // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an

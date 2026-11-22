@@ -17041,14 +17041,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // A value of a nominal type defined as another nominal type
       // (`type Wrapped = Circle`) holds the inner value: its fields are read
       // there, as the static type reads them through both layers (CE-1667).
-      if (rt.kind === 'record' || rt.kind === 'tuple')
-        base = innerNominalValue(base);
+      // The receiver of a protocol property and the value named in an error
+      // stay `base`: only the stored fields are read in `holder`.
+      const holder =
+        rt.kind === 'record' || rt.kind === 'tuple'
+          ? innerNominalValue(base)
+          : base;
 
       if (rt.kind === 'record') {
         // A tagged nominal value: the payload is the single dictionary
         // operand of the tagged application.
-        if (isFunction(base) && base.ops.length === 1) {
-          const payload = base.ops[0];
+        if (isFunction(holder) && holder.ops.length === 1) {
+          const payload = holder.ops[0];
           if (isDictionary(payload)) {
             // Dictionary entries are stored raw: canonicalize before
             // evaluating.
@@ -17091,7 +17095,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           );
         // A tagged nominal value spreads its tuple payload inline
         // (`["pt", 1, 2]`); a plain `Tuple` value has the same shape.
-        if (isFunction(base) && i < base.ops.length) return base.ops[i];
+        if (isFunction(holder) && i < holder.ops.length) return holder.ops[i];
         return undefined;
       }
       return undefined;
