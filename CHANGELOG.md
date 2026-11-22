@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### New Features
+
+- **Signature help marks optional, rest and implicit parameters, and covers
+  member calls** (CE-1698). A parameter of `epsilSignatureHelp()` has
+  `optional: true` when a call can leave it out (`axis1` and `axis2` of
+  `transpose(`, a parameter of the source with a default value), `rest: true`
+  when it takes the remaining arguments (the second parameter of `sum(`,
+  `...rest`), and `implicit: 'pipe'` or `implicit: 'receiver'` when the left
+  side of `|>` or the receiver of a member call fills it. After `|>`, the slot
+  is that of the completion snippets: `xs |> take(` marks `xs`, and
+  `xs |> map(` marks the collection; a signature where the slot is not known
+  has no mark. A member call (`c.scale(`) has the signature of the protocol
+  function or of the field that holds a function, as member completion
+  resolves the member; `xs.take(` stays `null`, since a library function is
+  not a member. The active parameter skips the implicit parameter
+  (`xs |> take(` and `c.scale(` are at their second parameter).
+
+### Resolved Issues
+
+- **Members after a dot are listed for a value made by a constructor.** After
+  `let c = Circle(1)` (no type annotation), completion at `c.` lists the
+  members of `Circle`, and `c.scale(` has signature help; before, both were
+  empty unless `c` was declared `c: Circle`.
+
 ## 0.198.1 _2026-11-21_
 
 ### New Features

@@ -1026,6 +1026,14 @@ const p: record{x: real, y: real, tag: string} = {x -> 1, y -> 2, tag -> "a"}
     `);
   });
 
+  test('a value made by the constructor of a nominal type has that type', () => {
+    expect(labels(complete(SHAPES + 'let d = Circle(2)\nd.▮'))).toEqual([
+      'area',
+      'r',
+      'scale',
+    ]);
+  });
+
   test('a record lists its fields, with their types', () => {
     const result = complete(SHAPES + 'p.▮');
     expect(result.items.map((i) => [i.label, i.detail])).toEqual([

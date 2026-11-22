@@ -97,7 +97,7 @@ describe('EPSIL SIGNATURE HELP: CALLEE', () => {
           label: 'f(x: real, n: integer?) -> real',
           parameters: [
             { name: 'x', type: 'real', range: [2, 9] },
-            { name: 'n', type: 'integer', range: [11, 22] },
+            { name: 'n', type: 'integer', range: [11, 22], optional: true },
           ],
           activeParameter: 0,
         },
@@ -299,6 +299,190 @@ describe('EPSIL SIGNATURE HELP: FUNCTIONS OF THE SOURCE', () => {
       help('type alias F = G\ntype alias G = F\nlet h: F = p => 1\nh(▮')
     ).toBeNull();
     expect(help('type F = (real) -> real\nlet h: F = p => 1\nh(▮')).toBeNull();
+  });
+});
+
+/** The marks of each parameter of a signature: `optional`, `rest` and
+ * `implicit`. */
+function marks(
+  signature: EpsilSignatureHelp['signatures'][number] | undefined
+): Record<string, unknown>[] | undefined {
+  return signature?.parameters.map(
+    ({ name: _name, type: _type, range: _range, ...rest }) => rest
+  );
+}
+
+const SHAPES = `protocol Shape {
+  function area(self: Self) -> number
+  function scale(self: Self, k: number) -> Self
+}
+type Circle = tuple<r: number> is Shape {
+  function area(self: Circle) -> number { Pi * self.r^2 }
+  function scale(self: Circle, k: number) -> Circle { Circle(self.r * k) }
+}
+const c: Circle = Circle(1)
+`;
+
+describe('EPSIL SIGNATURE HELP: PARAMETER KINDS', () => {
+  test('an optional parameter of a library signature', () => {
+    expect(marks(help('let a = transpose(▮')?.signatures[0])).toEqual([
+      {},
+      { optional: true },
+      { optional: true },
+    ]);
+  });
+
+  test('a variadic parameter of a library signature is a rest parameter', () => {
+    expect(marks(help('let a = sum(▮')?.signatures[0])).toEqual([
+      {},
+      { rest: true },
+    ]);
+  });
+
+  test('a call with no implicit argument has no marks', () => {
+    const result = help('let a = take(▮');
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{}, {}],
+    ]);
+  });
+
+  test('a parameter of the source with a default value is optional', () => {
+    const result = help('function f(a: real, b: real = 1) { a }\nf(▮');
+    expect(result?.signatures[0].label).toBe('f(a: real, b: real?)');
+    expect(marks(result?.signatures[0])).toEqual([{}, { optional: true }]);
+  });
+
+  test('a rest parameter of the source', () => {
+    const result = help('function g(a, ...rest) { a }\ng(▮');
+    expect(marks(result?.signatures[0])).toEqual([{}, { rest: true }]);
+  });
+});
+
+describe('EPSIL SIGNATURE HELP: THE PIPED VALUE', () => {
+  const XS = 'let xs = [1, 2]\n';
+
+  test('the piped value fills the first parameter of `take`', () => {
+    const result = help(XS + 'let a = xs |> take(▮');
+    // An overload set: the arm for a string has no slot for a list, so it is
+    // not marked and has no active parameter.
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{ implicit: 'pipe' }, {}],
+    ]);
+    expect(result?.signatures.map((s) => s.activeParameter)).toEqual([-1, 1]);
+    expect(result).toMatchObject({ activeSignature: 1, activeParameter: 1 });
+  });
+
+  test('the piped value fills the collection of `map`', () => {
+    const result = help(XS + 'let a = xs |> map(▮');
+    expect(marks(result?.signatures[0])).toEqual([
+      {},
+      { rest: true, implicit: 'pipe' },
+    ]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('a function of the source: the slot that the value fits', () => {
+    const result = help('function g(n: integer, s: string) { n }\n"a" |> g(▮');
+    expect(marks(result?.signatures[0])).toEqual([{}, { implicit: 'pipe' }]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('no mark when the call has no implicit argument', () => {
+    // A `_` places the piped value.
+    const result = help(XS + 'let a = xs |> take(_, ▮');
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{}, {}],
+    ]);
+    expect(result?.activeParameter).toBe(1);
+  });
+
+  test('no mark when the slot depends on the arguments still to write', () => {
+    // With one argument the piped value fills `initial`, with two the
+    // collection, as the snippet `fold(reducer, initial)` assumes.
+    const result = help(XS + 'let a = xs |> fold(▮');
+    expect(marks(result?.signatures[0])).toEqual([{}, {}, {}]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('no mark when a `_` under the offset places the piped value', () => {
+    const result = help(XS + 'let a = xs |> take(_▮');
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{}, {}],
+    ]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('no mark when the slot is not known', () => {
+    // `ys` has no type.
+    const result = help('let a = ys |> take(▮');
+    expect(result?.signatures.map(marks)).toEqual([
+      [{}, {}],
+      [{}, {}],
+    ]);
+  });
+});
+
+describe('EPSIL SIGNATURE HELP: MEMBER CALLS', () => {
+  test('a protocol function: the receiver fills its first parameter', () => {
+    const result = help(SHAPES + 'c.scale(▮');
+    expect(result).toMatchObject({
+      callee: 'scale',
+      activeSignature: 0,
+      activeParameter: 1,
+    });
+    expect(result?.signatures[0].label).toBe(
+      'scale(self: Circle, k: number) -> Circle'
+    );
+    expect(marks(result?.signatures[0])).toEqual([
+      { implicit: 'receiver' },
+      {},
+    ]);
+    expect(help(SHAPES + 'c.scale(k: ▮')?.activeParameter).toBe(1);
+    // The receiver is the only parameter: no argument is expected.
+    expect(help(SHAPES + 'c.area(▮')?.activeParameter).toBe(-1);
+  });
+
+  test('a field that holds a function', () => {
+    const result = help(
+      'const p: record{f: (x: real) -> real} = {f -> (x => x)}\np.f(▮'
+    );
+    expect(result?.signatures[0].label).toBe('f(x: real) -> real');
+    expect(marks(result?.signatures[0])).toEqual([{}]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('a value made by the constructor of a nominal type', () => {
+    const source = SHAPES.replace('const c: Circle', 'let c');
+    const result = help(source + 'c.scale(▮');
+    expect(marks(result?.signatures[0])).toEqual([
+      { implicit: 'receiver' },
+      {},
+    ]);
+    expect(result?.activeParameter).toBe(1);
+  });
+
+  test('a field whose type is an alias of the source', () => {
+    const result = help(
+      'type alias F = (x: real) -> real\n' +
+        'const p: record{f: F} = {f -> (x => x)}\np.f(▮'
+    );
+    expect(result?.signatures.length).toBe(1);
+    expect(marks(result?.signatures[0])).toEqual([{}]);
+    expect(result?.activeParameter).toBe(0);
+  });
+
+  test('a member that does not resolve to one function gives null', () => {
+    expect(help(SHAPES + 'c.zz(▮')).toBeNull();
+    expect(help(SHAPES + 'c.r(▮')).toBeNull();
+    // A receiver with no type.
+    expect(help('ys.scale(▮')).toBeNull();
+    // A library function is not a member of a list
+    // (`dot-call-not-a-protocol-function`).
+    expect(help('let xs = [1, 2]\nlet a = xs.take(▮')).toBeNull();
   });
 });
 
