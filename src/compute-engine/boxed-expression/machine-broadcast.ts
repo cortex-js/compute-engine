@@ -391,14 +391,19 @@ export function bigFloatBroadcast(
     } else {
       const b = cellOf(columns[1], i);
       if (!a.float && !b.float) return undefined;
-      if (operator === 'Add') r = a.decimal.addBounded(b.decimal, ce.precision);
-      else {
+      const denominator =
+        'denominator' in a ? a.denominator : (b as BigCellValue).denominator;
+      if (operator === 'Add') {
+        if (denominator !== undefined) return undefined;
+        r = a.decimal.addBounded(b.decimal, ce.precision);
+      } else {
         if (
           (!a.float && a.decimal.isZero()) ||
           (!b.float && b.decimal.isZero())
         )
           return undefined;
         r = bigProduct(a.decimal, b.decimal, ce.precision);
+        if (denominator !== undefined) r = r.div(denominator, ce.precision);
       }
     }
     out[i] = ce.number(ce._inexactNumericValue(r));
@@ -427,6 +432,8 @@ function bigProduct(a: BigDecimal, b: BigDecimal, prec: number): BigDecimal {
 interface BigCellValue {
   decimal: BigDecimal;
   float: boolean;
+  /** The denominator of an exact fraction, whose numerator is `decimal`. */
+  denominator?: BigDecimal;
 }
 
 /** The operands of the cells of {@link bigFloatBroadcast} that one list
@@ -467,7 +474,17 @@ function bigCellValueOf(x: Expression): BigCellValue | undefined {
     };
     if (exact.radical !== 1 || exact.rational === undefined) return undefined;
     const [n, d] = exact.rational;
-    if (Number(d) !== 1 || !Number.isSafeInteger(Number(n))) return undefined;
+    if (!Number.isSafeInteger(Number(n)) || !Number.isSafeInteger(Number(d)))
+      return undefined;
+    // A fraction `n/d` is its numerator and its denominator: a product
+    // with it is `(x·n)/d`, the numerator first, as the scalar product
+    // computes it (`mulNEvaluated()`) (CE-1653).
+    if (Number(d) !== 1)
+      return {
+        decimal: new BigDecimal(Number(n)),
+        float: false,
+        denominator: new BigDecimal(Number(d)),
+      };
     return { decimal: new BigDecimal(Number(n)), float: false };
   }
   const decimal = (nv as { decimal?: unknown }).decimal;

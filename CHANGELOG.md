@@ -26,6 +26,14 @@
 
 ### Resolved Issues
 
+- **The numeric value of a product with a list of fractions is the value of
+  each scalar product** (CE-1653). `N(3·[1/3, 2/3])` is `[1, 2]`; it was
+  `[0.999…9, 2.000…1]`, because each fraction was rounded before the
+  product. The same holds for a matrix of fractions, a list of fractions
+  times a list, a fraction times a point (`(1/3)·(3, 6)` is `(1, 2)`) and,
+  above machine precision, a fraction times a list of floats
+  (`(1/3)·[1.5, 2.5]` is `[0.5, 0.833…3]`).
+
 - **A small number in engineering notation is printed with the right
   exponent** (CE-1690). `0.000012` was `120.0\cdot10^{-3}` (that is
   `0.12`); it is now `12.0\cdot10^{-6}`. Every exponent from `-4` down that

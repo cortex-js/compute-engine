@@ -3524,6 +3524,21 @@ export function isExactRationalLiteral(x: Expression): boolean {
 }
 
 /**
+ * Whether `x` is a `List` literal whose cells are exact integer or rational
+ * literals (`isExactRationalLiteral()`), or lists of them: a vector or a
+ * matrix of fractions.
+ */
+export function isExactRationalListLiteral(x: Expression): boolean {
+  return (
+    isFunction(x, 'List') &&
+    x.nops > 0 &&
+    x.ops.every(
+      (c) => isExactRationalLiteral(c) || isExactRationalListLiteral(c)
+    )
+  );
+}
+
+/**
  * Whether `x` is a real number literal whose value is 0, ±∞, NaN or a
  * subnormal double (see `isOutsideNormalDoubleRange()`). After a numeric
  * evaluation, this is what an exact factor such as `1/10^400`, `10^400` or
@@ -4060,7 +4075,17 @@ function mulTuples(
 
   // Combine the scalar factors (commutative). `scalars` is non-empty because
   // `mul`/`mulN` short-circuit single-operand calls before reaching here.
-  const scalar = multiply(...scalars);
+  // On the `.N()` route, exact integer and rational factors stay exact, and
+  // so does an exact component: `mulN` folds them before it rounds, as for
+  // a scalar product. Rounded first, `(1/3)·(3, 6)` was `(0.999…9, 1.999…8)`
+  // (CE-1653).
+  const exactScalar =
+    numericApproximation && scalars.every((x) => isExactRationalLiteral(x));
+  const scalar = exactScalar
+    ? scalars.length === 1
+      ? scalars[0]
+      : mul(...scalars)
+    : multiply(...scalars);
 
   // Evaluate each component first (mirrors `mulTensors`): a raw component like
   // `0.3n` with `n` a list must materialize before the scalar product, or the
@@ -4082,7 +4107,11 @@ function mulTuples(
       readsAssignedVariable(ce, c)
     )
       return multiply(scalar, c);
-    const cv = numericApproximation ? c.N() : c.evaluate();
+    const cv = numericApproximation
+      ? exactScalar && isExactRationalLiteral(c)
+        ? c
+        : c.N()
+      : c.evaluate();
     // An absent component (`Missing`) makes its product `Missing`, as the
     // `Multiply` operator answers. `mulN()` keeps the symbol, so without
     // this `(2·(1, Missing)).N()` was `(2, 2·Missing)`.
@@ -4296,10 +4325,13 @@ function mulTensors(
   // each cell product (`mulN`) folds it with the cell before it rounds, as the
   // scalar product does. Floated first, `1/3` was rounded and then multiplied
   // by each cell, and `[1, 2, 3]/3` gave `0.999…9` for its last cell.
+  // A list literal of such literals (a vector or a matrix of fractions)
+  // stays exact too, for the same reason: `3·[1/3, 2/3]` is `[1, 2]`, where
+  // rounding each fraction first gave `0.999…9` (CE-1653).
   const withAbsentCells = new Map<Expression, Expression>();
   const evaluated = xs.map((op) => {
     const value = numericApproximation
-      ? isExactRationalLiteral(op)
+      ? isExactRationalLiteral(op) || isExactRationalListLiteral(op)
         ? op
         : op.N()
       : operandsAreValues
@@ -4475,12 +4507,15 @@ function mulTensors(
   // before: a float cell is already rounded, and the double and big-decimal
   // kernels of `scaleTensor()` decline an exact rational scalar, so a long
   // list of floats divided by 3 went through a boxed product for each cell.
+  // Above machine precision the scalar stays exact: the big-decimal kernel
+  // computes `(x·p)/q` for each float cell, as the scalar product does, where
+  // the rounded fraction gave `(1/3)·[1.5]` as `0.499…95` (CE-1653).
   const scalar: Expression | null =
     scalars.length === 0
       ? null
       : numericApproximation &&
           scalars.every(isExactRationalLiteral) &&
-          tensors.some(hasExactCell)
+          (tensors.some(hasExactCell) || bignumPreferred(ce))
         ? mul(...scalars)
         : multiply(...scalars);
   // Each scalar factor is in `evaluated`: a value of the caller, or the

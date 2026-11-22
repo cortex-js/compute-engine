@@ -216,6 +216,7 @@ import {
   mulAroundNotationalProducts,
   isOutOfDoubleRangeLiteral,
   cellProductOperandIsValue,
+  isExactRationalListLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import {
   INTEGER_CLAUSE_ROLE,
@@ -19566,7 +19567,13 @@ function mulEvaluatedOperands(
         op.isPure === true &&
         (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
     );
-    const factors = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
+    // A list literal of exact integers and fractions is its own value, and
+    // is passed exact: the tensor kernel folds each cell with the scalar
+    // factors before it rounds, so `3·[1/3, 2/3]` is `[1, 2]`, not
+    // `[0.999…9, 2.000…1]` (CE-1653).
+    const factors = ops.map((op, i) =>
+      raw[i] || isExactRationalListLiteral(op) ? op : evaluated[i]
+    );
     // A pure operand whose float is 0 or ±∞ can have an exact value
     // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an
     // integer). It is passed as its exact value, so that `mulNEvaluated`
