@@ -21,6 +21,13 @@
   `1`, where the sum was `8` and `x` was `4`: each read of the view by the
   reducer evaluated the source again. `Product` and `Reduce`, and a view over
   such a view (`Sum(Filter(Map(f, Sort(…)), p))`), are corrected too.
+- **A real solution with a square root of a parameter has a condition**
+  (CE-1593). `Solve(x^2 = a, x ∈ RealNumbers)` is
+  `[If(0 ≤ a, √a), If(0 ≤ a, -√a)]`, where it was `[√a, -√a]`, which is not
+  real for `a < 0`. With the assumption `a > 0` the result is `[√a, -√a]`, and
+  with `a < 0` it is `[]`. Over a domain such as `Integers`, or when no such
+  condition is found, the `Solve` stays unevaluated: `x^4 = a` over the real
+  numbers gave the four roots, `i·∜a` included.
 
 ## 0.197.1 _2026-11-21_
 

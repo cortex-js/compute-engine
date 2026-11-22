@@ -3578,6 +3578,53 @@ function isRealRoot(root: Expression): boolean | undefined {
 }
 
 /**
+ * A condition on the parameters of `root` that holds exactly where `root` is
+ * real, or `undefined` when no such condition is found. The root must be
+ * `p + q·√r`, with one radicand `r`, where `p`, `q` and `r` are real
+ * (`isRealForSolve()`: a parameter whose type is not declared is real) and
+ * `q` is a number that is not 0. The condition is then `0 ≤ r`: for `r < 0`
+ * the imaginary part of the root is `q·√(-r)`, which is not 0. For
+ * `x² = a`, the roots `√a` and `-√a` are real where `0 ≤ a`, and the roots
+ * `-1/2 ± √(4a + 1)/2` of `x² + x = a` where `0 ≤ 4a + 1`.
+ *
+ * For another form (two radicands, a coefficient `q` with a parameter, which
+ * can be 0, a logarithm), the result is `undefined`.
+ */
+export function realRootGuard(root: Expression): Expression | undefined {
+  const ce = root.engine;
+  const radicals = root.getSubexpressions('Sqrt');
+  if (radicals.length === 0 || !isFunction(radicals[0])) return undefined;
+  const r = radicals[0].op1;
+  if (!radicals.every((s) => isFunction(s) && s.nops === 1 && s.op1.isSame(r)))
+    return undefined;
+  if (r.unknowns.length === 0 || isRealForSolve(r) !== true) return undefined;
+  ce.pushScope();
+  try {
+    let name: string;
+    let i = 0;
+    do name = `_sqrt_${i++}`;
+    while (root.has(name));
+    const t = ce.symbol(name);
+    // `root` with each `√r` replaced by `t`.
+    const replace = (e: Expression): Expression => {
+      if (!isFunction(e)) return e;
+      if (e.operator === 'Sqrt' && e.op1.isSame(r)) return t;
+      return ce.function(e.operator, e.ops.map(replace));
+    };
+    const coefficients = getPolynomialCoefficients(replace(root), name);
+    if (coefficients?.length !== 2) return undefined;
+    const [p, q] = coefficients;
+    if (q.unknowns.length > 0 || isRealRoot(q) !== true) return undefined;
+    const qValue = q.N().re;
+    if (!Number.isFinite(qValue) || Math.abs(qValue) < 1e-9) return undefined;
+    if (isRealForSolve(p) !== true) return undefined;
+  } finally {
+    ce.popScope();
+  }
+  return ce.function('LessEqual', [ce.Zero, r]);
+}
+
+/**
  * Return `true` when `expr`, an expression with no free symbol, is a real
  * number by its structure: a real literal or constant, or a sum, product,
  * quotient or real function of such expressions. An `arcsin` or `arccos` is

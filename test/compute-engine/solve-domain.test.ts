@@ -2044,6 +2044,145 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
   });
 });
 
+// The roots `±√a` of `x² = a` are not real for `a < 0`. Over the real line,
+// a polynomial root with a parameter whose membership is not decided is
+// kept with the condition that makes it real; over another domain, or when
+// there is no such condition, the `Solve` stays unevaluated.
+describe('SOLVE OVER THE REAL LINE — a root with a parameter', () => {
+  const solve = (
+    eq: MathJsonExpression,
+    domain: MathJsonExpression = 'RealNumbers'
+  ): MathJsonExpression =>
+    new ComputeEngine()
+      .box(['Solve', eq, ['Element', 'x', domain]] as MathJsonExpression)
+      .evaluate().json;
+
+  test('x² = a gives ±√a with the condition 0 ≤ a', () => {
+    const guarded = [
+      'List',
+      ['If', ['LessEqual', 0, 'a'], ['Sqrt', 'a']],
+      ['If', ['LessEqual', 0, 'a'], ['Negate', ['Sqrt', 'a']]],
+    ];
+    expect(solve(['Equal', ['Power', 'x', 2], 'a'])).toEqual(guarded);
+    expect(
+      new ComputeEngine()
+        .box(['Solve', ['Equal', ['Power', 'x', 2], 'a'], 'x', 'RealNumbers'])
+        .evaluate().json
+    ).toEqual(guarded);
+    expect(
+      solve(
+        ['Equal', ['Power', 'x', 2], 'a'],
+        ['Interval', ['Negate', 'PositiveInfinity'], 'PositiveInfinity']
+      )
+    ).toEqual(guarded);
+  });
+
+  test('the condition is the radicand of the root', () => {
+    expect(solve(['Equal', 'x', ['Sqrt', 'a']])).toEqual([
+      'List',
+      ['If', ['LessEqual', 0, 'a'], ['Sqrt', 'a']],
+    ]);
+    const r = new ComputeEngine()
+      .box([
+        'Solve',
+        ['Equal', ['Add', ['Power', 'x', 2], 'x'], 'a'],
+        ['Element', 'x', 'RealNumbers'],
+      ])
+      .evaluate();
+    expect(r.nops).toBe(2);
+    for (const root of r.ops!)
+      expect(root.op1.json).toEqual([
+        'LessEqual',
+        0,
+        ['Add', ['Multiply', 4, 'a'], 1],
+      ]);
+  });
+
+  test('an assumption on the parameter decides the condition', () => {
+    const ce = new ComputeEngine();
+    const eq = ['Equal', ['Power', 'x', 2], 'a'];
+    const solveIn = () =>
+      ce
+        .box([
+          'Solve',
+          eq,
+          ['Element', 'x', 'RealNumbers'],
+        ] as MathJsonExpression)
+        .evaluate().json;
+    ce.pushScope();
+    ce.assume(ce.box(['Greater', 'a', 0]));
+    expect(solveIn()).toEqual([
+      'List',
+      ['Sqrt', 'a'],
+      ['Negate', ['Sqrt', 'a']],
+    ]);
+    ce.popScope();
+    ce.pushScope();
+    ce.assume(ce.box(['Less', 'a', 0]));
+    expect(solveIn()).toEqual(['List']);
+    ce.popScope();
+  });
+
+  test('a root that is real for each value of the parameter has no condition', () => {
+    expect(solve(['Equal', ['Power', 'x', 2], ['Power', 'a', 2]])).toEqual([
+      'List',
+      ['Abs', 'a'],
+      ['Negate', ['Abs', 'a']],
+    ]);
+    expect(solve(['Equal', ['Power', 'x', 2], 4])).toEqual(['List', 2, -2]);
+    expect(solve(['Equal', ['Power', 'x', 2], -1])).toEqual(['List']);
+  });
+
+  test('with no condition, or over another domain, Solve stays unevaluated', () => {
+    // `±a·√b` is real for `a = 0` also: `0 ≤ b` is not the exact condition.
+    for (const [eq, domain] of [
+      [['Equal', ['Power', 'x', 2], ['Multiply', 'b', ['Power', 'a', 2]]]],
+      [['Equal', ['Power', 'x', 4], 'a']],
+      [['Equal', ['Power', 'x', 2], 'a'], 'Integers'],
+    ] as Array<[MathJsonExpression, MathJsonExpression?]>)
+      expect((solve(eq, domain) as any[])[0]).toBe('Solve');
+  });
+
+  // The guard `0 ≤ a` states only where the root is real: a constraint on
+  // the unknown that is not decided at the root gives no answer.
+  test('a condition on the unknown that is not decided gives no answer', () => {
+    for (const condition of [
+      ['Less', 'x', -5],
+      ['Greater', 'x', 0],
+    ] as MathJsonExpression[])
+      expect(
+        new ComputeEngine()
+          .box([
+            'Solve',
+            ['Equal', ['Power', 'x', 2], 'a'],
+            ['Element', 'x', 'RealNumbers', condition],
+          ] as MathJsonExpression)
+          .evaluate().operator
+      ).toBe('Solve');
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assume(ce.box(['Greater', 'x', 0]));
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Power', 'x', 2], 'a'],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate().operator
+    ).toBe('Solve');
+    ce.popScope();
+  });
+
+  test('over the complex numbers, x² = a gives ±√a', () => {
+    expect(solve(['Equal', ['Power', 'x', 2], 'a'], 'ComplexNumbers')).toEqual([
+      'List',
+      ['Sqrt', 'a'],
+      ['Negate', ['Sqrt', 'a']],
+    ]);
+  });
+});
+
 // An equality chain `a = b = c` is two equations. The solvers that read
 // only the first two operands must not answer for the chain.
 describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
