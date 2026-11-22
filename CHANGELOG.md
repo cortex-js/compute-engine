@@ -134,6 +134,15 @@
 
 ### Resolved Issues
 
+- **A subscript made of letters stays one symbol when one of its letters
+  names a macro** (CE-1657). After `ce.declare('P', { macro: ['Add', 't', 1] })`,
+  `I_{Past}` is the symbol `I_Past`, as it is with no macro; it was
+  `["Subscript", "I", ["Multiply", "a", "s", "t", ["Add", "t", 1]]]`, because
+  the letters were read as a product and `P` was expanded inside it. The same
+  holds for `["Subscript", "I", "P"]`, which is `I_P`. An index that is an
+  expression still expands the macro: `I_{P+1}` is
+  `["Subscript", "I", ["Add", "t", 2]]`.
+
 - **A function that passes its argument whole to another function takes a list
   whole when that function does** (CE-1696). With `S(x) = Mean(x)` and
   `T(x) = S(x)`, `T([1, 2, 6])` is now `3`; it was `[1, 2, 6]`, because the list
