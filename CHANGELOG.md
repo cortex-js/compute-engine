@@ -95,6 +95,15 @@
   still decline. A `list<any>` input stays refused (#640, reported by
   [enumeratio](https://github.com/enumeratio)).
 
+- **The recursive form that compiles is documented.** A function literal
+  applied to itself (`Apply(f, f, L)` with `f = (self, t) ↦ …self(self, …)…`)
+  still declines: its argument `self` is a function value passed to a
+  function. Written as a named function with a declared signature,
+  `s := t ↦ If(Length(t) = 0, 0, First(t) + s(Rest(t)))` with `s` declared
+  `(list<integer>) -> integer`, the recursion compiles on JavaScript and gives
+  the interpreter's value (#639, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
 ### Resolved Issues
 
 - **Under `.N()`, the guard digits of an exact operand grow with its nearness

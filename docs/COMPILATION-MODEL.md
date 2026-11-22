@@ -2351,7 +2351,21 @@ Every other function value declines, with a reason that names the form:
   or held in a block local (`Declare(h, "function", t ↦ 2t)`);
 - a parameter of the root declared with a function type
   (`(h: (real) -> real) ↦ Map(h, [1, 2])`);
-- `Sort` with an ordering function.
+- `Sort` with an ordering function;
+- a function literal applied to itself, `Apply(f, f, L)` with
+  `f = (self, t) ↦ If(Length(t) = 0, 0, First(t) + self(self, Rest(t)))`
+  (#639): the argument `self` is a function value passed to a function.
+
+A recursion compiles written as a named user function with a declared
+signature (see "User functions and dispatch": real recursion on JavaScript,
+no depth guard, a decline on the shader targets). With `T: list<integer>`,
+`ce.declare("s", "(list<integer>) -> integer")` and
+`s := t ↦ If(Length(t) = 0, 0, First(t) + s(Rest(t)))`, `s(T)` compiles and
+gives 6 at `T = [1, 2, 3]`, as the self-application above does in the
+interpreter. Without the signature the parameter `t` has the type
+`indexed_collection<number>` and the call declines ("the parameter t of s is
+not a scalar"). A recursion into a tree whose depth is not stated (a list of
+lists of lists...) has no settled shape and declines in either form.
 
 The interpreter keeps first-class functions: lambdas, closures, currying,
 partial application and function values.
