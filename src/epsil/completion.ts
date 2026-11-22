@@ -142,6 +142,12 @@ export type EpsilCompletionItem = {
    * of the source) admits a list of the expected type too. A host may hide
    * the names that are `'never'`. */
   fit?: 'match' | 'maybe' | 'never';
+  /** The characters of `label` that the typed word matched, for a hump or
+   * a subsequence match: offsets into `label`, end excluded, sorted, not
+   * overlapping, adjacent characters in one range (`idM` matches
+   * `identityMatrix` at `[[0, 2], [8, 9]]`). Absent for a prefix match:
+   * the first `range[1] - range[0]` characters of `label` matched. */
+  matchRanges?: readonly [start: number, end: number][];
 };
 
 /** The completions at an offset of an Epsil source. */
@@ -976,7 +982,8 @@ export function visibleBindings(
 /**
  * Keep the items that match `prefix`, sort them and drop the sort tier.
  * The prefix matches come first, then the hump matches, then the
- * subsequence matches (`matchClass`).
+ * subsequence matches (`matchClass`). A hump or subsequence match gets its
+ * `matchRanges`.
  */
 function finish(
   items: (EpsilCompletionItem & { tier: number })[],
@@ -985,16 +992,20 @@ function finish(
   const seen = new Set<string>();
   return items
     .map((item) => ({ item, match: matchClass(item, prefix) }))
-    .filter(({ match }) => match >= 0)
+    .filter(({ match }) => match.order >= 0)
     .sort(
       ({ item: a, match: ma }, { item: b, match: mb }) =>
-        ma - mb ||
+        ma.order - mb.order ||
         a.rank - b.rank ||
         Number(a.fit === 'never') - Number(b.fit === 'never') ||
         a.tier - b.tier ||
         (a.label < b.label ? -1 : a.label > b.label ? 1 : 0)
     )
-    .map(({ item }) => item)
+    .map(({ item, match }) =>
+      match.positions === undefined
+        ? item
+        : { ...item, matchRanges: rangesOf(match.positions) }
+    )
     .filter((item) => {
       // A text offered twice (a keyword that is also a likely value, such
       // as `true`) keeps its first, best-ranked item.
@@ -1007,24 +1018,46 @@ function finish(
 }
 
 /**
- * How the label of `item` matches the word `prefix`, ignoring case: 0 when
- * it starts with the word, 1 when the word matches its humps, 2 when the
- * word is a subsequence of it that starts at its first character, -1 when
- * it does not match. A word of one character, a fix-it, a keyword and a
- * likely value match by prefix only.
+ * How the label of `item` matches the word `prefix`, ignoring case: `order`
+ * is 0 when it starts with the word, 1 when the word matches its humps, 2
+ * when the word is a subsequence of it that starts at its first character,
+ * -1 when it does not match. A word of one character, a fix-it, a keyword
+ * and a likely value match by prefix only. `positions` are the offsets in
+ * the label of the characters of the word, for a hump or subsequence match.
  */
-function matchClass(item: EpsilCompletionItem, prefix: string): number {
+function matchClass(
+  item: EpsilCompletionItem,
+  prefix: string
+): { order: number; positions?: number[] } {
   const label = item.label;
-  if (label.toLowerCase().startsWith(prefix.toLowerCase())) return 0;
+  if (label.toLowerCase().startsWith(prefix.toLowerCase())) return { order: 0 };
+  // The matchers compare UTF-16 code units: a word with a character outside
+  // the BMP (a surrogate pair) could match half of one character and half of
+  // another, so such a word matches by prefix only.
   if (
     prefix.length < 2 ||
+    /[\uD800-\uDFFF]/.test(prefix) ||
     item.kind === 'fixit' ||
     item.kind === 'keyword' ||
     item.kind === 'value'
   )
-    return -1;
-  if (matchesHumps(label, prefix)) return 1;
-  return matchesSubsequence(label, prefix) ? 2 : -1;
+    return { order: -1 };
+  const humps = matchesHumps(label, prefix);
+  if (humps !== undefined) return { order: 1, positions: humps };
+  const subsequence = matchesSubsequence(label, prefix);
+  if (subsequence !== undefined) return { order: 2, positions: subsequence };
+  return { order: -1 };
+}
+
+/** The increasing `positions` as ranges, end excluded, adjacent ones merged. */
+function rangesOf(positions: readonly number[]): [number, number][] {
+  const ranges: [number, number][] = [];
+  for (const p of positions) {
+    const last = ranges[ranges.length - 1];
+    if (last !== undefined && last[1] === p) last[1] = p + 1;
+    else ranges.push([p, p + 1]);
+  }
+  return ranges;
 }
 
 /** Whether the character `a` is `b`, ignoring case. */
@@ -1065,55 +1098,87 @@ function isLower(c: string): boolean {
 }
 
 /**
- * Whether `word` matches the humps of `label`, ignoring case: its first
+ * Where `word` matches the humps of `label`, ignoring case: its first
  * character is the first character of the label, and each next character
  * continues the current hump or starts a later one (`idM` and `iM` match
- * `identityMatrix`, `invH` matches `inverseHaversine`). The reachable
- * positions after each character are kept, so that `abc` matches `abBc`;
- * the cost is the length of the label times the length of the word.
+ * `identityMatrix`, `invH` matches `inverseHaversine`). The result is the
+ * offset of each character of the word in the label, `undefined` when it
+ * does not match. Of the ways to match, the one with the fewest runs of
+ * adjacent characters is chosen (each run starts a hump): `imat` on
+ * `identityMatrixAt` gives `i`, `Mat`, not `i`, `M`, `A`, `t`. On a tie, a
+ * character continues the run of the one before rather than starting a
+ * hump, and the earliest places are taken. The cost is the length of the
+ * label times the length of the word.
  */
-function matchesHumps(label: string, word: string): boolean {
+function matchesHumps(label: string, word: string): number[] | undefined {
   const n = label.length;
-  if (n === 0 || !sameLetter(label[0], word[0])) return false;
-  const humps: number[] = [];
-  for (let i = 0; i < n; i++) if (isHumpStart(label, i)) humps.push(i);
-  // `next[p]`: whether the next character of the word may be at `p`.
-  let next = new Uint8Array(n + 1);
-  next[1] = 1;
-  let first = 1;
+  if (n === 0 || !sameLetter(label[0], word[0])) return undefined;
+  // `runs[k][p]`: the fewest runs that match the first `k + 1` characters
+  // of the word with the last one at `p`; `from[k][p]`: the offset of the
+  // character before it in that match.
+  const runs: Int32Array[] = [new Int32Array(n).fill(-1)];
+  const from: Int32Array[] = [new Int32Array(n)];
+  runs[0][0] = 1;
   for (let k = 1; k < word.length; k++) {
     const c = word[k];
-    const reached = new Uint8Array(n + 1);
-    let least = n + 1;
-    // Continue the current hump.
-    for (let p = first; p < n; p++)
-      if (next[p] === 1 && sameLetter(label[p], c)) {
-        reached[p + 1] = 1;
-        least = Math.min(least, p + 1);
+    const before = runs[k - 1];
+    const here = new Int32Array(n).fill(-1);
+    const at = new Int32Array(n);
+    let found = false;
+    // The best match of the previous characters that ends before `p`.
+    let best = -1;
+    let bestAt = -1;
+    for (let p = 1; p < n; p++) {
+      const q = p - 1;
+      if (before[q] >= 0 && (best < 0 || before[q] < best)) {
+        best = before[q];
+        bestAt = q;
       }
-    // Start a later hump.
-    for (const q of humps)
-      if (q >= first && sameLetter(label[q], c)) {
-        reached[q + 1] = 1;
-        least = Math.min(least, q + 1);
+      if (!sameLetter(label[p], c)) continue;
+      // Continue the current hump.
+      if (before[q] >= 0) {
+        here[p] = before[q];
+        at[p] = q;
       }
-    if (least > n) return false;
-    next = reached;
-    first = least;
+      // Start a later hump.
+      if (
+        best >= 0 &&
+        isHumpStart(label, p) &&
+        (here[p] < 0 || best + 1 < here[p])
+      ) {
+        here[p] = best + 1;
+        at[p] = bestAt;
+      }
+      if (here[p] >= 0) found = true;
+    }
+    if (!found) return undefined;
+    runs.push(here);
+    from.push(at);
   }
-  return true;
+  const last = runs[word.length - 1];
+  let end = -1;
+  for (let p = 0; p < n; p++)
+    if (last[p] >= 0 && (end < 0 || last[p] < last[end])) end = p;
+  const positions: number[] = new Array(word.length);
+  for (let k = word.length - 1; k >= 0; k--) {
+    positions[k] = end;
+    end = from[k][end];
+  }
+  return positions;
 }
 
 /**
- * Whether the characters of `word` are in `label` in order, ignoring case,
- * the first one at the start of the label.
+ * Where the characters of `word` are in `label` in order, ignoring case,
+ * the first one at the start of the label: each character at its first
+ * place after the one before (`ivs` on `inverse` gives 0, 2, 5).
+ * `undefined` when they are not.
  */
-function matchesSubsequence(label: string, word: string): boolean {
-  if (label.length === 0 || !sameLetter(label[0], word[0])) return false;
-  let k = 1;
-  for (let i = 1; i < label.length && k < word.length; i++)
-    if (sameLetter(label[i], word[k])) k += 1;
-  return k === word.length;
+function matchesSubsequence(label: string, word: string): number[] | undefined {
+  if (label.length === 0 || !sameLetter(label[0], word[0])) return undefined;
+  const positions = [0];
+  for (let i = 1; i < label.length && positions.length < word.length; i++)
+    if (sameLetter(label[i], word[positions.length])) positions.push(i);
+  return positions.length === word.length ? positions : undefined;
 }
 
 /** Whether `start` is inside a string, a LaTeX island or a comment. */

@@ -447,10 +447,20 @@ const source = "let b = isM";
 const result = epsilCompletions(ce, source, source.length);
 result.items.map((i) => i.label);
 // ➔ ["isMatch", "isMissing", "isSquareMatrix", "isCompatibleUnit", ...]
+result.items[0].matchRanges; // ➔ undefined: a prefix match
+result.items[2].matchRanges; // ➔ [[0, 2], [8, 9]]: "is" and "M"
+result.items[3].matchRanges; // ➔ [[0, 2], [4, 5]]: "is" and "m"
 ```
 
 `isMatch` and `isMissing` start with `isM`, `isSquareMatrix` matches its
-humps, `isCompatibleUnit` is a subsequence. Within each of the three, the
+humps, `isCompatibleUnit` is a subsequence. A hump or subsequence item has
+`matchRanges`, the characters of its label that the word matched (offsets
+into the label, end excluded, adjacent characters in one range), so that an
+editor can show them in bold; a prefix item has none, as its first
+`range[1] - range[0]` characters matched. Of the ways a word matches the
+humps, the one with the fewest ranges is chosen (`imat` on
+`identityMatrixAt` gives `i` and `Mat`); in a subsequence, each character
+is at its first place after the one before. Within each of the three, the
 items come sorted by `rank`:
 1 for the likely values, 2 and 3 for the names of the source and of the
 library whose type matches the expected type, 4 and 5 for the other names,

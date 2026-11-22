@@ -2167,4 +2167,92 @@ describe('EPSIL COMPLETION: MATCHING BEYOND A PREFIX', () => {
       labels(complete('let max_count = 2\nlet b = mc▮'), 'variable')
     ).toEqual(['max_count']);
   });
+
+  test('the matched characters of a hump match', () => {
+    expect(item(complete('idM▮'), 'identityMatrix')?.matchRanges).toEqual([
+      [0, 2],
+      [8, 9],
+    ]);
+    expect(item(complete('invH▮'), 'inverseHaversine')?.matchRanges).toEqual([
+      [0, 3],
+      [7, 8],
+    ]);
+    expect(
+      item(complete('let max_count = 2\nlet b = mc▮'), 'max_count')?.matchRanges
+    ).toEqual([
+      [0, 1],
+      [4, 5],
+    ]);
+  });
+
+  test('a hump match takes the fewest ranges', () => {
+    const result = complete('let identityMatrixAt = 1\nlet b = imat▮');
+    expect(item(result, 'identityMatrixAt')?.matchRanges).toEqual([
+      [0, 1],
+      [8, 11],
+    ]);
+    // `b` can only be `B`: from `b` at 1, `c` cannot follow.
+    expect(
+      item(complete('let abBc = 1\nlet b = abc▮'), 'abBc')?.matchRanges
+    ).toEqual([
+      [0, 1],
+      [2, 4],
+    ]);
+  });
+
+  test('the matched characters of a subsequence match', () => {
+    // Each character at its first place after the one before.
+    expect(item(complete('ivs▮'), 'inverse')?.matchRanges).toEqual([
+      [0, 1],
+      [2, 3],
+      [5, 6],
+    ]);
+  });
+
+  test('a prefix match has no match ranges', () => {
+    const result = complete('ident▮');
+    expect(item(result, 'identityMatrix')).toBeDefined();
+    expect(item(result, 'identityMatrix')?.matchRanges).toBeUndefined();
+    expect(
+      item(complete('let ivSum = 1\nlet b = ivs▮'), 'ivSum')?.matchRanges
+    ).toBeUndefined();
+  });
+
+  test('a word with a character outside the BMP matches by prefix only', () => {
+    // `a𝑥` would otherwise match `a𝑎𝑥` by halves of two characters.
+    const result = complete('let a\u{1D44E}\u{1D465} = 1\nlet b = a\u{1D465}▮');
+    expect(item(result, 'a\u{1D44E}\u{1D465}')).toBeUndefined();
+  });
+
+  test('the match ranges ignore case', () => {
+    expect(item(complete('IDM▮'), 'identityMatrix')?.matchRanges).toEqual([
+      [0, 2],
+      [8, 9],
+    ]);
+    expect(item(complete('INVH▮'), 'inverseHaversine')?.matchRanges).toEqual([
+      [0, 3],
+      [7, 8],
+    ]);
+  });
+
+  test('the match ranges are sorted, apart, within the label and cover the word', () => {
+    for (const word of ['idM', 'invH', 'ivs', 'isM', 'mc', 'sqm']) {
+      for (const { label, matchRanges } of complete(`${word}▮`).items) {
+        if (matchRanges === undefined) {
+          expect(label.toLowerCase().startsWith(word.toLowerCase())).toBe(true);
+          continue;
+        }
+        let covered = '';
+        let end = -1;
+        for (const [s, e] of matchRanges) {
+          expect(s).toBeGreaterThan(end);
+          expect(e).toBeGreaterThan(s);
+          expect(e).toBeLessThanOrEqual(label.length);
+          covered += label.slice(s, e);
+          end = e;
+        }
+        expect(covered.toLowerCase()).toBe(word.toLowerCase());
+      }
+    }
+  });
 });
