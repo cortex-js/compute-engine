@@ -9,6 +9,16 @@
   interpreter gives no value, so the compiled code throws `out-of-range`
   (#630, contributed by [enumeratio](https://github.com/enumeratio)).
 
+- **A function value that reads a parameter of the enclosing function keeps
+  it when another argument mentions the same name.**
+  `Apply(a ↦ Apply(v ↦ Map(j ↦ v[j] + a, 1..2), Map(q ↦ a + q, 1..2)), 10)`
+  was `[a_1 + 11, a_1 + 12]`, and is `[21, 22]` again; a `Fold` whose step
+  applies such a typed let gave `[5, At(acc_1, 2), At(acc_1_1, 3)]`, and gives
+  `[5, 6, 7]`. The scope of a nested `Block` holds the binding of each
+  enclosing parameter its body reads, and the capture check took that entry
+  for a binder and renamed the parameter there (#632 and #655, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features
