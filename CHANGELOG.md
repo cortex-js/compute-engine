@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Performance
+
+- **An iteration with `max` of an angle evaluates in milliseconds** (CE-1359).
+  `Arctan2` with a float operand now gives a float also when the other operand
+  is an exact expression: `Arctan2(Cos(Pi/60), 0.5)` is `1.1066…`, where it
+  stayed unevaluated. And `Max`, `Min` and `Sort` now order an exact value that
+  holds `Arctan2`: `Max(Arctan2(1/2, -Sin(Arctan(1/2))), 1.5)` is
+  `Arctan2(1/2, -Sin(Arctan(1/2)))`, where it stayed unevaluated. A function
+  whose body is a loop of 12 passes over such values kept a `Max` expression
+  that grew at each pass, and
+  took about 5 seconds to evaluate at one point. It now takes about 15 ms, and
+  about 130 ms for the first point.
+
 ## 0.197.1 _2026-11-21_
 
 ### Improvements

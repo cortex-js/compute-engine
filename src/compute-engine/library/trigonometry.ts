@@ -978,13 +978,20 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // A float operand makes the angle a float, as `Arctan(0.5)` is:
         // `Arctan2(0.0, 1)` is the float `0`, and `Arctan2(0.0, -1)` the
         // float `3.14…`, not the exact `π` of `exactArctan2()`.
-        const floatAngle = () =>
+        const floatAngle = (u = y, v = x) =>
           radiansToAngle(
-            apply2(y, x, Math.atan2, (a, b) =>
+            apply2(u, v, Math.atan2, (a, b) =>
               BigDecimal.atan2(a, b, ce.precision)
             )
           );
-        if (hasFloatOperand([y, x])) return floatAngle();
+        // The other operand can be an exact constant that is not a number
+        // literal (`cos(π/60)`): it is approximated, as `0.5 + cos(π/60)`
+        // is. An operand with an unknown is not a number after `.N()`, and
+        // the call stays symbolic.
+        if (hasFloatOperand([y, x]))
+          return isNumber(y) && isNumber(x)
+            ? floatAngle()
+            : floatAngle(isNumber(y) ? y : y.N(), isNumber(x) ? x : x.N());
 
         if (!numericApproximation) return exactArctan2(y, x, halfTurn, ce);
         // Under `.N()` in a unit other than radians, exact operands take the

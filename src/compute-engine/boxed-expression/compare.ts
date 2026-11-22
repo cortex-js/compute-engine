@@ -3018,7 +3018,8 @@ const approximations = new WeakMap<
  * bound for an expression that contains it, and its order is not known.
  * The list is: `Add`, `Subtract`, `Negate`, `Multiply`, `Divide`, `Square`,
  * `Sqrt`, `Root`, `Power`, `Exp`, `Ln`, `Log`, `Lb`, `Lg`, `Abs`, `Sin`,
- * `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arcsin`, `Arccos`, `Sinh`,
+ * `Cos`, `Tan`, `Cot`, `Sec`, `Csc`, `Arctan`, `Arctan2`, `Arcsin`,
+ * `Arccos`, `Sinh`,
  * `Cosh`, `Tanh`, `Arsinh`, `Arcosh`, `Artanh`, and, only above machine
  * precision, `Gamma`, `Erf`, `Erfc`, `Erfi`, `Zeta` (see `propagatedError`).
  */
@@ -3355,6 +3356,22 @@ function propagatedError(
         : undefined;
     case 'Arctan':
       return u.logError - logRadians;
+    case 'Arctan2': {
+      // `atan2(y, x)` with `u` = y and `w` = x. Its gradient has the norm
+      // 1/r, with r the distance to the origin, so over the box of the two
+      // intervals the error is at most (e_y + e_x)/r_min, where r_min is at
+      // least the larger of |y| − e_y and |x| − e_x. This holds only when
+      // the box does not meet the negative x-axis, where atan2 jumps by
+      // 2π: the interval of y does not contain 0, or x is positive over its
+      // interval. Either one also keeps the box away from the origin.
+      if (w === undefined) return undefined;
+      const my = lower(u);
+      const mx = lower(w);
+      if (my === undefined && !(mx !== undefined && w.sign === 1))
+        return undefined;
+      const logR = Math.max(my ?? -Infinity, mx ?? -Infinity);
+      return logAdd(u.logError, w.logError) - logR - logRadians;
+    }
     case 'Arcsin':
     case 'Arccos': {
       const m = upper(u);
