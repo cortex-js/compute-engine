@@ -2533,8 +2533,10 @@ function lowerOnce(
             ? rowOfHead(rows, head.symbol)
             : undefined;
         // A function literal or a user function of two parameters: the
-        // left fold by it (`lists.reduceBy()`).
-        if (e.nops === 3 && r === undefined) return lists.reduceBy(e);
+        // left fold by it (`lists.reduceBy()`), from `init` or, with none,
+        // from the first element.
+        if ((e.nops === 3 || e.nops === 2) && r === undefined)
+          return lists.reduceBy(e);
         // A left fold, as the interpreter's: `Subtract` and `Divide` too.
         if (e.nops !== 3 || (r?.arity !== 'variadic' && r?.arity !== 2))
           decline(
