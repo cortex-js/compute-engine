@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.199.0 _2026-11-22_
 
 ### Breaking Changes
 
@@ -140,11 +140,28 @@
   `Map(r ↦ Reduce(r, Add, 0), g)`, `Length(g)` and `Count(g)` declined. On
   JavaScript, `Map` whose value for a row is not a list, `Length`, `Count`,
   `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over such an input or parameter
-  now compile, and read each row of the host's array in place. A row at an
-  index known only at run time, a `Map` or a `Filter` that gives a list of
-  rows, a tuple that holds such a list, a typed `Apply` parameter of that type
-  and a list of lists of run-time length built in the program still decline
-  (#638, reported by [enumeratio](https://github.com/enumeratio)).
+  now compile, and read each row of the host's array in place. A `Map` or a
+  `Filter` that gives a list of rows and a list of lists of run-time length
+  built in the program still decline (#638, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **A row of a `list<list<integer>>` input at an index known at run time
+  compiles, and such a list can be read by a function, held in a tuple or
+  bound by `Apply`.** With `g` declared `list<list<integer>>` and `k` an
+  integer, `Sum(g[k])` and `Length(g[k])` declined; on JavaScript they compile,
+  `g[-1]` is the last row, and at `g = [[1, 2], [3], [4, 5, 6]]`,
+  `Length(g[5])` is `NaN` and `Coalesce(Length(g[5]), -7)` is `-7`, as the
+  interpreter's `Missing`. The size of a tree from its adjacency list,
+  `sz := (g, v) ↦ 1 + Reduce(Map(c ↦ sz(g, c), g[v]), Add, 0)` with `sz`
+  declared `(list<list<integer>>, integer) -> integer`, compiles, and so does
+  the same function `size(v)` that reads the adjacency list `A` as a free
+  input (it declined: "the function size reads the input A of type
+  list<list<integer>>"): `size(1)` at `A = [[2, 3], [4], [], []]` is `4`. A
+  tuple input `G: tuple<integer, list<list<integer>>>` (`G[1] + Length(G[2])`)
+  or `tuple<list<integer>, list<integer>>`, and a typed parameter of `Apply`
+  (`Apply((m: list<list<integer>>) ↦ Length(m), g)`) compile too. The row
+  `g[k]` as the result of the program and `AssertPresent(g[k])` decline (#638,
+  #639, reported by [enumeratio](https://github.com/enumeratio)).
 
 ### Resolved Issues
 

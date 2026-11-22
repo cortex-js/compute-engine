@@ -517,6 +517,12 @@ function canonicalJuxtaposition(
   // instead of [2, f(x)].
   ops = combineFunctionApplications(ce, ops);
 
+  // The juxtaposition was one application: `(x \mapsto x^2)(a)` on the
+  // partial-form route, where the literal is still in its `Delimiter` and
+  // the two-operand branches above do not see it. It is that application,
+  // not a product of one factor.
+  if (ops.length === 1) return bindsOperand ? ops[0] : canonicalOnce(ops[0]);
+
   //
   // Is it a number juxtaposed with a tagged unit expression?
   // e.g. `12\,\mathrm{cm}` or `9.8\,\mathrm{m/s^2}`

@@ -207,7 +207,21 @@ export function extractFiniteDomainWithReason(
         };
       }
     }
-    // Range with non-integer or symbolic bounds
+    // An empty range, a step of 0, or a bound or a step that is not an
+    // integer (`Range(1, 4, 0.5)`): the values are the ones `Range` itself
+    // enumerates. `Range(5, 1)` and `Range(1, 4, 0)` are empty. A range whose
+    // count is unknown (a symbolic bound) cannot be enumerated.
+    const rangeSize = domain.count;
+    if (typeof rangeSize === 'number' && domain.isFiniteCollection === true) {
+      if (rangeSize <= 1000) return successResult([...domain.each()]);
+      return {
+        status: 'non-enumerable',
+        variable,
+        domain,
+        reason: 'domain-too-large',
+      };
+    }
+    // Range with symbolic bounds
     return {
       status: 'non-enumerable',
       variable,

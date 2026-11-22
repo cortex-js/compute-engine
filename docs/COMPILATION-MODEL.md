@@ -64,12 +64,16 @@ when it compiles. A difference that this list does not name is a defect.
   (`IsMissing(Tuple(Missing, Missing))` is `False` in the interpreter, and
   a point of `NaN` coordinates is absent). No compiled list is absent, nor
   a boolean on `glsl` (their producers decline): a discharge reads such a
-  value as present. A colour read out of range refuses after the passes,
-  so `IsMissing` of a colour declines, while `Coalesce` and
-  `AssertPresent` keep the colour as their value. A string read out of
-  range (`At` of a list of strings) is `undefined` on `javascript`, its
-  test; it is read only by a discharge or as the result, and any other
-  read of it refuses after the passes (CE-1556). A point (a tuple of numbers, `tuple<real,
+  value as present. The one exception is the row `g[i]` of a
+  `list<list<integer>>` or `list<list<real>>` input at an index known at run
+  time, whose `Length` is `NaN` out of range, the absent value that the
+  discharges test (see "Lists of two run-time lengths"). A colour read out
+  of range refuses after the passes, so `IsMissing` of a colour declines,
+  while `Coalesce` and `AssertPresent` keep the colour as their value. A
+  string read out of range (`At` of a list of strings) is `undefined` on
+  `javascript`, its test; it is read only by a discharge or as the result,
+  and any other read of it refuses after the passes (CE-1556). A point (a
+  tuple of numbers, `tuple<real,
   real>` included) is tested at a discharge with the point
   test, which also reads the point of `NaN` coordinates as absent: no point
   is proved present by its type, as no `real` is, because a read out of
@@ -1522,18 +1526,38 @@ a result as `+∞` tests the real part, not the imaginary part.
 The rows of an input of type `list<list<real>>` or `list<list<integer>>` can
 have different lengths. On `javascript` (not in the bigint and interval modes)
 such an input, a positional parameter of a root function literal or a
-parameter of a user function of that type is the host's array of arrays, read
-in three ways: the element `g[i][j]` (`At(At(g, i), j)`), which is `NaN`
-where an index is out of range of the list or of its row; row by row, by a
-reader of a list that reads each row where it reads it (`Map` whose value for
-a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`, `Fold`,
-`Reduce`; #638); and an argument of a call at a parameter of that type, which
-takes it whole. Every other read declines with `outside-profile`, so the
-interpreter evaluates it: with `g: list<list<integer>>`, `(g) ↦ g[2][1]` at
-`g = [[1, 2, 3], [4]]` gives `4`, `g[2][3]` gives `NaN`, `Length(g)` gives 2
-and `Map(r ↦ Reduce(r, Add, 0), g)` gives `[6, 4]`, while the row `g[1]` (at a
-count of rows known at run time), `Sum(g[1])` and `Map(r ↦ 2r, g)` (a list of
-rows) decline. A user function whose result
+parameter of a user function of that type is the host's array of arrays. So
+is such a list read by a user function as a free input, a part of a tuple
+input (`G: tuple<integer, list<list<integer>>>`, `At(G, 2)`) and a typed
+parameter of `Apply` (`Apply((m: list<list<integer>>) ↦ Length(m), L)`). It
+is read in four ways: the element `g[i][j]` (`At(At(g, i), j)`), which is
+`NaN` where an index is out of range of the list or of its row; row by row,
+by a reader of a list that reads each row where it reads it (`Map` whose value
+for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`, `Fold`,
+`Reduce`; #638); the row `g[i]` at an index known at run time, negative from
+the end, read by a reader of a list (#638, #639); and an argument of a call at
+a parameter of that type, which takes it whole. Out of range the interpreter's
+row is `Missing`: compiled, `Length(g[i])` is `NaN`, `First`, `Last` and an
+element of the row are `NaN`, `IsMissing(g[i])` is `True` and
+`Coalesce(Length(g[i]), -7)` is -7, as the interpreter's; a reducer of the
+row (`Sum(g[i])` gives 0) and every other operator over it are unspecified.
+`IsMissing` and `Length` of `If(c, g[i], g[j])` and of
+`Coalesce(g[i], g[j])` give the interpreter's values: the value keeps the
+absent value of the operand taken. `AssertPresent(g[i])`, the row as the
+result of the program or of a user function, and the row carried by a loop (a
+local that a `Loop` assigns it, the accumulator or the initial value of a
+`Reduce` or a `Fold`) decline: `fr := (g, k) ↦ g[k]` declared
+`(list<list<integer>>, integer) -> list<integer>` declines in
+`IsMissing(fr(L, n))`, so the interpreter evaluates it. Every other read
+declines with `outside-profile`, so the interpreter evaluates it:
+with `g: list<list<integer>>`, `(g) ↦ g[2][1]` at `g = [[1, 2, 3], [4]]` gives
+`4`, `g[2][3]` gives `NaN`, `Length(g)` gives 2, `Map(r ↦ Reduce(r, Add, 0), g)`
+gives `[6, 4]`, `Sum(g[1])` gives 6 and `Length(g[3])` gives `NaN`, while
+`Map(r ↦ 2r, g)` (a list of rows) declines. The size of a tree from its
+adjacency list compiles as the recursive
+`sz := (g, v) ↦ 1 + Reduce(Map(c ↦ sz(g, c), g[v]), Add, 0)` with `sz`
+declared `(list<list<integer>>, integer) -> integer`: `sz(A, 1)` at
+`A = [[2, 3], [4], [], []]` gives 4. A user function whose result
 type is such a list compiles when its body is a list of rank 2 of lengths that
 the body settles: with `n = 32`,
 `step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`
@@ -2348,8 +2372,6 @@ defined function: the code is the closed form of the derivative
 
 Every other function value declines, with a reason that names the form:
 
-- a defined function given by its name to `Map` (`Map(f, L)`: "Map of a
-  function that is not a literal of one parameter");
 - a partial application or a curried call: `Apply(Apply(f, 1), u)`;
 - a function value passed as an argument to a user function (`h(x ↦ x + u)`)
   or held in a block local (`Declare(h, "function", t ↦ 2t)`);

@@ -2037,37 +2037,61 @@ export function listLowering(cx: Lowering) {
    *  makes each where it is read and `rows()` makes the value of the lane
    *  `rows`, the result of the program only (`README.md`, "The rows
    *  lane"). `undefined` for another expression, and in the interval
-   *  mode. */
+   *  mode. Of an input or a parameter, `row(i)` is the row at the index
+   *  `i` from 1 known at run time, and `length` the value of its `Length`,
+   *  NaN where `i` is out of range. */
   const chunks = (
     e: Expression
   ):
     | V
-    | { source: () => Source; rows: () => V; groups?: readonly V[] }
+    | {
+        source: () => Source;
+        rows: () => V;
+        groups?: readonly V[];
+        row?: (i: V) => { row: V; length: V };
+      }
     | undefined => {
     // An input or a parameter of the lane `rows` (a list of lists of two
-    // lengths not stated, `rowsElementLane()`): its rows, each read where
-    // it is read, a build over the elements of the host's row.
-    const lane = isSymbol(e) ? cx.rowsElementLane(e.type.type) : undefined;
+    // lengths not stated, `rowsElementLane()`), or such a part of a tuple
+    // input read part by part (`At(G, 2)`, `tupleParts()`): its rows, each
+    // read where it is read, a build over the elements of the host's row.
+    const part =
+      isFunction(e, 'At') &&
+      e.nops === 2 &&
+      isSymbol(e.ops[0]) &&
+      typeof e.ops[0].type.type === 'object' &&
+      e.ops[0].type.type.kind === 'tuple';
+    const lane =
+      isSymbol(e) || part ? cx.rowsElementLane(e.type.type) : undefined;
     if (lane !== undefined && !cx.interval) {
       const g = cx.wholeRows(e);
       if (type(g).lane !== 'rows') return undefined;
       const get = lane === 'integer' ? 'rows.get.int' : 'rows.get';
+      const built = (i: V, n: V): V => {
+        const k = b.newValue(scalarType('integer'));
+        return cx.region(
+          'build',
+          [n],
+          [k],
+          () => [b.op(get, [g, i, k], scalarType(lane))],
+          e
+        )[0];
+      };
       return {
         source: () => ({
           length: b.op('rows.count', [g], scalarType('integer')),
-          at: (i) => {
-            const n = b.op('rows.len', [g, i], scalarType('integer'));
-            const k = b.newValue(scalarType('integer'));
-            return cx.region(
-              'build',
-              [n],
-              [k],
-              () => [b.op(get, [g, i, k], scalarType(lane))],
-              e
-            )[0];
-          },
+          at: (i) => built(i, b.op('rows.len', [g, i], scalarType('integer'))),
         }),
         rows: () => g,
+        // Out of range the row is a build of no element, so `At`, `First`
+        // and `Last` of it are NaN.
+        row: (i) => {
+          const k = b.op('rows.row', [g, i], scalarType('integer'));
+          return {
+            row: built(k, b.op('rows.rowlen', [g, k], scalarType('integer'))),
+            length: b.op('rows.rowlen.nan', [g, k], scalarType('integer')),
+          };
+        },
       };
     }
     if (
@@ -2315,6 +2339,10 @@ export function listLowering(cx: Lowering) {
           throw new Mismatch('a length');
         if (n === undefined) return [y];
         const m = t.shape[0];
+        // The carried length is a new value, which `cx.rowLengths` does not
+        // name: a row that can be absent would read as present.
+        if (typeof m !== 'number' && cx.rowLengths.has(m.v))
+          decline(e, 'a row at an index known at run time carried by a loop');
         return [typeof m === 'number' ? b.constant(m, 'integer') : m.v, y];
       });
       return { region, params };
@@ -2404,6 +2432,8 @@ export function listLowering(cx: Lowering) {
       }
       if (kind === 'scalar' || fixed !== undefined) return [init];
       const n = type(init).shape[0];
+      if (typeof n !== 'number' && cx.rowLengths.has(n.v))
+        decline(e, 'a row at an index known at run time carried by a loop');
       return [typeof n === 'number' ? integer(n) : n.v, init];
     };
     const outs: V[] = [];
@@ -3023,9 +3053,20 @@ export function listLowering(cx: Lowering) {
     const [zero, one] = [integer(0), integer(1)];
     if (h === 'Rest' || h === 'Most') {
       const length = int(e, 'Max', int(e, 'Subtract', n, one), zero);
-      return reindexed(e, s, length, (k) =>
+      const r = reindexed(e, s, length, (k) =>
         h === 'Rest' ? int(e, 'Add', k, one) : k
       );
+      // Of a row that can be absent (`cx.rowLengths`), the value of
+      // `Length` is NaN where the row is: `length` plus the difference of
+      // the two lengths of the row, 0 where it is present.
+      const absent = cx.rowLengths.get(n);
+      const m = type(r).shape[0];
+      if (absent !== undefined && typeof m !== 'number')
+        cx.rowLengths.set(
+          m.v,
+          cx.apply(e, 'Add', [length, cx.apply(e, 'Subtract', [absent, n])])
+        );
+      return r;
     }
     if (h === 'Reverse')
       return reindexed(e, s, n, (k) =>

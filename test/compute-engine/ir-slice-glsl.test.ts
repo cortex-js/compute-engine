@@ -68,6 +68,8 @@ describe('IR slice: GLSL text', () => {
       'rows.at', 'rows.at.int',
       // The same input read row by row (#638).
       'rows.count', 'rows.len', 'rows.get', 'rows.get.int',
+      // A row of it at an index known at run time.
+      'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
       // The string lane (CE-1530), and `ColorToString` (CE-1548).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',

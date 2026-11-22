@@ -134,6 +134,17 @@ describe('CE-1607: the element of a list of rows of different lengths', () => {
       [9, 16],
     ]);
   });
+
+  test('a row at a constant index of a count known at run time', () => {
+    expect(compiled(epsil('(g: list<list<integer>>) => Length(g[1])'))(J)).toBe(
+      3
+    );
+    expect(compiled(epsil('(g: list<list<integer>>) => sum(g[1])'))(J)).toBe(6);
+    // Out of range, `Length` of the row is NaN (the interpreter's `Missing`).
+    expect(
+      compiled(epsil('(g: list<list<integer>>) => Length(g[3])'))(J)
+    ).toBeNaN();
+  });
 });
 
 describe('CE-1607: every other read declines', () => {
@@ -145,12 +156,11 @@ describe('CE-1607: every other read declines', () => {
   });
 
   // The rows are read one by one by `Length`, `Map` and the other readers
-  // of a list (#638, `ir-rows-input-readers.test.ts`); a row at an index
-  // known at run time, and a list of the rows, still decline.
+  // of a list, also at an index known at run time (#638,
+  // `ir-rows-input-readers.test.ts`); a row as the result, and a list of
+  // the rows, still decline.
   test.each([
-    ['g[1]', 'at an index other than a constant'],
-    ['Length(g[1])', 'at an index other than a constant'],
-    ['sum(g[1])', 'at an index other than a constant'],
+    ['g[1]', 'a row at an index known at run time as the result'],
     ['map(r => r, g)', 'a list of lists of run-time length'],
   ])('%s', (body, why) => {
     expect(declined(epsil(`(g: list<list<integer>>) => ${body}`))).toContain(

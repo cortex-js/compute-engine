@@ -278,6 +278,10 @@ export type Lowering = {
   wholeRows(e: Expression): V;
   /** The inputs and the parameters of the lane `rows`. */
   readonly rowsParams: Set<V>;
+  /** The count of the elements of a row `At(g, i)` of such a value at an
+   *  index known at run time, 0 where `i` is out of range, and the value
+   *  of `Length` of the row, NaN there (`lower.ts`). */
+  readonly rowLengths: Map<V, V>;
   /** The lane of the elements of a value of the engine type `t` that is of
    *  the lane `rows` as an input or a parameter (`rowsElementLane()`). */
   rowsElementLane(t: Type): 'integer' | 'real' | undefined;

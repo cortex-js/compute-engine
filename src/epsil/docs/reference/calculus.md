@@ -103,7 +103,7 @@ Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.
 
 ### Limits
 
-`(index: symbol, lower: value, upper: value) -> tuple`
+`(index: symbol, lower: value, upper: value, step: value?) -> tuple`
 
 Limits of a function
 
