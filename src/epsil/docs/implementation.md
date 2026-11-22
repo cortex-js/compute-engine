@@ -650,7 +650,7 @@ const source = "function f(x: real, n: integer = 2) -> real { x }\nf(1, ";
 const result = epsilSignatureHelp(ce, source, source.length);
 result.callee;                        // ➔ "f"
 result.signatures[0].label;           // ➔ "f(x: real, n: integer?) -> real"
-result.signatures[0].parameters[1];   // ➔ { name: "n", type: "integer", range: [11, 22] }
+result.signatures[0].parameters[1];   // ➔ { name: "n", type: "integer", range: [11, 22], optional: true }
 result.activeParameter;               // ➔ 1
 epsilSignatureHelp(ce, "join(", 5).signatures.length; // ➔ 2: an overload set
 ```
@@ -666,6 +666,33 @@ can differ: `epsilSignatureHelp(ce, "slice(s, 1, ", 12)` gives `-1, 2, -1, 2`
 for the four signatures, because the two that take a `span` have no third
 parameter. The VS Code extension serves the same signatures as its
 signature help.
+
+A parameter has `optional: true` when a call can leave it out (`axis1:
+integer?` in `transpose`, a parameter of the source with a default value),
+and `rest: true` when it takes the remaining arguments (`tuple*` in `sum`,
+`...rest` in the source). These come from the signature, not from the
+label. A parameter that the call fills with a value not written between
+its parentheses has `implicit`: `'pipe'` for the left side of `|>`, in the
+slot that the `Pipe` handler gives it (the slot of the completion
+snippets; no mark when that slot is not known), and `'receiver'` for the
+value before the `.` of a member call. A field is absent rather than
+`false`. The active parameter skips the implicit parameter.
+
+```ts
+const piped = "let xs = [1, 2]\nxs |> map(";
+const p = epsilSignatureHelp(ce, piped, piped.length);
+p.signatures[0].parameters[1]; // ➔ { type: "collection<T>", range: [27, 41], rest: true, implicit: "pipe" }
+p.activeParameter;             // ➔ 0: the mapping
+```
+
+A member call has the signature of the member as member completion
+resolves it: a protocol function, its first parameter marked
+`implicit: 'receiver'`, or a field that holds a function. With
+`const c: Circle` and a protocol function `scale(self: Self, k: number)`,
+`c.scale(` gives `scale(self: Circle, k: number) -> Circle` with the active
+parameter 1 (`k`). A member that is not one function gives `null`, and so
+does a library function, which is not a member (`xs.take(` is the error
+`dot-call-not-a-protocol-function`).
 
 ### Hover and definition
 

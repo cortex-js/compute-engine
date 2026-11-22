@@ -8,23 +8,36 @@ import type {
 import { typeToString } from '../common/type/serialize.js';
 
 import {
+  operand,
+  operator,
+  operands,
+  stringValue,
+  symbol,
+} from '../math-json/utils.js';
+
+import {
   collectDeclarations,
-  collectSourceTypes,
+  contextAt,
   declarationOf,
   functionSignatureParts,
   insideLiteralOrComment,
   isFunctionHeader,
+  memberCallee,
   parseSourceType,
   parseWithHole,
-  visibleBindings,
+  pipedTopicSlots,
+  slotOfOperand,
+  spanOf,
+  unfoldSourceAliases,
   wordAt,
+  type Context,
   type Declaration,
   type SourceType,
 } from './completion.js';
 import { describeName } from './describe-name.js';
 import { tokenize } from './lexer.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
-import { documentBindings, type BindingGroup } from './occurrences.js';
+import type { BindingGroup } from './occurrences.js';
 import { HARD_RESERVED_WORDS } from './reserved-words.js';
 import { escapeSymbol } from './serialize-epsil.js';
 import type { Token } from './tokens.js';
@@ -50,6 +63,21 @@ export type EpsilSignatureParameter = {
   type: string;
   /** The offsets of the parameter's text in the `label` of its signature. */
   range: [start: number, end: number];
+  /** Present when a call can leave the parameter out: an optional parameter
+   * of a signature (`axis1: integer?` in `transpose`), or a parameter of the
+   * source with a default value. */
+  optional?: true;
+  /** Present when the parameter takes the remaining arguments: the variadic
+   * parameter of a signature (`tuple*` in `sum`, `collection<T>+` in
+   * `map`), or a rest parameter of the source (`...rest`). */
+  rest?: true;
+  /** Present when the call fills the parameter with a value that is not
+   * written between its parentheses: `'pipe'` for the left side of `|>`
+   * (`xs |> take(` fills `xs`, `xs |> map(` fills the collection), in the
+   * slot that the `Pipe` handler gives it, and absent when that slot is not
+   * known; `'receiver'` for the value before the `.` of a member call
+   * (`c.scale(` fills `self`). */
+  implicit?: 'pipe' | 'receiver';
 };
 
 /** One signature of the callee. */
@@ -88,6 +116,11 @@ export type EpsilSignatureHelp = {
 type Candidate = Omit<EpsilSignature, 'activeParameter'> & {
   /** Whether the last parameter takes all the remaining arguments. */
   rest: boolean;
+  /** The parameter that the call fills with an implicit argument (the
+   * piped value, the receiver), which no written argument binds; `'none'`
+   * when the piped value fits no parameter, so the signature cannot be the
+   * one called. */
+  implicit?: number | 'none';
 };
 
 /**
@@ -106,12 +139,23 @@ type Candidate = Omit<EpsilSignature, 'activeParameter'> & {
  * so that variable gives `null`; in the full signature of a `function`, the
  * signature shows the parameters of the header with no result.
  *
+ * A member call (`c.scale(▮`) has the signature of the member as member
+ * completion resolves it: a protocol function, whose first parameter the
+ * receiver fills (`implicit: 'receiver'`), or a field that holds a
+ * function. A member that is not one function, or a receiver of unknown
+ * type, gives `null`: a library function is not a member (`xs.take(▮`,
+ * `dot-call-not-a-protocol-function`). After `|>` (`xs |> take(▮`), the
+ * parameter that the piped value fills is marked `implicit: 'pipe'` in each
+ * signature where its slot is known (the slot of the completion snippets);
+ * a signature where the piped value fits no parameter has no active
+ * parameter.
+ *
  * The active parameter is the parameter of the argument at the offset: the
- * argument index (the commas at the depth of the call before the offset), or
- * for a named argument (`f(n: ▮)`) the parameter of that name. A rest or
- * variadic parameter stays active for every argument after its position. An
- * argument past the last parameter, or a name that no parameter has, gives
- * `-1`.
+ * argument index (the commas at the depth of the call before the offset),
+ * past the parameter of the piped value or of the receiver, or for a named
+ * argument (`f(n: ▮)`) the parameter of that name. A rest or variadic
+ * parameter stays active for every argument after its position. An argument
+ * past the last parameter, or a name that no parameter has, gives `-1`.
  *
  * The options are those of `epsilCompletions()`.
  */
@@ -132,32 +176,35 @@ export function epsilSignatureHelp(
 
   const call = callAt(tokens, start);
   if (call === undefined) return null;
-  const { head, headStart, std, index, label } = call;
+  const { head, headStart, std, member, index, label } = call;
 
   const { text, placeholder, ast } = parseWithHole(source, start, end, options);
-  // The binding of the callee at the callee: a name bound between the callee
-  // and the offset (a lambda parameter) does not shadow it. A `std::` call
-  // is always a library function.
-  const group = std
-    ? undefined
-    : visibleBindings(documentBindings(ast, text), placeholder, headStart).get(
-        head
+  // The names visible at the callee: a name bound between the callee and
+  // the offset (a lambda parameter) does not shadow it.
+  const context = contextAt(ce, ast, text, placeholder, headStart, options);
+  const candidates = member
+    ? memberSignaturesOf(context, head, headStart)
+    : signaturesOf(
+        ce,
+        head,
+        // A `std::` call is always a library function.
+        std ? undefined : context.visible.get(head),
+        ast,
+        text,
+        context.typeNames,
+        context.sourceTypes
       );
-  const sourceTypes = collectSourceTypes(ast, options?.sumVariants);
-  const typeNames = new Set([
-    ...(options?.typeNames ?? []),
-    ...sourceTypes.keys(),
-  ]);
-  const candidates = signaturesOf(
-    ce,
-    head,
-    group,
-    ast,
-    text,
-    typeNames,
-    sourceTypes
-  );
   if (candidates === undefined || candidates.length === 0) return null;
+  if (!member && !(std && context.visible.has(head)))
+    markPipedTopic(
+      context,
+      candidates,
+      head,
+      headStart,
+      index,
+      // A `_` under the offset places the piped value (`xs |> take(_▮`).
+      source.slice(start, end) === '_' ? placeholder : undefined
+    );
 
   const active = candidates.map((c) => activeParameterOf(c, index, label));
   const activeSignature = Math.max(
@@ -166,10 +213,12 @@ export function epsilSignatureHelp(
   );
   return {
     callee: candidates.callee,
-    signatures: candidates.map(({ rest: _rest, ...signature }, i) => ({
-      ...signature,
-      activeParameter: active[i],
-    })),
+    signatures: candidates.map(
+      ({ rest: _rest, implicit: _, ...signature }, i) => ({
+        ...signature,
+        activeParameter: active[i],
+      })
+    ),
     activeSignature,
     activeParameter: active[activeSignature],
   };
@@ -182,19 +231,139 @@ function activeParameterOf(
   index: number,
   label: string | undefined
 ): number {
-  const { parameters, rest } = candidate;
+  const { parameters, rest, implicit } = candidate;
+  if (implicit === 'none') return -1;
   if (label !== undefined) return parameters.findIndex((p) => p.name === label);
-  if (index < parameters.length) return index;
+  // The written arguments skip the parameter of the implicit argument.
+  const slot = slotOfOperand(index, implicit);
+  if (slot < parameters.length) return slot;
   return rest ? parameters.length - 1 : -1;
+}
+
+/**
+ * Mark the parameter that the left side of `|>` fills in each signature,
+ * when the call written at `headStart` is the right side of a `Pipe` that
+ * takes the piped value as an implicit argument: the slot of the completion
+ * snippets (`pipedTopicSlots`). A signature whose slot is not known is not
+ * marked; one with no slot for the piped value cannot be the call's.
+ * `underscore` is the placeholder of the hole when the hole replaced a
+ * `_`, which places the piped value: the call then has no implicit
+ * argument.
+ */
+function markPipedTopic(
+  context: Context,
+  candidates: Candidate[],
+  head: string,
+  headStart: number,
+  index: number,
+  underscore: string | undefined
+): void {
+  const found = innermostNode(
+    context.ast,
+    (node) => operator(node) === head && spanOf(node)?.[0] === headStart
+  );
+  if (found?.parent === undefined) return;
+  const { node, parent, index: position } = found;
+  if (operator(parent) !== 'Pipe' || position !== 1) return;
+  if (underscore !== undefined && symbol(operands(node)[index]) === underscore)
+    return;
+  const slots = pipedTopicSlots(
+    context,
+    operand(parent, 1),
+    node,
+    index < operands(node).length ? index : undefined
+  );
+  if (slots === undefined || slots.length !== candidates.length) return;
+  candidates.forEach((candidate, i) => {
+    const slot = slots[i];
+    if (slot === null) return;
+    candidate.implicit = slot;
+    if (slot !== 'none')
+      candidate.parameters[slot] = {
+        ...candidate.parameters[slot],
+        implicit: 'pipe',
+      };
+  });
+}
+
+/**
+ * The signatures of the member call `receiver.head(…)` whose member name is
+ * at `headStart`, as member completion resolves the member
+ * (`memberCallee`): the signature of a protocol function, its first
+ * parameter filled by the receiver, or the signatures of a field that holds
+ * a function. `undefined` when the member is not one function.
+ */
+function memberSignaturesOf(
+  context: Context,
+  head: string,
+  headStart: number
+): (Candidate[] & { callee: string }) | undefined {
+  const found = innermostNode(context.ast, (node) => {
+    const span = spanOf(node);
+    return (
+      operator(node) === 'MemberCall' &&
+      stringValue(operand(node, 2)) === head &&
+      span !== undefined &&
+      span[0] < headStart &&
+      headStart <= span[1]
+    );
+  });
+  if (found === undefined) return undefined;
+  const callee = memberCallee(context, operand(found.node, 1), head);
+  if (callee === undefined) return undefined;
+  const name = escapeSymbol(head);
+  if (callee.kind === 'field')
+    return Object.assign(signaturesOfType(name, callee.type), {
+      callee: head,
+    });
+  const candidates = signaturesOfType(name, callee.signature);
+  for (const candidate of candidates) {
+    if (candidate.parameters.length === 0) return undefined;
+    candidate.implicit = 0;
+    candidate.parameters[0] = {
+      ...candidate.parameters[0],
+      implicit: 'receiver',
+    };
+  }
+  return Object.assign(candidates, { callee: head });
+}
+
+/** The deepest node of `ast` that passes `test`, with its parent and its
+ * index among the operands of its parent. */
+function innermostNode(
+  ast: MathJsonExpression | null,
+  test: (node: MathJsonExpression) => boolean
+):
+  | { node: MathJsonExpression; parent?: MathJsonExpression; index: number }
+  | undefined {
+  let found:
+    | { node: MathJsonExpression; parent?: MathJsonExpression; index: number }
+    | undefined;
+  let depth = -1;
+  const visit = (
+    node: MathJsonExpression,
+    parent: MathJsonExpression | undefined,
+    index: number,
+    d: number
+  ) => {
+    if (d > depth && test(node)) {
+      found = { node, ...(parent === undefined ? {} : { parent }), index };
+      depth = d;
+    }
+    operands(node).forEach((op, i) => visit(op, node, i, d + 1));
+  };
+  if (ast !== null) visit(ast, undefined, -1, 0);
+  return found;
 }
 
 /** The innermost call written `name(…)` whose arguments contain `start`:
  * its callee, the offset of the callee, whether it is qualified by `std::`,
  * the index of the argument at `start` (the commas at the depth of the call
  * before `start`) and the label of that argument when it is a named argument
- * (`f(n: ▮)`, also `f(n▮: 2)`). A bracket that is not such a call (a group, a
- * list, a block, `(f)(x)`, `g(1)(x)`, `f (x)`, a member call, the parameters
- * of a `function` header, a keyword) is skipped with its commas. */
+ * (`f(n: ▮)`, also `f(n▮: 2)`). A member call (`xs.f(…)`) is such a call,
+ * with `member` set. A bracket that is not such a call (a group, a list, a
+ * block, `(f)(x)`, `g(1)(x)`, `f (x)`, the parameters of a `function`
+ * header, a keyword) is skipped with its commas. */
 function callAt(
   tokens: readonly Token[],
   start: number
@@ -203,6 +372,7 @@ function callAt(
       head: string;
       headStart: number;
       std: boolean;
+      member: boolean;
       index: number;
       label?: string;
     }
@@ -267,14 +437,16 @@ function callAt(
   return undefined;
 }
 
-/** The name written before the `(` at `paren`, its offset, and whether it
- * is qualified by `std::`, when the bracket is the argument list of a call
- * of that name. As in the parser, the `(` of a call follows the name with no
- * whitespace. */
+/** The name written before the `(` at `paren`, its offset, whether it is
+ * qualified by `std::` and whether it is the member of a member call
+ * (`xs.f(`), when the bracket is the argument list of a call of that name.
+ * As in the parser, the `(` of a call follows the name with no whitespace. */
 function calleeOf(
   tokens: readonly Token[],
   paren: number
-): { head: string; headStart: number; std: boolean } | undefined {
+):
+  | { head: string; headStart: number; std: boolean; member: boolean }
+  | undefined {
   const token = tokens[paren - 1];
   if (
     token === undefined ||
@@ -283,18 +455,18 @@ function calleeOf(
   )
     return undefined;
   const before = tokens[paren - 2];
-  if (before?.type === 'OPERATOR' && before.text === '.') return undefined;
   let head: string | undefined;
   if (token.type === 'VERBATIM_SYMBOL') head = token.value;
   else if (token.type === 'SYMBOL' && !HARD_RESERVED_WORDS.has(token.text))
     head = token.text;
   if (head === undefined) return undefined;
+  const member = before?.type === 'OPERATOR' && before.text === '.';
   if (before?.type !== 'OPERATOR' || before.text !== '::')
-    return { head, headStart: token.start, std: false };
+    return { head, headStart: token.start, std: false, member };
   // A qualified name: `std` is the only module.
   const module = tokens[paren - 3];
   return module?.type === 'SYMBOL' && module.text === 'std'
-    ? { head, headStart: token.start, std: true }
+    ? { head, headStart: token.start, std: true, member: false }
     : undefined;
 }
 
@@ -333,14 +505,12 @@ function signaturesOf(
     // A variable whose declared type is a function type, or an alias of one.
     const declaration = declarationOf(group, declarations);
     if (declaration?.kind === 'value') {
-      let type = parseSourceType(ce, declaration.type, typeNames);
-      const seen = new Set<string>();
-      while (typeof type === 'object' && type.kind === 'reference') {
-        const declared = sourceTypes.get(type.name);
-        if (declared?.kind !== 'alias' || seen.has(type.name)) break;
-        seen.add(type.name);
-        type = parseSourceType(ce, declared.body, typeNames);
-      }
+      const type = unfoldSourceAliases(
+        ce,
+        parseSourceType(ce, declaration.type, typeNames),
+        sourceTypes,
+        typeNames
+      );
       return type === undefined
         ? undefined
         : withCallee(signaturesOfType(escapeSymbol(head), type), head);
@@ -400,6 +570,11 @@ function clauseSignature(
         : { name: declaration.names[i] }),
       type: params[i] ?? 'any',
       range: ranges[i],
+      ...(declaration.rest && i === declaration.params.length - 1
+        ? { rest: true as const }
+        : declaration.optional[i]
+          ? { optional: true as const }
+          : {}),
     })),
     rest: declaration.rest,
   };
@@ -448,6 +623,11 @@ function signaturesOfType(callee: string, type: Type): Candidate[] {
         ...(element.name === undefined ? {} : { name: element.name }),
         type: typeToString(element.type),
         range: ranges[i],
+        ...(element === type.variadicArg
+          ? { rest: true as const }
+          : i >= (type.args?.length ?? 0)
+            ? { optional: true as const }
+            : {}),
       })),
       rest: type.variadicArg !== undefined,
     },

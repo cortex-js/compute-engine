@@ -256,7 +256,12 @@ export type Declaration =
   /** A `let` or a `const` with no type and a literal value (`let a = 5`):
    * its type is the type of the value, widened as the engine widens it
    * (`declarationDetail`). */
-  | { kind: 'literal'; value: MathJsonExpression; constant: boolean };
+  | { kind: 'literal'; value: MathJsonExpression; constant: boolean }
+  /** A `let` or a `const` with no type whose value is a call (`let c =
+   * Circle(1)`): the name of the callee. The value of a call of the
+   * constructor of a nominal type of the source has that type
+   * (`receiverTypeOf`). */
+  | { kind: 'call'; callee: string };
 
 /** How a candidate name fits the expected type (`EpsilCompletionItem.fit`). */
 type Fit = 'match' | 'maybe' | 'never';
@@ -459,18 +464,7 @@ export function epsilCompletions(
         );
 
   const visible = visibleBindings(groups, placeholder, start);
-  // A variant of a sum type of the source is a type too (`const q: square`).
-  const typeNames = new Set([
-    ...(options?.typeNames ?? []),
-    ...sourceTypes.keys(),
-    ...[...sourceTypes.values()].flatMap((declared) =>
-      declared.kind === 'sum'
-        ? declared.variants
-            .filter((v) => v.payload !== undefined)
-            .map((v) => v.name)
-        : []
-    ),
-  ]);
+  const typeNames = sourceTypeNames(options?.typeNames, sourceTypes);
 
   const context: Context = {
     ce,
@@ -960,6 +954,59 @@ export function parseWithHole(
     // A `#error` pragma throws: no tree.
   }
   return { text, placeholder, ast };
+}
+
+/** The types of the source and of the `typeNames` option. A variant of a
+ * sum type of the source is a type too (`const q: square`). */
+function sourceTypeNames(
+  typeNames: readonly string[] | undefined,
+  sourceTypes: ReadonlyMap<string, SourceType>
+): Set<string> {
+  return new Set([
+    ...(typeNames ?? []),
+    ...sourceTypes.keys(),
+    ...[...sourceTypes.values()].flatMap((declared) =>
+      declared.kind === 'sum'
+        ? declared.variants
+            .filter((v) => v.payload !== undefined)
+            .map((v) => v.name)
+        : []
+    ),
+  ]);
+}
+
+/**
+ * The context of the type rules of the completions at `start` of the parse
+ * with the hole (`parseWithHole`), with no path to a hole: the names visible
+ * at `start`, the declarations and the types of the source. For signature
+ * help, which reads the slot of the piped value (`implicitTopicSlots`) and
+ * the members of a receiver (`memberCallee`) with these rules.
+ */
+export function contextAt(
+  ce: ComputeEngine,
+  ast: MathJsonExpression | null,
+  text: string,
+  placeholder: string,
+  start: number,
+  options:
+    | {
+        typeNames?: readonly string[];
+        sumVariants?: Readonly<Record<string, string>>;
+      }
+    | undefined
+): Context {
+  const sourceTypes = collectSourceTypes(ast, options?.sumVariants);
+  return {
+    ce,
+    nodes: [],
+    indices: [],
+    ast,
+    visible: visibleBindings(documentBindings(ast, text), placeholder, start),
+    declarations: collectDeclarations(ast),
+    sourceTypes,
+    text,
+    typeNames: sourceTypeNames(options?.typeNames, sourceTypes),
+  };
 }
 
 /** The innermost binding of each name visible at `start`. */
@@ -2357,7 +2404,7 @@ export function spanOf(
     : undefined;
 }
 
-type Context = {
+export type Context = {
   ce: ComputeEngine;
   nodes: MathJsonExpression[];
   indices: number[];
@@ -2733,7 +2780,7 @@ function pipedTopicField(
 
 /** The parameter slot of operand `j` of a call where the piped value fills
  * the slot `topic` (`implicitTopicSlot`). */
-function slotOfOperand(j: number, topic: number | undefined): number {
+export function slotOfOperand(j: number, topic: number | undefined): number {
   return topic !== undefined && j >= topic ? j + 1 : j;
 }
 
@@ -2825,14 +2872,12 @@ function namedCallee(
   if (group !== undefined) {
     const declaration = declarationOf(group, context.declarations);
     if (declaration?.kind !== 'value') return undefined;
-    let type = parseSourceType(ce, declaration.type, context.typeNames);
-    const seen = new Set<string>();
-    while (typeof type === 'object' && type.kind === 'reference') {
-      const declared = context.sourceTypes.get(type.name);
-      if (declared?.kind !== 'alias' || seen.has(type.name)) break;
-      seen.add(type.name);
-      type = parseSourceType(ce, declared.body, context.typeNames);
-    }
+    const type = unfoldSourceAliases(
+      ce,
+      parseSourceType(ce, declaration.type, context.typeNames),
+      context.sourceTypes,
+      context.typeNames
+    );
     const resolved =
       typeof type === 'object' && type.kind === 'reference'
         ? resolveTypeReference(type)
@@ -2986,33 +3031,24 @@ function namedArgumentsAt(
   const piped =
     k >= 2 && operator(nodes[k - 2]) === 'Pipe' && indices[k - 1] === 1;
   if (piped && !callee.topic) return undefined;
-  // Whether the piped value is an implicit argument, as the `Pipe` handler
-  // decides (`pipeStageWithImplicitTopic` in `library/core.ts`): the call
-  // has no `_` and is incomplete under every signature. Its slot is then
-  // that of `topicSlotOf` in each signature.
-  const implicit =
-    piped &&
-    !written.some((arg) => symbol(arg) === '_') &&
-    callee.arms.every((arm) => written.length < arm.required);
+  const topics = piped
+    ? implicitTopicSlots(
+        context,
+        callee.arms,
+        operand(nodes[k - 2], 1),
+        written,
+        hole
+      )
+    : undefined;
 
   // The names that each signature that can still match offers.
   const offers: Map<string, string | undefined>[] = [];
   // Whether a signature can still match the call, named or not.
   let matched = false;
-  for (const arm of callee.arms) {
+  for (const [a, arm] of callee.arms.entries()) {
     let topic: number | undefined;
-    if (implicit) {
-      if (!arm.rest && written.length + 1 > arm.params.length) continue;
-      const slot = topicSlotOf(
-        context,
-        operand(nodes[k - 2], 1),
-        written,
-        hole,
-        [
-          ...arm.params.map((p) => p.slotType),
-          ...(arm.rest ? [arm.restType] : []),
-        ]
-      );
+    if (topics !== undefined) {
+      const slot = topics[a];
       // A signature where the piped value fits no slot cannot match.
       if (slot === 'none') continue;
       if (slot === null) return undefined;
@@ -3062,6 +3098,108 @@ function namedArgumentsAt(
     names.push({ name, ...(agree && type !== undefined ? { type } : {}) });
   }
   return { names, only };
+}
+
+/**
+ * The slot that the piped value `topic` fills in each signature `arms` of
+ * a call of the operands `written` on the right side of `|>`, when the
+ * piped value is an implicit argument, as the `Pipe` handler decides
+ * (`pipeStageWithImplicitTopic` in `library/core.ts`): the call has no `_`
+ * and is incomplete under every signature. `undefined` otherwise. The slot
+ * is that of `topicSlotOf` in each signature, with the operand at `hole`
+ * fitting any slot; `'none'` for a signature that has no slot for it. When
+ * the operand at `hole` is the last one, the call may get more operands, up
+ * to all the required ones but the piped value, as the snippet of the call
+ * assumes (`pipedTopicField`): a slot that differs between these counts is
+ * not known (`null`; `xs |> fold(▮` fills `initial` with one operand and the
+ * collection with two).
+ */
+function implicitTopicSlots(
+  context: Context,
+  arms: readonly CalleeArm[],
+  topic: MathJsonExpression | null,
+  written: readonly (MathJsonExpression | null)[],
+  hole: number | undefined
+): (number | null | 'none')[] | undefined {
+  if (
+    written.some((arg) => symbol(arg) === '_') ||
+    !arms.every((arm) => written.length < arm.required)
+  )
+    return undefined;
+  return arms.map((arm) => {
+    if (!arm.rest && written.length + 1 > arm.params.length) return 'none';
+    const params = [
+      ...arm.params.map((p) => p.slotType),
+      ...(arm.rest ? [arm.restType] : []),
+    ];
+    const slot = topicSlotOf(context, topic, written, hole, params);
+    const padded = arm.required - 1;
+    if (hole !== written.length - 1 || padded <= written.length) return slot;
+    const full = [
+      ...written,
+      ...new Array<null>(padded - written.length).fill(null),
+    ];
+    return topicSlotOf(context, topic, full, hole, params) === slot
+      ? slot
+      : null;
+  });
+}
+
+/**
+ * The slot that the left side `topic` of `|>` fills in each signature of
+ * the call `call` on its right side, for signature help: the signatures of
+ * `namedCallee` (one per definition of a function of the source, one per
+ * arm of a library function) and their slot (`implicitTopicSlots`), with
+ * the argument at `hole` fitting any slot. `undefined` when the callee does
+ * not take the piped value as an implicit argument there.
+ */
+export function pipedTopicSlots(
+  context: Context,
+  topic: MathJsonExpression | null,
+  call: MathJsonExpression,
+  hole: number | undefined
+): (number | null | 'none')[] | undefined {
+  const callee = namedCallee(context, operator(call));
+  if (callee === undefined || !callee.topic) return undefined;
+  return implicitTopicSlots(context, callee.arms, topic, operands(call), hole);
+}
+
+/**
+ * What the member call `receiver.name(…)` calls, as member completion
+ * resolves the member (`membersOf`): a protocol function, with its
+ * signature (the receiver is its first parameter, as `canonicalMemberCall`
+ * passes it), or a field that holds a function, with its type. `undefined`
+ * when the type of the receiver is not known, when it has no member of that
+ * name, or when the member is not one function.
+ */
+export function memberCallee(
+  context: Context,
+  receiver: MathJsonExpression | null,
+  name: string
+):
+  | { kind: 'function'; signature: FunctionSignature }
+  | { kind: 'field'; type: Type }
+  | undefined {
+  const base = receiverTypeOf(context, receiver);
+  if (base === undefined) return undefined;
+  const member = membersOf(context, base).find((m) => m.name === name);
+  if (member?.kind === 'function')
+    return member.signature === undefined
+      ? undefined
+      : { kind: 'function', signature: member.signature };
+  if (member === undefined || member.noCall || member.type === undefined)
+    return undefined;
+  const unfolded = unfoldSourceAliases(
+    context.ce,
+    member.type,
+    context.sourceTypes,
+    context.typeNames
+  );
+  if (unfolded === undefined) return undefined;
+  const type = resolveTypeAlias(unfolded);
+  return signatureArms(type) === undefined
+    ? undefined
+    : { kind: 'field', type };
 }
 
 /**
@@ -3380,6 +3518,8 @@ type Member =
        * `undefined` when the signature is not known. */
       required: Parameter[] | undefined;
       detail: string;
+      /** The signature of the function, the receiver first, when known. */
+      signature?: FunctionSignature;
     };
 
 /**
@@ -3415,9 +3555,20 @@ function receiverTypeOf(
   if (name !== null) {
     const group = context.visible.get(name);
     if (group === undefined || group.kind === 'function') return undefined;
+    const declaration = declarationOf(group, context.declarations);
+    // A value made by the constructor of a nominal type of the source
+    // (`let c = Circle(1)`) has that type.
+    if (declaration?.kind === 'call') {
+      const { callee } = declaration;
+      const binding = context.visible.get(callee);
+      return context.sourceTypes.get(callee)?.kind === 'nominal' &&
+        (binding === undefined || binding.kind === 'type')
+        ? parseSourceType(context.ce, callee, context.typeNames)
+        : undefined;
+    }
     const { type } = declarationDetail(
       context.ce,
-      declarationOf(group, context.declarations),
+      declaration,
       context.text,
       context.typeNames
     );
@@ -3624,6 +3775,7 @@ function membersOf(context: Context, type: Type): Member[] {
         (rest.variadicArg === undefined ? 0 : 1),
       required: parametersOf(rest),
       detail: typeToString(rest),
+      signature,
     });
   };
 
@@ -3962,6 +4114,25 @@ export function parseTypeString(
   } catch {
     return undefined;
   }
+}
+
+/** `type` through the aliases of the source that it names (`type alias F =
+ * (x: real) -> real`), which `parseSourceType` gives as a reference with no
+ * definition. A cycle of aliases stops at its first repeated name. */
+export function unfoldSourceAliases(
+  ce: ComputeEngine,
+  type: Type | undefined,
+  sourceTypes: ReadonlyMap<string, SourceType>,
+  typeNames: ReadonlySet<string>
+): Type | undefined {
+  const seen = new Set<string>();
+  while (typeof type === 'object' && type.kind === 'reference') {
+    const declared = sourceTypes.get(type.name);
+    if (declared?.kind !== 'alias' || seen.has(type.name)) break;
+    seen.add(type.name);
+    type = parseSourceType(ce, declared.body, typeNames);
+  }
+  return type;
 }
 
 /** A type of the source: parsed by the engine, or else with the names of
@@ -4699,6 +4870,11 @@ export function collectDeclarations(
             value: value!,
             constant: symbol(attribute('constant')) === 'True',
           });
+        else if (
+          operator(operand(node, 2)) === 'Dictionary' &&
+          operator(value) !== ''
+        )
+          record(operand(node, 1), { kind: 'call', callee: operator(value) });
       }
     } else if (head === 'DefineFunction') {
       const fn = operand(node, 2);
