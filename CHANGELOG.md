@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### New Features
+
+- **A completion item says which characters of its label matched**
+  (CE-1695). A hump or subsequence item has `matchRanges`, offsets into
+  `label`, end excluded, sorted, with adjacent characters in one range, so an
+  editor can show them in bold: at `idM`, `identityMatrix` has
+  `[[0, 2], [8, 9]]`, and at `ivs`, `inverse` has `[[0, 1], [2, 3], [5, 6]]`.
+  A prefix item has no `matchRanges`: its first `range[1] - range[0]`
+  characters matched.
+
 ### Improvements
 
 - **A completion item's `fit` is more precise** (CE-1694). Where a number is
@@ -11,6 +21,24 @@
   judged by the type of its literal: the likely values (`0`, `""`) and the
   keywords `true` and `false`. At `determinant(`, `true` is `'never'`; at
   `if `, it is `'match'`. The other keywords (`if`, `let`) have no `fit`.
+
+### Resolved Issues
+
+- **A recursive Document function whose body narrows a parameter binds**
+  (CE-1692). With no stated types, a recursion that reads a point (`p.x`) or
+  consumes a list (`mean(x)`) was a row error, "… does not match (unknown) any
+  -> unknown", and every row that called it had no value. Its parameters now
+  take the types that the body infers, as for a function that is not recursive,
+  so a list argument at such a parameter is passed whole: with
+  `K(0,x) = mean(x)` and `K(n,x) = K(n-1,x)`, `K(3,[1,2,6])` is `3`, and with
+  `g(P) = P.x (1,0)`, `f(P,n) = g(P) + f(P,n-1)` and the base clause `(0,0)`,
+  `f((1,2),2)` is `(2,0)`.
+- **A Document value row that declares the field axes as locals is a value**
+  (CE-1693). With the field row `d = x + y`, the row
+  `A = (x := [1,2]; y := [3,4]; d)` is the list `[4, 6]`, but it had the field
+  parameters `x` and `y`, so a host drew it and the rows that read it as fields.
+  A read of a field row inside a `Block` that declares an axis before the read
+  no longer counts as a read of that axis.
 
 ## 0.198.0 _2026-11-21_
 

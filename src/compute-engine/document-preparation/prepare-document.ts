@@ -471,6 +471,73 @@ function isJoinOperandOnly(body: Expression, name: string): boolean {
 }
 
 /**
+ * The names of `axes` that a read of the macro `name` in the raw expression
+ * `expr` reads. The macro expands at the read, so its operands resolve
+ * there: an axis that a `Block` around the read declares, in a `Declare`
+ * statement before the statement that holds the read, is the local. Any other
+ * binding (a later `Declare`, an `Assign`, a binder) keeps the axis, and so
+ * does a read that the walk does not find.
+ */
+function macroAxesRead(
+  expr: Expression,
+  name: string,
+  axes: readonly string[]
+): Set<string> {
+  const read = new Set<string>();
+  let found = false;
+  const visit = (e: Expression, locals: ReadonlySet<string>) => {
+    if (isSymbol(e)) {
+      if (e.symbol !== name) return;
+      found = true;
+      for (const axis of axes) if (!locals.has(axis)) read.add(axis);
+      return;
+    }
+    if (isDictionary(e)) {
+      for (const value of e.values) visit(value, locals);
+      return;
+    }
+    if (!isFunction(e)) return;
+    if (e.operator === name) visit(e.engine.symbol(name), locals);
+    if (e.operator !== 'Block') {
+      for (const op of e.ops) visit(op, locals);
+      return;
+    }
+    const inner = new Set(locals);
+    for (const statement of e.ops) {
+      visit(statement, inner);
+      if (statement.operator === 'Declare' && isFunction(statement)) {
+        const local = statement.ops[0];
+        if (local !== undefined && isSymbol(local)) inner.add(local.symbol);
+      }
+    }
+  };
+  visit(expr, new Set());
+  return found ? read : new Set(axes);
+}
+
+/**
+ * The type of the parameter `name` of the function literal `body` that a row
+ * with no stated type for it gets from its inferred type `slot`. A parameter
+ * read only as an operand of a join is any value
+ * (`isJoinOperandOnly()`); with no stated result, a tuple that index reads
+ * made is the indexed collection of its components (`oneElementTypeOf()`).
+ */
+function openSlot(
+  body: Expression,
+  name: string,
+  slot: Type,
+  row: DraftRow
+): Type {
+  if (
+    typeToString(slot) === 'collection<any>' &&
+    isFunction(body) &&
+    isJoinOperandOnly(body.ops[0], name)
+  )
+    return 'any';
+  return row.resultType === undefined ? oneElementTypeOf(slot) : slot;
+}
+
+/**
  * The type of an argument at a call site, widened as `callSiteTypes`
  * documents: a literal or a ranged number becomes `real`, or `number` when
  * it may be complex, a string or a boolean value becomes its kind, and a
@@ -953,11 +1020,14 @@ export function prepareDocument(
       function formals(
         parameters: readonly string[],
         row: DraftRow,
-        fixed: boolean
+        fixed: boolean,
+        guessed?: ReadonlyArray<string | undefined>
       ) {
-        return parameters.map((param): MathJsonExpression => {
+        return parameters.map((param, i): MathJsonExpression => {
           const type =
-            row.formalTypes?.[param] ?? (fixed ? 'unknown' : undefined);
+            row.formalTypes?.[param] ??
+            guessed?.[i] ??
+            (fixed ? 'unknown' : undefined);
           return type === undefined
             ? param
             : ['Typed', param, "'" + type + "'"];
@@ -1046,7 +1116,12 @@ export function prepareDocument(
         function settle(
           group: readonly string[],
           cyclic: boolean,
-          guesses?: ReadonlyMap<string, Type>
+          guesses?: ReadonlyMap<string, Type>,
+          parameterGuesses?: ReadonlyMap<
+            string,
+            ReadonlyArray<string | undefined>
+          >,
+          round = 0
         ): void {
           for (const name of group) {
             const invalid = references.get(name)!.find((ref) => {
@@ -1075,6 +1150,7 @@ export function prepareDocument(
           if (groupHasValue) {
             const axes = new Set<string>();
             if (fieldAxes.size > 0 && !writableSlots?.has(group[0])) {
+              let raw: Expression | undefined;
               for (const ref of references.get(group[0])!) {
                 if (fieldAxes.has(ref)) axes.add(ref);
                 const binding = scope.bindings.get(ref);
@@ -1082,11 +1158,15 @@ export function prepareDocument(
                   binding !== undefined && 'value' in binding
                     ? binding.value.macro
                     : undefined;
-                if (Array.isArray(macro))
-                  for (const operand of macro.slice(1)) {
-                    if (typeof operand === 'string' && fieldAxes.has(operand))
-                      axes.add(operand);
-                  }
+                if (!Array.isArray(macro)) continue;
+                const operands: string[] = [];
+                for (const operand of macro.slice(1))
+                  if (typeof operand === 'string' && fieldAxes.has(operand))
+                    operands.push(operand);
+                if (operands.length === 0) continue;
+                raw ??= ce.box(parsed.get(first.row.id)!, { form: 'raw' });
+                for (const axis of macroAxesRead(raw, ref, operands))
+                  axes.add(axis);
               }
             }
             if (axes.size > 0) {
@@ -1216,8 +1296,16 @@ export function prepareDocument(
               if (row.resultType !== undefined) continue;
               const arms = baseArms(parsed.get(row.id)!, component).map(
                 (arm) =>
-                  ce.box(['Function', arm, ...formals(head.params, row, true)])
-                    .type.type
+                  ce.box([
+                    'Function',
+                    arm,
+                    ...formals(
+                      head.params,
+                      row,
+                      true,
+                      parameterGuesses?.get(name)
+                    ),
+                  ]).type.type
               );
               if (
                 arms.length === 0 ||
@@ -1234,7 +1322,8 @@ export function prepareDocument(
                 continue;
               guessed.set(name, guess);
             }
-            if (guessed.size > 0) return settle(group, cyclic, guessed);
+            if (guessed.size > 0)
+              return settle(group, cyclic, guessed, parameterGuesses, round);
           }
           const reject = (failed: string, invalid: Expression) => {
             if (guesses === undefined || guesses.size === 0)
@@ -1243,8 +1332,17 @@ export function prepareDocument(
             // prepared is not a counted frame, so no holder count is kept,
             // and `undeclare` would send engine-wide redefine events.
             for (const name of group) scope.bindings.delete(name);
-            return settle(group, cyclic, new Map());
+            return settle(group, cyclic, new Map(), parameterGuesses, round);
           };
+          // Each round of the parameter retry below changes the provisional
+          // type of at least one parameter.
+          const parameterRounds =
+            2 *
+            group.reduce(
+              (count, name) =>
+                count + declarations.get(name)!.head.params.length,
+              0
+            );
           const checked = group.map(
             (
               name
@@ -1263,7 +1361,10 @@ export function prepareDocument(
               head.params.every((param) => row.formalTypes?.[param]);
             if (!cyclic && !typed) continue;
             const parameters = head.params.map(
-              (param) => row.formalTypes?.[param] ?? 'unknown'
+              (param, i) =>
+                row.formalTypes?.[param] ??
+                parameterGuesses?.get(name)?.[i] ??
+                'unknown'
             );
             const effects = row.effects ?? 'any';
             const signature =
@@ -1293,7 +1394,8 @@ export function prepareDocument(
             const parameters = formals(
               head.params,
               row,
-              contract !== undefined
+              contract !== undefined,
+              parameterGuesses?.get(name)
             );
             let body = ce.box(['Function', rhs, ...parameters]);
             if (!body.isValid) return reject(name, body);
@@ -1313,14 +1415,7 @@ export function prepareDocument(
                   const slot = inferred.args?.[i]?.type;
                   if (typeof parameter !== 'string' || slot === undefined)
                     return parameter;
-                  const open =
-                    typeToString(slot) === 'collection<any>' &&
-                    isFunction(body) &&
-                    isJoinOperandOnly(body.ops[0], parameter)
-                      ? 'any'
-                      : row.resultType === undefined
-                        ? oneElementTypeOf(slot)
-                        : slot;
+                  const open = openSlot(body, parameter, slot, row);
                   if (open === slot) return parameter;
                   changed = true;
                   return ['Typed', parameter, "'" + typeToString(open) + "'"];
@@ -1391,17 +1486,74 @@ export function prepareDocument(
               // result is a promise, refused only when disjoint from the
               // inferred result, as for a partly annotated row. The derived
               // result of a cyclic row without one is checked strictly.
-              const stated = contract.type;
-              const refused =
+              const refuses = (expected: Type) =>
                 row.resultType !== undefined &&
                 typeof sig === 'object' &&
                 sig.kind === 'signature' &&
-                typeof stated === 'object' &&
-                stated.kind === 'signature'
+                typeof expected === 'object' &&
+                expected.kind === 'signature'
                   ? !actual.matches(
-                      ce.type({ ...stated, result: sig.result })
-                    ) || ce.type(sig.result).isDisjointFrom(stated.result)
-                  : !actual.matches(contract);
+                      ce.type({ ...expected, result: sig.result })
+                    ) || ce.type(sig.result).isDisjointFrom(expected.result)
+                  : !actual.matches(ce.type(expected));
+              const stated = contract.type;
+              let refused = refuses(stated);
+              // A parameter of a cyclic row with no stated type has a
+              // provisional type in the contract (`unknown` first), which
+              // the body can narrow (`collection<any> | tuple` from
+              // `PointX(q)`). The contract cannot keep `unknown` then: a
+              // call broadcasts a list argument over an `unknown`
+              // parameter, though the body takes the list whole. When the
+              // body matches the contract with its inferred types in place
+              // of the provisional ones, the component is settled again
+              // with the inferred types, opened as for a row that is not
+              // cyclic (`openSlot()`), as its provisional types, until the
+              // opened types are the provisional ones. A component that
+              // does not settle within `parameterRounds` is refused.
+              if (
+                refused &&
+                cyclic &&
+                typeof sig === 'object' &&
+                sig.kind === 'signature' &&
+                typeof stated === 'object' &&
+                stated.kind === 'signature' &&
+                isFunction(body)
+              ) {
+                const current = parameterGuesses?.get(name);
+                let changed = false;
+                const next = head.params.map((param, i) => {
+                  if (row.formalTypes?.[param] !== undefined) return undefined;
+                  const slot = sig.args?.[i]?.type;
+                  const guess =
+                    slot === undefined
+                      ? (current?.[i] ?? 'unknown')
+                      : typeToString(openSlot(body, param, slot, row));
+                  if (guess !== (current?.[i] ?? 'unknown')) changed = true;
+                  return guess;
+                });
+                const inferred = {
+                  ...stated,
+                  args: stated.args?.map((arg, i) => {
+                    const slot = sig.args?.[i]?.type;
+                    return next[i] === undefined || slot === undefined
+                      ? arg
+                      : { ...arg, type: slot };
+                  }),
+                };
+                if (!refuses(inferred)) {
+                  if (!changed) refused = false;
+                  else if (round < parameterRounds) {
+                    for (const other of group) scope.bindings.delete(other);
+                    return settle(
+                      group,
+                      cyclic,
+                      guesses,
+                      new Map(parameterGuesses).set(name, next),
+                      round + 1
+                    );
+                  }
+                }
+              }
               if (refused)
                 return reject(
                   name,
