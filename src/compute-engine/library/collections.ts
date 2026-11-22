@@ -3883,7 +3883,9 @@ function finitenessOfSource(xs: Expression): boolean | undefined {
   if (finite !== undefined || xs.isCollection || !isFunction(xs)) return finite;
   if (isFiniteCount(xs.count)) return true;
   if (eagerOperandsAreFinite(xs)) return true;
-  if (xs.ops.some((op) => op.isCollection && op.isFiniteCollection === undefined))
+  if (
+    xs.ops.some((op) => op.isCollection && op.isFiniteCollection === undefined)
+  )
     return undefined;
   return eagerViewSource(xs).isFiniteCollection;
 }

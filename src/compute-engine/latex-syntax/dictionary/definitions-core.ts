@@ -7357,9 +7357,7 @@ function parseCasesEnvironment(parser: Parser): MathJsonExpression | null {
  * so `m = \text{cubic}` keeps the right operand of its `Equal`, and
  * `f(\text{a}, x) > 0` keeps the first argument of `f`.
  */
-function withoutTextAnnotations(
-  cond: MathJsonExpression
-): MathJsonExpression {
+function withoutTextAnnotations(cond: MathJsonExpression): MathJsonExpression {
   const body = operand(cond, 1);
   if (
     operator(cond) === 'Delimiter' &&

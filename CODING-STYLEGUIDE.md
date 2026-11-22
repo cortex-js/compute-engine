@@ -132,6 +132,17 @@ its [implementation conventions](ARCHITECTURE.md#implementation-conventions).
   creates such a literal on a slow route, about 150 ns against about 10 ns for a
   class instance (measured 2026-10-23); the operand views of
   `operand-descriptor.ts` were changed to classes for this reason.
+- Do not create a `WeakRef` or call `deref()` on a route that runs for each
+  node, read or evaluation. Each of them adds its target to the kept list of
+  the agent (`AddToKeptObjects`, ECMA-262), which is emptied only at the end
+  of the job, so in a long synchronous computation every target stays in
+  memory and each collection gets slower. A strong reference is sound when
+  its holder lives no longer than the target, or already reaches it: then it
+  keeps nothing alive that the holder did not keep. Otherwise keep a
+  `WeakRef`, in particular for an object of the host, which a dependency must
+  not keep alive. To check a change, count the constructions and `deref()`
+  calls per operation, and compare the heap after many operations in one
+  job.
 
 Public Compute Engine guides live in the separate
 `~/dev/cortexjs.io/docs/compute-engine/` checkout. Do not recreate this repo's

@@ -36,13 +36,16 @@
  *
  * ## Entry representation
  *
- * `Array<[WeakRef<ObjectInterface>, number]>` — the object read, and its
- * version at read time. The reference is **weak** because a dependency edge
- * must not keep an object alive (ruling B12: "the engine must not secretly
- * keep objects alive"); a reference that has since been collected invalidates
- * the entry conservatively, since there is no longer any way to check its
- * version. Duplicate reads of one object coalesce to the LOWEST version seen
- * (equivalently: first read wins — any later bump already invalidates).
+ * `Array<[DepRef, number]>` — the object read, and its version at read
+ * time. The reference to an object of the host is **weak** because a
+ * dependency edge must not keep such an object alive (ruling B12: "the
+ * engine must not secretly keep objects alive"). The token of a read of a
+ * unit environment, an object of the engine, is held strongly
+ * ({@link DepRef}). A weak reference that has since been collected
+ * invalidates the entry conservatively, since there is no longer any way to
+ * check its version. Duplicate reads of one object coalesce to the LOWEST
+ * version seen (equivalently: first read wins — any later bump already
+ * invalidates).
  *
  * The dependency edge is only half of B12/B3. The other half is a payload
  * rule enforced at each cache's commit point rather than here: **a cache
@@ -121,19 +124,44 @@ export type VersionedObject = {
    * context, not a counter: the read of an entry of a unit environment
    * (`UnitReadToken`, `binding-unit.ts`). See {@link stampObjectDepsAtEnd}. */
   readonly _readAgainAtEnd?: boolean;
-  /** A weak reference to the object, for an object that is read often and
-   * lives long (a token of `binding-unit.ts`): a dependency on it uses this
-   * reference and allocates none. */
-  readonly _ref?: WeakRef<VersionedObject>;
+  /** The reference that a dependency on the object keeps, when the object
+   * gives one: a dependency on it then allocates none. A token of
+   * `binding-unit.ts` is its own reference ({@link DepRef}), held strongly. */
+  readonly _ref?: DepRef;
 };
 
-/** One recorded read: the object, held weakly, and its version at read time.
- * For an object read again at the end of the computation
- * (`VersionedObject._readAgainAtEnd`), in a record that asks for it
- * ({@link stampObjectDepsAtEnd}), the third item is its version then. */
-export type ObjectDep =
-  | [WeakRef<VersionedObject>, number]
-  | [WeakRef<VersionedObject>, number, number];
+/**
+ * The reference that a dependency keeps to the object it read: a `WeakRef`
+ * for an object of the host, or the object itself, whose `deref()` returns
+ * it, for a token of a read of a unit environment (`UnitReadToken`,
+ * `binding-unit.ts`).
+ *
+ * A token is made at each read of a new occurrence, and its version is
+ * checked at each reuse of a cached value. The creation of a `WeakRef` and
+ * each `deref()` that returns its target add the target to the kept list of
+ * the agent (`AddToKeptObjects`, ECMA-262), which is emptied only at the end
+ * of the job. A `WeakRef` per token would keep every token of a long
+ * synchronous computation, with its environment and its key, until that
+ * computation returns.
+ *
+ * Held strongly, a token lives as long as the record that read it. A record
+ * lives on the expression or the definition whose value it caches, and the
+ * reads that it records are reads of the occurrences of that holder: the
+ * holder already reaches their environments and their keys. A record that
+ * `mergeObjectDeps()` copies into an enclosing computation can also hold the
+ * token of an intermediate expression, and keeps that environment and that
+ * key as long as the record lives. The key can be a value definition, whose
+ * value can hold a value of the host: the test
+ * `unit-read-token-lifetime.test.ts` checks that the values of a popped
+ * scope are still collected.
+ */
+export type DepRef = { deref(): VersionedObject | undefined };
+
+/** One recorded read: a reference to the object ({@link DepRef}), and its
+ * version at read time. For an object read again at the end of the
+ * computation (`VersionedObject._readAgainAtEnd`), in a record that asks for
+ * it ({@link stampObjectDepsAtEnd}), the third item is its version then. */
+export type ObjectDep = [DepRef, number] | [DepRef, number, number];
 
 /** The dependency set of one cache entry. An entry with no object reads
  * carries `undefined` rather than an empty array, so the overwhelmingly

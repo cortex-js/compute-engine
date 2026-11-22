@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.197.1 _2026-11-21_
 
 ### Improvements
 
@@ -41,6 +41,26 @@
   integers, booleans or strings (at most four), and the result type `real`,
   `integer`, `boolean` or `nothing`. A function that builds a `Figure` of a
   drawing library still declines (CE-1652).
+
+- **A Document gives a recursive function a result type, and each function
+  the types of its call sites.** A recursive function row with no
+  `resultType` was typed `-> unknown` (or `-> list<any>`). Its result is now
+  the join of its base arms, the arms that call no function of the recursion,
+  widened as a local is, when the body confirms it: with
+  `r(n)=\begin{cases}(0,0)&n\le0\\r(n-1)+(1,1)&\text{otherwise}\end{cases}`,
+  `r` is `(unknown) -> tuple<number, number>`, and the factorial is
+  `(unknown) -> number`. When a body refuses the guess, the component keeps
+  the old result type, so no function of the component, and no call in it, is
+  refused that was accepted before. A later row whose stated type is disjoint
+  from the confirmed result is refused, which happens only for a program that
+  is already ill-typed.
+  The new field `callSiteTypes` of a function's `PreparedDocumentDefinition`
+  gives, for each parameter, the join of the widened types of its arguments
+  in the bodies of the definition rows: with `d(p)=\sqrt{p.x^2+p.y^2}`,
+  `A=d((3,4))` and `B=d((1,2))`, it is `["tuple<real, real>"]`, and with
+  `C=d([(3,4),(6,8)])` too, `["list<tuple<real, real>^2> | tuple<real, real>"]`.
+  An entry is `undefined` with no call, or when an argument type is open. The
+  field is advisory: it does not change the function's contract.
 
 ### Behavior Changes
 
