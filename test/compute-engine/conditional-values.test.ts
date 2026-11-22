@@ -610,13 +610,20 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
 
   it('numeric decidable-False (sin(x) + 2 = 0) → no roots, unchanged', () => {
     const eq = ['Equal', ['Add', ['Sin', 'x'], 2], 0];
-    expect(solveStrings(ce, eq, 'x')).toEqual([]);
+    const real = new ComputeEngine();
+    real.declare('x', 'real');
+    expect(solveStrings(real, eq, 'x')).toEqual([]);
+    // With no domain, the removed roots are complex roots (#526)
+    expect(ce.box(['Solve', eq, 'x'] as any).evaluate().operator).toBe('Solve');
   });
 
   it('a decidable-False guard prunes the guarded root to [] (decision 8)', () => {
     // Assume concrete out-of-range coefficients (|−b/a| = 5 > 1); the guard
     // resolves False in solution-set position, so both branches vanish.
+    // `x` is declared real: with no domain, the removed roots are complex
+    // roots (#526).
     const engine = new ComputeEngine();
+    engine.declare('x', 'real');
     engine.assume(engine.parse('a = 1'));
     engine.assume(engine.parse('b = 5'));
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];

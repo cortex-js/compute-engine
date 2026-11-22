@@ -148,7 +148,11 @@ describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: expr.solve()', () => {
   });
 
   test('cos(sin(x)) = 0 has no real root (|sin(x)| ≤ 1 < π/2)', () => {
-    expect(ce.parse('\\cos(\\sin(x))=0').solve('x')).toEqual([]);
+    const real = new ComputeEngine();
+    real.declare('x', 'real');
+    expect(real.parse('\\cos(\\sin(x))=0').solve('x')).toEqual([]);
+    // With no domain, `sin(x) = ±π/2` has complex roots (#526)
+    expect(ce.parse('\\cos(\\sin(x))=0').solve('x')).toBeNull();
   });
 
   test('sin(sin(x)) = -1/2 gives one root of each family', () => {
@@ -190,8 +194,8 @@ describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: Solve with no domain', () => {
     expectFamiliesOf(result, (x) => Math.sin(2 * Math.sin(x)));
   });
 
-  test('cos(sin(x)) = 0 gives the empty list', () => {
-    expect(solveLatex('\\cos(\\sin(x))=0').toString()).toBe('[]');
+  test('cos(sin(x)) = 0 has no answer: its roots are complex (#526)', () => {
+    expect(solveLatex('\\cos(\\sin(x))=0').operator).toBe('Solve');
   });
 
   test('sin(sin(x)) = -1/2', () => {

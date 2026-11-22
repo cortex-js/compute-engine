@@ -401,7 +401,7 @@ function hasLambertW(expr: Expression): boolean {
  *  when its argument is in [−1/e, 0). Outside those intervals W₀ and W₋₁
  *  have complex values, and these values are roots, but only two of the
  *  infinitely many complex roots `W_k(…)`: `solve` returns the real roots
- *  of such a transcendental equation, as it does for `sin(x) = 2` (no root)
+ *  of such a transcendental equation, as it does for `e^x = 2` (`ln(2)` only)
  *  or `x³ = 1` (the real root only). A root that is not a number literal
  *  after `N()` (a parametric offset) is kept; `validateRoots()` decides
  *  it. */

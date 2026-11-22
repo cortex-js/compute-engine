@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **With no domain, `Solve` no longer answers `[]` for an equation that has
+  only complex roots.** `Solve(sin(x) = 2, x)` and `Solve(e^x = -1, x)` were
+  `[]`, which reads as "no solution", although `x = π/2 ± i·ln(2 + √3)` and
+  `x = (2k + 1)·π·i` are solutions; with no domain, `Solve` answers over the
+  complex numbers where it can (`Solve(x^2 + 1 = 0, x)` is `[i, -i]`). When
+  the inversion of `sin`, `cos`, `cosh`, `tanh` or an exponential removes a
+  root because it is not real, or an interval proof shows that a nested
+  periodic equation (`cos(sin(x)) = 0`) has no real root, `Solve` now stays
+  unevaluated, and `expr.solve('x')` gives `null`. Over `RealNumbers`, or for
+  an unknown declared `real`, the answer is still `[]`; `Solve(e^x = 0, x)` and `Solve(√x = -1, x)`, which
+  have no complex root either, are still `[]` (#526, reported by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.199.0 _2026-11-22_
 
 ### Breaking Changes

@@ -153,13 +153,16 @@ describe('Solve of an identity, a contradiction, an unsolved equation', () => {
 
   test('candidate roots that are all rejected give no solution', () => {
     expect(solve(['Equal', ['Sqrt', 'x'], -1])).toEqual(['List']);
-    expect(solve(['Equal', ['Sin', 'x'], 2])).toEqual(['List']);
-    expect(solve(['Equal', ['Cos', 'x'], 2])).toEqual(['List']);
     expect(solve(['Equal', ['Exp', 'x'], 0])).toEqual(['List']);
-    expect(solve(['Equal', ['Exp', 'x'], -1])).toEqual(['List']);
-    expect(solve(['Equal', ['Cosh', 'x'], ['Rational', 1, 2]])).toEqual([
-      'List',
-    ]);
+    // These have complex roots: `[]` over the real numbers only (#526)
+    const real = ['Element', 'x', 'RealNumbers'];
+    expect(solve(['Equal', ['Sin', 'x'], 2], real as any)).toEqual(['List']);
+    expect(solve(['Equal', ['Cos', 'x'], 2], real as any)).toEqual(['List']);
+    expect(solve(['Equal', ['Exp', 'x'], -1], real as any)).toEqual(['List']);
+    expect(
+      solve(['Equal', ['Cosh', 'x'], ['Rational', 1, 2]], real as any)
+    ).toEqual(['List']);
+    expect((solve(['Equal', ['Sin', 'x'], 2]) as unknown[])[0]).toBe('Solve');
   });
 
   test('an exponential equation keeps an exact root', () => {

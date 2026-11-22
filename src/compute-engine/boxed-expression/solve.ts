@@ -182,6 +182,7 @@ type RootStats = {
   undecided: boolean;
   partial?: boolean;
   userRule?: boolean;
+  complexRootRemoved?: boolean;
 };
 
 /** New statistics for a recursive call of `findUnivariateRoots()`. */
@@ -191,6 +192,7 @@ function childStats(): Required<RootStats> {
     undecided: false,
     partial: false,
     userRule: false,
+    complexRootRemoved: false,
   };
 }
 
@@ -209,6 +211,7 @@ function adoptChildStats(stats: RootStats | undefined, child: RootStats): void {
   if (child.partial) stats.partial = true;
   if (child.undecided) stats.undecided = true;
   if (child.userRule) stats.userRule = true;
+  if (child.complexRootRemoved) stats.complexRootRemoved = true;
 }
 
 /**
@@ -707,8 +710,10 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // `If(guard, root)`. The rule condition does not test the range: a root
   // whose guard is false is dropped later (`conditionalRoot()`), and the solver
   // then knows that a candidate root existed and was rejected. An empty
-  // solution list is then a decision (`sin x = 2` has no real root), not a
-  // failure to find a root.
+  // solution list is then a decision for a real unknown (`sin x = 2` has no
+  // real root), not a failure to find a root. For an unknown that is not
+  // declared real, the dropped root is a complex root
+  // (`stats.complexRootRemoved`), and the empty list is not a decision.
   //
 
   // a·sin(x) + b = 0  =>  x = arcsin(-b/a)
@@ -3430,6 +3435,15 @@ function isComplexUnknown(ce: ComputeEngine, x: string): boolean {
 }
 
 /**
+ * Return `true` when the numeric value of `root` is a finite number, real or
+ * complex: `arcsin(2)` and `ln(-1)` are, `ln(0)` is not.
+ */
+function isFiniteNumericValue(root: Expression): boolean {
+  const n = root.N();
+  return isNumber(n) && Number.isFinite(n.re) && Number.isFinite(n.im);
+}
+
+/**
  * The type of the unknown `x` that the solver reads: its declared type, or
  * `unknown` when its type was inferred from the value assigned to it.
  *
@@ -3792,7 +3806,11 @@ function splitScaledTerm(
  *
  * Returns an empty list when `-c/k ≤ 0` (`e^(x + 1) = -2`), or when no root
  * of the equation for `g(x)` is real and that list holds all its roots: the
- * equation has no real root, and the caller counts this as a decision.
+ * equation has no real root, and the caller counts this as a decision. For
+ * `-c/k < 0` and for roots that are not real, the equation has a complex
+ * root (`e^(x + 1) = -2` has the roots `ln(2) - 1 + (2k + 1)·π·i`), thus
+ * the empty list sets `stats.complexRootRemoved`. `b^w` is never 0, thus
+ * `-c/k = 0` does not.
  * Returns `null` when `expr` does not have this form, when `g(x)` is not
  * known to be real for each real `x` (`e^(i·x + 1) = -e` has the root `π`),
  * when the sign of `-c/k` is not known, when the equation for `g(x)` gives
@@ -3827,6 +3845,7 @@ function solveSingleExponential(
   if (!isRealForRealUnknown(f.op2, x)) return null;
   // The sign tests below are decided only for a real `-c/k`.
   const ratio = ce.function('Divide', [ce.function('Negate', [c]), k]);
+  if (ratio.isNegative === true && stats) stats.complexRootRemoved = true;
   if (ratio.isNonPositive === true) return [];
   if (ratio.isPositive !== true) return null;
   const value = isSymbol(base, 'ExponentialE')
@@ -3848,6 +3867,7 @@ function solveSingleExponential(
   if (real.length === 0 && (child.partial || child.undecided || child.userRule))
     return null;
   adoptChildStats(stats, child);
+  if (real.length === 0 && stats) stats.complexRootRemoved = true;
   return real;
 }
 
@@ -4668,6 +4688,13 @@ function chainedEqualityRoots(
  * to `ce.solveRules` matched (also for a factor of a product): the caller
  * then accepts the roots of that template for a function that the root
  * finder cannot invert.
+ * `stats.complexRootRemoved` is set to `true` when a strategy removed a
+ * root because it is not real, and the value of that root is a finite
+ * complex number: `arcsin(2)` for `sin(x) = 2`, `ln(-1)` for `e^x = -1`.
+ * The equation then has a complex root, and an empty result is not a
+ * decision for an unknown that is not declared real
+ * (`emptyRootsAnswer()`). A value that is not finite (`ln(0)` for
+ * `e^x = 0`) is not a root and does not set the flag.
  *
  */
 export function findUnivariateRoots(
@@ -4751,6 +4778,7 @@ function univariateRoots(
     undecided: boolean;
     partial?: boolean;
     userRule?: boolean;
+    complexRootRemoved?: boolean;
   }
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
@@ -4759,6 +4787,7 @@ function univariateRoots(
     stats.undecided = false;
     stats.partial = false;
     stats.userRule = false;
+    stats.complexRootRemoved = false;
   }
 
   // `BaseForm` is an inert display wrapper (`BaseForm(value, base)`); its value
@@ -5532,7 +5561,9 @@ function univariateRoots(
   // removal is not a decision. The guard `0 ≤ r` of `√u = r` is different:
   // the principal square root is never a negative real number, thus its
   // removal is a decision when `r` is real. For a complex `r`, it is not
-  // (`√x = i` has the root `-1`).
+  // (`√x = i` has the root `-1`). For an unknown that is not declared real
+  // (no domain), a removed root whose value is a finite complex number sets
+  // `stats.complexRootRemoved` (see `findUnivariateRoots()`).
   const complexUnknown = isComplexUnknown(ce, x);
   const sqrtGuardDecides =
     sqrtGuard === null ||
@@ -5549,7 +5580,11 @@ function univariateRoots(
         restriction.condition
       );
       if (root !== null) resolved.push(root);
-      else if (complexUnknown && stats) stats.undecided = true;
+      else if (stats) {
+        if (complexUnknown) stats.undecided = true;
+        if (isFiniteNumericValue(restriction.value))
+          stats.complexRootRemoved = true;
+      }
     } else if (sqrtGuard !== null) {
       const root = conditionalRoot(ce, r.evaluate().simplify(), sqrtGuard);
       if (root !== null) resolved.push(root);
