@@ -16,7 +16,7 @@
  *   node scripts/issues.mjs new                   creates the next file from the template, prints its path
  *                                                 (the id comes from the shared counter, `scripts/issue-ids.mjs`)
  *   node scripts/issues.mjs id                    takes the next id without a file (a ROADMAP entry)
- *   node scripts/issues.mjs merge-check [<rev>]   the issue files that both sides of a merge added or changed
+ *   node scripts/issues.mjs merge-check [<rev>]   the ids that both sides of a merge took (exit 1 when one was)
  *   node scripts/issues.mjs close <id> <reason…>  removes the file, one line to CLOSED.md
  *   node scripts/issues.mjs close --all           the same for every `state: close` file
  *
@@ -209,7 +209,7 @@ export function compareVersions(a, b) {
 }
 
 const USAGE =
-  'usage: node scripts/issues.mjs lint | board | backlog | in-progress | show <id> | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]';
+  'usage: node scripts/issues.mjs lint | board | backlog | in-progress | show <id> | release <version> | set <id> <field> <value> | flag <id> +f|-f | start <id> <owner> | new | id | merge-check [<rev>] | close <id> <reason…> | close --all   [--dir <path>] [--today <date>] [--json]';
 
 function usage(msg) {
   throw new UsageError(msg ?? '');
@@ -549,6 +549,17 @@ function closedMax() {
     (m) => Number(m[1])
   );
   return Math.max(0, ...ids);
+}
+
+/** The ids that CLOSED.md names. */
+function closedIds() {
+  const p = path.join(opts.dir, 'CLOSED.md');
+  if (!fs.existsSync(p)) return new Set();
+  return new Set(
+    [...fs.readFileSync(p, 'utf8').matchAll(/^- CE-(\d+) /gm)].map((m) =>
+      Number(m[1])
+    )
+  );
 }
 
 /** The highest `### CE-<n>` heading of ROADMAP.md, which shares the counter. */
@@ -1187,8 +1198,10 @@ function newIssue(withoutFile = false) {
   try {
     n = allocateId(
       min,
+      // A reserve id was given by the master and is unique: it is dropped
+      // only when this copy already has it as a file or a closed issue.
       (k) =>
-        !fs.existsSync(path.join(opts.dir, `CE-${k}.md`)) && k > closedMax()
+        !fs.existsSync(path.join(opts.dir, `CE-${k}.md`)) && !closedIds().has(k)
     );
   } catch (err) {
     fail(err.message);
@@ -1207,62 +1220,96 @@ function newIssue(withoutFile = false) {
 }
 
 /**
- * The issue files that both sides of a merge added or changed: the merge in
- * progress (`MERGE_HEAD`), or the merge commit `rev` (default `HEAD`). Two
- * sides that add the same `CE-<n>.md` gave one number to two issues, and a
- * merge that keeps one file loses the other one without a conflict marker.
- * Exit 1 when a file was added on both sides.
+ * The ids that both sides of a merge took: the merge commit `rev`, or the
+ * merge in progress (`MERGE_HEAD`), or the merge commit `HEAD`. A side takes
+ * an id with a new `issues/CE-<n>.md`, a new `CLOSED.md` line (an issue filed
+ * and closed on that side) or a new `### CE-<n>.` heading of `ROADMAP.md`.
+ * Two sides that took one id gave it to two items: git reports an add/add
+ * conflict for two issue files, and a resolution that takes one side loses
+ * the other issue. The same addition on both sides (one commit that reached
+ * both, for example through a rebase) is one item. Also lists the issue files
+ * that both sides changed. Exit 1 when an id was taken on both sides.
  */
 function mergeCheck(rev) {
+  // The worktree the command runs in, which can be a linked one.
   const git = (...a) =>
-    execFileSync('git', a, { cwd: ROOT, encoding: 'utf8' }).trim();
+    execFileSync('git', a, { cwd: process.cwd(), encoding: 'utf8' }).trim();
+  const isRev = (r) => {
+    try {
+      git('rev-parse', '--verify', '-q', r);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   let ours;
   let theirs;
-  try {
-    git('rev-parse', '--verify', '-q', 'MERGE_HEAD');
+  if (rev === undefined && isRev('MERGE_HEAD'))
     [ours, theirs] = ['HEAD', 'MERGE_HEAD'];
-  } catch {
+  else {
     const m = rev ?? 'HEAD';
-    try {
-      git('rev-parse', '--verify', '-q', `${m}^2`);
-    } catch {
+    if (!isRev(`${m}^2`))
       fail(`${m} is not a merge commit, and no merge is in progress`);
-    }
     [ours, theirs] = [`${m}^1`, `${m}^2`];
   }
   const base = git('merge-base', ours, theirs);
-  const changed = (side, filter) =>
+  // `--no-renames`: a new file must not be paired with a deleted one.
+  const diff = (side, options, path) =>
+    git('diff', '--no-renames', ...options, base, side, '--', path);
+  /** id → the additions that took it, each as a string to compare. */
+  const taken = (side) => {
+    const ids = new Map();
+    const add = (id, what) => {
+      if (!ids.has(id)) ids.set(id, new Set());
+      ids.get(id).add(what);
+    };
+    for (const f of diff(
+      side,
+      ['--name-only', '--diff-filter=A'],
+      'issues/'
+    ).split('\n')) {
+      const m = /^issues\/CE-(\d+)\.md$/.exec(f);
+      if (m) add(Number(m[1]), `file ${git('rev-parse', `${side}:${f}`)}`);
+    }
+    for (const [file, re] of [
+      ['issues/CLOSED.md', /^\+- CE-(\d+) /],
+      ['ROADMAP.md', /^\+### CE-(\d+)\./],
+    ])
+      for (const line of diff(side, ['-U0'], file).split('\n')) {
+        const m = re.exec(line);
+        if (m) add(Number(m[1]), `${file}: ${line.slice(1)}`);
+      }
+    return ids;
+  };
+  const ourIds = taken(ours);
+  const theirIds = taken(theirs);
+  const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+  const both = [...theirIds.keys()]
+    .filter((id) => ourIds.has(id) && !same(ourIds.get(id), theirIds.get(id)))
+    .sort((a, b) => a - b);
+  const where = (s) =>
+    [...s].map((w) => (w.startsWith('file ') ? 'an issue file' : w)).join('; ');
+  for (const id of both)
+    console.log(
+      `CE-${id}: error: taken on both sides (${ours}: ${where(ourIds.get(id))}; ${theirs}: ${where(theirIds.get(id))}); ` +
+        'give one of the two items a new id with `new` or `id`'
+    );
+  const modified = (side) =>
     new Set(
-      git(
-        'diff',
-        '--name-only',
-        `--diff-filter=${filter}`,
-        base,
-        side,
-        '--',
-        'issues/'
-      )
+      diff(side, ['--name-only', '--diff-filter=M'], 'issues/')
         .split('\n')
         .filter((f) => /^issues\/CE-\d+\.md$/.test(f))
     );
-  const addedOurs = changed(ours, 'A');
-  const addedBoth = [...changed(theirs, 'A')].filter((f) => addedOurs.has(f));
-  const modifiedOurs = changed(ours, 'M');
-  const modifiedBoth = [...changed(theirs, 'M')].filter((f) =>
-    modifiedOurs.has(f)
-  );
-  for (const f of addedBoth)
-    console.log(
-      `${f}: error: added on both sides, so two issues have one id; give one of them a new id with \`new\``
-    );
+  const modifiedOurs = modified(ours);
+  const modifiedBoth = [...modified(theirs)].filter((f) => modifiedOurs.has(f));
   for (const f of modifiedBoth)
     console.log(
       `${f}: changed on both sides; check that the merge kept both changes`
     );
   console.log(
-    `${ours} and ${theirs}: ${addedBoth.length} added on both sides, ${modifiedBoth.length} changed on both sides`
+    `${ours} and ${theirs}: ${both.length} ids taken on both sides, ${modifiedBoth.length} issue files changed on both sides`
   );
-  process.exit(addedBoth.length ? 1 : 0);
+  process.exit(both.length ? 1 : 0);
 }
 
 function template(n) {

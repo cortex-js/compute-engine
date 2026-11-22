@@ -30,9 +30,10 @@ ssh, with a reserve of a few numbers for when univac cannot be reached
 (`scripts/issue-ids.mjs`). `issues/NEXT.md` records the next number that this
 copy of the repository knows, so a number read from it by hand can be the one
 that another machine took. After a pull or a merge,
-`node scripts/issues.mjs merge-check` lists the issue files that both sides
-added: two issues with one number, of which a merge keeps one file without a
-conflict. Tycho's `COMPUTE_ENGINE.md` holds the
+`node scripts/issues.mjs merge-check` lists the ids that both sides took (as
+an issue file, a `CLOSED.md` line or a ROADMAP heading): two items with one
+number. Git reports an add/add conflict for two issue files, and a resolution
+that takes one side loses the other issue. Tycho's `COMPUTE_ENGINE.md` holds the
 reference material on how Tycho uses the engine, and
 `COMPUTE_ENGINE_CHECKLIST.md` holds the steps of an adoption. Tycho files its
 requests to CE as files in `issues/`, in this repository.
@@ -367,7 +368,7 @@ has no dependency.
 | `start <id> <owner>`         | sets `in-progress`, `owner` and `started`; refuses an item that is not `open` or `investigate`, a P4, `needs-review`, or any item while a confirmed P0 is open |
 | `new`                        | creates `issues/CE-<n>.md` from the template with the next id of the shared counter, prints the path, and increases `issues/NEXT.md` |
 | `id`                         | takes the next id of the shared counter without a file (the number of a ROADMAP entry), and increases `issues/NEXT.md`         |
-| `merge-check [<rev>]`        | the issue files that both sides of the merge in progress, or of the merge commit `rev`, added or changed; exit 1 when one was added on both sides |
+| `merge-check [<rev>]`        | the ids that both sides of the merge commit `rev`, or of the merge in progress, took (as an issue file, a `CLOSED.md` line or a ROADMAP heading), and the issue files both changed; exit 1 when an id was taken on both sides |
 | `close <id> <reason>`        | removes the file and writes the line to `CLOSED.md`                                                                            |
 | `close --all`                | the same for every file with `state: close`; the reason is the `close-reason` field                                            |
 

@@ -20,8 +20,8 @@
  * With the master out of reach and the reserve empty, it refuses: an id made
  * up locally is how two issues got one number.
  *
- * The master is the machine whose host name is `univac`, or any machine with
- * `CE_ISSUE_ID_MASTER=1`. `CE_ISSUE_ID_HOST` names the ssh host of the master
+ * The master is Windows on the machine named `univac` (not its WSL), or any
+ * machine with `CE_ISSUE_ID_MASTER=1`. `CE_ISSUE_ID_HOST` names the ssh host of the master
  * (default `univac.local`). The state is in `~/.local/state/compute-engine-issue-ids/`:
  * `next` on the master, `reserve.json` on another machine. The script has no
  * dependency.
@@ -49,10 +49,16 @@ const LOCK = path.join(STATE_DIR, 'lock');
 /** The repo path on the master, for the ssh command (`~` is its home). */
 const MASTER_SCRIPT = '~/dev/compute-engine/scripts/issue-ids.mjs';
 
+/**
+ * The Windows side of univac. Its WSL has the same host name, and a home of
+ * its own, so a clone there must not count as a second master.
+ */
 export function isMaster() {
   if (process.env.CE_ISSUE_ID_MASTER !== undefined)
     return process.env.CE_ISSUE_ID_MASTER === '1';
-  return os.hostname().toLowerCase() === 'univac';
+  return (
+    process.platform === 'win32' && os.hostname().toLowerCase() === 'univac'
+  );
 }
 
 function masterHost() {
@@ -64,8 +70,9 @@ function sleep(ms) {
 }
 
 /**
- * Runs `fn` while holding the lock directory. A lock older than 30 s is left
- * by a process that died, and is removed.
+ * Runs `fn` while holding the lock directory. A holder can wait for ssh (up
+ * to about 35 s), so only a lock older than 120 s is taken as left by a
+ * process that died, and removed.
  */
 function withLock(fn) {
   fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -76,12 +83,12 @@ function withLock(fn) {
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
       try {
-        if (Date.now() - fs.statSync(LOCK).mtimeMs > 30_000)
+        if (Date.now() - fs.statSync(LOCK).mtimeMs > 120_000)
           fs.rmSync(LOCK, { recursive: true, force: true });
       } catch {
         // The holder released it between the two calls.
       }
-      if (k > 200) throw new Error(`issue-ids: ${LOCK} is held`);
+      if (k > 3000) throw new Error(`issue-ids: ${LOCK} is held`);
       sleep(50);
     }
   }
@@ -95,11 +102,22 @@ function withLock(fn) {
 /** On the master: `count` new ids, the first one at least `min`. */
 export function take(count, min) {
   return withLock(() => {
-    const stored = fs.existsSync(NEXT)
-      ? Number(fs.readFileSync(NEXT, 'utf8').trim())
-      : 0;
-    const first = Math.max(Number.isInteger(stored) ? stored : 0, min);
-    fs.writeFileSync(NEXT, `${first + count}\n`);
+    let stored = 0;
+    if (fs.existsSync(NEXT)) {
+      // A counter that does not read as a number is refused: starting again
+      // at `min` would give out the ids already in another machine's reserve.
+      const text = fs.readFileSync(NEXT, 'utf8').trim();
+      stored = Number(text);
+      if (!/^\d+$/.test(text) || stored <= 0)
+        throw new Error(
+          `issue-ids: ${NEXT} holds ${JSON.stringify(text)}, not a number`
+        );
+    }
+    const first = Math.max(stored, min);
+    // Written to a new file, then renamed over the counter, so that a crash
+    // never leaves it empty.
+    fs.writeFileSync(`${NEXT}.tmp`, `${first + count}\n`);
+    fs.renameSync(`${NEXT}.tmp`, NEXT);
     return Array.from({ length: count }, (_, k) => first + k);
   });
 }
@@ -118,7 +136,10 @@ function writeReserve(ids) {
   fs.writeFileSync(RESERVE_FILE, `${JSON.stringify(ids)}\n`);
 }
 
-/** Runs `take` on the master; null when it cannot be reached. */
+/**
+ * Runs `take` on the master: `{ ids }`, or `{ why }` when it failed (the ssh
+ * exit status and the last line of its error output).
+ */
 function takeRemote(count, min) {
   try {
     const out = execFileSync(
@@ -134,9 +155,19 @@ function takeRemote(count, min) {
       { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }
     );
     const ids = out.trim().split(/\s+/).map(Number);
-    return ids.length === count && ids.every(Number.isInteger) ? ids : null;
-  } catch {
-    return null;
+    return ids.length === count && ids.every(Number.isInteger)
+      ? { ids }
+      : {
+          why: `unexpected output ${JSON.stringify(out.trim().slice(0, 200))}`,
+        };
+  } catch (err) {
+    const stderr = String(err.stderr ?? '')
+      .trim()
+      .split('\n')
+      .pop();
+    return {
+      why: `ssh exit ${err.status ?? err.signal ?? err.code}${stderr ? `: ${stderr}` : ''}`,
+    };
   }
 }
 
@@ -147,20 +178,28 @@ function takeRemote(count, min) {
  */
 export function allocateId(min, isFree = () => true) {
   if (isMaster()) return take(1, min)[0];
-  const reserve = readReserve().filter(isFree);
-  const ids = takeRemote(1 + Math.max(0, RESERVE - reserve.length), min);
-  if (ids !== null) {
-    writeReserve([...reserve, ...ids.slice(1)]);
-    return ids[0];
-  }
-  if (reserve.length > 0) {
-    writeReserve(reserve.slice(1));
-    return reserve[0];
-  }
-  throw new Error(
-    `issue-ids: the master counter (ssh ${masterHost()}) cannot be reached and the reserve is empty; ` +
-      'file the issue when the master is back, or name the defect in your report'
-  );
+  // The local lock keeps two sessions of this machine from taking the same
+  // reserve id, or from writing the reserve over each other.
+  return withLock(() => {
+    const reserve = readReserve().filter(isFree);
+    const result = takeRemote(1 + Math.max(0, RESERVE - reserve.length), min);
+    if (result.ids) {
+      writeReserve([...reserve, ...result.ids.slice(1)]);
+      return result.ids[0];
+    }
+    if (reserve.length > 0) {
+      console.error(
+        `issue-ids: the master counter (ssh ${masterHost()}) failed (${result.why}); ` +
+          `CE-${reserve[0]} comes from the reserve, ${reserve.length - 1} left`
+      );
+      writeReserve(reserve.slice(1));
+      return reserve[0];
+    }
+    throw new Error(
+      `issue-ids: the master counter (ssh ${masterHost()}) failed (${result.why}) and the reserve is empty; ` +
+        'file the issue when the master is back, or name the defect in your report'
+    );
+  });
 }
 
 function main(argv) {
