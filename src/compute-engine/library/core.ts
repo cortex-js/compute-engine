@@ -387,6 +387,8 @@ import {
   isDeclaredScalarType,
   isUnresolvedMappableOperand,
   refusedLiteralArgumentError,
+  unknownBesideWholeParameters,
+  unknownBesideWholeCallType,
 } from '../boxed-expression/boxed-function.js';
 import {
   numericDerivativeOfApply,
@@ -1354,8 +1356,11 @@ function applyLiteralMaps(
   if (!isFunction(fn, 'Function')) return false;
   // A generic literal (`(x: T) -> T where T`) binds its argument whole, as
   // on the named route: its type parameter is solved against the whole
-  // argument (`literalParamsMap`).
-  if (!literalParamsMap(fn.type.type)) return false;
+  // argument (`literalParamsMap`). A literal with a parameter typed
+  // `unknown` beside one that binds whole maps at the first only
+  // (`literalMappedParameters`).
+  const maps = literalMappedParameters(fn.type.type);
+  if (maps === undefined) return false;
   // A collection argument with no value yet (a symbol declared
   // `list<real>`) also takes this route, and `applyLiteralMapped` holds the
   // application. The type handler (`applyLiteralMapType`) types the call as
@@ -1366,8 +1371,28 @@ function applyLiteralMaps(
   return args
     .slice(0, mappedArgumentCount(fn.type.type))
     .some(
-      (a) => isBroadcastableCollection(a) || isUnresolvedMappableOperand(a)
+      (a, i) =>
+        maps(i) &&
+        (isBroadcastableCollection(a) || isUnresolvedMappableOperand(a))
     );
+}
+
+/**
+ * The parameters of a function literal of signature `sig` at which
+ * `Apply(fn, …args)` maps a list argument: every parameter when they all
+ * map (`literalParamsMap`); when a parameter typed `unknown` is beside one
+ * that binds whole, the first only, as on the named route (user decision
+ * 2026-11-22, CE-1697, `unknownBesideWholeParameters`); `undefined` when
+ * no parameter maps. With `q := (L, k) ↦ Mean(L)·k`,
+ * `Apply(q, [1, 2, 6], [1, 2])` is `[3, 6]`, one call per element of `k`,
+ * and `L` is bound whole in each.
+ */
+function literalMappedParameters(
+  sig: Type
+): ((i: number) => boolean) | undefined {
+  if (literalParamsMap(sig)) return () => true;
+  const maps = unknownBesideWholeParameters(sig);
+  return maps === undefined ? undefined : (i) => maps[i] === true;
 }
 
 /**
@@ -1650,7 +1675,13 @@ function applyLiteralMapType(
     ].every((p) => isDeclaredScalarType(p.type))
   )
     return undefined;
-  if (!literalParamsMap(fn.type)) return undefined;
+  // A literal with a parameter typed `unknown` beside one that binds whole
+  // maps at the first only, and is typed as the named call of the same
+  // literal (user decision 2026-11-22, CE-1697).
+  // The signature of a curried literal (`readBody` false) is typed with the
+  // arguments of the outer call, so it describes the cell too.
+  if (!literalParamsMap(fn.type))
+    return unknownBesideWholeCallType(fn.type, args);
   const mapsOver = (t: Type): boolean =>
     isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
     !isSubtype(t, 'string') &&
@@ -1806,7 +1837,11 @@ function applyLiteralMapped(
   args: ReadonlyArray<Expression>,
   numericApproximation: boolean | undefined
 ): Expression | ApplyCells | undefined {
-  const mapped = (x: Expression) => isBroadcastableCollection(x);
+  // A parameter that binds whole beside a parameter typed `unknown` takes
+  // its argument whole in every cell (`literalMappedParameters`).
+  const maps = literalMappedParameters(fn.type.type) ?? (() => true);
+  const mapped = (x: Expression, i: number) =>
+    maps(i) && isBroadcastableCollection(x);
   // The arguments of a rest parameter are bound whole, after the mapped
   // ones, in every cell (`mappedArgumentCount`).
   const fixed = Math.min(args.length, mappedArgumentCount(fn.type.type));
@@ -1821,13 +1856,17 @@ function applyLiteralMapped(
   // collection: binding it whole would give a value of a different shape
   // than the mapped type of the call. Evaluating the held application again
   // after the symbol has a value maps it.
-  if (args.some((x) => !mapped(x) && isUnresolvedMappableOperand(x)))
+  if (
+    args.some(
+      (x, i) => maps(i) && !mapped(x, i) && isUnresolvedMappableOperand(x)
+    )
+  )
     return ce._fn('Apply', [fn, ...args, ...rest]);
   const lazy = lazyBroadcastMapIfNeeded(
     ce,
     'Apply',
     [fn, ...args, ...rest],
-    (x, i) => i > 0 && i <= fixed && mapped(x),
+    (x, i) => i > 0 && i <= fixed && mapped(x, i - 1),
     numericApproximation === true
   );
   if (lazy) return lazy;

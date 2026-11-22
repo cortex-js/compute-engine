@@ -588,6 +588,8 @@ import {
   functionLiteralParameterType,
   isFunctionLiteralParameter,
   isScalarType,
+  isUnknownParameterType,
+  isWideParameterType,
   capturedTypesWidened,
   resultOutsideCallType,
 } from './function-literal.js';
@@ -19818,6 +19820,11 @@ type BroadcastSlot = {
    * (`declaredPlanWithPointSlots`). It maps only a list of points
    * (`mapsAsPointList`); any other argument binds whole. */
   pointList?: boolean;
+  /** This slot binds whole and is declared `any`, `expression` or `value`
+   * (`isWideParameterType`): a collection there can change the shape of
+   * each cell, so the result of the signature does not describe a cell
+   * (`pointListApplicationType`). */
+  wide?: boolean;
   /** This slot maps to the cells even when its element type can hold a
    * list: a scalar slot of the point-list plan (`pointListParamSlots`)
    * typed `unknown` maps a list of lists at every depth, as the parameter of
@@ -19911,6 +19918,59 @@ export function broadcastableParamSlots(
   return plan ?? undefined;
 }
 
+/**
+ * For a signature with a parameter typed `unknown` (no declaration) and a
+ * parameter that binds its argument whole (a collection, a union with a
+ * collection arm, `any`, `expression`, `value`): for each fixed parameter,
+ * whether a list argument there is mapped, one call per element. A scalar
+ * parameter maps, as the parameter of a one-parameter function does, and the
+ * other one binds whole (user decision 2026-11-22, CE-1697). `undefined` for
+ * any other signature, and for a generic one.
+ *
+ * With `f(P, n) := Which(n = 0, …, f(P, n - 1))` and `P` inferred
+ * `collection<any> | tuple`, `f((1, 2), [1, 2])` is one call per count;
+ * bound whole, `n = 0` never held for the whole list and the recursion did
+ * not end. A built-in such as `Repeat(value, integer)` declares its scalar
+ * parameter, and is not such a signature. A function-typed parameter does
+ * not count: it never stopped the map (`paramsAreScalar`).
+ *
+ * The named route reads it through `pointListParamSlots`, and `Apply` of a
+ * function literal through `literalMappedParameters` (`library/core.ts`).
+ * @internal
+ */
+export function unknownBesideWholeParameters(sig: Type): boolean[] | undefined {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
+  if (isPolymorphicType(sig)) return undefined;
+  const types = [...(sig.args ?? []), ...(sig.optArgs ?? [])].map((arg) =>
+    substituteDeclaredBounds(sig.typeParams, arg.type)
+  );
+  if (!types.some((t) => isUnknownParameterType(t))) return undefined;
+  const maps = types.map((t) => isScalarType(t));
+  if (!types.some((t, i) => !maps[i] && !isSubtype(t, 'function')))
+    return undefined;
+  return maps;
+}
+
+/**
+ * The type of `Apply(fn, …args)` for a function literal `fn` of signature
+ * `sig` with a parameter typed `unknown` beside one that binds whole
+ * (`unknownBesideWholeParameters`): the type of the named call of the same
+ * literal (`pointListApplicationType`), so that the two routes agree.
+ * `undefined` for another signature, and when no argument is mapped.
+ * @internal
+ */
+export function unknownBesideWholeCallType(
+  sig: Type,
+  args: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (unknownBesideWholeParameters(sig) === undefined) return undefined;
+  return pointListApplicationType(
+    pointListParamSlots(sig),
+    args.map(pointListOperandOfDescriptor),
+    functionResult(sig) ?? 'unknown'
+  );
+}
+
 /** Memoized per SIGNATURE TYPE object, as `BROADCAST_SLOT_PLANS`. `null`
  * records "no parameter is declared as a point". */
 const POINT_SLOT_PLANS = new WeakMap<object, BroadcastSlotPlan | null>();
@@ -19918,8 +19978,10 @@ const POINT_SLOT_PLANS = new WeakMap<object, BroadcastSlotPlan | null>();
 /**
  * The per-slot plan of the POINT-LIST map of `source`, or `undefined` when no
  * required or optional parameter of its signature is declared as a point (a
- * plain tuple type, see `isPointParameterType`). An overload set declines, as
- * in `broadcastableParamSlots`.
+ * plain tuple type, see `isPointParameterType`), it has no variadic tail, and
+ * it has no parameter typed `unknown` beside one that binds whole
+ * (`unknownBesideWholeParameters`). An overload set declines, as in
+ * `broadcastableParamSlots`.
  *
  * A user function whose parameter is declared as a point, called with a list
  * of points at that parameter, answers the list of its values at each point
@@ -19978,12 +20040,14 @@ export function pointListParamSlots(
     (arg): BroadcastSlot => {
       const t = substituteDeclaredBounds(sigType.typeParams, arg.type);
       if (isPointParameterType(t)) return { mappable: true, elements: t };
-      return isScalarType(t)
-        ? { mappable: true, elements: t, cells: true }
+      if (isScalarType(t)) return { mappable: true, elements: t, cells: true };
+      return isWideParameterType(t)
+        ? { mappable: false, wide: true }
         : WHOLE_SLOT;
     }
   );
-  // Only a POINT slot or a variadic tail puts a signature on this plan: a
+  // Only a POINT slot, a variadic tail or a parameter typed `unknown` beside
+  // one that binds whole (below) puts a signature on this plan: a
   // signature whose parameters are all scalar keeps the `paramsAreScalar`
   // route. A variadic tail (a rest parameter) collects its arguments into
   // one tuple, so `paramsAreScalar` is false for it, and this plan maps the
@@ -19991,11 +20055,15 @@ export function pointListParamSlots(
   // (`WHOLE_SLOT` past the fixed slots): with `k(a, ...xs) = (a, xs)`,
   // `k([1, 2], 3)` is `[(1, (3)), (2, (3))]` and `k(1, [1, 2])` is
   // `(1, ([1, 2]))`.
+  //
+  // A signature with a parameter typed `unknown` beside one that binds whole
+  // is on this plan too (`unknownBesideWholeParameters`, CE-1697).
   const plan =
     sigType.variadicArg !== undefined ||
     slots.some(
       (s) => s.elements !== undefined && isPointParameterType(s.elements)
-    )
+    ) ||
+    unknownBesideWholeParameters(sigType) !== undefined
       ? { at: (i: number) => slots[i] ?? WHOLE_SLOT }
       : null;
   POINT_SLOT_PLANS.set(sigType, plan);
@@ -20411,6 +20479,36 @@ function pointListApplicationType(
     if (!x.tuple) shape = combineMapShapes(shape, operandMapShape(x.type));
   });
   if (shape === 'cell') return undefined;
+  // A cell result `R` that holds every list of `R` (`unknown`, `any`, the
+  // open form `R | tuple | list<R | tuple | list<any>>`), over an operand
+  // that may or may not be a list: every nesting of the map is in `R`, and
+  // the call is `R`. Spelled as the map, the type of a call nested in
+  // another call of such a function grew one level per call
+  // (`W_1(W_2(…))`, Tycho item 336, with the map of CE-1697). A
+  // surely-list operand keeps `list<R>`.
+  // A collection bound whole at a parameter declared `any`, `expression` or
+  // `value` can change the shape of each cell: with `(L: expression, k) ↦
+  // L·k`, the signature result is `number`, and the cell for `L = [1, 2, 6]`
+  // is a list. The cell is then `any`, as the call of such a function is
+  // typed when its argument can be a collection (`wideParameterArgument`).
+  if (
+    ops.some(
+      (x, i) => plan.at(i).wide === true && !x.tuple && !cannotHoldAList(x.type)
+    )
+  )
+    result = 'any';
+  // The collapse is read only with no point slot and no declared plan: their
+  // absences are added to the type below.
+  if (
+    declared === undefined &&
+    !ops.some((_, i) => {
+      const elements = plan.at(i).elements;
+      return elements !== undefined && isPointParameterType(elements);
+    }) &&
+    mapShapeHasCell(shape) &&
+    isSubtype({ kind: 'list', elements: result }, result)
+  )
+    return result;
   // A DECLARED `broadcastable<P>` slot whose `P` cannot hold a list (a
   // point, a number) maps its argument to the cells too, paired with the
   // point-list map (`declaredPlanWithPointSlots`): with
@@ -20530,6 +20628,12 @@ function isDeepPointOperand(
  */
 type MapShape =
   'cell' | 'tensor' | 'list' | { list: MapShape } | { union: MapShape[] };
+
+/** Whether the map shape `s` is a union with a `'cell'` arm: the operand
+ * may or may not be a list. */
+function mapShapeHasCell(s: MapShape): boolean {
+  return typeof s !== 'string' && 'union' in s && s.union.includes('cell');
+}
 
 /** The union of the shapes `arms`, without repeated arms and without nested
  * unions; one arm is returned as is. */

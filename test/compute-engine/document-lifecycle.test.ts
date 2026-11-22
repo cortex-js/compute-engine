@@ -2041,11 +2041,10 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
       revision.dispose();
     });
 
-    test('a list at the other parameter is not mapped over (pinned)', () => {
-      // The narrowed `P` admits a list, so the call is not mapped over the
-      // list at `n`, and `n = 0` never holds for the whole list: the
-      // recursion limit is reached. A stated `list<number>` at `P` does the
-      // same on 0.198.0.
+    test('a list at the other parameter is mapped over (CE-1697)', () => {
+      // The narrowed `P` admits a list and binds its argument whole; the list
+      // at the untyped `n` is mapped, one call per count. Bound whole, `n = 0`
+      // never held for the whole list and the recursion did not end.
       const revision = prepare({
         g: [['P'], ['Multiply', ['PointX', 'P'], ['Tuple', 1, 0]]],
         f: [
@@ -2055,10 +2054,15 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
             ['Add', ['g', 'P'], ['f', 'P', ['Subtract', 'n', 1]]]
           ),
         ],
+        K: [['n', 'q'], cases(['Mean', 'q'], n1('K', 'q'))],
       });
-      expect(() =>
-        value(revision, ['f', ['Tuple', 1, 2], ['List', 1, 2]])
-      ).toThrow(/Recursion limit/);
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['f', ['Tuple', 1, 2], ['List', 1, 2]])).toBe(
+        '["List",["Tuple",1,0],["Tuple",2,0]]'
+      );
+      expect(value(revision, ['K', ['List', 0, 1], ['List', 1, 2, 6]])).toBe(
+        '["List",3,3]'
+      );
       revision.dispose();
     });
 
@@ -2140,9 +2144,7 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
       expect(value(revision, ['P', ['List', 0, 1]])).toBe(
         '["List",0,["Add",1,["Sin",1]]]'
       );
-      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe(
-        '["List",4,5,9]'
-      );
+      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe('["List",4,5,9]');
       revision.dispose();
     });
 

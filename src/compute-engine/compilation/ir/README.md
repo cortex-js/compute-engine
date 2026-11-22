@@ -2928,7 +2928,9 @@ declines); it maps a list at every parameter when all are scalar
 (`paramsAreScalar()`); beside a parameter declared as a point
 (`pointListParamSlots()`), a list of points at that parameter (not at an indexed
 one, `p ↦ p[1] + p[2]`) and any list at a parameter of a scalar type or of no
-stated type (user decision 2026-10-24); every other list binds whole. The
+stated type (user decision 2026-10-24); beside a parameter that binds whole, a
+list at a parameter of no stated type (`unknownBesideWholeParameters()`,
+CE-1697); every other list binds whole. The
 profile maps a flat list at a scalar parameter, and a list of points at a
 parameter declared as a point that the interpreter maps (`pointsMapAt()`,
 CE-1477), one point per call, the other arguments bound whole in each cell

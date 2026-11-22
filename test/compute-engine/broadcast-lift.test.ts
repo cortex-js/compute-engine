@@ -359,8 +359,12 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
     );
   });
 
-  test('a collection-typed parameter still vetoes', () => {
-    expect(runEpsil(prog('c: list<number>', '[1]'))).toBe('box([10,20])');
+  test('a collection-typed parameter does not veto', () => {
+    // An untyped parameter beside a parameter that binds whole maps a list
+    // (user decision 2026-11-22, CE-1697). Before, it gave `box([10,20])`.
+    expect(runEpsil(prog('c: list<number>', '[1]'))).toBe(
+      '[box(10),box(20)]'
+    );
     // A parameter declared as a point does not veto: an untyped parameter
     // beside it follows the rule of a one-parameter function and maps a list
     // (user decision 2026-10-24, ROADMAP CE-414.2). Before, it gave
@@ -369,7 +373,7 @@ describe('BROADCAST ELIGIBILITY: function-typed parameters', () => {
       '[box(10),box(20)]'
     );
     expect(runEpsil(prog('c: dictionary<number>', '{lo -> 0}'))).toBe(
-      'box([10,20])'
+      '[box(10),box(20)]'
     );
   });
 
