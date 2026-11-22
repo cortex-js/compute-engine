@@ -9,6 +9,17 @@
   digits, so another separator throws a `RangeError`. The type
   `EpsilNumberFormat` is exported from the Epsil entry (#653, contributed by
   [enumeratio](https://github.com/enumeratio)).
+- **The permutation statistics that depend on the degree n take a
+  `PermutationAction(n)`.** A `Permutation` keeps its normalized form (trailing
+  fixed points dropped), so equal permutations stay structurally the same.
+  `PermutationCycles(p, PermutationAction(n))` lists every cycle on 1..n, the
+  fixed points as 1-cycles; without the action it is unchanged. The new
+  `PermutationFixedPoints(p, PermutationAction(n))` gives the fixed points,
+  and `PermutationImages(p, PermutationAction(n))` the one-line form padded to
+  n: for `Permutation([2, 1, 3])` in degree 4, `[3, 4]` and `[2, 1, 3, 4]`. A
+  permutation that moves a point above n is
+  `Error("permutation-outside-action")` (#622, contributed by
+  [enumeratio](https://github.com/enumeratio)).
 
 ### Resolved Issues
 
