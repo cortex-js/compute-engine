@@ -23,6 +23,7 @@
 
 const CACHE_CLASSES = [
   'sgn', // BoxedFunction._sgn — generation key
+  'finite', // BoxedFunction._isFinite — the same key
   'type', // BoxedFunction._type — same key, plus the _typeGeneration fast path
   'effects', // BoxedFunction._effects — generation key, cycle-safe bespoke
   'lazyValue', // the lazy-collection evaluate memo — epoch + generation + scope

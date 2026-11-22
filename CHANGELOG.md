@@ -10,6 +10,14 @@
   `RangeError`, as for `IsPrime`, and `PrimePi` and `NthPrime` throw past
   20,000,768, where the interpreter gives an error.
 
+- **The derivative of a function whose parameter has the name of a declared
+  symbol is no longer slower** (CE-1708). With `x` declared `real`, the
+  derivative of `f(x) = √(x + √(x + … + √x))`, 37 levels, took about 1.8
+  times as long as the same function with a parameter `p`; it now takes
+  about as long. The finiteness of an expression is now cached like its
+  sign, so building a chain of calls is no longer quadratic in its depth
+  (CE-1200): 5,000 nested `Sin` took 4.8 s, and now take less than 0.1 s.
+
 ### Resolved Issues
 
 - **A Document row can call an import declared `unknown` or `function`**

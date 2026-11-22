@@ -12,7 +12,7 @@
  *   look-up of `element`).
  * - `walkinvariant` does not wrap the callback of a walk, so the invariant
  *   sub-expressions of the callback are evaluated at each element.
- * - `sgn` and `type` empty their cell before each read, unless a
+ * - `sgn`, `finite` and `type` empty their cell before each read, unless a
  *   computation of the cell is in progress: a re-entrant read must still get
  *   the answer that ends a recursive read (`forgetSettledValue()`,
  *   `boxed-expression/cache.ts`). With `type` off, the type of a recursive
@@ -63,6 +63,7 @@ export const CACHE_SWITCHES = [
   'effects', // effects cache of a function expression (`boxed-function.ts`)
   'element', // element memo of a lazy collection (`collection-element-memo.ts`)
   'facet', // count, isEmpty and isFinite memo (`boxed-function.ts`)
+  'finite', // finiteness cache of a function expression (`boxed-function.ts`)
   'factor', // factor memo (`boxed-expression/factor.ts`)
   'lazyvalue', // lazy value memo of a collection view (`boxed-function.ts`)
   'limitprobe', // compiled probes of `Limit` (`symbolic/limit.ts`)

@@ -637,6 +637,30 @@ import {
  * invalidated with it. */
 type FacetEntry<T> = { value: T; objectDeps?: ObjectDeps };
 
+/** The operators whose rule in `BoxedFunction._isFiniteUncached()` reads the
+ * `isFinite` of their operands (`_warmOperandsFinite()`). */
+const FINITE_FROM_OPERANDS: ReadonlySet<string> = new Set([
+  'Abs',
+  'Sqrt',
+  'Root',
+  'Power',
+  'Divide',
+  'Negate',
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Sin',
+  'Cos',
+  'Sinh',
+  'Cosh',
+  'Exp',
+  'Erf',
+  'Erfc',
+  'Arctan',
+  'Ln',
+  'Log',
+]);
+
 /** Count of provisional (re-entrant) `_effectsOf` reads — see the cycle note
  * on `_effectsOf`. A computation that consumed one must not be frozen into
  * the memo. Monotonic; only ever compared before/after a computation. */
@@ -1577,6 +1601,10 @@ export class BoxedFunction
     generation: -1,
   };
   private _type: CachedValue<BoxedType | undefined> = {
+    value: null,
+    generation: -1,
+  };
+  private _isFinite: CachedValue<boolean | undefined> = {
     value: null,
     generation: -1,
   };
@@ -3939,6 +3967,61 @@ export class BoxedFunction
 
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
+    // Memoized like `sgn`, on the same key: the answer reads the operands'
+    // own `isFinite`, so without the memo a chain such as
+    // `Sqrt(Add(x, Sqrt(Add(x, …))))` is walked to its end at each read, and
+    // a derivation that builds and types each level reads it again at each
+    // level (CE-1708).
+    const gen = this.engine._cacheGeneration();
+    if (cacheOff('finite')) forgetSettledValue(cachedCell(this._isFinite, gen));
+    else if (
+      FINITE_FROM_OPERANDS.has(this._operator) &&
+      cachedCell(this._isFinite, gen).generation !== gen
+    )
+      this._warmOperandsFinite(gen);
+    return cachedValue(
+      this._isFinite,
+      gen,
+      () => this._isFiniteUncached(),
+      CACHE_STATS ? { cls: 'finite', same: (a, b) => a === b } : undefined,
+      this.engine
+    );
+  }
+
+  /**
+   * Fill the `isFinite` cells of the operands of this expression, deepest
+   * first, without recursion: an operand whose rule in `_isFiniteUncached()`
+   * reads the `isFinite` of its own operands (`FINITE_FROM_OPERANDS`) is
+   * read after them, so each computation finds its operands cached and the
+   * stack does not grow with the depth of the expression. Without it, a
+   * first read at the root of a chain of 2,000 `Sin` overflowed the stack
+   * (five frames a level through `cachedValue()`, where the uncached getter
+   * took two).
+   */
+  private _warmOperandsFinite(gen: number): void {
+    const cold = (x: Expression): x is BoxedFunction =>
+      x instanceof BoxedFunction &&
+      FINITE_FROM_OPERANDS.has(x.operator) &&
+      cachedCell(x._isFinite, gen).generation !== gen;
+    const pending: [BoxedFunction, boolean][] = [];
+    for (const x of this.ops) if (cold(x)) pending.push([x, false]);
+    if (pending.length === 0) return;
+    const seen = new Set<BoxedFunction>();
+    while (pending.length > 0) {
+      const [node, expanded] = pending.pop()!;
+      if (expanded) {
+        void node.isFinite;
+        continue;
+      }
+      if (seen.has(node)) continue;
+      seen.add(node);
+      pending.push([node, true]);
+      for (const x of node.ops)
+        if (cold(x) && !seen.has(x)) pending.push([x, false]);
+    }
+  }
+
+  private _isFiniteUncached(): boolean | undefined {
     // A value of a value kind (`isKindValue()`) is not a number, and has no
     // numeric property to read: the answer is `undefined`, so a fold that
     // reads it does not fire (`docs/plans/2026-10-26-value-kinds.md`,
