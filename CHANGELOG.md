@@ -26,6 +26,11 @@
 
 ### Resolved Issues
 
+- **A small number in engineering notation is printed with the right
+  exponent** (CE-1690). `0.000012` was `120.0\cdot10^{-3}` (that is
+  `0.12`); it is now `12.0\cdot10^{-6}`. Every exponent from `-4` down that
+  is not a multiple of 3 was wrong.
+
 - **A Document row can call an import declared `unknown` or `function`**
   (CE-1705). With an import `f` declared `function` and given the value
   `t ↦ 2t`, the row `g(x) = f(x) + 1` is prepared, and `g(2)` is `5`. It was

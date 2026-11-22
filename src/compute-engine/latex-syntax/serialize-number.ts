@@ -434,12 +434,12 @@ function serializeScientificNotationNumber(
   }
 
   if (Math.abs(exponent) % expMultiple !== 0) {
-    // Need to adjust the exponent and values, e.g. for engineering notation
-    const adjust =
-      exponent > 0
-        ? exponent % expMultiple
-        : -((expMultiple + exponent) % expMultiple);
-    exponent = exponent >= 0 ? exponent - adjust : exponent + adjust;
+    // Need to adjust the exponent and values, e.g. for engineering notation:
+    // the exponent goes down to the multiple below it, for both signs, and
+    // the decimal point moves right by the same count (`1.2e-5` is
+    // `12e-6`, `1.2e5` is `120e3`).
+    const adjust = ((exponent % expMultiple) + expMultiple) % expMultiple;
+    exponent -= adjust;
     // Don't use numeric operations, which may introduce artifacting
     // eslint-disable-next-line prefer-const
     let [_, whole, fraction] = mantissa.match(/^(.*)\.(.*)$/) ?? [

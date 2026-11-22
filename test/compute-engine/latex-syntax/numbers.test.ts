@@ -523,7 +523,7 @@ describe('SERIALIZATION OF NUMBERS', () => {
       });
     expect(reformat('0')).toMatchInlineSnapshot(`0`);
     expect(reformat('1')).toMatchInlineSnapshot(`1`);
-    expect(reformat('0.00001')).toMatchInlineSnapshot(`100.0\\times10^{-3}`);
+    expect(reformat('0.00001')).toMatchInlineSnapshot(`10.0\\times10^{-6}`);
     expect(reformat('0.0123')).toMatchInlineSnapshot(`12.3\\times10^{-3}`);
     expect(reformat('0.001')).toMatchInlineSnapshot(`1.0\\times10^{-3}`);
     expect(reformat('0.123')).toMatchInlineSnapshot(`123.0\\times10^{-3}`);
