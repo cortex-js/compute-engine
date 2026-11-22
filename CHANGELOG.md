@@ -13,6 +13,20 @@
   [enumeratio](https://github.com/enumeratio), fixes
   [#492](https://github.com/cortex-js/compute-engine/issues/492)).
 
+- **A list at a parameter with no type is mapped, also beside a parameter that
+  takes its argument whole** (CE-1697). With
+  `f(L, n) := Which(n = 0, 0, True, Mean(L) + f(L, n - 1))`, where `L` is used
+  as a collection, `f([1, 2, 6], [1, 2])` is `[3, 6]`, one call for each
+  element of `n` with `L` passed whole to each call. Before, both lists were
+  passed whole, and the recursion never reached its base case
+  (`Recursion limit exceeded`). A body that combines the whole list with the
+  other argument element by element now gives one row per element: with
+  `g(L, k) := Mean(L) + L·k`, `g([1, 2, 6], [1, 2, 3])` is
+  `[[4, 5, 9], [5, 7, 15], [6, 9, 21]]`; it was `[4, 7, 21]`. The call is
+  typed as the map (`list<…>`). `Apply` of a function literal follows the same
+  rule. A library function whose scalar parameter is declared, such as
+  `Repeat(value, integer)`, is unchanged.
+
 ### New Features
 
 - **Signature help marks optional, rest and implicit parameters, and covers
@@ -150,6 +164,25 @@
   #639, reported by [enumeratio](https://github.com/enumeratio)).
 
 ### Resolved Issues
+
+- **A subscript made of letters stays one symbol when one of its letters
+  names a macro** (CE-1657). After `ce.declare('P', { macro: ['Add', 't', 1] })`,
+  `I_{Past}` is the symbol `I_Past`, as it is with no macro; it was
+  `["Subscript", "I", ["Multiply", "a", "s", "t", ["Add", "t", 1]]]`, because
+  the letters were read as a product and `P` was expanded inside it. The same
+  holds for `["Subscript", "I", "P"]`, which is `I_P`. An index that is an
+  expression still expands the macro: `I_{P+1}` is
+  `["Subscript", "I", ["Add", "t", 2]]`.
+
+- **A function that passes its argument whole to another function takes a list
+  whole when that function does** (CE-1696). With `S(x) = Mean(x)` and
+  `T(x) = S(x)`, `T([1, 2, 6])` is now `3`; it was `[1, 2, 6]`, because the list
+  was mapped over its elements. This happened for Document function rows, and
+  for functions declared (`ce.declare('S', 'function')` or with a signature)
+  before they were assigned; a plain `ce.assign()` already gave `3`. With the
+  same `S`, `T(x) = S(x) + x` now gives `[4, 5, 9]` for `[1, 2, 6]`, as a plain
+  `ce.assign()` did, where it gave `[2, 4, 12]`. A callee that maps its argument
+  (`Sin`, or a name that holds `Norm`) still maps it.
 
 - **Under `.N()`, the guard digits of an exact operand grow with its nearness
   to a pole and, for some functions, with its size.** An exact operand was

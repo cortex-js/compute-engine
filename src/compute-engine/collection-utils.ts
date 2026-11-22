@@ -5718,10 +5718,11 @@ export function isCardinalityOperand(x: Expression): boolean {
  * iterates every non-text collection, so a tuple beside a list was zipped
  * too, and `f([1, 2, 3], (10, 20))` for a scalar-parameter `f` gave two rows
  * `(1, 10), (2, 20)` instead of three rows each holding the whole point.
+ * `participates` reads the item and its position.
  */
 export function zipBroadcast(
   items: ReadonlyArray<Expression>,
-  participates: (x: Expression) => boolean
+  participates: (x: Expression, i: number) => boolean
 ): Iterator<Expression[]> {
   const columns = items.filter(participates);
   const inner = zip(columns);
@@ -5732,7 +5733,7 @@ export function zipBroadcast(
       let k = 0;
       return {
         done: false,
-        value: items.map((x) => (participates(x) ? value[k++] : x)),
+        value: items.map((x, i) => (participates(x, i) ? value[k++] : x)),
       };
     },
   };

@@ -238,11 +238,7 @@ const BOX_CASES: [string, MathJsonExpression, string][] = [
   ['Flatten', ['Flatten', 'xs'], 'collection<any> | value'],
   ['SetFrom', ['SetFrom', 'xs'], 'collection<any> | value'],
   ['TupleFrom', ['TupleFrom', 'xs'], 'collection<any> | value'],
-  [
-    'mixed use',
-    ['Add', ['Mean', 'xs'], 'xs'],
-    'collection<number> | value',
-  ],
+  ['mixed use', ['Add', ['Mean', 'xs'], 'xs'], 'collection<number> | value'],
 ];
 
 function substitute(
@@ -444,7 +440,9 @@ describe('Element-wise uses still broadcast', () => {
       ce,
       'function h(xs) { map(xs => mean(xs), [[1, 2], [3]]) + xs }'
     );
-    expect(ce.symbol('h').type.toString()).toBe('(xs: unknown) -> list<number>');
+    expect(ce.symbol('h').type.toString()).toBe(
+      '(xs: unknown) -> list<number>'
+    );
   });
 
   test('a use inside an inner function is a use of the outer parameter', () => {
@@ -680,6 +678,88 @@ describe('Limitations of the rule, as they behave today', () => {
         .evaluate()
         .toString()
     ).toBe('2');
+  });
+
+  test('a call through a name declared `function` or with a signature is a whole use (CE-1696)', () => {
+    const L: MathJsonExpression = ['List', 1, 2, 6];
+    const mean: MathJsonExpression = ['Function', ['Mean', 'x'], 'x'];
+    const value = (ce: ComputeEngine, expr: MathJsonExpression) =>
+      ce.box(expr).evaluate().toString();
+    // Both orders, and a chain of three.
+    for (const order of [
+      ['S', 'T', 'U'],
+      ['U', 'T', 'S'],
+    ]) {
+      const ce = new ComputeEngine();
+      for (const name of ['S', 'T', 'U']) ce.declare(name, 'function');
+      const bodies: Record<string, MathJsonExpression> = {
+        S: mean,
+        T: ['Function', ['S', 'x'], 'x'],
+        U: ['Function', ['T', 'x'], 'x'],
+      };
+      for (const name of order) ce.assign(name, bodies[name]);
+      expect(value(ce, ['T', L])).toBe('3');
+      expect(value(ce, ['U', L])).toBe('3');
+    }
+    // A callee declared with a signature.
+    let ce = new ComputeEngine();
+    ce.declare('S', '(collection<number> | value) -> number');
+    ce.assign('S', mean);
+    ce.assign('T', ['Function', ['S', 'x'], 'x']);
+    expect(ce.box('T').type.toString()).toBe(
+      '(x: collection<number> | value) -> number'
+    );
+    expect(value(ce, ['T', L])).toBe('3');
+    // A recursive caller.
+    ce = new ComputeEngine();
+    ce.declare('S', 'function');
+    ce.declare('K', 'function');
+    ce.assign('S', mean);
+    ce.assign('K', [
+      'Function',
+      ['If', ['Equal', 'n', 0], ['S', 'x'], ['K', ['Subtract', 'n', 1], 'x']],
+      'n',
+      'x',
+    ]);
+    expect(value(ce, ['K', 2, L])).toBe('3');
+    // A use that is also element-wise: the list is bound whole, as without
+    // the declarations, `Mean([1, 2, 6]) + [1, 2, 6]`.
+    ce = new ComputeEngine();
+    ce.declare('S', 'function');
+    ce.declare('T', 'function');
+    ce.assign('S', mean);
+    ce.assign('T', ['Function', ['Add', ['S', 'x'], 'x'], 'x']);
+    expect(value(ce, ['T', L])).toBe('[4,5,9]');
+  });
+
+  test('a name that holds Norm keeps its exception (CE-1696)', () => {
+    // `Norm` takes a list element by element, so a wrapper through a name
+    // that holds it maps a list too, declared first or not.
+    for (const declared of [true, false]) {
+      const ce = new ComputeEngine();
+      if (declared) {
+        ce.declare('S', 'function');
+        ce.declare('T', 'function');
+      }
+      ce.assign('S', ce.box('Norm'));
+      ce.assign('T', ['Function', ['S', 'x'], 'x']);
+      expect(ce.box(['T', ['List', 3, 4]]).evaluate().json).toEqual([
+        'List',
+        3,
+        4,
+      ]);
+    }
+  });
+
+  test('a call through a name declared `function` whose slot is scalar maps a list (CE-1696)', () => {
+    const ce = new ComputeEngine();
+    for (const name of ['R', 'Q', 'P']) ce.declare(name, 'function');
+    ce.assign('R', ['Function', ['Sin', 'x'], 'x']);
+    ce.assign('Q', ['Function', ['R', 'x'], 'x']);
+    ce.assign('P', ['Function', ['Add', ['R', 'x'], 'x'], 'x']);
+    const L: MathJsonExpression = ['List', 0, 1];
+    expect(ce.box(['Q', L]).evaluate().toString()).toBe('[0,sin(1)]');
+    expect(ce.box(['P', L]).evaluate().toString()).toBe('[0,1 + sin(1)]');
   });
 
   test('a call to a local function whose parameter is a declared list is a whole use', () => {

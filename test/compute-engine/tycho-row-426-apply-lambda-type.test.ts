@@ -562,12 +562,17 @@ describe('row 426 second review: a nested literal that reads an outer name', () 
       ce.assign('S', ce.box(['List', "'x'", "'y'"]));
       const value = ce.box(['Apply', literal, 'M', second]).evaluate();
       // The two routes agree, and neither is refined by the nested literal.
+      // A `b` read only as a scalar stays `unknown`, and a list there is
+      // mapped, one call per element, beside the whole-bound `a` (user
+      // decision 2026-11-22, CE-1697): the call is a list of the result.
+      // A `b` read by index binds whole.
       expect(applied.toString()).toBe(named.toString());
+      const result = ce
+        .box(literal)
+        .type.toString()
+        .replace(/^.*-> /, '');
       expect(applied.toString()).toBe(
-        ce
-          .box(literal)
-          .type.toString()
-          .replace(/^.*-> /, '')
+        label === 'At(b, 1)' ? result : `list<${result}>`
       );
       // With `b = M`, `u·b` is a list: the literal's own signature types it
       // a number (the unknown parameter `b` is read as a number), so that

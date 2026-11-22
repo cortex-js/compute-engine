@@ -32,7 +32,7 @@ import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
 import { isOne } from '../numerics/rationals.js';
-import { asBigint } from './numerics.js';
+import { asBigint, asSmallInteger } from './numerics.js';
 
 import { canonicalAdd } from './arithmetic-add.js';
 import { canonicalMultiply } from './arithmetic-mul-div.js';
@@ -123,6 +123,7 @@ import {
   placeholderSlotsAs,
   signatureArms,
   withoutKindArms,
+  collectionElementType,
 } from '../../common/type/utils.js';
 import { KIND_PRIMITIVES, kindTypeNames } from './value-kinds.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -2053,7 +2054,12 @@ function unboundRebuilder(
         ops: nodeOps,
         policy:
           info.lazy !== undefined
-            ? operandPolicies(info.lazy.operandRoles(nodeOps), nodeOps)
+            ? operandPolicies(
+                ce,
+                node.operator,
+                info.lazy.operandRoles(nodeOps),
+                nodeOps
+              )
             : undefined,
         underBinder: underBinder || binder,
         hidden: info.hides
@@ -2087,6 +2093,7 @@ function unboundRebuilder(
           const x = f.ops[f.i];
           const p = f.policy?.[f.i];
           if (p === 'skip') give(f, x, false);
+          else if (p === 'names') give(f, withKeptNames(ce, x), true);
           else visit(f, x, f.underBinder, f.hidden, p === 'name');
           continue;
         }
@@ -2168,16 +2175,21 @@ function boxRawOperands(
 
 /** What the walk of the raw operands of a lazy call does with an operand:
  * keep it as it is (`skip`: the role `opaque` or `held`), keep a macro name
- * there as a name (`name`: a symbol with the role `bound` or `clause`), or
- * walk it (`undefined`). */
-type OperandPolicy = 'skip' | 'name' | undefined;
+ * there as a name (`name`: a symbol with the role `bound` or `clause`, or a
+ * part of a compound symbol), keep each symbol operand of it as a name
+ * (`names`: the letters of a compound symbol), or walk it (`undefined`). */
+type OperandPolicy = 'skip' | 'name' | 'names' | undefined;
 
-/** The `OperandPolicy` of each operand `ops` of a lazy call whose operand
- * roles are `roles`, or `undefined` when every operand is walked. */
+/** The `OperandPolicy` of each operand `ops` of the lazy call `operator`
+ * whose operand roles are `roles`, or `undefined` when every operand is
+ * walked. */
 function operandPolicies(
+  ce: ComputeEngine,
+  operator: MathJsonSymbol,
   roles: ReadonlyArray<string> | undefined,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<OperandPolicy> | undefined {
+  if (operator === 'Subscript') return compoundSymbolPolicies(ce, ops);
   if (roles === undefined) return undefined;
   let out: OperandPolicy[] | undefined;
   for (let i = 0; i < ops.length; i++) {
@@ -2191,6 +2203,61 @@ function operandPolicies(
     if (p !== undefined) (out ??= [])[i] = p;
   }
   return out;
+}
+
+/**
+ * The `OperandPolicy` of the operands `[base, index]` of a `Subscript` that
+ * its `canonical` handler joins into one symbol (`library/core.ts`): a
+ * symbol base, and an index that is a symbol or an `InvisibleOperator` of
+ * symbols and non-negative integers (`I_{Past}` is the symbol `I_Past`). The
+ * letters are parts of a name, so a letter that names a macro is not
+ * expanded there, as it is not in `I_{aPb}`, which the parser joins. A base
+ * whose value definition has a collection type (a list, a ring constant such
+ * as `Integers`) or a `subscriptEvaluate` handler reads the index as a value
+ * (`At`, `QuotientRing`, a kept `Subscript`), so the index is walked. Any
+ * other `Subscript` is walked (`undefined`).
+ */
+function compoundSymbolPolicies(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<OperandPolicy> | undefined {
+  if (ops.length !== 2) return undefined;
+  const [base, index] = ops;
+  if (!isSymbol(base)) return undefined;
+  const def = ce.lookupDefinition(base.symbol);
+  if (
+    isValueDef(def) &&
+    (def.value.subscriptEvaluate !== undefined ||
+      collectionElementType(def.value.type.type) !== undefined)
+  )
+    return undefined;
+  if (isSymbol(index)) return ['name', 'name'];
+  if (
+    isFunction(index, 'InvisibleOperator') &&
+    index.ops.every((x) => isSymbol(x) || (asSmallInteger(x) ?? -1) >= 0)
+  )
+    return ['name', 'names'];
+  return undefined;
+}
+
+/** The raw node `x` with each symbol operand that is not canonical and
+ * names a macro replaced by a kept name (`keptName()`), or `x` when there is
+ * none. */
+function withKeptNames(ce: ComputeEngine, x: Expression): Expression {
+  if (!isFunction(x)) return x;
+  let changed = false;
+  const ops = x.ops.map((op) => {
+    if (!isSymbol(op) || op.isCanonical || !ce._macroNames.has(op.symbol))
+      return op;
+    changed = true;
+    return keptName(ce, op);
+  });
+  if (!changed) return x;
+  return boxFunction(ce, x.operator, ops, {
+    canonical: false,
+    structural: false,
+    metadata: { latex: x.verbatimLatex, sourceOffsets: x.sourceOffsets },
+  });
 }
 
 /** The raw function nodes that hold no macro name of their engine: the
@@ -5028,7 +5095,7 @@ function expandMacroOperands(
   return (
     unboundRebuilder(ce, { structural: false, expand: true })(
       xs,
-      operandPolicies(roles, xs),
+      operandPolicies(ce, name, roles, xs),
       false,
       { head: name, ops: xs, parent: undefined }
     ) ?? xs

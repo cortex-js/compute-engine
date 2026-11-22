@@ -109,6 +109,27 @@ wrote**, not by the operand shapes:
    parameter in a static error of the body, and the type that compilation
    reads.
 
+   A list at a parameter with no declared type is mapped, one call per
+   element, also when another parameter binds its argument whole: a
+   parameter typed as a collection, as a union with a collection arm, or
+   declared `any`, `expression` or `value` (user decision 2026-11-22,
+   CE-1697). The parameter that binds whole is not part of the map, and its
+   argument is passed whole to each call. With
+   `f(L, n) := Which(n = 0, 0, True, Mean(L) + f(L, n - 1))`,
+   `f([1, 2, 6], [1, 2])` is `[3, 6]`; bound whole, `n = 0` never held for
+   the whole list and the recursion did not end. A body that combines the
+   whole list with the element gives one value per element:
+   `g(L, k) := Mean(L) + L·k` gives `[[4, 5, 9], [5, 7, 15]]` for
+   `g([1, 2, 6], [1, 2])`, not the pairing `[4, 7]`. A function-typed
+   parameter does not count, and neither does a built-in whose scalar
+   parameter is declared (`Repeat(value, integer)`). `Apply` of a function
+   literal maps the same way, with the same type
+   (`literalMappedParameters()`, `library/core.ts`). The test is
+   `unknownBesideWholeParameters()` (`boxed-expression/boxed-function.ts`),
+   read by the plan `pointListParamSlots()`, which compiled code reads too.
+   A compiled `Apply` of such a literal with a list at the mapped parameter
+   declines.
+
    A function that passes a collection to itself at a parameter position (a
    list literal, a range, a comprehension, any collection-typed argument)
    makes that parameter a collection, so a list argument is passed whole, not

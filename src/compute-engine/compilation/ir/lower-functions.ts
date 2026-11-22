@@ -485,7 +485,9 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
  *  (`pointListParamSlots()`): a list of points at a point parameter that
  *  is not an indexed one (`isIndexReadTuple()`), and any list at a
  *  parameter of a scalar type or of no stated type (user decision
- *  2026-10-24). Every other list binds whole. */
+ *  2026-10-24). The same plan holds a signature with a parameter of no
+ *  stated type beside one that binds whole (`unknownBesideWholeParameters()`,
+ *  CE-1697): a list maps at the first. Every other list binds whole. */
 function listMapsAt(sig: Type): (i: number, points: boolean) => boolean {
   // A parameter declared `broadcastable<T>` (and a scalar beside it) maps.
   const declared = broadcastableParamSlots(sig);

@@ -171,8 +171,10 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
     expect(w1()).toBe(
       '(unknown, list<tuple<number, number>> | tuple<number, number>) -> list<string> | string'
     );
+    // Each call maps the list that the call inside it can give (CE-1697),
+    // and each result can be a list: the nesting grows by one per call.
     expect(e()).toBe(
-      '(list<tuple<number, number>> | tuple<number, number>) -> list<string> | string'
+      '(list<tuple<number, number>> | tuple<number, number>) -> list<list<list<list<string> | string> | list<string> | string> | list<list<string> | string> | list<string> | string> | list<list<list<string> | string> | list<string> | string> | list<list<string> | string> | list<string> | string'
     );
 
     // A new body of the outermost callee.
@@ -197,8 +199,9 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
     expect(w1()).toBe(
       '(unknown, list<tuple<number, number>> | tuple<number, number>) -> integer | list<integer>'
     );
+    // Each call maps the list that the call inside it can give (CE-1697).
     expect(e()).toBe(
-      '(list<tuple<number, number>> | tuple<number, number>) -> integer | list<integer>'
+      '(list<tuple<number, number>> | tuple<number, number>) -> integer | list<integer | list<integer | list<integer | list<integer>> | list<integer>> | list<integer | list<integer>> | list<integer>> | list<integer | list<integer | list<integer>> | list<integer>> | list<integer | list<integer>> | list<integer>'
     );
   });
 
@@ -357,9 +360,13 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     };
     const scratch = new ComputeEngine();
     const scope = newScope(scratch);
-    const events = eventsOf(scratch, () => inScratch(scratch, scope, () => check(scratch)));
+    const events = eventsOf(scratch, () =>
+      inScratch(scratch, scope, () => check(scratch))
+    );
     expect([...scope.bindings.keys()]).toEqual([]);
-    expect(events.filter((e) => e.kind === 'inference' && e.valueType !== true)).toEqual([]);
+    expect(
+      events.filter((e) => e.kind === 'inference' && e.valueType !== true)
+    ).toEqual([]);
     check(new ComputeEngine());
   });
 
@@ -490,4 +497,3 @@ describe('A CHAIN OF FUNCTIONS THAT EACH CALL THE NEXT TWICE', () => {
     }
   });
 });
-

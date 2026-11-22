@@ -2041,11 +2041,10 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
       revision.dispose();
     });
 
-    test('a list at the other parameter is not mapped over (pinned)', () => {
-      // The narrowed `P` admits a list, so the call is not mapped over the
-      // list at `n`, and `n = 0` never holds for the whole list: the
-      // recursion limit is reached. A stated `list<number>` at `P` does the
-      // same on 0.198.0.
+    test('a list at the other parameter is mapped over (CE-1697)', () => {
+      // The narrowed `P` admits a list and binds its argument whole; the list
+      // at the untyped `n` is mapped, one call per count. Bound whole, `n = 0`
+      // never held for the whole list and the recursion did not end.
       const revision = prepare({
         g: [['P'], ['Multiply', ['PointX', 'P'], ['Tuple', 1, 0]]],
         f: [
@@ -2055,10 +2054,15 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
             ['Add', ['g', 'P'], ['f', 'P', ['Subtract', 'n', 1]]]
           ),
         ],
+        K: [['n', 'q'], cases(['Mean', 'q'], n1('K', 'q'))],
       });
-      expect(() =>
-        value(revision, ['f', ['Tuple', 1, 2], ['List', 1, 2]])
-      ).toThrow(/Recursion limit/);
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['f', ['Tuple', 1, 2], ['List', 1, 2]])).toBe(
+        '["List",["Tuple",1,0],["Tuple",2,0]]'
+      );
+      expect(value(revision, ['K', ['List', 0, 1], ['List', 1, 2, 6]])).toBe(
+        '["List",3,3]'
+      );
       revision.dispose();
     });
 
@@ -2089,6 +2093,68 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
       const revision = prepare({ K }, { formalTypes: { x: 'list<number>' } });
       expect(errors(revision)).toBe('[]');
       expect(value(revision, ['K', 2, ['List', 1, 2, 6]])).toBe('5');
+      revision.dispose();
+    });
+  });
+
+  describe('a function that passes its parameter whole to another row (CE-1696)', () => {
+    const S: [string[], Json] = [['x'], ['Mean', 'x']];
+    const type = (revision: { scope: InspectableScope }, name: string) =>
+      ce.expr(name, { scope: revision.scope }).type.toString();
+
+    test('takes a list argument whole when the callee does', () => {
+      const revision = prepare({
+        S,
+        T: [['x'], ['S', 'x']],
+        U: [['x'], ['T', 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(type(revision, 'T')).toBe(
+        '(x: collection<number> | value) -> number'
+      );
+      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe('3');
+      expect(value(revision, ['U', ['List', 1, 2, 6]])).toBe('3');
+      expect(value(revision, ['T', 4])).toBe('4');
+      revision.dispose();
+    });
+
+    test('maps a list argument when the callee does', () => {
+      const revision = prepare({
+        R: [['x'], ['Sin', 'x']],
+        Q: [['x'], ['R', 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['Q', ['List', 0, 1]])).toBe(
+        '["List",0,["Sin",1]]'
+      );
+      revision.dispose();
+    });
+
+    test('a parameter also used element-wise', () => {
+      // With `Sin` as the callee, every use is element-wise and the call
+      // maps. With `Mean`, the list is bound whole, as for `ce.assign()`:
+      // `Mean([1, 2, 6]) + [1, 2, 6]`.
+      const revision = prepare({
+        R: [['x'], ['Sin', 'x']],
+        P: [['x'], ['Add', ['R', 'x'], 'x']],
+        S,
+        T: [['x'], ['Add', ['S', 'x'], 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['P', ['List', 0, 1]])).toBe(
+        '["List",0,["Add",1,["Sin",1]]]'
+      );
+      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe('["List",4,5,9]');
+      revision.dispose();
+    });
+
+    test('a recursive caller', () => {
+      const revision = prepare({
+        S,
+        K: [['n', 'x'], cases(['S', 'x'], n1('K', 'x'))],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['K', 2, ['List', 1, 2, 6]])).toBe('3');
       revision.dispose();
     });
   });
