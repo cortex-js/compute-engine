@@ -44,6 +44,7 @@ import {
   optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { isLibraryOperator } from '../library-shadowing.js';
+import { declaredBinderNamesOf } from '../boxed-expression/binding-sites.js';
 
 type Head = { name: string; params: readonly string[] };
 type Role = 'function' | 'value';
@@ -70,29 +71,48 @@ export interface PreparedDocumentDefinition {
    * Advisory argument types of a function row, one entry per parameter: the
    * join of the static types of the arguments at that position in every call
    * of the function from the bodies of the revision's definition rows (value
-   * rows and function rows that are not errors; formula rows and the rows
-   * that read a field axis are not canonicalized by prepare and give no
-   * evidence). Each argument type is widened: a number becomes
+   * rows and function rows that are not errors; a row that reads a field
+   * axis gives no evidence) and from the formula rows. In a formula row, an
+   * argument that reads a field axis (such as the plot axis `t`) or a field
+   * value is open; a name that a binder above it binds is not a field read.
+   * A binder's own limits count as bound too: in `Sum(1, Limits(t, 1,
+   * h(t)))`, the `t` of the upper limit, which reads the axis, gives the
+   * evidence of its declared input type. A formula row that calls a
+   * function of the document is canonicalized only to read these types, in
+   * a scope of its own that is then discarded: it gives no definition and
+   * no row error, and a formula row that is not valid gives no evidence.
+   * Another free name of a formula
+   * row has the type of the input that the host declared with that name,
+   * and is otherwise open. Each argument type is widened: a number becomes
    * `real`, or `number` when it may be complex, and a list, a set or a tuple
    * keeps its shape and its lengths (`[1, 2, 3]` gives `vector<real^3>`). The
    * join is the type join of the engine, so a point at one call and a list
    * of points at another give their union.
    *
-   * An entry is `undefined` when the function has no call, when the type of
-   * one call's argument at that position is `never` or an error, or is or
-   * has a part (an element, a field) that is `unknown` or `any`, or,
-   * for every entry, when one call has another number of arguments or a
-   * spread argument. A parameter passed on has the type that its function
-   * infers for it, usually open: in `g(q) = d(q)`, `q` is
-   * `collection<any> | tuple`, so the entry of `d` is `undefined`. A call of
-   * a function from its own body is a call site too. Every entry is
-   * `undefined` when the function's name is read as a value, not called
-   * (`Map(L, d)`, `f(d)`). The operands of `Hold` and `Quote` are not read.
-   * A parameter of a function literal with the function's name shadows it;
-   * a local of a `Block` with that name does not, so a call of such a local
-   * counts as a call of the function. The variable of a binder with the
-   * function's name (`Sum(h, Limits(h, 1, 3))`) does not shadow it either:
-   * it reads as the function used as a value, and every entry is
+   * An argument whose type is or has a part (an element, a field) that is
+   * `unknown` or `any` gives no evidence at its position: the entry is then
+   * the join of the other calls' argument types, and describes those calls
+   * only. A host that declares such an entry as the formal type of the
+   * parameter changes the function's contract. A call whose argument is
+   * typed exactly `unknown` or `any` is still accepted by the static check,
+   * but a call whose argument only has an open part can be refused: with
+   * the formal `tuple<real, real>`, the argument `[q]` of type
+   * `list<unknown>` is an error. A parameter passed on has the type that its
+   * function infers for it, usually open: in `g(q) = d(q)`, `q` is
+   * `collection<any> | tuple`, so the call `d(q)` gives no evidence.
+   *
+   * An entry is `undefined` when the function has no call, when no call has
+   * an argument of a type that is not open at that position, when the type
+   * of one call's argument at that position is `never` or an error, or, for
+   * every entry, when one call has another number of arguments or a spread
+   * argument. A call of a function from its own body is a call site too.
+   * Every entry is `undefined` when the function's name is read as a value,
+   * not called (`Map(L, d)`, `f(d)`). The operands of `Hold` and `Quote` are
+   * not read. A parameter of a function literal with the function's name
+   * shadows it; a local of a `Block` with that name does not, so a call of
+   * such a local counts as a call of the function. The variable of a binder
+   * with the function's name (`Sum(h, Limits(h, 1, 3))`) does not shadow it
+   * either: it reads as the function used as a value, and every entry is
    * `undefined`.
    *
    * The field is advisory. It does not change the function's contract: no
@@ -517,31 +537,87 @@ function hasOpenPart(t: Type): boolean {
   }
 }
 
+/** The argument types of the calls of each function, by position. `null`
+ * marks a position, or a whole function, with no usable evidence. */
+type CallSiteEvidence = Map<string, (Type[] | null)[] | null>;
+
+function emptyCallSiteEvidence(
+  arities: ReadonlyMap<string, number>
+): CallSiteEvidence {
+  return new Map(
+    [...arities].map(([name, arity]) => [
+      name,
+      Array.from({ length: arity }, () => []),
+    ])
+  );
+}
+
+/** Add the evidence of `from` to `into`. */
+function mergeCallSiteEvidence(
+  into: CallSiteEvidence,
+  from: CallSiteEvidence
+): void {
+  for (const [name, slots] of from) {
+    const target = into.get(name);
+    if (target === null) continue;
+    if (slots === null || target === undefined) {
+      into.set(name, slots);
+      continue;
+    }
+    slots.forEach((types, i) => {
+      if (types === null) target[i] = null;
+      else target[i]?.push(...types);
+    });
+  }
+}
+
 /**
- * The `callSiteTypes` of each function in `arities`, from one walk over the
- * canonical `bodies`. A call of a function under a `Function` literal one of
- * whose parameters has the function's name is not a call of it. A function
- * whose name is read as a value (`Map(L, d)`, `f(d)`) has no evidence. The
- * operands of `Hold` and `Quote` are not walked.
+ * The names that `expr` binds in its operands: the variables of a binder
+ * (`declaredBinderNamesOf`: the index of a `Sum`, the parameters of a
+ * `Function`) and the locals that a library `Block` declares.
  */
-function callSiteTypes(
+function boundNames(ce: IComputeEngine, expr: Expression): readonly string[] {
+  if (!isFunction(expr)) return [];
+  const names = declaredBinderNamesOf(ce, expr.operator, expr.ops);
+  if (expr.operator !== 'Block' || !isLibraryOperator(expr)) return names;
+  const locals = expr.ops.flatMap((op) =>
+    isFunction(op, 'Declare') && isSymbol(op.op1) ? [op.op1.symbol] : []
+  );
+  return locals.length === 0 ? names : [...names, ...locals];
+}
+
+/**
+ * Add to `evidence` the argument types of the calls of the functions in
+ * `arities`, from one walk over the canonical `bodies`. The walk reads the
+ * types before it returns, so a body boxed in a scope of its own is read
+ * before the scope is disposed. A call of a function under a `Function`
+ * literal one of whose parameters has the function's name is not a call of
+ * it. A function whose name is read as a value (`Map(L, d)`, `f(d)`) has no
+ * evidence. The operands of `Hold` and `Quote` are not walked. An argument
+ * that `isOpen` accepts is open, as an argument of an open type; `bound`
+ * holds the names that a binder around the argument binds (`boundNames`).
+ */
+function readCallSites(
   ce: IComputeEngine,
   bodies: readonly Expression[],
-  arities: ReadonlyMap<string, number>
-): Map<string, (string | undefined)[]> {
-  // `null` marks a position, or a whole function, with no usable evidence.
-  const evidence = new Map<string, (Type[] | null)[] | null>();
-  for (const [name, arity] of arities)
-    evidence.set(
-      name,
-      Array.from({ length: arity }, () => [])
-    );
-  const pending: { expr: Expression; shadowed: ReadonlySet<string> }[] =
-    bodies.map((expr) => ({ expr, shadowed: new Set<string>() }));
+  arities: ReadonlyMap<string, number>,
+  evidence: CallSiteEvidence,
+  isOpen?: (arg: Expression, bound: ReadonlySet<string>) => boolean
+): void {
+  const pending: {
+    expr: Expression;
+    shadowed: ReadonlySet<string>;
+    bound: ReadonlySet<string>;
+  }[] = bodies.map((expr) => ({
+    expr,
+    shadowed: new Set<string>(),
+    bound: new Set<string>(),
+  }));
   while (pending.length > 0) {
-    const { expr, shadowed } = pending.pop()!;
+    const { expr, shadowed, bound } = pending.pop()!;
     if (isDictionary(expr)) {
-      for (const value of expr.values) pending.push({ expr: value, shadowed });
+      for (const value of expr.values)
+        pending.push({ expr: value, shadowed, bound });
       continue;
     }
     if (isSymbol(expr)) {
@@ -585,17 +661,26 @@ function callSiteTypes(
           const types = slots[i];
           if (types === null) return;
           const type = arg.type.type;
-          if (
-            hasOpenPart(type) ||
-            type === 'never' ||
-            arg.type.matches('error')
-          )
-            slots[i] = null;
-          else types.push(widenArgumentType(ce, type));
+          if (type === 'never' || arg.type.matches('error')) slots[i] = null;
+          // An open argument gives no evidence at its position.
+          else if (!hasOpenPart(type) && !isOpen?.(arg, bound))
+            types.push(widenArgumentType(ce, type));
         });
     }
-    for (const op of operands) pending.push({ expr: op, shadowed: inner });
+    const names = isOpen === undefined ? [] : boundNames(ce, expr);
+    const innerBound =
+      names.length === 0 ? bound : new Set([...bound, ...names]);
+    for (const op of operands)
+      pending.push({ expr: op, shadowed: inner, bound: innerBound });
   }
+}
+
+/** The `callSiteTypes` of each function in `arities`, from `evidence`. */
+function callSiteTypes(
+  ce: IComputeEngine,
+  arities: ReadonlyMap<string, number>,
+  evidence: CallSiteEvidence
+): Map<string, (string | undefined)[]> {
   const result = new Map<string, (string | undefined)[]>();
   for (const [name, arity] of arities) {
     const slots = evidence.get(name)!;
@@ -1434,7 +1519,13 @@ export function prepareDocument(
           cursors.size === 0,
         'Document preparation lost a row'
       );
-      const callSites = callSiteTypes(
+      const arities = new Map(
+        [...declarations]
+          .filter(([, { row }]) => row.role === 'function')
+          .map(([name, { head }]) => [name, head.params.length])
+      );
+      const evidence = emptyCallSiteEvidence(arities);
+      readCallSites(
         ce,
         [...declarations]
           .filter(
@@ -1442,12 +1533,63 @@ export function prepareDocument(
               !rowErrors.has(row.id) && !fieldParameters.has(name)
           )
           .map(([name]) => bodies.get(name)!),
-        new Map(
-          [...declarations]
-            .filter(([, { row }]) => row.role === 'function')
-            .map(([name, { head }]) => [name, head.params.length])
-        )
+        arities,
+        evidence
       );
+      // A formula row that calls a function of the document is boxed only
+      // to read the types of its arguments, in a scope of its own: a free
+      // name, or a name that the row declares, is declared there, not in the
+      // revision or in another row. A row that does not box, or is not
+      // valid, gives no evidence. An argument that reads a field axis or a
+      // field value is open: its value depends on the point of the field. A
+      // name that a binder around it binds (`\sum_{t=1}^{3}`) is not a read.
+      const readsField = (
+        expr: Expression,
+        bound: ReadonlySet<string>
+      ): boolean => {
+        if (isSymbol(expr))
+          return (
+            !bound.has(expr.symbol) &&
+            (fieldAxes.has(expr.symbol) || fieldParameters.has(expr.symbol))
+          );
+        if (isDictionary(expr))
+          return expr.values.some((value) => readsField(value, bound));
+        if (!isFunction(expr)) return false;
+        if (!bound.has(expr.operator) && fieldParameters.has(expr.operator))
+          return true;
+        const names = boundNames(ce, expr);
+        const inner =
+          names.length === 0 ? bound : new Set([...bound, ...names]);
+        return expr.ops.some((op) => readsField(op, inner));
+      };
+      for (const row of rows) {
+        if (
+          row.role !== 'formula' ||
+          !rowReferences.get(row.id)!.some((ref) => names.callables.has(ref))
+        )
+          continue;
+        checkDeadline(ce._deadlineFrame);
+        const probe = ce.createScope({}, scope);
+        try {
+          ce._inScope(probe, () => {
+            const expr = ce.box(parsed.get(row.id)!);
+            if (!expr.isValid) return;
+            // A row adds its evidence only when its walk finishes.
+            const read = emptyCallSiteEvidence(arities);
+            readCallSites(ce, [expr], arities, read, readsField);
+            mergeCallSiteEvidence(evidence, read);
+          });
+        } catch (error) {
+          // This advisory step must not make prepare throw: a defect of the
+          // box only leaves an entry out, and `withRootRepair` resets the
+          // boxing state.
+          if (error instanceof Error && error.name === 'CancellationError')
+            throw error;
+        } finally {
+          probe.dispose();
+        }
+      }
+      const callSites = callSiteTypes(ce, arities, evidence);
       const preparedDefinitions: PreparedDocumentDefinition[] = [
         ...declarations,
       ].map(([name, item]) => ({

@@ -1414,6 +1414,32 @@ describe('call-site types', () => {
     ).toEqual({ d: [undefined], g: ['tuple<real, real>'], E: undefined });
   });
 
+  test('ignore an open argument when another call has a closed one', () => {
+    const rows = [
+      d,
+      { id: 'g', latex: 'g(q)=d(q)' },
+      { id: 'E', latex: 'E=g((1,1))' },
+      { id: 'A', latex: 'A=d((3,4))' },
+    ];
+    const entry = callSiteTypes(rows).d;
+    expect(entry).toEqual(['tuple<real, real>']);
+    // The entry describes the closed call only. Declared as the formal type,
+    // it still accepts a call with an `unknown` argument.
+    const revision = imports.prepare(
+      [
+        { ...d, formalTypes: { p: entry[0]! } },
+        { id: 'g', latex: 'g(q)=d(q)', formalTypes: { q: 'unknown' } },
+        { id: 'A', latex: 'A=d((3,4))' },
+      ],
+      latexSyntax(ce)
+    );
+    expect(revision.rowErrors.size).toBe(0);
+    expect(
+      ce.parse('g((3,4))', { scope: revision.scope }).evaluate().json
+    ).toEqual(5);
+    revision.dispose();
+  });
+
   test('read a typed formal as shadowing the function of its name', () => {
     // The call `f(1)` in `g` calls the formal `f`, not the row `f`.
     expect(
@@ -1534,6 +1560,200 @@ describe('call-site types', () => {
     revision.dispose();
     imp.dispose();
     env.dispose();
+  });
+
+  describe('of formula rows', () => {
+    type Json = Parameters<DocumentSyntax['normalize']>[0];
+    const engine = new ComputeEngine();
+    const env = createDocumentEnvironment(engine, () => {});
+    // The axis `t` is also an input declared `real`.
+    const imp = env.createImports((input) => {
+      input('s', 'real');
+      input('t', 'real');
+    });
+    afterAll(() => {
+      imp.dispose();
+      env.dispose();
+    });
+    const defs: Record<string, [string[], Json]> = {
+      g: [['v'], 'v'],
+      d: [
+        ['p'],
+        [
+          'Sqrt',
+          ['Add', ['Square', ['At', 'p', 1]], ['Square', ['At', 'p', 2]]],
+        ],
+      ],
+      // `P(k, q) = q` when `k <= 0`, else `P(k - 1, q) + (1, 1)`.
+      P: [
+        ['k', 'q'],
+        [
+          'Which',
+          ['LessEqual', 'k', 0],
+          'q',
+          'True',
+          ['Add', ['P', ['Subtract', 'k', 1], 'q'], ['Tuple', 1, 1]],
+        ],
+      ],
+      // `H(f) = f(1)`, with `f: (real) -> real`.
+      H: [['f'], ['f', 1]],
+    };
+    // A row whose ID is in `defs` is a function definition given as JSON,
+    // and one whose ID is in `values` a value row. Any other row is a
+    // formula row, parsed from its LaTeX, or given as `{ json }`.
+    type Formula = string | { json: Json };
+    const prepareRows = (
+      formulas: Formula[],
+      values: Record<string, Json> = {}
+    ) => {
+      const json = new Map<string, Json>();
+      return imp.prepare(
+        [
+          ...Object.keys(defs).map((id) => ({
+            id,
+            latex: id,
+            ...(id === 'H' ? { formalTypes: { f: '(real) -> real' } } : {}),
+          })),
+          ...Object.keys(values).map((id) => ({ id, latex: id })),
+          ...formulas.map((formula, i) => {
+            if (typeof formula === 'string')
+              return { id: 'F' + i, latex: formula };
+            json.set('F' + i, formula.json);
+            return { id: 'F' + i, latex: '0' };
+          }),
+        ],
+        {
+          split: (source) =>
+            source in defs || source in values
+              ? { head: 'f', body: '' }
+              : undefined,
+          recognize: (row) =>
+            row.id in defs
+              ? {
+                  role: 'function',
+                  head: { name: row.id, params: defs[row.id][0] },
+                  bodyJson: defs[row.id][1],
+                }
+              : row.id in values
+                ? {
+                    role: 'value',
+                    head: { name: row.id, params: [] },
+                    bodyJson: values[row.id],
+                  }
+                : undefined,
+          normalize: (raw) => raw,
+          lowerBody: (raw, row) => json.get(row.id) ?? raw,
+          fieldAxes: new Set(['x', 't']),
+        }
+      );
+    };
+    const formulaCallSiteTypes = (
+      formulas: Formula[],
+      values: Record<string, Json> = {}
+    ) => {
+      const revision = prepareRows(formulas, values);
+      expect(revision.rowErrors.size).toBe(0);
+      expect(revision.definitions.map((def) => def.name)).toEqual([
+        ...Object.keys(defs),
+        ...Object.keys(values),
+      ]);
+      const result = Object.fromEntries(
+        revision.definitions.map((def) => [def.name, def.callSiteTypes])
+      );
+      revision.dispose();
+      return result;
+    };
+
+    test('give the types of the arguments of their calls', () => {
+      // The recursive call gives `k - 1` and the open `q`; the plot row
+      // gives the point, and its axis `t` is open.
+      expect(formulaCallSiteTypes([]).P).toEqual(['number', undefined]);
+      expect(formulaCallSiteTypes(['(P(t,(1,0)))']).P).toEqual([
+        'number',
+        'tuple<real, real>',
+      ]);
+      expect(
+        formulaCallSiteTypes(['g(2.5)', '\\sum_{k=1}^{3} g(k)']).g
+      ).toEqual(['real']);
+    });
+
+    test('read a free name as the input of that name, or as open', () => {
+      // `s` is an input declared `real`; `u` is not declared.
+      expect(formulaCallSiteTypes(['d((s,1))']).d).toEqual([
+        'tuple<real, real>',
+      ]);
+      expect(formulaCallSiteTypes(['y=d((u,1))']).d).toEqual([undefined]);
+    });
+
+    test('read an argument that reads a field axis or value as open', () => {
+      // `x` and `t` are field axes, and `V` a field value that reads `x`.
+      // The other arguments of the row still give evidence.
+      expect(formulaCallSiteTypes(['(P(x,(1,0)))']).P).toEqual([
+        'number',
+        'tuple<real, real>',
+      ]);
+      const V = { V: ['Add', 'x', 1] as Json };
+      expect(formulaCallSiteTypes(['(P(V,(1,0)))'], V).P).toEqual([
+        'number',
+        'tuple<real, real>',
+      ]);
+      expect(formulaCallSiteTypes(['g(V)'], V).g).toEqual([undefined]);
+      // The axis `t` is open even though an input of that name is `real`.
+      expect(formulaCallSiteTypes(['g(t)', 'g(t+1)']).g).toEqual([undefined]);
+      // The index of a sum named `t` is not the axis.
+      expect(formulaCallSiteTypes(['\\sum_{t=1}^{3} g(t)']).g).toEqual([
+        'real',
+      ]);
+    });
+
+    test('read each row in a scope of its own', () => {
+      // The declaration of `u` in one row does not type `u` in another.
+      const declares: Formula = {
+        json: ['Program', ['Declare', 'u', "'real'"], ['d', ['Tuple', 1, 2]]],
+      };
+      expect(formulaCallSiteTypes([declares, 'g(u)']).g).toEqual([undefined]);
+    });
+
+    test('leave the signature of a function passed as a value unchanged', () => {
+      const signatures = (formulas: Formula[]) => {
+        const revision = prepareRows(formulas);
+        const result = ['g', 'd', 'P', 'H'].map((name) =>
+          engine.expr(name, { scope: revision.scope }).type.toString()
+        );
+        revision.dispose();
+        return result;
+      };
+      expect(
+        signatures([
+          { json: ['Map', ['List', 1, 2], 'g'] },
+          { json: ['H', 'g'] },
+          { json: ['H', 'd'] },
+          '(P(2,(1,0)))',
+        ])
+      ).toEqual(signatures([]));
+    });
+
+    test('give no evidence, and no error, for an invalid row', () => {
+      expect(formulaCallSiteTypes(['g(\\frac{1}{})']).g).toEqual([undefined]);
+      expect(formulaCallSiteTypes(['g(\\frac{1}{})', 'g(2)']).g).toEqual([
+        'real',
+      ]);
+    });
+
+    test('are undefined when the row reads the function as a value', () => {
+      expect(formulaCallSiteTypes(['g(2)', 'g']).g).toEqual([undefined]);
+    });
+
+    test('do not declare the free names of the row in the revision', () => {
+      const revision = prepareRows(['(P(t,(1,0)))', 'd((u,1))']);
+      expect([...revision.scope.bindings.keys()].sort()).toEqual([
+        'H',
+        'P',
+        'd',
+        'g',
+      ]);
+      revision.dispose();
+    });
   });
 
   test('do not change the contract of the function', () => {
