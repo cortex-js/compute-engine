@@ -107,11 +107,11 @@ then runs only the files whose path matches it.
    new untracked files by hand), then `git apply --check` and `git apply` in
    the main tree. If the check fails, reconcile with the Edit tool. Then run
    in the main tree the targeted tests again and `npm run test:core`, and
-   `npm run check:deps` when imports changed. When the change is in
-   `src/compute-engine/boxed-expression/` or `src/common/type/`, also take the
-   box lock and run `npm test` in the main tree before you stage, because the
-   batch commits before the nightly run, and the nearby test files and
-   `test:core` do not hold every caller of these files.
+   `npm run check:deps` when imports changed. When the change is in `src/`,
+   also take the box lock and run `npm test` in the main tree before you
+   stage, because the batch commits before the nightly run, and the nearby
+   test files and `test:core` do not hold every caller of a source file: a
+   change of the effects code or of the compiler breaks tests far from it.
 8. Add a `CHANGELOG.md` item under `[Unreleased]` when users can see the
    change (the rules are in `CODING-STYLEGUIDE.md`). Do not edit
    `src/api.md` by hand: it is generated from the doc comments of the
