@@ -483,7 +483,9 @@ in LaTeX.
 `..` binds tighter than relational operators and more loosely than addition
 and subtraction. The Unicode two-dot leader `‥` is an input alias.
 Serialization writes `Range(a, b, 1)` as `a .. b`, and writes `Range(a, b)`
-and a range with another step, `Range(a, b, step)`, as calls.
+and a range with another step, `Range(a, b, step)`, as calls. The command
+line prints a range in a list the same way: `[1..2, 1..3]` prints
+`[1..2,1..3]`. A range alone prints its elements: `1..3` prints `[1,2,3]`.
 
 ## Qualified names: `::` {#qualified-names}
 
