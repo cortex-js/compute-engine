@@ -10,6 +10,8 @@ import {
   broadcastableBaseMatches,
   collectionElementType,
   hasFunctionSignature,
+  isWildcardFunctionType,
+  resolveTypeAlias,
   signatureArms,
   signatureEffects,
   signatureSlotType,
@@ -1111,7 +1113,9 @@ function excludesEveryScalar(t: Type): boolean {
  *   use like any other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
  *   that slot then has a collection arm. It is the only way the lift reaches
  *   through a function, and it reads the signature of `h` as it is when the
- *   signature of `k` is derived. With `ce.assign()`, both definition orders
+ *   signature of `k` is derived. A name declared with a signature, or
+ *   declared `function` and assigned a literal or an operator, is read
+ *   through its value definition ({@link calledValueSlotArm}). With `ce.assign()`, both definition orders
  *   give the same result: the definition of `h` derives the signature of
  *   `k` again (`repairProvisionalDependents()`, `function-utils.ts`). In a
  *   `Block`, `h` is read through the definition that the call dispatches to
@@ -1250,7 +1254,7 @@ export function wholeCollectionParameterType(
         const def = expr.operatorDefinition ?? calledOperatorDefinition(expr);
         const arm =
           def === undefined
-            ? undefined
+            ? calledValueSlotArm(expr)
             : wholeCollectionSlotArm(expr.operator, def);
         if (arm !== undefined) arms.push(arm);
       }
@@ -1398,6 +1402,38 @@ function calledOperatorDefinition(
   return binding !== undefined && 'operator' in binding
     ? binding.operator
     : undefined;
+}
+
+/**
+ * The collection arm of the first slot of the function that the call `expr`
+ * reads through a VALUE definition, or `undefined` when that slot has none.
+ *
+ * A name declared with a signature (`ce.declare('S', '(x: list) -> real')`,
+ * or the type that a document gives a function row), or declared `function`
+ * and assigned a literal, is a value definition, not an operator
+ * definition, so {@link calledOperatorDefinition} finds nothing. The slot is
+ * read from the declared signature, or, for a name declared `function`, from
+ * the type of the function it holds now, as a call of the name is checked
+ * (`calleeSignatureType()`, `box.ts`). Without it, `T(x) = S(x)` with
+ * `S(x) = Mean(x)` kept an `unknown` slot, and `T([1, 2, 6])` was applied to
+ * each element and gave `[1, 2, 6]`, where the same functions defined by
+ * `ce.assign()` alone give `3` (CE-1696).
+ */
+function calledValueSlotArm(expr: Expression): Type | undefined {
+  const def = expr.valueDefinition;
+  if (def === undefined) return undefined;
+  const declared = resolveTypeAlias(def.type.type);
+  const wildcard = isWildcardFunctionType(declared);
+  if (wildcard && def._programVariable) return undefined;
+  // A name that holds an operator (`S := Norm`) is read as that operator, so
+  // its exceptions (`Norm`, a broadcastable operator) still hold.
+  const held = def._programVariable ? undefined : def.value;
+  if (isSymbol(held) && held.operatorDefinition !== undefined)
+    return wholeCollectionSlotArm(held.symbol, held.operatorDefinition);
+  return firstSlotCollectionArm(
+    wildcard ? held?.type.type : declared,
+    undefined
+  );
 }
 
 /**

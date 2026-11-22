@@ -37,6 +37,15 @@
 
 ### Resolved Issues
 
+- **A function that passes its argument whole to another function takes a list
+  whole when that function does** (CE-1696). With `S(x) = Mean(x)` and
+  `T(x) = S(x)`, `T([1, 2, 6])` is now `3`; it was `[1, 2, 6]`, because the list
+  was mapped over its elements. This happened for Document function rows, and
+  for functions declared (`ce.declare('S', 'function')` or with a signature)
+  before they were assigned; a plain `ce.assign()` already gave `3`. With the
+  same `S`, `T(x) = S(x) + x` now gives `[4, 5, 9]` for `[1, 2, 6]`, as a plain
+  `ce.assign()` did, where it gave `[2, 4, 12]`. A callee that maps its argument
+  (`Sin`, or a name that holds `Norm`) still maps it.
 - **Members after a dot are listed for a value made by a constructor.** After
   `let c = Circle(1)` (no type annotation), completion at `c.` lists the
   members of `Circle`, and `c.scale(` has signature help; before, both were

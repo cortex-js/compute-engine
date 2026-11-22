@@ -2093,6 +2093,70 @@ describe('rows given as the JSON of their bodies, over the axes x and y', () => 
     });
   });
 
+  describe('a function that passes its parameter whole to another row (CE-1696)', () => {
+    const S: [string[], Json] = [['x'], ['Mean', 'x']];
+    const type = (revision: { scope: InspectableScope }, name: string) =>
+      ce.expr(name, { scope: revision.scope }).type.toString();
+
+    test('takes a list argument whole when the callee does', () => {
+      const revision = prepare({
+        S,
+        T: [['x'], ['S', 'x']],
+        U: [['x'], ['T', 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(type(revision, 'T')).toBe(
+        '(x: collection<number> | value) -> number'
+      );
+      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe('3');
+      expect(value(revision, ['U', ['List', 1, 2, 6]])).toBe('3');
+      expect(value(revision, ['T', 4])).toBe('4');
+      revision.dispose();
+    });
+
+    test('maps a list argument when the callee does', () => {
+      const revision = prepare({
+        R: [['x'], ['Sin', 'x']],
+        Q: [['x'], ['R', 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['Q', ['List', 0, 1]])).toBe(
+        '["List",0,["Sin",1]]'
+      );
+      revision.dispose();
+    });
+
+    test('a parameter also used element-wise', () => {
+      // With `Sin` as the callee, every use is element-wise and the call
+      // maps. With `Mean`, the list is bound whole, as for `ce.assign()`:
+      // `Mean([1, 2, 6]) + [1, 2, 6]`.
+      const revision = prepare({
+        R: [['x'], ['Sin', 'x']],
+        P: [['x'], ['Add', ['R', 'x'], 'x']],
+        S,
+        T: [['x'], ['Add', ['S', 'x'], 'x']],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['P', ['List', 0, 1]])).toBe(
+        '["List",0,["Add",1,["Sin",1]]]'
+      );
+      expect(value(revision, ['T', ['List', 1, 2, 6]])).toBe(
+        '["List",4,5,9]'
+      );
+      revision.dispose();
+    });
+
+    test('a recursive caller', () => {
+      const revision = prepare({
+        S,
+        K: [['n', 'x'], cases(['S', 'x'], n1('K', 'x'))],
+      });
+      expect(errors(revision)).toBe('[]');
+      expect(value(revision, ['K', 2, ['List', 1, 2, 6]])).toBe('3');
+      revision.dispose();
+    });
+  });
+
   describe('a Block that declares the axes as locals (CE-1693)', () => {
     const d: [string[], Json] = [[], ['Add', 'x', 'y']];
     const declare = (axis: string, values: number[]): Json => [
