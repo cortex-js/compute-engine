@@ -1066,11 +1066,23 @@ name of the program and the library.
   (`idM` gives `identityMatrix`, `invH` gives `inverseHaversine`) and a
   subsequence, ranked below a prefix match. The host cannot add this: CE
   filters the list.
-- **CE-1664.7** Calls inserted with argument placeholders: accepting
-  `identityMatrix` inserts `identityMatrix(▮)`, `take` inserts
-  `take(▮xs, ▮count)`. Agree the placeholder format with Tycho first (a
-  snippet syntax in `insertText`, or a separate field), so that its editor
-  moves between the placeholders; a Tycho issue or row records its half.
+- **CE-1664.7** Calls inserted with argument placeholders. Shape agreed with
+  Tycho: a new optional field `snippet?: string` on `EpsilCompletionItem`,
+  next to `insertText`, which stays the plain fallback. A function item
+  (library or source) with at least one required parameter gets
+  `take(${1:xs}, ${2:count})${0}`: one numbered field per required
+  parameter, its default text the parameter name (the type when it has no
+  name: `${1:real}`), and `${0}` for the final caret. Optional and rest
+  parameters get no field. No snippet when a `(` already follows the word,
+  for a call with no required argument (it keeps `insertText: "area()"`),
+  or where CE gives no items (a string, a LaTeX island, a comment). The
+  first argument is left out after `|>` (`xs |> take` gives
+  `take(${1:count})${0}`) and for a member function after `.`
+  (`xs.f(${1:k})${0}`). Constraints, from CodeMirror's `snippet()` and
+  LSP: one line, no newline; never a `{`, `}`, `$`, `#` or `\` outside the
+  field syntax; each field its own number, also for two parameters of the
+  same name. Tycho applies it with `apply: snippet(item.snippet)` and shows
+  only the rest of the name as its inline suggestion.
 - **CE-1664.8** A function found by what it does: match the library
   description and keywords (`adjoint`, `rref`, `norm`), ranked below the name
   matches.
