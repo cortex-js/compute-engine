@@ -931,11 +931,12 @@ is exact on `bigint` values, with the helpers of `bigint-runtime.ts` (members of
 (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane only), the comparisons,
 `And`, `Or`, `Not`, `If`, `Which`, `Block`, `Sum` and `Product` with integer
 bounds, `List`, `Range`, `Length`, `At` (`bat`), `Sort` (`bsort`), `Map`,
-`Filter`, `Reduce`, `ReplaceAt` (`bwix`), `Loop`, user functions with integer parameters (declared, as
-`(integer) -> integer`), and a root function literal with integer parameters. A
-closed node is the exact value of `evaluate()` (`N()` of `2^70 + 1` is rounded);
-a closed node whose value is not an integer (`Mod(5, 0)`, `(−1)!`) is lowered as
-written, so its helper throws the pole where it is evaluated.
+`Filter`, `Reduce`, `ReplaceAt` (`bwix`), `Loop`, user functions with integer
+parameters (declared, as `(integer) -> integer`), and a root function literal
+with integer parameters. A closed node is the exact value of `evaluate()` (`N()`
+of `2^70 + 1` is rounded); a closed node whose value is not an integer
+(`Mod(5, 0)`, `(−1)!`) is lowered as written, so its helper throws the pole
+where it is evaluated.
 
 Every value is an integer or a boolean, also a loop index, a list index and a
 length: a loop counts with a `bigint` counter, and the code converts with
@@ -1709,8 +1710,9 @@ time is `wix` (it throws `out-of-range` for an index that is 0, out of range or
 not an integer, where the interpreter gives an unevaluated form or an error), on
 JavaScript only (`bwix` in the `bigint` mode): GLSL and the interval mode
 decline it. On GLSL, which builds no list, a constant index of a list of a
-constant length is the list of its elements. A boolean value in a list of numbers, or the reverse,
-and a complex value decline; so do several indexes (`ReplaceAt(M, i, j, v)`).
+constant length is the list of its elements. A boolean value in a list of
+numbers, or the reverse, and a complex value decline; so do several indexes
+(`ReplaceAt(M, i, j, v)`).
 
 A list local written whole (JavaScript; CE-1481): a `Block` local whose value is
 a list, each write of which in its scope is `Assign(L, value)` (`rebuiltOnly()`:
@@ -2930,12 +2932,12 @@ declines); it maps a list at every parameter when all are scalar
 one, `p ↦ p[1] + p[2]`) and any list at a parameter of a scalar type or of no
 stated type (user decision 2026-10-24); beside a parameter that binds whole, a
 list at a parameter of no stated type (`unknownBesideWholeParameters()`,
-CE-1697); every other list binds whole. The
-profile maps a flat list at a scalar parameter, and a list of points at a
-parameter declared as a point that the interpreter maps (`pointsMapAt()`,
-CE-1477), one point per call, the other arguments bound whole in each cell
-(`mapOver()`): `k := (p: tuple<number, number>, x) ↦ 42` of `k((1, 2), [3, 4])`
-is `[42, 42]`, and `g(B)` of a list of points `B` with
+CE-1697); every other list binds whole. The profile maps a flat list at a scalar
+parameter, and a list of points at a parameter declared as a point that the
+interpreter maps (`pointsMapAt()`, CE-1477), one point per call, the other
+arguments bound whole in each cell (`mapOver()`):
+`k := (p: tuple<number, number>, x) ↦ 42` of `k((1, 2), [3, 4])` is `[42, 42]`,
+and `g(B)` of a list of points `B` with
 `g := (p: tuple<real, real>) ↦ p[1] + p[2]`, declared `function` or not, is
 `[3, 7]` at `B = [(1, 2), (3, 4)]`. A list that the interpreter maps where the
 parameter is a list or took a point or a list of points at the first call

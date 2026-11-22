@@ -312,9 +312,7 @@ export function bat(list: ReadonlyArray<unknown>, i: bigint): unknown {
 export function bwix(n: bigint, i: bigint): bigint {
   const k = i > 0n ? i - 1n : n + i;
   if (i !== 0n && k >= 0n && k < n) return k;
-  throw new Error(
-    `out-of-range: the index ${i} of a list of ${n} elements`
-  );
+  throw new Error(`out-of-range: the index ${i} of a list of ${n} elements`);
 }
 
 /** `Sort(list)` of integers: a sorted copy, ascending. */

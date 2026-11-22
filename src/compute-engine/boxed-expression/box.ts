@@ -2234,9 +2234,7 @@ function compoundSymbolPolicies(
   if (isSymbol(index)) return ['name', 'name'];
   if (
     isFunction(index, 'InvisibleOperator') &&
-    index.ops.every(
-      (x) => isSymbol(x) || (asSmallInteger(x) ?? -1) >= 0
-    )
+    index.ops.every((x) => isSymbol(x) || (asSmallInteger(x) ?? -1) >= 0)
   )
     return ['name', 'names'];
   return undefined;
