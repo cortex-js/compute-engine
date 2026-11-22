@@ -35,6 +35,18 @@
   `[k(a), g(b)]` (#636, contributed by
   [enumeratio](https://github.com/enumeratio)).
 
+- **`Flatten(m, d)` compiles when the depth is a constant non-negative integer
+  or `+oo`.** A matrix has one nesting level, so depth 0 is the matrix itself
+  and any other depth is the list of its elements row by row; another depth
+  declines (#641, contributed by [enumeratio](https://github.com/enumeratio)).
+
+- **`Sort` of integers and `ReplaceAt` at a run-time position compile in the
+  `bigint` mode.** `Sort(L)` gives a sorted copy of the list of `bigint`
+  values, and `ReplaceAt(L, i, v)` with an index known at run time throws
+  `out-of-range` for an index that is 0 or out of range, as in the double
+  mode (#643 and #645, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.198.0 _2026-11-21_
 
 ### New Features

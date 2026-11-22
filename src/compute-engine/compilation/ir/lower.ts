@@ -5813,7 +5813,7 @@ function lowerOnce(
         );
       k = b.constant(at, 'integer');
     } else {
-      if (!options.javascript || bigint)
+      if (!options.javascript)
         decline(
           e,
           c !== undefined

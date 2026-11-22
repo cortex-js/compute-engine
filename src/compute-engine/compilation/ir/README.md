@@ -911,8 +911,8 @@ is exact on `bigint` values, with the helpers of `bigint-runtime.ts` (members of
 (`bpow`), `Factorial` (`bfactorial`), `Binomial`, `Choose`, `GCD`, `LCM`
 (`bbinomial`, `bgcd`, `blcm`, rows of the integer lane only), the comparisons,
 `And`, `Or`, `Not`, `If`, `Which`, `Block`, `Sum` and `Product` with integer
-bounds, `List`, `Range`, `Length`, `At` (`bat`), `Map`, `Filter`, `Reduce`,
-`Loop`, user functions with integer parameters (declared, as
+bounds, `List`, `Range`, `Length`, `At` (`bat`), `Sort` (`bsort`), `Map`,
+`Filter`, `Reduce`, `ReplaceAt` (`bwix`), `Loop`, user functions with integer parameters (declared, as
 `(integer) -> integer`), and a root function literal with integer parameters. A
 closed node is the exact value of `evaluate()` (`N()` of `2^70 + 1` is rounded);
 a closed node whose value is not an integer (`Mod(5, 0)`, `(−1)!`) is lowered as
@@ -1688,9 +1688,9 @@ index of a list of stated length is a constant; one that is 0 or out of range
 declines (the interpreter leaves `ReplaceAt` unevaluated). An index known at run
 time is `wix` (it throws `out-of-range` for an index that is 0, out of range or
 not an integer, where the interpreter gives an unevaluated form or an error), on
-JavaScript only: GLSL, the interval mode and the `bigint` mode decline it. On
-GLSL, which builds no list, a constant index of a list of a constant length is
-the list of its elements. A boolean value in a list of numbers, or the reverse,
+JavaScript only (`bwix` in the `bigint` mode): GLSL and the interval mode
+decline it. On GLSL, which builds no list, a constant index of a list of a
+constant length is the list of its elements. A boolean value in a list of numbers, or the reverse,
 and a complex value decline; so do several indexes (`ReplaceAt(M, i, j, v)`).
 
 A list local written whole (JavaScript; CE-1481): a `Block` local whose value is
@@ -2344,7 +2344,9 @@ operands decline. On JavaScript:
   declines, the empty tuple). Both decline a matrix whose number of rows is
   known at run time only: the interpreter's empty list of rows has rank 1 and
   the shape `(0)`. `Flatten(m)` is the build of the elements row by row (a list
-  is itself, a scalar the list of it). `Reshape(m, Tuple(d1, …, dk))` of
+  is itself, a scalar the list of it); with a depth, a constant non-negative
+  integer or `+oo`, depth 0 is `m` and any other is the same build, as a matrix
+  has one level (another depth declines). `Reshape(m, Tuple(d1, …, dk))` of
   constant positive integers is the nested build of the elements row by row,
   cycled from the first when there are fewer, as the interpreter's; another
   shape (an input, a `List`) declines.
