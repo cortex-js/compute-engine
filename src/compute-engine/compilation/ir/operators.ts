@@ -278,7 +278,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('GCD',          'variadic', [[[I], I, 'gcd'], [[R], R, 'rgcd']], { ...list, fold: F.gcd }),
   row('LCM',          'variadic', [[[I], I, 'lcm'], [[R], R, 'rlcm']], { ...list, fold: F.lcm }),
   row('Factorial2',   1,          [[[R], R, 'factorial2']],      { fold: F.factorial2 }),
-  row('Zeta',         1,          [[[R], R, 'zeta']],            { fold: F.zeta }),
+  // Of a complex `s`, the interpreter's Hurwitz kernel at `a = 1`
+  // (`czeta`), as the interpreter evaluates it (CE-1600).
+  row('Zeta',         1,          rc('zeta', 1),                 { fold: F.zeta }),
   // `Zeta(s, a)`: the generalized zeta of Wolfram's convention.
   row('Zeta',         2,          [[[R, R], R, 'zetagen']],      { fold: F.zetagen }),
   // `Chop(x, tol)`; `Chop(x)` takes the engine's tolerance (`lower.ts`).

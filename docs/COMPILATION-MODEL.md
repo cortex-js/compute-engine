@@ -246,6 +246,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `javascript` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.
+- `javascript` (crafted), `x: real` or `z: complex`: `Zeta` near its pole
+  loses relative precision, about the square root of the machine epsilon
+  divided by the distance to 1: at `1 + 10⁻¹²` the relative error is
+  `8.9e-5`, at `1 + 10⁻⁹` it is `8.3e-8`.
 - `javascript`, `interval-js` (crafted): a sum that overflows the double
   range is `Infinity` (on `interval-js`, once one end is `∞` the interval
   `add` rounds the other end to `∞` too), also inside `Mean`, which sums

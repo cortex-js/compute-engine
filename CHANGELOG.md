@@ -18,6 +18,12 @@
   sign, so building a chain of calls is no longer quadratic in its depth
   (CE-1200): 5,000 nested `Sin` took 4.8 s, and now take less than 0.1 s.
 
+- **`Zeta` of a complex argument compiles on JavaScript** (CE-1600), with the
+  interpreter's kernel: `|ζ(1/2 + it)|` with `t` real and `ζ(z)` with `z`
+  complex compile, where they declined with "Zeta of complex", so a plot of
+  zeta on the critical strip ran in the interpreter at every sample. The
+  GLSL target still declines it.
+
 ### Resolved Issues
 
 - **A Document row can call an import declared `unknown` or `function`**
