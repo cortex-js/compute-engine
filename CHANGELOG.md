@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A point plus a name of unknown type is typed as a point** (CE-1319). With
+  `y` undeclared, `(1, 2) + y` is typed `tuple<number, number>`; it was
+  `number | tuple<number, number>`, although a number plus a point is an
+  error. So `q ↦ q + (1, 2)` is typed `(q: unknown) -> tuple<number, number>`,
+  as `q ↦ q·(1, 2)` already was.
+
+- **The value of a `Declare` in a nested block reads the parameter of the
+  same name** (CE-1702). `u ↦ Block(Block(Declare(u, u + 1), u))` applied to
+  `2` is `3`, and so is the same body written with a `Delimiter` around the
+  inner block; it was the formula `u + 1`, because the value read the new
+  local, which had no value yet. A `Declare` of the parameter's name in the
+  body's own block is still the error `variable-redeclaration`. A block in between that declares
+  the name is closer than the parameter, and a global of the same name is
+  not read.
+
+- **A function that passes its argument whole to another function and also
+  uses it as a number reports a result that holds a list** (CE-1701). With
+  `S(x) = Mean(x)` and `T(x) = S(x) + x`, `T` is typed
+  `-> broadcastable<number>`, and `T([1, 2, 6])` is typed `vector<3>`; it was
+  `-> number` and `number`, while the value is `[4, 5, 9]`. A function with a default value or a rest
+  parameter is typed `-> any` in this case.
+
 ## 0.199.0 _2026-11-22_
 
 ### Breaking Changes
@@ -28,6 +54,14 @@
   `Repeat(value, integer)`, is unchanged.
 
 ### New Features
+
+- **`Limits` takes a step**
+  ([#517](https://github.com/cortex-js/compute-engine/issues/517)).
+  A sum or a product reads `Limits(i, lo, hi, step)`, the Wolfram iterator
+  `{i, lo, hi, step}`, as `Element(i, Range(lo, hi, step))`:
+  `Sum(i, Limits(i, 1, 4, 2))` is `4` and `Product(i, Limits(i, 1, 4, 2))` is
+  `3`. The step was dropped, and the sum was `10`. `NDSolve` declines a
+  `Limits` with a step.
 
 - **Signature help marks optional, rest and implicit parameters, and covers
   member calls** (CE-1698). A parameter of `epsilSignatureHelp()` has
@@ -165,27 +199,19 @@
 
 ### Resolved Issues
 
-- **A point plus a name of unknown type is typed as a point** (CE-1319). With
-  `y` undeclared, `(1, 2) + y` is typed `tuple<number, number>`; it was
-  `number | tuple<number, number>`, although a number plus a point is an
-  error. So `q ↦ q + (1, 2)` is typed `(q: unknown) -> tuple<number, number>`,
-  as `q ↦ q·(1, 2)` already was.
+- **The LaTeX of `Boole` of an operand that is not a relation reads back as
+  `Boole`** ([#517](https://github.com/cortex-js/compute-engine/issues/517)).
+  `Boole(P)` is written `\operatorname{Boole}(P)`; it was the Iverson bracket
+  `[P]`, which reads back as the list `["List", "P"]`. A relation keeps the
+  bracket: `Boole(x > 0)` is written `\lbrack0\lt x\rbrack`.
 
-- **The value of a `Declare` in a nested block reads the parameter of the
-  same name** (CE-1702). `u ↦ Block(Block(Declare(u, u + 1), u))` applied to
-  `2` is `3`, and so is the same body written with a `Delimiter` around the
-  inner block; it was the formula `u + 1`, because the value read the new
-  local, which had no value yet. A `Declare` of the parameter's name in the
-  body's own block is still the error `variable-redeclaration`. A block in between that declares
-  the name is closer than the parameter, and a global of the same name is
-  not read.
-
-- **A function that passes its argument whole to another function and also
-  uses it as a number reports a result that holds a list** (CE-1701). With
-  `S(x) = Mean(x)` and `T(x) = S(x) + x`, `T` is typed
-  `-> broadcastable<number>`, and `T([1, 2, 6])` is typed `vector<3>`; it was
-  `-> number` and `number`, while the value is `[4, 5, 9]`. A function with a default value or a rest
-  parameter is typed `-> any` in this case.
+- **The partial canonical form `InvisibleOperator` of an applied function
+  literal is the application**
+  ([#517](https://github.com/cortex-js/compute-engine/issues/517)).
+  `ce.parse("(x\\mapsto x^2)(a)", { canonical: ["InvisibleOperator"] })` is
+  `["Apply", ["Function", ["Power", "x", 2], "x"], "a"]`; it was a `Multiply`
+  of one operand around the `Apply`, and for a curried literal the `Multiply`
+  held an `incompatible-type` error.
 
 - **A subscript made of letters stays one symbol when one of its letters
   names a macro** (CE-1657). After `ce.declare('P', { macro: ['Add', 't', 1] })`,
