@@ -1029,6 +1029,60 @@ third is the one delivered to Tycho.
   every top-level value is returned with its static type. A spec of its own
   first; the opinion of the compiler session is in the spec above.
 
+### CE-1664. Epsil editor completion: fewer names where few fit, better matching, richer insertion
+
+**Status:** ready (approved 2026-11-21); capability, L. Sub-items in priority
+order; CE-1664.11 last. Builds on CE-1661 (the `fit` field, the types of
+unannotated names, functions judged by signature) and CE-1663 (members after
+`.`). File: `src/epsil/completion.ts`; tests in
+`test/compute-engine/epsil-completion.test.ts`.
+**Witness:** plausible; `epsilCompletions` lists all of about 600 names at
+each position below, where the context allows a few.
+
+`epsilCompletions` knows an expected type at a call argument and at a
+declared value; at the positions below it has none, and the menu lists every
+name of the program and the library.
+
+- **CE-1664.1** Field names in a record literal: at
+  `const r: record{x: real, y: real} = {` offer `x ->` and `y ->`, then the
+  fields not written yet, each with its type as detail; after `x -> ` the
+  field's type is the expected type.
+- **CE-1664.2** Variants in a `match`: at a case of `match c {` with
+  `c: Color` (a sum type), offer the variants not covered yet, and a fix-it
+  that inserts every missing case.
+- **CE-1664.3** Named arguments: at `take(xs, ` offer the parameter names not
+  supplied yet (`count:`), and after `count: ` that parameter's type as the
+  expected type. Only when the call resolves through a declaration with
+  parameter names (the rule of `errors.md`, named arguments).
+- **CE-1664.4** Expected types of the common positions: `boolean` after `if`
+  and `while`, a collection after `for … in`, and at an operand of an
+  arithmetic operator the type that the other operand and the operator's
+  overloads allow (`1 + ▮` a number-like type; `A * ▮` with `A: matrix`
+  admits a matrix and a number).
+- **CE-1664.5** A fix-it after a dot on a library function: `xs.sort` is
+  `dot-call-not-a-protocol-function`; offer `xs |> sort` instead. After
+  CE-1663.
+- **CE-1664.6** Matching beyond a prefix: the capitals of a camelCase name
+  (`idM` gives `identityMatrix`, `invH` gives `inverseHaversine`) and a
+  subsequence, ranked below a prefix match. The host cannot add this: CE
+  filters the list.
+- **CE-1664.7** Calls inserted with argument placeholders: accepting
+  `identityMatrix` inserts `identityMatrix(▮)`, `take` inserts
+  `take(▮xs, ▮count)`. Agree the placeholder format with Tycho first (a
+  snippet syntax in `insertText`, or a separate field), so that its editor
+  moves between the placeholders; a Tycho issue or row records its half.
+- **CE-1664.8** A function found by what it does: match the library
+  description and keywords (`adjoint`, `rref`, `norm`), ranked below the name
+  matches.
+- **CE-1664.9** Order among the names that fit: common functions first
+  (`sqrt`, `sin`, `plot`, `map`), from counts of the names in Tycho's
+  documents; alphabetical today.
+- **CE-1664.10** Inferred types shown inline (`const another = 5  : integer`),
+  a new query for the host, from the same inference as CE-1661.
+- **CE-1664.11** LaTeX commands inside a `$…$` island (`$\fr` gives
+  `\frac`), from MathLive's command list. Lowest priority: the interactive
+  math editor covers LaTeX input.
+
 ## Performance
 
 ### CE-624. The interpreter cannot compute a nested integral of a user-function call
