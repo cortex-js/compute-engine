@@ -13,6 +13,15 @@
   took about 5 seconds to evaluate at one point. It now takes about 15 ms, and
   about 130 ms for the first point.
 
+### Resolved Issues
+
+- **A sum over a view whose source has an effect runs the effect once**
+  (CE-1428). With `x := 0`,
+  `Sum(Map(k ↦ k + 1, Sort(Block(x := x + 1, [x, x]))))` is `4` and `x` is
+  `1`, where the sum was `8` and `x` was `4`: each read of the view by the
+  reducer evaluated the source again. `Product` and `Reduce`, and a view over
+  such a view (`Sum(Filter(Map(f, Sort(…)), p))`), are corrected too.
+
 ## 0.197.1 _2026-11-21_
 
 ### Improvements

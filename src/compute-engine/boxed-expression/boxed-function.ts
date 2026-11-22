@@ -22878,15 +22878,46 @@ function isSelectedCollectionSource(x: Expression): boolean {
  * its literal, was summed. The evaluation of such a view materializes it
  * over the value of its source, so the reducer reads that value instead.
  * (CE-97.1)
+ *
+ * A view over such a source that is not pure (`isTransitivelyPure()`) is
+ * selected before its finiteness is read, whatever that finiteness is: the
+ * read evaluates the source, and only the value of a pure source is kept
+ * (`keptEagerSourceValue()`). Each later read of a facet of the view (its
+ * finiteness, its count, its walk) evaluated the source again, so
+ * `Sum(Map(f, Sort(Block(x := x + 1, [x, x]))))` ran the assignment four
+ * times and summed values of `x` from different runs. (CE-1428)
  */
 export function isViewOverHeldEagerSource(x: Expression, depth = 0): boolean {
   if (depth > 8 || !isFunction(x) || x.isLazyCollection !== true) return false;
+  // The scan covers every depth, so the nested calls do not repeat it.
+  if (depth === 0 && hasImpureHeldEagerSource(x, 0)) return true;
   if (x.isFiniteCollection !== undefined) return false;
   return x.ops.some(
     (op) =>
       (isTypedAsCollection(op) && isHeldEagerSource(op)) ||
       isViewOverHeldEagerSource(op, depth + 1)
   );
+}
+
+/**
+ * Whether the lazy view `x` has a source, at any depth of nested views, that
+ * is not a collection value yet (`isHeldEagerSource()`) and is not pure.
+ * Reads no facet of a view, so it evaluates nothing.
+ */
+function hasImpureHeldEagerSource(
+  x: Expression & FunctionInterface,
+  depth: number
+): boolean {
+  return x.ops.some((op) => {
+    if (isTypedAsCollection(op) && isHeldEagerSource(op))
+      return !isTransitivelyPure(op);
+    return (
+      depth < 8 &&
+      isFunction(op) &&
+      op.isLazyCollection === true &&
+      hasImpureHeldEagerSource(op, depth + 1)
+    );
+  });
 }
 
 /**
