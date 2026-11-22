@@ -212,7 +212,12 @@ function highlightCode(
         push(out, start, end, symbolStyle(src, tokens, i));
         break;
       case 'VERBATIM_SYMBOL':
-        push(out, start, end, isCallee(tokens, i) ? 'functionName' : 'variableName');
+        push(
+          out,
+          start,
+          end,
+          isCallee(tokens, i) ? 'functionName' : 'variableName'
+        );
         break;
       case 'STRING':
         stringToken(line, src, tok, start, end, st, out, depth);
@@ -522,7 +527,11 @@ function symbolStyle(src: string, tokens: Token[], i: number): string {
       return contextual;
     // The module qualifier of `std::name`.
     const next = tokens[i + 1];
-    if (next?.type === 'OPERATOR' && next.text === '::' && !next.precededByWhitespace)
+    if (
+      next?.type === 'OPERATOR' &&
+      next.text === '::' &&
+      !next.precededByWhitespace
+    )
       return 'namespace';
   }
 

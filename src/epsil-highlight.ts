@@ -4,10 +4,7 @@
 // it: a CodeMirror 6 stream parser and a function that returns the styled
 // ranges of a source. The bundle imports nothing.
 
-export {
-  epsilStreamParser,
-  epsilHighlightTokens,
-} from './epsil/highlight.js';
+export { epsilStreamParser, epsilHighlightTokens } from './epsil/highlight.js';
 
 export type {
   EpsilHighlightToken,
