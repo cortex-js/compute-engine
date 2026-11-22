@@ -264,3 +264,53 @@ is then needed (about 10 % of the integral). It changes the scoping of the
 `Integrate` handler (the value shield and the independent parameters are
 declared in the handler scope today) and needs its own design and the
 integration test suites.
+
+## Measures of 2026-11-21 (session cebatch-351)
+
+A second machine (Windows, 16 cores, Node 26.13.1, load 0.0, box lock held).
+`node benchmarks/type-derivation.mjs` with the published 0.118.2 bundle and
+a bundle of the source at `5b2cf702b7371284dc3bed34161796323998a533`
+(built with the options of the release build), medians of seven rounds, µs:
+
+```
+case          0.118.2   source   ratio
+box              18.2     22.7    1.25
+simplify          165      312    1.89
+nested-root      46.2      119    2.58
+integral         1525     3009    1.97
+definite         52.9      346    6.54
+```
+
+The ratios are higher than those of 2026-11-08 on the first machine, but the
+source has not become slower since then: in one process, a bundle of
+`1f2e45346` (2026-11-08) and a bundle of the source read 508 and 525 µs on
+the definite integral, 358 and 400 µs on the simplification, which is within
+the variation of one bundle. Several bundles in one process make each one
+slower (five bundles: about 530 µs for each), so only bundles timed in the
+same run are compared.
+
+Profile of `∫₁² 1/x dx` (bundle of the source, one warm process, percent of
+the profile, of which about 5 % is the load of the module): the value shield
+of the `Integrate` handler 54 %, and inside it boxing 44 %: the canonical
+form of the function literals 19 %, the binder scope 14 %, the application of
+the literal of `EvaluateAt` 12 %, `rebindParameters()` 8 %; the
+antiderivative 11 %; the list test of the integrand
+(`integrateListIntegrand()`) 9.6 %, all of it the signature type of the
+integrand literal, which no other step of the evaluation reads;
+`liftIntegrand()` 3.8 %. No function takes more than 2 % on its own.
+
+An experiment that is not in the source: `integrateListIntegrand()` reads
+the type of the body of the literal first, and returns at once when it is a
+number and the body holds no `List` and no `Return` and the literal has no
+declared signature and no ascribed result (the conditions under which the
+signature takes its result from the body type without a change of shape).
+The signature is then not computed, but the type of the body remains
+(4.3 % of the profile). The definite integral went from 430 to 415 µs (−3.5 %,
+mean of four alternated runs of two bundles), and the indefinite integral did
+not change. The change was not kept: it adds a second route to the result
+type of a literal for 3.5 % of one case.
+
+The simplification of `√(3+2√2)`: the `Add` type handler takes 13 % of the
+profile (about 17 % of the work), spread over `signedInfinitySum()`, which
+makes four subtype tests per term with new union types at each call, and the
+other branches of `addTypeOnTypes()`. No single step is above 2 %.
