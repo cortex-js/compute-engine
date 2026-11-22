@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### New Features
+
+- **`serializeEpsil` takes a `numberFormat` option for the digit grouping.**
+  `serializeEpsil(3811)` is `3_811`, and
+  `serializeEpsil(3811, { numberFormat: { digitGroup: 0 } })` is `3811`;
+  `digitGroupSeparator: ''` does the same. Epsil reads only `_` between
+  digits, so another separator throws a `RangeError`. The type
+  `EpsilNumberFormat` is exported from the Epsil entry (#653, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ### Resolved Issues
 
 - **`Reduce(L, f)` with no initial value compiles when `f` is a function

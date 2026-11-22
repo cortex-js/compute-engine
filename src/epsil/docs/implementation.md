@@ -637,6 +637,18 @@ serializeEpsil(["Sin", "x"], { libraryNames: "mathjson" });
 // ➔ "Sin(x)"
 ```
 
+A number is written with its digits in groups of three, separated by `_`.
+The `numberFormat` option changes the grouping: `digitGroup: 0` or
+`digitGroupSeparator: ""` writes the digits with no separator. Epsil reads
+only `_` between digits, so another separator throws a `RangeError`.
+
+```js
+serializeEpsil(3811);
+// ➔ "3_811"
+serializeEpsil(3811, { numberFormat: { digitGroup: 0 } });
+// ➔ "3811"
+```
+
 ### Syntax highlighting
 
 The entry `@cortex-js/compute-engine/epsil-highlight` colors Epsil source. It
