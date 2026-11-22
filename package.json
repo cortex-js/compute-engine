@@ -1,5 +1,5 @@
 {
-  "version": "0.197.1",
+  "version": "0.198.0",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
     "brb": "node scripts/issues-ui.mjs --open",
@@ -140,6 +140,11 @@
       "types": "./dist/types/epsil.d.ts",
       "import": "./dist/esm-min/epsil.js",
       "default": "./dist/esm-min/epsil.js"
+    },
+    "./epsil-highlight": {
+      "types": "./dist/types/epsil-highlight.d.ts",
+      "import": "./dist/esm-min/epsil-highlight.js",
+      "default": "./dist/esm-min/epsil-highlight.js"
     },
     "./cli": {
       "import": "./dist/esm-min/cli/epsil.js",

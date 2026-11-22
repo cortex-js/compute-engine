@@ -1066,11 +1066,6 @@ name of the program and the library.
   (`idM` gives `identityMatrix`, `invH` gives `inverseHaversine`) and a
   subsequence, ranked below a prefix match. The host cannot add this: CE
   filters the list.
-- **CE-1664.7** Calls inserted with argument placeholders: accepting
-  `identityMatrix` inserts `identityMatrix(▮)`, `take` inserts
-  `take(▮xs, ▮count)`. Agree the placeholder format with Tycho first (a
-  snippet syntax in `insertText`, or a separate field), so that its editor
-  moves between the placeholders; a Tycho issue or row records its half.
 - **CE-1664.8** A function found by what it does: match the library
   description and keywords (`adjoint`, `rref`, `norm`), ranked below the name
   matches.

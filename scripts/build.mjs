@@ -69,14 +69,15 @@ const SPLIT_ENTRIES = [
   'numerics',
 ];
 
-// The two entries that must stay a single file and import no chunk:
-// `runtime` (its smoke test, `test/consumer/js-runtime-smoke.mjs`, asserts
-// that it imports nothing, so that compiled code can run without the engine)
-// and `kernel-worker` (a host copies the file next to its own files and
+// The entries that must stay a single file and import no chunk: `runtime`
+// (its smoke test, `test/consumer/js-runtime-smoke.mjs`, asserts that it
+// imports nothing, so that compiled code can run without the engine),
+// `epsil-highlight` (an editor bundle loads it without the parser or the
+// engine) and `kernel-worker` (a host copies the file next to its own files and
 // starts it with `new Worker(url, { type: 'module' })`). Each has its own
-// copy of the modules it uses; neither exchanges class instances with the
+// copy of the modules it uses; none exchanges class instances with the
 // engine, so the duplicate definitions do no harm there.
-const STANDALONE_ENTRIES = ['runtime', 'kernel-worker'];
+const STANDALONE_ENTRIES = ['runtime', 'kernel-worker', 'epsil-highlight'];
 
 // The published layout puts the variant marker in the DIRECTORY, not the
 // filename: `esm/<name>.js` and `esm-min/<name>.js`. Each ESM directory is

@@ -436,8 +436,11 @@ must take the arguments and return a value of the result type. A function
 whose result may be a function may fit too, since the result of a call is
 passed (`xs |> f(y)`). At the right side of `|>` a function that takes more
 arguments may fit (`xs |> take(2)` is `take(xs, 2)`), and so may a callback
-of `map`, which takes one argument per source (`map(f, xs, ys)`). An
-argument of a function that maps over a list (`abs`, `*`, a function of the
+of `map`, which takes one argument per source (`map(f, xs, ys)`). In a
+call at the right side of `|>` with no `_`, an argument expects the type of
+the parameter it binds once the piped value fills its slot: in
+`1..10 |> filter(▮)` the predicate, in `[1, 2] |> map(▮)` the mapping
+function. An argument of a function that maps over a list (`abs`, `*`, a function of the
 source) admits a list of the expected type too. A `let` or a `const` with a
 literal value has the type of the value: `const n = 5` is an `integer`,
 `let x = 5` a `number`.
@@ -475,7 +478,33 @@ result.items.map((i) => [i.label, i.detail, i.insertText]);
 // ➔ [["area", "() -> number", "area()"], ["r", "number", undefined]]
 ```
 
-The VS Code extension serves the same items as its completions.
+A function item with a required parameter (a library function, a function
+of the source, a variant constructor with a payload, a function member after
+`.`) also has a `snippet`: the call, with one numbered field per required
+parameter in the syntax of LSP and of CodeMirror's `snippet()`. The default
+text of a field is the name of the parameter, or its type when it has none;
+a name or a type with a `{`, `}`, `$`, `#`, `\` or a line break is skipped,
+for the type or for `arg1`, `arg2`, .... Optional and rest parameters have
+no field. After `|>` the field of the slot that the piped value fills is
+left out (`xs |> fold` gives `fold(${1:reducer}, ${2:initial})${0}`, as
+`xs |> fold(f, 0)` is `fold(f, 0, xs)`); there is no snippet when that slot
+is not known, as when the left side has no static type. A function member
+leaves out its receiver. There is no snippet before a `(` (also after spaces
+or tabs), where a function value is expected (`filter(xs, isPrime)`, also an
+optional one, `((real) -> real) | nothing`; not after `|>`), for a function with no required parameter left, and for an
+overload set, or a function of the source defined several times, whose
+definitions differ in the number of required parameters. `insertText` stays
+the plain text, for an editor that does not take snippets.
+
+```ts
+const source = "let xs = [1, 2, 3]\nxs |> tak";
+const result = epsilCompletions(ce, source, source.length);
+result.items.find((i) => i.label === "take")?.snippet;
+// ➔ "take(${1:count})${0}"   (at `tak` alone: "take(${1:xs}, ${2:count})${0}")
+```
+
+The VS Code extension serves the same items as its completions, and sends a
+`snippet` as a snippet to a client that supports snippets.
 
 Each library item also has a `description`: the paragraphs of the library
 description, which the hover of the name shows.
@@ -607,6 +636,70 @@ serializeEpsil(["Sin", "x"]);
 serializeEpsil(["Sin", "x"], { libraryNames: "mathjson" });
 // ➔ "Sin(x)"
 ```
+
+### Syntax highlighting
+
+The entry `@cortex-js/compute-engine/epsil-highlight` colors Epsil source. It
+contains no engine and no parser, and imports nothing, so an editor bundle can
+load it alone. Its token boundaries are those of the Epsil lexer.
+
+`epsilStreamParser` is a CodeMirror 6 stream parser:
+
+```js
+import { StreamLanguage } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
+import { epsilStreamParser } from '@cortex-js/compute-engine/epsil-highlight';
+
+const epsil = StreamLanguage.define({
+  ...epsilStreamParser,
+  tokenTable: {
+    latex: tags.special(tags.string),
+    rawString: tags.special(tags.string),
+    functionName: tags.function(tags.variableName),
+  },
+});
+```
+
+`epsilHighlightTokens(source)` returns the styled ranges of a source, for
+rendering outside an editor. White space has no range:
+
+```js
+epsilHighlightTokens('let x = f(2)');
+// ➔ [
+//   { start: 0, end: 3, style: 'definitionKeyword' },
+//   { start: 4, end: 5, style: 'variableName' },
+//   { start: 6, end: 7, style: 'operator' },
+//   { start: 8, end: 9, style: 'functionName' },
+//   { start: 9, end: 10, style: 'paren' },
+//   { start: 10, end: 11, style: 'number' },
+//   { start: 11, end: 12, style: 'paren' },
+// ]
+```
+
+The styles are `@lezer/highlight` tag names, plus three names of its own:
+
+| Style | Source |
+| :--- | :--- |
+| `controlKeyword` | `if`, `else`, `for`, `while`, `do`, `match`, `break`, `continue`, `parallel` |
+| `definitionKeyword` | `let`, `const`, `function`, `type`, `alias`, `protocol`, `where`, `readonly`, `readwrite` |
+| `operatorKeyword` | `in`, `is` |
+| `bool` | `true`, `false`, `True`, `False` |
+| `atom` | `NaN`, `Infinity`, `oo`, `Nothing`, `Missing`, … and the glyph constants `π`, `ℝ`, `∞`, … |
+| `number`, `operator`, `paren`, `squareBracket`, `brace`, `separator` | numbers, operators (with superscripts, subscripts and the glyphs `∫ ∑ ∏`), brackets, `,` and `;` |
+| `string`, `escape` | a string; its escape sequences and the `\(` and `)` of an interpolation, whose inner code has the styles of code |
+| `comment`, `docComment` | `//` and nested `/* */` comments; `///` and `/** */` doc comments |
+| `meta` | a `#pragma` and the `#!` line |
+| `namespace` | `std` in `std::name` |
+| `variableName` | a name |
+| `invalid` | an escape sequence or a character that the lexer refuses |
+| `functionName` | a name directly followed by `(`, which is always a call |
+| `latex` | a `$…$` island |
+| `rawString` | a `#"…"#` string |
+
+A word such as `let`, `type` or `is` is a keyword only when a name follows it
+on the same line: in `let type = 5`, `type` is a `variableName`. A block
+comment, a `"""` string and a `$…$` island can span lines; the stream parser
+carries them from one line to the next.
 
 ## How Epsil lowers to MathJSON
 

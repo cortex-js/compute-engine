@@ -5,6 +5,7 @@ import {
   DiagnosticSeverity,
   DidChangeConfigurationNotification,
   DocumentHighlightKind,
+  InsertTextFormat,
   LSPErrorCodes,
   MarkupKind,
   ProposedFeatures,
@@ -89,6 +90,7 @@ let hasRelatedInformationCapability = false;
 let hasCodeDescriptionCapability = false;
 let hasHierarchicalSymbolCapability = false;
 let hasInsertReplaceCapability = false;
+let hasSnippetCapability = false;
 let hasNoActiveParameterCapability = false;
 let diagnosticsEnabled = true;
 
@@ -158,6 +160,11 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   hasInsertReplaceCapability =
     params.capabilities.textDocument?.completion?.completionItem
       ?.insertReplaceSupport === true;
+  // A client with this capability takes a completion as a snippet (a call
+  // with its argument fields); without it, an item inserts its plain text.
+  hasSnippetCapability =
+    params.capabilities.textDocument?.completion?.completionItem
+      ?.snippetSupport === true;
   // With this capability (LSP 3.18) an `activeParameter` of `null` means
   // that no parameter is active. The protocol types of this package predate
   // it.
@@ -284,7 +291,9 @@ const COMPLETION_KINDS: Record<
 // calls too. Its `range` becomes each item's text edit, so that the client
 // replaces the word being typed, and its order is kept through `sortText`.
 // A client with `insertReplaceSupport` also gets the whole word under the
-// cursor (`range[0]` to `replaceEnd`) as the range to replace.
+// cursor (`range[0]` to `replaceEnd`) as the range to replace. An item with a
+// `snippet` (a call with its argument fields) is sent as a snippet to a
+// client with `snippetSupport`.
 connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
   const document = documents.get(textDocument.uri);
   if (document === undefined) return [];
@@ -302,18 +311,25 @@ connection.onCompletion(({ textDocument, position }): CompletionItem[] => {
     start: range.start,
     end: document.positionAt(result.replaceEnd),
   };
-  return result.items.map((item, index) => ({
-    label: item.label,
-    kind: COMPLETION_KINDS[item.kind],
-    ...(item.detail === undefined ? {} : { detail: item.detail }),
-    ...(item.documentation === undefined
-      ? {}
-      : { documentation: item.documentation }),
-    sortText: `${item.rank}-${String(index).padStart(5, '0')}`,
-    textEdit: hasInsertReplaceCapability
-      ? { insert: range, replace, newText: item.insertText ?? item.label }
-      : { range, newText: item.insertText ?? item.label },
-  }));
+  return result.items.map((item, index) => {
+    const snippet = hasSnippetCapability ? item.snippet : undefined;
+    const newText = snippet ?? item.insertText ?? item.label;
+    return {
+      label: item.label,
+      kind: COMPLETION_KINDS[item.kind],
+      ...(item.detail === undefined ? {} : { detail: item.detail }),
+      ...(item.documentation === undefined
+        ? {}
+        : { documentation: item.documentation }),
+      sortText: `${item.rank}-${String(index).padStart(5, '0')}`,
+      ...(snippet === undefined
+        ? {}
+        : { insertTextFormat: InsertTextFormat.Snippet }),
+      textEdit: hasInsertReplaceCapability
+        ? { insert: range, replace, newText }
+        : { range, newText },
+    };
+  });
 });
 
 // The signatures come from `epsilSignatureHelp()`, the function Tycho's

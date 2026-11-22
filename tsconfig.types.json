@@ -20,6 +20,7 @@
     "src/compile.ts",
     "src/runtime.ts",
     "src/kernel-worker.ts",
+    "src/epsil-highlight.ts",
     "src/identities.ts",
     "src/integration-rules.ts",
     "src/group-theory.ts"

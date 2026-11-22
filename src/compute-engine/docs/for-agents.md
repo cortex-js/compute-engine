@@ -257,6 +257,7 @@ canceled; // ➔ true
 | `@cortex-js/compute-engine/compile` | compilation targets (JavaScript, GLSL, interval arithmetic) |
 | `@cortex-js/compute-engine/math-json` | MathJSON types and utilities only |
 | `@cortex-js/compute-engine/epsil` | `executeEpsil()` to run [Epsil](/epsil/) programs |
+| `@cortex-js/compute-engine/epsil-highlight` | syntax highlighting of Epsil source (a CodeMirror 6 stream parser), with no engine and no parser |
 
 The full API reference is at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/). The
