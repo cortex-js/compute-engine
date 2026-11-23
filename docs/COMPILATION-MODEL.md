@@ -1610,13 +1610,16 @@ parameter of a user function of that type is the host's array of arrays. So
 is such a list read by a user function as a free input, a part of a tuple
 input (`G: tuple<integer, list<list<integer>>>`, `At(G, 2)`) and a typed
 parameter of `Apply` (`Apply((m: list<list<integer>>) ↦ Length(m), L)`). It
-is read in four ways: the element `g[i][j]` (`At(At(g, i), j)`), which is
+is read in five ways: the element `g[i][j]` (`At(At(g, i), j)`), which is
 `NaN` where an index is out of range of the list or of its row; row by row,
 by a reader of a list that reads each row where it reads it (`Map` whose value
 for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`, `Fold`,
 `Reduce`; #638); the row `g[i]` at an index known at run time, negative from
-the end, read by a reader of a list (#638, #639); and an argument of a call at
-a parameter of that type, which takes it whole. Out of range the interpreter's
+the end, read by a reader of a list (#638, #639); `Flatten(g)`, a new list of
+the elements of its rows in order, which every reader of a list reads
+(`Flatten(g, 0)`, whose value is the rows, declines; CE-1734); and an
+argument of a call at a parameter of that type, which takes it whole. Out of
+range the interpreter's
 row is `Missing`: compiled, `Length(g[i])` is `NaN`, `First`, `Last` and an
 element of the row are `NaN`, `IsMissing(g[i])` is `True` and
 `Coalesce(Length(g[i]), -7)` is -7, as the interpreter's; a reducer of the

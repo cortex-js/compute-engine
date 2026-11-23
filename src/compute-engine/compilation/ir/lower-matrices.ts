@@ -240,6 +240,50 @@ export function matrixLowering(
     return w;
   };
 
+  /** The depth of `Flatten(x, d)`: `+oo` without `d`; a `d` that is not a
+   *  constant non-negative integer or `+oo` declines. */
+  const flattenDepth = (e: Fn): number => {
+    const depth =
+      e.nops === 2
+        ? isSymbol(e.ops[1], 'PositiveInfinity')
+          ? Infinity
+          : cx.constant(cx.value(e.ops[1])!)
+        : Infinity;
+    if (
+      depth === undefined ||
+      !(depth === Infinity || (Number.isInteger(depth) && depth >= 0))
+    )
+      decline(
+        e,
+        'Flatten to a depth that is not a constant non-negative integer'
+      );
+    return depth;
+  };
+
+  /** `Flatten(g)` and `Flatten(g, d)` of an input or a parameter `g` of the
+   *  lane `rows` (a list of lists whose rows can have different lengths),
+   *  or of such a part of a tuple input (`chunks()` of `lower-lists.ts`):
+   *  the elements of its rows, in order, copied from the host's rows by
+   *  the region `rows.flat`. A depth of 1 or more flattens the one nesting
+   *  level; a depth of 0, whose value is the rows, declines. `undefined`
+   *  for another operand. */
+  const flattenRows = (e: Fn): V | undefined => {
+    const x = e.ops[0];
+    const lane = cx.rowsElementLane(x.type.type);
+    if (lane === undefined || !(isSymbol(x) || isFunction(x, 'At')))
+      return undefined;
+    const r = lists.chunks(x);
+    if (r === undefined || typeof r === 'number' || r.row === undefined)
+      return undefined;
+    if (flattenDepth(e) === 0)
+      decline(
+        e,
+        'Flatten to the depth 0 of a list of rows of different lengths (its value is the rows)'
+      );
+    const flat = lane === 'integer' ? 'rows.flat.int' : 'rows.flat';
+    return cx.region(flat, [r.rows()], [], () => [], e)[1];
+  };
+
   /** The operators of `MATRIX_HEADS`. */
   const matrix = (e: Fn): V => {
     const h = e.operator;
@@ -259,6 +303,10 @@ export function matrixLowering(
     if (h === 'Matrix') return cx.value(e.ops[0])!;
     if (h === 'MatrixMultiply') return product(e);
     if (h === 'Reshape') return reshape(e);
+    if (h === 'Flatten') {
+      const v = flattenRows(e);
+      if (v !== undefined) return v;
+    }
     const m = numbers(e, e.ops[0]);
     const rank = type(m).shape.length;
     // An empty list of rows has rank 1 and the shape `(0)` in the
@@ -283,20 +331,7 @@ export function matrixLowering(
     if (h === 'Flatten') {
       // A depth of 0 leaves the rows; any other flattens the one nesting
       // level a matrix has (`+oo` is complete).
-      const depth =
-        e.nops === 2
-          ? isSymbol(e.ops[1], 'PositiveInfinity')
-            ? Infinity
-            : cx.constant(cx.value(e.ops[1])!)
-          : Infinity;
-      if (
-        depth === undefined ||
-        !(depth === Infinity || (Number.isInteger(depth) && depth >= 0))
-      )
-        decline(
-          e,
-          'Flatten to a depth that is not a constant non-negative integer'
-        );
+      const depth = flattenDepth(e);
       return rank === 0
         ? cx.list(e, [m])
         : rank === 1 || depth === 0

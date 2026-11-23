@@ -891,7 +891,7 @@ a user function of that type, such an input that a user function reads
 (`capture()`, #638), a part of a tuple input read part by part (above), and a
 typed parameter of `Apply`, which binds its argument whole as a parameter of a
 user function does. It is the host's array of arrays, whose rows can have
-different lengths, and it is read in four ways: the element `At(At(g, i), j)`
+different lengths, and it is read in five ways: the element `At(At(g, i), j)`
 (`rows.at`, `rows.at.int` on the lane of the elements; `_atr` of the JavaScript
 printer, NaN where `i` is out of range of `g` or `j` of its row, from the end
 when negative, as `At` of a number); row by row, as the rows of a `Chunk`
@@ -903,8 +903,12 @@ whose value for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`,
 run time (`row()` of `chunks()`): `rows.row` (`_rowr`) is the index from 0 of
 the row, from the end when `i` is negative, -1 out of range, and the row is the
 build of `rows.rowlen` (`_lenr`, 0 at -1) elements `rows.get`, so `At`, `First`
-and `Last` of an element of an absent row are NaN; and an argument of a call at
-a parameter of that lane, which takes it whole. The interpreter's absent row is
+and `Last` of an element of an absent row are NaN; `Flatten` of `g` to a depth
+other than 0 (`flattenRows()` of `lower-matrices.ts`, CE-1734): the region
+`rows.flat` or `rows.flat.int`, whose results are the count and a new list of
+the elements of the rows in order, which every reader of a list reads (a depth
+of 0, whose value is the rows, declines); and an argument of a call at a
+parameter of that lane, which takes it whole. The interpreter's absent row is
 `Missing`, and `Length` of it is `Missing`: `rowLengths` of `lower.ts` maps the
 count of the build to `rows.rowlen.nan` (NaN at -1), which `Length` reads (also
 of a local that holds the row, of its `Reverse`, which keeps the count, and of

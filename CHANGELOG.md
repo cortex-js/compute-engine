@@ -64,6 +64,17 @@
 
 ### Improvements
 
+- **A compiled function can flatten a list of lists that it receives as
+  input** (CE-1734, #638). With `L: list<list<integer>>`,
+  `compile(Length(Flatten(L)))` fell back to the interpreter, because an
+  input whose rows can have different lengths was read only row by row. On
+  JavaScript, `Flatten(L)` now compiles to a new list of the elements of the
+  rows in order: at `L = [[1, 2], [], [3]]` it gives `[1, 2, 3]`, and
+  `Length`, `Sum`, `Sort`, `Map` and the other readers of a list read it. A
+  part of a tuple input and a parameter of a user function of that type
+  compile too. `Flatten(L, 0)`, GLSL, the interval target and the bigint
+  mode still fall back.
+
 - **In the bigint compile mode, `Floor`, `Ceil`, `Round` and `Truncate` of
   an integer times a rational constant compile.** With `n: integer`,
   `compile(Floor(n/2), { mode: 'bigint' })` fell back to the interpreter

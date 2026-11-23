@@ -61,6 +61,7 @@ import {
   LOGIC,
   printProgram,
   type Printed,
+  type RegionSpelling,
   type Syntax,
 } from './print.js';
 import { TEXT, TEXT_REGIONS } from './print-js-text.js';
@@ -188,6 +189,18 @@ const OTHER_LANES = {
   'rgcd': '_SYS.ir.gcd($0, $1)',
   'rlcm': '_SYS.ir.lcm($0, $1)',
 };
+
+/** `Flatten` of an input or a parameter of the lane `rows` (`rows.flat`,
+ *  `rows.flat.int`): the elements of the host's rows, arrays or typed
+ *  arrays, in order, and their count. */
+const flatRows: RegionSpelling = ({ outs: [c, out], args: [g] }) => ({
+  open: [
+    `const ${out} = [];`,
+    `for (const _row of ${g}) for (const _x of _row) ${out}.push(_x);`,
+    `const ${c} = ${out}.length;`,
+  ],
+  close: () => [],
+});
 
 /** The text of the result of the entry of the record type `t`, read from
  *  `value`: a record of a named tuple type is an object keyed by the names
@@ -363,12 +376,12 @@ export const JS: Syntax = deepFreeze({
   regions: {
     ...builds(NUMBERS, (out) => `${out}.length`),
     ...TEXT_REGIONS,
-    integrate: ({ outs: [out], args: [a, b], params: [t] }) => ({
+    'integrate': ({ outs: [out], args: [a, b], params: [t] }) => ({
       open: [`const ${out} = _SYS.irIntegrate((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, ${a}, ${b});`],
     }),
     // The indices sorted by a comparison, as the interpreter sorts them.
-    sortby: ({ outs: [out], args: [n], params: [i, j] }) => ({
+    'sortby': ({ outs: [out], args: [n], params: [i, j] }) => ({
       open: [
         `const ${out} = Array.from({ length: ${n} }, (_, k) => k).sort((${i}, ${j}) => {`,
       ],
@@ -376,7 +389,7 @@ export const JS: Syntax = deepFreeze({
     }),
     // The elements of an `Iterate`: the accumulator is a variable that
     // each pass sets to its element.
-    iterate: ({ outs: [out], args: [n, x0], params: [k, acc] }) => ({
+    'iterate': ({ outs: [out], args: [n, x0], params: [k, acc] }) => ({
       open: [
         `const ${out}_n = ${n};`,
         guard(`${out}_n`, 'a list'),
@@ -387,26 +400,30 @@ export const JS: Syntax = deepFreeze({
       close: ([y]) => [`  ${acc} = ${out}[${k}] = ${y};`, '}'],
     }),
     // The numeric derivative of the runtime (`_SYS.nd`).
-    derivative: ({ outs: [out], args: [x], params: [t] }) => ({
+    'derivative': ({ outs: [out], args: [x], params: [t] }) => ({
       open: [`const ${out} = _SYS.nd((${t}) => {`],
       close: ([y]) => [`  return ${y};`, `}, 1, 'scalar')(${x});`],
     }),
-    choice: ({ outs: [c, out], args: [n] }) => ({
+    'choice': ({ outs: [c, out], args: [n] }) => ({
       open: [
         `const ${out} = _SYS.randomChoice(_SYS.domainInterval('RandomChoice', 0, 1), ${n});`,
         `const ${c} = ${out}.length;`,
       ],
       close: () => [],
     }),
+    // `Flatten` of an input or a parameter of the lane `rows`: the elements
+    // of the host's rows (arrays or typed arrays), in order.
+    'rows.flat': flatRows,
+    'rows.flat.int': flatRows,
     // The indices of `RandomSample(L, k)`, drawn as the interpreter draws.
-    sample: ({ outs: [c, out], args: [n, k] }) => ({
+    'sample': ({ outs: [c, out], args: [n, k] }) => ({
       open: [
         `const ${out} = _SYS.randomSample(${n}, ${k});`,
         `const ${c} = ${out}.length;`,
       ],
       close: () => [],
     }),
-    seeded: ({ outs, args: [seed] }) => ({
+    'seeded': ({ outs, args: [seed] }) => ({
       open: [
         ...outs.map((o) => `let ${o};`),
         `_SYS.withRandomSeed(${seed}, () => {`,
@@ -415,7 +432,7 @@ export const JS: Syntax = deepFreeze({
     }),
     // The private list of a list accumulator in a worker program: a
     // `Float64Array`, which the pool transfers.
-    zeros: ({ outs: [out], args: [n] }) => ({
+    'zeros': ({ outs: [out], args: [n] }) => ({
       open: [],
       close: ([y]) => [`const ${out} = new Float64Array(${n}).fill(${y});`],
     }),

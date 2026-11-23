@@ -709,6 +709,23 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
           ]
         : undefined,
   },
+  // `Flatten(g)` of an input or a parameter `g` of the lane `rows`, of
+  // reals (`rows.flat`) or of integers (`rows.flat.int`): the elements of
+  // its rows, in order (its body is empty); the results are the count and
+  // the list. JavaScript only.
+  ...(['rows.flat', 'rows.flat.int'] as const).map((op): RegionRow => ({
+    op,
+    effect: 'pure',
+    args: ['rows'],
+    params: [],
+    results: (_, ys, [count]) =>
+      ys.length === 0
+        ? [
+            { lane: I, shape: [] },
+            { lane: op === 'rows.flat' ? R : I, shape: [{ v: count }] },
+          ]
+        : undefined,
+  })),
   // The engine's machine quadrature from `a` to `b` of the region's yield
   // at its parameter.
   {
