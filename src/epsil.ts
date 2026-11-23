@@ -16,7 +16,11 @@ export { ComputeEngine } from './compute-engine.js';
 export { parseEpsil } from './epsil/parse-epsil.js';
 export { serializeEpsil } from './epsil/serialize-epsil.js';
 export type { EpsilNumberFormat } from './epsil/serialize-epsil.js';
-export { executeEpsil, executeEpsilAsync } from './epsil/execute-epsil.js';
+export {
+  applyEpsilAsync,
+  executeEpsil,
+  executeEpsilAsync,
+} from './epsil/execute-epsil.js';
 export {
   binderSitesOf,
   resolveLibraryNames,
@@ -46,6 +50,7 @@ export {
   epsilNameOf,
 } from './epsil/library-names.js';
 export type {
+  ApplyEpsilAsyncOptions,
   ExecuteEpsilOptions,
   ExecuteEpsilAsyncOptions,
   ExecuteEpsilResult,

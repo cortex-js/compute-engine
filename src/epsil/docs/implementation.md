@@ -295,6 +295,33 @@ await executeEpsilAsync(ce, "f(5)", {
 // ➔ cell-1 k + 1
 ```
 
+To apply a function value that the host kept, such as a timer callback that
+a cell returned, use `applyEpsilAsync(ce, fn, args, options?)`. It takes the
+`debug` and `signal` options of `executeEpsilAsync()`, and it calls the hooks
+for the statements of the function only, with no statement for the call:
+
+```ts
+executeEpsil(ce, "let a = 0\nlet cb = t => do {\n  a = a + t\n  a\n}", {
+  url: "cell",
+});
+const callback = ce.box("cb").evaluate();
+const result = await applyEpsilAsync(ce, callback, [ce.number(5)], {
+  debug: {
+    beforeStatement: (at) =>
+      console.log(at.sourceUrl, at.sourceContent?.slice(...at.range)),
+  },
+});
+// ➔ cell a = a + t
+// ➔ cell a
+console.log(result.value.json);
+// ➔ 5
+```
+
+Its result has the form of the result of `executeEpsilAsync()`: a runtime
+problem is an `["Error", …]` value, and a finite lazy collection is listed.
+The `diagnostics` are empty, because the statements of the function are in
+the source of an earlier run.
+
 When a hook throws, or its promise rejects, the run stops and the promise of
 `executeEpsilAsync()` rejects with that error: this is how a debugger ends a
 run. An abort of `signal` while a hook's promise is pending takes effect only

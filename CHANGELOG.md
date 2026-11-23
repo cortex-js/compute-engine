@@ -33,6 +33,15 @@
 
 ### Improvements
 
+- **`applyEpsilAsync(ce, fn, args, { debug, signal })` applies a function
+  value under a debugger** (CE-1647). A host that kept a function of an
+  earlier run, such as the timer callback of a notebook cell, applies it
+  with the debug hooks and the signal of `executeEpsilAsync()`: the hooks
+  are called for the statements of the function only, and a pause does not
+  count against a time limit. The result has the form of the result of
+  `executeEpsilAsync()`, and a runtime problem is an `["Error", …]` value.
+  Before, the host ran a wrapper program that called the function, and
+  the statements of the wrapper called the hooks too.
 - **`\zeta(0, a)` with a symbolic `a` evaluates to `1/2 - a`** (CE-1598),
   as `HurwitzZeta(0, a)` does. The two-argument `Zeta` stayed unevaluated
   unless `a` was known to be positive. For another order, such as

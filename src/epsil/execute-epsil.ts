@@ -360,6 +360,168 @@ export async function executeEpsilAsync(
   }
 }
 
+export interface ApplyEpsilAsyncOptions {
+  /** An abort of this signal stops the application: the promise of
+   * `applyEpsilAsync` rejects with a `CancellationError` whose `cause` is
+   * the signal's reason, as for `executeEpsilAsync`. */
+  signal?: AbortSignal;
+  /** Hooks with which a debugger follows the application, as in
+   * `ExecuteEpsilAsyncOptions.debug`. They are called for the statements of
+   * the body of the function (with the source of the run that defined it,
+   * `EpsilDebugStatement.sourceContent`), and of each function that it
+   * calls. No statement is called for the application itself. */
+  debug?: EpsilDebugHooks;
+}
+
+/**
+ * Apply the function value `fn` to `args` on the asynchronous route, as a
+ * statement of `executeEpsilAsync()` that calls it does, and return its
+ * value.
+ *
+ * Use it to call a function that an earlier run of Epsil defined or
+ * returned, such as a timer callback that a notebook cell gave to its host,
+ * under a debugger: with `options.debug`, the hooks are installed and the
+ * time limit counts running time only, as in a debug run of
+ * `executeEpsilAsync()`, and the hooks are called for the statements of the
+ * function. A wrapper program that calls the function would call them for
+ * its own statements too.
+ *
+ * `fn` is a function value (`ce.box("cb").evaluate()`), or the name of a
+ * function. The function runs in the scope in which it was defined: an
+ * assignment of a variable of a notebook cell changes the variable of that
+ * cell.
+ *
+ * The result is the result of `executeEpsilAsync()` for a program whose
+ * value is the call:
+ *
+ * - A runtime problem is a value (`["Error", …]`), not an exception. A
+ *   timeout of a `ce.withTimeLimit()` span around the call is an error
+ *   value whose second operand is the cause (`"timeout"`).
+ * - When the function gives a finite lazy collection, the value is the list
+ *   of its elements.
+ * - `diagnostics` is empty and `valueRange` is not given: the statements of
+ *   the function are in the source of an earlier run. Thus an error in a
+ *   statement of the function whose value is discarded is not reported, as
+ *   a run reports it with a `runtime-error` diagnostic. A host that needs
+ *   it reads the value of each statement in `debug.afterStatement`.
+ *
+ * The promise rejects when the `signal` is aborted (a `CancellationError`),
+ * and when a debug hook throws (its error).
+ *
+ * Until the promise settles, run no other evaluation on this engine: a
+ * statement of that evaluation calls the debug hooks too
+ * (`EpsilDebugHooks`).
+ */
+export async function applyEpsilAsync(
+  ce: ComputeEngine,
+  fn: Expression,
+  args: ReadonlyArray<Expression>,
+  options?: ApplyEpsilAsyncOptions
+): Promise<ExecuteEpsilResult> {
+  const signal = options?.signal;
+  const aborted = (): CancellationError =>
+    new CancellationError({ cause: signal?.reason });
+  if (signal?.aborted) throw aborted();
+  // The deadline frame of the application, on a pause clock of its own in
+  // a debug run, as in `executeEpsilAsync()`.
+  const hostFrame = ce._deadlineFrame;
+  const debugRun =
+    options?.debug === undefined
+      ? undefined
+      : (() => {
+          const clock = makePauseClock();
+          return {
+            clock,
+            frame: frameOnClock(
+              hostFrame ?? { at: Infinity, spans: [] },
+              clock
+            ),
+          };
+        })();
+  const runFrame = debugRun?.frame ?? hostFrame;
+  const enclosingDebugHooks = ce._epsilDebugHooks;
+  const enclosingDebugRun = ce._epsilDebugRun;
+  if (options?.debug !== undefined) {
+    ce._epsilDebugHooks = options.debug;
+    ce._epsilDebugRun = debugRun;
+  }
+  let outsideFrame = hostFrame;
+  try {
+    let pending: Promise<Expression> | undefined;
+    let failure: { error: unknown } | undefined;
+    // The evaluation reads the deadline frame when it starts.
+    ce._deadlineFrame = runFrame;
+    try {
+      // The function is code of a program: it runs with no iteration
+      // limit, as in `executeEpsilRun()`.
+      ce._liftDefaultIterationLimit();
+      // The library's `Apply`, not a definition of the name `Apply` in the
+      // current scope.
+      const call = ce._libraryCall('Apply', [fn, ...args])!;
+      pending = call.evaluateAsync({ signal });
+    } catch (e) {
+      failure = { error: e };
+    }
+    ce._deadlineFrame = outsideFrame;
+    let value: Expression | undefined;
+    if (pending !== undefined) {
+      try {
+        value = await pending;
+      } catch (e) {
+        failure = { error: e };
+      }
+    }
+    outsideFrame = ce._deadlineFrame;
+    if (signal?.aborted)
+      throw failure?.error instanceof CancellationError
+        ? failure.error
+        : aborted();
+    if (failure !== undefined) {
+      if (isDebugHookFailure(failure.error)) throw failure.error;
+      value = applicationFailureValue(ce, failure.error);
+    }
+    if (value!.isLazyCollection)
+      value = listedFinalValue(ce, value!, runFrame);
+    return { value: value!, diagnostics: [] };
+  } finally {
+    ce._deadlineFrame = outsideFrame;
+    ce._epsilDebugHooks = enclosingDebugHooks;
+    ce._epsilDebugRun = enclosingDebugRun;
+  }
+}
+
+/** The error value of an application of `applyEpsilAsync()` whose
+ * evaluation threw `e`: the value that a statement of a program that
+ * throws `e` gets (`programFailureValue()`, `compute-engine/function-utils.ts`).
+ * It is built with no deadline frame, because the frame can have expired. */
+function applicationFailureValue(ce: ComputeEngine, e: unknown): Expression {
+  const frame = ce._deadlineFrame;
+  ce._deadlineFrame = undefined;
+  try {
+    const constant = constantAssignmentName(e);
+    if (constant !== undefined)
+      return ce.error(['constant-assignment', constant]);
+    return failureErrorValue(ce, e);
+  } finally {
+    ce._deadlineFrame = frame;
+  }
+}
+
+/** The error value of an evaluation that threw `e`: `["Error", message]`,
+ * with the cause as a second operand when `e` is a cancellation. The cause
+ * is the one that the statement loop of the engine writes
+ * (`programFailureValue()`, `compute-engine/function-utils.ts`). */
+function failureErrorValue(ce: ComputeEngine, e: unknown): Expression {
+  const message = ce.string(e instanceof Error ? e.message : String(e));
+  const cause =
+    cancellationCause(e) ??
+    (e instanceof CancellationError ? budgetCauseOf(e) : undefined);
+  return ce._fn(
+    'Error',
+    cause === undefined ? [message] : [message, ce.string(cause)]
+  );
+}
+
 /**
  * The run of a program, shared by `executeEpsil` and `executeEpsilAsync`: a
  * generator that yields each top-level statement to evaluate and receives
@@ -1058,16 +1220,7 @@ function listedFinalValue(
       throw e;
     }
     ce._deadlineFrame = isTimeoutCancellation(e) ? undefined : outsideFrame;
-    const message = ce.string(e instanceof Error ? e.message : String(e));
-    // The cause that the statement loop of the engine writes
-    // (`programFailureValue()`, `compute-engine/function-utils.ts`).
-    const cause =
-      cancellationCause(e) ??
-      (e instanceof CancellationError ? budgetCauseOf(e) : undefined);
-    return ce._fn(
-      'Error',
-      cause === undefined ? [message] : [message, ce.string(cause)]
-    );
+    return failureErrorValue(ce, e);
   }
 }
 
