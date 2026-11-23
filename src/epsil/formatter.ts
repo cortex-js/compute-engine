@@ -82,17 +82,14 @@ function trimTrailingPadding(s: string): string {
  * belongs to the single `Formatter` given to its constructor, and each
  * serialization makes a new formatter and new blocks, so a cached result is
  * never used with different options.
+ *
+ * A query reads and writes the cache in its own body and loops over its
+ * children with `for`, with no callback (`compute`, `reduce`, `forEach`): a
+ * query recurses into its children, and each callback adds a stack frame at
+ * each level of the block tree, so it divides the depth of nesting that the
+ * formatter accepts before "Maximum call stack size exceeded".
  */
-class OffsetCache<T extends NonNullable<unknown>> {
-  private readonly values = new Map<number, T>();
-  get(offset: number, compute: () => T): T {
-    const cached = this.values.get(offset);
-    if (cached !== undefined) return cached;
-    const result = compute();
-    this.values.set(offset, result);
-    return result;
-  }
-}
+class OffsetCache<T extends NonNullable<unknown>> extends Map<number, T> {}
 
 export abstract class FormattingBlock {
   protected fmt: Formatter;
@@ -207,20 +204,24 @@ export class LineBlock extends FormattingBlock {
     return fragments.join('');
   }
   nextCol(offset: number): number {
-    return this.nextColCache.get(offset, () =>
-      this.blocks.reduce((acc, val) => val.nextCol(acc), offset)
-    );
+    const cached = this.nextColCache.get(offset);
+    if (cached !== undefined) return cached;
+    let col = offset;
+    for (const block of this.blocks) col = block.nextCol(col);
+    this.nextColCache.set(offset, col);
+    return col;
   }
   cost(offset: number): number {
-    return this.costCache.get(offset, () => {
-      let result = 0;
-      let col = offset;
-      for (const block of this.blocks) {
-        result += block.cost(col);
-        col = block.nextCol(col);
-      }
-      return result;
-    });
+    const cached = this.costCache.get(offset);
+    if (cached !== undefined) return cached;
+    let result = 0;
+    let col = offset;
+    for (const block of this.blocks) {
+      result += block.cost(col);
+      col = block.nextCol(col);
+    }
+    this.costCache.set(offset, result);
+    return result;
   }
 }
 
@@ -274,12 +275,13 @@ export class StackBlock extends FormattingBlock {
   }
   private readonly costCache = new OffsetCache<number>();
   cost(offset: number): number {
-    return this.costCache.get(offset, () =>
-      this.blocks.reduce(
-        (acc, val) => this.fmt.cost.linebreak + acc + val.cost(offset),
-        0
-      )
-    );
+    const cached = this.costCache.get(offset);
+    if (cached !== undefined) return cached;
+    let result = 0;
+    for (const block of this.blocks)
+      result += this.fmt.cost.linebreak + block.cost(offset);
+    this.costCache.set(offset, result);
+    return result;
   }
 }
 
@@ -305,11 +307,11 @@ export class WrapBlock extends FormattingBlock {
   }
 
   private readonly solutionCache = new OffsetCache<FormattingBlock>();
+  /** The layout of the blocks, computed once for each starting column. */
   solution(offset: number): FormattingBlock {
-    return this.solutionCache.get(offset, () => this.layout(offset));
-  }
+    const cached = this.solutionCache.get(offset);
+    if (cached !== undefined) return cached;
 
-  private layout(offset: number): FormattingBlock {
     const lines: FormattingBlock[][] = [];
     let line: FormattingBlock[] = [];
     // The column after the last block of the current line. This is the value
@@ -341,10 +343,12 @@ export class WrapBlock extends FormattingBlock {
     // Don't forget the last line
     if (line.length !== 0) lines.push(line);
 
-    return new StackBlock(
+    const result = new StackBlock(
       this.fmt,
       ...lines.map((x) => new LineBlock(this.fmt, ...x))
     );
+    this.solutionCache.set(offset, result);
+    return result;
   }
 
   serialize(offset: number): string {
@@ -372,18 +376,19 @@ export class ChoiceBlock extends FormattingBlock {
   // Which block would be chosen if starting at column `offset`
   private readonly choiceCache = new OffsetCache<FormattingBlock>();
   choice(offset: number): FormattingBlock {
-    return this.choiceCache.get(offset, () => {
-      let block: FormattingBlock | undefined;
-      let minCost = Infinity;
-      this.blocks.forEach((x) => {
-        const cost = x.cost(offset);
-        if (cost < minCost) {
-          minCost = cost;
-          block = x;
-        }
-      });
-      return block!;
-    });
+    const cached = this.choiceCache.get(offset);
+    if (cached !== undefined) return cached;
+    let block: FormattingBlock | undefined;
+    let minCost = Infinity;
+    for (const x of this.blocks) {
+      const cost = x.cost(offset);
+      if (cost < minCost) {
+        minCost = cost;
+        block = x;
+      }
+    }
+    this.choiceCache.set(offset, block!);
+    return block!;
   }
   serialize(offset: number): string {
     return this.choice(offset).serialize(offset);

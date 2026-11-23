@@ -25,6 +25,11 @@
 
 ### Resolved Issues
 
+- **The Epsil formatter accepts about twice the depth of nesting** (CE-1186).
+  `serializeEpsil()` of a chain of about 140 nested function applications
+  could fail with "Maximum call stack size exceeded" in the formatter. The
+  formatter now adds fewer stack frames for each level, and the same chain
+  serializes up to about 240 levels.
 - **`JacobiTheta` gives the digits of the engine's precision** (CE-1395).
   Above machine precision it gave about 16 digits: at a precision of 30,
   `N(JacobiTheta(3, 0, i))` gave `1.086434811213308`; it now gives

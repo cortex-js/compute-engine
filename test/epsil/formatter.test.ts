@@ -1,7 +1,14 @@
 import { operand } from '../../src/math-json/utils';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { Formatter, StackBlock } from '../../src/epsil/formatter';
+import {
+  ChoiceBlock,
+  Formatter,
+  FormattingBlock,
+  LineBlock,
+  StackBlock,
+  WrapBlock,
+} from '../../src/epsil/formatter';
 import { MathJsonExpression } from '../../src/math-json/types';
 
 //
@@ -398,14 +405,92 @@ describe('EPSIL FORMATTER — time is not exponential in nesting depth', () => {
   }, 300_000);
 });
 
+describe('EPSIL FORMATTER — stack frames for each level of nesting', () => {
+  // A query of a block (`cost()`, `nextCol()`) recurses into its children,
+  // so the depth of nesting that the formatter accepts before "Maximum call
+  // stack size exceeded" is the size of the stack divided by the frames that
+  // a level adds. A callback in a query (a `compute` function given to the
+  // cache, `reduce`, `forEach`) adds frames: with them, a chain of 140 nested
+  // function applications overflowed the stack in a new Jest worker. The
+  // frame count, unlike the depth at which the stack overflows, does not
+  // depend on the state of the JIT or on the load of the machine.
+
+  /** A leaf that records the deepest stack from which it is queried. */
+  class ProbeBlock extends FormattingBlock {
+    maxFrames = 0;
+    private record(): void {
+      const frames = new Error().stack!.split('\n').length;
+      if (frames > this.maxFrames) this.maxFrames = frames;
+    }
+    debug(): string {
+      return 'Probe';
+    }
+    serialize(_offset: number): string {
+      this.record();
+      return 'x';
+    }
+    nextCol(offset: number): number {
+      this.record();
+      return offset + 1;
+    }
+    cost(_offset: number): number {
+      this.record();
+      return 0;
+    }
+  }
+
+  function framesPerLevel(
+    nest: (fmt: Formatter, inner: FormattingBlock) => FormattingBlock
+  ): number {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = Infinity;
+    try {
+      const frames = (depth: number): number => {
+        const fmt = new Formatter();
+        const leaf = new ProbeBlock(fmt);
+        let block: FormattingBlock = leaf;
+        for (let i = 0; i < depth; i++) block = nest(fmt, block);
+        block.serialize(0);
+        return leaf.maxFrames;
+      };
+      return (frames(20) - frames(10)) / 10;
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
+  }
+
+  test('a choice between a line and a stack adds 3 frames', () => {
+    // `ChoiceBlock.choice()` → `LineBlock.cost()` → `ChoiceBlock.cost()`
+    expect(
+      framesPerLevel(
+        (fmt, inner) =>
+          new ChoiceBlock(
+            fmt,
+            new LineBlock(fmt, fmt.text('('), inner),
+            new StackBlock(fmt, fmt.text('('), inner)
+          )
+      )
+    ).toBe(3);
+  });
+
+  test('a wrap adds 3 frames', () => {
+    // `WrapBlock.serialize()` → `StackBlock.serialize()` →
+    // `LineBlock.serialize()`, the blocks of its solution
+    expect(
+      framesPerLevel((fmt, inner) => new WrapBlock(fmt, fmt.text('('), inner))
+    ).toBe(3);
+  });
+});
+
 describe('EPSIL FORMATTER — deep indentation', () => {
   // Each level applies a function literal, whose body aligns under the open
   // parenthesis, and holds the next level in a call of a function with a
   // name of 61 characters, whose argument aligns under its open parenthesis.
   // A level indents by about 55 columns, so at depth 40 a line starts past
   // column 2000. The formatter recurses for each level, and the depth stays
-  // far from the limit of the call stack, which is between 160 and 200
-  // levels of this chain.
+  // far from the limit of the call stack: a chain of the same structure with
+  // a short function name overflows between 240 and 280 levels in a new Jest
+  // worker.
   const LONG_NAME = 'f' + '_long'.repeat(12);
   function chain(depth: number): MathJsonExpression {
     let node: MathJsonExpression = ['Add', 'x0', 1];
