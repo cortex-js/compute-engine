@@ -122,11 +122,13 @@ import {
   Decline,
   BIGINT_LANE,
   decline,
+  fullyListed,
   handlerAnswer,
   hasOwnLowering,
   hasUnsettledShape,
   isUntyped,
   LANE_MISMATCH,
+  listedOf,
   POSSIBLE_NOTHING,
   type DeclineReason,
   STATIC_TYPE_ERROR,
@@ -527,6 +529,13 @@ class WidenList extends Decline {
   }
 }
 
+/** The decline of a call of a function of the host with a list, a tuple
+ *  or a record as an argument in a lowering that does not track the
+ *  `Listed` of its values (`Lowering.trackListed`): `lowerWide()` lowers
+ *  the program again with it on (CE-1652, step 5). No program that
+ *  compiled before such arguments were admitted lowers twice. */
+class NeedsListed extends Decline {}
+
 /** The string constants of a lowering (`Lowering.known()`): `keep`, the
  *  lowering keeps them, at every place (a parameter, a record field) or at
  *  the places of `only`; `seen`, the constants could decide a test: an
@@ -599,7 +608,8 @@ export function lower(
 }
 
 /** `lowerOnce()`, again with one more list local on the real lane at each
- *  `WidenList`. */
+ *  `WidenList`, and with the `Listed` of the values tracked after a
+ *  `NeedsListed`. */
 function lowerWide(
   root: Expression,
   rows: readonly OperatorRow[],
@@ -610,10 +620,15 @@ function lowerWide(
   // the retries, each a whole lowering) the program declines.
   const MAX_WIDENED = 16;
   const wide = new Set<Expression>();
+  let track = false;
   for (;;) {
     try {
-      return lowerOnce(root, rows, options, wide, strings);
+      return lowerOnce(root, rows, options, wide, strings, track);
     } catch (error) {
+      if (error instanceof NeedsListed && !track) {
+        track = true;
+        continue;
+      }
       if (!(error instanceof WidenList)) throw error;
       if (wide.has(error.declaration) || wide.size >= MAX_WIDENED)
         throw new Decline(error.node, error.cause, error.head, error.reason);
@@ -666,7 +681,8 @@ function lowerOnce(
   rows: readonly OperatorRow[],
   options: LowerOptions,
   wide: ReadonlySet<Expression>,
-  strings: StringConstants
+  strings: StringConstants,
+  trackListed = false
 ): Program {
   const ce = root.engine;
   const bigint = options.mode === 'bigint';
@@ -1800,6 +1816,21 @@ function lowerOnce(
     return apply(e, 'At', [l, i]);
   };
 
+  /** `v`, the value of `e`. A `List` or a `Tuple` that is not a node of
+   *  the program (the elements of a `Range` of constants, as a literal) can
+   *  share its value with a literal of the program of the same structure
+   *  (the memo): the value is not listed then (`Listed`; CE-1652, step 5). */
+  const unlisted = (e: Expression, v: V | undefined): V | undefined => {
+    if (
+      v !== undefined &&
+      isFunction(e) &&
+      (e.operator === 'List' || e.operator === 'Tuple') &&
+      !readers.has(e)
+    )
+      cx.listed.set(v, false);
+    return v;
+  };
+
   /** Lower `e`. With `want` false its value is not used (a statement). */
   const value = (e: Expression, want = true): V | undefined => {
     // The root `Tuple` is lowered where it is (`rootParts`).
@@ -1820,7 +1851,7 @@ function lowerOnce(
               ? typeTests.delete(x)
               : typeTests.set(x, tests[i])
           );
-        return m.v;
+        return unlisted(e, m.v);
       }
     }
     const region = b.current();
@@ -1855,7 +1886,7 @@ function lowerOnce(
         tests: tests.some((x) => x !== undefined) ? tests : undefined,
       });
     }
-    return v;
+    return unlisted(e, v);
   };
 
   /** `e` and the operands of its `And`, `Or` and `Not`, in preorder: the
@@ -1978,16 +2009,42 @@ function lowerOnce(
     const dispatched = user === undefined ? protocols.dispatch(e) : undefined;
     if (dispatched !== undefined) {
       reachBody(dispatched.binding.literal.ops[0]);
-      return fns.call(
+      // A method whose declared result is `nothing`: as a user function
+      // of that result, below.
+      const nothing = fns.declaresNothing(dispatched.call, dispatched.binding);
+      if (nothing && want && !nothingPlace(e))
+        decline(
+          e,
+          `a call of ${e.operator}, whose value Nothing is read`,
+          POSSIBLE_NOTHING
+        );
+      const v = fns.call(
         dispatched.call,
         dispatched.binding,
         dispatched.values,
         () => nanForAbsent(e)
       );
+      return nothing && !want ? undefined : v;
     }
     if (user !== undefined || fns.recursive(e)) {
       if (user !== undefined) reachBody(user.literal.ops[0]);
-      return fns.call(e, user, undefined, () => nanForAbsent(e));
+      // A function whose declared result is `nothing` (`draw(...args) ->
+      // nothing`): its value is read only where a call of a function of
+      // the host of that result is (`nothingPlace()`); its body is lowered
+      // as a statement (`define()` of `lower-functions.ts`; CE-1652,
+      // step 5).
+      const nothing =
+        user !== undefined
+          ? fns.declaresNothing(e, user)
+          : fns.recursiveNothing(e);
+      if (nothing && want && !nothingPlace(e))
+        decline(
+          e,
+          `a call of ${e.operator}, whose value Nothing is read`,
+          POSSIBLE_NOTHING
+        );
+      const v = fns.call(e, user, undefined, () => nanForAbsent(e));
+      return nothing && !want ? undefined : v;
     }
     // A host's handler (of a library head, or of a host operator): its
     // expression is lowered in place of `e`.
@@ -2055,7 +2112,10 @@ function lowerOnce(
       case 'List': {
         // A list, or a record of elements of several lanes.
         const elements = e.ops.map((op) => value(op)!);
-        return records.literal(e, elements, false) ?? list(e, elements);
+        return (
+          records.literal(e, elements, false, readers.has(e)) ??
+          literalListed(e, elements, list(e, elements))
+        );
       }
       case 'Tuple': {
         // A point of NaN coordinates is the absent point: the written
@@ -2076,7 +2136,10 @@ function lowerOnce(
               (x) => same(x.shape, t[0].shape) && !lengthValues(x).length
             ))
         )
-          return records.literal(e, parts, true) ?? tuple(e, parts);
+          return (
+            records.literal(e, parts, true, readers.has(e)) ??
+            literalListed(e, parts, tuple(e, parts))
+          );
         // A record among the elements: the root is a record too.
         if (t.some((x) => x.lane === 'record' || x.lane === 'nothing'))
           return records.literal(e, parts, true)!;
@@ -2677,6 +2740,13 @@ function lowerOnce(
           const n = type(owned.binding.v).shape[0];
           return typeof n === 'number' ? b.constant(n, 'integer') : n.v;
         }
+        // Of the arguments of a rest parameter: their number (CE-1652,
+        // step 5).
+        if (e.nops === 1 && owned !== undefined) {
+          const t = type(owned.binding.v);
+          if (t.head !== undefined)
+            return b.constant(t.fields!.length, 'integer');
+        }
         // Of a string (its static type): the number of its characters.
         if (e.nops === 1 && isSubtype(e.ops[0].type.type, 'string')) {
           const s = scalar(e.ops[0]);
@@ -2847,6 +2917,24 @@ function lowerOnce(
       // Every list of the slice is listed: `ListFrom(L)` is `L`.
       case 'ListFrom': {
         const v = e.nops === 1 ? value(e.ops[0])! : undefined;
+        // The arguments of a rest parameter (a record, `IRType.head`), a
+        // `Tuple`: the `List` of its fields, a record that only a function
+        // of the host and `At` read (CE-1652, step 5).
+        const t = v === undefined ? undefined : type(v);
+        if (t?.head === 'List') return v;
+        if (t?.head === 'Tuple') {
+          const l = b.list(
+            t.fields!.map((f, k) =>
+              b.op('field', [v!, b.constant(k, 'integer')], {
+                ...f,
+                constant: undefined,
+              })
+            ),
+            { ...t, head: 'List' }
+          );
+          cx.listed.set(l, listedOf(cx, v!));
+          return l;
+        }
         if (
           v === undefined ||
           tuples.get(v) === 0 ||
@@ -5391,6 +5479,22 @@ function lowerOnce(
     );
   };
 
+  /** The list or the tuple `v` that the `List` or the `Tuple` literal `e`
+   *  of the values `elements` made: the interpreter holds it as that
+   *  literal when `e` is a node of the program (not a literal that the
+   *  lowering made of a value of the engine, such as the elements of a
+   *  `Range` of constants) and each element is listed (`Listed`; CE-1652,
+   *  step 5). */
+  const literalListed = (e: Fn, elements: V[], v: V): V => {
+    if (
+      readers.has(e) &&
+      cx.listed.get(v) !== false &&
+      elements.every((x) => listedOf(cx, x) === true)
+    )
+      cx.listed.set(v, true);
+    return v;
+  };
+
   /** The list `e` of the values `elements`; a list of tuples when they are
    *  tuples. */
   const list = (e: Fn, elements: V[]): V => {
@@ -7044,6 +7148,8 @@ function lowerOnce(
     rowsParams,
     heldParams: new Set<V>(),
     typeTests,
+    listed: new Map(),
+    trackListed,
     known: (v) => {
       // A subject that is not a constant, which a kept constant could make
       // known (a constant subject is decided in every lowering).
@@ -7147,16 +7253,73 @@ function lowerOnce(
   // The functions of the host that the program calls (`hostCall()`).
   const hosts: HostCall[] = [];
 
+  /** Whether the value `Nothing` of `x` is read only where the code does
+   *  not read it: as the value of the root function literal, or as the
+   *  last operand of a `Block` or the operand of a `Typed` that is. A
+   *  `Nothing` read as NaN there. The body of a user function whose
+   *  declared result is `nothing` is lowered as a statement (`define()` of
+   *  `lower-functions.ts`). */
+  const nothingPlace = (x: Expression): boolean => {
+    const places = readers.get(x) ?? [];
+    return (
+      places.length > 0 &&
+      places.every(
+        ([r, i]) =>
+          (r === root && r.operator === 'Function' && i === 0) ||
+          (r.operator === 'Block' && i === r.nops - 1 && nothingPlace(r)) ||
+          (r.operator === 'Typed' && i === 0 && nothingPlace(r))
+      )
+    );
+  };
+
+  /** Why a value of the IR type `t` (of the tuple mark `mark`) cannot be
+   *  the argument of a function of the host, or `undefined`: a scalar of
+   *  the lane `real`, `integer`, `boolean` or `string`; on JavaScript with
+   *  records also a list or a tuple of such scalars, and a record of a
+   *  named tuple type or of the arguments of a rest parameter whose fields
+   *  are such values or `Nothing` (CE-1652, step 5). The code makes
+   *  the engine's value of each one before the call (`boxValue()` of
+   *  `print-js.ts`). A record of no names made by a `Tuple` or a `List`
+   *  literal declines: its type does not say which one made it, so the
+   *  engine's value is not known. */
+  const unboxable = (
+    t: IRType,
+    mark: number | undefined
+  ): string | undefined => {
+    const scalars = ['real', 'integer', 'boolean', 'string'];
+    if (t.shape.length === 0 && mark === undefined && scalars.includes(t.lane))
+      return undefined;
+    if (!javascript) return 'not a real, an integer, a boolean or a string';
+    if (t.lane === 'record') {
+      if (t.nominal === undefined && t.head === undefined)
+        return 'a record of no names (a Tuple or a List of several types, which the code does not tell apart)';
+      return (t.fields ?? [])
+        .map((f, k) =>
+          f.lane === 'nothing' ? undefined : unboxable(f, t.marks?.[k])
+        )
+        .find((x) => x !== undefined);
+    }
+    // A colour: the code holds it in OKLCh (`_SYS.rgb`), where the
+    // interpreter holds the colour of its constructor (`Rgb(0.5, 0, 0)`).
+    if (t.lane === 'color')
+      return 'a colour (the compiled colour is in OKLCh, where the interpreter keeps the space of its constructor)';
+    if (!scalars.includes(t.lane))
+      return `a value of the lane ${t.lane}, not a real, an integer, a boolean, a string, a list, a tuple or a record`;
+    return undefined;
+  };
+
   /** The value of `e`, a call of a function that the host declared with an
    *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
    *  operation that calls the interpreter for the call at run time
    *  (`_SYS.hosts` of `print-js.ts`), at each evaluation of `e`, in the
    *  order of the program. Each argument is a scalar of the lane `real`,
-   *  `integer`, `boolean` or `string`, at most `MAX_HOST_ARGUMENTS` of them.
-   *  The static type of the call is `real`, `integer` or `boolean`, the
-   *  lane of the value, or `nothing`, which the code reads only as the value
-   *  of the root function literal (NaN there, as the interpreter's `Nothing`
-   *  is). Plain JavaScript only: the shader targets cannot call the host,
+   *  `integer`, `boolean` or `string`, or (`unboxable()`; CE-1652, step 5)
+   *  a list, a tuple or a record, at most `MAX_HOST_ARGUMENTS` of
+   *  them. The static type of the call is `real`, `integer` or `boolean`,
+   *  the lane of the value, or `nothing`, which the code reads only as the
+   *  value of the root function literal or of a user function whose result
+   *  is `nothing` (`nothingPlace()`; NaN there, as the interpreter's
+   *  `Nothing` is). Plain JavaScript only: the shader targets cannot call the host,
    *  the interval and `bigint` modes have no lane of its values. A function
    *  that assigns a variable of the engine (`assignedNames()`) declines: the
    *  host function would read the variable before the code writes it back. */
@@ -7183,42 +7346,58 @@ function lowerOnce(
       why(
         `of type ${engineTypeToString(t)}, not real, integer, boolean or nothing`
       );
-    // The value of the root function literal, or the last operand of a
-    // `Block` that is: a `Nothing` read as NaN.
-    const atRoot = (x: Expression): boolean => {
-      const places = readers.get(x) ?? [];
-      return (
-        places.length > 0 &&
-        places.every(
-          ([r, i]) =>
-            (r === root && r.operator === 'Function' && i === 0) ||
-            (r.operator === 'Block' && i === r.nops - 1 && atRoot(r))
-        )
-      );
-    };
-    if (result === 'nothing' && want && !atRoot(e))
+    if (result === 'nothing' && want && !nothingPlace(e))
       why('whose value Nothing is read', POSSIBLE_NOTHING);
     const args = e.ops.map((op) => {
       const v = value(op)!;
       const a = type(v);
-      if (
-        a.shape.length > 0 ||
-        tuples.has(v) ||
-        !['real', 'integer', 'boolean', 'string'].includes(a.lane)
-      )
-        why(
-          `with an argument of type ${typeToString(a)}, not a real, an integer, a boolean or a string`
+      // A list, a tuple or a record: the engine's value is the one that
+      // the code makes of it only where `Listed` says so, which this
+      // lowering tracks (`NeedsListed`).
+      const whole = a.shape.length > 0 || a.lane === 'record';
+      if (whole && javascript && !cx.trackListed)
+        throw new NeedsListed(
+          text(e),
+          'a list, a tuple or a record argument of a function of the host',
+          e.operator
         );
+      const refused = unboxable(a, tuples.get(v));
+      if (refused !== undefined)
+        why(
+          `with an argument of type ${typeToString(a, tuples.get(v) ?? -1)}, ${refused}`
+        );
+      if (whole) {
+        if (!fullyListed(listedOf(cx, v)))
+          why(
+            `with an argument that holds a list or a tuple that the interpreter can hold as a lazy collection (Range, Reverse, Linspace) or that the code does not know as a List or a Tuple literal`
+          );
+      }
       return v;
     });
     const lanes = args.map((v) => type(v).lane);
+    // The IR type of each argument, a run-time length as -1, and its tuple
+    // mark: the code makes the engine's value from them (`boxValue()` of
+    // `print-js.ts`).
+    const types = args.map((v): IRType => {
+      const t = type(v);
+      return {
+        ...t,
+        shape: t.shape.map((n) =>
+          typeof n === 'number' ? n : (cx.constant(n.v) ?? -1)
+        ),
+      };
+    });
+    const marks = args.map((v) => tuples.get(v));
+    const key = (ts: readonly IRType[], ms: readonly (number | undefined)[]) =>
+      ts.map((t, j) => typeToString(t, ms[j] ?? -1)).join('\u0000');
     const def = e.operatorDefinition!;
     let k = hosts.findIndex(
       (h) =>
         h.definition === def &&
         h.result === result &&
         h.args.length === lanes.length &&
-        h.args.every((l, j) => l === lanes[j])
+        h.args.every((l, j) => l === lanes[j]) &&
+        key(h.types, h.marks) === key(types, marks)
     );
     if (k < 0) {
       k = hosts.length;
@@ -7227,6 +7406,8 @@ function lowerOnce(
         call: e,
         definition: def,
         args: lanes,
+        types,
+        marks,
         result: result!,
       });
     }

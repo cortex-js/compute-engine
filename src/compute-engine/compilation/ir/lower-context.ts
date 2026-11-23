@@ -269,6 +269,39 @@ export const TUPLE_RULES: Readonly<Record<string, TupleRule>> = Object.freeze({
 });
 
 /** The operations of the walk (`lower.ts`) that the other parts call. */
+/** Whether the engine's value of a value of the code is the value that the
+ *  code makes of it at the call of a function of the host (`boxValue()` of
+ *  `print-js.ts`; CE-1652, step 5): `true` for a scalar, and for a list or
+ *  a tuple that a `List` or a `Tuple` literal made of such values, which
+ *  the interpreter holds as that `List` or `Tuple`; for a record, the
+ *  `Listed` of each field; `false` where the interpreter can hold a lazy
+ *  collection (`Range(1, 3)`, `Reverse(L)`, a `Linspace`), which the code
+ *  holds as the array of its elements, or where the code does not know. */
+export type Listed = boolean | readonly Listed[];
+
+/** The `Listed` of the value `v` (`Lowering.listed`). */
+export function listedOf(cx: Lowering, v: V): Listed {
+  const known = cx.listed.get(v);
+  if (known !== undefined) return known;
+  const t = cx.type(v);
+  return t.shape.length === 0 && t.lane !== 'record';
+}
+
+/** Every list, tuple and record in a value of the `Listed` `l` is listed. */
+export function fullyListed(l: Listed): boolean {
+  return l === true || (Array.isArray(l) && l.every(fullyListed));
+}
+
+/** A value of the `Listed` `a` stands where one of `p` was given: it is
+ *  listed wherever `p` is. */
+export function coversListed(a: Listed, p: Listed): boolean {
+  if (p === false) return true;
+  if (p === true) return a === true;
+  return Array.isArray(a)
+    ? p.every((x, k) => coversListed(a[k] ?? false, x))
+    : p.every((x) => coversListed(false, x));
+}
+
 export type Lowering = {
   readonly b: Builder;
   readonly rows: readonly OperatorRow[];
@@ -303,6 +336,17 @@ export type Lowering = {
    *  A condition made of such tests (`And`, `Or`, `Not`) takes its arm,
    *  and the other arm is not lowered (`conditional()` of `lower.ts`). */
   readonly typeTests: Map<Expression, boolean>;
+  /** Whether the engine's value of a value of the code is the value that
+   *  the code makes of it for a function of the host (`Listed`), for the
+   *  values that the lowering knows (CE-1652, step 5): a value not here is
+   *  `true` when it is a scalar, else `false` (`listedOf()`). */
+  readonly listed: Map<V, Listed>;
+  /** A function lowered for the `Listed` of the arguments of its first
+   *  call declines a later call of less (`call()` of
+   *  `lower-functions.ts`). On in a lowering of a program that passes a
+   *  list, a tuple or a record to a function of the host (`hostCall()` of
+   *  `lower.ts`), whose `Listed` the code must know. */
+  readonly trackListed: boolean;
   /** The value of the string `v` when it is known when the code is
    *  emitted (CE-1652, step 4c; README, "Records"): a string constant, a
    *  parameter whose argument was one, a field of a record made from one

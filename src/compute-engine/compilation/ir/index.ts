@@ -626,7 +626,11 @@ function tables(
               arity: h.args.length as 0 | 1 | 2 | 3 | 4,
               signatures: [
                 [
-                  h.args,
+                  // A list or a tuple is taken whole (CE-1652, step 5);
+                  // `verify()` checks the operands against `h.types`.
+                  h.args.map((l, j) =>
+                    h.types[j].shape.length > 0 ? ('list' as const) : l
+                  ),
                   h.result === 'nothing' ? 'real' : h.result,
                   hostCallOp(k),
                 ] as const,

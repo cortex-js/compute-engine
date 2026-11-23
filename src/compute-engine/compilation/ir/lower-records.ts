@@ -17,6 +17,7 @@ import {
   decline,
   hasUnsettledShape,
   isUntyped,
+  listedOf,
   recordNames,
   tupleBody,
   type Fn,
@@ -109,7 +110,8 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     e: Expression,
     values: V[],
     nominal?: { nominal: string; names?: readonly string[] },
-    fields: (IRType | undefined)[] = []
+    fields: (IRType | undefined)[] = [],
+    head?: 'List' | 'Tuple'
   ): V => {
     const types = values.map((v, k): IRType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
@@ -140,8 +142,13 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
       marks: values.map((x) => tuples.get(x)),
       ...(nominal === undefined ? {} : { nominal: nominal.nominal }),
       ...(nominal?.names === undefined ? {} : { names: nominal.names }),
+      ...(head === undefined ? {} : { head }),
     });
     parts.set(v, values);
+    cx.listed.set(
+      v,
+      values.map((x) => listedOf(cx, x))
+    );
     return v;
   };
 
@@ -164,9 +171,25 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
 
   /** A `Tuple` (`tuple`) or `List` literal of the values `elements`: a
    *  record when they do not make a list (`fitsList()`), else
-   *  `undefined`, the list of today. */
-  const literal = (e: Fn, elements: V[], tuple: boolean): V | undefined =>
-    !javascript || fitsList(elements, tuple) ? undefined : make(e, elements);
+   *  `undefined`, the list of today. With `known`, in a lowering that
+   *  tracks the `Listed` of its values (`Lowering.trackListed`), the
+   *  record's type holds the head of the literal (`IRType.head`), so that
+   *  a function of the host takes it (CE-1652, step 5). */
+  const literal = (
+    e: Fn,
+    elements: V[],
+    tuple: boolean,
+    known = false
+  ): V | undefined =>
+    !javascript || fitsList(elements, tuple)
+      ? undefined
+      : make(
+          e,
+          elements,
+          undefined,
+          [],
+          known && cx.trackListed ? (tuple ? 'Tuple' : 'List') : undefined
+        );
 
   /** `P(a, b, …)`, the constructor of the named tuple type `P`: each
    *  operand is lowered for the declared type of its field. An operand
@@ -238,6 +261,8 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     const t = type(r);
     const { constant, ...f } = t.fields![k];
     const v = b.op('field', [r, b.constant(k, 'integer')], f);
+    const listed = listedOf(cx, r);
+    if (Array.isArray(listed)) cx.listed.set(v, listed[k] ?? false);
     if (constant !== undefined)
       cx.holdKnown(v, constant, `${t.nominal ?? 'record'}.${k}`);
     if (f.lane === 'string' && f.shape.length === 0) cx.mayHoldKnown(v);

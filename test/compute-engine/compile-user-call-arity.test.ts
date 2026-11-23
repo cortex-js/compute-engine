@@ -80,19 +80,20 @@ describe('A user-function call with the wrong number of arguments', () => {
 
   test('a rest parameter takes any number of arguments after the fixed ones', () => {
     const ce = engine();
-    // No target compiles a rest parameter, so these calls decline for that
-    // reason, not for their number of arguments.
+    // No target compiles a rest parameter beside other parameters (CE-1652,
+    // step 5), so these calls decline for that reason, not for their number
+    // of arguments.
     for (const [json, value] of [
       [['r', 't'], 1],
       [['r', 't', 2, 3], 3],
     ] as const) {
       const r = compile(ce.box(json as never));
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/a parameter of r that is not a name/);
+      expect(r.error).toMatch(/a rest parameter of r beside other parameters/);
       expect(r.run!({ t: 1 } as never)).toBe(value);
     }
     const none = compile(ce.box(['r'] as never));
     expect(none.success).toBe(false);
-    expect(none.error).toMatch(/a parameter of r that is not a name/);
+    expect(none.error).toMatch(/a rest parameter of r beside other parameters/);
   });
 });

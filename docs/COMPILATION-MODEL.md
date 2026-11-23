@@ -2665,8 +2665,10 @@ clauses or a method of a protocol (those are the program's own functions).
 These decline:
 
 - another target, `interval-js` and the `bigint` mode;
-- an argument that is not a real, an integer, a boolean or a string (a list,
-  a tuple, a complex number), and more than four arguments;
+- an argument that is not a real, an integer, a boolean, a string, or a
+  list, a tuple or a record that the interpreter holds as the literal that
+  the code makes of it (below; a complex number, a colour, a `Range`), and
+  more than four arguments;
 - a static type of the call other than `real`, `integer`, `boolean` or
   `nothing`: `(real) -> any` gives no settled shape (R3);
 - a value `nothing` read anywhere but as the value of the root function
@@ -2743,8 +2745,32 @@ of two literals with a run-time condition) is compared at run time.
 `N(x, 15)` of a list or a tuple
 of reals is the list or the tuple. A record whose field is a list parameter
 of a run-time length (`dash(self, pattern: list<real>)` storing
-`N(pattern, 15)`) declines. A record passed to a function of the host still
-declines (CE-1652, step 5).
+`N(pattern, 15)`) declines.
+
+A function whose one parameter is a rest parameter
+(`function draw(...args) -> nothing { figureDraw(listFrom(args)) }`)
+compiles on JavaScript (CE-1652, step 5): `args` is the `Tuple` of the
+arguments of each call, whose number and types are known there, and the
+function is compiled once for each list of argument types. `listFrom(args)`,
+`length(args)` and `args[k]` of a constant `k` read it; another reader
+declines. A function of result `nothing` is read only where a function of
+the host of that result is. A function of the host takes a list, a tuple or a
+record (one of a named tuple type, the arguments of a rest parameter, or a
+`Tuple` or `List` literal of several types), and receives the engine's
+value, as the interpreter passes it: with Tycho's drawing prelude,
+`t => draw(circle((cos(t), 0), 0.1))` calls `figureDraw` with
+`List(Figure("circle", List(0.5403…, 0, 0.1), Tuple(1, 0, 0, 1, 0, 0),
+Nothing, Nothing, Nothing, Nothing, Nothing))`. A number is passed as its
+machine number, as for a scalar argument (the interpreter's `N(x, 15)` keeps
+15 digits). The interpreter holds a `Range`, a `Linspace` or a `Reverse` as a
+lazy collection, which the code holds as an array, so a list is taken only
+where the compiler knows that it is a `List` or a `Tuple` literal of the
+program (also through a record field, a parameter and the result of a
+function): `draw(1..3)`, `figureDraw(reverse([1, t]))`, `figureDraw([1, t]
++ 1)` and a list constant decline. A colour declines (the code holds
+`rgb(t, 0, 0)` in OKLCh, where the interpreter keeps `Rgb(t, 0, 0)`), and so
+does a rest parameter beside other parameters. The result of a function of the
+host must still be `real`, `integer`, `boolean` or `nothing`.
 
 ## Collections
 

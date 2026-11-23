@@ -3515,7 +3515,8 @@ two types"); `admits()` refuses the lane there too.
   `color` is of that engine type (`fig.fillPaint is nothing`). A `Tuple` pattern
   of a `Match` does not take a value of a named tuple type (the interpreter's),
   and declines on a record with no names. Every other reader declines:
-  arithmetic, `Equal`, `Length`, `Map`.
+  arithmetic, `Equal`, `Length` (but of the arguments of a rest parameter,
+  below), `Map`.
 - **User functions.** A function whose result type is not a scalar (a named
   tuple type, `list<real | string>`) returns the record of its body; a body that
   is not a record declines as before ("the result of f is not a scalar"), and a
@@ -3648,6 +3649,62 @@ two types"); `admits()` refuses the lane there too.
   function once per colour. The third lowering takes the decisions of the
   second; if it fails all the same, the second is the program. The decline of
   the second lowering is the program's decline.
+- **Rest parameters and the host boundary** (CE-1652, step 5; JavaScript only).
+  A user function whose one parameter is a rest parameter
+  (`function draw(...args) -> nothing { figureDraw(listFrom(args)) }`, the
+  parameter `Spread(args)`) binds it to the record of the arguments of each
+  call, each lowered in order (`restRecord()` of `lower-functions.ts`): a record
+  of no names whose type holds the head `Tuple` (`IRType.head`), as the
+  interpreter binds `args` to the `Tuple` of the arguments. The function is
+  lowered once per type of that record, so two calls with arguments of the same
+  types call one function. `ListFrom(args)` is the record of the same fields of
+  the head `List`; `Length(args)` is the number of arguments and `args[k]` of a
+  constant `k` the argument (the record rules); any other reader declines as for
+  a record (`listFrom(args) + 1`). A rest parameter beside other parameters
+  declines, and so does a call on another target. A user function whose declared
+  result is `nothing` has the real lane: its body is lowered as a statement and
+  its value is NaN, the `Nothing` of a host call of result `nothing`. Its body
+  ends in an `Assign`, a `Declare` or a value of the static type `nothing` (a
+  call of such a function, a loop, an `If` of such branches), where the
+  interpreter gives `Nothing`; another body declines (`define()` of
+  `lower-functions.ts`). The value of a call of it is read only where such a
+  host call's is (`nothingPlace()` of `lower.ts`: the value of the root function
+  literal, or the last operand of a `Block` or the operand of a `Typed` that
+  is), NaN there; elsewhere it declines (`possible-nothing`), also when the call
+  is a dispatched protocol method. A function of the host takes, beside a scalar
+  of the lane `real`, `integer`, `boolean` or `string`, a list or a tuple of
+  such scalars and a record of a named tuple type or of a head whose fields are
+  such values or `Nothing` (`unboxable()` of `lower.ts`). `HostCall.types` and
+  `HostCall.marks` keep the IR type and the tuple mark of each argument, the row
+  takes a list operand whole, and `verify()` checks the operands against those
+  types. Before the call, `boxValue()` of `print-js.ts` makes the engine's value
+  from them: a record of a named type is the application of its constructor
+  (`Figure("circle", List(…), Tuple(…), Nothing, …)`), a record of a head the
+  application of the head, a list a `List`, a tuple (the axis of its mark) a
+  `Tuple`, a `nothing` field `Nothing`, and a number, a string or a boolean as
+  for a scalar argument (a real is its machine number: the interpreter's
+  `N(x, 15)` keeps 15 digits, so the two agree within 1e-12, and the
+  interpreter's exact `Cos(1)` is a number). The engine's value must be the
+  interpreter's, so a list, a tuple or a record is taken only where the lowering
+  knows that the interpreter holds a `List` or a `Tuple` literal (`Listed` of
+  `lower-context.ts`, `Lowering.listed`): a `List` or a `Tuple` literal node of
+  the program of listed elements, a field of a record of listed fields, the
+  parameter of a function given a listed argument at its first call, and a call
+  of a function whose body is listed. The interpreter holds a `Range`, a
+  `Linspace` or a `Reverse` as a lazy collection, which the code holds as the
+  array of its elements: such a value, the elements of a `Range` of constants
+  that the lowering lists, an element-wise sum, a constant read from its value
+  and an `if` of two lists decline. A function lowered for a listed argument
+  declines a later call with an argument that is not (`coversListed()`). The
+  tracking runs in a second lowering of a program whose first lowering reaches
+  such a host argument (`NeedsListed`), so a program with no such argument keeps
+  its code; in it, a `Tuple` or a `List` literal of several types holds its head
+  too, so `figureDraw((t, "a"))` and `draw([circle(…), circle(…)])` compile. A
+  record of no names that is not such a literal (a constant `pair = (1, "a")`),
+  a colour (the code holds `Rgb(0.5, 0, 0)` in OKLCh), a complex number, a list
+  of a run-time length in a rest argument and a lane `rows` decline. The host
+  function's static type still must be `real`, `integer`, `boolean` or
+  `nothing`.
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names

@@ -182,7 +182,11 @@ let g = (t: real) => if hostPositive(t) { 1 } else { 2 }`);
     ce.declare('u', 'real');
     const e = ce.box([
       'First',
-      ['Map', ['Function', ['hostSq', ['Multiply', 'x', 'u']], 'x'], ['List', 1, 2, 3]],
+      [
+        'Map',
+        ['Function', ['hostSq', ['Multiply', 'x', 'u']], 'x'],
+        ['List', 1, 2, 3],
+      ],
     ]);
     const result = compile(e, { fallback: false });
     expect((result.run as (a: object) => number)({ u: 2 })).toBe(4);
@@ -256,9 +260,10 @@ describe('a call of a function of the host that declines', () => {
     expect(declined(fn(ce, 'f'))).toMatch(/whose value Nothing is read/);
   });
 
-  test('a list argument', () => {
-    const { ce } = engine('let f = (t: real) => hostDraw([t, t])');
-    expect(declined(fn(ce, 'f'))).toMatch(/with an argument of type/);
+  test('a list argument that the interpreter holds as a Range (CE-1652, step 5)', () => {
+    // A `List` or a `Tuple` literal compiles (`compile-records-host.test.ts`).
+    const { ce } = engine('let f = (t: real) => hostDraw(1..3)');
+    expect(declined(fn(ce, 'f'))).toMatch(/lazy collection/);
   });
 
   test('a value of type any', () => {
@@ -274,9 +279,7 @@ describe('a call of a function of the host that declines', () => {
   test('a function that assigns a variable of the engine', () => {
     const { ce, calls } = engine(`let s = 0.5
 let f = (t: real) => do { s = s + t; hostDraw(s) }`);
-    expect(declined(fn(ce, 'f'))).toMatch(
-      /assigns a variable of the engine/
-    );
+    expect(declined(fn(ce, 'f'))).toMatch(/assigns a variable of the engine/);
     expect(calls).toEqual([]);
   });
 
@@ -285,7 +288,9 @@ let f = (t: real) => do { s = s + t; hostDraw(s) }`);
     const body = fn(ce, 'f');
     const glsl = compile(body, { to: 'glsl' });
     expect(glsl.success).toBe(false);
-    expect(glsl.diagnostic?.message ?? '').toMatch(/of the host, on this target/);
+    expect(glsl.diagnostic?.message ?? '').toMatch(
+      /of the host, on this target/
+    );
     expect(compile(body, { to: 'interval-javascript' }).success).toBe(false);
   });
 });

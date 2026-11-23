@@ -260,6 +260,20 @@
   of a number in the value (`(t, 1) is tuple<real, real>`: the number can be
   `NaN`), and `x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does,
   still fall back to the interpreter.
+- **`compile()` compiles a call of a function whose one parameter is a rest
+  parameter, and passes a list, a tuple or a value of a named tuple type to a
+  function of the host, which it refused** (CE-1652). With a drawing prelude
+  whose `function draw(...args) -> nothing { figureDraw(listFrom(args)) }` calls
+  a host function `figureDraw` declared `(any) -> nothing`,
+  `t => draw(circle((cos(t), 0), 0.1))`,
+  `t => draw(circle((t, 0), 1).rotate(t))` and
+  `t => draw(circle((0, 0), 1), circle((t, 0), 0.5).fill("red"))` compile, and
+  `figureDraw` receives the value that the interpreter passes,
+  `List(Figure("circle", List(…), Tuple(…), Nothing, …))`, its numbers as
+  machine numbers. `length(args)` and `args[k]` compile too. A list that the
+  interpreter holds as a lazy collection (`draw(1..3)`, `reverse([1, t])`), a
+  colour, a rest parameter beside other parameters, and a function of the host
+  whose result is `any` still fall back to the interpreter.
 
 ## 0.200.1 _2026-11-23_
 
