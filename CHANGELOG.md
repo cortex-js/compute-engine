@@ -22,8 +22,9 @@
   scope took 12 ms. The row now has the least effects that hold those of its
   body (`(unknown) pure -> number`), and `F(14)` takes about 3 ms. A body
   that draws a random number still gives the row the effect `random`.
-- **`Zeta`, `HurwitzZeta`, `PolyGamma` and `Gamma` of a complex argument
-  compile on GLSL** (CE-1600), so a domain coloring of these functions draws
+- **`Zeta`, `HurwitzZeta`, `PolyGamma`, `Gamma`, `PolyLog` and `LerchPhi` of
+  a complex argument compile on GLSL** (CE-1600), so a domain coloring of
+  these functions draws
   on the GPU: `compile(ce.parse('\\zeta(z)'), { to: 'glsl' })` with `z`
   declared `complex` gave the decline "the operation czeta on glsl". The
   single-float kernels give the values of `N()` within about 3e-5 for
@@ -33,7 +34,15 @@
   kernels' values, `NaN` included). `PolyGamma(n, z)` of a complex `z` also
   compiles on JavaScript, with the interpreter's kernel, and under
   `mode: 'complex'` `PolyGamma(n, x)` of a real `x` takes it too.
-  `LerchPhi` and `PolyLog` of a complex argument still decline on GLSL.
+  `PolyLog(s, z)` of a real order is within 3e-5 of `N()` on the plane,
+  and `LerchPhi(z, s, a)` in the unit disk; `LerchPhi` gives `NaN` past the
+  unit circle unless `a = 1`, and next to `z = 1` (where
+  `|ln z| < (|s| + 24)/1400`). Both give `NaN` where their terms cancel too
+  far (mostly `LerchPhi` for `Re(s) < 0`), and `PolyLog` gives `NaN` where
+  `|ln z| > 3.5` (`|z| > 4.7` next to the negative real axis, `|z| > 33` on
+  the positive one) at an order `Re(s) > 1` that is not an integer, or an
+  integer above 24. The GLSL `Zeta(x)` of a real `x` next to 0 is exact to
+  single-float precision: `Zeta(-1e-6)` gave `-0.5243` for `-0.5000`.
 
 ### Resolved Issues
 

@@ -344,12 +344,15 @@ Taylor polynomial of degree 8 below |x| = 0.5 (error 2e-11), and `sin(x) / x`
 above. The other real functions (`Erf`, `Gamma`, `Zeta`, `Arccot`, `Arcsec`,
 ...) decline there.
 
-On GLSL, `Zeta`, `HurwitzZeta`, `PolyGamma` (an integer order) and `Gamma` of a
-complex operand are the helpers of `glsl-complex-special-helpers.ts` (CE-1600;
-its header gives the methods), and the real helper on the real axis. The
+On GLSL, `Zeta`, `HurwitzZeta`, `PolyGamma` (an integer order), `Gamma`,
+`PolyLog` and `LerchPhi` of a complex operand are the helpers of
+`glsl-complex-special-helpers.ts` (CE-1600; its header gives the methods and
+their regions), and the real helper on the real axis where it has a value. The
 Euler-Maclaurin sums are exact to about 1e-5 of the sizes of their terms, not of
-the value (`docs/COMPILATION-MODEL.md`, known limitations). `LerchPhi` and
-`PolyLog` of a complex operand decline.
+the value (`docs/COMPILATION-MODEL.md`, known limitations). `PolyLog` and
+`LerchPhi` keep the sizes of their terms and give NaN where those pass 100 times
+the value, and NaN in the regions that no method covers (`LerchPhi` past the
+unit circle for `a != 1`).
 
 `Mod` on JavaScript is `floorMod()` (the remainder with the sign of the
 divisor). For a divisor of 1 it computes `x - floor(x)`, the same double with no

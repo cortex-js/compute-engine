@@ -304,6 +304,36 @@ interpreter's value. A line is removed when the case declines or is fixed.
   value of `LogGamma(z)`). On the real axis `PolyGamma(n, z)` and
   `HurwitzZeta(z, a)` give `NaN` where the real helper does (its terms
   cancel: `PolyGamma(2, -0.5)`), also under `mode: 'complex'` (CE-1600).
+- `glsl`, `z: complex`: `LerchPhi(z, s, a)` gives `NaN` past the unit circle
+  unless `a = 1` (`LerchPhi(1.5i, 2, 1/2)`), where `|ln z| < (|s| + 24)/1400`
+  (`LerchPhi(0.999 + 0.001i, 2, 1/2)`), and where the sizes of its terms pass
+  100 times the value, mostly for `Re s < 0`: `LerchPhi(z, -2, 1/2)` at
+  `z = -0.9 + 0.3i`, a quarter of the unit disk for `s = -1`, `a = 1/2`, and
+  half of it for `s = -5/2`
+  (CE-1600). The interpreter gives a value at each of these points.
+- `glsl`, `z: complex`: `PolyLog(s, z)` gives `NaN` where `|ln z| > 3.5` for
+  an order `Re s > 1` that is not an integer, or an integer above 24
+  (`PolyLog(5/2, -6 + 0.75i)`), where the sizes of its terms pass 100 times
+  the value, and where a term overflows (`PolyLog(-20, -2 + 0.1i)`, where
+  ζ(-20 - k) passes the largest float). The sizes count `1 + |Im s|` times
+  in the expansion in `ln z`, so a large `|Im s|` gives `NaN` in more of the
+  plane: 55 of the 289 points of a grid of step 0.75 on the square
+  `-6 <= Re z, Im z <= 6` for `s = 4 + 10i`,
+  none for `s = 1/2 + 3i`. An order next to an integer `m >= 1` gives `NaN`
+  for `1/2 < |z|` and `|ln z| <= 3.5`, where the first term and the term
+  `ζ(s - m + 1)` cancel: 158 of the 169 points of a grid of step 0.5 on
+  the square `-3 <= Re z, Im z <= 3` for
+  `s = 1.005`, 4 for `s = 1.02` (CE-1600). The interpreter gives a value at
+  each of these points.
+- `glsl` (plausible?), `x: real`: `HurwitzZeta(s, x)` of a negative order is
+  off by more than single-float precision: `HurwitzZeta(-1.5, 1/2)` gives
+  `0.0164797` where the interpreter gives `0.0164748` (`2.9e-4` relative),
+  `HurwitzZeta(-1, 1/2)` gives `0.0416714` for `1/24`, and
+  `HurwitzZeta(-2.5, 1/2)` gives `-0.0070074` for `-0.0070113`; `LerchPhi(1, s,
+  a)` gives the same values (`_gpu_ir_hurwitz_zeta`, found by CE-1600).
+- `glsl` (crafted), `x: real`: `PolyLog(-20, x)` is `1.9e-4` off at `x = -2`
+  (`105957176` where the interpreter gives `105977187`), the real helper
+  `_gpu_ir_poly_log` (found by CE-1600).
 - `glsl` (crafted), `x: real`, `y: real`: `GCD(x, y)` and `LCM(x, y)` at
   two integers of which one is 2^31 or more give `NaN` (the shader computes
   the divisor of two integers on `int`s): at `x = 2^31`, `y = 3` the

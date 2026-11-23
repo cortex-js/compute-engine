@@ -803,12 +803,14 @@ export const GLSL: Syntax = deepFreeze({
     'polylog': helperCall('_gpu_ir_poly_log', 2),
     'harmonic': helperCall('_gpu_ir_harmonic', 1),
     'harmonic2': helperCall('_gpu_ir_harmonic2', 2),
-    // `Gamma`, `Zeta`, `HurwitzZeta` and `PolyGamma` of a complex operand
-    // (`GLSL_COMPLEX_SPECIAL_HELPERS`, CE-1600).
+    // `Gamma`, `Zeta`, `HurwitzZeta`, `PolyGamma`, `LerchPhi` and `PolyLog`
+    // of a complex operand (`GLSL_COMPLEX_SPECIAL_HELPERS`, CE-1600).
     'cgamma': helperCall('_gpu_ir_cgamma', 1),
     'czeta': helperCall('_gpu_ir_czeta', 1),
     'churwitzzeta': helperCall('_gpu_ir_churwitz_zeta', 2),
     'cpolygamma': helperCall('_gpu_ir_cpolygamma', 2),
+    'clerchphi': helperCall('_gpu_ir_clerch_phi', 3),
+    'cpolylog': helperCall('_gpu_ir_cpolylog', 2),
     'asoklch': '$0',
     'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
     'asrgb': {
@@ -1142,7 +1144,9 @@ export const GLSL: Syntax = deepFreeze({
   float sum = 0.0;
   for (int k = 1; k < 10; k++) sum += pow(float(k), -t);
   float nt = pow(10.0, -t);
-  sum += 10.0 * nt / (t - 1.0) + 0.5 * nt;
+  // t - 1 exactly: 1 - s rounds next to s = 0, where the pole term is
+  // about 1/s (ζ(-1e-6) was -0.5243).
+  sum += 10.0 * nt / (s < 0.5 ? -s : t - 1.0) + 0.5 * nt;
   float b[6] = float[6](1.0 / 12.0, -1.0 / 720.0, 1.0 / 30240.0, -1.0 / 1209600.0, 1.0 / 47900160.0, -691.0 / 1307674368000.0);
   float c = t * nt * 0.1;
   for (int k = 0; k < 6; k++) {

@@ -81,7 +81,7 @@ describe('IR slice: GLSL text', () => {
         'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'ccot', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
         'cconj', 'cabs', 'carg', 'ceq', 'cne', 'mandelbrot', 'julia', 'csec', 'ccsc', 'csech', 'ccsch', 'ccoth',
         'casin', 'cacos', 'catan', 'casinh', 'cacosh', 'catanh', 'cacsc', 'casec', 'casech', 'cacoth', 'clog10',
-        'croot', 'cgamma', 'czeta', 'churwitzzeta', 'cpolygamma'].includes(f))]);
+        'croot', 'cgamma', 'czeta', 'churwitzzeta', 'cpolygamma', 'clerchphi', 'cpolylog'].includes(f))]);
     const bigintOnly = new Set<string>();
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {

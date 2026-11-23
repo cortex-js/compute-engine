@@ -1,6 +1,7 @@
 /**
- * CE-1600: `Zeta`, `HurwitzZeta`, `PolyGamma` and `Gamma` of a complex
- * operand compile on GLSL (`glsl-complex-special-helpers.ts`), and
+ * CE-1600: `Zeta`, `HurwitzZeta`, `PolyGamma`, `Gamma`, `LerchPhi` and
+ * `PolyLog` of a complex operand compile on GLSL
+ * (`glsl-complex-special-helpers.ts`), and
  * `PolyGamma(n, z)` of a complex `z` on JavaScript (`cpolygamma`, the
  * interpreter's kernels).
  *
@@ -11,6 +12,8 @@
  * within 3e-5 of the sum of the sizes of its Euler-Maclaurin terms, which
  * grow as |a + N|^(1 - Re s): for Re s < 0 its error relative to the value
  * is up to a few percent (`docs/COMPILATION-MODEL.md`, known limitations).
+ * `LerchPhi` and `PolyLog` are within 3e-5 of the value, or NaN in the
+ * regions that no method of theirs covers (the `nan` field of a case).
  * Without the browser the value tests are skipped.
  */
 
@@ -48,6 +51,14 @@ describe('CE-1600: the complex special functions compile on GLSL', () => {
     ['PolyGamma(n, z)', ['PolyGamma', 'n', 'z'], '_gpu_ir_cpolygamma('],
     ['PolyGamma(1, z)', ['PolyGamma', 1, 'z'], '_gpu_ir_cpolygamma('],
     ['Gamma(z)', ['Gamma', 'z'], '_gpu_ir_cgamma('],
+    ['LerchPhi(z, 2, 1)', ['LerchPhi', 'z', 2, 1], '_gpu_ir_clerch_phi('],
+    [
+      'LerchPhi(z, w, 1/2)',
+      ['LerchPhi', 'z', 'w', ['Rational', 1, 2]],
+      '_gpu_ir_clerch_phi(',
+    ],
+    ['PolyLog(2, z)', ['PolyLog', 2, 'z'], '_gpu_ir_cpolylog('],
+    ['PolyLog(w, z)', ['PolyLog', 'w', 'z'], '_gpu_ir_cpolylog('],
     [
       '|Zeta(1/2 + it)|',
       [
@@ -74,6 +85,8 @@ describe('CE-1600: the complex special functions compile on GLSL', () => {
       ['HurwitzZeta', 'z', 'w'],
       ['PolyGamma', 'n', 'z'],
       ['Gamma', 'z'],
+      ['LerchPhi', 'z', 'w', 'z'],
+      ['PolyLog', 'w', 'z'],
     ]);
     const defined = [...r.preamble!.matchAll(/^\w+ (_gpu_ir_\w+)\(/gm)].map(
       (m) => m[1]
@@ -224,6 +237,8 @@ type ValueCase = {
   value: (re: number, im: number) => Cx;
   /** The largest error allowed at the point, for the value `v`. */
   tolerance: (re: number, im: number, v: Cx) => number;
+  /** Where the helper may give NaN (a region it does not cover). */
+  nan?: (re: number, im: number) => boolean;
 };
 
 const size = (v: Cx) => Math.hypot(v.re, v.im);
@@ -235,6 +250,10 @@ const ZETA_POINTS = [
   [0.5, 14.134725], [0.5, 14.13], [0.5, 21.02204], [0.5, 21.02],
   [1.001, 0.001], [1, 0.01], [1, 1e-4], [0.999, 0], [1.01, 0],
   [-3, 0], [-2, 0], [2, 0], [0.5, 0],
+  // Next to 0, where 1 - s rounds (the real helper takes -s).
+  [-1e-6, 0], [1e-6, 0], [-1e-5, 0],
+  // Off the real axis, the functional equation takes -s too.
+  [-1e-6, 1e-7], [-1e-4, 1e-4], [-1e-3, -2e-3],
 ];
 
 const HURWITZ_A: [number, number][] = [
@@ -286,6 +305,51 @@ const VALUE_CASES: ValueCase[] = [
     // Below the smallest float, any value that rounds there.
     tolerance: (_re, _im, v) => 1e-4 * size(v) + 1.2e-38,
   },
+  // The plane to |z| = 6: the series, the expansion in ln z, the inversion
+  // formula; on the cut z > 1 the side Im z < 0.
+  ...([[2, 0], [3, 0], [1, 0], [0.5, 0], [-2, 0], [-5, 0], [2.5, 0], [0.5, 3]] as const).map(
+    ([sr, si]): ValueCase => ({
+      label: `PolyLog(${sr} + ${si}i, z)`,
+      json: ['PolyLog', ['Complex', sr, si], 'z'],
+      points: si === 0 ? grid(steps(-6, 6, 0.75), steps(-6, 6, 0.75)) : grid(steps(-4, 4, 1), steps(-4, 4, 1)),
+      value: (re, im) => ce.function('PolyLog', [complexOf(sr, si), complexOf(re, im)]).N(),
+      tolerance: (_re, _im, v) => 3e-5 * size(v),
+      // The inversion formula for a Re s > 1 that is not an integer.
+      nan: (re, im) => sr === 2.5 && Math.hypot(Math.log(Math.hypot(re, im)), Math.atan2(im, re)) > 3.5,
+    })
+  ),
+  // A large |Im s|: the value, or NaN where the error of the factors could
+  // pass 3e-5 of it (it was 8.8e-5 at -6 - 2.25i).
+  {
+    label: 'PolyLog(4 + 10i, z)',
+    json: ['PolyLog', ['Complex', 4, 10], 'z'],
+    points: [...grid(steps(-6, 6, 2), steps(-6, 6, 2)), [-6, -2.25], [-5.25, -1.5]],
+    value: (re, im) => ce.function('PolyLog', [complexOf(4, 10), complexOf(re, im)]).N(),
+    tolerance: (_re, _im, v) => 3e-5 * size(v),
+    nan: () => true,
+  },
+  // The inversion formula next to the order 0: 1 - s rounds in float32,
+  // and the pole term of ζ(1 - s, q) takes the exact distance -s.
+  {
+    label: 'PolyLog(-1e-6, z)',
+    json: ['PolyLog', fr(-1e-6), 'z'],
+    points: grid([-40, -10, -3, 3, 10, 40], [-5, -1, 0.5, 1, 5, 20]),
+    value: (re, im) => ce.function('PolyLog', [exact(fr(-1e-6)), complexOf(re, im)]).N(),
+    tolerance: (_re, _im, v) => 3e-5 * size(v),
+  },
+  // The unit disk: the series, then the asymptotic expansion; NaN past
+  // the unit circle for a != 1.
+  ...([[2, 0, 1, 0], [2, 0, 0.3, 0.2], [0.5, 8, 0.7, 0], [3, 0, -2.3, 0.5], [1.5, 0, 0.2, 6]] as const).map(
+    ([sr, si, ar, ai]): ValueCase => ({
+      label: `LerchPhi(z, ${sr} + ${si}i, ${ar} + ${ai}i)`,
+      json: ['LerchPhi', 'z', ['Complex', sr, si], ['Complex', ar, ai]],
+      points: grid(steps(-1.2, 1.2, 0.15), steps(-1.2, 1.2, 0.15)),
+      value: (re, im) =>
+        ce.function('LerchPhi', [complexOf(re, im), complexOf(sr, si), complexOf(fr(ar), fr(ai))]).N(),
+      tolerance: (_re, _im, v) => 3e-5 * size(v),
+      nan: (re, im) => !(ar === 1 && ai === 0) && Math.hypot(re, im) > 1,
+    })
+  ),
 ];
 
 function complexShader(code: string, preamble: string, part: '.x' | '.y') {
@@ -340,6 +404,8 @@ function complexShader(code: string, preamble: string, part: '.x' | '.y') {
           // On the real axis the real helper, which gives NaN where its
           // terms cancel (the strict real lane gives the same NaN).
           if (im === 0 && Number.isNaN(got.re) && Number.isNaN(got.im)) return;
+          if (c.nan?.(re, im) && Number.isNaN(got.re) && Number.isNaN(got.im))
+            return;
           // A pole: an infinite part.
           if (!Number.isFinite(size(v))) {
             if (Number.isFinite(size(got)))
@@ -372,6 +438,34 @@ function complexShader(code: string, preamble: string, part: '.x' | '.y') {
           name: JSON.stringify(json),
           source: complexShader(r.code, r.preamble ?? '', '.x'),
           uniforms: { u_re: p.re, u_im: p.im },
+        };
+      });
+      const values = await driver.evaluate(items);
+      expect(
+        values.map((v, k) => [items[k].name, v.ok && Number.isNaN(v.value)])
+      ).toEqual(items.map((i) => [i.name, true]));
+    }, 120_000);
+
+    test('NaN where no method of LerchPhi or PolyLog applies', async () => {
+      // prettier-ignore
+      const cases: [Json, Cx][] = [
+        // Past the unit circle for a != 1.
+        [['LerchPhi', 'z', 2, ['Rational', 1, 2]], { re: 0, im: 1.5 }],
+        // Next to z = 1 for a != 1 (the base point would pass 4,200 terms).
+        [['LerchPhi', 'z', 2, ['Rational', 1, 2]], { re: 0.999, im: 0.001 }],
+        // The inversion formula for a Re s > 1 that is not an integer.
+        [['PolyLog', ['Rational', 5, 2], 'z'], { re: -6, im: 0.75 }],
+        // For Re s < 0 the terms of Φ grow as k^(-Re s) and cancel.
+        [['LerchPhi', 'z', -2, ['Rational', 1, 2]], { re: -0.9, im: 0.3 }],
+        // ζ(-20 - k) overflows: NaN, not the +∞ of a pole.
+        [['PolyLog', -20, 'z'], { re: -2, im: 0.1 }],
+      ];
+      const items = cases.map(([json, p]) => {
+        const r = glsl(json);
+        return {
+          name: `${JSON.stringify(json)} at ${p.re} + ${p.im}i`,
+          source: complexShader(r.code, r.preamble ?? '', '.x'),
+          uniforms: { u_re: fr(p.re), u_im: fr(p.im) },
         };
       });
       const values = await driver.evaluate(items);

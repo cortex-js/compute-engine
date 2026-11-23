@@ -1,7 +1,8 @@
 /**
- * The GLSL helpers of `Gamma`, `Zeta`, `HurwitzZeta` and `PolyGamma` of a
- * complex operand for the IR printer (`print-glsl.ts`), on the `vec2`
- * (re, im) of the complex lane, float32 (CE-1600).
+ * The GLSL helpers of `Gamma`, `Zeta`, `HurwitzZeta`, `PolyGamma`,
+ * `LerchPhi` and `PolyLog` of a complex operand for the IR printer
+ * (`print-glsl.ts`), on the `vec2` (re, im) of the complex lane, float32
+ * (CE-1600).
  *
  * - ζ(s, a) (`_gpu_ir_churwitz_em`): the Euler-Maclaurin sum after a shift
  *   of a by N terms, Σ_{k<N} (a+k)^-s + w^(1-s)/(s-1) + w^-s/2 +
@@ -28,6 +29,20 @@
  *   for Re z >= 1/2, the reflection π / (sin(πz) Γ(1 - z)) below, also in
  *   log form, so that sin(πz) for a large |Im z| does not overflow; exp of
  *   the logarithm last.
+ * - Li_s(z) (`_gpu_ir_cpolylog`): z Φ(z, s, 1) by the series for
+ *   |z| <= 1/2, the expansion in powers of ln z for |ln z| <= 3.5
+ *   (`_gpu_ir_cpolylog_mu`, which holds 1/2 < |z| <= 2), the inversion
+ *   formula past it (`_gpu_ir_cpolylog_inv`; NaN there for a Re s > 1 that
+ *   is not an integer, and for an integer above 24).
+ * - Φ(z, s, a) (`_gpu_ir_clerch_phi`): the series for |z| <= 1/2,
+ *   Li_s(z)/z for a = 1, ζ(s, a) at z = 1, the series up to a large base
+ *   point and its asymptotic expansion there for |z| <= 1
+ *   (`_gpu_ir_clerch_asym`); NaN past the unit circle for a != 1, and
+ *   where |ln z| < (|s| + 24)/1400 (next to z = 1, where the base point
+ *   would pass 4,200 terms).
+ *   Each of these sums keeps the sizes of its terms, and is NaN where they
+ *   pass 100 times the value (`_gpu_ir_clerch_checked`): mostly
+ *   `LerchPhi` for Re s < 0, whose terms grow as k^(-Re s).
  *
  * On the real axis each one is the real helper (`_gpu_ir_zeta`,
  * `_gpu_ir_hurwitz_zeta`, `_gpu_ir_polygamma`, `_gpu_ir_gamma`) where that
@@ -85,11 +100,17 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
 }`,
   // ζ(s, a) of complex s and a, by Euler-Maclaurin (see the header).
   _gpu_ir_churwitz_em: `vec2 _gpu_ir_churwitz_em(vec2 s, vec2 a) {
-  if ((floatBitsToUint(s.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(s.y) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.y) & 0x7FFFFFFFu) >= 0x7F800000u) return vec2(${NAN});
-  if (s.x == 1.0 && s.y == 0.0) return vec2(${INF});
+  return _gpu_ir_churwitz_emm(s, s - vec2(1.0, 0.0), a).xy;
+}`,
+  // ζ(s, a) and the sum of the sizes of its terms, with sm1 = s - 1 from a
+  // caller that knows it more exactly than s (the distance to the pole:
+  // 1 - s rounds next to s = 0).
+  _gpu_ir_churwitz_emm: `vec3 _gpu_ir_churwitz_emm(vec2 s, vec2 sm1, vec2 a) {
+  if ((floatBitsToUint(s.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(s.y) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.y) & 0x7FFFFFFFu) >= 0x7F800000u) return vec3(${NAN});
+  if (sm1.x == 0.0 && sm1.y == 0.0) return vec3(${INF});
   float r = max(3.0, 0.17507043740108486 * (_gpu_ir_chypot(s.x, s.y) + 32.0));
   float nf = max(0.0, ceil(r - a.x));
-  if (nf > 4200.0) return vec2(${NAN});
+  if (nf > 4200.0) return vec3(${NAN});
   int n = int(nf);
   vec2 sum = vec2(0.0);
   float mag = 0.0;
@@ -97,8 +118,8 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
   for (int k = 0; k < 4200; k++) {
     if (k >= n) break;
     if (w.x == 0.0 && w.y == 0.0) {
-      if (s.x > 0.0) return vec2(${INF});
-      if (s.x == 0.0) return vec2(${NAN});
+      if (s.x > 0.0) return vec3(${INF});
+      if (s.x == 0.0) return vec3(${NAN});
     } else {
       vec2 t = _gpu_ir_cz_powm(w, s);
       sum += t;
@@ -108,7 +129,7 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
   }
   vec2 p = _gpu_ir_cz_powm(w, s);
   vec2 iw = _gpu_ir_cinv(w);
-  vec2 t1 = _gpu_ir_cz_mul(_gpu_ir_cz_mul(p, w), _gpu_ir_cinv(s - vec2(1.0, 0.0)));
+  vec2 t1 = _gpu_ir_cz_mul(_gpu_ir_cz_mul(p, w), _gpu_ir_cinv(sm1));
   sum += t1 + 0.5 * p;
   mag += abs(t1.x) + abs(t1.y) + 0.5 * (abs(p.x) + abs(p.y));
   float c[16] = float[16](
@@ -130,8 +151,8 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
     float m = float(2 * j);
     q = _gpu_ir_cz_mul(_gpu_ir_cz_mul(q, iw2), _gpu_ir_cz_mul(s + vec2(m + 1.0, 0.0), s + vec2(m + 2.0, 0.0)));
   }
-  if (!(last <= 3.0e-5 * mag) || !(mag <= 3.4028234663852886e38)) return vec2(${NAN});
-  return sum;
+  if (!(last <= 3.0e-5 * mag) || !(mag <= 3.4028234663852886e38)) return vec3(${NAN});
+  return vec3(sum, mag);
 }`,
   // HurwitzZeta(s, a): the real helper on the real axis. Its NaN there
   // means a complex value (a < 0 and s not an integer), which the sum
@@ -152,7 +173,7 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
   if (s.y == 0.0) return vec2(_gpu_ir_zeta(s.x), 0.0);
   if (s.x >= 0.0) return _gpu_ir_churwitz_em(s, vec2(1.0, 0.0));
   vec2 u = vec2(1.0, 0.0) - s;
-  vec2 l = s * 0.6931471805599453 + (s - vec2(1.0, 0.0)) * 1.1447298858494002 + _gpu_ir_clnsinpi(0.5 * s) + _gpu_ir_clngamma_lanczos(u) + _gpu_ir_cz_ln(_gpu_ir_churwitz_em(u, vec2(1.0, 0.0)));
+  vec2 l = s * 0.6931471805599453 + (s - vec2(1.0, 0.0)) * 1.1447298858494002 + _gpu_ir_clnsinpi(0.5 * s) + _gpu_ir_clngamma_lanczos(u) + _gpu_ir_cz_ln(_gpu_ir_churwitz_emm(u, -s, vec2(1.0, 0.0)).xy);
   return _gpu_ir_cz_exp(l);
 }`,
   // ψ(z) off the real axis (see the header).
@@ -226,10 +247,282 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
   vec2 l = _gpu_ir_cz_ln(vec2(1.0 - e * q.y, -e * q.x)) + vec2(3.14159265358979 * y - 0.6931471805599453, 3.14159265358979 * (0.5 - z.x));
   return z.y < 0.0 ? vec2(l.x, -l.y) : l;
 }`,
+  // ln Γ(z) (up to a multiple of 2πi): the Lanczos sum for Re z >= 1/2,
+  // the reflection below.
+  _gpu_ir_clngamma: `vec2 _gpu_ir_clngamma(vec2 z) {
+  return z.x >= 0.5 ? _gpu_ir_clngamma_lanczos(z) : vec2(1.1447298858494002, 0.0) - _gpu_ir_clnsinpi(z) - _gpu_ir_clngamma_lanczos(vec2(1.0, 0.0) - z);
+}`,
   // Γ(z): the real helper on the real axis (+∞ at a pole).
   _gpu_ir_cgamma: `vec2 _gpu_ir_cgamma(vec2 z) {
   if (z.y == 0.0) return vec2(_gpu_ir_gamma(z.x), 0.0);
-  vec2 l = z.x >= 0.5 ? _gpu_ir_clngamma_lanczos(z) : vec2(1.1447298858494002, 0.0) - _gpu_ir_clnsinpi(z) - _gpu_ir_clngamma_lanczos(vec2(1.0, 0.0) - z);
-  return _gpu_ir_cz_exp(l);
+  return _gpu_ir_cz_exp(_gpu_ir_clngamma(z));
+}`,
+  // z^k w^-s for an integer k >= 0 and w != 0, as one exp, from
+  // l = (ln|z|, the argument of z in units of π in two parts, the first
+  // with 10 bits after the point): k times the first part is exact for
+  // k < 8192, so the phase k arg z keeps its digits when |z| = 1.
+  _gpu_ir_clerch_term: `vec2 _gpu_ir_clerch_term(vec3 l, float k, vec2 w, vec2 s) {
+  float lr = _gpu_ir_cz_log(_gpu_ir_chypot(w.x, w.y));
+  float th = w.y == 0.0 ? (w.x < 0.0 ? 1.0 : 0.0) : _gpu_ir_carg(w) * 0.3183098861837907;
+  float m = exp((k == 0.0 ? 0.0 : k * l.x) + s.y * th * 3.14159265358979 - s.x * lr);
+  vec2 sc = _gpu_ir_sincospi(mod(k * l.y, 2.0) + k * l.z - (s.x * th + s.y * (lr * 0.3183098861837907)));
+  return m * vec2(sc.y, sc.x);
+}`,
+  // The l of _gpu_ir_clerch_term for z.
+  _gpu_ir_clerch_zl: `vec3 _gpu_ir_clerch_zl(vec2 z) {
+  float th = z.y == 0.0 ? (z.x < 0.0 ? 1.0 : 0.0) : _gpu_ir_carg(z) * 0.3183098861837907;
+  float hi = floor(th * 1024.0) / 1024.0;
+  return vec3(_gpu_ir_cz_log(_gpu_ir_chypot(z.x, z.y)), hi, th - hi);
+}`,
+  // Σ_{k<n} z^k (a+k)^-s, n <= 4200, and the sum of the sizes of its terms
+  // (z of the result). A term a + k = 0 is a pole for Re s > 0 (+∞, with
+  // the size -1 that _gpu_ir_clerch_checked reads as a pole), NaN for
+  // Re s = 0, and 0 for Re s < 0.
+  _gpu_ir_clerch_head: `vec3 _gpu_ir_clerch_head(vec3 l, vec2 s, vec2 a, int n) {
+  vec3 r = vec3(0.0);
+  vec2 w = a;
+  for (int k = 0; k < 4200; k++) {
+    if (k >= n) break;
+    if (w.x == 0.0 && w.y == 0.0) {
+      if (s.x > 0.0) return vec3(${INF}, ${INF}, -1.0);
+      if (s.x == 0.0) return vec3(${NAN});
+    } else {
+      vec2 t = _gpu_ir_clerch_term(l, float(k), w, s);
+      r += vec3(t, abs(t.x) + abs(t.y));
+    }
+    w.x += 1.0;
+  }
+  return r;
+}`,
+  // Φ(z, s, a) for |z| <= 1/2 by its series, as (value, sum of the sizes of
+  // the terms). It stops after three terms in a row that decrease, each
+  // below 1e-9 of the sum of the sizes, past Re(a + k) > 0; NaN after 1,000
+  // terms.
+  _gpu_ir_clerch_series: `vec3 _gpu_ir_clerch_series(vec2 z, vec2 s, vec2 a) {
+  vec3 l = _gpu_ir_clerch_zl(z);
+  vec3 r = vec3(0.0);
+  vec2 w = a;
+  float prev = ${INF};
+  int small = 0;
+  for (int k = 0; k < 1000; k++) {
+    float st = 0.0;
+    if (w.x == 0.0 && w.y == 0.0) {
+      if (s.x > 0.0) return vec3(${INF}, ${INF}, -1.0);
+      if (s.x == 0.0) return vec3(${NAN});
+    } else {
+      vec2 t = _gpu_ir_clerch_term(l, float(k), w, s);
+      st = abs(t.x) + abs(t.y);
+      r += vec3(t, st);
+    }
+    small = w.x > 0.0 && st <= prev && st <= 1.0e-9 * r.z ? small + 1 : 0;
+    if (small == 3) return r;
+    prev = st;
+    w.x += 1.0;
+  }
+  return vec3(${NAN});
+}`,
+  // Φ(z, s, a) for |z| <= 1, z != 0, 1: the series for k < n, then
+  // z^n Φ(z, s, w), w = a + n, by its asymptotic expansion for a large w,
+  // w^-s Σ_k b_k (s)_k w^-k, where Σ b_k t^k = 1/(1 - z e^-t) (Watson's
+  // lemma on Φ = 1/Γ(s) ∫ t^(s-1) e^(-wt) / (1 - z e^-t) dt; for |z| <= 1
+  // the function has no pole in Re t > 0). Its terms shrink by about
+  // |s + k| / (|w| |ln z|): n makes Re w >= 3 (|s| + 24) / |ln z|, and
+  // Re w >= |Im a|. As (value, sum of the sizes of the terms); NaN where n
+  // passes 4,200 (next to z = 1).
+  _gpu_ir_clerch_asym: `vec3 _gpu_ir_clerch_asym(vec2 z, vec2 s, vec2 a) {
+  vec2 lz = _gpu_ir_cz_ln(z);
+  float r = _gpu_ir_chypot(lz.x, lz.y);
+  float nf = max(0.0, ceil(max(3.0 * (_gpu_ir_chypot(s.x, s.y) + 24.0) / r, abs(a.y)) - a.x));
+  if (!(nf <= 4200.0)) return vec3(${NAN});
+  vec3 l = _gpu_ir_clerch_zl(z);
+  vec3 h = _gpu_ir_clerch_head(l, s, a, int(nf));
+  if (h.z < 0.0) return h;
+  vec2 w = vec2(a.x + nf, a.y);
+  vec2 f = _gpu_ir_clerch_term(l, nf, w, s);
+  vec2 iw = _gpu_ir_cinv(w);
+  vec2 b[24];
+  b[0] = _gpu_ir_cinv(vec2(1.0 - z.x, -z.y));
+  for (int k = 0; k < 23; k++) {
+    vec2 acc = b[k];
+    for (int j = 0; j <= k; j++) acc -= _gpu_ir_cz_mul(b[j], b[k - j]);
+    b[k + 1] = acc / float(k + 1);
+  }
+  vec2 sum = vec2(0.0);
+  float mag = 0.0;
+  float last = ${INF};
+  float t1 = ${INF};
+  vec2 q = vec2(1.0, 0.0);
+  for (int k = 0; k < 24; k++) {
+    vec2 t = _gpu_ir_cz_mul(b[k], q);
+    sum += t;
+    float t2 = t1;
+    t1 = abs(t.x) + abs(t.y);
+    mag += t1;
+    // Two terms: at z = -1 every other b_k is 0.
+    last = max(t1, t2);
+    if (last <= 1.0e-9 * mag) break;
+    q = _gpu_ir_cz_mul(q, _gpu_ir_cz_mul(s + vec2(float(k), 0.0), iw));
+  }
+  if (!(last <= 1.0e-7 * mag)) return vec3(${NAN});
+  vec2 tail = _gpu_ir_cz_mul(f, sum);
+  return vec3(h.xy + tail, h.z + (abs(f.x) + abs(f.y)) * mag);
+}`,
+  // (value, sum of the sizes of the terms) to vec2: NaN where the sum of
+  // the sizes passes 100 times the size of the value (its float32 error,
+  // up to about 3e-7 of that sum, would pass 3e-5 of the value). A pole
+  // (the size -1) stays +∞; any other sum of sizes that is not finite (a
+  // term that overflows at a point that is not a pole) is NaN.
+  _gpu_ir_clerch_checked: `vec2 _gpu_ir_clerch_checked(vec3 r) {
+  if (r.z < 0.0) return r.xy;
+  if (!(r.z <= 3.4028234663852886e38)) return vec2(${NAN});
+  if (!(r.z <= 100.0 * (abs(r.x) + abs(r.y)))) return vec2(${NAN});
+  return r.xy;
+}`,
+  // Li_s(z) for 1/2 < |z| and |ln z| <= 3.5, z != 1, from μ = ln z
+  // (|μ| < 2π): Γ(1-s)(-μ)^(s-1) + Σ_k ζ(s-k) μ^k / k!, and for an
+  // integer s = m >= 1, the limit μ^(m-1)/(m-1)! (H_(m-1) - ln(-μ)) in place
+  // of the first term and of the term k = m - 1. On the cut z > 1 the side
+  // Im z < 0, as the interpreter (the argument of -μ is π). As (value, sum
+  // of the sizes of the terms). The sum stops when two terms in a row are
+  // below 1e-9 of the sizes, past k = max(Re s + 2, 1.7|s|): there the
+  // terms shrink by about |μ|/2π (1 + |s|/(k+1)) <= 0.89 each (two terms,
+  // since ζ(s-k) is 0 at a negative even integer). NaN after 128 terms.
+  _gpu_ir_cpolylog_mu: `vec3 _gpu_ir_cpolylog_mu(vec2 s, vec2 z) {
+  vec2 mu = _gpu_ir_cz_ln(z);
+  vec2 lnm = _gpu_ir_cz_ln(-mu);
+  bool isint = s.y == 0.0 && s.x == floor(s.x);
+  float m = s.x;
+  vec2 sing = vec2(0.0);
+  if (isint && m >= 1.0) {
+    if (m <= 200.0) {
+      vec2 p = vec2(1.0, 0.0);
+      float h = 0.0;
+      for (int j = 1; j < 200; j++) {
+        if (float(j) >= m) break;
+        p = _gpu_ir_cz_mul(p, mu) / float(j);
+        h += 1.0 / float(j);
+      }
+      sing = _gpu_ir_cz_mul(p, vec2(h, 0.0) - lnm);
+    }
+  } else {
+    sing = _gpu_ir_cz_exp(_gpu_ir_clngamma(vec2(1.0 - s.x, -s.y)) + _gpu_ir_cz_mul(s - vec2(1.0, 0.0), lnm));
+  }
+  vec2 sum = sing;
+  float mag = abs(sing.x) + abs(sing.y);
+  float kmin = max(s.x + 2.0, 1.7 * _gpu_ir_chypot(s.x, s.y));
+  vec2 p = vec2(1.0, 0.0);
+  float t1 = ${INF};
+  float t2 = ${INF};
+  for (int k = 0; k < 128; k++) {
+    if (!(isint && float(k) == m - 1.0)) {
+      vec2 t = _gpu_ir_cz_mul(_gpu_ir_czeta(vec2(s.x - float(k), s.y)), p);
+      t2 = t1;
+      t1 = abs(t.x) + abs(t.y);
+      sum += t;
+      mag += t1;
+    }
+    if (float(k) >= kmin && max(t1, t2) <= 1.0e-9 * mag) break;
+    p = _gpu_ir_cz_mul(p, mu) / float(k + 1);
+  }
+  if (!(max(t1, t2) <= 1.0e-9 * mag)) return vec3(${NAN});
+  // The error of ζ(s - k) and of the first term, relative to their sizes,
+  // grows with |Im s| (their phases): the sizes count 1 + |Im s| times, so
+  // that _gpu_ir_clerch_checked gives NaN before the error passes 3e-5 of
+  // the value (8.8e-5 at s = 4 + 10i, z = -6 - 2.25i without it).
+  return vec3(sum, mag * (1.0 + abs(s.y)));
+}`,
+  // Li_s(z) for |z| > 2 by the inversion formula, with Li_s(1/z) by the
+  // series and L = ln(-z) (on the cut z > 1, arg(-z) = π: the side
+  // Im z < 0): for an integer m from 1 to 24,
+  // Li_m(z) = -(2πi)^m/m! B_m(1/2 + L/(2πi)) - (-1)^m Li_m(1/z); for an
+  // integer m <= 0, Li_0(z) = z/(1 - z) and Li_m(z) = (-1)^(m+1) Li_m(1/z);
+  // otherwise, for Re s <= 1, with σ = ±1 the sign of Im s (+1 at 0),
+  // Li_s(z) = (2π)^s/Γ(s) e^(σiπs/2) ζ(1-s, 1/2 + σL/(2πi)) - e^(σiπs) Li_s(1/z).
+  // NaN for Re s > 1 that is not an integer, and for an integer above 24.
+  _gpu_ir_cpolylog_inv: `vec3 _gpu_ir_cpolylog_inv(vec2 s, vec2 z) {
+  vec2 iz = _gpu_ir_cinv(z);
+  bool isint = s.y == 0.0 && s.x == floor(s.x);
+  if (isint && s.x == 0.0) return vec3(_gpu_ir_cz_mul(z, _gpu_ir_cinv(vec2(1.0 - z.x, -z.y))), 0.0);
+  if ((!isint && s.x > 1.0) || (isint && s.x > 24.0)) return vec3(${NAN});
+  vec3 r = _gpu_ir_clerch_series(iz, s, vec2(1.0, 0.0));
+  vec2 li = _gpu_ir_cz_mul(iz, r.xy);
+  float mag = r.z * (abs(iz.x) + abs(iz.y));
+  if (isint && s.x < 0.0) return vec3(mod(s.x, 2.0) == 0.0 ? -li : li, mag);
+  vec2 lm = _gpu_ir_cz_ln(-z);
+  vec2 rhs;
+  vec2 other;
+  // The sum of the sizes of the terms of rhs.
+  float rsz;
+  if (isint) {
+    int m = int(s.x);
+    float B[25] = float[25](1.0, -0.5, 1.0 / 6.0, 0.0, -1.0 / 30.0, 0.0, 1.0 / 42.0, 0.0, -1.0 / 30.0, 0.0, 5.0 / 66.0, 0.0, -691.0 / 2730.0, 0.0, 7.0 / 6.0, 0.0, -3617.0 / 510.0, 0.0, 43867.0 / 798.0, 0.0, -174611.0 / 330.0, 0.0, 854513.0 / 138.0, 0.0, -236364091.0 / 2730.0);
+    vec2 x = vec2(0.5 + lm.y * 0.15915494309189535, -lm.x * 0.15915494309189535);
+    vec2 bp = vec2(0.0);
+    float bsz = 0.0;
+    vec2 xp = vec2(1.0, 0.0);
+    float c = 1.0;
+    float f = 1.0;
+    for (int j = 0; j <= 24; j++) {
+      if (j > m) break;
+      vec2 t = c * B[m - j] * xp;
+      bp += t;
+      bsz += abs(t.x) + abs(t.y);
+      xp = _gpu_ir_cz_mul(xp, x);
+      c = c * float(m - j) / float(j + 1);
+      if (j > 0) f *= 6.283185307179586 / float(j);
+    }
+    // f = (2π)^m / m!, times i^m.
+    vec2 im = m % 4 == 0 ? vec2(1.0, 0.0) : m % 4 == 1 ? vec2(0.0, 1.0) : m % 4 == 2 ? vec2(-1.0, 0.0) : vec2(0.0, -1.0);
+    rhs = -f * _gpu_ir_cz_mul(im, bp);
+    rsz = f * bsz;
+    other = m % 2 == 0 ? li : -li;
+  } else {
+    float sg = s.y < 0.0 ? -1.0 : 1.0;
+    vec2 q = vec2(0.5 + sg * lm.y * 0.15915494309189535, -sg * lm.x * 0.15915494309189535);
+    vec2 lf = s * 1.8378770664093453 - _gpu_ir_clngamma(s) + sg * 1.5707963267948966 * vec2(-s.y, s.x);
+    vec2 e = _gpu_ir_cz_exp(lf);
+    // -s is the exact distance of 1 - s to the pole of ζ.
+    vec3 h = _gpu_ir_churwitz_emm(vec2(1.0 - s.x, -s.y), -s, q);
+    rhs = _gpu_ir_cz_mul(e, h.xy);
+    rsz = (abs(e.x) + abs(e.y)) * h.z;
+    other = _gpu_ir_cz_mul(_gpu_ir_cz_exp(sg * 3.14159265358979 * vec2(-s.y, s.x)), li);
+  }
+  vec2 v = rhs - other;
+  return vec3(v, rsz + abs(other.x) + abs(other.y) + mag);
+}`,
+  // PolyLog(s, z): the real helper on the real axis where it has a value;
+  // ζ(s) at z = 1; z Φ(z, s, 1) by the series for |z| <= 1/2; then
+  // _gpu_ir_cpolylog_mu for |ln z| <= 3.5, which holds 1/2 < |z| <= 2;
+  // then _gpu_ir_cpolylog_inv.
+  _gpu_ir_cpolylog: `vec2 _gpu_ir_cpolylog(vec2 s, vec2 z) {
+  if ((floatBitsToUint(s.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(s.y) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(z.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(z.y) & 0x7FFFFFFFu) >= 0x7F800000u) return vec2(${NAN});
+  if (s.y == 0.0 && z.y == 0.0) {
+    float r = _gpu_ir_poly_log(s.x, z.x);
+    if ((floatBitsToUint(r) & 0x7FFFFFFFu) <= 0x7F800000u) return vec2(r, 0.0);
+  }
+  if (z.x == 1.0 && z.y == 0.0) return _gpu_ir_czeta(s);
+  if (_gpu_ir_chypot(z.x, z.y) <= 0.5) {
+    vec3 r = _gpu_ir_clerch_series(z, s, vec2(1.0, 0.0));
+    return _gpu_ir_cz_mul(z, _gpu_ir_clerch_checked(r));
+  }
+  vec2 mu = _gpu_ir_cz_ln(z);
+  if (_gpu_ir_chypot(mu.x, mu.y) <= 3.5) return _gpu_ir_clerch_checked(_gpu_ir_cpolylog_mu(s, z));
+  return _gpu_ir_clerch_checked(_gpu_ir_cpolylog_inv(s, z));
+}`,
+  // LerchPhi(z, s, a): the real helper on the real axis where it has a
+  // value; the series for |z| <= 1/2; Li_s(z)/z for a = 1; ζ(s, a) at
+  // z = 1; _gpu_ir_clerch_asym for |z| <= 1; NaN past the unit circle.
+  _gpu_ir_clerch_phi: `vec2 _gpu_ir_clerch_phi(vec2 z, vec2 s, vec2 a) {
+  if ((floatBitsToUint(z.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(z.y) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(s.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(s.y) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.x) & 0x7FFFFFFFu) >= 0x7F800000u || (floatBitsToUint(a.y) & 0x7FFFFFFFu) >= 0x7F800000u) return vec2(${NAN});
+  if (z.y == 0.0 && s.y == 0.0 && a.y == 0.0) {
+    float r = _gpu_ir_lerch_phi(z.x, s.x, a.x);
+    if ((floatBitsToUint(r) & 0x7FFFFFFFu) <= 0x7F800000u) return vec2(r, 0.0);
+  }
+  float rz = _gpu_ir_chypot(z.x, z.y);
+  if (rz <= 0.5) return _gpu_ir_clerch_checked(_gpu_ir_clerch_series(z, s, a));
+  if (a.x == 1.0 && a.y == 0.0) return _gpu_ir_cz_mul(_gpu_ir_cpolylog(s, z), _gpu_ir_cinv(z));
+  if (z.x == 1.0 && z.y == 0.0) return _gpu_ir_churwitz_zeta(s, a);
+  if (rz <= 1.0) return _gpu_ir_clerch_checked(_gpu_ir_clerch_asym(z, s, a));
+  return vec2(${NAN});
 }`,
 };
