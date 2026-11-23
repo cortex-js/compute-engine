@@ -2,7 +2,11 @@ import * as esbuild from 'esbuild';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
-import { createJavaScriptRuntime, runtimeVersion } from '../../src/runtime';
+import {
+  createJavaScriptRuntime,
+  runtimeVersion,
+  sysHelpers,
+} from '../../src/runtime';
 import { createSysRuntime } from '../../src/compute-engine/compilation/javascript-runtime';
 
 /**
@@ -465,5 +469,39 @@ describe('the reconstruction digits of a negative base travel with the result', 
         reconstructionDigits: undefined,
       })({ x })
     ).toEqual(createJavaScriptRuntime().load(result)({ x }));
+  });
+});
+
+describe('the exported helper table', () => {
+  const typed = new ComputeEngine();
+  typed.declare('x', 'real');
+
+  test('a runtime inherits sysHelpers', () => {
+    expect(Object.getPrototypeOf(createJavaScriptRuntime())).toBe(sysHelpers);
+  });
+
+  test('Binomial: the code calls _SYS.binomial, and sysHelpers.binomial gives its value', () => {
+    const result = compile(typed.box(['Binomial', 8, 'x']), {
+      fallback: false,
+      constantFold: false,
+    })!;
+    expect(result.success).toBe(true);
+    expect(result.code).toContain('_SYS.binomial(');
+    const viaTable = sysHelpers.binomial(8, 3);
+    expect(viaTable).toBe(56);
+    expect(createJavaScriptRuntime().load(result)({ x: 3 })).toBe(viaTable);
+    expect(result.run!({ x: 3 })).toBe(viaTable);
+  });
+
+  test('Digamma: the code calls _SYS.ir.digamma, which is sysHelpers.digamma', () => {
+    const result = compile(typed.box(['Digamma', 'x']), {
+      fallback: false,
+      constantFold: false,
+    })!;
+    expect(result.success).toBe(true);
+    expect(result.code).toContain('_SYS.ir.digamma(');
+    const viaTable = sysHelpers.digamma(2.5);
+    expect(createJavaScriptRuntime().load(result)({ x: 2.5 })).toBe(viaTable);
+    expect(result.run!({ x: 2.5 })).toBe(viaTable);
   });
 });

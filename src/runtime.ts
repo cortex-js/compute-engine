@@ -11,6 +11,13 @@ export {
   RUNTIME_VERSION as runtimeVersion,
 } from './compute-engine/compilation/javascript-runtime.js';
 
+// The stateless helpers that the code of a JavaScript compilation result calls
+// as `_SYS.<name>` (`_SYS.digamma`, `_SYS.cpow`, ...). A host that lowers its
+// own operators the same way calls them from here, not from an engine
+// internal. The engine-bound ones (the random family, `integrate`, `tick`) are
+// members of a runtime, which inherits this table.
+export { SYS_HELPERS as sysHelpers } from './compute-engine/compilation/javascript-runtime.js';
+
 export type {
   JavaScriptRuntime,
   JavaScriptRuntimeOptions,

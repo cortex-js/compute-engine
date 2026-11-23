@@ -1,3 +1,16 @@
+## [Unreleased]
+
+### New Features
+
+- **`@cortex-js/compute-engine/runtime` exports `sysHelpers`,** the table of
+  stateless helpers that the code of a JavaScript compilation result calls as
+  `_SYS.<name>`. A host that lowers its own operators the same way reads them
+  from the entry instead of from an engine internal: `sysHelpers.digamma(2.5)`
+  is the value that `compile(ce.box(["Digamma", "x"])).run({ x: 2.5 })` gives,
+  and a runtime from `createJavaScriptRuntime()` inherits the table. The
+  engine-bound helpers (the random family, `integrate`, `tick`) stay members
+  of a runtime (#527, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features
