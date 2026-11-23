@@ -7788,3 +7788,64 @@ export function implementationLiteralAt(
 
   return ce._fn('Function', [body, ...params], { canonical: false });
 }
+
+/**
+ * The requirement of the function member `member` of `record` at `Self =
+ * self`, the edge's target: the types that {@link dispatchMember} checks the
+ * arguments of a call against once it has selected an edge. For the
+ * compiler, which dispatches a call at compile time (CE-1652). `null` when
+ * `member` is not a function member of `record`.
+ */
+export function protocolRequirementAt(
+  ce: ProtocolReadView,
+  record: ProtocolRecord,
+  member: string,
+  self: Type
+): FunctionSignature | null {
+  return requirementAt(ce, record, member, self);
+}
+
+/**
+ * The arguments that {@link dispatchMember} passes to the implementation of
+ * `record.member` for the operands `ops` of a call: the written ones, and,
+ * at each parameter that the call leaves out or that a `ProtocolDefault`
+ * placeholder stands for, the default of the requirement, boxed in the
+ * scope that declares the protocol and evaluated, as the interpreter fills
+ * it; `defaults` holds, at each such parameter, the boxed default before
+ * its evaluation (a symbol default is the symbol). For the compiler
+ * (CE-1652). A string, the reason, where the interpreter gives an error: a
+ * number of arguments that the requirement does not admit, or a
+ * placeholder at a parameter with no default.
+ */
+export function protocolCallArguments(
+  ce: IComputeEngine,
+  record: ProtocolRecord,
+  member: string,
+  ops: ReadonlyArray<Expression>
+): { args: Expression[]; defaults: (Expression | undefined)[] } | string {
+  ops = withoutTrailingDefaults(ops);
+  const shape = requirementShape(ce, record, member);
+  if (shape === null) return `${member} is not a function of ${record.name}`;
+  const { min, max } = requirementArity(shape);
+  if (ops.length < min || ops.length > max)
+    return `${record.name}.${member} called with ${ops.length} arguments`;
+  if (ops.length === max && !ops.some(isProtocolDefault))
+    return { args: [...ops], defaults: [] };
+  const defaults = requirementDefaults(ce, record, member, shape);
+  const filled: Expression[] = [];
+  const boxed: (Expression | undefined)[] = [];
+  for (let i = 0; i < max; i++) {
+    const op = ops[i];
+    if (op !== undefined && !isProtocolDefault(op)) {
+      filled.push(op);
+      boxed.push(undefined);
+      continue;
+    }
+    const d = i < min ? undefined : defaults[i - min];
+    if (d === undefined)
+      return `no value for the parameter ${i + 1} of ${record.name}.${member}`;
+    filled.push(d.evaluate());
+    boxed.push(d);
+  }
+  return { args: filled, defaults: boxed };
+}

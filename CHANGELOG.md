@@ -127,6 +127,16 @@
   another named type, a recursive function that takes or returns such a
   value, and such a call on GLSL or `interval-js` still fall back to the
   interpreter.
+- **`compile()` compiles a call of a protocol method on a value of a named
+  tuple type, which it refused** (CE-1652). With a protocol `Drawable` that
+  `Figure` implements, `(t: real) => circle((2, 0), 0.2).rotateAbout(t / 1000,
+  (0, 0))` and `rotateAbout(circle((1, 0), 1), t, (0, 0))` compile on
+  JavaScript: the implementation is chosen when the code is compiled, from the
+  type of the value, and an argument that the call leaves out takes the
+  default of the protocol (`grow(self: Self, k: real = figureScale)`). A call
+  that two protocols implement for the type, an implementation given by the
+  host, a value that is not of a named tuple type, and such a call on GLSL or
+  `interval-js` still fall back to the interpreter.
 
 ## 0.200.1 _2026-11-23_
 

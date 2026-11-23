@@ -3504,6 +3504,36 @@ before ("elements of two types"); `admits()` refuses the lane there too.
   the type of a record on a cycle is a fixed point that the lowering does not
   compute, and a record that grows at each call would lower a new function at
   each.
+- **Protocol methods.** A call whose head is the dispatcher of a protocol member
+  (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
+  the same canonical form) and whose first operand is a record of a named type
+  `T` is dispatched at compile time (`lower-protocols.ts`; CE-1652, step 4).
+  The interpreter (`dispatchMember()` of `engine-protocols.ts`) selects the
+  most specific of the edges whose target holds the type of the value at run
+  time; the type of a record is its nominal type, so the compiler requires
+  exactly one edge of `protocolDispatchCandidates()` that overlaps `T`
+  (`typesOverlap()`), a target that holds `T`, no condition and an Epsil
+  implementation: that edge is then the one selected for every value of `T`.
+  The arguments are those that the interpreter passes
+  (`protocolCallArguments()`): a parameter that the call leaves out takes the
+  default of the requirement, boxed in the scope of the protocol and evaluated
+  at compile time. A symbol default (a constant, which a later program can
+  declare again) that is not the library's is a capture (`symbolDeps`), as a
+  free name with a value is (`captured()`), so a host recompiles when its
+  value changes; a symbol default with no value declines (the interpreter
+  reads it in the scope of the protocol, the lowering would read it at the
+  call site). Each argument must prove the type of the requirement at `Self` =
+  the target, by its static type or, of no stated type or `any`, by its lane,
+  as the interpreter checks it. The implementation (`implementationLiteralAt()`,
+  `Self` replaced by the target) is made canonical once per edge and member
+  and lowered as a user function, so each record type lowers it once; the
+  result that its body declares (`Typed(body, "boolean")`, at `Self` = the
+  target) is its declared result, which the body must prove, as for a user
+  function (`signatureTypes()`). Two edges that overlap `T` (two
+  protocols that declare the member), a conditional edge, a host callback, a
+  first operand that is not a record, a record of no named type and a record of
+  a parameterized type decline. The qualified call (`ProtocolMember`) still
+  declines.
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names

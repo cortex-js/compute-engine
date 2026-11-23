@@ -2668,9 +2668,18 @@ given to a parameter that the interpreter maps over a list (`tag(x) =
 contracts"), so `let m = fig.matrix` is a `tuple<number, …>`, and a field
 typed `real` given `m[1]` declines (R5). A local declared with a tuple type
 declines too; read the field where it is used (`fig.matrix[1]`), or declare
-a local of each element (`let a: real = fig.matrix[1]`). A record
-passed to a function of the host, and a method of a protocol, still decline
-(CE-1652, steps 4 and 5).
+a local of each element (`let a: real = fig.matrix[1]`). A method of a
+protocol called on a record (`circle((2, 0), 0.2).rotateAbout(t, (0, 0))`)
+is dispatched when the code is compiled, from the nominal type `T` of the
+record: it compiles when exactly one conformance overlaps `T`, holds `T`, has
+no condition and is implemented in Epsil, so the interpreter selects it for
+every value of `T`; a parameter that the call leaves out takes the default of
+the requirement (a constant default is in `symbolDeps`; a symbol default with
+no value declines), and a body that does not prove the result that the
+implementation declares declines. Two protocols that implement the member
+for `T`, a conditional conformance, an implementation of the host, a first
+operand that is not a record, and a record of no named type decline. A record passed to a
+function of the host still declines (CE-1652, step 5).
 
 ## Collections
 

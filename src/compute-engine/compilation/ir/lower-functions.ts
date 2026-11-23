@@ -331,8 +331,17 @@ function openList(t: Type): { length?: number; point?: number } | undefined {
 
 /** The parameter names of a function literal, and its signature's types.
  *  `wide` is `cx.wide`: in `'real'` (`mode: 'strict'`), a result written
- *  `unknown` that the engine refined to a complex scalar is open. */
-function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
+ *  `unknown` that the engine refined to a complex scalar is open.
+ *  `implementation`: `literal` is the implementation of a protocol member
+ *  (`lower-protocols.ts`), whose head `e` is the dispatcher: its result is
+ *  the one that its body declares (`Typed(body, "boolean")`), in its own
+ *  signature. */
+function signatureTypes(
+  e: Fn,
+  literal: Fn,
+  wide: 'real' | 'complex',
+  implementation = false
+) {
   const od = e.operatorDefinition as
     | {
         _isLambda?: boolean;
@@ -435,6 +444,10 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   // host declares it in the signature of its definition (not derived from
   // the literal, `_derivedSignature`); a result written `unknown` is refined
   // from the body.
+  const typedBody =
+    isFunction(literal.ops[0], 'Typed') ||
+    (isFunction(literal.ops[0], 'Block') &&
+      isFunction(literal.ops[0].ops.at(-1), 'Typed'));
   const looseWritten =
     typeof written === 'object' &&
     written.kind === 'signature' &&
@@ -442,15 +455,13 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   const inferred =
     looseWritten ||
     (od?._isLambda
-      ? od._derivedSignature === true &&
-        !(
-          isFunction(literal.ops[0], 'Typed') ||
-          (isFunction(literal.ops[0], 'Block') &&
-            isFunction(literal.ops[0].ops.at(-1), 'Typed'))
-        )
+      ? od._derivedSignature === true && !typedBody
       : vd === undefined || vd.inferredType === true);
-  const r =
-    inferred && typedByMatch(literal.ops[0])
+  const r = implementation
+    ? typedBody && typeof own === 'object' && own.kind === 'signature'
+      ? present(own.result)
+      : undefined
+    : inferred && typedByMatch(literal.ops[0])
       ? undefined
       : signature?.result && present(signature.result);
   // A list of reals, integers or booleans: the type of the body, whose
@@ -1170,7 +1181,7 @@ export function functionLowering(
    *  `lower.ts`). */
   const call = (
     e: Fn,
-    binding?: { key: object; literal: Fn },
+    binding?: { key: object; literal: Fn; implementation?: boolean },
     given?: V[],
     nanForAbsent: () => boolean = () => false
   ): number => {
@@ -1184,7 +1195,12 @@ export function functionLowering(
     if (binding !== undefined) {
       let sig = signatures.get(binding.key);
       if (sig === undefined) {
-        sig = signatureTypes(e, binding.literal, cx.wide);
+        sig = signatureTypes(
+          e,
+          binding.literal,
+          cx.wide,
+          binding.implementation
+        );
         signatures.set(binding.key, sig);
       }
       // A parameter declared as a point maps a list of points

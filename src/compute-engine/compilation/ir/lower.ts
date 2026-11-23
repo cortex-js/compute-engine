@@ -189,6 +189,7 @@ import {
 } from './lower-enclosure.js';
 import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
+import { protocolLowering } from './lower-protocols.js';
 import { recordConstructor, recordLowering } from './lower-records.js';
 
 export { Decline } from './lower-context.js';
@@ -1728,6 +1729,18 @@ function lowerOnce(
           (!created.has(e) && hasOwnLowering(e.operator, e.operatorDefinition))
       );
       if (refused !== undefined) decline(e, refused);
+    }
+    // A protocol method on a record: the implementation that the
+    // interpreter selects for every value of its type (`lower-protocols.ts`).
+    const dispatched = user === undefined ? protocols.dispatch(e) : undefined;
+    if (dispatched !== undefined) {
+      reachBody(dispatched.binding.literal.ops[0]);
+      return fns.call(
+        dispatched.call,
+        dispatched.binding,
+        dispatched.values,
+        () => nanForAbsent(e)
+      );
     }
     if (user !== undefined || fns.recursive(e)) {
       if (user !== undefined) reachBody(user.literal.ops[0]);
@@ -6601,6 +6614,7 @@ function lowerOnce(
   const fns = functionLowering(cx, lists, javascript);
   const records = recordLowering(cx, javascript);
   const matches = matchLowering(cx, records);
+  const protocols = protocolLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));
