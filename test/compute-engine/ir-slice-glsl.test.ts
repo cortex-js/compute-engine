@@ -52,7 +52,7 @@ const PINNED: [rule: string, program: unknown][] = [
 ];
 
 describe('IR slice: GLSL text', () => {
-  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, and the rows of Chunk and Partition)', () => {
+  test('every IR operation has a spelling in both printers (GLSL declines a draw, a Range, a run-time index of a list of booleans or of points, a real function with no GLSL form, an integer row of reals, the Fibonacci number of an integer, a complex function with no GLSL form, a colour map, a sort, an ordering, a median and the other statistics of a list, the run-time test of a real count of a rotation, the rounding of a real count, the samples of a Linspace, the operations of a list local written in place, the matrix kernels, the rows of Chunk and Partition, and the records)', () => {
     // prettier-ignore
     const jsOnly = new Set(['draw', 'shuffle', 'rangecount', 'colormap', 'atu', 'atp',
       'sort', 'sort.int', 'ordering', 'median',
@@ -70,6 +70,8 @@ describe('IR slice: GLSL text', () => {
       'rows.count', 'rows.len', 'rows.get', 'rows.get.int',
       // A row of it at an index known at run time.
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
+      // A record and its `Nothing` field (CE-1652).
+      'field', 'nothing',
       // The string lane (CE-1530), and `ColorToString` (CE-1548).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',

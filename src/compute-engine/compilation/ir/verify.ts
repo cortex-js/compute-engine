@@ -101,9 +101,14 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           'color',
           'string',
           'rows',
+          'record',
+          'nothing',
         ].includes(t.lane)
       )
         fail(`v${v}: lane ${t.lane}`);
+      // A record is not an element of a list.
+      if (t.lane === 'record' && t.shape.length > 0)
+        fail(`v${v}: a list of records`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
           fail(`v${v}: shape ${JSON.stringify(t.shape)}`);
@@ -160,6 +165,17 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
         return;
       }
       case 'op': {
+        // The field at a constant index of a record: the type of that
+        // field.
+        if (i.op === 'field') {
+          const [r, k] = i.args;
+          const f = type(r).fields?.[constant(k) ?? -1];
+          if (type(r).lane !== 'record' || f === undefined)
+            fail(`field v${i.out}: not a field of a record`);
+          if (!equal(type(i.out), f!))
+            fail(`field v${i.out}: the result is not ${typeToString(f!)}`);
+          return;
+        }
         const found =
           rowOfOp(rows, i.op) ?? fail(`no row for the operation ${i.op}`);
         const { row, signature } = found;
@@ -178,6 +194,14 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
       }
       case 'list': {
         const t = type(i.out);
+        // A record: one value per field, of the field's type.
+        if (t.lane === 'record') {
+          if (t.fields?.length !== i.args.length)
+            fail(`record v${i.out}: ${i.args.length} fields`);
+          return i.args.forEach((a, k) =>
+            sub(a, t.fields![k], `record v${i.out}`)
+          );
+        }
         const element = elementType(t);
         if (t.shape[0] !== i.args.length)
           fail(`list v${i.out}: length ${JSON.stringify(t.shape[0])}`);

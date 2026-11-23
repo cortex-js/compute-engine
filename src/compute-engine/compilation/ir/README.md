@@ -877,7 +877,8 @@ refuses: `Rank`, `Shape`, `Flatten`, `Transpose`, `Max`, `Sum`, `First`,
 `ListJoin`, `PointList`, `List`, `Length` of a local that holds it, a call of a
 user function with it as an argument, arithmetic and comparisons; an `If`
 between two values of the lane (`If(x > 0, Chunk(L, 2), Chunk(L, 3))`), a
-`Tuple` of it and a scalar (`Tuple(Chunk(L, 2), x)`: "elements of two types")
+`Tuple` of it and a scalar (`Tuple(Chunk(L, 2), x)`: "a record with a field
+of lists of rows of two lengths")
 and a `Tuple` of the value twice (`cse` makes one value used twice). `IsMissing`
 of it is `False`, the interpreter's value (with no pass the producer stays, and
 it declines). No pass has a case of its own for the lane.
@@ -945,9 +946,9 @@ Code whose result is of the lane has `rows: true` and `shippable: false`:
 (`loadBroadcast()`, `loadBroadcastSlice()`, `loadBroadcastAsync()`) throw a
 `TypeError` (a batch writes numbers); `run()`, `runtime.load()` and `runAsync()`
 return the arrays. Declined: the lane on GLSL, in the interval mode and in the
-bigint mode; a list of points, of complex numbers or of colours (`Chunk(P, 2)`);
-a literal list of rows of two lengths as the result, `List(List(x, y), List(z))`
-("elements of two types").
+bigint mode; a list of points, of complex numbers or of colours (`Chunk(P, 2)`).
+A literal list of rows of two lengths, `List(List(x, y), List(z))`, is a record
+of two lists ("Records"), an array of arrays on JavaScript.
 
 ## The `bigint` mode
 
@@ -2283,7 +2284,7 @@ JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`). On GLSL a
 list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4` (`bvec2`,
 ... for booleans; `vec2(cos(t), sin(t))`), and another length a `float[n]`. A
 tuple of lists is a list of rows (`Tuple(L)` of a list of stated length); a
-tuple of tuples declines, except as the element of a `Loop` over a literal
+tuple of tuples is a record ("Records"), except as the element of a `Loop` over a literal
 `List` of `Tuple`s of one length (`for gap in [(A, B, C), (B, C, D)]`, `A` to
 `D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an index into
 one list per position, a list of points where the parts are tuples (`[A, B]`,
@@ -3421,6 +3422,76 @@ program whose last statement is a definition is `Nothing` and declines.
   (`function f(s: string) -> boolean { match s { … } }`, the body
   `Typed(…, "boolean")`; a signature that the host declares) is kept, and a
   body that contradicts it declines. `typedByMatch()` visits each node once.
+
+## Records
+
+`lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
+the lane `record` and the shape `[]` whose fields each have a settled shape
+(`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time"). Its IR type
+holds the IR type of each field (`fields`), the tuple mark of each (`marks`) and,
+for a value of a nominal tuple type, the name of the type (`nominal`) and its
+field names (`names`); `joinType()`, the type equality of the verifier and
+`sameFields()` compare two records by their nominal type and field by field, so
+two records of one engine type whose fields have different shapes are two IR
+types, and so are records of two nominal types of the same fields. A field is a scalar of a lane (a colour, a string), a list or a
+tuple of stated lengths, a record, or the unit type `nothing`: a field whose
+value is `Nothing`. On JavaScript a record is the array of its fields (a `list`
+instruction of the record type), a `nothing` field `null` (the operation
+`nothing`). Records compile on JavaScript only (user decision Q3 of the plan of
+CE-1652): on GLSL, in the interval mode and in the `bigint` mode a constructor
+declines ("records compile on javascript only"), also when a field read would
+fold the record away, and a `Tuple` or a `List` of several lanes is lowered as
+before ("elements of two types"); `admits()` refuses the lane there too.
+
+- **Making a record.** The constructor of a nominal tuple type that
+  `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or
+  an alias type, not a variant of a sum declared with `|`, whose tag is a
+  value at run time): each operand is lowered for the declared type of its field,
+  and an operand whose static type does not prove that type declines (R5), as
+  does one whose static type comes from a `Match` (CE-1731). Where the declared
+  type settles an IR type (`real`, `string`, `color`,
+  `tuple<real, real, real, real, real, real>`), the field has it (an integer
+  operand of a real field is read as is); where it gives no single shape (`any`,
+  `list`, `string | color | nothing`), the field has the shape of the operand, so
+  a filled and an unfilled `Figure` are two record types. `Nothing` is a field
+  of the type `nothing`. A `Tuple` or a `List` literal whose elements do not
+  make a list (two lanes that do not join, lists of two lengths, a tuple and a
+  list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
+  `Tuple` or `List` of one lane stays the tuple or the list of "Tuples" and
+  "Lists". A field of a run-time length declines (its length is a value of the
+  function that makes the record), and so does a field of the lane `rows`. A
+  list of records (an element of a build, a filter or a random frame) declines.
+- **Reading a record.** `Field(r, name)` of a record of a named tuple type and
+  `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the
+  operation `field`, `r[k]` on JavaScript, with the field's tuple mark); any
+  other index declines. A field of a record made in the same body is the value
+  it was made of, so a constant stays a constant: `match fig.kind { … }` keeps
+  one case, and an `If` whose condition compares such a field with a literal
+  (or whose arms give two record types, or a record and another value) keeps
+  the arm taken when the condition is known at compile time (the shapes of the
+  other arm do not count). An `If` with a condition known only at run time whose
+  arms give two record types declines ("arms of two types", R3).
+  `MatchesType(x, T)` of a field of a record that the static type of `x` does
+  not decide is decided by the lane of the field: a field of the lane `nothing`,
+  `string`, `boolean` or `color` is of that engine type
+  (`fig.fillPaint is nothing`). A `Tuple` pattern of a `Match` does not take a
+  value of a named tuple type (the interpreter's), and declines on a record with
+  no names. Every other reader declines: arithmetic, `Equal`, `Length`, `Map`.
+- **User functions.** A function whose result type is not a scalar (a named
+  tuple type, `list<real | string>`) returns the record of its body; a body that
+  is not a record declines as before ("the result of f is not a scalar"), and a
+  result type with field names requires a record of those names. A recursive
+  function whose result is a record declines. Records as arguments are step 3 of
+  CE-1652.
+- **The result of `run()`.** A record result of the entry is converted once, at
+  the root (`record` of the `Syntax`, from the IR type of the result): a record
+  of a named tuple type is an object keyed by its field names
+  (`f(t) = P(cos(t), sin(t))` gives `{x: 0.54, y: 0.84}` at `t = 1`), a record
+  in a field is converted the same way, a field that can hold a complex value
+  follows the result convention (`{value: 2}`, not `{value: {re: 2, im: 0}}`),
+  a `nothing` field is `null`, a colour
+  keeps its run-time object, and a record with no names stays an array. A record
+  result has no batch: `broadcast()` and `broadcastAsync()` throw.
 
 ## How to add
 

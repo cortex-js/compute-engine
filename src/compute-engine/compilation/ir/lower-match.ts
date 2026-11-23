@@ -25,6 +25,7 @@ import {
   type Lowering,
 } from './lower-context.js';
 import { isSubLane, scalarType, type V } from './ir.js';
+import type { Type } from '../../../common/type/types.js';
 
 /** The fewest digits of `N(x, p)` whose value the double of `x` gives
  *  within the agreement of the targets (`N(1/3, 15)` is
@@ -74,7 +75,15 @@ export function typedByMatch(
   return e.ops.some((op) => typedByMatch(op, seen));
 }
 
-export function matchLowering(cx: Lowering) {
+/** The reads of a record that `MatchesType` of a field needs: the `named`
+ *  and `at` of `recordLowering()` (`lower-records.ts`). Declared here, not
+ *  imported, because `lower-records.ts` imports this module. */
+type RecordReads = {
+  named(e: Fn, r: V, name: string | undefined): V;
+  at(e: Expression, r: V, i: V): V;
+};
+
+export function matchLowering(cx: Lowering, records: RecordReads) {
   const { b } = cx;
 
   /** `e` reads a name that the walk binds as a local of a block or a
@@ -136,8 +145,12 @@ export function matchLowering(cx: Lowering) {
 
   /** `MatchesType(x, T)` (`x is T`): `True` when the static type of `x` is
    *  a subtype of `T`, `False` when the two types do not overlap; the
-   *  subject is lowered only for its effect. Otherwise it declines: no
-   *  run-time test of a type is emitted. */
+   *  subject is lowered only for its effect. When the static type does not
+   *  decide, or cannot be trusted (CE-1731), a subject that is a field of
+   *  a record (`Field`, `At`) is decided by the lane of the field: a value
+   *  of the lane `nothing`, `string`, `boolean` or `color` is of that
+   *  engine type, settled by the operand of the record's constructor.
+   *  Otherwise it declines: no run-time test of a type is emitted. */
   const matchesType = (e: Fn): V => {
     const [x, t] = e.ops;
     const text =
@@ -159,28 +172,55 @@ export function matchLowering(cx: Lowering) {
         'MatchesType of a subject of the static type error',
         STATIC_TYPE_ERROR
       );
-    if (typedByMatch(subject))
-      decline(
-        e,
-        'MatchesType of a subject whose static type comes from a Match (CE-1731)'
-      );
-    if (readsLocal(subject))
-      decline(
-        e,
-        'MatchesType of a subject that reads a local, whose type can come from a Match (CE-1731)'
-      );
-    const verdict = isSubtype(s, settled.type)
-      ? true
-      : !typesOverlap(s, settled.type)
-        ? false
+    const decide = (t: Type) =>
+      isSubtype(t, settled.type)
+        ? true
+        : !typesOverlap(t, settled.type)
+          ? false
+          : undefined;
+    const untrusted = typedByMatch(subject)
+      ? 'MatchesType of a subject whose static type comes from a Match (CE-1731)'
+      : readsLocal(subject)
+        ? 'MatchesType of a subject that reads a local, whose type can come from a Match (CE-1731)'
         : undefined;
-    if (verdict === undefined)
+    const verdict = untrusted === undefined ? decide(s) : undefined;
+    if (verdict !== undefined) {
+      if (subject.isPure !== true) cx.value(subject, false);
+      return b.constant(verdict, 'boolean');
+    }
+    // The lane of a field of a record, which the passes remove when nothing
+    // else reads it. The record is lowered once, and the field read from it.
+    const read =
+      (isFunction(subject, 'Field') || isFunction(subject, 'At')) &&
+      subject.nops === 2 &&
+      cx.isLibrary(subject)
+        ? subject
+        : undefined;
+    const r = read === undefined ? undefined : cx.value(read.ops[0])!;
+    const v =
+      read === undefined || r === undefined || cx.type(r).lane !== 'record'
+        ? undefined
+        : read.operator === 'Field'
+          ? records.named(
+              read,
+              r,
+              isString(read.ops[1]) ? read.ops[1].string : undefined
+            )
+          : records.at(read, r, cx.value(read.ops[1])!);
+    const lane = v === undefined ? undefined : cx.type(v);
+    const known =
+      lane !== undefined &&
+      lane.shape.length === 0 &&
+      ['nothing', 'string', 'boolean', 'color'].includes(lane.lane)
+        ? decide(lane.lane as Type)
+        : undefined;
+    if (known === undefined)
       decline(
         e,
-        `MatchesType of a value of type ${typeToString(s)}, which neither proves nor excludes ${settled.canonicalText}`
+        untrusted ??
+          `MatchesType of a value of type ${typeToString(s)}, which neither proves nor excludes ${settled.canonicalText}`
       );
-    if (subject.isPure !== true) cx.value(subject, false);
-    return b.constant(verdict, 'boolean');
+    return b.constant(known, 'boolean');
   };
 
   /** The case `c` of a `Match`, or a decline for a case that the compiler
@@ -265,6 +305,11 @@ export function matchLowering(cx: Lowering) {
       if (a.kind === 'tuple') {
         if (t.shape.length > 0 && !point)
           decline(e, 'a Tuple pattern of a Match on a list');
+        // A value of a named tuple type is not taken by a `Tuple` pattern
+        // (the interpreter's); a record of a `Tuple` or a `List` literal of
+        // several lanes is not told apart here.
+        if (t.lane === 'record' && t.names === undefined)
+          decline(e, 'a Tuple pattern of a Match on a record with no names');
         if (!point || t.shape[0] !== a.names.length) continue;
         const values = a.names.map((_, k) =>
           b.op('elem', [s, b.constant(k, 'integer')], scalarType(t.lane))

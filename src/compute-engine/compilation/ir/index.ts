@@ -117,14 +117,24 @@ export type Profile = {
 
 export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
   javascript: {
-    lanes: ['real', 'integer', 'boolean', 'complex', 'color', 'string', 'rows'],
+    lanes: [
+      'real',
+      'integer',
+      'boolean',
+      'complex',
+      'color',
+      'string',
+      'rows',
+      'record',
+      'nothing',
+    ],
     rank: Infinity,
     runtimeLengths: true,
     draws: true,
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: ['rows'],
+    scalarLanes: ['rows', 'record', 'nothing'],
     resultOnly: Object.fromEntries(
       ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
         op,
@@ -177,7 +187,7 @@ export function admits(
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {
-        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : 'complex numbers'}`,
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : t.lane === 'record' ? 'records' : t.lane === 'nothing' ? 'Nothing' : 'complex numbers'}`,
       };
     if (
       t.shape.length > profile.rank &&
@@ -278,12 +288,46 @@ export function admits(
     const m = stringListRefusal(p);
     if (m !== undefined) return m;
   }
+  if (profile.lanes.includes('nothing')) {
+    const m = nothingRefusal(p);
+    if (m !== undefined) return m;
+  }
   if (entry.tuple === true && profile.syntax.retTuple === undefined)
     return { head: 'Tuple', cause: 'a Tuple of elements of several shapes' };
   if (!profile.recursion && recursiveFunctions(p.functions).size > 0)
     return {
       cause: `a recursive function (${[...recursiveFunctions(p.functions)].join(', ')})`,
     };
+  return undefined;
+}
+
+/**
+ * A value of the lane `nothing` (`Nothing`, `README.md`, "Records") is read
+ * only as a field of a record that a `list` makes: any other read of it, and
+ * a yield of it (an arm, a carried value, the result of a function or of
+ * the entry), refuses. The passes run before, so a field read only by a
+ * type test that the lowering decided is gone.
+ */
+function nothingRefusal(p: Program): Refusal | undefined {
+  const nothing = (v: V) => p.types[v].lane === 'nothing';
+  const refusal: Refusal = {
+    cause: 'the value Nothing other than as a field of a record',
+  };
+  const walk = (r: Region): Refusal | undefined => {
+    for (const i of r.body) {
+      const field = i.k === 'list' && p.types[i.out].lane === 'record';
+      if (!field && argsOf(i).some(nothing)) return refusal;
+      for (const x of regionsOf(i)) {
+        const m = walk(x);
+        if (m !== undefined) return m;
+      }
+    }
+    return r.yields.some(nothing) ? refusal : undefined;
+  };
+  for (const f of p.functions) {
+    const m = walk(f.body);
+    if (m !== undefined) return m;
+  }
   return undefined;
 }
 

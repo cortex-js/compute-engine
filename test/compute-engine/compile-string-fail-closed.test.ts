@@ -493,7 +493,9 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
       const expr = ce.box([head, T, T] as any);
       const r = compile(expr, { constantFold: false });
       expect(r.success).toBe(false);
-      expect(r.error).toMatch(/elements of two types/);
+      // A tuple of a number and a string is a record (CE-1652), which
+      // `Equal` does not read.
+      expect(r.error).toMatch(/Equal of record|NotEqual of record/);
       expect(expr.evaluate().toString()).toBe(expected);
     }
   });

@@ -378,6 +378,31 @@ export type Lowering = {
   readonly tuples: Map<V, number>;
 };
 
+/** The field names of the named tuple type `t` (a reference to a nominal
+ *  type whose body is a tuple with a name for each element), or
+ *  `undefined`. */
+export function recordNames(t: Type): string[] | undefined {
+  const body = tupleBody(t);
+  return body?.every((x) => x.name !== undefined)
+    ? body.map((x) => x.name!)
+    : undefined;
+}
+
+/** The elements of the body of the nominal tuple type that `t` refers to
+ *  (not a parameterized one), or `undefined`. */
+export function tupleBody(t: Type) {
+  if (
+    typeof t !== 'object' ||
+    t.kind !== 'reference' ||
+    t.alias ||
+    t.args !== undefined ||
+    typeof t.def !== 'object' ||
+    t.def.kind !== 'tuple'
+  )
+    return undefined;
+  return t.def.elements;
+}
+
 /** The definition that the head of the call `e` resolves to, when it is a
  *  user function with a function literal, and the literal. */
 export function userBinding(e: Fn): { key: object; literal: Fn } | undefined {

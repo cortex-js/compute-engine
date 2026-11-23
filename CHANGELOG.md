@@ -40,6 +40,19 @@
   compiles to `x`. A case with a guard, a `Match` with no `_` case, an `x is
   T` that the type of `x` does not decide and `N(x, p)` with fewer than 15
   digits still fall back to the interpreter.
+- **`compile()` compiles a value of a named tuple type, and a `Tuple` or a
+  list of elements of several kinds, which it refused** (CE-1652). With
+  `type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
+  `f(t)` compiles on JavaScript, and `run({ t: 1 })` returns the object
+  `{ x: 0.5403…, y: 0.8414… }`, keyed by the field names; a field whose value
+  is `Nothing` is `null`, and a value of a named tuple type in a field is an
+  object too. `f(t: real) = [t, "a"]` and `("a", t)` compile and return the
+  array `[1, "a"]`. A field is read by its name (`p.x`) or at a constant
+  index (`q[1]`), and a field typed `any` or `string | color | nothing` takes
+  the shape of the value it is given. A value whose kind depends on a run-time
+  condition (`if t > 0 { P(t, 1) } else { Q("a") }`), a field read at an
+  index that is not a constant, and such a value on GLSL or `interval-js` still
+  fall back to the interpreter. A result of this kind cannot be broadcast.
 
 ## 0.200.1 _2026-11-23_
 
