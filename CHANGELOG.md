@@ -91,6 +91,15 @@
   `⌊n/m!⌋`, and at `n = 100n, m = 3n` gives `16n`. A constant divisor,
   `(n − Mod(n, 3))/3`, compiles too. Another quotient still falls back.
 
+- **In the bigint compile mode, `Reduce` and `Fold` that build a list of a
+  run-time length compile** (CE-1740, #638). With `n: integer`,
+  `compile(Fold((a, i) => Join(a, [i]), [0], 1..n), { mode: 'bigint' })`
+  fell back to the interpreter, although the default mode compiled it. The
+  loop now carries the list and its length, as in the default mode, and at
+  `n = 5n` gives `[0n, 1n, 2n, 3n, 4n, 5n]`. `Append(a, i)` from `List()`
+  compiles too. A step that gives a value that is not an integer or a
+  Boolean still falls back.
+
 - **A compiled `If` or `Which` with an empty list as one arm compiles on
   JavaScript** (CE-1735, #638). `If(n < 1, [], Range(1, n))` declined with
   "an empty list", so the program fell back to the interpreter. The arm

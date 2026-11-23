@@ -276,6 +276,59 @@ describe('a list accumulator in the bigint mode', () => {
     }
     expect(c.run({ n: 100n })[0]).toBe(354224848179261915075n);
   });
+
+  // CE-1740: a list of a run-time length, carried with its length.
+  it.each([
+    // The interpreter leaves `Drop` of a fold held, so the fold is bare.
+    ['Join', fold(['Join', 'acc', ['List', 'k']], ['List', 0])],
+    [
+      'Append from List()',
+      fold(['Append', 'acc', ['Power', 'k', 20]], ['List']),
+    ],
+    ['a prefix', fold(['Join', ['List', 'k'], 'acc'], ['List', 7])],
+    ['Booleans', fold(['Append', 'acc', ['Less', 'k', 3]], ['List'])],
+    [
+      'a condition',
+      fold(
+        ['If', ['Equal', ['Mod', 'k', 2], 0], ['Append', 'acc', 'k'], 'acc'],
+        ['List']
+      ),
+    ],
+    [
+      'Last of a factorial list',
+      [
+        'Last',
+        fold(
+          ['Append', 'acc', ['Multiply', 'k', ['Last', 'acc']]],
+          ['List', 1]
+        ),
+      ],
+    ],
+  ] as [string, MathJsonExpression][])(
+    'a list of a run-time length: %s agrees with evaluate()',
+    (_, expr) => {
+      const box = ce.box(expr);
+      const c = compile(box, { mode: 'bigint', fallback: false } as any) as any;
+      expect(c.success).toBe(true);
+      const big = (x: any): unknown =>
+        x.symbol === 'True'
+          ? true
+          : x.symbol === 'False'
+            ? false
+            : exact(x.toString());
+      // An exact integer prints as its digits, or as digits then `e+k`.
+      const exact = (s: string): bigint => {
+        const [m, k] = s.split('e+');
+        return BigInt(m) * 10n ** BigInt(k ?? 0);
+      };
+      for (const n of [-2, 0, 1, 5, 30]) {
+        const r = box.subs({ n } as any).evaluate();
+        const expected = r.ops ? r.ops.map(big) : big(r);
+        const run = c.run({ n: BigInt(n) });
+        expect(Array.isArray(run) ? Array.from(run) : run).toEqual(expected);
+      }
+    }
+  );
 });
 
 describe('what still declines', () => {
@@ -287,12 +340,11 @@ describe('what still declines', () => {
     ).toThrow(/changes the length of a tuple/);
   });
 
-  it('a list of a run-time length on GLSL and in the bigint mode', () => {
+  it('a list of a run-time length on GLSL', () => {
     const expr = ce.box(fold(['Append', 'acc', 'k'], ['List']));
-    for (const o of [{ to: 'glsl' }, { mode: 'bigint' }] as any[])
-      expect(() => compile(expr, { ...o, fallback: false })).toThrow(
-        /run-time length/
-      );
+    expect(() => compile(expr, { to: 'glsl', fallback: false })).toThrow(
+      /run-time length/
+    );
   });
 
   // The interpreter's `Join` keeps a tuple as one element

@@ -2406,11 +2406,7 @@ export function listLowering(cx: Lowering) {
       );
     };
     const { lane, region, params, fixed } = tryAll();
-    if (
-      kind === 'list' &&
-      fixed === undefined &&
-      (!cx.runtimeLengths || cx.bigint)
-    )
+    if (kind === 'list' && fixed === undefined && !cx.runtimeLengths)
       decline(
         e,
         `${e.operator} of a list of a run-time length (JavaScript only)`

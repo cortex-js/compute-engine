@@ -2241,8 +2241,9 @@ built the same way, with the interpreter's value for every length, also 0:
   stated length, a tuple always, is one carried value of that length, which
   every step must keep; otherwise (a `Map` of a run-time length, or `List()`,
   whose element type is the body's, found by a trial lowering) it is carried as
-  its length then the list, on JavaScript only (not GLSL, not the `bigint`
-  mode). The interval mode declines every `Reduce` by a function.
+  its length then the list, on JavaScript only (not GLSL); in the `bigint`
+  mode the length is a `bigint`. The interval mode declines every `Reduce` by
+  a function.
 - `Tabulate(f, n1, …, nd)` (also `Table` of one index from 1) is the nested
   builds of `f(i1, …, id)` at the indices from 1; a count below 1 is empty, a
   real count is tested at run time (`count.int`), the inner counts must be
