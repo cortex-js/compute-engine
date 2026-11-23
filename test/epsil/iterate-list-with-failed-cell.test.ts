@@ -34,8 +34,13 @@ function run(body: string): {
   };
 }
 
-/** The diagnostic of the `let xs` statement, which holds the failed cell. */
-const LET_XS = `${'function g(x) { 1/x }\n'.length}:let xs = [1, g("a"), 3]`;
+/** The diagnostic of the `let xs` statement, which holds the failed cell. It
+ * underlines the element `g("a")` of the list. */
+const LET_XS = `${G.indexOf('g("a")')}:g("a")`;
+
+/** The failed cell of a list literal: a diagnostic of a statement whose value
+ * holds the list underlines it. */
+const CELL = 'g("a")';
 
 describe('EPSIL ITERATION OVER A LIST WITH A FAILED CELL', () => {
   test('a loop over the variable runs one turn for each cell', () => {
@@ -86,7 +91,7 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     const r = report(body);
     // The loop still runs one turn for each cell.
     expect(r.value).toBe('3');
-    expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
+    expect(r.at).toEqual([LET_XS, atText(body, CELL)]);
     // Line 2 is the `let xs` statement of the prefix; line 4 is the loop.
     expect(r.lines).toEqual([2, 4]);
     // The same code and message as the statement.
@@ -107,7 +112,7 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
       const r = report(body);
       expect(r.at).toEqual([
         LET_XS,
-        atText(body, LITERAL),
+        atText(body, CELL),
         atText(body, `for x in ${LITERAL} ${loopBody}`),
       ]);
       expect(r.messages[1]).toEqual(r.messages[0]);
@@ -140,14 +145,14 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     const body = `let n = 0\nfor i in [1, 2] { for x in ${LITERAL} { n = n + 1 } }\nn`;
     const r = report(body);
     expect(r.value).toBe('6');
-    expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
+    expect(r.at).toEqual([LET_XS, atText(body, CELL)]);
   });
 
   test('a header in a function body is reported once for all calls', () => {
     const body = `function h() { let n = 0\nfor x in ${LITERAL} { n = n + 1 }\nn }\nh() + h()`;
     const r = report(body);
     expect(r.value).toBe('6');
-    expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
+    expect(r.at).toEqual([LET_XS, atText(body, CELL)]);
   });
 
   test('an inner header that reads the failed cell is reported', () => {
@@ -155,7 +160,9 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
     const body = 'let n = 0\nfor x in xs { for y in [x, 2] { n = n + 1 } }\nn';
     const r = report(body);
     expect(r.value).toBe('6');
-    expect(r.at).toEqual([LET_XS, atText(body, '[x, 2]')]);
+    // The element `x` of the header `[x, 2]` holds the failed cell.
+    const inHeader = G.length + body.indexOf('[x, 2]') + 1;
+    expect(r.at).toEqual([LET_XS, `${inHeader}:x`]);
   });
 
   test('a header that the static check reports is also reported by the run', () => {
@@ -169,17 +176,17 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
       'runtime-error',
       'runtime-error',
     ]);
-    expect(r.at[2]).toBe(atText(body, '[1, 1/"a", 3]'));
+    expect(r.at[2]).toBe(atText(body, '1/"a"'));
   });
 
   test('a comprehension header is reported when the run reads the list', () => {
     const body = `let ys = [1 for x in ${LITERAL}]\nlet t = 0\nfor y in ys { t = t + y }\nt`;
     const r = report(body);
     expect(r.value).toBe('3');
-    expect(r.at).toEqual([LET_XS, atText(body, LITERAL)]);
+    expect(r.at).toEqual([LET_XS, atText(body, CELL)]);
 
     const sum = `sum([1 for x in ${LITERAL}])`;
-    expect(report(sum).at).toEqual([LET_XS, atText(sum, LITERAL)]);
+    expect(report(sum).at).toEqual([LET_XS, atText(sum, CELL)]);
   });
 
   test('a comprehension that is the value of the program is read by the host', () => {

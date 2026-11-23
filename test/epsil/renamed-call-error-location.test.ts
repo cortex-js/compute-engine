@@ -78,9 +78,9 @@ describe('an error in the argument of a renamed call', () => {
 
   test.each([
     // The frame `Multiply argument 2` was recorded in the body of `g`. The
-    // elements of a list record no frame, so nothing shows which element
-    // made the error: the whole statement is underlined, not the `u` of
-    // `u/2`.
+    // elements of a list record no frame, but the element of the value of
+    // the statement that holds the error is the last one: it is underlined,
+    // not the `u` of `u/2`.
     'function g(x) { Ln(x) * 2 }\nlet v = [u/2, g("a")]',
     // The same frame, recorded in the statement of `x`.
     'let x = Ln(w) * 2\nlet v = [u/2, x]',
@@ -95,7 +95,10 @@ describe('an error in the argument of a renamed call', () => {
   ])('a frame recorded outside the statement: %s', (program) => {
     const src = `${prefix}${program}\n0`;
     const stmt = program.slice(program.lastIndexOf('\n') + 1);
-    expect(errorRanges(src, stmt)).toEqual([rangeOf(src, stmt)]);
+    // The last element, between `, ` and the closing bracket.
+    const start = src.lastIndexOf(stmt) + stmt.lastIndexOf(', ') + 2;
+    const end = src.lastIndexOf(stmt) + stmt.length - 1;
+    expect(errorRanges(src, stmt)).toEqual([[start, end]]);
   });
 
   test('a call that stays a division is not changed', () => {

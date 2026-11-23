@@ -69,8 +69,9 @@ describe('EPSIL NESTED STATEMENT DIAGNOSTICS', () => {
       G +
         'let ys = []\nlet n = 0\nfor i in [1, 2, 3] { if i == 2 { ys = [g("a")] } else { ys = [i] }; n = n + 1 }\n[ys, n]'
     );
-    // The statement inside the branch, not the whole `if`.
-    expect(r.at).toEqual(['ys = [g("a")]']);
+    // The element of the list of the statement inside the branch, not the
+    // whole `if`.
+    expect(r.at).toEqual(['g("a")']);
     expect(r.value.toString()).toBe('[[3],3]');
   });
 
@@ -79,7 +80,7 @@ describe('EPSIL NESTED STATEMENT DIAGNOSTICS', () => {
       G +
         'let ys = []\nfor i in [1, 2, 3] { if i == 2 { ys = [g("a")] } else { ys = [i] } }\nys'
     );
-    expect(r.at).toEqual(['ys = [g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
     expect(r.value.toString()).toBe('[3]');
   });
 
@@ -103,13 +104,13 @@ describe('EPSIL NESTED STATEMENT DIAGNOSTICS', () => {
       G +
         'function f(n) { let tmp = [g("a")]\n n }\nlet t = 0\nfor k in [1, 2, 3] { t = t + f(k) }\nt'
     );
-    expect(r.at).toEqual(['let tmp = [g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
     expect(r.value.toString()).toBe('6');
   });
 
   test('a lambda body reports its discarded statement', () => {
     const r = run(G + 'let k = (x) => do { let z = [g(x)]; 1 }\nk("a")');
-    expect(r.at).toEqual(['let z = [g(x)]']);
+    expect(r.at).toEqual(['g(x)']);
     expect(r.value.toString()).toBe('1');
   });
 

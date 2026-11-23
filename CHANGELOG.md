@@ -11,6 +11,15 @@
   `g(3)` is `6`. A body that takes the list whole declares its parameter:
   with `F(p: list) := Block(Assign(p, [1, 2]), Length(p))`,
   `F([10, 20, 30])` is `2`.
+- **In Epsil, an error in an element of a list or a tuple is underlined at
+  that element** (CE-1137). With `function g(x) { Ln(x) + 1 }` and
+  `let y = 5`, the error of `let v = [y + 1, g("a")]` underlined the `y` of
+  the other element, and that of `let xs = [1, g("a"), 3]` underlined the
+  whole statement. Both now underline `g("a")`. This applies when the
+  list is the value of the statement, of a `let` or of an assignment to a
+  name, and when each element before the failed one is a literal, a list or
+  an arithmetic call: a variable or another call can give a `Sequence`,
+  which moves the elements, and the location is then as before.
 
 ### Improvements
 

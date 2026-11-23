@@ -681,7 +681,8 @@ function* executeEpsilSteps(
           heldErrors[0].json,
           stmt,
           range,
-          boxedStmt
+          boxedStmt,
+          heldElement(value, heldErrors[0], stmt)
         ).range;
     });
     // A runtime problem in a NON-final statement would otherwise vanish —
@@ -831,7 +832,8 @@ function* executeEpsilSteps(
               statementRange(stmt, source),
               defSites,
               cancellation,
-              boxedStmt
+              boxedStmt,
+              value
             )
           );
       });
@@ -1223,14 +1225,26 @@ export function errorFrameChain(
  * `Characters(s)`. See `locateError()` for how a frame is matched onto the
  * source. The frames of the result name the written calls (see
  * {@link errorFrameChain}).
+ *
+ * `element` is the written element of a list or a tuple of the statement
+ * that holds the error in the value of the statement ({@link heldElement}).
+ * When it has a source range, the error is located inside it, as in a
+ * statement whose value is the element.
  */
 function narrowErrorRange(
   ce: ComputeEngine,
   error: MathJsonExpression,
   stmt: MathJsonExpression,
   fallback: [number, number],
-  boxedStmt?: Expression
+  boxedStmt?: Expression,
+  element?: MathJsonExpression
 ): { range: [number, number]; frames: ErrorFrameRef[] } {
+  const elementRange =
+    element === undefined ? undefined : sourceOffsetsOf(element);
+  if (element !== undefined && elementRange !== undefined) {
+    stmt = element;
+    fallback = elementRange;
+  }
   // The engine resolves the callee's declared parameter names so a NAMED
   // call's frame index (which counts declaration slots after the seam's
   // permutation) lands on the argument as WRITTEN — see `argumentAtSlot`
@@ -1245,6 +1259,117 @@ function narrowErrorRange(
     canonicalOrderOf(ce, boxedStmt),
     offendingValue(error)
   );
+}
+
+/**
+ * The written element of a list or tuple literal of the statement `stmt`
+ * whose value, in `value` (the value of the statement), holds `error`: the
+ * `g("a")` of `let v = [y + 1, g("a")]`. In nested literals, the innermost
+ * such element. `undefined` when the written value of the statement is not
+ * such a literal, or when its element cannot be known.
+ *
+ * A list or a tuple records no frame for its elements, so the breadcrumb of
+ * an error that a called function made has only the frames of the body of
+ * the function. Matched by operator name to the calls of the whole
+ * statement, the frame `Add argument 1` of `function g(x) { Ln(x) + 1 }`
+ * selects the `y` of `y + 1`. Inside the element, it matches no call.
+ *
+ * The written value of the statement is `stmt` itself, the value of a `let`
+ * of a name, or the right side of an assignment to a name. A literal is read
+ * only when the node of `value` at its place has the same operator and the
+ * same number of operands. A `Sequence` is spliced into a list, also when a
+ * variable or a call gives it: with `s = Sequence(1, 2)` and
+ * `t = Sequence()`, the value of `[s, g("a"), t]` is `[1, 2, Error]`, and its
+ * position 3 is not the written `t`. So the element at position `i` of
+ * `value` is taken as the written element `i` only when each written
+ * element before it surely gives one value ({@link isSingleValued}). The
+ * elements after it do not move it. The assignment to an element
+ * (`m[1] = [a, b]`) is not read: its value can be the whole collection `m`.
+ * The first element that holds `error` is selected, and the walk continues
+ * in it while it is also a written literal.
+ */
+function heldElement(
+  value: Expression,
+  error: Expression,
+  stmt: MathJsonExpression
+): MathJsonExpression | undefined {
+  let written: MathJsonExpression | undefined = writtenStatementValue(stmt);
+  let node = value;
+  let element: MathJsonExpression | undefined;
+  while (written !== undefined && node !== error) {
+    const head = operator(written);
+    if (head !== 'List' && head !== 'Tuple') break;
+    const elements = operands(written);
+    if (!isFunction(node, head) || node.nops !== elements.length) break;
+    const index = node.ops.findIndex(
+      (op) => op === error || op.errors.includes(error)
+    );
+    if (index < 0 || !elements.slice(0, index).every(isSingleValued)) break;
+    element = elements[index];
+    written = element;
+    node = node.ops[index];
+  }
+  return element;
+}
+
+/**
+ * Whether the written element `x` (raw MathJSON) of a list gives exactly one
+ * element of the evaluated list: a number or a string, a list or a tuple
+ * literal, or a call of an arithmetic operator or of an elementary function
+ * (`SINGLE_VALUED_CALLS`), which gives one value also when an operand is a
+ * `Sequence`. A variable, a spread, or another call can give a `Sequence`,
+ * which the list splices ({@link heldElement}).
+ */
+function isSingleValued(x: MathJsonExpression): boolean {
+  const head = operator(x);
+  if (head === '') return symbol(x) === null;
+  return head === 'List' || head === 'Tuple' || SINGLE_VALUED_CALLS.has(head);
+}
+
+const SINGLE_VALUED_CALLS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Sqrt',
+  'Root',
+  'Square',
+  'Abs',
+  'Exp',
+  'Ln',
+  'Log',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Max',
+  'Min',
+]);
+
+/**
+ * The value written in the statement `stmt` (raw MathJSON): `stmt` itself,
+ * the value of `let v = …` (`Declare(v, Dictionary(KeyValuePair("value",
+ * …)))`), or the right side of `v = …`. `undefined` for a `let` with no
+ * value, and for a declaration or an assignment whose target is not a name.
+ */
+function writtenStatementValue(
+  stmt: MathJsonExpression
+): MathJsonExpression | undefined {
+  const head = operator(stmt);
+  if (head !== 'Declare' && head !== 'Assign') return stmt;
+  const ops = operands(stmt);
+  if (symbol(ops[0]) === null) return undefined;
+  if (head === 'Assign') return ops[1];
+  for (const op of ops.slice(1)) {
+    if (operator(op) !== 'Dictionary') continue;
+    for (const entry of operands(op)) {
+      const [key, entryValue] = operands(entry);
+      if (operator(entry) === 'KeyValuePair' && symbol(key) === 'value')
+        return entryValue;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -1323,7 +1448,10 @@ function errorValueDiagnostic(
   cancellation?: CancellationCause,
   /** The canonical form of `stmt`, when it is known (see
    * {@link canonicalOrderOf}). */
-  boxedStmt?: Expression
+  boxedStmt?: Expression,
+  /** The value of `stmt` that holds `error`, when it is known (see
+   * {@link heldElement}). */
+  value?: Expression
 ): ParsingDiagnostic {
   // An error that BUBBLED out of a subexpression carries a breadcrumb
   // of `(operator, operand index)` frames (engine design §2a). Rendered
@@ -1336,7 +1464,8 @@ function errorValueDiagnostic(
     error.json,
     stmt,
     fallback,
-    boxedStmt
+    boxedStmt,
+    value === undefined ? undefined : heldElement(value, error, stmt)
   );
   const range = located.range;
   const frames = errorFrameChain(error.json, located.frames);
@@ -1711,7 +1840,8 @@ function nestedStatementReporter(
           origin.range,
           defSites,
           undefined,
-          made?.statement ?? statement
+          made?.statement ?? statement,
+          result
         );
         failures.set(failureKey(errors[0]), diagnostic);
         diagnostics.push(diagnostic);

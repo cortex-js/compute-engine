@@ -221,8 +221,8 @@ describe('a sum or product in the body of a called function', () => {
     ['function g(x) { 1 + x }', 'let v = g("a") + y', 'g("a")'],
     ['function g(x) { x * 2 }', 'let v = 3 * y + g("a")', 'g("a")'],
     ['function g(x) { x + 1 }', 'let v = Sin(y + 1) * g("a")', 'g("a")'],
-    // No frame of the statement selects the call: the whole statement.
-    ['function g(x) { x * 2 }', 'let v = [3 * y, g("a")]', 'let v = [3 * y, g("a")]'],
+    // The element of the list that holds the error selects the call.
+    ['function g(x) { x * 2 }', 'let v = [3 * y, g("a")]', 'g("a")'],
   ])('%s, %s underlines %s', (definition, stmt, expected) => {
     expect(underlines(`${definition}\nlet y = 5\n${stmt}\n0`)).toEqual([
       expected,

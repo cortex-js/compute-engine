@@ -29,7 +29,7 @@ describe('EPSIL WHILE LET BODY DIAGNOSTICS', () => {
       G + 'let i: any = 0\nwhile let n: number = i { i = "s"\n [g("a")] }\n1'
     );
     expect(r.codes).toEqual(['runtime-error']);
-    expect(r.at).toEqual(['[g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
   });
 
   test('a value passed up from an `if` in a `while let` body is reported where it was made', () => {
@@ -38,18 +38,18 @@ describe('EPSIL WHILE LET BODY DIAGNOSTICS', () => {
         'let i: any = 0\nwhile let n: number = i { i = "s"; if true { [g("a")] } }\n1'
     );
     expect(r.codes).toEqual(['runtime-error']);
-    expect(r.at).toEqual(['[g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
   });
 
   test('a `while` body is reported as before', () => {
     const r = run(G + 'let x = 1\nwhile x < 2 { x = x + 1\n [g("a")] }\n1');
-    expect(r.at).toEqual(['[g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
   });
 
   test('an `if let` in a loop body is reported at its branch statement', () => {
     const r = run(G + 'for k in [1] { if let n: number = k { [g("a")] } }\n1');
     expect(r.codes).toEqual(['runtime-error']);
-    expect(r.at).toEqual(['[g("a")]']);
+    expect(r.at).toEqual(['g("a")']);
   });
 
   test('the value of an `if let` that a function returns is not reported', () => {

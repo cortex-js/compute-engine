@@ -75,6 +75,62 @@ describe('an error in the body of a called function', () => {
   });
 });
 
+describe('an error in an element of a written list or tuple', () => {
+  // A list records no frame for its elements, so the frames of the error of
+  // `g("a")` all come from the body of `g`. The locator adds the frame of the
+  // written list whose element holds the error.
+  const fn = 'function g(x) { Ln(x) + 1 }\nlet y = 5\n';
+
+  test.each([
+    ['let v = [y + 1, g("a")]', 'g("a")'],
+    ['let v = [g("a"), y + 1]', 'g("a")'],
+    ['let v = (y + 1, g("a"))', 'g("a")'],
+    ['let v = [[y + 1], [g("a")]]', 'g("a")'],
+    ['let v = [1, "b", g("a")]', 'g("a")'],
+    // A variable or a call before the element can give a `Sequence`, which
+    // the list splices, so its position is not known: the whole statement.
+    ['let v = [y, g("a")]', 'let v = [y, g("a")]'],
+    [
+      'let s = Sequence(1, 2)\nlet t = Sequence()\nlet v = [s, g("a"), t]',
+      'let v = [s, g("a"), t]',
+    ],
+    [
+      'function h() { Sequence() }\nfunction k() { Sequence(1, 2) }\nlet v = [k(), g("a"), h()]',
+      'let v = [k(), g("a"), h()]',
+    ],
+    // An element after the error does not move it.
+    ['let v = [g("a"), y]', 'g("a")'],
+    // Another list of the statement does not compete with the element.
+    ['let v = [[y + 1], g("a")]', 'g("a")'],
+    ['let v = [[y + 1, 2], g("a")]', 'g("a")'],
+    ['let v = [Max([y + 1, 2]), g("a")]', 'g("a")'],
+    // The frames of the statement inside the element are used.
+    ['let w: any = "s"\nlet v = [1, y + Ln(w)]', 'w'],
+    // A `Sequence` is spliced into the list, so a position of the value is
+    // not a written position: the element is not known.
+    [
+      'let e = g("a")\nlet v = [Sequence(1, e), Sequence()]',
+      'let v = [Sequence(1, e), Sequence()]',
+    ],
+    ['let v: any = 0\nv = [y + 1, g("a")]', 'g("a")'],
+    // The element reads an error made by an earlier statement.
+    ['let x = g("a")\nlet v = [y + 1, x]', 'x'],
+  ])('%s underlines %s', (stmt, expected) => {
+    expect(underlines(`${fn}${stmt}\n0`)).toEqual([expected]);
+  });
+
+  test('the list is the value of the program', () => {
+    const src = `${fn}[y + 1, g("a")]`;
+    const range = executeEpsil(new ComputeEngine(), src).valueRange!;
+    expect(src.slice(range[0], range[1])).toEqual('g("a")');
+  });
+
+  test('the list is a statement of a function body', () => {
+    const src = `${fn}function f() {\n  [y + 1, g("a")]\n  1\n}\nlet v = f()\n0`;
+    expect(underlines(src, '[y + 1')).toEqual(['g("a")']);
+  });
+});
+
 describe('an error made by an earlier statement', () => {
   // The frames are `Sin argument 1, Multiply argument 1`: the first frame
   // was recorded by the statement that assigned `w2`.
