@@ -227,7 +227,7 @@ function adoptChildStats(stats: RootStats | undefined, child: RootStats): void {
  * name in a new scope (`ce.pushScope()`) and makes the symbol in that scope,
  * so that the outer value or type does not apply to the temporary unknown.
  */
-function temporaryUnknownName(
+export function temporaryUnknownName(
   expr: Expression,
   x: string,
   names: ReadonlyArray<string> = ['u', 't', 'w', 's', 'v', 'y', 'z']
@@ -2953,7 +2953,12 @@ function solveByZeroProduct(
   x: string,
   depth: number,
   trace?: RuleSteps,
-  stats?: { partial?: boolean; undecided?: boolean; userRule?: boolean }
+  stats?: {
+    partial?: boolean;
+    undecided?: boolean;
+    userRule?: boolean;
+    complexRootRemoved?: boolean;
+  }
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(expr, 'Multiply')) return null;
@@ -2965,6 +2970,8 @@ function solveByZeroProduct(
   let undecided = false;
   // A factor was solved by a template that the host added to `ce.solveRules`
   let userRule = false;
+  // A strategy removed a root of a factor because it is not real
+  let complexRootRemoved = false;
   // The factor bases whose roots are collected (a factor `fⁿ`, n > 0,
   // contributes the roots of `f`; n ≤ 0 contributes none).
   const bases: Expression[] = [];
@@ -3001,6 +3008,7 @@ function solveByZeroProduct(
       undecided: false,
       partial: false,
       userRule: false,
+      complexRootRemoved: false,
     };
     const factorRoots = stepUnivariateRoots(
       base,
@@ -3012,6 +3020,7 @@ function solveByZeroProduct(
     if (factorStats.partial) partial = true;
     if (factorStats.undecided) undecided = true;
     if (factorStats.userRule) userRule = true;
+    if (factorStats.complexRootRemoved) complexRootRemoved = true;
     if (factorRoots.length === 0 && !factorHasNoRoot(base, x, factorStats))
       partial = true;
     roots.push(...factorRoots);
@@ -3020,6 +3029,7 @@ function solveByZeroProduct(
   if (partial && stats) stats.partial = true;
   if (undecided && stats) stats.undecided = true;
   if (userRule && stats) stats.userRule = true;
+  if (complexRootRemoved && stats) stats.complexRootRemoved = true;
   return roots;
 }
 
@@ -3063,7 +3073,12 @@ function solveByMultipleAngleTrig(
   x: string,
   depth: number,
   trace?: RuleSteps,
-  stats?: { partial?: boolean; undecided?: boolean; userRule?: boolean }
+  stats?: {
+    partial?: boolean;
+    undecided?: boolean;
+    userRule?: boolean;
+    complexRootRemoved?: boolean;
+  }
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null;
   if (!hasMultipleAngleTrig(expr, x)) return null;
@@ -3151,6 +3166,7 @@ function solveByMultipleAngleTrig(
     undecided: false,
     partial: false,
     userRule: false,
+    complexRootRemoved: false,
   };
   const roots = stepUnivariateRoots(
     bases[0],
@@ -3163,6 +3179,7 @@ function solveByMultipleAngleTrig(
     if (factorStats.partial) stats.partial = true;
     if (factorStats.undecided) stats.undecided = true;
     if (factorStats.userRule) stats.userRule = true;
+    if (factorStats.complexRootRemoved) stats.complexRootRemoved = true;
     if (roots.length === 0 && !factorHasNoRoot(bases[0], x, factorStats))
       stats.partial = true;
   }

@@ -2837,18 +2837,24 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     const families = solved.ops!.filter((op) => hasArbitraryConstant(op));
     if (families.length === 0) expect(solved.nops).toBe(values.length);
     else {
+      // The step of a family can be imaginary: `e^x = 2` gives
+      // `ln 2 + 2πi·Z(1)` (CE-1713)
       const isMember = (family: any, v: number) => {
-        const at = (k: number) =>
-          (
+        const at = (k: number) => {
+          const z = (
             family.replace(
               { match: ce.box(['ArbitraryInteger', 1]), replace: ce.number(k) },
               { recursive: true }
             ) ?? family
-          ).N().re;
-        const a = at(0);
-        const step = at(1) - a;
-        const k = Math.round((v - a) / step);
-        return Math.abs(a + k * step - v) < 1e-9;
+          ).N();
+          return [z.re, z.im];
+        };
+        const [ar, ai] = at(0);
+        const [br, bi] = at(1);
+        const [sr, si] = [br - ar, bi - ai];
+        // k = Re((v - a)/step)
+        const k = Math.round(((v - ar) * sr - ai * si) / (sr * sr + si * si));
+        return Math.hypot(ar + k * sr - v, ai + k * si) < 1e-9;
       };
       for (const v of values)
         expect(solved.ops!.some((fam) => isMember(fam, v))).toBe(true);
@@ -3045,10 +3051,14 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     }
     // An exponential with a positive base is positive: no real root, a
     // decision for a real x. With no domain, `e^{x+1}=-2` has complex roots
-    // (#526), and `10^{x+1}=0` has no root.
+    // (#526): `Solve` gives their families (CE-1713), and `solve()`, which
+    // has no principal root to give, `null`. `10^{x+1}=0` has no root.
     for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0', '10^{x+1}=0'])
       expect(solveReal(latex)).toEqual([]);
-    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0']) noAnswer(latex);
+    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0']) {
+      expect(solveOp(latex).toString()).toMatch(/ArbitraryInteger/);
+      expect(ce.parse(latex).solve('x')).toBeNull();
+    }
     expect(ce.parse('10^{x+1}=0').solve('x')).toEqual([]);
     expect(solveOp('10^{x+1}=0').toString()).toBe('[]');
     // The sign of the value is not known: no answer
@@ -3211,9 +3221,15 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
   test('a parameter declared complex: a root that can be complex is no answer', () => {
     const complexA = new ComputeEngine();
     complexA.declare('a', 'complex');
+    // `Solve` gives the families of complex roots of an exponential
+    // (CE-1713): `ln 2 - a + 2πik` holds for a complex `a`. `solve()` gives
+    // no real root. `e^{ax}=2` has no root for `a = 0`.
+    expect(solveOp(complexA, 'e^{x+a}=2').toString()).toMatch(
+      /ArbitraryInteger/
+    );
+    expect(complexA.parse('e^{x+a}=2').solve('x')).toBeNull();
     for (const latex of [
       '|x-a|=2',
-      'e^{x+a}=2',
       'e^{ax}=2',
       '\\tan(2x)=a',
       '\\tan(3x)=a',
@@ -3297,16 +3313,22 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
   });
 
   test('an exponential with an exponent that is not real', () => {
-    // e^(i·x + 1) = -e has the root π: e^(iπ) = -1
+    // e^(i·x + 1) = -e has the root π: e^(iπ) = -1. `Solve` gives the
+    // families of roots (CE-1713), `π + 2πk`; `solve()` has no answer.
     expect(Math.cos(Math.PI)).toBeCloseTo(-1, 15);
     for (const latex of [
       'e^{ix+1}=-e',
-      'e^{ix^2}=-1',
       'e^{i(x+1)}=-1',
       'e^{ix}=-1',
       '3e^{ix}+3=0',
-    ])
-      noAnswer(ce, latex);
+    ]) {
+      expect(solveOp(ce, latex).toString()).toMatch(/ArbitraryInteger/);
+      expect(ce.parse(latex).solve('x')).toBeNull();
+    }
+    expect(solveOp(ce, 'e^{ix}=-1').toString()).toBe(
+      '[pi + 2pi * ArbitraryInteger(1)]'
+    );
+    noAnswer(ce, 'e^{ix^2}=-1');
   });
 
   test('an exponential whose roots are not real has no real root', () => {
@@ -3314,33 +3336,39 @@ describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
     // roots `±i·√(ln 2)` are complex roots, and there is no answer (#526).
     noAnswer(ce, 'e^{x^2}=\\frac12');
     noAnswer(ce, '2^{x^2+1}=1');
+    // `solve()` gives the real roots of `e^{x^2}=2`. `x² = ln 2 + 2πik` has
+    // complex roots that no family with one parameter holds: `Solve` has no
+    // answer (CE-1713)
     const r = Math.sqrt(Math.log(2));
-    expect(checkedRoots(ce, 'e^{x^2}=2', (x) => Math.exp(x * x) - 2)).toEqual(
-      [-r, r].map((v) => expect.closeTo(v, 12))
-    );
+    expect(
+      ce
+        .parse('e^{x^2}=2')
+        .solve('x')!
+        .map((v) => v.N().re)
+        .sort((a, b) => a - b)
+    ).toEqual([-r, r].map((v) => expect.closeTo(v, 12)));
+    expect(solveOp(ce, 'e^{x^2}=2').operator).toBe('Solve');
     expect(checkedRoots(ce, 'e^{x+1}=2', (x) => Math.exp(x + 1) - 2)).toEqual([
       expect.closeTo(Math.log(2) - 1, 12),
     ]);
     expect(solveReal('e^{x+1}=-2')).toEqual([]);
-    noAnswer(ce, 'e^{x+1}=-2');
+    expect(solveOp(ce, 'e^{x+1}=-2').toString()).toMatch(/ArbitraryInteger/);
+    expect(ce.parse('e^{x+1}=-2').solve('x')).toBeNull();
   });
 
   test('an unknown that can be complex: no answer from the real strategies', () => {
     const complex = new ComputeEngine();
     complex.declare('x', 'complex');
-    // e^x = -1 has the roots (2k + 1)·π·i; sin(x) = 2 has the roots
-    // π/2 ± i·ln(2 + √3) + 2kπ; |x| = 1 is the unit circle.
-    for (const latex of [
-      'e^x=-1',
-      'e^x=2',
-      'e^{2x}=-1',
-      '\\sin x=2',
-      '\\sin(2x)=2',
-      '\\cosh x=0',
-      '|x|=1',
-      '2|x|=1',
-    ])
+    // sin(x) = 2 has the roots π/2 ± i·ln(2 + √3) + 2kπ; |x| = 1 is the
+    // unit circle.
+    for (const latex of ['\\sin x=2', '\\sin(2x)=2', '|x|=1', '2|x|=1'])
       noAnswer(complex, latex);
+    // e^x = -1 has the roots (2k + 1)·π·i: `Solve` gives the families of
+    // an exponential (CE-1713), `solve()` has no answer.
+    for (const latex of ['e^x=-1', 'e^x=2', 'e^{2x}=-1', '\\cosh x=0']) {
+      expect(solveOp(complex, latex).toString()).toMatch(/ArbitraryInteger/);
+      expect(complex.parse(latex).solve('x')).toBeNull();
+    }
     // A principal square root is never a negative real number
     expect(complex.parse('\\sqrt{x}=-1').solve('x')).toEqual([]);
   });

@@ -550,8 +550,9 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
     expect(
       overC(['Equal', ['Exp', ['Cos', 'x']], 'ExponentialE']).operator
     ).toBe('Solve');
-    // Over the real numbers and with no domain, `sin x = 2πik` has a real
-    // root only for `k = 0`: the families are all the roots
+    // Over the real numbers, `sin x = 2πik` has a real root only for
+    // `k = 0`: the families are all the roots. With no domain, `Solve`
+    // answers over the complex numbers, and there is no answer (CE-1713)
     expect(
       ce
         .box([
@@ -562,7 +563,7 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
         .evaluate()
         .toString()
     ).toBe('[pi * ArbitraryInteger(1)]');
-    expect(solve('e^{\\sin(x)} = 1').toString()).toBe('[pi * ArbitraryInteger(1)]');
+    expect(solve('e^{\\sin(x)} = 1').operator).toBe('Solve');
   });
 
   test('a hyperbolic function has an imaginary period', () => {
@@ -577,11 +578,17 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
       ])
       .N();
     expect(Math.hypot(c.re - 2, c.im)).toBeLessThan(1e-12);
-    expect(overC(['Equal', ['Sinh', 'x'], 0]).operator).toBe('Solve');
-    expect(overC(['Equal', ['Cosh', 'x'], 2]).operator).toBe('Solve');
-    expect(overC(['Equal', ['Tanh', 'x'], ['Rational', 1, 2]]).operator).toBe(
-      'Solve'
+    // A hyperbolic function is a sum of exponentials: the roots are
+    // families with an imaginary step (CE-1713): `e^x = ±1`
+    expect(overC(['Equal', ['Sinh', 'x'], 0]).toString()).toBe(
+      '[2i * pi * ArbitraryInteger(1),2i * pi * ArbitraryInteger(1) + i * pi]'
     );
+    expect(overC(['Equal', ['Cosh', 'x'], 2]).toString()).toBe(
+      '[2i * pi * ArbitraryInteger(1) + ln(2 + sqrt(3)),2i * pi * ArbitraryInteger(1) + ln(2 - sqrt(3))]'
+    );
+    expect(
+      overC(['Equal', ['Tanh', 'x'], ['Rational', 1, 2]]).toString()
+    ).toBe('[i * pi * ArbitraryInteger(1) + 1/2 * ln(3)]');
     // Over the real numbers, the roots are unchanged
     expect(
       ce
@@ -593,7 +600,20 @@ describe('SOLVE: PERIODIC FAMILIES OVER THE COMPLEX NUMBERS', () => {
         .evaluate()
         .toString()
     ).toBe('[0]');
-    expect(solve('\\cosh(x) = 2').toString()).toBe('[arcosh(2),-arcosh(2)]');
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Cosh', 'x'], 2],
+          ['Element', 'x', 'RealNumbers'],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[arcosh(2),-arcosh(2)]');
+    // With no domain, the roots are those over the complex numbers
+    expect(solve('\\cosh(x) = 2').toString()).toBe(
+      overC(['Equal', ['Cosh', 'x'], 2]).toString()
+    );
   });
 
   test('the families of sin(x) = c hold all the complex roots', () => {

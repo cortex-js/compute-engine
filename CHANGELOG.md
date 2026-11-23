@@ -33,6 +33,23 @@
 
 ### Behavior Changes
 
+- **With no domain, `Solve` gives the complex roots of an exponential
+  equation** (CE-1713). For a complex `x`, `e^x` repeats with the period
+  `2πi`, so `Solve(e^x = 2, x)` is now `[ln(2) + 2πi·n]`, where `n` is
+  `ArbitraryInteger(1)`, any integer; it was `[ln(2)]`. `Solve(e^x = -1, x)`
+  is `[iπ + 2πi·n]` (it stayed unevaluated), `Solve((x - 1)(e^x + 1) = 0, x)`
+  is `[1, iπ + 2πi·n]` (it was `[1]`), and `Solve(2^x = 8, x)` is
+  `[3 + 2πi·n/ln(2)]`. A hyperbolic function is a sum of exponentials:
+  `Solve(cosh(x) = 2, x)` is `[ln(2 + √3) + 2πi·n, ln(2 - √3) + 2πi·n]`.
+  `Solve` over `ComplexNumbers` gives the same families. An equation whose
+  complex roots are not all known now stays unevaluated with no domain: an
+  exponent that is not linear (`e^(x²) = 2`), a trig function of a periodic
+  argument (`sin(sin(x)) = 0`, which holds where `sin(x) = kπ`), and an
+  equation from which a step removed a complex root
+  (`(sin(x) - 2)(sin(x) - 1/2) = 0`). Over `RealNumbers`, or for an unknown
+  declared `real`, the answers do not change: `Solve(e^x = 2, x ∈ ℝ)` is
+  `[ln(2)]`. `expr.solve('x')` does not change.
+
 - **`ReplaceAll` applies a rule for a name and a rule for an expression in
   one pass** (CE-1691). The rules for names were applied first, so a
   pattern rule saw their result: `ReplaceAll(x + x^2, [x -> 2, x^2 -> y])`

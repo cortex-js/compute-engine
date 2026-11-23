@@ -584,11 +584,13 @@ symbolic values, never floats:
 ```
 
 **Solving equations exactly.** `solve` returns the exact solution set — for a
-cubic, an absolute-value equation and an exponential equation:
+cubic, an absolute-value equation and an exponential equation. With no
+domain, the unknown is a complex number, and the exponential equation has a
+family of roots: `ArbitraryInteger(1)` is any integer.
 
 ```epsil
 (Solve($x^3 - 6x^2 + 11x - 6 = 0$, x), Solve($|x-3| = 5$, x), Solve($2^x = 8$, x))
-// ➔ ([1, 2, 3], [-2, 8], [3])
+// ➔ ([1, 2, 3], [-2, 8], [3 + (2i * pi) / ln(2) * ArbitraryInteger(1)])
 ```
 
 ## Strings

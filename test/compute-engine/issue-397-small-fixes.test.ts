@@ -168,11 +168,28 @@ describe('Solve of an identity, a contradiction, an unsolved equation', () => {
   test('an exponential equation keeps an exact root', () => {
     // The constant `ExponentialE` used to be replaced by its float value
     // before solving: `ln(3)` came out as 1.0986…, and `e^(2x) = 5` was
-    // not recognized at all.
-    expect(solve(['Equal', ['Exp', 'x'], 3])).toEqual(['List', ['Ln', 3]]);
+    // not recognized at all. With no domain, the roots are the families of
+    // complex roots (CE-1713).
+    expect(solve(['Equal', ['Exp', 'x'], 3])).toEqual([
+      'List',
+      [
+        'Add',
+        ['Multiply', ['Complex', 0, 2], 'Pi', ['ArbitraryInteger', 1]],
+        ['Ln', 3],
+      ],
+    ]);
     expect(solve(['Equal', ['Exp', ['Multiply', 2, 'x']], 5])).toEqual([
       'List',
-      ['Multiply', ['Rational', 1, 2], ['Ln', 5]],
+      [
+        'Add',
+        ['Multiply', ['Complex', 0, 1], 'Pi', ['ArbitraryInteger', 1]],
+        ['Multiply', ['Rational', 1, 2], ['Ln', 5]],
+      ],
+    ]);
+    const real = ['Element', 'x', 'RealNumbers'];
+    expect(solve(['Equal', ['Exp', 'x'], 3], real as any)).toEqual([
+      'List',
+      ['Ln', 3],
     ]);
   });
 });

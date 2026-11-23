@@ -1189,8 +1189,14 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
       [['Multiply', 'x', ['Ln', 'x']], [1]],
     ];
     for (const [g, expected] of cases) {
-      expect(solutions(ce.box(['Solve', g, 'x']))).toEqual(expected);
       expect(solutions(solveIn(g, 'RealNumbers'))).toEqual(expected);
+      // With no domain, `e^x + 1` has the complex roots `(2k + 1)πi`
+      // (CE-1713)
+      if (JSON.stringify(g).includes('["Add",["Exp","x"],1]'))
+        expect(ce.box(['Solve', g, 'x']).evaluate().toString()).toBe(
+          '[2,2i * pi * ArbitraryInteger(1) + i * pi]'
+        );
+      else expect(solutions(ce.box(['Solve', g, 'x']))).toEqual(expected);
     }
     // `x² + 1` has no real root. With no domain, the roots `±i` are roots
     // too when `x` has no type, so only the real domain is checked.

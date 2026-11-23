@@ -5,8 +5,10 @@ import { opsReads } from '../utils';
 // A trig function whose argument is itself a periodic function of the
 // unknown (`sin(sin(x))`) makes a periodic equation, with the period of the
 // inner trig function. `expr.solve()` gives one root of each family of
-// roots in one period, `Solve` gives the families with a fresh integer
-// parameter, and `Solve` over a bounded domain gives the roots in the
+// roots in one period, `Solve` over the real numbers gives the families
+// with a fresh integer parameter (with no domain, the complex roots are not
+// in a family, and there is no answer), and `Solve` over a bounded domain
+// gives the roots in the
 // domain. Each list is checked by a scan of one period with an interval
 // proof, because the root finder solves the outer function for one period
 // of its argument only. A trig function of an argument that is not
@@ -16,6 +18,19 @@ const ce = new ComputeEngine();
 
 function solveLatex(latex: string): Expression {
   return ce.function('Solve', [ce.parse(latex), ce.symbol('x')]).evaluate();
+}
+
+// Over the real numbers. With no domain, `Solve` answers over the complex
+// numbers, and these equations have complex roots that no family holds
+// (`sin(sin(x)) = 0` holds where `sin(x) = kπ`): there is no answer
+// (CE-1713).
+function solveOverReals(latex: string): Expression {
+  return ce
+    .function('Solve', [
+      ce.parse(latex),
+      ce.function('Element', [ce.symbol('x'), ce.symbol('RealNumbers')]),
+    ])
+    .evaluate();
 }
 
 function solveOver(latex: string, lo: number, hi: number): Expression {
@@ -175,42 +190,55 @@ describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: expr.solve()', () => {
   });
 });
 
-describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: Solve with no domain', () => {
+describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: Solve over the real numbers', () => {
   test('sin(sin(x)) = 0', () => {
-    const result = solveLatex('\\sin(\\sin(x))=0');
+    const result = solveOverReals('\\sin(\\sin(x))=0');
     expect(result.toString()).toBe('[pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(Math.sin(x)));
   });
 
   test('sin(cos(x)) = 0', () => {
-    const result = solveLatex('\\sin(\\cos(x))=0');
+    const result = solveOverReals('\\sin(\\cos(x))=0');
     expect(result.toString()).toBe('[1/2 * pi + pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(Math.cos(x)));
   });
 
   test('sin(2·sin(x)) = 0', () => {
-    const result = solveLatex('\\sin(2\\sin(x))=0');
+    const result = solveOverReals('\\sin(2\\sin(x))=0');
     expect(result.toString()).toBe('[pi * ArbitraryInteger(1)]');
     expectFamiliesOf(result, (x) => Math.sin(2 * Math.sin(x)));
   });
 
-  test('cos(sin(x)) = 0 has no answer: its roots are complex (#526)', () => {
-    expect(solveLatex('\\cos(\\sin(x))=0').operator).toBe('Solve');
-  });
-
   test('sin(sin(x)) = -1/2', () => {
-    const result = solveLatex('\\sin(\\sin(x))=-\\frac12');
+    const result = solveOverReals('\\sin(\\sin(x))=-\\frac12');
     expectFamiliesOf(result, (x) => Math.sin(Math.sin(x)) + 0.5);
   });
 
   test('cos(sin(x)) = 9/10', () => {
-    const result = solveLatex('\\cos(\\sin(x))=\\frac{9}{10}');
+    const result = solveOverReals('\\cos(\\sin(x))=\\frac{9}{10}');
     expectFamiliesOf(result, (x) => Math.cos(Math.sin(x)) - 0.9);
   });
 
   test('sin(sin(2x + 1)) = 0', () => {
-    const result = solveLatex('\\sin(\\sin(2x+1))=0');
+    const result = solveOverReals('\\sin(\\sin(2x+1))=0');
     expectFamiliesOf(result, (x) => Math.sin(Math.sin(2 * x + 1)));
+  });
+});
+
+describe('A TRIG FUNCTION OF A PERIODIC ARGUMENT: Solve with no domain', () => {
+  // `sin(x) = kπ` has complex roots for `k ≠ 0`, and no family with one
+  // parameter holds them (CE-1713)
+  test.each([
+    '\\sin(\\sin(x))=0',
+    '\\sin(\\cos(x))=0',
+    '\\sin(2\\sin(x))=0',
+    '\\sin(\\sin(x))=-\\frac12',
+    '\\cos(\\sin(x))=\\frac{9}{10}',
+    '\\sin(\\sin(2x+1))=0',
+    // Its roots are all complex (#526)
+    '\\cos(\\sin(x))=0',
+  ])('%s has no answer: it has complex roots', (latex) => {
+    expect(solveLatex(latex).operator).toBe('Solve');
   });
 });
 
@@ -363,8 +391,10 @@ describe('THE ARGUMENT REACHES MORE THAN ONE PERIOD OF THE OUTER FUNCTION', () =
         .filter((v, i, all) => i === 0 || Math.abs(v - all[i - 1]) > 1e-9);
       expectRootsOf(inPeriod, f, -Math.PI - 1e-9, Math.PI - 1e-9);
     });
-    test(`${latex}: Solve with no domain`, () => {
-      expectFamiliesOf(solveLatex(latex), f);
+    test(`${latex}: Solve over the real numbers`, () => {
+      expectFamiliesOf(solveOverReals(latex), f);
+      // With no domain, the complex roots are not in a family (CE-1713)
+      expect(solveLatex(latex).operator).toBe('Solve');
     });
     test(`${latex}: Solve over [-7, 7]`, () => {
       const result = solveOver(latex, -7, 7);

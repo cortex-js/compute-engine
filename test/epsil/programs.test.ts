@@ -922,7 +922,11 @@ describe('EPSIL PROGRAMS — equations, exactly solved', () => {
     const { text, diagnostics } = run(`
 (Solve($x^3 - 6x^2 + 11x - 6 = 0$, x), Solve($|x-3| = 5$, x), Solve($2^x = 8$, x))`);
     expect(diagnostics).toEqual([]);
-    expect(text).toBe('([1,2,3], [-2,8], [3])');
+    // With no domain, `2^x = 8` has the complex roots `3 + 2πik/ln 2`
+    // (CE-1713)
+    expect(text).toBe(
+      '([1,2,3], [-2,8], [3 + (2i * pi) / ln(2) * ArbitraryInteger(1)])'
+    );
   });
 });
 

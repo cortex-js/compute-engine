@@ -35,6 +35,7 @@ import {
 import {
   findUnivariateRoots,
   realRootGuard,
+  temporaryUnknownName,
   unknownType,
   withExactIntegerExponents,
 } from './solve.js';
@@ -976,9 +977,45 @@ function evaluateSolveOperands(
                 conditioned
               )
             : undefined;
+      // An unknown whose type is not real is solved over the complex
+      // numbers (`emptyRootsAnswer()`).
+      const complexUnknown = !unknownType(ce, names[0]).matches('real');
+      // Several equations, a chain or alternatives (`e^x = 2 ∨ x = 1`) are
+      // solved by strategies that give the real roots only of an
+      // exponential or of a trig function of a periodic argument: there is
+      // no answer over the complex numbers.
+      const singleEquation = isFunction(ceq, 'Equal')
+        ? ceq.nops === 2
+        : ceq.type.matches('number');
+      if (
+        complexUnknown &&
+        !singleEquation &&
+        (hasExponentialOf(ceq, names[0]) ||
+          hasNestedPeriodicHead(ceq, names[0]))
+      )
+        return undefined;
       if (common === 'undecided') return undefined;
       if (common !== undefined) {
         roots = common;
+      } else if (
+        complexUnknown &&
+        (isFunction(ceq, 'Equal') || ceq.type.matches('number')) &&
+        hasExponentialOf(ceq, names[0])
+      ) {
+        // The unknown is in an exponent: the root templates give only the
+        // real roots, `ln 2` for `e^x = 2`, and the answer is the families
+        // of complex roots (`exponentialRootFamilies()`), `ln 2 + 2πik`. A
+        // side condition cannot remove the members of a family.
+        const result = exponentialRootFamilies(
+          ce,
+          ceq,
+          names[0],
+          (factor, stats) =>
+            findUnivariateRoots(factor, names[0], 0, undefined, stats)
+        );
+        if (result === undefined) return undefined;
+        if (result.periodic && conditioned) return undefined;
+        roots = result.roots;
       } else if (isFunction(ceq, 'Equal') || ceq.type.matches('number')) {
         // An equation (or a bare expression read as `= 0`): the same two
         // steps as `ceq.solve()`, with the candidate statistics kept. An
@@ -988,6 +1025,7 @@ function evaluateSolveOperands(
           candidates: false,
           undecided: false,
           userRule: false,
+          complexRootRemoved: false,
         };
         const found = findUnivariateRoots(ceq, names[0], 0, undefined, stats);
         roots = filterRootsByAssumptions(ce, found, names[0]);
@@ -997,6 +1035,18 @@ function evaluateSolveOperands(
         // (`(x - 1)·BesselJ(0, x) = 0` gives only `1`), or a factor of a
         // product gave no root.
         if (partialRootListReason(ceq, names[0], found, stats) !== undefined)
+          return undefined;
+        // Over the complex numbers, a list from which a strategy removed a
+        // root that is not real is only a part of the roots:
+        // `(sin(x) - 2)(sin(x) - 1/2) = 0` has the roots of `sin(x) = 2`. So
+        // has a trig function of a periodic argument: `sin(sin(x)) = 0`
+        // holds where `sin(x) = kπ`, which has complex roots for `k ≠ 0`,
+        // and the root finder gives only the real ones.
+        if (
+          complexUnknown &&
+          (stats.complexRootRemoved ||
+            equationHasNestedPeriodicHead(ceq, names[0]))
+        )
           return undefined;
         if (roots.length === 0)
           return emptyRootsAnswer(ce, ceq, names[0], stats, conditioned);
@@ -1428,13 +1478,40 @@ export function solveOverDomain(
   // 1. Symbolic solve (equations only), then membership filter. A predicate
   // with a float over a discrete domain is enumerated (see above).
   if (isEquation && !discreteInexact) {
+    const complexDomain = sym(domain) === 'ComplexNumbers';
+    // Over the complex numbers, the unknown in an exponent gives families of
+    // roots (`exponentialRootFamilies()`), as with no domain.
+    if (complexDomain && hasExponentialOf(ceq, unknown)) {
+      const result = exponentialRootFamilies(
+        ce,
+        ceq,
+        unknown,
+        (factor, factorStats) =>
+          symbolicRoots(ce, factor, unknown, refinedType, factorStats)
+      );
+      if (result === undefined) return undefined;
+      if (
+        result.periodic &&
+        (condition !== undefined || sideConditions.length > 0)
+      )
+        return undefined;
+      const inDomain = result.roots.filter((r) =>
+        keepInDomain(ce, domain, unknown, r, condition)
+      );
+      return filterSide([...filterRootsByAssumptions(ce, inDomain, unknown)]);
+    }
     const stats = {
       candidates: false,
       undecided: false,
       partial: false,
       userRule: false,
+      complexRootRemoved: false,
     };
     const roots = symbolicRoots(ce, ceq, unknown, refinedType, stats);
+    // Over the complex numbers, a root that a strategy removed because it
+    // is not real is a root (`(sin(x) - 2)(sin(x) - 1/2) = 0`): the list is
+    // only a part of the roots.
+    if (complexDomain && stats.complexRootRemoved) return undefined;
 
     // Phase 2.2: the symbolic trig rules return principal values only. Over a
     // bounded domain, expand each principal root `x₀` into its full `x₀ + k·T`
@@ -4093,6 +4170,436 @@ function periodicRootFamilies(
     roots: [
       ...result.isolated,
       ...result.families.map((f) => familyExpression(ce, f, t)),
+    ],
+  };
+}
+
+//
+// ─── Root families of an exponential equation over the complex numbers ─────
+//
+// For a complex `z`, `b^z = e^(z·ln b)` repeats with the period `2πi/ln b`:
+// `e^x = 2` has the roots `ln 2 + 2πik`, and `e^x = -1` the roots
+// `πi + 2πik`, for each integer `k`. The root templates of `solve.ts` give
+// only the real root (`ln 2`), or no root. With no domain or over
+// `ComplexNumbers`, for an unknown that is not declared real, an equation
+// in which the unknown is in an exponent or in a hyperbolic function (a sum
+// of exponentials) gets its families of roots from
+// `exponentialRootFamilies()`, or no answer.
+//
+
+/** The hyperbolic functions, which `withExponentials()` rewrites. */
+const HYPERBOLIC_HEADS = new Set([
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+]);
+
+/**
+ * Return `true` when `unknown` is in an exponent of `expr` (`e^x`, `2^x`,
+ * `x^x`) or in the argument of a hyperbolic function (`sinh(x)`).
+ */
+export function hasExponentialOf(expr: Expression, unknown: string): boolean {
+  if (!isFunction(expr) || !expr.has(unknown)) return false;
+  const op = expr.operator;
+  if (op === 'Exp' || HYPERBOLIC_HEADS.has(op)) return true;
+  if (op === 'Power' && expr.op2.has(unknown)) return true;
+  return expr.ops.some((child) => hasExponentialOf(child, unknown));
+}
+
+/**
+ * `expr` with each hyperbolic function of `unknown` written with
+ * exponentials (`sinh(g)` is `(e^g - e^(-g))/2`, `tanh(g)` is
+ * `(e^(2g) - 1)/(e^(2g) + 1)`), and each `Exp(g)` written as `e^g`. A
+ * quotient has no negative power of `e^g`, so that its denominator is a
+ * polynomial in `e^g` (`exponentialFactorFamilies()`).
+ */
+function withExponentials(
+  ce: ComputeEngine,
+  expr: Expression,
+  unknown: string
+): Expression {
+  if (!isFunction(expr) || !expr.has(unknown)) return expr;
+  const ops = expr.ops.map((op) => withExponentials(ce, op, unknown));
+  const op = expr.operator;
+  if (op === 'Exp' && ops.length === 1) return ce.E.pow(ops[0]);
+  if (HYPERBOLIC_HEADS.has(op) && ops.length === 1) {
+    const p = ce.E.pow(ops[0]);
+    const m = ce.E.pow(ops[0].neg());
+    const p2 = ce.E.pow(ops[0].mul(2));
+    if (op === 'Sinh') return p.sub(m).div(2);
+    if (op === 'Cosh') return p.add(m).div(2);
+    if (op === 'Tanh') return p2.sub(ce.One).div(p2.add(ce.One));
+    if (op === 'Coth') return p2.add(ce.One).div(p2.sub(ce.One));
+    if (op === 'Sech') return p.mul(2).div(p2.add(ce.One));
+    return p.mul(2).div(p2.sub(ce.One));
+  }
+  if (ops.every((o, i) => o === expr.ops[i])) return expr;
+  return ce.function(op, ops);
+}
+
+/** A power `base^(a·x + d)` of a constant base, with `x` the unknown. */
+type ExponentialNode = {
+  node: Expression;
+  base: Expression;
+  a: Expression;
+  d: Expression;
+};
+
+/**
+ * Add to `out` each power of `expr` whose exponent holds `unknown`. Returns
+ * `false` when such a power has a base that holds `unknown`, or an exponent
+ * that is not linear in `unknown`.
+ */
+function exponentialNodes(
+  expr: Expression,
+  unknown: string,
+  out: ExponentialNode[]
+): boolean {
+  if (!isFunction(expr) || !expr.has(unknown)) return true;
+  if (expr.operator === 'Power' && expr.op2.has(unknown)) {
+    if (expr.op1.has(unknown)) return false;
+    const coeffs = getPolynomialCoefficients(expr.op2, unknown);
+    if (coeffs === null || coeffs.length !== 2) return false;
+    out.push({ node: expr, base: expr.op1, a: coeffs[1], d: coeffs[0] });
+    return true;
+  }
+  return expr.ops.every((op) => exponentialNodes(op, unknown, out));
+}
+
+/** The largest exponent of a power of `u` in `exponentialFactorFamilies()`. */
+const MAX_EXPONENTIAL_DEGREE = 64;
+
+/**
+ * Return `true` when each power in `expr` whose base holds `u` has a
+ * constant integer exponent of at most `MAX_EXPONENTIAL_DEGREE` in
+ * magnitude.
+ */
+function hasSmallPowers(expr: Expression, u: string): boolean {
+  if (!isFunction(expr) || !expr.has(u)) return true;
+  if (expr.operator === 'Power' && expr.op1.has(u)) {
+    const n = expr.op2.re;
+    if (
+      expr.op2.has(u) ||
+      !Number.isInteger(n) ||
+      Math.abs(n) > MAX_EXPONENTIAL_DEGREE
+    )
+      return false;
+  }
+  return expr.ops.every((op) => hasSmallPowers(op, u));
+}
+
+/** `expr` with each node of `nodes` replaced by its replacement. */
+function replaceNodes(
+  ce: ComputeEngine,
+  expr: Expression,
+  nodes: ReadonlyArray<[Expression, Expression]>
+): Expression {
+  for (const [node, replacement] of nodes)
+    if (node === expr) return replacement;
+  if (!isFunction(expr)) return expr;
+  const ops = expr.ops.map((op) => replaceNodes(ce, op, nodes));
+  if (ops.every((o, i) => o === expr.ops[i])) return expr;
+  return ce.function(expr.operator, ops);
+}
+
+/**
+ * The principal value of the logarithm of the complex number `u`:
+ * `ln|u| + i·arg(u)`, with `arg(u)` in `(-π, π]`. `ln 2`, `ln 2 + iπ` for
+ * `-2`, `iπ/2` for `i`. A form that is not checked numerically stays
+ * `Ln(u)`, which is the principal value too.
+ */
+function principalLog(ce: ComputeEngine, u: Expression): Expression {
+  const ln = ce.function('Ln', [u]);
+  if (u.isPositive === true) return ln;
+  if (u.isNegative === true)
+    return ce
+      .function('Add', [ce.function('Ln', [u.neg()]), ce.I.mul(ce.Pi)])
+      .evaluate();
+  if (u.unknowns.length > 0) return ln;
+  const parts = ce
+    .function('Add', [
+      ce.function('Ln', [ce.function('Abs', [u])]),
+      ce.I.mul(ce.function('Arg', [u])),
+    ])
+    .evaluate();
+  if (parts.has('Arg') || parts.has('Argument')) return ln;
+  const a = parts.N();
+  const b = ln.N();
+  if (
+    !Number.isFinite(a.re) ||
+    !Number.isFinite(a.im) ||
+    Math.abs(a.re - b.re) > 1e-9 * Math.max(1, Math.abs(b.re)) ||
+    Math.abs(a.im - b.im) > 1e-9 * Math.max(1, Math.abs(b.im))
+  )
+    return ln;
+  return parts;
+}
+
+/**
+ * The families of the roots of `factor` in `unknown`, a factor in which
+ * `unknown` is only in powers `bᵍ` of one constant base `b` (`e`, or a
+ * positive real number other than 1), each with an exponent `g = aᵢ·x + dᵢ`
+ * linear in `unknown`, where the ratios of the coefficients `aᵢ` are
+ * rational numbers. With `a₀` the coefficient of the first power (made
+ * positive when its sign is known) and `L` the least common denominator of
+ * the ratios `aᵢ/a₀`, each power is `b^dᵢ·uⁿⁱ`, with `u = b^(a₀·x/L)` and
+ * the integer `nᵢ = L·aᵢ/a₀`. The factor is then a rational function
+ * `N(u)/D(u)`, and each root `uⱼ` of the polynomial `N` where `uⱼ ≠ 0` and
+ * `D(uⱼ) ≠ 0` gives the family `x = (Ln uⱼ + 2πik)·L/(a₀·ln b)`
+ * (`principalLog()`). The coefficient `a₀` must be known to be nonzero.
+ *
+ * Returns an empty list when the factor has no root (`e^x`, `tanh(x) - 1`),
+ * and `undefined` when the factor is not of this form or its roots are not
+ * all known.
+ */
+function exponentialFactorFamilies(
+  ce: ComputeEngine,
+  factor: Expression,
+  unknown: string
+): { root: Expression; spacing: Expression }[] | undefined {
+  const nodes: ExponentialNode[] = [];
+  if (!exponentialNodes(factor, unknown, nodes) || nodes.length === 0)
+    return undefined;
+  const base = nodes[0].base;
+  const natural = sym(base) === 'ExponentialE';
+  if (!natural && (base.isPositive !== true || base.isEqual(1) !== false))
+    return undefined;
+  if (!nodes.every((n) => n.base.isSame(base))) return undefined;
+  // `u = e^x` and not `e^(-x)` for `sinh(x)`: the roots are then written
+  // with `ln uⱼ` and not `-ln uⱼ`.
+  const a0 = nodes[0].a.isNegative === true ? nodes[0].a.neg() : nodes[0].a;
+  if (a0.isEqual(0) !== false) return undefined;
+  const ratios: [number, number][] = [];
+  for (const n of nodes) {
+    const r = exactSpacingRatio(ce, n.a, a0);
+    if (r === undefined) return undefined;
+    const [num, den] = [Number(r[0]), Number(r[1])];
+    if (!Number.isSafeInteger(num) || !Number.isSafeInteger(den) || den === 0)
+      return undefined;
+    ratios.push([num, den]);
+  }
+  const gcd = (p: number, q: number): number => (q === 0 ? p : gcd(q, p % q));
+  let lcd = 1;
+  for (const [, den] of ratios)
+    lcd = (lcd * Math.abs(den)) / gcd(lcd, Math.abs(den));
+  if (lcd > 64) return undefined;
+
+  // When each exponent is `aᵢ·(x + c)` for one constant `c`
+  // (`2e^(3x + 1) = 5`), `u = b^(a₀·(x + c)/L)`, and the roots are written
+  // with `x + c`: `(ln(5/2) + 2πik)/3 - 1/3`. Else each power is
+  // `b^dᵢ·uⁿⁱ`.
+  const c = nodes[0].d.div(nodes[0].a).evaluate();
+  const shared = nodes.every(
+    (n) => n.d.sub(n.a.mul(c)).evaluate().isEqual(0) === true
+  );
+
+  const uName = temporaryUnknownName(factor, unknown);
+  if (uName === undefined) return undefined;
+  // `u` is declared in a new scope, so that an outer value or type of the
+  // name does not apply to it.
+  ce.pushScope();
+  try {
+    ce.declare(uName, 'complex');
+    const u = ce.symbol(uName);
+    const replaced = replaceNodes(
+      ce,
+      factor,
+      nodes.map((n, i) => {
+        const power = u.pow((ratios[i][0] * lcd) / ratios[i][1]);
+        if (shared || n.d.isSame(0)) return [n.node, power];
+        return [n.node, base.pow(n.d).mul(power)];
+      })
+    );
+    if (replaced.has(unknown)) return undefined;
+    // The expansion below is dense: a large power of `u`, or of a sum that
+    // holds `u` (`(1 + e^(64x))^1000000`), would make a polynomial of a very
+    // large degree.
+    if (!hasSmallPowers(replaced, uName)) return undefined;
+    // Multiplied by `u^m`, the factor has no negative power of `u`: its roots
+    // are the same, since `u ≠ 0`.
+    const m = Math.max(0, ...ratios.map(([num, den]) => (-num * lcd) / den));
+    const [numerator, d] = together(
+      expand(m === 0 ? replaced : replaced.mul(u.pow(m)))
+    ).numeratorDenominator;
+    const n = expand(numerator);
+    const denominator = expand(d);
+    if (getPolynomialCoefficients(n, uName) === null) return undefined;
+    if (getPolynomialCoefficients(denominator, uName) === null)
+      return undefined;
+    if (!n.has(uName)) return n.isEqual(0) === false ? [] : undefined;
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+      complexRootRemoved: false,
+    };
+    const uRoots = findUnivariateRoots(n, uName, 0, undefined, stats);
+    if (
+      uRoots.length === 0 ||
+      stats.complexRootRemoved ||
+      partialRootListReason(n, uName, uRoots, stats) !== undefined
+    )
+      return undefined;
+
+    // u = b^(s·x), with s = a₀/L
+    const scale = a0.div(lcd);
+    const lnBase = natural ? ce.One : ce.function('Ln', [base]);
+    const spacing = ce
+      .number(2)
+      .mul(ce.Pi)
+      .mul(ce.I)
+      .div(scale.mul(lnBase))
+      .evaluate();
+    const families: { root: Expression; spacing: Expression }[] = [];
+    for (const ur of uRoots) {
+      if (ur.has(uName) || isRestriction(ur)) return undefined;
+      const zero = ur.isEqual(0);
+      if (zero === true) continue;
+      if (zero !== false) return undefined;
+      if (denominator.has(uName)) {
+        const pole = denominator
+          .subs({ [uName]: ur })
+          .evaluate()
+          .isEqual(0);
+        if (pole === true) continue;
+        if (pole !== false) return undefined;
+      }
+      const log =
+        !natural && ur.isPositive === true
+          ? ce.function('Log', [ur, base])
+          : principalLog(ce, ur).div(lnBase);
+      const root = log.div(scale);
+      families.push({
+        root: (shared && !c.isSame(0) ? root.sub(c) : root).evaluate(),
+        spacing,
+      });
+    }
+    return families;
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * The answer of `Solve` for the equation `equation` (an `Equal`, or an
+ * expression read as `= 0`) in `unknown` over the complex numbers, when
+ * `unknown` is in an exponent or in a hyperbolic function
+ * (`hasExponentialOf()`): the families of roots of each exponential factor
+ * (`exponentialFactorFamilies()`) with a fresh integer parameter, and the
+ * roots of each polynomial factor that are in no family. `solveFactor`
+ * gives the roots of a polynomial factor.
+ *
+ * `periodic` is `true` when the list holds a family. Returns `undefined`
+ * when the roots are not all known: a factor is neither polynomial nor
+ * exponential (`x·e^x - 1`, `e^(x²) - 2`, `sin(x)·e^x`), an exponential
+ * factor has a pole and there is another factor, or an assumption is about
+ * `unknown` (a family cannot express a restriction).
+ */
+export function exponentialRootFamilies(
+  ce: ComputeEngine,
+  equation: Expression,
+  unknown: string,
+  solveFactor: (
+    factor: Expression,
+    stats: {
+      candidates: boolean;
+      undecided: boolean;
+      partial: boolean;
+      userRule: boolean;
+      complexRootRemoved: boolean;
+    }
+  ) => ReadonlyArray<Expression>
+): { periodic: boolean; roots: Expression[] } | undefined {
+  const { predBody, isEquation } = classifyPredicate(equation);
+  if (!isEquation) return undefined;
+  // A family ranges over the complex plane: it cannot express a type
+  // narrower than `complex` (`imaginary`) or an assumption about the
+  // unknown.
+  if (!isSubtype('complex', unknownType(ce, unknown).type)) return undefined;
+  for (const [fact, records] of contextAssumptions(ce).entries())
+    if (isFactTrue(records) && fact.unknowns.includes(unknown))
+      return undefined;
+  const body = withExponentials(ce, predBody, unknown);
+  const factors = isFunction(body, 'Multiply') ? body.ops : [body];
+  const withUnknown = factors.filter((f) => f.has(unknown));
+  // The residual has no unknown (`e^x = e^x` is `0 = 0`): an identity or a
+  // contradiction, which `emptyRootsAnswer()` decides for a polynomial only.
+  if (withUnknown.length === 0) return undefined;
+
+  const families: { root: Expression; spacing: Expression }[] = [];
+  const polynomialRoots: Expression[] = [];
+  for (const factor of withUnknown) {
+    // `fⁿ` has the roots of `f` when `n` is a positive integer.
+    let f = factor;
+    if (isFunction(factor, 'Power') && !factor.op2.has(unknown)) {
+      if (factor.op2.isInteger !== true || factor.op2.isPositive !== true)
+        return undefined;
+      f = factor.op1;
+    }
+    if (!hasExponentialOf(f, unknown)) {
+      if (getPolynomialCoefficients(f, unknown) === null) return undefined;
+      const stats = {
+        candidates: false,
+        undecided: false,
+        partial: false,
+        userRule: false,
+        complexRootRemoved: false,
+      };
+      const roots = solveFactor(f, stats);
+      if (
+        stats.complexRootRemoved ||
+        partialRootListReason(f, unknown, roots, stats) !== undefined
+      )
+        return undefined;
+      if (roots.length === 0 && polynomialDegree(f, unknown) > 0)
+        return undefined;
+      polynomialRoots.push(...roots);
+      continue;
+    }
+    // A pole of this factor can be a root of another factor.
+    if (withUnknown.length > 1 && f.denominator.has(unknown)) return undefined;
+    const found = exponentialFactorFamilies(ce, f, unknown);
+    if (found === undefined) return undefined;
+    families.push(...found);
+  }
+
+  // Each family root must make the equation 0 when it is a number.
+  for (const family of families) {
+    for (const k of [0, 1]) {
+      const value = family.root.add(family.spacing.mul(k));
+      if (value.unknowns.length > 0) break;
+      const residual = predBody.subs({ [unknown]: value }).N();
+      if (!isNumber(residual)) return undefined;
+      const r = Math.hypot(residual.re, residual.im);
+      if (!(r <= 1e-8)) return undefined;
+    }
+  }
+
+  // The roots of the polynomial factors that are in no family.
+  const isolated: Expression[] = [];
+  for (const root of polynomialRoots) {
+    const inFamily = families.some(
+      (f) => root.sub(f.root).div(f.spacing).evaluate().isInteger === true
+    );
+    if (!inFamily && !isolated.some((o) => o.isSame(root))) isolated.push(root);
+  }
+  if (families.length === 0) return { periodic: false, roots: isolated };
+  const t = arbitraryIntegers(ce, equation, 1)[0];
+  return {
+    periodic: true,
+    roots: [
+      ...isolated,
+      ...families.map((f) =>
+        familyExpression(
+          ce,
+          { root: f.root, value: NaN, spacing: f.spacing, spacingValue: NaN },
+          t
+        )
+      ),
     ],
   };
 }
