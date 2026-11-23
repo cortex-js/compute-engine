@@ -63,6 +63,30 @@ describe('Epsil CLI arguments', () => {
     );
   });
 
+  test('takes an option value that starts with a dash', () => {
+    expect(parseCliArguments(['-e', '-5 % 3'], {}).eval).toBe('-5 % 3');
+    expect(parseCliArguments(['--eval', '-x', '--json'], {})).toMatchObject({
+      eval: '-x',
+      outputMode: 'json',
+    });
+    expect(parseCliArguments(['--eval=-1'], {}).eval).toBe('-1');
+    expect(parseCliArguments(['-e-1'], {}).eval).toBe('-1');
+    expect(parseCheckArguments(['-e', '-1 + 2'], {}).eval).toBe('-1 + 2');
+    // An option with no value, and the arguments after `--`, stay as they are.
+    expect(() => parseCliArguments(['-e'], {})).toThrow(CliUsageError);
+    expect(parseCliArguments(['--', '-e'], {})).toMatchObject({
+      eval: undefined,
+      file: '-e',
+    });
+  });
+
+  test('evaluates a program that starts with a minus sign', async () => {
+    const { io, stdout, stderr } = makeIo();
+    expect(await main(['-e', '-5 % 3'], io)).toBe(0);
+    expect(stderr()).toBe('');
+    expect(stdout().trim()).toBe('1');
+  });
+
   test('accepts zero as no time limit', () => {
     expect(parseCliArguments(['--time-limit', '0'], {}).timeLimit).toBe(0);
   });

@@ -73,6 +73,11 @@
 
 ### Resolved Issues
 
+- **The `epsil` command line tool accepts an option value that starts with a
+  dash** (CE-1393). `epsil -e '-5 % 3'` failed with "Option '-e' argument is
+  ambiguous", and it now prints `1`. An option that takes a value takes the
+  next argument, whatever its first character.
+
 - **A scope that the host pops is released when the garbage collector runs**
   (CE-1152). After a call of a function evaluated in a scope, the engine kept
   that scope and its definitions in memory after `ce.popScope()`, until a later

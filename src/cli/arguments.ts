@@ -1,4 +1,4 @@
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 
 import { defaultPoolSize } from '../compute-engine/kernel-pool.js';
 
@@ -24,31 +24,25 @@ export function parseCliArguments(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env
 ): CliOptions {
-  let parsed: ReturnType<typeof parseArgs>;
-  try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      strict: true,
-      options: {
-        'eval': { type: 'string', short: 'e' },
-        'help': { type: 'boolean', short: 'h' },
-        'version': { type: 'boolean', short: 'v' },
-        'json': { type: 'boolean' },
-        'epsil': { type: 'boolean' },
-        'latex': { type: 'boolean' },
-        'from': { type: 'string' },
-        'fancy-symbols': { type: 'boolean' },
-        'diagnostics': { type: 'string' },
-        'no-color': { type: 'boolean' },
-        'time-limit': { type: 'string' },
-        'compile': { type: 'boolean' },
-        'workers': { type: 'string' },
-      },
-    });
-  } catch (error) {
-    throw new CliUsageError(messageFromError(error));
-  }
+  const parsed = parseOptions(
+    args,
+    {
+      'eval': { type: 'string', short: 'e' },
+      'help': { type: 'boolean', short: 'h' },
+      'version': { type: 'boolean', short: 'v' },
+      'json': { type: 'boolean' },
+      'epsil': { type: 'boolean' },
+      'latex': { type: 'boolean' },
+      'from': { type: 'string' },
+      'fancy-symbols': { type: 'boolean' },
+      'diagnostics': { type: 'string' },
+      'no-color': { type: 'boolean' },
+      'time-limit': { type: 'string' },
+      'compile': { type: 'boolean' },
+      'workers': { type: 'string' },
+    },
+    true
+  );
 
   const { values, positionals } = parsed;
   const evalSource = typeof values.eval === 'string' ? values.eval : undefined;
@@ -107,22 +101,16 @@ export function parseCheckArguments(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env
 ): CheckOptions {
-  let parsed: ReturnType<typeof parseArgs>;
-  try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      strict: true,
-      options: {
-        'eval': { type: 'string', short: 'e' },
-        'json': { type: 'boolean' },
-        'effects': { type: 'boolean' },
-        'no-color': { type: 'boolean' },
-      },
-    });
-  } catch (error) {
-    throw new CliUsageError(messageFromError(error));
-  }
+  const parsed = parseOptions(
+    args,
+    {
+      'eval': { type: 'string', short: 'e' },
+      'json': { type: 'boolean' },
+      'effects': { type: 'boolean' },
+      'no-color': { type: 'boolean' },
+    },
+    true
+  );
 
   const { values, positionals } = parsed;
   const evalSource = typeof values.eval === 'string' ? values.eval : undefined;
@@ -141,20 +129,14 @@ export function parseCheckArguments(
 }
 
 export function parseDocArguments(args: readonly string[]): DocOptions {
-  let parsed: ReturnType<typeof parseArgs>;
-  try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: true,
-      strict: true,
-      options: {
-        json: { type: 'boolean' },
-        limit: { type: 'string' },
-      },
-    });
-  } catch (error) {
-    throw new CliUsageError(messageFromError(error));
-  }
+  const parsed = parseOptions(
+    args,
+    {
+      json: { type: 'boolean' },
+      limit: { type: 'string' },
+    },
+    true
+  );
 
   const { values, positionals } = parsed;
   const query = positionals.join(' ').trim();
@@ -176,26 +158,20 @@ export function parseMcpArguments(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env
 ): McpOptions {
-  let parsed: ReturnType<typeof parseArgs>;
-  try {
-    parsed = parseArgs({
-      args: [...args],
-      allowPositionals: false,
-      strict: true,
-      options: {
-        'time-limit': { type: 'string' },
-        'transport': { type: 'string' },
-        'host': { type: 'string' },
-        'port': { type: 'string' },
-        'path': { type: 'string' },
-        'allow-origin': { type: 'string', multiple: true },
-        'auth-token-env': { type: 'string' },
-        'workers': { type: 'string' },
-      },
-    });
-  } catch (error) {
-    throw new CliUsageError(messageFromError(error));
-  }
+  const parsed = parseOptions(
+    args,
+    {
+      'time-limit': { type: 'string' },
+      'transport': { type: 'string' },
+      'host': { type: 'string' },
+      'port': { type: 'string' },
+      'path': { type: 'string' },
+      'allow-origin': { type: 'string', multiple: true },
+      'auth-token-env': { type: 'string' },
+      'workers': { type: 'string' },
+    },
+    false
+  );
 
   const { values } = parsed;
   const timeLimit = values['time-limit'];
@@ -385,6 +361,69 @@ function parseTimeLimit(value: string | undefined): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result))
     throw new CliUsageError('--time-limit is too large.');
+  return result;
+}
+
+/**
+ * Parse `args` strictly against `options`, and report a parse error as a
+ * `CliUsageError`.
+ *
+ * The value of a string option may start with a dash: `-e '-5 % 3'` and
+ * `--time-limit -1` give the option the next argument, as `--eval=-5 % 3`
+ * does. `parseArgs` alone refuses such a value as ambiguous.
+ */
+function parseOptions(
+  args: readonly string[],
+  options: ParseArgsOptionsConfig,
+  allowPositionals: boolean
+): ReturnType<typeof parseArgs> {
+  try {
+    return parseArgs({
+      args: joinOptionValues(args, options),
+      allowPositionals,
+      strict: true,
+      options,
+    });
+  } catch (error) {
+    throw new CliUsageError(messageFromError(error));
+  }
+}
+
+/**
+ * Write each string option that is followed by its value in a separate
+ * argument (`-e X`, `--eval X`) as one argument `--eval=X`, so that
+ * `parseArgs` takes `X` as the value even when it starts with a dash. As with
+ * getopt, a string option always takes the next argument, also one that
+ * names an option: `-e --json` evaluates the program `--json`. An option that
+ * is the last argument stays as it is, and `parseArgs` reports the missing
+ * value. The arguments after `--` stay as they are. A group of short options
+ * that ends with a string option (`-he X`) is not joined, so its value cannot
+ * start with a dash.
+ */
+function joinOptionValues(
+  args: readonly string[],
+  options: ParseArgsOptionsConfig
+): string[] {
+  const names = new Map<string, string>();
+  for (const [name, option] of Object.entries(options)) {
+    if (option.type !== 'string') continue;
+    names.set(`--${name}`, name);
+    if (option.short !== undefined) names.set(`-${option.short}`, name);
+  }
+
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--') {
+      result.push(...args.slice(i));
+      break;
+    }
+    const name = names.get(arg);
+    if (name !== undefined && i + 1 < args.length) {
+      result.push(`--${name}=${args[i + 1]}`);
+      i += 1;
+    } else result.push(arg);
+  }
   return result;
 }
 
