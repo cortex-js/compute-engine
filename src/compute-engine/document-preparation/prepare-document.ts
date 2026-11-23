@@ -2,7 +2,12 @@ import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { widenAll } from '../../common/type/subtype.js';
-import type { Type } from '../../common/type/types.js';
+import type { EffectSet, Type } from '../../common/type/types.js';
+import {
+  effectSetToString,
+  isEffectSubset,
+  unionEffectSets,
+} from '../../common/type/effects.js';
 import type {
   BoxedValueDefinition,
   Expression,
@@ -1121,7 +1126,8 @@ export function prepareDocument(
             string,
             ReadonlyArray<string | undefined>
           >,
-          round = 0
+          round = 0,
+          assumedEffects: EffectSet = []
         ): void {
           for (const name of group) {
             const invalid = references.get(name)!.find((ref) => {
@@ -1323,7 +1329,14 @@ export function prepareDocument(
               guessed.set(name, guess);
             }
             if (guessed.size > 0)
-              return settle(group, cyclic, guessed, parameterGuesses, round);
+              return settle(
+                group,
+                cyclic,
+                guessed,
+                parameterGuesses,
+                round,
+                assumedEffects
+              );
           }
           const reject = (failed: string, invalid: Expression) => {
             if (guesses === undefined || guesses.size === 0)
@@ -1332,7 +1345,14 @@ export function prepareDocument(
             // prepared is not a counted frame, so no holder count is kept,
             // and `undeclare` would send engine-wide redefine events.
             for (const name of group) scope.bindings.delete(name);
-            return settle(group, cyclic, new Map(), parameterGuesses, round);
+            return settle(
+              group,
+              cyclic,
+              new Map(),
+              parameterGuesses,
+              round,
+              assumedEffects
+            );
           };
           // Each round of the parameter retry below changes the provisional
           // type of at least one parameter.
@@ -1366,7 +1386,16 @@ export function prepareDocument(
                 parameterGuesses?.get(name)?.[i] ??
                 'unknown'
             );
-            const effects = row.effects ?? 'any';
+            // A cyclic row with no stated effect is first assumed to have
+            // the effects `assumedEffects` (none at first): its calls of the
+            // rows of the component take them, and the check of each body
+            // below widens them until they hold the body's effects. No
+            // effect is written `pure`, as for a typed row that is not
+            // cyclic: an unlabeled contract would skip the conformance check
+            // of its effects.
+            const effects =
+              row.effects ??
+              (cyclic ? effectSetToString(assumedEffects) : 'any');
             const signature =
               '(' +
               parameters.join(', ') +
@@ -1434,6 +1463,29 @@ export function prepareDocument(
             // inferred result.
             let partial = false;
             const sig = actual.type;
+            // The effects of a cyclic row are the least set that holds the
+            // effects of its body when each call of the component has them:
+            // a recursion whose body has no effect is `pure`, and its
+            // applications are kept (CE-1709). A body with effects outside
+            // the assumed set settles the component again with their union;
+            // the set only grows, up to `any`.
+            if (
+              cyclic &&
+              row.effects === undefined &&
+              typeof sig === 'object' &&
+              sig.kind === 'signature' &&
+              !isEffectSubset(signatureEffects(sig), assumedEffects)
+            ) {
+              for (const other of group) scope.bindings.delete(other);
+              return settle(
+                group,
+                cyclic,
+                guesses,
+                parameterGuesses,
+                round,
+                unionEffectSets(assumedEffects, signatureEffects(sig)) ?? 'any'
+              );
+            }
             if (
               contract === undefined &&
               (row.resultType !== undefined || row.effects !== undefined) &&
@@ -1549,7 +1601,8 @@ export function prepareDocument(
                       cyclic,
                       guesses,
                       new Map(parameterGuesses).set(name, next),
-                      round + 1
+                      round + 1,
+                      assumedEffects
                     );
                   }
                 }

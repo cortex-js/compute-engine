@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Improvements
+
+- **A recursive function row of a Document whose body has no effect is pure,
+  and its applications are kept** (CE-1709). A row that states no effect and
+  calls itself, or another row that calls it back, had the effects `any`, so
+  each application was evaluated again: `F(n) = F(n-1) + F(n-1)` ran 2^n
+  times, and `F(14)` took about 850 ms where the same function assigned on a
+  scope took 12 ms. The row now has the least effects that hold those of its
+  body (`(unknown) pure -> number`), and `F(14)` takes about 3 ms. A body
+  that draws a random number still gives the row the effect `random`.
+
 ### Resolved Issues
 
 - **The interpreter fallback of a compilation whose `inputs` names a

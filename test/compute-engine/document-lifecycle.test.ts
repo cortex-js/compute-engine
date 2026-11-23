@@ -1429,25 +1429,25 @@ describe('the result of a recursive function with no stated result', () => {
     });
     expect(revision.rowErrors.size).toBe(0);
     expect(typeOf(revision, 'r')).toBe(
-      '(unknown) any -> tuple<number, number>'
+      '(unknown) pure -> tuple<number, number>'
     );
     expect(call(revision, ['r', 3])).toBe('["Tuple",3,3]');
     expect(typeOf(revision, 's')).toBe(
-      '(unknown) any -> tuple<number, number>'
+      '(unknown) pure -> tuple<number, number>'
     );
     expect(call(revision, ['s', 3])).toBe('["Tuple",6,3]');
     expect(typeOf(revision, 'C')).toBe(
-      '(unknown, unknown) any -> tuple<number, number>'
+      '(unknown, unknown) pure -> tuple<number, number>'
     );
     expect(call(revision, ['C', 2, 3])).toBe('["Tuple",6,6]');
-    expect(typeOf(revision, 'z')).toBe('(unknown) any -> number');
+    expect(typeOf(revision, 'z')).toBe('(unknown) pure -> number');
     expect(call(revision, ['z', 3])).toBe('["Complex",0,-1]');
-    expect(typeOf(revision, 'f')).toBe('(unknown) any -> number');
+    expect(typeOf(revision, 'f')).toBe('(unknown) pure -> number');
     expect(call(revision, ['f', 3])).toBe('6');
-    expect(typeOf(revision, 'M')).toBe('(unknown) any -> list<number>');
+    expect(typeOf(revision, 'M')).toBe('(unknown) pure -> list<number>');
     expect(call(revision, ['M', 2])).toBe('["List",0,1,2]');
-    expect(typeOf(revision, 'e')).toBe('(unknown) any -> number');
-    expect(typeOf(revision, 'o')).toBe('(unknown) any -> number');
+    expect(typeOf(revision, 'e')).toBe('(unknown) pure -> number');
+    expect(typeOf(revision, 'o')).toBe('(unknown) pure -> number');
     expect(call(revision, ['e', 3])).toBe('0');
     revision.dispose();
   });
@@ -1473,13 +1473,13 @@ describe('the result of a recursive function with no stated result', () => {
       ],
     });
     expect(revision.rowErrors.size).toBe(0);
-    expect(typeOf(revision, 'P')).toBe('(unknown, unknown) any -> unknown');
+    expect(typeOf(revision, 'P')).toBe('(unknown, unknown) pure -> unknown');
     expect(call(revision, ['P', 3, ['Tuple', 1, 1]])).toBe('["Tuple",4,7]');
     expect(typeOf(revision, 'B')).toBe(
-      '(unknown, unknown) any -> tuple<number, number>'
+      '(unknown, unknown) pure -> tuple<number, number>'
     );
     expect(call(revision, ['B', 2, ['Tuple', 1, 3]])).toBe('["Tuple",2,6]');
-    expect(typeOf(revision, 'L')).toBe('(unknown) any -> list<any>');
+    expect(typeOf(revision, 'L')).toBe('(unknown) pure -> list<any>');
     expect(call(revision, ['L', 3])).toBe('["List",1,2,3]');
     revision.dispose();
   });
