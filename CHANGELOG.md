@@ -57,6 +57,12 @@
   `[0.999…9, 1.5]`, and `N((1/3)·[3 + 6i])` gave `0.999…9 + 1.999…8i`; they
   are now `[1, 1.5]` and `1 + 2i`. A matrix of floats times a number is
   computed on its doubles row by row, about six times faster.
+- **A square root times a list of fractions has the numeric value of the
+  scalar product in each cell** (CE-1715). At the default precision,
+  `N(√2·[1/3])` gave `[0.471404520791031682933424928812542301650399437]`,
+  with more digits than the precision and a wrong last digit, where
+  `N(√2·(1/3))` gives `0.4714045207910316829338962`. The cell is now the
+  same value. A tuple of fractions times `√2` had the same digits.
 - **In Epsil, an error in the second operand of a subtraction whose first
   operand has a unary minus underlines the operand that made the error**
   (CE-1129). With `s` holding `"a"`, the type error of `-(y + 2) - s`

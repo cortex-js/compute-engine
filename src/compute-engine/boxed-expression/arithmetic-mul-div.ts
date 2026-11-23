@@ -3535,22 +3535,11 @@ export function isExactRationalLiteral(x: Expression): boolean {
  * `undefined` when `x` has no exact cell, or `value` has not the shape of
  * `x`: `value` is the factor then.
  *
- * `undefined` too when one of the `factors` of the product is an exact
- * number with a radical (`√2`): the scalar product folds it with an exact
- * cell into one exact number before it rounds (`√2·(1/3)` is `√2/3`), which
- * no cell product does, and rounding the cell first gives the scalar
- * product's value there.
+ * Beside an exact factor with a radical (`√2`), the cell product folds the
+ * exact cell with that factor too (`mulTensors()`), as the scalar product
+ * does: `√2·(1/3)` is `√2/3` before it rounds (CE-1715).
  */
 export function nKeepingExactCells(
-  x: Expression,
-  value: Expression,
-  factors: ReadonlyArray<Expression>
-): Expression | undefined {
-  if (factors.some(isExactIrrationalLiteral)) return undefined;
-  return keepExactCells(x, value);
-}
-
-function keepExactCells(
   x: Expression,
   value: Expression
 ): Expression | undefined {
@@ -3559,7 +3548,7 @@ function keepExactCells(
 }
 
 /**
- * `keepExactCells()`, with `null` when a kept cell is not at its place in
+ * `nKeepingExactCells()`, with `null` when a kept cell is not at its place in
  * `value`: a cell whose value is a `Sequence` is spliced into the list
  * (`[Empty(), 1/3, Two()]` with `Empty()` an empty sequence and `Two()` a
  * sequence of two numbers has three cells and its value three cells, in
@@ -3603,7 +3592,7 @@ function keepExactCellsOf(
 }
 
 /**
- * Whether `x` is a cell that `keepExactCells()` keeps: an exact number with
+ * Whether `x` is a cell that `nKeepingExactCells()` keeps: an exact number with
  * rational parts that is not an integer. An exact integer cell has the same
  * product rounded or not.
  */
@@ -3955,6 +3944,33 @@ export function mulNEvaluated(
   // An exact complex literal whose parts are rationals (`3 + 6i`) is kept in
   // the same way: `(1/3)·(3 + 6i)` is `1 + 2i`, where the rounded `1/3` gave
   // `0.999…9 + 1.999…8i` (CE-1711).
+  // Beside an exact number with a radical (`√2`), the exact number literals
+  // are first folded into one exact number, as the canonical form of the
+  // scalar product does (`√2·(1/3)` is `√2/3`), and rounded once. Rounded
+  // first, `√2` times `1/3` gave another double at machine precision and,
+  // at a higher precision, kept every digit of the product of two big
+  // decimals. The cell product of a list, `√2·[1/3]`, takes this route
+  // (CE-1715).
+  const isExactFactor = (x: Expression, i: number) =>
+    !numeric?.[i] &&
+    (isExactGaussianRationalLiteral(x) || isExactIrrationalLiteral(x));
+  // A product that `mul()` does not fold into one number (`√1234·√1235`,
+  // whose radicand is above the limit of a literal) is left as it is: its
+  // numeric value would come back here.
+  const folded =
+    xs.some((x, i) => !numeric?.[i] && isExactIrrationalLiteral(x)) &&
+    xs.filter(isExactFactor).length >= 2
+      ? mul(...xs.filter(isExactFactor))
+      : undefined;
+  if (folded !== undefined && isNumber(folded)) {
+    const rest = xs.filter((x, i) => !isExactFactor(x, i));
+    return mulNEvaluated(
+      [folded, ...rest],
+      numeric === undefined
+        ? undefined
+        : [false, ...numeric.filter((_, i) => !isExactFactor(xs[i], i))]
+    );
+  }
   let exactFactors = xs.map((x, i) =>
     !numeric?.[i] && isExactGaussianRationalLiteral(x) ? x : undefined
   );
@@ -4197,6 +4213,20 @@ function mulTuples(
       ? scalars[0]
       : mul(...scalars)
     : multiply(...scalars);
+  // Beside an exact number with a radical (`√2`), an exact component is
+  // folded with the exact scalar factors before it rounds, as the scalar
+  // product does (`√2·(1/3)` is `√2/3`), and then multiplied by the other
+  // scalar factors. Multiplied by the rounded `√2`, the component kept every
+  // digit of a product of two big decimals (CE-1715).
+  const isExactScalar = (x: Expression) =>
+    isExactGaussianRationalLiteral(x) || isExactIrrationalLiteral(x);
+  const radical =
+    numericApproximation && scalars.some(isExactIrrationalLiteral)
+      ? {
+          exact: mul(...scalars.filter(isExactScalar)),
+          rest: scalars.filter((x) => !isExactScalar(x)),
+        }
+      : undefined;
 
   // Evaluate each component first (mirrors `mulTensors`): a raw component like
   // `0.3n` with `n` a list must materialize before the scalar product, or the
@@ -4218,6 +4248,8 @@ function mulTuples(
       readsAssignedVariable(ce, c)
     )
       return multiply(scalar, c);
+    if (radical !== undefined && isExactGaussianRationalLiteral(c))
+      return mulN(mul(radical.exact, c), ...radical.rest);
     const cv = numericApproximation
       ? exactScalar && isExactRationalLiteral(c)
         ? c
@@ -4355,13 +4387,28 @@ function mulTensors(
   // made from several factors is not a value (`0.5·π` is not yet a float),
   // and is evaluated as before.
   let valueScalar: Expression | undefined;
+  // On the `.N()` route, when a scalar factor is an exact number with a
+  // radical (`√2`): the product of the exact scalar factors, and the other
+  // scalar factors (see `radicalScalar` below).
+  let radicalScalar:
+    { scalar: Expression; exact: Expression; rest: Expression[] } | undefined;
   // On the `.N()` route, a cell product that holds an `Error` (a failed cell
   // of the tensor) is evaluated, so that the error bubbles out of the
   // product with its `Multiply` frame, as on the exact route:
   // `(3·[Error("missing"), 2]).N()` is `[Error("missing"), 6]`, not
   // `[3·Error("missing"), 6]`. A valid cell product is already a float.
+  // The product of the scalar and an exact cell, beside a radical, is the
+  // exact product of the cell and the exact scalar factors, rounded once,
+  // times the other scalar factors.
   const multiplyCell = numericApproximation
     ? (...xs: ReadonlyArray<Expression>) => {
+        if (
+          radicalScalar !== undefined &&
+          xs.length === 2 &&
+          xs[0] === radicalScalar.scalar &&
+          isExactGaussianRationalLiteral(xs[1])
+        )
+          xs = [mul(radicalScalar.exact, xs[1]), ...radicalScalar.rest];
         const product = multiply(...xs);
         return product.isValid ? product : product.N();
       }
@@ -4444,11 +4491,19 @@ function mulTensors(
   // fraction first gave `0.999…9`. Each cell product is then the scalar
   // product of the same factors, which folds an exact factor beside a float
   // or `π` too (`nKeepingExactCells()`).
+  // An exact number with a radical (`√2`) is rounded, as the kernels below
+  // read a float scalar, and `exactRadicals` maps its value to it: the
+  // product of an exact cell with the scalar folds the radical with the
+  // cell before it rounds, as the scalar product does (`√2·(1/3)` is
+  // `√2/3`, CE-1715). Multiplied by the rounded `√2`, the cell product kept
+  // every digit of a product of two big decimals.
   const withAbsentCells = new Map<Expression, Expression>();
+  const exactRadicals = new Map<Expression, Expression>();
   const numericValueOf = (op: Expression): Expression => {
     if (isExactGaussianRationalLiteral(op)) return op;
     const value = op.N();
-    return nKeepingExactCells(op, value, xs) ?? value;
+    if (isExactIrrationalLiteral(op)) exactRadicals.set(value, op);
+    return nKeepingExactCells(op, value) ?? value;
   };
   const evaluated = xs.map((op) => {
     const value = numericApproximation
@@ -4637,6 +4692,17 @@ function mulTensors(
   // Each scalar factor is in `evaluated`: a value of the caller, or the
   // result of the evaluation above (or `NaN` for an absence marker).
   if (scalars.length === 1 && scalar === scalars[0]) valueScalar = scalar;
+  if (scalar !== null && scalars.some((s) => exactRadicals.has(s))) {
+    const isExact = (s: Expression) =>
+      exactRadicals.has(s) || isExactGaussianRationalLiteral(s);
+    radicalScalar = {
+      scalar,
+      exact: mul(
+        ...scalars.filter(isExact).map((s) => exactRadicals.get(s) ?? s)
+      ),
+      rest: scalars.filter((s) => !isExact(s)),
+    };
+  }
 
   // Fold the tensors left to right, in order.
   let product: Expression = tensors[0];

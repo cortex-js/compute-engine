@@ -6,6 +6,9 @@
  *   the fraction first: `(2/3)·[81.67574227865587]` was one ulp off.
  * - CE-1711: a list or a tuple that mixes exact cells with other cells was
  *   rounded cell by cell first: `3·[1/3, 0.5]` gave `0.999…9`.
+ * - CE-1715: beside an exact radical factor, an exact cell was rounded and
+ *   multiplied by the rounded radical: `√2·[1/3]` kept the 45 digits of a
+ *   product of two big decimals, with a wrong 21st digit.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression as Json } from '../../src/math-json/types';
@@ -61,9 +64,112 @@ describe('CE-1710: a fraction times a list of floats, at machine precision', () 
   });
 });
 
+describe('CE-1715: an exact radical factor and exact cells', () => {
+  const cases = [
+    ['a list', ['Multiply', ['Sqrt', 2], ['List', ['Rational', 1, 3], 0.5]]],
+    ['a tuple', ['Multiply', ['Sqrt', 2], ['Tuple', ['Rational', 1, 3], 0.5]]],
+    [
+      'a float factor',
+      ['Multiply', ['Sqrt', 2], 0.5, ['List', ['Rational', 1, 3], 2]],
+    ],
+    [
+      'a float factor and a tuple',
+      ['Multiply', ['Sqrt', 2], 0.5, ['Tuple', ['Rational', 1, 3], 2]],
+    ],
+    [
+      'a complex component of a tuple',
+      ['Multiply', ['Sqrt', 2], ['Tuple', ['Divide', ['Complex', 1, 1], 3], 1]],
+    ],
+    // The two lists below are broadcast cell by cell, not scaled by the
+    // tensor kernel.
+    [
+      'a Missing cell',
+      ['Multiply', ['Sqrt', 2], ['List', ['Rational', 1, 3], 'Missing']],
+    ],
+    [
+      'a tuple cell',
+      ['Multiply', ['Sqrt', 2], ['List', ['Rational', 1, 3], ['Tuple', 1, 2]]],
+    ],
+    [
+      'two equal radicals',
+      ['Multiply', ['Sqrt', 2], ['Sqrt', 2], ['List', ['Rational', 1, 3]]],
+    ],
+    [
+      'a symbol factor',
+      ['Multiply', ['Sqrt', 2], 'x', ['List', ['Rational', 1, 3], 0.5]],
+    ],
+    [
+      'two radicals',
+      [
+        'Multiply',
+        ['Sqrt', 2],
+        ['Sqrt', 3],
+        ['List', ['Rational', 1, 3], ['Rational', 2, 7]],
+      ],
+    ],
+    [
+      'a fraction factor',
+      [
+        'Multiply',
+        ['Sqrt', 2],
+        ['Rational', 1, 5],
+        ['List', ['Rational', 1, 3], 0.5],
+      ],
+    ],
+    [
+      'a matrix',
+      [
+        'Multiply',
+        ['Sqrt', 2],
+        [
+          'List',
+          ['List', ['Rational', 1, 3], 2],
+          ['List', 0.5, ['Rational', 2, 7]],
+        ],
+      ],
+    ],
+  ] as const;
+
+  const cellsAreScalarProducts = (ce: ComputeEngine, json: Json) => {
+    const [, ...factors] = json as unknown as Json[];
+    const container = factors.find(
+      (f) => Array.isArray(f) && (f[0] === 'List' || f[0] === 'Tuple')
+    ) as unknown as Json[];
+    const others = factors.filter((f) => (f as unknown) !== container);
+    const expected = (cell: Json): unknown =>
+      Array.isArray(cell) && cell[0] === 'List'
+        ? ['List', ...(cell.slice(1) as Json[]).map(expected)]
+        : scalar(ce, ['Multiply', ...others, cell]);
+    expect(ce.box(json).N().json).toEqual([
+      container[0],
+      ...container.slice(1).map(expected),
+    ]);
+  };
+
+  test('the witness', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Multiply', ['Sqrt', 2], ['List', ['Rational', 1, 3], 0.5]]).N()
+        .json
+    ).toEqual([
+      'List',
+      { num: '0.4714045207910316829338962' },
+      { num: '0.7071067811865475244008445' },
+    ]);
+  });
+
+  for (const precision of [21, 'machine', 50] as const) {
+    describe(`at the precision ${precision}`, () => {
+      const ce = new ComputeEngine();
+      ce.precision = precision;
+      test.each(cases)('%s: each cell is the scalar product', (_, json) =>
+        cellsAreScalarProducts(ce, json as Json)
+      );
+    });
+  }
+});
+
 describe('CE-1711: a list or tuple that mixes exact cells with other cells', () => {
-  // Beside an exact radical factor (`√2`) the cells are rounded first, as
-  // before: CE-1715 records the digits of that case at this precision.
   const ce = new ComputeEngine();
 
   test.each([

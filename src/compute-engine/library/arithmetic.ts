@@ -19594,7 +19594,7 @@ function mulEvaluatedOperands(
     let keptExactCells = false;
     const factors = ops.map((op, i) => {
       if (raw[i]) return op;
-      const kept = nKeepingExactCells(op, evaluated[i], ops);
+      const kept = nKeepingExactCells(op, evaluated[i]);
       if (kept === undefined) return evaluated[i];
       keptExactCells = true;
       return kept;
