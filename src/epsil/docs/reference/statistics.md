@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Statistics
 
-The 35 definitions of the statistics library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 43 definitions of the statistics library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -20,6 +20,12 @@ it has none), with its signature in the engine's type syntax. The
 category.
 
 ## Definitions
+
+### betaDistribution
+
+MathJSON `BetaDistribution` · `(real<0<..>, real<0<..>) -> expression<BetaDistribution>`
+
+Beta distribution with shape parameters α and β, on the interval [0, 1].
 
 ### betaRegularized
 
@@ -49,6 +55,12 @@ Binomial distribution: number of successes in n independent trials, each with su
 MathJSON `CDF` · `(distribution, real | signed_infinity) -> nan | real<0..1>`
 
 Cumulative distribution function P(X ≤ x) of a distribution.
+
+### chiSquareDistribution
+
+MathJSON `ChiSquareDistribution` · `(real<0<..>) -> expression<ChiSquareDistribution>`
+
+Chi-square distribution with k degrees of freedom (k &gt; 0, not necessarily an integer).
 
 ### correlation
 
@@ -92,17 +104,35 @@ MathJSON `ExponentialDistribution` · `(real<0<..>) -> expression<ExponentialDis
 
 Exponential distribution with rate parameter λ.
 
+### fRatioDistribution
+
+MathJSON `FRatioDistribution` · `(real<0<..>, real<0<..>) -> expression<FRatioDistribution>`
+
+Snedecor's F distribution with d₁ degrees of freedom in the numerator and d₂ in the denominator.
+
 ### findFit
 
 MathJSON `FindFit` · `(any, any, any, any, dictionary?) -> dictionary`
 
 Nonlinear least-squares fit of a model to data. FindFit(data, model, params, vars): fit `model` (an expression in `vars` and the parameters) to `data`, a list of (x…, y) tuples or a plain list of y values. Each parameter spec is a bare symbol, (a, a0), or (a, a0, lo, hi) with box constraints. Returns a record &#123;parameters, converged, residualNorm, iterations&#125;. `converged` is true at a stationary point of the sum of squared residuals (a minimum of the misfit, which is not zero for noisy data), and at an exact fit: every residual within the engine's tolerance of the terms its own row computes. The joint form takes a list of models and matching datasets sharing parameters. An optional fifth argument is a dictionary of options: `{global: {b: [lo, hi]}}` searches the named parameters (at most two) over the given range for the lowest sum of squared residuals instead of returning the local minimum nearest the start; `iterations` is then the total over every solver run. The search samples each parameter on a grid: a parameter that scales the phase of a periodic function of a variable (`b` in `cos(b x + c)`) gets a point in every basin of the residual, about `π / (span of x)` apart; `{global: {b: [lo, hi, step]}}` sets the step of the grid instead (when the model is linear in the other parameters; otherwise the solver runs from each point of a coarse grid of 24 points, or 6 × 6). A step on the phase `c` of `a cos(b x + c)` keeps it on the grid; without a step the phase is solved by least squares. With more than 300 data rows the grid is scanned on a stratified sample of 300 rows, and the best grid points are then solved again and refined on every row. With a kernel pool on the engine (`ce.workers`), `evaluateAsync()` scans the grid on the workers and gives the record of `evaluate()`; the solver runs stay on the calling thread. The record of `evaluateAsync()` also has `route`: "pool" when the workers scanned the grid, or "calling-thread" with a `reason` ("no-pool", "pool-unusable", "no-global-search", "not-separable", "not-compilable", "pool-declined", "no-points-to-ship", "step-budget", "setup-timeout"). On the calling thread `evaluateAsync()` gives the event loop a turn about every 8 ms, and it keeps the limit of a `withTimeLimit` span that encloses the call.
 
+### gammaDistribution
+
+MathJSON `GammaDistribution` · `(real<0<..>, real<0<..>) -> expression<GammaDistribution>`
+
+Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x &gt; 0.
+
 ### gammaRegularized
 
 MathJSON `GammaRegularized` · `(complex | infinity, complex | infinity, (complex | infinity)?) -> number`
 
 Regularized upper incomplete gamma function Q(a, z) = Γ(a, z)/Γ(a); with three arguments, Q(a, z0) − Q(a, z1)
+
+### geometricDistribution
+
+MathJSON `GeometricDistribution` · `(real<0..1>) -> expression<GeometricDistribution>`
+
+Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 &lt; p ≤ 1). The support is &#123;0, 1, 2, …&#125;.
 
 ### histogram
 
@@ -114,6 +144,12 @@ Compute a histogram of the values in a collection. Returns a list of (bin start,
 histogram([1, 2, 2, 3], 3)
 // ➔ [(1, 1),(1.6666666666666665, 2),(2.333333333333333, 1)]
 ```
+
+### hypergeometricDistribution
+
+MathJSON `HypergeometricDistribution` · `(integer<0..>, integer<0..>, integer<0..>) -> expression<HypergeometricDistribution>`
+
+Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N).
 
 ### interquartileRange
 
@@ -160,6 +196,12 @@ Most frequently occurring value in a collection.
 mode([1, 2, 2, 3])
 // ➔ 2
 ```
+
+### negativeBinomialDistribution
+
+MathJSON `NegativeBinomialDistribution` · `(integer<1..>, real<0..1>) -> expression<NegativeBinomialDistribution>`
+
+Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 &lt; p ≤ 1). The support is &#123;0, 1, 2, …&#125;.
 
 ### normalDistribution
 
@@ -253,6 +295,12 @@ slidingWindow("abcd", 2)
 MathJSON `StandardDeviation` · `((collection<number> | distribution | number)+) -> nan | real<0..>`
 
 Sample Standard Deviation of a collection of numbers.
+
+### studentTDistribution
+
+MathJSON `StudentTDistribution` · `(real<0<..>) -> expression<StudentTDistribution>`
+
+Student's t distribution with ν degrees of freedom (ν &gt; 0, not necessarily an integer).
 
 ### uniformDistribution
 

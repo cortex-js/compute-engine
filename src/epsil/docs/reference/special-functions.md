@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Special functions
 
-The 19 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 24 definitions of the special functions library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -48,6 +48,18 @@ barnesG(5)
 N(barnesG(1/2))
 // ➔ 0.603244281209446206191
 ```
+
+### chebyshevT
+
+MathJSON `ChebyshevT` · `(degree: integer, complex) -> number`
+
+Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). T₋ₙ = Tₙ. Example: ChebyshevT(3, x) → 4x³ − 3x
+
+### chebyshevU
+
+MathJSON `ChebyshevU` · `(degree: integer, complex) -> number`
+
+Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. Example: ChebyshevU(2, x) → 4x² − 1
 
 ### clausenCl
 
@@ -102,6 +114,12 @@ MathJSON `ExpIntegralEi` · `(complex | infinity) -> number`
 
 Exponential integral Ei(x) = PV ∫_&#123;−∞&#125;^x eᵗ/t dt.
 
+### hermiteH
+
+MathJSON `HermiteH` · `(degree: integer, complex) -> number`
+
+Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. A negative degree stays unevaluated. Example: HermiteH(2, x) → 4x² − 2
+
 ### hypergeometric1F1
 
 MathJSON `Hypergeometric1F1` · `(complex | infinity, complex | infinity, complex | infinity) -> number`
@@ -119,6 +137,18 @@ Gauss hypergeometric function ₂F₁(a, b; c; z).
 MathJSON `JacobiTheta` · `(number, complex | infinity, complex | infinity, number?) -> number`
 
 Jacobi theta function θⱼ(z, τ), j ∈ &#123;1,2,3,4&#125;, nome q = e^&#123;iπτ&#125; (Fungrim convention).
+
+### laguerreL
+
+MathJSON `LaguerreL` · `(degree: integer, complex) -> number`
+
+Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. A negative degree stays unevaluated. Example: LaguerreL(2, x) → x²/2 − 2x + 1
+
+### legendreP
+
+MathJSON `LegendreP` · `(degree: integer, complex) -> number`
+
+Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. P₋ₙ = Pₙ₋₁. Example: LegendreP(2, x) → (3x² − 1)/2
 
 ### logBarnesG
 
