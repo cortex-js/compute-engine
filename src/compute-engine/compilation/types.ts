@@ -1278,7 +1278,9 @@ export type CompilationResult<
    * arguments of the function, in this order, and returns an array: the
    * value of the function, then the new value of each variable. A variable
    * that holds a list (`let L = [0, 0, 0]`) is an array of its elements,
-   * whose length can change at each call. A host that
+   * whose length can change at each call. A variable that holds a list of
+   * lists (`let g = [[0, 1], [1, 0]]`) is an array of arrays of its
+   * elements. A host that
    * runs the code without the engine (`load()`) gives the values and keeps
    * the new ones itself.
    *

@@ -916,6 +916,7 @@ function lowerOnce(
    *  two lengths not stated, `rowsElementLane()`), and the occurrence of a
    *  name that `wholeRows()` lowers, the only one that may read one. */
   const rowsParams = new Set<V>();
+  const rowsElements = new Map<V, 'integer' | 'real'>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1070,6 +1071,18 @@ function lowerOnce(
     return undefined;
   };
   const bound = (name: string) => lookup(name)?.binding.v;
+
+  /** `Lowering.rowsLaneOf()`. */
+  const rowsLaneOf = (e: Expression): 'integer' | 'real' | undefined => {
+    const v = isSymbol(e) ? bound(e.symbol) : undefined;
+    return (
+      (v === undefined ? undefined : rowsElements.get(v)) ??
+      rowsElementLane(
+        e.type.type,
+        options.mode === 'complex' ? 'complex' : 'real'
+      )
+    );
+  };
 
   const withFrame = <T>(loop: boolean, f: (frame: Frame) => T): T => {
     const frame: Frame = { names: new Map(), loop };
@@ -1932,9 +1945,10 @@ function lowerOnce(
         // an index is out of range of the list or of its row, as `At` of a
         // number.
         const outer = e.ops[0];
-        const lane = isFunction(outer, 'At')
-          ? rowsElementLane(outer.ops[0]?.type.type)
-          : undefined;
+        const lane =
+          isFunction(outer, 'At') && outer.ops[0] !== undefined
+            ? rowsLaneOf(outer.ops[0])
+            : undefined;
         if (
           lane !== undefined &&
           isFunction(outer, 'At') &&
@@ -2945,7 +2959,7 @@ function lowerOnce(
               );
             if (
               rowsElementLane(d.t) === 'integer' &&
-              rowsElementLane(a.type.type) !== 'integer'
+              rowsLaneOf(a) !== 'integer'
             )
               decline(
                 a,
@@ -4144,7 +4158,7 @@ function lowerOnce(
   const rowsInput = (
     t: Type
   ): { lane: Lane; shape: (number | 'run-time')[] } | undefined =>
-    options.javascript && !bigint && !interval && rowsElementLane(t)
+    options.javascript && !bigint && !interval && rowsElementLane(t, cx.wide)
       ? { lane: 'rows', shape: [] }
       : undefined;
 
@@ -6120,6 +6134,25 @@ function lowerOnce(
       return listWrite(e, owned, r.ops[1], () => scalar(r.ops[2]), false, want);
     }
     const binding = writable(e, name);
+    if (binding.grid !== undefined) {
+      // A list of lists of a variable of the engine (CE-1721), written by a
+      // statement of the body (`assignedNames()`): a list of rank 2 of
+      // numbers of its lane, which the entry returns.
+      const x = value(e.ops[1]);
+      const t = x === undefined ? undefined : type(x);
+      if (
+        t === undefined ||
+        t.shape.length !== 2 ||
+        tuples.has(x!) ||
+        !isSubLane(t.lane, binding.grid)
+      )
+        decline(
+          e,
+          `a value of type ${t === undefined ? 'nothing' : typeToString(t, tuples.get(x!) ?? -1)} written to a list of lists of ${binding.grid} elements`
+        );
+      binding.v = x!;
+      return binding.v;
+    }
     if (binding.whole !== undefined) {
       // A list local written whole (`wholeLocal()`).
       const r = e.ops[1];
@@ -6775,7 +6808,10 @@ function lowerOnce(
     wholeRows,
     rowsParams,
     rowLengths,
-    rowsElementLane,
+    rowsElementLane: (t) =>
+      rowsElementLane(t, options.mode === 'complex' ? 'complex' : 'real'),
+    rowsElements,
+    rowsLaneOf,
     apply,
     type,
     constant,
@@ -6959,12 +6995,18 @@ function lowerOnce(
    *  state that a call of the interpreter changes in the engine (CE-1620).
    *  Each one is a variable with a declared type of the lane `real`,
    *  `integer` or `boolean` (`inputType()`), or a list of that lane of no
-   *  stated length (`list<number>`, CE-1662), on the plain JavaScript
-   *  target; another one declines. A function that `f` calls and that
-   *  reads such a name declines (`free()`): it would read the value before
-   *  the call. */
+   *  stated length (`list<number>`, CE-1662), or a list of lists of
+   *  integers or reals of two lengths not stated (`list<list<number>>`,
+   *  CE-1721) that only an `Assign` that is a statement of the body
+   *  writes, on the plain JavaScript target; another one declines. A
+   *  function that `f` calls and that reads such a name declines
+   *  (`free()`): it would read the value before the call. */
   const assignedNames = (f: Fn): Assigned[] => {
     const out: Assigned[] = [];
+    // The statements of the body: the only places where a list of lists is
+    // written (`assign()`).
+    const body = f.ops[0];
+    const statements = isFunction(body, 'Block') ? body.ops : [body];
     // `bound`: the names that a parameter of a function literal or a
     // `Declare` of a `Block` around `x` binds.
     const visit = (x: Expression, bound: ReadonlySet<string>): void => {
@@ -6990,12 +7032,32 @@ function lowerOnce(
       const targets = isFunction(target, 'Tuple') ? target.ops : [target];
       for (const t of targets) {
         if (!isSymbol(t) || inner.has(t.symbol)) continue;
-        if (out.some((s) => s.name === t.symbol)) continue;
+        const why = (reason: string) =>
+          decline(x, `an assignment of ${t.symbol}, ${reason}`);
+        // A list of lists is written by an `Assign` of the name that is a
+        // statement of the body, so that its value after the body is that
+        // of the last such write, a list of rank 2.
+        const grid = (s: Assigned) => {
+          if (
+            s.rows &&
+            !(
+              x.operator === 'Assign' &&
+              x.ops[0] === t &&
+              statements.includes(x)
+            )
+          )
+            why(
+              'a list of lists, other than by an Assign that is a statement of the body'
+            );
+        };
+        const seen = out.find((s) => s.name === t.symbol);
+        if (seen !== undefined) {
+          grid(seen);
+          continue;
+        }
         const h = held(t.symbol);
         if (h === undefined || h.library) continue;
         const def = h.definition;
-        const why = (reason: string) =>
-          decline(x, `an assignment of ${t.symbol}, ${reason}`);
         if (!options.javascript || interval || bigint)
           why('a variable of the engine, on this target');
         if (def.isConstant) why('a constant');
@@ -7005,6 +7067,20 @@ function lowerOnce(
           why('a name with no value at the compilation, or an input');
         if (def.inferredType)
           why('whose type is inferred from its value: declare its type');
+        // A list of lists of two lengths not stated, of integers or reals
+        // (CE-1721): the host's rows, as an input of that type.
+        const rows = cx.rowsElementLane(def.type.type);
+        if (rows !== undefined) {
+          const s: Assigned = {
+            name: t.symbol,
+            definition: def,
+            lane: rows,
+            rows: true,
+          };
+          grid(s);
+          out.push(s);
+          continue;
+        }
         const ir = inputType(def.type.type);
         const list = ir?.shape.length === 1 && ir.shape[0] === 'run-time';
         const lane = ir?.shape.length === 0 || list ? ir!.lane : undefined;
@@ -7069,6 +7145,21 @@ function lowerOnce(
       // value of each name after it (`Program.assigns`). The stored value
       // is hidden while the body is lowered, so that no analysis reads it.
       for (const s of states) {
+        if (s.rows) {
+          // A list of lists: the host's array of arrays, read as an input
+          // of the lane `rows` until a statement of the body writes it
+          // (`assign()`).
+          b.positional += 1;
+          const v = b.param(s.name, { lane: 'rows', shape: [] });
+          rowsParams.add(v);
+          rowsElements.set(v, s.lane as 'integer' | 'real');
+          frames[0].names.set(s.name, {
+            v,
+            role: 'local',
+            grid: s.lane as 'integer' | 'real',
+          });
+          continue;
+        }
         if (s.list) {
           // A list of a run-time length, its length before it, held as a
           // list local that the body writes whole (`wholeLocal()`): each

@@ -240,12 +240,15 @@ export type HostCall = {
  *  the definition that the body reads and writes, and its lane. With
  *  `list`, a list of that lane of a length known at run time, which can
  *  change at each call: the entry takes its length, then the list, and
- *  returns the list. */
+ *  returns the list. With `rows`, a list of lists of elements of that lane
+ *  (CE-1721): the entry takes the host's array of arrays (the lane `rows`)
+ *  and returns the list of rank 2 that the body writes. */
 export type Assigned = {
   readonly name: string;
   readonly definition: BoxedValueDefinition;
   readonly lane: Lane;
   readonly list?: true;
+  readonly rows?: true;
 };
 
 /** A sign that the declared type of an input proves. */

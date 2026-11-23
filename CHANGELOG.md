@@ -64,6 +64,21 @@
 
 ### Improvements
 
+- **A function literal that updates a list of lists variable of the engine
+  compiles to JavaScript** (CE-1721), so the timer callback of the Game of
+  Life runs compiled: with `let g = map(i => map(j => …, Range(1, n)),
+  Range(1, n))` and `step(g: list) = map(i => map(j => …, Range(1, n)),
+  Range(1, n))`, the function `(t: real) => do { g = step(g) }` gave the
+  decline "an assignment of g, of type list<list<number>>". One tick of a
+  32 × 32 grid took about 1.7 s interpreted and takes about 1 ms compiled.
+  Each call of `run()` reads the grid in the engine and writes the new grid
+  back. Three changes make this compile: an input of type
+  `list<list<number>>` is read as a list of lists of reals (not in the
+  `complex` mode), a parameter of type `list` of a user function takes such
+  a list whole, and the variable can be written by an assignment that is a
+  statement of the body. A write in a branch or in a loop, and a second
+  write that reads the first, still fall back to the interpreter.
+
 - **A compiled function can flatten a list of lists that it receives as
   input** (CE-1734, #638). With `L: list<list<integer>>`,
   `compile(Length(Flatten(L)))` fell back to the interpreter, because an

@@ -269,7 +269,7 @@ export function matrixLowering(
    *  for another operand. */
   const flattenRows = (e: Fn): V | undefined => {
     const x = e.ops[0];
-    const lane = cx.rowsElementLane(x.type.type);
+    const lane = cx.rowsLaneOf(x);
     if (lane === undefined || !(isSymbol(x) || isFunction(x, 'At')))
       return undefined;
     const r = lists.chunks(x);

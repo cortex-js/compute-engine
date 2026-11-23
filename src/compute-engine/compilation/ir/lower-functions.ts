@@ -113,8 +113,24 @@ export function inputType(
  *  held whole on the lane `rows`: its rows can have different lengths, so
  *  the only reader of an element is `At(At(g, i), j)` (`rows.at`), and a
  *  call passes it whole to a parameter of such a type (README.md, "The
- *  rows lane"). */
-export function rowsElementLane(t: Type): 'integer' | 'real' | undefined {
+ *  rows lane"). An element of type `number` is a real, as the element of a
+ *  list input is (`inputType()`), except where `wide` is `complex`: the
+ *  host could pass a complex element there (CE-1721). */
+export function rowsElementLane(
+  t: Type,
+  wide: 'real' | 'complex' = 'real'
+): 'integer' | 'real' | undefined {
+  const x = rowsElement(t);
+  if (x === undefined || x === 'never' || x === 'unknown' || x === 'any')
+    return undefined;
+  if (x === 'number') return wide === 'real' ? 'real' : undefined;
+  if (isSubtype(x, 'integer')) return 'integer';
+  return isSubtype(x, 'real') ? 'real' : undefined;
+}
+
+/** The type of the elements of a list of lists of two lengths not stated,
+ *  or `undefined`. */
+function rowsElement(t: Type): Type | undefined {
   const free = (x: Type): x is ListType =>
     typeof x === 'object' &&
     x.kind === 'list' &&
@@ -122,11 +138,7 @@ export function rowsElementLane(t: Type): 'integer' | 'real' | undefined {
   t = present(t);
   if (!free(t)) return undefined;
   const inner = present(t.elements);
-  if (!free(inner)) return undefined;
-  const x = present(inner.elements);
-  if (x === 'never' || x === 'unknown' || x === 'any') return undefined;
-  if (isSubtype(x, 'integer')) return 'integer';
-  return isSubtype(x, 'real') ? 'real' : undefined;
+  return free(inner) ? present(inner.elements) : undefined;
 }
 
 /** The tuple types of `t`: a tuple, or a union of tuples. */
@@ -215,7 +227,7 @@ export function tupleParts(
       members.map((m) => {
         const x = m.elements[j].type;
         if (x === 'unknown') return undefined;
-        const rows = rowsElementLane(x);
+        const rows = rowsElementLane(x, wide);
         if (rows !== undefined) return `rows ${rows}`;
         const ir = inputType(x, wide, true);
         if (ir?.shape.length === 0) return ir.lane;
@@ -394,7 +406,7 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
     const t =
       typeof d === 'object' && d.kind === 'broadcastable' ? d.elements : d;
     // A list of lists of two lengths not stated: the host's rows, whole.
-    const element = rowsElementLane(t);
+    const element = rowsElementLane(t, wide);
     if (element !== undefined)
       return { lane: 'rows' as const, shape: [], element };
     const list = tupleOrInputType(t);
@@ -479,7 +491,16 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   const shaped = list === undefined && r ? openList(r) : undefined;
   // A list of lists of two lengths not stated (`list<list<integer>>`): the
   // body settles both lengths (a list of rank 2, not of the lane `rows`).
-  const grid = r === undefined ? undefined : rowsElementLane(r);
+  // Of elements of type `any` (`list<list<any>>`, the type that the engine
+  // gives a body whose elements read a parameter `g: list`), the body
+  // settles their lane too: a real or an integer (CE-1721). An element of
+  // no stated type (`unknown`, a body over an untyped parameter) is not
+  // such a list: its shape is not settled.
+  const grid =
+    r === undefined
+      ? undefined
+      : (rowsElementLane(r, wide) ??
+        (rowsElement(r) === 'any' ? 'real' : undefined));
   // Where the interpreter maps a call over a list argument: the signature
   // of the binding, or of the literal for a name declared `function`.
   const mapsAt = listMapsAt(signature ?? literal.type.type);
@@ -747,6 +768,15 @@ export function functionLowering(
       // or a scalar for a parameter of no stated type.
       const v = args?.[i];
       const t = v === undefined ? undefined : type(v);
+      // A list of lists of two lengths not stated, bound whole (`rowsAt()`):
+      // the parameter is of the lane `rows`, of the lane of the elements of
+      // the argument of the first call.
+      if (t?.lane === 'rows' && rowsAt(sig, i, e.ops[i]))
+        return {
+          lane: 'rows' as const,
+          shape: [],
+          element: cx.rowsLaneOf(e.ops[i])!,
+        };
       if (
         cx.tuples.get(v!) === 0 &&
         t?.shape.length === 1 &&
@@ -806,6 +836,8 @@ export function functionLowering(
       const v = param(ir, names[i], { lane: t.lane, shape });
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       if (t.lane === 'rows') cx.rowsParams.add(v);
+      if ('element' in t && t.element !== undefined)
+        cx.rowsElements.set(v, t.element);
       return v;
     });
     const fn: UserFunction = {
@@ -1057,6 +1089,27 @@ export function functionLowering(
   const argument = (op: Expression, lane: Lane | undefined): V =>
     lane === 'rows' ? cx.wholeRows(op) : cx.value(op)!;
 
+  /** Whether the parameter `i` of `sig`, of a type that states no lane
+   *  (`list`, no stated type: `point`), takes the argument `op` of a list
+   *  of lists of two lengths not stated whole, as a parameter of the lane
+   *  `rows` does (CE-1721): the type of `op` is within the declared type
+   *  and the interpreter binds it whole (`listMapsAt()`). */
+  const rowsAt = (
+    sig: ReturnType<typeof signatureTypes>,
+    i: number,
+    op: Expression
+  ): boolean => {
+    const p = sig.params[i];
+    if (p === undefined || !('point' in p) || p.point === undefined)
+      return false;
+    const t = op.type.type;
+    return (
+      !sig.mapsAt(i, false) &&
+      cx.rowsLaneOf(op) !== undefined &&
+      (p.point === 'unknown' || isSubtype(t, p.point))
+    );
+  };
+
   /** A call of the user function that the head of `e` resolves to, or of
    *  the function of that name being lowered; with `given`, of the values
    *  of its arguments, already lowered. `nanForAbsent`: every reader of
@@ -1098,7 +1151,9 @@ export function functionLowering(
                   ('point' in p && p.point !== undefined)))
           ))
       )
-        early = e.ops.map((op, i) => argument(op, sig.params[i]?.lane));
+        early = e.ops.map((op, i) =>
+          argument(op, rowsAt(sig, i, op) ? 'rows' : sig.params[i]?.lane)
+        );
       // A list of points there: the call maps, one point per call, each
       // other argument as at any mapped call (`mapOver()`).
       const lowered = early;
@@ -1206,7 +1261,7 @@ export function functionLowering(
       if (
         p.lane === 'rows' &&
         p.element === 'integer' &&
-        rowsElementLane(op.type.type) !== 'integer'
+        cx.rowsLaneOf(op) !== 'integer'
       )
         decline(
           op,

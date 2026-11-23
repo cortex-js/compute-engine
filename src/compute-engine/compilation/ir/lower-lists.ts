@@ -2061,8 +2061,7 @@ export function listLowering(cx: Lowering) {
       isSymbol(e.ops[0]) &&
       typeof e.ops[0].type.type === 'object' &&
       e.ops[0].type.type.kind === 'tuple';
-    const lane =
-      isSymbol(e) || part ? cx.rowsElementLane(e.type.type) : undefined;
+    const lane = isSymbol(e) || part ? cx.rowsLaneOf(e) : undefined;
     if (lane !== undefined && !cx.interval) {
       const g = cx.wholeRows(e);
       if (type(g).lane !== 'rows') return undefined;

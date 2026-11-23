@@ -205,9 +205,11 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       const r = js(ce, ['Map', F2, ['Range', 1, 'N'], 'S']);
       expect(r.success).toBe(false);
       // A list of strings is admitted as an input (CE-1548): it declines at
-      // the first operation that reads its elements as numbers.
+      // the first operation that reads its elements as numbers. A list of
+      // lists of numbers is the host's rows (CE-1721), which `Map` does not
+      // read element by element.
       expect(r.diagnostic?.message).toMatch(
-        /the input S of type|Add of integer, string/
+        /the input S of type|Add of integer, string|a list of lists of run-time length/
       );
     }
   );

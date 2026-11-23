@@ -890,7 +890,18 @@ read by name, a positional parameter of a root function literal, a parameter of
 a user function of that type, such an input that a user function reads
 (`capture()`, #638), a part of a tuple input read part by part (above), and a
 typed parameter of `Apply`, which binds its argument whole as a parameter of a
-user function does. It is the host's array of arrays, whose rows can have
+user function does. An element type `number` is a real, except in the mode
+`complex` (`rowsElementLane()` with `wide`). A parameter of a user function
+whose type states no lane (`g: list`, or no type: `point` of
+`signatureTypes()`) is of the lane when the argument of its first call is
+(`rowsAt()` of `lower-functions.ts`, where the interpreter binds the argument
+whole), with the lane of the elements of that argument; such a name has no
+type of rows, so the readers below take the lane of its elements from the
+parameter it binds (`rowsLaneOf()`, `rowsElements`), and a result of type
+`list<list<any>>` that such a body gives is a list of rank 2 of reals or
+integers (`grid` of `signatureTypes()`) (CE-1721). A variable of the engine of
+that type that a root function literal assigns is a positional parameter of the
+lane (`assignedNames()`, `Program.assigns`). It is the host's array of arrays, whose rows can have
 different lengths, and it is read in five ways: the element `At(At(g, i), j)`
 (`rows.at`, `rows.at.int` on the lane of the elements; `_atr` of the JavaScript
 printer, NaN where `i` is out of range of `g` or `j` of its row, from the end
@@ -3630,7 +3641,12 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   of a declared type of the lane `real`, `integer` or `boolean`, the name is a
   local whose value is a positional parameter after the arguments (a list of
   such values of no stated length, CE-1662: its length and the list, bound as a
-  list local written whole, `wholeLocal()`, whose length a write can change),
+  list local written whole, `wholeLocal()`, whose length a write can change;
+  a list of lists of two lengths not stated, CE-1721: the host's array of
+  arrays of the lane `rows`, bound as a local of the lane of its elements
+  (`Binding.grid`) that only an `Assign` that is a statement of the body
+  writes, with a list of rank 2 of that lane, which the entry returns and
+  `run()` writes back as a `List` of `List`s),
   its stored value is hidden while the body is lowered
   (`withVarsValuesHidden()`), and the entry returns the array of the value of
   the body (NaN for a body that ends in an assignment) and the value of each

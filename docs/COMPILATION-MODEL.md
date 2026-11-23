@@ -1646,7 +1646,24 @@ the body settles: with `n = 32`,
 `step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`
 compiles as `(g: list<list<integer>>) ↦ step(g)` and as `step(G)` with `G`
 declared `list<list<integer>>`, and `run()` returns an array of 32 arrays of
-32 numbers. Its result is not such an input: `step(step(g))` declines. Two lists of
+32 numbers. Its result is not such an input: `step(step(g))` declines. An
+element type `number` is read as `real` (`list<list<number>>`, the type of
+`let g = map(i ↦ map(j ↦ Mod(i + j, 2), Range(1, n)), Range(1, n))`), except in
+the mode `complex`, where such an input declines. A parameter of a user function
+declared `list`, or of no declared type, takes such a list whole where the
+interpreter binds it whole, and reads it in the same ways (CE-1721):
+`count(g: list, i: integer, j: integer) = g[i][j]` and
+`step(g: list) = map(i ↦ map(j ↦ 1 - count(g, i, j), Range(1, n)), Range(1, n))`
+compile in `(g: list<list<number>>) ↦ step(g)`. A root function literal that
+assigns a variable of the engine of such a type compiles too (the grid of the
+Game of Life in a timer callback, `(t: real) ↦ do { g = step(g) }`): the code
+takes the host's array of arrays after the arguments, a statement of the body
+writes a list of rank 2, and `run()` writes it back to the engine as a `List` of
+`List`s. A write of the variable in a branch, in a loop or in a function
+literal, an `AddTo` of it, and a write of a value that is not a list of rank 2
+of numbers of its element type decline; after the write the name holds that
+list of rank 2, not such an input, so a second write `g = step(g)` declines.
+Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with
 `L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
