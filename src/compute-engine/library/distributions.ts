@@ -1493,10 +1493,7 @@ function distributionPDF(
       // x^(k/2 − 1)·e^(−x/2) / (2^(k/2)·Γ(k/2)) for x > 0.
       const [k] = distOps(dist);
       const density = div(
-        mul([
-          pow(x, sub(half(k), ce.One)),
-          fn('Exp', [neg(half(x))]),
-        ]),
+        mul([pow(x, sub(half(k), ce.One)), fn('Exp', [neg(half(x))])]),
         mul([pow(ce.number(2), half(k)), fn('Gamma', [half(k)])])
       );
       return onPositiveHalfLine(ce, x, density, numericApproximation);
@@ -1520,10 +1517,7 @@ function distributionPDF(
         mul([
           pow(div(d1, d2), half(d1)),
           pow(x, sub(half(d1), ce.One)),
-          pow(
-            add([ce.One, div(mul([d1, x]), d2)]),
-            neg(half(add([d1, d2])))
-          ),
+          pow(add([ce.One, div(mul([d1, x]), d2)]), neg(half(add([d1, d2])))),
         ]),
         fn('Beta', [half(d1), half(d2)])
       );
@@ -1563,12 +1557,15 @@ function distributionPDF(
       // would read `0^0` there, which the engine leaves as `NaN`.
       if (isNumber(p) && p.isSame(1)) {
         if (isFiniteRealLiteral(k)) return k.is(0) ? ce.One : ce.Zero;
-        return fn('Which', [fn('Equal', [k, ce.Zero]), ce.One, ce.True, ce.Zero]);
+        return fn('Which', [
+          fn('Equal', [k, ce.Zero]),
+          ce.One,
+          ce.True,
+          ce.Zero,
+        ]);
       }
       const closed = mul([
-        n.isSame(1)
-          ? ce.One
-          : fn('Binomial', [add([n, k, ce.NegativeOne]), k]),
+        n.isSame(1) ? ce.One : fn('Binomial', [add([n, k, ce.NegativeOne]), k]),
         pow(p, n),
         pow(sub(ce.One, p), k),
       ]);
@@ -2161,7 +2158,11 @@ function distributionQuantile(
         const pr = asRational(p);
         if (!p0r || !pr) return undefined;
         const k = geometric
-          ? geometricQuantileExact(bigRational(p0r), bigRational(pr), ce._deadline)
+          ? geometricQuantileExact(
+              bigRational(p0r),
+              bigRational(pr),
+              ce._deadline
+            )
           : negativeBinomialQuantileExact(
               nn,
               bigRational(p0r),
@@ -2484,10 +2485,7 @@ function distributionMeanExact(
         dist.operator === 'GeometricDistribution'
           ? [ce.One, distOps(dist)[0]]
           : distOps(dist);
-      return div(
-        mul([n, ce.function('Subtract', [ce.One, p])]),
-        p
-      ).evaluate();
+      return div(mul([n, ce.function('Subtract', [ce.One, p])]), p).evaluate();
     }
     case 'HypergeometricDistribution': {
       // nK/N; N = 0 forces n = K = 0, and the count is 0.

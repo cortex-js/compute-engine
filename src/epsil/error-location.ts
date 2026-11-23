@@ -898,10 +898,7 @@ function frameCalls(
 
 /** Whether `name` is `Negate` and `call` is a written subtraction, the call
  * of a `Negate` frame that {@link isWrittenCallOf} adds. */
-function isSubtractForNegate(
-  call: MathJsonExpression,
-  name: string
-): boolean {
+function isSubtractForNegate(call: MathJsonExpression, name: string): boolean {
   return name === 'Negate' && operator(call) === 'Subtract';
 }
 

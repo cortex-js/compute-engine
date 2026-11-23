@@ -23,11 +23,7 @@ import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 export type OrthogonalPolynomial =
-  | 'ChebyshevT'
-  | 'ChebyshevU'
-  | 'LegendreP'
-  | 'HermiteH'
-  | 'LaguerreL';
+  'ChebyshevT' | 'ChebyshevU' | 'LegendreP' | 'HermiteH' | 'LaguerreL';
 
 /** The largest |degree| that the numeric kernels compute: past it they
  *  return NaN (the interpreter leaves the call unevaluated), so that a
@@ -142,7 +138,10 @@ export function orthogonalPolynomialComplex(
           .div(k + 1);
         break;
       case 'HermiteH':
-        p2 = z.mul(2).mul(p1).sub(p0.mul(2 * k));
+        p2 = z
+          .mul(2)
+          .mul(p1)
+          .sub(p0.mul(2 * k));
         break;
       case 'LaguerreL':
         p2 = new Complex(2 * k + 1)

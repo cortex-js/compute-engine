@@ -13732,8 +13732,7 @@ function replaceTopDown(expr: Expression, rules: Rule[]): Expression {
 
 /** A rule of `ReplaceAll`: a rule for a name, or a pattern rule. */
 type ReplaceAllRule =
-  | { symbol: string }
-  | { rule: { match: Expression; replace: Expression } };
+  { symbol: string } | { rule: { match: Expression; replace: Expression } };
 
 /**
  * `ReplaceAll` with rules for names and pattern rules: the rules are applied
@@ -13766,7 +13765,9 @@ function replaceAllMixed(
   // `hit` is `true` when a pattern rule replaced a part of `expr`: `expr` is
   // then the rebuilt part, with `subs()` applied to its other parts.
   // `null` when a rebuilt part is not a node that `subs()` distributes over.
-  const walk = (expr: Expression): { expr: Expression; hit: boolean } | null => {
+  const walk = (
+    expr: Expression
+  ): { expr: Expression; hit: boolean } | null => {
     for (const r of rules) {
       // A rule for a name: `subs()` replaces this part.
       if ('symbol' in r) {
@@ -13788,11 +13789,7 @@ function replaceAllMixed(
     // node gives. A node that binds a name of a rule (`Sum`, `Function`, a
     // set builder), or that `subs()` renames to avoid a capture, fails.
     const separate = expr.ops.map((op) => op.subs(substitution));
-    if (
-      !expr
-        .subs(substitution)
-        .isSame(ce.function(expr.operator, separate))
-    )
+    if (!expr.subs(substitution).isSame(ce.function(expr.operator, separate)))
       return null;
     const ops = parts.map((x, i) => (x.hit ? x.expr : separate[i]));
     return { expr: ce.function(expr.operator, ops), hit: true };

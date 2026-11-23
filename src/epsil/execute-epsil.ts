@@ -484,8 +484,7 @@ export async function applyEpsilAsync(
       if (isDebugHookFailure(failure.error)) throw failure.error;
       value = applicationFailureValue(ce, failure.error);
     }
-    if (value!.isLazyCollection)
-      value = listedFinalValue(ce, value!, runFrame);
+    if (value!.isLazyCollection) value = listedFinalValue(ce, value!, runFrame);
     return { value: value!, diagnostics: [] };
   } finally {
     ce._deadlineFrame = outsideFrame;

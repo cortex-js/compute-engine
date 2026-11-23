@@ -580,8 +580,7 @@ export function hypergeometricQuantile(
   // Smallest weights first, so that the sum keeps them.
   let total = 0;
   for (let j = 0; j < below.length; j++) total += weights[j];
-  for (let j = weights.length - 1; j >= below.length; j--)
-    total += weights[j];
+  for (let j = weights.length - 1; j >= below.length; j--) total += weights[j];
   // A weight `d` steps from the mode is a product of `d` ratios, each with
   // about 4 roundings: the tolerance grows with `d`.
   const tolerance = (i: number): number =>
@@ -602,8 +601,7 @@ export function hypergeometricQuantile(
   let j = weights.length - 1;
   while (
     j > 0 &&
-    tail + weights[j] <=
-      total * upperTailTarget(prob, tolerance(first + j - 1))
+    tail + weights[j] <= total * upperTailTarget(prob, tolerance(first + j - 1))
   ) {
     tail += weights[j];
     j -= 1;
@@ -652,12 +650,7 @@ export function negativeBinomialQuantileExact(
   if (b <= 0n || a <= 0n || a > b || d <= 0n || c <= 0n || c >= d)
     return undefined;
   if (a === b) return 0;
-  const start = negativeBinomialQuantile(
-    n,
-    ratio(a, b),
-    ratio(c, d),
-    deadline
-  );
+  const start = negativeBinomialQuantile(n, ratio(a, b), ratio(c, d), deadline);
   if (!Number.isFinite(start)) return undefined;
   const bits = b.toString(2).length;
   if ((n + start + 64) * bits > EXACT_BINOMIAL_MAX_BITS) return undefined;

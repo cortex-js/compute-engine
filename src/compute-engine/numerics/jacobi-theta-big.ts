@@ -108,7 +108,8 @@ function thetaAt(
   const s = (n: number) => (half ? (n + 0.5) * (n + 0.5) : n * n);
   const k = (n: number) => (half ? 2 * n + 1 : 2 * n);
   // cosh(t) ≤ e^{|t|}: the bound is within a factor 2 of the largest part
-  const logBound = (n: number) => -Math.PI * bNum * s(n) + k(n) * Math.PI * yNum;
+  const logBound = (n: number) =>
+    -Math.PI * bNum * s(n) + k(n) * Math.PI * yNum;
 
   let re = BigDecimal.ZERO;
   let im = BigDecimal.ZERO;
