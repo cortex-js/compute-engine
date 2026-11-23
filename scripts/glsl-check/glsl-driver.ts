@@ -140,40 +140,57 @@ window.glslCheck = (() => {
       );
       const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       gl.viewport(0, 0, 1, 1);
+      // Each distinct source is compiled and linked once, and its program
+      // draws every item of that source: the items of a case usually differ
+      // only in their uniforms, and the compile is most of the time of a
+      // draw (SwiftShader). A program keeps no value of one item for the
+      // next: each item sets every active uniform (a missing one is an
+      // error below) and its own textures.
+      const programs = new Map();
+      const programOf = (source) => {
+        let entry = programs.get(source);
+        if (entry) return entry;
+        const shader = make('fragment', source);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          entry = { log: gl.getShaderInfoLog(shader) || '' };
+          gl.deleteShader(shader);
+        } else {
+          const program = gl.createProgram();
+          gl.attachShader(program, vertex);
+          gl.attachShader(program, shader);
+          gl.linkProgram(program);
+          if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            entry = { log: gl.getProgramInfoLog(program) || '' };
+            gl.deleteProgram(program);
+            gl.deleteShader(shader);
+          } else {
+            // The name of an active array uniform ends with \`[0]\`.
+            const active = [];
+            const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+            for (let i = 0; i < count; i++)
+              active.push(
+                gl.getActiveUniform(program, i).name.replace(/\\[0\\]$/, '')
+              );
+            entry = { program, shader, active };
+          }
+        }
+        programs.set(source, entry);
+        return entry;
+      };
       const results = items.map(({ name, source, uniforms, textures = {} }) => {
         if (status !== gl.FRAMEBUFFER_COMPLETE)
           return { name, ok: false, log: 'framebuffer status ' + status };
-        const shader = make('fragment', source);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-          const log = gl.getShaderInfoLog(shader) || '';
-          gl.deleteShader(shader);
-          return { name, ok: false, log };
-        }
-        const program = gl.createProgram();
-        gl.attachShader(program, vertex);
-        gl.attachShader(program, shader);
-        gl.linkProgram(program);
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-          const log = gl.getProgramInfoLog(program) || '';
-          gl.deleteProgram(program);
-          gl.deleteShader(shader);
-          return { name, ok: false, log };
-        }
+        const entry = programOf(source);
+        if (entry.program === undefined) return { name, ok: false, log: entry.log };
+        const { program, active } = entry;
         // Each active uniform of the program must be a key of
         // \`uniforms\`: a uniform with no value reads as 0. A key with no
-        // active uniform is skipped and reported in \`inactive\`. The name of
-        // an active array uniform ends with \`[0]\`.
-        const active = [];
-        const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
-        for (let i = 0; i < count; i++)
-          active.push(gl.getActiveUniform(program, i).name.replace(/\\[0\\]$/, ''));
+        // active uniform is skipped and reported in \`inactive\`.
         const missing = active.filter(
           (u) => !Object.hasOwn(uniforms, u) && !Object.hasOwn(textures, u)
         );
         const inactive = Object.keys(uniforms).filter((u) => !active.includes(u));
         if (missing.length > 0) {
-          gl.deleteProgram(program);
-          gl.deleteShader(shader);
           return {
             name,
             ok: false,
@@ -207,8 +224,6 @@ window.glslCheck = (() => {
         const uniformError = gl.getError();
         if (uniformError !== gl.NO_ERROR) {
           made.forEach((tex) => gl.deleteTexture(tex));
-          gl.deleteProgram(program);
-          gl.deleteShader(shader);
           return {
             name,
             ok: false,
@@ -222,12 +237,16 @@ window.glslCheck = (() => {
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixel);
         const error = gl.getError();
         made.forEach((tex) => gl.deleteTexture(tex));
-        gl.deleteProgram(program);
-        gl.deleteShader(shader);
         if (error !== gl.NO_ERROR)
           return { name, ok: false, log: 'WebGL error ' + error };
         return { name, ok: true, value: encode(pixel[0]), inactive };
       });
+      gl.useProgram(null);
+      for (const { program, shader } of programs.values()) {
+        if (program === undefined) continue;
+        gl.deleteProgram(program);
+        gl.deleteShader(shader);
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(framebuffer);
       gl.deleteTexture(texture);
