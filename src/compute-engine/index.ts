@@ -1781,7 +1781,7 @@ export class ComputeEngine implements IComputeEngine {
       // `CDF`/`Mean`(distribution)… would reject their distribution argument.
       this.declareType(
         'distribution',
-        'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
+        'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution> | expression<StudentTDistribution> | expression<ChiSquareDistribution> | expression<FRatioDistribution> | expression<GammaDistribution> | expression<BetaDistribution> | expression<GeometricDistribution> | expression<NegativeBinomialDistribution> | expression<HypergeometricDistribution>',
         { alias: true }
       );
     });

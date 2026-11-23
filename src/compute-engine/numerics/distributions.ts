@@ -1,5 +1,10 @@
 import { checkDeadline } from '../../common/interruptible.js';
-import { betaRegularized, erfInv, gammaQ } from './special-functions.js';
+import {
+  betaRegularized,
+  erfInv,
+  gammaP,
+  gammaQ,
+} from './special-functions.js';
 import type { Rational } from './types.js';
 
 //
@@ -269,4 +274,591 @@ export function poissonQuantileExact(
   if (!Number.isFinite(start))
     start = Math.ceil(lambda + 10 * Math.sqrt(lambda) + 40);
   return stepToQuantile(atLeast, start, Infinity, deadline);
+}
+
+//
+// Quantiles of the distributions with no closed-form quantile (CE-1590).
+//
+
+/**
+ * The `x` in `(0, upper)` (`upper` is `+∞` or `1`) with `f(x) = target`,
+ * for a monotone `f` (increasing, a CDF, or decreasing, an upper tail
+ * `1 − CDF`), by bisection to adjacent doubles. `NaN` when `target` is not in
+ * `(0, 1)`, when `f` gives `NaN` or when no bracket is found.
+ *
+ * A caller passes the upper tail for a probability above `½`, so that the
+ * target keeps its relative precision where the CDF is close to 1.
+ *
+ * Bisection rather than Newton: it needs no density and cannot leave the
+ * bracket, and each step costs one kernel call (at most about 2,200 steps,
+ * for a root in the subnormal range). The bisection is geometric while the
+ * bracket spans more than a factor of 4, so a root far from 1 (`10^−100`)
+ * is found in a few hundred steps.
+ */
+export function solveMonotone(
+  f: (x: number) => number,
+  target: number,
+  increasing: boolean,
+  upper: number,
+  deadline?: number
+): number {
+  if (!(target > 0 && target < 1)) return NaN;
+  // `true` when the root is above `x`, `undefined` for a NaN kernel.
+  const isBelow = (x: number): boolean | undefined => {
+    const v = f(x);
+    if (Number.isNaN(v)) return undefined;
+    return increasing ? v < target : v > target;
+  };
+  let lo = 0;
+  let hi = Number.isFinite(upper) ? upper : 1;
+  if (!Number.isFinite(upper)) {
+    // Double `hi` until the quantile is at or below it.
+    for (;;) {
+      const b = isBelow(hi);
+      if (b === undefined) return NaN;
+      if (!b) break;
+      lo = hi;
+      hi *= 2;
+      if (!Number.isFinite(hi)) return NaN;
+    }
+  }
+  if (lo === 0) {
+    // Halve down from `hi` to a positive lower end, so that the bisection
+    // below can be geometric.
+    for (let x = hi / 2; x > 1e-300; x /= 2) {
+      const b = isBelow(x);
+      if (b === undefined) return NaN;
+      if (b) {
+        lo = x;
+        break;
+      }
+      hi = x;
+    }
+  }
+  for (let i = 0; i < 2200; i++) {
+    const mid = lo > 0 && hi / lo > 4 ? Math.sqrt(lo * hi) : lo + (hi - lo) / 2;
+    if (mid <= lo || mid >= hi) break;
+    const b = isBelow(mid);
+    if (b === undefined) return NaN;
+    if (b) lo = mid;
+    else hi = mid;
+    if ((i & 0xff) === 0xff) checkDeadline(deadline);
+  }
+  return hi;
+}
+
+/**
+ * The least integer `k` in `[kMin, kMax]` with `atLeast(k)` true, for a
+ * monotone `atLeast` with `atLeast(kMax)` true (`kMax` may be `+∞`): a
+ * doubling search from `seed` for a bracket, then a binary search. `NaN`
+ * when no `k` below `2^53` is found.
+ */
+function leastIntegerWith(
+  atLeast: (k: number) => boolean,
+  seed: number,
+  kMin: number,
+  kMax: number,
+  deadline?: number
+): number {
+  let k = Math.round(seed);
+  if (!Number.isFinite(k)) k = kMin;
+  k = Math.min(Math.max(k, kMin), kMax);
+  // Above 2^53 the doubles are not consecutive integers, and the binary
+  // search below could not advance.
+  if (k > Number.MAX_SAFE_INTEGER) return NaN;
+  let lo: number;
+  let hi: number;
+  if (atLeast(k)) {
+    // Bracket below: `lo` fails, `hi` holds.
+    hi = k;
+    let step = 1;
+    lo = k - step;
+    while (lo >= kMin && atLeast(lo)) {
+      hi = lo;
+      step *= 2;
+      lo = hi - step;
+      checkDeadline(deadline);
+    }
+    if (lo < kMin) {
+      if (atLeast(kMin)) return kMin;
+      lo = kMin;
+    }
+  } else {
+    lo = k;
+    let step = 1;
+    hi = k + step;
+    while (hi < kMax && !atLeast(hi)) {
+      lo = hi;
+      step *= 2;
+      hi = lo + step;
+      if (hi > Number.MAX_SAFE_INTEGER) return NaN;
+      checkDeadline(deadline);
+    }
+    if (hi >= kMax) hi = kMax;
+  }
+  // Invariant: `atLeast(lo)` is false and `atLeast(hi)` is true.
+  while (hi - lo > 1) {
+    const mid = Math.floor(lo + (hi - lo) / 2);
+    if (mid <= lo || mid >= hi) return NaN;
+    if (atLeast(mid)) hi = mid;
+    else lo = mid;
+    checkDeadline(deadline);
+  }
+  return hi;
+}
+
+/**
+ * The RELATIVE tolerance of the float discrete searches below: a `p` that
+ * is itself a CDF value can be recomputed a few ulps above the machine CDF,
+ * which would otherwise overshoot by one. The target is `p·(1 − tolerance)`.
+ * It is relative, not the absolute `1e-12` of `discreteQuantile`, because
+ * with a small success probability the masses are small: Geometric(10^−15)
+ * has masses of about 10^−15, and `p − 10^−12` is then a thousand support
+ * points below the quantile. With `8ε` the shift there is a few points, as
+ * near the resolution of a double CDF at 0.5 as a round trip allows.
+ */
+const DISCRETE_QUANTILE_TOLERANCE = 8 * Number.EPSILON;
+
+/**
+ * `P(X ≤ k) = 1 − (1 − p)^(k+1)` of Geometric(p), for an integer `k ≥ 0`,
+ * written so that it keeps its relative precision for a small `p` or a
+ * small `k`: the plain difference cancels there, and the incomplete-beta
+ * form `I_p(1, k + 1)` loses about 10^−12 at `k + 1 ≈ 5·10^9`.
+ */
+export function geometricCDF(p: number, k: number): number {
+  return -Math.expm1((k + 1) * Math.log1p(-p));
+}
+
+/**
+ * Quantile of Geometric(p) (the number of failures before the first
+ * success) at probability `prob`. `CDF(k) = 1 − (1 − p)^(k+1)`.
+ */
+export function geometricQuantile(
+  p: number,
+  prob: number,
+  deadline?: number
+): number {
+  if (prob <= 0 || p >= 1) return 0;
+  if (prob >= 1) return Infinity;
+  const seed = Math.ceil(Math.log1p(-prob) / Math.log1p(-p)) - 1;
+  return leastIntegerWith(
+    discreteQuantileTest(
+      prob,
+      (k) => geometricCDF(p, k),
+      // P(X > k) = (1 − p)^(k+1)
+      (k) => Math.exp((k + 1) * Math.log1p(-p))
+    ),
+    seed,
+    0,
+    Infinity,
+    deadline
+  );
+}
+
+/**
+ * The test `CDF(k) ≥ prob` of a float discrete quantile search, with the
+ * tolerance `DISCRETE_QUANTILE_TOLERANCE` relative to the tail that holds
+ * `prob`: for `prob > ½` it is `P(X > k) ≤ 1 − prob` on the upper tail
+ * `sf`. A relative tolerance on `prob` itself is an absolute shift of about
+ * `2·10^−15` near 1, where the masses can be smaller than that
+ * (`Quantile(GeometricDistribution(0.3), 0.9999999999999991)` stopped 3
+ * points short).
+ */
+function discreteQuantileTest(
+  prob: number,
+  cdf: (k: number) => number,
+  sf: (k: number) => number
+): (k: number) => boolean {
+  if (prob <= 0.5) {
+    const target = prob * (1 - DISCRETE_QUANTILE_TOLERANCE);
+    return (k) => cdf(k) >= target;
+  }
+  const target = upperTailTarget(prob, DISCRETE_QUANTILE_TOLERANCE);
+  return (k) => sf(k) <= target;
+}
+
+/**
+ * The largest upper tail `P(X > k)` that still counts as reaching `prob`,
+ * for `prob > ½`: `1 − prob` (exact, Sterbenz) with the relative
+ * `tolerance`, and 2 ulps of `prob` more. A `prob` that is a CDF value is
+ * that value rounded to a double, which moves `1 − prob` by up to half an
+ * ulp; without the absolute term `Quantile(CDF(k))` gave `k + 1` near 1.
+ */
+function upperTailTarget(prob: number, tolerance: number): number {
+  return (1 - prob) * (1 + tolerance) + Number.EPSILON;
+}
+
+/**
+ * Quantile of NegativeBinomial(n, p) (the number of failures before the
+ * `n`-th success) at probability `prob`. `CDF(k) = I_p(n, k + 1)`.
+ */
+export function negativeBinomialQuantile(
+  n: number,
+  p: number,
+  prob: number,
+  deadline?: number
+): number {
+  if (prob <= 0 || p >= 1) return 0;
+  if (prob >= 1) return Infinity;
+  const mean = (n * (1 - p)) / p;
+  const stddev = Math.sqrt(n * (1 - p)) / p;
+  const seed = mean + Math.SQRT2 * erfInv(2 * prob - 1) * stddev;
+  return leastIntegerWith(
+    discreteQuantileTest(
+      prob,
+      (k) => betaRegularized(p, n, k + 1),
+      // P(X > k) from the kernel `CDF` evaluates, so that
+      // `Quantile(CDF(k)) = k` holds: the mirrored kernel `I_{1−p}(k + 1, n)`
+      // differs from it by up to 10^−12. The difference is exact (Sterbenz)
+      // where it is used, for a CDF above ½.
+      (k) => 1 - betaRegularized(p, n, k + 1)
+    ),
+    seed,
+    0,
+    Infinity,
+    deadline
+  );
+}
+
+/** The support `[lo, hi]` of Hypergeometric(n, K, N): `n` draws without
+ * replacement from `N` items of which `K` are successes. */
+export function hypergeometricSupport(
+  n: number,
+  K: number,
+  N: number
+): [number, number] {
+  return [Math.max(0, n + K - N), Math.min(n, K)];
+}
+
+/**
+ * Quantile of Hypergeometric(n, K, N) at probability `prob`.
+ *
+ * The masses are built as weights relative to the mass at the mode,
+ * `⌊(n + 1)(K + 1)/(N + 2)⌋`, which is set to 1, outward in both directions
+ * by the ratio `P(i+1)/P(i) = (K − i)(n − i) / ((i + 1)(N − K − n + i + 1))`,
+ * until a weight underflows to 0. The masses themselves can be far below
+ * the double range (`P(0) = 1/C(4000, 2000)` for (2000, 2000, 4000)); their
+ * ratios to the largest one are not, except in tails that hold no
+ * representable probability.
+ */
+export function hypergeometricQuantile(
+  n: number,
+  K: number,
+  N: number,
+  prob: number,
+  deadline?: number
+): number {
+  const [lo, hi] = hypergeometricSupport(n, K, N);
+  if (prob <= 0 || lo === hi) return lo;
+  if (prob >= 1) return hi;
+  const ratio = (i: number): number =>
+    ((K - i) * (n - i)) / ((i + 1) * (N - K - n + i + 1));
+  const mode = Math.min(
+    Math.max(Math.floor(((n + 1) * (K + 1)) / (N + 2)), lo),
+    hi
+  );
+  // The weights below the mode, from the mode down, then those above it.
+  const below: number[] = [];
+  let w = 1;
+  for (let i = mode; i > lo; i--) {
+    w /= ratio(i - 1);
+    if (!(w > 0) || !Number.isFinite(w)) break;
+    below.push(w);
+    if ((i & 0x3ff) === 0) checkDeadline(deadline);
+  }
+  const above: number[] = [];
+  w = 1;
+  for (let i = mode; i < hi; i++) {
+    w *= ratio(i);
+    if (!(w > 0) || !Number.isFinite(w)) break;
+    above.push(w);
+    if ((i & 0x3ff) === 0) checkDeadline(deadline);
+  }
+  // The weights in order, from `first` up; the ones outside underflowed.
+  const weights = [...below.reverse(), 1, ...above];
+  const first = mode - below.length;
+  // Smallest weights first, so that the sum keeps them.
+  let total = 0;
+  for (let j = 0; j < below.length; j++) total += weights[j];
+  for (let j = weights.length - 1; j >= below.length; j--)
+    total += weights[j];
+  // A weight `d` steps from the mode is a product of `d` ratios, each with
+  // about 4 roundings: the tolerance grows with `d`.
+  const tolerance = (i: number): number =>
+    DISCRETE_QUANTILE_TOLERANCE + 4 * Number.EPSILON * Math.abs(i - mode);
+  if (prob <= 0.5) {
+    // The least `k` with `Σ_{i≤k} w_i ≥ prob·total`.
+    let sum = 0;
+    for (let j = 0; j < weights.length; j++) {
+      sum += weights[j];
+      if (sum >= prob * total * (1 - tolerance(first + j))) return first + j;
+    }
+    return first + weights.length - 1;
+  }
+  // The least `k` with `Σ_{i>k} w_i ≤ (1 − prob)·total`, summed from the
+  // top, so that a `prob` close to 1 keeps its digits (`1 − prob` is exact
+  // for `prob ≥ ½`).
+  let tail = 0;
+  let j = weights.length - 1;
+  while (
+    j > 0 &&
+    tail + weights[j] <=
+      total * upperTailTarget(prob, tolerance(first + j - 1))
+  ) {
+    tail += weights[j];
+    j -= 1;
+  }
+  return first + j;
+}
+
+/**
+ * Exact quantile of `Geometric(a/b)` at `p = c/d`: the least `k ≥ 0` with
+ * `(1 − a/b)^(k+1) ≤ 1 − c/d`, that is `d·(b − a)^(k+1) ≤ (d − c)·b^(k+1)`.
+ * `undefined` when the integers of a test would exceed
+ * `EXACT_BINOMIAL_MAX_BITS` or the steps run out.
+ */
+export function geometricQuantileExact(
+  [a, b]: [bigint, bigint],
+  [c, d]: [bigint, bigint],
+  deadline?: number
+): number | undefined {
+  if (b <= 0n || a <= 0n || a > b || d <= 0n || c <= 0n || c >= d)
+    return undefined;
+  if (a === b) return 0;
+  const start = geometricQuantile(ratio(a, b), ratio(c, d), deadline);
+  if (!Number.isFinite(start)) return undefined;
+  const bits = b.toString(2).length;
+  if ((start + 2) * bits > EXACT_BINOMIAL_MAX_BITS) return undefined;
+  const atLeast = (k: number): boolean => {
+    const e = BigInt(k + 1);
+    return d * (b - a) ** e <= (d - c) * b ** e;
+  };
+  return stepToQuantile(atLeast, start, Infinity, deadline);
+}
+
+/**
+ * Exact quantile of `NegativeBinomial(n, a/b)` at `p = c/d`: the least
+ * `k ≥ 0` with `CDF(k) ≥ p`. With `y = b − a`,
+ * `b^(n+k)·CDF(k) = a^n·Σ_{i≤k} C(n − 1 + i, i)·y^i·b^(k−i)`, so the test is
+ * `d·a^n·Σ ≥ c·b^(n+k)`, in integers.
+ */
+export function negativeBinomialQuantileExact(
+  n: number,
+  [a, b]: [bigint, bigint],
+  [c, d]: [bigint, bigint],
+  deadline?: number
+): number | undefined {
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  if (b <= 0n || a <= 0n || a > b || d <= 0n || c <= 0n || c >= d)
+    return undefined;
+  if (a === b) return 0;
+  const start = negativeBinomialQuantile(
+    n,
+    ratio(a, b),
+    ratio(c, d),
+    deadline
+  );
+  if (!Number.isFinite(start)) return undefined;
+  const bits = b.toString(2).length;
+  if ((n + start + 64) * bits > EXACT_BINOMIAL_MAX_BITS) return undefined;
+  const y = b - a;
+  const an = a ** BigInt(n);
+  const atLeast = (k: number): boolean => {
+    let coef = 1n;
+    let yPow = 1n;
+    let sum = 0n;
+    for (let i = 0; i <= k; i++) {
+      if (i > 0) {
+        coef = (coef * BigInt(n - 1 + i)) / BigInt(i);
+        yPow *= y;
+      }
+      sum = sum * b + coef * yPow;
+      if ((i & 0xff) === 0xff) checkDeadline(deadline);
+    }
+    return d * an * sum >= c * b ** BigInt(n + k);
+  };
+  return stepToQuantile(atLeast, start, Infinity, deadline);
+}
+
+/** The largest population `N` of a hypergeometric distribution that the
+ * exact sums accept: a mass is a ratio of binomials of about `N` bits. */
+const EXACT_HYPERGEOMETRIC_MAX_N = 20_000;
+
+/**
+ * `P(X ≤ k)` of Hypergeometric(n, K, N), exactly, as `[numerator,
+ * denominator]`; `undefined` when `N` is above
+ * `EXACT_HYPERGEOMETRIC_MAX_N`. `k` is an integer; below the support the
+ * result is `0`, at or above its top `1`.
+ */
+export function hypergeometricCDFExact(
+  n: number,
+  K: number,
+  N: number,
+  k: number,
+  deadline?: number
+): [bigint, bigint] | undefined {
+  if (N > EXACT_HYPERGEOMETRIC_MAX_N) return undefined;
+  const [lo, hi] = hypergeometricSupport(n, K, N);
+  if (k < lo) return [0n, 1n];
+  if (k >= hi) return [1n, 1n];
+  const sums = hypergeometricPartialSums(n, K, N, k, deadline);
+  return [sums.sum, sums.total];
+}
+
+/** `Σ_{lo ≤ i ≤ k} C(K, i)·C(N − K, n − i)` and `C(N, n)`, for `k` in the
+ * support. */
+function hypergeometricPartialSums(
+  n: number,
+  K: number,
+  N: number,
+  k: number,
+  deadline?: number
+): { sum: bigint; total: bigint } {
+  const [lo] = hypergeometricSupport(n, K, N);
+  // C(K, i) and C(N − K, n − i) are carried from one `i` to the next.
+  let cK = bigChoose(K, lo);
+  let cR = bigChoose(N - K, n - lo);
+  let sum = 0n;
+  for (let i = lo; i <= k; i++) {
+    if (i > lo) {
+      cK = (cK * BigInt(K - i + 1)) / BigInt(i);
+      // C(m, j − 1) = C(m, j)·j / (m − j + 1), with m = N − K, j = n − i + 1.
+      cR = (cR * BigInt(n - i + 1)) / BigInt(N - K - n + i);
+    }
+    sum += cK * cR;
+    if ((i & 0xff) === 0xff) checkDeadline(deadline);
+  }
+  return { sum, total: bigChoose(N, n) };
+}
+
+/** `C(m, j)` as a bigint, for integers `0 ≤ j ≤ m`. */
+function bigChoose(m: number, j: number): bigint {
+  if (j < 0 || j > m) return 0n;
+  const t = Math.min(j, m - j);
+  let r = 1n;
+  for (let i = 1; i <= t; i++) r = (r * BigInt(m - t + i)) / BigInt(i);
+  return r;
+}
+
+/**
+ * Exact quantile of Hypergeometric(n, K, N) at `p = c/d`: the least `k` with
+ * `d·Σ_{i≤k} C(K, i)·C(N − K, n − i) ≥ c·C(N, n)`, by a walk up the support.
+ * `undefined` when `N` is above `EXACT_HYPERGEOMETRIC_MAX_N`.
+ */
+export function hypergeometricQuantileExact(
+  n: number,
+  K: number,
+  N: number,
+  [c, d]: [bigint, bigint],
+  deadline?: number
+): number | undefined {
+  if (N > EXACT_HYPERGEOMETRIC_MAX_N) return undefined;
+  if (d <= 0n || c <= 0n || c >= d) return undefined;
+  const [lo, hi] = hypergeometricSupport(n, K, N);
+  const target = c * bigChoose(N, n);
+  let cK = bigChoose(K, lo);
+  let cR = bigChoose(N - K, n - lo);
+  let sum = 0n;
+  for (let i = lo; i <= hi; i++) {
+    if (i > lo) {
+      cK = (cK * BigInt(K - i + 1)) / BigInt(i);
+      cR = (cR * BigInt(n - i + 1)) / BigInt(N - K - n + i);
+    }
+    sum += cK * cR;
+    if (d * sum >= target) return i;
+    if ((i & 0xff) === 0xff) checkDeadline(deadline);
+  }
+  return hi;
+}
+
+/**
+ * The machine quantile of a continuous distribution with no closed-form
+ * quantile, at a probability `prob` in `(0, 1)`: `operator` is the head of
+ * the distribution and `params` its parameters. `NaN` when no value is
+ * found, or for another head.
+ *
+ * Each distribution gives its lower tail (the CDF) and its upper tail
+ * (`1 − CDF`) from the regularized kernels, each where it keeps its relative
+ * precision; `solveMonotone` inverts the one of the tail that holds `prob`.
+ * `upperProb` is `1 − prob`, given by the caller from the exact value, since
+ * a `prob` close to 1 (`1 − 10^−30`) rounds to the double `1`.
+ */
+export function continuousQuantile(
+  operator: string,
+  params: readonly number[],
+  prob: number,
+  upperProb: number,
+  deadline?: number
+): number {
+  const lower = prob <= 0.5;
+  const target = lower ? prob : upperProb;
+  if (!(target > 0 && target <= 0.5)) return NaN;
+  const solve = (
+    cdf: (x: number) => number,
+    sf: (x: number) => number,
+    upper: number
+  ): number =>
+    lower
+      ? solveMonotone(cdf, target, true, upper, deadline)
+      : solveMonotone(sf, target, false, upper, deadline);
+  switch (operator) {
+    case 'StudentTDistribution': {
+      const [nu] = params;
+      if (prob === 0.5) return 0;
+      // The quantile below ½ is the opposite of the one above it.
+      let t: number;
+      if (target > 0.25) {
+        // Near the median, P(|T| < t) = I_{t²/(ν+t²)}(½, ν/2) = |2p − 1|
+        // (exact for ¼ ≤ p ≤ ¾). The tail form below loses a small `t`:
+        // `ν + t²` rounds to `ν`, and the tail is ½ on a whole interval.
+        const central = lower ? 1 - 2 * prob : 2 * prob - 1;
+        t = solveMonotone(
+          (t) => betaRegularized((t * t) / (nu + t * t), 0.5, nu / 2),
+          central,
+          true,
+          Infinity,
+          deadline
+        );
+      } else {
+        // P(T > t) = ½·I_{ν/(ν+t²)}(ν/2, ½) for t ≥ 0.
+        const tail = (t: number): number =>
+          0.5 * betaRegularized(nu / (nu + t * t), nu / 2, 0.5);
+        t = solveMonotone(tail, target, false, Infinity, deadline);
+      }
+      return lower ? -t : t;
+    }
+    case 'ChiSquareDistribution': {
+      const [k] = params;
+      return solve(
+        (x) => gammaP(k / 2, x / 2),
+        (x) => gammaQ(k / 2, x / 2),
+        Infinity
+      );
+    }
+    case 'GammaDistribution': {
+      const [alpha, theta] = params;
+      return solve(
+        (x) => gammaP(alpha, x / theta),
+        (x) => gammaQ(alpha, x / theta),
+        Infinity
+      );
+    }
+    case 'FRatioDistribution': {
+      const [d1, d2] = params;
+      return solve(
+        (x) => betaRegularized((d1 * x) / (d1 * x + d2), d1 / 2, d2 / 2),
+        (x) => betaRegularized(d2 / (d2 + d1 * x), d2 / 2, d1 / 2),
+        Infinity
+      );
+    }
+    case 'BetaDistribution': {
+      const [a, b] = params;
+      return solve(
+        (x) => betaRegularized(x, a, b),
+        (x) => betaRegularized(1 - x, b, a),
+        1
+      );
+    }
+  }
+  return NaN;
 }

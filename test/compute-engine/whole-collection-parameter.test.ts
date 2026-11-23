@@ -130,7 +130,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // `value` arm. A point argument does not reach the result: `mean` of a
     // point is a number, and a number plus a point is an `incompatible-type`
     // error, as it was before.
-    '(xs: collection<number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | number>',
+    '(xs: collection<number> | value) -> broadcastable<expression<BetaDistribution> | expression<BinomialDistribution> | expression<ChiSquareDistribution> | expression<ExponentialDistribution> | expression<FRatioDistribution> | expression<GammaDistribution> | expression<GeometricDistribution> | expression<HypergeometricDistribution> | expression<NegativeBinomialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<StudentTDistribution> | expression<UniformDistribution> | number>',
     [LIST, NESTED, SCALAR],
   ],
 ];

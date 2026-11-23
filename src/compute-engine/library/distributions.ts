@@ -1,9 +1,11 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   bigBetaRegularized,
+  bigGammaP,
   bigGammaQ,
   bigGammaQNegativeOrder,
   betaRegularized,
+  gammaP,
   gammaQ,
   SPECIAL_FN_GUARD,
 } from '../numerics/special-functions.js';
@@ -43,6 +45,16 @@ import {
   bigRational,
   binomialQuantile,
   binomialQuantileExact,
+  continuousQuantile,
+  geometricCDF,
+  geometricQuantile,
+  geometricQuantileExact,
+  hypergeometricCDFExact,
+  hypergeometricQuantile,
+  hypergeometricQuantileExact,
+  hypergeometricSupport,
+  negativeBinomialQuantile,
+  negativeBinomialQuantileExact,
   poissonQuantile,
   poissonQuantileExact,
 } from '../numerics/distributions.js';
@@ -82,9 +94,17 @@ const DISTRIBUTION_HEADS = [
   'PoissonDistribution',
   'UniformDistribution',
   'ExponentialDistribution',
+  'StudentTDistribution',
+  'ChiSquareDistribution',
+  'FRatioDistribution',
+  'GammaDistribution',
+  'BetaDistribution',
+  'GeometricDistribution',
+  'NegativeBinomialDistribution',
+  'HypergeometricDistribution',
 ];
 
-/** True if `x` is one of the five distribution constructor expressions. */
+/** True if `x` is one of the distribution constructor expressions. */
 export function isDistributionExpression(x: Expression): boolean {
   return DISTRIBUTION_HEADS.includes(x.operator);
 }
@@ -112,7 +132,10 @@ function floatIfFloat(
 function isDiscrete(dist: Expression): boolean {
   return (
     dist.operator === 'BinomialDistribution' ||
-    dist.operator === 'PoissonDistribution'
+    dist.operator === 'PoissonDistribution' ||
+    dist.operator === 'GeometricDistribution' ||
+    dist.operator === 'NegativeBinomialDistribution' ||
+    dist.operator === 'HypergeometricDistribution'
   );
 }
 
@@ -266,6 +289,56 @@ function signedInfinitySign(x: Expression): 1 | -1 | undefined {
   if (p === '+oo') return 1;
   if (p === '-oo') return -1;
   return undefined;
+}
+
+/**
+ * The `canonical` handler of a constructor whose parameters are each a
+ * positive finite real (`real<0<..>`), named `labels` in the diagnostics: a
+ * literal off the real carrier is an `incompatible-type` error and a literal
+ * that is not positive an `out-of-range` one, as for `PoissonDistribution`.
+ */
+function positiveParameters(
+  name: string,
+  labels: string[]
+): (
+  ops: ReadonlyArray<Expression>,
+  options: { engine: ComputeEngine }
+) => Expression | null {
+  return (ops, { engine: ce }) => {
+    if (ops.length !== labels.length) return null;
+    return ce._fn(
+      name,
+      ops.map((op, i) => {
+        const x = op.canonical;
+        if (offRealCarrier(x)) return carrierError(ce, name, 'real', x);
+        if (isFiniteRealLiteral(x) && x.isPositive !== true)
+          return rangeError(ce, `${labels[i]} > 0`, x);
+        return x;
+      })
+    );
+  };
+}
+
+/**
+ * A success probability `p` with `0 < p ≤ 1`, or the error for a literal
+ * outside it. `[0, 1]` is the carrier, as for `BinomialDistribution`; `p = 0`
+ * is a range error, since no trial then succeeds and the count of failures
+ * has no distribution.
+ */
+function successProbability(
+  ce: ComputeEngine,
+  name: string,
+  p: Expression
+): Expression {
+  if (
+    offRealCarrier(p) ||
+    (isFiniteRealLiteral(p) &&
+      (p.isNegative === true || litOrder(ce, p, ce.One) === 1))
+  )
+    return carrierError(ce, name, 'real<0..1>', p);
+  if (isFiniteRealLiteral(p) && p.isPositive !== true)
+    return rangeError(ce, 'p > 0', p);
+  return p;
 }
 
 /** The closed unit interval, the proven-domain claim for
@@ -966,6 +1039,107 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('ExponentialDistribution', [lambda]);
       },
     },
+
+    StudentTDistribution: {
+      description:
+        "Student's t distribution with ν degrees of freedom (ν > 0, not necessarily an integer).",
+      signature: '(real<0<..>) -> expression<StudentTDistribution>',
+      nanBehavior: 'reject',
+      canonical: positiveParameters('StudentTDistribution', ['ν']),
+    },
+
+    ChiSquareDistribution: {
+      description:
+        'Chi-square distribution with k degrees of freedom (k > 0, not necessarily an integer).',
+      signature: '(real<0<..>) -> expression<ChiSquareDistribution>',
+      nanBehavior: 'reject',
+      canonical: positiveParameters('ChiSquareDistribution', ['k']),
+    },
+
+    FRatioDistribution: {
+      description:
+        "Snedecor's F distribution with d₁ degrees of freedom in the numerator and d₂ in the denominator.",
+      signature: '(real<0<..>, real<0<..>) -> expression<FRatioDistribution>',
+      nanBehavior: 'reject',
+      canonical: positiveParameters('FRatioDistribution', ['d₁', 'd₂']),
+    },
+
+    GammaDistribution: {
+      description:
+        'Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x > 0.',
+      signature: '(real<0<..>, real<0<..>) -> expression<GammaDistribution>',
+      nanBehavior: 'reject',
+      canonical: positiveParameters('GammaDistribution', ['α', 'θ']),
+    },
+
+    BetaDistribution: {
+      description:
+        'Beta distribution with shape parameters α and β, on the interval [0, 1].',
+      signature: '(real<0<..>, real<0<..>) -> expression<BetaDistribution>',
+      nanBehavior: 'reject',
+      canonical: positiveParameters('BetaDistribution', ['α', 'β']),
+    },
+
+    GeometricDistribution: {
+      description:
+        'Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}.',
+      signature: '(real<0..1>) -> expression<GeometricDistribution>',
+      nanBehavior: 'reject',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 1) return null;
+        return ce._fn('GeometricDistribution', [
+          successProbability(ce, 'GeometricDistribution', ops[0].canonical),
+        ]);
+      },
+    },
+
+    NegativeBinomialDistribution: {
+      description:
+        'Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}.',
+      signature:
+        '(integer<1..>, real<0..1>) -> expression<NegativeBinomialDistribution>',
+      nanBehavior: 'reject',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 2) return null;
+        let n = ops[0].canonical;
+        if (isNumber(n) && n.isInteger !== true)
+          n = carrierError(ce, 'NegativeBinomialDistribution', 'integer', n);
+        else if (isNumber(n) && n.isPositive !== true)
+          n = rangeError(ce, 'n ∈ ℤ>0', n);
+        const p = successProbability(
+          ce,
+          'NegativeBinomialDistribution',
+          ops[1].canonical
+        );
+        return ce._fn('NegativeBinomialDistribution', [n, p]);
+      },
+    },
+
+    HypergeometricDistribution: {
+      description:
+        'Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N).',
+      signature:
+        '(integer<0..>, integer<0..>, integer<0..>) -> expression<HypergeometricDistribution>',
+      nanBehavior: 'reject',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 3) return null;
+        const name = 'HypergeometricDistribution';
+        const params = ops.map((x) => {
+          const c = x.canonical;
+          if (isNumber(c) && c.isInteger !== true)
+            return carrierError(ce, name, 'integer', c);
+          if (isNumber(c) && c.isNegative === true)
+            return rangeError(ce, '∈ ℤ≥0', c);
+          return c;
+        });
+        let [n, K] = params;
+        const N = params[2];
+        // n ≤ N and K ≤ N, decided on the exact values (`litOrder`).
+        if (litOrder(ce, n, N) === 1) n = rangeError(ce, 'n ≤ N', n);
+        if (litOrder(ce, K, N) === 1) K = rangeError(ce, 'K ≤ N', K);
+        return ce._fn(name, [n, K, N]);
+      },
+    },
   },
 
   {
@@ -1106,12 +1280,17 @@ const NON_NEGATIVE_REAL_TYPE = parseType('real<0..>');
 function discreteSupportGuard(
   ce: ComputeEngine,
   k: Expression,
-  upper?: Expression
+  upper?: Expression,
+  lower?: Expression
 ): Expression | undefined {
   const clauses: Expression[] = [];
   if (!isSubtype(k.type.type, 'integer'))
     clauses.push(ce.function('Equal', [ce.function('Floor', [k]), k]));
-  if (!isSubtype(k.type.type, NON_NEGATIVE_REAL_TYPE))
+  // A support whose bottom is above 0 (a hypergeometric one) writes its
+  // `k ≥ lower` clause always, as for the top.
+  if (lower !== undefined && !lower.is(0))
+    clauses.push(ce.function('GreaterEqual', [k, lower]));
+  else if (!isSubtype(k.type.type, NON_NEGATIVE_REAL_TYPE))
     clauses.push(ce.function('GreaterEqual', [k, ce.Zero]));
   if (upper !== undefined) clauses.push(ce.function('LessEqual', [k, upper]));
   if (clauses.length === 0) return undefined;
@@ -1173,6 +1352,7 @@ function distributionPDF(
   x: Expression,
   numericApproximation: boolean
 ): Expression | undefined {
+  const add = (a: Expression[]) => ce.function('Add', a);
   const mul = (a: Expression[]) => ce.function('Multiply', a);
   const sub = (a: Expression, b: Expression) => ce.function('Subtract', [a, b]);
   const div = (a: Expression, b: Expression) => ce.function('Divide', [a, b]);
@@ -1180,7 +1360,7 @@ function distributionPDF(
   const neg = (a: Expression) => ce.function('Negate', [a]);
   const fn = (h: string, a: Expression[]) => ce.function(h, a);
 
-  // Each of the five densities vanishes at ±∞ (a probability density is
+  // Each density vanishes at ±∞ (a probability density is
   // integrable, so it has no mass at an infinite point). Decided here, before
   // the closed forms, which would otherwise evaluate `e^{+∞}` or a Poisson
   // pmf at an infinite index and answer `+∞` or `NaN`.
@@ -1296,8 +1476,182 @@ function distributionPDF(
       // where `λe^{−λx}` grows without bound.
       return fn('Which', [fn('Less', [x, ce.Zero]), ce.Zero, ce.True, density]);
     }
+
+    case 'StudentTDistribution': {
+      // (ν/(ν + x²))^((ν+1)/2) / (√ν·B(ν/2, ½)), on the whole real line.
+      const [nu] = distOps(dist);
+      return div(
+        pow(
+          div(nu, add([nu, pow(x, ce.number(2))])),
+          div(add([nu, ce.One]), ce.number(2))
+        ),
+        mul([fn('Sqrt', [nu]), fn('Beta', [half(nu), ce.Half])])
+      );
+    }
+
+    case 'ChiSquareDistribution': {
+      // x^(k/2 − 1)·e^(−x/2) / (2^(k/2)·Γ(k/2)) for x > 0.
+      const [k] = distOps(dist);
+      const density = div(
+        mul([
+          pow(x, sub(half(k), ce.One)),
+          fn('Exp', [neg(half(x))]),
+        ]),
+        mul([pow(ce.number(2), half(k)), fn('Gamma', [half(k)])])
+      );
+      return onPositiveHalfLine(ce, x, density, numericApproximation);
+    }
+
+    case 'GammaDistribution': {
+      // x^(α − 1)·e^(−x/θ) / (Γ(α)·θ^α) for x > 0.
+      const [alpha, theta] = distOps(dist);
+      const density = div(
+        mul([pow(x, sub(alpha, ce.One)), fn('Exp', [neg(div(x, theta))])]),
+        mul([fn('Gamma', [alpha]), pow(theta, alpha)])
+      );
+      return onPositiveHalfLine(ce, x, density, numericApproximation);
+    }
+
+    case 'FRatioDistribution': {
+      // (d₁/d₂)^(d₁/2)·x^(d₁/2 − 1)·(1 + d₁x/d₂)^(−(d₁+d₂)/2) / B(d₁/2, d₂/2)
+      // for x > 0.
+      const [d1, d2] = distOps(dist);
+      const density = div(
+        mul([
+          pow(div(d1, d2), half(d1)),
+          pow(x, sub(half(d1), ce.One)),
+          pow(
+            add([ce.One, div(mul([d1, x]), d2)]),
+            neg(half(add([d1, d2])))
+          ),
+        ]),
+        fn('Beta', [half(d1), half(d2)])
+      );
+      return onPositiveHalfLine(ce, x, density, numericApproximation);
+    }
+
+    case 'BetaDistribution': {
+      // x^(α − 1)·(1 − x)^(β − 1) / B(α, β) for 0 < x < 1.
+      const [a, b] = distOps(dist);
+      const density = div(
+        mul([pow(x, sub(a, ce.One)), pow(sub(ce.One, x), sub(b, ce.One))]),
+        fn('Beta', [a, b])
+      );
+      const lo = litOrder(ce, x, ce.Zero);
+      const hi = litOrder(ce, x, ce.One);
+      if (lo !== undefined && hi !== undefined)
+        return lo > 0 && hi < 0 ? density : ce.Zero;
+      return fn('Which', [
+        fn('And', [fn('Less', [ce.Zero, x]), fn('Less', [x, ce.One])]),
+        heldArm(density, numericApproximation),
+        ce.True,
+        ce.Zero,
+      ]);
+    }
+
+    case 'GeometricDistribution':
+    case 'NegativeBinomialDistribution': {
+      // Geometric(p) is NegativeBinomial(1, p): the mass at k ≥ 0 is
+      // C(n + k − 1, k)·p^n·(1 − p)^k.
+      const [n, p] =
+        dist.operator === 'GeometricDistribution'
+          ? [ce.One, distOps(dist)[0]]
+          : distOps(dist);
+      if (isFiniteRealLiteral(x) && x.isNegative === true) return ce.Zero;
+      const k = x;
+      // At p = 1 every trial succeeds: the mass is all at 0. The closed form
+      // would read `0^0` there, which the engine leaves as `NaN`.
+      if (isNumber(p) && p.isSame(1)) {
+        if (isFiniteRealLiteral(k)) return k.is(0) ? ce.One : ce.Zero;
+        return fn('Which', [fn('Equal', [k, ce.Zero]), ce.One, ce.True, ce.Zero]);
+      }
+      const closed = mul([
+        n.isSame(1)
+          ? ce.One
+          : fn('Binomial', [add([n, k, ce.NegativeOne]), k]),
+        pow(p, n),
+        pow(sub(ce.One, p), k),
+      ]);
+      if (isFiniteRealLiteral(x)) return closed;
+      return guardedMass(
+        ce,
+        discreteSupportGuard(ce, k),
+        closed,
+        numericApproximation
+      );
+    }
+
+    case 'HypergeometricDistribution': {
+      // C(K, k)·C(N − K, n − k) / C(N, n) on the support
+      // max(0, n + K − N) ≤ k ≤ min(n, K). Only literal parameters: the
+      // support of symbolic ones is a pair of `Max` and `Min`.
+      const params = hypergeometricParameters(dist);
+      if (params === undefined) return undefined;
+      const [n, K, N] = params;
+      const [lo, hi] = hypergeometricSupport(n, K, N);
+      if (isFiniteRealLiteral(x)) {
+        const v = litVal(x);
+        if (v === undefined || v < lo || v > hi) return ce.Zero;
+      }
+      const k = x;
+      const closed = div(
+        mul([
+          fn('Binomial', [ce.number(K), k]),
+          fn('Binomial', [ce.number(N - K), sub(ce.number(n), k)]),
+        ]),
+        fn('Binomial', [ce.number(N), ce.number(n)])
+      );
+      if (isFiniteRealLiteral(x)) return closed;
+      return guardedMass(
+        ce,
+        discreteSupportGuard(ce, k, ce.number(hi), ce.number(lo)),
+        closed,
+        numericApproximation
+      );
+    }
   }
   return undefined;
+}
+
+/** `x/2`. */
+function half(x: Expression): Expression {
+  return x.engine.function('Divide', [x, x.engine.number(2)]);
+}
+
+/** An arm of a `Which`, evaluated in the caller's mode: `Which` holds its
+ * arms, so the caller's evaluation of the result would leave the arm as
+ * written (see `guardedMass`). */
+function heldArm(arm: Expression, numericApproximation: boolean): Expression {
+  return numericApproximation ? arm.N() : arm.evaluate();
+}
+
+/** `density` for `x > 0` and `0` elsewhere: the density of a distribution
+ * on the open half-line, which, as in Wolfram's convention, is `0` at the
+ * point `0` itself. */
+function onPositiveHalfLine(
+  ce: ComputeEngine,
+  x: Expression,
+  density: Expression,
+  numericApproximation: boolean
+): Expression {
+  if (isFiniteRealLiteral(x)) return x.isPositive === true ? density : ce.Zero;
+  return ce.function('Which', [
+    ce.function('Greater', [x, ce.Zero]),
+    heldArm(density, numericApproximation),
+    ce.True,
+    ce.Zero,
+  ]);
+}
+
+/** The parameters `[n, K, N]` of a hypergeometric distribution when each
+ * is an integer literal (in the range of a double), or `undefined`. */
+function hypergeometricParameters(
+  dist: Expression
+): [number, number, number] | undefined {
+  const ops = distOps(dist);
+  const r = ops.map((x) => asSmallInteger(x));
+  if (r.length !== 3 || r.some((v) => v === null || v < 0)) return undefined;
+  return r as [number, number, number];
 }
 
 function distributionCDF(
@@ -1405,8 +1759,203 @@ function distributionCDF(
       // where `1 − e^{−λx}` is negative.
       return fn('Which', [fn('Less', [x, ce.Zero]), ce.Zero, ce.True, tail]);
     }
+
+    case 'StudentTDistribution': {
+      // P(T ≤ x) = ½·I_{ν/(ν+x²)}(ν/2, ½) for x ≤ 0, and 1 minus that for
+      // x > 0 (the distribution is symmetric about 0).
+      const [nu] = distOps(dist);
+      const lowerTail = mul([
+        ce.Half,
+        fn('BetaRegularized', [
+          div(nu, add([nu, ce.function('Power', [x, ce.number(2)])])),
+          half(nu),
+          ce.Half,
+        ]),
+      ]);
+      const upper = sub(ce.One, lowerTail);
+      if (isFiniteRealLiteral(x))
+        return x.isPositive === true ? upper : lowerTail;
+      return fn('Which', [
+        fn('LessEqual', [x, ce.Zero]),
+        heldArm(lowerTail, numericApproximation),
+        ce.True,
+        heldArm(upper, numericApproximation),
+      ]);
+    }
+
+    case 'ChiSquareDistribution':
+    case 'GammaDistribution': {
+      // P(X ≤ x) = 1 − Q(α, x/θ) for x > 0; ChiSquare(k) is Gamma(k/2, 2).
+      const [alpha, theta] =
+        dist.operator === 'ChiSquareDistribution'
+          ? [half(distOps(dist)[0]), ce.number(2)]
+          : distOps(dist);
+      // A numeric value at a literal point comes from the lower-tail kernel
+      // P(α, z) itself: `1 − Q` cancels where the CDF is small, the
+      // lower-tail p-value (`CDF(GammaDistribution(2, 1), 10^−10)` is
+      // `5·10^−21`, and `1 − Q` gave `0` at machine precision).
+      if (
+        numericApproximation &&
+        isFiniteRealLiteral(x) &&
+        x.isPositive === true
+      ) {
+        const z = div(x, theta).N();
+        const a = alpha.N();
+        if (isFiniteRealLiteral(a) && isFiniteRealLiteral(z)) {
+          const r = apply2(
+            a,
+            z,
+            (a, z) => gammaP(a, z),
+            (a, z) => bigGammaP(ce, a, z, ce.precision)
+          );
+          if (r !== undefined) return r;
+        }
+      }
+      const closed = sub(
+        ce.One,
+        fn('GammaRegularized', [alpha, div(x, theta)])
+      );
+      return cdfOnPositiveHalfLine(ce, x, closed, numericApproximation);
+    }
+
+    case 'FRatioDistribution': {
+      // P(X ≤ x) = I_{d₁x/(d₁x + d₂)}(d₁/2, d₂/2) for x > 0.
+      const [d1, d2] = distOps(dist);
+      const closed = fn('BetaRegularized', [
+        div(mul([d1, x]), add([mul([d1, x]), d2])),
+        half(d1),
+        half(d2),
+      ]);
+      return cdfOnPositiveHalfLine(ce, x, closed, numericApproximation);
+    }
+
+    case 'BetaDistribution': {
+      const [a, b] = distOps(dist);
+      const closed = fn('BetaRegularized', [x, a, b]);
+      const lo = litOrder(ce, x, ce.Zero);
+      const hi = litOrder(ce, x, ce.One);
+      if (lo !== undefined && lo <= 0) return ce.Zero;
+      if (hi !== undefined && hi >= 0) return ce.One;
+      if (lo !== undefined && hi !== undefined) return closed;
+      return fn('Which', [
+        fn('LessEqual', [x, ce.Zero]),
+        ce.Zero,
+        fn('GreaterEqual', [x, ce.One]),
+        ce.One,
+        ce.True,
+        heldArm(closed, numericApproximation),
+      ]);
+    }
+
+    case 'GeometricDistribution':
+    case 'NegativeBinomialDistribution': {
+      // P(X ≤ k) = I_p(n, ⌊k⌋ + 1); for the geometric (n = 1) it is also
+      // 1 − (1 − p)^(⌊k⌋ + 1).
+      if (isFiniteRealLiteral(x) && x.isNegative === true) return ce.Zero;
+      const k = floorIndex(ce, x);
+      let closed: Expression;
+      if (dist.operator === 'GeometricDistribution') {
+        const [p] = distOps(dist);
+        // A numeric value at a literal point: `1 − (1 − p)^(k+1)` cancels
+        // when `p` or `k` is small (`CDF(GeometricDistribution(10^−15), 0)`
+        // is `10^−15`).
+        if (numericApproximation && isFiniteRealLiteral(k)) {
+          const r = geometricCDFValue(ce, p, k);
+          if (r !== undefined) return r;
+        }
+        closed = sub(
+          ce.One,
+          ce.function('Power', [sub(ce.One, p), add([k, ce.One])])
+        );
+      } else {
+        const [n, p] = distOps(dist);
+        closed = fn('BetaRegularized', [p, n, add([k, ce.One])]);
+      }
+      if (isFiniteRealLiteral(x)) return closed;
+      return discreteCDFGuard(ce, x, closed, numericApproximation);
+    }
+
+    case 'HypergeometricDistribution': {
+      // A finite sum of masses: computed exactly for literal parameters and
+      // a literal point. A symbolic point stays symbolic.
+      const params = hypergeometricParameters(dist);
+      if (params === undefined || !isFiniteRealLiteral(x)) return undefined;
+      const [lo, hi] = hypergeometricSupport(...params);
+      if (litOrder(ce, x, ce.number(lo)) === -1) return ce.Zero;
+      const top = litOrder(ce, x, ce.number(hi));
+      if (top === 0 || top === 1) return ce.One;
+      // `⌊x⌋` of the exact value: the double of `4 − 10^−30` is 4.
+      const k = asSmallInteger(floorIndex(ce, x));
+      if (k === null) return undefined;
+      const r = hypergeometricCDFExact(...params, k, ce._deadline);
+      if (r === undefined) return undefined;
+      return ce.number([r[0], r[1]]);
+    }
   }
   return undefined;
+}
+
+/**
+ * The numeric `1 − (1 − p)^(k+1)` of a geometric CDF at a literal integer
+ * `k ≥ 0`, or `undefined` when `p` or `k` has no double. At machine
+ * precision it is `geometricCDF` (`−expm1((k + 1)·log1p(−p))`), the kernel
+ * the float quantile search uses, so that `Quantile(CDF(k)) = k`. At a
+ * higher precision the difference is evaluated with as many more digits as
+ * it cancels, about `−log₁₀((k + 1)·p)`.
+ */
+function geometricCDFValue(
+  ce: ComputeEngine,
+  p: Expression,
+  k: Expression
+): Expression | undefined {
+  const pv = litVal(p);
+  const kv = litVal(k);
+  if (pv === undefined || kv === undefined) return undefined;
+  if (!bignumPreferred(ce)) return ce.number(geometricCDF(pv, kv));
+  const small = (kv + 1) * pv;
+  const cancelled = small < 1 ? Math.ceil(-Math.log10(small)) : 0;
+  const working = ce.precision;
+  const value = ce._withTransientPrecision(
+    working + SPECIAL_FN_GUARD + cancelled,
+    () =>
+      ce
+        .function('Subtract', [
+          ce.One,
+          ce.function('Power', [
+            ce.function('Subtract', [ce.One, p]),
+            ce.number(kv + 1),
+          ]),
+        ])
+        .N()
+  );
+  return roundToWorkingPrecision(value, working) ?? value;
+}
+
+/**
+ * The index `⌊x⌋` of a discrete CDF: evaluated for a numeric non-integer
+ * point, written for a symbolic one; an index proven integer passes through.
+ */
+function floorIndex(ce: ComputeEngine, x: Expression): Expression {
+  if (isFiniteRealLiteral(x))
+    return x.isInteger === true ? x : ce.function('Floor', [x]).evaluate();
+  return isSubtype(x.type.type, 'integer') ? x : ce.function('Floor', [x]);
+}
+
+/** `closed` for `x > 0` and `0` elsewhere: the CDF of a distribution on the
+ * half-line `x > 0`. */
+function cdfOnPositiveHalfLine(
+  ce: ComputeEngine,
+  x: Expression,
+  closed: Expression,
+  numericApproximation: boolean
+): Expression {
+  if (isFiniteRealLiteral(x)) return x.isPositive === true ? closed : ce.Zero;
+  return ce.function('Which', [
+    ce.function('LessEqual', [x, ce.Zero]),
+    ce.Zero,
+    ce.True,
+    heldArm(closed, numericApproximation),
+  ]);
 }
 
 /**
@@ -1573,8 +2122,148 @@ function distributionQuantile(
       if (lv === undefined || pv === undefined) return undefined;
       return ce.number(poissonQuantile(lv, pv, ce._deadline));
     }
+
+    case 'StudentTDistribution':
+    case 'ChiSquareDistribution':
+    case 'GammaDistribution':
+    case 'FRatioDistribution':
+    case 'BetaDistribution': {
+      // The bottom and the top of the support.
+      const t = dist.operator === 'StudentTDistribution';
+      if (pv === 0) return t ? ce.NegativeInfinity : ce.Zero;
+      // A `p` below 1 can round to the double `1`, and its quantile is
+      // finite: the test is on the exact value.
+      if (pv === 1 && litOrder(ce, p, ce.One) === 0)
+        return dist.operator === 'BetaDistribution'
+          ? ce.One
+          : ce.PositiveInfinity;
+      // The t distribution is symmetric about 0.
+      if (t && p.isSame(ce.Half)) return ce.Zero;
+      // No closed form: a numeric value only.
+      if (!numericApproximation) return undefined;
+      return continuousQuantileValue(ce, dist, p);
+    }
+
+    case 'GeometricDistribution':
+    case 'NegativeBinomialDistribution': {
+      const geometric = dist.operator === 'GeometricDistribution';
+      const [n, p0] = geometric ? [ce.One, distOps(dist)[0]] : distOps(dist);
+      // At p₀ = 1 the mass is all at 0.
+      if (pv === 0 || (isNumber(p0) && p0.isSame(1))) return ce.Zero;
+      if (pv === 1 && (numericApproximation || p.isSame(ce.One)))
+        return ce.PositiveInfinity;
+      const nn = asSmallInteger(n);
+      if (nn === null) return undefined;
+      // The float search under `.N()`, the exact one under `evaluate()`, as
+      // for the binomial above.
+      if (!numericApproximation) {
+        const p0r = asRational(p0);
+        const pr = asRational(p);
+        if (!p0r || !pr) return undefined;
+        const k = geometric
+          ? geometricQuantileExact(bigRational(p0r), bigRational(pr), ce._deadline)
+          : negativeBinomialQuantileExact(
+              nn,
+              bigRational(p0r),
+              bigRational(pr),
+              ce._deadline
+            );
+        return k === undefined ? undefined : ce.number(k);
+      }
+      const ppv = litVal(p0);
+      if (ppv === undefined || pv === undefined) return undefined;
+      const k = geometric
+        ? geometricQuantile(ppv, pv, ce._deadline)
+        : negativeBinomialQuantile(nn, ppv, pv, ce._deadline);
+      return Number.isFinite(k) ? ce.number(k) : undefined;
+    }
+
+    case 'HypergeometricDistribution': {
+      const params = hypergeometricParameters(dist);
+      if (params === undefined) return undefined;
+      const [lo, hi] = hypergeometricSupport(...params);
+      if (pv === 0) return ce.number(lo);
+      if (pv === 1 && (numericApproximation || p.isSame(ce.One)))
+        return ce.number(hi);
+      if (!numericApproximation) {
+        const pr = asRational(p);
+        if (!pr) return undefined;
+        const k = hypergeometricQuantileExact(
+          ...params,
+          bigRational(pr),
+          ce._deadline
+        );
+        return k === undefined ? undefined : ce.number(k);
+      }
+      if (pv === undefined) return undefined;
+      return ce.number(hypergeometricQuantile(...params, pv, ce._deadline));
+    }
   }
   return undefined;
+}
+
+/** The most Newton steps `continuousQuantileValue` takes from the machine
+ * value: each step doubles the digits, so 12 reach far past any precision
+ * the engine is set to. */
+const MAX_QUANTILE_NEWTON_STEPS = 12;
+
+/**
+ * The numeric quantile of a continuous distribution with no closed-form
+ * quantile, at a probability `p` in `(0, 1)`, or `undefined` when a
+ * parameter is not a literal or no value is found.
+ *
+ * At machine precision the value is the bisection of the machine kernels
+ * (`continuousQuantile`). At a higher precision it is refined by Newton's
+ * method, `x ← x − (CDF(x) − p)/PDF(x)`, on the closed forms of the CDF and
+ * the density evaluated at that precision. The closed forms write a CDF near
+ * 0 or 1 as `1 − Q` or `1 − ½·I`, so `CDF(x) − p` cancels about
+ * `−log₁₀(min(p, 1 − p))` digits: the steps carry that many guard digits
+ * more.
+ */
+function continuousQuantileValue(
+  ce: ComputeEngine,
+  dist: Expression,
+  p: Expression
+): Expression | undefined {
+  const params: number[] = [];
+  for (const op of distOps(dist)) {
+    const v = litVal(op);
+    if (v === undefined) return undefined;
+    params.push(v);
+  }
+  const pv = litVal(p);
+  if (pv === undefined) return undefined;
+  // The upper tail from the exact `p`: `1 − 10^−30` rounds to the double 1.
+  const qv = ce.function('Subtract', [ce.One, p]).N().re;
+  const x0 = continuousQuantile(dist.operator, params, pv, qv, ce._deadline);
+  if (!Number.isFinite(x0)) return undefined;
+  if (!bignumPreferred(ce)) return ce.number(x0);
+
+  const working = ce.precision;
+  const tail = Math.min(pv, qv);
+  const cancelled =
+    tail > 0 && Number.isFinite(tail) ? Math.ceil(-Math.log10(tail)) : 0;
+  const tolerance = Math.pow(10, -(working + 2));
+  const value = ce._withTransientPrecision(
+    working + SPECIAL_FN_GUARD + Math.max(0, cancelled),
+    () => {
+      let x: Expression = ce.number(x0);
+      for (let i = 0; i < MAX_QUANTILE_NEWTON_STEPS; i++) {
+        const F = distributionCDF(ce, dist, x, true)?.N();
+        const f = distributionPDF(ce, dist, x, true)?.N();
+        if (!F || !f || !isNumber(F) || !isNumber(f)) return undefined;
+        const step = ce
+          .function('Divide', [ce.function('Subtract', [F, p]), f])
+          .N();
+        if (!isNumber(step) || step.isFinite !== true) return undefined;
+        x = ce.function('Subtract', [x, step]).N();
+        if (!isNumber(x) || x.isFinite !== true) return undefined;
+        if (Math.abs(step.re) <= tolerance * Math.abs(x.re)) return x;
+      }
+      return undefined;
+    }
+  );
+  return roundToWorkingPrecision(value, working) ?? value;
 }
 
 //
@@ -1766,8 +2455,66 @@ function distributionMeanExact(
       ).evaluate();
     case 'ExponentialDistribution':
       return div(ce.One, distOps(dist)[0]).evaluate();
+    case 'StudentTDistribution':
+      // No mean for ν ≤ 1 (the Cauchy distribution at ν = 1).
+      return momentAbove(ce, distOps(dist)[0], 1, ce.Zero, ce.NaN);
+    case 'ChiSquareDistribution':
+      return distOps(dist)[0].evaluate();
+    case 'FRatioDistribution': {
+      // d₂/(d₂ − 2) for d₂ > 2; the integral diverges to +∞ below.
+      const d2 = distOps(dist)[1];
+      return momentAbove(
+        ce,
+        d2,
+        2,
+        div(d2, ce.function('Subtract', [d2, ce.number(2)])),
+        ce.PositiveInfinity
+      );
+    }
+    case 'GammaDistribution':
+      return mul([...distOps(dist)]).evaluate();
+    case 'BetaDistribution': {
+      const [a, b] = distOps(dist);
+      return div(a, add([a, b])).evaluate();
+    }
+    case 'GeometricDistribution':
+    case 'NegativeBinomialDistribution': {
+      // n(1 − p)/p, with n = 1 for the geometric.
+      const [n, p] =
+        dist.operator === 'GeometricDistribution'
+          ? [ce.One, distOps(dist)[0]]
+          : distOps(dist);
+      return div(
+        mul([n, ce.function('Subtract', [ce.One, p])]),
+        p
+      ).evaluate();
+    }
+    case 'HypergeometricDistribution': {
+      // nK/N; N = 0 forces n = K = 0, and the count is 0.
+      const [n, K, N] = distOps(dist);
+      if (N.is(0)) return ce.Zero;
+      return div(mul([n, K]), N).evaluate();
+    }
   }
   return undefined;
+}
+
+/**
+ * A moment that exists only when the parameter `x` is above `bound`: `r`
+ * for a literal `x > bound`, `otherwise` for a literal `x ≤ bound`
+ * (`NaN` when the moment has no value, `+∞` when its integral diverges),
+ * and `undefined`, a decline, when the order of `x` is not known.
+ */
+function momentAbove(
+  ce: ComputeEngine,
+  x: Expression,
+  bound: number,
+  r: Expression,
+  otherwise: Expression
+): Expression | undefined {
+  const order = litOrder(ce, x, ce.number(bound));
+  if (order === undefined) return undefined;
+  return order === 1 ? r.evaluate() : otherwise;
 }
 
 export function distributionVariance(
@@ -1807,6 +2554,80 @@ function distributionVarianceExact(
     }
     case 'ExponentialDistribution':
       return div(ce.One, pow(distOps(dist)[0], ce.number(2))).evaluate();
+    case 'StudentTDistribution': {
+      // ν/(ν − 2) for ν > 2, +∞ for 1 < ν ≤ 2, and no value for ν ≤ 1,
+      // where there is no mean.
+      const [nu] = distOps(dist);
+      if (litOrder(ce, nu, ce.One) !== 1)
+        return momentAbove(ce, nu, 1, ce.NaN, ce.NaN);
+      return momentAbove(
+        ce,
+        nu,
+        2,
+        div(nu, sub(nu, ce.number(2))),
+        ce.PositiveInfinity
+      );
+    }
+    case 'ChiSquareDistribution':
+      return mul([ce.number(2), distOps(dist)[0]]).evaluate();
+    case 'FRatioDistribution': {
+      // 2d₂²(d₁ + d₂ − 2) / (d₁(d₂ − 2)²(d₂ − 4)) for d₂ > 4, +∞ for
+      // 2 < d₂ ≤ 4, and no value for d₂ ≤ 2, where the mean is +∞.
+      const [d1, d2] = distOps(dist);
+      if (litOrder(ce, d2, ce.number(2)) !== 1)
+        return momentAbove(ce, d2, 2, ce.NaN, ce.NaN);
+      return momentAbove(
+        ce,
+        d2,
+        4,
+        div(
+          mul([
+            ce.number(2),
+            pow(d2, ce.number(2)),
+            sub(ce.function('Add', [d1, d2]), ce.number(2)),
+          ]),
+          mul([
+            d1,
+            pow(sub(d2, ce.number(2)), ce.number(2)),
+            sub(d2, ce.number(4)),
+          ])
+        ),
+        ce.PositiveInfinity
+      );
+    }
+    case 'GammaDistribution': {
+      const [alpha, theta] = distOps(dist);
+      return mul([alpha, pow(theta, ce.number(2))]).evaluate();
+    }
+    case 'BetaDistribution': {
+      // αβ / ((α + β)²(α + β + 1))
+      const [a, b] = distOps(dist);
+      const s = ce.function('Add', [a, b]);
+      return div(
+        mul([a, b]),
+        mul([pow(s, ce.number(2)), ce.function('Add', [s, ce.One])])
+      ).evaluate();
+    }
+    case 'GeometricDistribution':
+    case 'NegativeBinomialDistribution': {
+      // n(1 − p)/p², with n = 1 for the geometric.
+      const [n, p] =
+        dist.operator === 'GeometricDistribution'
+          ? [ce.One, distOps(dist)[0]]
+          : distOps(dist);
+      return div(mul([n, sub(ce.One, p)]), pow(p, ce.number(2))).evaluate();
+    }
+    case 'HypergeometricDistribution': {
+      // nK(N − K)(N − n) / (N²(N − 1)); 0 when N ≤ 1, where the count is
+      // fixed.
+      const [n, K, N] = distOps(dist);
+      const big = litOrder(ce, N, ce.One);
+      if (big === 0 || big === -1) return ce.Zero;
+      return div(
+        mul([n, K, sub(N, K), sub(N, n)]),
+        mul([pow(N, ce.number(2)), sub(N, ce.One)])
+      ).evaluate();
+    }
   }
   return undefined;
 }

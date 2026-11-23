@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+### New Features
+
+- **Eight more probability distributions: `StudentTDistribution(ν)`,
+  `ChiSquareDistribution(k)`, `FRatioDistribution(d₁, d₂)`,
+  `GammaDistribution(α, θ)` (shape and scale), `BetaDistribution(α, β)`,
+  `GeometricDistribution(p)`, `NegativeBinomialDistribution(n, p)` and
+  `HypergeometricDistribution(n, K, N)`** (CE-1590). `PDF`, `CDF`,
+  `Quantile`, `Mean`, `Variance` and `StandardDeviation` accept them, as
+  they accept the five older distributions. A t critical value
+  `Quantile(StudentTDistribution(10), 0.975)` is `2.2281388519862747484`,
+  and the p-value of a chi-square test is
+  `1 - CDF(ChiSquareDistribution(4), 9.488)`. A density at a symbolic point
+  evaluates to its closed form, which compiles:
+  `PDF(BetaDistribution(2, 3), x)` is
+  `Which(0 < x && x < 1, 12x(1 - x)^2, True, 0)`. The geometric and the
+  negative binomial distributions count the failures before the first (the
+  n-th) success, so their support starts at 0. A continuous quantile has no
+  closed form: with exact operands it stays unevaluated, and `.N()` gives
+  its value.
+
 ### Behavior Changes
 
 - **`ReplaceAll` applies a rule for a name and a rule for an expression in

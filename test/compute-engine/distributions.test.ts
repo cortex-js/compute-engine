@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compile';
 import { BigDecimal } from '../../src/big-decimal';
 import {
   gammaP,
@@ -1015,6 +1016,404 @@ describe('distribution operators', () => {
         expect(e.latex).toContain(`\\operatorname{${c[0]}}`);
         expect(ce.parse(e.latex).operator).toBe(c[0]);
       });
+    }
+  });
+});
+
+// Golden values from mpmath at 30 digits (`betainc`, `gammainc`, `findroot`
+// on the CDF), rounded to the engine's default 21 digits.
+describe('t, chi-square, F, gamma, beta, geometric, negative binomial and hypergeometric distributions', () => {
+  const ce = new ComputeEngine();
+  const ev = (e: any) => ce.box(e).evaluate().toString();
+  const n = (e: any) => ce.box(e).N().toString();
+
+  test('the witness: a t CDF and a t critical value', () => {
+    expect(ev(['CDF', ['StudentTDistribution', 10], 2.228138852])).toBe(
+      '0.975000000000581744579'
+    );
+    expect(ev(['Quantile', ['StudentTDistribution', 10], 0.975])).toBe(
+      '2.2281388519862747484'
+    );
+    expect(ev(['Quantile', ['StudentTDistribution', 10], 0.025])).toBe(
+      '-2.2281388519862747484'
+    );
+  });
+
+  test('p-values of chi-square and F tests', () => {
+    expect(ev(['CDF', ['ChiSquareDistribution', 4], 9.488])).toBe(
+      '0.950005594422005374128'
+    );
+    expect(ev(['CDF', ['FRatioDistribution', 3, 20], 3.098])).toBe(
+      '0.949981629893228218665'
+    );
+    expect(ev(['Quantile', ['ChiSquareDistribution', 4], 0.95])).toBe(
+      '9.4877290367811567517'
+    );
+    expect(ev(['Quantile', ['FRatioDistribution', 3, 20], 0.95])).toBe(
+      '3.09839121214078009933'
+    );
+  });
+
+  test('gamma and beta probabilities', () => {
+    expect(ev(['CDF', ['GammaDistribution', 2, 3], 4])).toBe(
+      '1 - 7 / (3e^(4/3))'
+    );
+    expect(ev(['PDF', ['GammaDistribution', 2, 3], 4])).toBe('4 / (9e^(4/3))');
+    expect(ev(['Quantile', ['GammaDistribution', 2.5, 3], 0.5])).toBe(
+      '6.52719028664329097574'
+    );
+    expect(ev(['CDF', ['BetaDistribution', 2, 3], ['Rational', 1, 2]])).toBe(
+      '11/16'
+    );
+    expect(ev(['PDF', ['BetaDistribution', 2, 3], ['Rational', 1, 2]])).toBe(
+      '3/2'
+    );
+    expect(ev(['Quantile', ['BetaDistribution', 2, 3], 0.5])).toBe(
+      '0.385727568132389548276'
+    );
+  });
+
+  test('a density at a symbolic point is its closed form, which compiles', () => {
+    expect(ev(['PDF', ['StudentTDistribution', 10], 'x'])).toBe(
+      '984375/8 * (1 / (x^2 + 10))^(11/2)'
+    );
+    expect(ev(['PDF', ['ChiSquareDistribution', 4], 'x'])).toBe(
+      'Which(0 < x, 1/4 * x * e^(-1/2 * x), "True", 0)'
+    );
+    expect(ev(['PDF', ['BetaDistribution', 2, 3], 'x'])).toBe(
+      'Which(0 < x && x < 1, 12x * (1 - x)^2, "True", 0)'
+    );
+    expect(ev(['CDF', ['StudentTDistribution', 10], 'x'])).toContain(
+      'BetaRegularized'
+    );
+    expect(ev(['CDF', ['ChiSquareDistribution', 4], 'x'])).toBe(
+      'Which(x <= 0, 0, "True", 1 - GammaRegularized(2, 1/2 * x))'
+    );
+    // Compiled, each gives the interpreter's value at x = 3.
+    const te = new ComputeEngine();
+    te.declare('x', 'real');
+    for (const d of [
+      ['StudentTDistribution', 10],
+      ['ChiSquareDistribution', 3],
+      ['FRatioDistribution', 3, 20],
+      ['GammaDistribution', 2.5, 3],
+      ['BetaDistribution', 2, 3],
+      ['GeometricDistribution', 0.3],
+      ['NegativeBinomialDistribution', 3, 0.4],
+      ['HypergeometricDistribution', 10, 7, 20],
+    ] as any[])
+      for (const op of ['PDF', 'CDF']) {
+        // The hypergeometric CDF has no closed form at a symbolic point.
+        if (op === 'CDF' && d[0] === 'HypergeometricDistribution') continue;
+        const f = compile(te.box([op, d, 'x']).evaluate(), { fallback: false });
+        expect(f.success).toBe(true);
+        expect(f.run!({ x: 3 })).toBeCloseTo(te.box([op, d, 3]).N().re, 12);
+      }
+  });
+
+  test('a density is 0 off its support, also at its end points', () => {
+    expect(ev(['PDF', ['GammaDistribution', 1, 2], 0])).toBe('0');
+    expect(ev(['PDF', ['ChiSquareDistribution', 3], -1])).toBe('0');
+    expect(ev(['PDF', ['BetaDistribution', 2, 3], 1])).toBe('0');
+    expect(ev(['PDF', ['StudentTDistribution', 3], 'PositiveInfinity'])).toBe(
+      '0'
+    );
+    expect(ev(['CDF', ['BetaDistribution', 2, 3], 2])).toBe('1');
+    expect(ev(['CDF', ['FRatioDistribution', 2, 3], 0])).toBe('0');
+    expect(ev(['CDF', ['StudentTDistribution', 3], 0])).toBe('1/2');
+    expect(ev(['CDF', ['StudentTDistribution', 3], 'NegativeInfinity'])).toBe(
+      '0'
+    );
+  });
+
+  test('continuous quantiles: end points, symmetry, exact operands', () => {
+    expect(ev(['Quantile', ['StudentTDistribution', 10], 0])).toBe('-oo');
+    expect(ev(['Quantile', ['StudentTDistribution', 10], 1])).toBe('+oo');
+    expect(ev(['Quantile', ['StudentTDistribution', 10], ['Rational', 1, 2]])).toBe('0');
+    expect(ev(['Quantile', ['ChiSquareDistribution', 3], 0])).toBe('0');
+    expect(ev(['Quantile', ['BetaDistribution', 2, 3], 1])).toBe('1');
+    // No closed form: an exact probability stays symbolic, and `.N()` gives
+    // the value.
+    expect(ev(['Quantile', ['StudentTDistribution', 10], ['Rational', 3, 4]])).toBe(
+      'Quantile(StudentTDistribution(10), 3/4)'
+    );
+    expect(n(['Quantile', ['StudentTDistribution', 10], ['Rational', 3, 4]])).toBe(
+      '0.699812061312431627344'
+    );
+    expect(ev(['Quantile', ['StudentTDistribution', 'nu'], 0.3])).toBe(
+      'Quantile(StudentTDistribution(nu), 0.3)'
+    );
+  });
+
+  test('a quantile in a far tail keeps its digits', () => {
+    // 1 − 10^−30 rounds to the double 1, and the quantile is finite.
+    expect(
+      n([
+        'Quantile',
+        ['StudentTDistribution', 10],
+        ['Subtract', 1, ['Power', 10, -30]],
+      ])
+    ).toBe('2564.52393174261527932');
+    // The Cauchy distribution: tan(π(p − ½)).
+    expect(ev(['Quantile', ['StudentTDistribution', 1], 1e-12])).toBe(
+      '-318309886183.790671538'
+    );
+    // P(a, x) ≈ x^a/Γ(a + 1) near 0.
+    expect(ev(['Quantile', ['GammaDistribution', 0.01, 1], 0.1])).toBe(
+      '5.66073814706188123175e-101'
+    );
+  });
+
+  test('a quantile at machine precision and at 60 digits', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine.box(['Quantile', ['StudentTDistribution', 10], 0.975]).N().re
+    ).toBeCloseTo(2.228138851986275, 14);
+    const big = new ComputeEngine();
+    big.precision = 60;
+    expect(
+      big.box(['Quantile', ['StudentTDistribution', 10], 0.975]).N().toString()
+    ).toBe('2.22813885198627474839549066320180671785601936641673315471948');
+  });
+
+  test('CDF(Quantile(p)) = p', () => {
+    const dists: any[] = [
+      ['StudentTDistribution', 2.5],
+      ['ChiSquareDistribution', 7],
+      ['FRatioDistribution', 5, 2],
+      ['GammaDistribution', 0.5, 4],
+      ['BetaDistribution', 0.5, 3],
+    ];
+    for (const d of dists)
+      for (const p of [0.001, 0.2, 0.5, 0.8, 0.999]) {
+        const q = ce.box(['Quantile', d, p]).evaluate();
+        expect(ce.box(['CDF', d, q]).N().re).toBeCloseTo(p, 14);
+      }
+  });
+
+  test('geometric: failures before the first success', () => {
+    const g = ['GeometricDistribution', ['Rational', 1, 3]];
+    expect(ev(['PDF', g, 2])).toBe('4/27');
+    expect(ev(['PDF', g, 2.5])).toBe('0');
+    expect(ev(['PDF', g, -1])).toBe('0');
+    expect(ev(['CDF', g, 2])).toBe('19/27');
+    expect(ev(['CDF', g, 2.5])).toBe('19/27');
+    expect(ev(['Quantile', g, ['Rational', 1, 2]])).toBe('1');
+    expect(ev(['Quantile', g, ['Rational', 19, 27]])).toBe('2');
+    expect(ev(['Quantile', g, 0.5])).toBe('1');
+    expect(ev(['Quantile', ['GeometricDistribution', 1e-9], 0.99])).toBe(
+      '4605170183'
+    );
+    // At p = 1 the mass is all at 0.
+    expect(ev(['PDF', ['GeometricDistribution', 1], 0])).toBe('1');
+    expect(ev(['Quantile', ['GeometricDistribution', 1], 0.7])).toBe('0');
+    expect(ev(['PDF', ['GeometricDistribution', 'p'], 'k'])).toBe(
+      'Which(floor(k) == k && 0 <= k, p * (1 - p)^k, "True", 0)'
+    );
+  });
+
+  test('negative binomial: failures before the n-th success', () => {
+    const d = ['NegativeBinomialDistribution', 3, ['Rational', 1, 2]];
+    expect(ev(['PDF', d, 2])).toBe('3/16');
+    expect(ev(['CDF', d, 2])).toBe('1/2');
+    // 1 − P(at most 2 successes in 10 trials) = 1 − 56/1024.
+    expect(ev(['CDF', d, 7])).toBe('121/128');
+    expect(ev(['Quantile', d, ['Rational', 1, 2]])).toBe('2');
+    expect(ev(['Quantile', ['NegativeBinomialDistribution', 3, 0.5], 0.9])).toBe(
+      '6'
+    );
+  });
+
+  test('hypergeometric: n draws from N items, K of them successes', () => {
+    const d = ['HypergeometricDistribution', 10, 7, 20];
+    expect(ev(['PDF', d, 3])).toBe('105/323');
+    expect(ev(['PDF', d, 8])).toBe('0');
+    expect(ev(['CDF', d, 3])).toBe('1/2');
+    expect(ev(['CDF', d, 3.5])).toBe('1/2');
+    expect(ev(['CDF', d, 7])).toBe('1');
+    expect(ev(['Quantile', d, ['Rational', 1, 2]])).toBe('3');
+    expect(ev(['Quantile', d, 0.5])).toBe('3');
+    expect(ev(['Quantile', d, 1])).toBe('7');
+    // A support whose bottom is above 0: max(0, n + K − N) = 5.
+    const e = ['HypergeometricDistribution', 10, 15, 20];
+    expect(ev(['PDF', e, 4])).toBe('0');
+    expect(ev(['Quantile', e, 0])).toBe('5');
+    expect(ev(['PDF', e, 'k'])).toBe(
+      'Which(floor(k) == k && 5 <= k && k <= 10, 1/184756 * Binomial(15, k) * Binomial(5, 10 - k), "True", 0)'
+    );
+  });
+
+  test('constructors validate their parameters', () => {
+    for (const bad of [
+      ['StudentTDistribution', 0],
+      ['ChiSquareDistribution', -1],
+      ['FRatioDistribution', 1, 0],
+      ['GammaDistribution', 1, -2],
+      ['BetaDistribution', 'Pi', 0],
+      ['GeometricDistribution', 0],
+      ['GeometricDistribution', 1.5],
+      ['NegativeBinomialDistribution', 0, 0.5],
+      ['NegativeBinomialDistribution', 1.5, 0.5],
+      ['HypergeometricDistribution', 30, 7, 20],
+      ['HypergeometricDistribution', 3, 21, 20],
+      ['HypergeometricDistribution', -1, 2, 20],
+    ] as any[])
+      expect(ce.box(bad).isValid).toBe(false);
+    for (const good of [
+      ['StudentTDistribution', 'nu'],
+      ['GammaDistribution', 0.5, 2],
+      ['GeometricDistribution', 1],
+      ['HypergeometricDistribution', 0, 0, 0],
+    ] as any[])
+      expect(ce.box(good).isValid).toBe(true);
+  });
+
+  test('a float hypergeometric quantile of a large population', () => {
+    // The mass at the bottom of the support, 1/C(4000, 2000), is far below
+    // the double range.
+    expect(
+      ev(['Quantile', ['HypergeometricDistribution', 2000, 2000, 4000], 0.5])
+    ).toBe('1000');
+    expect(
+      ev([
+        'Quantile',
+        ['HypergeometricDistribution', 50000, 50000, 100000],
+        0.975,
+      ])
+    ).toBe('25155');
+  });
+
+  test('a lower-tail gamma CDF keeps its digits', () => {
+    // 1 − Q(α, z) cancels where the CDF is small; mpmath gives
+    // 4.99999999966666666668e-21 and 2.65961440479179952944e-10.
+    expect(ev(['CDF', ['GammaDistribution', 2, 1], 1e-10])).toBe(
+      '4.99999999966666666668e-21'
+    );
+    expect(ev(['CDF', ['ChiSquareDistribution', 3], 1e-6])).toBe(
+      '2.65961440479179952944e-10'
+    );
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine.box(['CDF', ['GammaDistribution', 2, 1], 1e-10]).N().re
+    ).toBeCloseTo(4.99999999966666e-21, 33);
+  });
+
+  test('a discrete float quantile: Quantile(CDF(k)) = k, and small masses', () => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    for (const d of [
+      ['GeometricDistribution', 0.013],
+      ['NegativeBinomialDistribution', 7, 0.05],
+      ['HypergeometricDistribution', 50, 30, 120],
+    ] as any[])
+      for (let k = 1; k < 40; k++) {
+        const p = machine.box(['CDF', d, k]).N();
+        if (p.re >= 1) break;
+        expect(machine.box(['Quantile', d, p]).N().re).toBe(k);
+      }
+    // Masses of about 10^−15: ln 2/10^−15 − 1 = 693147180559944.3…, and
+    // the double CDF resolves the quantile to about one point there.
+    const q = ce.box(['Quantile', ['GeometricDistribution', 1e-15], 0.5]).N();
+    expect(Math.abs(q.re - 693147180559944)).toBeLessThanOrEqual(2);
+  });
+
+  test('edge cases of the float searches', () => {
+    // A quantile past 2^53 has no integer double: it stays unevaluated
+    // (the search used to loop).
+    expect(ev(['Quantile', ['GeometricDistribution', 1e-20], 0.5])).toBe(
+      'Quantile(GeometricDistribution(1e-20), 0.5)'
+    );
+    // Near 1 the search is on the upper tail: the exact quantiles of these
+    // doubles are 97 and 1125 (mpmath); the double CDF resolves them to
+    // within a point.
+    const g = ce.box(['Quantile', ['GeometricDistribution', 0.3], 0.9999999999999991]).N().re;
+    expect(Math.abs(g - 97)).toBeLessThanOrEqual(1);
+    expect(
+      ev([
+        'Quantile',
+        ['HypergeometricDistribution', 2000, 2000, 4000],
+        0.999999999999999,
+      ])
+    ).toBe('1125');
+    // Near the median of a t distribution: tan(π·10^−12) for ν = 1.
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    expect(
+      machine.box(['Quantile', ['StudentTDistribution', 1], 0.500000000001]).N()
+        .re
+    ).toBeCloseTo(3.14152315615637e-12, 24);
+    expect(ev(['Quantile', ['StudentTDistribution', 10], 0.6])).toBe(
+      '0.26018482949208023537'
+    );
+    // The floor of the exact point, not of its double.
+    expect(
+      ev([
+        'CDF',
+        ['HypergeometricDistribution', 10, 7, 20],
+        ['Subtract', 4, ['Power', 10, -30]],
+      ])
+    ).toBe('1/2');
+  });
+
+  test('Mean, Variance and StandardDeviation', () => {
+    const moments = (d: any) =>
+      ['Mean', 'Variance', 'StandardDeviation']
+        .map((o) => ev([o, d]))
+        .join(' | ');
+    expect(moments(['StudentTDistribution', 10])).toBe('0 | 5/4 | sqrt(5)/2');
+    // No mean for ν ≤ 1; an infinite variance for 1 < ν ≤ 2.
+    expect(moments(['StudentTDistribution', 1])).toBe('NaN | NaN | NaN');
+    expect(moments(['StudentTDistribution', 1.5])).toBe('0 | +oo | +oo');
+    expect(moments(['StudentTDistribution', 'nu'])).toBe(
+      'Mean(StudentTDistribution(nu)) | Variance(StudentTDistribution(nu)) | StandardDeviation(StudentTDistribution(nu))'
+    );
+    expect(moments(['ChiSquareDistribution', 4])).toBe('4 | 8 | 2sqrt(2)');
+    expect(moments(['FRatioDistribution', 3, 20])).toBe(
+      '10/9 | 175/162 | 5/18sqrt(14)'
+    );
+    expect(moments(['FRatioDistribution', 3, 3])).toBe('3 | +oo | +oo');
+    expect(moments(['GammaDistribution', 2, 3])).toBe('6 | 18 | 3sqrt(2)');
+    expect(moments(['BetaDistribution', 2, 3])).toBe('2/5 | 1/25 | 1/5');
+    expect(moments(['GeometricDistribution', ['Rational', 1, 3]])).toBe(
+      '2 | 6 | sqrt(6)'
+    );
+    expect(
+      moments(['NegativeBinomialDistribution', 3, ['Rational', 1, 2]])
+    ).toBe('3 | 6 | sqrt(6)');
+    expect(moments(['HypergeometricDistribution', 10, 7, 20])).toBe(
+      '7/2 | 91/76 | sqrt(1729)/38'
+    );
+  });
+
+  test('the closed forms are what D and Integrate work on', () => {
+    expect(
+      ce
+        .box([
+          'Integrate',
+          ['PDF', ['BetaDistribution', 2, 3], 'x'],
+          ['Limits', 'x', 0, 1],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('1');
+  });
+
+  test('LaTeX round-trip', () => {
+    for (const c of [
+      ['StudentTDistribution', 10],
+      ['ChiSquareDistribution', 4],
+      ['FRatioDistribution', 3, 20],
+      ['GammaDistribution', 2, 3],
+      ['BetaDistribution', 2, 3],
+      ['GeometricDistribution', ['Rational', 1, 3]],
+      ['NegativeBinomialDistribution', 3, ['Rational', 1, 2]],
+      ['HypergeometricDistribution', 10, 7, 20],
+    ] as any[]) {
+      const e = ce.box(c);
+      expect(e.latex).toContain(`\\operatorname{${c[0]}}`);
+      expect(ce.parse(e.latex).isSame(e)).toBe(true);
     }
   });
 });

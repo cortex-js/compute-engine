@@ -172,6 +172,12 @@ interpreter's value. A line is removed when the case declines or is fixed.
   and `Filter` do in the interpreter); the interpreter's `Iterate` applies
   the literal's (`[6, 1, 6]`). CE-1461.
 
+- `plausible?` — `javascript`, `x: real`: the CDF of a gamma or chi-square
+  distribution at a symbolic point compiles as `1 - GammaRegularized(α, x/θ)`,
+  which cancels in the lower tail: `CDF(GammaDistribution(2, 1), x)` at
+  `x = 10^-10` gives `0`; the interpreter gives `4.99999999966667e-21` from
+  the lower-tail kernel. CE-1590.
+
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
