@@ -73,6 +73,11 @@
 
 ### Resolved Issues
 
+- **A scope that the host pops is released when the garbage collector runs**
+  (CE-1152). After a call of a function evaluated in a scope, the engine kept
+  that scope and its definitions in memory after `ce.popScope()`, until a later
+  call read a type under another scope. One scope at most was kept this way.
+
 - **The Epsil guides describe a `let` with no value as valid** (CE-1459).
   The declarations guide and `epsil doc declaration-without-value` said that
   `let a: integer; if c { a = 1 }; a` is the error

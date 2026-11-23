@@ -72,17 +72,6 @@ function defineApplying(ce: ComputeEngine, fnName: string, head: string) {
   );
 }
 
-/** The static typing view memoizes the innermost context of the last type
- * read (`innermostFrameMemo`, `static-typing-view.ts`), which keeps the
- * LAST popped scope in memory until a type read under another context. A
- * push, a definition without a provisional reading, and a pop move the memo
- * off the scope under test (CE-1152 records the retention). */
-function moveTypingMemo(ce: ComputeEngine): void {
-  ce.pushScope();
-  ce.assign('memoMover', ce.box(['Function', 1, 'x'] as any));
-  ce.popScope();
-}
-
 describe('CE-1102: the registry of waiting definitions holds weak references', () => {
   test('the definitions of a discarded scope leave the registry', async () => {
     const ce = new ComputeEngine();
@@ -94,7 +83,6 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
       // collected. Before the fix, `pass + 1` definitions waited on `h_0`.
       expect(await collectUntilAtMost(ce, 'h_0', 1)).toBeLessThanOrEqual(1);
     }
-    moveTypingMemo(ce);
     expect(await collectUntilAtMost(ce, 'h_0', 0)).toBe(0);
     expect(await collectUntilAtMost(ce, 'h_19', 0)).toBe(0);
     // A declaration of a name that only collected bodies applied has
@@ -111,7 +99,6 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     const scope = ce.context.lexicalScope;
     defineApplying(ce, 'f', 'h');
     ce.popScope();
-    moveTypingMemo(ce);
     await collect();
     // Reachable through `scope`, so still registered.
     expect(_provisionalDependentCount(ce, 'h')).toBe(1);
@@ -139,7 +126,6 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     ce.pushScope();
     defineApplying(ce, 'fDropped', 'h');
     ce.popScope();
-    moveTypingMemo(ce);
     expect(await collectUntilAtMost(ce, 'h', 1)).toBe(1);
 
     ce.declare('h', '(real) -> real');
@@ -161,7 +147,6 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     expect(() => ce.withValues({ k: 2 }, () => 1)).toThrow(
       /the body of a function applies "k"/
     );
-    moveTypingMemo(ce);
     // Collect until the value is accepted, at most 20 times. The registry
     // is not read in between: `withValues()` itself must skip the collected
     // body.
@@ -187,7 +172,6 @@ describe('CE-1102: the registry of waiting definitions holds weak references', (
     for (let i = 0; i < 40; i++) defineApplying(ce, `f_${i}`, 'h');
     defineApplying(ce, 'probeFn', 'probeHead');
     ce.popScope();
-    moveTypingMemo(ce);
     await collectUntilProbeGone(ce, 'probeHead');
     // No read of `h` yet: the 40 collected references are still there.
     expect(_provisionalReferenceCount(ce, 'h')).toBe(40);

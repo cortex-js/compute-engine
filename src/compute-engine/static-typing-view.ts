@@ -82,14 +82,15 @@ export function forgetBodyScopeApplied(bodyScope: object): void {
   appliedBodyScopes.delete(bodyScope);
 }
 
-/** For each evaluation-context stack, the result of the last scan of
- * `innermostFrame()`: the length of the stack and its innermost context
+/** For each evaluation-context stack and each of its innermost contexts,
+ * the result of the last scan of `innermostFrame()`: the length of the stack
  * then, and the frame found. A context is a new object at each push, so a
  * stack with the same length and the same innermost context holds the same
- * contexts. */
+ * contexts. Both keys are weak: the memo does not keep a popped context, or
+ * the scopes it reaches, in memory. */
 const innermostFrameMemo = new WeakMap<
   object,
-  { length: number; top: object; frame: object | undefined }
+  WeakMap<object, { length: number; frame: object | undefined }>
 >();
 
 /** The innermost call frame of a function literal on `stack` (the
@@ -101,9 +102,9 @@ function innermostFrame(
   const length = stack.length;
   if (length === 0) return undefined;
   const top = stack[length - 1];
-  const memo = innermostFrameMemo.get(stack);
-  if (memo !== undefined && memo.length === length && memo.top === top)
-    return memo.frame;
+  let byTop = innermostFrameMemo.get(stack);
+  const memo = byTop?.get(top);
+  if (memo !== undefined && memo.length === length) return memo.frame;
   let frame: object | undefined = undefined;
   for (let i = length - 1; i >= 0; i--) {
     const scope = stack[i].lexicalScope;
@@ -112,12 +113,16 @@ function innermostFrame(
       break;
     }
   }
-  if (memo === undefined) innermostFrameMemo.set(stack, { length, top, frame });
-  else {
+  if (memo !== undefined) {
     memo.length = length;
-    memo.top = top;
     memo.frame = frame;
+    return frame;
   }
+  if (byTop === undefined) {
+    byTop = new WeakMap();
+    innermostFrameMemo.set(stack, byTop);
+  }
+  byTop.set(top, { length, frame });
   return frame;
 }
 
