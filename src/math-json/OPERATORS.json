@@ -5442,8 +5442,8 @@
     {
       "name": "Mod",
       "category": "Arithmetic",
-      "arity": "2",
-      "signature": "(real, real) -> real",
+      "arity": "optional",
+      "signature": "(real, real, real?) -> real",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5452,7 +5452,8 @@
       "description": "Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.",
       "wikidata": "Q1799665",
       "examples": [
-        "[7 % 3, -7 % 3]"
+        "[7 % 3, -7 % 3]",
+        "Mod(9, 3, 1)"
       ]
     },
     {

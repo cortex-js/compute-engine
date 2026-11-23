@@ -13040,7 +13040,13 @@ function exactJumpBroadcastOperands(
         : undefined;
     divisor = real(tail[1]);
     if (divisor === undefined) dividend = real(tail[0]);
-    if (divisor === 0 || (divisor === undefined && dividend === undefined))
+    // `Mod(a, m, d)` jumps where `(a − d)/m` is an integer: every element is
+    // taken as near a jump.
+    if (
+      tail.length > 2 ||
+      divisor === 0 ||
+      (divisor === undefined && dividend === undefined)
+    )
       scale = NaN;
   }
   const isNearJump = (x: Expression): boolean => {

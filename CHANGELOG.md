@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### New Features
+
+- **`Mod(m, n, d)` is the representative of `m` modulo `n` in `[d, d + n)`,**
+  as in Mathematica's `Mod[m, n, d]` (#548, contributed by
+  [enumeratio](https://github.com/enumeratio)). It was an
+  `unexpected-argument` error. The signature is now `(real, real, real?)`
+  and the value is `d + Mod(m − d, n)`, under `evaluate()` and `.N()`:
+  `Mod(7, 3, 1)` is `1`, `Mod(9, 3, 1)` is `3` (a residue in `1..3`),
+  `Mod(−1, 3, 1)` is `2` and `Mod(10, 4, −1)` is `2`. Exact rational and
+  float operands keep their kind, and a symbolic operand leaves the call
+  unevaluated. The JavaScript, GLSL and interval targets and the bigint mode
+  decline the three-operand form, so a compiled program falls back to the
+  interpreter; the enclosure, measurement, limit and derivative code leave it
+  unevaluated, and the LaTeX form writes `\mathrm{Mod}(m, n, d)`. The
+  two-operand `Mod` is unchanged.
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features

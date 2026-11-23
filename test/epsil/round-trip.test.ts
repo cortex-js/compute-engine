@@ -415,7 +415,19 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
     'deep mixed',
     ['Equal', ['Add', 'a', ['Multiply', 'b', 'c']], ['Divide', 1, 2]],
   ],
+  // Only the two-operand `Mod` is the infix `%`; `Mod(m, n, d)` is a call.
+  ['Mod, two operands', ['Mod', 'x', 3]],
+  ['Mod, offset, literals', ['Mod', 7, 3, 1]],
+  ['Mod, offset, symbols', ['Mod', 'x', 'n', 'd']],
 ];
+
+describe('EPSIL Mod spelling', () => {
+  test('the infix % is for two operands only', () => {
+    expect(serializeEpsil(['Mod', 'x', 3])).toBe('x % 3');
+    expect(serializeEpsil(['Mod', 7, 3, 1])).toBe('Mod(7, 3, 1)');
+    expect(serializeEpsil(['Mod', 'x', 'n', 'd'])).toBe('Mod(x, n, d)');
+  });
+});
 
 describe('EPSIL ROUND-TRIP', () => {
   test.each(CORPUS)('%s', (_label, expr) => {

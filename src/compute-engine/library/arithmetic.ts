@@ -11453,8 +11453,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // named by `definedWhen` below, which the gate routes to the codomain
       // marker (`Mod(1, 0)` → `NaN`),
       // never to `Error`.
-      signature: '(real, real) -> real',
-      examples: ['[7 % 3, -7 % 3]'],
+      // `Mod(m, n, d)` is the representative of `m` modulo `n` in `[d, d + n)`,
+      // `d + Mod(m − d, n)` (Mathematica's `Mod[m, n, d]`): `Mod(m, 3, 1)`
+      // ranges over `1..3`.
+      signature: '(real, real, real?) -> real',
+      examples: ['[7 % 3, -7 % 3]', 'Mod(9, 3, 1)'],
       nanBehavior: 'propagate',
       // The named domain condition (Contract B, `docs/ERROR-MODEL.md` §4):
       // inside the carrier, a floored remainder exists exactly for a
@@ -11484,8 +11487,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (positiveSign(s) === true || negativeSign(s) === true) return true;
         return s === 'not-zero' ? true : undefined;
       },
-      type: ([a, b], context) => {
+      type: ([a, b, d], context) => {
         if (!a || !b) return undefined;
+        // The offset `d` shifts the result, so it takes part in the kind: an
+        // integer `Mod(m, n, 1/2)` is not an integer. Declining leaves the
+        // declared `real`.
+        if (d !== undefined && !factsOf(broadcastCellType(d.type)).real)
+          return undefined;
         // A floored remainder is defined only for a finite real dividend and a
         // finite, non-zero real modulus, and it stays in the operands' common
         // numeric kind (`Mod(k, 900)` is an integer for an integer `k`). The
@@ -11516,6 +11524,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!bNonZero) return undefined;
         const ta = broadcastCellType(a.type);
         const tb = broadcastCellType(b.type);
+        if (d !== undefined) {
+          const td = broadcastCellType(d.type);
+          if (
+            factsOf(ta).integer &&
+            factsOf(tb).integer &&
+            factsOf(td).integer
+          )
+            return BoxedType.forResult('integer', context.engine._typeResolver);
+          if (
+            factsOf(ta).rational &&
+            factsOf(tb).rational &&
+            factsOf(td).rational
+          )
+            return BoxedType.forResult(
+              rationalTierOf([a, b, d]),
+              context.engine._typeResolver
+            );
+          return BoxedType.forResult('real', context.engine._typeResolver);
+        }
         if (factsOf(ta).integer && factsOf(tb).integer)
           return BoxedType.forResult('integer', context.engine._typeResolver);
         // A float literal operand makes a float result (`Mod(5.0, 3/2)` is
@@ -11530,6 +11557,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       sgn: (ops) => {
+        // The sign of `d + Mod(m − d, n)` is not that of the remainder.
+        if (ops.length > 2) return undefined;
         const n = ops[1]; //base of Mod
         if (n === undefined || n.isExtendedReal == false) return undefined;
         if (n.isSame(0)) return 'unsigned';
@@ -11549,7 +11578,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
+      evaluate: (
+        [a, b, d],
+        { engine: ce, numericApproximation, expression }
+      ) => {
+        // `Mod(m, n, d)` is `d + Mod(m − d, n)`, in `[d, d + n)`. A residue
+        // the two-operand form cannot decide (a symbol) leaves it unevaluated.
+        if (d !== undefined) {
+          const inner = ce.function('Mod', [a.sub(d), b]);
+          const r = numericApproximation ? inner.N() : inner.evaluate();
+          if (r.operator === 'Mod') return undefined;
+          const sum = r.add(d);
+          return numericApproximation ? sum.N() : sum.evaluate();
+        }
         // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
         // values of exact operands are used near such a point
         // (`exactModUnderN()`).
