@@ -2903,8 +2903,12 @@ function lowerOnce(
             return raw;
           }
           // The checks read the argument before it is widened to the lane
-          // of its parameter, so a widening cannot hide a mismatch.
-          const raw = value(a)!;
+          // of its parameter, so a widening cannot hide a mismatch. `List()`
+          // at a parameter declared a flat list of integers or reals is the
+          // empty list of that lane.
+          const empty = d === undefined ? undefined : emptyListLane(a, d.t);
+          const raw =
+            empty === undefined ? value(a)! : emptyList(a as Fn, empty);
           const v = d === undefined ? raw : widen(raw, d.lane);
           const t = type(raw);
           // An argument at a list or a tuple parameter must have its
@@ -4694,8 +4698,16 @@ function lowerOnce(
     first?: V,
     start = b.types.length
   ): V | undefined => {
+    // An arm `List()` of a conditional whose type is a flat list of
+    // integers or reals (the other arms give the element type,
+    // `If(n < 1, [], Range(1, n))`): the empty list of that lane, which
+    // `branch()` joins with the other arms as lists of two lengths.
+    const arm = (x: Expression): V | undefined => {
+      const lane = want ? emptyListLane(x, node.type.type) : undefined;
+      return lane === undefined ? value(x, want) : emptyList(x as Fn, lane);
+    };
     if (clauses.length === 0) {
-      if (otherwise !== undefined) return value(otherwise, want);
+      if (otherwise !== undefined) return arm(otherwise);
       if (!want) return undefined;
       const t = first === undefined ? undefined : type(first);
       // An `If` whose arm is a flat list of numbers or a list of points:
@@ -4805,7 +4817,7 @@ function lowerOnce(
     return branch(
       node,
       cond,
-      () => (first = value(then, want)),
+      () => (first = arm(then)),
       () => conditional(node, rest, otherwise, want, first, at),
       want
     );
@@ -6410,6 +6422,43 @@ function lowerOnce(
   /** `List()`, which has no type of its own. */
   const isEmptyList = (x: Expression) => isFunction(x, 'List') && x.nops === 0;
 
+  /** The lane of `x`, `List()`, where the type `t` of the place that
+   *  takes it (a conditional of which it is an arm, a parameter) is a flat
+   *  list of integers or reals, on a target with run-time lengths; or
+   *  `undefined`: then `List()` declines, it has no type of its own. A
+   *  conditional whose arms are all `List()` (`list<never>`) takes the
+   *  integer lane. */
+  const emptyListLane = (
+    x: Expression,
+    t: Type
+  ): 'integer' | 'real' | undefined => {
+    if (!isEmptyList(x) || interval || !options.runtimeLengths)
+      return undefined;
+    const ir = inputType(t);
+    if (ir?.shape.length !== 1 || ir.shape[0] !== 'run-time') return undefined;
+    return ir.lane === 'integer' || ir.lane === 'real' ? ir.lane : undefined;
+  };
+
+  /** The list of no element of the lane `lane`: a build of no element (a
+   *  stated length is at least 1). `element` makes the element of the
+   *  build from the zero of the lane (a point of zeros for a list of
+   *  points). */
+  const emptyList = (
+    e: Fn,
+    lane: Lane,
+    element: (zero: V) => V = (zero) => zero
+  ): V => {
+    const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+    const k = b.newValue(scalarType('integer'));
+    return region(
+      'build',
+      [b.constant(0, 'integer')],
+      [k],
+      () => [element(zero)],
+      e
+    )[0];
+  };
+
   /** The value `x` written to a list local written whole of the lane `lane`
    *  (`wholeLocal()`): a list of the rank, the lengths after the first and
    *  the tuple mark of the local, of a sub-lane; an empty list (`undefined`
@@ -6422,20 +6471,10 @@ function lowerOnce(
     lane: Lane
   ): V => {
     const t = x === undefined ? { lane, shape: [0] } : type(x);
-    if (x === undefined || (t.shape.length === 1 && t.shape[0] === 0)) {
-      // A build of no element: a stated length is at least 1.
-      const zero = b.constant(lane === 'boolean' ? false : 0, lane);
-      const k = b.newValue(scalarType('integer'));
-      return region(
-        'build',
-        [b.constant(0, 'integer')],
-        [k],
-        () => [
-          whole.points ? tuple(e, Array<V>(whole.inner[0]).fill(zero)) : zero,
-        ],
-        e
-      )[0];
-    }
+    if (x === undefined || (t.shape.length === 1 && t.shape[0] === 0))
+      return emptyList(e, lane, (zero) =>
+        whole.points ? tuple(e, Array<V>(whole.inner[0]).fill(zero)) : zero
+      );
     const shaped =
       t.shape.length === 1 + whole.inner.length &&
       whole.inner.every((n, k) => t.shape[k + 1] === n) &&

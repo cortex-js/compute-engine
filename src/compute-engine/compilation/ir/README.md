@@ -1487,8 +1487,15 @@ yield (`If(x > 0, List(x, 2), D)` is `[x, 2]` or `D`, and its `Length` is 2 or
 the length of `D`). A length value that is a constant at least 1 and equal to
 the other arm's length is that stated length
 (`If(c, Repeat(x, 400), Range(1, 400))` is a list of 400; two empty arms keep
-the length result). The invariant: a value that a type names (of a value or of a
-function's result) is live wherever that type is, so `dce` keeps it; when `fold`
+the length result). An arm `List()`, which has no type of its own, is the empty
+list (a build of no element) of the lane of the conditional's engine type when
+that type is a flat list of integers or reals (`If(n < 1, [], Range(1, n))`, of
+type `list<integer>`; arms that are all `List()`, of type `list<never>`, take the
+integer lane); so is `List()` at a parameter of `Apply` declared such a list
+(`Typed(xs, 'list<integer>')`). Otherwise, and on GLSL and in the interval
+mode, `List()` declines ("an empty list"). The invariant: a value that a type
+names (of a value or of a function's result) is live wherever that type is, so
+`dce` keeps it; when `fold`
 takes the arm of an `if` whose list is the program's result, the length constant
 of that arm is read by the result type only. GLSL and the interval mode decline
 lists of two lengths ("arms that are lists of two lengths"): GLSL has no

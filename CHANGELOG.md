@@ -64,6 +64,15 @@
 
 ### Improvements
 
+- **A compiled `If` or `Which` with an empty list as one arm compiles on
+  JavaScript** (CE-1735, #638). `If(n < 1, [], Range(1, n))` declined with
+  "an empty list", so the program fell back to the interpreter. The arm
+  `[]` now takes the element type of the other arms when the type of the
+  conditional is a list of integers or reals, and the result is `[]` or
+  the other list. `[]` as the argument of an `Apply` parameter declared
+  `list<integer>` or `list<real>` compiles the same way. A list of
+  booleans, points or lists, GLSL and the interval target still decline.
+
 - **The `///` comments of a protocol and of its members are kept, and the
   editor functions show them** (CE-1730). `epsilHover()` on a protocol gives
   its comment, also for a protocol that a prelude declared on the engine,
