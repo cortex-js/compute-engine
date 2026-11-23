@@ -398,6 +398,54 @@ describe('an error in an operand of a subtraction', () => {
   });
 });
 
+describe('an error in the second operand of a subtraction with a unary minus', () => {
+  // `a - b` is `Add(a, Negate(b))` in canonical form, so the error of `b`
+  // has the frame `Negate argument 1`. The written subtraction is a call of
+  // that frame, as the written unary minus is, and the unary minus of the
+  // first operand is not the only candidate. When the frames cannot tell
+  // the two calls apart, the underline is the subtraction or the site that
+  // the engine recorded, never the operand of the unary minus.
+  const prefix = 'let s: any = "a"\nlet y = 5\n';
+
+  test.each([
+    ['let v = -(y + 2) - s', '-(y + 2) - s'],
+    ['let v = -y - s', 's'],
+    ['let v = -s - y', 's'],
+    ['let v = [-y - s, 1]', 's'],
+    ['let v = Sin(-y - s)', 's'],
+    ['let v = -(2) - "a"', '"a"'],
+    ['let v = -("a") - 2', '"a"'],
+    // `y - 2` is `Add(y, -2)` in canonical form, with no `Negate`.
+    ['let v = [y - 2, -s]', 's'],
+    ['let v = [-s, y - 2]', 's'],
+    // A runtime error of the `Negate` of a subtraction has an `Add` frame
+    // after its `Negate` frame, so the frame alone names the `-s`.
+    ['let v = [y - z, -s]', 's'],
+  ])('runtime: %s underlines %s', (stmt, expected) => {
+    expect(underlines(`${prefix}let z = 1\n${stmt}\n0`)).toEqual([expected]);
+  });
+
+  test('a Negate frame of an earlier statement does not select a subtrahend', () => {
+    // The error of `-s` is held by `x`. The frame `Add argument 1` of the
+    // subtraction names `x`, so the frame `Negate argument 1` was not
+    // recorded by the subtraction.
+    const src = `${prefix}let x: any = -s\nlet v = [x - y, 1]\n0`;
+    expect(underlines(src)).toEqual(['x']);
+  });
+
+  test.each([
+    ['let v = -(y + 2) - s', 's'],
+    ['let v = -y - s', 's'],
+    ['let v = -s - y', 's'],
+    ['let v = Sin(-y - s)', 's'],
+    ['let v = -(2) - "a"', '"a"'],
+  ])('static: %s underlines %s', (stmt, expected) => {
+    expect(
+      underlines(`${prefix}${stmt}\n0`, 'let v', 'static-type-error')
+    ).toEqual([expected]);
+  });
+});
+
 describe('an argument whose value the logarithm refuses', () => {
   // `Ln(w)`, with `w` a variable that holds `"s"`, is valid when it is
   // boxed, and the evaluation refuses the value. The error has the frame

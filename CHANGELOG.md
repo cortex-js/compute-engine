@@ -35,6 +35,11 @@
   `[0.999…9, 1.5]`, and `N((1/3)·[3 + 6i])` gave `0.999…9 + 1.999…8i`; they
   are now `[1, 1.5]` and `1 + 2i`. A matrix of floats times a number is
   computed on its doubles row by row, about six times faster.
+- **In Epsil, an error in the second operand of a subtraction whose first
+  operand has a unary minus underlines the operand that made the error**
+  (CE-1129). With `s` holding `"a"`, the type error of `-(y + 2) - s`
+  underlined `y + 2`, and the runtime error of `[-y - s, 1]` underlined `y`.
+  Both now underline `s`.
 
 ## 0.200.0 _2026-11-22_
 

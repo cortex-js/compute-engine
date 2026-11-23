@@ -247,14 +247,14 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — a rule at a function parameter', () 
 
   test('a call made by canonicalization is not mapped to an unrelated call', () => {
     // `sqrt(y) - "a"` canonicalizes to `Add(Sqrt(y), Negate(Error(…)))`. The
-    // raw statement has no `Negate`, and the only operand of the canonical
-    // `Negate` is the error, so no operand of `Sqrt(y)` matches it. The
-    // error is not put on `y`: the anchor stays on the whole statement.
+    // written subtraction is the call of the canonical `Negate`, and its
+    // second operand is the argument of the frame `Negate argument 1`. The
+    // error is not put on `y`, an operand of `Sqrt(y)`.
     const src = 'sqrt(y) - "a"';
     const { diagnostics } = run(src);
     expect(
       diagnostics.map((d) => [d.message[3], src.slice(d.range[0], d.range[1])])
-    ).toEqual([['incompatible-type', src]]);
+    ).toEqual([['incompatible-type', '"a"']]);
   });
 
   test('a hidden error does not hide a different error with the same description', () => {

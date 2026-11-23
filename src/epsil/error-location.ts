@@ -241,8 +241,7 @@ export function locateError(
   for (let k = 0; k < frames.length; k++) {
     if (rejected.frames.has(k)) continue;
     const { name } = frames[k];
-    const matches: MathJsonExpression[] = [];
-    findWrittenCalls(stmt, name, matches);
+    const matches = frameCalls(frames, k, stmt, stmt, canonicalOrder);
     // When the argument is not sure, the whole call is the range: it
     // contains the error.
     const callOf = (call: MathJsonExpression) =>
@@ -290,9 +289,15 @@ export function locateError(
         // in `y`. When no call can have made the error
         // (`x + Ln(2) + Ln(3)`), the frame is skipped, as for one call
         // below.
-        const inScope: MathJsonExpression[] = [];
         // Every call is compared, not only the first two.
-        findWrittenCalls(reached.scope, name, inScope, Infinity);
+        const inScope = frameCalls(
+          frames,
+          k,
+          reached.scope,
+          stmt,
+          canonicalOrder,
+          Infinity
+        );
         const checks = inScope.map((call) =>
           literalArgumentMatch(
             call,
@@ -528,9 +533,7 @@ function rejectFramesOutsideScope(
       .map((node) => renamedCallFrame(frames[j], node, canonicalOrder))
       .filter((frame) => frame !== undefined);
     if (renamed.length === 1) frames[j] = renamed[0];
-    const { name } = frames[j];
-    const calls: MathJsonExpression[] = [];
-    findWrittenCalls(stmt, name, calls, Infinity);
+    const calls = frameCalls(frames, j, stmt, stmt, canonicalOrder, Infinity);
     if (calls.length === 0) continue;
 
     let candidates: MathJsonExpression[];
@@ -696,17 +699,25 @@ function walkToFrame(
     if (j > k) {
       // A rejected frame did not make the error in this statement.
       if (rejected?.frames.has(j)) continue;
-      const inStatement: MathJsonExpression[] = [];
-      findWrittenCalls(stmt, name, inStatement);
-      if (inStatement.length === 0) continue;
+      if (frameCalls(frames, j, stmt, stmt, canonicalOrder).length === 0)
+        continue;
     }
 
-    // A written subtraction is also a call of an `Add` frame (see
-    // `clusterOperators`), so the calls of both operators are searched
-    // together. In `Sqrt(y + 2) - s`, the shallowest one is the subtraction,
-    // not the `y + 2` inside `Sqrt`.
+    // A written subtraction is also a call of an `Add` frame and of a `Negate`
+    // frame (see `isWrittenCallOf`), so the calls of these operators are
+    // searched together. In `Sqrt(y + 2) - s`, the shallowest one is the
+    // subtraction, not the `y + 2` inside `Sqrt`.
     const shallowest: MathJsonExpression[] = [];
-    findShallowestByOperators(scope, clusterOperators(name), shallowest);
+    findShallowestByOperators(
+      scope,
+      (node) =>
+        isWrittenCallOf(node, name) &&
+        !(
+          isSubtractForNegate(node, name) &&
+          subtractionRuledOut(frames, j, node, stmt, canonicalOrder)
+        ),
+      shallowest
+    );
     if (shallowest.length !== 1) return undefined;
     const selected = frameArgument(
       frames,
@@ -738,8 +749,7 @@ function walkToFrame(
           // The operand that holds the argument (the argument itself, or a
           // nested call that canonicalization merges with `call`).
           if (pathTo(op, arg, [])) continue;
-          const other: MathJsonExpression[] = [];
-          findWrittenCalls(op, name, other);
+          const other = frameCalls(frames, j, op, stmt, canonicalOrder);
           // Another call of `name` inside an operand can be the call of the
           // frame, so the argument is not sure. For a sum or a product, the
           // call contains that other call, and its range is the result:
@@ -775,6 +785,116 @@ const REORDERED_OPERATORS = new Set(['Add', 'Multiply', 'Xor', 'Set']);
 function clusterOperators(name: string): readonly string[] {
   if (name === 'Add') return ['Add', 'Subtract'];
   return [name];
+}
+
+/**
+ * Whether the written node `node` is a call that a frame of the operator
+ * `name` can name: a call of `name`, or of an operator that canonicalization
+ * merges into it (see {@link clusterOperators}).
+ *
+ * A written subtraction `a - b` is `Add(a, Negate(b))` in canonical form, so
+ * it is also a call of a `Negate` frame, whose argument 1 is `b` (see
+ * {@link subtrahendAt}). Unlike the calls of a cluster, these calls are not
+ * merged: `-(-x)` has two `Negate` calls. A subtraction of a number literal
+ * is not such a call: canonicalization folds the number, and `y - 2` is
+ * `Add(y, -2)`, with no `Negate`.
+ */
+function isWrittenCallOf(node: MathJsonExpression, name: string): boolean {
+  if (clusterOperators(name).includes(operator(node))) return true;
+  if (!isSubtractForNegate(node, name)) return false;
+  const subtrahend = subtrahendAt(node, 1);
+  return subtrahend !== null && machineValue(subtrahend) === null;
+}
+
+/**
+ * Whether the frames show that the error of the `Negate` frame `k` was not
+ * made by the canonical `Negate` of the written subtraction `call`.
+ *
+ * The evaluation of the canonical sum `Add(a, Negate(b))` of `a - b` records
+ * an `Add` frame for the operand whose evaluation returned the error, so the
+ * frame after `k` must be an `Add` frame, and its index must name the operand
+ * made from `b`. Otherwise the `Negate` frame was recorded somewhere else: with
+ * `let x = -s`, the error of `[x - y, 1]` has the frames
+ * `Negate argument 1, Add argument 1`, and the `Add` frame names `x`, not `y`.
+ *
+ * A frame `k` with no frame after it rules out the subtraction for a runtime
+ * error, which comes with `canonicalOrder`: in `[y - z, -s]`, the frame
+ * `Negate argument 1` alone names the `-s`. It does not for the one frame of
+ * a static check, which comes without `canonicalOrder` (`locateError` in
+ * `static-diagnostics.ts`). An index that `canonicalOrder` cannot map to a
+ * written operand does not rule out the subtraction either.
+ */
+function subtractionRuledOut(
+  frames: readonly ErrorFrameRef[],
+  k: number,
+  call: MathJsonExpression,
+  stmt: MathJsonExpression,
+  canonicalOrder: CanonicalOrder | undefined
+): boolean {
+  const outer = frames[k + 1];
+  if (outer === undefined) return canonicalOrder !== undefined;
+  if (outer.name !== 'Add') return true;
+  if (canonicalOrder === undefined) return false;
+  const written = writtenOperandAt(
+    clusterTop(stmt, call, 'Add'),
+    'Add',
+    outer.index,
+    canonicalOrder
+  );
+  return written !== null && written !== subtrahendAt(call, 1);
+}
+
+/**
+ * The argument of a `Negate` frame when its written call is the subtraction
+ * `call`: the second operand of `call` for the argument 1, `null` for any
+ * other argument or a subtraction that has not two operands.
+ */
+function subtrahendAt(
+  call: MathJsonExpression,
+  index: number
+): MathJsonExpression | null {
+  const ops = [...operands(call)];
+  return index === 1 && ops.length === 2 ? ops[1] : null;
+}
+
+/**
+ * The written calls of `expr` that frame `k` can name: those of
+ * {@link findWrittenCalls}, without the subtractions that the frames rule out
+ * ({@link subtractionRuledOut}). The search stops when it has `limit` calls.
+ */
+function frameCalls(
+  frames: readonly ErrorFrameRef[],
+  k: number,
+  expr: MathJsonExpression,
+  stmt: MathJsonExpression,
+  canonicalOrder: CanonicalOrder | undefined,
+  limit = 2
+): MathJsonExpression[] {
+  const { name } = frames[k];
+  const calls: MathJsonExpression[] = [];
+  if (name !== 'Negate') {
+    findWrittenCalls(expr, name, calls, limit);
+    return calls;
+  }
+  findWrittenCalls(expr, name, calls, Infinity);
+  return calls
+    .filter(
+      (call) =>
+        !(
+          isSubtractForNegate(call, name) &&
+          subtractionRuledOut(frames, k, call, stmt, canonicalOrder)
+        )
+    )
+    .slice(0, limit);
+}
+
+/** Whether `name` is `Negate` and `call` is a written subtraction, the call
+ * of a `Negate` frame that {@link isWrittenCallOf} adds. */
+function isSubtractForNegate(
+  call: MathJsonExpression,
+  name: string
+): boolean {
+  return name === 'Negate' && operator(call) === 'Subtract';
 }
 
 /**
@@ -821,12 +941,14 @@ function frameArgument(
 ): { call: MathJsonExpression; arg: MathJsonExpression | null } | undefined {
   const { name, index } = frames[j];
   let inner: string | undefined;
+  let innerIndex = -1;
   for (let i = j - 1; i >= 0 && inner === undefined; i--) {
     // A rejected frame did not make the error in this statement.
     if (rejected?.frames.has(i)) continue;
-    const found: MathJsonExpression[] = [];
-    findWrittenCalls(stmt, frames[i].name, found);
-    if (found.length > 0) inner = frames[i].name;
+    if (frameCalls(frames, i, stmt, stmt, canonicalOrder).length > 0) {
+      inner = frames[i].name;
+      innerIndex = i;
+    }
   }
 
   const reordered =
@@ -850,12 +972,23 @@ function frameArgument(
   } else if (reordered && inner !== undefined) {
     const top = clusterTop(scope, call, name);
     const holders = clusterLeaves(top, name).filter((leaf) => {
-      // `inner` was found with `findWrittenCalls`, which can give a written
-      // subtraction for an `Add` frame, so the operands are searched the
-      // same way.
-      const found: MathJsonExpression[] = [];
-      findWrittenCalls(leaf, inner, found);
-      return found.length > 0;
+      // `inner` was found with `frameCalls`, which can give a written
+      // subtraction for an `Add` or a `Negate` frame, so the operands are
+      // searched the same way.
+      if (frameCalls(frames, innerIndex, leaf, stmt, canonicalOrder).length > 0)
+        return true;
+      // The second operand of a written subtraction of the sum is inside the
+      // canonical `Negate` of that subtraction: the `s` of `-(y + 2) - s`.
+      if (inner !== 'Negate') return false;
+      const path: MathJsonExpression[] = [];
+      if (!pathTo(top, leaf, path) || path.length < 2) return false;
+      const parent = path[path.length - 2];
+      return (
+        isWrittenCallOf(parent, inner) &&
+        isSubtractForNegate(parent, inner) &&
+        subtrahendAt(parent, 1) === leaf &&
+        !subtractionRuledOut(frames, innerIndex, parent, stmt, canonicalOrder)
+      );
     });
     // When more than one operand holds a call of the inner operator, the
     // canonical operand that the index names keeps the source range of its
@@ -880,6 +1013,10 @@ function frameArgument(
     }
     if (arg === null) return undefined;
     result = { call: top, arg };
+  } else if (isSubtractForNegate(call, name)) {
+    if (subtractionRuledOut(frames, j, call, stmt, canonicalOrder))
+      return undefined;
+    result = { call, arg: subtrahendAt(call, index) };
   } else {
     result = {
       call,
@@ -1040,6 +1177,10 @@ function literalArgumentMatch(
   ) => readonly (string | undefined)[] | undefined,
   canonicalOrder?: CanonicalOrder
 ): 'is' | 'is-not' | 'unsure' {
+  if (isSubtractForNegate(call, frame.name)) {
+    const arg = subtrahendAt(call, frame.index);
+    return arg === null ? 'unsure' : compareLiteral(arg, offending);
+  }
   // `findWrittenCalls` can give a written `Subtract` for an `Add` frame.
   if (operator(call) !== frame.name) return 'unsure';
   if (
@@ -1057,21 +1198,21 @@ function literalArgumentMatch(
   return arg === null ? 'unsure' : compareLiteral(arg, offending);
 }
 
-/** Collect the nodes of `expr` whose operator is one of `names` and that are
- * not inside another such node (early-exits once there are two). */
+/** Collect the calls of `expr` that `accept` accepts and that are not inside
+ * another such call (early-exits once there are two). */
 function findShallowestByOperators(
   expr: MathJsonExpression | null,
-  names: readonly string[],
+  accept: (node: MathJsonExpression) => boolean,
   matches: MathJsonExpression[]
 ): void {
   if (expr === null || matches.length > 1) return;
   if (operator(expr) === '') return;
-  if (names.includes(operator(expr))) {
+  if (accept(expr)) {
     matches.push(expr);
     return;
   }
   for (const op of operands(expr))
-    findShallowestByOperators(op, names, matches);
+    findShallowestByOperators(op, accept, matches);
 }
 
 /**
@@ -1148,9 +1289,9 @@ export function narrowToFrames(
   ).range;
 }
 
-/** Collect every node of `expr` whose operator is `name`. The search stops
- * when it has `limit` matches: two matches tell that a name is ambiguous as
- * surely as ten. */
+/** Collect every node of `expr` that is a written call of a frame of `name`
+ * ({@link isWrittenCallOf}). The search stops when it has `limit` matches:
+ * two matches tell that a name is ambiguous as surely as ten. */
 function findByOperator(
   expr: MathJsonExpression | null,
   name: string,
@@ -1159,7 +1300,7 @@ function findByOperator(
 ): void {
   if (expr === null || matches.length >= limit) return;
   if (operator(expr) === '') return;
-  if (operator(expr) === name) matches.push(expr);
+  if (isWrittenCallOf(expr, name)) matches.push(expr);
   for (const op of operands(expr)) findByOperator(op, name, matches, limit);
 }
 
@@ -1167,8 +1308,9 @@ function findByOperator(
  * Collect the written calls of `expr` that a frame of the operator `name`
  * can name (the search stops when it has `limit` matches).
  *
- * For most operators these are the calls of `name`. When canonicalization
- * merges other written operators into a call of `name` (see
+ * For most operators these are the calls of `name`, and for `Negate` also
+ * the written subtractions (see {@link isWrittenCallOf}). When
+ * canonicalization merges other written operators into a call of `name` (see
  * {@link clusterOperators}), each match is one cluster: the outermost call
  * of a chain of nested calls of these operators ({@link clusterTop}). The
  * calls of the cluster become one canonical call, so they are one match:
