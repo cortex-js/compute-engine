@@ -70,8 +70,18 @@
   the positive one) at an order `Re(s) > 1` that is not an integer, or an
   integer above 24. The GLSL `Zeta(x)` of a real `x` next to 0 is exact to
   single-float precision: `Zeta(-1e-6)` gave `-0.5243` for `-0.5000`.
+- **`LambertW(x)` of a real `x` compiles to GLSL and to the interval target**
+  (CE-1511). It declined on both. On GLSL, `LambertW(1)` is `0.5671433`
+  and `LambertW(-0.5)` is `NaN` (below `-1/e`). On the interval target, the
+  interval of `[0.5, 3]` holds `[0.3517, 1.0499]`, an interval below `-1/e`
+  is empty, and `[-0.5, 1]` gives the partial interval `[-1, 0.5671]`.
 
 ### Resolved Issues
+
+- **`LambertW(x)` is correct for `x` above about `1e154`** (CE-1511). The
+  value was the first estimate of the iteration: `N(LambertW(1e300))` was
+  `684.2471774347877`, and it is now `684.2472086297608`. Compiled
+  JavaScript gives the same value.
 
 - **The `epsil` command line tool accepts an option value that starts with a
   dash** (CE-1393). `epsil -e '-5 % 3'` failed with "Option '-e' argument is

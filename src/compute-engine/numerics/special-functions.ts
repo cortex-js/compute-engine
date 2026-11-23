@@ -5021,14 +5021,15 @@ export function polylog(n: number, z: number): number {
 /** Halley refinement of a Lambert W estimate `w` toward the root of
  *  w·e^w = x (branch-independent: the same equation on every branch). */
 function lambertWHalley(w: number, x: number): number {
-  // Halley's method: converges cubically
+  // Halley's method: converges cubically. The correction term f·f''/(2f')
+  // is written f·(w + 2)/(2(w + 1)), with no e^w: the product f·f'' is
+  // about x·e^w, which overflows for x above about 1e154. For w > 0, f and
+  // f' are divided by e^w, as w·e^w can overflow next to the largest double.
   for (let i = 0; i < 30; i++) {
-    const ew = Math.exp(w);
-    const wew = w * ew;
-    const f = wew - x;
-    const fp = ew * (w + 1);
-    const fpp = ew * (w + 2);
-    const delta = f / (fp - (f * fpp) / (2 * fp));
+    const scaled = w > 0;
+    const ew = scaled ? 1 : Math.exp(w);
+    const f = scaled ? w - x * Math.exp(-w) : w * ew - x;
+    const delta = f / (ew * (w + 1) - (f * (w + 2)) / (2 * (w + 1)));
     w -= delta;
     if (Math.abs(delta) < 1e-15 * (1 + Math.abs(w))) break;
   }

@@ -5,9 +5,9 @@
  * `Factorial2`, `Zeta`, `Binomial`, `Choose` and `LCM` of integers, `GCD`
  * and `LCM` of reals, `Heaviside`, `Remainder` (integers and reals),
  * `Smoothstep`,
- * `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`, `Trigamma` and
- * `BesselJ` of an integer order. `PolyGamma` declines: the deleted GPU
- * helper is NaN where its terms cancel (`PolyGamma(2, -0.5)`), where the
+ * `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`, `Trigamma`, `BesselJ`
+ * of an integer order and `LambertW` of one operand. `PolyGamma` declines:
+ * the deleted GPU helper is NaN where its terms cancel (`PolyGamma(2, -0.5)`), where the
  * interpreter has a value.
  *
  * In WebGL 2 (SwiftShader) each shader gives the interpreter's value
@@ -143,6 +143,14 @@ const CASES: Case[] = [
       // Near x = n + 5, where a power series cancels in single precision.
       [25, 29.9], [15, 19.9], [20, 24], [10, 14.5], [8, 12.5], [6, 10.5],
       [20, 200], [18, 180], [10, 7], [30, 10]] },
+  // CE-1511. Next to -1/e the condition of W₀ is 1/(1 + W₀): the series
+  // (below -1/e + 0.01), Halley's iteration and Newton's iteration of the
+  // logarithm (above e) each meet the tolerance; NaN below -1/e. The float
+  // of -0.36787944 is below -1/e (NaN); -0.3678794205188751 is the first
+  // float above it.
+  { op: 'LambertW', inputs: ['x'], rel: 1e-6, abs: 1e-7,
+    points: [[-0.5], [-0.36787944], [-0.3678794205188751], [-0.3678], [-0.36], [-0.3], [-0.25], [-0.1], [-1e-6], [0], [1e-20], [1e-3],
+      [0.5], [1], [2.5], [2.7182817], [2.7182819], [10], [99], [101], [1e6], [1e20], [3e38]] },
 ];
 
 const programOf = (c: Case) =>

@@ -56,7 +56,7 @@ const UNARY = ['sqrt', 'square', 'abs', 'exp', 'ln', 'log10', 'log2', 'sin',
   'asin', 'acos', 'atan', 'acot', 'asec', 'acsc', 'asinh', 'acosh', 'atanh',
   'coth', 'acoth', 'asech', 'acsch', 'floor', 'ceil', 'round', 'trunc',
   'fract', 'sign', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
-  'factorial2', 'not', 'sinc', 'heaviside'];
+  'factorial2', 'not', 'sinc', 'heaviside', 'lambertw'];
 
 // prettier-ignore
 const BINARY: Record<string, string> = { add: 'add', sub: 'sub', mul: 'mul',

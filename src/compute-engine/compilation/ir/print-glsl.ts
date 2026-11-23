@@ -643,6 +643,10 @@ export const GLSL: Syntax = deepFreeze({
     // InverseHaversine: 2 arcsin √x, real on [0, 1].
     'invhav': `($0 >= 0.0 && $0 <= 1.0 ? 2.0 * asin(sqrt($0)) : ${NAN})`,
     'erfinv': { text: '_gpu_ir_erfinv($0)', helpers: ['_gpu_ir_erfinv'] },
+    'lambertw': {
+      text: '_gpu_ir_lambertw($0)',
+      helpers: ['_gpu_ir_lambertw'],
+    },
     'beta': {
       text: '_gpu_ir_beta($0, $1)',
       helpers: [
@@ -1270,6 +1274,55 @@ export const GLSL: Syntax = deepFreeze({
     p = 2.83297682 + p * w;
   }
   return p * x;
+}`,
+    // W₀(x), the principal branch of the Lambert W function: NaN below
+    // -1/e, +∞ at +∞. Next to -1/e (d = x + 1/e < 0.01) the series about
+    // the branch point to p⁹, p = √(2e·d); above e, Newton's iteration on
+    // w + ln w = ln x, as w·e^w would overflow; between, Halley's iteration
+    // on w·e^w = x from Winitzki's estimate (from the series to p³ below
+    // -0.25). Each converges in at most 4 passes. The float of 1/e,
+    // 0.36787945, is above 1/e: x is in the domain when x > -0.36787945.
+    // In d, 1/e is that float less 9.15e-9, and 9.15e-9 is written
+    // -x·2.4871612e-8, its value next to -1/e: a renderer adds two
+    // constants into one float (SwiftShader), and that float is again
+    // 0.36787945.
+    _gpu_ir_lambertw: `float _gpu_ir_lambertw(float x) {
+  if (!(x > -0.36787945)) return ${NAN};
+  if (x >= uintBitsToFloat(0x7f800000u)) return x;
+  float d = (x + 0.36787945) + x * 2.4871612e-8;
+  if (x == 0.0) return 0.0;
+  if (d < 0.01) {
+    float p = sqrt(5.4365637 * d);
+    return -1.0 + p * (1.0 + p * (-0.33333333 + p * (0.15277778 + p * (-0.07962963 + p * (0.044502314 + p * (-0.025984716 + p * (0.015635632 + p * (-0.0096168919 + p * 0.0060145431))))))));
+  }
+  float w;
+  if (x > 2.7182818) {
+    float l = log(x);
+    float ll = log(l);
+    w = x < 100.0 ? l - ll : l - ll + ll / l;
+    for (int i = 0; i < 8; i++) {
+      float next = w / (1.0 + w) * (1.0 + l - log(w));
+      bool done = abs(next - w) <= 1e-7 * w;
+      w = next;
+      if (done) break;
+    }
+    return w;
+  }
+  if (x < -0.25) {
+    float p = sqrt(5.4365637 * d);
+    w = -1.0 + p * (1.0 + p * (-0.33333333 + p * 0.15277778));
+  } else {
+    float l = log(1.0 + x);
+    w = l * (1.0 - log(1.0 + l) / (2.0 + l));
+  }
+  for (int i = 0; i < 8; i++) {
+    float ew = exp(w);
+    float f = w * ew - x;
+    float delta = f / (ew * (w + 1.0) - f * (w + 2.0) / (2.0 * (w + 1.0)));
+    w -= delta;
+    if (abs(delta) <= 1e-7 * abs(w)) break;
+  }
+  return w;
 }`,
     // B(a, b) = Γ(a) Γ(b) / Γ(a + b); in log form for a, b > 0 with
     // a + b > 30 (an error of about 2e-7 per unit of |ln B| there); for

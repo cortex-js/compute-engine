@@ -81,6 +81,7 @@ import {
   chop as _chop,
   erf as _erf,
   erfc as _erfc,
+  lambertw as _lambertw,
   exp2 as _exp2,
   hypot as _hypot,
 } from './elementary.js';
@@ -366,6 +367,7 @@ export const IntervalArithmetic = {
   chop: _chop,
   erf: _erf,
   erfc: _erfc,
+  lambertw: _lambertw,
   exp2: _exp2,
   hypot: _hypot,
 
