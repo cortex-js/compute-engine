@@ -36,15 +36,6 @@
   are now `[1, 1.5]` and `1 + 2i`. A matrix of floats times a number is
   computed on its doubles row by row, about six times faster.
 
-- **The interpreter fallback of a compilation whose `inputs` names a
-  Document row gives the row the value of the run** (CE-1707). With the rows
-  `k = 2x_w` and `X(x) = Factor(kx)`, `compile(X(x), { inputs: { k: 'real' } })`
-  declines on `Factor`, and its `run({ x: 1, k: 3 })` threw `Cannot assign a
-  value to the constant "k"`; it now gives `3`, the value that the compiled
-  code gives when the expression compiles. The row keeps its own value after
-  the run. A run argument that names a row and is not in `inputs` is still
-  refused.
-
 ## 0.200.0 _2026-11-22_
 
 ### Improvements
@@ -72,6 +63,15 @@
   GLSL target still declines it.
 
 ### Resolved Issues
+
+- **The interpreter fallback of a compilation whose `inputs` names a
+  Document row gives the row the value of the run** (CE-1707). With the rows
+  `k = 2x_w` and `X(x) = Factor(kx)`, `compile(X(x), { inputs: { k: 'real' } })`
+  declines on `Factor`, and its `run({ x: 1, k: 3 })` threw `Cannot assign a
+  value to the constant "k"`; it now gives `3`, the value that the compiled
+  code gives when the expression compiles. The row keeps its own value after
+  the run. A run argument that names a row and is not in `inputs` is still
+  refused.
 
 - **With no domain, `Solve` no longer answers `[]` for an equation that has
   only complex roots.** `Solve(sin(x) = 2, x)` and `Solve(e^x = -1, x)` were
