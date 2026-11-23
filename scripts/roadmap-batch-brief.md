@@ -82,7 +82,10 @@ then runs only the files whose path matches it.
    tree, or, for `source: tycho`, run `issues.mjs set {{ID}} state fixed` and
    `set {{ID}} fixed-in <full HEAD hash>` (Tycho deletes the file when the
    fix verifies), because the web app tells whether a fix is released only
-   from a hash or a version. Stage that change with the fix.
+   from a hash or a version. Stage that change with the fix. Right after the
+   fix commit, set `fixed-in` to the full hash of the fix commit and commit
+   that file alone as `{{ID}}: fixed-in <hash>`, because the HEAD hash names
+   the parent, which does not contain the fix.
 4. Make a worktree: `git worktree add --detach /tmp/wt-{{NAME}} HEAD`, then
    `{{LINK}}`.
    Write every later command for it with an absolute path or
