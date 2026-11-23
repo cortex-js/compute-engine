@@ -3524,17 +3524,125 @@ export function isExactRationalLiteral(x: Expression): boolean {
 }
 
 /**
- * Whether `x` is a `List` literal whose cells are exact integer or rational
- * literals (`isExactRationalLiteral()`), or lists of them: a vector or a
- * matrix of fractions.
+ * `value`, the value under `.N()` of `x`, a factor of a product, with the
+ * exact cells of `x` put back when `x` is a `List` or `Tuple` literal: a
+ * cell that is an exact number whose real and imaginary parts are rationals
+ * (`1/3`, `3 + 6i`) is the cell of `x`, and every other cell is the cell of
+ * `value`, which is not evaluated again; a nested list literal is read the
+ * same way. The cell product then folds the exact cell with the other
+ * factors before it rounds, as the scalar product does: `3·[1/3, 0.5]` is
+ * `[1, 1.5]`, where rounding `1/3` first gave `0.999…9` (CE-1711).
+ * `undefined` when `x` has no exact cell, or `value` has not the shape of
+ * `x`: `value` is the factor then.
+ *
+ * `undefined` too when one of the `factors` of the product is an exact
+ * number with a radical (`√2`): the scalar product folds it with an exact
+ * cell into one exact number before it rounds (`√2·(1/3)` is `√2/3`), which
+ * no cell product does, and rounding the cell first gives the scalar
+ * product's value there.
  */
-export function isExactRationalListLiteral(x: Expression): boolean {
+export function nKeepingExactCells(
+  x: Expression,
+  value: Expression,
+  factors: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (factors.some(isExactIrrationalLiteral)) return undefined;
+  return keepExactCells(x, value);
+}
+
+function keepExactCells(
+  x: Expression,
+  value: Expression
+): Expression | undefined {
+  const kept = keepExactCellsOf(x, value);
+  return kept === null ? undefined : kept;
+}
+
+/**
+ * `keepExactCells()`, with `null` when a kept cell is not at its place in
+ * `value`: a cell whose value is a `Sequence` is spliced into the list
+ * (`[Empty(), 1/3, Two()]` with `Empty()` an empty sequence and `Two()` a
+ * sequence of two numbers has three cells and its value three cells, in
+ * other places). The whole product then takes `value`.
+ */
+function keepExactCellsOf(
+  x: Expression,
+  value: Expression
+): Expression | undefined | null {
+  if (!isFunction(x) || (x.operator !== 'List' && x.operator !== 'Tuple'))
+    return undefined;
+  // A list that holds its numbers unboxed holds machine numbers only, and
+  // its value has the same cells: reading its cells would box each one.
+  if (x._machineFloats !== undefined) return undefined;
+  if (
+    x.nops === 0 ||
+    !isFunction(value) ||
+    value.operator !== x.operator ||
+    value.nops !== x.nops
+  )
+    return undefined;
+  if (!x.ops.some((c) => isKeptExactCell(c) || isListOrTuple(c)))
+    return undefined;
+  let kept = false;
+  const values = value.ops;
+  const cells: Expression[] = [];
+  for (const [i, c] of x.ops.entries()) {
+    if (isKeptExactCell(c)) {
+      const v = values[i];
+      if (!isNumber(v) || !v.isSame(c.N())) return null;
+      kept = true;
+      cells.push(c);
+      continue;
+    }
+    const nested = keepExactCellsOf(c, values[i]);
+    if (nested === null) return null;
+    if (nested !== undefined) kept = true;
+    cells.push(nested ?? values[i]);
+  }
+  return kept ? x.engine.function(x.operator, cells) : undefined;
+}
+
+/**
+ * Whether `x` is a cell that `keepExactCells()` keeps: an exact number with
+ * rational parts that is not an integer. An exact integer cell has the same
+ * product rounded or not.
+ */
+function isKeptExactCell(x: Expression): boolean {
+  return isExactGaussianRationalLiteral(x) && x.isInteger !== true;
+}
+
+function isListOrTuple(x: Expression): boolean {
+  return isFunction(x) && (x.operator === 'List' || x.operator === 'Tuple');
+}
+
+/**
+ * Whether `x`, the value under `.N()` of a product, holds an exact number
+ * that is not an integer: a cell that `nKeepingExactCells()` kept exact and
+ * that no cell product folded. A list that holds its numbers unboxed holds
+ * none, and is not read.
+ */
+export function holdsExactNonInteger(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact && x.isInteger !== true;
+  if (!isFunction(x) || x._machineFloats !== undefined) return false;
+  return x.ops.some(holdsExactNonInteger);
+}
+
+/** Whether `x` is an exact number literal with a radical (`√2`, `2√3/5`). */
+function isExactIrrationalLiteral(x: Expression): boolean {
+  return isNumber(x) && x.isExact && !isExactGaussianRationalLiteral(x);
+}
+
+/**
+ * Whether `x` is an exact number literal whose real and imaginary parts are
+ * rationals: an exact integer or fraction (`isExactRationalLiteral()`), or a
+ * complex number such as `3 + 6i` or `i/3`.
+ */
+function isExactGaussianRationalLiteral(x: Expression): boolean {
+  if (isExactRationalLiteral(x)) return true;
+  if (!isNumber(x) || !x.isExact) return false;
+  const nv = x.numericValue;
   return (
-    isFunction(x, 'List') &&
-    x.nops > 0 &&
-    x.ops.every(
-      (c) => isExactRationalLiteral(c) || isExactRationalListLiteral(c)
-    )
+    nv instanceof ExactNumericValue && nv.radical === 1 && nv.imRadical === 1
   );
 }
 
@@ -3844,8 +3952,11 @@ export function mulNEvaluated(
   // `.N()` floats), and a product with a symbolic factor keeps no exact
   // coefficient that `expandProducts` could rebuild into a `Divide`
   // (`(1/3)·(1/x)` under `.N()` is `0.333…/x`, not `1/(3x)`).
+  // An exact complex literal whose parts are rationals (`3 + 6i`) is kept in
+  // the same way: `(1/3)·(3 + 6i)` is `1 + 2i`, where the rounded `1/3` gave
+  // `0.999…9 + 1.999…8i` (CE-1711).
   let exactFactors = xs.map((x, i) =>
-    !numeric?.[i] && isExactRationalLiteral(x) ? x : undefined
+    !numeric?.[i] && isExactGaussianRationalLiteral(x) ? x : undefined
   );
   const originals = xs;
   xs = xs.map((x, i) => (numeric?.[i] ? x : x.N()));
@@ -3945,7 +4056,7 @@ export function mulNEvaluated(
     ? xs.map((x, i) => exactFactors[i] ?? x)
     : xs;
   const floatLiteral = (r: Expression): Expression =>
-    isExactRationalLiteral(r) || (isNumber(r) && !bignumPreferred(ce))
+    isExactGaussianRationalLiteral(r) || (isNumber(r) && !bignumPreferred(ce))
       ? r.N()
       : r;
   // Without a factor that `expandProducts` reads specially
@@ -4325,22 +4436,23 @@ function mulTensors(
   // each cell product (`mulN`) folds it with the cell before it rounds, as the
   // scalar product does. Floated first, `1/3` was rounded and then multiplied
   // by each cell, and `[1, 2, 3]/3` gave `0.999…9` for its last cell.
-  // A list literal of such literals (a vector or a matrix of fractions)
-  // stays exact too, for the same reason: `3·[1/3, 2/3]` is `[1, 2]`, where
-  // rounding each fraction first gave `0.999…9` (CE-1653).
-  // Only when every factor is exact: beside a float or an irrational factor
-  // the cell is rounded first, as before, which is what the scalar product
-  // gives there.
-  const allExact = xs.every(
-    (x) => isExactRationalLiteral(x) || isExactRationalListLiteral(x)
-  );
+  // An exact complex literal whose parts are rationals (`2 + 5i`) stays
+  // exact in the same way, as the scalar product keeps it (`mulNEvaluated`).
+  // The exact cells of a list or tuple literal stay exact too, for the same
+  // reason, and its other cells are rounded: `3·[1/3, 2/3]` is `[1, 2]`
+  // (CE-1653) and `3·[1/3, 0.5]` is `[1, 1.5]` (CE-1711), where rounding each
+  // fraction first gave `0.999…9`. Each cell product is then the scalar
+  // product of the same factors, which folds an exact factor beside a float
+  // or `π` too (`nKeepingExactCells()`).
   const withAbsentCells = new Map<Expression, Expression>();
+  const numericValueOf = (op: Expression): Expression => {
+    if (isExactGaussianRationalLiteral(op)) return op;
+    const value = op.N();
+    return nKeepingExactCells(op, value, xs) ?? value;
+  };
   const evaluated = xs.map((op) => {
     const value = numericApproximation
-      ? isExactRationalLiteral(op) ||
-        (allExact && isExactRationalListLiteral(op))
-        ? op
-        : op.N()
+      ? numericValueOf(op)
       : operandsAreValues
         ? op
         : op.evaluate();
@@ -4508,21 +4620,18 @@ function mulTensors(
   // Combine the scalar factors (these are commutative). Through `multiply`,
   // not the `.mul()` method: the method always distributes, which would
   // open `(x+1)·2` into `2x + 2` before it ever reached a cell.
-  // Exact literal scalars are combined exactly on the `.N()` route too (`mulN`
-  // floats its product), so that the cell products fold the exact value with
-  // each exact cell. Beside tensors of floats only, the scalar is floated, as
-  // before: a float cell is already rounded, and the double and big-decimal
-  // kernels of `scaleTensor()` decline an exact rational scalar, so a long
-  // list of floats divided by 3 went through a boxed product for each cell.
-  // Above machine precision the scalar stays exact: the big-decimal kernel
-  // computes `(x·p)/q` for each float cell, as the scalar product does, where
-  // the rounded fraction gave `(1/3)·[1.5]` as `0.499…95` (CE-1653).
+  // Exact literal scalars (rationals, and complex numbers with rational
+  // parts) are combined exactly on the `.N()` route too (`mulN` floats its
+  // product), so that each cell product folds the exact value with its cell
+  // before it rounds, as the scalar product does. For a float cell, the
+  // big-decimal kernel (above machine precision, CE-1653) and the double
+  // kernel (`scaleFloatsByRational()`, CE-1710) compute `(x·p)/q`: the
+  // rounded fraction gave `(1/3)·[1.5]` as `0.499…95`, and
+  // `(2/3)·[81.67574227865587]` one ulp off.
   const scalar: Expression | null =
     scalars.length === 0
       ? null
-      : numericApproximation &&
-          scalars.every(isExactRationalLiteral) &&
-          (tensors.some(hasExactCell) || bignumPreferred(ce))
+      : numericApproximation && scalars.every(isExactGaussianRationalLiteral)
         ? mul(...scalars)
         : multiply(...scalars);
   // Each scalar factor is in `evaluated`: a value of the caller, or the
@@ -4688,18 +4797,33 @@ function scaleExactIntegersByRational(
 }
 
 /**
- * Whether the tensor value `x` has a cell that is not a float number literal
- * (an exact number, or a symbolic cell). A list of machine numbers is read
- * from its doubles (`array`), without boxing its elements: an element with a
- * fraction part is a float, and an element with an integer value is exact
- * when `_machineFloats` is `false`.
+ * `scalar · vector` under `.N()` at machine precision for an exact rational
+ * `scalar` `p/q` and a vector of floats stored as doubles (`values`), or
+ * `undefined` when a condition fails. Each cell is the double `(v·p)/q`,
+ * the numerator first, which is what the scalar product `mulN` gives for a
+ * float times an exact rational (CE-1710); the double of `p/q` times `v`
+ * is one ulp off for about a third of the cells. A cell whose `v·p` is not
+ * finite declines.
  */
-function hasExactCell(x: Expression): boolean {
-  if (!isFunction(x, 'List')) return !isNumber(x) || x.isExact;
-  const floats = x._machineFloats;
-  if (floats !== undefined)
-    return floats === false && (x.array?.some(Number.isInteger) ?? false);
-  return x.ops.some(hasExactCell);
+function scaleFloatsByRational(
+  ce: ComputeEngine,
+  values: ReadonlyArray<number>,
+  scalar: Expression
+): Expression | undefined {
+  const r = asRational(scalar);
+  if (r === undefined) return undefined;
+  const p = Number(r[0]);
+  const q = Number(r[1]);
+  if (!Number.isSafeInteger(p) || !Number.isSafeInteger(q) || q <= 1)
+    return undefined;
+  const out = new Array<number>(values.length);
+  for (let i = 0; i < values.length; i++) {
+    const c = (values[i] * p) / q;
+    if (!Number.isFinite(c)) return undefined;
+    // `-0` is stored as `0`, as the `array` of a list stores it.
+    out[i] = c === 0 ? 0 : c;
+  }
+  return ce._list(out, true);
 }
 
 /**
@@ -4761,16 +4885,21 @@ function scaleMachineVector(
   if (values === undefined) return undefined;
   // An exact scalar that is not a safe integer (`1/3`, `1/2`): its product
   // with each cell is exact, and `evaluate()` keeps it exact. Under `.N()`,
-  // see `scaleExactIntegersByRational()`.
+  // see `scaleExactIntegersByRational()` for a vector of exact integers and
+  // `scaleFloatsByRational()` for a vector of floats.
   const k = machineNumberOf(scalar);
   if (
     isNumber(scalar) &&
     scalar.isExact &&
     (k === undefined || isExactNonInteger(scalar, k))
-  )
-    return numericApproximation && vectorFloats === false
-      ? scaleExactIntegersByRational(ce, values, scalar)
+  ) {
+    if (!numericApproximation) return undefined;
+    if (vectorFloats === false && values.some(Number.isInteger))
+      return scaleExactIntegersByRational(ce, values, scalar);
+    return !bignumPreferred(ce) && holdsDoubles(vector)
+      ? scaleFloatsByRational(ce, values, scalar)
       : undefined;
+  }
   if (k === undefined || !Number.isFinite(k)) return undefined;
   const floatsAreDoubles =
     !bignumPreferred(ce) && isStoredAsDouble(scalar) && holdsDoubles(vector);
@@ -4827,6 +4956,17 @@ function scaleTensor(
   if (shape.length === 1) {
     const scaled = scaleMachineVector(ce, tensor, scalar, numericApproximation);
     if (scaled !== undefined) return scaled;
+  }
+  // A matrix whose rows are such vectors is scaled row by row, on the same
+  // doubles.
+  if (shape.length === 2 && isFunction(tensor, 'List')) {
+    const rows: Expression[] = [];
+    for (const row of tensor.ops) {
+      const scaled = scaleMachineVector(ce, row, scalar, numericApproximation);
+      if (scaled === undefined) break;
+      rows.push(scaled);
+    }
+    if (rows.length === tensor.nops) return ce.function('List', rows);
   }
 
   // Pack once for the whole scaling. A pack failure leaves the scaling inert.

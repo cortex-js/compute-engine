@@ -25,6 +25,17 @@
 
 ### Resolved Issues
 
+- **Each cell of the numeric value of a product with a list is the numeric
+  value of the scalar product** (CE-1710, CE-1711). At machine precision, a
+  fraction times a list of floats rounded the fraction first:
+  `N((2/3)·[81.67574227865587])` gave `54.450494852437245` where
+  `N((2/3)·81.67574227865587)` gives `54.45049485243725`, one cell in three
+  off by one unit in the last place. A list or a tuple that mixes exact cells
+  with other cells rounded its exact cells first: `N(3·[1/3, 0.5])` gave
+  `[0.999…9, 1.5]`, and `N((1/3)·[3 + 6i])` gave `0.999…9 + 1.999…8i`; they
+  are now `[1, 1.5]` and `1 + 2i`. A matrix of floats times a number is
+  computed on its doubles row by row, about six times faster.
+
 - **The interpreter fallback of a compilation whose `inputs` names a
   Document row gives the row the value of the run** (CE-1707). With the rows
   `k = 2x_w` and `X(x) = Factor(kx)`, `compile(X(x), { inputs: { k: 'real' } })`

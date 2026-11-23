@@ -216,7 +216,8 @@ import {
   mulAroundNotationalProducts,
   isOutOfDoubleRangeLiteral,
   cellProductOperandIsValue,
-  isExactRationalListLiteral,
+  holdsExactNonInteger,
+  nKeepingExactCells,
   isExactRationalLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import {
@@ -19568,18 +19569,21 @@ function mulEvaluatedOperands(
         op.isPure === true &&
         (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
     );
-    // A list literal of exact integers and fractions is its own value, and
-    // is passed exact: the tensor kernel folds each cell with the scalar
-    // factors before it rounds, so `3·[1/3, 2/3]` is `[1, 2]`, not
-    // `[0.999…9, 2.000…1]` (CE-1653).
-    // Only when every factor is such a literal or an exact number: beside a
-    // float or an irrational factor, the list is rounded first, as before.
-    const allExact = ops.every(
-      (op) => isExactRationalLiteral(op) || isExactRationalListLiteral(op)
-    );
-    const factors = ops.map((op, i) =>
-      raw[i] || (allExact && isExactRationalListLiteral(op)) ? op : evaluated[i]
-    );
+    // A list or tuple literal keeps its exact cells, and rounds the others:
+    // the tensor kernel folds each exact cell with the scalar factors before
+    // it rounds, as the scalar product does, so `3·[1/3, 2/3]` is `[1, 2]`
+    // (CE-1653) and `3·[1/3, 0.5]` is `[1, 1.5]` (CE-1711), where rounding
+    // each fraction first gave `0.999…9` (`nKeepingExactCells()`).
+    // The cells that are not exact are those of `evaluated[i]`: the operand
+    // is not evaluated again.
+    let keptExactCells = false;
+    const factors = ops.map((op, i) => {
+      if (raw[i]) return op;
+      const kept = nKeepingExactCells(op, evaluated[i], ops);
+      if (kept === undefined) return evaluated[i];
+      keptExactCells = true;
+      return kept;
+    });
     // A pure operand whose float is 0 or ±∞ can have an exact value
     // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an
     // integer). It is passed as its exact value, so that `mulNEvaluated`
@@ -19594,10 +19598,18 @@ function mulEvaluatedOperands(
       }
     }
     rescueExactCoefficients(engine!, ops, factors, raw);
-    const r = mulNEvaluated(
+    let r = mulNEvaluated(
       factors,
       raw.map((x) => !x)
     );
+    // A product that no cell product reached (a factor that is a collection
+    // with no value) keeps the list whole: its exact cells are then rounded,
+    // with the product of the rounded operands.
+    if (keptExactCells && holdsExactNonInteger(r))
+      r = mulNEvaluated(
+        factors.map((f, i) => (raw[i] ? f : evaluated[i])),
+        raw.map((x) => !x)
+      );
     // See the matching comment in `Add` (Tycho item 101).
     return markAbsentPointCells(engine!, expression, r, evaluated);
   }
