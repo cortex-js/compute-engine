@@ -248,6 +248,40 @@ decided when the code is emitted, with no test of a type at run time:
 A parameter with a declared union type (`c: string | color`) still declines
 (the rule of `AGENTS.md`); Tycho declares it `any`.
 
+Decided 2026-11-23 (user): a condition made only of tests decided from types
+(`x is T`, a folded `==`, and `And`/`Or`/`Not` of them) lowers only the arm
+taken (`docs/COMPILATION-MODEL.md` states the exception). A `list<real>`
+parameter of a run-time length stored in a record field (`dash([t, 2])`)
+keeps declining: one lowered function per length would change the code of
+programs that compile today.
+
+### 4.11 String constants settled in the IR type (step 4c)
+
+Added 2026-11-23 (user decision) after step 4b: in Tycho's prelude (version
+24), `rotate(t)`, `scale`, `reflect`, `skew`, `bounds`, `center` and `anchor`
+decline because `figureKindBox` matches `fig.kind` at run time, so every arm
+is lowered and the `"group"` arm declines; `stroke("blue")` and `rotate(t)`
+decline because `w == figureDefault` and `about == figureDefault` compare a
+string at run time and the arms give two record types. In each case the
+string is a constant known when the code is emitted: the `kind` operand of a
+constructor is a literal (`figureOf("circle", …)`), and a default is the
+evaluated constant of the requirement.
+
+- A string value whose value is known at compile time (a literal, a constant
+  default, a field of a record built from such a value, a parameter of a
+  lowered function whose argument is such a value) carries that value in its
+  IR type. Two records whose constant fields differ are two IR types, and a
+  function is lowered once per such type (the lane key includes the value).
+- `==`, `!=`, `match` on constant arms and `x is T` whose operands carry
+  known values fold to a constant, and the conditional lowers only the arm
+  taken (4.10, decision above).
+- A value that is not a constant (a string computed at run time, an `if` of
+  two constant strings with a run-time condition) has the plain string type,
+  as today.
+- The constant is part of the type only where the lowering reads it; the
+  emitted value is the string itself, so `run()` and the host see the same
+  value as today.
+
 ## 5. What Tycho changes
 
 - `Figure` is declared, as Tycho's prelude version 22 does (checked by
@@ -294,6 +328,7 @@ every program that compiles today with the same code.
 3. Records as arguments and results of user functions (4.4). Size M.
 4. Protocol methods (4.5). Size M.
 4b. Values settled per lowered function (4.10). Size M.
+4c. String constants settled in the IR type (4.11). Size M.
 5. Rest parameters and the host boundary (4.6, 4.7). Size M.
 6. The acceptance tests (section 7), `docs/COMPILATION-MODEL.md` (the paragraph
    that says that a function that builds a `Figure` declines is replaced by
