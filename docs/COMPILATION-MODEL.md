@@ -2642,9 +2642,20 @@ These decline:
   (`do { s = s + t; hostDraw(s) }`): the host function could read the
   variable before the code writes it back.
 
-A function that builds a value of a type of the program (the `Figure` of a
-drawing library, a tuple of a string, lists and fields typed `any`) has no
-settled shape, and declines (R3).
+A value of a named tuple type of the program is a record on JavaScript
+(`compilation/ir/README.md`, "Records"; CE-1652): each field has a settled
+shape, from its declared type, or, for a field typed `any`, `list` or
+`string | color | nothing`, from the value that the constructor receives. With
+`type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
+`f(t)` compiles, and `run({ t: 1 })` gives the object `{ x: 0.5403…,
+y: 0.8414… }`; a `Nothing` field is `null`. A `Tuple` or a `List` of
+elements of several lanes (`[t, "a"]`) is a record with no names, an array at
+`run()`. A record is read at a constant position only (`p.x`, `q[1]`). Two
+records of one engine type whose fields have different shapes (a filled and
+an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
+whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
+decline a record. A record passed to a user function or to a function of the
+host, and a method of a protocol, still decline (CE-1652, steps 3 to 5).
 
 ## Collections
 

@@ -124,6 +124,11 @@ export type Syntax = {
   /** The return of the array of `values` (an entry `tuple`). Absent: the
    *  target declines such an entry. */
   retTuple?(values: string[]): string;
+  /** The result of the entry of the type `type`, from the text `value` of
+   *  a name: a record of a named tuple type, also one in a field, as the
+   *  host reads it (`README.md`, "Records"), or `undefined` when the value
+   *  is returned as it is. */
+  record?(value: string, type: IRType): string | undefined;
   call(fn: string, args: string[]): string;
   /** A function other than the entry. */
   fn(
@@ -652,11 +657,28 @@ export function printProgram(
     decided = cyclic?.has(f.name) ?? false;
     const ys = f.body.yields;
     const waiting = wait !== undefined;
-    if (f.tuple === true && syntax.retTuple !== undefined)
-      return [...body(f.body, 1, waiting), '  ' + syntax.retTuple(ys.map(use))];
+    // A record result of the entry is converted once, there: each is read
+    // through a name.
+    const named: string[] = [];
+    const result = (y: V, k: number): string => {
+      const t = type(y);
+      if (f.name !== p.entry || t.lane !== 'record') return use(y);
+      const r = `_record${k}`;
+      const text = syntax.record?.(r, t);
+      if (text === undefined) return use(y);
+      named.push(`  const ${r} = ${use(y)};`);
+      return text;
+    };
+    if (f.tuple === true && syntax.retTuple !== undefined) {
+      const lines = body(f.body, 1, waiting);
+      const values = ys.map(result);
+      return [...lines, ...named, '  ' + syntax.retTuple(values)];
+    }
     if (f.results.length !== 1)
       throw new Error('slice printer: a function with several results');
-    return [...body(f.body, 1, waiting), `  return ${use(ys[0])};`];
+    const lines = body(f.body, 1, waiting);
+    const value = result(ys[0], 0);
+    return [...lines, ...named, `  return ${value};`];
   };
   // The entry first: `order` follows `p.functions`, whose first is the entry.
   const main = returned(entry);

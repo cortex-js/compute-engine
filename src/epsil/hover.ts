@@ -1,12 +1,14 @@
 import type { ComputeEngine } from '../compute-engine.js';
 import type { MathJsonExpression } from '../math-json/types.js';
-import { operands, operator } from '../math-json/utils.js';
+import { operand, operands, operator, symbol } from '../math-json/utils.js';
 
 import {
   collectDeclarations,
   collectSourceTypes,
   declarationDetail,
   declarationOf,
+  protocolDocumentation,
+  protocolMemberDeclaration,
 } from './completion.js';
 import { definitionSitesByOffset } from './definition-sites.js';
 import {
@@ -178,10 +180,14 @@ export function epsilHover(
       new Set([...(options?.typeNames ?? []), ...sourceTypes.keys()])
     );
     const definition = group.occurrences.find((o) => o.role === 'definition');
+    const protocol =
+      group.kind === 'type' ? protocolStatement(ast, at.name) : undefined;
     const description =
-      definition === undefined || ast === null
-        ? undefined
-        : definitionSitesByOffset(ast).get(definition.start)?.description;
+      protocol !== undefined
+        ? protocolDocumentation(protocol).description
+        : definition === undefined || ast === null
+          ? undefined
+          : definitionSitesByOffset(ast).get(definition.start)?.description;
     return {
       range,
       name: written,
@@ -415,18 +421,59 @@ function engineHover(
     // A function member of a protocol declared above the name shadows the
     // spelling: the call reaches the dispatcher of the member.
     const member = at.members.get(name);
-    if (member !== undefined && range[0] >= member.from)
+    if (member !== undefined && range[0] >= member.from) {
+      const description = protocolMemberDeclaration(
+        ce,
+        at.ast,
+        name,
+        range[0]
+      )?.description;
       return {
         range,
         name: written,
         kind: 'function',
         detail: member.declarations[0].signature,
+        ...(description === undefined ? {} : { description: [description] }),
       };
+    }
     id = canonicalLibraryName(name);
+  }
+
+  // The dispatcher of a member of a protocol of the engine is described by
+  // the member: its declared signature and its `///` comment.
+  if (id === name && ce.lookupDefinition(name) !== undefined) {
+    const member = protocolMemberDeclaration(ce, null, name);
+    if (member !== undefined)
+      return {
+        range,
+        name: written,
+        kind: 'function',
+        detail: member.signature,
+        ...(member.description === undefined
+          ? {}
+          : { description: [member.description] }),
+      };
   }
 
   const entry = id === undefined ? undefined : describeName(ce, id);
   if (entry === undefined) {
+    // A protocol that the engine holds (one that a prelude declared): its
+    // `///` comment.
+    const record = ce._protocolRegistry[name];
+    if (record !== undefined)
+      return {
+        range,
+        name: written,
+        kind: 'type',
+        detail:
+          `protocol ${name}` +
+          (record.extends.length === 0
+            ? ''
+            : ` extends ${record.extends.join(', ')}`),
+        ...(record.description === undefined
+          ? {}
+          : { description: [record.description] }),
+      };
     // A constructor of a sum type of the source, as in its completion item.
     for (const [sum, declared] of collectSourceTypes(
       at.ast,
@@ -483,4 +530,16 @@ function entryHover(
       : { description: entry.description }),
     ...(entry.reference === undefined ? {} : { reference: entry.reference }),
   };
+}
+
+/** The `DeclareProtocol` statement of the protocol `name` in `ast`. */
+function protocolStatement(
+  ast: MathJsonExpression | null,
+  name: string
+): MathJsonExpression | undefined {
+  return operands(ast).find(
+    (statement) =>
+      operator(statement) === 'DeclareProtocol' &&
+      symbol(operand(statement, 1)) === name
+  );
 }

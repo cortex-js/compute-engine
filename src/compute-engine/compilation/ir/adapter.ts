@@ -67,6 +67,7 @@ import {
   regionsOf,
   scalarType,
   type Assigned,
+  type IRType,
   type Lane,
   type Program,
   type Region,
@@ -259,6 +260,23 @@ export function inputReport(
     });
   }
   return { freeSymbols, freeSymbolTypes };
+}
+
+/** `t` is, or holds, a record whose fields include `re` and `im`. */
+function complexLike(t: IRType): boolean {
+  return (
+    t.lane === 'record' &&
+    ((t.names?.includes('re') === true && t.names.includes('im')) ||
+      (t.fields ?? []).some(complexLike))
+  );
+}
+
+/** The error of a batch of code whose result is a record (README,
+ *  "Records"): a batch writes numbers only. */
+function recordBroadcastError(): Error {
+  return new TypeError(
+    'Code whose result is a record cannot be broadcast: the batch runner writes numbers only. Call `run()` for each value.'
+  );
 }
 
 /** The `lowered` of the report on JavaScript and interval-js: the value
@@ -495,6 +513,12 @@ function compileIr(
   const p = slice.program;
 
   const entry = entryOf(p);
+  // A record of fields named `re` and `im` would be read as a complex
+  // number by the result convention (`normalizeRunResult()`).
+  if (entry.results.some(complexLike))
+    throw decline(
+      'a record of fields named re and im as the result, which the result convention reads as a complex number'
+    );
   const literal = entry.literal === true;
   // A tuple read part by part is one input, at its first part.
   const inputs = entryInputs(
@@ -529,8 +553,10 @@ function compileIr(
   const shared: Key[] = [];
   // A string input, or a string result: no batch (a batch is of numbers).
   let strings = entry.results.some((t) => t.lane === 'string');
-  // A list of rows of different lengths as the result: no batch either.
+  // A list of rows of different lengths as the result: no batch either;
+  // nor a record (README, "Records"), which a batch cannot write.
   const rows = entry.results.some((t) => t.lane === 'rows');
+  const records = entry.results.some((t) => t.lane === 'record');
   entry.paramNames.forEach((name, k) => {
     const t = p.types[entry.body.params[k]];
     const i = argumentIndex(entry, k);
@@ -610,6 +636,7 @@ function compileIr(
     hostCalls.length === 0 &&
     !strings &&
     !rows &&
+    !records &&
     Object.values(vars).every(readsVarsObject) &&
     isShippableCode(code);
   const once = slice.preambleOnce;
@@ -671,6 +698,7 @@ function compileIr(
     if (bigint) throw bigintBroadcastError();
     if (strings) throw stringBroadcastError();
     if (rows) throw rowsBroadcastError();
+    if (records) throw recordBroadcastError();
     const previous = setReconstructionDigits(result.reconstructionDigits);
     try {
       return g();
@@ -710,9 +738,13 @@ function compileIr(
       ? () => Promise.reject(stringBroadcastError())
       : rows
         ? () => Promise.reject(rowsBroadcastError())
-        : makeBroadcastAsync(asyncSpec);
+        : records
+          ? () => Promise.reject(recordBroadcastError())
+          : makeBroadcastAsync(asyncSpec);
   result.willUsePool =
-    bigint || strings || rows ? () => false : makeWillUsePool(asyncSpec);
+    bigint || strings || rows || records
+      ? () => false
+      : makeWillUsePool(asyncSpec);
   // The pool loops (`outline()`): each worker program as a stored lambda,
   // which a worker loads, and as a function over the engine's runtime, for
   // a sub-range that the calling thread runs again. The asynchronous text

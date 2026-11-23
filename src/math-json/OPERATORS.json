@@ -972,6 +972,18 @@
       ]
     },
     {
+      "name": "BetaDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0<..>, real<0<..>) -> expression<BetaDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Beta distribution with shape parameters α and β, on the interval [0, 1]."
+    },
+    {
       "name": "BetaRegularized",
       "category": "Statistics",
       "arity": "optional",
@@ -1246,6 +1258,32 @@
       ]
     },
     {
+      "name": "ChebyshevT",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(degree: integer, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Chebyshev polynomial of the first kind Tₙ(x), with Tₙ(cos θ) = cos(nθ). T₋ₙ = Tₙ. Example: ChebyshevT(3, x) → 4x³ − 3x",
+      "wikidata": "Q620196"
+    },
+    {
+      "name": "ChebyshevU",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(degree: integer, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Chebyshev polynomial of the second kind Uₙ(x), with Uₙ(cos θ) = sin((n+1)θ)/sin θ. U₋₁ = 0 and U₋ₙ = −Uₙ₋₂. Example: ChebyshevU(2, x) → 4x² − 1",
+      "wikidata": "Q620196"
+    },
+    {
       "name": "ChineseRemainder",
       "category": "Number Theory",
       "arity": "optional",
@@ -1260,6 +1298,18 @@
         "ChineseRemainder([2, 3, 2], [3, 5, 7])  // 23",
         "ChineseRemainder([2, 3, 2], [3, 5, 7], 100)  // 128"
       ]
+    },
+    {
+      "name": "ChiSquareDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0<..>) -> expression<ChiSquareDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Chi-square distribution with k degrees of freedom (k > 0, not necessarily an integer)."
     },
     {
       "name": "CholeskyDecomposition",
@@ -2032,13 +2082,13 @@
       "name": "DeclareProtocol",
       "category": "Core",
       "arity": "optional",
-      "signature": "(symbol|string, members: dictionary<any>?, parents: any?) scope -> nothing",
+      "signature": "(symbol|string, members: dictionary<any>?, parents: any?, attributes: dictionary<any>?) scope -> nothing",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `[\"List\", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`[\"Dictionary\"]` when there are none). Evaluates to `Nothing`.",
+      "description": "Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> [\"Pair\", \"function\"|\"readonly\"|\"readwrite\", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `[\"List\", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`[\"Dictionary\"]` when there are none). An optional fourth operand documents the protocol: `[\"Dictionary\", description: string, members: [\"Dictionary\", member: string]]` (the `///` comments of an Epsil `protocol` statement); the two operands before it are then required. Evaluates to `Nothing`.",
       "examples": [
         "protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))"
       ]
@@ -3375,6 +3425,18 @@
       ]
     },
     {
+      "name": "FRatioDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0<..>, real<0<..>) -> expression<FRatioDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Snedecor's F distribution with d₁ degrees of freedom in the numerator and d₂ in the denominator."
+    },
+    {
       "name": "FresnelC",
       "category": "Trigonometry",
       "arity": "1",
@@ -3474,6 +3536,18 @@
       ]
     },
     {
+      "name": "GammaDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0<..>, real<0<..>) -> expression<GammaDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Gamma distribution with shape α and scale θ: the density is x^(α−1)·e^(−x/θ)/(Γ(α)·θ^α) for x > 0."
+    },
+    {
       "name": "GammaLn",
       "category": "Arithmetic",
       "arity": "1",
@@ -3526,6 +3600,18 @@
       "examples": [
         "[GCD(12, 18), GCD(12, 18, 27)]"
       ]
+    },
+    {
+      "name": "GeometricDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0..1>) -> expression<GeometricDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Geometric distribution: the number of failures before the first success, each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}."
     },
     {
       "name": "GeometricVector",
@@ -3674,6 +3760,19 @@
       ]
     },
     {
+      "name": "HermiteH",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(degree: integer, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Hermite polynomial Hₙ(x) of the physicists' convention, with H₀ = 1, H₁ = 2x and Hₙ₊₁ = 2x Hₙ − 2n Hₙ₋₁. A negative degree stays unevaluated. Example: HermiteH(2, x) → 4x² − 2",
+      "wikidata": "Q1047256"
+    },
+    {
       "name": "Histogram",
       "category": "Statistics",
       "arity": "2",
@@ -3810,6 +3909,18 @@
       "broadcastable": true,
       "description": "Gauss hypergeometric function ₂F₁(a, b; c; z).",
       "wikidata": "Q21028472"
+    },
+    {
+      "name": "HypergeometricDistribution",
+      "category": "Statistics",
+      "arity": "3",
+      "signature": "(integer<0..>, integer<0..>, integer<0..>) -> expression<HypergeometricDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Hypergeometric distribution: the number of successes in n draws without replacement from a population of N items of which K are successes (0 ≤ n ≤ N, 0 ≤ K ≤ N)."
     },
     {
       "name": "Hypot",
@@ -4714,6 +4825,19 @@
       "description": "Kurtosis of a collection of numbers."
     },
     {
+      "name": "LaguerreL",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(degree: integer, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Laguerre polynomial Lₙ(x) = Σₖ (−1)ᵏ C(n, k) xᵏ/k!. A negative degree stays unevaluated. Example: LaguerreL(2, x) → x²/2 − 2x + 1",
+      "wikidata": "Q1366960"
+    },
+    {
       "name": "LambertW",
       "category": "Arithmetic",
       "arity": "optional",
@@ -4805,6 +4929,19 @@
       "examples": [
         "[LCM(4, 6), LCM(4, 6, 10)]"
       ]
+    },
+    {
+      "name": "LegendreP",
+      "category": "special-functions",
+      "arity": "2",
+      "signature": "(degree: integer, complex) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": true,
+      "description": "Legendre polynomial Pₙ(x), with P₀ = 1, P₁ = x and (n+1)Pₙ₊₁ = (2n+1)x Pₙ − n Pₙ₋₁. P₋ₙ = Pₙ₋₁. Example: LegendreP(2, x) → (3x² − 1)/2",
+      "wikidata": "Q215405"
     },
     {
       "name": "LegendreSymbol",
@@ -4904,8 +5041,8 @@
     {
       "name": "Limits",
       "category": "Calculus",
-      "arity": "3",
-      "signature": "(index:symbol, lower:value, upper:value) -> tuple",
+      "arity": "optional",
+      "signature": "(index:symbol, lower:value, upper:value, step:value?) -> tuple",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -5674,6 +5811,18 @@
       "examples": [
         "-(x - 1)"
       ]
+    },
+    {
+      "name": "NegativeBinomialDistribution",
+      "category": "Statistics",
+      "arity": "2",
+      "signature": "(integer<1..>, real<0..1>) -> expression<NegativeBinomialDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Negative binomial distribution: the number of failures before the n-th success (n a positive integer), each trial a success with probability p (0 < p ≤ 1). The support is {0, 1, 2, …}."
     },
     {
       "name": "NextPrime",
@@ -6805,7 +6954,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `PolynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part and then imaginary part. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `PolynomialRoot` until `N()`. Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2"
+      "description": "The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `PolynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `PolynomialRoot` until `N()`. Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2"
     },
     {
       "name": "PolynomialRoots",
@@ -8632,6 +8781,18 @@
         "StringSplit(\"a,b,c\", \",\")",
         "StringSplit(\"  one two  three \")"
       ]
+    },
+    {
+      "name": "StudentTDistribution",
+      "category": "Statistics",
+      "arity": "1",
+      "signature": "(real<0<..>) -> expression<StudentTDistribution>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Student's t distribution with ν degrees of freedom (ν > 0, not necessarily an integer)."
     },
     {
       "name": "Subfactorial",

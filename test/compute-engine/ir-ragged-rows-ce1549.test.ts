@@ -253,13 +253,23 @@ describe('CE-1549: declines', () => {
     ['windows of a size known at run time', ['Partition', 'L', 'n', 1], 'javascript', 'Partition in windows of a size that is not a constant'],
     ['a list of points', ['Chunk', 'P', 2], 'javascript', 'Chunk of a list of other than numbers or booleans'],
     ['a list of complex numbers', ['Chunk', ['List', 1, 'ImaginaryUnit', 2], 2], 'javascript', 'Chunk of a list of other than numbers or booleans'],
-    ['a literal list of rows of two lengths', ['List', ['List', 'x', 1], ['List', 'x']], 'javascript', 'elements of two types'],
+    ['a literal list of rows of two lengths, on GLSL', ['List', ['List', 'x', 1], ['List', 'x']], 'glsl', 'elements of two types'],
     ['on GLSL', ['Chunk', 'L', 2], 'glsl', ''],
     ['on interval-js', ['Chunk', 'L', 2], 'interval-js', 'Chunk on interval-js'],
   ])('%s', (_, json, to, cause) => {
     const message = failure(() => js(json, { to }));
     expect(message).toBeDefined();
     expect(message).toContain(cause);
+  });
+
+  test('a literal list of rows of two lengths is a record on JavaScript (CE-1652)', () => {
+    const json: Json = ['List', ['List', 'x', 1], ['List', 'x']];
+    expect(js(json).run!({ x: 2 } as never)).toEqual([[2, 1], [2]]);
+    expect(box(json).subs({ x: 2 }).evaluate().json).toEqual([
+      'List',
+      ['List', 2, 1],
+      ['List', 2],
+    ]);
   });
 
   test('in the bigint mode', () => {

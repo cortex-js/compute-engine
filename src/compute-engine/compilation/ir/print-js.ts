@@ -42,6 +42,7 @@ import {
   useIndex,
   type HostCall,
   type Instr,
+  type IRType,
   type Program,
   type Region,
   type V,
@@ -188,6 +189,36 @@ const OTHER_LANES = {
   'rlcm': '_SYS.ir.lcm($0, $1)',
 };
 
+/** The text of the result of the entry of the record type `t`, read from
+ *  `value`: a record of a named tuple type is an object keyed by the names
+ *  of its fields; a record with no names stays the array of its fields; a
+ *  record in a field is converted the same way. A field of the lane
+ *  `nothing` is `null` in the array already. A field that holds a complex
+ *  value gets the result convention (`_SYS.ir.normalize`), which the
+ *  boundary does not apply inside an object. `undefined` when no record in
+ *  `t` has names: the array is the result. */
+function recordResult(value: string, t: IRType): string | undefined {
+  if (t.lane !== 'record') return undefined;
+  const nested = (t.fields ?? []).map((f, k) =>
+    recordResult(`${value}[${k}]`, f)
+  );
+  if (t.names === undefined && nested.every((x) => x === undefined))
+    return undefined;
+  const fields = (t.fields ?? []).map(
+    (f, k) =>
+      nested[k] ??
+      (holdsComplex(f) ? `_SYS.ir.normalize(${value}[${k}])` : `${value}[${k}]`)
+  );
+  if (t.names !== undefined)
+    return `{ ${t.names.map((n, k) => `${JSON.stringify(n)}: ${fields[k]}`).join(', ')} }`;
+  return `[${fields.join(', ')}]`;
+}
+
+/** Whether a value of the type `t` can hold a complex number. */
+function holdsComplex(t: IRType): boolean {
+  return t.lane === 'complex' || (t.fields ?? []).some(holdsComplex);
+}
+
 export const JS: Syntax = deepFreeze({
   ops: {
     ...ARITHMETIC,
@@ -215,6 +246,10 @@ export const JS: Syntax = deepFreeze({
     ...LOGIC,
     'boole': '($0 ? 1 : 0)',
     'elem': '$0[$1]',
+    // A record (`README.md`, "Records"): the field at an index from 0, and
+    // `Nothing`.
+    'field': '$0[$1]',
+    'nothing': 'null',
     'at': { text: '_at($0, $1)', helpers: ['_at'] },
     'atu': { text: '_atu($0, $1)', helpers: ['_atu'] },
     'atp': { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
@@ -458,6 +493,7 @@ export const JS: Syntax = deepFreeze({
     `${mutable ? 'let' : 'const'} ${name}${value === undefined ? '' : ` = ${value}`};`,
   loopOpen: loopOpen(NUMBERS),
   retTuple: (values) => `return [${values.join(', ')}];`,
+  record: recordResult,
   call: (fn, args) => `${fn}(${args.join(', ')})`,
   fn: (name, params, _result, body) =>
     [

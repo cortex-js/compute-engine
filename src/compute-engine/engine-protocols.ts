@@ -455,6 +455,11 @@ export function declareProtocolImpl(
     fromStatement?: boolean;
     origin?: DeclarationOrigin;
     extends?: readonly string[];
+    /** The documentation of the protocol (`ProtocolRecord.description`). */
+    description?: string;
+    /** The documentation of each member, by name
+     * (`ProtocolMember.description`). */
+    memberDescriptions?: Readonly<Record<string, string>>;
   }
 ): void {
   assertDocumentRegistryWritable(ce);
@@ -547,6 +552,24 @@ export function declareProtocolImpl(
     }
   }
 
+  // The documentation of the members, of members that the protocol declares.
+  for (const [member, text] of Object.entries(
+    options?.memberDescriptions ?? {}
+  )) {
+    if (typeof text !== 'string')
+      throw Error(`The description of \`${name}.${member}\` is not a string`);
+    if (validated[member] === undefined)
+      throw Error(
+        `The protocol "${name}" has no member "${member}" to describe`
+      );
+    validated[member].description = text;
+  }
+  if (
+    options?.description !== undefined &&
+    typeof options.description !== 'string'
+  )
+    throw Error(`The description of the protocol "${name}" is not a string`);
+
   // The parent list, validated like the members before anything is touched.
   const parents = validatedParents(ce, name, options?.extends);
   // One declaring protocol per member name in the closure, checked against
@@ -594,6 +617,8 @@ export function declareProtocolImpl(
     existing.members = validated;
     existing.extends = parents;
     existing.declaredByStatement = fromStatement;
+    if (options?.description === undefined) delete existing.description;
+    else existing.description = options.description;
     // The redefinition stamp belongs to the declaration it describes. A
     // replacement without an origin (the box route, which has no batch) clears
     // it rather than leaving a stale one behind: an unstamped record is
@@ -720,6 +745,8 @@ export function declareProtocolImpl(
     conformances: [],
     declaredByStatement: fromStatement,
   };
+  if (options?.description !== undefined)
+    record.description = options.description;
   if (origin !== undefined) record._declOrigin = origin;
   registry[name] = record;
   // A fresh declaration is a config event because `typesOverlap` and dispatch

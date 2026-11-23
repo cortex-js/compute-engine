@@ -56,6 +56,7 @@ import {
   recursiveFunctions,
   regionsOf,
   scalarType,
+  typeToString,
   useIndex,
   type Constant,
   type IRType,
@@ -528,7 +529,13 @@ const cse: Pass = (p, rows) => {
     if (!fx.mergeable(i)) return undefined;
     if (i.k === 'const') return literalKey(i.value);
     if (i.k === 'op') return `o ${i.op} ${i.args.join(',')}`;
-    if (i.k === 'list') return `l ${p.types[i.out].lane} ${i.args.join(',')}`;
+    // A record by its whole type: its nominal name, the names and the
+    // types of its fields.
+    if (i.k === 'list') {
+      const t = p.types[i.out];
+      const of = t.lane === 'record' ? typeToString(t) : t.lane;
+      return `l ${of} ${i.args.join(',')}`;
+    }
     return undefined;
   };
   // An instruction with regions that is not effectful (a `may-fail` one, as
@@ -549,7 +556,8 @@ const cse: Pass = (p, rows) => {
     const type = (v: V) => {
       const t = p.types[v];
       const shape = t.shape.map((n) => (typeof n === 'number' ? n : name(n.v)));
-      return `${t.lane}${t.storage ?? ''}[${shape.join(',')}]`;
+      const of = t.lane === 'record' ? typeToString(t) : t.lane;
+      return `${of}${t.storage ?? ''}[${shape.join(',')}]`;
     };
     const def = (v: V) => (inner.set(v, inner.size), type(v));
     const parts: string[] = [];

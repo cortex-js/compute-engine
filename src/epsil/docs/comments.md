@@ -43,3 +43,17 @@ prints, what an editor hover shows. Markdown is the intended format.
 /// Doubles its argument.
 twice(x) = 2x
 ```
+
+A documentation comment before a `protocol` statement documents the protocol,
+and one before a member of its body documents that member. The engine keeps
+them with the protocol, so an editor shows them in the hover of the protocol
+and in the help of a member, also when the protocol was declared by a program
+that ran earlier on the same engine:
+
+```epsil
+/// Things that move.
+protocol Movable {
+  /// Moves the thing by `d`.
+  function move(self: Self, d: real) -> Self
+}
+```

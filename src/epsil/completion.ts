@@ -35,6 +35,7 @@ import { widenValueTypes } from '../common/type/widen-value.js';
 import { widenLocalType } from '../compute-engine/boxed-expression/boxed-value-definition.js';
 import { isOperatorDef } from '../compute-engine/boxed-expression/definition-guards.js';
 import {
+  isProtocolDispatcher,
   protocolFunctionMemberOwners,
   protocolPropertyTypeOfReceiver,
 } from '../compute-engine/engine-protocols.js';
@@ -265,8 +266,10 @@ export type Declaration =
   /** A `let` or a `const` with no type whose value is a call (`let c =
    * Circle(1)`): the name of the callee. The value of a call of the
    * constructor of a nominal type of the source has that type
-   * (`receiverTypeOf`). */
-  | { kind: 'call'; callee: string };
+   * (`receiverTypeOf`). `scalarArguments` is set when every argument is a
+   * number or a string literal: a function that maps over a list then has
+   * the result of its signature. */
+  | { kind: 'call'; callee: string; scalarArguments: boolean };
 
 /** How a candidate name fits the expected type (`EpsilCompletionItem.fit`). */
 type Fit = 'match' | 'maybe' | 'never';
@@ -672,6 +675,12 @@ export function epsilCompletions(
             : { insertText: spelling }),
         ...(snippet === undefined ? {} : { snippet }),
         detail: member.detail,
+        ...(member.description === undefined
+          ? {}
+          : {
+              documentation: firstLine(member.description),
+              description: [member.description],
+            }),
         ...(fit === undefined ? {} : { fit }),
       });
     }
@@ -3207,16 +3216,20 @@ export function memberCallee(
   receiver: MathJsonExpression | null,
   name: string
 ):
-  | { kind: 'function'; signature: FunctionSignature }
-  | { kind: 'field'; type: Type }
+  | { kind: 'function'; signature: FunctionSignature; description?: string }
+  | { kind: 'field'; type: Type; description?: string }
   | undefined {
   const base = receiverTypeOf(context, receiver);
   if (base === undefined) return undefined;
   const member = membersOf(context, base).find((m) => m.name === name);
+  const described =
+    member?.description === undefined
+      ? {}
+      : { description: member.description };
   if (member?.kind === 'function')
     return member.signature === undefined
       ? undefined
-      : { kind: 'function', signature: member.signature };
+      : { kind: 'function', signature: member.signature, ...described };
   if (member === undefined || member.noCall || member.type === undefined)
     return undefined;
   const unfolded = unfoldSourceAliases(
@@ -3229,7 +3242,7 @@ export function memberCallee(
   const type = resolveTypeAlias(unfolded);
   return signatureArms(type) === undefined
     ? undefined
-    : { kind: 'field', type };
+    : { kind: 'field', type, ...described };
 }
 
 /**
@@ -3538,6 +3551,8 @@ type Member =
        * same name: `x.name()` calls the function, not the property's value,
        * so the call has no type here. */
       noCall?: true;
+      /** The documentation of a protocol property (its `///` comment). */
+      description?: string;
     }
   | {
       kind: 'function';
@@ -3550,6 +3565,8 @@ type Member =
       detail: string;
       /** The signature of the function, the receiver first, when known. */
       signature?: FunctionSignature;
+      /** The documentation of a protocol function (its `///` comment). */
+      description?: string;
     };
 
 /**
@@ -3558,7 +3575,7 @@ type Member =
  * the source, the type of a member of a receiver (`a.b`, `a.f()`), else
  * `staticTypeOf`.
  */
-function receiverTypeOf(
+export function receiverTypeOf(
   context: Context,
   node: MathJsonExpression | null
 ): Type | undefined {
@@ -3591,10 +3608,28 @@ function receiverTypeOf(
     if (declaration?.kind === 'call') {
       const { callee } = declaration;
       const binding = context.visible.get(callee);
-      return context.sourceTypes.get(callee)?.kind === 'nominal' &&
+      if (
+        context.sourceTypes.get(callee)?.kind === 'nominal' &&
         (binding === undefined || binding.kind === 'type')
-        ? parseSourceType(context.ce, callee, context.typeNames)
-        : undefined;
+      )
+        return parseSourceType(context.ce, callee, context.typeNames);
+      // A value made by a function that the engine defines (a prelude's
+      // `let c = circle(…)`) has the declared result type of the function.
+      if (binding !== undefined) return undefined;
+      const signature = context.ce.operatorInfo(callee)?.signature?.type;
+      const result =
+        typeof signature === 'object' && signature.kind === 'signature'
+          ? signature.result
+          : undefined;
+      // A function that maps over a list has a result of another shape
+      // than its signature's (`Sin([1, 2])`).
+      return result === undefined ||
+        result === 'unknown' ||
+        result === 'any' ||
+        result === 'expression' ||
+        (isBroadcastable(context.ce, callee) && !declaration.scalarArguments)
+        ? undefined
+        : result;
     }
     const { type } = declarationDetail(
       context.ce,
@@ -3764,6 +3799,10 @@ function membersOf(context: Context, type: Type): Member[] {
   // `Self` in a requirement is the type of the receiver.
   const self = typeToString(type);
   const addRequirement = (name: string, requirement: ProtocolMember) => {
+    const described =
+      requirement.description === undefined
+        ? {}
+        : { description: requirement.description };
     if (requirement.kind !== 'function') {
       const text = requirement.type.replace(/\bSelf\b/g, self);
       add({
@@ -3771,6 +3810,7 @@ function membersOf(context: Context, type: Type): Member[] {
         name,
         type: parseSourceType(ce, text, context.typeNames),
         detail: text,
+        ...described,
       });
       return;
     }
@@ -3788,6 +3828,7 @@ function membersOf(context: Context, type: Type): Member[] {
         arity: undefined,
         required: undefined,
         detail: text,
+        ...described,
       });
       return;
     }
@@ -3806,6 +3847,7 @@ function membersOf(context: Context, type: Type): Member[] {
       required: parametersOf(rest),
       detail: typeToString(rest),
       signature,
+      ...described,
     });
   };
 
@@ -3825,15 +3867,18 @@ function membersOf(context: Context, type: Type): Member[] {
       const name = symbol(operand(statement, 1));
       if (name === null) continue;
       const requirements: [string, ProtocolMember][] = [];
+      const docs = protocolDocumentation(statement).members;
       for (const kv of operands(operand(statement, 2))) {
         const member = symbol(operand(kv, 1));
         const kind = stringValue(operand(operand(kv, 2), 1));
         const text = stringValue(operand(operand(kv, 2), 2));
         if (member === null || text === null) continue;
+        const doc = docs.get(member);
+        const described = doc === undefined ? {} : { description: doc };
         if (kind === 'function')
-          requirements.push([member, { kind, signature: text }]);
+          requirements.push([member, { kind, signature: text, ...described }]);
         else if (kind === 'readonly' || kind === 'readwrite')
-          requirements.push([member, { kind, type: text }]);
+          requirements.push([member, { kind, type: text, ...described }]);
       }
       protocols.set(name, {
         members: requirements,
@@ -4904,7 +4949,16 @@ export function collectDeclarations(
           operator(operand(node, 2)) === 'Dictionary' &&
           operator(value) !== ''
         )
-          record(operand(node, 1), { kind: 'call', callee: operator(value) });
+          record(operand(node, 1), {
+            kind: 'call',
+            callee: operator(value),
+            scalarArguments: operands(value).every(
+              (a) =>
+                typeof a === 'number' ||
+                isNumberNode(a) ||
+                (typeof a === 'object' && a !== null && 'str' in a)
+            ),
+          });
       }
     } else if (head === 'DefineFunction') {
       const fn = operand(node, 2);
@@ -5033,6 +5087,16 @@ function engineEntries(ce: ComputeEngine): LibraryEntry[] {
           type = undefined;
         }
       }
+      // The dispatcher of a protocol member is described by the member: its
+      // declared signature and its `///` comment, not the dispatcher's.
+      const member = isFunction
+        ? protocolMemberDeclaration(ce, null, name)
+        : undefined;
+      if (member !== undefined) {
+        entry.signature = member.signature;
+        entry.description =
+          member.description === undefined ? undefined : [member.description];
+      }
       const documentation = entry.description?.[0]?.split('\n')[0]?.trim();
       entries.push({
         label: name,
@@ -5053,6 +5117,104 @@ function engineEntries(ce: ComputeEngine): LibraryEntry[] {
       });
     }
   return entries;
+}
+
+/**
+ * The declaration of the function member `name` of a protocol: of the one
+ * protocol that the source declares (`ast`) before the offset `before`, or
+ * else, when the engine binds `name` to the dispatcher of a protocol member
+ * (no function of the engine shadows it), of the one protocol of the engine
+ * that declares a function of that name. Its signature is the declared
+ * text, with `Self` for the receiver, and its description is the `///`
+ * comment of the member. `undefined` when no protocol, or more than one,
+ * declares it.
+ */
+export function protocolMemberDeclaration(
+  ce: ComputeEngine,
+  ast: MathJsonExpression | null,
+  name: string,
+  before = Infinity
+): { protocol: string; signature: string; description?: string } | undefined {
+  // A function that the engine defines above the standard library, and
+  // that is not a dispatcher, shadows every protocol member of its name.
+  const definition = ce.lookupDefinition(name);
+  if (
+    definition !== undefined &&
+    !isProtocolDispatcher(definition) &&
+    ce.contextStack[0]?.lexicalScope.bindings.get(name) !== definition
+  )
+    return undefined;
+  const declared: {
+    protocol: string;
+    signature: string;
+    description?: string;
+  }[] = [];
+  for (const statement of operands(ast)) {
+    if (operator(statement) !== 'DeclareProtocol') continue;
+    // A member takes the bare spelling after its declaration only.
+    const end = spanOf(statement)?.[1];
+    if (end !== undefined && end > before) continue;
+    const protocol = symbol(operand(statement, 1));
+    if (protocol === null) continue;
+    for (const kv of operands(operand(statement, 2))) {
+      if (symbol(operand(kv, 1)) !== name) continue;
+      const kind = stringValue(operand(operand(kv, 2), 1));
+      const signature = stringValue(operand(operand(kv, 2), 2));
+      if (kind !== 'function' || signature === null) continue;
+      const description = protocolDocumentation(statement).members.get(name);
+      declared.push({
+        protocol,
+        signature,
+        ...(description === undefined ? {} : { description }),
+      });
+    }
+  }
+  if (declared.length > 0)
+    return declared.length === 1 ? declared[0] : undefined;
+  if (!isProtocolDispatcher(definition)) return undefined;
+  const records = Object.values(ce._protocolRegistry).filter(
+    (record) => record.members[name]?.kind === 'function'
+  );
+  if (records.length !== 1) return undefined;
+  const member = records[0].members[name];
+  if (member.kind !== 'function') return undefined;
+  return {
+    protocol: records[0].name,
+    signature: member.signature,
+    ...(member.description === undefined
+      ? {}
+      : { description: member.description }),
+  };
+}
+
+/** The first line of a description, trimmed. */
+export function firstLine(text: string): string {
+  return text.split('\n')[0].trim();
+}
+
+/**
+ * The documentation of a `DeclareProtocol` statement: its fourth operand,
+ * `["Dictionary", description: …, members: ["Dictionary", member: …]]`, the
+ * `///` comments of the protocol and of its members.
+ */
+export function protocolDocumentation(statement: MathJsonExpression): {
+  description?: string;
+  members: Map<string, string>;
+} {
+  const members = new Map<string, string>();
+  let description: string | undefined;
+  for (const kv of operands(operands(statement)[3] ?? null)) {
+    const key = symbol(operand(kv, 1));
+    const value = operand(kv, 2);
+    if (key === 'description') description = stringValue(value) ?? undefined;
+    else if (key === 'members')
+      for (const entry of operands(value)) {
+        const member = symbol(operand(entry, 1));
+        const text = stringValue(operand(entry, 2));
+        if (member !== null && text !== null) members.set(member, text);
+      }
+  }
+  return { ...(description === undefined ? {} : { description }), members };
 }
 
 function libraryEntries(ce: ComputeEngine): LibraryEntry[] {

@@ -274,10 +274,14 @@ describe('the tuple-consumption rule', () => {
     expect(
       declined(['If', ['Less', 'x', 0], ['Tuple', 'x', 1], ['List', 1, 'x']])
     ).toMatch(/arms of a tuple and a list/);
+    // A tuple of tuples, and of a number and a boolean, is a record
+    // (CE-1652, `compile-records.test.ts`), which `Length` does not read.
     expect(
       declined(['Length', ['Tuple', ['Tuple', 'x', 1], ['Tuple', 'x', 1]]])
-    ).toMatch(/a tuple of tuples/);
-    expect(declined(['Tuple', 'x', 'True'])).toMatch(/elements of two types/);
+    ).toMatch(/a scalar where a list is required/);
+    expect(declined(['Length', ['Tuple', 'x', 'True']])).toMatch(
+      /a scalar where a list is required/
+    );
     expect(
       declined(['Comprehension', 'k', ['Element', 'k', ['Tuple', 'x', 1]]])
     ).toMatch(/a tuple where a list is read/);

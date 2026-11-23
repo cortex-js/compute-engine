@@ -649,7 +649,9 @@ describe('A point parameter called with a list of points maps over the points', 
         )
       ).toThrow(
         param.startsWith('tuple<broadcastable')
-          ? /elements of two types/
+          ? // A tuple of a list and a scalar is a record (CE-1652), whose
+            // list field has a run-time length.
+            /a record with a field of a run-time length/
           : /incompatible-type/
       );
     }

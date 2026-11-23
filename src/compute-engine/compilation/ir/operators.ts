@@ -396,6 +396,11 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // of a list of strings, conditioned (`text.elem`).
   row(undefined,      2,          [[['list', I], 'element', 'elem']], list),
   row(undefined,      2,          [[['list', I], 'element', 'text.elem']], list),
+  // A record (`README.md`, "Records"): the field at a constant index from
+  // 0, of the type of that field (the verifier reads it, not this
+  // signature), and `Nothing`, the value of a field of the lane `nothing`.
+  row(undefined,      2,          [[['record', I], 'record', 'field']], { threads: false }),
+  row(undefined,      0,          [[[], 'nothing', 'nothing']], { threads: false }),
   // A list local written in place (`lower.ts`, `README.md`, "Lists"): the
   // array that the local owns, a copy of its value (`copy`); the index from
   // 0 of an index from 1 or from the end of a list of `n` elements, which

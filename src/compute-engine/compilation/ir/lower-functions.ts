@@ -10,7 +10,12 @@
  * never below the final one.
  */
 
-import type { ListType, TupleType, Type } from '../../../common/type/types.js';
+import type {
+  ListType,
+  TupleType,
+  Type,
+  TypeReference,
+} from '../../../common/type/types.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import type { BoxedValueDefinition, Expression } from '../../global-types.js';
@@ -36,6 +41,7 @@ import {
   hasUnsettledShape,
   isUntyped,
   LANE_MISMATCH,
+  tupleBody,
   UNSETTLED_SHAPE,
   type Binding,
   type Fn,
@@ -479,20 +485,34 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
   const mapsAt = listMapsAt(signature ?? literal.type.type);
   const pointsAt = pointsMapAt(signature ?? literal.type.type);
   // A colour result is on the colour lane; a colour parameter declines.
+  // Another result that is not a scalar (a named tuple type, a list of
+  // several lanes) is the type of the body when the body is a record
+  // (`record`), and declines otherwise (`define()`).
+  const scalarResult = r === undefined ? undefined : inputType(r, 'real', true);
+  const record =
+    !open &&
+    list === undefined &&
+    points === undefined &&
+    !shaped &&
+    grid === undefined &&
+    r !== 'color' &&
+    (scalarResult === undefined || scalarResult.shape.length > 0);
   const result: IRType | undefined =
     open ||
     list !== undefined ||
     points !== undefined ||
     shaped ||
-    grid !== undefined
+    grid !== undefined ||
+    record
       ? undefined
       : r === 'color'
         ? { lane: 'color', shape: [] }
-        : scalarOf(literal, r, `the result of ${e.operator}`);
+        : scalarOf(literal, r!, `the result of ${e.operator}`);
   return {
     names,
     params,
     result,
+    record,
     list,
     tuple,
     r,
@@ -696,7 +716,18 @@ export function functionLowering(
     nanForAbsent: () => boolean
   ): UserFunction => {
     begun += 1;
-    const { names, result, list, tuple, r, open, points, shaped, grid } = sig;
+    const {
+      names,
+      result,
+      record,
+      list,
+      tuple,
+      r,
+      open,
+      points,
+      shaped,
+      grid,
+    } = sig;
     const params = sig.params.map((declared, i) => {
       if (complexAt(declared, args?.[i]))
         return { ...declared, lane: 'complex' as const };
@@ -839,10 +870,35 @@ export function functionLowering(
     try {
       b.define(ir, () => {
         const body =
-          list || open || points !== undefined || shaped || grid
+          list || open || points !== undefined || shaped || grid || record
             ? cx.value(literal.ops[0])!
             : cx.scalar(literal.ops[0]);
         const t = type(body);
+        // A result that is not a scalar: a record, of the nominal type of
+        // the result type when it is one.
+        if (record) {
+          if (t.lane !== 'record')
+            scalarOf(literal, r!, `the result of ${e.operator}`);
+          const nominal = tupleBody(r!) && (r as TypeReference).name;
+          if (nominal !== undefined && t.nominal !== nominal)
+            decline(
+              literal,
+              `a body of ${e.operator} that is not ${engineTypeToString(r!)}`
+            );
+          // A structural result type with field names: a record of those
+          // names, in that order.
+          const elements =
+            typeof r === 'object' && r.kind === 'tuple' ? r.elements : [];
+          if (
+            elements.some((x) => x.name !== undefined) &&
+            (t.names?.length !== elements.length ||
+              elements.some((x, k) => x.name !== t.names![k]))
+          )
+            decline(
+              literal,
+              `a body of ${e.operator} that is not a record of the field names of ${engineTypeToString(r!)}`
+            );
+        }
         // A list of lists of two lengths not stated: a list of rank 2 of
         // the lengths that the body settles.
         if (

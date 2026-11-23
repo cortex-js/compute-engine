@@ -1,0 +1,233 @@
+/**
+ * The lowering of records (README, "Records"; CE-1652, step 2): a value
+ * whose fields each have a settled shape, made by the constructor of a
+ * named tuple type, or by a `Tuple` or a `List` literal whose elements are
+ * not of one lane. A record is read at a constant position only (`Field`,
+ * `At` of a constant index). No run-time test of a type is emitted
+ * (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time").
+ */
+
+import type { Type, TypeReference } from '../../../common/type/types.js';
+import { sumVariantInfo } from '../../sum-representation.js';
+import { isSubtype } from '../../../common/type/subtype.js';
+import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
+import { isSymbol } from '../../boxed-expression/type-guards.js';
+import type { Expression } from '../../global-types.js';
+import {
+  decline,
+  hasUnsettledShape,
+  recordNames,
+  tupleBody,
+  type Fn,
+  type Lowering,
+} from './lower-context.js';
+import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
+import { typedByMatch } from './lower-match.js';
+import {
+  elementIndex,
+  isSubType,
+  joinType,
+  lengthValues,
+  typeToString,
+  type IRType,
+  type V,
+} from './ir.js';
+
+/** The constructor of a nominal tuple type that the engine minted for
+ *  `type P = tuple<…>` (`mintTypeConstructor()`): the declared type of
+ *  each field, and their names when each has one. `undefined` for any
+ *  other call. */
+export function recordConstructor(
+  e: Fn
+): { nominal: string; types: Type[]; names?: string[] } | undefined {
+  // The marker that `mintTypeConstructor()` sets on the definition.
+  const od = e.operatorDefinition as
+    { _mintedTypeConstructor?: string } | undefined;
+  if (od?._mintedTypeConstructor !== 'nominal') return undefined;
+  // A variant of a sum declared with `|`: its tag is a value at run time
+  // (`sum-representation.ts`), which a record does not hold.
+  if (sumVariantInfo(e.engine, e.operator) !== undefined) return undefined;
+  const t = e.type.type;
+  const body = tupleBody(t);
+  if (body === undefined || body.length !== e.nops) return undefined;
+  const names = recordNames(t);
+  return {
+    nominal: (t as TypeReference).name,
+    types: body.map((x) => x.type),
+    ...(names === undefined ? {} : { names }),
+  };
+}
+
+/** The IR type that the declared type `d` of a field settles (a scalar, a
+ *  colour, a string, a tuple or a list of stated lengths), or `undefined`
+ *  when the operand decides it (`any`, `list`, `string | color |
+ *  nothing`). */
+function settledType(d: Type, wide: 'real' | 'complex'): IRType | undefined {
+  if (d === 'color') return { lane: 'color', shape: [] };
+  if (hasUnsettledShape(d)) return undefined;
+  const t = tupleOrInputType(d, wide) ?? inputType(d, wide, true);
+  if (t === undefined || t.shape.some((n) => n === 'run-time'))
+    return undefined;
+  return { lane: t.lane, shape: t.shape as number[] };
+}
+
+/** `javascript`: the target holds records (JavaScript, not the interval
+ *  or the `bigint` mode). Elsewhere a constructor declines and a `Tuple`
+ *  or a `List` of several lanes is lowered as before (user decision Q3 of
+ *  the plan of CE-1652). */
+export function recordLowering(cx: Lowering, javascript: boolean) {
+  const { b, type, tuples } = cx;
+  /** The values of the fields of each record made in this lowering: a
+   *  read of a field of one is that value (a constant stays a constant). */
+  const parts = new Map<V, V[]>();
+
+  /** The record of the values `values`, of the field types `fields` (the
+   *  types of the values when absent), of a nominal type and its field
+   *  names. A field of a
+   *  run-time length declines: the length is a value of the function that
+   *  makes the record, which a reader in another function cannot name. */
+  const make = (
+    e: Expression,
+    values: V[],
+    nominal?: { nominal: string; names?: readonly string[] },
+    fields: (IRType | undefined)[] = []
+  ): V => {
+    const types = values.map((v, k): IRType => {
+      const t = fields[k] ?? type(v);
+      if (t.lane === 'rows')
+        decline(e, 'a record with a field of lists of rows of two lengths');
+      const shape = t.shape.map((n) =>
+        typeof n === 'number' ? n : (cx.constant(n.v) ?? n)
+      );
+      if (shape.some((n) => typeof n !== 'number'))
+        decline(e, 'a record with a field of a run-time length');
+      return { ...t, shape };
+    });
+    const v = b.list(values, {
+      lane: 'record',
+      shape: [],
+      fields: types,
+      marks: values.map((x) => tuples.get(x)),
+      ...(nominal === undefined ? {} : { nominal: nominal.nominal }),
+      ...(nominal?.names === undefined ? {} : { names: nominal.names }),
+    });
+    parts.set(v, values);
+    return v;
+  };
+
+  /** The elements of a `Tuple` (`tuple`) or of a `List` make a list: one
+   *  lane, one shape, one tuple mark (a `Tuple` of tuples does not). */
+  const fitsList = (elements: V[], tuple: boolean): boolean => {
+    if (elements.length === 0) return true;
+    if (tuple && elements.some((v) => tuples.has(v))) return false;
+    if (elements.some((v) => tuples.get(v) !== tuples.get(elements[0])))
+      return false;
+    let t: IRType | undefined = type(elements[0]);
+    for (const v of elements) {
+      t = joinType(t, type(v));
+      if (t === undefined) return false;
+    }
+    return (
+      t.lane !== 'record' && t.lane !== 'nothing' && !lengthValues(t).length
+    );
+  };
+
+  /** A `Tuple` (`tuple`) or `List` literal of the values `elements`: a
+   *  record when they do not make a list (`fitsList()`), else
+   *  `undefined`, the list of today. */
+  const literal = (e: Fn, elements: V[], tuple: boolean): V | undefined =>
+    !javascript || fitsList(elements, tuple) ? undefined : make(e, elements);
+
+  /** `P(a, b, …)`, the constructor of the named tuple type `P`: each
+   *  operand is lowered for the declared type of its field. An operand
+   *  whose static type does not prove that type declines (R5); where the
+   *  declared type settles an IR type the field has it, else the operand
+   *  decides (`settledType()`). `Nothing` is a field of the lane
+   *  `nothing`. */
+  const construct = (e: Fn): V => {
+    const c = recordConstructor(e)!;
+    if (!javascript)
+      decline(
+        e,
+        `a value of the type ${c.nominal}, a record: records compile on javascript only`
+      );
+    const fields: (IRType | undefined)[] = [];
+    const values = e.ops.map((op, k) => {
+      const d = c.types[k];
+      const what = `the field ${c.names?.[k] ?? k + 1} of ${e.operator}`;
+      if (isSymbol(op, 'Nothing')) {
+        if (!isSubtype('nothing', d))
+          decline(op, `${what}: Nothing, not ${engineTypeToString(d)}`);
+        const t: IRType = { lane: 'nothing', shape: [] };
+        fields.push(t);
+        return b.op('nothing', [], t);
+      }
+      if (typedByMatch(op))
+        decline(
+          op,
+          `${what}: a value whose static type comes from a Match (CE-1731)`
+        );
+      if (!isSubtype(op.type.type, d))
+        decline(
+          op,
+          `${what}: a value of type ${engineTypeToString(op.type.type)}, which does not prove ${engineTypeToString(d)}`
+        );
+      const v = cx.value(op)!;
+      const settled = settledType(d, cx.wide);
+      fields.push(settled);
+      if (settled === undefined) return v;
+      const w = cx.widen(v, settled.lane);
+      if (
+        !isSubType(type(w), settled, cx.constant) ||
+        tuples.get(w) !== tupleAxis(d)
+      )
+        decline(
+          op,
+          `${what}: a value of ${typeToString(type(w))}, not ${engineTypeToString(d)}`
+        );
+      return w;
+    });
+    return make(e, values, c, fields);
+  };
+
+  /** The field `k` (from 0) of the record `r`: the value it was made of,
+   *  or its read. */
+  const field = (r: V, k: number): V => {
+    const known = parts.get(r)?.[k];
+    if (known !== undefined) return known;
+    const t = type(r);
+    const v = b.op('field', [r, b.constant(k, 'integer')], t.fields![k]);
+    const mark = t.marks?.[k];
+    if (mark !== undefined) tuples.set(v, mark);
+    return v;
+  };
+
+  /** `At(r, i)` of a record: the field at the constant index `i` (from 1,
+   *  or from the end when negative); another index declines. */
+  const at = (e: Expression, r: V, i: V): V => {
+    const k = elementIndex(type(r).fields!.length, cx.constant(i));
+    if (k === undefined)
+      decline(
+        e,
+        'At of a record at an index that is not a constant in range (a record is read at a constant position)'
+      );
+    return field(r, k);
+  };
+
+  /** `Field(r, name)`: the field of that name of a record of a named tuple
+   *  type. */
+  const named = (e: Fn, r: V, name: string | undefined): V => {
+    const t = type(r);
+    if (t.lane !== 'record')
+      decline(e, 'Field of a value that is not a record');
+    const k = name === undefined ? -1 : (t.names?.indexOf(name) ?? -1);
+    if (k < 0)
+      decline(
+        e,
+        `Field of a record with no field ${name ?? ''} (${typeToString(t)})`
+      );
+    return field(r, k);
+  };
+
+  return { construct, literal, at, named };
+}

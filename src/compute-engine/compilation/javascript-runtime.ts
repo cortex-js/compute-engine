@@ -2604,6 +2604,9 @@ export const IR_FUNCTIONS = Object.freeze({
   ...COMPLEX_FUNCTIONS,
   pow: realPow,
   mod: floorMod,
+  // The result convention in a field of a record that the entry returns as
+  // an object (`normalizeRunResult` does not walk an object).
+  normalize: normalizeRunResult,
 });
 
 /**

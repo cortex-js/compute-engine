@@ -5185,12 +5185,18 @@ function rawDictionaryEntries(
  * PartialOrder { … }`). The members operand is then required, so the
  * position of the parents is fixed: `["Dictionary"]` for a protocol with no
  * members of its own.
+ *
+ * The optional fourth operand documents the protocol:
+ * `["Dictionary", description: string, members: ["Dictionary", member:
+ * string]]`, the `///` comments of an Epsil `protocol` statement. The parents
+ * are then required (`["List"]` when there are none).
  */
 function declareProtocolStatement(
   ce: ComputeEngine,
   nameOp: Expression | undefined,
   membersOp: Expression | undefined,
   parentsOp: Expression | undefined,
+  attributesOp: Expression | undefined,
   /** See `declareTypeStatement`'s parameter of the same name. */
   onStatementRoute: boolean
 ): Expression | null {
@@ -5271,12 +5277,42 @@ function declareProtocolStatement(
     parents = names as string[];
   }
 
+  // The documentation of the protocol and of its members.
+  let description: string | undefined;
+  let memberDescriptions: Record<string, string> | undefined;
+  if (attributesOp !== undefined) {
+    const malformed = () =>
+      ce.error(
+        [
+          'invalid-protocol-declaration',
+          `Expected the documentation of \`${name}\` as \`["Dictionary", description: string, members: ["Dictionary", member: string]]\``,
+        ],
+        name
+      );
+    const entries = rawDictionaryEntries(attributesOp);
+    if (entries === null) return malformed();
+    for (const [key, value] of entries) {
+      if (key === 'description' && isString(value)) description = value.string;
+      else if (key === 'members') {
+        const docs = rawDictionaryEntries(value);
+        if (docs === null) return malformed();
+        memberDescriptions = {};
+        for (const [member, text] of docs) {
+          if (!isString(text)) return malformed();
+          memberDescriptions[member] = text.string;
+        }
+      } else return malformed();
+    }
+  }
+
   // Errors are values: a malformed signature must not throw to the host.
   try {
     declareProtocolImpl(ce, name, members, {
       fromStatement: true,
       origin: statementOrigin(ce, nameOp, onStatementRoute),
       extends: parents,
+      ...(description === undefined ? {} : { description }),
+      ...(memberDescriptions === undefined ? {} : { memberDescriptions }),
     });
   } catch (e) {
     if (e instanceof RedefinitionError)
@@ -8582,12 +8618,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'that conforms to it conforms to each of them, and its ' +
         'implementation block may implement their members. The members ' +
         'operand is then required (`["Dictionary"]` when there are none). ' +
+        'An optional fourth operand documents the protocol: ' +
+        '`["Dictionary", description: string, members: ["Dictionary", ' +
+        'member: string]]` (the `///` comments of an Epsil `protocol` ' +
+        'statement); the two operands before it are then required. ' +
         'Evaluates to `Nothing`.',
       lazy: true,
       // Introduces an engine-global declaration that outlives the
       // application: the `scope` label (see `DeclareType`).
       signature:
-        '(symbol|string, members: dictionary<any>?, parents: any?) scope -> nothing',
+        '(symbol|string, members: dictionary<any>?, parents: any?, attributes: dictionary<any>?) scope -> nothing',
       examples: [
         'protocol Area { function area(self: Self) -> number }\ntype square = tuple<side: number> is Area {\n  function area(self: square) -> number { self.side^2 }\n}\narea(square(3))',
       ],
@@ -8599,14 +8639,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // auto-declare it as a variable, and the members dictionary carries
         // `Self`-typed signatures no type resolver knows.
         const err = withStatementRoute(ce, (route) =>
-          declareProtocolStatement(ce, args[0], args[1], args[2], route)
+          declareProtocolStatement(
+            ce,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            route
+          )
         );
         if (err) return err;
         return ce._fn('DeclareProtocol', args);
       },
       evaluate: (ops, { engine: ce }) =>
         withStatementRoute(ce, (route) =>
-          declareProtocolStatement(ce, ops[0], ops[1], ops[2], route)
+          declareProtocolStatement(ce, ops[0], ops[1], ops[2], ops[3], route)
         ) ?? ce.Nothing,
     },
 

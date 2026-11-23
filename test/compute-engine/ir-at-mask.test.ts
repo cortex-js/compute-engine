@@ -425,8 +425,10 @@ describe('IR profile, batch G29: JavaScript', () => {
   // prettier-ignore
   test.each([
     ['a Which with no default', ['At', 'A', ['Map', fn(['Which', gt('k', 2), 'True'], 'k'), 'A']], /arms of two types/],
-    ['a literal Missing member', ['At', 'A', ['List', 'True', 'Missing', 'True']], /elements of two types/],
-    ['a literal NaN member', ['At', 'A', ['List', 'True', 'NaN', gt('x', 1)]], /elements of two types/],
+    // A list of booleans and a number is a record (CE-1652), which is not
+    // an index.
+    ['a literal Missing member', ['At', 'A', ['List', 'True', 'Missing', 'True']], /At of a list/],
+    ['a literal NaN member', ['At', 'A', ['List', 'True', 'NaN', gt('x', 1)]], /At of a list/],
   ])('an undefined member, %s: the existing compiler’s value is the interpreter’s; the profile declines', (_, json, cause) => {
     for (const p of POINTS)
       expect(agree(existing(json).run!(p as never), interpreted(json, p))).toBe(true);

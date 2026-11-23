@@ -33,7 +33,15 @@ import type {
 } from '../../global-types.js';
 
 export type Lane =
-  'real' | 'integer' | 'boolean' | 'complex' | 'color' | 'string' | 'rows';
+  | 'real'
+  | 'integer'
+  | 'boolean'
+  | 'complex'
+  | 'color'
+  | 'string'
+  | 'rows'
+  | 'record'
+  | 'nothing';
 
 /** The value of a constant of the `complex` lane. */
 export type Cx = { readonly re: number; readonly im: number };
@@ -46,11 +54,22 @@ export type Length = number | { readonly v: V };
 
 /** `storage`: a list that the host holds in a storage of that kind (the
  *  option `storage` of `compile()`), set after the passes; it is read only
- *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`). */
+ *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`).
+ *
+ *  A value of the lane `record` (shape `[]`) is a record of settled fields
+ *  (`README.md`, "Records"): `fields` is the IR type of each field, in
+ *  order, `marks` the tuple mark of each (`Lowering.tuples`), `nominal` the
+ *  name of the nominal tuple type of the value and `names` its field names
+ *  (none for a `Tuple` or a `List` literal of mixed lanes). A field of the
+ *  lane `nothing` holds `Nothing`. */
 export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
   readonly storage?: 'sampler2D';
+  readonly fields?: readonly IRType[];
+  readonly marks?: readonly (number | undefined)[];
+  readonly nominal?: string;
+  readonly names?: readonly string[];
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
@@ -319,19 +338,48 @@ export function sameShape(
 }
 
 /** A value of type `a` can stand where `b` is read: the same shape, and a
- *  sub-lane. */
+ *  sub-lane; two records are one record type. */
 export function isSubType(
   a: IRType,
   b: IRType,
   constant?: (v: V) => number | undefined
 ): boolean {
-  return sameShape(a.shape, b.shape, constant) && isSubLane(a.lane, b.lane);
+  return (
+    sameShape(a.shape, b.shape, constant) &&
+    isSubLane(a.lane, b.lane) &&
+    sameFields(a, b)
+  );
+}
+
+/** `a` and `b` are records of one nominal type and the same fields (types,
+ *  tuple marks and names), compared field by field, or neither is a
+ *  record. */
+export function sameFields(a: IRType, b: IRType): boolean {
+  if (a.lane !== 'record' && b.lane !== 'record') return true;
+  const [f, g] = [a.fields ?? [], b.fields ?? []];
+  const [m, n] = [a.marks ?? [], b.marks ?? []];
+  return (
+    a.lane === b.lane &&
+    a.nominal === b.nominal &&
+    f.length === g.length &&
+    a.names?.join('\u0000') === b.names?.join('\u0000') &&
+    f.every(
+      (x, k) =>
+        m[k] === n[k] &&
+        x.lane === g[k].lane &&
+        sameShape(x.shape, g[k].shape) &&
+        sameFields(x, g[k])
+    )
+  );
 }
 
 /** The type of a value that is either `a` or `b` (converted to the
- *  complex lane when the other is complex), or `undefined`. */
+ *  complex lane when the other is complex), or `undefined`. Two records
+ *  join only when they are one record type. */
 export function joinType(a: IRType, b: IRType): IRType | undefined {
   if (!sameShape(a.shape, b.shape)) return undefined;
+  if (a.lane === 'record' || b.lane === 'record')
+    return sameFields(a, b) ? a : undefined;
   if (widensTo(a.lane, b.lane)) return b;
   return widensTo(b.lane, a.lane) ? a : undefined;
 }
@@ -365,6 +413,14 @@ export function typeToString(
    *  (`tuple<real, real>`) or -1, and a run-time length without its value. */
   axis: number | false = false
 ): string {
+  // A record: its fields, named or not.
+  if (t.lane === 'record')
+    return `${t.nominal ?? 'record'}(${(t.fields ?? [])
+      .map(
+        (f, j) =>
+          `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`
+      )
+      .join(', ')})`;
   // The tuple mark's axis is the number of list axes outside the tuple.
   const k = axis === false ? -1 : axis;
   return t.shape.reduceRight<string>(

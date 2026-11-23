@@ -97,6 +97,7 @@ import {
   typeToString,
   type Assigned,
   type HostCall,
+  type Constant,
   type IRType,
   type Instr,
   type Lane,
@@ -188,6 +189,7 @@ import {
 } from './lower-enclosure.js';
 import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
+import { recordConstructor, recordLowering } from './lower-records.js';
 
 export { Decline } from './lower-context.js';
 
@@ -1568,6 +1570,7 @@ function lowerOnce(
   /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
   const at = (e: Expression, l: V, i: V): V => {
     const t = type(l);
+    if (t.lane === 'record') return records.at(e, l, i);
     const [n, k] = [t.shape[0], constant(i)];
     const flat = t.shape.length === 1 && !tuples.has(l);
     const points = tuples.get(l) === 1 && t.shape.length === 2;
@@ -1666,6 +1669,8 @@ function lowerOnce(
     const v = value(e)!;
     if (type(v).shape.length > 0)
       decline(e, 'a list where a scalar is required');
+    if (type(v).lane === 'record')
+      decline(e, 'a record where a scalar is required');
     return v;
   };
 
@@ -1738,6 +1743,8 @@ function lowerOnce(
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
     if (!isLibraryOperator(e as never, e.operator)) {
       if (isHostDefinition(e)) return hostCall(e, want);
+      // The constructor of a named tuple type: a record.
+      if (recordConstructor(e) !== undefined) return records.construct(e);
       decline(
         e,
         e.operatorDefinition === undefined && e.valueDefinition === undefined
@@ -1789,11 +1796,11 @@ function lowerOnce(
       }
       case 'Block':
         return block(e, want);
-      case 'List':
-        return list(
-          e,
-          e.ops.map((op) => value(op)!)
-        );
+      case 'List': {
+        // A list, or a record of elements of several lanes.
+        const elements = e.ops.map((op) => value(op)!);
+        return records.literal(e, elements, false) ?? list(e, elements);
+      }
       case 'Tuple': {
         // A point of NaN coordinates is the absent point: the written
         // `Missing` as a coordinate is not (`IsMissing(Tuple(Missing,
@@ -1813,7 +1820,10 @@ function lowerOnce(
               (x) => same(x.shape, t[0].shape) && !lengthValues(x).length
             ))
         )
-          return tuple(e, parts);
+          return records.literal(e, parts, true) ?? tuple(e, parts);
+        // A record among the elements: the root is a record too.
+        if (t.some((x) => x.lane === 'record' || x.lane === 'nothing'))
+          return records.literal(e, parts, true)!;
         rootParts = parts;
         return parts[0];
       }
@@ -3070,6 +3080,14 @@ function lowerOnce(
         return matches.numeric(e, want);
       case 'MatchesType':
         return matches.matchesType(e);
+      // `lower-records.ts`.
+      case 'Field':
+        if (e.nops !== 2) break;
+        return records.named(
+          e,
+          value(e.ops[0])!,
+          isString(e.ops[1]) ? e.ops[1].string : undefined
+        );
       case 'Match':
         return matches.match(e, want);
       case 'Declare':
@@ -4123,6 +4141,46 @@ function lowerOnce(
     const a = arm(then);
     const c = arm(otherwise, a.bindings);
     const { bindings, before } = a;
+    // The comparison of two constants (a field of a record made from a
+    // literal and a literal), which the `fold` pass folds later.
+    const comparison = (v: V): Constant | undefined => {
+      const d = b.defs.get(v);
+      if (d === undefined || d.args.length !== 2) return b.constants.get(v);
+      const [x, y] = d.args.map((a) => b.constants.get(a));
+      if (x === undefined || y === undefined || typeof x === 'object')
+        return undefined;
+      if (d.op === 'eq' || d.op === 'text.eq') return x === y;
+      if (d.op === 'ne' || d.op === 'text.ne') return x !== y;
+      return undefined;
+    };
+    const known = comparison(cond);
+    const tests = isFunction(node, 'If')
+      ? [node.ops[0]]
+      : isFunction(node, 'Which')
+        ? node.ops.filter((_, k) => k % 2 === 0)
+        : [];
+    const readsField = (x: Expression): boolean =>
+      isFunction(x) && (x.operator === 'Field' || x.ops.some(readsField));
+    // A condition known at compile time, whose arms do not join, and
+    // which reads a field of a record (`If(fig.kind == "circle", …)` of a
+    // record made from a literal) or has an arm that is a record: the arm
+    // taken, as the interpreter takes it (the shapes of the other arm do
+    // not count, as for a `Match` of a constant subject). Arms that join
+    // keep the `if`.
+    if (
+      typeof known === 'boolean' &&
+      want &&
+      a.result !== undefined &&
+      c.result !== undefined &&
+      ([a.result, c.result].some((v) => type(v).lane === 'record') ||
+        tests.some(readsField)) &&
+      joinType(type(a.result), type(c.result)) === undefined
+    ) {
+      const taken = known ? a : c;
+      taken.region.body.forEach((i) => b.current().body.push(i));
+      bindings.forEach((x, i) => (x.v = taken.after[i]));
+      return taken.result;
+    }
     const outs: V[] = [];
     const join = (
       x: V,
@@ -4244,6 +4302,9 @@ function lowerOnce(
   ): V[] => {
     const r = regionRow(op)!;
     const body = b.region(params, f);
+    // A list of records, or a record from a region, has no type here.
+    if (body.yields.some((y) => ['record', 'nothing'].includes(type(y).lane)))
+      decline(site, 'a record made in a build, a filter or a random frame');
     // The element of a build whose length is a constant value (made in
     // the region, which the result cannot name) has that length.
     const ys = body.yields.map((y): IRType => {
@@ -4771,6 +4832,7 @@ function lowerOnce(
    *  input must be real). */
   const absent = (node: Expression, operand: Expression, v: V): V => {
     const t = type(v);
+    if (t.lane === 'nothing') decline(node, `${node.operator} of Nothing`);
     const nan = (x: V) => apply(node, ofOp('isnan'), [x]);
     // The NaN of `MaxBy` and `MinBy` stands for a form that the interpreter
     // leaves unevaluated, which is not absent.
@@ -4906,6 +4968,8 @@ function lowerOnce(
     }
     if (lengthValues(t).length > 0)
       decline(e, 'a list of lists of run-time length');
+    if (t.lane === 'record' || t.lane === 'nothing')
+      decline(e, 'a list of records');
     const v = b.list(
       elements.map((v) => widen(v, t!.lane)),
       {
@@ -5061,6 +5125,14 @@ function lowerOnce(
               `a list value for a local declared ${typeName}`,
               UNSETTLED_SHAPE
             );
+          frame.names.set(n, { v, role: 'constant' });
+          return void (result = v);
+        }
+        // A record (README, "Records") is a constant: a local that a later
+        // statement writes declines (a loop or an arm would carry it).
+        if (type(v).lane === 'record' || type(v).lane === 'nothing') {
+          if (e.ops.some((y) => facts(y).writes.has(n)))
+            decline(s, `a record in the local ${n}, which a statement writes`);
           frame.names.set(n, { v, role: 'constant' });
           return void (result = v);
         }
@@ -6524,7 +6596,11 @@ function lowerOnce(
   const lists = listLowering(cx);
   const matrices = matrixLowering(cx, lists);
   const fns = functionLowering(cx, lists);
-  const matches = matchLowering(cx);
+  const records = recordLowering(
+    cx,
+    options.javascript === true && !bigint && !interval
+  );
+  const matches = matchLowering(cx, records);
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));

@@ -20,6 +20,7 @@ import {
   collectDeclarations,
   contextAt,
   declarationOf,
+  firstLine,
   functionSignatureParts,
   insideLiteralOrComment,
   isFunctionHeader,
@@ -27,6 +28,8 @@ import {
   parseSourceType,
   parseWithHole,
   pipedTopicSlots,
+  protocolMemberDeclaration,
+  receiverTypeOf,
   slotOfOperand,
   spanOf,
   unfoldSourceAliases,
@@ -187,7 +190,12 @@ export function epsilSignatureHelp(
   const context = contextAt(ce, ast, text, placeholder, headStart, options);
   const candidates = member
     ? memberSignaturesOf(context, head, headStart)
-    : signaturesOf(
+    : // A call of a protocol member that the source does not shadow
+      // reaches the dispatcher of the member: the member's declaration.
+      ((std || context.visible.has(head)
+        ? undefined
+        : protocolMemberSignaturesOf(context, head, headStart)) ??
+      signaturesOf(
         ce,
         head,
         // A `std::` call is always a library function.
@@ -196,7 +204,7 @@ export function epsilSignatureHelp(
         text,
         context.typeNames,
         context.sourceTypes
-      );
+      ));
   if (candidates === undefined || candidates.length === 0) return null;
   if (!member && !(std && context.visible.has(head)))
     markPipedTopic(
@@ -331,12 +339,19 @@ function memberSignaturesOf(
   const callee = memberCallee(context, operand(found.node, 1), head);
   if (callee === undefined) return undefined;
   const name = escapeSymbol(head);
-  if (callee.kind === 'field')
-    return Object.assign(signaturesOfType(name, callee.type), {
-      callee: head,
-    });
+  const documentation =
+    callee.description === undefined
+      ? undefined
+      : firstLine(callee.description);
+  if (callee.kind === 'field') {
+    const fields = signaturesOfType(name, callee.type);
+    if (documentation)
+      for (const candidate of fields) candidate.documentation = documentation;
+    return Object.assign(fields, { callee: head });
+  }
   const candidates = signaturesOfType(name, callee.signature);
   for (const candidate of candidates) {
+    if (documentation) candidate.documentation = documentation;
     if (candidate.parameters.length === 0) return undefined;
     candidate.implicit = 0;
     candidate.parameters[0] = {
@@ -344,6 +359,51 @@ function memberSignaturesOf(
       implicit: 'receiver',
     };
   }
+  return Object.assign(candidates, { callee: head });
+}
+
+/**
+ * The signature of the call `head(…)` written at `headStart` of a function
+ * member of a protocol (`rotate(c, ▮)`, which reaches the dispatcher of the
+ * member): the declared signature of the member, `Self` read as the type of
+ * the first argument when it is known (else `any`), with the `///` comment
+ * of the member. `undefined` when no protocol declares one function of that
+ * name (`protocolMemberDeclaration`).
+ */
+function protocolMemberSignaturesOf(
+  context: Context,
+  head: string,
+  headStart: number
+): (Candidate[] & { callee: string }) | undefined {
+  const declared = protocolMemberDeclaration(
+    context.ce,
+    context.ast,
+    head,
+    headStart
+  );
+  if (declared === undefined) return undefined;
+  const call = innermostNode(context.ast, (node) => {
+    const span = spanOf(node);
+    return (
+      operator(node) === head && span !== undefined && span[0] === headStart
+    );
+  });
+  const receiver =
+    call === undefined
+      ? undefined
+      : receiverTypeOf(context, operand(call.node, 1));
+  const self = receiver === undefined ? 'any' : typeToString(receiver);
+  const type = parseSourceType(
+    context.ce,
+    declared.signature.replace(/\bSelf\b/g, self),
+    context.typeNames
+  );
+  if (type === undefined) return undefined;
+  const candidates = signaturesOfType(escapeSymbol(head), type);
+  if (candidates.length === 0) return undefined;
+  if (declared.description !== undefined)
+    for (const candidate of candidates)
+      candidate.documentation = firstLine(declared.description);
   return Object.assign(candidates, { callee: head });
 }
 
