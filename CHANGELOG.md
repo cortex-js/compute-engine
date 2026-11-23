@@ -169,6 +169,17 @@
   { "x" } else { "y" }`) is compared at run time as before; a figure of
   kind `"group"` (a recursive `figureBox`) still falls back to the
   interpreter.
+- **`compile()` compiles `x is T` of a parameter typed `any` that is given a
+  point, a list or a box (a tuple of two points), which it refused** (CE-1652).
+  As the interpreter gives it, `box is nothing` is `false` for a box
+  `((x0, y0), (x1, y1))`, `x is tuple` is `true` for `(t, 1)` and `false` for
+  `[t, 1]`, and the arm not taken is not compiled: with a drawing prelude whose
+  `figureBoxCenter(box: any)` begins with `if box is nothing`,
+  `circle((t, 0), 1).rotate(t)`, `.scale(2)`, `.scale((2, t))`, `.reflect("x")`,
+  `.skew(t, 0)`, `.center()` and `.anchor("center")` compile. A test of the type
+  of a number in the value (`(t, 1) is tuple<real, real>`: the number can be
+  `NaN`), and `x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does,
+  still fall back to the interpreter.
 
 ## 0.200.1 _2026-11-23_
 

@@ -23,6 +23,7 @@ import {
   freeBinding,
   isFreeCallHead,
   isFunction,
+  isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import {
   isSubLane,
@@ -786,7 +787,8 @@ export function functionLowering(
         ? { lane: 'string', shape: [] }
         : { lane: 'string', shape: [], constant: known };
     }
-    if (t.lane === 'color') return { lane: t.lane, shape: [] };
+    if (t.lane === 'color' || t.lane === 'nothing')
+      return { lane: t.lane, shape: [] };
     // A number at `any`: the lane that its static type proves, or that a
     // parameter of this kind holds, so that a test of its type in the body
     // is decided by the lane (`matchesType()` of `lower-match.ts`). A
@@ -994,8 +996,19 @@ export function functionLowering(
         cx.mayHoldKnown(v);
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       if (t.lane === 'rows') cx.rowsParams.add(v);
-      // Of the type of its argument: `x is T` reads its IR type.
-      if ('type' in t && t.type !== undefined) cx.heldParams.add(v);
+      // Of the type of its argument: `x is T` reads its IR type. So does a
+      // point, a list of points or a flat list at a parameter that takes
+      // the shape of its argument: each call gives that shape (`laneKey()`,
+      // `call()`).
+      const declared = sig.params[i];
+      if (
+        ('type' in t && t.type !== undefined) ||
+        ('taken' in t &&
+          t.taken !== undefined &&
+          'point' in declared &&
+          declared.point !== undefined)
+      )
+        cx.heldParams.add(v);
       return v;
     });
     const fn: UserFunction = {
@@ -1305,7 +1318,19 @@ export function functionLowering(
                 p.shape[0] === 'run-time')
           ))
       )
-        early = e.ops.map((op, i) => argument(op, sig.params[i]?.lane));
+        early = e.ops.map((op, i) => {
+          // `Nothing` at a parameter of no stated type or of type `any`: a
+          // value of the type `nothing`, which the parameter holds
+          // (`held()`; CE-1652, step 4b).
+          const p = sig.params[i];
+          return javascript &&
+            isSymbol(op, 'Nothing') &&
+            p !== undefined &&
+            'record' in p &&
+            p.record === true
+            ? b.op('nothing', [], { lane: 'nothing', shape: [] })
+            : argument(op, p?.lane);
+        });
       // A list of points there: the call maps, one point per call, each
       // other argument as at any mapped call (`mapOver()`).
       const lowered = early;

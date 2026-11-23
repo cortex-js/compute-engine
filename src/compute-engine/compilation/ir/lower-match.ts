@@ -35,22 +35,89 @@ import {
 import type { Type, TypeReference } from '../../../common/type/types.js';
 
 /** The engine type of the values of the IR type `t` of a parameter that
- *  holds the type of its argument (`Lowering.heldParams`): a record of a
- *  named tuple type that is not parameterized, by that type; a scalar of
- *  the lane `string`, `color`, `boolean`, `integer`, `real` or `nothing`,
- *  by that type. A number on such a lane has a static type that proves it
- *  (`held()`). Otherwise `undefined`. */
-function engineTypeOf(e: Expression, t: IRType): Type | undefined {
-  if (t.lane === 'record') {
-    if (t.nominal === undefined) return undefined;
-    const ce = e.engine as unknown as IComputeEngine;
-    const r = ce._typeResolver.resolve(t.nominal) as TypeReference | undefined;
-    return r === undefined || (r.typeParams?.length ?? 0) > 0 ? undefined : r;
-  }
-  if (t.shape.length > 0) return undefined;
+ *  holds the type of its argument (`Lowering.heldParams`): a scalar of the
+ *  lane `string`, `color`, `boolean`, `integer`, `real` or `nothing`, by
+ *  that type (a number on such a lane has a static type that proves it,
+ *  `held()`); a record, a point or a list by `valueTypeOf()`. Otherwise
+ *  `undefined`. */
+function engineTypeOf(
+  e: Expression,
+  t: IRType,
+  mark: number | undefined
+): Type | undefined {
+  if (t.lane === 'record' || t.shape.length > 0) return valueTypeOf(e, t, mark);
   return ['string', 'color', 'boolean', 'integer', 'real', 'nothing'].includes(
     t.lane
   )
+    ? (t.lane as Type)
+    : undefined;
+}
+
+/** An engine type that holds the interpreter's type of every value of the
+ *  IR type `t` with the tuple mark `mark` (CE-1652, step 4b), so that `x is
+ *  T` is `True` when it is a subtype of `T` and `False` when the two do not
+ *  overlap:
+ *
+ *  - a record of a named tuple type that is not parameterized: that type;
+ *  - a record of no names, which a `Tuple` or a `List` literal makes when
+ *    its elements do not make a list: the union of the tuple of its fields
+ *    and the list of them, because the IR type does not say which literal
+ *    made it (a box `((x0, y0), (x1, y1))`: `is nothing` and `is string`
+ *    are `False`, `is tuple` and `is list` are not decided);
+ *  - an axis of a list (`list<…>`, of no length) or the axis of the tuple
+ *    mark (`tuple<…>` of its length);
+ *  - an element: `number` for a number of any lane (the interpreter's
+ *    value can be `NaN`, `~oo` or imaginary where the target's is a
+ *    double), `string`, `boolean`, `color` or `nothing`.
+ *
+ *  Otherwise `undefined`. */
+function valueTypeOf(
+  e: Expression,
+  t: IRType,
+  mark: number | undefined
+): Type | undefined {
+  if (t.lane === 'record') {
+    if (t.nominal !== undefined) {
+      const ce = e.engine as unknown as IComputeEngine;
+      const r = ce._typeResolver.resolve(t.nominal) as
+        TypeReference | undefined;
+      return r === undefined || (r.typeParams?.length ?? 0) > 0 ? undefined : r;
+    }
+    const fields = t.fields ?? [];
+    const types = fields.map((f, k) => valueTypeOf(e, f, t.marks?.[k]));
+    if (fields.length === 0 || !types.every((x) => x !== undefined))
+      return undefined;
+    const tuple: Type = {
+      kind: 'tuple',
+      elements: types.map((type) => ({ type })),
+    };
+    // The IR type of a record of no names does not say whether a `Tuple`
+    // or a `List` literal made it (`make()` of `lower-records.ts` resolves
+    // the lengths that `fitsList()` reads): both readings, and a test is
+    // decided only when they agree.
+    return {
+      kind: 'union',
+      types: [tuple, { kind: 'list', elements: { kind: 'union', types } }],
+    };
+  }
+  if (t.shape.length > 0) {
+    const [n, ...rest] = t.shape;
+    const inner = valueTypeOf(
+      e,
+      { lane: t.lane, shape: rest },
+      mark === undefined || mark === 0 ? undefined : mark - 1
+    );
+    if (inner === undefined) return undefined;
+    if (mark !== 0) return { kind: 'list', elements: inner };
+    return typeof n === 'number'
+      ? {
+          kind: 'tuple',
+          elements: Array.from({ length: n }, () => ({ type: inner })),
+        }
+      : undefined;
+  }
+  if (['real', 'integer', 'complex'].includes(t.lane)) return 'number';
+  return ['string', 'color', 'boolean', 'nothing'].includes(t.lane)
     ? (t.lane as Type)
     : undefined;
 }
@@ -257,7 +324,7 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     if (isSymbol(subject) && isUntyped(s)) {
       const p = cx.value(subject)!;
       const held = cx.heldParams.has(p)
-        ? engineTypeOf(e, cx.type(p))
+        ? engineTypeOf(e, cx.type(p), cx.tuples.get(p))
         : undefined;
       const known = held === undefined ? undefined : decide(held);
       if (known !== undefined) {

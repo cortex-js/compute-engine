@@ -287,9 +287,11 @@ export type Lowering = {
   wholeRows(e: Expression): V;
   /** The parameters of user functions that hold the IR type of their
    *  argument (`held()` of `lower-functions.ts`): a parameter of no stated
-   *  type or of type `any` holding a record, a string, a colour or (at
-   *  `any`) a number. Inside the function lowered for that type, `x is T`
-   *  of it is decided by that IR type (CE-1652, step 4b). */
+   *  type or of type `any` holding a record, a string, a colour, `Nothing`
+   *  or (at `any`) a number, and one that takes the shape of its argument
+   *  (a point, a list of points, a flat list). Inside the function lowered
+   *  for that type, `x is T` of it is decided by that IR type (CE-1652,
+   *  step 4b). */
   readonly heldParams: Set<V>;
   /** The tests decided from the IR types of their operands in the function
    *  lowered for them (CE-1652, step 4b): `x is T` of a parameter of

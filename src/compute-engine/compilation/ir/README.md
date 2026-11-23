@@ -3541,13 +3541,30 @@ before ("elements of two types"); `admits()` refuses the lane there too.
   type `any` (not one of no stated type, which keeps the real lane of
   today), also a real or an integer whose argument's static type proves the
   lane, or which is itself such a parameter (`figureScaling(k)` in
-  `scale(self, k: any)`). `MatchesType` of such a parameter whose static type
-  does not decide (`any`, `unknown`) is decided by its IR type
-  (`engineTypeOf()` of `lower-match.ts`): a record by its nominal type (not a
-  parameterized one), a scalar of the lane `string`, `color`, `boolean`,
-  `integer`, `real` or `nothing` by that type, with `isSubtype()` and
-  `typesOverlap()`; a test that the type does not decide (`k is integer` of a
-  real) declines. `Equal` and `NotEqual` of a string and a real, an integer, a
+  `scale(self, k: any)`), and, on JavaScript, `Nothing` (written as the
+  argument, or a value of the lane `nothing`). A parameter that takes the
+  shape of its argument (a point, a list of points, a flat list; below) is in
+  `heldParams` too: every call gives that shape. `MatchesType` of such a
+  parameter whose static type does not decide (`any`, `unknown`) is decided by
+  its IR type (`engineTypeOf()` of `lower-match.ts`): a scalar of the lane
+  `string`, `color`, `boolean`, `integer`, `real` or `nothing` by that type;
+  a record, a point or a list by an engine type that holds every value of the
+  IR type (`valueTypeOf()`): a record by its nominal type (not a
+  parameterized one); a record of no names by the tuple of its fields
+  (`tuple<tuple<number, number>, tuple<number, number>>` for a box
+  `((x0, y0), (x1, y1))`), or by that tuple or the list of the fields where
+  the fields do not join (`(t, "a")` and `[t, "a"]` are one IR type); the axis
+  of the tuple mark by a `tuple` of its length, another axis by a `list`; a
+  number of any lane by `number` (the interpreter's value can be `NaN`, which
+  is not a `real`). The test is decided with `isSubtype()` and
+  `typesOverlap()`, as the interpreter decides it on the value
+  (`dynamicTypeTest()`): `box is nothing` of a box is `False`, `(t, 1) is
+  tuple` is `True`, `[t, 1] is tuple` is `False`; a test that the type does
+  not decide (`k is integer` of a real, `(t, 1) is tuple<real, real>`,
+  `(t, "a") is tuple`) declines. A value `nothing` is still refused as the
+  argument of a call (`nothingRefusal()` of `index.ts`), so `Nothing` as an
+  argument compiles where the passes remove the call (`boxCenter(Nothing)`,
+  whose result is the constant `(0, 0)`). `Equal` and `NotEqual` of a string and a real, an integer, a
   boolean, `nothing` or a tuple of reals are the constants `False` and `True`
   (`apart()` of `lower.ts`), the interpreter's values for those types (checked:
   `(0, 0) == "default"`, `2 == "a"`, `NaN == "a"`, `True == "a"`,

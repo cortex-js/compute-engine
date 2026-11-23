@@ -2689,9 +2689,14 @@ operand that is not a record, and a record of no named type decline. A
 function is compiled once for each type of its arguments, so inside one copy
 a parameter of no stated type or of type `any` that holds a record, a string
 or a colour (and, of type `any`, a real or an integer whose static type
-proves it) has a settled type: `x is T` of it is `true` or `false` when that
-type decides it (`x is Figure` of a `Figure`, `c is string` of a colour), and
-declines otherwise (`k is integer` of a real). A parameter of type `any`
+proves it, or `Nothing`; and a point, a list of points or a flat list at a
+parameter that takes the shape of its argument) has a settled type: `x is T`
+of it is `true` or `false` when that type decides it (`x is Figure` of a
+`Figure`, `c is string` of a colour, `box is nothing` of a box
+`((x0, y0), (x1, y1))`, `x is tuple` of a point or of a list), and
+declines otherwise (`k is integer` of a real; `p is tuple<real, real>` of a
+point, whose coordinate can be `NaN`; `x is tuple` of `(t, "a")`, which
+compiles as `[t, "a"]` does). A parameter of type `any`
 takes a real or an integer, and one whose type settles no shape (no stated
 type, `any`, `list`) a point or a flat list of a stated length (of strings
 too: `figureOf("invalid", ["message"])`), one copy per type and shape. `a == b` and `a != b` of a string and a real, an integer, a boolean,

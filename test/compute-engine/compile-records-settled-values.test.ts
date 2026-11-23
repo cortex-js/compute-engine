@@ -9,7 +9,8 @@
  *
  * - `x is T` of the parameter: from the IR type of its argument (a record
  *   by its nominal type, a string, a colour, a real or an integer by its
- *   lane);
+ *   lane; a point, a list, a box or `Nothing` by an engine type that holds
+ *   each of its values);
  * - `a == b` and `a != b` of operands of two IR types that cannot hold
  *   equal values (a tuple of reals and a string): the interpreter's
  *   constant;
@@ -315,6 +316,85 @@ describe('x is T of a parameter of type any or of no stated type', () => {
       ce,
       '(t: real) => untypedIsText(t)',
       /MatchesType of a value of type unknown/
+    );
+  });
+});
+
+describe('x is T of a point, a list, a box or Nothing at a parameter of type any', () => {
+  // Tycho's `figureBoxCenter` (drawing prelude, version 25): the box is
+  // `Nothing` or a tuple of two points, read by index.
+  const ce = engine(
+    PRELUDE +
+      CASES +
+      `
+  function boxCenter(box: any) {
+    if box is nothing { (0, 0) } else { ((box[1][1] + box[2][1]) / 2, (box[1][2] + box[2][2]) / 2) }
+  }
+  function shapeOf(x: any) {
+    if x is nothing { 1 } else if x is string { 2 } else if x is list { 3 } else if x is tuple { 4 } else { 5 }
+  }
+  function isTuple(x: any) { if x is tuple { 1 } else { 2 } }
+  function isPoint(x: any) { if x is tuple<real, real> { 1 } else { 2 } }
+`
+  );
+
+  test("Tycho's figureBoxCenter: a box and Nothing", () => {
+    expectAgrees(ce, '(t: real) => boxCenter(((t, 0), (1, 2 * t)))');
+    expect(expectAgrees(ce, '(t: real) => boxCenter(Nothing)').run(1)).toEqual([
+      0, 0,
+    ]);
+    expectAgrees(
+      ce,
+      '(t: real) => boxCenter(figureBox(circle((t, 0), 1), (1, 0, 0, 1, 0, 0)))'
+    );
+  });
+
+  test('a point, a list, a list of points and a box', () => {
+    // The interpreter's types: `(t, 1)` is a tuple, `[t, 1]` and
+    // `[(t, 1), (2, 3)]` are lists, `((t, 0), (1, 1))` is a tuple.
+    for (const [arg, kind] of [
+      ['(t, 1)', 4],
+      ['[t, 1]', 3],
+      ['[(t, 1), (2, 3)]', 3],
+    ] as const)
+      expect(expectAgrees(ce, `(t: real) => shapeOf(${arg})`).run(1)).toBe(
+        kind
+      );
+    // A box compiles to a record of no names, which a `List` literal of
+    // lists of one length can also make: `x is list` is not decided
+    // (`box is nothing` is, see the boxes above).
+    expectDeclines(
+      ce,
+      '(t: real) => shapeOf(((t, 0), (1, 1)))',
+      /neither proves nor excludes list/
+    );
+    expect(
+      expectAgrees(
+        ce,
+        '(t: real) => isTuple((t, 1)) + 10 * isTuple([t, 1])'
+      ).run(1)
+    ).toBe(21);
+  });
+
+  test('a test that the IR type does not decide declines', () => {
+    // A number on the real lane can be `NaN` (`(NaN, 0)` is not a
+    // `tuple<real, real>`).
+    expectDeclines(
+      ce,
+      '(t: real) => isPoint((t, 1))',
+      /neither proves nor excludes tuple<real, real>/
+    );
+    // `(t, "a")` and `[t, "a"]` are records of one IR type: a tuple for the
+    // interpreter, and a list.
+    expectDeclines(
+      ce,
+      '(t: real) => isTuple((t, "a"))',
+      /neither proves nor excludes tuple/
+    );
+    expectDeclines(
+      ce,
+      '(t: real) => isTuple([t, "a"])',
+      /neither proves nor excludes tuple/
     );
   });
 });
