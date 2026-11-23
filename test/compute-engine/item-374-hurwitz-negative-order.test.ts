@@ -343,6 +343,30 @@ describe('Zeta(s, a) with a symbolic a: the Bernoulli polynomial only for a posi
     ).toBe(true);
   });
 
+  test('Zeta(0, a) with no assumption on a is 1/2 − a, as HurwitzZeta(0, a)', () => {
+    // Both conventions give 1/2 − a at s = 0 for every base point, also a
+    // negative one (`Zeta(0, −5/2)` is 3).
+    const engine = new ComputeEngine();
+    const expected = engine.box(['Subtract', ['Rational', 1, 2], 'a']);
+    const parsed = engine.parse('\\zeta(0, a)');
+    expect(parsed.operator).toBe('Zeta');
+    expect(parsed.evaluate().isSame(expected)).toBe(true);
+    expect(engine.box(['Zeta', 0, 'a']).N().toString()).toBe('0.5 - a');
+    expect(
+      engine
+        .box(['Zeta', 0, ['Rational', -5, 2]])
+        .evaluate()
+        .isSame(engine.number(3))
+    ).toBe(true);
+  });
+
+  test('Zeta(−1, a) with no assumption on a stays symbolic', () => {
+    // The polynomial is the Hurwitz value, which is wrong for a negative a.
+    const engine = new ComputeEngine();
+    const r = engine.box(['Zeta', -1, 'a']).evaluate();
+    expect(r.operator).toBe('Zeta');
+  });
+
   test('HurwitzZeta(−1, a) with no assumption on a is the polynomial', () => {
     const engine = new ComputeEngine();
     const r = engine.box(['HurwitzZeta', -1, 'a']).evaluate();

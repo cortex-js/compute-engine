@@ -33,6 +33,13 @@
 
 ### Improvements
 
+- **`\zeta(0, a)` with a symbolic `a` evaluates to `1/2 - a`** (CE-1598),
+  as `HurwitzZeta(0, a)` does. The two-argument `Zeta` stayed unevaluated
+  unless `a` was known to be positive. For another order, such as
+  `\zeta(-1, a)`, the condition remains: at a negative base point `Zeta`
+  and `HurwitzZeta` have different values (`Zeta(-1, -5/2)` is `109/24`,
+  `HurwitzZeta(-1, -5/2)` is `-107/24`), so the Bernoulli polynomial of
+  `HurwitzZeta` is correct for `Zeta` only when `a` is positive.
 - **A nonzero constant over a polynomial equal to 0 has no solution**
   (CE-1594). `Solve(1/(x^2+1) = 0, x)`, `Solve((x^2+1)^(-2) = 0, x)` and
   `Solve((x-1)^(-2) = 0, x)` stayed unevaluated; they are now `[]`, as

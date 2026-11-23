@@ -7435,7 +7435,8 @@ function evaluateGeneralizedZeta(
   }
 
   // A symbolic `a` gets the Bernoulli polynomial of `evaluateHurwitzZeta`
-  // only when `a` is known to be positive: for a negative `a` the terms with
+  // only when `a` is known to be positive, or at s = 0, where both
+  // conventions give 1/2 − a (above): for a negative `a` the terms with
   // k + a < 0 are |k + a|^(−s) here, so at a = −5/2 Zeta(−1, a) is 109/24,
   // while the polynomial −a²/2 + a/2 − 1/12 (the Hurwitz value) is −107/24.
   if (!isNumber(a) || a.re > 0)
@@ -7444,7 +7445,7 @@ function evaluateGeneralizedZeta(
       s,
       a,
       numericApproximation,
-      isNumber(a) || a.isPositive === true
+      isNumber(a) || a.isPositive === true || sInt === 0
     );
 
   if (!a.isComplex && a.re === 0)
