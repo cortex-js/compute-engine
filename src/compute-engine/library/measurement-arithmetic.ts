@@ -973,6 +973,9 @@ function sawtoothApply(
   numericApproximation: boolean
 ): Expression | undefined {
   if (!args.every((a) => isRealNominal(a.nominal))) return undefined;
+  // The offset of `Mod(m, n, d)` moves the jumps (at integer `(m − d)/n`) and
+  // carries its own uncertainty; neither is propagated here.
+  if (operator === 'Mod' && args.length > 2) return undefined;
   const value = call.evaluate({ numericApproximation });
   if (isNumber(value) && value.isNaN === true) return value;
   const [a, b] = args;

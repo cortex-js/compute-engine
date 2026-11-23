@@ -23,6 +23,7 @@
     "src/epsil-highlight.ts",
     "src/identities.ts",
     "src/integration-rules.ts",
-    "src/group-theory.ts"
+    "src/group-theory.ts",
+    "src/combinatorics.ts"
   ]
 }

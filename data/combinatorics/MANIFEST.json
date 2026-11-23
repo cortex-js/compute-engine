@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "generator": "scripts/combinatorics/generate.ts",
+  "areas": {
+    "permutations": {
+      "statistics": 351,
+      "findstat": 343,
+      "examples": 1076
+    },
+    "partitions": {
+      "statistics": 195,
+      "findstat": 192,
+      "examples": 968
+    }
+  },
+  "findstatMatches": 535
+}

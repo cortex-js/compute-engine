@@ -3140,6 +3140,10 @@ export function serializeEpsil(
       return fmt.line(opSymbol, serializeExpression(arg));
     }
 
+    // `7 % 3 % 1` re-parses as `Mod(Mod(7, 3), 1)`, so the offset form
+    // `Mod(m, n, d)` keeps its call spelling.
+    if (opName === 'Mod' && nops(expr) !== 2) return null;
+
     if (op.postfix) {
       if (nops(expr) !== 1) return null;
       const arg = operand(expr, 1);

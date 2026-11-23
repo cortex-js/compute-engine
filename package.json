@@ -28,7 +28,7 @@
     "check:roundtrip": "tsx docs/mathnet/scripts/check-roundtrip.ts",
     "lint": "npm run lint:code",
     "lint:code": "oxlint src",
-    "ci:corpus-pipeline": "tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && tsx scripts/fungrim/artifact-freshness.ts && tsx scripts/fungrim/apply-solve-templates.ts --check && tsx scripts/fungrim/recompile-drift.ts && tsx scripts/fungrim/compile-properties.ts --check && tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
+    "ci:corpus-pipeline": "tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && tsx scripts/fungrim/artifact-freshness.ts && tsx scripts/fungrim/apply-solve-templates.ts --check && tsx scripts/fungrim/recompile-drift.ts && tsx scripts/fungrim/compile-properties.ts --check && tsx scripts/combinatorics/generate.ts --check && tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
     "ci": "npm run check:docs && npm run test:tools && npm run lint && npm run typecheck && npm run check:deps && npm run ci:corpus-pipeline && bash scripts/test-types.sh && npm test",
     "typecheck": "bash ./scripts/typecheck.sh",
     "test:require": "node ./test/consumer/require-smoke.cjs",
@@ -120,6 +120,11 @@
       "types": "./dist/types/kernel-worker.d.ts",
       "import": "./dist/esm-min/kernel-worker.js",
       "default": "./dist/esm-min/kernel-worker.js"
+    },
+    "./combinatorics": {
+      "types": "./dist/types/combinatorics.d.ts",
+      "import": "./dist/esm-min/combinatorics.js",
+      "default": "./dist/esm-min/combinatorics.js"
     },
     "./identities": {
       "types": "./dist/types/identities.d.ts",

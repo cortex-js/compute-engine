@@ -4056,6 +4056,13 @@ function differentiateNode(
     return differentiate(rewritten, v, depth + 1, trace);
   }
 
+  // `Mod(u, c, d)` (offset `d`) stays symbolic: the jumps sit where
+  // `(u − d)/c` is an integer, which the rule below does not account for.
+  if (expr.operator === 'Mod' && expr.nops === 3) {
+    if (!expr.ops.some((o) => dependsOnVariable(o, v))) return ce.Zero;
+    return ce._fn('D', [expr, ce.symbol(v)]);
+  }
+
   // Mod(u, c): CE's Mod is the FLOORED remainder, the real sawtooth
   // ((u mod c) + c) mod c, whose result has the sign of c:
   //

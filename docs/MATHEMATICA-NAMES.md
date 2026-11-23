@@ -52,6 +52,7 @@ capability gap.
 | `Tr[m]` | `Trace` | Same value for a square matrix only. **No alias:** Mathematica's `Tr` of a rectangular matrix is the sum of its diagonal elements, while CE's `Trace` gives an `expected-square-matrix` error; Mathematica's `Tr` of a vector is the sum of its elements and `Tr` of a rank-3 tensor `t` is the sum of `t[[i,i,i]]`, while CE's `Trace` rejects a vector and gives the trace over the last two axes (a vector) for a rank-3 tensor. The second and third operands also differ: `Tr[list, f, n]` takes a function and a level, `Trace(m, axis1, axis2)` takes two axes. |
 | `Factorial2[n]` / `n!!` | `Factorial2` | |
 | `SingularValueDecomposition` | `SVD` | Float-only; no symbolic `SingularValues` (ROADMAP B14). |
+| `PiecewiseExpand[expr]` | `PiecewiseExpand` | Same name, for `Abs`, `Sign`, `Min`, `Max` and `Heaviside`; the result is a `Which(c1, v1, …, True, vd)`, not Mathematica's `Piecewise[{{v1, c1}, …}, vd]`, whose operands differ. No assumption operand: the assumptions are those of `ce.assume()`. |
 
 ## Same name, verified
 
