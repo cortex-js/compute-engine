@@ -123,6 +123,54 @@ that compute an index from the count (`Last`, a negative index, `Take`/`Drop`
 with a negative count, `Most`, the rotations) accept a `bigint` index, so that
 these give their value.
 
+### CE-1742. A list type refined by a predicate on its value
+
+**Status:** waits for user (design); capability, L. GitHub #531. The type
+system's goal of refinement types: `docs/TYPE_SYSTEM_ROADMAP.md`, §1.
+**Witness:** corpus; GitHub #531: the combinatorics library declares its
+domains `permutation` and `integer_partition` as aliases of `list<integer>`,
+and each statistic's `evaluate` checks membership itself.
+
+A declaration could say which lists a type admits: `permutation` is a
+`list<integer>` that is a bijection of `1..n`, `integer_partition` one whose
+parts are positive and non-increasing. The check then lives in one place,
+the signature documents the domain, and two operators could differ by domain
+(today `MajorIndex` and `WordMajorIndex` are two names because two aliases of
+`list<integer>` cannot be told apart).
+
+The design must settle:
+
+- how the predicate is written (a MathJSON or Epsil predicate function, as
+  `type permutation = list<integer> where IsPermutation`);
+- where it is checked: a static type cannot decide a predicate on a value, so
+  the check runs on the value at the call, and a subtype test between two
+  refined types needs a rule (the same predicate, or none);
+- what a call outside the domain gives: unevaluated, as the statistics give
+  today when `evaluate` returns `undefined`;
+- how `compile()` treats such a parameter: a run-time check, or a decline.
+
+### CE-1743. A signature may name a type that is declared later
+
+**Status:** waits for user (design); capability, M. GitHub #531. Forward
+references inside type declarations: `docs/TYPE_SYSTEM_ROADMAP.md`, §1
+(the `type name<T>` marker).
+**Witness:** corpus; GitHub #531: a combinatorics statistic accepts the
+group-theory `Permutation` only when `loadGroupTheory` ran before
+`loadCombinatorics`; loaded in the other order, the statistics do not accept
+it. `ce.declare('f', '(Permutation) -> integer')` before the type exists fails
+with `Unknown type "Permutation"`.
+
+A type declaration can already refer to a type declared later (a forward
+reference, fulfilled when the type is declared). A signature of `ce.declare`
+cannot. With a forward reference there, a library can name the type of
+another optional library in any load order: until the type is declared, no
+value matches that part of the signature.
+
+The design must settle how a misspelled type name is still reported, since
+today the same error catches it: an explicit marker for a forward reference
+in a signature, or an error when the reference is still unfulfilled at a
+defined point (the first evaluation of the operator).
+
 ## Evaluation, canonical forms and scoping
 
 ### CE-111. Some lazy operators still run synchronously under `evaluateAsync`
