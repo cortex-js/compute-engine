@@ -163,8 +163,9 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // `DefineFunction` mints no error node: `clauseRedefinitionDiagnostic`
   // reports it there.
   'function-redefinition',
-  // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration has a
-  // value (`declaration-without-value`, minted by the `Declare` canonical
+  // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration that is
+  // not a statement of a program or of a block has a value
+  // (`declaration-without-value`, minted by the `Declare` canonical
   // handler), a declaration is a statement of a block and not in a branch
   // or a loop body (`declaration-below-statement`, minted by the `Declare`
   // canonical handler), an assignment writes a declared name

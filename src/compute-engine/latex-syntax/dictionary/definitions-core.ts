@@ -8534,9 +8534,10 @@ function parseLetStatement(
     if (typeEnd < 0) typeEnd = parser.index;
     parser.index = typeEnd;
     const text = typeAnnotationText(parser, typeStart, typeEnd);
-    // The value, when the statement has one. A declaration has a value, so
-    // `let k \colon T` with no value is a `Declare` with no value, which the
-    // engine refuses (`declaration-without-value`).
+    // The value, when the statement has one. `let k \colon T` with no value
+    // is a `Declare` with no value: in a block it reserves a slot that a
+    // later assignment initializes; alone, the engine refuses it
+    // (`declaration-without-value`).
     let value: MathJsonExpression | undefined = undefined;
     if (
       LET_ASSIGNMENT_TOKENS.some((t) => parser.matchAll(t)) ||

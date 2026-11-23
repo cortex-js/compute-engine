@@ -65,6 +65,17 @@
 
 ### Resolved Issues
 
+- **The Epsil guides describe a `let` with no value as valid** (CE-1459).
+  The declarations guide and `epsil doc declaration-without-value` said that
+  `let a: integer; if c { a = 1 }; a` is the error
+  `declaration-without-value`. It gives `1` when `c` is true, and the
+  run-time error `read-before-initialization` when `c` is false; `epsil doc
+  read-before-initialization` now explains this case.
+  `declaration-without-value` is now described as the error of a `Declare`
+  that is not a statement of a block. The error of
+  `let (U, S, V) = svd([[1, 2], [3, 4]])` now points to `epsil doc
+  unevaluated-tuple`, a new explanation, instead of
+  `epsil doc runtime-error`.
 - **A function with inferred effects follows a new body of a helper that it
   calls** (CE-1674). With `h` declared `(number) -> number` and assigned a
   pure `Function`, a function `k` that calls `h` and states no effects kept

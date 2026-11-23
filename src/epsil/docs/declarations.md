@@ -198,7 +198,8 @@ locals. A binding has a fixed type contract and a separate initialization state:
    later assignment initializes it in the same straight-line statement sequence
    before any use, preparation infers its contract from that assignment. Thus
    `let x; x = 1` establishes `number`, but the slot remains uninitialized until
-   the assignment runs. A read before initialization is still an error.
+   the assignment runs. A read before initialization is the run-time error
+   `read-before-initialization`.
    Preparation does not search branches, loops or called functions for an
    initializer. An intervening runtime application, or one in the proposed
    later initializer, also stops this inference: `let x; x=1+2` stays unknown;
@@ -283,9 +284,9 @@ finishes with `1`, because the failed assignment leaves `a` unchanged.
 | `let a = 1; b = a + 1; b`                  | error: `assignment-to-undeclared-variable` |
 | `let s = 0; for i in 1..3 { s = s + i }; s` | `6`                                   |
 | `let a = 1; if c { a = 2 }; a`             | `2` when `c` is true, else `1`         |
-| `let a: integer; if c { a = 1 }; a`        | error: `declaration-without-value`     |
+| `let a: integer; if c { a = 1 }; a`        | `1` when `c` is true, else error: `read-before-initialization` |
 | `let f: (integer) -> integer; function f(x) { x + 1 }; f(2)` | `3` |
-| `let f: (integer) -> integer; f(2)`        | error: `declaration-without-value`     |
+| `let f: (integer) -> integer; f(2)`        | error: `read-before-initialization`    |
 | `if c { a = 1 }; a`                        | error: `assignment-to-undeclared-variable` |
 | `do { if c { a = 1 }; a }`                 | error: `assignment-to-undeclared-variable` |
 | `do { let a = 1; a = "x"; a }`             | error: `assignment-type-mismatch`      |

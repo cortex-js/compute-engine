@@ -31,6 +31,12 @@ The message reads "expected `T`, got `U`": T is what the context requires, U is 
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see `epsil doc runtime-error`).
 
+## `unevaluated-tuple`
+
+A destructuring `let (a, b) = v` takes a tuple apart. Here the value has a tuple type, but its evaluation did not give a tuple, so its elements are not known and no name is bound.
+
+A function that needs numeric input stays unevaluated when its input is exact: `svd([[1, 2], [3, 4]])` has the type of a tuple of three matrices, and gives the tuple only with numeric input. Write `N(…)` around the value: `let (U, S, V) = N(svd([[1, 2], [3, 4]]))`. A symbol that has a tuple type and no value, such as a name that the host declared, gives this error too: give it a value before the destructuring.
+
 ## `expected-present`
 
 A presence assertion `x?!` (`AssertPresent(x)`) was evaluated on an absent value: `missing`, `NaN`, or an indeterminate form such as `0/0`. The assertion says "this value is present, fail otherwise", and it failed; the error names the operand as written.
@@ -266,7 +272,11 @@ A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k =
 
 ## `read-before-initialization`
 
-A variable declared without a value was read before its initializer assignment ran. Give it a value before reading it. For example, write `let x; x = 1; x`. An assignment in a branch or loop initializes the variable only when that assignment executes.
+A variable that a `let` declares without a value was read before an assignment gave it a value. A `let` with no value is valid: `let x: integer` declares `x`, and `x` gets its value when the first assignment to it runs, as in `let x; x = 1; x`. The error comes when the read runs, not before.
+
+An assignment in a branch or in a loop body gives the value only when it runs: `let a: integer; if c { a = 1 }; a` gives `1` when `c` is true, and this error when `c` is false. A function declared by its type has no value either until a `function` statement of the same name defines it, or an assignment gives it a function: `let f: (integer) -> integer; f(2)` is this error, and `let f: (integer) -> integer; f = (x) => x + 1; f(2)` gives `3`.
+
+Give the variable its value in the declaration, `let x: integer = 0`, or by an assignment that runs on every path before the read: `let t = 0; if c { t = 1 }; t`.
 
 ## `read-before-declaration`
 
@@ -276,7 +286,9 @@ The error is found before the program runs. Move the declaration before the firs
 
 ## `declaration-without-value`
 
-A `let` or a `const` declares a name without a value: `let x: integer`. A declaration gives the name its value, so that a read of the name never finds a local with no value. Write the value in the declaration: `let x: integer = 0`. To give the value later in a branch, declare the name with a first value before the branch: `let t = 0; if c { t = 1 }`. One declaration needs no value: at the top level of a program, the signature of a function that a `function` statement of the same name defines, `let f: (integer) -> integer; function f(x) { x + 1 }`. In a function body or a block, a function statement declares a local, so give the type with the value: `let f: (integer) -> integer = (x) => x + 1`.
+A `Declare` expression with no value is not a statement of a program or of a block: `["Declare", "x", "'integer'"]` evaluated alone. Nothing after it can give the name a value, so the declaration is refused. Give the value in the declaration, `["Declare", "x", "'integer'", 0]`, or make the declaration a statement of a block that assigns the name: `["Block", ["Declare", "x", "'integer'"], ["Assign", "x", 0], "x"]`.
+
+In Epsil every `let` is a statement of a program or of a block, so a `let` with no value is valid: `let x: integer`. A read of the variable before an assignment gives it a value is the error `read-before-initialization` (see `epsil doc read-before-initialization`).
 
 ## `declaration-below-statement`
 

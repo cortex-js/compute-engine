@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { explainErrorCode } from '../../src/epsil/error-explanations';
+import { formatDiagnostics } from '../../src/cli/format';
 
 //
 // CE-1389. A destructuring of a value that has a tuple type but did not
@@ -61,6 +63,22 @@ describe('CE-1389: destructuring a value that did not evaluate to a tuple', () =
     );
     expect(diagnostics).toEqual([]);
     expect(value.operator).toBe('List');
+  });
+
+  // CE-1459: the footer of the CLI names the code, which has its own
+  // explanation, not the generic `runtime-error` page.
+  test('the CLI footer names `epsil doc unevaluated-tuple`', () => {
+    const source = 'let (U, S, V) = svd([[1, 2], [3, 4]])\nU';
+    const rendered = formatDiagnostics(
+      run(source).diagnostics,
+      source,
+      undefined,
+      false
+    );
+    expect(rendered).toContain(
+      '`epsil doc unevaluated-tuple` explains this error'
+    );
+    expect(explainErrorCode('unevaluated-tuple')).toContain('N(svd(');
   });
 
   test('a value whose type is not a tuple type is still a type error', () => {
