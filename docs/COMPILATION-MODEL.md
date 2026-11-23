@@ -243,6 +243,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `(1/(s√(2π)))·Integrate(e^(−Z²/(2s²)), Limits(Z, −∞, x))` at `s = 1` gives
   `7.0866e-16` at `x = −8` and `0` at `x = −9`; the interpreter gives
   `6.2210e-16` and `1.1286e-19`.
+- `glsl`, `x: real`: a definite integral is its closed form, the difference
+  of the antiderivative at its bounds in single floats, so its error is
+  absolute: `Integrate(sin(t), Limits(t, 0, x))` is `1 − cos(x)`, which
+  gives `0.0312545` at `x = 0.25` in SwiftShader (whose `cos` is off by
+  about 2e-4); the interpreter gives `0.0310876`. An integral with no
+  closed form declines (CE-1467).
+- `glsl` (plausible?), `a: real`: where the closed form of a definite
+  integral is `NaN`, at a bound where the integrand has an integrable
+  singularity, the compiled code gives `NaN`:
+  `Integrate(ln(t), Limits(t, a, 2))` at `a = 0`. The interpreter (and
+  `javascript`, which runs the quadrature there) gives `−0.6137`
+  (CE-1467).
 - `javascript` (crafted), `x: real`: `Zeta(x)` at
   `x = -171.5` gives `Infinity` (the machine kernel overflows below about
   `-171`); the interpreter at the default precision gives `4.739e172`.

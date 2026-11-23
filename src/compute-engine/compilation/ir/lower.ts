@@ -452,10 +452,17 @@ export type LowerOptions = {
   /** Called when a sum or a short list starts an attempt to be written
    *  out (`sliceProgram()` lowers the loops again only after one). */
   readonly attempted?: () => void;
-  /** JavaScript, not the interval mode: the numeric derivative of a
-   *  derivative with no closed form, and the closed form of a definite
-   *  integral in place of the quadrature. */
+  /** The JavaScript target, not the interval mode: the lowerings that only
+   *  JavaScript spells, such as the numeric derivative of a derivative with
+   *  no closed form and the string lane. */
   readonly javascript?: boolean;
+  /** JavaScript (not the interval mode) and GLSL: the closed form of a
+   *  definite integral in place of the quadrature. */
+  readonly closedIntegrals?: boolean;
+  /** JavaScript, whose runtime has a quadrature (GLSL has none): where the
+   *  closed form of an integral is NaN, the quadrature runs. Without it,
+   *  the closed form is the value alone. */
+  readonly quadrature?: boolean;
 };
 
 /** The IR operation of the read of the `vars` name of index `k` on the
@@ -5641,17 +5648,17 @@ function lowerOnce(
         e,
         'an integrand whose parameter is not the variable of the integral'
       );
-    // JavaScript: the closed form that the engine gives at compile time,
-    // with the guards of `closedForm()`; with none,
-    // a guard that fails or a closed form that does not lower, the
-    // quadrature. Not with a draw, which the engine would read once, and
+    // JavaScript and GLSL: the closed form that the engine gives at compile
+    // time, with the guards of `closedForm()`; with none, a guard that
+    // fails or a closed form that does not lower, the quadrature (which
+    // GLSL declines). Not with a draw, which the engine would read once, and
     // not for an indefinite integral, a function of its variable. Not when
     // the closed form reads the variable that no bound reads (its value
     // outside), or divides by a name that no divisor of `e` reads: it is
     // NaN or loses its digits where the divisor is 0 or near it
     // (`∫₀ˣ cos(a·t) dt` is `sin(a·x)/a`).
     if (
-      options.javascript &&
+      options.closedIntegrals &&
       e.operator === 'Integrate' &&
       e.isPure &&
       !quadratureOnly.has(e) &&
@@ -5684,7 +5691,9 @@ function lowerOnce(
         // The closed form is NaN at a bound where the integrand has an
         // integrable singularity (`∫ ln(t) dt` from `a` = 0 is
         // `a − a·ln(a) − …`): there the quadrature runs. An integral whose
-        // quadrature does not lower keeps the closed form alone.
+        // quadrature does not lower, or a target with no quadrature (GLSL),
+        // keeps the closed form alone, NaN there.
+        if (!options.quadrature) return v;
         quadratureOnly.add(e);
         try {
           if (trial(() => integral(e)) === undefined) return v;

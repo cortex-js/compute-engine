@@ -673,6 +673,8 @@ export function sliceProgram(
     iterationBudget: interval ? undefined : options.iterationBudget,
     runtimeLengths: profile.runtimeLengths,
     javascript: options.target === 'javascript' && !interval,
+    closedIntegrals: !interval,
+    quadrature: options.target === 'javascript',
     // Not past the `iterationBudget`: such a loop is NaN, or refuses to
     // start in the interval mode. Not in the complex mode, where a real
     // term of a constant index is in a loop a complex one.

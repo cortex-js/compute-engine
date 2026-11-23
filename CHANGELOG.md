@@ -33,6 +33,15 @@
 
 ### Improvements
 
+- **A definite integral compiles to GLSL when the engine finds its closed
+  form** (CE-1467).
+  `compile(ce.parse("\\int_0^x \\sin t\\,dt"), { to: "glsl" })` declined;
+  its code is now `((-cos(x)) + 1.0)`, as the JavaScript code computes it.
+  An integral with no closed form, and every `NIntegrate`, still decline on
+  GLSL, which has no quadrature. Where the closed form is `NaN`, at a bound
+  where the integrand has an integrable singularity (`\int_a^2 \ln t\,dt` at
+  `a = 0`), the GLSL code gives `NaN`; the JavaScript code runs the
+  quadrature there.
 - **In Epsil, a `$…$` LaTeX island is read with the LaTeX syntax of the
   engine when the host gives no `parseLatex`** (CE-1665). With
   `ce = new ComputeEngine()`, `executeEpsil(ce, "$\\frac{1}{2}$ + 1")` gave

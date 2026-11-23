@@ -2838,61 +2838,63 @@ shippable (it may draw). As for any pure operation, the number of evaluations of
 an integral is unspecified (an unused one is removed), and the fallback's draws
 are not the program's. An integrand with an effectful operation declines (the
 routine chooses its samples), as do two variables and the option
-`quadrature: 'monte-carlo'`. GLSL has no spelling.
+`quadrature: 'monte-carlo'`. GLSL has no spelling: an `NIntegrate`, and an
+`Integrate` with no closed form below, decline there.
 
-On JavaScript, an `Integrate` (not an `NIntegrate`) whose closed form the engine
-gives at compile time is that closed form: `∫₀ˣ 0.1·√(t² + 1) dt` is
-`0.05·(x·√(x² + 1) + arsinh(x))`, computed with no quadrature. The engine is
-asked as for the interval mode (`integralClosedForm()`), under the guards of
-`closedForm()` for a derivative, where a failed guard keeps the quadrature in
-place of a decline: the values of the `vars` names are hidden (`∫₀ˣ T·t dt` with
-`vars: {T}` is `T·x²/2` also when `T` holds 2); a `vars` name of a constant or
-of an inferred type, an angular unit other than radians, more than `CLOSED_SIZE`
-nodes in the node or in the closed form, and a closed form that reads a name
-that the walk binds otherwise (`foreign()`) keep the quadrature. So do a closed
-form that reads the variable of the integral when no bound reads it (the
-variable's value outside: `a` of `w(t) = a·t` in `∫₀¹ ∫₀ˣ w(t) dt da`), a closed
-form that holds a NaN (`∫₀^∞ t·e^(−a·t) dt` is `If(0 < a, NaN)`;
-`∫₀^∞ t·e^(−t) dt` is 1), and a closed form with a divisor (the denominator of a
-`Divide`, the base of a `Power` of a negative exponent) with a new factor
-(`divisors()`). The factors of a divisor are found through a `Multiply`, a
-`Negate`, a `Sqrt`, a `Root` and a `Power` of a number exponent; a factor that
-reads a name other than a library constant is new unless it is the same
-expression as a factor of a divisor of the node. Such a closed form is NaN where
-the factor is 0 and loses its digits near it (`∫₀ˣ cos(a·t) dt` is `sin(a·x)/a`,
-NaN at a = 0; `∫₀ˣ t·cos(a·t) dt` is 134217728 at a = 1e-12 for 2;
-`∫₀ˣ cos(a·t)/(1 + a²) dt` divides by `a·(1 + a²)`), where the quadrature is
-right. A divisor of the node is a pole of the integrand itself, where nothing is
-owed; it counts also in the body of a user function that the node calls (a
-factor that reads none of its parameters) and through a value that a name of it
-holds (`q := 2s` read as `t/q` gives the factor `s`): the Gaussian divides by
-`s` (or `s²`) in its integrand or in the body of the function `G` that it
-integrates, and keeps its closed form; `∫₀ˣ h(t) dt` with `h(t) = cos(a·t)`
-keeps the quadrature; `∫₀ˣ sin(π·t) dt` divides by `π` and keeps its closed
-form. The engine's search finds no closed form across a pole (`∫₋₁² dt/t` is
-NaN, and so is the quadrature; `∫ dt/t` between inputs `a` and `b` has none);
-`∫₋₁¹ dt/t²` is its value `+∞`, where the quadrature is NaN. A node that is not
-pure for the engine keeps the quadrature: a draw, which the engine would read
-once at compile time, and an integrand that holds an integral. A closed form
-that does not lower (an operator with no row), that is not real, or that holds a
-loop or a call is not used (`closedRegion()`). The closed form is computed in
-doubles: `∫ t dt` from `a` = 1e8 to `b` = 1e8 + 1 is `b²/2 − a²/2`, 100000000
-for 100000000.5. Where the closed form is NaN, at a bound where the integrand
-has an integrable singularity (`∫ ln(t) dt` from `a` = 0 to 2 is
-`a − a·ln(a) − 2 + 2·ln(2)`, NaN at a = 0), the code runs the quadrature
-(−0.6137); an integral whose quadrature does not lower keeps the closed form
-alone. Its error is therefore absolute, about one unit in the last place of the
-larger value of the antiderivative, and where the integral is much smaller than
-that value its relative error is large: `∫ sin(t) dt` from 0 to 1e-4 is 5.2e-9
-off in relative terms, and the Gaussian distribution function at `x = −9`,
-`s = 1` is 0 for 1.13e-19. The values are within 1e-15 absolute of the integral
-(docs/COMPILATION-MODEL.md, "Known limitations"). A name that the closed form
-absorbs stays a dependency of the code (`symbolDeps`): each name of the node
-that holds a value, is not bound in the walk and is not a variable of the node
-(of the `Limits`, of a `D`), each name that holds a value in a value that the
-node reaches (a function body, an expression a name holds), not a `vars` name,
-and each user function that it reaches; this holds for the closed form of a
-derivative too. An input that the closed form does not read is not in
+On JavaScript and GLSL (the lowering option `closedIntegrals`), an `Integrate`
+(not an `NIntegrate`) whose closed form the engine gives at compile time is that
+closed form: `∫₀ˣ 0.1·√(t² + 1) dt` is `0.05·(x·√(x² + 1) + arsinh(x))`,
+computed with no quadrature. The engine is asked as for the interval mode
+(`integralClosedForm()`), under the guards of `closedForm()` for a derivative,
+where a failed guard keeps the quadrature in place of a decline: the values of
+the `vars` names are hidden (`∫₀ˣ T·t dt` with `vars: {T}` is `T·x²/2` also when
+`T` holds 2); a `vars` name of a constant or of an inferred type, an angular
+unit other than radians, more than `CLOSED_SIZE` nodes in the node or in the
+closed form, and a closed form that reads a name that the walk binds otherwise
+(`foreign()`) keep the quadrature. So do a closed form that reads the variable
+of the integral when no bound reads it (the variable's value outside: `a` of
+`w(t) = a·t` in `∫₀¹ ∫₀ˣ w(t) dt da`), a closed form that holds a NaN
+(`∫₀^∞ t·e^(−a·t) dt` is `If(0 < a, NaN)`; `∫₀^∞ t·e^(−t) dt` is 1), and a
+closed form with a divisor (the denominator of a `Divide`, the base of a `Power`
+of a negative exponent) with a new factor (`divisors()`). The factors of a
+divisor are found through a `Multiply`, a `Negate`, a `Sqrt`, a `Root` and a
+`Power` of a number exponent; a factor that reads a name other than a library
+constant is new unless it is the same expression as a factor of a divisor of the
+node. Such a closed form is NaN where the factor is 0 and loses its digits near
+it (`∫₀ˣ cos(a·t) dt` is `sin(a·x)/a`, NaN at a = 0; `∫₀ˣ t·cos(a·t) dt` is
+134217728 at a = 1e-12 for 2; `∫₀ˣ cos(a·t)/(1 + a²) dt` divides by
+`a·(1 + a²)`), where the quadrature is right. A divisor of the node is a pole of
+the integrand itself, where nothing is owed; it counts also in the body of a
+user function that the node calls (a factor that reads none of its parameters)
+and through a value that a name of it holds (`q := 2s` read as `t/q` gives the
+factor `s`): the Gaussian divides by `s` (or `s²`) in its integrand or in the
+body of the function `G` that it integrates, and keeps its closed form;
+`∫₀ˣ h(t) dt` with `h(t) = cos(a·t)` keeps the quadrature; `∫₀ˣ sin(π·t) dt`
+divides by `π` and keeps its closed form. The engine's search finds no closed
+form across a pole (`∫₋₁² dt/t` is NaN, and so is the quadrature; `∫ dt/t`
+between inputs `a` and `b` has none); `∫₋₁¹ dt/t²` is its value `+∞`, where the
+quadrature is NaN. A node that is not pure for the engine keeps the quadrature:
+a draw, which the engine would read once at compile time, and an integrand that
+holds an integral. A closed form that does not lower (an operator with no row),
+that is not real, or that holds a loop or a call is not used (`closedRegion()`).
+The closed form is computed in doubles: `∫ t dt` from `a` = 1e8 to `b` = 1e8 + 1
+is `b²/2 − a²/2`, 100000000 for 100000000.5. Where the closed form is NaN, at a
+bound where the integrand has an integrable singularity (`∫ ln(t) dt` from `a` =
+0 to 2 is `a − a·ln(a) − 2 + 2·ln(2)`, NaN at a = 0), the code runs the
+quadrature (−0.6137); an integral whose quadrature does not lower, and every
+integral on GLSL (the lowering option `quadrature` is false), keeps the closed
+form alone, NaN there. Its error is therefore absolute, about one unit in the
+last place of the larger value of the antiderivative, and where the integral is
+much smaller than that value its relative error is large: `∫ sin(t) dt` from 0
+to 1e-4 is 5.2e-9 off in relative terms, and the Gaussian distribution function
+at `x = −9`, `s = 1` is 0 for 1.13e-19. The values are within 1e-15 absolute of
+the integral (docs/COMPILATION-MODEL.md, "Known limitations"). A name that the
+closed form absorbs stays a dependency of the code (`symbolDeps`): each name of
+the node that holds a value, is not bound in the walk and is not a variable of
+the node (of the `Limits`, of a `D`), each name that holds a value in a value
+that the node reaches (a function body, an expression a name holds), not a
+`vars` name, and each user function that it reaches; this holds for the closed
+form of a derivative too. An input that the closed form does not read is not in
 `freeSymbols` (`∫ t² dt` from `x` to `x` is 0); `freeSymbols` lists the names
 that the code reads from the inputs object, by name, so its order and a name it
 leaves out do not change a call.

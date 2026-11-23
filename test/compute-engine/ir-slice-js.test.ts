@@ -1760,7 +1760,7 @@ describe('IR slice: integrals', () => {
       }
     }
   });
-  test('an integrand with a draw, two variables, and GLSL decline', () => {
+  test('an integrand with a draw, two variables, and GLSL with no closed form decline', () => {
     for (const [json, cause] of [
       [
         [
@@ -1781,9 +1781,11 @@ describe('IR slice: integrals', () => {
       ],
     ] as [Json, RegExp][])
       expect(declineOf(() => js(json)).message).toMatch(cause);
+    // GLSL has no quadrature: an integral is its closed form or declines
+    // (CE-1467).
     const sine = ce.box([
       'Integrate',
-      ['Sin', 't'],
+      ['Exp', ['Sin', 't']],
       ['Limits', 't', 0, 'x'],
     ] as never);
     expect(() => compileSlice(sine, { target: 'glsl' })).toThrow(/integrate/);
