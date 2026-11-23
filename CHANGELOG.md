@@ -25,6 +25,13 @@
 
 ### Resolved Issues
 
+- **`JacobiTheta` gives the digits of the engine's precision** (CE-1395).
+  Above machine precision it gave about 16 digits: at a precision of 30,
+  `N(JacobiTheta(3, 0, i))` gave `1.086434811213308`; it now gives
+  `1.08643481121330801457531612151`. Where the digits cannot be reached (an
+  `Im(τ)` very close to 0, or a zero of the function that the series does not
+  give exactly, such as `JacobiTheta(3, 1/2 + i/2, i)`), the expression stays
+  unevaluated, as `DedekindEta` does.
 - **Each cell of the numeric value of a product with a list is the numeric
   value of the scalar product** (CE-1710, CE-1711). At machine precision, a
   fraction times a list of floats rounded the fraction first:

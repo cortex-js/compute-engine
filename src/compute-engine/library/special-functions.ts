@@ -60,6 +60,8 @@ import {
   bigLogIntegral,
 } from '../numerics/exponential-integral-big.js';
 import { bigDedekindEta } from '../numerics/dedekind-eta-big.js';
+import { bigJacobiTheta } from '../numerics/jacobi-theta-big.js';
+import type { NumericValue } from '../numeric-value/types.js';
 import { intervalOfType } from '../numerics/interval-arithmetic.js';
 import { typeFact } from '../boxed-expression/operand-descriptor.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -262,6 +264,27 @@ function agmValueAtInfinity(
   if (point === '+oo' && !partner.isComplex && partner.isPositive === true)
     return ce.PositiveInfinity;
   return ce.ComplexInfinity;
+}
+
+/**
+ * The real and imaginary parts of a finite number literal as big decimals,
+ * at the engine's precision plus the digits of the integer part of the
+ * larger part: a kernel that reduces a phase modulo a period needs the
+ * fraction, which an exact `10⁴⁰ + 1` rounded to 30 digits loses.
+ */
+function bigComplexAt(
+  engine: IComputeEngine,
+  nv: number | NumericValue
+): { re: BigDecimal; im: BigDecimal } {
+  const exact = typeof nv === 'number' ? engine._numericValue(nv) : nv;
+  const size = Math.max(Math.abs(exact.re), Math.abs(exact.im));
+  const prec =
+    engine.precision + (size >= 1 ? Math.ceil(Math.log10(size)) + 1 : 0);
+  const value = exact.N(prec);
+  return {
+    re: value.bignumReAt(prec) ?? engine.bignum(value.re),
+    im: value.bignumImAt(prec) ?? engine.bignum(value.im),
+  };
 }
 
 /** A literal integer ≤ 0, where a Pochhammer symbol or a hypergeometric parameter is degenerate. */
@@ -1269,6 +1292,35 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         if (held !== undefined) return held ?? undefined;
         if (!shouldNumericize(numericApproximation, ops[1], ops[2]))
           return undefined;
+        // Above machine precision a finite z and a τ in the upper half-plane
+        // give both parts of θⱼ(z, τ) at the digits asked for, or the head
+        // stays unevaluated (`bigJacobiTheta` declines where it cannot reach
+        // them).
+        const [z, tau] = [ops[1], ops[2]];
+        if (
+          bignumPreferred(engine) &&
+          isNumber(z) &&
+          isNumber(tau) &&
+          tau.im > 0 &&
+          Number.isFinite(z.re) &&
+          Number.isFinite(z.im) &&
+          Number.isFinite(tau.re) &&
+          Number.isFinite(tau.im)
+        ) {
+          const zv = bigComplexAt(engine, z.numericValue!);
+          const tv = bigComplexAt(engine, tau.numericValue!);
+          const big = bigJacobiTheta(
+            engine,
+            j as 1 | 2 | 3 | 4,
+            zv.re,
+            zv.im,
+            tv.re,
+            tv.im,
+            engine.precision
+          );
+          if (big === undefined) return undefined;
+          return engine.number(engine._inexactNumericValue(big));
+        }
         return applyN(
           [ops[1], ops[2]],
           (z, tau) =>
@@ -1319,14 +1371,11 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           Number.isFinite(tau.re) &&
           Number.isFinite(tau.im)
         ) {
-          const nv = tau.numericValue;
-          const value = (
-            typeof nv === 'number' ? engine._numericValue(nv) : nv
-          ).N(engine.precision);
+          const value = bigComplexAt(engine, tau.numericValue!);
           const big = bigDedekindEta(
             engine,
-            value.bignumReAt(engine.precision) ?? engine.bignum(value.re),
-            value.bignumImAt(engine.precision) ?? engine.bignum(value.im),
+            value.re,
+            value.im,
             engine.precision
           );
           if (big === undefined) return undefined;
