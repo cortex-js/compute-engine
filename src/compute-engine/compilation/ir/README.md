@@ -877,11 +877,11 @@ refuses: `Rank`, `Shape`, `Flatten`, `Transpose`, `Max`, `Sum`, `First`,
 `ListJoin`, `PointList`, `List`, `Length` of a local that holds it, a call of a
 user function with it as an argument, arithmetic and comparisons; an `If`
 between two values of the lane (`If(x > 0, Chunk(L, 2), Chunk(L, 3))`), a
-`Tuple` of it and a scalar (`Tuple(Chunk(L, 2), x)`: "a record with a field
-of lists of rows of two lengths")
-and a `Tuple` of the value twice (`cse` makes one value used twice). `IsMissing`
-of it is `False`, the interpreter's value (with no pass the producer stays, and
-it declines). No pass has a case of its own for the lane.
+`Tuple` of it and a scalar (`Tuple(Chunk(L, 2), x)`: "a record with a field of
+lists of rows of two lengths") and a `Tuple` of the value twice (`cse` makes one
+value used twice). `IsMissing` of it is `False`, the interpreter's value (with
+no pass the producer stays, and it declines). No pass has a case of its own for
+the lane.
 
 An input of a list of lists of integers or reals whose two lengths are not
 stated (`list<list<integer>>`, `list<list<real>>`; `rowsElementLane()` of
@@ -892,55 +892,56 @@ a user function of that type, such an input that a user function reads
 typed parameter of `Apply`, which binds its argument whole as a parameter of a
 user function does. An element type `number` is a real, except in the mode
 `complex` (`rowsElementLane()` with `wide`). A parameter of a user function
-whose type states no lane (`g: list`, or no type: `point` of
-`signatureTypes()`) is of the lane when the argument of its first call is
-(`rowsAt()` of `lower-functions.ts`, where the interpreter binds the argument
-whole), with the lane of the elements of that argument; such a name has no
-type of rows, so the readers below take the lane of its elements from the
-parameter it binds (`rowsLaneOf()`, `rowsElements`), and a result of type
-`list<list<any>>` that such a body gives is a list of rank 2 of reals or
-integers (`grid` of `signatureTypes()`) (CE-1721). A variable of the engine of
-that type that a root function literal assigns is a positional parameter of the
-lane (`assignedNames()`, `Program.assigns`). It is the host's array of arrays, whose rows can have
-different lengths, and it is read in five ways: the element `At(At(g, i), j)`
-(`rows.at`, `rows.at.int` on the lane of the elements; `_atr` of the JavaScript
-printer, NaN where `i` is out of range of `g` or `j` of its row, from the end
-when negative, as `At` of a number); row by row, as the rows of a `Chunk`
-(`chunks()` of `lower-lists.ts`, #638): the count of the rows is `rows.count`
-(`g.length`) and the row `i` the build of `rows.len` (`g[i].length`) elements
-`rows.get` or `rows.get.int` (`g[i][j]`), each index from 0 in range, so `Map`
-whose value for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`,
-`Fold` and `Reduce` over `g` read it; the row `At(g, i)` at an index known at
-run time (`row()` of `chunks()`): `rows.row` (`_rowr`) is the index from 0 of
-the row, from the end when `i` is negative, -1 out of range, and the row is the
-build of `rows.rowlen` (`_lenr`, 0 at -1) elements `rows.get`, so `At`, `First`
-and `Last` of an element of an absent row are NaN; `Flatten` of `g` to a depth
-other than 0 (`flattenRows()` of `lower-matrices.ts`, CE-1734): the region
-`rows.flat` or `rows.flat.int`, whose results are the count and a new list of
-the elements of the rows in order, which every reader of a list reads (a depth
-of 0, whose value is the rows, declines); and an argument of a call at a
-parameter of that lane, which takes it whole. The interpreter's absent row is
-`Missing`, and `Length` of it is `Missing`: `rowLengths` of `lower.ts` maps the
-count of the build to `rows.rowlen.nan` (NaN at -1), which `Length` reads (also
-of a local that holds the row, of its `Reverse`, which keeps the count, and of
-its `Rest`, whose count `lower-lists.ts` maps too) and `absent()` tests, so
-`IsMissing` and `Coalesce` give the interpreter's value. An `If` or a `Coalesce`
-of such a row maps the count that its join makes to the `rows.rowlen.nan` of the
-arm taken (`branch()`). `AssertPresent` of the row and the row as the result
-(`result()`) or as the value of a user function's body (`fr := (g, k) ↦ g[k]`),
-a list of no element where the interpreter gives `Missing`, decline; so does a
-row carried by a loop (`carry` of `loop()`, `start` and the step of
-`reduceBy()`), whose carried count is a new value that `rowLengths` does not
-name; a reducer of an absent row is unspecified (`Sum` gives 0). A row of a
-`Chunk` or a `Partition` is read at a constant index in range of a constant
-count only. Every other read of the name declines (`symbol()` of `lower.ts`,
-which admits only the occurrence that `wholeRows()` lowers): a `Map` or a
-`Filter` whose value is a list of rows ("a list of lists of run-time length"),
-arithmetic, `g` as the result, a binding to a local, an argument of a parameter
-of another type, and a list that the program makes at such a parameter
-(`sq(sq(g))`). A list of lists of booleans, the bigint and the interval modes
-and GLSL decline the input. The entry checks it as a list (a string or a typed
-array is refused), and a batch shares it between its cells.
+whose type states no lane (`g: list`, or no type: `point` of `signatureTypes()`)
+is of the lane when the argument of its first call is (`rowsAt()` of
+`lower-functions.ts`, where the interpreter binds the argument whole), with the
+lane of the elements of that argument; such a name has no type of rows, so the
+readers below take the lane of its elements from the parameter it binds
+(`rowsLaneOf()`, `rowsElements`), and a result of type `list<list<any>>` that
+such a body gives is a list of rank 2 of reals or integers (`grid` of
+`signatureTypes()`) (CE-1721). A variable of the engine of that type that a root
+function literal assigns is a positional parameter of the lane
+(`assignedNames()`, `Program.assigns`). It is the host's array of arrays, whose
+rows can have different lengths, and it is read in five ways: the element
+`At(At(g, i), j)` (`rows.at`, `rows.at.int` on the lane of the elements; `_atr`
+of the JavaScript printer, NaN where `i` is out of range of `g` or `j` of its
+row, from the end when negative, as `At` of a number); row by row, as the rows
+of a `Chunk` (`chunks()` of `lower-lists.ts`, #638): the count of the rows is
+`rows.count` (`g.length`) and the row `i` the build of `rows.len`
+(`g[i].length`) elements `rows.get` or `rows.get.int` (`g[i][j]`), each index
+from 0 in range, so `Map` whose value for a row is not a list, `Length`,
+`Count`, `IsEmpty`, `IndexWhere`, `Fold` and `Reduce` over `g` read it; the row
+`At(g, i)` at an index known at run time (`row()` of `chunks()`): `rows.row`
+(`_rowr`) is the index from 0 of the row, from the end when `i` is negative, -1
+out of range, and the row is the build of `rows.rowlen` (`_lenr`, 0 at -1)
+elements `rows.get`, so `At`, `First` and `Last` of an element of an absent row
+are NaN; `Flatten` of `g` to a depth other than 0 (`flattenRows()` of
+`lower-matrices.ts`, CE-1734): the region `rows.flat` or `rows.flat.int`, whose
+results are the count and a new list of the elements of the rows in order, which
+every reader of a list reads (a depth of 0, whose value is the rows, declines);
+and an argument of a call at a parameter of that lane, which takes it whole. The
+interpreter's absent row is `Missing`, and `Length` of it is `Missing`:
+`rowLengths` of `lower.ts` maps the count of the build to `rows.rowlen.nan` (NaN
+at -1), which `Length` reads (also of a local that holds the row, of its
+`Reverse`, which keeps the count, and of its `Rest`, whose count
+`lower-lists.ts` maps too) and `absent()` tests, so `IsMissing` and `Coalesce`
+give the interpreter's value. An `If` or a `Coalesce` of such a row maps the
+count that its join makes to the `rows.rowlen.nan` of the arm taken
+(`branch()`). `AssertPresent` of the row and the row as the result (`result()`)
+or as the value of a user function's body (`fr := (g, k) ↦ g[k]`), a list of no
+element where the interpreter gives `Missing`, decline; so does a row carried by
+a loop (`carry` of `loop()`, `start` and the step of `reduceBy()`), whose
+carried count is a new value that `rowLengths` does not name; a reducer of an
+absent row is unspecified (`Sum` gives 0). A row of a `Chunk` or a `Partition`
+is read at a constant index in range of a constant count only. Every other read
+of the name declines (`symbol()` of `lower.ts`, which admits only the occurrence
+that `wholeRows()` lowers): a `Map` or a `Filter` whose value is a list of rows
+("a list of lists of run-time length"), arithmetic, `g` as the result, a binding
+to a local, an argument of a parameter of another type, and a list that the
+program makes at such a parameter (`sq(sq(g))`). A list of lists of booleans,
+the bigint and the interval modes and GLSL decline the input. The entry checks
+it as a list (a string or a typed array is refused), and a batch shares it
+between its cells.
 
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
@@ -1011,13 +1012,12 @@ signature such as `Divide`, `Sqrt` or `Hypot`), so also `Floor(n/m)`,
 rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` of an operand other
 than a product of rational constants and integers (the syntax does not spell
 them; `Floor(n/3)` is `Floor(1/3·n)`, the floor division `floordiv.int` of `n`
-by 3, and `Round(n/2)` with a `roundingTies` other than the default declines);
-a quotient other than `(a − Mod(a, c))/c` of pure integers, which is
+by 3, and `Round(n/2)` with a `roundingTies` other than the default declines); a
+quotient other than `(a − Mod(a, c))/c` of pure integers, which is
 `floordiv.int(a, c)` (and `p/c·(a − Mod(a, c))` of a constant `c`, which is
-`p·floordiv.int(a, c)`);
-`If` with no else of a number and `Which` with no `True` clause
-(their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`);
-`Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an
+`p·floordiv.int(a, c)`); `If` with no else of a number and `Which` with no
+`True` clause (their value is `NaN`); `Max` and `Min` of a list (their identity
+is `±∞`); `Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an
 `iterationBudget` (its value over the budget is `NaN`); a random frame, a draw
 and an integral; and the option `vars`. A decline of a node off the integer lane
 has the code `'bigint-lane'`; another decline (`vars`, an operator outside the
@@ -1510,38 +1510,37 @@ the other arm's length is that stated length
 the length result). An arm `List()`, which has no type of its own, is the empty
 list (a build of no element) of the lane of the conditional's engine type when
 that type is a flat list of integers or reals (`If(n < 1, [], Range(1, n))`, of
-type `list<integer>`; arms that are all `List()`, of type `list<never>`, take the
-integer lane); so is `List()` at a parameter of `Apply` declared such a list
-(`Typed(xs, 'list<integer>')`). Otherwise, and on GLSL and in the interval
-mode, `List()` declines ("an empty list"). The invariant: a value that a type
-names (of a value or of a function's result) is live wherever that type is, so
-`dce` keeps it; when `fold`
-takes the arm of an `if` whose list is the program's result, the length constant
-of that arm is read by the result type only. GLSL and the interval mode decline
-lists of two lengths ("arms that are lists of two lengths"): GLSL has no
-run-time length, and in the interval mode a length is a plain number that an
-undecided condition cannot join. A list arm beside a scalar arm, tuples of two
-lengths, lists of lists and lists of two lanes that do not join (booleans and
-reals) decline with "arms of two types". `elem` reads an element from 0; `At` is
-the interpreter's rule (from 1, from the end when negative, NaN outside; on GLSL
-a conditional that reads the element only in range, with the length as a
-literal, `$#0` in the spelling), and the fold turns an `At` of a constant index
-in range into an `elem`. Another index can be out of range. On JavaScript, of a
-list of booleans it is `atu`, `undefined` out of range where the interpreter
-gives `Missing` (`At(X > 0, 5)` of a list `X` of three numbers), a pure read: no
-operation on a boolean fails on `undefined`; of a list of real points it is
-`atp`, a point of NaN coordinates out of range, the interpreter's value
-(`At(P, 0)` is `[NaN, NaN]`). Of a list of complex numbers or another list of
-lists it declines: a read of an absent row must not fail, and no program of
-Tycho's corpus reads one. GLSL, the interval and the bigint modes decline every
-such index. `build` and `filter` are region rows. A `Length`, a reduction, a
-`Map` or a `Filter` of a `Range` reads its count and the arithmetic of its
-elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no build, a
-`Map` (and a one-clause `Comprehension`) over a source of a constant length of 1
-to 64 (`SCALARIZE_LIMIT`) is the list of its elements, the body lowered once per
-element in order: a `vecN` or a `float[n]` (`Map(f, L)` of `L: list<real^3>`,
-`Map(f, List(a, b, c))`). A `Range` of integer constant operands is a source of
-a constant length, its exact count
+type `list<integer>`; arms that are all `List()`, of type `list<never>`, take
+the integer lane); so is `List()` at a parameter of `Apply` declared such a list
+(`Typed(xs, 'list<integer>')`). Otherwise, and on GLSL and in the interval mode,
+`List()` declines ("an empty list"). The invariant: a value that a type names
+(of a value or of a function's result) is live wherever that type is, so `dce`
+keeps it; when `fold` takes the arm of an `if` whose list is the program's
+result, the length constant of that arm is read by the result type only. GLSL
+and the interval mode decline lists of two lengths ("arms that are lists of two
+lengths"): GLSL has no run-time length, and in the interval mode a length is a
+plain number that an undecided condition cannot join. A list arm beside a scalar
+arm, tuples of two lengths, lists of lists and lists of two lanes that do not
+join (booleans and reals) decline with "arms of two types". `elem` reads an
+element from 0; `At` is the interpreter's rule (from 1, from the end when
+negative, NaN outside; on GLSL a conditional that reads the element only in
+range, with the length as a literal, `$#0` in the spelling), and the fold turns
+an `At` of a constant index in range into an `elem`. Another index can be out of
+range. On JavaScript, of a list of booleans it is `atu`, `undefined` out of
+range where the interpreter gives `Missing` (`At(X > 0, 5)` of a list `X` of
+three numbers), a pure read: no operation on a boolean fails on `undefined`; of
+a list of real points it is `atp`, a point of NaN coordinates out of range, the
+interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of complex numbers
+or another list of lists it declines: a read of an absent row must not fail, and
+no program of Tycho's corpus reads one. GLSL, the interval and the bigint modes
+decline every such index. `build` and `filter` are region rows. A `Length`, a
+reduction, a `Map` or a `Filter` of a `Range` reads its count and the arithmetic
+of its elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no
+build, a `Map` (and a one-clause `Comprehension`) over a source of a constant
+length of 1 to 64 (`SCALARIZE_LIMIT`) is the list of its elements, the body
+lowered once per element in order: a `vecN` or a `float[n]` (`Map(f, L)` of
+`L: list<real^3>`, `Map(f, List(a, b, c))`). A `Range` of integer constant
+operands is a source of a constant length, its exact count
 (`Min(Comprehension((x - k)², Element(k, Range(1, 16))))` is a `float[16]`); not
 with `constantFold: false`. The elements of such builds in one program are at
 most 4,096; past that, a `Filter`, a `Range` of a run-time length, of a real
@@ -2252,9 +2251,9 @@ built the same way, with the interpreter's value for every length, also 0:
   stated length, a tuple always, is one carried value of that length, which
   every step must keep; otherwise (a `Map` of a run-time length, or `List()`,
   whose element type is the body's, found by a trial lowering) it is carried as
-  its length then the list, on JavaScript only (not GLSL); in the `bigint`
-  mode the length is a `bigint`. The interval mode declines every `Reduce` by
-  a function.
+  its length then the list, on JavaScript only (not GLSL); in the `bigint` mode
+  the length is a `bigint`. The interval mode declines every `Reduce` by a
+  function.
 - `Tabulate(f, n1, …, nd)` (also `Table` of one index from 1) is the nested
   builds of `f(i1, …, id)` at the indices from 1; a count below 1 is empty, a
   real count is tested at run time (`count.int`), the inner counts must be
@@ -2312,24 +2311,24 @@ JavaScript (`Tuple(Cos(t), Sin(t))` is `[0.54, 0.84]` at `t = 1`). On GLSL a
 list of 2 to 4 elements, a tuple or not, is a `vec2`, `vec3` or `vec4` (`bvec2`,
 ... for booleans; `vec2(cos(t), sin(t))`), and another length a `float[n]`. A
 tuple of lists is a list of rows (`Tuple(L)` of a list of stated length); a
-tuple of tuples is a record ("Records"), except as the element of a `Loop` over a literal
-`List` of `Tuple`s of one length (`for gap in [(A, B, C), (B, C, D)]`, `A` to
-`D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an index into
-one list per position, a list of points where the parts are tuples (`[A, B]`,
-`[B, C]`, `[C, D]`), and `At` of the element at a constant index (1 to 3, or −3
-to −1) is the part at that index (`gap[1]` is `A`, then `B`); a `Tuple` pattern
-binds each name to a part (`for (p, q, r) in …`). Any other read of the element
-(`Length(gap)`, `f(gap)`, `gap[k]`) declines, and so does an effect in the list
-(the interpreter reads it element by element). `PointList` with no list
-component is the tuple of its components; with list components it is the list of
-the tuples of their elements at each index, a scalar component in every tuple,
-as long as the shortest component, as in the interpreter: a stated length, one
-length value (`PointList(D, Map(f, D))`), or the `Min` of the lengths at run
-time (`PointList(A1, A2, A3)` of three inputs of type `list<real>`).
-`Zip(A, B, …)` of lists of numbers is that value, as in the interpreter (a list
-of tuples as long as the shortest list), and is lowered as `PointList`; a list
-with an effect declines (the interpreter reads the lists up to the shortest). A
-list of tuples, a build of tuples
+tuple of tuples is a record ("Records"), except as the element of a `Loop` over
+a literal `List` of `Tuple`s of one length (`for gap in [(A, B, C), (B, C, D)]`,
+`A` to `D` tuples; JavaScript only, `tupleColumns()`): the loop runs over an
+index into one list per position, a list of points where the parts are tuples
+(`[A, B]`, `[B, C]`, `[C, D]`), and `At` of the element at a constant index (1
+to 3, or −3 to −1) is the part at that index (`gap[1]` is `A`, then `B`); a
+`Tuple` pattern binds each name to a part (`for (p, q, r) in …`). Any other read
+of the element (`Length(gap)`, `f(gap)`, `gap[k]`) declines, and so does an
+effect in the list (the interpreter reads it element by element). `PointList`
+with no list component is the tuple of its components; with list components it
+is the list of the tuples of their elements at each index, a scalar component in
+every tuple, as long as the shortest component, as in the interpreter: a stated
+length, one length value (`PointList(D, Map(f, D))`), or the `Min` of the
+lengths at run time (`PointList(A1, A2, A3)` of three inputs of type
+`list<real>`). `Zip(A, B, …)` of lists of numbers is that value, as in the
+interpreter (a list of tuples as long as the shortest list), and is lowered as
+`PointList`; a list with an effect declines (the interpreter reads the lists up
+to the shortest). A list of tuples, a build of tuples
 (`Comprehension(Tuple(f(k), g(k)), Element(k, R))`) and the element of a list of
 tuples are tuples at their axis.
 
@@ -3411,9 +3410,9 @@ program whose last statement is a definition is `Nothing` and declines.
 - `N(x)` and `N(x, p)` of a number (an integer, a rational, a real or a
   complex), a string or a boolean is `x`. `p`, when given, is a literal integer
   of at least 15: the interpreter rounds to `p` digits, and `N(1/3, 15)` is
-  `0.333333333333333`, 1e-15 from the double. Another precision, another
-  operand (`N([x, 2])`), a number in the interval mode (the enclosure of `x`
-  need not hold the rounded number) and the `bigint` mode decline.
+  `0.333333333333333`, 1e-15 from the double. Another precision, another operand
+  (`N([x, 2])`), a number in the interval mode (the enclosure of `x` need not
+  hold the rounded number) and the `bigint` mode decline.
 - `MatchesType(x, T)` (`x is T`) is the constant `True` when the static type of
   `x` is a subtype of `T`, `False` when the two types do not overlap
   (`x is string` of `x: real`); otherwise it declines (`x is integer` of
@@ -3421,80 +3420,82 @@ program whose last statement is a definition is `Nothing` and declines.
   form in the innermost local scope of the walk (`Lowering.scopes`: a `Block`,
   the function literal whose body is lowered, the root literal), and it is
   lowered only for its effect. A subject whose type comes from a `Match`
-  declines (`typedByMatch()`, CE-1731), and so does a subject that reads a
-  local of a block or a capture of a case: the type of a local is the type of
-  its value, which can be a `Match`. A name that the walk binds as an input, a
+  declines (`typedByMatch()`, CE-1731), and so does a subject that reads a local
+  of a block or a capture of a case: the type of a local is the type of its
+  value, which can be a `Match`. A name that the walk binds as an input, a
   parameter or a loop index, and a free name, are read by their type.
 - `Element(x, S)` of a number set that `domainToType()` maps to a type
   (`Integers`, `RationalNumbers`, `RealNumbers`, `ComplexNumbers`,
   `ImaginaryNumbers`, `Numbers` and the extended sets) is decided as
-  `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is
-  `True`, `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the
-  same type. A subject typed `nothing`, a subject whose type comes from a
-  `Match` or that reads a local, and a type that does not decide
-  (`x ∈ ℤ` of `x: real`) go to the list operators, which decline for a set.
-  Another set (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the
-  negation of the same constant; when it is not decided, it declines.
+  `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is `True`,
+  `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the same
+  type. A subject typed `nothing`, a subject whose type comes from a `Match` or
+  that reads a local, and a type that does not decide (`x ∈ ℤ` of `x: real`) go
+  to the list operators, which decline for a set. Another set
+  (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the negation of
+  the same constant; when it is not decided, it declines.
 - `Match(subject, case…)`: the subject is lowered once. A case of a string or a
   real number constant (`== "rect"`, `== 3`) is a clause of a `Which` on the
-  subject, compared by `Equal` (exactly: the interpreter compares a number
-  that is not an integer with a tolerance, a known limitation of
+  subject, compared by `Equal` (exactly: the interpreter compares a number that
+  is not an integer with a tolerance, a known limitation of
   `docs/COMPILATION-MODEL.md`); it is decided at compile time when the subject
-  is a constant (a `bigint` constant is compared by `Equal`), and not taken when the subject has another kind (a number
-  against a string). `_` takes every value. A `Tuple` pattern of distinct names
-  is taken when the subject is a tuple of its length, and binds each name to
-  the element at its position; it is not taken by a scalar or a tuple of another
-  length, and declines on a list. The cases after one that takes every value
-  are not read, so with a constant subject one case remains and the shapes of
-  the others do not count (`match "rect" { == "circ" => [1, 2]; == "rect" => t
-  }` is `t`). Each body is the body of the function literal of its case
-  (`buildCaseClosure()`), made canonical in the innermost local scope of the
-  walk and lowered in the scope of that literal, as the interpreter runs it. A
-  guard, a pattern of another kind (a name, `Pin`, a list, a range), a `Match`
-  with no case that takes every value, and cases whose results have two shapes
-  (`arms of two types`) decline. A string compiles on JavaScript only.
+  is a constant (a `bigint` constant is compared by `Equal`), and not taken when
+  the subject has another kind (a number against a string). `_` takes every
+  value. A `Tuple` pattern of distinct names is taken when the subject is a
+  tuple of its length, and binds each name to the element at its position; it is
+  not taken by a scalar or a tuple of another length, and declines on a list.
+  The cases after one that takes every value are not read, so with a constant
+  subject one case remains and the shapes of the others do not count
+  (`match "rect" { == "circ" => [1, 2]; == "rect" => t }` is `t`). Each body is
+  the body of the function literal of its case (`buildCaseClosure()`), made
+  canonical in the innermost local scope of the walk and lowered in the scope of
+  that literal, as the interpreter runs it. A guard, a pattern of another kind
+  (a name, `Pin`, a list, a range), a `Match` with no case that takes every
+  value, and cases whose results have two shapes (`arms of two types`) decline.
+  A string compiles on JavaScript only.
 - The engine types a `Match` by its case bodies that are literals (CE-1731). A
-  user function whose result is inferred, not declared, from a body that holds
-  a `Match` (or calls a function whose body holds one) takes its result from
-  the lowered body, as a result of no stated type. A declared result
+  user function whose result is inferred, not declared, from a body that holds a
+  `Match` (or calls a function whose body holds one) takes its result from the
+  lowered body, as a result of no stated type. A declared result
   (`function f(s: string) -> boolean { match s { … } }`, the body
-  `Typed(…, "boolean")`; a signature that the host declares) is kept, and a
-  body that contradicts it declines. `typedByMatch()` visits each node once.
+  `Typed(…, "boolean")`; a signature that the host declares) is kept, and a body
+  that contradicts it declines. `typedByMatch()` visits each node once.
 
 ## Records
 
 `lower-records.ts` (CE-1652, step 2; JavaScript only). A record is a value of
 the lane `record` and the shape `[]` whose fields each have a settled shape
 (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time"). Its IR type
-holds the IR type of each field (`fields`), the tuple mark of each (`marks`) and,
-for a value of a nominal tuple type, the name of the type (`nominal`) and its
-field names (`names`); `joinType()`, the type equality of the verifier and
+holds the IR type of each field (`fields`), the tuple mark of each (`marks`)
+and, for a value of a nominal tuple type, the name of the type (`nominal`) and
+its field names (`names`); `joinType()`, the type equality of the verifier and
 `sameFields()` compare two records by their nominal type and field by field, so
 two records of one engine type whose fields have different shapes are two IR
-types, and so are records of two nominal types of the same fields. A field is a scalar of a lane (a colour, a string), a list or a
-tuple of stated lengths, a record, or the unit type `nothing`: a field whose
-value is `Nothing`. On JavaScript a record is the array of its fields (a `list`
-instruction of the record type), a `nothing` field `null` (the operation
-`nothing`). Records compile on JavaScript only (user decision Q3 of the plan of
-CE-1652): on GLSL, in the interval mode and in the `bigint` mode a constructor
-declines ("records compile on javascript only"), also when a field read would
-fold the record away, and a `Tuple` or a `List` of several lanes is lowered as
-before ("elements of two types"); `admits()` refuses the lane there too.
+types, and so are records of two nominal types of the same fields. A field is a
+scalar of a lane (a colour, a string), a list or a tuple of stated lengths, a
+record, or the unit type `nothing`: a field whose value is `Nothing`. On
+JavaScript a record is the array of its fields (a `list` instruction of the
+record type), a `nothing` field `null` (the operation `nothing`). Records
+compile on JavaScript only (user decision Q3 of the plan of CE-1652): on GLSL,
+in the interval mode and in the `bigint` mode a constructor declines ("records
+compile on javascript only"), also when a field read would fold the record away,
+and a `Tuple` or a `List` of several lanes is lowered as before ("elements of
+two types"); `admits()` refuses the lane there too.
 
 - **Making a record.** The constructor of a nominal tuple type that
-  `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or
-  an alias type, not a variant of a sum declared with `|`, whose tag is a
-  value at run time): each operand is lowered for the declared type of its field,
-  and an operand whose static type does not prove that type declines (R5), as
-  does one whose static type comes from a `Match` (CE-1731). Where the declared
-  type settles an IR type (`real`, `string`, `color`,
+  `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or an
+  alias type, not a variant of a sum declared with `|`, whose tag is a value at
+  run time): each operand is lowered for the declared type of its field, and an
+  operand whose static type does not prove that type declines (R5), as does one
+  whose static type comes from a `Match` (CE-1731). Where the declared type
+  settles an IR type (`real`, `string`, `color`,
   `tuple<real, real, real, real, real, real>`), the field has it (an integer
   operand of a real field is read as is); where it gives no single shape (`any`,
-  `list`, `string | color | nothing`), the field has the shape of the operand, so
-  a filled and an unfilled `Figure` are two record types. `Nothing` is a field
-  of the type `nothing`. A `Tuple` or a `List` literal whose elements do not
-  make a list (two lanes that do not join, lists of two lengths, a tuple and a
-  list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
+  `list`, `string | color | nothing`), the field has the shape of the operand,
+  so a filled and an unfilled `Figure` are two record types. `Nothing` is a
+  field of the type `nothing`. A `Tuple` or a `List` literal whose elements do
+  not make a list (two lanes that do not join, lists of two lengths, a tuple and
+  a list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
   `Tuple` or `List` of one lane stays the tuple or the list of "Tuples" and
   "Lists". A field of a run-time length declines (its length is a value of the
   function that makes the record), and so does a field of the lane `rows`. A
@@ -3504,166 +3505,158 @@ before ("elements of two types"); `admits()` refuses the lane there too.
   operation `field`, `r[k]` on JavaScript, with the field's tuple mark); any
   other index declines. A field of a record made in the same body is the value
   it was made of, so a constant stays a constant: `match fig.kind { … }` keeps
-  one case, and an `If` whose condition compares such a field with a literal
-  (or whose arms give two record types, or a record and another value) keeps
-  the arm taken when the condition is known at compile time (the shapes of the
-  other arm do not count). An `If` with a condition known only at run time whose
-  arms give two record types declines ("arms of two types", R3).
-  `MatchesType(x, T)` of a field of a record that the static type of `x` does
-  not decide is decided by the lane of the field: a field of the lane `nothing`,
-  `string`, `boolean` or `color` is of that engine type
-  (`fig.fillPaint is nothing`). A `Tuple` pattern of a `Match` does not take a
-  value of a named tuple type (the interpreter's), and declines on a record with
-  no names. Every other reader declines: arithmetic, `Equal`, `Length`, `Map`.
+  one case, and an `If` whose condition compares such a field with a literal (or
+  whose arms give two record types, or a record and another value) keeps the arm
+  taken when the condition is known at compile time (the shapes of the other arm
+  do not count). An `If` with a condition known only at run time whose arms give
+  two record types declines ("arms of two types", R3). `MatchesType(x, T)` of a
+  field of a record that the static type of `x` does not decide is decided by
+  the lane of the field: a field of the lane `nothing`, `string`, `boolean` or
+  `color` is of that engine type (`fig.fillPaint is nothing`). A `Tuple` pattern
+  of a `Match` does not take a value of a named tuple type (the interpreter's),
+  and declines on a record with no names. Every other reader declines:
+  arithmetic, `Equal`, `Length`, `Map`.
 - **User functions.** A function whose result type is not a scalar (a named
   tuple type, `list<real | string>`) returns the record of its body; a body that
   is not a record declines as before ("the result of f is not a scalar"), and a
-  result type with field names requires a record of those names. A parameter
-  of no stated type, of type `any` or of a nominal tuple type holds the type of
-  a record argument (`held()` of `lower-functions.ts`; CE-1652, step 3), and
-  one of no stated type or `any` also the type of a string or a colour
-  (JavaScript only): the parameter has the IR type of the argument, with its
-  fields, and the lane key (`laneKey()`) holds that type (`typeToString()`:
-  the nominal type, the field names, and the IR type and the tuple mark of each
-  field), so two calls of records of one IR type call one function and two
-  calls of records of two types (`fill` of an unfilled and of a filled
-  `Figure`) two. Such a parameter's arguments are lowered before the function
-  is chosen at each call. A parameter of a nominal tuple type takes a record of
-  that nominal type only, or of a nominal type that the static type of the
-  argument proves a subtype of it; any other record declines (R5). In a
-  constructor, an operand of no stated type or of type `any` (such a
-  parameter) proves the declared type of its field by its lane (a string, a
-  colour, a boolean, a number, `nothing`) in the function lowered for it. A
-  field of a record parameter is read as on a local record (the operation
-  `field`), so `x is T` of a field is decided by its lane and a `match` on a
-  field compares at run time. A recursive call on a cycle of calls through a
-  function whose parameter or declared result is a record, or whose arguments
-  hold a record, declines before a function is lowered for it (`recordCycle()`):
-  the type of a record on a cycle is a fixed point that the lowering does not
-  compute, and a record that grows at each call would lower a new function at
-  each.
+  result type with field names requires a record of those names. A parameter of
+  no stated type, of type `any` or of a nominal tuple type holds the type of a
+  record argument (`held()` of `lower-functions.ts`; CE-1652, step 3), and one
+  of no stated type or `any` also the type of a string or a colour (JavaScript
+  only): the parameter has the IR type of the argument, with its fields, and the
+  lane key (`laneKey()`) holds that type (`typeToString()`: the nominal type,
+  the field names, and the IR type and the tuple mark of each field), so two
+  calls of records of one IR type call one function and two calls of records of
+  two types (`fill` of an unfilled and of a filled `Figure`) two. Such a
+  parameter's arguments are lowered before the function is chosen at each call.
+  A parameter of a nominal tuple type takes a record of that nominal type only,
+  or of a nominal type that the static type of the argument proves a subtype of
+  it; any other record declines (R5). In a constructor, an operand of no stated
+  type or of type `any` (such a parameter) proves the declared type of its field
+  by its lane (a string, a colour, a boolean, a number, `nothing`) in the
+  function lowered for it. A field of a record parameter is read as on a local
+  record (the operation `field`), so `x is T` of a field is decided by its lane
+  and a `match` on a field compares at run time. A recursive call on a cycle of
+  calls through a function whose parameter or declared result is a record, or
+  whose arguments hold a record, declines before a function is lowered for it
+  (`recordCycle()`): the type of a record on a cycle is a fixed point that the
+  lowering does not compute, and a record that grows at each call would lower a
+  new function at each.
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type
-  `T` is dispatched at compile time (`lower-protocols.ts`; CE-1652, step 4).
-  The interpreter (`dispatchMember()` of `engine-protocols.ts`) selects the
-  most specific of the edges whose target holds the type of the value at run
-  time; the type of a record is its nominal type, so the compiler requires
-  exactly one edge of `protocolDispatchCandidates()` that overlaps `T`
-  (`typesOverlap()`), a target that holds `T`, no condition and an Epsil
-  implementation: that edge is then the one selected for every value of `T`.
-  The arguments are those that the interpreter passes
-  (`protocolCallArguments()`): a parameter that the call leaves out takes the
-  default of the requirement, boxed in the scope of the protocol and evaluated
-  at compile time. A symbol default (a constant, which a later program can
-  declare again) that is not the library's is a capture (`symbolDeps`), as a
-  free name with a value is (`captured()`), so a host recompiles when its
-  value changes; a symbol default with no value declines (the interpreter
-  reads it in the scope of the protocol, the lowering would read it at the
-  call site). Each argument must prove the type of the requirement at `Self` =
-  the target, by its static type or, of no stated type or `any`, by its lane,
-  as the interpreter checks it. The implementation (`implementationLiteralAt()`,
-  `Self` replaced by the target) is made canonical once per edge and member
-  and lowered as a user function, so each record type lowers it once; the
-  result that its body declares (`Typed(body, "boolean")`, at `Self` = the
-  target) is its declared result, which the body must prove, as for a user
-  function (`signatureTypes()`). Two edges that overlap `T` (two
+  `T` is dispatched at compile time (`lower-protocols.ts`; CE-1652, step 4). The
+  interpreter (`dispatchMember()` of `engine-protocols.ts`) selects the most
+  specific of the edges whose target holds the type of the value at run time;
+  the type of a record is its nominal type, so the compiler requires exactly one
+  edge of `protocolDispatchCandidates()` that overlaps `T` (`typesOverlap()`), a
+  target that holds `T`, no condition and an Epsil implementation: that edge is
+  then the one selected for every value of `T`. The arguments are those that the
+  interpreter passes (`protocolCallArguments()`): a parameter that the call
+  leaves out takes the default of the requirement, boxed in the scope of the
+  protocol and evaluated at compile time. A symbol default (a constant, which a
+  later program can declare again) that is not the library's is a capture
+  (`symbolDeps`), as a free name with a value is (`captured()`), so a host
+  recompiles when its value changes; a symbol default with no value declines
+  (the interpreter reads it in the scope of the protocol, the lowering would
+  read it at the call site). Each argument must prove the type of the
+  requirement at `Self` = the target, by its static type or, of no stated type
+  or `any`, by its lane, as the interpreter checks it. The implementation
+  (`implementationLiteralAt()`, `Self` replaced by the target) is made canonical
+  once per edge and member and lowered as a user function, so each record type
+  lowers it once; the result that its body declares (`Typed(body, "boolean")`,
+  at `Self` = the target) is its declared result, which the body must prove, as
+  for a user function (`signatureTypes()`). Two edges that overlap `T` (two
   protocols that declare the member), a conditional edge, a host callback, a
   first operand that is not a record, a record of no named type and a record of
   a parameterized type decline. The qualified call (`ProtocolMember`) still
   declines.
-- **Values settled per lowered function** (CE-1652, step 4b). A user function
-  is lowered once per lane key, so in one lowered function a parameter that
-  holds the type of its argument (`held()`) has a settled IR type, and the
-  parameter is in `Lowering.heldParams`. `held()` takes, at a parameter of
-  type `any` (not one of no stated type, which keeps the real lane of
-  today), also a real or an integer whose argument's static type proves the
-  lane, or which is itself such a parameter (`figureScaling(k)` in
-  `scale(self, k: any)`), and, on JavaScript, `Nothing` (written as the
-  argument, or a value of the lane `nothing`). A parameter that takes the
-  shape of its argument (a point, a list of points, a flat list; below) is in
-  `heldParams` too: every call gives that shape. `MatchesType` of such a
-  parameter whose static type does not decide (`any`, `unknown`) is decided by
-  its IR type (`engineTypeOf()` of `lower-match.ts`): a scalar of the lane
-  `string`, `color`, `boolean`, `integer`, `real` or `nothing` by that type;
-  a record, a point or a list by an engine type that holds every value of the
-  IR type (`valueTypeOf()`): a record by its nominal type (not a
-  parameterized one); a record of no names by the tuple of its fields
-  (`tuple<tuple<number, number>, tuple<number, number>>` for a box
-  `((x0, y0), (x1, y1))`), or by that tuple or the list of the fields where
-  the fields do not join (`(t, "a")` and `[t, "a"]` are one IR type); the axis
-  of the tuple mark by a `tuple` of its length, another axis by a `list`; a
-  number of any lane by `number` (the interpreter's value can be `NaN`, which
-  is not a `real`). The test is decided with `isSubtype()` and
-  `typesOverlap()`, as the interpreter decides it on the value
-  (`dynamicTypeTest()`): `box is nothing` of a box is `False`, `(t, 1) is
-  tuple` is `True`, `[t, 1] is tuple` is `False`; a test that the type does
-  not decide (`k is integer` of a real, `(t, 1) is tuple<real, real>`,
-  `(t, "a") is tuple`) declines. A value `nothing` is still refused as the
-  argument of a call (`nothingRefusal()` of `index.ts`), so `Nothing` as an
-  argument compiles where the passes remove the call (`boxCenter(Nothing)`,
-  whose result is the constant `(0, 0)`). `Equal` and `NotEqual` of a string and a real, an integer, a
-  boolean, `nothing` or a tuple of reals are the constants `False` and `True`
-  (`apart()` of `lower.ts`), the interpreter's values for those types (checked:
-  `(0, 0) == "default"`, `2 == "a"`, `NaN == "a"`, `True == "a"`,
-  `Nothing == "a"` are `False`); a list threads, and a record or a colour with
-  a string is left unevaluated by the interpreter, so those still decline.
-  Both kinds of decided test are recorded in `Lowering.typeTests`; a condition
-  of an `If` or a `Which` made only of them (`And`, `Or`, `Not`;
-  `typeDecided()` of `lower.ts`) takes its arm and the other arm is not
-  lowered, as for a decided scalar condition
-  (`docs/COMPILATION-MODEL.md`, "The arms of a conditional"): such a
-  condition declined before, so no program that compiled changes. A
-  parameter whose type settles no shape (`point` of `signatureTypes()`: no
-  stated type, `any`, `list`) is lowered once per shape of its argument (a
-  scalar, a point `p2`, a flat list `w3` that binds whole, of strings `w1s`
-  on JavaScript; `laneKey()`), so its arguments are lowered before the
-  function is chosen at every call, not only the first. `N(x, p)` of a list
-  or a tuple of reals (by its static type, or by its IR type when the static
-  type is `any` or `unknown`) is `x`; in the interval and the `bigint` mode
-  it declines. A record field from a list parameter of a run-time length
-  (`N(pattern, 15)` of `pattern: list<real>`) still declines ("a record with
-  a field of a run-time length").
+- **Values settled per lowered function** (CE-1652, step 4b). A user function is
+  lowered once per lane key, so in one lowered function a parameter that holds
+  the type of its argument (`held()`) has a settled IR type, and the parameter
+  is in `Lowering.heldParams`. `held()` takes, at a parameter of type `any` (not
+  one of no stated type, which keeps the real lane of today), also a real or an
+  integer whose argument's static type proves the lane, or which is itself such
+  a parameter (`figureScaling(k)` in `scale(self, k: any)`), and, on JavaScript,
+  `Nothing` (written as the argument, or a value of the lane `nothing`). A
+  parameter that takes the shape of its argument (a point, a list of points, a
+  flat list; below) is in `heldParams` too: every call gives that shape.
+  `MatchesType` of such a parameter whose static type does not decide (`any`,
+  `unknown`) is decided by its IR type (`engineTypeOf()` of `lower-match.ts`): a
+  scalar of the lane `string`, `color`, `boolean`, `integer`, `real` or
+  `nothing` by that type; a record, a point or a list by an engine type that
+  holds every value of the IR type (`valueTypeOf()`): a record by its nominal
+  type (not a parameterized one); a record of no names by the tuple of its
+  fields (`tuple<tuple<number, number>, tuple<number, number>>` for a box
+  `((x0, y0), (x1, y1))`), or by that tuple or the list of the fields where the
+  fields do not join (`(t, "a")` and `[t, "a"]` are one IR type); the axis of
+  the tuple mark by a `tuple` of its length, another axis by a `list`; a number
+  of any lane by `number` (the interpreter's value can be `NaN`, which is not a
+  `real`). The test is decided with `isSubtype()` and `typesOverlap()`, as the
+  interpreter decides it on the value (`dynamicTypeTest()`): `box is nothing` of
+  a box is `False`, `(t, 1) is tuple` is `True`, `[t, 1] is tuple` is `False`; a
+  test that the type does not decide (`k is integer` of a real,
+  `(t, 1) is tuple<real, real>`, `(t, "a") is tuple`) declines. A value
+  `nothing` is still refused as the argument of a call (`nothingRefusal()` of
+  `index.ts`), so `Nothing` as an argument compiles where the passes remove the
+  call (`boxCenter(Nothing)`, whose result is the constant `(0, 0)`). `Equal`
+  and `NotEqual` of a string and a real, an integer, a boolean, `nothing` or a
+  tuple of reals are the constants `False` and `True` (`apart()` of `lower.ts`),
+  the interpreter's values for those types (checked: `(0, 0) == "default"`,
+  `2 == "a"`, `NaN == "a"`, `True == "a"`, `Nothing == "a"` are `False`); a list
+  threads, and a record or a colour with a string is left unevaluated by the
+  interpreter, so those still decline. Both kinds of decided test are recorded
+  in `Lowering.typeTests`; a condition of an `If` or a `Which` made only of them
+  (`And`, `Or`, `Not`; `typeDecided()` of `lower.ts`) takes its arm and the
+  other arm is not lowered, as for a decided scalar condition
+  (`docs/COMPILATION-MODEL.md`, "The arms of a conditional"): such a condition
+  declined before, so no program that compiled changes. A parameter whose type
+  settles no shape (`point` of `signatureTypes()`: no stated type, `any`,
+  `list`) is lowered once per shape of its argument (a scalar, a point `p2`, a
+  flat list `w3` that binds whole, of strings `w1s` on JavaScript; `laneKey()`),
+  so its arguments are lowered before the function is chosen at every call, not
+  only the first. `N(x, p)` of a list or a tuple of reals (by its static type,
+  or by its IR type when the static type is `any` or `unknown`) is `x`; in the
+  interval and the `bigint` mode it declines. A record field from a list
+  parameter of a run-time length (`N(pattern, 15)` of `pattern: list<real>`)
+  still declines ("a record with a field of a run-time length").
 - **String constants** (CE-1652, step 4c). `lower()` lowers a program up to
-  three times. The first lowering keeps no string constant, so a program
-  that compiles there keeps its code. When it declines and the constants
-  could decide a test (`seen`: an `Equal` or a `NotEqual` of two values
-  that each are a string constant, a string parameter or the read of a
-  string field (`mayHoldKnown()`), or a `Match` on such a parameter or
-  field), the second lowering keeps them (JavaScript, not the `bigint`
-  mode): `Lowering.known(v)` is the value of
-  a string constant (`b.constants`), of a parameter whose argument was a
-  known string (`held()`: at a parameter of no stated type, `any` or
-  `string`, the lane key holds the value, so a function is lowered once per
+  three times. The first lowering keeps no string constant, so a program that
+  compiles there keeps its code. When it declines and the constants could decide
+  a test (`seen`: an `Equal` or a `NotEqual` of two values that each are a
+  string constant, a string parameter or the read of a string field
+  (`mayHoldKnown()`), or a `Match` on such a parameter or field), the second
+  lowering keeps them (JavaScript, not the `bigint` mode): `Lowering.known(v)`
+  is the value of a string constant (`b.constants`), of a parameter whose
+  argument was a known string (`held()`: at a parameter of no stated type, `any`
+  or `string`, the lane key holds the value, so a function is lowered once per
   value; the arguments of a `string` parameter are then lowered before the
-  function is chosen), or of the read of a record field whose type holds
-  the value (`IRType.constant`, set by `make()` of `lower-records.ts`; two
-  records whose constant fields differ are two record types, and
-  `joinType()` makes such a field a plain string where they meet, as at an
-  `if` of two). The type of a value never holds a constant: the lowering
-  keeps the value of a parameter and of a field read aside
-  (`holdKnown()`), so a local written in a loop or an `if` of two literals
-  is a plain string. `Equal` and `NotEqual` of two known strings are
-  constants recorded in `typeTests`, so a condition of them takes its arm
-  (`typeDecided()`, the memo of `value()` keeping the decision), and a
-  `Match` on a known subject keeps the one case taken. Each such decision
-  reads its operands (`readKnown()`): the third lowering keeps a constant
-  only at the places (a parameter `f#i`, a field `T.k`) that a decision
-  read, or through which such a value came (`feeds`: the parameter `kind`
-  of `figureOf` into the field `Figure.0`), so a fill colour that no test
-  reads does not lower a function once per colour. The third lowering
-  takes the decisions of the second; if it fails all the same, the second
-  is the program. The decline of the second lowering is the
-  program's decline.
+  function is chosen), or of the read of a record field whose type holds the
+  value (`IRType.constant`, set by `make()` of `lower-records.ts`; two records
+  whose constant fields differ are two record types, and `joinType()` makes such
+  a field a plain string where they meet, as at an `if` of two). The type of a
+  value never holds a constant: the lowering keeps the value of a parameter and
+  of a field read aside (`holdKnown()`), so a local written in a loop or an `if`
+  of two literals is a plain string. `Equal` and `NotEqual` of two known strings
+  are constants recorded in `typeTests`, so a condition of them takes its arm
+  (`typeDecided()`, the memo of `value()` keeping the decision), and a `Match`
+  on a known subject keeps the one case taken. Each such decision reads its
+  operands (`readKnown()`): the third lowering keeps a constant only at the
+  places (a parameter `f#i`, a field `T.k`) that a decision read, or through
+  which such a value came (`feeds`: the parameter `kind` of `figureOf` into the
+  field `Figure.0`), so a fill colour that no test reads does not lower a
+  function once per colour. The third lowering takes the decisions of the
+  second; if it fails all the same, the second is the program. The decline of
+  the second lowering is the program's decline.
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names
   (`f(t) = P(cos(t), sin(t))` gives `{x: 0.54, y: 0.84}` at `t = 1`), a record
   in a field is converted the same way, a field that can hold a complex value
-  follows the result convention (`{value: 2}`, not `{value: {re: 2, im: 0}}`),
-  a `nothing` field is `null`, a colour
-  keeps its run-time object, and a record with no names stays an array. A record
-  result has no batch: `broadcast()` and `broadcastAsync()` throw.
+  follows the result convention (`{value: 2}`, not `{value: {re: 2, im: 0}}`), a
+  `nothing` field is `null`, a colour keeps its run-time object, and a record
+  with no names stays an array. A record result has no batch: `broadcast()` and
+  `broadcastAsync()` throw.
 
 ## How to add
 
@@ -3775,16 +3768,15 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   of a declared type of the lane `real`, `integer` or `boolean`, the name is a
   local whose value is a positional parameter after the arguments (a list of
   such values of no stated length, CE-1662: its length and the list, bound as a
-  list local written whole, `wholeLocal()`, whose length a write can change;
-  a list of lists of two lengths not stated, CE-1721: the host's array of
-  arrays of the lane `rows`, bound as a local of the lane of its elements
-  (`Binding.grid`) that only an `Assign` that is a statement of the body
-  writes, with a list of rank 2 of that lane, which the entry returns and
-  `run()` writes back as a `List` of `List`s),
-  its stored value is hidden while the body is lowered
-  (`withVarsValuesHidden()`), and the entry returns the array of the value of
-  the body (NaN for a body that ends in an assignment) and the value of each
-  name after it. `run()` reads each value in the engine before the call and
+  list local written whole, `wholeLocal()`, whose length a write can change; a
+  list of lists of two lengths not stated, CE-1721: the host's array of arrays
+  of the lane `rows`, bound as a local of the lane of its elements
+  (`Binding.grid`) that only an `Assign` that is a statement of the body writes,
+  with a list of rank 2 of that lane, which the entry returns and `run()` writes
+  back as a `List` of `List`s), its stored value is hidden while the body is
+  lowered (`withVarsValuesHidden()`), and the entry returns the array of the
+  value of the body (NaN for a body that ends in an assignment) and the value of
+  each name after it. `run()` reads each value in the engine before the call and
   writes the new values back after it (`assigningRun()` of `adapter.ts`); the
   result is not `shippable`, and `implicitCompile()` gives no result for it.
   Another target, the interval and `bigint` modes, an inferred type, a constant

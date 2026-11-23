@@ -11526,11 +11526,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const tb = broadcastCellType(b.type);
         if (d !== undefined) {
           const td = broadcastCellType(d.type);
-          if (
-            factsOf(ta).integer &&
-            factsOf(tb).integer &&
-            factsOf(td).integer
-          )
+          if (factsOf(ta).integer && factsOf(tb).integer && factsOf(td).integer)
             return BoxedType.forResult('integer', context.engine._typeResolver);
           if (
             factsOf(ta).rational &&

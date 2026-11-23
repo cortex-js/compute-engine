@@ -3570,7 +3570,9 @@ function lowerOnce(
       y.isPure === true && facts(y).writes.size === 0;
     if (!pure(a) || !pure(c!)) return undefined;
     const [va, vc] = [value(a)!, value(c!)!];
-    if ([va, vc].some((v) => type(v).lane !== 'integer' || type(v).shape.length))
+    if (
+      [va, vc].some((v) => type(v).lane !== 'integer' || type(v).shape.length)
+    )
       return undefined;
     const quotient = apply(e, ofOp('floordiv.int'), [va, vc]);
     if (p === 1n) return quotient;
@@ -3609,9 +3611,7 @@ function lowerOnce(
     if (e.operator === 'Round' && !SETTINGS.roundingTies(ce))
       decline(e, 'Round with a roundingTies other than the default');
     const values = others.map((op) => value(op)!);
-    if (
-      values.some((v) => type(v).lane !== 'integer' || type(v).shape.length)
-    )
+    if (values.some((v) => type(v).lane !== 'integer' || type(v).shape.length))
       decline(
         e,
         `${e.operator} of a product of a rational and a value that is not an integer (the bigint mode)`,
@@ -3637,7 +3637,10 @@ function lowerOnce(
       e.operator === 'Truncate'
         ? floorDiv(magnitude, q)
         : floorDiv(
-            apply(e, 'Add', [apply(e, 'Multiply', [int(2n), magnitude]), int(q)]),
+            apply(e, 'Add', [
+              apply(e, 'Multiply', [int(2n), magnitude]),
+              int(q),
+            ]),
             2n * q
           );
     return apply(e, 'Multiply', [apply(e, 'Sign', [a]), k]);
