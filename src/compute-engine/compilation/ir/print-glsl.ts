@@ -16,6 +16,7 @@
 
 import { entryOf, type IRType, type Program } from './ir.js';
 import { GLSL_ZETA_HELPERS } from './glsl-zeta-helpers.js';
+import { GLSL_COMPLEX_SPECIAL_HELPERS } from './glsl-complex-special-helpers.js';
 import { deepFreeze, type OperatorRow } from './operators.js';
 import {
   ARITHMETIC,
@@ -450,7 +451,8 @@ const COMPLEX_HELPERS: Record<string, string> = {
 };
 
 /** The helpers that a helper calls, by name, which `helpersOf()` does not
- *  find in `COMPLEX_HELPERS` or `GLSL_ZETA_HELPERS`. */
+ *  find in `COMPLEX_HELPERS`, `GLSL_ZETA_HELPERS` or
+ *  `GLSL_COMPLEX_SPECIAL_HELPERS`. */
 const CALLED: Record<string, string[]> = {
   _gpu_ir_carg: ['_gpu_ir_carg'],
   _gpu_ir_root: ['_gpu_ir_root'],
@@ -459,13 +461,22 @@ const CALLED: Record<string, string[]> = {
   _gpu_ir_gammaln: ['_gpu_ir_sincospi', '_gpu_ir_gammaln'],
   _gpu_ir_digamma: ['_gpu_ir_sincospi', '_gpu_ir_digamma'],
   _gpu_ir_trigamma: ['_gpu_ir_sincospi', '_gpu_ir_trigamma'],
+  _gpu_ir_zeta: [
+    '_gpu_ir_sincospi',
+    '_gpu_ir_gamma',
+    '_gpu_ir_gammaln',
+    '_gpu_ir_zeta',
+  ],
 };
 
-/** The helper `name` of `COMPLEX_HELPERS` or `GLSL_ZETA_HELPERS`, after
- *  the helpers that it calls (found in its text, less its comments), each
- *  before its first call. */
+/** The helper `name` of `COMPLEX_HELPERS`, `GLSL_ZETA_HELPERS` or
+ *  `GLSL_COMPLEX_SPECIAL_HELPERS`, after the helpers that it calls (found
+ *  in its text, less its comments), each before its first call. */
 function helpersOf(name: string, out: string[] = []): string[] {
-  const text = COMPLEX_HELPERS[name] ?? GLSL_ZETA_HELPERS[name];
+  const text =
+    COMPLEX_HELPERS[name] ??
+    GLSL_ZETA_HELPERS[name] ??
+    GLSL_COMPLEX_SPECIAL_HELPERS[name];
   if (text === undefined) {
     const known = CALLED[name];
     if (known === undefined)
@@ -792,6 +803,12 @@ export const GLSL: Syntax = deepFreeze({
     'polylog': helperCall('_gpu_ir_poly_log', 2),
     'harmonic': helperCall('_gpu_ir_harmonic', 1),
     'harmonic2': helperCall('_gpu_ir_harmonic2', 2),
+    // `Gamma`, `Zeta`, `HurwitzZeta` and `PolyGamma` of a complex operand
+    // (`GLSL_COMPLEX_SPECIAL_HELPERS`, CE-1600).
+    'cgamma': helperCall('_gpu_ir_cgamma', 1),
+    'czeta': helperCall('_gpu_ir_czeta', 1),
+    'churwitzzeta': helperCall('_gpu_ir_churwitz_zeta', 2),
+    'cpolygamma': helperCall('_gpu_ir_cpolygamma', 2),
     'asoklch': '$0',
     'asoklab': { text: '_gpu_ir_lab($0)', helpers: ['_gpu_ir_lab'] },
     'asrgb': {
@@ -1697,10 +1714,10 @@ export const GLSL: Syntax = deepFreeze({
     // With no comment: the adapter refuses an input name that the code
     // calls, and a comment can read as a call (`x (x+1)`).
     ...Object.fromEntries(
-      Object.entries(GLSL_ZETA_HELPERS).map(([h, text]) => [
-        h,
-        text.replace(/\s*\/\/[^\n]*/g, ''),
-      ])
+      Object.entries({
+        ...GLSL_ZETA_HELPERS,
+        ...GLSL_COMPLEX_SPECIAL_HELPERS,
+      }).map(([h, text]) => [h, text.replace(/\s*\/\/[^\n]*/g, '')])
     ),
     // The element `k` (from 0) of a list in a sampler (README, `storage`).
     _gpu_ir_texel: `float _gpu_ir_texel(sampler2D v, int k) {

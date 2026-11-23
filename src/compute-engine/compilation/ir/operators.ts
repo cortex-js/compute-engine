@@ -307,7 +307,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('HarmonicNumber', 2,        [[[R, R], R, 'harmonic2']],    { fold: F.harmonic2, ...domain }),
   row('Digamma',      1,          [[[R], R, 'digamma']],         { fold: F.digamma }),
   row('Trigamma',     1,          [[[R], R, 'trigamma']],        { fold: F.trigamma }),
-  row('PolyGamma',    2,          [[[I, R], R, 'polygamma']],    { fold: F.polygamma, ...domain }),
+  row('PolyGamma',    2,          [[[I, R], R, 'polygamma'], [[I, C], C, 'cpolygamma']], { fold: F.polygamma, ...domain }),
   row('AiryAi',       1,          [[[R], R, 'airyai']],          { fold: F.airyai }),
   row('AiryBi',       1,          [[[R], R, 'airybi']],          { fold: F.airybi }),
   row('AiryAiPrime',  1,          [[[R], R, 'airyaiprime']],     { fold: F.airyaiprime }),

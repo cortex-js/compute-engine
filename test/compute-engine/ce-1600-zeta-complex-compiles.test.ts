@@ -81,9 +81,11 @@ describe('Zeta of a complex argument on JavaScript', () => {
     expect(r.code).not.toContain('czeta');
   });
 
-  test('GLSL still declines: it has no complex zeta kernel', () => {
-    expect(() =>
-      compile(ce.box(['Zeta', 'z']), { to: 'glsl', fallback: false } as never)
-    ).toThrow(/czeta/);
+  test('GLSL compiles it too (`ce-1600-glsl-complex-zeta.test.ts`)', () => {
+    const r = compile(ce.box(['Zeta', 'z']), {
+      to: 'glsl',
+      fallback: false,
+    } as never) as unknown as { code: string };
+    expect(r.code).toContain('_gpu_ir_czeta(');
   });
 });

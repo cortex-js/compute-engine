@@ -143,7 +143,9 @@ import {
   hypergeometric2F1Complex,
   gamma as complexGamma,
   incompleteGammaUpperComplex,
+  polygammaComplex,
 } from '../numerics/numeric-complex.js';
+import { logGammaComplex } from '../numerics/log-gamma.js';
 import {
   adaptiveQuadrature,
   insideQuadrature,
@@ -2547,6 +2549,13 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
     return { re: a / m + 0, im: b / m };
   },
   churwitzzeta: (s: Cx, a: Cx): Cx => SYS_HELPERS.churwitzZeta(s, a),
+  // `PolyGamma(n, z)` of a complex `z`: the real kernel on the real axis (a
+  // pole is +∞), and elsewhere the interpreter's kernels, `polygammaComplex`
+  // and for the order -1 `logGammaComplex` (`LogGamma`) (CE-1600).
+  cpolygamma: (n: number, z: Cx): Cx =>
+    continuedKernel([{ re: n, im: 0 }, z], SYS_HELPERS.polygamma, (n, z) =>
+      n.re === -1 ? logGammaComplex(z) : polygammaComplex(n.re, z)
+    ),
   // ζ(s) = ζ(s, 1): the interpreter evaluates `Zeta` of a complex `s` with
   // the Hurwitz kernel at `a = 1` (CE-1600).
   czeta: (s: Cx): Cx => SYS_HELPERS.churwitzZeta(s, { re: 1, im: 0 }),

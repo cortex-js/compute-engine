@@ -103,7 +103,7 @@ describe('GPU: the real-only shader lowerings', () => {
       ['Arccot', 'z'],
       ['Arcsch', 'z'],
       ['InverseHaversine', 'z'],
-      ['Gamma', 'z'],
+      // `Gamma` of a complex operand compiles on GLSL (CE-1600).
       ['Factorial', 'z'],
     ];
     for (const to of ['glsl'])

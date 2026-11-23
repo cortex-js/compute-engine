@@ -272,21 +272,21 @@ describe('Digamma and Trigamma at a complex z', () => {
   });
 });
 
-describe('PolyGamma JS compile: a complex-typed argument fails closed', () => {
+describe('PolyGamma JS compile: a complex-typed argument', () => {
   ce.declare('pg340_n', 'integer');
   ce.declare('pg340_z', 'complex');
   ce.declare('pg340_r', 'real');
 
-  test('compiling with a declared-complex argument does not silently use the real kernel', () => {
+  test('compiles to the complex kernel, which gives the value of N() (CE-1600)', () => {
     const compiled = compile(ce.box(['PolyGamma', 'pg340_n', 'pg340_z']));
-    if (!compiled.success) return; // fails closed at compile time — acceptable
-    // Or it compiles with a runtime realness guard: a genuinely complex
-    // value must not silently flow through the real-only `_SYS.polygamma`.
+    expect(compiled.success).toBe(true);
     const got = compiled.run?.({
       pg340_n: 1,
       pg340_z: { re: 1, im: 2 },
-    } as any);
-    expect(Number.isNaN(got as number)).toBe(true);
+    } as any) as unknown as { re: number; im: number };
+    const v = ce.box(['PolyGamma', 1, ['Complex', 1, 2]]).N();
+    expect(got.re).toBeCloseTo(v.re, 12);
+    expect(got.im).toBeCloseTo(v.im, 12);
   });
 });
 

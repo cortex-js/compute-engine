@@ -427,7 +427,7 @@ function uniforms(
 const DECLINES: [label: string, json: Json, cause: RegExp, options?: object][] = [
   ['Arccot', ['Arccot', 'z'], /Arccot \(the operation cacot\) on glsl/],
   ['Arcsch', ['Arcsch', 'z'], /Arcsch \(the operation cacsch\)/],
-  ['Gamma of a complex', ['Gamma', 'z'], /Gamma \(the operation cgamma\) on glsl/],
+  ['PolyLog of a complex', ['PolyLog', 2, 'z'], /PolyLog \(the operation cpolylog\) on glsl/],
   ['a comparison of complex values', ['Less', 'z', 'w'], /Less of complex/],
   ['a list of complex values', ['List', 'z', 'w'], /a list of complex numbers on glsl/],
   ['a tuple of complex values', ['Tuple', 'z', ['Exp', 'z']], /a list of complex numbers on glsl/],

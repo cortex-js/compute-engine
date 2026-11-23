@@ -10,6 +10,18 @@
   scope took 12 ms. The row now has the least effects that hold those of its
   body (`(unknown) pure -> number`), and `F(14)` takes about 3 ms. A body
   that draws a random number still gives the row the effect `random`.
+- **`Zeta`, `HurwitzZeta`, `PolyGamma` and `Gamma` of a complex argument
+  compile on GLSL** (CE-1600), so a domain coloring of these functions draws
+  on the GPU: `compile(ce.parse('\\zeta(z)'), { to: 'glsl' })` with `z`
+  declared `complex` gave the decline "the operation czeta on glsl". The
+  single-float kernels give the values of `N()` within about 3e-5 for
+  `Gamma`, `Zeta` and `PolyGamma` (a few percent of `HurwitzZeta` for
+  `Re(s) < 0`, where its terms are much larger than its value; next to a
+  zero of ζ the error is absolute; on the real axis they give the real
+  kernels' values, `NaN` included). `PolyGamma(n, z)` of a complex `z` also
+  compiles on JavaScript, with the interpreter's kernel, and under
+  `mode: 'complex'` `PolyGamma(n, x)` of a real `x` takes it too.
+  `LerchPhi` and `PolyLog` of a complex argument still decline on GLSL.
 
 ### Resolved Issues
 

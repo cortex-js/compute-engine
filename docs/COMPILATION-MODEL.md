@@ -285,6 +285,25 @@ interpreter's value. A line is removed when the case declines or is fixed.
 - `glsl` (crafted), `x: real`, `y: real`: `Hypot(x, y)` is
   `length(vec2(x, y))`, which squares its operands: `Hypot(1e20, 1e20)` gives
   `Infinity` and `Hypot(1e-25, 1e-25)` gives `0`.
+- `glsl`, `z: complex`: `Zeta(z)` for Re z >= 0, `HurwitzZeta(z, a)` and
+  `PolyGamma(n, z)` of an order n >= 1 are an Euler-Maclaurin sum in single
+  floats, exact to about 1e-5 of the sum of the sizes of its terms
+  (CE-1600). The error is absolute at that scale, not relative to the
+  value. Next to the zero `1/2 + 21.022039i` of ζ (at the single float
+  `21.02203941`), `Zeta(z)` gives `-6.4e-7 + 2.0e-7i`, where the
+  interpreter gives `-5.6e-8 - 2.5e-7i`; at `1/2 - 25i` the relative error
+  is `2.7e-4` (a value of `0.0149`). For Re z < 0 the terms grow as
+  |a + N|^(1 - Re z), with N about 1.1(|z| + 32)/(2π):
+  `HurwitzZeta(z, 0.25 + 0.5i)` at `z = -4 - 5i` gives `0.01500 - 0.01917i`,
+  where the interpreter gives `0.01606 - 0.01961i`. `Zeta(z)` for Re z < 0
+  takes the functional equation: from Re z = -4 to 0 and |Im z| <= 40, its
+  error is at most `2.2e-5` of the larger of the value and 1.
+- `glsl` (crafted), `n: integer`, `z: complex`: `PolyGamma(n, z)` at the
+  order `-1` gives `NaN` off the positive real axis (at `z = -2.5`, where
+  the interpreter and the `javascript` target give `-0.0562 - 9.4248i`, the
+  value of `LogGamma(z)`). On the real axis `PolyGamma(n, z)` and
+  `HurwitzZeta(z, a)` give `NaN` where the real helper does (its terms
+  cancel: `PolyGamma(2, -0.5)`), also under `mode: 'complex'` (CE-1600).
 - `glsl` (crafted), `x: real`, `y: real`: `GCD(x, y)` and `LCM(x, y)` at
   two integers of which one is 2^31 or more give `NaN` (the shader computes
   the divisor of two integers on `int`s): at `x = 2^31`, `y = 3` the
