@@ -13501,7 +13501,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
-      evaluate: guardDigitsSizeN(
+      evaluate: guardDigitsN(
         ([x, n], { numericApproximation, engine, expression }) => {
           // Non-lazy operator: operands arrive already evaluated by the driver
           // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
@@ -13612,10 +13612,25 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // float of `e` at the working precision.
         (original, index) =>
           !(index === 0 && isSymbol(original, 'ExponentialE')),
-        // Only `e^x` is ill conditioned at a large operand (condition |x|);
-        // `x^n` with an exact `x` is not (`Sqrt(10^600 + 1/3)`).
-        (expression) =>
-          isFunction(expression) && isSymbol(expression.op1, 'ExponentialE')
+        // `b^x` is ill conditioned at a large exponent: the error of `x`
+        // reaches the result multiplied by `|x·ln b|`, and that of `b` by
+        // `|x|` (`2^(3000000000000001/3)` lost 5 digits at 30). So the size
+        // of the exponent sets the guard digits; the size of the base does
+        // not (`Sqrt(10^600 + 1/3)`). An exact integer exponent adds none:
+        // it has no rounding error, `exactBaseIntegerPower()` reads the base
+        // with the digits that the size of an integer literal needs, and an
+        // integer past the cap (`(1/3)^(10^600)`) gives 0 or `+oo` instead
+        // of a decline. A non-integer exponent past the cap declines
+        // (`2^(10^600 + 1/3)`).
+        {
+          size: (expression, index) =>
+            index === 1 &&
+            isFunction(expression) &&
+            !(
+              expression.op2.isInteger === true &&
+              (!isNumber(expression.op2) || expression.op2.isExact)
+            ),
+        }
       ),
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
       // when x < 0, only defined if n is an integer

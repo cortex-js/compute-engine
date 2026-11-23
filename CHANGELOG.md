@@ -32,6 +32,16 @@
   `Im(τ)` very close to 0, or a zero of the function that the series does not
   give exactly, such as `JacobiTheta(3, 1/2 + i/2, i)`), the expression stays
   unevaluated, as `DedekindEta` does.
+- **The numeric value of a power with a large exponent has the digits of the
+  engine's precision** (CE-1700). Above machine precision, an exact exponent
+  that is not an integer lost a digit for each power of ten of its size: at
+  a precision of 30, `N(2^(3000000000000001/3))` gave
+  `1.97495439177298922275641597277e+301029995663981`, where the value is
+  `1.97495439177298922275641642908e+301029995663981`. A large float
+  exponent lost the digits of an exact base in the same way. The exponent is
+  now read with more digits as its size grows. A non-integer exponent of
+  more than about 500 digits leaves the power unevaluated:
+  `N(2^(10^600 + 1/3))` gave `+oo`.
 - **Each cell of the numeric value of a product with a list is the numeric
   value of the scalar product** (CE-1710, CE-1711). At machine precision, a
   fraction times a list of floats rounded the fraction first:

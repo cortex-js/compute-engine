@@ -382,7 +382,8 @@ function readExactly(original: Expression, op: Expression): boolean {
  * - `size`: its condition number grows with the operand (`Gamma`, `Zeta`,
  *   `Exp`); a function that is well conditioned at a large operand (`Ln`,
  *   `Sin`, `Sqrt`, `Arctan`) must not have it, or `Ln(2^2000 + 1)` is
- *   declined. A function, for a call as written: `Power` is for `e^x` only;
+ *   declined. A function selects the operands that set it: `Power` selects
+ *   its exponent, not its base (`Sqrt(10^600 + 1/3)` is answered);
  * - `pole`: it is singular at the integers it names, `nonpositive` for the
  *   gamma family, `negative` for `Binomial` (`Γ(n + 1)`), one mode per
  *   operand for `HurwitzZeta` (`s` at 1, `a` at the non-positive integers).
@@ -403,7 +404,14 @@ export type PoleSum = readonly [number, number, 1 | -1, PoleMode];
 type PoleRule = PoleMode | ReadonlyArray<PoleMode>;
 
 export interface GuardRules {
-  size?: boolean | ((expression: Expression) => boolean);
+  /**
+   * `true`: the magnitude of each guarded operand sets the digits that the
+   * size rule adds, except an integer read exactly. A function: it selects,
+   * for the call and the index of an operand, the operands whose magnitude
+   * sets them, also an operand that is not guarded, because its size can
+   * multiply the error of another operand (`Power`).
+   */
+  size?: boolean | ((expression: Expression, index: number) => boolean);
   /** A mode for every operand, or one for each operand (`one`: singular at
    * 1 only; `none`: regular). */
   pole?: PoleRule | ((expression: Expression) => PoleRule | undefined);
@@ -477,8 +485,8 @@ export function guardDigitsN(
     if (!guarded.some((x) => x)) return evaluate(ops, options);
 
     const working = ce.precision;
-    const grows =
-      typeof rules.size === 'function' ? rules.size(expression) : !!rules.size;
+    const sizeRule = rules.size;
+    const grows = sizeRule !== undefined && sizeRule !== false;
     const pole =
       typeof rules.pole === 'function' ? rules.pole(expression) : rules.pole;
     const operands: GuardOperand[] = [];
@@ -512,7 +520,11 @@ export function guardDigitsN(
         },
       });
       // An integer held exactly has no rounding error to grow with its size.
-      if (grows && guarded[i] && !readExactly(originals[i], op))
+      if (
+        typeof sizeRule === 'function'
+          ? sizeRule(expression, i)
+          : sizeRule === true && guarded[i] && !readExactly(originals[i], op)
+      )
         sized.push(value);
     });
     const extra = extraGuardDigits(

@@ -6,8 +6,8 @@ import { ComputeEngine } from '../../src/compute-engine';
 // operands within 10^-11 of a pole (`Β(1/3, b)` with `a + b` near −4).
 // The guard grows with the size of the operand, for the functions whose
 // condition number grows with it (`Gamma`, `Factorial`, `Zeta`,
-// `DirichletEta`, `HurwitzZeta`, `Exp`, `Binomial`), and with the digits that
-// a pole cancels.
+// `DirichletEta`, `HurwitzZeta`, `Exp`, `Binomial`, and `Power` by its
+// exponent), and with the digits that a pole cancels.
 //
 // The expected values are mpmath 1.3, rounded to 30 significant digits.
 
@@ -169,6 +169,85 @@ describe('ONLY THE SINGULAR SUMS OF OPERANDS ADD GUARD DIGITS', () => {
     expect(digits(ce.box(expr as never).N() as never)).toEqual(
       ce.bignum(expected).toString()
     );
+  });
+});
+
+// `b^x` is ill conditioned at a large exponent: the error of `x` reaches the
+// result multiplied by `|x·ln b|`, and that of `b` by `|x|`. The size of the
+// exponent sets the guard digits, for every base. The expected values are
+// decimal.js `exp(x·ln b)` at 200 digits, rounded.
+const POWERS: [string, unknown, string, string][] = [
+  [
+    '2^(3000000000000001/3)',
+    ['Power', 2, R(3000000000000001, 3)],
+    '1.97495439177298922275641642908e+301029995663981',
+    '1.9749543917729892227564164290838368477097920168537e+301029995663981',
+  ],
+  [
+    '3^(-3000000000000001/7)',
+    ['Power', 3, R(-3000000000000001, 7)],
+    '5.55172142538540491020551905093e-204480537736999',
+    '5.5517214253854049102055190509251677240089421759847e-204480537736999',
+  ],
+  [
+    '(1/3)^(1000000000001/3)',
+    ['Power', R(1, 3), R(1000000000001, 3)],
+    '8.98422217834026694857872336493e-159040418241',
+    '8.9842221783402669485787233649298030926046111861287e-159040418241',
+  ],
+  [
+    'π^(1000000000001/3)',
+    ['Power', 'Pi', R(1000000000001, 3)],
+    '3.49677810894109102404740901594e+165716624231',
+    '3.4967781089410910240474090159359727303518662015359e+165716624231',
+  ],
+  // A float exponent has no rounding error, but its size multiplies the
+  // error of the base.
+  [
+    '(1/3)^123456789012345.5',
+    ['Power', R(1, 3), 123456789012345.5],
+    '1.20192536486320256703117195e-58903858077231',
+    '1.201925364863202567031171949999789058276182271837e-58903858077231',
+  ],
+];
+
+describe('THE GUARD OF A POWER GROWS WITH ITS EXPONENT', () => {
+  test.each(POWERS)('%s', (_name, expr, at30, at50) => {
+    for (const [precision, expected] of [
+      [30, at30],
+      [50, at50],
+    ] as const) {
+      const ce = new ComputeEngine();
+      ce.precision = precision;
+      expect(digits(ce.box(expr as never).N() as never)).toEqual(
+        ce.bignum(expected).toString()
+      );
+    }
+  });
+
+  test('the size of the base adds no guard', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 30;
+    const v = ce
+      .box(['Power', ['Add', ['Power', 10, 600], R(1, 3)], R(1, 3)])
+      .N();
+    expect(digits(v as never)).toEqual(ce.bignum('1e200').toString());
+  });
+
+  test('an exact integer exponent past the cap is answered', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 30;
+    const v = ce.box(['Power', R(1, 3), ['Power', 10, 600]]).N();
+    expect(v.isSame(0)).toBe(true);
+  });
+
+  test('an exponent past the cap that is not an integer stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 30;
+    const r = ce
+      .box(['Power', 2, ['Add', ['Power', 10, 600], R(1, 3)]])
+      .N();
+    expect(r.operator).toBe('Power');
   });
 });
 
