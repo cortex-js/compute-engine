@@ -81,6 +81,16 @@
   `list<integer>` or `list<real>` compiles the same way. A list of
   booleans, points or lists, GLSL and the interval target still decline.
 
+- **A compiled test of membership in a number set compiles when the declared
+  type decides it** (CE-1738, #638). With `n: integer`,
+  `Element(n, Integers)` (`n \in \Z`) fell back to the interpreter. It now
+  compiles to `True`, on every target. The test is decided from the static
+  type of the value, for `Integers`, `RationalNumbers`, `RealNumbers`,
+  `ComplexNumbers`, `ImaginaryNumbers`, `Numbers` and the extended sets:
+  `True` when the type is inside the set, `False` when the two do not meet
+  (`x \in i\R` with `x: real`). `NotElement` is the negation. A type that
+  does not decide (`x \in \Z` with `x: real`) still falls back.
+
 - **The `///` comments of a protocol and of its members are kept, and the
   editor functions show them** (CE-1730). `epsilHover()` on a protocol gives
   its comment, also for a protocol that a prelude declared on the engine,

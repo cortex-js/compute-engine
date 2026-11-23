@@ -2488,6 +2488,13 @@ function lowerOnce(
       case 'Scan':
       case 'Tabulate':
       case 'Element':
+        // Of a number set, decided from the static type of the value
+        // (`lower-match.ts`); otherwise a search of a list.
+        if (e.operator === 'Element') {
+          const decided = matches.element(e);
+          if (decided !== undefined) return decided;
+        }
+      // falls through
       case 'Identity':
       case 'CountIf':
       case 'Find':
@@ -2501,6 +2508,13 @@ function lowerOnce(
       case 'ApplyWhole':
       case 'ContainsSequence':
         return lists.collection(e);
+      case 'NotElement': {
+        // Of a number set, decided from the static type of the value
+        // (`lower-match.ts`); otherwise not compiled.
+        const decided = matches.element(e);
+        if (decided !== undefined) return decided;
+        break;
+      }
       case 'StartsWith':
       case 'EndsWith':
         // Of strings: the rows of the string lane (CE-1530); of lists, the

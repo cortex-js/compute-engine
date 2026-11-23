@@ -3386,7 +3386,7 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Match, x is T and N
 
-`lower-match.ts`. None of the three emits a test of a type at run time
+`lower-match.ts`. None of them emits a test of a type at run time
 (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time").
 
 - `N(x)` and `N(x, p)` of a number (an integer, a rational, a real or a
@@ -3406,6 +3406,16 @@ program whose last statement is a definition is `Nothing` and declines.
   local of a block or a capture of a case: the type of a local is the type of
   its value, which can be a `Match`. A name that the walk binds as an input, a
   parameter or a loop index, and a free name, are read by their type.
+- `Element(x, S)` of a number set that `domainToType()` maps to a type
+  (`Integers`, `RationalNumbers`, `RealNumbers`, `ComplexNumbers`,
+  `ImaginaryNumbers`, `Numbers` and the extended sets) is decided as
+  `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is
+  `True`, `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the
+  same type. A subject typed `nothing`, a subject whose type comes from a
+  `Match` or that reads a local, and a type that does not decide
+  (`x ∈ ℤ` of `x: real`) go to the list operators, which decline for a set.
+  Another set (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the
+  negation of the same constant; when it is not decided, it declines.
 - `Match(subject, case…)`: the subject is lowered once. A case of a string or a
   real number constant (`== "rect"`, `== 3`) is a clause of a `Which` on the
   subject, compared by `Equal` (exactly: the interpreter compares a number

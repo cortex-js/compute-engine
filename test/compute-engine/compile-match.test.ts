@@ -10,6 +10,9 @@
  * - `Match`: a case of a constant is a clause of a `Which` on the subject,
  *   `_` is the default, a `Tuple` pattern of names is selected by the shape
  *   of the subject at compile time, and a constant subject keeps one case.
+ * - `Element(x, S)` of a number set (`Integers`, `RealNumbers`, ...) is
+ *   decided as `MatchesType` of the type of the set, and `NotElement(x, S)`
+ *   is its negation (CE-1738).
  *
  * Every case is compared with the interpreter's value, on `javascript` and
  * `interval-js` (an enclosure that holds it); `glsl` cannot run here, so it
@@ -429,6 +432,89 @@ describe('MatchesType of a name whose value holds a Match', () => {
       ce,
       ['MatchesType', 'v', { str: 'integer' }],
       /MatchesType of a subject whose static type comes from a Match/
+    );
+  });
+});
+
+describe('Element(x, S) of a number set: a constant from the static type of x (CE-1738)', () => {
+  const ce = engine(`
+    function byMatch(s: string, x: real) { match s { == "a" => x * 2; _ => 0 } }
+  `);
+  ce.declare('L', 'list<integer>');
+  const test01 = (x: any, set: string) => ['If', ['Element', x, set], 1, 0];
+
+  test('True when the static type is a subtype of the type of S', () => {
+    for (const set of ['Integers', 'RationalNumbers', 'RealNumbers', 'Numbers'])
+      expectAgrees(ce, test01('n', set), [{ n: 3 }, { n: -2 }]);
+    expectAgrees(ce, test01(['Add', 'n', 1], 'Integers'), [{ n: 3 }]);
+    expectAgrees(ce, test01('x', 'ComplexNumbers'), [{ x: 0.5 }]);
+  });
+
+  test('False when the two types do not overlap', () => {
+    expectAgrees(ce, test01('x', 'ImaginaryNumbers'), [{ x: 0.5 }]);
+    expectAgrees(ce, test01('s', 'Integers'), [{ s: 'a' }]);
+  });
+
+  test('of an element of a list of integers', () => {
+    const r: any = compile(
+      ce.box(['Map', ['Function', ['Element', 'k', 'Integers'], 'k'], 'L']),
+      { fallback: false }
+    );
+    expect(r.run({ L: [1, -4] })).toEqual([true, true]);
+  });
+
+  test('declines when the static type neither proves nor excludes the set', () => {
+    expectDeclines(
+      ce,
+      ['Element', 'x', 'Integers'],
+      /Element of a value that the interpreter may hold exactly/,
+      { 'interval-js': /Element on interval-js/ }
+    );
+    // `NonNegativeIntegers` is not a set of `domainToType()`: the type of
+    // `n` does not prove it.
+    expectDeclines(
+      ce,
+      ['Element', 'n', 'NonNegativeIntegers'],
+      /Element of a value that the interpreter may hold exactly/,
+      { 'interval-js': /Element on interval-js/ }
+    );
+  });
+
+  test('declines a subject whose static type comes from a Match (CE-1731)', () => {
+    // The engine types `byMatch(s, x)` as an integer, from the case `_ => 0`;
+    // its value at `"a"`, 1.25 is 2.5.
+    expect(
+      interpreted(ce, test01(['byMatch', 's', 'x'], 'Integers'), {
+        s: 'a',
+        x: 1.25,
+      })
+    ).toBe(0);
+    expectDeclines(
+      ce,
+      ['Element', ['byMatch', 's', 'x'], 'Integers'],
+      /Element of a value that the interpreter may hold exactly/,
+      { 'interval-js': /Element on interval-js/ }
+    );
+    // `NotElement` has no list lowering: a decline shows that the type of
+    // the subject did not decide it.
+    expectDeclines(
+      ce,
+      ['NotElement', ['byMatch', 's', 'x'], 'Integers'],
+      /the operator NotElement is not supported/
+    );
+  });
+
+  test('NotElement is the negation', () => {
+    expectAgrees(ce, ['If', ['NotElement', 'n', 'Integers'], 1, 0], [{ n: 3 }]);
+    expectAgrees(
+      ce,
+      ['If', ['NotElement', 'x', 'ImaginaryNumbers'], 1, 0],
+      [{ x: 0.5 }]
+    );
+    expectDeclines(
+      ce,
+      ['NotElement', 'x', 'Integers'],
+      /the operator NotElement is not supported/
     );
   });
 });
