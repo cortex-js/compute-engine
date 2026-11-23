@@ -526,6 +526,12 @@
   with more digits than the precision and a wrong last digit, where
   `N(√2·(1/3))` gives `0.4714045207910316829338962`. The cell is now the
   same value. A tuple of fractions times `√2` had the same digits.
+- **A fraction times a complex number has a correct last digit at the
+  default precision** (CE-1718). `N((1/3)·√-2)` gave `0.471…682933i`, where
+  `N(√-2/3)` gives `0.471…682934i`, and `N((1/3)·e^i)` and
+  `N((1/3)·1.5i)` (`0.4999…95i`) had the same error. The fraction is now
+  applied as a product and a division with guard digits, as for a real
+  number: `N((1/3)·1.5i)` is `0.5i`.
 - **In Epsil, an error in the second operand of a subtraction whose first
   operand has a unary minus underlines the operand that made the error**
   (CE-1129). With `s` holding `"a"`, the type error of `-(y + 2) - s`
