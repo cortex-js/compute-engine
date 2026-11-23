@@ -87,6 +87,15 @@ describe('a tuple input of strings and numbers', () => {
       ['If', ['Equal', ['At', 'W', 1], ['At', 'W', 2]], 1, 0],
       { W: ['a', 'b'] },
     ],
+    // `First`, `Second` and `Last` are `At` of the index 1, 2 and -1.
+    ['the first part', ['First', 'T'], { T: ['E', 8] }],
+    ['the last part', ['Multiply', ['Last', 'T'], 2], { T: ['E', 8] }],
+    ['the second part', ['Second', 'U'], { U: ['x', 1.5, true] }],
+    [
+      'the first and the last part',
+      ['If', ['Equal', ['First', 'T'], "'A'"], ['Last', 'T'], 0],
+      { T: ['A', 3] },
+    ],
   ] as [string, MathJsonExpression, Record<string, unknown>][])(
     '%s agrees with evaluate()',
     (_, expr, scope) => {
@@ -117,6 +126,41 @@ describe('a tuple input of strings and numbers', () => {
   });
 });
 
+// A `Tuple` literal whose parts have different shapes (a number and a list
+// of a run-time length) read at a constant index is the part at that index.
+describe('a part of a tuple literal of a number and a list', () => {
+  const ce2 = new ComputeEngine();
+  ce2.declare('P', 'list<integer>');
+  ce2.declare('n', 'integer');
+  const pair: MathJsonExpression = ['Tuple', 3, 'P'];
+
+  it.each([
+    ['At 1', ['At', pair, 1], 3],
+    ['At -2', ['At', pair, -2], 3],
+    ['First', ['First', pair], 3],
+    ['the length of At 2', ['Length', ['At', pair, 2]], 3],
+    ['the sum of Last', ['Sum', ['Last', pair]], 12],
+  ] as [string, MathJsonExpression, number][])(
+    '%s agrees with evaluate()',
+    (_, expr, value) => {
+      const box = ce2.box(expr);
+      const c = compile(box, { fallback: false }) as any;
+      expect(c.run({ P: [1, 4, 7] })).toBe(value);
+      const r = box.subs({ P: ce2.box(['List', 1, 4, 7]) }).evaluate();
+      expect(r.re).toBe(value);
+    }
+  );
+
+  it.each([
+    ['at a run-time index', ['At', pair, 'n']],
+    ['out of range', ['At', pair, 3]],
+  ] as [string, MathJsonExpression][])('declines %s', (_, expr) =>
+    expect(() => compile(ce2.box(expr), { fallback: false })).toThrow(
+      /a record with a field of a run-time length/
+    )
+  );
+});
+
 describe('what declines', () => {
   const declines = (
     expr: MathJsonExpression,
@@ -132,6 +176,7 @@ describe('what declines', () => {
     ['the length', ['Length', 'T']],
     ['a part at a run-time index', ['At', 'T', 'n']],
     ['a part out of range', ['At', 'T', 3]],
+    ['a third part of a pair', ['Third', 'T']],
     ['a part, then the whole tuple', ['Block', ['At', 'T', 2], 'T']],
   ] as [string, MathJsonExpression][])('%s', (_, expr) =>
     declines(expr, {}, /a tuple whose parts have different lanes/)

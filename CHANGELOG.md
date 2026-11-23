@@ -91,6 +91,16 @@
   (`x \in i\R` with `x: real`). `NotElement` is the negation. A type that
   does not decide (`x \in \Z` with `x: real`) still falls back.
 
+- **A compiled read of one part of a tuple whose parts have different kinds
+  compiles in more forms on JavaScript** (CE-1741, #638). With
+  `S: tuple<string, integer>`, `First(S)` and `Last(S)` fell back to the
+  interpreter, while `At(S, 1)` compiled. `First`, `Second`, `Third` and
+  `Last` now read the part as `At` does. With `P: list<integer>`,
+  `At(Tuple(0, P), 2)` also fell back; `At`, `First` and `Last` of a
+  `Tuple` literal at a constant index in range now compile to the part at
+  that index (`P` here). A read at an index known only at run time still
+  falls back: the shape of the result depends on the index.
+
 - **The `///` comments of a protocol and of its members are kept, and the
   editor functions show them** (CE-1730). `epsilHover()` on a protocol gives
   its comment, also for a protocol that a prelude declared on the engine,

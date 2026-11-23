@@ -1665,6 +1665,48 @@ function lowerOnce(
     return v;
   };
 
+  /** `At(c, k)` (`e`) where `c` is read part by part, `k` the index from 1
+   *  (from the end when negative), `undefined` when it is not a constant
+   *  integer. A tuple input whose parts have different lanes
+   *  (`tupleParts()`) or a tuple of tuples (`loop()`) is read at a constant
+   *  index in range only. Of a `Tuple` literal at such an index, each part
+   *  is lowered in order, as the interpreter evaluates them, and the value
+   *  is the part `k`: its shape is settled whatever the shapes of the other
+   *  parts. `undefined` for another `c` or another index of a literal. */
+  const part = (
+    e: Expression,
+    c: Expression,
+    k: number | undefined
+  ): V | undefined => {
+    if (isFunction(c, 'Tuple')) {
+      const j = elementIndex(c.nops, k);
+      if (j === undefined) return undefined;
+      return c.ops.map((op) => value(op)!)[j];
+    }
+    if (!isSymbol(c)) return undefined;
+    // The first read of a tuple input read part by part makes its binding
+    // (`input()`).
+    if (
+      lookup(c.symbol) === undefined &&
+      tupleParts(c.type.type, cx.wide) !== undefined
+    ) {
+      partsRead = c;
+      symbol(c, true);
+    }
+    const owned = lookup(c.symbol);
+    const parts = owned?.binding.parts;
+    if (parts === undefined) return undefined;
+    const what =
+      owned!.binding.role === 'input'
+        ? 'a tuple whose parts have different lanes'
+        : 'a tuple of tuples';
+    if (k === undefined || !Number.isInteger(k))
+      decline(e, `At of ${what} at an index that is not a constant`);
+    const j = elementIndex(parts.length, k);
+    if (j === undefined) decline(e, `At of ${what} at an index out of range`);
+    return parts[j];
+  };
+
   const scalar = (e: Expression): V => {
     const v = value(e)!;
     if (type(v).shape.length > 0)
@@ -1913,34 +1955,14 @@ function lowerOnce(
             );
           }
         }
-        // The first read of a tuple input read part by part makes its
-        // binding (`input()`).
-        if (
-          isSymbol(e.ops[0]) &&
-          lookup(e.ops[0].symbol) === undefined &&
-          tupleParts(e.ops[0].type.type, cx.wide) !== undefined
-        ) {
-          partsRead = e.ops[0];
-          symbol(e.ops[0], true);
-        }
+        const p = part(
+          e,
+          e.ops[0],
+          isNumber(e.ops[1]) && e.ops[1].im === 0 ? e.ops[1].re : undefined
+        );
+        if (p !== undefined) return p;
         // A read of a list local written in place: in order with its writes.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
-        // An element of a tuple of tuples (`loop()`), or a part of a tuple
-        // input read part by part: a constant index.
-        const parts = owned?.binding.parts;
-        if (parts !== undefined) {
-          const what =
-            owned!.binding.role === 'input'
-              ? 'a tuple whose parts have different lanes'
-              : 'a tuple of tuples';
-          const j = e.ops[1].re;
-          if (!isNumber(e.ops[1]) || !Number.isInteger(j))
-            decline(e, `At of ${what} at an index that is not a constant`);
-          const x = parts[j > 0 ? j - 1 : parts.length + j];
-          if (x === undefined)
-            decline(e, `At of ${what} at an index out of range`);
-          return x;
-        }
         if (owned?.binding.role === 'list') {
           const l = owned.binding.v;
           const i = scalar(e.ops[1]);
@@ -2032,6 +2054,8 @@ function lowerOnce(
       case 'Last': {
         if (e.nops !== 1) break;
         const k = { First: 1, Second: 2, Third: 3, Last: -1 }[e.operator]!;
+        const p = part(e, e.ops[0], k);
+        if (p !== undefined) return p;
         const i = b.constant(k, 'integer');
         if (lists.isIterate(e.ops[0]) && k > 0)
           return at(e, lists.iterateTo(e, e.ops[0], i), i);
