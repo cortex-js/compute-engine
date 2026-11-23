@@ -441,3 +441,181 @@ describe('a record declines', () => {
     );
   });
 });
+
+/**
+ * Records as arguments of user functions (CE-1652, step 3): a parameter of
+ * no stated type, of type `any` or of a nominal tuple type holds the type
+ * of a record argument, and the function is lowered once per such type
+ * (a parameter of no stated type or `any` holds a string or a colour the
+ * same way). A parameter of a nominal tuple type takes a record of that
+ * type only. A recursive call on a cycle with a record declines.
+ */
+describe('records as arguments of user functions', () => {
+  const ce = engine();
+  executeEpsil(
+    ce,
+    `
+    type Q = tuple<x: real, y: real>
+    shift(p: P, d: real) = P(p.x + d, p.y)
+    fill(fig: Figure, p: any) = Figure(fig.kind, fig.geom, fig.matrix, p, fig.strokePaint, fig.strokePx, fig.dashPattern, fig.alpha)
+    function translate(fig: Figure, d: tuple<real, real>) {
+      let m = fig.matrix
+      let x: real = m[5] + d[1]
+      let y: real = m[6] + d[2]
+      Figure(fig.kind, fig.geom, (fig.matrix[1], fig.matrix[2], fig.matrix[3], fig.matrix[4], x, y), fig.fillPaint, fig.strokePaint, fig.strokePx, fig.dashPattern, fig.alpha)
+    }
+    radius(fig) = fig.geom[3]
+    radiusAny(fig: any) = fig.geom[3]
+    viaUntyped(x) = fill(x, "red")
+    fillCode(fig: Figure) = if fig.fillPaint is nothing { 0 } else { 1 }
+    function kindCode(fig: Figure) { match fig.kind { == "circle" => fig.geom[3]; == "label" => 2; _ => 0 } }
+    function walk(p: P, n: integer) -> P { if n <= 0 { p } else { walk(P(p.x + 1, p.y), n - 1) } }
+    function wrap(x, n: integer) { if n <= 0 { 0 } else { wrap((x, "a"), n - 1) } }
+    tag(x) = ("sample", x)
+  `
+  );
+  const circleAt = (x: any, y: any, r: any) => ['circle', ['Tuple', x, y], r];
+  const codeOf = (r: any) => `${r.preamble ?? ''}\n${r.code}`;
+
+  test('a parameter of a nominal tuple type, a result of that type', () => {
+    expectAgrees(ce, ['shift', ['P', ['Cos', 't'], ['Sin', 't']], 1]);
+  });
+
+  test('a Figure parameter, and a parameter of type any that holds a string', () => {
+    const r = expectAgrees(ce, [
+      'fill',
+      circleAt(['Cos', 't'], 0, 0.1),
+      { str: 'red' },
+    ]);
+    expect(r.run({ t: 0 }).fillPaint).toBe('red');
+  });
+
+  test('a parameter of type any that holds a colour, through two functions', () => {
+    const expr = [
+      'translate',
+      ['fill', circleAt(0, 0, 't'), ['Rgb', 't', 0, 0]],
+      ['Tuple', 1, 2],
+    ];
+    const js = compileTo(ce, expr, 'javascript');
+    if (!js.ok) throw new Error(js.message);
+    const colour = compileTo(ce, ['Rgb', 't', 0, 0], 'javascript');
+    if (!colour.ok) throw new Error(colour.message);
+    for (const t of [1, 0.3]) {
+      const got = js.result.run({ t });
+      const expected = ce.box(expr).subs({ t }).evaluate().N();
+      // The colour is the run-time object of the compiled `Rgb`, and the
+      // interpreter's field is that `Rgb`.
+      expect(got.fillPaint).toEqual(colour.result.run({ t }));
+      expect(isFunction(expected) && expected.ops[3].operator).toBe('Rgb');
+      // The other fields: the interpreter's value with no fill.
+      const plain = ce
+        .box(['translate', circleAt(0, 0, 't'), ['Tuple', 1, 2]])
+        .subs({ t })
+        .evaluate()
+        .N();
+      expectClose({ ...got, fillPaint: null }, hostValue(plain));
+      expect(got.matrix).toEqual([1, 0, 0, 1, 1, 2]);
+    }
+  });
+
+  test('a parameter of no stated type, and of type any, read by a field', () => {
+    expectAgrees(ce, ['radius', circleAt('t', 0, 2)]);
+    expectAgrees(ce, ['radiusAny', circleAt('t', 0, 2)]);
+    expectAgrees(ce, ['viaUntyped', circleAt('t', 1, 2)]);
+  });
+
+  test('one function called with two record types: two lowered functions', () => {
+    // The functions lowered for `expr`: in the complex mode, where the
+    // pass `inline` does not copy a function called twice.
+    const lowered = (expr: any) => {
+      const r = compileTo(ce, expr, 'javascript', 'complex');
+      if (!r.ok) throw new Error(r.message);
+      return new Set(codeOf(r.result).match(/u\d+_fill\b/g)).size;
+    };
+    const two = [
+      'Tuple',
+      ['fill', circleAt('t', 0, 1), { str: 'red' }],
+      [
+        'fill',
+        ['fill', circleAt('t', 0, 2), { str: 'blue' }],
+        { str: 'green' },
+      ],
+    ];
+    expectAgrees(ce, two);
+    expect(lowered(two)).toBe(2);
+    // Two calls with records of one type share one lowered function.
+    const one = [
+      'Tuple',
+      ['fill', circleAt('t', 0, 1), { str: 'red' }],
+      ['fill', circleAt(0, 't', 2), { str: 'blue' }],
+    ];
+    expectAgrees(ce, one);
+    expect(lowered(one)).toBe(1);
+  });
+
+  test('x is T and Match on a field of a record parameter', () => {
+    expectAgrees(ce, ['fillCode', circleAt('t', 0, 2)]);
+    expectAgrees(ce, [
+      'fillCode',
+      ['fill', circleAt('t', 0, 2), { str: 'red' }],
+    ]);
+    expectAgrees(ce, ['kindCode', circleAt('t', 0, 2)]);
+  });
+
+  test('a parameter of a nominal tuple type given a record of another type', () => {
+    expectDeclines(
+      ce,
+      ['viaUntyped', ['Q', 't', 1]],
+      /an argument of fill for the parameter fig of type Figure that is a record of the type Q/
+    );
+  });
+
+  test('a recursive function over a record', () => {
+    expectDeclines(
+      ce,
+      ['walk', ['P', 't', 1], 3],
+      /a recursive call of walk, on a cycle of calls with a record parameter or result/
+    );
+    // A record that grows at each call.
+    expectDeclines(
+      ce,
+      ['wrap', ['Tuple', 't', { str: 'b' }], 3],
+      /a recursive call of wrap, on a cycle of calls with a record parameter or result/
+    );
+  });
+
+  test('a list of two lanes at a parameter that maps over lists', () => {
+    // The interpreter maps `tag` over the list:
+    // `[("sample", t), ("sample", "a")]`.
+    expectDeclines(
+      ce,
+      ['tag', ['List', 't', { str: 'a' }]],
+      /a list of elements of two types given to the parameter x of tag, which maps over a list/
+    );
+    // A tuple binds whole.
+    expectAgrees(ce, ['tag', ['Tuple', 't', { str: 'a' }]]);
+  });
+
+  test('on GLSL and interval-js', () => {
+    for (const to of ['glsl', 'interval-js'] as Target[]) {
+      expectDeclines(
+        ce,
+        ['shift', ['P', ['Cos', 't'], ['Sin', 't']], 1],
+        /records compile on javascript only/,
+        to
+      );
+      expectDeclines(
+        ce,
+        ['fill', circleAt(['Cos', 't'], 0, 0.1), { str: 'red' }],
+        /records compile on javascript only|text compiles on javascript only/,
+        to
+      );
+      expectDeclines(
+        ce,
+        ['radius', circleAt('t', 0, 2)],
+        /records compile on javascript only|text compiles on javascript only/,
+        to
+      );
+    }
+  });
+});

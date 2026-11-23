@@ -3480,9 +3480,30 @@ before ("elements of two types"); `admits()` refuses the lane there too.
 - **User functions.** A function whose result type is not a scalar (a named
   tuple type, `list<real | string>`) returns the record of its body; a body that
   is not a record declines as before ("the result of f is not a scalar"), and a
-  result type with field names requires a record of those names. A recursive
-  function whose result is a record declines. Records as arguments are step 3 of
-  CE-1652.
+  result type with field names requires a record of those names. A parameter
+  of no stated type, of type `any` or of a nominal tuple type holds the type of
+  a record argument (`held()` of `lower-functions.ts`; CE-1652, step 3), and
+  one of no stated type or `any` also the type of a string or a colour
+  (JavaScript only): the parameter has the IR type of the argument, with its
+  fields, and the lane key (`laneKey()`) holds that type (`typeToString()`:
+  the nominal type, the field names, and the IR type and the tuple mark of each
+  field), so two calls of records of one IR type call one function and two
+  calls of records of two types (`fill` of an unfilled and of a filled
+  `Figure`) two. Such a parameter's arguments are lowered before the function
+  is chosen at each call. A parameter of a nominal tuple type takes a record of
+  that nominal type only, or of a nominal type that the static type of the
+  argument proves a subtype of it; any other record declines (R5). In a
+  constructor, an operand of no stated type or of type `any` (such a
+  parameter) proves the declared type of its field by its lane (a string, a
+  colour, a boolean, a number, `nothing`) in the function lowered for it. A
+  field of a record parameter is read as on a local record (the operation
+  `field`), so `x is T` of a field is decided by its lane and a `match` on a
+  field compares at run time. A recursive call on a cycle of calls through a
+  function whose parameter or declared result is a record, or whose arguments
+  hold a record, declines before a function is lowered for it (`recordCycle()`):
+  the type of a record on a cycle is a fixed point that the lowering does not
+  compute, and a record that grows at each call would lower a new function at
+  each.
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names

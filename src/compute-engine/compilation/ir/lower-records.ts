@@ -16,6 +16,7 @@ import type { Expression } from '../../global-types.js';
 import {
   decline,
   hasUnsettledShape,
+  isUntyped,
   recordNames,
   tupleBody,
   type Fn,
@@ -69,6 +70,24 @@ function settledType(d: Type, wide: 'real' | 'complex'): IRType | undefined {
   if (t === undefined || t.shape.some((n) => n === 'run-time'))
     return undefined;
   return { lane: t.lane, shape: t.shape as number[] };
+}
+
+/** The scalar of the IR type `t` (no tuple mark when `!marked`) is of the
+ *  engine type `d`: its lane names an engine type that is a subtype of
+ *  `d`. A list, a tuple and a record do not prove a type here. */
+function laneProves(t: IRType, marked: boolean, d: Type): boolean {
+  if (t.shape.length > 0 || marked) return false;
+  const lanes: Partial<Record<IRType['lane'], Type>> = {
+    string: 'string',
+    color: 'color',
+    boolean: 'boolean',
+    integer: 'integer',
+    real: 'real',
+    complex: 'complex',
+    nothing: 'nothing',
+  };
+  const e = lanes[t.lane];
+  return e !== undefined && isSubtype(e, d);
 }
 
 /** `javascript`: the target holds records (JavaScript, not the interval
@@ -167,12 +186,21 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
           op,
           `${what}: a value whose static type comes from a Match (CE-1731)`
         );
-      if (!isSubtype(op.type.type, d))
+      // A value of no stated type or of type `any` (a parameter that holds
+      // the type of its argument, `held()` of `lower-functions.ts`): its
+      // lane proves the field's type, in the function lowered for it.
+      const open = !isSubtype(op.type.type, d) && isUntyped(op.type.type);
+      if (!open && !isSubtype(op.type.type, d))
         decline(
           op,
           `${what}: a value of type ${engineTypeToString(op.type.type)}, which does not prove ${engineTypeToString(d)}`
         );
       const v = cx.value(op)!;
+      if (open && !laneProves(type(v), tuples.has(v), d))
+        decline(
+          op,
+          `${what}: a value of type ${engineTypeToString(op.type.type)}, here ${typeToString(type(v))}, which does not prove ${engineTypeToString(d)}`
+        );
       const settled = settledType(d, cx.wide);
       fields.push(settled);
       if (settled === undefined) return v;

@@ -417,6 +417,14 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
           // No stated type, or `number`: the lane of a scalar argument,
           // a real or a complex (`laneKey()`).
           open: present(t) === 'unknown' || present(t) === 'number',
+          // No stated type, `any`, or a nominal tuple type: the type of a
+          // record argument (`held()`); `true` for any record, else the
+          // nominal type that the record must have.
+          record: isUntyped(t)
+            ? (true as const)
+            : tupleBody(t) !== undefined
+              ? (t as TypeReference)
+              : undefined,
         };
   });
   // A result that the engine inferred from a body that holds a `Match` is
@@ -591,7 +599,13 @@ type UserFunction = {
     taken?: string;
     /** Of the lane `rows`: the lane of the elements. */
     element?: 'integer' | 'real';
+    /** The type of the argument that the parameter holds (`held()`): a
+     *  record, with its fields. */
+    type?: IRType;
   }[];
+  /** A parameter or the declared result is a record: a recursive call
+   *  declines (`call()`). */
+  record: boolean;
   /** The number of parameters of `ir` for `params` (with the lengths). */
   own: number;
   result?: IRType;
@@ -633,7 +647,10 @@ type UserFunction = {
 
 export function functionLowering(
   cx: Lowering,
-  lists: ReturnType<typeof listLowering>
+  lists: ReturnType<typeof listLowering>,
+  /** The target holds records and text (JavaScript, not the interval or
+   *  the `bigint` mode). */
+  javascript = false
 ) {
   const { b, type } = cx;
   /** The IR functions of each binding, one per lane key (`laneKey()`). */
@@ -675,10 +692,66 @@ export function functionLowering(
    *  integers at a list parameter of integers. */
   const laneKey = (sig: ReturnType<typeof signatureTypes>, args?: V[]) =>
     sig.params
-      .map((p, i) =>
-        complexAt(p, args?.[i]) ? 'c' : realListAt(p, args?.[i]) ? 'l' : 'r'
-      )
+      .map((p, i) => {
+        // A parameter that holds the type of its argument: one function
+        // per type, a record by its nominal type and each field.
+        const h = held(p, args?.[i]);
+        if (h !== undefined) return `{${typeToString(h)}}`;
+        return complexAt(p, args?.[i])
+          ? 'c'
+          : realListAt(p, args?.[i])
+            ? 'l'
+            : 'r';
+      })
       .join('');
+  /** The type of the argument `v` that a parameter of no stated type, of
+   *  type `any` or of a nominal tuple type holds (README, "Records"): a
+   *  record; at a parameter of no stated type or `any`, also a string or
+   *  a colour (JavaScript only). Otherwise `undefined`, the rules of
+   *  today. */
+  const held = (
+    p: ReturnType<typeof signatureTypes>['params'][number],
+    v: V | undefined
+  ): IRType | undefined => {
+    if (v === undefined || !('record' in p) || p.record === undefined)
+      return undefined;
+    const t = type(v);
+    if (t.lane === 'record') return t;
+    return javascript &&
+      p.record === true &&
+      t.shape.length === 0 &&
+      (t.lane === 'string' || t.lane === 'color') &&
+      !cx.tuples.has(v)
+      ? { lane: t.lane, shape: [] }
+      : undefined;
+  };
+  /** A call `e` of a function of the binding `key` (or of the function
+   *  `fn` when it has none) while a function of it is being lowered: a
+   *  recursive call. It declines when a function on the cycle of calls
+   *  has a record parameter or result, or when the arguments `args` hold
+   *  a record: the type of a record on a cycle is a fixed point that the
+   *  lowering does not compute (and a record that grows at each call
+   *  would lower a new function at each). */
+  const recordCycle = (
+    e: Fn,
+    on: UserFunction[],
+    sig?: ReturnType<typeof signatureTypes>,
+    args?: V[]
+  ) => {
+    if (on.length === 0) return;
+    const stack = [...lowering];
+    const from = Math.min(...on.map((f) => stack.indexOf(f)));
+    const cycle = stack.slice(from);
+    if (
+      cycle.some((f) => f.record) ||
+      (sig !== undefined &&
+        sig.params.some((p, i) => held(p, args?.[i])?.lane === 'record'))
+    )
+      decline(
+        e,
+        `a recursive call of ${e.operator}, on a cycle of calls with a record parameter or result (the type of a record on a cycle of calls is not computed)`
+      );
+  };
   /** The functions being lowered, by the name of their head: a call of
    *  that name in the body is the recursive call (its node can be bound
    *  before the definition is). */
@@ -729,6 +802,32 @@ export function functionLowering(
       grid,
     } = sig;
     const params = sig.params.map((declared, i) => {
+      // A record (or, at a parameter of no stated type or `any`, a string
+      // or a colour): the parameter has the type of the argument, and the
+      // function is lowered once per such type (`laneKey()`).
+      const h = held(declared, args?.[i]);
+      if (h !== undefined) {
+        // A parameter of a nominal tuple type takes a record of that type
+        // only, or of a type that the static type of the argument proves
+        // a subtype of it (R5).
+        const nominal = (declared as { record?: true | TypeReference }).record;
+        const s = e.ops[i]?.type.type;
+        if (
+          typeof nominal === 'object' &&
+          h.nominal !== nominal.name &&
+          !(
+            typeof s === 'object' &&
+            s.kind === 'reference' &&
+            s.name === h.nominal &&
+            isSubtype(s, nominal)
+          )
+        )
+          decline(
+            e.ops[i] ?? e,
+            `an argument of ${e.operator} for the parameter ${names[i]} of type ${nominal.name} that is ${h.nominal === undefined ? 'a record of no named type' : `a record of the type ${h.nominal}`}`
+          );
+        return { lane: h.lane, shape: [], type: h };
+      }
       if (complexAt(declared, args?.[i]))
         return { ...declared, lane: 'complex' as const };
       // A list of reals at a list parameter of integers: on the real lane.
@@ -803,7 +902,11 @@ export function functionLowering(
           ? { v: param(ir, names[i], { lane: 'integer', shape: [] }, true) }
           : n
       );
-      const v = param(ir, names[i], { lane: t.lane, shape });
+      const v = param(
+        ir,
+        names[i],
+        'type' in t && t.type !== undefined ? t.type : { lane: t.lane, shape }
+      );
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       if (t.lane === 'rows') cx.rowsParams.add(v);
       return v;
@@ -813,6 +916,7 @@ export function functionLowering(
       params,
       own: (ir.lifted = ir.body.params.length),
       result,
+      record: record || params.some((p) => p.lane === 'record'),
       list:
         list !== undefined ||
         points !== undefined ||
@@ -1093,6 +1197,8 @@ export function functionLowering(
             (p) =>
               ('open' in p && p.open) ||
               ('whole' in p && p.whole) ||
+              // A parameter that can hold a record (`held()`).
+              ('record' in p && p.record !== undefined) ||
               (!functions.has(binding.key) &&
                 ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
                   ('point' in p && p.point !== undefined)))
@@ -1141,11 +1247,36 @@ export function functionLowering(
           }
         );
       }
+      // A list of elements of two lanes (a record, `lower.ts`) at a
+      // parameter that the interpreter maps over a list: the interpreter
+      // maps the function over the elements, the parameter would hold the
+      // record whole. A tuple binds whole.
+      if (lowered !== undefined)
+        e.ops.forEach((op, i) => {
+          const s = op.type.type;
+          if (
+            type(lowered[i]).lane === 'record' &&
+            sig.mapsAt(i, false) &&
+            (s === 'list' || (typeof s === 'object' && s.kind === 'list'))
+          )
+            decline(
+              op,
+              `a list of elements of two types given to the parameter ${sig.names[i]} of ${e.operator}, which maps over a list (the interpreter maps the function over the list)`
+            );
+        });
       // A call in the body being lowered (a recursive call) calls that IR
       // function, whatever its reader (`tells`); another call calls the one
       // for its kind of reader (`define()`). An argument can hold the first
       // call of the same function.
       const variants = functions.get(binding.key);
+      // A call while a function of the binding is being lowered, before a
+      // function of another record type would be lowered for it.
+      recordCycle(
+        e,
+        [...(variants?.values() ?? [])].filter((f) => lowering.has(f)),
+        sig,
+        early
+      );
       const lane = laneKey(sig, early);
       const both = variants?.get(lane);
       fn = variants?.get(lane + '?') as UserFunction;
@@ -1161,7 +1292,10 @@ export function functionLowering(
             define(e, binding.key, binding.literal, sig, early, () => nan);
         }
     }
-    if (lowering.has(fn)) fn.recursive.push([e, nanForAbsent]);
+    if (lowering.has(fn)) {
+      recordCycle(e, [fn]);
+      fn.recursive.push([e, nanForAbsent]);
+    }
     if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
     // A call back to a lane of the function that another lane of it hides
@@ -1255,10 +1389,10 @@ export function functionLowering(
         p.shape[0] !== 'run-time' || n === undefined
           ? []
           : [typeof n === 'number' ? b.constant(n, 'integer') : n.v];
-      const declared = {
+      const declared = (p.type ?? {
         lane: p.lane,
         shape: p.shape.map((m) => (m === 'run-time' ? n : m)),
-      } as IRType;
+      }) as IRType;
       if (p.shape.length === 0 && t.shape.length > 0) {
         // A list that the interpreter binds whole at a scalar parameter.
         if (!fn.mapsAt(i, false))

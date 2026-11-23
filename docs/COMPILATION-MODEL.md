@@ -2654,8 +2654,23 @@ elements of several lanes (`[t, "a"]`) is a record with no names, an array at
 records of one engine type whose fields have different shapes (a filled and
 an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
 whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
-decline a record. A record passed to a user function or to a function of the
-host, and a method of a protocol, still decline (CE-1652, steps 3 to 5).
+decline a record. A parameter of a user function of no stated type, of type
+`any` or of a named tuple type takes a record (one of no stated type or `any`
+also a string or a colour), and the function is compiled once for each type
+of record it is given: with `shift(p: P, d: real) = P(p.x + d, p.y)`,
+`shift(P(cos(t), sin(t)), 1)` compiles. A parameter of a named tuple type
+takes a record of that type only (R5), and a recursive function whose
+parameter or result is a record declines. A list of elements of several lanes
+given to a parameter that the interpreter maps over a list (`tag(x) =
+("sample", x)`, `tag([t, "a"])`) declines; a tuple there is passed whole
+(`tag((t, "a"))` compiles). A local declared with no type widens a real to
+`number` (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and Block
+contracts"), so `let m = fig.matrix` is a `tuple<number, …>`, and a field
+typed `real` given `m[1]` declines (R5). A local declared with a tuple type
+declines too; read the field where it is used (`fig.matrix[1]`), or declare
+a local of each element (`let a: real = fig.matrix[1]`). A record
+passed to a function of the host, and a method of a protocol, still decline
+(CE-1652, steps 4 and 5).
 
 ## Collections
 

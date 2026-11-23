@@ -115,6 +115,18 @@
   condition (`if t > 0 { P(t, 1) } else { Q("a") }`), a field read at an
   index that is not a constant, and such a value on GLSL or `interval-js` still
   fall back to the interpreter. A result of this kind cannot be broadcast.
+- **`compile()` compiles a call of a user function that takes a value of a
+  named tuple type, which it refused** (CE-1652). With `shift(p: P, d: real)
+  = P(p.x + d, p.y)`, `shift(P(cos(t), sin(t)), 1)` compiles on JavaScript.
+  A parameter of no stated type, of type `any` or of a named tuple type takes
+  such a value, and one of no stated type or `any` also takes a string or a
+  colour: with `fill(fig: Figure, p: any)`, `fill(circle((0, 0), t), "red")`
+  and `fill(circle((0, 0), t), rgb(t, 0, 0))` compile. A function called with
+  values of two shapes (`fill` of an unfilled and of a filled figure) is
+  compiled once for each. A parameter of a named tuple type given a value of
+  another named type, a recursive function that takes or returns such a
+  value, and such a call on GLSL or `interval-js` still fall back to the
+  interpreter.
 
 ## 0.200.1 _2026-11-23_
 

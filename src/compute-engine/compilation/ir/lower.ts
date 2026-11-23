@@ -6595,11 +6595,11 @@ function lowerOnce(
   };
   const lists = listLowering(cx);
   const matrices = matrixLowering(cx, lists);
-  const fns = functionLowering(cx, lists);
-  const records = recordLowering(
-    cx,
-    options.javascript === true && !bigint && !interval
-  );
+  // The target holds records (JavaScript, not the interval or the
+  // `bigint` mode).
+  const javascript = options.javascript === true && !bigint && !interval;
+  const fns = functionLowering(cx, lists, javascript);
+  const records = recordLowering(cx, javascript);
   const matches = matchLowering(cx, records);
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
