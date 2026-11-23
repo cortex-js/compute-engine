@@ -186,7 +186,10 @@ export function enclosingFrame(
  * the frame of the written call ({@link renamedCallFrame}), so that it
  * selects the written argument. This is done only for a written call that is
  * the value of the statement or the argument that an outer frame of the
- * statement selected ({@link rejectFramesOutsideScope}).
+ * statement selected ({@link rejectFramesOutsideScope}). The result holds
+ * these frames as `frames`, in the order of `frames`, so that a message names
+ * the written call: `Exp argument 1`, not `Power argument 2`. Every other
+ * frame is as recorded.
  */
 export function locateError(
   frames: readonly ErrorFrameRef[],
@@ -222,7 +225,11 @@ export function locateError(
   /** The value that the error names as the cause (see
    * {@link offendingValue}), such as `"a"` for the error of `Ln("a")`. */
   offending?: MathJsonExpression
-): { range: [number, number]; call?: MathJsonExpression } {
+): {
+  range: [number, number];
+  call?: MathJsonExpression;
+  frames: ErrorFrameRef[];
+} {
   // The frames as recorded name the canonical calls. `rejectFramesOutsideScope`
   // changes the frames of renamed calls in `written`, which is used from
   // here on, and compares the frames as recorded with the canonical operands.
@@ -339,9 +346,10 @@ export function locateError(
     // The matched CALL travels with the range: a caller quoting the error's
     // surroundings wants `IndexOf(digits, cs[i], 23)`, not the one argument
     // the range underlines and not the whole enclosing statement.
-    if (range !== undefined) return { range, call: found.call };
+    if (range !== undefined)
+      return { range, call: found.call, frames: written };
   }
-  return { range: fallback };
+  return { range: fallback, frames: written };
 }
 
 /**
@@ -1264,29 +1272,6 @@ function argumentAtSlot(
     if (written !== null && names.indexOf(written) === slot) return op;
   }
   return null;
-}
-
-/** {@link locateError}'s range alone, for a caller that only needs to point. */
-export function narrowToFrames(
-  frames: readonly ErrorFrameRef[],
-  stmt: MathJsonExpression,
-  fallback: [number, number],
-  slotNamesFor?: (
-    operatorName: string
-  ) => readonly (string | undefined)[] | undefined,
-  frameIndexOrder: 'declaration' | 'written' = 'declaration',
-  canonicalOrder?: CanonicalOrder,
-  offending?: MathJsonExpression
-): [number, number] {
-  return locateError(
-    frames,
-    stmt,
-    fallback,
-    slotNamesFor,
-    frameIndexOrder,
-    canonicalOrder,
-    offending
-  ).range;
 }
 
 /** Collect every node of `expr` that is a written call of a frame of `name`

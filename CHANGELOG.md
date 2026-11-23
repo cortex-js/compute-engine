@@ -47,6 +47,12 @@
   (CE-1129). With `s` holding `"a"`, the type error of `-(y + 2) - s`
   underlined `y + 2`, and the runtime error of `[-y - s, 1]` underlined `y`.
   Both now underline `s`.
+- **In Epsil, the message of an error in the argument of `exp` or in the
+  numerator of a division names the call that the program contains**
+  (CE-1139). With `w` holding `"s"`, the runtime error of `exp(w) + 1` said
+  "in Power argument 2, in Add argument 1", and that of `w/2 + 1` said "in
+  Multiply argument 2, in Add argument 1". They now say "in Exp argument 1"
+  and "in Divide argument 1".
 
 ## 0.200.0 _2026-11-22_
 

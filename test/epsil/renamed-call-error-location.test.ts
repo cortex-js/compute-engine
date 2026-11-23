@@ -108,3 +108,47 @@ describe('an error in the argument of a renamed call', () => {
     expect(errorRanges(src, 'let v')).toEqual([rangeOf(src, 'g("a")')]);
   });
 });
+
+describe('the message names the written call', () => {
+  /** The frames of the message of the runtime error of the statement that
+   * starts with `let v`. */
+  function frames(program: string): string {
+    const src = `${prefix}${program}\n0`;
+    const at = src.indexOf('let v');
+    const d = executeEpsil(new ComputeEngine(), src).diagnostics.find(
+      (x) =>
+        Array.isArray(x.message) &&
+        x.message[0] === 'runtime-error' &&
+        x.range[0] >= at
+    );
+    expect(d).toBeDefined();
+    return String(d!.message[2]);
+  }
+
+  test.each([
+    ['let v = Exp(w) + 1', 'in Exp argument 1, in Add argument 1'],
+    ['let v = w/2 + 1', 'in Divide argument 1, in Add argument 1'],
+    ['let v = -w/2', 'in Divide argument 1'],
+    ['let v = Exp(w/2)', 'in Divide argument 1, in Exp argument 1'],
+    // The frames of the subtraction still name the canonical `Negate` and
+    // `Add` (CE-1717).
+    [
+      'let v = 1 - Exp(w)',
+      'in Exp argument 1, in Negate argument 1, in Add argument 1',
+    ],
+    // `y^2` is a written call of `Power`: its frame is not changed.
+    ['let y = 3\nlet v = y^2 + Exp(w)', 'in Exp argument 1, in Add argument 2'],
+    ['let v = 2^w + 1', 'in Power argument 2, in Add argument 1'],
+  ])('%s', (program, expected) => {
+    expect(frames(program)).toBe(expected);
+  });
+
+  test('a frame recorded in an earlier statement is not changed', () => {
+    // The frame `Multiply argument 2` was recorded by `Ln(w) * 2` in the
+    // statement of `x`. It is not the frame of the division `u/2`, whose
+    // canonical form is `Multiply(1/2, u)`.
+    expect(frames('let x = Ln(w) * 2\nlet v = [u/2, x]')).toBe(
+      'in Ln argument 1, in Multiply argument 2'
+    );
+  });
+});

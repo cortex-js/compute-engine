@@ -55,10 +55,11 @@ import { resolveLibraryNames } from './resolve-library-names.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import { definitionSites } from './definition-sites.js';
 import {
-  narrowToFrames,
+  locateError,
   offendingValue,
   traceFrames,
   type CanonicalOrder,
+  type ErrorFrameRef,
 } from './error-location.js';
 import { signatureNotes } from './signature-notes.js';
 import {
@@ -681,7 +682,7 @@ function* executeEpsilSteps(
           stmt,
           range,
           boxedStmt
-        );
+        ).range;
     });
     // A runtime problem in a NON-final statement would otherwise vanish —
     // only the last statement's value is returned — so surface it as a
@@ -1162,11 +1163,26 @@ function reportWalkFailure(
     diagnostics.push(diagnostic);
 }
 
-export function errorFrameChain(error: MathJsonExpression): string {
+/**
+ * The frames of the `ErrorTrace` breadcrumb of `error` as text:
+ * `in Ln argument 1, in Add argument 2`.
+ *
+ * `written` is the list of the `ErrorFrame` frames that {@link locateError}
+ * returns, in the order of {@link traceFrames}: a frame of a call that
+ * canonicalization renamed is there the frame of the written call, so that
+ * the error of `exp(w) + 1` is `in Exp argument 1`, not `in Power argument 2`.
+ * Without it, the frames are as recorded.
+ */
+export function errorFrameChain(
+  error: MathJsonExpression,
+  written?: readonly ErrorFrameRef[]
+): string {
   const ops = [...operands(error)];
   const trace = ops[ops.length - 1];
   if (trace === undefined || operator(trace) !== 'ErrorTrace') return '';
   const frames: string[] = [];
+  // The index of the next `ErrorFrame` in `written`.
+  let k = 0;
   for (const frame of operands(trace)) {
     if (operator(frame) === 'ErrorBroadcast') {
       const name = stringValue(operand(frame, 1));
@@ -1181,9 +1197,15 @@ export function errorFrameChain(error: MathJsonExpression): string {
       continue;
     }
     if (operator(frame) !== 'ErrorFrame') continue;
-    const name = stringValue(operand(frame, 1));
-    const index = machineValue(operand(frame, 2));
-    if (name === null || index === null) continue;
+    const recordedName = stringValue(operand(frame, 1));
+    const recordedIndex = machineValue(operand(frame, 2));
+    // `traceFrames` skips the same frames.
+    if (recordedName === null || recordedIndex === null) continue;
+    const { name, index } = written?.[k] ?? {
+      name: recordedName,
+      index: recordedIndex,
+    };
+    k += 1;
     // `Block` and `Function` frames are evaluation structure the engine
     // inserted (a lambda body, a statement block) — not calls the user
     // wrote — so they add no information a reader can act on.
@@ -1198,8 +1220,9 @@ export function errorFrameChain(error: MathJsonExpression): string {
  * frame that produced it, using the error's own `ErrorTrace` breadcrumb — the
  * difference between underlining all of
  * `s |> Map(_ => Length(Characters(s)), _)` and underlining the `s` inside
- * `Characters(s)`. See `narrowToFrames()` for how a frame is matched onto the
- * source.
+ * `Characters(s)`. See `locateError()` for how a frame is matched onto the
+ * source. The frames of the result name the written calls (see
+ * {@link errorFrameChain}).
  */
 function narrowErrorRange(
   ce: ComputeEngine,
@@ -1207,13 +1230,13 @@ function narrowErrorRange(
   stmt: MathJsonExpression,
   fallback: [number, number],
   boxedStmt?: Expression
-): [number, number] {
+): { range: [number, number]; frames: ErrorFrameRef[] } {
   // The engine resolves the callee's declared parameter names so a NAMED
   // call's frame index (which counts declaration slots after the seam's
   // permutation) lands on the argument as WRITTEN — see `argumentAtSlot`
   // (error-location.ts). The seam's own normalization failures were never
   // permuted; their index counts written positions and is used directly.
-  return narrowToFrames(
+  return locateError(
     traceFrames(error),
     stmt,
     fallback,
@@ -1305,10 +1328,19 @@ function errorValueDiagnostic(
   // An error that BUBBLED out of a subexpression carries a breadcrumb
   // of `(operator, operand index)` frames (engine design §2a). Rendered
   // compactly as `%1`, it recovers the context the bare error lost; the
-  // statement range below supplies the source anchoring.
-  const frames = errorFrameChain(error.json);
+  // statement range below supplies the source anchoring. A frame of a call
+  // that canonicalization renamed names the written call (`Exp`, not
+  // `Power`).
+  const located = narrowErrorRange(
+    ce,
+    error.json,
+    stmt,
+    fallback,
+    boxedStmt
+  );
+  const range = located.range;
+  const frames = errorFrameChain(error.json, located.frames);
   const description = describeError(error.json);
-  const range = narrowErrorRange(ce, error.json, stmt, fallback, boxedStmt);
   const diagnostic = makeDiagnostic(
     cancellation !== undefined
       ? ['evaluation-canceled', cancellation, error.toString()]
