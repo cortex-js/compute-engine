@@ -206,6 +206,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // lowering makes: exact where the quotient is an integer or a half of
   // one (a GLSL division need not be correctly rounded).
   row(undefined,      2,          [[[R, R], R, 'div.q']],        { fold: (a: number, b: number) => a / b }),
+  // The floor of the quotient of two integers, which the lowering makes in
+  // the bigint mode only: the rounding of an integer times a rational
+  // constant (`Floor(n/2)`), and `(a - Mod(a, c))/c`.
+  row(undefined,      2,          [[[I, I], I, 'floordiv.int']], {}),
   row('Power',        2,          [...rc('pow', 2), [[I, I], I, 'pow.int']], { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
   row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
   row('Abs',          1,          [...arith('abs', 1), [[C], R, 'cabs']], { fold: Math.abs }),
@@ -705,6 +709,23 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
           ]
         : undefined,
   },
+  // `Flatten(g)` of an input or a parameter `g` of the lane `rows`, of
+  // reals (`rows.flat`) or of integers (`rows.flat.int`): the elements of
+  // its rows, in order (its body is empty); the results are the count and
+  // the list. JavaScript only.
+  ...(['rows.flat', 'rows.flat.int'] as const).map((op): RegionRow => ({
+    op,
+    effect: 'pure',
+    args: ['rows'],
+    params: [],
+    results: (_, ys, [count]) =>
+      ys.length === 0
+        ? [
+            { lane: I, shape: [] },
+            { lane: op === 'rows.flat' ? R : I, shape: [{ v: count }] },
+          ]
+        : undefined,
+  })),
   // The engine's machine quadrature from `a` to `b` of the region's yield
   // at its parameter.
   {

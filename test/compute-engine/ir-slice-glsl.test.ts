@@ -84,7 +84,8 @@ describe('IR slice: GLSL text', () => {
         'cconj', 'cabs', 'carg', 'ceq', 'cne', 'mandelbrot', 'julia', 'csec', 'ccsc', 'csech', 'ccsch', 'ccoth',
         'casin', 'cacos', 'catan', 'casinh', 'cacosh', 'catanh', 'cacsc', 'casec', 'casech', 'cacoth', 'clog10',
         'croot', 'cgamma', 'czeta', 'churwitzzeta', 'cpolygamma', 'clerchphi', 'cpolylog'].includes(f))]);
-    const bigintOnly = new Set<string>();
+    // The floor division of integers, which only the bigint mode makes.
+    const bigintOnly = new Set<string>(['floordiv.int']);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
         if (bigintOnly.has(op)) {

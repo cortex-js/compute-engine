@@ -397,25 +397,39 @@ function assigningRun(
     const n = v?.N();
     return isNumber(n) && n.im === 0 ? n.re : undefined;
   };
-  const read = (x: Assigned): number | boolean | (number | boolean)[] => {
+  // The elements of the list `v`, or `undefined`. A list that an
+  // interpreted call wrote can be held lazily (`Rest(List(1, 2, 3))`): its
+  // elements are read.
+  const elements = (v: Expression | undefined): Expression[] | undefined =>
+    v?.isFiniteCollection === true && !isString(v) ? [...v.each()] : undefined;
+  const read = (
+    x: Assigned
+  ): number | boolean | (number | boolean)[] | (number | boolean)[][] => {
     const v = x.definition.value;
-    if (x.list) {
-      // A list that an interpreted call wrote can be held lazily
-      // (`Rest(List(1, 2, 3))`): its elements are read.
-      const items =
-        v?.isFiniteCollection === true && !isString(v)
-          ? [...v.each()].map((y) => scalar(y, x.lane))
-          : undefined;
+    if (x.rows) {
+      // A list of lists: an array of arrays of the values of the elements.
+      const rows = elements(v)?.map((row) =>
+        elements(row)?.map((y) => scalar(y, x.lane))
+      );
+      if (rows?.every((row) => row?.every((y) => y !== undefined)))
+        return rows as (number | boolean)[][];
+    } else if (x.list) {
+      const items = elements(v)?.map((y) => scalar(y, x.lane));
       if (items?.every((y) => y !== undefined))
         return items as (number | boolean)[];
     } else {
       const y = scalar(v, x.lane);
       if (y !== undefined) return y;
     }
+    const what = x.rows
+      ? 'list of lists of values'
+      : x.list
+        ? 'list of values'
+        : 'value';
     throw new TypeError(
       `The variable "${x.name}" that the compiled function assigns holds ` +
         `${v === undefined ? 'no value' : v.toString()}, not a ` +
-        `${x.list ? 'list of values' : 'value'} of the lane ${x.lane}.`
+        `${what} of the lane ${x.lane}.`
     );
   };
   return (...args: unknown[]) =>
@@ -430,10 +444,15 @@ function assigningRun(
               ? ce.True
               : ce.False
             : ce.number(z as number);
-        // A list is an array of the values of its elements.
-        x.definition.value = x.list
-          ? ce.function('List', Array.from(y as ArrayLike<unknown>, box))
-          : box(y);
+        // A list is an array of the values of its elements; a list of
+        // lists, an array of such arrays.
+        const list = (z: unknown): Expression =>
+          ce.function('List', Array.from(z as ArrayLike<unknown>, box));
+        x.definition.value = x.rows
+          ? ce.function('List', Array.from(y as ArrayLike<unknown>, list))
+          : x.list
+            ? list(y)
+            : box(y);
       });
       return normalizeRunResult(r[0]);
     });

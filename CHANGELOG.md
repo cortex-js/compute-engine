@@ -64,6 +64,86 @@
 
 ### Improvements
 
+- **A function literal that updates a list of lists variable of the engine
+  compiles to JavaScript** (CE-1721), so the timer callback of the Game of
+  Life runs compiled: with `let g = map(i => map(j => …, Range(1, n)),
+  Range(1, n))` and `step(g: list) = map(i => map(j => …, Range(1, n)),
+  Range(1, n))`, the function `(t: real) => do { g = step(g) }` gave the
+  decline "an assignment of g, of type list<list<number>>". One tick of a
+  32 × 32 grid took about 1.7 s interpreted and takes about 1 ms compiled.
+  Each call of `run()` reads the grid in the engine and writes the new grid
+  back. Three changes make this compile: an input of type
+  `list<list<number>>` is read as a list of lists of reals (not in the
+  `complex` mode), a parameter of type `list` of a user function takes such
+  a list whole, and the variable can be written by an assignment that is a
+  statement of the body. A write in a branch or in a loop, and a second
+  write that reads the first, still fall back to the interpreter.
+
+- **A compiled function can flatten a list of lists that it receives as
+  input** (CE-1734, #638). With `L: list<list<integer>>`,
+  `compile(Length(Flatten(L)))` fell back to the interpreter, because an
+  input whose rows can have different lengths was read only row by row. On
+  JavaScript, `Flatten(L)` now compiles to a new list of the elements of the
+  rows in order: at `L = [[1, 2], [], [3]]` it gives `[1, 2, 3]`, and
+  `Length`, `Sum`, `Sort`, `Map` and the other readers of a list read it. A
+  part of a tuple input and a parameter of a user function of that type
+  compile too. `Flatten(L, 0)`, GLSL, the interval target and the bigint
+  mode still fall back.
+
+- **In the bigint compile mode, `Floor`, `Ceil`, `Round` and `Truncate` of
+  an integer times a rational constant compile.** With `n: integer`,
+  `compile(Floor(n/2), { mode: 'bigint' })` fell back to the interpreter
+  (`1/2` has no `bigint` value). It now compiles to an exact division of
+  integers, and at `n = -7n` gives `-4n`; `Ceil((n + 1)/3)` and
+  `Round(3n/4)` compile too. `Round` with a `roundingTies` other than the
+  default still falls back, and so does `Floor(n/m)` of two inputs.
+
+- **In the bigint compile mode, `(a − Mod(a, c))/c` of integers compiles**
+  (CE-1739, #638). With `n, m: integer`,
+  `compile((n − Mod(n, m!))/m!, { mode: 'bigint' })` fell back to the
+  interpreter, because a quotient of two integers is not always an integer.
+  This quotient always is: it now compiles to the exact floor division
+  `⌊n/m!⌋`, and at `n = 100n, m = 3n` gives `16n`. A constant divisor,
+  `(n − Mod(n, 3))/3`, compiles too. Another quotient still falls back.
+
+- **In the bigint compile mode, `Reduce` and `Fold` that build a list of a
+  run-time length compile** (CE-1740, #638). With `n: integer`,
+  `compile(Fold((a, i) => Join(a, [i]), [0], 1..n), { mode: 'bigint' })`
+  fell back to the interpreter, although the default mode compiled it. The
+  loop now carries the list and its length, as in the default mode, and at
+  `n = 5n` gives `[0n, 1n, 2n, 3n, 4n, 5n]`. `Append(a, i)` from `List()`
+  compiles too. A step that gives a value that is not an integer or a
+  Boolean still falls back.
+
+- **A compiled `If` or `Which` with an empty list as one arm compiles on
+  JavaScript** (CE-1735, #638). `If(n < 1, [], Range(1, n))` declined with
+  "an empty list", so the program fell back to the interpreter. The arm
+  `[]` now takes the element type of the other arms when the type of the
+  conditional is a list of integers or reals, and the result is `[]` or
+  the other list. `[]` as the argument of an `Apply` parameter declared
+  `list<integer>` or `list<real>` compiles the same way. A list of
+  booleans, points or lists, GLSL and the interval target still decline.
+
+- **A compiled test of membership in a number set compiles when the declared
+  type decides it** (CE-1738, #638). With `n: integer`,
+  `Element(n, Integers)` (`n \in \Z`) fell back to the interpreter. It now
+  compiles to `True`, on every target. The test is decided from the static
+  type of the value, for `Integers`, `RationalNumbers`, `RealNumbers`,
+  `ComplexNumbers`, `ImaginaryNumbers`, `Numbers` and the extended sets:
+  `True` when the type is inside the set, `False` when the two do not meet
+  (`x \in i\R` with `x: real`). `NotElement` is the negation. A type that
+  does not decide (`x \in \Z` with `x: real`) still falls back.
+
+- **A compiled read of one part of a tuple whose parts have different kinds
+  compiles in more forms on JavaScript** (CE-1741, #638). With
+  `S: tuple<string, integer>`, `First(S)` and `Last(S)` fell back to the
+  interpreter, while `At(S, 1)` compiled. `First`, `Second`, `Third` and
+  `Last` now read the part as `At` does. With `P: list<integer>`,
+  `At(Tuple(0, P), 2)` also fell back; `At`, `First` and `Last` of a
+  `Tuple` literal at a constant index in range now compile to the part at
+  that index (`P` here). A read at an index known only at run time still
+  falls back: the shape of the result depends on the index.
+
 - **The `///` comments of a protocol and of its members are kept, and the
   editor functions show them** (CE-1730). `epsilHover()` on a protocol gives
   its comment, also for a protocol that a prelude declared on the engine,

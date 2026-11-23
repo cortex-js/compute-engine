@@ -294,8 +294,9 @@ describe('IR profile, batch G13: a rational factor is a division (D2)', () => {
       re: 1,
       im: 2,
     });
+    // A quotient outside of a rounding (`Floor(k/3)` compiles, CE-1737).
     expect(
-      failure(() => js(['Floor', ['Divide', 'k', 3]], { mode: 'bigint' }))
+      failure(() => js(['Add', ['Divide', 'k', 3], 1], { mode: 'bigint' }))
         ?.message
     ).toMatch(/1\/3: a number that is not an integer \(the bigint mode\)/);
   });

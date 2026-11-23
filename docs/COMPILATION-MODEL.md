@@ -1617,13 +1617,16 @@ parameter of a user function of that type is the host's array of arrays. So
 is such a list read by a user function as a free input, a part of a tuple
 input (`G: tuple<integer, list<list<integer>>>`, `At(G, 2)`) and a typed
 parameter of `Apply` (`Apply((m: list<list<integer>>) ↦ Length(m), L)`). It
-is read in four ways: the element `g[i][j]` (`At(At(g, i), j)`), which is
+is read in five ways: the element `g[i][j]` (`At(At(g, i), j)`), which is
 `NaN` where an index is out of range of the list or of its row; row by row,
 by a reader of a list that reads each row where it reads it (`Map` whose value
 for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`, `Fold`,
 `Reduce`; #638); the row `g[i]` at an index known at run time, negative from
-the end, read by a reader of a list (#638, #639); and an argument of a call at
-a parameter of that type, which takes it whole. Out of range the interpreter's
+the end, read by a reader of a list (#638, #639); `Flatten(g)`, a new list of
+the elements of its rows in order, which every reader of a list reads
+(`Flatten(g, 0)`, whose value is the rows, declines; CE-1734); and an
+argument of a call at a parameter of that type, which takes it whole. Out of
+range the interpreter's
 row is `Missing`: compiled, `Length(g[i])` is `NaN`, `First`, `Last` and an
 element of the row are `NaN`, `IsMissing(g[i])` is `True` and
 `Coalesce(Length(g[i]), -7)` is -7, as the interpreter's; a reducer of the
@@ -1650,7 +1653,24 @@ the body settles: with `n = 32`,
 `step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`
 compiles as `(g: list<list<integer>>) ↦ step(g)` and as `step(G)` with `G`
 declared `list<list<integer>>`, and `run()` returns an array of 32 arrays of
-32 numbers. Its result is not such an input: `step(step(g))` declines. Two lists of
+32 numbers. Its result is not such an input: `step(step(g))` declines. An
+element type `number` is read as `real` (`list<list<number>>`, the type of
+`let g = map(i ↦ map(j ↦ Mod(i + j, 2), Range(1, n)), Range(1, n))`), except in
+the mode `complex`, where such an input declines. A parameter of a user function
+declared `list`, or of no declared type, takes such a list whole where the
+interpreter binds it whole, and reads it in the same ways (CE-1721):
+`count(g: list, i: integer, j: integer) = g[i][j]` and
+`step(g: list) = map(i ↦ map(j ↦ 1 - count(g, i, j), Range(1, n)), Range(1, n))`
+compile in `(g: list<list<number>>) ↦ step(g)`. A root function literal that
+assigns a variable of the engine of such a type compiles too (the grid of the
+Game of Life in a timer callback, `(t: real) ↦ do { g = step(g) }`): the code
+takes the host's array of arrays after the arguments, a statement of the body
+writes a list of rank 2, and `run()` writes it back to the engine as a `List` of
+`List`s. A write of the variable in a branch, in a loop or in a function
+literal, an `AddTo` of it, and a write of a value that is not a list of rank 2
+of numbers of its element type decline; after the write the name holds that
+list of rank 2, not such an input, so a second write `g = step(g)` declines.
+Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with
 `L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
@@ -1937,7 +1957,7 @@ The result of an expression has `broadcast()`, `broadcastAsync()`,
 is the value of `run()` at that cell, a batch has no batch body, and
 `runAsync()` runs `run()` (no loop goes to the pool). With `mode: 'bigint'` it computes every integer as a `bigint`, with the
 helpers, the inputs, the results and the pole of "The `bigint` mode"; a
-program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
+program with a real or complex value anywhere (`n/2`, `Floor(n/m)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
 `outside-profile`, not `bigint-lane`. A colour (`Rgb`, `Hsl`, `Hsv`,
 `Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
@@ -2340,7 +2360,12 @@ an else, `Which` with a `True` clause, `Block`, `Sum` and `Product` with
 integer bounds, `List`, `Range`, `Length`, `At`, `Sort`, `Map`, `Filter`,
 `Reduce`, `ReplaceAt`, `Loop` and user functions with integer parameters
 compile. A loop counts with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)`
-is exact at any `n`.
+is exact at any `n`. `Floor`, `Ceil`, `Round` and `Truncate` of a product
+of integers and rational constants compile to an exact division of integers:
+`Floor(n/2)`, `Ceil((n + 1)/3)`, `Round(3n/4)` (with the default
+`roundingTies`). The quotient `(a − Mod(a, c))/c` of integers `a` and `c`
+with no effect is the floor division `⌊a/c⌋`, also of a constant `c`
+(`(n − Mod(n, m!))/m!`, `(n − Mod(n, 3))/3`); another quotient declines.
 
 **What declines.** A node off the integer lane declines with the code
 `'bigint-lane'`; an operator that the mode does not spell declines with
@@ -2350,7 +2375,8 @@ decline does. Examples, with `n`, `m: integer` and `x: real`:
 | Expression                                    | Reason of the decline                                         |
 | --------------------------------------------- | ------------------------------------------------------------- |
 | `n + x`, `n + 10π`                            | a real value                                                  |
-| `Floor(n/3)`, `n < 7/2`, `Sum(i, i = 1..n/2)` | a rational constant has no `bigint` value                     |
+| `n/3`, `n < 7/2`, `Sum(i, i = 1..n/2)`        | a rational constant has no `bigint` value                     |
+| `Floor(n/m)`                                  | a quotient of two integers is not an integer                  |
 | `Floor(Sqrt(n))`                              | `Sqrt` of an integer is not an integer                        |
 | `n^m`                                         | the exponent is not proved nonnegative (`n^m` is a rational at `m < 0`) |
 | `Factorial2(n)`                               | its value is not an integer (`(−5)!! = 1/3`)                  |

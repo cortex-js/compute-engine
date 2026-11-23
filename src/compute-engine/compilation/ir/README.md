@@ -890,8 +890,19 @@ read by name, a positional parameter of a root function literal, a parameter of
 a user function of that type, such an input that a user function reads
 (`capture()`, #638), a part of a tuple input read part by part (above), and a
 typed parameter of `Apply`, which binds its argument whole as a parameter of a
-user function does. It is the host's array of arrays, whose rows can have
-different lengths, and it is read in four ways: the element `At(At(g, i), j)`
+user function does. An element type `number` is a real, except in the mode
+`complex` (`rowsElementLane()` with `wide`). A parameter of a user function
+whose type states no lane (`g: list`, or no type: `point` of
+`signatureTypes()`) is of the lane when the argument of its first call is
+(`rowsAt()` of `lower-functions.ts`, where the interpreter binds the argument
+whole), with the lane of the elements of that argument; such a name has no
+type of rows, so the readers below take the lane of its elements from the
+parameter it binds (`rowsLaneOf()`, `rowsElements`), and a result of type
+`list<list<any>>` that such a body gives is a list of rank 2 of reals or
+integers (`grid` of `signatureTypes()`) (CE-1721). A variable of the engine of
+that type that a root function literal assigns is a positional parameter of the
+lane (`assignedNames()`, `Program.assigns`). It is the host's array of arrays, whose rows can have
+different lengths, and it is read in five ways: the element `At(At(g, i), j)`
 (`rows.at`, `rows.at.int` on the lane of the elements; `_atr` of the JavaScript
 printer, NaN where `i` is out of range of `g` or `j` of its row, from the end
 when negative, as `At` of a number); row by row, as the rows of a `Chunk`
@@ -903,8 +914,12 @@ whose value for a row is not a list, `Length`, `Count`, `IsEmpty`, `IndexWhere`,
 run time (`row()` of `chunks()`): `rows.row` (`_rowr`) is the index from 0 of
 the row, from the end when `i` is negative, -1 out of range, and the row is the
 build of `rows.rowlen` (`_lenr`, 0 at -1) elements `rows.get`, so `At`, `First`
-and `Last` of an element of an absent row are NaN; and an argument of a call at
-a parameter of that lane, which takes it whole. The interpreter's absent row is
+and `Last` of an element of an absent row are NaN; `Flatten` of `g` to a depth
+other than 0 (`flattenRows()` of `lower-matrices.ts`, CE-1734): the region
+`rows.flat` or `rows.flat.int`, whose results are the count and a new list of
+the elements of the rows in order, which every reader of a list reads (a depth
+of 0, whose value is the rows, declines); and an argument of a call at a
+parameter of that lane, which takes it whole. The interpreter's absent row is
 `Missing`, and `Length` of it is `Missing`: `rowLengths` of `lower.ts` maps the
 count of the build to `rows.rowlen.nan` (NaN at -1), which `Length` reads (also
 of a local that holds the row, of its `Reverse`, which keeps the count, and of
@@ -988,14 +1003,19 @@ real `pow` only.
 
 Declined, each with its cause: a real or complex value anywhere (an input that
 is not of a subtype of `integer`, a real literal, `Pi`, a row with no integer
-signature such as `Divide`, `Sqrt` or `Hypot`), so also a quotient under a
-rounding function (`Floor(n/3)` is `Floor(n·1/3)`, and `1/3` has no `bigint`
-value), `Floor(Sqrt(n))`, a division under an integer promise
+signature such as `Divide`, `Sqrt` or `Hypot`), so also `Floor(n/m)`,
+`Floor(Sqrt(n))`, a division under an integer promise
 (`Declare(t, integer, n/m)`) and a comparison with a rational constant
 (`n < 7/2`); a `Power` whose exponent is not proved nonnegative (a constant
 `>= 0`, an `Abs`, an even power, a sum or a product of such values: `n^m` is a
-rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` (the syntax does not
-spell them); `If` with no else of a number and `Which` with no `True` clause
+rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` of an operand other
+than a product of rational constants and integers (the syntax does not spell
+them; `Floor(n/3)` is `Floor(1/3·n)`, the floor division `floordiv.int` of `n`
+by 3, and `Round(n/2)` with a `roundingTies` other than the default declines);
+a quotient other than `(a − Mod(a, c))/c` of pure integers, which is
+`floordiv.int(a, c)` (and `p/c·(a − Mod(a, c))` of a constant `c`, which is
+`p·floordiv.int(a, c)`);
+`If` with no else of a number and `Which` with no `True` clause
 (their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`);
 `Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an
 `iterationBudget` (its value over the budget is `NaN`); a random frame, a draw
@@ -1487,8 +1507,15 @@ yield (`If(x > 0, List(x, 2), D)` is `[x, 2]` or `D`, and its `Length` is 2 or
 the length of `D`). A length value that is a constant at least 1 and equal to
 the other arm's length is that stated length
 (`If(c, Repeat(x, 400), Range(1, 400))` is a list of 400; two empty arms keep
-the length result). The invariant: a value that a type names (of a value or of a
-function's result) is live wherever that type is, so `dce` keeps it; when `fold`
+the length result). An arm `List()`, which has no type of its own, is the empty
+list (a build of no element) of the lane of the conditional's engine type when
+that type is a flat list of integers or reals (`If(n < 1, [], Range(1, n))`, of
+type `list<integer>`; arms that are all `List()`, of type `list<never>`, take the
+integer lane); so is `List()` at a parameter of `Apply` declared such a list
+(`Typed(xs, 'list<integer>')`). Otherwise, and on GLSL and in the interval
+mode, `List()` declines ("an empty list"). The invariant: a value that a type
+names (of a value or of a function's result) is live wherever that type is, so
+`dce` keeps it; when `fold`
 takes the arm of an `if` whose list is the program's result, the length constant
 of that arm is read by the result type only. GLSL and the interval mode decline
 lists of two lengths ("arms that are lists of two lengths"): GLSL has no
@@ -2225,8 +2252,9 @@ built the same way, with the interpreter's value for every length, also 0:
   stated length, a tuple always, is one carried value of that length, which
   every step must keep; otherwise (a `Map` of a run-time length, or `List()`,
   whose element type is the body's, found by a trial lowering) it is carried as
-  its length then the list, on JavaScript only (not GLSL, not the `bigint`
-  mode). The interval mode declines every `Reduce` by a function.
+  its length then the list, on JavaScript only (not GLSL); in the `bigint`
+  mode the length is a `bigint`. The interval mode declines every `Reduce` by
+  a function.
 - `Tabulate(f, n1, …, nd)` (also `Table` of one index from 1) is the nested
   builds of `f(i1, …, id)` at the indices from 1; a count below 1 is empty, a
   real count is tested at run time (`count.int`), the inner counts must be
@@ -3377,7 +3405,7 @@ program whose last statement is a definition is `Nothing` and declines.
 
 ## Match, x is T and N
 
-`lower-match.ts`. None of the three emits a test of a type at run time
+`lower-match.ts`. None of them emits a test of a type at run time
 (`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time").
 
 - `N(x)` and `N(x, p)` of a number (an integer, a rational, a real or a
@@ -3397,6 +3425,16 @@ program whose last statement is a definition is `Nothing` and declines.
   local of a block or a capture of a case: the type of a local is the type of
   its value, which can be a `Match`. A name that the walk binds as an input, a
   parameter or a loop index, and a free name, are read by their type.
+- `Element(x, S)` of a number set that `domainToType()` maps to a type
+  (`Integers`, `RationalNumbers`, `RealNumbers`, `ComplexNumbers`,
+  `ImaginaryNumbers`, `Numbers` and the extended sets) is decided as
+  `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is
+  `True`, `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the
+  same type. A subject typed `nothing`, a subject whose type comes from a
+  `Match` or that reads a local, and a type that does not decide
+  (`x ∈ ℤ` of `x: real`) go to the list operators, which decline for a set.
+  Another set (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the
+  negation of the same constant; when it is not decided, it declines.
 - `Match(subject, case…)`: the subject is lowered once. A case of a string or a
   real number constant (`== "rect"`, `== 3`) is a clause of a `Which` on the
   subject, compared by `Equal` (exactly: the interpreter compares a number
@@ -3737,7 +3775,12 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   of a declared type of the lane `real`, `integer` or `boolean`, the name is a
   local whose value is a positional parameter after the arguments (a list of
   such values of no stated length, CE-1662: its length and the list, bound as a
-  list local written whole, `wholeLocal()`, whose length a write can change),
+  list local written whole, `wholeLocal()`, whose length a write can change;
+  a list of lists of two lengths not stated, CE-1721: the host's array of
+  arrays of the lane `rows`, bound as a local of the lane of its elements
+  (`Binding.grid`) that only an `Assign` that is a statement of the body
+  writes, with a list of rank 2 of that lane, which the entry returns and
+  `run()` writes back as a `List` of `List`s),
   its stored value is hidden while the body is lowered
   (`withVarsValuesHidden()`), and the entry returns the array of the value of
   the body (NaN for a body that ends in an assignment) and the value of each

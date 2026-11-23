@@ -325,6 +325,107 @@ describe('IR bigint: the interpreter, exactly', () => {
       [{ J: [0, 2, 3, 5], n: 10 }]
     );
   });
+  test('Floor, Ceil, Round and Truncate of an integer times a rational constant (CE-1737)', () => {
+    const points = [-7, -6, -5, -1, 0, 1, 5, 6, 7].map((n) => ({ n, m: 3 }));
+    const big = [P60 + 5n, -(P60 + 5n), P53 * 10n + 7n].map((n) => ({
+      n,
+      m: -3,
+    }));
+    for (const head of ['Floor', 'Ceil', 'Round', 'Truncate'])
+      for (const x of [
+        ['Divide', 'n', 2],
+        ['Divide', ['Multiply', -5, 'n'], 6],
+        ['Divide', ['Add', ['Multiply', 'n', 'm'], 1], 4],
+        ['Multiply', ['Rational', 7, 10], 'n'],
+      ])
+        agrees([head, x], [...points, ...big]);
+    // A structural `Rational`, with no canonical form.
+    const r = compile(
+      ce.box(['Floor', ['Multiply', ['Rational', 1, 2], 'n']], {
+        form: 'structural',
+      }),
+      { ...BIG, fallback: false } as never
+    ) as CompilationResult<'javascript'>;
+    expect(r.run!({ n: -7 } as never)).toEqual(-4n);
+  });
+  test('(a - Mod(a, c)) / c is the floor division of a by c (CE-1739)', () => {
+    const points = [-7, -6, -1, 0, 1, 5, 6, 7].flatMap((n) =>
+      [-3, 2, 3].map((m) => ({ n, m }))
+    );
+    const big = [
+      { n: P60 + 5n, m: 7 },
+      { n: -(P60 + 5n), m: 7 },
+      { n: P53 * 10n + 7n, m: -9 },
+    ];
+    // The witness: a divisor of a factorial.
+    agrees(
+      [
+        'Divide',
+        ['Subtract', 'n', ['Mod', 'n', ['Factorial', 'm']]],
+        ['Factorial', 'm'],
+      ],
+      [-7, -1, 0, 1, 100].map((n) => ({ n, m: 3 }))
+    );
+    for (const x of [
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'm'],
+      ['Divide', ['Add', ['Negate', ['Mod', 'n', 'm']], 'n'], 'm'],
+      [
+        'Divide',
+        ['Subtract', ['Multiply', 2, 'n'], ['Mod', ['Multiply', 2, 'n'], 'm']],
+        'm',
+      ],
+      // A literal divisor: the product `1/3 · (n - Mod(n, 3))`, and
+      // `2/3 · (n - Mod(n, 3))`.
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 3]], 3],
+      [
+        'Divide',
+        ['Multiply', 2, ['Subtract', 'n', ['Mod', 'n', 3]]],
+        3,
+      ],
+      ['Add', ['Divide', ['Subtract', 'n', ['Mod', 'n', 7]], 7], 1],
+    ])
+      agrees(x, [...points, ...big]);
+    expect(
+      compiled(['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'm']).code
+    ).toMatch(/bfloorDiv/);
+  });
+  test('a quotient that is not (a - Mod(a, c)) / c declines (CE-1739)', () => {
+    for (const x of [
+      // Another divisor, another dividend of Mod.
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'k'],
+      ['Divide', ['Subtract', 'n', ['Mod', 'k', 'm']], 'm'],
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 3]], 2],
+      // A sum: `n - Mod(n, m) + 1` is not a multiple of `m`.
+      ['Divide', ['Add', 'n', ['Negate', ['Mod', 'n', 'm']], 1], 'm'],
+      // A dividend that writes a variable: the interpreter reads it twice,
+      // and its value at n = 10, m = 3 is 10/3.
+      [
+        'Block',
+        ['Declare', 't', 'integer', 'n'],
+        [
+          'Divide',
+          [
+            'Subtract',
+            ['Block', ['Assign', 't', ['Add', 't', 1]], 't'],
+            ['Mod', ['Block', ['Assign', 't', ['Add', 't', 1]], 't'], 'm'],
+          ],
+          'm',
+        ],
+      ],
+    ])
+      expect(() => compiled(x)).toThrow(/bigint mode/);
+  });
+  test('Round of a quotient with another roundingTies declines (CE-1737)', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'integer');
+    e.roundingTies = 'to-even';
+    expect(() =>
+      compile(e.box(['Round', ['Divide', 'n', 2]]), {
+        ...BIG,
+        fallback: false,
+      } as never)
+    ).toThrow(/roundingTies/);
+  });
   test('a function literal at the root', () => {
     const r = compiled([
       'Function',
@@ -582,8 +683,9 @@ describe('IR bigint: declines', () => {
   // Each row has its options: a third parameter of the callback with no
   // column is read by Jest as `done`.
   const DECLINES: [string, Json, Record<string, unknown>][] = [
-    ['a quotient under Floor', ['Floor', ['Divide', 'n', 3]], {}],
-    ['a quotient under Ceil', ['Ceil', ['Divide', 'n', 2]], {}],
+    ['a quotient of two integers under Floor', ['Floor', ['Divide', 'n', 'm']], {}],
+    ['a rational times a real under Floor', ['Floor', ['Divide', 'x', 2]], {}],
+    ['a quotient outside of a rounding', ['Add', ['Divide', 'n', 2], 1], {}],
     ['Floor of a square root', ['Floor', ['Sqrt', 'n']], {}],
     [
       'a checked division under an integer promise',

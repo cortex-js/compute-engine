@@ -196,11 +196,13 @@ let half = (t: real) => do { K = K + 0.5 }`);
     );
   });
 
-  test('a list of lists declines', () => {
+  test('arithmetic of a list of lists declines', () => {
+    // A list of lists is the host's rows (CE-1721,
+    // ir-assigns-grid-ce1721.test.ts), which arithmetic does not read.
     const ce = engine(`let g = [[1, 0], [0, 1]]
 let f = (t: real) => do { g = g + 1 }`);
     expect(declined(fn(ce, 'f'))).toMatch(
-      'an assignment of g, of type list<list<number>>'
+      'g of type list<list<number>> other than in an element read'
     );
   });
 

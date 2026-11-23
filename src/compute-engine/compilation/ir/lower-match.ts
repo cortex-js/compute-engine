@@ -1,8 +1,9 @@
 /**
- * The lowering of `N`, `MatchesType` and `Match` (README, "Match, x is T
- * and N"; CE-1652, step 1). No run-time test of a type is emitted: a type
- * test is decided from the static type of its subject, and a `Tuple`
- * pattern from the shape of the subject.
+ * The lowering of `N`, `MatchesType`, `Match`, and `Element` of a number
+ * set (README, "Match, x is T and N"; CE-1652, step 1; CE-1738). No
+ * run-time test of a type is emitted: a type test is decided from the
+ * static type of its subject, and a `Tuple` pattern from the shape of the
+ * subject.
  */
 
 import type { Expression, IComputeEngine } from '../../global-types.js';
@@ -13,6 +14,7 @@ import {
   isSymbol,
 } from '../../boxed-expression/type-guards.js';
 import { buildCaseClosure } from '../../boxed-expression/match-dispatch.js';
+import { domainToType } from '../../boxed-expression/number-set-types.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typesOverlap } from '../../../common/type/reduce.js';
 import { typeToString } from '../../../common/type/serialize.js';
@@ -367,6 +369,46 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     return b.constant(known, 'boolean');
   };
 
+  /** `Element(x, S)` of a number set `S` that `domainToType()` maps to a
+   *  type (`Integers`, `RealNumbers`, `ComplexNumbers`, ...): `True` when
+   *  the static type of `x` is a subtype of that type, `False` when the two
+   *  types do not overlap, as `MatchesType` decides; the subject is lowered
+   *  only for its effect. The interpreter maps the set to the same type
+   *  (`membershipKleene()`, `library/sets.ts`), and the host supplies a
+   *  value of the declared type. `NotElement(x, S)` is the negation.
+   *  `undefined` when the static type does not decide, cannot be trusted
+   *  (CE-1731) or is `nothing` or `never`, or when `S` is not such a set:
+   *  `Element` then goes to the list operators, which lower the call or
+   *  decline, and `NotElement` declines. */
+  const element = (e: Fn): V | undefined => {
+    if (e.nops !== 2) return undefined;
+    const [x, set] = e.ops;
+    const t = domainToType(set);
+    if (t === 'unknown') return undefined;
+    const s = x.type.type;
+    if (s === 'error')
+      decline(
+        e,
+        `${e.operator} of a value of the static type error`,
+        STATIC_TYPE_ERROR
+      );
+    // `nothing` is the type of an absent value, and `never` is a subtype
+    // of every type: neither is decided here.
+    if (s === 'nothing' || s === 'never') return undefined;
+    if (typedByMatch(x) || readsLocal(x)) return undefined;
+    const verdict = isSubtype(s, t)
+      ? true
+      : !typesOverlap(s, t)
+        ? false
+        : undefined;
+    if (verdict === undefined) return undefined;
+    if (x.isPure !== true) cx.value(x, false);
+    return b.constant(
+      e.operator === 'NotElement' ? !verdict : verdict,
+      'boolean'
+    );
+  };
+
   /** The case `c` of a `Match`, or a decline for a case that the compiler
    *  does not read. */
   const arm = (c: Expression): Arm => {
@@ -500,5 +542,5 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     return chain(0);
   };
 
-  return { numeric, matchesType, match };
+  return { numeric, matchesType, element, match };
 }

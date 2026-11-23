@@ -5,10 +5,10 @@ import type { MathJsonExpression } from '../../src/math-json/types';
 // (the lane `rows`, whose rows can have different lengths) is read row by
 // row by the readers of a list on JavaScript (#638, `chunks()` of
 // `lower-lists.ts`): `Map`, `Length`, `Count`, `IsEmpty`, `Reduce`, `Fold`,
-// `IndexWhere`. Each compiled result must equal `evaluate()`. A row is also
-// read at an index known at run time, a user function reads a free input
-// of the lane, and a part of a tuple input or a typed parameter of `Apply`
-// can be of the lane.
+// `IndexWhere`. `Flatten` copies the rows into one new list (CE-1734). Each
+// compiled result must equal `evaluate()`. A row is also read at an index
+// known at run time, a user function reads a free input of the lane, and a
+// part of a tuple input or a typed parameter of `Apply` can be of the lane.
 
 const ce = new ComputeEngine();
 ce.declare('L', 'list<list<integer>>');
@@ -333,7 +333,12 @@ describe('a row at an index known at run time', () => {
       'IsMissing of a Reduce whose accumulator is the row',
       [
         'IsMissing',
-        ['Reduce', ['Range', 1, 2], ['Function', at, 'acc', 'j'], ['List', 1, 2]],
+        [
+          'Reduce',
+          ['Range', 1, 2],
+          ['Function', at, 'acc', 'j'],
+          ['List', 1, 2],
+        ],
       ],
       'carried by a loop',
     ],
@@ -410,10 +415,7 @@ describe('a tuple input and a typed parameter of the lane', () => {
     'L',
   ];
   it.each([
-    [
-      'a part of the lane',
-      ['Add', ['At', 'G', 1], ['Length', ['At', 'G', 2]]],
-    ],
+    ['a part of the lane', ['Add', ['At', 'G', 1], ['Length', ['At', 'G', 2]]]],
     ['a row of the part', ['Length', ['At', ['At', 'G', 2], 'n']]],
     ['an element of the part', ['At', ['At', ['At', 'G', 2], 'n'], 1]],
     [
@@ -450,6 +452,105 @@ describe('a tuple input and a typed parameter of the lane', () => {
           compile(local.box(expr), { fallback: false, ...options } as any)
         ).toThrow();
     }
+  );
+});
+
+describe('Flatten of the rows (CE-1734)', () => {
+  const local = new ComputeEngine();
+  local.declare('L', 'list<list<integer>>');
+  local.declare('R', 'list<list<real>>');
+  local.declare('G', 'tuple<integer, list<list<integer>>>');
+  local.declare('n', 'integer');
+  local.declare('f', '(list<list<integer>>) -> integer');
+  local.assign('f', local.box(['Function', ['Sum', ['Flatten', 'g']], 'g']));
+  const rows = (g: number[][]) =>
+    local.box(['List', ...g.map((x) => ['List', ...x])]);
+  const flat: MathJsonExpression = ['Flatten', 'L'];
+  it.each([
+    ['Length', ['Length', flat]],
+    ['the list', flat],
+    ['to the depth 1', ['Flatten', 'L', 1]],
+    ['to the depth 2', ['Flatten', 'L', 2]],
+    ['to the depth +oo', ['Flatten', 'L', 'PositiveInfinity']],
+    ['Flatten of Flatten', ['Flatten', flat]],
+    ['Sum', ['Sum', flat]],
+    ['Max', ['Max', flat]],
+    ['Sort', ['Sort', flat]],
+    ['the last element', ['At', flat, -1]],
+    ['Map', ['Map', ['Function', ['Multiply', 'x', 2], 'x'], flat]],
+    ['a user function of that parameter type', ['f', 'L']],
+    [
+      'a typed parameter of Apply',
+      [
+        'Apply',
+        [
+          'Function',
+          ['Length', ['Flatten', 'm']],
+          ['Typed', 'm', "'list<list<integer>>'"],
+        ],
+        'L',
+      ],
+    ],
+  ] as [string, MathJsonExpression][])(
+    '%s agrees with evaluate()',
+    (_, expr) => {
+      const c = compile(local.box(expr), { fallback: false }) as any;
+      for (const L of [...GRAPHS, [[4, 5], [], [6]]]) {
+        const r = local
+          .box(expr)
+          .subs({ L: rows(L) })
+          .evaluate();
+        expect(plain(c.run({ L }))).toEqual(
+          r.isCollection ? [...(r as any).each()].map((x) => x.re) : r.re
+        );
+      }
+    }
+  );
+
+  it('rows of reals, and a part of a tuple input', () => {
+    const c = compile(local.box(['Flatten', 'R']), { fallback: false }) as any;
+    expect(plain(c.run({ R: [[1.5, 2], [], [3]] }))).toEqual([1.5, 2, 3]);
+    const p = compile(local.box(['Sum', ['Flatten', ['At', 'G', 2]]]), {
+      fallback: false,
+    }) as any;
+    expect(p.run({ G: [7, [[1], [2, 3]]] })).toBe(6);
+  });
+
+  it('reads rows that are typed arrays', () => {
+    const c = compile(local.box(flat), { fallback: false }) as any;
+    expect(
+      plain(c.run({ L: [new Int32Array([1, 2]), new Float64Array([3])] }))
+    ).toEqual([1, 2, 3]);
+  });
+
+  it('reads the host rows in place, with no other helper', () => {
+    const c = compile(local.box(['Length', flat]), { fallback: false });
+    expect(c.code).toContain('for (const _row of _.L)');
+  });
+
+  it.each([
+    ['to the depth 0, whose value is the rows', ['Flatten', 'L', 0], /depth 0/],
+    [
+      'to a depth known at run time',
+      ['Flatten', 'L', 'n'],
+      /not a constant non-negative integer/,
+    ],
+  ] as [string, MathJsonExpression, RegExp][])(
+    '%s declines',
+    (_, expr, why) => {
+      expect(() => compile(local.box(expr), { fallback: false })).toThrow(why);
+    }
+  );
+
+  it.each([{ to: 'glsl' }, { to: 'interval-js' }, { mode: 'bigint' }])(
+    'declines on %o',
+    (options) =>
+      expect(() =>
+        compile(local.box(['Length', flat]), {
+          fallback: false,
+          ...options,
+        } as any)
+      ).toThrow()
   );
 });
 

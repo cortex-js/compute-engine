@@ -237,6 +237,10 @@ export type Binding = {
     readonly widen?: Expression;
   };
   parts?: readonly V[];
+  /** A list of lists of a variable of the engine that the root function
+   *  literal assigns (CE-1721), of this lane of elements: the host's rows
+   *  (the lane `rows`) until a write, then the list of rank 2 written. */
+  grid?: 'integer' | 'real';
   /** The carried accumulator of a `Reduce` by a function literal. */
   accumulator?: boolean;
 };
@@ -335,6 +339,14 @@ export type Lowering = {
   /** The lane of the elements of a value of the engine type `t` that is of
    *  the lane `rows` as an input or a parameter (`rowsElementLane()`). */
   rowsElementLane(t: Type): 'integer' | 'real' | undefined;
+  /** The lane of the elements of each parameter of the lane `rows` of a
+   *  user function (`rowsParams`). */
+  readonly rowsElements: Map<V, 'integer' | 'real'>;
+  /** The lane of the elements of `e` where it is of the lane `rows`: that
+   *  of the parameter that the name `e` binds (`rowsElements`), whose
+   *  declared type can state no lane (`g: list`, CE-1721), or else that of
+   *  its engine type (`rowsElementLane()`). */
+  rowsLaneOf(e: Expression): 'integer' | 'real' | undefined;
   /** Apply the row `r`, or the row of the library head of that name, to
    *  `args`. */
   apply(node: Expression, r: OperatorRow | string, args: V[]): V;

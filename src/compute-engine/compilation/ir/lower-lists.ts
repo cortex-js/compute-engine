@@ -2061,8 +2061,7 @@ export function listLowering(cx: Lowering) {
       isSymbol(e.ops[0]) &&
       typeof e.ops[0].type.type === 'object' &&
       e.ops[0].type.type.kind === 'tuple';
-    const lane =
-      isSymbol(e) || part ? cx.rowsElementLane(e.type.type) : undefined;
+    const lane = isSymbol(e) || part ? cx.rowsLaneOf(e) : undefined;
     if (lane !== undefined && !cx.interval) {
       const g = cx.wholeRows(e);
       if (type(g).lane !== 'rows') return undefined;
@@ -2406,11 +2405,7 @@ export function listLowering(cx: Lowering) {
       );
     };
     const { lane, region, params, fixed } = tryAll();
-    if (
-      kind === 'list' &&
-      fixed === undefined &&
-      (!cx.runtimeLengths || cx.bigint)
-    )
+    if (kind === 'list' && fixed === undefined && !cx.runtimeLengths)
       decline(
         e,
         `${e.operator} of a list of a run-time length (JavaScript only)`

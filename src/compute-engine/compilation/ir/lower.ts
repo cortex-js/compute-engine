@@ -1039,6 +1039,7 @@ function lowerOnce(
     const place = knownStrings.get(v)?.place;
     if (place !== undefined) strings.read.add(place);
   };
+  const rowsElements = new Map<V, 'integer' | 'real'>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1193,6 +1194,18 @@ function lowerOnce(
     return undefined;
   };
   const bound = (name: string) => lookup(name)?.binding.v;
+
+  /** `Lowering.rowsLaneOf()`. */
+  const rowsLaneOf = (e: Expression): 'integer' | 'real' | undefined => {
+    const v = isSymbol(e) ? bound(e.symbol) : undefined;
+    return (
+      (v === undefined ? undefined : rowsElements.get(v)) ??
+      rowsElementLane(
+        e.type.type,
+        options.mode === 'complex' ? 'complex' : 'real'
+      )
+    );
+  };
 
   const withFrame = <T>(loop: boolean, f: (frame: Frame) => T): T => {
     const frame: Frame = { names: new Map(), loop };
@@ -1854,6 +1867,48 @@ function lowerOnce(
     return out;
   };
 
+  /** `At(c, k)` (`e`) where `c` is read part by part, `k` the index from 1
+   *  (from the end when negative), `undefined` when it is not a constant
+   *  integer. A tuple input whose parts have different lanes
+   *  (`tupleParts()`) or a tuple of tuples (`loop()`) is read at a constant
+   *  index in range only. Of a `Tuple` literal at such an index, each part
+   *  is lowered in order, as the interpreter evaluates them, and the value
+   *  is the part `k`: its shape is settled whatever the shapes of the other
+   *  parts. `undefined` for another `c` or another index of a literal. */
+  const part = (
+    e: Expression,
+    c: Expression,
+    k: number | undefined
+  ): V | undefined => {
+    if (isFunction(c, 'Tuple')) {
+      const j = elementIndex(c.nops, k);
+      if (j === undefined) return undefined;
+      return c.ops.map((op) => value(op)!)[j];
+    }
+    if (!isSymbol(c)) return undefined;
+    // The first read of a tuple input read part by part makes its binding
+    // (`input()`).
+    if (
+      lookup(c.symbol) === undefined &&
+      tupleParts(c.type.type, cx.wide) !== undefined
+    ) {
+      partsRead = c;
+      symbol(c, true);
+    }
+    const owned = lookup(c.symbol);
+    const parts = owned?.binding.parts;
+    if (parts === undefined) return undefined;
+    const what =
+      owned!.binding.role === 'input'
+        ? 'a tuple whose parts have different lanes'
+        : 'a tuple of tuples';
+    if (k === undefined || !Number.isInteger(k))
+      decline(e, `At of ${what} at an index that is not a constant`);
+    const j = elementIndex(parts.length, k);
+    if (j === undefined) decline(e, `At of ${what} at an index out of range`);
+    return parts[j];
+  };
+
   const scalar = (e: Expression): V => {
     const v = value(e)!;
     if (type(v).shape.length > 0)
@@ -2091,9 +2146,10 @@ function lowerOnce(
         // an index is out of range of the list or of its row, as `At` of a
         // number.
         const outer = e.ops[0];
-        const lane = isFunction(outer, 'At')
-          ? rowsElementLane(outer.ops[0]?.type.type)
-          : undefined;
+        const lane =
+          isFunction(outer, 'At') && outer.ops[0] !== undefined
+            ? rowsLaneOf(outer.ops[0])
+            : undefined;
         if (
           lane !== undefined &&
           isFunction(outer, 'At') &&
@@ -2114,34 +2170,14 @@ function lowerOnce(
             );
           }
         }
-        // The first read of a tuple input read part by part makes its
-        // binding (`input()`).
-        if (
-          isSymbol(e.ops[0]) &&
-          lookup(e.ops[0].symbol) === undefined &&
-          tupleParts(e.ops[0].type.type, cx.wide) !== undefined
-        ) {
-          partsRead = e.ops[0];
-          symbol(e.ops[0], true);
-        }
+        const p = part(
+          e,
+          e.ops[0],
+          isNumber(e.ops[1]) && e.ops[1].im === 0 ? e.ops[1].re : undefined
+        );
+        if (p !== undefined) return p;
         // A read of a list local written in place: in order with its writes.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
-        // An element of a tuple of tuples (`loop()`), or a part of a tuple
-        // input read part by part: a constant index.
-        const parts = owned?.binding.parts;
-        if (parts !== undefined) {
-          const what =
-            owned!.binding.role === 'input'
-              ? 'a tuple whose parts have different lanes'
-              : 'a tuple of tuples';
-          const j = e.ops[1].re;
-          if (!isNumber(e.ops[1]) || !Number.isInteger(j))
-            decline(e, `At of ${what} at an index that is not a constant`);
-          const x = parts[j > 0 ? j - 1 : parts.length + j];
-          if (x === undefined)
-            decline(e, `At of ${what} at an index out of range`);
-          return x;
-        }
         if (owned?.binding.role === 'list') {
           const l = owned.binding.v;
           const i = scalar(e.ops[1]);
@@ -2233,6 +2269,8 @@ function lowerOnce(
       case 'Last': {
         if (e.nops !== 1) break;
         const k = { First: 1, Second: 2, Third: 3, Last: -1 }[e.operator]!;
+        const p = part(e, e.ops[0], k);
+        if (p !== undefined) return p;
         const i = b.constant(k, 'integer');
         if (lists.isIterate(e.ops[0]) && k > 0)
           return at(e, lists.iterateTo(e, e.ops[0], i), i);
@@ -2279,8 +2317,21 @@ function lowerOnce(
         const d = apply(e, 'Add', [p, apply(e, 'Negate', [q])]);
         return apply(e, 'Abs', [d]);
       }
+      case 'Floor':
+      case 'Ceil':
+      case 'Round':
+      case 'Truncate': {
+        const v = bigint ? roundedQuotient(e) : undefined;
+        if (v !== undefined) return v;
+        break;
+      }
+      case 'Divide': {
+        const v = bigint ? flooredQuotient(e) : undefined;
+        if (v !== undefined) return v;
+        break;
+      }
       case 'Multiply':
-        return product(e);
+        return (bigint ? flooredQuotient(e) : undefined) ?? product(e);
       case 'Power': {
         // The interval mode (`README.md`, "The interval mode"): `x^(p/q)` of
         // a literal rational is `Root(x, q)^p`, or `pow.principal` of the
@@ -2681,6 +2732,13 @@ function lowerOnce(
       case 'Scan':
       case 'Tabulate':
       case 'Element':
+        // Of a number set, decided from the static type of the value
+        // (`lower-match.ts`); otherwise a search of a list.
+        if (e.operator === 'Element') {
+          const decided = matches.element(e);
+          if (decided !== undefined) return decided;
+        }
+      // falls through
       case 'Identity':
       case 'CountIf':
       case 'Find':
@@ -2694,6 +2752,13 @@ function lowerOnce(
       case 'ApplyWhole':
       case 'ContainsSequence':
         return lists.collection(e);
+      case 'NotElement': {
+        // Of a number set, decided from the static type of the value
+        // (`lower-match.ts`); otherwise not compiled.
+        const decided = matches.element(e);
+        if (decided !== undefined) return decided;
+        break;
+      }
       case 'StartsWith':
       case 'EndsWith':
         // Of strings: the rows of the string lane (CE-1530); of lists, the
@@ -3095,7 +3160,7 @@ function lowerOnce(
               );
             if (
               rowsElementLane(d.t) === 'integer' &&
-              rowsElementLane(a.type.type) !== 'integer'
+              rowsLaneOf(a) !== 'integer'
             )
               decline(
                 a,
@@ -3104,8 +3169,12 @@ function lowerOnce(
             return raw;
           }
           // The checks read the argument before it is widened to the lane
-          // of its parameter, so a widening cannot hide a mismatch.
-          const raw = value(a)!;
+          // of its parameter, so a widening cannot hide a mismatch. `List()`
+          // at a parameter declared a flat list of integers or reals is the
+          // empty list of that lane.
+          const empty = d === undefined ? undefined : emptyListLane(a, d.t);
+          const raw =
+            empty === undefined ? value(a)! : emptyList(a as Fn, empty);
           const v = d === undefined ? raw : widen(raw, d.lane);
           const t = type(raw);
           // An argument at a list or a tuple parameter must have its
@@ -3441,6 +3510,137 @@ function lowerOnce(
     } else if (p !== 1) factors = [b.constant(p, 'integer'), ...lists];
     const v = mul(factors);
     return apply(e, ofOp('div.q'), [v, b.constant(q, 'integer')]);
+  };
+
+  /** The numerator and the denominator (`> 0`) of an exact rational literal,
+   *  `undefined` for any other expression. */
+  const rational = (op: Expression): [bigint, bigint] | undefined => {
+    const n = literalNumber(op);
+    if (n === undefined || !n.isExact) return undefined;
+    const nv = n.numericValue;
+    if (typeof nv === 'number')
+      return Number.isInteger(nv) ? [BigInt(nv), 1n] : undefined;
+    return nv instanceof ExactNumericValue &&
+      BigInt(nv.imRational[0]) === 0n &&
+      nv.radical === 1
+      ? [BigInt(nv.rational[0]), BigInt(nv.rational[1])]
+      : undefined;
+  };
+
+  /** The bigint mode: `(a − Mod(a, c)) / c` is `⌊a/c⌋`, the floor division
+   *  `floordiv.int` of the integers `a` and `c`, because `Mod` is the
+   *  remainder with the sign of the divisor. Of a literal `c > 1`, the
+   *  canonical form is the product `p/c · (a − Mod(a, c))`, which is
+   *  `p·⌊a/c⌋`. The interpreter reads `a` and `c` twice and the code reads
+   *  them once, so each must be pure and write no variable. `undefined` when
+   *  `e` is not such a quotient of two integers. */
+  const flooredQuotient = (e: Fn): V | undefined => {
+    if (e.nops !== 2) return undefined;
+    // The dividend `x`, the divisor `c` (an expression, or the literal
+    // denominator `q`), and the factor `p` of the product.
+    let [x, c]: [Expression, Expression | undefined] = [e.ops[0], e.ops[1]];
+    let [p, q]: [bigint, bigint | undefined] = [1n, undefined];
+    if (e.operator === 'Multiply') {
+      const k = e.ops.findIndex((op) => rational(op) !== undefined);
+      if (k < 0) return undefined;
+      [p, q] = rational(e.ops[k])!;
+      if (q === 1n) return undefined;
+      [x, c] = [e.ops[1 - k], undefined];
+    }
+    const library = (y: Expression, name: string, n: number) =>
+      isFunction(y, name) &&
+      y.nops === n &&
+      isLibraryOperator(y as never, name);
+    if (!library(x, 'Add', 2)) return undefined;
+    const [s, t] = (x as Fn).ops;
+    const k = library(s, 'Negate', 1) ? 0 : library(t, 'Negate', 1) ? 1 : -1;
+    if (k < 0) return undefined;
+    const mod = (k === 0 ? s : t) as Fn;
+    const a = k === 0 ? t : s;
+    const m = mod.ops[0];
+    if (!library(m, 'Mod', 2)) return undefined;
+    const [ma, mc] = (m as Fn).ops;
+    if (!ma.isSame(a)) return undefined;
+    if (q !== undefined) {
+      const r = rational(mc);
+      if (r === undefined || r[1] !== 1n || r[0] !== q) return undefined;
+      c = mc;
+    } else if (!mc.isSame(c!)) return undefined;
+    const pure = (y: Expression) =>
+      y.isPure === true && facts(y).writes.size === 0;
+    if (!pure(a) || !pure(c!)) return undefined;
+    const [va, vc] = [value(a)!, value(c!)!];
+    if ([va, vc].some((v) => type(v).lane !== 'integer' || type(v).shape.length))
+      return undefined;
+    const quotient = apply(e, ofOp('floordiv.int'), [va, vc]);
+    if (p === 1n) return quotient;
+    return apply(e, 'Multiply', [
+      b.constant(Number.isSafeInteger(Number(p)) ? Number(p) : p, 'integer'),
+      quotient,
+    ]);
+  };
+
+  /** The bigint mode: `Floor`, `Ceil`, `Round` or `Truncate` of a product
+   *  of exact rational literals and integers (the canonical form of `n/2`
+   *  is `Multiply(1/2, n)`) is the quotient of `a = p · integers` by `q`,
+   *  where `p/q` is the product of the literals and `q > 0`, rounded with
+   *  the floor division of integers: `Ceil` is `-⌊-a/q⌋`, `Truncate` is
+   *  `sign(a)·⌊|a|/q⌋`, and `Round` (ties away from zero, the default
+   *  `roundingTies`) is `sign(a)·⌊(2|a| + q)/2q⌋`. `undefined` when the
+   *  operand is not such a product, or has no literal that is not an
+   *  integer. */
+  const roundedQuotient = (e: Fn): V | undefined => {
+    const [x] = e.ops;
+    if (
+      e.nops !== 1 ||
+      !isFunction(x, 'Multiply') ||
+      !isLibraryOperator(x as never, 'Multiply')
+    )
+      return undefined;
+    let [p, q] = [1n, 1n];
+    const others: Expression[] = [];
+    for (const op of x.ops) {
+      const pq = rational(op);
+      if (pq === undefined) others.push(op);
+      else [p, q] = [p * pq[0], q * pq[1]];
+    }
+    if (q === 1n || others.length === 0) return undefined;
+    if (q < 0n) [p, q] = [-p, -q];
+    if (e.operator === 'Round' && !SETTINGS.roundingTies(ce))
+      decline(e, 'Round with a roundingTies other than the default');
+    const values = others.map((op) => value(op)!);
+    if (
+      values.some((v) => type(v).lane !== 'integer' || type(v).shape.length)
+    )
+      decline(
+        e,
+        `${e.operator} of a product of a rational and a value that is not an integer (the bigint mode)`,
+        BIGINT_LANE
+      );
+    const int = (k: bigint) =>
+      b.constant(Number.isSafeInteger(Number(k)) ? Number(k) : k, 'integer');
+    const mul = (xs: V[]) =>
+      xs.length === 1 ? xs[0] : apply(e, 'Multiply', xs);
+    const a =
+      p === 1n
+        ? mul(values)
+        : p === -1n
+          ? apply(e, 'Negate', [mul(values)])
+          : mul([int(p), ...values]);
+    const floorDiv = (n: V, d: bigint) =>
+      apply(e, ofOp('floordiv.int'), [n, int(d)]);
+    if (e.operator === 'Floor') return floorDiv(a, q);
+    if (e.operator === 'Ceil')
+      return apply(e, 'Negate', [floorDiv(apply(e, 'Negate', [a]), q)]);
+    const magnitude = apply(e, 'Abs', [a]);
+    const k =
+      e.operator === 'Truncate'
+        ? floorDiv(magnitude, q)
+        : floorDiv(
+            apply(e, 'Add', [apply(e, 'Multiply', [int(2n), magnitude]), int(q)]),
+            2n * q
+          );
+    return apply(e, 'Multiply', [apply(e, 'Sign', [a]), k]);
   };
 
   /** The booleans `first`, `next(1)`, … `next(n - 1)` joined by `And`
@@ -4159,7 +4359,7 @@ function lowerOnce(
   const rowsInput = (
     t: Type
   ): { lane: Lane; shape: (number | 'run-time')[] } | undefined =>
-    options.javascript && !bigint && !interval && rowsElementLane(t)
+    options.javascript && !bigint && !interval && rowsElementLane(t, cx.wide)
       ? { lane: 'rows', shape: [] }
       : undefined;
 
@@ -4913,8 +5113,16 @@ function lowerOnce(
     first?: V,
     start = b.types.length
   ): V | undefined => {
+    // An arm `List()` of a conditional whose type is a flat list of
+    // integers or reals (the other arms give the element type,
+    // `If(n < 1, [], Range(1, n))`): the empty list of that lane, which
+    // `branch()` joins with the other arms as lists of two lengths.
+    const arm = (x: Expression): V | undefined => {
+      const lane = want ? emptyListLane(x, node.type.type) : undefined;
+      return lane === undefined ? value(x, want) : emptyList(x as Fn, lane);
+    };
     if (clauses.length === 0) {
-      if (otherwise !== undefined) return value(otherwise, want);
+      if (otherwise !== undefined) return arm(otherwise);
       if (!want) return undefined;
       const t = first === undefined ? undefined : type(first);
       // An `If` whose arm is a flat list of numbers or a list of points:
@@ -5037,7 +5245,7 @@ function lowerOnce(
     return branch(
       node,
       cond,
-      () => (first = value(then, want)),
+      () => (first = arm(then)),
       () => conditional(node, rest, otherwise, want, first, at),
       want
     );
@@ -6158,6 +6366,25 @@ function lowerOnce(
       return listWrite(e, owned, r.ops[1], () => scalar(r.ops[2]), false, want);
     }
     const binding = writable(e, name);
+    if (binding.grid !== undefined) {
+      // A list of lists of a variable of the engine (CE-1721), written by a
+      // statement of the body (`assignedNames()`): a list of rank 2 of
+      // numbers of its lane, which the entry returns.
+      const x = value(e.ops[1]);
+      const t = x === undefined ? undefined : type(x);
+      if (
+        t === undefined ||
+        t.shape.length !== 2 ||
+        tuples.has(x!) ||
+        !isSubLane(t.lane, binding.grid)
+      )
+        decline(
+          e,
+          `a value of type ${t === undefined ? 'nothing' : typeToString(t, tuples.get(x!) ?? -1)} written to a list of lists of ${binding.grid} elements`
+        );
+      binding.v = x!;
+      return binding.v;
+    }
     if (binding.whole !== undefined) {
       // A list local written whole (`wholeLocal()`).
       const r = e.ops[1];
@@ -6642,6 +6869,43 @@ function lowerOnce(
   /** `List()`, which has no type of its own. */
   const isEmptyList = (x: Expression) => isFunction(x, 'List') && x.nops === 0;
 
+  /** The lane of `x`, `List()`, where the type `t` of the place that
+   *  takes it (a conditional of which it is an arm, a parameter) is a flat
+   *  list of integers or reals, on a target with run-time lengths; or
+   *  `undefined`: then `List()` declines, it has no type of its own. A
+   *  conditional whose arms are all `List()` (`list<never>`) takes the
+   *  integer lane. */
+  const emptyListLane = (
+    x: Expression,
+    t: Type
+  ): 'integer' | 'real' | undefined => {
+    if (!isEmptyList(x) || interval || !options.runtimeLengths)
+      return undefined;
+    const ir = inputType(t);
+    if (ir?.shape.length !== 1 || ir.shape[0] !== 'run-time') return undefined;
+    return ir.lane === 'integer' || ir.lane === 'real' ? ir.lane : undefined;
+  };
+
+  /** The list of no element of the lane `lane`: a build of no element (a
+   *  stated length is at least 1). `element` makes the element of the
+   *  build from the zero of the lane (a point of zeros for a list of
+   *  points). */
+  const emptyList = (
+    e: Fn,
+    lane: Lane,
+    element: (zero: V) => V = (zero) => zero
+  ): V => {
+    const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+    const k = b.newValue(scalarType('integer'));
+    return region(
+      'build',
+      [b.constant(0, 'integer')],
+      [k],
+      () => [element(zero)],
+      e
+    )[0];
+  };
+
   /** The value `x` written to a list local written whole of the lane `lane`
    *  (`wholeLocal()`): a list of the rank, the lengths after the first and
    *  the tuple mark of the local, of a sub-lane; an empty list (`undefined`
@@ -6654,20 +6918,10 @@ function lowerOnce(
     lane: Lane
   ): V => {
     const t = x === undefined ? { lane, shape: [0] } : type(x);
-    if (x === undefined || (t.shape.length === 1 && t.shape[0] === 0)) {
-      // A build of no element: a stated length is at least 1.
-      const zero = b.constant(lane === 'boolean' ? false : 0, lane);
-      const k = b.newValue(scalarType('integer'));
-      return region(
-        'build',
-        [b.constant(0, 'integer')],
-        [k],
-        () => [
-          whole.points ? tuple(e, Array<V>(whole.inner[0]).fill(zero)) : zero,
-        ],
-        e
-      )[0];
-    }
+    if (x === undefined || (t.shape.length === 1 && t.shape[0] === 0))
+      return emptyList(e, lane, (zero) =>
+        whole.points ? tuple(e, Array<V>(whole.inner[0]).fill(zero)) : zero
+      );
     const shaped =
       t.shape.length === 1 + whole.inner.length &&
       whole.inner.every((n, k) => t.shape[k + 1] === n) &&
@@ -6799,7 +7053,10 @@ function lowerOnce(
     holdKnown: (v, value, place) => knownStrings.set(v, { value, place }),
     readKnown,
     rowLengths,
-    rowsElementLane,
+    rowsElementLane: (t) =>
+      rowsElementLane(t, options.mode === 'complex' ? 'complex' : 'real'),
+    rowsElements,
+    rowsLaneOf,
     apply,
     type,
     constant,
@@ -6984,12 +7241,18 @@ function lowerOnce(
    *  state that a call of the interpreter changes in the engine (CE-1620).
    *  Each one is a variable with a declared type of the lane `real`,
    *  `integer` or `boolean` (`inputType()`), or a list of that lane of no
-   *  stated length (`list<number>`, CE-1662), on the plain JavaScript
-   *  target; another one declines. A function that `f` calls and that
-   *  reads such a name declines (`free()`): it would read the value before
-   *  the call. */
+   *  stated length (`list<number>`, CE-1662), or a list of lists of
+   *  integers or reals of two lengths not stated (`list<list<number>>`,
+   *  CE-1721) that only an `Assign` that is a statement of the body
+   *  writes, on the plain JavaScript target; another one declines. A
+   *  function that `f` calls and that reads such a name declines
+   *  (`free()`): it would read the value before the call. */
   const assignedNames = (f: Fn): Assigned[] => {
     const out: Assigned[] = [];
+    // The statements of the body: the only places where a list of lists is
+    // written (`assign()`).
+    const body = f.ops[0];
+    const statements = isFunction(body, 'Block') ? body.ops : [body];
     // `bound`: the names that a parameter of a function literal or a
     // `Declare` of a `Block` around `x` binds.
     const visit = (x: Expression, bound: ReadonlySet<string>): void => {
@@ -7015,12 +7278,32 @@ function lowerOnce(
       const targets = isFunction(target, 'Tuple') ? target.ops : [target];
       for (const t of targets) {
         if (!isSymbol(t) || inner.has(t.symbol)) continue;
-        if (out.some((s) => s.name === t.symbol)) continue;
+        const why = (reason: string) =>
+          decline(x, `an assignment of ${t.symbol}, ${reason}`);
+        // A list of lists is written by an `Assign` of the name that is a
+        // statement of the body, so that its value after the body is that
+        // of the last such write, a list of rank 2.
+        const grid = (s: Assigned) => {
+          if (
+            s.rows &&
+            !(
+              x.operator === 'Assign' &&
+              x.ops[0] === t &&
+              statements.includes(x)
+            )
+          )
+            why(
+              'a list of lists, other than by an Assign that is a statement of the body'
+            );
+        };
+        const seen = out.find((s) => s.name === t.symbol);
+        if (seen !== undefined) {
+          grid(seen);
+          continue;
+        }
         const h = held(t.symbol);
         if (h === undefined || h.library) continue;
         const def = h.definition;
-        const why = (reason: string) =>
-          decline(x, `an assignment of ${t.symbol}, ${reason}`);
         if (!options.javascript || interval || bigint)
           why('a variable of the engine, on this target');
         if (def.isConstant) why('a constant');
@@ -7030,6 +7313,20 @@ function lowerOnce(
           why('a name with no value at the compilation, or an input');
         if (def.inferredType)
           why('whose type is inferred from its value: declare its type');
+        // A list of lists of two lengths not stated, of integers or reals
+        // (CE-1721): the host's rows, as an input of that type.
+        const rows = cx.rowsElementLane(def.type.type);
+        if (rows !== undefined) {
+          const s: Assigned = {
+            name: t.symbol,
+            definition: def,
+            lane: rows,
+            rows: true,
+          };
+          grid(s);
+          out.push(s);
+          continue;
+        }
         const ir = inputType(def.type.type);
         const list = ir?.shape.length === 1 && ir.shape[0] === 'run-time';
         const lane = ir?.shape.length === 0 || list ? ir!.lane : undefined;
@@ -7094,6 +7391,21 @@ function lowerOnce(
       // value of each name after it (`Program.assigns`). The stored value
       // is hidden while the body is lowered, so that no analysis reads it.
       for (const s of states) {
+        if (s.rows) {
+          // A list of lists: the host's array of arrays, read as an input
+          // of the lane `rows` until a statement of the body writes it
+          // (`assign()`).
+          b.positional += 1;
+          const v = b.param(s.name, { lane: 'rows', shape: [] });
+          rowsParams.add(v);
+          rowsElements.set(v, s.lane as 'integer' | 'real');
+          frames[0].names.set(s.name, {
+            v,
+            role: 'local',
+            grid: s.lane as 'integer' | 'real',
+          });
+          continue;
+        }
         if (s.list) {
           // A list of a run-time length, its length before it, held as a
           // list local that the body writes whole (`wholeLocal()`): each
