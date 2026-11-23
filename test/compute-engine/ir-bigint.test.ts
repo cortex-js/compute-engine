@@ -453,9 +453,11 @@ describe('IR bigint: random programs against the interpreter', () => {
           );
       }
     }
-    console.log(
-      `ir bigint random: ${counts.compiled} compiled, ${counts.declined} declined, ${counts.compared} compared`
-    );
+    // Statistics for a reader of the run, printed on request only.
+    if (process.env.CE_TEST_REPORT)
+      console.log(
+        `ir bigint random: ${counts.compiled} compiled, ${counts.declined} declined, ${counts.compared} compared`
+      );
     expect(failures).toEqual([]);
     expect(counts.compared).toBeGreaterThan(300);
   });

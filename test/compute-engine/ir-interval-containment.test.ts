@@ -495,9 +495,11 @@ describe('the interval mode: containment', () => {
   });
 
   test('the count of checks, and of those that used the slack', () => {
-    console.log(
-      `${checks} containment checks, ${slack} within the 2-ulp slack\n${SAMPLES.join('\n')}`
-    );
+    // Statistics for a reader of the run, printed on request only.
+    if (process.env.CE_TEST_REPORT)
+      console.log(
+        `${checks} containment checks, ${slack} within the 2-ulp slack\n${SAMPLES.join('\n')}`
+      );
     expect(checks).toBeGreaterThan(10_000);
   });
 

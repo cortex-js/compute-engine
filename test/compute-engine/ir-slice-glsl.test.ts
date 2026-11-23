@@ -357,9 +357,11 @@ const INTEGER_PROGRAMS: [unknown, Point[]][] = [
         });
       });
       const points = cases.reduce((n, c) => n + c.points.length, 0);
-      console.log(
-        `GLSL: ${cases.length} programs at ${points} points, ${failures.length} failures`
-      );
+      // Statistics for a reader of the run, printed on request only.
+      if (process.env.CE_TEST_REPORT)
+        console.log(
+          `GLSL: ${cases.length} programs at ${points} points, ${failures.length} failures`
+        );
       expect(cases.length).toBeGreaterThanOrEqual(30);
       expect(failures).toEqual([]);
     }, 180_000);

@@ -15,7 +15,12 @@ import { formatDiagnostics } from '../../src/cli/format';
 const CODE = 'equation-not-assignment';
 
 function run(source: string) {
-  const result = executeEpsil(new ComputeEngine(), source);
+  const ce = new ComputeEngine();
+  // A `print(...)` of a case writes to a sink, not to the test output.
+  ce.effects = {
+    console: { log: () => undefined, readLine: () => undefined },
+  };
+  const result = executeEpsil(ce, source);
   return {
     value: result.value?.json,
     codes: result.diagnostics.map((d) =>

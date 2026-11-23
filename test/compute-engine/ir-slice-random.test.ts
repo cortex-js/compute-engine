@@ -492,36 +492,38 @@ describe('IR slice: random programs against the interpreter', () => {
         }
       }
     }
-    console.log(
-      JSON.stringify(
-        {
-          generated: COUNT,
-          boxErrors: boxErrors.length,
-          boxErrorSample: boxErrors.slice(0, 5),
-          compiled,
-          warned,
-          declined: COUNT - compiled - boxErrors.length,
-          compared,
-          reached: Object.fromEntries(reached),
-          interpreterErrors: interpreterErrors.length,
-          interpreterErrorClasses: Object.fromEntries(
-            [...errorClasses].sort((a, b) => b[1] - a[1])
-          ),
-          interpreterErrorSamples: errorSamples,
-          bitDifferences: bitDifferences.length,
-          bitDifferenceSample: bitDifferences.slice(0, 5),
-          declines: Object.fromEntries(
-            [...declines].sort((a, b) => b[1] - a[1])
-          ),
-          expectedDeclines: Object.fromEntries(expectedDeclines),
-          disagreements: Object.fromEntries(kinds),
-          samples: Object.fromEntries(samples),
-          unclassified,
-        },
-        null,
-        1
-      )
-    );
+    // Statistics for a reader of the run, printed on request only.
+    if (process.env.CE_TEST_REPORT)
+      console.log(
+        JSON.stringify(
+          {
+            generated: COUNT,
+            boxErrors: boxErrors.length,
+            boxErrorSample: boxErrors.slice(0, 5),
+            compiled,
+            warned,
+            declined: COUNT - compiled - boxErrors.length,
+            compared,
+            reached: Object.fromEntries(reached),
+            interpreterErrors: interpreterErrors.length,
+            interpreterErrorClasses: Object.fromEntries(
+              [...errorClasses].sort((a, b) => b[1] - a[1])
+            ),
+            interpreterErrorSamples: errorSamples,
+            bitDifferences: bitDifferences.length,
+            bitDifferenceSample: bitDifferences.slice(0, 5),
+            declines: Object.fromEntries(
+              [...declines].sort((a, b) => b[1] - a[1])
+            ),
+            expectedDeclines: Object.fromEntries(expectedDeclines),
+            disagreements: Object.fromEntries(kinds),
+            samples: Object.fromEntries(samples),
+            unclassified,
+          },
+          null,
+          1
+        )
+      );
     expect(compiled).toBeGreaterThan(COUNT / 2);
     // Each construct is reached by more than 10 programs in 5,000.
     for (const [c, n] of reached)
@@ -786,7 +788,9 @@ describe('IR slice: random programs with shared nodes', () => {
         }
       }
     }
-    console.log(`shared nodes: ${compared} comparisons`);
+    // Statistics for a reader of the run, printed on request only.
+    if (process.env.CE_TEST_REPORT)
+      console.log(`shared nodes: ${compared} comparisons`);
     expect(compared).toBeGreaterThan(200);
     expect(unclassified).toEqual([]);
   });

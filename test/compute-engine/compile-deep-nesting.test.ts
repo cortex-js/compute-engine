@@ -32,7 +32,7 @@
 // `_compileInner()` and `compileExpr()` moved to helper functions, and the
 // first-compile limits in a warm worker rose from 342 to 429 for the chain
 // and from a degree of 166 to 193 for Horner form. They were measured with
-// `scripts/compiler-growth.mjs` (one Jest worker, three compile test files
+// a binary search over Jest runs (one Jest worker, three compile test files
 // before the compile), and the Horner limit with the same search on a
 // Horner probe.
 //

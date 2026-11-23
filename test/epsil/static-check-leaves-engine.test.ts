@@ -329,7 +329,14 @@ describe('THE CHECK PUTS BACK THE HOLDER COUNTS OF THE FRAMES', () => {
         return ce.number(1);
       },
     });
-    staticDiagnostics(ce, ['Block', ['Write', 1]], '');
+    // A `Write` whose write throws (a second declaration of a name) makes
+    // the engine report the failed canonicalization on the console.
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      staticDiagnostics(ce, ['Block', ['Write', 1]], '');
+    } finally {
+      error.mockRestore();
+    }
     expect(counts(ce)).toEqual(before);
     counted(ce).forEach((d, i) => expect(d === defs[i]).toBe(true));
     expect(ce.lookupDefinition('f')).toBe(binding);

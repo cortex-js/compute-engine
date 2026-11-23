@@ -262,11 +262,13 @@ describe('the interval mode, integrals: containment', () => {
   });
 
   test('the count of checks, and of those that used the slack', () => {
-    console.log(
-      `${checks} containment checks, ${skipped} skipped (an error of the quadrature above 1e-8), ` +
-        `${byError} within the error of the quadrature (largest ${largestError}), ` +
-        `${slack} within the 2-ulp slack; exact references: ${EXACT.size}\n${[...EXACT].join('\n')}`
-    );
+    // Statistics for a reader of the run, printed on request only.
+    if (process.env.CE_TEST_REPORT)
+      console.log(
+        `${checks} containment checks, ${skipped} skipped (an error of the quadrature above 1e-8), ` +
+          `${byError} within the error of the quadrature (largest ${largestError}), ` +
+          `${slack} within the 2-ulp slack; exact references: ${EXACT.size}\n${[...EXACT].join('\n')}`
+      );
     expect(checks).toBeGreaterThan(1_000);
   });
 });

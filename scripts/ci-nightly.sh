@@ -43,24 +43,11 @@
 #      typecheck`, the declaration build that the declaration test reads
 #      (`dist/types/compute-engine.d.ts`), and `bash scripts/test.sh` (the
 #      declaration test and the whole jest suite).
-#      Then `scripts/compiler-growth.mjs` measures the two numbers of the
-#      compiler growth guard: the code lines of
-#      `src/compute-engine/compilation` and the compile depth limit (a
-#      first compile in a warm Jest worker). It takes about 5 s when the
-#      limit did not change, and about 35 s otherwise.
 #   4. Records the result in STATE_DIR, in the format of Tycho's nightly job
 #      so that `~/.claude/scripts/suite-status.mjs` reads both:
 #      - `last.json`: the last COMPLETE run: the commit, the times, the exit
 #        code, `passed` or `failed`, and what failed (`typecheck`,
-#        `declarations`, or the path of each failing test file). Also
-#        `metrics`, the two growth numbers of this run, and
-#        `previousMetrics`, the same numbers of the earlier run, on the
-#        nearest ancestor commit (or the same commit), that measured them,
-#        with its commit. `suite-status.mjs` reports a fall of the depth
-#        limit between the two. It does not report the code lines, which
-#        this job only records.
-#      - `metrics.jsonl`: the growth numbers of every complete run, one
-#        JSON line per run.
+#        `declarations`, or the path of each failing test file).
 #      - `attempt.json`: the last attempt of any kind. Its result can also
 #        be `unchanged` (nothing to run), `skipped` (no box lock) or `error`
 #        (the worktree could not be made, or the run was interrupted). Such
@@ -73,10 +60,8 @@
 # `CE_NIGHTLY=1 scripts/test.sh` run at the commit on the WSL Linux of <host>
 # (univac), in a slot of `~/.claude/scripts/remote-jest.mjs`, not here; the run
 # takes no box lock and makes no worktree on this machine. The result is
-# recorded here as for a local run, with `host` in the state. The compiler
-# growth numbers are not measured: the compile depth limit depends on the
-# machine, so a number from another machine would make a false rise or fall in
-# the history. When <host> cannot be reached the attempt is `error`.
+# recorded here as for a local run, with `host` in the state. When <host>
+# cannot be reached the attempt is `error`.
 #
 # STATE_DIR is `${XDG_STATE_HOME:-$HOME/.local/state}/compute-engine-ci-nightly`.
 # It is outside the repository because the result belongs to this machine,
@@ -94,13 +79,6 @@ REPO="$(dirname "$COMMON_DIR")"
 export REPO
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/compute-engine-ci-nightly"
-# The compiler growth numbers: one JSON line per complete run, and the
-# output of the run in progress. The history is written only by the run that
-# owns the worktree (see claim_worktree). The output file is one file per
-# run, named with the pid, because the run reads it after it releases the
-# lock, when the next run can already be started.
-METRICS_HISTORY="$STATE_DIR/metrics.jsonl"
-RUN_METRICS="$STATE_DIR/run-metrics-$$.json"
 LABEL="local.compute-engine.ci-nightly"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 BOX_LOCK="$HOME/.claude/scripts/box-lock.mjs"
@@ -135,87 +113,24 @@ usage() {
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# The local time of day, for the status lines of the console.
+clock() { date +%H:%M:%S; }
+
+# minutes_since <epoch seconds>: the whole minutes since then.
+minutes_since() { echo $((($(date +%s) - $1) / 60)); }
+
 # write_state <file> <sha> <started> <ended> <exit> <result> <log> [failed...]
-#
-# When METRICS_FILE names the output of `scripts/compiler-growth.mjs`, the
-# state also gets `metrics` (the two numbers of this run) and
-# `previousMetrics` (for each number, the value, commit and end time of the
-# earlier run on the nearest ancestor commit (or on this commit) that
-# measured it, from METRICS_HISTORY), and this run
-# is added to METRICS_HISTORY. suite-status.mjs compares the two.
 write_state() {
   mkdir -p "$STATE_DIR"
-  METRICS_HISTORY="$METRICS_HISTORY" node -e '
+  node -e '
     const fs = require("node:fs");
     const [file, sha, startedAt, endedAt, exit, result, log, ...failedJobs] = process.argv.slice(1);
     // `repo` lets suite-status.mjs find the repo of this state directory.
     const state = { sha, startedAt, endedAt, exit: Number(exit), result, failedJobs, log, leftOut: [], repo: process.env.REPO };
     // A run of `run --remote <host>`: the machine that ran the checks.
     if (process.env.CI_REMOTE_HOST) state.host = process.env.CI_REMOTE_HOST;
-    const metricsFile = process.env.METRICS_FILE, historyFile = process.env.METRICS_HISTORY;
-    let metrics;
-    try { metrics = metricsFile && JSON.parse(fs.readFileSync(metricsFile, "utf8")); } catch {}
-    if (metrics) {
-      state.metrics = metrics;
-      let history = [];
-      try {
-        for (const line of fs.readFileSync(historyFile, "utf8").split("\n")) {
-          try { if (line) history.push(JSON.parse(line)); } catch {}
-        }
-      } catch {}
-      // A run on an older commit must not be compared with a newer one: that
-      // would show a false rise or fall. Only an earlier run on this commit
-      // or on one of its ancestors counts.
-      const isAncestor = (h) => {
-        try {
-          require("node:child_process").execFileSync("git", ["-C", process.env.REPO, "merge-base", "--is-ancestor", h.sha, sha], { stdio: "ignore" });
-          return true;
-        } catch { return false; }
-      };
-      // Of those runs, the nearest ancestor counts, not the latest in time: a
-      // `run --commit` on an old commit after a run on a newer one would
-      // otherwise move the comparison back to the old commit. The history is
-      // read from the end, so of two runs on the same commit the later one
-      // counts.
-      const descends = (a, b) => {
-        try {
-          require("node:child_process").execFileSync("git", ["-C", process.env.REPO, "merge-base", "--is-ancestor", a, b], { stdio: "ignore" });
-          return true;
-        } catch { return false; }
-      };
-      state.previousMetrics = {};
-      for (const key of ["compilerCodeLines", "compileDepthLimit"]) {
-        let before;
-        for (const h of [...history].reverse()) {
-          if (!Number.isFinite(h[key]) || !isAncestor(h)) continue;
-          if (!before || (h.sha !== before.sha && descends(before.sha, h.sha))) before = h;
-        }
-        if (before) state.previousMetrics[key] = { value: before[key], sha: before.sha, endedAt: before.endedAt };
-      }
-      try {
-        fs.appendFileSync(historyFile, JSON.stringify({ sha, endedAt, ...metrics }) + "\n");
-      } catch (e) {
-        console.error("ci-nightly: the growth history was not written: " + e.message);
-      }
-    }
     fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
   ' "$@"
-}
-
-# The compile depth limit of the latest run that measured it, or nothing.
-# compiler-growth.mjs starts its search there.
-last_depth_limit() {
-  node -e '
-    let h = [];
-    // Each line is read on its own, so that one bad line does not lose the hint.
-    try {
-      for (const l of require("node:fs").readFileSync(process.argv[1], "utf8").split("\n")) {
-        try { if (l) h.push(JSON.parse(l)); } catch {}
-      }
-    } catch {}
-    const v = h.findLast((e) => Number.isFinite(e.compileDepthLimit))?.compileDepthLimit;
-    if (v) console.log(v);
-  ' "$METRICS_HISTORY"
 }
 
 # covered <sha>: true when a passing full run already covers the commit, by
@@ -336,14 +251,15 @@ on_interrupt() {
   finish_run
   if [ -n "$RUN_SHA" ]; then
     echo "ci-nightly: interrupted" >> "$RUN_LOG"
+    echo "ci-nightly: $(clock) interrupted"
     write_state "$STATE_DIR/attempt.json" "$RUN_SHA" "$RUN_STARTED" "$(now)" 130 error "$RUN_LOG"
   fi
-  rm -f "$RUN_METRICS"
   exit 130
 }
 
 cmd_run() {
-  local force="" commit="" priority=() remote="" sha started log rc result depth_hint="" failed=()
+  local force="" commit="" priority=() remote="" sha started log rc result failed=()
+  local start_epoch locked_epoch
   while [ $# -gt 0 ]; do
     case "$1" in
       --force) force="--force" ;;
@@ -380,7 +296,9 @@ cmd_run() {
   # The pid makes the name unique: two runs started in the same second
   # would otherwise share a log and read each other's failures.
   log="$STATE_DIR/logs/$(date +%Y%m%d-%H%M%S)-$$.log"
-  echo "ci-nightly: full suite${remote:+ on $remote}; log $log"
+  start_epoch="$(date +%s)"
+  locked_epoch="$start_epoch"
+  echo "ci-nightly: $(clock) started: full suite${remote:+ on $remote}; log $log"
   RUN_SHA="$sha" RUN_STARTED="$started" RUN_LOG="$log"
   trap on_interrupt INT TERM HUP
   # A remote run takes no box lock and makes no worktree here.
@@ -391,7 +309,15 @@ cmd_run() {
   # The wait runs in the background, so that a signal reaches on_interrupt
   # at once (bash runs a trap only after a foreground command ends), and
   # on_interrupt stops it, which removes this run from the lock's queue.
-  node "$BOX_LOCK" acquire "$OWNER" "$HOLD_MINUTES" "compute-engine nightly full suite" --pid="$$" --wait="$WAIT_MINUTES" ${priority[@]+"${priority[@]}"} >> "$log" 2>&1 &
+  # On a terminal, the lines of the wait (one a minute while the lock is
+  # held) also go to the console. Under launchd they go to the log only, so
+  # that launchd.log does not repeat them.
+  echo "ci-nightly: $(clock) waiting for the box lock (at most $WAIT_MINUTES min)"
+  if [ -t 1 ]; then
+    node "$BOX_LOCK" acquire "$OWNER" "$HOLD_MINUTES" "compute-engine nightly full suite" --pid="$$" --wait="$WAIT_MINUTES" ${priority[@]+"${priority[@]}"} > >(tee -a "$log") 2>&1 &
+  else
+    node "$BOX_LOCK" acquire "$OWNER" "$HOLD_MINUTES" "compute-engine nightly full suite" --pid="$$" --wait="$WAIT_MINUTES" ${priority[@]+"${priority[@]}"} >> "$log" 2>&1 &
+  fi
   RUN_CHILD=$!
   wait "$RUN_CHILD"
   rc=$?
@@ -404,6 +330,8 @@ cmd_run() {
     return 1
   fi
   RUN_LOCKED=1
+  locked_epoch="$(date +%s)"
+  echo "ci-nightly: $(clock) box lock acquired after $(minutes_since "$start_epoch") min"
   # The wait can last hours: test the HEAD of now, not the one of before
   # (a commit given with --commit stays the same).
   sha="$(git -C "$REPO" rev-parse "${commit:-HEAD}^{commit}")" || { finish_run; return 1; }
@@ -423,7 +351,6 @@ cmd_run() {
     return 1
   fi
   RUN_WT="$WT"
-  depth_hint="$(last_depth_limit)"
   if ! git -C "$REPO" worktree add --detach "$WT" "$sha" >> "$log" 2>&1 ||
     ! ln -s "$REPO/node_modules" "$WT/node_modules"; then
     finish_run
@@ -436,7 +363,7 @@ cmd_run() {
 
   if [ -n "$remote" ]; then
     echo "ci-nightly: testing ${sha:0:9} on $remote" | tee -a "$log"
-    # The same checks as below, but the growth measure (see "Remote runs").
+    # The same checks as below.
     # Each failure writes a "failed job" line; the command ends with status
     # 0, so a status of remote-jest other than 0 means the checks did not all
     # run (255: SSH failed; 254: the slot could not be made; 124: the time
@@ -451,30 +378,25 @@ cmd_run() {
       CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
       true' >> "$log" 2>&1 &
   else
+  # fd 3 is the console: the checks write to the log, and each phase also
+  # writes one status line to the console.
+  exec 3>&1
   (
+    phase() { echo "=== $1"; echo "ci-nightly: $(clock) $1" >&3; }
     cd "$WT" || { echo "ci-nightly: failed job: worktree"; exit 1; }
-    echo "=== typecheck"
+    phase typecheck
     npm run typecheck || echo "ci-nightly: failed job: typecheck"
     # The declaration test (test/public-ts-declarations/main.ts) imports
     # dist/types/compute-engine, refreshed by typecheck above.
-    echo "=== declarations"
+    phase declarations
     bash scripts/test-types.sh || echo "ci-nightly: failed job: declarations"
-    echo "=== test.sh"
+    phase test.sh
     # test.sh stops at the first failing step (set -e); its exit code is
     # what tells a pass. CE_NIGHTLY=1 turns on the nightly suites
     # (test/compute-engine/nightly/README.md), which every other run skips.
     CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
-    # The growth guard of the compiler
-    # (docs/plans/2026-11-02-compiler-contraction-plan.md §5): its code
-    # lines and its compile depth limit. A measure that fails is not a
-    # failed job: the number is null and the reason is in this log.
-    echo "=== compiler growth"
-    if node scripts/compiler-growth.mjs ${depth_hint:+--depth-hint "$depth_hint"} > "$RUN_METRICS"; then
-      cat "$RUN_METRICS"
-    else
-      echo "ci-nightly: the compiler growth measure failed (status $?)"
-    fi
   ) >> "$log" 2>&1 &
+  exec 3>&-
   fi
   # In the background with `wait`: bash runs a trap only after a foreground
   # command ends, which would be after the whole suite.
@@ -500,8 +422,7 @@ cmd_run() {
   if [ "$rc" -ne 0 ]; then
     echo "ci-nightly: the checks stopped with status $rc before they ended" >> "$log"
     write_state "$STATE_DIR/attempt.json" "$sha" "$started" "$(now)" "$rc" error "$log"
-    rm -f "$RUN_METRICS"
-    echo "ci-nightly: ${sha:0:9} did not complete (status $rc; see $log)"
+    echo "ci-nightly: $(clock) ended: ${sha:0:9} did not complete (status $rc; see $log)"
     if [ -n "$remote" ] && [ "$rc" -eq 255 ]; then
       echo "ci-nightly: $remote could not be reached; run without --remote to test here"
     fi
@@ -525,11 +446,10 @@ cmd_run() {
     result=passed
     rc=0
   fi
-  METRICS_FILE="$RUN_METRICS" write_state "$STATE_DIR/last.json" "$sha" "$started" "$(now)" "$rc" "$result" "$log" "${failed[@]}"
-  rm -f "$RUN_METRICS"
+  write_state "$STATE_DIR/last.json" "$sha" "$started" "$(now)" "$rc" "$result" "$log" "${failed[@]}"
   cp "$STATE_DIR/last.json" "$STATE_DIR/attempt.json"
   prune_logs
-  echo "ci-nightly: ${sha:0:9} $result${failed:+ (${failed[*]})}"
+  echo "ci-nightly: $(clock) ended: ${sha:0:9} $result${failed:+ (${failed[*]})}; $(minutes_since "$locked_epoch") min of checks, $(minutes_since "$start_epoch") min in all"
   # `show` moves the green mark; `notify` tells the user of a failure.
   node "$SUITE_STATUS" show --repo "$REPO" >/dev/null 2>&1
   node "$SUITE_STATUS" notify >/dev/null 2>&1
