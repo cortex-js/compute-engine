@@ -136,6 +136,12 @@ const CASES: [name: string, json: Json, points: Point[], tolerance?: number][] =
   ['ClausenCl', ['ClausenCl', 'n', 'x'], grid('n', [1, 2, 3, 4], 'x', [-3, -1, 0, 0.5, 1, 3, 10]), 1e-13],
   ['LambertW', ['LambertW', 'x'], xs([-0.5, -0.36787944117144233, -0.3, -0.2, 0, 0.5, 1, 2, 10, 1e10])],
   ['LambertW of a branch', ['LambertW', 'x', 'n'], grid('x', [-0.3, -0.1, 0.5, 2], 'n', [-1, 0, 1])],
+  ['ChebyshevT', ['ChebyshevT', 'n', 'x'], grid('n', [0, 1, 2, 3, 7, 20, -1, -3], 'x', [-2.5, -1, -0.5, 0, 0.3, 1, 1.5, 10])],
+  ['ChebyshevU', ['ChebyshevU', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -1, -2, -5], 'x', [-2.5, -1, -0.5, 0, 0.3, 1, 1.5, 10])],
+  ['LegendreP', ['LegendreP', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -1, -4], 'x', [-2.5, -1, -0.5, 0, 0.3, 1, 1.5, 10])],
+  // A negative degree has no value: NaN, the interpreter is unevaluated.
+  ['HermiteH', ['HermiteH', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -1], 'x', [-2.5, -1, -0.5, 0, 0.3, 1, 1.5, 10])],
+  ['LaguerreL', ['LaguerreL', 'n', 'x'], grid('n', [0, 1, 2, 5, 20, -2], 'x', [-2.5, -1, 0, 0.3, 1, 1.5, 10, 30.5])],
   ['Fibonacci', ['Fibonacci', 'n'], [0, 1, 2, 5, 10, 20, 50, 78, 79, 100, 500, 1000, 1476, 1477, -1, -2, -7, -80].map((n) => ({ n })), 1e-14],
   ['IsPrime', ['IsPrime', 'n'], [0, 1, 2, 3, 4, 97, 91, -7, 1e15 + 37, 2 ** 53 + 2].map((n) => ({ n }))],
   ['Binomial of reals', ['Binomial', 'x', 'y'], grid('x', [5, 10, 7, 6, 20, 2.5, -3, 0.5, -2.5], 'y', [2, 3, 0, 6, 10, 1.5, -1, -2])],

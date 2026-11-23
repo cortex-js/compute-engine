@@ -339,6 +339,12 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('StieltjesGamma', 1,        [[[I], R, 'stieltjes']],       { fold: F.stieltjes }),
   row('StieltjesGamma', 2,        [[[I, R], R, 'stieltjesa']],   { fold: F.stieltjesa, ...domain }),
   row('ClausenCl',    2,          [[[I, R], R, 'clausen']],      { fold: F.clausen }),
+  // The orthogonal polynomials, of an integer degree and a real x.
+  row('ChebyshevT',   2,          [[[I, R], R, 'chebyshevt']],   { fold: F.chebyshevt }),
+  row('ChebyshevU',   2,          [[[I, R], R, 'chebyshevu']],   { fold: F.chebyshevu }),
+  row('LegendreP',    2,          [[[I, R], R, 'legendrep']],    { fold: F.legendrep }),
+  row('HermiteH',     2,          [[[I, R], R, 'hermiteh']],     { fold: F.hermiteh }),
+  row('LaguerreL',    2,          [[[I, R], R, 'laguerrel']],    { fold: F.laguerrel }),
   row('LambertW',     1,          rc('lambertw', 1),             { fold: F.lambertw, ...domain }),
   row('LambertW',     2,          [[[R, I], R, 'lambertwk']],    { fold: F.lambertwk, ...domain }),
   row('Fibonacci',    1,          [[[I], I, 'fibonacci.int'], [[R], R, 'fibonacci']], { fold: F.fibonacci }),

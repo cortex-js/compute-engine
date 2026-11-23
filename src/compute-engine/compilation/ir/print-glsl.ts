@@ -18,6 +18,7 @@ import { entryOf, type IRType, type Program } from './ir.js';
 import { GLSL_ZETA_HELPERS } from './glsl-zeta-helpers.js';
 import { GLSL_COMPLEX_SPECIAL_HELPERS } from './glsl-complex-special-helpers.js';
 import { deepFreeze, type OperatorRow } from './operators.js';
+import { MAX_NUMERIC_DEGREE } from '../../numerics/orthogonal-polynomials.js';
 import {
   ARITHMETIC,
   calls,
@@ -659,6 +660,27 @@ export const GLSL: Syntax = deepFreeze({
     'besselj': {
       text: '_gpu_ir_besselj($0, $1)',
       helpers: ['_gpu_ir_sincospi', '_gpu_ir_besselj'],
+    },
+    // The orthogonal polynomials, by the kind number of `_gpu_ir_orthopoly`.
+    'chebyshevt': {
+      text: '_gpu_ir_orthopoly(0, $0, $1)',
+      helpers: ['_gpu_ir_orthopoly'],
+    },
+    'chebyshevu': {
+      text: '_gpu_ir_orthopoly(1, $0, $1)',
+      helpers: ['_gpu_ir_orthopoly'],
+    },
+    'legendrep': {
+      text: '_gpu_ir_orthopoly(2, $0, $1)',
+      helpers: ['_gpu_ir_orthopoly'],
+    },
+    'hermiteh': {
+      text: '_gpu_ir_orthopoly(3, $0, $1)',
+      helpers: ['_gpu_ir_orthopoly'],
+    },
+    'laguerrel': {
+      text: '_gpu_ir_orthopoly(4, $0, $1)',
+      helpers: ['_gpu_ir_orthopoly'],
     },
     'digamma': {
       text: '_gpu_ir_digamma($0)',
@@ -1467,6 +1489,43 @@ export const GLSL: Syntax = deepFreeze({
     }
   }
   return sgn * jn / norm;
+}`,
+    // The orthogonal polynomial of the integer degree `order` at x, by the
+    // three-term recurrences of `numerics/orthogonal-polynomials.ts`, as
+    // the interpreter computes it. `kind`: 0 ChebyshevT, 1 ChebyshevU,
+    // 2 LegendreP, 3 HermiteH, 4 LaguerreL. A negative degree of a
+    // Chebyshev or Legendre polynomial maps to a nonnegative one; of a
+    // Hermite or Laguerre polynomial, and a degree past
+    // `MAX_NUMERIC_DEGREE`, it is NaN.
+    _gpu_ir_orthopoly: `float _gpu_ir_orthopoly(int kind, float order, float x) {
+  // A float outside the range of an int has no defined conversion.
+  if (abs(order) > ${MAX_NUMERIC_DEGREE + 2}.0) return ${NAN};
+  int n = int(order);
+  float sgn = 1.0;
+  if (n < 0) {
+    if (kind == 0) n = -n;
+    else if (kind == 1) {
+      if (n == -1) return 0.0;
+      n = -n - 2;
+      sgn = -1.0;
+    } else if (kind == 2) n = -n - 1;
+    else return ${NAN};
+  }
+  if (n > ${MAX_NUMERIC_DEGREE}) return ${NAN};
+  float p0 = 1.0;
+  if (n == 0) return sgn;
+  float p1 = kind == 1 || kind == 3 ? 2.0 * x : kind == 4 ? 1.0 - x : x;
+  for (int k = 1; k < n; k++) {
+    float fk = float(k);
+    float p2;
+    if (kind <= 1) p2 = 2.0 * x * p1 - p0;
+    else if (kind == 2) p2 = ((2.0 * fk + 1.0) * x * p1 - fk * p0) / (fk + 1.0);
+    else if (kind == 3) p2 = 2.0 * x * p1 - 2.0 * fk * p0;
+    else p2 = ((2.0 * fk + 1.0 - x) * p1 - fk * p0) / (fk + 1.0);
+    p0 = p1;
+    p1 = p2;
+  }
+  return sgn * p1;
 }`,
     // hav x = sin²(x/2).
     _gpu_ir_hav: `float _gpu_ir_hav(float x) {

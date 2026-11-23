@@ -76,7 +76,7 @@ describe('IR slice: GLSL text', () => {
         'acot', 'asec', 'acsc', 'hav', 'acoth', 'asech', 'acsch', 'erf', 'erfc', 'gamma', 'gammaln', 'factorial',
         'factorial2', 'zeta', 'lcm', 'heaviside', 'remainder', 'smoothstep', 'invhav', 'erfinv', 'beta', 'digamma',
         'trigamma', 'besselj', 'polygamma', 'hurwitzzeta', 'zetagen', 'lerchphi', 'polylog', 'harmonic',
-        'harmonic2', 'lambertw'].includes(f)),
+        'harmonic2', 'lambertw', 'chebyshevt', 'chebyshevu', 'legendrep', 'hermiteh', 'laguerrel'].includes(f)),
       ...Object.keys(COMPLEX_FUNCTIONS).filter((f) => !['cplx', 'cadd', 'csub', 'cneg', 'cmul', 'cdiv',
         'cpow', 'cexp', 'cln', 'csqrt', 'csin', 'ccos', 'ctan', 'ccot', 'csinh', 'ccosh', 'ctanh', 'cre', 'cim',
         'cconj', 'cabs', 'carg', 'ceq', 'cne', 'mandelbrot', 'julia', 'csec', 'ccsc', 'csech', 'ccsch', 'ccoth',

@@ -60,8 +60,6 @@
 "CarlsonRF": {"signature":"(complex, complex, complex) -> complex","description":"Carlson symmetric elliptic integral of the first kind","arity":3},
 "CarlsonRG": {"signature":"(complex, complex, complex) -> complex","description":"Carlson symmetric elliptic integral of the second kind","arity":3},
 "CarlsonRJ": {"signature":"(complex, complex, complex, complex) -> complex","description":"Carlson symmetric elliptic integral of the third kind","arity":4},
-"ChebyshevT": {"signature":"(integer, complex) -> complex","description":"Chebyshev polynomial of the first kind","arity":2},
-"ChebyshevU": {"signature":"(integer, complex) -> complex","description":"Chebyshev polynomial of the second kind","arity":2},
 "ClosedDisk": {"signature":"(complex, real) -> set<complex>","description":null,"arity":2},
 "CongruentMod": {"signature":"(integer, integer, integer) -> boolean","description":null,"arity":3},
 "ConreyGenerator": {"signature":"(integer) -> complex","description":"Conrey generator","arity":1},

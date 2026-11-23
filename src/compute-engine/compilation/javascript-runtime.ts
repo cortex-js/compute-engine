@@ -93,6 +93,7 @@ import {
 import { lambertWComplex } from '../numerics/lambert-w-complex.js';
 import { stieltjesGammaReal } from '../numerics/stieltjes.js';
 import { clausen } from '../numerics/clausen.js';
+import { orthogonalPolynomial } from '../numerics/orthogonal-polynomials.js';
 import { polylogOrderComplex, polylogOrderReal } from '../numerics/polylog.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import {
@@ -2090,6 +2091,18 @@ export const REAL_FUNCTIONS = Object.freeze({
   stieltjes: (n: number): number => stieltjesGammaReal(n),
   stieltjesa: (n: number, a: number): number => stieltjesGammaReal(n, a),
   clausen: (n: number, x: number): number => clausen(n, x),
+  // The orthogonal polynomials of an integer degree: NaN at a degree where
+  // the interpreter leaves the call unevaluated.
+  chebyshevt: (n: number, x: number): number =>
+    orthogonalPolynomial('ChebyshevT', n, x),
+  chebyshevu: (n: number, x: number): number =>
+    orthogonalPolynomial('ChebyshevU', n, x),
+  legendrep: (n: number, x: number): number =>
+    orthogonalPolynomial('LegendreP', n, x),
+  hermiteh: (n: number, x: number): number =>
+    orthogonalPolynomial('HermiteH', n, x),
+  laguerrel: (n: number, x: number): number =>
+    orthogonalPolynomial('LaguerreL', n, x),
   // The principal branch, and the branch `k` (an integer).
   lambertw: (x: number): number => lambertW(x),
   lambertwk: (x: number, k: number): number => lambertW(x, k),

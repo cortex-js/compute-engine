@@ -6,7 +6,8 @@
  * and `LCM` of reals, `Heaviside`, `Remainder` (integers and reals),
  * `Smoothstep`,
  * `InverseHaversine`, `ErfInv`, `Beta`, `Digamma`, `Trigamma`, `BesselJ`
- * of an integer order and `LambertW` of one operand. `PolyGamma` declines:
+ * of an integer order, `LambertW` of one operand, and `ChebyshevT`,
+ * `ChebyshevU`, `LegendreP`, `HermiteH` and `LaguerreL`. `PolyGamma` declines:
  * the deleted GPU helper is NaN where its terms cancel (`PolyGamma(2, -0.5)`), where the
  * interpreter has a value.
  *
@@ -143,6 +144,18 @@ const CASES: Case[] = [
       // Near x = n + 5, where a power series cancels in single precision.
       [25, 29.9], [15, 19.9], [20, 24], [10, 14.5], [8, 12.5], [6, 10.5],
       [20, 200], [18, 180], [10, 7], [30, 10]] },
+  // The orthogonal polynomials: the forward recurrence. On [-1, 1] each
+  // step adds an absolute error of a few ulps.
+  { op: 'ChebyshevT', inputs: ['n', 'x'], rel: 1e-5, abs: 1e-5,
+    points: [[0, 0.3], [1, -0.7], [2, 0.5], [3, 0.5], [7, -0.9], [20, 0.25], [-3, 0.5], [5, 2.5], [10, -1.5]] },
+  { op: 'ChebyshevU', inputs: ['n', 'x'], rel: 1e-5, abs: 1e-5,
+    points: [[0, 0.3], [1, -0.7], [4, 0.5], [9, -0.9], [-1, 0.5], [-4, 0.5], [6, 1.75]] },
+  { op: 'LegendreP', inputs: ['n', 'x'], rel: 1e-5, abs: 1e-5,
+    points: [[0, 0.3], [1, -0.7], [2, 0.5], [5, 0.3], [12, -0.8], [-1, 0.5], [-4, 0.5], [6, 3]] },
+  { op: 'HermiteH', inputs: ['n', 'x'], rel: 1e-5, abs: 1e-5,
+    points: [[0, 0.3], [1, -0.7], [3, 0.5], [6, 1.5], [10, -2.5], [-1, 0.5]] },
+  { op: 'LaguerreL', inputs: ['n', 'x'], rel: 1e-5, abs: 1e-5,
+    points: [[0, 0.3], [1, -0.7], [3, 0.5], [6, 1.5], [10, 4], [-2, 0.5]] },
   // CE-1511. Next to -1/e the condition of W₀ is 1/(1 + W₀): the series
   // (below -1/e + 0.01), Halley's iteration and Newton's iteration of the
   // logarithm (above e) each meet the tolerance; NaN below -1/e. The float

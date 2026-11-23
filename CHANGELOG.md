@@ -19,6 +19,17 @@
   n-th) success, so their support starts at 0. A continuous quantile has no
   closed form: with exact operands it stays unevaluated, and `.N()` gives
   its value.
+- **The orthogonal polynomials `ChebyshevT(n, x)`, `ChebyshevU(n, x)`,
+  `LegendreP(n, x)`, `HermiteH(n, x)` and `LaguerreL(n, x)`, of an integer
+  degree** (CE-1592). In Epsil they are `chebyshevT`, `chebyshevU`,
+  `legendreP`, `hermiteH` and `laguerreL`; in LaTeX
+  `\operatorname{ChebyshevT}(n, x)`. With a literal degree, a symbolic `x`
+  gives the polynomial: `ChebyshevT(3, x)` is `4x^3 - 3x` and
+  `LegendreP(2, x)` is `3/2 * x^2 - 1/2`. An exact rational `x` gives an
+  exact value (`ChebyshevT(3, 1/2)` is `-1`), and a float `x` or `.N()` the
+  value of the three-term recurrence. `HermiteH` is the physicists'
+  polynomial (`HermiteH(2, x)` is `4x^2 - 2`). They compile to JavaScript and
+  GLSL for an integer degree and a real `x`.
 
 ### Behavior Changes
 
