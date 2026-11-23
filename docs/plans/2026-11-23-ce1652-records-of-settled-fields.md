@@ -222,6 +222,32 @@ gives a machine number of 15 digits; the compiled double agrees within the
 agreement of the target (1e-12 relative). `N` of a complex is the complex. Any
 other operand declines.
 
+### 4.10 Values settled per lowered function (step 4b)
+
+Added 2026-11-23 (user decision) after step 4: in Tycho's prelude, only
+`strokeWidth` and `opacity` compiled, because the bodies reached by the other
+members test or compare values whose type is `any` in the source. A function
+is lowered once per IR type of its arguments (4.4), so inside one lowered
+function each such value has a settled IR type, and these operations are
+decided when the code is emitted, with no test of a type at run time:
+
+- `x is T` (`MatchesType`) of a parameter typed `any` or untyped, holding a
+  record, a string, a colour or a number: decided from the IR type of the
+  argument of that lowered function (a record by its nominal type, as
+  `typesOverlap` and `isSubtype` decide on the engine types).
+- `a == b` and `a != b` whose operands have different IR types that cannot
+  be equal (a tuple of reals and a string, `about == figureDefault`): the
+  constant `false` (`true` for `!=`), as the interpreter gives for values of
+  those types; operands of one IR type compare as today. The interpreter's
+  value for each pair of IR types is checked, not assumed.
+- A parameter typed `any` or untyped takes a real or an integer (`k: any`
+  holding `2` or `(2, 3)`), one lowered function per IR type, as step 3 does
+  for records, strings and colours; a boolean stays as today.
+- `N(x, p)` of a list or a tuple of reals is the list or the tuple (4.9).
+
+A parameter with a declared union type (`c: string | color`) still declines
+(the rule of `AGENTS.md`); Tycho declares it `any`.
+
 ## 5. What Tycho changes
 
 - `Figure` is declared, as Tycho's prelude version 22 does (checked by
@@ -240,6 +266,11 @@ other operand declines.
   `about`, `scale`'s `k`, `stroke`'s `w`, the argument of `path` and `svg`,
   `canvas`'s figures and options, `figureBox`'s `x`, and the box helpers.
 - `figureDraw` is declared `(any) -> nothing`.
+- After step 4 (2026-11-23): the bodies that destructure the matrix into
+  `let`s (`figureCompose`) read it by index or declare a local per element
+  (`let a: real = m[1]`), because a local declared with no type widens a real
+  to `number` (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and
+  Block contracts"); and a parameter typed `string | color` is typed `any`.
 - A field typed `string | color | nothing` has no settled shape by its type, so the
   compiler takes its shape from the operand of the constructor (4.2), as for
   `any`: a filled and an unfilled circle are two record types, and an `if`
@@ -262,6 +293,7 @@ every program that compiles today with the same code.
    result (4.8), the decline on the other targets. Size M.
 3. Records as arguments and results of user functions (4.4). Size M.
 4. Protocol methods (4.5). Size M.
+4b. Values settled per lowered function (4.10). Size M.
 5. Rest parameters and the host boundary (4.6, 4.7). Size M.
 6. The acceptance tests (section 7), `docs/COMPILATION-MODEL.md` (the paragraph
    that says that a function that builds a `Figure` declines is replaced by
