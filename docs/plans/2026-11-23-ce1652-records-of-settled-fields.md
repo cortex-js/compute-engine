@@ -1,6 +1,7 @@
 # CE-1652: compiling a function that builds a figure (records of settled fields)
 
-Status: design note, not approved. No code is written.
+Status: approved by the user 2026-11-23, with Q1 (c), Q2 (b) and Q3 (a) of
+section 9. No code is written.
 
 Issue: `issues/CE-1652.md`, option (b), user decision 2026-11-22. Scope: the
 `javascript` target of the IR compiler (`src/compute-engine/compilation/ir/`);
@@ -87,7 +88,7 @@ both) has no settled shape and declines, as R3 says.
 
 `IRType` (`ir.ts`) gains a field `fields?: readonly IRType[]`, with the lane
 `'record'` and the shape `[]`. Each field is an IR type of today (a scalar of
-a lane, a list of a stated or a run-time length, a tuple), a record, or the
+a lane, `color` included, a list of a stated or a run-time length, a tuple), a record, or the
 new unit type `nothing`, the type of a field whose value is the constant
 `Nothing` (no storage, a constant on read). The IR type holds the positions;
 the names come from the engine type, which the lowering reads where a field is
@@ -102,7 +103,12 @@ The same kind gives a value to a `Tuple` of elements of two lanes
 (`Tuple("a", t)`), which declines today. Rule: a `Tuple` of scalars of one
 numeric lane stays the tuple of today (a list marked a tuple, a `vecN` on
 GLSL); any other `Tuple` whose elements each have a settled IR type is a
-record. So no program that compiles today changes its code.
+record. A `List` literal whose elements have settled IR types of different
+lanes (the `geom` of a label, `[x, y, "a"]`; of a curve, `[xs, ys, head,
+tail]`) is a record too: today it declines (`[t, "a"]` is `list<real |
+string>`, "not a scalar"), and its elements are read at constant positions
+only. A `List` of one lane stays the list of today. So no program that
+compiles today changes its code.
 
 ### 4.2 Making a record
 
@@ -111,7 +117,7 @@ record. So no program that compiles today changes its code.
   of its operands, each lowered with the declared type of its field as the
   wanted type. An operand whose static type does not prove the field's
   declared type declines (R5).
-- `Tuple` of mixed lanes (4.1).
+- `Tuple` and `List` literals of mixed lanes (4.1).
 - `Nothing` as the operand of a field: the field has the type `nothing`.
 
 ### 4.3 Reading a record
@@ -183,18 +189,30 @@ in addition to scalars, an argument of lane `record`, a list or a tuple: the
 compiled code converts it to the engine's value before the call, a record to
 the application of its type's constructor (`["Figure", "'circle'", ["List", …],
 …]`), the value of `ListFrom` to a `List` of the converted elements, `nothing`
-to `Nothing`. The conversion is one function of the runtime, `_SYS.box(type,
+to `Nothing`, a `color` (the run-time color object of today) to the
+engine's color value. The conversion is one function of the runtime, `_SYS.box(type,
 value)`, given the IR type at compile time. The rule of the result is not
 changed: a host function must declare a result `nothing` or a scalar. Tycho
 declares `figureDraw` `(any) -> nothing` (it is `(any) -> any` today).
 
 ### 4.8 The result of `run()`
 
-A record result of the root function is the array of its fields, as a tuple
-result is an array today, and `result.run(1)` of the `figure` program gives
-`["circle", [0.54, 0.84, 0.2], [1, 0, 0, 1, 0, 0], null, null, null, null, null]`.
-The names of the fields are in the static type of the function, which the
-host has. See Q1.
+Inside the compiled code a record stays the array of its fields (4.1). Where
+the root function returns, the result is converted once to a JavaScript
+object whose keys are the field names of the engine type:
+`result.run(1)` of the `figure` program gives
+`{kind: "circle", geom: [0.54, 0.84, 0.2], matrix: [1, 0, 0, 1, 0, 0],
+fillPaint: null, strokePaint: null, strokePx: null, dashPattern: null,
+alpha: null}`. A record in a field is converted the same way, a `nothing`
+field is `null`, and a tuple with no field names (a `Tuple` of mixed lanes,
+4.1) stays an array. The compiler emits the conversion from the IR type of
+the result, so it runs only at the root, once per call.
+
+Today a named tuple type of reals (`type P = tuple<x: real, y: real>`,
+`f(t: real) = P(cos(t), sin(t))`) declines ("the result of f is not a
+scalar (P)"), and an unnamed `(cos(t), sin(t))` returns an array. So the
+rule is: a value of a named tuple type is an object at `run()`, an unnamed
+tuple is an array, and no program that compiles today changes its result.
 
 ### 4.9 `N(x, p)`
 
@@ -206,11 +224,28 @@ other operand declines.
 
 ## 5. What Tycho changes
 
-- `figureDraw` declared `(any) -> nothing`.
-- Nothing else for the three programs of the instrument: the style fields
-  stay typed `any`, because a field that holds `nothing` has the unit type
-  (4.1). The decision text said that Tycho types each field; this note finds
-  that the fields need no new type (Q2).
+- `Figure` is declared, as Tycho's prelude version 22 does (checked by
+  Tycho on 0.200.0):
+  `tuple<kind: string, geom: list, matrix: tuple<real, real, real, real,
+  real, real>, fillPaint: string | color | nothing, strokePaint: string |
+  color | nothing, strokePx: real | nothing, dashPattern: list<real> |
+  nothing, alpha: real | nothing>`. `geom` stays `list`: per kind it holds
+  reals, a string (label, path, svg), nested lists (curve), figures (group,
+  canvas) or a raster (bitmap). Its shape in a record comes from the operand
+  of the constructor (4.1, 4.2); a group or canvas declines (4.4).
+- The parameters of the prelude's functions are typed where a parameter has
+  one shape (the parameters that feed the matrix are typed, because a
+  `tuple<any, any>` operand is refused at a `tuple<real, real>` field when
+  the function is defined). Left `any`, with several shapes: `rotate`'s
+  `about`, `scale`'s `k`, `stroke`'s `w`, the argument of `path` and `svg`,
+  `canvas`'s figures and options, `figureBox`'s `x`, and the box helpers.
+- `figureDraw` is declared `(any) -> nothing`.
+- A field typed `string | color | nothing` has no settled shape by its type, so the
+  compiler takes its shape from the operand of the constructor (4.2), as for
+  `any`: a filled and an unfilled circle are two record types, and an `if`
+  that mixes them declines (R3). Removing `nothing` from the style fields
+  (`""` for none) would let it compile; that is a separate decision, taken
+  only for a notebook that needs it.
 - After the CE release, Tycho runs its instrument
   (`scripts/repros/2026-11-20-ce-compile-figures.mts`) and AN10 of
   `requirements/archive/EPSIL_ANIMATION.md`, and removes the marker that cites
@@ -248,7 +283,9 @@ argument that the host receives) equals the interpreter's within 1e-12:
 - `t => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))`;
 - `t => draw(circle((cos(t), 0), 0.1))` and `t => draw(circle((0, 0), 1),
   label((0, 1), "a"))` (two records of different types in one `draw`);
-- `t => circle((0, 0), t).fill("red").translate((1, 2))`.
+- `t => circle((0, 0), t).fill("red").translate((1, 2))`;
+- `t => circle((0, 0), t).fill(rgb(t, 0, 0))` (a color field, through
+  `draw` too).
 
 Declines, each with its reason: an `if` whose arms give a `circle` and a
 `label`; a `group` (recursive `figureBox`); `.rotate(a)` without a pivot when
@@ -264,15 +301,15 @@ it reaches `figureBox` of a group; GLSL and `interval-js` of every case above.
 - `implementationLiteralAt()` has had no caller since the old compiler was
   retired; its tests must be added in step 4.
 
-## 9. Choices for the board
+## 9. Choices (decided by the user 2026-11-23)
 
-- **Q1.** The result of `run()` for a record: (a) the array of the fields
-  (recommended: as a tuple today, no conversion cost per call); (b) the
-  engine's MathJSON of the value (the interpreter's form, a conversion at
-  each call). A host that draws reads the argument of `figureDraw`, which is
-  the engine's value in both.
-- **Q2.** The style fields of `Figure`: (a) stay `any`, a `nothing` field has
-  the unit type (recommended: no Tycho change); (b) Tycho types each field
-  (`fillPaint: string`, `""` for none), as the decision text said.
-- **Q3.** GLSL: (a) declines a record (recommended: no drawing runs in a
-  shader); (b) a `struct` per record type, a separate plan.
+- **Q1.** The result of `run()` for a record: (c) a JavaScript object with
+  the field names, converted at the root only (4.8). Rejected: (a) the array
+  of the fields (the host needs the static type to name them); (b) the
+  engine's MathJSON (a conversion of the whole value at each call). A host
+  that draws reads the argument of `figureDraw`, which is the engine's value.
+- **Q2.** The style fields of `Figure`: (b) Tycho types each field and each
+  parameter of the prelude, and `nothing` stays in the type of the style
+  fields (section 5). Rejected: (a) the fields stay `any`.
+- **Q3.** GLSL: (a) declines a record; records compile on JavaScript only.
+  Rejected: (b) a `struct` per record type.
