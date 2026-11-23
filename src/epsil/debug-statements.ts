@@ -190,8 +190,9 @@ export function epsilDebugStatements(
     const opsSync = DEFERRED.has(head) ? false : sync;
     // The operands that the engine makes a function when they are not one:
     // those at a parameter of a function type of a library operator.
+    // A leaf has no operator (`head` is ''): it has no operand to lift.
     const lifted =
-      head === 'Program' || head === 'Block'
+      head === '' || head === 'Program' || head === 'Block'
         ? undefined
         : functionParameters(ce, head, ops.length);
     ops.forEach((op, i) => {
