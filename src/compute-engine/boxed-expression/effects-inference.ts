@@ -5,7 +5,6 @@ import type {
   Type,
 } from '../../common/type/types.js';
 import { resultUnderDeclaredParameters } from './declared-parameter-result.js';
-import { widen as widenTypes } from '../../common/type/subtype.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import { withStaticTypingView } from '../static-typing-view.js';
 import {
@@ -28,6 +27,7 @@ import {
   objectLayoutOfType,
   provablyDisjoint,
   widenAll,
+  widen as widenTypes,
 } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,

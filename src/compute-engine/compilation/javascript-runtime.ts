@@ -2114,7 +2114,7 @@ export const REAL_FUNCTIONS = Object.freeze({
   totient: (n: number): number => {
     if (n === 0) return 0;
     if (!Number.isInteger(n)) return NaN;
-    let m = Math.abs(integerOperand('Totient', n));
+    const m = Math.abs(integerOperand('Totient', n));
     let phi = m;
     for (const p of primeFactorsOf(m)) phi = (phi / p) * (p - 1);
     return phi;
