@@ -434,6 +434,8 @@ function signatureTypes(
             : tupleBody(t) !== undefined
               ? (t as TypeReference)
               : undefined,
+          // Of type `any`: also the lane of a number (`held()`).
+          any: isUntyped(t) && present(t) !== 'unknown',
         };
   });
   // A result that the engine inferred from a body that holds a `Match` is
@@ -701,38 +703,73 @@ export function functionLowering(
    *  complex argument each call a function of the lane of its argument,
    *  and so do a call with a list of reals and a call with a list of
    *  integers at a list parameter of integers. */
-  const laneKey = (sig: ReturnType<typeof signatureTypes>, args?: V[]) =>
+  const laneKey = (
+    sig: ReturnType<typeof signatureTypes>,
+    args?: V[],
+    ops?: readonly Expression[]
+  ) =>
     sig.params
       .map((p, i) => {
         // A parameter that holds the type of its argument: one function
         // per type, a record by its nominal type and each field.
-        const h = held(p, args?.[i]);
+        const h = held(p, args?.[i], ops?.[i]);
         if (h !== undefined) return `{${typeToString(h)}}`;
-        return complexAt(p, args?.[i])
-          ? 'c'
-          : realListAt(p, args?.[i])
-            ? 'l'
-            : 'r';
+        // A point, or a flat list that binds whole, at a parameter that
+        // takes the shape of its argument (`define()`): one function per
+        // shape, beside the one of a scalar (CE-1652, step 4b).
+        const v = args?.[i];
+        const s = v === undefined ? undefined : type(v);
+        const whole =
+          v !== undefined && !cx.tuples.has(v) && !sig.mapsAt(i, false);
+        const point =
+          'point' in p &&
+          p.point !== undefined &&
+          s?.shape.length === 1 &&
+          (cx.tuples.get(v!) === 0 || whole)
+            ? `${cx.tuples.get(v!) === 0 ? 'p' : 'w'}${String(s.shape[0])}${s.lane === 'string' ? 's' : ''}`
+            : '';
+        return (
+          (complexAt(p, args?.[i])
+            ? 'c'
+            : realListAt(p, args?.[i])
+              ? 'l'
+              : 'r') + point
+        );
       })
       .join('');
   /** The type of the argument `v` that a parameter of no stated type, of
    *  type `any` or of a nominal tuple type holds (README, "Records"): a
    *  record; at a parameter of no stated type or `any`, also a string or
-   *  a colour (JavaScript only). Otherwise `undefined`, the rules of
-   *  today. */
+   *  a colour (JavaScript only); at a parameter of type `any`, also a real
+   *  or an integer whose static type (of the argument `op`) proves its
+   *  lane (CE-1652, step 4b). Otherwise `undefined`, the rules of today. */
   const held = (
     p: ReturnType<typeof signatureTypes>['params'][number],
-    v: V | undefined
+    v: V | undefined,
+    op?: Expression
   ): IRType | undefined => {
     if (v === undefined || !('record' in p) || p.record === undefined)
       return undefined;
     const t = type(v);
     if (t.lane === 'record') return t;
-    return javascript &&
-      p.record === true &&
-      t.shape.length === 0 &&
-      (t.lane === 'string' || t.lane === 'color') &&
-      !cx.tuples.has(v)
+    if (
+      !javascript ||
+      p.record !== true ||
+      t.shape.length > 0 ||
+      cx.tuples.has(v)
+    )
+      return undefined;
+    if (t.lane === 'string' || t.lane === 'color')
+      return { lane: t.lane, shape: [] };
+    // A number at `any`: the lane that its static type proves, or that a
+    // parameter of this kind holds, so that a test of its type in the body
+    // is decided by the lane (`matchesType()` of `lower-match.ts`). A
+    // parameter of no stated type keeps the real lane of today.
+    return 'any' in p &&
+      p.any &&
+      (t.lane === 'real' || t.lane === 'integer') &&
+      (cx.heldParams.has(v) ||
+        (op !== undefined && isSubtype(op.type.type, t.lane)))
       ? { lane: t.lane, shape: [] }
       : undefined;
   };
@@ -816,7 +853,7 @@ export function functionLowering(
       // A record (or, at a parameter of no stated type or `any`, a string
       // or a colour): the parameter has the type of the argument, and the
       // function is lowered once per such type (`laneKey()`).
-      const h = held(declared, args?.[i]);
+      const h = held(declared, args?.[i], e.ops[i]);
       if (h !== undefined) {
         // A parameter of a nominal tuple type takes a record of that type
         // only, or of a type that the static type of the argument proves
@@ -888,9 +925,16 @@ export function functionLowering(
         !cx.tuples.has(v!) &&
         t?.shape.length === 1 &&
         typeof n === 'number' &&
-        (t.lane === 'real' || t.lane === 'integer')
+        (t.lane === 'real' ||
+          t.lane === 'integer' ||
+          // A list of strings (JavaScript only; CE-1652, step 4b).
+          (javascript && t.lane === 'string'))
       )
-        return { lane: p.lane, shape: [n], taken: names[i] };
+        return {
+          lane: t.lane === 'string' ? t.lane : p.lane,
+          shape: [n],
+          taken: names[i],
+        };
       if (p.point !== 'unknown')
         scalarOf(
           literal,
@@ -920,6 +964,8 @@ export function functionLowering(
       );
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       if (t.lane === 'rows') cx.rowsParams.add(v);
+      // Of the type of its argument: `x is T` reads its IR type.
+      if ('type' in t && t.type !== undefined) cx.heldParams.add(v);
       return v;
     });
     const fn: UserFunction = {
@@ -947,7 +993,7 @@ export function functionLowering(
     if (variants === undefined) functions.set(key, (variants = new Map()));
     // While the body is lowered, the function is the one of the lane
     // (`call()`); after, the one of its kind of call, or of both kinds.
-    const lane = laneKey(sig, args);
+    const lane = laneKey(sig, args, e.ops);
     variants.set(lane + '?', fn);
     // The function of this name being lowered, if any (another lane of
     // the same binding, `laneKey()`): restored after this one.
@@ -1215,9 +1261,12 @@ export function functionLowering(
               ('whole' in p && p.whole) ||
               // A parameter that can hold a record (`held()`).
               ('record' in p && p.record !== undefined) ||
+              // A parameter that takes the shape of its argument, one
+              // function per shape (`laneKey()`; CE-1652, step 4b).
+              ('point' in p && p.point !== undefined) ||
               (!functions.has(binding.key) &&
-                ((!cx.runtimeLengths && p.shape[0] === 'run-time') ||
-                  ('point' in p && p.point !== undefined)))
+                !cx.runtimeLengths &&
+                p.shape[0] === 'run-time')
           ))
       )
         early = e.ops.map((op, i) => argument(op, sig.params[i]?.lane));
@@ -1293,7 +1342,7 @@ export function functionLowering(
         sig,
         early
       );
-      const lane = laneKey(sig, early);
+      const lane = laneKey(sig, early, e.ops);
       const both = variants?.get(lane);
       fn = variants?.get(lane + '?') as UserFunction;
       if (fn === undefined)

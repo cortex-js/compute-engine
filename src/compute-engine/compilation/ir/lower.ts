@@ -625,9 +625,17 @@ function lowerOnce(
   // The memo of `value()`, keyed by the structural id of a node (`idOf()`),
   // so that equal sub-expressions that the source writes as separate nodes
   // are lowered once.
+  // An entry keeps the decisions of `typeTests` of its node and of the
+  // operands of its `And`, `Or` and `Not` (`testNodes()`): a structurally
+  // equal test lowered from the memo is decided as the first one was.
   const memo = new Map<
     number,
-    { v: V; region: Region; reads: [string, V | undefined][] }
+    {
+      v: V;
+      region: Region;
+      reads: [string, V | undefined][];
+      tests?: (boolean | undefined)[];
+    }
   >();
   // The id of a node, and of a definition: equal ids for two nodes of the
   // same operator, definition and operands, of the same kind and value of a
@@ -917,6 +925,9 @@ function lowerOnce(
    *  two lengths not stated, `rowsElementLane()`), and the occurrence of a
    *  name that `wholeRows()` lowers, the only one that may read one. */
   const rowsParams = new Set<V>();
+  /** The tests decided by the IR types of their operands
+   *  (`Lowering.typeTests`). */
+  const typeTests = new Map<Expression, boolean>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1312,6 +1323,15 @@ function lowerOnce(
       // Two booleans, and two lists or two tuples of real numbers, have one
       // equality (`equality()`); `NotEqual` is its negation.
       if ((r.head === 'Equal' || r.head === 'NotEqual') && given.length === 2) {
+        // A string and a value that is never a string: the interpreter's
+        // constant (CE-1652, step 4b). The node is lowered again in each
+        // function lowered for other types: its entry is that lowering's.
+        typeTests.delete(node);
+        if (apart(given[0], given[1]) || apart(given[1], given[0])) {
+          if (isFunction(node, r.head) && node.nops === 2)
+            typeTests.set(node, r.head === 'NotEqual');
+          return b.constant(r.head === 'NotEqual', 'boolean');
+        }
         const equal = equality(node, given[0], given[1]);
         if (equal !== undefined)
           return r.head === 'Equal' ? equal : apply(node, 'Not', [equal]);
@@ -1415,6 +1435,28 @@ function lowerOnce(
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
     return args.slice(1).reduce((x, y) => operation([x, y]), args[0]);
+  };
+
+  /** `x` is a string and `y` a value that the interpreter never finds
+   *  equal to a string, whatever their values: a real or an integer
+   *  number (`NaN` too), a boolean, `Nothing`, or a tuple of real numbers
+   *  (`"a" == 2`, `(0, 0) == "default"` are `False`). Not a list, which
+   *  `Equal` threads over, nor a colour or a record, whose `Equal` with a
+   *  string the interpreter leaves unevaluated. */
+  const apart = (x: V, y: V): boolean => {
+    const [s, t] = [type(x), type(y)];
+    if (s.lane !== 'string' || s.shape.length > 0 || tuples.has(x))
+      return false;
+    if (t.shape.length === 0)
+      return (
+        !tuples.has(y) &&
+        ['real', 'integer', 'boolean', 'nothing'].includes(t.lane)
+      );
+    return (
+      tuples.get(y) === 0 &&
+      t.shape.length === 1 &&
+      (t.lane === 'real' || t.lane === 'integer')
+    );
   };
 
   /** `Equal(x, y)` of two booleans, and of two lists or two tuples of real
@@ -1634,8 +1676,16 @@ function lowerOnce(
         m !== undefined &&
         b.isOpen(m.region) &&
         m.reads.every(([n, v]) => bound(n) === v)
-      )
+      ) {
+        const tests = m.tests;
+        if (tests !== undefined)
+          testNodes(e).forEach((x, i) =>
+            tests[i] === undefined
+              ? typeTests.delete(x)
+              : typeTests.set(x, tests[i])
+          );
         return m.v;
+      }
     }
     const region = b.current();
     const effects = b.effects;
@@ -1661,9 +1711,24 @@ function lowerOnce(
         n,
         bound(n),
       ]);
-      memo.set(id, { v, region, reads });
+      const tests = testNodes(e).map((x) => typeTests.get(x));
+      memo.set(id, {
+        v,
+        region,
+        reads,
+        tests: tests.some((x) => x !== undefined) ? tests : undefined,
+      });
     }
     return v;
+  };
+
+  /** `e` and the operands of its `And`, `Or` and `Not`, in preorder: the
+   *  nodes that `typeDecided()` reads. */
+  const testNodes = (e: Expression, out: Expression[] = []): Expression[] => {
+    out.push(e);
+    if (isFunction(e) && ['And', 'Or', 'Not'].includes(e.operator))
+      for (const x of e.ops) testNodes(x, out);
+    return out;
   };
 
   const scalar = (e: Expression): V => {
@@ -4699,6 +4764,24 @@ function lowerOnce(
    *  and whose arm is a list of numbers or of points, a list of NaN of its
    *  length: a `Which` gives `Missing`). `start` is the first value of the
    *  arm before `otherwise`. */
+  /** The value of the condition `test` when it is made of tests decided
+   *  by IR types (`typeTests`) with `And`, `Or` and `Not`, and is known
+   *  from them alone; otherwise `undefined`. */
+  const typeDecided = (test: Expression): boolean | undefined => {
+    const known = typeTests.get(test);
+    if (known !== undefined) return known;
+    if (!isFunction(test) || !isLibrary(test)) return undefined;
+    if (test.operator === 'Not' && test.nops === 1) {
+      const x = typeDecided(test.ops[0]);
+      return x === undefined ? undefined : !x;
+    }
+    if (test.operator !== 'And' && test.operator !== 'Or') return undefined;
+    const all = test.ops.map(typeDecided);
+    const stop = test.operator === 'Or';
+    if (all.includes(stop)) return stop;
+    return all.every((x) => x === !stop) ? !stop : undefined;
+  };
+
   const conditional = (
     node: Expression,
     clauses: [Expression, Expression][],
@@ -4772,6 +4855,14 @@ function lowerOnce(
       return keep(first!, b.list(nan, { lane: 'real', shape: t.shape }));
     }
     const [[test, then], ...rest] = clauses;
+    // The entries of an earlier lowering of the same nodes (a function
+    // lowered for other types) do not count (`typeDecided()`).
+    const forget = (x: Expression): void => {
+      typeTests.delete(x);
+      if (isFunction(x) && ['And', 'Or', 'Not'].includes(x.operator))
+        x.ops.forEach(forget);
+    };
+    forget(test);
     const cond = scalar(test);
     if (type(cond).lane !== 'boolean')
       decline(test, 'a condition that is not a boolean');
@@ -4804,10 +4895,15 @@ function lowerOnce(
       otherwise !== undefined &&
       kind(then) !== undefined &&
       arms.every((a) => kind(a) === kind(then));
+    // A condition decided by the IR types of its operands in the function
+    // lowered for them (`typeTests`, CE-1652, step 4b): the arm taken only,
+    // as for a scalar arm. Such a test declines on every target before.
+    const typed = typeDecided(test);
     const decided =
-      interval || (options.fold !== false && scalarArms)
+      typed ??
+      (interval || (options.fold !== false && scalarArms)
         ? b.constants.get(cond)
-        : undefined;
+        : undefined);
     if (decided === true) return value(then, want);
     if (
       decided === false &&
@@ -6566,6 +6662,8 @@ function lowerOnce(
     scalar,
     wholeRows,
     rowsParams,
+    heldParams: new Set<V>(),
+    typeTests,
     rowLengths,
     rowsElementLane,
     apply,

@@ -137,6 +137,22 @@
   that two protocols implement for the type, an implementation given by the
   host, a value that is not of a named tuple type, and such a call on GLSL or
   `interval-js` still fall back to the interpreter.
+- **`compile()` compiles a test of the type of a parameter typed `any`, and
+  `==` of a string and a number or a point, which it refused** (CE-1652). A
+  function is compiled once for each type of value it is given, so in each
+  copy `x is Figure`, `c is string` or `k is real` of a parameter `x: any`
+  that holds a value of a named tuple type, a string, a colour or a number is
+  `true` or `false`, and the arm of the `if` that is not taken is not
+  compiled: `figureBox(x: any) = if x is Figure { … } else { reduce(x, …) }`
+  compiles for a figure. `(0, 0) == "default"`, `2 == "a"` and `t != "a"`
+  are `false`, `false` and `true`, as the interpreter gives them. A parameter
+  typed `any` takes a real, an integer or a point (`scale(k: any)` with `2`,
+  `t` or `(2, t)`), and `N(x, 15)` of a list or a tuple of real numbers is
+  that list or tuple. A test that the type of the value does not decide
+  (`x is integer` of a real), `==` of a record or a colour and a string, two
+  strings compared at run time whose `if` arms have different kinds of value,
+  and a list parameter of no stated length stored in a value of a named tuple
+  type still fall back to the interpreter.
 
 ## 0.200.1 _2026-11-23_
 

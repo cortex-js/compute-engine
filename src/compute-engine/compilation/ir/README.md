@@ -3534,6 +3534,41 @@ before ("elements of two types"); `admits()` refuses the lane there too.
   first operand that is not a record, a record of no named type and a record of
   a parameterized type decline. The qualified call (`ProtocolMember`) still
   declines.
+- **Values settled per lowered function** (CE-1652, step 4b). A user function
+  is lowered once per lane key, so in one lowered function a parameter that
+  holds the type of its argument (`held()`) has a settled IR type, and the
+  parameter is in `Lowering.heldParams`. `held()` takes, at a parameter of
+  type `any` (not one of no stated type, which keeps the real lane of
+  today), also a real or an integer whose argument's static type proves the
+  lane, or which is itself such a parameter (`figureScaling(k)` in
+  `scale(self, k: any)`). `MatchesType` of such a parameter whose static type
+  does not decide (`any`, `unknown`) is decided by its IR type
+  (`engineTypeOf()` of `lower-match.ts`): a record by its nominal type (not a
+  parameterized one), a scalar of the lane `string`, `color`, `boolean`,
+  `integer`, `real` or `nothing` by that type, with `isSubtype()` and
+  `typesOverlap()`; a test that the type does not decide (`k is integer` of a
+  real) declines. `Equal` and `NotEqual` of a string and a real, an integer, a
+  boolean, `nothing` or a tuple of reals are the constants `False` and `True`
+  (`apart()` of `lower.ts`), the interpreter's values for those types (checked:
+  `(0, 0) == "default"`, `2 == "a"`, `NaN == "a"`, `True == "a"`,
+  `Nothing == "a"` are `False`); a list threads, and a record or a colour with
+  a string is left unevaluated by the interpreter, so those still decline.
+  Both kinds of decided test are recorded in `Lowering.typeTests`; a condition
+  of an `If` or a `Which` made only of them (`And`, `Or`, `Not`;
+  `typeDecided()` of `lower.ts`) takes its arm and the other arm is not
+  lowered, as for a decided scalar condition
+  (`docs/COMPILATION-MODEL.md`, "The arms of a conditional"): such a
+  condition declined before, so no program that compiled changes. A
+  parameter whose type settles no shape (`point` of `signatureTypes()`: no
+  stated type, `any`, `list`) is lowered once per shape of its argument (a
+  scalar, a point `p2`, a flat list `w3` that binds whole, of strings `w1s`
+  on JavaScript; `laneKey()`), so its arguments are lowered before the
+  function is chosen at every call, not only the first. `N(x, p)` of a list
+  or a tuple of reals (by its static type, or by its IR type when the static
+  type is `any` or `unknown`) is `x`; in the interval and the `bigint` mode
+  it declines. A record field from a list parameter of a run-time length
+  (`N(pattern, 15)` of `pattern: list<real>`) still declines ("a record with
+  a field of a run-time length").
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names

@@ -1471,6 +1471,12 @@ with an `else` arm whose arms all have a static type of one scalar kind
 taken, as the interpreter evaluates only that arm, and an arm that is not
 taken does not decline the program
 (`Which(1.2 <= 1, Which(x < -Sqrt(1 - 1.2^2), 1, True, 0), True, 1)` is `1`).
+A second exception is a condition made only of tests that the IR types of a
+function compiled for its argument types decide (`x is T` of a parameter of
+type `any` or of no stated type, `==` of a string and a value that is never a
+string; `And`, `Or`, `Not` of them; CE-1652): the compiler lowers only the
+arm taken, so `if x is Figure { … } else { reduce(x, …) }` compiles for a
+figure. Such a condition declined before.
 A name read only in the arm that is not taken is then not an input, and is
 not in `freeSymbols` (`If(1 < 2, x, y)` with `x, y: real` reads `x` only).
 So points of different sizes
@@ -2678,8 +2684,23 @@ the requirement (a constant default is in `symbolDeps`; a symbol default with
 no value declines), and a body that does not prove the result that the
 implementation declares declines. Two protocols that implement the member
 for `T`, a conditional conformance, an implementation of the host, a first
-operand that is not a record, and a record of no named type decline. A record passed to a
-function of the host still declines (CE-1652, step 5).
+operand that is not a record, and a record of no named type decline. A
+function is compiled once for each type of its arguments, so inside one copy
+a parameter of no stated type or of type `any` that holds a record, a string
+or a colour (and, of type `any`, a real or an integer whose static type
+proves it) has a settled type: `x is T` of it is `true` or `false` when that
+type decides it (`x is Figure` of a `Figure`, `c is string` of a colour), and
+declines otherwise (`k is integer` of a real). A parameter of type `any`
+takes a real or an integer, and one whose type settles no shape (no stated
+type, `any`, `list`) a point or a flat list of a stated length (of strings
+too: `figureOf("invalid", ["message"])`), one copy per type and shape. `a == b` and `a != b` of a string and a real, an integer, a boolean,
+`Nothing` or a point are the interpreter's `False` and `True`
+(`(0, 0) == "default"`); of a string and a record or a colour (which the
+interpreter leaves unevaluated) they decline. `N(x, 15)` of a list or a tuple
+of reals is the list or the tuple. A record whose field is a list parameter
+of a run-time length (`dash(self, pattern: list<real>)` storing
+`N(pattern, 15)`) declines. A record passed to a function of the host still
+declines (CE-1652, step 5).
 
 ## Collections
 

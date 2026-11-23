@@ -542,18 +542,21 @@ describe('IR profile, batch G14: declines', () => {
     ['Sum of a list of points (a point)', ['Sum', 'P'], 'javascript', /a term that is not a number/],
     ['a list of points scaled by a list of another stated length', ['Multiply', 'S', ['List', 1, 2]], 'javascript', /another shape/],
     ['a list of points read by a function body (a capture)', ['cap', 1], 'javascript', /reads the input P of type list<tuple<real, real>>/],
-    ['an untyped parameter, a list of points and a point', ['Add', ['gu', 'P'], ['gu', 'M']], 'javascript', /an argument of gu of another shape than at its first call/],
     ['a scalar after a list of points', ['List', ['ga', 'P'], ['ga', 'x']], 'javascript', /x: an argument of ga of another shape than at its first call: the parameter L is a list of points of 2 numbers \(real here\)/],
     ['a call of the result of the same function', ['ga', ['ga', 'P']], 'javascript', /the parameter L is a list of points of 2 numbers \(real here\)/],
     ['an integer after a list of points', ['Add', ['ga', 'P'], ['ga', ['Length', 'P']]], 'javascript', /the parameter L is a list of points of 2 numbers \(integer here\)/],
     ['a scalar after a PointList of lists', ['List', ['ga', ['PointList', 'D', 'E']], ['ga', 'x']], 'javascript', /the parameter L is a list of points of 2 numbers \(real here\)/],
     ['a list of points of 3 for a parameter declared of 2', ['fp', 'P3'], 'javascript', /"P3": an argument of fp that is not list<tuple<real, real>>$/],
     ['a list of numbers for a parameter declared a list of points', ['fp', 'D'], 'javascript', /D: an argument of fp that is not list<tuple<real, real>>$/],
-    ['an untyped parameter, a point and then a list of points', ['Add', ['gu', 'M'], ['gu', 'P']], 'javascript', /the parameter L is a point of 2 numbers \(list<tuple<real, real>> here\)/],
   ])('%s declines, with the cause', (_, json, to, cause) => {
     const d = failure(() => compile(box(json), { ...IR, to } as never));
     expect(d?.code).toBe('outside-profile');
     expect(d?.message).toMatch(cause);
+  });
+
+  test('an untyped parameter given a list of points and a point: one function for each (CE-1652, step 4b)', () => {
+    check(['Add', ['gu', 'P'], ['gu', 'M']], POINTS);
+    check(['Add', ['gu', 'M'], ['gu', 'P']], POINTS);
   });
 
   // Batch G30: on JavaScript an index that can be out of range reads a

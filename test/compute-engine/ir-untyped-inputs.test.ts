@@ -398,11 +398,18 @@ describe('IR profile: an input with no type', () => {
           expect(
             compiled(literal(op, type), { ...ir, to }).diagnostic?.message
           ).toMatch(`p: the input p of type ${type}`);
-      // A parameter declared `any` in the signature of a user function.
-      expect(compiled(['fa', 'x'], { ...ir, to }).diagnostic).toMatchObject({
-        code: 'unsettled-shape',
-        message: expect.stringContaining('the parameter p of fa'),
-      });
+      // A parameter declared `any` in the signature of a user function:
+      // on JavaScript it takes the lane of a real argument (CE-1652, step
+      // 4b).
+      if (to === 'javascript')
+        expect(compiled(['fa', 'x'], { ...ir, to }).run?.({ x: 2.5 })).toBe(
+          3.5
+        );
+      else
+        expect(compiled(['fa', 'x'], { ...ir, to }).diagnostic).toMatchObject({
+          code: 'unsettled-shape',
+          message: expect.stringContaining('the parameter p of fa'),
+        });
       // An argument of type `any` for a real parameter.
       expect(
         compiled(['Function', ['fs', 'a'], ['Typed', 'a', { str: 'any' }]], {

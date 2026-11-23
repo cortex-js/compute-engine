@@ -445,8 +445,9 @@ describe('IR profile, batch G11: arithmetic on points', () => {
     ['Distance of points of two lengths', ['Distance', 'P', 'P3'], ['javascript', 'glsl'], /lists of different lengths/],
     ['Distance of a point and a list of numbers', ['Distance', 'P', 'L2'], ['javascript', 'glsl'], /Distance of a value that is not a point/],
     ['Distance of lists of points of two lengths', ['Distance', ['List', ['Tuple', 1, 2]], ['List', ['Tuple', 1, 2], ['Tuple', 'u', 'v']]], ['javascript'], /lists of different lengths/],
-    ['an untyped parameter: a point, then a scalar', ['Add', ['Cmod', 'P'], ['Cmod', 'x']], ['javascript', 'glsl'], /x: an argument of Cmod of another shape than at its first call: the parameter p is a point of 2 numbers \(real here\)/],
-    ['an untyped parameter: points of two lengths', ['Add', ['Cmod', 'P'], ['Cmod', 'P3']], ['javascript', 'glsl'], /an argument of Cmod of another shape than at its first call: the parameter p is a point of 2 numbers \(tuple<real, real, real> here\)/],
+    // A scalar after a point: a function of its own (CE-1652, step 4b),
+    // which declines as a scalar first does.
+    ['an untyped parameter: a point, then a scalar', ['Add', ['Cmod', 'P'], ['Cmod', 'x']], ['javascript', 'glsl'], /the parameter p of Cmod is not a scalar \(collection<any> \| tuple\)/],
     ['an untyped parameter that is not a scalar, a scalar first', ['Cmod', 'x'], ['javascript', 'glsl'], /the parameter p of Cmod is not a scalar \(collection<any> \| tuple\)/],
     ['nrm of an empty tuple', ['nrm', ['Tuple']], ['javascript', 'glsl'], /Tuple\(\): an empty list/],
     ['a mutual recursion on GLSL', ['ev', 'P', 5], ['glsl'], /a recursive function/],
@@ -466,6 +467,12 @@ describe('IR profile, batch G11: arithmetic on points', () => {
       expect(d?.code).toBe('outside-profile');
       expect(d?.message).toMatch(cause);
     }
+  });
+
+  test('an untyped parameter given points of two lengths: one function for each (CE-1652, step 4b)', () => {
+    const json = ['Add', ['Cmod', 'P'], ['Cmod', 'P3']];
+    check(json, POINTS);
+    expect(glsl(json).success).toBe(true);
   });
 });
 

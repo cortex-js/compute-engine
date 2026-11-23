@@ -96,17 +96,24 @@ describe('string comparisons fail closed', () => {
   // literals under `Equal`/`NotEqual`, and a string-annotated parameter) are
   // now faithful compiles — see the `tier 2: scalar string equality` describe.
 
-  test('a MIXED string/number equality still declines', () => {
-    // Retained from tier 0. Probed, the interpreter answers `False` (equality
-    // is TOTAL across sorts, unlike the orderings, which stay inert) and a
-    // strict `"a" === 1` would agree — but admitting the mixed shape is a
-    // separate decision, so it keeps failing closed.
+  test('a MIXED string/number equality is the constant the interpreter gives', () => {
+    // The interpreter answers `False` (equality is TOTAL across sorts,
+    // unlike the orderings, which stay inert), whatever the values: the
+    // compiled code is that constant (CE-1652, step 4b, a user decision).
     for (const args of [
       [{ str: 'a' }, 1],
       [1, { str: 'a' }],
     ]) {
-      failsClosed(ce.box(['Equal', ...args] as any), '"False"');
-      failsClosed(ce.box(['NotEqual', ...args] as any), '"True"');
+      for (const [head, value] of [
+        ['Equal', false],
+        ['NotEqual', true],
+      ] as const) {
+        const expr = ce.box([head, ...args] as any);
+        expect(expr.evaluate().toString()).toBe(value ? '"True"' : '"False"');
+        const r = compile(expr, { constantFold: false });
+        expect(r.success).toBe(true);
+        expect(r.run!({})).toBe(value);
+      }
     }
   });
 
@@ -608,12 +615,15 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
   // lone-surrogate replacement), since the strings the interpreter compares
   // are already conditioned.
 
-  test('a provably NUMERIC participant keeps the shape closed', () => {
+  test('a provably NUMERIC participant is never equal to a string', () => {
+    // The interpreter's `False` (`True` for `NotEqual`) for every value of
+    // `nq` (CE-1652, step 4b).
     ce.declare('nq', 'number');
     for (const head of ['Equal', 'NotEqual'] as const) {
       const r = compile(ce.box([head, 'nq', { str: 'a' }] as any));
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/Equal of real, string/);
+      expect(r.success).toBe(true);
+      for (const nq of [2, -0.5])
+        expect(r.run!({ nq })).toBe(head === 'NotEqual');
     }
   });
 

@@ -5,7 +5,7 @@
  * pattern from the shape of the subject.
  */
 
-import type { Expression } from '../../global-types.js';
+import type { Expression, IComputeEngine } from '../../global-types.js';
 import {
   isFunction,
   isNumber,
@@ -19,13 +19,41 @@ import { typeToString } from '../../../common/type/serialize.js';
 import { isPolytype, settleTypeText } from '../../library/type-value-utils.js';
 import {
   decline,
+  isUntyped,
   STATIC_TYPE_ERROR,
   userBinding,
   type Fn,
   type Lowering,
 } from './lower-context.js';
-import { isSubLane, scalarType, type V } from './ir.js';
-import type { Type } from '../../../common/type/types.js';
+import {
+  isSubLane,
+  scalarType,
+  typeToString as irTypeToString,
+  type IRType,
+  type V,
+} from './ir.js';
+import type { Type, TypeReference } from '../../../common/type/types.js';
+
+/** The engine type of the values of the IR type `t` of a parameter that
+ *  holds the type of its argument (`Lowering.heldParams`): a record of a
+ *  named tuple type that is not parameterized, by that type; a scalar of
+ *  the lane `string`, `color`, `boolean`, `integer`, `real` or `nothing`,
+ *  by that type. A number on such a lane has a static type that proves it
+ *  (`held()`). Otherwise `undefined`. */
+function engineTypeOf(e: Expression, t: IRType): Type | undefined {
+  if (t.lane === 'record') {
+    if (t.nominal === undefined) return undefined;
+    const ce = e.engine as unknown as IComputeEngine;
+    const r = ce._typeResolver.resolve(t.nominal) as TypeReference | undefined;
+    return r === undefined || (r.typeParams?.length ?? 0) > 0 ? undefined : r;
+  }
+  if (t.shape.length > 0) return undefined;
+  return ['string', 'color', 'boolean', 'integer', 'real', 'nothing'].includes(
+    t.lane
+  )
+    ? (t.lane as Type)
+    : undefined;
+}
 
 /** The fewest digits of `N(x, p)` whose value the double of `x` gives
  *  within the agreement of the targets (`N(1/3, 15)` is
@@ -130,17 +158,48 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
       );
     const t = x.type.type;
     const number = isSubtype(t, 'number');
-    if (!number && !isSubtype(t, 'string') && !isSubtype(t, 'boolean'))
+    if (number || isSubtype(t, 'string') || isSubtype(t, 'boolean')) {
+      // The interpreter rounds to `p` digits: the enclosure of the exact
+      // value need not hold that number, and a bigint is not a machine
+      // number.
+      if (number && cx.interval)
+        decline(e, 'N of a number in the interval mode');
+      if (cx.bigint) decline(e, 'N in the bigint mode');
+      return cx.value(x, want);
+    }
+    // A list or a tuple of reals, whose `N` is the list of the `N` of its
+    // elements (README, "Match, x is T and N"); and a value of no stated
+    // type or of type `any` (a parameter that holds the type of its
+    // argument, `held()` of `lower-functions.ts`) by its IR type: a real,
+    // an integer, a string, a boolean, a colour (whose `N` is itself), or
+    // a list or a tuple of reals (CE-1652, step 4b).
+    const list =
+      typeof t === 'object' &&
+      ((t.kind === 'list' && isSubtype(t.elements, 'real')) ||
+        (t.kind === 'tuple' &&
+          t.elements.every((u) => isSubtype(u.type, 'real'))));
+    if (!list && !isUntyped(t))
       decline(
         e,
-        `N of a value of type ${typeToString(t)} (only a number, a string or a boolean)`
+        `N of a value of type ${typeToString(t)} (only a number, a string, a boolean, or a list or a tuple of real numbers)`
       );
-    // The interpreter rounds to `p` digits: the enclosure of the exact
-    // value need not hold that number, and a bigint is not a machine
-    // number.
-    if (number && cx.interval) decline(e, 'N of a number in the interval mode');
+    if (cx.interval)
+      decline(e, 'N of a list or of a value of type any in the interval mode');
     if (cx.bigint) decline(e, 'N in the bigint mode');
-    return cx.value(x, want);
+    const v = cx.value(x, true)!;
+    const vt = cx.type(v);
+    const reals = vt.lane === 'real' || vt.lane === 'integer';
+    const ok =
+      vt.shape.length === 0
+        ? !cx.tuples.has(v) &&
+          (reals || ['string', 'boolean', 'color'].includes(vt.lane))
+        : vt.shape.length === 1 && reals && (cx.tuples.get(v) ?? 0) === 0;
+    if (!ok)
+      decline(
+        e,
+        `N of a value of type ${typeToString(t)}, here ${irTypeToString(vt, cx.tuples.get(v) ?? -1)} (only a number, a string, a boolean, a colour, or a list or a tuple of real numbers)`
+      );
+    return v;
   };
 
   /** `MatchesType(x, T)` (`x is T`): `True` when the static type of `x` is
@@ -152,6 +211,9 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
    *  engine type, settled by the operand of the record's constructor.
    *  Otherwise it declines: no run-time test of a type is emitted. */
   const matchesType = (e: Fn): V => {
+    // The node is lowered again in each function lowered for other types:
+    // its entry in `typeTests` is that lowering's.
+    cx.typeTests.delete(e);
     const [x, t] = e.ops;
     const text =
       e.nops === 2 && isFunction(t, 'TypeFrom') && isString(t.ops[0])
@@ -187,6 +249,21 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     if (verdict !== undefined) {
       if (subject.isPure !== true) cx.value(subject, false);
       return b.constant(verdict, 'boolean');
+    }
+    // A parameter of no stated type or of type `any` that holds the IR
+    // type of its argument (`held()` of `lower-functions.ts`): in the
+    // function lowered for that type, the type of its value is the engine
+    // type of that IR type (CE-1652, step 4b).
+    if (isSymbol(subject) && isUntyped(s)) {
+      const p = cx.value(subject)!;
+      const held = cx.heldParams.has(p)
+        ? engineTypeOf(e, cx.type(p))
+        : undefined;
+      const known = held === undefined ? undefined : decide(held);
+      if (known !== undefined) {
+        cx.typeTests.set(e, known);
+        return b.constant(known, 'boolean');
+      }
     }
     // The lane of a field of a record, which the passes remove when nothing
     // else reads it. The record is lowered once, and the field read from it.

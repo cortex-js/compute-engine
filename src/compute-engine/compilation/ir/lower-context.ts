@@ -285,6 +285,18 @@ export type Lowering = {
    *  where `rows.at` or a parameter of that lane takes it whole; every
    *  other read declines. */
   wholeRows(e: Expression): V;
+  /** The parameters of user functions that hold the IR type of their
+   *  argument (`held()` of `lower-functions.ts`): a parameter of no stated
+   *  type or of type `any` holding a record, a string, a colour or (at
+   *  `any`) a number. Inside the function lowered for that type, `x is T`
+   *  of it is decided by that IR type (CE-1652, step 4b). */
+  readonly heldParams: Set<V>;
+  /** The tests decided from the IR types of their operands in the function
+   *  lowered for them (CE-1652, step 4b): `x is T` of a parameter of
+   *  `heldParams`, and `a == b` of a string and a value that is never one.
+   *  A condition made of such tests (`And`, `Or`, `Not`) takes its arm,
+   *  and the other arm is not lowered (`conditional()` of `lower.ts`). */
+  readonly typeTests: Map<Expression, boolean>;
   /** The inputs and the parameters of the lane `rows`. */
   readonly rowsParams: Set<V>;
   /** The count of the elements of a row `At(g, i)` of such a value at an

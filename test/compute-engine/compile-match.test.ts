@@ -157,8 +157,20 @@ describe('N(x, p)', () => {
       /N of a precision that is not a literal integer of at least 15 digits/
     ));
 
-  test('of a list declines', () =>
-    expectDeclines(ce, ['nl', 'x'], /N of a value of type vector<real\^2>/));
+  test('of a list is the list (CE-1652, step 4b)', () => {
+    const js = compileTo(ce, ['nl', 'x'], 'javascript');
+    if (!js.ok) throw new Error(js.message);
+    for (const x of [1.5, -0.1]) {
+      const v = ce.box(['nl', 'x']).subs({ x }).evaluate();
+      expect(js.run({ x })).toEqual(v.ops!.map((op) => op.re));
+    }
+    expect(compileTo(ce, ['nl', 'x'], 'glsl').ok).toBe(true);
+    const iv = compileTo(ce, ['nl', 'x'], 'interval-js');
+    expect(iv.ok).toBe(false);
+    expect((iv as { message: string }).message).toMatch(
+      /N of a list or of a value of type any in the interval mode/
+    );
+  });
 });
 
 describe('MatchesType(x, T): a constant from the static type of x', () => {

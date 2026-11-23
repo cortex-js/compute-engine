@@ -1815,7 +1815,7 @@ describe('a user function whose result is a list of elements of no stated type: 
     ]);
   });
 
-  test('one function for two calls with the same argument types; a call with another shape than the first declines', () => {
+  test('one function for two calls with the same argument types, another for a call of another shape', () => {
     const json = ['Add', ['At', ['v', 'x', 'y'], 1], ['At', ['v', 'y', 'x'], 2]];
     againstInterpreter(e, json, points);
     expect(
@@ -1824,14 +1824,10 @@ describe('a user function whose result is a list of elements of no stated type: 
         passes: { ...ALL_PASSES, inline: false },
       }).functions.filter((f) => f.source === 'v')
     ).toHaveLength(1);
-    // The function takes the shape of the parameters of its first call:
-    // points first, then scalars; scalars first, then points.
-    expect(
-      message(['List', ['At', ['At', ['v', 'P', 'Q'], 1], 1], ['At', ['v', 'x', 'y'], 1]])
-    ).toMatch(/an argument of v of another shape than at its first call/);
-    expect(
-      message(['List', ['At', ['v', 'x', 'y'], 1], ['At', ['At', ['v', 'P', 'Q'], 1], 1]])
-    ).toMatch(/a list argument of v/);
+    // Points and scalars: one function for each shape of the parameters
+    // (CE-1652, step 4b), in either order.
+    againstInterpreter(e, ['List', ['At', ['At', ['v', ['Tuple', 'x', 1.5], ['Tuple', 'y', -2]], 1], 1], ['At', ['v', 'x', 'y'], 1]], points);
+    againstInterpreter(e, ['List', ['At', ['v', 'x', 'y'], 1], ['At', ['At', ['v', ['Tuple', 'x', 1.5], ['Tuple', 'y', -2]], 1], 1]], points);
   });
 
   test('the same on JavaScript, GLSL and the interval mode; GLSL needs a stated length', () => {
@@ -1857,7 +1853,9 @@ describe('a user function whose result is a list of elements of no stated type: 
     expect(
       message(['Add', ['At', ['R', ['List', 1, 2], 'x'], 1], ['At', ['R', ['List', 1, 2, 3], 'x'], 1]])
     ).toMatch(
-      /an argument of R of another length than at its first call: the list parameter p has the length 2 of that call \(list<integer\^3> here\)$/
+      // One function per length (CE-1652, step 4b): the body of the second
+      // multiplies a list of 3 by a list of 2.
+      /lists of different lengths or ranks$/
     );
   });
 
@@ -2035,10 +2033,17 @@ describe('a user function of no stated result whose body is a list: the shape of
       expect([json, message(json, { to: 'glsl' })]).toEqual([json, 'compiled']);
   });
 
+  test('scalars and points: one function for each shape (CE-1652, step 4b)', () => {
+    // prettier-ignore
+    for (const json of [
+      ['List', ['At', ['two', 'x', 'y'], 1], ['At', ['At', ['two', ['Tuple', 'x', 1.5], ['Tuple', 'y', -2]], 1], 1]],
+      ['List', ['At', ['At', ['two', ['Tuple', 'x', 1.5], ['Tuple', 'y', -2]], 1], 1], ['At', ['two', 'x', 'y'], 1]],
+    ])
+      againstInterpreter(e, json, points);
+  });
+
   // prettier-ignore
   test.each([
-    ['scalars first, then points', ['List', ['At', ['two', 'x', 'y'], 1], ['At', ['At', ['two', 'P', 'Q'], 1], 1]], /a list argument of two \(the interpreter maps the function over the list\)/],
-    ['points first, then scalars', ['List', ['At', ['At', ['two', 'P', 'Q'], 1], 1], ['At', ['two', 'x', 'y'], 1]], /an argument of two of another shape than at its first call: the parameter a is a point of 2 numbers \(real here\)/],
     ['a recursive function', ['At', ['rl', 'x', 'y'], 1], /arms of two types/],
     ['a body of two shapes', ['At', ['un', 'x'], 1], /arms of two types/],
     ['a list of lists', ['At', ['nest', 'x'], 1], /a body of nest that is not a scalar, a point, or a list of numbers, booleans or points \(a result of no stated type\)/],
