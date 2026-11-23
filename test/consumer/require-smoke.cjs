@@ -43,6 +43,7 @@ const ENTRIES = {
   identities: ['loadIdentities'],
   'integration-rules': ['loadIntegrationRules'],
   'group-theory': ['loadGroupTheory'],
+  combinatorics: ['loadCombinatorics'],
   epsil: ['ComputeEngine', 'executeEpsil', 'parseEpsil'],
 };
 
@@ -164,5 +165,14 @@ for (const engine of [ce, full]) {
   const cyclic = ['PcGroup', ['List', 1000000000000], ['List', ['List']], ['List', ['List']], ['List', ['List']]];
   const pcOrder = engine.box(['PcGroupOrder', cyclic]).evaluate();
   if (pcOrder.json !== 1000000000000) fail('group-theory subpath did not compute collected group order');
+}
+
+// The combinatorics subpath, on an engine of either entry.
+for (const engine of [ce, full]) {
+  const report = loaded.combinatorics.loadCombinatorics(engine);
+  if (report.heads.length < 2 || report.skipped.length !== 0)
+    fail('combinatorics loader report is incorrect');
+  const maj = engine.box(['MajorIndex', ['List', 3, 1, 2]]).evaluate();
+  if (maj.json !== 1) fail('combinatorics subpath did not compute MajorIndex');
 }
 console.log('require-smoke: OK');

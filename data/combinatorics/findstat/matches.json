@@ -1,0 +1,4830 @@
+{
+  "source": "https://www.findstat.org",
+  "credit": "Identifiers and our own value-match records. FindStat's values are mathematical facts, credited to FindStat (https://www.findstat.org).",
+  "matches": [
+    {
+      "head": "Adjacencies",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000214",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AdjacentCycles",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000153",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AdmissibleInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000463",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Alignments",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000222",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AlternatingSubsetBreakCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001639",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ArithmeticProgressionsOfLengthTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001565",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AscentTopSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000471",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Ascents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000245",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AugmentedDoubleAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001948",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BabsonSteingrimssonStatisticDoublePrime",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000797",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BigAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000646",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BigDeficiencies",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000710",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BigExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000711",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Bonds",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001405",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "BoxedOccurrencesOf132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001083",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "BruhatLowerCovers",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000957",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BruhatTranspositionCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001558",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ComajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000833",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ConsecutiveSwapClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000458",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CycleAsOneLinePreimageSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000279",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CycleDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000317",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CycleMinimumExceedancesDeficiencies",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001269",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclesOfLengthAtLeastThree",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000486",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CyclesOfLengthAtMostTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000488",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CyclicBonds",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001516",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CyclicDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000619",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CyclicMisalignments",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001536",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicSmallWeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000236",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicValleys",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000243",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DecompositionNumber",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000056",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Depth",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000029",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentDifferenceSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000030",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentWeightMinusInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001911",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Descents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000021",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "DescentsAndRecoils",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001061",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DescentsOfDistanceThree",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001520",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DescentsOfTypeTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001737",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentsPlusRecoils",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000824",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Disorder",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000446",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DistinctPatternCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000520",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DoubleDeficiencies",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000732",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DoubleExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000731",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "ElizaldePakRank",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000352",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "EvenInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000538",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Excedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000155",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ExclusiveRightToLeftMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000374",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "FinalRises",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000989",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "FirstDescent",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000654",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "FirstEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000054",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "FixedPointMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000339",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "FixedPointsBeforeLargestMovedPoint",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001810",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "GlobalDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000546",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Hag",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001671",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "HalfPermanentOfIdentityPlusPermutation",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001661",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "HertzsprungOccurrencesOf132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001663",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "HookFactorizationPrefixLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000338",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InterpolatingPolynomialDegree",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001958",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InverseFoataArrowPairs",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001745",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InversionIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000616",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Inversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000018",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "InversionsBetweenExcedancesWithLinkedGreater",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001550",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InversionsOfDistanceAtMostThree",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000494",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InversionsOfSecondEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001557",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InversionsPlusMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001379",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InvisibleInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001727",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LabellingPermutationPreimageSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000280",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LargestDirectSummandSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000844",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LargestUniversalPatternSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001741",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LastDescent",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000653",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LeftOuterPeaks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000035",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "LeftToRightMaximaOrRightToLeftMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001004",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "LeftToRightMaximaXorRightToLeftMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001005",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LexicographicRank",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000020",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LongestArithmeticProgression",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001566",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LongestIncreasingSubsequenceCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000883",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "LongestTwinLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001517",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LowerMiddleEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001807",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Mad",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000795",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MajorIndexAfterZeroingFixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000334",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MajorIndexMinusInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001377",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Mak",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000794",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalCycleDifference",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000209",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MaximalDisplacement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000956",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalJump",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001246",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalRiseSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000651",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MaximumOfDescentsAndInverseDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001489",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MidPointsOfOccurrencesOf321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000371",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "MinimalInversionsEitherDirection",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001511",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MinimalStarTranspositionFactorizationCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001081",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NeighboringNumber",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001344",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NonAttackingNeighbors",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001388",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NonCyclicSmallWeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000242",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonInitialLeftToRightMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000541",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NonInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000246",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "NonNegativeWalkSteps",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001332",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonRecords",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001715",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonSmallWeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000238",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NontrivialCycles",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000162",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NormalizedSumOfDistancesToGreaterElement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000624",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf123Or132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000423",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf123Or231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000427",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf123Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000429",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000220",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf132Or213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000425",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf132Or231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000424",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf132Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000433",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf1432",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001847",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000218",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf213Or312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000434",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf2143",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000407",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf21Dash3",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000355",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf231Or312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000432",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf23Dash1",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000359",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000217",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf31Dash2",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000358",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf321Or3412",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001411",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf3241Or4231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000404",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf3412Or4231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000622",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf41352Or42351Or51342Or52341",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001059",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf4231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000408",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOfConsecutive132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001086",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOfInitial12Dash3",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001084",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOfInitial1Dash23",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001087",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOfInitial231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000800",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOfInitial312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000801",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OddDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001114",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OneBoxPatterns",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000064",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OverlapSetSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001096",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Peaks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000023",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "PermutationBreadth",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000842",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "PermutationGenus",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001394",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PinnacleSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001519",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PositionsOfLetterOneIn123",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001682",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PositionsOfLetterThreeIn132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001683",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PrefixExchangeDistance",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001077",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "PrimeColumnSums",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001285",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PrimeProductsPlusOne",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001288",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PureExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001665",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RajchgotIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001759",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RecursiveStartMinimumCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000873",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ReducedWordSupport",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000019",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RepeatedLehmerCodeEntries",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001298",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RestrictedNonInversionsBetweenExcedancesWithLinkedRightmost",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001551",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RightOuterPeaks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000834",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "RightTethers",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000666",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RightToLeftMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000991",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Runs",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000470",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Separators",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001402",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ShiftedMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000961",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ShortestDistinctWindowLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000923",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "SimsunDoubleDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000367",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SmallWeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000239",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SmallestFixedPoint",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001468",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SortingIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000224",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "StackSortingPasses",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000028",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "StandardizedBiAlternatingInversionNumber",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000677",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "StrongFixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000221",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SubsetHoleyness",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001469",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SumOfDistancesToGreaterElement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000625",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "TailPairsOfOccurrencesOf321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000123",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "ThreeExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000649",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ThreeShiftedMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000962",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "TotalDisplacement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000830",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "TwoRises",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000534",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "UlamDistance",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000829",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "UpperMiddleEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001806",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ValleysIncludingBoundary",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000099",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "VeryBigAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000871",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "VisibleDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001729",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "WeakAntiexcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000702",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "WeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000213",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AdjacenciesWithZeroAppended",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000215",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AdjacentTranspositions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001465",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AdmissibleInversionsPlusDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000868",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AlternatingRuns",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000483",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Antiexcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000703",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AscentBottomSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000472",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "AscentTopsWithSmallerValuesBefore",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001640",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "AscentsOfDistanceTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000837",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BabsonSteingrimssonStatistic",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000692",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "BabsonSteingrimssonStatisticPrime",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000796",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BigAscentsAfterPrependingZero",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000742",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "BigDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000647",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "BinStatistic",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001976",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BoxedOccurrencesOf123",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001082",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "BreakpointGraphCycles",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000696",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "BruhatNonInversionTranspositionCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001559",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ChordDiagramComponentCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001461",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ConjugacyClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000690",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Convexity",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000226",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CycleCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000031",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "CycleInverseClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001359",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclePeaks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000994",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "CyclesOfLengthAtMostThree",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000489",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "CyclicAlignments",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001535",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicCrossings",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001537",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicMaximalJump",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001245",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicSmallExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000241",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicSubsetHoleyness",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001470",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "CyclicallyAdjacentTranspositions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001466",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Denert",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000156",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentBottomSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000154",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentTopSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000111",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentWordFiberSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000530",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DescentsAfterZeroingFixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000333",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DescentsMinusOneUnlessFirstEntryOne",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001960",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DescentsOfDistanceTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000836",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DescentsOrRecoils",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000831",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "DiaconisGrahamDefect",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001906",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DistanceTwoSwapClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000669",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "DistinctDiagonalSums",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000891",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "DoubleAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000365",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "DoubleDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000366",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "DoubleSuccessions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001130",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "EvenDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001115",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "EvenWeakDeficienciesAndOddWeakExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001439",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ExclusiveLeftToRightMaxima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000996",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "ExteriorLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001052",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "FirstAscent",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000990",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "FirstDirectSummandSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000501",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "FixedPointAgreementCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001528",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "FixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000022",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "GlobalAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000234",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "GreaterNeighborOfMaximum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000060",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "HalfParityMismatches",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001801",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "HalfSymmetryClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000402",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "HookFactorInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000337",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "InsertionBumpsOfOne",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001390",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InverseFoataArrowAscents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001744",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InverseMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000305",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InversionSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000055",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "InversionsBetweenExcedancesAndFixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001552",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InversionsOfCyclicEmbedding",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001074",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InversionsOfDistanceAtMostTwo",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000495",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InversionsOfThirdEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001556",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "InvisibleDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001728",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "IsolatedDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000884",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "LargestCycleLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000485",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LargestGreatestCommonDivisorOfPositionAndValue",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001778",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LargestSearchTreeLeafLabel",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000727",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LargestWeakExcedancePosition",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001497",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LastEntry",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000740",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LeftToRightMaxima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000314",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LeftToRightMaximaPositionSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000756",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LeftToRightMinima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000542",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Load",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000304",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LongestCycleLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000485",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "LongestIncreasingSubsequence",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000062",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LongestKOneTwoPattern",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000451",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "LongestSuccessionRun",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001652",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LongestWeakTwinLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001667",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "LusztigAFunction",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001874",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000004",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "MajorIndexMinusExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000462",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MajorIndexPlusInverseMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000825",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Makl",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000798",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalDiagonalOccupancy",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000887",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalExcedance",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000141",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MaximalModularDisplacement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001569",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MaximalSuccessiveDifference",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000652",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "MidPointsOfOccurrencesOf123",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000372",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MinimalCycleDifference",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000210",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "MinimalJump",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001162",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NestedExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001513",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonCyclicSmallExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000235",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonFixedPoints",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000673",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "NonInversionSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000341",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonLeftToRightMaxima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000316",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonOverlappingDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001928",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonSmallExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000240",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NonWeakExcedanceMidPointsOfOccurrencesOf321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000375",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "NormalizedLeafLabelSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000726",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf123",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000002",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf123Or213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000428",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf123Or312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000430",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf12Dash3",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000357",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf1324",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000405",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf132Or213Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000457",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf132Or312",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000426",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf13Dash2",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000356",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf14Dash2Dash3Or14Dash3Dash2",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000709",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf213Or231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000435",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf213Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000431",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf2143Or4213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000751",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000219",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf231Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000436",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf2413",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001705",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf312Or321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000437",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000119",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf3241",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000406",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf32Dash1",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000360",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "OccurrencesOf4132Or4231",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000440",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOf4213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000750",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOf52341",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000623",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOfInitial123",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000804",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOfInitial132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000803",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOfInitial213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000799",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OccurrencesOfInitial2Dash13",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001085",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "OccurrencesOfInitial321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000802",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OddInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000539",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "OuterPeaks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000092",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ParkingPermutationPreimageSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001346",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "PermutationBounce",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000133",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PermutationCosine",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000342",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PermutationTreeHeight",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000308",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PopStackSortingPasses",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001090",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "PositionsOfLetterOneIn132",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001685",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PositionsOfLetterTwoIn213",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001687",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PrefixSumProduct",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001482",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "PrimeProductsMinusOne",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001287",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ProperBlocks",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001160",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Rafts",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000665",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "Recoils",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000354",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "RecursiveEndMaximumCount",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000461",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ReducedReflectionLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000809",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ReflectionLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000216",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "RestrictedNonInversionsBetweenExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001549",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RightFloats",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000663",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RightRopes",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000664",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "RightToLeftMaxima",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000007",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "RunSetFiberSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001735",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ScaledReciprocalPositionValueSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001293",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ShareshianWachsAdmissibleInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000866",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "ShortestCycleLength",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000487",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "SimionSchmidtPreimageSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000124",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "SmallExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000237",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "SmallerChildPathLeafLabel",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000724",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "SmallestLeafLabel",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000725",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "StaircaseSizeOfCode",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000662",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "StretchingPairs",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000516",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "SubsequenceMonotoneRunSum",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000484",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Successions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000441",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "SymmetryClassSize",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000401",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "ThreeRises",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000650",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "Tier",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000779",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "TotalSquaredDisplacement",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000828",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "TwoExcedances",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000648",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "TwoShiftedMajorIndex",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000963",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "UpDownRuns",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000638",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "Valleys",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000353",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "VerticalSeparators",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001403",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "VeryBigDescents",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000872",
+      "through": 5,
+      "valuesCompared": 152
+    },
+    {
+      "head": "VisibleInversions",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St001726",
+      "through": 5,
+      "valuesCompared": 153
+    },
+    {
+      "head": "WeakExcedanceMidPointsOfOccurrencesOf321",
+      "area": "permutations",
+      "domain": "permutation",
+      "collection": "Permutations",
+      "findstat": "St000373",
+      "through": 5,
+      "valuesCompared": 154
+    },
+    {
+      "head": "AddableCells",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000318",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "Aft",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001214",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "AlladiWeight",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000477",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "BerkovichGarvanRank",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001383",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "BinaryTreeCountWithNoTwinLeavesOfOneColor",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001099",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "BorderSkewStandardTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001387",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "BraceletCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001603",
+      "through": 6,
+      "valuesCompared": 26
+    },
+    {
+      "head": "BulgarianSolitaireOrbitSize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001914",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "BulgarianSolitairePreimageCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001913",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "BulgarianSolitairePreperiod",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001912",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "CartanDeterminant",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001571",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CellsOutsideDurfeeSquare",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001382",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "CellsOutsideFirstHook",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001175",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CellsOutsideFirstRow",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001176",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CellsOutsideLargestStaircase",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001384",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CellsWithEqualArmAndLeg",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001924",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CellsWithZeroLegAndOddArm",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000149",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "CentralizerSize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000184",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "CharacterPolynomialConstantTerm",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000929",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "ChompGrundyValue",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000681",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "CoarseningCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000346",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "CohookLengthProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001378",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ColoredCycleMultisetCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001612",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "ColoredEndofunctionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001610",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "ColoredRootedTreeCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001608",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "ColoredTreeCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001609",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "CompleteHomogeneousSymmetricFunctionAtOne",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001562",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ConjugateDistinctParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000159",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ConjugateOddParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000992",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ContainingRectangleShortSide",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000533",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ContainingSquareSide",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000784",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ContentSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000509",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "CornerMajorIndex",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000770",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "Corners",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000159",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "CouplesAreForeverGrundyValue",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000752",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "Crank",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000474",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CubeRootCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001364",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "CubedStandardTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000901",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "CyclicSievingPolynomialDegree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001918",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "DesarrangementTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000506",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "DiagonalArmSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000319",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "DiagonalHookLengthProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000870",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "DiagonalInversionDefect",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000377",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DiagonalInversions",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000378",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DiagramPosetLinearExtensionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000063",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctEvenParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001092",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctEvenSubsetSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000547",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctMultiplicities",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000897",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctOddPartsBelowLargestEvenPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001588",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctOddSubsetSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000549",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000159",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctPartsEqualToMultiplicity",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001940",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "DistinctRepeatedParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000257",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DistinctSubsetSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000548",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DominatedPartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000321",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "DominoTilingCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001380",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "DurfeeSquare",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000183",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "DysonRank",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000145",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "EdgeOrbitCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001982",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ElementarySymmetricFunctionAtOne",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001561",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "EvenOddCrank",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000997",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "EvenParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000142",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ExponensConsonantiae",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001128",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "FirstRowHookLengthSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000867",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "FlooredHalfMultiplicitySum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000150",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "GiniIndex",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001541",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "GreatestCommonDivisorOfParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000667",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "HalfLargestEvenPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001587",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "HalfSumOfEvenParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001252",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "HookLengthOfFirstCell",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000459",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "HookLengthOfLastDiagonalCell",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000460",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "HookLengthSquareSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001943",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "HookProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000179",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "HurwitzNumber",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001763",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "IncreasingTreeCountWithNoLeafOfItsParentsColor",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001101",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "InterlacingPartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001814",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "InvariantGraphCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000514",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "InvariantOrientedCycleCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000510",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "InvariantSetPartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000515",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "InvariantSubsetCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000511",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "InvariantThreeElementSubsetCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000512",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "InvariantTwoElementSubsetCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000513",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "InverseByConjugationCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001710",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "IsSelfConjugate",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001122",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "KrewerasNumber",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000517",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LagrangeInversionCoefficient",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001967",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "LargestEvenPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000995",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LargestMissingPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001392",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "LargestMultiplicity",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001933",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "LargestPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000147",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LargestRepeatedPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000143",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LargestShiftedPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000384",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LargestStaircaseSide",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000783",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LeafLabeledTreeCountWithNoTwinLeavesOfOneColor",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001100",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "LeastCommonMultipleOfParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000668",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "LehmerCodeMultiplicityPermutationCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000275",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "LengthCrank",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000146",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "LogarithmicDerivativeCoefficient",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001968",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "LowerCoverCountInDominanceOrder",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000480",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MaximalRectangleHalfPerimeter",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000380",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MaximalRookPlacementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001659",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MinimalSubpartitionSizeDifference",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000835",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MonotoneHurwitzNumber",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001934",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "MultinomialOfParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000048",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MultipartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000933",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "MultiplicityFactorialProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000706",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "MultiplicityOfLargestPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000993",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "MultiplicityOfSmallestPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000160",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "MultisetPartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001611",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "NecklaceCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001605",
+      "through": 6,
+      "valuesCompared": 26
+    },
+    {
+      "head": "NonDominatingSubmultisetCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001714",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "NonnegativeIntegerMatrixCountWithDecreasingColumnSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000812",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "OddParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000148",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "OddPartsBelowLargestEvenPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001586",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "OrderedRefinementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000935",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "OrderedSetPartitionCountWithDecreasingBlockSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000810",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "PairsOfDistinctParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000175",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PairwiseGreatestCommonDivisorSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001961",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PairwiseProductSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000567",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "PartCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000010",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartFactorialProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000707",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "PartProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000708",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "PartRange",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000225",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PartRearrangementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000278",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartSquareProduct",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001129",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartSquareSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001127",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartitionSize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000228",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartsAtLeastTwo",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001280",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PartsEqualOne",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000475",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartsEqualToMultiplicity",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001939",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PartsEqualToNextPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001091",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartsEqualTwo",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001657",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PartsExceedingOnes",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000473",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartsNotCongruentToOneModuloThree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001251",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "PartsNotCongruentToTwoModuloThree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001247",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PartsNotCongruentToZeroModuloThree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001250",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "PlancherelCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000284",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "PowerSumSymmetricFunctionAtOne",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001563",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ProperColoringSchemeCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000781",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "RefinementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000345",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "RemovableHorizontalDominoes",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000256",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "RimHooksRemovedToThreeCore",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000697",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "RimHooksRemovedToTwoCore",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000698",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "RookPlacementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000532",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "RootedTreeCountWithNoLeafOfItsParentsColor",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001098",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "RowCellPairs",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000566",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "RowRemovalGrundyValue",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001055",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SameLengthSubpartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001389",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SeaweedAlgebraDimension",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001262",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SecondAlladiWeight",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000478",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "SelfEvacuatingTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000618",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SemistandardTableauCountWithContent",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000814",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "SemistandardTableauCountWithEntriesUpToFour",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000712",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SemistandardTableauCountWithEntriesUpToLength",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000704",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "SemistandardTableauCountWithEntriesUpToSize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000705",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SemistandardTableauCountWithEntriesUpToThree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000715",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SemistandardTableauCountWithEntriesUpToTwo",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000714",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "SemistandardTableauWeightCountWithEntriesUpToLength",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001908",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "SetPartitionsWithBlockSizesCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000049",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "ShiftedStandardTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001593",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ShorterSideRookPlacementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000531",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SingletonParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001484",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SingletonRefinementCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000913",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "SmallestMissingPart",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000759",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SmallestNonRepeatedInteger",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001568",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "SmallestOddRestrictionDepth",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000749",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "SmirnovWordCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001097",
+      "through": 5,
+      "valuesCompared": 17
+    },
+    {
+      "head": "SquareRemovalGrundyValue",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000137",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "SquareRootCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000811",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "StandardTableauCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000003",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "StandardTableauCountWithEvenFirstDescent",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000621",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "StandardTableauCountWithMajorIndexCongruentToOneModuloSize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001440",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "StandardTableauCountWithMajorIndexDivisibleBySize",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001442",
+      "through": 5,
+      "valuesCompared": 18
+    },
+    {
+      "head": "StandardTableauCountWithNoConsecutiveEntriesInOneRow",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000212",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "StandardTableauCountWithOddFirstDescent",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000620",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "StarTranspositionFactorizationCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001936",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SubpartitionCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000108",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SubsetGreatestCommonDivisorSum",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001985",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SumOfEvenParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001248",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SumOfHookLengths",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000869",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "SumOfOddParts",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001249",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SumOfPartsAtLeastTwo",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001279",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SymmetricDiagonalHooks",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001525",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "SymplecticDimensionRankThree",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000716",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "SymplecticDimensionRankTwo",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000713",
+      "through": 6,
+      "valuesCompared": 28
+    },
+    {
+      "head": "TransitiveMonotoneFactorizationCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001938",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "TwelveTimesMajorIndexVarianceOfStandardTableaux",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001178",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "TwiceMeanMajorIndexOfStandardTableaux",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001177",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "UpperCoverCountInDominanceOrder",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000481",
+      "through": 6,
+      "valuesCompared": 30
+    },
+    {
+      "head": "WordCountWithoutThreeConsecutiveIncreasingLetters",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001103",
+      "through": 5,
+      "valuesCompared": 19
+    },
+    {
+      "head": "YoungLatticeCoveringRelationCount",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St001360",
+      "through": 6,
+      "valuesCompared": 29
+    },
+    {
+      "head": "ZeroOneMatrixCountWithDecreasingColumnSums",
+      "area": "partitions",
+      "domain": "integer_partition",
+      "collection": "Integer partitions",
+      "findstat": "St000813",
+      "through": 5,
+      "valuesCompared": 17
+    }
+  ]
+}

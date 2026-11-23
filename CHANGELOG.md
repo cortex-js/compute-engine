@@ -1,3 +1,22 @@
+## [Unreleased]
+
+### New Features
+
+- **An optional `combinatorics` library declares statistics over the engine's
+  own lists.** `loadCombinatorics(ce, { areas })`, exported from
+  `@cortex-js/compute-engine/combinatorics`, declares about 350 statistics of a
+  permutation as its one-line list, such as `MajorIndex`, `Inversions` and
+  `Denert`, and about 195 of an integer partition as its non-increasing parts,
+  such as `LargestPart`, `DurfeeSquare` and `AddableCells`. A statistic is
+  defined by an Epsil function literal, compiled ahead of time so the entry does
+  not carry the Epsil text, and may carry a TypeScript kernel that a test holds
+  equal to it; a list outside the domain, such as `MajorIndex([1, 1])`, stays
+  unevaluated. All but a few heads carry the identifier of a
+  [FindStat](https://www.findstat.org) statistic and equal its values on every
+  permutation of length at most 5 and every partition of size at most 6 that
+  FindStat tabulates; the others are held to their examples (#531, contributed by
+  [enumeratio](https://github.com/enumeratio))
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features
