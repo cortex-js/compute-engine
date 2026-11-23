@@ -24,6 +24,7 @@ import {
   polynomialDivide,
 } from '../boxed-expression/polynomials.js';
 import { partialFraction } from '../boxed-expression/factor.js';
+import { asExactSmallInteger } from '../boxed-expression/numerics.js';
 import {
   rebindEscaping,
   reduceTransformerHead,
@@ -4932,7 +4933,41 @@ function establishedAntiderivativeInRadians(
   const rpc = tryReversePowerChain(fn, index);
   if (rpc) return rpc;
 
+  const polyPower = tryExpandPolynomialPower(fn, index);
+  if (polyPower) return polyPower;
+
   return integrate(fn, index);
+}
+
+/**
+ * The largest degree, in the variable, of a polynomial power that
+ * `tryExpandPolynomialPower()` expands. A larger power stays unevaluated
+ * rather than expand to a long sum.
+ */
+const MAX_EXPANDED_POLYNOMIAL_DEGREE = 32;
+
+/**
+ * ∫ Q(x)ⁿ dx for a polynomial Q of degree 2 or more and an integer n ≥ 2:
+ * expand the power and integrate the sum term by term. A power of a linear
+ * polynomial is `tryLinearPower()`, and a power with the derivative of its
+ * base as a factor is a substitution; both are tried before this. Returns
+ * `null` when the expanded degree is more than
+ * `MAX_EXPANDED_POLYNOMIAL_DEGREE` or when the power does not expand to a
+ * sum.
+ */
+function tryExpandPolynomialPower(
+  fn: Expression,
+  index: string
+): Expression | null {
+  if (!isFunction(fn, 'Power')) return null;
+  const n = asExactSmallInteger(fn.op2);
+  if (n === null || n < 2) return null;
+  const degree = polynomialDegree(fn.op1, index);
+  if (degree < 2 || degree * n > MAX_EXPANDED_POLYNOMIAL_DEGREE) return null;
+  const expanded = expandAll(fn);
+  if (!isFunction(expanded, 'Add')) return null;
+  const result = antiderivative(expanded, index);
+  return result.has('Integrate') ? null : result;
 }
 
 function integrate(expr: Expression, variable: string): Expression {

@@ -33,6 +33,12 @@
 
 ### Improvements
 
+- **The antiderivative of an integer power of a polynomial of degree 2 or
+  more has a closed form** (CE-1591). `Integrate((x^2+1)^2, x)` stayed
+  unevaluated, while the same polynomial written out integrated; it is now
+  `x^5/5 + 2x^3/3 + x`. When no other rule applies, the power is expanded
+  and integrated term by term. A power whose expanded degree is more than 32
+  stays unevaluated.
 - **A function literal that assigns a list variable of the engine compiles to
   JavaScript** (CE-1662), so a timer callback that updates a list runs
   compiled: with `let L = [0, 0, 0]`, the function
