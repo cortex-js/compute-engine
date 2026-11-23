@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### New Features
+
+- **`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and
+  `Heaviside`, wherever they occur in `expr`, into one conditional value
+  `Which(c1, v1, …, True, vd)`** (#516, contributed by
+  [enumeratio](https://github.com/enumeratio)). `PiecewiseExpand(Max(x, y))`
+  is `Which(x - y >= 0, x, True, y)`, `PiecewiseExpand(Heaviside(x))` is
+  `Which(x < 0, 0, x > 0, 1, True, 1/2)` (the value `Heaviside(0)` has) and
+  `PiecewiseExpand(Sign(x))` is `Which(x > 0, 1, x < 0, -1, True, 0)`.
+  `Abs` and `Sign` split only for an argument known to be real (declared
+  `real`, or given a sign by `ce.assume()`); a complex or undeclared argument
+  is left as it is. Nested occurrences combine their conditions:
+  `PiecewiseExpand(Abs(x - Max(x, 1)))` is `Which(x - 1 >= 0, 0, True, 1 - x)`.
+  The assumptions of `ce.assume()` are read, never changed: with `x > 0`
+  assumed, `PiecewiseExpand(Abs(x))` is `x`, and with `x > 3` assumed the
+  constant of `Max(x, 2, y)` never wins. An expression with none of these
+  functions is returned unchanged, as is one whose arms would pass 256.
+  `Which`, `Sum` and the other operators that hold their operands are not
+  entered.
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features

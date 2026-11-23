@@ -13,6 +13,7 @@ import {
   validateAlgebraicGenerator,
 } from '../polynomial/boxed-number-field.js';
 import { expand, expandAll } from '../boxed-expression/expand.js';
+import { piecewiseExpand } from '../boxed-expression/piecewise-expand.js';
 import {
   polynomialDegree,
   getPolynomialCoefficients,
@@ -175,6 +176,19 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value)-> value',
       evaluate: ([x]) =>
         evaluateTensorProduct(expandAll(reduceTransformerOperand(x.canonical))),
+    },
+
+    PiecewiseExpand: {
+      description:
+        '`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. `Abs` and `Sign` split only for an argument known to be real. Nested occurrences combine their conditions, and the assumptions set by `ce.assume()` decide what they can: with `x > 0` assumed, `Abs(x)` is `x`. An expression with none of these functions is returned unchanged.',
+      examples: [
+        'PiecewiseExpand(Max(x, y))',
+        'PiecewiseExpand(Heaviside(x) + Max(x, 1))',
+      ],
+      lazy: true,
+      inspectsErrors: true, // see `Expand`
+      signature: '(value) -> value',
+      evaluate: ([x]) => piecewiseExpand(reduceTransformerOperand(x.canonical)),
     },
 
     AlgebraicGenerator: {

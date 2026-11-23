@@ -6520,6 +6520,22 @@
       ]
     },
     {
+      "name": "PiecewiseExpand",
+      "category": "Polynomials",
+      "arity": "1",
+      "signature": "(value) -> value",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. `Abs` and `Sign` split only for an argument known to be real. Nested occurrences combine their conditions, and the assumptions set by `ce.assume()` decide what they can: with `x > 0` assumed, `Abs(x)` is `x`. An expression with none of these functions is returned unchanged.",
+      "examples": [
+        "PiecewiseExpand(Max(x, y))",
+        "PiecewiseExpand(Heaviside(x) + Max(x, 1))"
+      ]
+    },
+    {
       "name": "Pin",
       "category": "Control Structures",
       "arity": "1",
