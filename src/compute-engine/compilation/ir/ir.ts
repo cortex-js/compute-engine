@@ -218,11 +218,15 @@ export type HostCall = {
 };
 
 /** A variable of the engine that a root function literal assigns: its name,
- *  the definition that the body reads and writes, and its lane. */
+ *  the definition that the body reads and writes, and its lane. With
+ *  `list`, a list of that lane of a length known at run time, which can
+ *  change at each call: the entry takes its length, then the list, and
+ *  returns the list. */
 export type Assigned = {
   readonly name: string;
   readonly definition: BoxedValueDefinition;
   readonly lane: Lane;
+  readonly list?: true;
 };
 
 /** A sign that the declared type of an input proves. */

@@ -21,7 +21,11 @@ import type {
   FreeSymbolType,
 } from '../types.js';
 import { isTupleShapedType } from '../../collection-utils.js';
-import { isNumber, isSymbol } from '../../boxed-expression/type-guards.js';
+import {
+  isNumber,
+  isString,
+  isSymbol,
+} from '../../boxed-expression/type-guards.js';
 import {
   bigintBroadcastError,
   checkEntry,
@@ -361,20 +365,39 @@ function assigningRun(
   inDigits: <T>(g: () => T) => T
 ): (...args: unknown[]) => unknown {
   const ce = expr.engine;
-  const read = (x: Assigned): number | boolean => {
-    const v = x.definition.value;
-    if (x.lane === 'boolean') {
+  // The machine value of the element `v` of the lane `lane`, or `undefined`.
+  const scalar = (
+    v: Expression | undefined,
+    lane: Assigned['lane']
+  ): number | boolean | undefined => {
+    if (lane === 'boolean') {
       if (isSymbol(v, 'True')) return true;
       if (isSymbol(v, 'False')) return false;
+      return undefined;
+    }
+    // An exact value (`1/30 * pi`) is read as its machine number.
+    const n = v?.N();
+    return isNumber(n) && n.im === 0 ? n.re : undefined;
+  };
+  const read = (x: Assigned): number | boolean | (number | boolean)[] => {
+    const v = x.definition.value;
+    if (x.list) {
+      // A list that an interpreted call wrote can be held lazily
+      // (`Rest(List(1, 2, 3))`): its elements are read.
+      const items =
+        v?.isFiniteCollection === true && !isString(v)
+          ? [...v.each()].map((y) => scalar(y, x.lane))
+          : undefined;
+      if (items?.every((y) => y !== undefined))
+        return items as (number | boolean)[];
     } else {
-      // An exact value (`1/30 * pi`) is read as its machine number.
-      const n = v?.N();
-      if (isNumber(n) && n.im === 0) return n.re;
+      const y = scalar(v, x.lane);
+      if (y !== undefined) return y;
     }
     throw new TypeError(
       `The variable "${x.name}" that the compiled function assigns holds ` +
-        `${v === undefined ? 'no value' : v.toString()}, not a value of ` +
-        `the lane ${x.lane}.`
+        `${v === undefined ? 'no value' : v.toString()}, not a ` +
+        `${x.list ? 'list of values' : 'value'} of the lane ${x.lane}.`
     );
   };
   return (...args: unknown[]) =>
@@ -383,12 +406,16 @@ function assigningRun(
       const r = call([...given, ...assigns.map(read)]) as unknown[];
       assigns.forEach((x, k) => {
         const y = r[k + 1];
-        x.definition.value =
-          typeof y === 'boolean'
-            ? y
+        const box = (z: unknown): Expression =>
+          x.lane === 'boolean'
+            ? z
               ? ce.True
               : ce.False
-            : ce.number(y as number);
+            : ce.number(z as number);
+        // A list is an array of the values of its elements.
+        x.definition.value = x.list
+          ? ce.function('List', Array.from(y as ArrayLike<unknown>, box))
+          : box(y);
       });
       return normalizeRunResult(r[0]);
     });

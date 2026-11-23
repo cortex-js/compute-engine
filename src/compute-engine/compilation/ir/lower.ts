@@ -5869,6 +5869,21 @@ function lowerOnce(
       const owned = isSymbol(target.ops[0])
         ? lookup(target.ops[0].symbol)
         : undefined;
+      // A list local written whole (a list variable of the engine that the
+      // function assigns, CE-1662): `Assign(L, ReplaceAt(L, i, L[i] + v))`,
+      // `i` evaluated once, before `v`, as the interpreter does. A write
+      // of `L` in `v` would be lost: it declines.
+      if (owned?.binding.whole !== undefined && target.nops === 2) {
+        const name = (target.ops[0] as Expression & { symbol: string }).symbol;
+        if (facts(increment).writes.has(name))
+          decline(e, `AddTo of an element of ${name} whose value writes it`);
+        const binding = writable(e, target.ops[0]);
+        const v = replaced(e, binding.v, target.ops[1], (old) =>
+          apply(e, 'Add', [old(), scalar(increment)])
+        );
+        binding.v = fitWhole(e, v, binding.whole!, binding.lane!);
+        return binding.v;
+      }
       if (owned?.binding.role !== 'list' || target.nops !== 2)
         decline(
           e,
@@ -5908,7 +5923,19 @@ function lowerOnce(
    *  (`wix`, JavaScript only). */
   const replaceAt = (e: Fn): V => {
     if (e.nops !== 3) decline(e, 'ReplaceAt with an index for each level');
-    const l = value(e.ops[0])!;
+    return replaced(e, value(e.ops[0])!, e.ops[1], () => scalar(e.ops[2]));
+  };
+
+  /** The list `l` with its element at the index `index` replaced by the
+   *  value `make(old)`, where `old()` reads the element that it replaces
+   *  (`replaceAt()`; `AddTo(At(L, i), v)` of a list local written whole,
+   *  `addTo()`). The index is evaluated once, before the value. */
+  const replaced = (
+    e: Fn,
+    l: V,
+    index: Expression,
+    make: (old: () => V) => V
+  ): V => {
     const t = type(l);
     if (
       t.shape.length !== 1 ||
@@ -5919,20 +5946,25 @@ function lowerOnce(
         e,
         'ReplaceAt of a value that is not a list of reals, integers or booleans'
       );
-    const i = scalar(e.ops[1]);
+    const i = scalar(index);
     if (!isSubLane(type(i).lane, 'real'))
-      decline(e.ops[1], 'an index that is not a number');
-    const x = scalar(e.ops[2]);
-    if ((type(x).lane === 'boolean') !== (t.lane === 'boolean'))
-      decline(
-        e,
-        `ReplaceAt of a ${type(x).lane} value in a list of ${t.lane} elements`
-      );
-    if (!isSubLane(type(x).lane, 'real') && type(x).lane !== 'boolean')
-      decline(e, `ReplaceAt of a ${type(x).lane} value`);
+      decline(index, 'an index that is not a number');
     const n = t.shape[0];
     const c = constant(i);
     const source = lists.listSource(l);
+    // The value, after the index is checked: a constant index of a list of
+    // a stated length is the position `at`.
+    const element = (k: V): V => {
+      const x = make(() => source.at(k));
+      if ((type(x).lane === 'boolean') !== (t.lane === 'boolean'))
+        decline(
+          e,
+          `ReplaceAt of a ${type(x).lane} value in a list of ${t.lane} elements`
+        );
+      if (!isSubLane(type(x).lane, 'real') && type(x).lane !== 'boolean')
+        decline(e, `ReplaceAt of a ${type(x).lane} value`);
+      return x;
+    };
     let k: V;
     // A constant index 0 or not an integer: the interpreter leaves the form
     // unevaluated or gives an error, whatever the length.
@@ -5945,16 +5977,18 @@ function lowerOnce(
           e,
           `the index ${c} of ReplaceAt of a list of ${n} elements (the interpreter leaves it unevaluated)`
         );
+      k = b.constant(at, 'integer');
       // A target with no run-time lengths (GLSL) builds no list: the list
       // of the elements.
-      if (options.runtimeLengths === false)
+      if (options.runtimeLengths === false) {
+        const x = element(k);
         return list(
           e,
           Array.from({ length: n }, (_, j) =>
             j === at ? x : source.at(b.constant(j, 'integer'))
           )
         );
-      k = b.constant(at, 'integer');
+      }
     } else {
       if (!options.javascript)
         decline(
@@ -5969,6 +6003,7 @@ function lowerOnce(
         scalarType('integer')
       );
     }
+    const x = element(k);
     return lists.built(e, source.length, (j) =>
       branch(
         e,
@@ -6597,7 +6632,8 @@ function lowerOnce(
    *  the scope of the compilation, not a local or a parameter of `f`: the
    *  state that a call of the interpreter changes in the engine (CE-1620).
    *  Each one is a variable with a declared type of the lane `real`,
-   *  `integer` or `boolean` (`inputType()`), on the plain JavaScript
+   *  `integer` or `boolean` (`inputType()`), or a list of that lane of no
+   *  stated length (`list<number>`, CE-1662), on the plain JavaScript
    *  target; another one declines. A function that `f` calls and that
    *  reads such a name declines (`free()`): it would read the value before
    *  the call. */
@@ -6616,10 +6652,15 @@ function lowerOnce(
               )
             : [];
       const inner = binds.length > 0 ? new Set([...bound, ...binds]) : bound;
+      // `AddTo(At(L, i), v)` (`L[i] += v`) writes `L`.
       const target =
-        x.operator === 'Assign' || x.operator === 'AddTo'
+        x.operator === 'Assign'
           ? x.ops[0]
-          : undefined;
+          : x.operator === 'AddTo'
+            ? isFunction(x.ops[0], 'At')
+              ? x.ops[0].ops[0]
+              : x.ops[0]
+            : undefined;
       const targets = isFunction(target, 'Tuple') ? target.ops : [target];
       for (const t of targets) {
         if (!isSymbol(t) || inner.has(t.symbol)) continue;
@@ -6639,10 +6680,16 @@ function lowerOnce(
         if (def.inferredType)
           why('whose type is inferred from its value: declare its type');
         const ir = inputType(def.type.type);
-        const lane = ir?.shape.length === 0 ? ir.lane : undefined;
+        const list = ir?.shape.length === 1 && ir.shape[0] === 'run-time';
+        const lane = ir?.shape.length === 0 || list ? ir!.lane : undefined;
         if (lane !== 'real' && lane !== 'integer' && lane !== 'boolean')
           return why(`of type ${engineTypeToString(def.type.type)}`);
-        out.push({ name: t.symbol, definition: def, lane });
+        out.push({
+          name: t.symbol,
+          definition: def,
+          lane,
+          ...(list ? { list: true } : {}),
+        });
       }
       x.ops.forEach((op) => visit(op, inner));
     };
@@ -6695,6 +6742,23 @@ function lowerOnce(
       // value of each name after it (`Program.assigns`). The stored value
       // is hidden while the body is lowered, so that no analysis reads it.
       for (const s of states) {
+        if (s.list) {
+          // A list of a run-time length, its length before it, held as a
+          // list local that the body writes whole (`wholeLocal()`): each
+          // write can change its length.
+          b.positional += 2;
+          const n = b.param(s.name, scalarType('integer'), true);
+          inputLengths.add(n);
+          const v = b.param(s.name, { lane: s.lane, shape: [{ v: n }] });
+          const whole = { inner: [], points: false };
+          frames[0].names.set(s.name, {
+            v,
+            lane: s.lane,
+            role: 'local',
+            whole,
+          });
+          continue;
+        }
         b.positional += 1;
         const v = b.param(s.name, scalarType(s.lane));
         frames[0].names.set(s.name, { v, lane: s.lane, role: 'local' });

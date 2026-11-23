@@ -1276,7 +1276,9 @@ export type CompilationResult<
    *
    * The `code` takes the value of each of these variables after the
    * arguments of the function, in this order, and returns an array: the
-   * value of the function, then the new value of each variable. A host that
+   * value of the function, then the new value of each variable. A variable
+   * that holds a list (`let L = [0, 0, 0]`) is an array of its elements,
+   * whose length can change at each call. A host that
    * runs the code without the engine (`load()`) gives the values and keeps
    * the new ones itself.
    *

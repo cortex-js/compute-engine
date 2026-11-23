@@ -33,6 +33,14 @@
 
 ### Improvements
 
+- **A function literal that assigns a list variable of the engine compiles to
+  JavaScript** (CE-1662), so a timer callback that updates a list runs
+  compiled: with `let L = [0, 0, 0]`, the function
+  `(t: real) => do { L = L + [1, 2, 3] }` (or `do { L[2] = L[2] + 1 }`, or
+  `do { L = Append(L, t) }`) gave the decline "an assignment of L, of type
+  list<number>". Each call of `run()` reads the list in the engine and
+  writes its new value back, as for a real variable (`assigns`); the length
+  of the list can change at each call. A list of lists still declines.
 - **A recursive function row of a Document whose body has no effect is pure,
   and its applications are kept** (CE-1709). A row that states no effect and
   calls itself, or another row that calls it back, had the effects `any`, so

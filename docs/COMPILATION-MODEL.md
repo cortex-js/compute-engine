@@ -2538,12 +2538,22 @@ a second time.
 
 The variable is a variable of the scope of the compilation, not a local or a
 parameter of the literal, with a declared type whose lane is `real`,
-`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`). These decline:
+`integer` or `boolean` (`let s = 0.5` in Epsil declares `s`), or a list of
+such values of no stated length (`let L = [0, 0, 0]` declares
+`list<number>`). A list variable is a list local that the body writes whole,
+and its length can change at each call: `L = L + [1, 2, 3]`,
+`L = Append(L, t)`, `M[2] = M[2] + 1` and `M[2] += 1` compile. The code takes it as an
+array and returns its new value as an array; `run()` reads its elements in
+the engine (also a list that an interpreted call holds lazily, such as
+`Rest(List(1, 2, 3))`) and writes back a `List` of machine numbers or of
+booleans. These decline:
 
 - another target, `interval-js` and the `bigint` mode;
 - a variable whose type is inferred from its value (`ce.assign('u', 1)`
   with no declaration): declare its type;
-- a constant, a list, a tuple, a string or a complex variable;
+- a constant, a tuple, a string or a complex variable, a list of lists
+  (`let g = [[1, 0], [0, 1]]`), a list of a stated length and a list of
+  points;
 - a variable with no value at the compilation, and a name of the `vars`,
   `symbolic` or `inputs` option: it is an input of the host;
 - a value of another lane: `n = n + 0.5` for `n: integer`;

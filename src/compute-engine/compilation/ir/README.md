@@ -3480,17 +3480,19 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   parameter of the literal; `assignedNames()` of `lower.ts`) has the name in
   `assigns` (`Program.assigns`): on the plain JavaScript target, for a variable
   of a declared type of the lane `real`, `integer` or `boolean`, the name is a
-  local whose value is a positional parameter after the arguments, its stored
-  value is hidden while the body is lowered (`withVarsValuesHidden()`), and the
-  entry returns the array of the value of the body (NaN for a body that ends in
-  an assignment) and the value of each name after it. `run()` reads each value
-  in the engine before the call and writes the new values back after it
-  (`assigningRun()` of `adapter.ts`); the result is not `shippable`, and
-  `implicitCompile()` gives no result for it. Another target, the interval and
-  `bigint` modes, an inferred type, a constant and another lane decline; so does
-  a user function that the body calls and that reads the name (`free()`: the
-  name is a local of the entry). A warning of a random frame is in `warnings`
-  (`kind: 'correctness'`). `profile` is `'ir'`.
+  local whose value is a positional parameter after the arguments (a list of
+  such values of no stated length, CE-1662: its length and the list, bound as a
+  list local written whole, `wholeLocal()`, whose length a write can change),
+  its stored value is hidden while the body is lowered
+  (`withVarsValuesHidden()`), and the entry returns the array of the value of
+  the body (NaN for a body that ends in an assignment) and the value of each
+  name after it. `run()` reads each value in the engine before the call and
+  writes the new values back after it (`assigningRun()` of `adapter.ts`); the
+  result is not `shippable`, and `implicitCompile()` gives no result for it.
+  Another target, the interval and `bigint` modes, an inferred type, a constant
+  and another lane decline; so does a user function that the body calls and that
+  reads the name (`free()`: the name is a local of the entry). A warning of a
+  random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the
   helpers and the user functions, `code` is the body (an expression of the
