@@ -1134,13 +1134,18 @@ Minimum of two or more numbers.
 
 ### Mod
 
-`(real, real) -> real`
+`(real, real, real?) -> real`
 
 Modulo: the remainder of the floored division of x by y. The sign of the result follows the sign of the divisor y (floored-division convention, matching most CAS). For a truncated/round-to-nearest remainder, see `Remainder`.
 
 ```epsil
 [7 % 3, -7 % 3]
 // ➔ [1,2]
+```
+
+```epsil
+Mod(9, 3, 1)
+// ➔ 3
 ```
 
 ### Multiply

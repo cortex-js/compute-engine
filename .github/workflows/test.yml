@@ -90,6 +90,13 @@ jobs:
           npx --yes tsx scripts/rubi/bundle-corpus.ts
           git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json
 
+      # Combinatorics data: the match records, the manifest and compiled.ts
+      # regenerate from the declaration tables unchanged, and every example
+      # row names a declared head. It evaluates no statistic: the Jest tests
+      # hold each head to its examples and to its FindStat values.
+      - name: Combinatorics data freshness
+        run: npx --yes tsx scripts/combinatorics/generate.ts --check
+
       # MathNet parser-regression gate: every corpus case whose recorded
       # `observed` outcome is "clean" must still parse clean, and nothing may
       # throw (docs/mathnet/parser-test-cases.json is the recorded contract;

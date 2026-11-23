@@ -732,6 +732,7 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
     'NumeratorDenominator',
     'NumericApproximation',
     'PartialFraction',
+    'PiecewiseExpand',
     'Polynomial',
     'PolynomialDegree',
     'PolynomialGCD',

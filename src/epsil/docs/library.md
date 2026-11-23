@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 747 functions and constants of the standard library, by category.
+The 748 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -33,7 +33,7 @@ To search the library by concept rather than by name, use
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
-- [Polynomials](#polynomials) — 18 definitions · [full reference](/epsil/reference/polynomials/)
+- [Polynomials](#polynomials) — 19 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 12 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 70 definitions · [full reference](/epsil/reference/number-theory/)
 - [Special functions](#special-functions) — 24 definitions · [full reference](/epsil/reference/special-functions/)
@@ -512,7 +512,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `max` | `Max` | `(value*) -> number` | Maximum of two or more numbers. |
 | `measurement` | `Measurement` | `(value, value) -> measurement` | A nominal value carrying a 1σ absolute uncertainty. |
 | `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers. |
-| — | `Mod` | `(real, real) -> real` | Modulo: the remainder of the floored division of x by y. |
+| — | `Mod` | `(real, real, real?) -> real` | Modulo: the remainder of the floored division of x by y. |
 | — | `Multiply` | `(number*) -> number` | Product of two or more values. |
 | — | `NaN` | constant `number` = `NaN` | Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0, or of an exact form with no value, such as 0/0. |
 | — | `Negate` | `(complex \| infinity) -> number` | Additive Inverse |
@@ -651,6 +651,7 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 | `expandAll` | `ExpandAll` | `(value) -> value` | Recursively expand out products and positive integer powers |
 | `factor` | `Factor` | `(value, symbol?, value?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
 | `partialFraction` | `PartialFraction` | `(value, symbol?) -> value` | Decompose a rational expression into partial fractions. |
+| `piecewiseExpand` | `PiecewiseExpand` | `(value) -> value` | `PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. |
 | `polynomial` | `Polynomial` | `(list<value>, symbol) -> value` | Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. |
 | `polynomialDegree` | `PolynomialDegree` | `(value, symbol?) -> integer` | Return the degree of a polynomial with respect to a variable. |
 | `polynomialGCD` | `PolynomialGCD` | `(a: value, b: value, variable: symbol?) -> value` | Return the greatest common divisor of two polynomials. |

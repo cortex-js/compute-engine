@@ -1752,8 +1752,11 @@ The code of a JavaScript compilation result reads only `_SYS` and `_`.
 the `_SYS` that `run()` uses, with no engine behind it, so code compiled in one
 place (a worker, a build) runs in another with only the numerics it calls. Its
 type exposes `load`, `frame` (set with `setFrame`), `iterationLimit`, `deadline`
-and `runtimeVersion`;
-the helper table is internal and may change in any release. `load()` evaluates
+and `runtimeVersion`. The module also exports `sysHelpers`, the stateless
+helpers that compiled code calls as `_SYS.<name>` (a runtime inherits them), so
+that a host can lower its own operators the same way: the names and signatures
+of its members follow the code of a compilation, and may change in any release
+(compare `runtimeVersion`). `load()` evaluates
 the definitions that read nothing per call (`preambleOnce`) once, as `run()`
 does, and the rest (`preamblePerCall`) on every call, and applies the input
 conversions of `run()` from `entryPlan`: a number given for a symbol read as

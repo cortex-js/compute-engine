@@ -670,6 +670,7 @@
       "ExpandAll",
       "Factor",
       "PartialFraction",
+      "PiecewiseExpand",
       "Polynomial",
       "PolynomialDegree",
       "PolynomialGCD",

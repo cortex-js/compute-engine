@@ -1,5 +1,67 @@
 ## [Unreleased]
 
+### New Features
+
+- **`Mod(m, n, d)` is the representative of `m` modulo `n` in `[d, d + n)`,**
+  as in Mathematica's `Mod[m, n, d]` (#548, contributed by
+  [enumeratio](https://github.com/enumeratio)). It was an
+  `unexpected-argument` error. The signature is now `(real, real, real?)`
+  and the value is `d + Mod(m − d, n)`, under `evaluate()` and `.N()`:
+  `Mod(7, 3, 1)` is `1`, `Mod(9, 3, 1)` is `3` (a residue in `1..3`),
+  `Mod(−1, 3, 1)` is `2` and `Mod(10, 4, −1)` is `2`. Exact rational and
+  float operands keep their kind, and a symbolic operand leaves the call
+  unevaluated. The JavaScript, GLSL and interval targets and the bigint mode
+  decline the three-operand form, so a compiled program falls back to the
+  interpreter; the enclosure, measurement, limit and derivative code leave it
+  unevaluated, and the LaTeX form writes `\mathrm{Mod}(m, n, d)`. The
+  two-operand `Mod` is unchanged.
+
+- **`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and
+  `Heaviside`, wherever they occur in `expr`, into one conditional value
+  `Which(c1, v1, …, True, vd)`** (#516, contributed by
+  [enumeratio](https://github.com/enumeratio)). `PiecewiseExpand(Max(x, y))`
+  is `Which(0 <= x - y, x, True, y)`, `PiecewiseExpand(Heaviside(x))` is
+  `Which(x < 0, 0, 0 < x, 1, True, 1/2)` (the value `Heaviside(0)` has) and
+  `PiecewiseExpand(Sign(x))` is `Which(0 < x, 1, x < 0, -1, True, 0)`.
+  `Abs` and `Sign` split only for an argument known to be real (declared
+  `real`, or given a sign by `ce.assume()`), and `Min`, `Max` and
+  `Heaviside` do not split an argument declared `complex` or `number`; such
+  a call is left as it is. Nested occurrences combine their conditions:
+  `PiecewiseExpand(Abs(x - Max(x, 1)))` is `Which(0 <= x - 1, 0, True, 1 - x)`.
+  The assumptions of `ce.assume()` are read, never changed: with `x > 0`
+  assumed, `PiecewiseExpand(Abs(x))` is `x`, and with `x > 3` assumed the
+  constant of `Max(x, 2, y)` never wins. An expression with none of these
+  functions is returned unchanged, as is one whose arms would pass 256.
+  `Which`, `Sum` and the other operators that hold their operands are not
+  entered.
+
+- **`@cortex-js/compute-engine/runtime` exports `sysHelpers`,** the table of
+  stateless helpers that the code of a JavaScript compilation result calls as
+  `_SYS.<name>`. A host that lowers its own operators the same way reads them
+  from the entry instead of from an engine internal: `sysHelpers.digamma(2.5)`
+  is the value that `compile(ce.box(["Digamma", "x"])).run({ x: 2.5 })` gives,
+  and a runtime from `createJavaScriptRuntime()` inherits the table. The
+  engine-bound helpers (the random family, `integrate`, `tick`) stay members
+  of a runtime. The names and signatures of the helpers follow the code of a
+  compilation and may change in any release (#527, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
+- **An optional `combinatorics` library declares statistics over the engine's
+  own lists.** `loadCombinatorics(ce, { areas })`, exported from
+  `@cortex-js/compute-engine/combinatorics`, declares about 350 statistics of a
+  permutation as its one-line list, such as `MajorIndex`, `Inversions` and
+  `Denert`, and about 195 of an integer partition as its non-increasing parts,
+  such as `LargestPart`, `DurfeeSquare` and `AddableCells`. A statistic is
+  defined by an Epsil function literal, compiled ahead of time so the entry
+  does not carry the Epsil text, and may carry a TypeScript kernel that a test
+  holds equal to it. A list of integers outside the domain, such as
+  `MajorIndex([1, 1])`, stays unevaluated; an argument that is not a list of
+  integers (`MajorIndex([1.5])`) is a type error. All but a few heads carry
+  the identifier of a [FindStat](https://www.findstat.org) statistic and equal
+  its values on every permutation of length at most 5 and every partition of
+  size at most 6 that FindStat tabulates; the others are held to their
+  examples (#531, contributed by [enumeratio](https://github.com/enumeratio)).
+
 ### Improvements
 
 - **The `///` comments of a protocol and of its members are kept, and the

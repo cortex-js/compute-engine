@@ -147,8 +147,10 @@ describe('searchDefinitions', () => {
     expect(ids('integral')[0]).toBe('Integrate');
   });
 
-  test('"piecewise" → Which first', () => {
-    expect(ids('piecewise')[0]).toBe('Which');
+  // `PiecewiseExpand` starts with the query, which ranks above the curated
+  // keyword of `Which`.
+  test('"piecewise" → PiecewiseExpand, then Which', () => {
+    expect(ids('piecewise').slice(0, 2)).toEqual(['PiecewiseExpand', 'Which']);
   });
 
   test('"there exists" → includes Exists', () => {

@@ -90,6 +90,7 @@ import * as runtime from '${PKG_NAME}/runtime';
 import * as identities from '${PKG_NAME}/identities';
 import * as integrationRules from '${PKG_NAME}/integration-rules';
 import * as groupTheory from '${PKG_NAME}/group-theory';
+import * as combinatorics from '${PKG_NAME}/combinatorics';
 import * as epsil from '${PKG_NAME}/epsil';
 
 // Touch a real symbol from each entry so tsc actually resolves the types
@@ -109,6 +110,7 @@ const touched: unknown[] = [
   runtime.runtimeVersion,
   identities.loadIdentities,
   groupTheory.loadGroupTheory,
+  combinatorics.loadCombinatorics,
   integrationRules.loadIntegrationRules,
   epsil.parseEpsil,
   epsil.serializeEpsil,

@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Polynomials
 
-The 18 definitions of the polynomials library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 19 definitions of the polynomials library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -80,6 +80,22 @@ Factor a polynomial expression into a product of irreducible factors. Uses exact
 MathJSON `PartialFraction` · `(value, symbol?) -> value`
 
 Decompose a rational expression into partial fractions. Example: PartialFraction(1/((x+1)(x+2)), x) → 1/(x+1) - 1/(x+2)
+
+### piecewiseExpand
+
+MathJSON `PiecewiseExpand` · `(value) -> value`
+
+`PiecewiseExpand(expr)` rewrites `Abs`, `Sign`, `Min`, `Max` and `Heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. `Abs` and `Sign` split only for an argument known to be real. Nested occurrences combine their conditions, and the assumptions set by `ce.assume()` decide what they can: with `x > 0` assumed, `Abs(x)` is `x`. An expression with none of these functions is returned unchanged.
+
+```epsil
+piecewiseExpand(max(x, y))
+// ➔ Which(0 <= x - y, x, true, y)
+```
+
+```epsil
+piecewiseExpand(heaviside(x) + max(x, 1))
+// ➔ Which(0 <= x - 1 && x < 0, x, 0 <= x - 1 && 0 < x, x + 1, 0 <= x - 1, x + 1/2, x < 0, 1, 0 < x, 2, true, 3/2)
+```
 
 ### polynomial
 
