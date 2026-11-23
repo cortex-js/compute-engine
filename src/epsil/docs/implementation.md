@@ -415,8 +415,16 @@ around the placeholder. The items are:
 - the names of the source visible at the offset, with their declared type
   or signature: a `let` is visible after its statement, a parameter in the
   body of its function;
+- the names that the engine defines above the standard library (a prelude
+  that the host ran with `executeEpsil()`, a name the host declared), with
+  their signature or type and the first line of their `///` comment or
+  description, unless a name of the source shadows them; a host name
+  declared with a signature (`ce.declare("draw", "(real) -> nothing")`) is a
+  function;
 - the standard-library names, by their Epsil spelling, with their signature
-  and the first line of their description;
+  and the first line of their description, unless the source or the engine
+  defines the spelling (a prelude's `segment` replaces the library's
+  `segment`);
 - the keywords valid at the position.
 
 The type expected at the offset comes from the value of a typed `let`, the

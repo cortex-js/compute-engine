@@ -2264,3 +2264,64 @@ describe('EPSIL COMPLETION: MATCHING BEYOND A PREFIX', () => {
     }
   });
 });
+
+describe('EPSIL COMPLETION: NAMES THAT THE ENGINE DEFINES', () => {
+  // A prelude that the host ran on the engine before the edited text (CE-1729).
+  const engine = new ComputeEngine();
+  executeEpsil(
+    engine,
+    [
+      '/// A circle with center `c` and radius `r`.',
+      'function circle(c: tuple<real, real>, r: real) { r }',
+      '/// A line segment from `p` to `q`.',
+      'function segment(p: tuple<real, real>, q: tuple<real, real>) { 1 }',
+      'let width = 3',
+    ].join('\n')
+  );
+  engine.declare('hostDraw', '(real) -> nothing');
+
+  const at = (source: string) =>
+    epsilCompletions(engine, source.replace('▮', ''), source.indexOf('▮'));
+
+  test('a function of the engine is an item, with its signature and comment', () => {
+    expect(item(at('circ▮'), 'circle')).toMatchObject({
+      kind: 'function',
+      detail: '(c: tuple<real, real>, r: real) -> real',
+      documentation: 'A circle with center `c` and radius `r`.',
+      description: ['A circle with center `c` and radius `r`.'],
+    });
+  });
+
+  test('a definition of the engine replaces the library item it shadows', () => {
+    const items = at('segm▮').items.filter((i) => i.label === 'segment');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'function',
+      detail: '(p: tuple<real, real>, q: tuple<real, real>) -> integer',
+      documentation: 'A line segment from `p` to `q`.',
+    });
+  });
+
+  test('a variable and a function of the host are items', () => {
+    expect(item(at('wid▮'), 'width')).toMatchObject({
+      kind: 'variable',
+      detail: 'number',
+    });
+    expect(item(at('hostD▮'), 'hostDraw')).toMatchObject({
+      kind: 'function',
+      detail: '(real) -> nothing',
+    });
+  });
+
+  test('a name of the source shadows the name of the engine', () => {
+    const items = at('function circle(r: real) { r }\ncirc▮').items.filter(
+      (i) => i.label === 'circle'
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].detail).toBe('(real)');
+  });
+
+  test('a library name that the engine does not define stays a library item', () => {
+    expect(item(at('si▮'), 'sin')?.kind).toBe('library-function');
+  });
+});

@@ -2,6 +2,17 @@
 
 ### Improvements
 
+- **`epsilCompletions()` offers the names that the engine defines, such as
+  the functions of a prelude that the host ran** (CE-1729). After
+  `executeEpsil(ce, prelude)`, typing `circ` in the edited source offers the
+  prelude's `circle`, with its signature and its `///` comment, as
+  `epsilHover()` describes it; it was not offered. A definition of the
+  engine replaces the library item of the spelling it shadows: a prelude's
+  `segment(p, q)` is offered in place of the library's `segment`, as a call
+  reaches it. A name of the edited source still shadows both, and a name that
+  the host declares with a signature (`ce.declare("draw", "(real) ->
+  nothing")`) is offered as a function.
+
 - **`compile()` compiles `Match`, `MatchesType` and `N`, which it refused**
   (CE-1652). A `Match` (the Epsil `match`) compiles when each case is a string
   or a number constant, `_`, or a `Tuple` of names:

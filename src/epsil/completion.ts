@@ -13,6 +13,7 @@ import type {
   FunctionSignature,
   Type,
 } from '../common/type/types.js';
+import type { Scope } from '../compute-engine/global-types.js';
 import { isOptionalField } from '../common/type/types.js';
 import { isEffectSubset } from '../common/type/effects.js';
 import { substituteTypeVariables } from '../common/type/instantiate.js';
@@ -116,15 +117,18 @@ export type EpsilCompletionItem = {
   edits?: [start: number, end: number, text: string][];
   /** A signature (`(real, integer) -> real`) or a type. */
   detail?: string;
-  /** The first line of the library description, for a library name. */
+  /** The first line of the description, for a library name or a name that
+   * the engine defines (the `///` comment of an Epsil definition). */
   documentation?: string;
-  /** The paragraphs of the library description, for a library name: what
-   * the hover of the name shows. */
+  /** The paragraphs of the description, for a library name or a name that
+   * the engine defines: what the hover of the name shows. */
   description?: string[];
   /** Smaller first: 0 fix-its and the parameter names of a call
-   * (`count: `), 1 likely values, 2 names of the source whose
+   * (`count: `), 1 likely values, 2 names of the source (or of the engine,
+   * above the standard library) whose
    * type matches the expected type (`fit` is `'match'`), 3 library names
-   * whose type matches, 4 other names of the source, 5 other library names,
+   * whose type matches, 4 other names of the source or of the engine, 5
+   * other library names,
    * 6 keywords. In rank 4 and 5, the names that may fit come before those
    * that cannot (`fit`). */
   rank: number;
@@ -283,7 +287,7 @@ type Callable = {
 /** A library name as an item, computed once per engine. */
 type LibraryEntry = {
   label: string;
-  kind: 'library-function' | 'library-constant';
+  kind: 'library-function' | 'library-constant' | 'function' | 'variable';
   detail?: string;
   documentation?: string;
   description?: string[];
@@ -304,8 +308,11 @@ const LIBRARY_ENTRIES = new WeakMap<ComputeEngine, LibraryEntry[]>();
  *
  * The items are the likely values of the type expected at the offset (`0`
  * for `let a: integer = ▮`), the names of the source that are visible at
- * the offset, the standard-library names (by their Epsil spelling, with
- * their signature) and the keywords valid at the position. After `:` in a
+ * the offset, the names that the engine defines above the standard library
+ * (a prelude that the host ran, unless the source shadows them), the
+ * standard-library names (by their Epsil spelling, with their signature;
+ * unless the source or the engine defines the spelling) and the keywords
+ * valid at the position. After `:` in a
  * declaration or a parameter, after `->` of a function header, after
  * `type name =` and after `is` of a type test, the items are the type names
  * instead. Where the grammar takes a new name or no word, there are no items;
@@ -830,9 +837,19 @@ export function epsilCompletions(
     }
   }
 
-  // 3. Library names, unless a name of the source shadows them.
-  for (const entry of libraryEntries(ce)) {
-    if (visible.has(entry.label)) continue;
+  // 3. The names that the engine defines above the standard library (a
+  // prelude that the host ran), unless a name of the source shadows them,
+  // then the library names, unless a name of the source or of the engine
+  // shadows them: the spelling reaches the engine's definition first
+  // (`engineHover()`).
+  const engine = engineEntries(ce);
+  const defined = new Set(engine.map((entry) => entry.label));
+  for (const entry of [
+    ...engine.filter((entry) => !visible.has(entry.label)),
+    ...libraryEntries(ce).filter(
+      (entry) => !visible.has(entry.label) && !defined.has(entry.label)
+    ),
+  ]) {
     const fit: Fit | undefined =
       expectedType === undefined
         ? undefined
@@ -849,14 +866,18 @@ export function epsilCompletions(
             : entry.type !== undefined
               ? fitValue(ce, entry.type, admitted, { pipe, openArity })
               : 'maybe';
+    const library = entry.kind.startsWith('library-');
+    const spelling = escapeSymbol(entry.label);
     items.push({
       label: entry.label,
       kind: entry.kind,
-      rank: fit === 'match' ? 3 : 5,
+      // A name of the engine ranks as a name of the source.
+      rank: library ? (fit === 'match' ? 3 : 5) : fit === 'match' ? 2 : 4,
       ...(fit === undefined ? {} : { fit }),
-      tier: 0,
+      tier: library ? 0 : 1,
+      ...(spelling === entry.label ? {} : { insertText: spelling }),
       ...snippetOf(
-        entry.label,
+        spelling,
         libraryParameters(entry),
         entry.arms?.map(callableOf)
       ),
@@ -4971,6 +4992,69 @@ export function collectSourceTypes(
 }
 
 /** The standard-library names of the engine, by their Epsil spelling. */
+/**
+ * The names that the engine defines in the scopes above the standard
+ * library, from the current scope out (an inner definition hides an outer
+ * one): the definitions of a prelude that the host ran on the engine, and
+ * the host's own. Each is described as `epsilHover()` describes it
+ * (`describeName()`): a function by its signature, a value by its type, and
+ * the description of the definition (the `///` comment of an Epsil
+ * definition). Not cached: the definitions change as the host runs code.
+ */
+function engineEntries(ce: ComputeEngine): LibraryEntry[] {
+  const system = ce.contextStack[0]?.lexicalScope;
+  const seen = new Set<string>();
+  const entries: LibraryEntry[] = [];
+  for (
+    let scope: Scope | null | undefined = ce.context.lexicalScope;
+    scope !== undefined && scope !== null && scope !== system;
+    scope = scope.parent
+  )
+    for (const name of scope.bindings.keys()) {
+      if (seen.has(name) || name.startsWith('_')) continue;
+      seen.add(name);
+      const entry = describeName(ce, name);
+      if (entry === undefined) continue;
+      const isFunction = entry.kind === 'function' || entry.kind === 'opaque';
+      let type: Type | undefined;
+      let arms: readonly FunctionSignature[] | undefined;
+      let union = false;
+      if (isFunction) {
+        const signature = ce.operatorInfo(name)?.signature?.type;
+        arms = signatureArms(signature);
+        union = typeof signature === 'object' && signature.kind === 'union';
+      } else {
+        type = ce.symbolInfo(name)?.type.type;
+        // A name that the host declares with a signature and no value
+        // (`ce.declare('draw', '(real) -> nothing')`) is called as a
+        // function.
+        if (type !== undefined && isFunctionType(type)) {
+          arms = signatureArms(type);
+          type = undefined;
+        }
+      }
+      const documentation = entry.description?.[0]?.split('\n')[0]?.trim();
+      entries.push({
+        label: name,
+        kind: isFunction || arms !== undefined ? 'function' : 'variable',
+        ...(entry.signature !== undefined || entry.type !== undefined
+          ? { detail: entry.signature ?? entry.type }
+          : {}),
+        ...(documentation ? { documentation } : {}),
+        ...(entry.description === undefined
+          ? {}
+          : { description: entry.description }),
+        ...(type === undefined ? {} : { type }),
+        ...(arms === undefined ? {} : { arms }),
+        ...(union ? { union } : {}),
+        ...(isFunction && isBroadcastable(ce, name)
+          ? { broadcastable: true }
+          : {}),
+      });
+    }
+  return entries;
+}
+
 function libraryEntries(ce: ComputeEngine): LibraryEntry[] {
   const cached = LIBRARY_ENTRIES.get(ce);
   if (cached !== undefined) return cached;
