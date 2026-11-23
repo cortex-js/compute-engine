@@ -93,7 +93,10 @@ then runs only the files whose path matches it.
    earlier session stopped there, and the "State of the work" paragraph of
    the issue says what remains: do not make a new worktree; read its
    `git -C /tmp/wt-{{NAME}} diff HEAD` and do only the steps that remain. Its
-   base can be older than HEAD; step 7 reconciles the patch. Do the fix and its tests there. Do the work
+   base can be older than HEAD; step 7 reconciles the patch. Do the fix and its tests there: give
+   every Edit and Write a path under `/tmp/wt-{{NAME}}`, never under
+   `{{REPO}}`, because an edit in the main tree enters the tests and commits
+   of the other sessions before your checks. Do the work
    yourself; use a subagent only for the review.
 5. Run the checks of `BUILD.md` "Completing delegated tasks" item 1 in the
    worktree: the test files of the change, the test files that contain a
