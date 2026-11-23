@@ -1,0 +1,278 @@
+# CE-1652: compiling a function that builds a figure (records of settled fields)
+
+Status: design note, not approved. No code is written.
+
+Issue: `issues/CE-1652.md`, option (b), user decision 2026-11-22. Scope: the
+`javascript` target of the IR compiler (`src/compute-engine/compilation/ir/`);
+GLSL, interval and `bigint` decline every value of the new kind.
+
+## 1. The question
+
+A Tycho notebook animation calls `draw(circle((cos(t), 0), 0.1))` in a timer
+callback. The callback runs interpreted because the compiler has no value for
+a `Figure`: a named tuple of a string, a list, a matrix and five style fields
+typed `any`. The decision asks for a plan where a record whose fields each
+have a settled shape compiles, and where a protocol method is dispatched at
+compile time on the static type of its receiver. This note says what the
+compiler lacks, the design of each part, the order of the work, and the
+choices that the board must confirm.
+
+## 2. What the code does today
+
+Read at `14d5c0ac584a271cebca8d765522fb3dca7ded89`, probed with the drawing
+prelude of Tycho (`src/graph-paper/notebook/drawing/prelude.ts`, version 21)
+and with small Epsil programs (`compile(fn, { to: 'javascript', fallback: false })`).
+
+The witness of the issue reproduces:
+
+| Program                                                         | Decline                                                    |
+| --------------------------------------------------------------- | ---------------------------------------------------------- |
+| `(t: real) => circle((cos(t), sin(t)), 0.2)`                    | the result of circle is not a scalar (Figure)              |
+| `(t: real) => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))` | rotateAbout is not the library operator here (a user definition) |
+| `(t: real) => draw(circle((cos(t), 0), 0.1))`                   | a parameter of draw that is not a name                     |
+| `(t: real) => hostDraw(t)` (CE-1621)                            | compiles                                                   |
+
+The interpreter's value of a figure is the application of the type's
+constructor: `circle((1, 2), 0.2).rotateAbout(0.5, (0, 0)).fill("red")` is
+the expression of type `Figure` (`.json`, numbers shortened here):
+
+```json
+["Figure", "'circle'", ["List", {"num": "1.0"}, {"num": "2.0"}, 0.2],
+ ["Tuple", 0.8775825, 0.4794255, -0.4794255, 0.8775825, {"num": "0.0"}, {"num": "0.0"}],
+ "'red'", "Nothing", "Nothing", "Nothing", "Nothing"]
+```
+
+Each operation that the prelude needs on the path of the three programs, and
+what the compiler does with it today (probed one at a time):
+
+| Operation                                   | Today                                                        |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| `N(x, 15)` on a real                        | declines: "the operator N is not supported"                  |
+| `Tuple("a", t)` (elements of two lanes)     | declines: "elements of two types"                            |
+| `P(k, g, m, a)`, the constructor of a type  | declines: "P is not the library operator here"               |
+| `Field(r, "alpha")`                         | declines: "the operator Field is not supported"              |
+| `w is string` (`MatchesType`)               | declines: "the operator MatchesType is not supported"        |
+| `match s { == "rect" => …; _ => … }`        | declines: "the operator Match is not supported"              |
+| a parameter typed `any`                     | declines: "the parameter w of g is not a scalar (any)"       |
+| a rest parameter `...args`                  | declines: "a parameter of … that is not a name"              |
+| a protocol method (`rotateAbout`)           | declines: the dispatcher is not a function literal           |
+| a host function with a list or tuple argument | declines (`docs/COMPILATION-MODEL.md`, "Functions of the host") |
+| a host function of result `any`             | declines (R3); Tycho declares `figureDraw` `(any) -> any`    |
+| a string result, `==` of two strings        | compiles                                                     |
+
+Two exports of `engine-protocols.ts` that the retired compiler used have no
+caller now and do the lookup that section 4.5 needs:
+`protocolDispatchCandidates()` (the conformance edges that implement a member)
+and `implementationLiteralAt()` (the implementation as a function literal with
+`Self` replaced by the edge's target, `null` for a host callback or a
+conditional edge).
+
+## 3. The rule that the design keeps
+
+`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time": the shape of
+every value comes from its static type and from the literal structure of its
+operands; no run-time test of a type is emitted; the compiler does not follow
+the paths of control flow. A record keeps this rule: the shape of each field is
+settled where the record is made, from the static type of the field when it
+settles one, otherwise from the shape of the operand that the constructor
+receives. A field typed `any` whose operand is the literal `[N(c[1], 15),
+N(c[2], 15), N(r, 15)]` is a list of three reals in that record. Two records of
+one engine type whose fields have different shapes are two IR types. A value
+that can be either (an `if` whose arms give a `circle` and a `label`, a list of
+both) has no settled shape and declines, as R3 says.
+
+## 4. Design
+
+### 4.1 The record value kind
+
+`IRType` (`ir.ts`) gains a field `fields?: readonly IRType[]`, with the lane
+`'record'` and the shape `[]`. Each field is an IR type of today (a scalar of
+a lane, a list of a stated or a run-time length, a tuple), a record, or the
+new unit type `nothing`, the type of a field whose value is the constant
+`Nothing` (no storage, a constant on read). The IR type holds the positions;
+the names come from the engine type, which the lowering reads where a field is
+named. `joinType()` (`ir.ts`), the type equality of the verifier
+(`verify.ts`) and the lane key (4.4) compare records field by field.
+
+On JavaScript a record is an array of its fields, as a tuple is an array
+today. A `nothing` field is `null` in the array. GLSL, the interval mode and
+the `bigint` mode decline a value of lane `record` (`admits()` of `index.ts`).
+
+The same kind gives a value to a `Tuple` of elements of two lanes
+(`Tuple("a", t)`), which declines today. Rule: a `Tuple` of scalars of one
+numeric lane stays the tuple of today (a list marked a tuple, a `vecN` on
+GLSL); any other `Tuple` whose elements each have a settled IR type is a
+record. So no program that compiles today changes its code.
+
+### 4.2 Making a record
+
+- The constructor of a named tuple type (`P(k, g, m, a)`, the operator that
+  `type P = tuple<…>` declares, signature `(kind: string, …) -> P`): a record
+  of its operands, each lowered with the declared type of its field as the
+  wanted type. An operand whose static type does not prove the field's
+  declared type declines (R5).
+- `Tuple` of mixed lanes (4.1).
+- `Nothing` as the operand of a field: the field has the type `nothing`.
+
+### 4.3 Reading a record
+
+- `Field(r, "name")` and `At(r, k)` of a constant `k`: the field's value, of
+  the field's IR type. Another index declines.
+- `MatchesType(x, T)` (`x is T`) of any value whose IR type is settled: a
+  constant, folded at compile time from the static type of `x` (or from the
+  record's engine type). When the static type neither proves nor excludes
+  `T`, it declines. This is not a test of a type at run time: the answer is
+  known when the code is emitted.
+- `Match` with arms of a constant (`== "rect"`, `== 3`), `_`, and a `Tuple`
+  pattern of names: an arm of a constant is a `Which` clause on the subject
+  (the string lane compares strings today); a `Tuple` pattern is selected at
+  compile time by the shape of the subject (a tuple of its length matches, a
+  scalar does not), and binds its names to the elements. A guard, a pattern of
+  another kind, or an arm whose result has another shape than the others
+  declines. When the subject is a constant (`fig.kind` of a record built from
+  the literal `"circle"`), the fold keeps one arm and the shapes of the other
+  arms do not count; this is the constant fold of today applied to a known
+  subject, not a path of control flow.
+- `If` whose condition folds to a constant keeps one arm, as above; an `If`
+  whose arms give two record types declines (R3).
+
+### 4.4 Records as arguments and results of user functions
+
+A parameter typed `any`, `unknown` or of the record's engine type (`fig: any`,
+`self: Figure`) takes a record: the function is lowered once per IR type of
+its arguments, the lane key of today (`laneKey()` of `lower-functions.ts`)
+extended with the record types. A result of no stated type, `any`, or the
+record's engine type is the type of the body. The parameters of the prelude
+that take a point (`c: any` read as `c[1]`, `c[2]`) are points by the rule of
+today. A recursive function whose result is a record declines (its result type
+is a fixed point that the lowering does not compute); `figureBox` over a group
+is such a function, and a figure of kind `"group"` therefore declines.
+
+### 4.5 Protocol methods dispatched at compile time
+
+A call whose head is a protocol dispatcher (`isProtocolDispatcher()`) and
+whose first operand is a record of engine type `T`: the compiler takes the
+candidates of `protocolDispatchCandidates(ce, member)` and requires that
+exactly one edge has a target that overlaps `T` (`typesOverlap()`), that this
+target is a supertype of `T`, and that the edge is not conditional and has an
+expression implementation. Then the dispatch of the interpreter, which picks
+an edge by the run-time type of the receiver (a subtype of `T`), picks the
+same edge for every value of `T`. `implementationLiteralAt()` gives its
+literal, which is lowered as a user function (4.4), keyed by the edge and the
+member. A constant default of a member (`about: any = figureDefault`) is the
+argument of a call that leaves it out, as `fillParameterDefaults()` does for a
+function. Two edges, a conditional edge, a host callback, or a first operand
+that is not a record decline. Step 4 reads `dispatchMember` of
+`engine-protocols.ts` to confirm that the interpreter's choice of an edge is
+the one stated here, and adds a test where a second edge on a narrower type
+makes the call decline.
+
+### 4.6 Rest parameters
+
+A call of a user function with a rest parameter (`function draw(...args)`) is
+lowered per call site, the rest parameter bound to the record of the
+arguments of that call (its length and the IR type of each element are known
+there). `ListFrom(args)` of it is a value that only a host call can take
+(4.7): a list of records of different types has no settled shape. Any other
+read of it declines.
+
+### 4.7 The host boundary
+
+A host function (`docs/COMPILATION-MODEL.md`, "Functions of the host") takes,
+in addition to scalars, an argument of lane `record`, a list or a tuple: the
+compiled code converts it to the engine's value before the call, a record to
+the application of its type's constructor (`["Figure", "'circle'", ["List", …],
+…]`), the value of `ListFrom` to a `List` of the converted elements, `nothing`
+to `Nothing`. The conversion is one function of the runtime, `_SYS.box(type,
+value)`, given the IR type at compile time. The rule of the result is not
+changed: a host function must declare a result `nothing` or a scalar. Tycho
+declares `figureDraw` `(any) -> nothing` (it is `(any) -> any` today).
+
+### 4.8 The result of `run()`
+
+A record result of the root function is the array of its fields, as a tuple
+result is an array today, and `result.run(1)` of the `figure` program gives
+`["circle", [0.54, 0.84, 0.2], [1, 0, 0, 1, 0, 0], null, null, null, null, null]`.
+The names of the fields are in the static type of the function, which the
+host has. See Q1.
+
+### 4.9 `N(x, p)`
+
+`N` of a real, an integer or a rational on the real lane is its value; `N` of
+a string, a boolean or a record is the operand. `N(x, 15)` in the interpreter
+gives a machine number of 15 digits; the compiled double agrees within the
+agreement of the target (1e-12 relative). `N` of a complex is the complex. Any
+other operand declines.
+
+## 5. What Tycho changes
+
+- `figureDraw` declared `(any) -> nothing`.
+- Nothing else for the three programs of the instrument: the style fields
+  stay typed `any`, because a field that holds `nothing` has the unit type
+  (4.1). The decision text said that Tycho types each field; this note finds
+  that the fields need no new type (Q2).
+- After the CE release, Tycho runs its instrument
+  (`scripts/repros/2026-11-20-ce-compile-figures.mts`) and AN10 of
+  `requirements/archive/EPSIL_ANIMATION.md`, and removes the marker that cites
+  CE-1652 in `compiledTick` of `ce-notebook-evaluator.ts`.
+
+## 6. Steps
+
+Each step is one commit with its tests and its README section, and leaves
+every program that compiles today with the same code.
+
+1. `N` (4.9), `MatchesType` folded (4.3), `Match` of constants and `Tuple`
+   patterns (4.3). Useful alone; size S.
+2. The record kind (4.1), its construction (4.2) and reads (4.3), the record
+   result (4.8), the decline on the other targets. Size M.
+3. Records as arguments and results of user functions (4.4). Size M.
+4. Protocol methods (4.5). Size M.
+5. Rest parameters and the host boundary (4.6, 4.7). Size M.
+6. The acceptance tests (section 7), `docs/COMPILATION-MODEL.md` (the paragraph
+   that says that a function that builds a `Figure` declines is replaced by
+   the rule of records), the CHANGELOG entry, the Tycho answer in the issue.
+
+The whole is size L, as the issue says.
+
+## 7. Acceptance
+
+A test file `test/compute-engine/compile-records.test.ts` holds a reduced
+prelude (the type `Figure`, the protocol `Drawable` with `translate`,
+`rotateAbout` and `fill`, `figureOf`, `figureCompose`, `figureTransform`,
+`figureTransformAbout`, `figureRotation`, `circle`, `label`, `draw` over a host
+`figureDraw` that records its argument), copied from the prelude of Tycho, not
+imported. For each case: compiled on JavaScript, and the value (or the
+argument that the host receives) equals the interpreter's within 1e-12:
+
+- `t => circle((cos(t), sin(t)), 0.2)`;
+- `t => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))`;
+- `t => draw(circle((cos(t), 0), 0.1))` and `t => draw(circle((0, 0), 1),
+  label((0, 1), "a"))` (two records of different types in one `draw`);
+- `t => circle((0, 0), t).fill("red").translate((1, 2))`.
+
+Declines, each with its reason: an `if` whose arms give a `circle` and a
+`label`; a `group` (recursive `figureBox`); `.rotate(a)` without a pivot when
+it reaches `figureBox` of a group; GLSL and `interval-js` of every case above.
+
+## 8. Risks
+
+- The cost of lowering the prelude bodies at each compilation. A callback
+  calls a few functions of the prelude; each is lowered once per IR type. To
+  be measured at step 5 on the acceptance cases (time of `compile()`).
+- The lane key grows with records: a key must stay a function of the IR type,
+  so two calls with records of one type share one lowered function.
+- `implementationLiteralAt()` has had no caller since the old compiler was
+  retired; its tests must be added in step 4.
+
+## 9. Choices for the board
+
+- **Q1.** The result of `run()` for a record: (a) the array of the fields
+  (recommended: as a tuple today, no conversion cost per call); (b) the
+  engine's MathJSON of the value (the interpreter's form, a conversion at
+  each call). A host that draws reads the argument of `figureDraw`, which is
+  the engine's value in both.
+- **Q2.** The style fields of `Figure`: (a) stay `any`, a `nothing` field has
+  the unit type (recommended: no Tycho change); (b) Tycho types each field
+  (`fillPaint: string`, `""` for none), as the decision text said.
+- **Q3.** GLSL: (a) declines a record (recommended: no drawing runs in a
+  shader); (b) a `struct` per record type, a separate plan.
