@@ -3225,6 +3225,27 @@ function factorHasNoRoot(
 }
 
 /**
+ * `true` when `f` is `c/p(x)`, with `c` free of the unknown `x` and not zero,
+ * and `p(x)` a polynomial of degree 1 or more (`1/(x² + 1)`,
+ * `(x - 1)^(-2)`, `3/(x(x + 1))`). Then `f = 0` has no root: a polynomial
+ * has a finite value at each `x`, real or complex, thus `c/p(x)` is not zero,
+ * and the roots of `p` are not in the domain of `f`. A numerator with a
+ * parameter (`a/(x² + 1)`) is read as nonzero, as for `a·x = 0`, which gives
+ * `[0]`. The zero test has no tolerance: `sin(10^{-20})` is not zero. The
+ * denominator must be a polynomial: `1/tan(x)` is zero at `π/2`.
+ */
+function isNonzeroOverPolynomial(f: Expression, x: string): boolean {
+  if (f.numerator.has(x) || hasArbitraryConstant(f.numerator)) return false;
+  // The numerator is reduced first: `(a + 1)² - a² - 2a - 1` is zero for each
+  // `a`, and the equation then holds for each `x`.
+  const numerator = expand(f.numerator).simplify();
+  const zero = numerator.isEqual(0);
+  if (zero === true) return false;
+  if (numerator.unknowns.length === 0 && zero !== false) return false;
+  return polynomialDegree(f.denominator, x) >= 1;
+}
+
+/**
  * `tan(f(arg))` as an algebraic expression in `arg`, for a real-principal-branch
  * inverse-trig function `f`; `null` for anything else. Used to clear two
  * *different* inverse-trig functions from an equation `g(x) = h(x)` by applying
@@ -4996,6 +5017,14 @@ function univariateRoots(
       traceStep(trace, 'solve.simplify', asEquation(expr, x));
   }
 
+  // A nonzero constant over a polynomial of the unknown (`1/(x² + 1)`,
+  // `(x - 1)^(-2)`) is never zero (`isNonzeroOverPolynomial()`). This is
+  // read before the denominators are cleared, and used when no strategy
+  // gave a candidate.
+  const nonzeroQuotient =
+    isNonzeroOverPolynomial(originalExpr, x) ||
+    isNonzeroOverPolynomial(expr, x);
+
   // Same-base power difference cᵃ − cᵇ = 0 ⟹ a − b = 0 (handles the f = 0 input
   // form, complementing the Equal-form peeling above).
   {
@@ -5509,6 +5538,9 @@ function univariateRoots(
         result = [...roots];
       }
     }
+
+    // A nonzero constant over a polynomial of the unknown has no root.
+    if (result.length === 0 && nonzeroQuotient) noRoot = true;
 
     // Generator substitution: an equation that is a polynomial in a single
     // nonlinear generator g(x) — `(ln x)² − 4`, `√(ln x) = ln√x`,

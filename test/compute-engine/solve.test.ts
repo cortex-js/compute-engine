@@ -1813,6 +1813,79 @@ describe('DOMAIN-CONSTRAINED SOLVE: infinities are not values of a declared unkn
   });
 });
 
+// A nonzero constant over a polynomial of the unknown has a finite, nonzero
+// value at each `x` where it is defined, thus it has no root (CE-1594).
+describe('A NONZERO CONSTANT OVER A POLYNOMIAL HAS NO ROOT', () => {
+  test.each([
+    ['(x^2 + 1)^(-2)', ['Power', ['Add', ['Power', 'x', 2], 1], -2]],
+    ['1/(x^2 + 1)', ['Divide', 1, ['Add', ['Power', 'x', 2], 1]]],
+    ['(x - 1)^(-2)', ['Power', ['Subtract', 'x', 1], -2]],
+    ['3/(x(x + 1))', ['Divide', 3, ['Multiply', 'x', ['Add', 'x', 1]]]],
+    ['a/(x^2 + 1)', ['Divide', 'a', ['Add', ['Power', 'x', 2], 1]]],
+    // The zero test of the numerator has no tolerance.
+    [
+      'sin(10^-20)/(x^2 + 1)',
+      ['Divide', ['Sin', ['Power', 10, -20]], ['Add', ['Power', 'x', 2], 1]],
+    ],
+  ])('%s = 0 has no root', (_, lhs) => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Solve', ['Equal', lhs, 0], 'x']).evaluate().json).toEqual([
+      'List',
+    ]);
+  });
+
+  test('the side of the zero does not matter', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('0 = \\frac{1}{(x-1)^2}').solve('x')).toEqual([]);
+  });
+
+  test('a numerator with the unknown keeps its roots', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Solve',
+          [
+            'Equal',
+            ['Divide', ['Subtract', 'x', 1], ['Add', ['Power', 'x', 2], 1]],
+            0,
+          ],
+          'x',
+        ])
+        .evaluate().json
+    ).toEqual(['List', 1]);
+  });
+
+  test('a numerator that is zero for each value of its parameter is not decided', () => {
+    // `(a + 1)² - a² - 2a - 1` is zero: the equation holds for each `x`.
+    const ce = new ComputeEngine();
+    const numerator = [
+      'Subtract',
+      ['Power', ['Add', 'a', 1], 2],
+      ['Add', ['Power', 'a', 2], ['Multiply', 2, 'a'], 1],
+    ];
+    expect(
+      ce
+        .box([
+          'Solve',
+          ['Equal', ['Divide', numerator, ['Add', ['Power', 'x', 2], 1]], 0],
+          'x',
+        ])
+        .evaluate().json
+    ).not.toEqual(['List']);
+  });
+
+  test('a denominator that is not a polynomial is not decided', () => {
+    // `1/tan(x)` is zero at `π/2`, where `tan(x)` has no finite value.
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box(['Solve', ['Equal', ['Divide', 1, ['Tan', 'x']], 0], 'x'])
+        .evaluate().operator
+    ).toBe('Solve');
+  });
+});
+
 describe('MULTIVARIATE TYPE FILTER: finiteness of a declared unknown', () => {
   const {
     filterSolutionByTypes,

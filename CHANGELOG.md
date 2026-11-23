@@ -33,6 +33,11 @@
 
 ### Improvements
 
+- **A nonzero constant over a polynomial equal to 0 has no solution**
+  (CE-1594). `Solve(1/(x^2+1) = 0, x)`, `Solve((x^2+1)^(-2) = 0, x)` and
+  `Solve((x-1)^(-2) = 0, x)` stayed unevaluated; they are now `[]`, as
+  `Solve(1/x = 0, x)` was. A numerator with a parameter is read as nonzero,
+  as for `a·x = 0`: `Solve(a/(x^2+1) = 0, x)` is `[]`.
 - **The antiderivative of an integer power of a polynomial of degree 2 or
   more has a closed form** (CE-1591). `Integrate((x^2+1)^2, x)` stayed
   unevaluated, while the same polynomial written out integrated; it is now
