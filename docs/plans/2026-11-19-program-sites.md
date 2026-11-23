@@ -5,7 +5,8 @@ source. It returns authored name sites and summarizes the Program bindings
 each direct statement reads, defines or writes. Querying the result executes
 no statement. Rebuilding from edited source yields a new result.
 
-The initial consumers are Tycho's prelude admission and diagnostics. The
+The initial consumers are Tycho's prelude admission and diagnostics, and
+the code cells of Tycho's notebook (CE-1628, "The notebook's code cells"). The
 existing [Program spec](2026-11-12-program-operator-spec.md) defines the
 lexical resolution and initialization rules. The query exposes the
 decisions made during preparation. It does not introduce a second way to
@@ -55,6 +56,29 @@ The slot is identified by the prepared binding. Until the compiler can
 share it, use the interpreter for the whole statement. The typed loop
 prototype returned 4 instead of 8 when a callee read the entry value for
 three successive writes. See `/private/tmp/ce-statement-slots.XOTxHE/REPORT.md`.
+
+## The notebook's code cells
+
+A notebook code cell is one Program. Tycho runs it with `executeEpsil()` in a
+scope pushed over the scope of its section, which holds the sliders, the
+tables and the formula definitions. The preparation for the query runs with
+that scope as the environment. For one prepared Program the query gives:
+
+1. Each site whose target is an external binding: its source range, its role
+   (read, write, or both for a compound assignment), the name of the binding,
+   and whether the site is deferred. A site that resolves to a Program
+   declaration or a local of the same name is not in this set.
+2. The set of external bindings that the Program writes, at any depth,
+   deferred writes included. Tycho declares a local copy of each before the
+   run, so that the run does not write the section. The set comes from the
+   resolution, not from a list of write forms, so a write form that the
+   language adds later is in the set with no change in Tycho.
+3. The sites to rewrite when the host renames an external binding: every
+   site of item 1 for that binding, and no other site.
+
+Tycho replaces its own walk of reads and its list of write forms
+(`src/graph-paper/notebook/cortex-analysis.ts`: `walkRefs`,
+`collectAssignedNames`) by the query.
 
 ## Reuse and migration
 
@@ -115,6 +139,27 @@ following checks where current source-only analysis is insufficient.
 - A macro expansion can create an executable input without an authored
   occurrence. Conversely, with `v1` declared real, `v1 / v1` retains two
   authored reads even when its executable result is the constant 1.
+
+For the notebook, each program below is prepared with an external `k` and
+`p`, both integers with the value 5. The values were measured at HEAD
+`ebd8db3c2` with `executeEpsil()` on a scope pushed over the two
+declarations.
+
+| Program | Value | Sites of item 1 and set of item 2 |
+| --- | --- | --- |
+| `function g() { k }`, `let k = 7`, `g()` | 7 | no external site: the deferred body reads the Program's `k`, declared after it |
+| `let h = () => k`, `let k = 7`, `h()` | 7 | the same for a lambda |
+| `let k = k + 1`, `k` | 6 | the read in the initializer is external; the read on the next line is the Program's `k` |
+| `let j = k`, `let k = 1` | diagnostic `read-before-declaration` | no external site: the read refers to the Program's `k` |
+| `for k in 1..2 { k }`, `k` | 5 | the read after the loop is external; the read in the body is the loop variable |
+| `p += 1` | 6; external `p` becomes 6 | one site, read and write; the write set is `{p}` |
+| `(p, q) := (1, 2)` | external `p` becomes 1 | the write set holds `p` (and `q` when it is external) |
+| `let f = () => do { p = 9 }`, `f()` | external `p` becomes 9 | a deferred write site; the write set is `{p}` |
+
+A rename of the external `k` in these programs rewrites only the sites the
+third column calls external. `match` binders, comprehension variables, tuple
+loop variables, tuple and typed declarations and function definitions are
+binders: a site that resolves to one of them is not external.
 
 The private feasibility harness and outputs are in
 `/private/tmp/ce-program-sites.tk4zmU`. They exercise existing machinery
