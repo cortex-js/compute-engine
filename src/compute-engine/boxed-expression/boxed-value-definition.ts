@@ -1723,12 +1723,15 @@ export class _BoxedValueDefinition
 
   /** The effects of a stored `Function` literal, when a walk of its body
    * reads an effect set that is derived from the conformance registry (a
-   * protocol dispatcher), memoized on the literal and on the version of the
-   * registry. `null` when the walk reads no such set. */
+   * protocol dispatcher) or a helper that a later write can change (a value
+   * binding with no stated effects), memoized on the literal and on the
+   * version of the registry, and, for such a walk, on `_callableVersion`.
+   * `null` when the walk reads no such set. */
   private _literalRegistryEffects:
     | {
         literal: Expression;
         version: number;
+        callable: number;
         effects: EffectSet | undefined | null;
       }
     | undefined = undefined;
@@ -1746,7 +1749,10 @@ export class _BoxedValueDefinition
    * the arrow are the union of the recorded effects and the effects of a new
    * walk of the body. The other parts of the recorded type do not change. A
    * literal whose walk reads no registry-derived set keeps the recorded
-   * type, and its body is walked again only when the registry changes.
+   * type, and its body is walked again only when the registry changes. The
+   * same holds when the body calls a value binding whose effects are not
+   * stated (`h` in `g = (x) => h(x)`): a write of `h` advances
+   * `_callableVersion`, and the body is walked again.
    */
   private _reviseLiteralArrowEffects(
     recorded: BoxedType,
@@ -1754,8 +1760,14 @@ export class _BoxedValueDefinition
   ): BoxedType {
     const ce = this._engine;
     const version = ce._conformanceVersion;
+    const callable = ce._callableVersion;
     let memo = this._literalRegistryEffects;
-    if (memo === undefined || memo.literal !== v || memo.version !== version) {
+    if (
+      memo === undefined ||
+      memo.literal !== v ||
+      memo.version !== version ||
+      (memo.effects !== null && memo.callable !== callable)
+    ) {
       let effects: EffectSet | undefined | null = null;
       try {
         const inferred = inferFunctionLiteralEffects(ce, v, {
@@ -1766,7 +1778,7 @@ export class _BoxedValueDefinition
         // A walk that cannot run says nothing new about the body.
         effects = null;
       }
-      memo = { literal: v, version, effects };
+      memo = { literal: v, version, callable, effects };
       this._literalRegistryEffects = memo;
     }
     if (memo.effects === null || memo.effects === undefined) return recorded;

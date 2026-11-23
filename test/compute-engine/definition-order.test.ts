@@ -767,6 +767,53 @@ describe('an assignment that falsifies a stated effect contract', () => {
     expect(ce.box(['g', 3]).evaluate().json).toBe(6);
   });
 
+  // `k` states no effects: they are inferred from the literal of `h` that
+  // the binding holds now, not when `k` was defined (CE-1674).
+  test('through an operator with inferred effects', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    ce.box(['Assign', 'k', ['Function', ['h', 'x'], 'x']]).evaluate();
+    callers['an operator'](ce, ['k', 'x']);
+    const result = ce.box(['Assign', 'h', random]).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(JSON.stringify(result.json)).toContain('random effects');
+    expect(ce.box(['g', 3]).evaluate().json).toBe(6);
+    expect(ce.lookupDefinition('k')!.operator?.pure).toBe(true);
+  });
+
+  test('an operator with inferred effects follows a new literal of its helper', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    ce.box(['Assign', 'k', ['Function', ['h', 'x'], 'x']]).evaluate();
+    const k = () => ce.lookupDefinition('k')!.operator!;
+    expect(k().pure).toBe(true);
+    ce.box(['Assign', 'h', random]).evaluate();
+    expect(k().pure).toBe(false);
+    expect(k().drawsRandom).toBe(true);
+    ce.box(['Assign', 'h', twice]).evaluate();
+    expect(k().pure).toBe(true);
+    expect(ce.box(['k', 3]).evaluate().json).toBe(6);
+  });
+
+  test('an operator with inferred effects follows the first literal of its helper', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(number) -> number');
+    ce.box(['Assign', 'k', ['Function', ['h', 'x'], 'x']]).evaluate();
+    const k = () => ce.lookupDefinition('k')!.operator!;
+    expect(k().pure).toBe(true);
+    ce.box(['Assign', 'h', random]).evaluate();
+    expect(k().pure).toBe(false);
+  });
+
+  test('the arrow of a value with an inferred type follows a new literal of its helper', () => {
+    const ce = new ComputeEngine();
+    helpers['a declared value'](ce);
+    ce.declare('g', { value: ce.box(['Function', ['h', 'x'], 'x']) });
+    expect(ce.box('g').type.toString()).not.toContain('random');
+    ce.box(['Assign', 'h', random]).evaluate();
+    expect(ce.box('g').type.toString()).toContain('random');
+  });
+
   test('a contract that admits the effect accepts the literal', () => {
     const ce = new ComputeEngine();
     helpers['a declared value'](ce);

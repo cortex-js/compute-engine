@@ -160,7 +160,8 @@ export interface InferredLiteralEffects {
    * opt-in"; ruled 2026-08-15). */
   escapingWrite: boolean;
   /** True when the walk consulted an effect set that is itself LAZILY DERIVED
-   * from the conformance registry — see `WalkState.consultsRegistry`. A
+   * from the conformance registry, or the `Function` literal that a value
+   * binding holds — see `WalkState.consultsRegistry`. A
    * definition stamped from such a walk installs a deriver of its own
    * (`_deriveEffects` in `boxed-operator-definition.ts`) instead of freezing
    * the value it saw. */
@@ -2480,7 +2481,8 @@ interface WalkState {
    * stamp is itself derived. A definition stamped by such a walk must
    * RE-DERIVE rather than freeze: the next conformance can widen the union
    * under it (`docs/TYPE_SYSTEM_ROADMAP.md`, Appendix B, "Changing a field is
-   * an effect"). */
+   * an effect"). The walk of the `Function` literal that a value binding
+   * holds sets it too: a later write can replace that literal. */
   consultsRegistry: boolean;
 }
 
@@ -3678,6 +3680,16 @@ class Walker {
         const found = storedFunctionLiteral(this.ce, name);
         const stored = found?.literal;
         const home = found?.home;
+        // A later write can give the binding another literal, or a first
+        // one, and a stamp of the caller would then keep the effects of the
+        // literal it saw: the caller re-derives instead, when
+        // `_callableVersion` changes. The literal of a block local comes
+        // from the text of its block, which a write does not change.
+        if (
+          home === undefined &&
+          (stored !== undefined || writableCallableBinding(this.ce, name))
+        )
+          this.state.consultsRegistry = true;
         if (stored !== undefined) {
           // A stored literal already walked into this accumulator at this
           // depth or a smaller one adds nothing (see `expandedLiterals`).
@@ -4231,6 +4243,22 @@ function storedFunctionLiteral(
   const value = def.value.value;
   if (value === undefined || !isFunction(value, 'Function')) return undefined;
   return { literal: value };
+}
+
+/**
+ * True when a write can give the value binding `name` a `Function` literal:
+ * the binding is not the local of a block or a binding that holds a value
+ * only in an activation, and its declared type can denote something
+ * callable. The conditions are those under which {@link storedFunctionLiteral}
+ * reads the value of the binding.
+ */
+function writableCallableBinding(ce: ComputeEngine, name: string): boolean {
+  const def = definitionOf(ce, name);
+  if (def === undefined || !('value' in def)) return false;
+  const value = def.value;
+  if (value._blockLocal === true && !value._programVariable) return false;
+  if (readsActivationHalf(value)) return false;
+  return bindingCouldHoldFunction(value.type?.type as Type | undefined);
 }
 
 /** The answers of `blockLocalLiteral()`, for each list of statements that

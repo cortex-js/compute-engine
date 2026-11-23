@@ -55,6 +55,15 @@
 
 ### Resolved Issues
 
+- **A function with inferred effects follows a new body of a helper that it
+  calls** (CE-1674). With `h` declared `(number) -> number` and assigned a
+  pure `Function`, a function `k` that calls `h` and states no effects kept
+  the effects of the body `h` had when `k` was defined: after
+  `h` was assigned `(x) => x + Random()`, `k` was still `pure`, and a
+  contract `(number) pure -> number` of a function that calls `k` did not
+  refuse the new body of `h`. The effects of `k` now follow each new body
+  of `h`, also when `h` had no body when `k` was defined, and the contract
+  refuses the assignment.
 - **The Epsil formatter accepts about twice the depth of nesting** (CE-1186).
   `serializeEpsil()` of a chain of about 140 nested function applications
   could fail with "Maximum call stack size exceeded" in the formatter. The
