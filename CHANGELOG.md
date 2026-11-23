@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- **`ReplaceAll` applies a rule for a name and a rule for an expression in
+  one pass** (CE-1691). The rules for names were applied first, so a
+  pattern rule saw their result: `ReplaceAll(x + x^2, [x -> 2, x^2 -> y])`
+  was `6`, and it is now `y + 2`, as its description says. At each part,
+  the first rule that matches replaces it, thus with two rules for the same
+  name the first one wins (it was the last one). When a pattern matches
+  inside a part that binds a name of a rule for a name (a `Sum`, a
+  `Function`, a set builder), or whose index the substitution must rename,
+  the call stays unevaluated: `ReplaceAll(Sum(x Sin(x), Limits(x, 1, 3)),
+  [x -> 2, Sin(_a) -> 1])`.
 - **A function that assigns its own parameter is applied to each element of
   a list argument, whatever the body does with the parameter** (CE-1507).
   The parameter had a scalar slot when the body only indexed it after the

@@ -10061,11 +10061,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           else ruleOps.push(op);
         }
 
-        // Split into simple symbol substitutions (applied simultaneously with a
-        // single `.subs`, so rule order does not matter) and pattern rules
-        // (applied with the rule machinery).
-        const substitution: Record<string, Expression> = {};
+        // Split into simple symbol substitutions (applied with `.subs()`, which
+        // keeps a name that a binder binds) and pattern rules (applied with
+        // the rule machinery). `order` keeps the order of the rules: at each
+        // part, the first rule that matches replaces it.
+        // No prototype: a rule for `__proto__` or `constructor` is a key.
+        const substitution: Record<string, Expression> = Object.create(null);
         const patternRules: Rule[] = [];
+        const order: ReplaceAllRule[] = [];
         for (const r of ruleOps) {
           if (!isFunction(r, 'To') && !isFunction(r, 'Rule')) return undefined;
           // Each side is canonicalized BEFORE its parameters are inlined: the
@@ -10080,17 +10083,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           });
           const rhs = inlineCallParameters(ce, r.op2.canonical);
           const s = sym(lhs);
-          if (s !== undefined) substitution[s] = rhs;
-          else patternRules.push({ match: lhs, replace: rhs });
+          if (s !== undefined) {
+            // The first rule for a name wins, as at any other part.
+            if (!Object.hasOwn(substitution, s)) {
+              substitution[s] = rhs;
+              order.push({ symbol: s });
+            }
+          } else {
+            const rule = { match: lhs, replace: rhs };
+            patternRules.push(rule);
+            order.push({ rule });
+          }
         }
 
-        let result = target;
-        if (Object.keys(substitution).length > 0)
-          result = result.subs(substitution);
-        if (patternRules.length > 0)
-          result = replaceTopDown(result, patternRules);
-
-        return result.evaluate();
+        const hasSymbolRules = Object.keys(substitution).length > 0;
+        if (!hasSymbolRules)
+          return replaceTopDown(target, patternRules).evaluate();
+        if (patternRules.length === 0)
+          return target.subs(substitution).evaluate();
+        return replaceAllMixed(target, substitution, order)?.evaluate();
       },
     },
 
@@ -13717,6 +13728,79 @@ function replaceTopDown(expr: Expression, rules: Rule[]): Expression {
     return r;
   });
   return changed ? expr.engine.function(expr.operator, ops) : expr;
+}
+
+/** A rule of `ReplaceAll`: a rule for a name, or a pattern rule. */
+type ReplaceAllRule =
+  | { symbol: string }
+  | { rule: { match: Expression; replace: Expression } };
+
+/**
+ * `ReplaceAll` with rules for names and pattern rules: the rules are applied
+ * in a single pass, so `x + x^2` with `x → 2` and `x^2 → y` is `y + 2`. At
+ * each part, from the top down, the first rule that matches replaces it, and
+ * the parts of a replaced part are not searched.
+ *
+ * The rules for names are applied with `subs()`, which does not replace a
+ * name that a binder binds and renames a binder that would capture a name of
+ * a replacement. Thus a part that holds no match of a pattern rule is given
+ * whole to `subs()`. Only the parts that hold a match are rebuilt here, with
+ * the replaced parts in place, and these parts never go through `subs()`.
+ *
+ * A part that is rebuilt here gives each of its operands to `subs()`
+ * separately. This is correct only when `subs()` of the whole part gives the
+ * same result. It does not when the part binds a name of a rule (`Sum`,
+ * `Function`, a set builder) or when `subs()` renames a bound name to avoid
+ * a capture. Then the result is `undefined`, and the call stays unevaluated.
+ */
+function replaceAllMixed(
+  target: Expression,
+  substitution: Record<string, Expression>,
+  order: ReadonlyArray<ReplaceAllRule>
+): Expression | undefined {
+  const ce = target.engine;
+  const rules = order.map((r) =>
+    'rule' in r ? { rules: ce.rules([r.rule]) } : r
+  );
+
+  // `hit` is `true` when a pattern rule replaced a part of `expr`: `expr` is
+  // then the rebuilt part, with `subs()` applied to its other parts.
+  // `null` when a rebuilt part is not a node that `subs()` distributes over.
+  const walk = (expr: Expression): { expr: Expression; hit: boolean } | null => {
+    for (const r of rules) {
+      // A rule for a name: `subs()` replaces this part.
+      if ('symbol' in r) {
+        if (isSymbol(expr, r.symbol)) return { expr, hit: false };
+        continue;
+      }
+      const replaced = expr.replace(r.rules, { once: true });
+      if (replaced !== null) return { expr: replaced, hit: true };
+    }
+    if (!isFunction(expr)) return { expr, hit: false };
+    const parts: { expr: Expression; hit: boolean }[] = [];
+    for (const op of expr.ops) {
+      const part = walk(op);
+      if (part === null) return null;
+      parts.push(part);
+    }
+    if (!parts.some((x) => x.hit)) return { expr, hit: false };
+    // `subs()` of each operand alone must give what `subs()` of the whole
+    // node gives. A node that binds a name of a rule (`Sum`, `Function`, a
+    // set builder), or that `subs()` renames to avoid a capture, fails.
+    const separate = expr.ops.map((op) => op.subs(substitution));
+    if (
+      !expr
+        .subs(substitution)
+        .isSame(ce.function(expr.operator, separate))
+    )
+      return null;
+    const ops = parts.map((x, i) => (x.hit ? x.expr : separate[i]));
+    return { expr: ce.function(expr.operator, ops), hit: true };
+  };
+
+  const result = walk(target);
+  if (result === null) return undefined;
+  return result.hit ? result.expr : target.subs(substitution);
 }
 
 /** A finite, non-negative integer: the only number that can be a code point. */
