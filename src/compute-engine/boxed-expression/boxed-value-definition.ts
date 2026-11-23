@@ -247,7 +247,13 @@ export class _BoxedValueDefinition
   examples?: string[];
   url?: string;
 
-  private _engine: ComputeEngine;
+  // `#private`, behind an accessor, as the `engine` of an expression is
+  // (`_BoxedExpression`), so that an inspection or a deep comparison of an
+  // expression stops at its definition.
+  readonly #engine: ComputeEngine;
+  private get _engine(): ComputeEngine {
+    return this.#engine;
+  }
 
   private _unsubscribeFromConfigurationChange?: () => void;
 
@@ -473,7 +479,7 @@ export class _BoxedValueDefinition
     }
   ) {
     noteDefinitionCreated(ce, this);
-    this._engine = ce;
+    this.#engine = ce;
     this.name = name;
     this._fixedInitializationType =
       (def as { [preparedContractDeclaration]?: true })[

@@ -253,6 +253,13 @@ interface StoredValueMemo {
  *  own-binding dereference — and the `N()` read of `_N`, which also reads the
  *  value's own bindings but has no cycle bookkeeping of `_dereference`. */
 type StoredValueRoute = 0 | 1 | 2;
+
+/** The last resolution of a symbol (`BoxedSymbol._resolution`). */
+type SymbolResolution = {
+  version: number;
+  def: BoxedDefinition | undefined;
+  scope: Scope | undefined;
+};
 const STORED_VALUE_MEMOS = new WeakMap<
   Expression,
   [
@@ -354,7 +361,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   /**
    * The definition of the symbol, if the symbol is bound/canonical.
    */
-  private readonly _def: BoxedDefinition | undefined;
+  // This field and the other fields that reach a definition, a scope or an
+  // environment are `#private`, behind an accessor, as `engine` is
+  // (`_BoxedExpression`).
+  readonly #def: BoxedDefinition | undefined;
+  private get _def(): BoxedDefinition | undefined {
+    return this.#def;
+  }
 
   /**
    * True when this symbol was boxed in the structural form and bound to its
@@ -381,7 +394,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * shape; the constructor sets it only for a symbol that a boxing makes.
    * @internal
    */
-  _env?: UnitEnvironment;
+  #env: UnitEnvironment | undefined;
+  get _env(): UnitEnvironment | undefined {
+    return this.#env;
+  }
+  set _env(env: UnitEnvironment | undefined) {
+    this.#env = env;
+  }
 
   /**
    * The home scope of a free name (a canonical symbol with no definition).
@@ -392,7 +411,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * definition has no home scope: its entry is keyed on (definition, name).
    * @internal
    */
-  _homeScope?: Scope;
+  #homeScope: Scope | undefined;
+  get _homeScope(): Scope | undefined {
+    return this.#homeScope;
+  }
+  set _homeScope(scope: Scope | undefined) {
+    this.#homeScope = scope;
+  }
 
   /** True on a raw symbol that the walk of the raw operands of a lazy call
    * (`expandMacroOperands()`, `box.ts`) put in place of a macro name that
@@ -408,16 +433,24 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * (`homeChainBinding()`), so a declaration made later in this scope or in an
    * ancestor of it is read, and a declaration in any other scope is not.
    */
-  private _defHome?: Scope;
+  #defHome: Scope | undefined;
+  private get _defHome(): Scope | undefined {
+    return this.#defHome;
+  }
+  private set _defHome(scope: Scope | undefined) {
+    this.#defHome = scope;
+  }
 
   /** The definition that the last resolution found, the scope that holds
    * it, and the type version it was found under (`_freeNameBinding()`,
    * `_homeBinding()`). */
-  private _resolution?: {
-    version: number;
-    def: BoxedDefinition | undefined;
-    scope: Scope | undefined;
-  };
+  #resolution: SymbolResolution | undefined;
+  private get _resolution(): SymbolResolution | undefined {
+    return this.#resolution;
+  }
+  private set _resolution(resolution: SymbolResolution | undefined) {
+    this.#resolution = resolution;
+  }
 
   /** The cached resolution, when it was found under the type version
    * `version` and its scope still holds it (the end of the Epsil static
@@ -458,7 +491,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         `Invalid symbol "${name}": ${validateSymbol(name)}`
       );
     this._id = name;
-    this._def = options?.def;
+    this.#def = options?.def;
     if (options?.def !== undefined)
       this._defHome = options.defHome ?? ce.context?.lexicalScope;
     const env = ce._boxingState.unitEnvironment();

@@ -420,7 +420,13 @@ export function buildDeferredLibraryOperator(
 }
 
 export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
-  engine: ComputeEngine;
+  // `#private`, behind an accessor, as the `engine` of an expression is
+  // (`_BoxedExpression`), so that an inspection or a deep comparison of an
+  // expression stops at its definition.
+  readonly #engine: ComputeEngine;
+  get engine(): ComputeEngine {
+    return this.#engine;
+  }
 
   name: string;
   description?: string | string[];
@@ -1271,7 +1277,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _BoxedOperatorDefinition._SIGNATURE_DESCRIPTOR
     );
     this.name = name;
-    this.engine = ce;
+    this.#engine = ce;
 
     if (def.signature) {
       this.inferredSignature = false;

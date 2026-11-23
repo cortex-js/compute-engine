@@ -157,6 +157,18 @@
 
 ### Resolved Issues
 
+- **A failed `node:assert` comparison whose actual value is an expression
+  no longer uses all the memory of the process** (CE-1650).
+  `assert.equal(ce.expr(['Add', 'A', 'x']), undefined)` took about one
+  second and 750 MB to write its message, and `assert.deepStrictEqual` did
+  not finish: the message and the comparison walked the whole engine. They
+  now stop at the expression's own data, and both finish at once. The
+  engine, the scopes and the definitions that an expression refers to are
+  now private fields: `expr.engine` is still available, but
+  `Object.keys(expr)` no longer lists it, and an expression cannot be read
+  through a `Proxy`, such as the one of Vue's `reactive()` (wrap the
+  expression with `markRaw()` or keep it outside the reactive object).
+
 - **`PolyLog(1, z)` of an exact rational `z` with `0 < z < 1` is a
   logarithm with no negation** (CE-1596). `PolyLog(1, 1/2).evaluate()` was
   `-ln(1/2)`, and it is now `ln(2)`; `PolyLog(1, 1/3)` is `ln(3/2)`.

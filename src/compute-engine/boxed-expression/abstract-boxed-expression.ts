@@ -346,7 +346,17 @@ export abstract class _BoxedExpression implements Expression {
     options?: PatternMatchOptions
   ): BoxedSubstitution | null;
 
-  readonly engine: ComputeEngine;
+  // The fields that reach the engine, a scope, a definition or an environment
+  // are `#private`, behind an accessor: `util.inspect` with
+  // `customInspect: false`, which `node:assert` uses to write the message of
+  // a failed comparison, and a deep comparison walk only the own enumerable
+  // properties, and from the engine they walked the whole engine
+  // (`expression-inspect-size.test.ts`).
+  readonly #engine: ComputeEngine;
+
+  get engine(): ComputeEngine {
+    return this.#engine;
+  }
 
   /** Verbatim LaTeX, obtained from a source, i.e. from parsing,
    *  not generated synthetically
@@ -379,7 +389,14 @@ export abstract class _BoxedExpression implements Expression {
   /** The binding environment captured by a parse with external symbol facts.
    * Rebuilding a function must retain its head's signature as well as the
    * bindings of its operands. Raw nodes remain unbound until rebuilt. */
-  _parseScope?: Scope;
+  #parseScope: Scope | undefined = undefined;
+
+  get _parseScope(): Scope | undefined {
+    return this.#parseScope;
+  }
+  set _parseScope(scope: Scope | undefined) {
+    this.#parseScope = scope;
+  }
 
   /** Retain bindings on function nodes and unbound descendants. Canonical
    * leaves already carry their bindings and can be shared or interned. */
@@ -427,7 +444,7 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   constructor(ce: ComputeEngine, metadata?: Metadata) {
-    this.engine = ce;
+    this.#engine = ce;
     if (metadata?.latex !== undefined) this.verbatimLatex = metadata.latex;
     if (metadata?.sourceOffsets !== undefined)
       this.sourceOffsets = metadata.sourceOffsets;

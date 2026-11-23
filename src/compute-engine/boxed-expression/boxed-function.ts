@@ -680,6 +680,37 @@ function takeProbeGuard(): StoreGuard | undefined {
   return guard;
 }
 
+/** The callee stamp of a call (`BoxedFunction._calleeStamp`). */
+type CalleeStamp = {
+  half: { _writeVersion: number };
+  version: number;
+  written:
+    ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
+  ops?: ReadonlyArray<Expression>;
+  filled?: ReadonlyArray<Expression>;
+  receiver?: { _writeVersion: number };
+  operator?: string;
+  scope?: Scope;
+  rechecked?: {
+    half: { _writeVersion: number };
+    version: number;
+    call: Expression;
+  };
+};
+
+/** The memo of `BoxedFunction._reboxedForFreeHead()`
+ * (`BoxedFunction._forwardRebox`). */
+type ForwardRebox = {
+  half: { _writeVersion: number };
+  version: number;
+  call: Expression;
+  scope?: Scope;
+  unitCounter?: number;
+  unitReads?: ObjectDeps;
+  typeGeneration?: number;
+  definitionVersion?: number;
+};
+
 // The lazy-collection evaluate memo (`_memoizedLazyCollectionValue()`)
 // fails closed on re-entry. When an evaluation of a node starts while the
 // walk that fills the memo of that node is not done (a self-referential
@@ -1133,12 +1164,27 @@ export class BoxedFunction
   // Only canonical expressions have an associated def (are bound)
   // If `null`, the expression is not bound, if `undefined`, the expression
   // is bound but no definition was found.
-  private _def: BoxedDefinition | undefined | null;
+  // This field and the other fields that reach a definition, a scope or an
+  // environment are `#private`, behind an accessor, as `engine` is
+  // (`_BoxedExpression`).
+  #def: BoxedDefinition | undefined | null;
+  private get _def(): BoxedDefinition | undefined | null {
+    return this.#def;
+  }
+  private set _def(def: BoxedDefinition | undefined | null) {
+    this.#def = def;
+  }
 
   /** If the operator is scoped, the local scope associated with
    * the function expression
    */
-  private _localScope: Scope | undefined;
+  #localScope: Scope | undefined;
+  private get _localScope(): Scope | undefined {
+    return this.#localScope;
+  }
+  private set _localScope(scope: Scope | undefined) {
+    this.#localScope = scope;
+  }
 
   private _isStructural: boolean;
 
@@ -1172,7 +1218,13 @@ export class BoxedFunction
    * generation-guarded: validity was decided at construction time, and the
    * resolution records that decision, not a recomputable view.
    * @internal */
-  _resolvedOverload: OverloadResolution | undefined = undefined;
+  #resolvedOverload: OverloadResolution | undefined = undefined;
+  get _resolvedOverload(): OverloadResolution | undefined {
+    return this.#resolvedOverload;
+  }
+  set _resolvedOverload(resolution: OverloadResolution | undefined) {
+    this.#resolvedOverload = resolution;
+  }
 
   /** The operands of this call before validation replaced one of them with
    * an `incompatible-type` error. The construction site (`box.ts`) sets it
@@ -1264,24 +1316,13 @@ export class BoxedFunction
    * scope where the call is read instead, it could read a parameter of
    * another function with the same name.
    * @internal */
-  _calleeStamp:
-    | {
-        half: { _writeVersion: number };
-        version: number;
-        written:
-          ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
-        ops?: ReadonlyArray<Expression>;
-        filled?: ReadonlyArray<Expression>;
-        receiver?: { _writeVersion: number };
-        operator?: string;
-        scope?: Scope;
-        rechecked?: {
-          half: { _writeVersion: number };
-          version: number;
-          call: Expression;
-        };
-      }
-    | undefined = undefined;
+  #calleeStamp: CalleeStamp | undefined = undefined;
+  get _calleeStamp(): CalleeStamp | undefined {
+    return this.#calleeStamp;
+  }
+  set _calleeStamp(stamp: CalleeStamp | undefined) {
+    this.#calleeStamp = stamp;
+  }
 
   /** Record the definition that the name of this call holds now
    * (`_calleeStamp`). A call that has a record keeps it. `ops` are the
@@ -1433,18 +1474,13 @@ export class BoxedFunction
   /** The memo of `_reboxedForFreeHead()`: the definition half the name
    * held and its change counter when the call was boxed again, the new
    * call, and the other keys that `_reboxedForFreeHead()` describes. */
-  private _forwardRebox:
-    | {
-        half: { _writeVersion: number };
-        version: number;
-        call: Expression;
-        scope?: Scope;
-        unitCounter?: number;
-        unitReads?: ObjectDeps;
-        typeGeneration?: number;
-        definitionVersion?: number;
-      }
-    | undefined = undefined;
+  #forwardRebox: ForwardRebox | undefined = undefined;
+  private get _forwardRebox(): ForwardRebox | undefined {
+    return this.#forwardRebox;
+  }
+  private set _forwardRebox(memo: ForwardRebox | undefined) {
+    this.#forwardRebox = memo;
+  }
 
   /** This call boxed again against the definition that its name holds now,
    * when the call has a free head (`_freeHeadScope`, `binding-unit.ts`):
@@ -1653,7 +1689,13 @@ export class BoxedFunction
    * scope object restores the same bindings (identity hit is correct),
    * while a genuinely different chain must miss. This stamp is what lets
    * clean scope pops leave the `callable` axis entirely (design §6). */
-  private _effectsScope: Scope | undefined = undefined;
+  #effectsScope: Scope | undefined = undefined;
+  private get _effectsScope(): Scope | undefined {
+    return this.#effectsScope;
+  }
+  private set _effectsScope(scope: Scope | undefined) {
+    this.#effectsScope = scope;
+  }
 
   /** The `_effects` entry was computed in the static view of the bindings
    * of a type computation while a call frame was on the stack
@@ -1668,7 +1710,13 @@ export class BoxedFunction
    * definition when it is read, and a later declaration of it advances no
    * axis: the entry is computed again when one of these names resolves to
    * another definition. */
-  private _effectsDeps: EffectsLookups | undefined = undefined;
+  #effectsDeps: EffectsLookups | undefined = undefined;
+  private get _effectsDeps(): EffectsLookups | undefined {
+    return this.#effectsDeps;
+  }
+  private set _effectsDeps(deps: EffectsLookups | undefined) {
+    this.#effectsDeps = deps;
+  }
 
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
    * `_memoizedLazyCollectionValue()`. */
@@ -1715,7 +1763,13 @@ export class BoxedFunction
    * scope object re-pushed (a scoped operator re-pushing its `localScope`
    * every evaluation) has the same bindings, so it correctly hits.
    * Constant entries resolve nothing and do not consult this. */
-  private _lazyValueScope: Scope | undefined = undefined;
+  #lazyValueScope: Scope | undefined = undefined;
+  private get _lazyValueScope(): Scope | undefined {
+    return this.#lazyValueScope;
+  }
+  private set _lazyValueScope(scope: Scope | undefined) {
+    this.#lazyValueScope = scope;
+  }
 
   /** The in-flight ASYNC computation of the lazy-collection evaluate memo,
    * kept as the PROMISE so that a concurrent `evaluateAsync()` call on the
@@ -1816,7 +1870,13 @@ export class BoxedFunction
    * have one shape.
    * @internal
    */
-  _freeHeadScope?: Scope;
+  #freeHeadScope: Scope | undefined;
+  get _freeHeadScope(): Scope | undefined {
+    return this.#freeHeadScope;
+  }
+  set _freeHeadScope(scope: Scope | undefined) {
+    this.#freeHeadScope = scope;
+  }
 
   /**
    * For a free call head
@@ -1828,7 +1888,13 @@ export class BoxedFunction
    * not initialized, as `_freeHeadScope` is.
    * @internal
    */
-  _freeHeadEnv?: UnitEnvironment;
+  #freeHeadEnv: UnitEnvironment | undefined;
+  get _freeHeadEnv(): UnitEnvironment | undefined {
+    return this.#freeHeadEnv;
+  }
+  set _freeHeadEnv(env: UnitEnvironment | undefined) {
+    this.#freeHeadEnv = env;
+  }
 
   /**
    * The definition of the head of this call: its own definition, or, for a

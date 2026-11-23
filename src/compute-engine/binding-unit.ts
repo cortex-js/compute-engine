@@ -605,13 +605,28 @@ function readsAsVariableIn(
  * operation when that one finds the same entries.
  */
 class UnitReadToken {
+  // `#private`, so that `util.inspect` with `customInspect: false` and a deep
+  // comparison of an expression whose cache holds the token do not walk the
+  // environment and the key (`expression-inspect-size.test.ts`).
+  readonly #context: UnitReadContext;
+  readonly #env: UnitEnvironment | undefined;
+  readonly #key: object;
+  readonly #name: string;
+  readonly #variable: boolean;
+
   constructor(
-    private readonly _context: UnitReadContext,
-    private readonly _env: UnitEnvironment | undefined,
-    private readonly _key: object,
-    private readonly _name: string,
-    private readonly _variable: boolean
-  ) {}
+    context: UnitReadContext,
+    env: UnitEnvironment | undefined,
+    key: object,
+    name: string,
+    variable: boolean
+  ) {
+    this.#context = context;
+    this.#env = env;
+    this.#key = key;
+    this.#name = name;
+    this.#variable = variable;
+  }
 
   /** The version is what the read finds now, not a counter: a record whose
    * dependencies are read after its computation reads it again then
@@ -627,12 +642,12 @@ class UnitReadToken {
   }
 
   get _version(): number {
-    if (this._variable)
-      return readsAsVariableIn(this._context, this._env, this._key, this._name)
+    if (this.#variable)
+      return readsAsVariableIn(this.#context, this.#env, this.#key, this.#name)
         ? 1
         : 0;
     return definitionId(
-      unitEntryOf(this._context, this._env, this._key, this._name)
+      unitEntryOf(this.#context, this.#env, this.#key, this.#name)
     );
   }
 }
