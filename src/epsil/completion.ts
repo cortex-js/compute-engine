@@ -58,6 +58,7 @@ import {
   type BindingGroup,
 } from './occurrences.js';
 import { parseEpsil } from './parse-epsil.js';
+import { islandParser } from './latex-islands.js';
 import { SPECIFIER_WORDS } from './parser.js';
 import {
   escapeProtocolName,
@@ -314,7 +315,9 @@ const LIBRARY_ENTRIES = new WeakMap<ComputeEngine, LibraryEntry[]>();
  * (`namedArgumentsAt`).
  *
  * The options are those of `parseEpsil()`: the type, protocol and sum
- * variant names that the source may use without declaring them.
+ * variant names that the source may use without declaring them, and the
+ * parser of the `$…$` LaTeX islands, which is by default the LaTeX syntax
+ * of the engine, as in `executeEpsil()`.
  */
 export function epsilCompletions(
   ce: ComputeEngine,
@@ -324,8 +327,10 @@ export function epsilCompletions(
     typeNames?: readonly string[];
     protocolNames?: readonly string[];
     sumVariants?: Readonly<Record<string, string>>;
+    parseLatex?: (latex: string) => MathJsonExpression;
   }
 ): EpsilCompletions {
+  options = { ...options, parseLatex: islandParser(ce, options?.parseLatex) };
   offset = Math.max(0, Math.min(offset, source.length));
   let [start, end] = wordAt(source, offset);
   const tokens = tokenize(source);
@@ -936,6 +941,7 @@ export function parseWithHole(
         typeNames?: readonly string[];
         protocolNames?: readonly string[];
         sumVariants?: Readonly<Record<string, string>>;
+        parseLatex?: (latex: string) => MathJsonExpression;
       }
     | undefined
 ): { text: string; placeholder: string; ast: MathJsonExpression | null } {
@@ -949,6 +955,7 @@ export function parseWithHole(
       typeNames: options?.typeNames,
       protocolNames: options?.protocolNames,
       sumVariants: options?.sumVariants,
+      parseLatex: options?.parseLatex,
     });
   } catch {
     // A `#error` pragma throws: no tree.
@@ -1855,6 +1862,7 @@ function matchVariantItems(
     | {
         typeNames?: readonly string[];
         sumVariants?: Readonly<Record<string, string>>;
+        parseLatex?: (latex: string) => MathJsonExpression;
       }
     | undefined
 ): (EpsilCompletionItem & { tier: number })[] | undefined {
@@ -1863,6 +1871,7 @@ function matchVariantItems(
     [tree] = parseEpsil(source.slice(0, start) + source.slice(end), undefined, {
       typeNames: options?.typeNames,
       sumVariants: options?.sumVariants,
+      parseLatex: options?.parseLatex,
     });
   } catch {
     // A `#error` pragma throws: no tree.

@@ -23,6 +23,7 @@ import {
   type ProtocolFunctionMember,
 } from './occurrences.js';
 import { parseEpsil } from './parse-epsil.js';
+import { islandParser } from './latex-islands.js';
 import { HARD_RESERVED_WORDS } from './reserved-words.js';
 import { binderSitesOf } from './resolve-library-names.js';
 import type { SourceSpan, Token } from './tokens.js';
@@ -83,6 +84,7 @@ type SourceOptions = {
   typeNames?: readonly string[];
   protocolNames?: readonly string[];
   sumVariants?: Readonly<Record<string, string>>;
+  parseLatex?: (latex: string) => MathJsonExpression;
 };
 
 /** The contextual words that head a statement, with the operators of the
@@ -258,6 +260,7 @@ function nameAt(
       typeNames: options?.typeNames,
       protocolNames: options?.protocolNames,
       sumVariants: options?.sumVariants,
+      parseLatex: islandParser(ce, options?.parseLatex),
     });
   } catch {
     // A `#error` pragma throws: no tree, so no name of the source.

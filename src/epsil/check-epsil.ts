@@ -4,6 +4,7 @@ import { FatalParsingError, type ParsingDiagnostic } from './diagnostics.js';
 import type { ExecuteEpsilOptions } from './execute-epsil.js';
 import { nextEpsilBatchId, sumVariantNames } from './execute-epsil.js';
 import { parseEpsil } from './parse-epsil.js';
+import { islandParser } from './latex-islands.js';
 import { canonicalLibraryName } from './library-names.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { staticDiagnostics } from './static-diagnostics.js';
@@ -43,7 +44,7 @@ export function checkEpsil(
   let ast;
   try {
     const [parsed, parseDiagnostics] = parseEpsil(source, options?.url, {
-      parseLatex: options?.parseLatex,
+      parseLatex: islandParser(ce, options?.parseLatex),
       allowHostPragmas: options?.allowHostPragmas ?? false,
       typeNames: ce._typeResolver.names,
       protocolNames: Object.keys(ce._protocolRegistry),

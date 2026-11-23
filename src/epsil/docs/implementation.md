@@ -159,11 +159,14 @@ The returned object contains the last statement's boxed value and all
 diagnostics. Runtime failures are represented as error values rather than
 escaping to the host as ordinary exceptions.
 
-To enable `$…$` LaTeX islands, inject the engine's LaTeX parser:
+`$…$` LaTeX islands are read with the LaTeX syntax of the engine, as
+`ce.parse(latex, { form: "raw" })` reads them. A host with a LaTeX parser of
+its own gives it with the `parseLatex` option:
 
 ```js
-const parseLatex = (latex) => ce.parse(latex).json;
-const result = executeEpsil(ce, "2 * $\\frac{1}{2}$", { parseLatex });
+const result = executeEpsil(ce, "2 * $\\frac{1}{2}$");
+const parseLatex = (latex) => ce.parse(latex, { form: "raw" }).json;
+const same = executeEpsil(ce, "2 * $\\frac{1}{2}$", { parseLatex });
 ```
 
 Host-state pragmas remain disabled unless
@@ -1726,8 +1729,18 @@ point, composing with its surroundings like any other primary:
 
 Epsil's parser has no static dependency on the LaTeX parser: it is passed in by
 the caller, the same way the engine itself injects `LatexSyntax` rather than
-importing it directly. Without an injected parser, an island produces a
-`latex-parsing-unavailable` diagnostic instead of a spliced expression.
+importing it directly. The functions that take an engine (`executeEpsil`,
+`executeEpsilAsync`, `checkEpsil`, `epsilCompletions`, `epsilSignatureHelp`,
+`epsilHover`, `epsilDefinition`, `epsilDebugStatements`) use the `parseLatex`
+option, or else `ce.parse(latex, { form: "raw" })`: the LaTeX syntax of the
+engine, with the engine-wide `ce.latexOptions` and the functions that the
+engine knows when the program is parsed. The program is parsed before its
+first statement runs, so its own bindings do not count: with a function `g`
+declared by the host, `let g = 5` then `$g(3)$` reads the island as a call of
+`g`.
+Without a parser (`parseEpsil` with no `parseLatex`, or an engine of the
+core-only entry), an island produces a `latex-parsing-unavailable` diagnostic
+instead of a spliced expression.
 
 ### Symbol names and normalization
 

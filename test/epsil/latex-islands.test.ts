@@ -1,7 +1,18 @@
 import { operand } from '../../src/math-json/utils';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine as ComputeEngineImpl } from '../../src/compute-engine/index';
 import { MathJsonExpression } from '../../src/math-json/types';
+import { islandParser } from '../../src/epsil/latex-islands';
+import {
+  checkEpsil,
+  epsilCompletions,
+  epsilDebugStatements,
+  epsilHover,
+  epsilSignatureHelp,
+  executeEpsil,
+  executeEpsilAsync,
+} from '../../src/epsil';
 
 //
 // `$…$` LaTeX islands (Phase 2, Stage C). A `LATEX_ISLAND` token is a primary.
@@ -82,5 +93,103 @@ describe('EPSIL LATEX ISLANDS (real engine)', () => {
     });
     expect(diags).toHaveLength(0);
     expect(bare(operand(value, 1)!)).toStrictEqual(['Multiply', 2, ['Divide', 1, 2]]);
+  });
+});
+
+describe('EPSIL LATEX ISLANDS (the LaTeX syntax of the engine)', () => {
+  const source = 'const b = $\\sqrt5$\nconst c = $\\frac{1}{2}$ + 1\nb^2 + c';
+
+  test('checkEpsil and executeEpsil read an island with ce.latexSyntax', () => {
+    const ce = new ComputeEngine();
+    expect(checkEpsil(ce, source).diagnostics).toEqual([]);
+    const result = executeEpsil(ce, source);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value.toString()).toBe('13/2');
+  });
+
+  test('executeEpsilAsync reads an island with ce.latexSyntax', async () => {
+    const ce = new ComputeEngine();
+    const result = await executeEpsilAsync(ce, source);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value.toString()).toBe('13/2');
+  });
+
+  test('the island uses the engine-wide LaTeX options', () => {
+    const ce = new ComputeEngine();
+    ce.latexOptions = { ...ce.latexOptions, decimalSeparator: '{,}' };
+    const result = executeEpsil(ce, '$1{,}5$ * 2');
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value.toString()).toBe('3');
+  });
+
+  test('the island knows the functions of the engine', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    // `ce.latexSyntax.parse('f(x)')` alone gives a product of `f` and `(x)`.
+    expect(islandParser(ce, undefined)!('f(x)')).toEqual(['f', 'x']);
+    // The raw parse declares nothing on the engine.
+    expect(ce.lookupDefinition('x')).toBeUndefined();
+  });
+
+  test('an island cannot replace a library function', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(ce, '$\\sin(x) \\coloneq 5$\n$\\sin(0)$');
+    expect(result.value.toString()).toBe('0');
+    expect(ce.box(['Sin', 0]).evaluate().toString()).toBe('0');
+  });
+
+  test('an injected parseLatex wins over the engine', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(ce, '$x$ + 1', { parseLatex: () => 41 });
+    expect(result.value.toString()).toBe('42');
+  });
+
+  test('the editor functions read an island with the engine or with parseLatex', () => {
+    const real = new ComputeEngine().latexSyntax!;
+    const seen: string[] = [];
+    const syntax = {
+      parse: (latex: string, options?: any) => {
+        seen.push(latex);
+        return real.parse(latex, options);
+      },
+      serialize: (expr: MathJsonExpression) => real.serialize(expr),
+    };
+    const ce = new ComputeEngine({ latexSyntax: syntax });
+    const text = 'let a = $\\sqrt{2}$\nmax(a, ';
+    epsilDebugStatements(ce, text);
+    epsilCompletions(ce, text, text.length);
+    epsilSignatureHelp(ce, text, text.length);
+    epsilHover(ce, text, 4);
+    expect(seen.length).toBeGreaterThanOrEqual(4);
+    expect(seen.every((latex) => latex === '\\sqrt{2}')).toBe(true);
+
+    seen.length = 0;
+    const injected: string[] = [];
+    const parseLatex = (latex: string): MathJsonExpression => {
+      injected.push(latex);
+      return 2;
+    };
+    epsilDebugStatements(ce, text, { parseLatex });
+    epsilCompletions(ce, text, text.length, { parseLatex });
+    epsilSignatureHelp(ce, text, text.length, { parseLatex });
+    epsilHover(ce, text, 4, { parseLatex });
+    expect(seen).toEqual([]);
+    expect(injected.length).toBeGreaterThanOrEqual(4);
+  });
+
+  test('an engine with no LaTeX syntax gives latex-parsing-unavailable', () => {
+    const factory = ComputeEngineImpl._latexSyntaxFactory;
+    ComputeEngineImpl._latexSyntaxFactory = null;
+    try {
+      const ce = new ComputeEngine();
+      expect(ce.latexSyntax).toBeUndefined();
+      const codes = checkEpsil(ce, source).diagnostics.map((d) => d.message[0]);
+      expect(codes).toEqual([
+        'latex-parsing-unavailable',
+        'latex-parsing-unavailable',
+      ]);
+    } finally {
+      ComputeEngineImpl._latexSyntaxFactory = factory;
+    }
   });
 });

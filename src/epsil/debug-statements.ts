@@ -4,6 +4,7 @@ import { operands, operator, symbol } from '../math-json/utils.js';
 import type { Type } from '../common/type/types.js';
 
 import { parseEpsil } from './parse-epsil.js';
+import { islandParser } from './latex-islands.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 
 //
@@ -37,6 +38,7 @@ type SourceOptions = {
   typeNames?: readonly string[];
   protocolNames?: readonly string[];
   sumVariants?: Readonly<Record<string, string>>;
+  parseLatex?: (latex: string) => MathJsonExpression;
 };
 
 /** The library operators that apply a function literal written as one of
@@ -139,6 +141,7 @@ export function epsilDebugStatements(
       typeNames: options?.typeNames,
       protocolNames: options?.protocolNames,
       sumVariants: options?.sumVariants,
+      parseLatex: islandParser(ce, options?.parseLatex),
     });
     ast = resolveLibraryNames(parsed, source, ce);
   } catch {

@@ -51,6 +51,7 @@ import {
   programInterruption,
 } from '../compute-engine/library/control-structures.js';
 import { parseEpsil } from './parse-epsil.js';
+import { islandParser } from './latex-islands.js';
 import { resolveLibraryNames } from './resolve-library-names.js';
 import { canonicalLibraryName, epsilNameOf } from './library-names.js';
 import { definitionSites } from './definition-sites.js';
@@ -73,8 +74,11 @@ import {
 export interface ExecuteEpsilOptions {
   /** Source URL (for `#url`/`#filename` pragmas and diagnostic origins). */
   url?: string;
-  /** Injected LaTeX parser for `$…$` islands (a structural mirror of the
-   * engine's `ILatexSyntax` injection). */
+  /** The parser of the `$…$` LaTeX islands. Without it, an island is read
+   * with the LaTeX syntax of the engine (`ce.latexSyntax`) and the
+   * engine-wide LaTeX options; an engine with no LaTeX syntax (the
+   * core-only entry) gives the diagnostic `latex-parsing-unavailable` for
+   * each island. */
   parseLatex?: (latex: string) => MathJsonExpression;
   /** Opt into the host-state pragmas `#env`/`#navigator` (default `false`). */
   allowHostPragmas?: boolean;
@@ -582,7 +586,7 @@ function* executeEpsilSteps(
   let ast: MathJsonExpression;
   try {
     const [parsed, parseDiagnostics] = parseEpsil(source, options?.url, {
-      parseLatex: options?.parseLatex,
+      parseLatex: islandParser(ce, options?.parseLatex),
       allowHostPragmas: options?.allowHostPragmas ?? false,
       // The engine's already-declared type names, so an annotation naming a
       // host type resolves at parse time. `names` walks the scope chain.

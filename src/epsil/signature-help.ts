@@ -6,6 +6,7 @@ import type {
   Type,
 } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
+import { islandParser } from './latex-islands.js';
 
 import {
   operand,
@@ -167,8 +168,10 @@ export function epsilSignatureHelp(
     typeNames?: readonly string[];
     protocolNames?: readonly string[];
     sumVariants?: Readonly<Record<string, string>>;
+    parseLatex?: (latex: string) => MathJsonExpression;
   }
 ): EpsilSignatureHelp | null {
+  options = { ...options, parseLatex: islandParser(ce, options?.parseLatex) };
   offset = Math.max(0, Math.min(offset, source.length));
   const [start, end] = wordAt(source, offset);
   const tokens = tokenize(source);

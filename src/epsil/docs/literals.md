@@ -312,8 +312,11 @@ other primary — so this is `2 × ½`:
 
 The LaTeX dialect accepted inside an island is whatever the host's LaTeX parser
 accepts — Epsil does not define or restrict it. In practice this is the Compute
-Engine's LaTeX parser. Because the parser is supplied by the host rather than
-built into the language, a host that does not supply one turns every island
+Engine's LaTeX parser. The parser is not built into the language: a function
+that runs or reads a program with an engine (`executeEpsil`, `checkEpsil`, the
+editor functions) uses the host's `parseLatex` option, or else the LaTeX syntax
+of the engine. A parse with no parser (`parseEpsil` without `parseLatex`, or an
+engine of the core-only entry, which has no LaTeX syntax) turns every island
 into a `latex-parsing-unavailable` diagnostic. See
 [Strings and LaTeX islands](/epsil/implementation/#strings-and-latex-islands)
 for how a host wires one up.

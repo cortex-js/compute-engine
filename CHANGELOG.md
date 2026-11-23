@@ -33,6 +33,18 @@
 
 ### Improvements
 
+- **In Epsil, a `$…$` LaTeX island is read with the LaTeX syntax of the
+  engine when the host gives no `parseLatex`** (CE-1665). With
+  `ce = new ComputeEngine()`, `executeEpsil(ce, "$\\frac{1}{2}$ + 1")` gave
+  the error `latex-parsing-unavailable`; its value is now `3/2`. This
+  applies to `executeEpsil`, `executeEpsilAsync`, `checkEpsil`,
+  `epsilCompletions`, `epsilSignatureHelp`, `epsilHover`,
+  `epsilDefinition` and `epsilDebugStatements`. The island is read as
+  `ce.parse(latex, { form: "raw" })` reads it, with `ce.latexOptions`. The
+  editor functions also take a `parseLatex` option now. An engine of the
+  core-only entry has no LaTeX syntax: an island still gives
+  `latex-parsing-unavailable` there.
+
 - **`applyEpsilAsync(ce, fn, args, { debug, signal })` applies a function
   value under a debugger** (CE-1647). A host that kept a function of an
   earlier run, such as the timer callback of a notebook cell, applies it
