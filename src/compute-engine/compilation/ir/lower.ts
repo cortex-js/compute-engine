@@ -527,10 +527,84 @@ class WidenList extends Decline {
   }
 }
 
+/** The string constants of a lowering (`Lowering.known()`): `keep`, the
+ *  lowering keeps them, at every place (a parameter, a record field) or at
+ *  the places of `only`; `seen`, the constants could decide a test: an
+ *  `Equal` or a `NotEqual` of two values that each are a string constant or
+ *  could hold one (`Lowering.mayHoldKnown()`), or a `Match` on such a value
+ *  that is not a constant. `read`: the places whose constant a decision read
+ *  (`Lowering.readKnown()`); `feeds`: the places whose constant came
+ *  through each place (the parameter of `figureOf` into the field `kind`). */
+type StringConstants = {
+  readonly keep: boolean;
+  seen: boolean;
+  readonly only?: ReadonlySet<string>;
+  readonly read: Set<string>;
+  readonly feeds: Map<string, Set<string>>;
+};
+
+const stringConstants = (
+  keep: boolean,
+  only?: ReadonlySet<string>
+): StringConstants => ({
+  keep,
+  seen: false,
+  ...(only === undefined ? {} : { only }),
+  read: new Set(),
+  feeds: new Map(),
+});
+
+/** The program of `root`. On JavaScript (not the `bigint` mode), a program
+ *  that declines where a kept string constant could decide a test (`seen`)
+ *  is lowered again with the string constants kept (CE-1652, step 4c;
+ *  README, "Records"), and the decline of that lowering is the program's.
+ *  Then a third lowering keeps a constant only at the places whose
+ *  constant a decision read, so that a function is not lowered once per
+ *  value of a string that no test reads; it takes the same decisions, and
+ *  when it fails all the same, the second lowering is the program. A
+ *  program that compiles without the constants keeps its code. */
 export function lower(
   root: Expression,
   rows: readonly OperatorRow[],
   options: LowerOptions = {}
+): Program {
+  const strings = stringConstants(false);
+  try {
+    return lowerWide(root, rows, options, strings);
+  } catch (error) {
+    if (
+      !(error instanceof Decline) ||
+      !strings.seen ||
+      options.javascript !== true ||
+      options.mode === 'bigint'
+    )
+      throw error;
+  }
+  const all = stringConstants(true);
+  const p = lowerWide(root, rows, options, all);
+  // The places read, and those whose constant came through them.
+  const kept = new Set<string>();
+  const visit = (place: string) => {
+    if (kept.has(place)) return;
+    kept.add(place);
+    all.feeds.get(place)?.forEach(visit);
+  };
+  all.read.forEach(visit);
+  // The third lowering only narrows `p`, a valid program.
+  try {
+    return lowerWide(root, rows, options, stringConstants(true, kept));
+  } catch {
+    return p;
+  }
+}
+
+/** `lowerOnce()`, again with one more list local on the real lane at each
+ *  `WidenList`. */
+function lowerWide(
+  root: Expression,
+  rows: readonly OperatorRow[],
+  options: LowerOptions,
+  strings: StringConstants
 ): Program {
   // Each retry widens one more declaration; past `MAX_WIDENED` (a bound on
   // the retries, each a whole lowering) the program declines.
@@ -538,7 +612,7 @@ export function lower(
   const wide = new Set<Expression>();
   for (;;) {
     try {
-      return lowerOnce(root, rows, options, wide);
+      return lowerOnce(root, rows, options, wide, strings);
     } catch (error) {
       if (!(error instanceof WidenList)) throw error;
       if (wide.has(error.declaration) || wide.size >= MAX_WIDENED)
@@ -586,12 +660,13 @@ function literalNumber(
 }
 
 /** `lower()` with the list locals of the declarations `wide` on the real
- *  lane. */
+ *  lane, and the string constants of `strings`. */
 function lowerOnce(
   root: Expression,
   rows: readonly OperatorRow[],
   options: LowerOptions,
-  wide: ReadonlySet<Expression>
+  wide: ReadonlySet<Expression>,
+  strings: StringConstants
 ): Program {
   const ce = root.engine;
   const bigint = options.mode === 'bigint';
@@ -928,6 +1003,42 @@ function lowerOnce(
   /** The tests decided by the IR types of their operands
    *  (`Lowering.typeTests`). */
   const typeTests = new Map<Expression, boolean>();
+  /** The values that are a known string other than a constant (a
+   *  parameter, the read of a field), and the place of each
+   *  (`Lowering.holdKnown()`). */
+  const knownStrings = new Map<V, { value: string; place: string }>();
+  /** `Lowering.mayHoldKnown()`. */
+  const knowable = new Set<V>();
+  /** The value of the known string `v` where the lowering keeps the
+   *  constants, otherwise `undefined`. */
+  const knownString = (v: V): string | undefined => {
+    if (!strings.keep) return undefined;
+    const c = b.constants.get(v);
+    return typeof c === 'string' ? c : knownStrings.get(v)?.value;
+  };
+  /** `v` can be a known string where the lowering keeps the constants: a
+   *  string constant, or a value of `knowable`. */
+  const mayBeKnown = (v: V): boolean =>
+    typeof b.constants.get(v) === 'string' || knowable.has(v);
+  /** `Lowering.keepKnown()`. */
+  const keepKnown = (v: V, place: string): string | undefined => {
+    const s = knownString(v);
+    if (s === undefined) return undefined;
+    const from = knownStrings.get(v)?.place;
+    if (from !== undefined) {
+      let feeds = strings.feeds.get(place);
+      if (feeds === undefined) strings.feeds.set(place, (feeds = new Set()));
+      feeds.add(from);
+    }
+    return strings.only === undefined || strings.only.has(place)
+      ? s
+      : undefined;
+  };
+  /** `Lowering.readKnown()`. */
+  const readKnown = (v: V): void => {
+    const place = knownStrings.get(v)?.place;
+    if (place !== undefined) strings.read.add(place);
+  };
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1331,6 +1442,18 @@ function lowerOnce(
           if (isFunction(node, r.head) && node.nops === 2)
             typeTests.set(node, r.head === 'NotEqual');
           return b.constant(r.head === 'NotEqual', 'boolean');
+        }
+        // Two strings of known values (`known()`; CE-1652, step 4c). In
+        // the first lowering, a test that the constants would decide
+        // (`seen`).
+        if (!strings.keep && given.every(mayBeKnown)) strings.seen = true;
+        const [x, y] = given.map((v) => knownString(v));
+        if (x !== undefined && y !== undefined) {
+          given.forEach(readKnown);
+          const verdict = (x === y) === (r.head === 'Equal');
+          if (isFunction(node, r.head) && node.nops === 2)
+            typeTests.set(node, verdict);
+          return b.constant(verdict, 'boolean');
         }
         const equal = equality(node, given[0], given[1]);
         if (equal !== undefined)
@@ -6664,6 +6787,17 @@ function lowerOnce(
     rowsParams,
     heldParams: new Set<V>(),
     typeTests,
+    known: (v) => {
+      // A subject that is not a constant, which a kept constant could make
+      // known (a constant subject is decided in every lowering).
+      if (!strings.keep && knowable.has(v)) strings.seen = true;
+      return knownString(v);
+    },
+    mayHoldKnown: (v) => knowable.add(v),
+    keepsStrings: strings.keep,
+    keepKnown,
+    holdKnown: (v, value, place) => knownStrings.set(v, { value, place }),
+    readKnown,
     rowLengths,
     rowsElementLane,
     apply,

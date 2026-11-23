@@ -70,6 +70,12 @@ export type IRType = {
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
   readonly names?: readonly string[];
+  /** A field of the lane `string` whose value is known when the code is
+   *  emitted (CE-1652, step 4c; `README.md`, "Records"): two records whose
+   *  constant fields differ are two record types. Only in `fields`: the
+   *  type of a value never holds it, the lowering keeps the constant of a
+   *  value aside (`Lowering.known()`). */
+  readonly constant?: string;
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
@@ -338,7 +344,8 @@ export function sameShape(
 }
 
 /** A value of type `a` can stand where `b` is read: the same shape, and a
- *  sub-lane; two records are one record type. */
+ *  sub-lane; two records are one record type, or `b` the type of `a` with
+ *  fewer constant fields (`sameFields()`). */
 export function isSubType(
   a: IRType,
   b: IRType,
@@ -347,14 +354,21 @@ export function isSubType(
   return (
     sameShape(a.shape, b.shape, constant) &&
     isSubLane(a.lane, b.lane) &&
-    sameFields(a, b)
+    sameFields(a, b, 'sub')
   );
 }
 
 /** `a` and `b` are records of one nominal type and the same fields (types,
  *  tuple marks and names), compared field by field, or neither is a
- *  record. */
-export function sameFields(a: IRType, b: IRType): boolean {
+ *  record. The constant of a string field (`IRType.constant`; CE-1652,
+ *  step 4c): the same in `a` and `b` (`same`), the same or absent in `b`
+ *  (`sub`: a value of type `a` stands where `b` is read), or not compared
+ *  (`loose`). */
+export function sameFields(
+  a: IRType,
+  b: IRType,
+  constants: 'same' | 'sub' | 'loose' = 'same'
+): boolean {
   if (a.lane !== 'record' && b.lane !== 'record') return true;
   const [f, g] = [a.fields ?? [], b.fields ?? []];
   const [m, n] = [a.marks ?? [], b.marks ?? []];
@@ -368,18 +382,36 @@ export function sameFields(a: IRType, b: IRType): boolean {
         m[k] === n[k] &&
         x.lane === g[k].lane &&
         sameShape(x.shape, g[k].shape) &&
-        sameFields(x, g[k])
+        (constants === 'loose' ||
+          x.constant === g[k].constant ||
+          (constants === 'sub' && g[k].constant === undefined)) &&
+        sameFields(x, g[k], constants)
     )
   );
 }
 
+/** The record type `a` (of the fields of `b`, `sameFields(a, b, 'loose')`)
+ *  with the constant of each string field that `b` does not have. */
+function commonConstants(a: IRType, b: IRType): IRType {
+  if (a.lane !== 'record') {
+    if (a.constant === undefined || a.constant === b.constant) return a;
+    const { constant: _, ...rest } = a;
+    return rest;
+  }
+  return {
+    ...a,
+    fields: a.fields?.map((f, k) => commonConstants(f, b.fields![k])),
+  };
+}
+
 /** The type of a value that is either `a` or `b` (converted to the
  *  complex lane when the other is complex), or `undefined`. Two records
- *  join only when they are one record type. */
+ *  join only when they are one record type, but for their constant
+ *  fields: a field whose constants differ is a string (CE-1652, step 4c). */
 export function joinType(a: IRType, b: IRType): IRType | undefined {
   if (!sameShape(a.shape, b.shape)) return undefined;
   if (a.lane === 'record' || b.lane === 'record')
-    return sameFields(a, b) ? a : undefined;
+    return sameFields(a, b, 'loose') ? commonConstants(a, b) : undefined;
   if (widensTo(a.lane, b.lane)) return b;
   return widensTo(b.lane, a.lane) ? a : undefined;
 }
@@ -413,6 +445,8 @@ export function typeToString(
    *  (`tuple<real, real>`) or -1, and a run-time length without its value. */
   axis: number | false = false
 ): string {
+  // A string field of a known value (CE-1652, step 4c).
+  if (t.constant !== undefined) return JSON.stringify(t.constant);
   // A record: its fields, named or not.
   if (t.lane === 'record')
     return `${t.nominal ?? 'record'}(${(t.fields ?? [])

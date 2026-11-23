@@ -410,14 +410,11 @@ describe('a protocol method declines', () => {
 
   test("Tycho's rotate: a body that compares the default with a point", () => {
     // `if about == figureDefault { … } else { about }`: with the default,
-    // the arms are a point and a string, and the strings compare at run
-    // time. With a point, `==` of a tuple and a string is `False` (CE-1652,
-    // step 4b): `compile-records-settled-values.test.ts`.
-    expectDeclines(
-      ce,
-      '(t: real) => circle((1, 0), 1).rotate(t)',
-      /arms of two types/
-    );
+    // the two strings are known and `==` is `True` (CE-1652, step 4c:
+    // `compile-records-string-constants.test.ts`). With a point, `==` of a
+    // tuple and a string is `False` (CE-1652, step 4b):
+    // `compile-records-settled-values.test.ts`.
+    expectAgrees(ce, '(t: real) => circle((1, 0), 1).rotate(t)');
     expectAgrees(ce, '(t: real) => circle((1, 0), 1).rotate(t, (1, 1))');
   });
 

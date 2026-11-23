@@ -470,19 +470,13 @@ describe("Tycho's fill, stroke and rotate", () => {
     expectAgrees(ce, '(t: real) => circle((1, 0), 1).rotate(t, (1, 1))');
   });
 
-  test('the default figureDefault: two strings compare at run time', () => {
+  test('the default figureDefault: two known strings', () => {
     // The arms of the `if` are two record types (stroke), or a point and a
-    // string (rotate): R3.
-    expectDeclines(
-      ce,
-      '(t: real) => circle((1, 0), 1).stroke("blue")',
-      /arms of two types/
-    );
-    expectDeclines(
-      ce,
-      '(t: real) => circle((1, 0), 1).rotate(t)',
-      /arms of two types/
-    );
+    // string (rotate); the default and `figureDefault` are known strings,
+    // so `==` is decided and the arm taken is the only one lowered
+    // (CE-1652, step 4c: `compile-records-string-constants.test.ts`).
+    expectAgrees(ce, '(t: real) => circle((1, 0), 1).stroke("blue")');
+    expectAgrees(ce, '(t: real) => circle((1, 0), 1).rotate(t)');
   });
 
   test('on GLSL and interval-js', () => {

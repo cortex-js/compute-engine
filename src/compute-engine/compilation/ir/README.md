@@ -3569,6 +3569,37 @@ before ("elements of two types"); `admits()` refuses the lane there too.
   it declines. A record field from a list parameter of a run-time length
   (`N(pattern, 15)` of `pattern: list<real>`) still declines ("a record with
   a field of a run-time length").
+- **String constants** (CE-1652, step 4c). `lower()` lowers a program up to
+  three times. The first lowering keeps no string constant, so a program
+  that compiles there keeps its code. When it declines and the constants
+  could decide a test (`seen`: an `Equal` or a `NotEqual` of two values
+  that each are a string constant, a string parameter or the read of a
+  string field (`mayHoldKnown()`), or a `Match` on such a parameter or
+  field), the second lowering keeps them (JavaScript, not the `bigint`
+  mode): `Lowering.known(v)` is the value of
+  a string constant (`b.constants`), of a parameter whose argument was a
+  known string (`held()`: at a parameter of no stated type, `any` or
+  `string`, the lane key holds the value, so a function is lowered once per
+  value; the arguments of a `string` parameter are then lowered before the
+  function is chosen), or of the read of a record field whose type holds
+  the value (`IRType.constant`, set by `make()` of `lower-records.ts`; two
+  records whose constant fields differ are two record types, and
+  `joinType()` makes such a field a plain string where they meet, as at an
+  `if` of two). The type of a value never holds a constant: the lowering
+  keeps the value of a parameter and of a field read aside
+  (`holdKnown()`), so a local written in a loop or an `if` of two literals
+  is a plain string. `Equal` and `NotEqual` of two known strings are
+  constants recorded in `typeTests`, so a condition of them takes its arm
+  (`typeDecided()`, the memo of `value()` keeping the decision), and a
+  `Match` on a known subject keeps the one case taken. Each such decision
+  reads its operands (`readKnown()`): the third lowering keeps a constant
+  only at the places (a parameter `f#i`, a field `T.k`) that a decision
+  read, or through which such a value came (`feeds`: the parameter `kind`
+  of `figureOf` into the field `Figure.0`), so a fill colour that no test
+  reads does not lower a function once per colour. The third lowering
+  takes the decisions of the second; if it fails all the same, the second
+  is the program. The decline of the second lowering is the
+  program's decline.
 - **The result of `run()`.** A record result of the entry is converted once, at
   the root (`record` of the `Syntax`, from the IR type of the result): a record
   of a named tuple type is an object keyed by its field names

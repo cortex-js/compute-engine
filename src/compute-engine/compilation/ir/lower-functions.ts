@@ -706,13 +706,14 @@ export function functionLowering(
   const laneKey = (
     sig: ReturnType<typeof signatureTypes>,
     args?: V[],
-    ops?: readonly Expression[]
+    ops?: readonly Expression[],
+    name?: string
   ) =>
     sig.params
       .map((p, i) => {
         // A parameter that holds the type of its argument: one function
         // per type, a record by its nominal type and each field.
-        const h = held(p, args?.[i], ops?.[i]);
+        const h = held(p, args?.[i], ops?.[i], name && `${name}#${i}`);
         if (h !== undefined) return `{${typeToString(h)}}`;
         // A point, or a flat list that binds whole, at a parameter that
         // takes the shape of its argument (`define()`): one function per
@@ -742,15 +743,35 @@ export function functionLowering(
    *  record; at a parameter of no stated type or `any`, also a string or
    *  a colour (JavaScript only); at a parameter of type `any`, also a real
    *  or an integer whose static type (of the argument `op`) proves its
-   *  lane (CE-1652, step 4b). Otherwise `undefined`, the rules of today. */
+   *  lane (CE-1652, step 4b). A string of a known value (`cx.known()`),
+   *  there or at a parameter of type `string`, is a type of its own, which
+   *  holds the value (`IRType.constant`; CE-1652, step 4c): one function
+   *  per value, where the lowering keeps the constant at the parameter
+   *  `place` (`cx.keepKnown()`). Otherwise `undefined`, the rules of
+   *  today. */
   const held = (
     p: ReturnType<typeof signatureTypes>['params'][number],
     v: V | undefined,
-    op?: Expression
+    op?: Expression,
+    place?: string
   ): IRType | undefined => {
-    if (v === undefined || !('record' in p) || p.record === undefined)
-      return undefined;
+    if (v === undefined) return undefined;
     const t = type(v);
+    const text =
+      javascript &&
+      t.lane === 'string' &&
+      t.shape.length === 0 &&
+      !cx.tuples.has(v);
+    if (!('record' in p) || p.record === undefined) {
+      // A parameter of type `string`.
+      const known =
+        text && p.lane === 'string' && p.shape.length === 0 && place
+          ? cx.keepKnown(v, place)
+          : undefined;
+      return known === undefined
+        ? undefined
+        : { lane: 'string', shape: [], constant: known };
+    }
     if (t.lane === 'record') return t;
     if (
       !javascript ||
@@ -759,8 +780,13 @@ export function functionLowering(
       cx.tuples.has(v)
     )
       return undefined;
-    if (t.lane === 'string' || t.lane === 'color')
-      return { lane: t.lane, shape: [] };
+    if (text) {
+      const known = place ? cx.keepKnown(v, place) : undefined;
+      return known === undefined
+        ? { lane: 'string', shape: [] }
+        : { lane: 'string', shape: [], constant: known };
+    }
+    if (t.lane === 'color') return { lane: t.lane, shape: [] };
     // A number at `any`: the lane that its static type proves, or that a
     // parameter of this kind holds, so that a test of its type in the body
     // is decided by the lane (`matchesType()` of `lower-match.ts`). A
@@ -853,7 +879,7 @@ export function functionLowering(
       // A record (or, at a parameter of no stated type or `any`, a string
       // or a colour): the parameter has the type of the argument, and the
       // function is lowered once per such type (`laneKey()`).
-      const h = held(declared, args?.[i], e.ops[i]);
+      const h = held(declared, args?.[i], e.ops[i], `${e.operator}#${i}`);
       if (h !== undefined) {
         // A parameter of a nominal tuple type takes a record of that type
         // only, or of a type that the static type of the argument proves
@@ -957,11 +983,15 @@ export function functionLowering(
           ? { v: param(ir, names[i], { lane: 'integer', shape: [] }, true) }
           : n
       );
-      const v = param(
-        ir,
-        names[i],
-        'type' in t && t.type !== undefined ? t.type : { lane: t.lane, shape }
-      );
+      // A string of a known value: the parameter is that value
+      // (`cx.holdKnown()`); its type does not hold it.
+      const { constant, ...paramType } =
+        'type' in t && t.type !== undefined ? t.type : { lane: t.lane, shape };
+      const v = param(ir, names[i], paramType);
+      if (constant !== undefined)
+        cx.holdKnown(v, constant, `${e.operator}#${i}`);
+      if (paramType.lane === 'string' && paramType.shape.length === 0)
+        cx.mayHoldKnown(v);
       if ('tuple' in t && t.tuple !== undefined) cx.tuples.set(v, t.tuple);
       if (t.lane === 'rows') cx.rowsParams.add(v);
       // Of the type of its argument: `x is T` reads its IR type.
@@ -993,7 +1023,7 @@ export function functionLowering(
     if (variants === undefined) functions.set(key, (variants = new Map()));
     // While the body is lowered, the function is the one of the lane
     // (`call()`); after, the one of its kind of call, or of both kinds.
-    const lane = laneKey(sig, args, e.ops);
+    const lane = laneKey(sig, args, e.ops, e.operator);
     variants.set(lane + '?', fn);
     // The function of this name being lowered, if any (another lane of
     // the same binding, `laneKey()`): restored after this one.
@@ -1264,6 +1294,12 @@ export function functionLowering(
               // A parameter that takes the shape of its argument, one
               // function per shape (`laneKey()`; CE-1652, step 4b).
               ('point' in p && p.point !== undefined) ||
+              // A parameter of type `string`, one function per known
+              // value (`held()`; CE-1652, step 4c), where the lowering
+              // keeps the constants.
+              (cx.keepsStrings &&
+                p.lane === 'string' &&
+                p.shape.length === 0) ||
               (!functions.has(binding.key) &&
                 !cx.runtimeLengths &&
                 p.shape[0] === 'run-time')
@@ -1342,7 +1378,7 @@ export function functionLowering(
         sig,
         early
       );
-      const lane = laneKey(sig, early, e.ops);
+      const lane = laneKey(sig, early, e.ops, e.operator);
       const both = variants?.get(lane);
       fn = variants?.get(lane + '?') as UserFunction;
       if (fn === undefined)
@@ -1488,6 +1524,15 @@ export function functionLowering(
             sameShape(t.shape, declared.shape)
             ? LANE_MISMATCH
             : undefined
+        );
+      // The function lowered for a known string (`held()`) takes that
+      // string only: a recursive call, which takes the function being
+      // lowered, with another string declines (`isSubType()` does not
+      // compare the constant of a string).
+      if (declared.constant !== undefined && cx.known(v) !== declared.constant)
+        decline(
+          op,
+          `an argument of ${e.operator} that is not the string "${declared.constant}" of the function being lowered`
         );
       return [...length, v];
     });

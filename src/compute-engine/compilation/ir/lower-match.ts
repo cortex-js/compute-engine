@@ -372,7 +372,11 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     const s = cx.value(e.ops[0])!;
     const t = cx.type(s);
     const point = cx.tuples.get(s) === 0 && t.shape.length === 1;
-    const known = b.constants.get(s);
+    // A string of a known value (`Lowering.known()`; CE-1652, step 4c) is
+    // decided as a constant.
+    const text = cx.known(s);
+    if (text !== undefined) cx.readKnown(s);
+    const known = text ?? b.constants.get(s);
     // Each case that can be taken: its condition (`undefined` when it takes
     // every value that reaches it) and its body. The cases after one that
     // takes every value are not read.

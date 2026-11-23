@@ -112,6 +112,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     fields: (IRType | undefined)[] = []
   ): V => {
     const types = values.map((v, k): IRType => {
+      const place = `${nominal?.nominal ?? 'record'}.${k}`;
       const t = fields[k] ?? type(v);
       if (t.lane === 'rows')
         decline(e, 'a record with a field of lists of rows of two lengths');
@@ -120,7 +121,17 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
       );
       if (shape.some((n) => typeof n !== 'number'))
         decline(e, 'a record with a field of a run-time length');
-      return { ...t, shape };
+      // A string of a known value: the field's type holds it (CE-1652,
+      // step 4c).
+      const known =
+        t.lane === 'string' && shape.length === 0 && !tuples.has(v)
+          ? cx.keepKnown(v, place)
+          : undefined;
+      return {
+        ...t,
+        shape,
+        ...(known === undefined ? {} : { constant: known }),
+      };
     });
     const v = b.list(values, {
       lane: 'record',
@@ -219,12 +230,17 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
   };
 
   /** The field `k` (from 0) of the record `r`: the value it was made of,
-   *  or its read. */
+   *  or its read. The read of a string field of a known value is that
+   *  value (`Lowering.known()`); its type does not hold it. */
   const field = (r: V, k: number): V => {
     const known = parts.get(r)?.[k];
     if (known !== undefined) return known;
     const t = type(r);
-    const v = b.op('field', [r, b.constant(k, 'integer')], t.fields![k]);
+    const { constant, ...f } = t.fields![k];
+    const v = b.op('field', [r, b.constant(k, 'integer')], f);
+    if (constant !== undefined)
+      cx.holdKnown(v, constant, `${t.nominal ?? 'record'}.${k}`);
+    if (f.lane === 'string' && f.shape.length === 0) cx.mayHoldKnown(v);
     const mark = t.marks?.[k];
     if (mark !== undefined) tuples.set(v, mark);
     return v;

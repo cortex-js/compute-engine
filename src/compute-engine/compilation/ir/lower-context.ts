@@ -297,6 +297,33 @@ export type Lowering = {
    *  A condition made of such tests (`And`, `Or`, `Not`) takes its arm,
    *  and the other arm is not lowered (`conditional()` of `lower.ts`). */
   readonly typeTests: Map<Expression, boolean>;
+  /** The value of the string `v` when it is known when the code is
+   *  emitted (CE-1652, step 4c; README, "Records"): a string constant, a
+   *  parameter whose argument was one, a field of a record made from one
+   *  (`holdKnown()`). Only in a lowering that keeps the constants
+   *  (`lower()`: a program that the first lowering declines); in the
+   *  first, `undefined`, and the lowering notes that a constant could be
+   *  there when `v` is a value of `mayHoldKnown()`. */
+  known(v: V): string | undefined;
+  /** `v` (a string parameter, the read of a string field) is a known
+   *  string where the lowering keeps the constants and its argument or its
+   *  record holds one: in the first lowering, a test of it with a known
+   *  string notes that the constants could decide it (`lower()`). */
+  mayHoldKnown(v: V): void;
+  /** The lowering keeps the string constants (`known()`). */
+  readonly keepsStrings: boolean;
+  /** The value of the known string `v` that the place `place` (a
+   *  parameter `f#i`, a record field `T.k`) keeps in its type, or
+   *  `undefined`: the last lowering keeps a constant only at a place whose
+   *  constant a decision read (`readKnown()`), so that a constant that no
+   *  test reads (a colour) does not lower a function once per value. */
+  keepKnown(v: V, place: string): string | undefined;
+  /** `v` (a parameter, the read of a field) is the known string `value`,
+   *  kept at the place `place` (`keepKnown()`). */
+  holdKnown(v: V, value: string, place: string): void;
+  /** A decision (`==`, a `Match`) read the known string `v`: the places
+   *  its value came through keep their constant (`keepKnown()`). */
+  readKnown(v: V): void;
   /** The inputs and the parameters of the lane `rows`. */
   readonly rowsParams: Set<V>;
   /** The count of the elements of a row `At(g, i)` of such a value at an

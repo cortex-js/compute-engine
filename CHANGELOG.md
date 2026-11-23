@@ -153,6 +153,22 @@
   strings compared at run time whose `if` arms have different kinds of value,
   and a list parameter of no stated length stored in a value of a named tuple
   type still fall back to the interpreter.
+- **`compile()` compiles `==`, `!=` and `match` of strings whose values are
+  known when the code is compiled, which it refused when the arms of the
+  `if` or the `match` had different kinds of value** (CE-1652). A string
+  literal, a protocol default, a parameter given such a string and a field
+  of a value of a named tuple type made from one keep their value inside the
+  compiled code, so `w == figureDefault` with the default `"default"`, and
+  `match fig.kind { == "group" => …; == "circle" => …; … }` on a figure made
+  by `figureOf("circle", …)`, are decided and only the arm taken is
+  compiled: `circle((t, 0), 1).rotate(t)`, `.scale(2)`, `.reflect("x")`,
+  `.skew(t, 0.5)` and `.stroke("blue")` of a drawing prelude compile. A
+  function is then compiled once per value of such a string that a test
+  reads (not per colour of a fill that no test reads). A program that
+  compiled before keeps its code; a string computed at run time (`if t > 0
+  { "x" } else { "y" }`) is compared at run time as before; a figure of
+  kind `"group"` (a recursive `figureBox`) still falls back to the
+  interpreter.
 
 ## 0.200.1 _2026-11-23_
 

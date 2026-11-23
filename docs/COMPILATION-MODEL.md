@@ -1474,7 +1474,8 @@ taken does not decline the program
 A second exception is a condition made only of tests that the IR types of a
 function compiled for its argument types decide (`x is T` of a parameter of
 type `any` or of no stated type, `==` of a string and a value that is never a
-string; `And`, `Or`, `Not` of them; CE-1652): the compiler lowers only the
+string, `==` of two strings whose values are known; `And`, `Or`, `Not` of
+them; CE-1652): the compiler lowers only the
 arm taken, so `if x is Figure { … } else { reduce(x, …) }` compiles for a
 figure. Such a condition declined before.
 A name read only in the arm that is not taken is then not an input, and is
@@ -2696,7 +2697,19 @@ type, `any`, `list`) a point or a flat list of a stated length (of strings
 too: `figureOf("invalid", ["message"])`), one copy per type and shape. `a == b` and `a != b` of a string and a real, an integer, a boolean,
 `Nothing` or a point are the interpreter's `False` and `True`
 (`(0, 0) == "default"`); of a string and a record or a colour (which the
-interpreter leaves unevaluated) they decline. `N(x, 15)` of a list or a tuple
+interpreter leaves unevaluated) they decline. On JavaScript, a program that
+declines where a string of a known value was (a literal, a protocol default,
+a parameter given such a string, a field of a record made from one) is
+compiled again with these values kept (CE-1652, step 4c): `==` and `!=` of two
+such strings and a `match` on one are decided, and the conditional lowers only
+the arm taken, so `rotate(self, a, about: any = figureDefault)` with
+`if about == figureDefault { … } else { about }`, and
+`match fig.kind { == "group" => figureBox(g, m); … }` on a circle, compile. A
+function is compiled once per value only at a parameter or a field whose value
+such a test reads (two fill colours make one copy). A program that compiles
+without the values keeps its code, and a string computed at run time (an `if`
+of two literals with a run-time condition) is compared at run time.
+`N(x, 15)` of a list or a tuple
 of reals is the list or the tuple. A record whose field is a list parameter
 of a run-time length (`dash(self, pattern: list<real>)` storing
 `N(pattern, 15)`) declines. A record passed to a function of the host still
