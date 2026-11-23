@@ -49,6 +49,7 @@ import {
 import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
 import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
+import { typedByMatch } from './lower-match.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
@@ -331,6 +332,7 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
         _isLambda?: boolean;
         inferredSignature?: boolean;
         _signatureSkeleton?: Type;
+        _derivedSignature?: boolean;
         signature?: { type: Type };
       }
     | undefined;
@@ -411,7 +413,32 @@ function signatureTypes(e: Fn, literal: Fn, wide: 'real' | 'complex') {
           open: present(t) === 'unknown' || present(t) === 'number',
         };
   });
-  const r = signature?.result && present(signature.result);
+  // A result that the engine inferred from a body that holds a `Match` is
+  // not the type of its value (CE-1731): the body decides, as for a result
+  // of no stated type.
+  // A user function declares its result as the type of its body
+  // (`Typed(body, "boolean")`, also as the last statement of a `Block`); a
+  // host declares it in the signature of its definition (not derived from
+  // the literal, `_derivedSignature`); a result written `unknown` is refined
+  // from the body.
+  const looseWritten =
+    typeof written === 'object' &&
+    written.kind === 'signature' &&
+    loose(present(written.result));
+  const inferred =
+    looseWritten ||
+    (od?._isLambda
+      ? od._derivedSignature === true &&
+        !(
+          isFunction(literal.ops[0], 'Typed') ||
+          (isFunction(literal.ops[0], 'Block') &&
+            isFunction(literal.ops[0].ops.at(-1), 'Typed'))
+        )
+      : vd === undefined || vd.inferredType === true);
+  const r =
+    inferred && typedByMatch(literal.ops[0])
+      ? undefined
+      : signature?.result && present(signature.result);
   // A list of reals, integers or booleans: the type of the body, whose
   // length can be a value of the body; or a tuple of them (a point), whose
   // body is a tuple; or a list of points (`tuple` is the axis of the mark).
@@ -807,6 +834,8 @@ export function functionLowering(
       read: false,
     };
     cx.bodies.set(literal.ops[0], reads);
+    const scope = literal.localScope;
+    if (scope !== undefined) cx.scopes.push(scope);
     try {
       b.define(ir, () => {
         const body =
@@ -928,6 +957,7 @@ export function functionLowering(
               `a recursive call of ${e.operator} whose value can be an absent list, read by other than At, First, Last, an arithmetic operator or a reduction`
             );
     } finally {
+      if (scope !== undefined) cx.scopes.pop();
       cx.frames.splice(0, cx.frames.length, ...outer);
       cx.inFunction = caller;
       if (prior === undefined) cx.bodies.delete(literal.ops[0]);

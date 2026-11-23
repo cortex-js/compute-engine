@@ -3374,6 +3374,54 @@ binds another literal (a second clause, a function of several clauses), and in a
 nested block, where the function is a local whose value the statement writes. A
 program whose last statement is a definition is `Nothing` and declines.
 
+## Match, x is T and N
+
+`lower-match.ts`. None of the three emits a test of a type at run time
+(`docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time").
+
+- `N(x)` and `N(x, p)` of a number (an integer, a rational, a real or a
+  complex), a string or a boolean is `x`. `p`, when given, is a literal integer
+  of at least 15: the interpreter rounds to `p` digits, and `N(1/3, 15)` is
+  `0.333333333333333`, 1e-15 from the double. Another precision, another
+  operand (`N([x, 2])`), a number in the interval mode (the enclosure of `x`
+  need not hold the rounded number) and the `bigint` mode decline.
+- `MatchesType(x, T)` (`x is T`) is the constant `True` when the static type of
+  `x` is a subtype of `T`, `False` when the two types do not overlap
+  (`x is string` of `x: real`); otherwise it declines (`x is integer` of
+  `x: real`). The subject is held raw: its type is the type of its canonical
+  form in the innermost local scope of the walk (`Lowering.scopes`: a `Block`,
+  the function literal whose body is lowered, the root literal), and it is
+  lowered only for its effect. A subject whose type comes from a `Match`
+  declines (`typedByMatch()`, CE-1731), and so does a subject that reads a
+  local of a block or a capture of a case: the type of a local is the type of
+  its value, which can be a `Match`. A name that the walk binds as an input, a
+  parameter or a loop index, and a free name, are read by their type.
+- `Match(subject, case…)`: the subject is lowered once. A case of a string or a
+  real number constant (`== "rect"`, `== 3`) is a clause of a `Which` on the
+  subject, compared by `Equal` (exactly: the interpreter compares a number
+  that is not an integer with a tolerance, a known limitation of
+  `docs/COMPILATION-MODEL.md`); it is decided at compile time when the subject
+  is a constant (a `bigint` constant is compared by `Equal`), and not taken when the subject has another kind (a number
+  against a string). `_` takes every value. A `Tuple` pattern of distinct names
+  is taken when the subject is a tuple of its length, and binds each name to
+  the element at its position; it is not taken by a scalar or a tuple of another
+  length, and declines on a list. The cases after one that takes every value
+  are not read, so with a constant subject one case remains and the shapes of
+  the others do not count (`match "rect" { == "circ" => [1, 2]; == "rect" => t
+  }` is `t`). Each body is the body of the function literal of its case
+  (`buildCaseClosure()`), made canonical in the innermost local scope of the
+  walk and lowered in the scope of that literal, as the interpreter runs it. A
+  guard, a pattern of another kind (a name, `Pin`, a list, a range), a `Match`
+  with no case that takes every value, and cases whose results have two shapes
+  (`arms of two types`) decline. A string compiles on JavaScript only.
+- The engine types a `Match` by its case bodies that are literals (CE-1731). A
+  user function whose result is inferred, not declared, from a body that holds
+  a `Match` (or calls a function whose body holds one) takes its result from
+  the lowered body, as a result of no stated type. A declared result
+  (`function f(s: string) -> boolean { match s { … } }`, the body
+  `Typed(…, "boolean")`; a signature that the host declares) is kept, and a
+  body that contradicts it declines. `typedByMatch()` visits each node once.
+
 ## How to add
 
 - An operator: one row in `OPERATORS`; a spelling in `JS.ops` and `GLSL.ops` for

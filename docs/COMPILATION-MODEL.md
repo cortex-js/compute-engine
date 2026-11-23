@@ -178,6 +178,10 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `x = 10^-10` gives `0`; the interpreter gives `4.99999999966667e-21` from
   the lower-tail kernel. CE-1590.
 
+- `javascript` (crafted): a `Match` case of a number that is not an integer
+  compares the subject exactly; the interpreter compares with the tolerance of
+  `isEqual`. `Match(x, MatchCase(0.3, 1), MatchCase(_, 0))` at
+  `x = 0.1 + 0.2` gives `0`; the interpreter gives `1`. CE-1652.
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives

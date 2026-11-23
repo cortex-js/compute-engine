@@ -104,21 +104,34 @@ describe('a jump declines everywhere else', () => {
     // The value reads an input: with no input, the block folds to a number.
     ['a Break with a value', inLoop(['Break', 'x'])],
     ['a Break with a value in a branch', inLoop(['If', gt, ['Break', 5]])],
-    [
-      'a Break in a Match case',
-      inLoop([
-        'Match',
-        'k',
-        ['MatchCase', 2, ['Break']],
-        ['MatchCase', '_', ['Assign', 's', 'k']],
-      ]),
-    ],
   ])('%s', (_name, json) => {
     const ce = engine();
     for (const to of SHADERS)
       expect(() =>
         compile(ce.box(json as any), { to, fallback: false })
       ).toThrow(/Could not compile/);
+  });
+
+  test('a Break in a Match case is the Break of the If of its case', () => {
+    const ce = engine();
+    const match = inLoop([
+      'Match',
+      'k',
+      ['MatchCase', 2, ['Break']],
+      ['MatchCase', '_', ['Assign', 's', 'k']],
+    ]);
+    const ifForm = inLoop([
+      'If',
+      ['Equal', 'k', 2],
+      ['Break'],
+      ['Assign', 's', 'k'],
+    ]);
+    expect(ce.box(match as any).evaluate().re).toBe(1);
+    for (const to of SHADERS) {
+      const code = (x: unknown) =>
+        (compile(ce.box(x as any), { to, fallback: false }) as any).code;
+      expect(code(match)).toBe(code(ifForm));
+    }
   });
 
   test('a Break in the body of a user function called in a Loop', () => {

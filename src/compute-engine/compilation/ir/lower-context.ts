@@ -8,6 +8,7 @@ import type {
   BoxedValueDefinition,
   Expression,
   FunctionInterface,
+  Scope,
 } from '../../global-types.js';
 import type { Type } from '../../../common/type/types.js';
 import type { CompileDiagnosticKind } from '../types.js';
@@ -268,6 +269,14 @@ export type Lowering = {
   readonly b: Builder;
   readonly rows: readonly OperatorRow[];
   readonly frames: Frame[];
+  /** The local scopes of the engine around the node being lowered, the
+   *  innermost last: the scope of each node with one (a `Block`), of a
+   *  function literal whose body is lowered, and of the root literal. A
+   *  part that the canonical form holds raw (a case of a `Match`, the
+   *  subject of `MatchesType`) is made canonical in the innermost one, as
+   *  the interpreter makes it canonical in the scope of the running
+   *  block. */
+  readonly scopes: Scope[];
   value(e: Expression, want?: boolean): V | undefined;
   /** The value of `e`, which must be a scalar. */
   scalar(e: Expression): V;

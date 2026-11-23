@@ -8,8 +8,9 @@ const intervalCompile = (expr: any, options: Record<string, unknown> = {}) =>
   compile(expr, { ...options, to: 'interval-js' } as any) as any;
 
 /**
- * `compile()` of the `Match` head (docs/LANGUAGE-MODEL.md §5). The compiler
- * declines `Match`, and the interpreter fallback gives its value.
+ * `compile()` of the `Match` head on `interval-js`. The cases of constants
+ * and `_` lower as the clauses of a `Which` on the subject
+ * (`compile-match.test.ts` has the cases of every target, CE-1652).
  */
 
 const ce = new ComputeEngine();
@@ -18,7 +19,7 @@ ce.declare('xs', 'real | list<real> | list<list<real>>');
 // subject `x` of the tests on this engine is declared.
 ce.declare('x', 'number');
 
-describe('COMPILE Match — interval-js fails closed', () => {
+describe('COMPILE Match — interval-js', () => {
   const m: MathJsonExpression = [
     'Match',
     'x',
@@ -26,15 +27,23 @@ describe('COMPILE Match — interval-js fails closed', () => {
     ['MatchCase', '_', -1],
   ];
 
-  it('interval-js reports failure (no interval-Which treatment invented, §5)', () => {
-    const r = compile(ce.box(m), { to: 'interval-js' });
-    expect(r.success).toBe(false);
+  it('compiles as the Which of its cases, with the interpreter\'s values', () => {
+    const r = intervalCompile(ce.box(m));
+    expect(r.success).toBe(true);
+    expect(r.run({ x: 1 })).toEqual({
+      kind: 'interval',
+      value: { lo: 10, hi: 10 },
+    });
+    expect(r.run({ x: 2 })).toEqual({
+      kind: 'interval',
+      value: { lo: -1, hi: -1 },
+    });
   });
 });
 
 describe('COMPILE Match — typed bindings (`MatchesType` with a literal type)', () => {
 
-  it('the interval target keeps failing closed (its values are intervals)', () => {
+  it('declines a type that the static type of the subject does not decide', () => {
     const r = intervalCompile(
       ce.box(['MatchesType', 'x', { str: 'integer' }])
     );

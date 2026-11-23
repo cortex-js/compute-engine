@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Improvements
+
+- **`compile()` compiles `Match`, `MatchesType` and `N`, which it refused**
+  (CE-1652). A `Match` (the Epsil `match`) compiles when each case is a string
+  or a number constant, `_`, or a `Tuple` of names:
+  `match k { == "square" => x^2; == "circle" => π x^2; _ => 0 }` gives `9` for
+  `k = "square"`, `x = 3`, and `match P { (a, b) => a + b; _ => 0 }` gives `3`
+  for `P = (1, 2)`. A `Tuple` pattern is chosen from the type of the subject,
+  and a constant subject keeps one case. `x is T` compiles to `true` or
+  `false` when the type of `x` decides it (`x is string` of a real `x` is
+  `false`), and `N(x)` or `N(x, 15)` of a number, a string or a boolean
+  compiles to `x`. A case with a guard, a `Match` with no `_` case, an `x is
+  T` that the type of `x` does not decide and `N(x, p)` with fewer than 15
+  digits still fall back to the interpreter.
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features

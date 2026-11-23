@@ -187,6 +187,7 @@ import {
   isEnclosureNode,
 } from './lower-enclosure.js';
 import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
+import { matchLowering } from './lower-match.js';
 
 export { Decline } from './lower-context.js';
 
@@ -615,6 +616,9 @@ function lowerOnce(
             (i.k === 'region' && regionRow(i.op)?.effect !== 'pure')
   );
   const frames: Frame[] = [{ names: new Map(), loop: false }];
+  // The local scopes of the engine around the node being lowered
+  // (`Lowering.scopes`).
+  const scopes: Scope[] = [];
   // The memo of `value()`, keyed by the structural id of a node (`idOf()`),
   // so that equal sub-expressions that the source writes as separate nodes
   // are lowered once.
@@ -1631,7 +1635,14 @@ function lowerOnce(
     }
     const region = b.current();
     const effects = b.effects;
-    const v = node(e, want);
+    const scope = isFunction(e) ? e.localScope : undefined;
+    if (scope !== undefined) scopes.push(scope);
+    let v: V | undefined;
+    try {
+      v = node(e, want);
+    } finally {
+      if (scope !== undefined) scopes.pop();
+    }
     const lane = v === undefined ? undefined : type(v).lane;
     if (bigint && (lane === 'real' || lane === 'complex' || lane === 'color'))
       decline(
@@ -3054,6 +3065,13 @@ function lowerOnce(
       case 'AssertPresent':
         if (e.nops !== 1) break;
         return present(e, value(e.ops[0])!);
+      // `lower-match.ts`.
+      case 'N':
+        return matches.numeric(e, want);
+      case 'MatchesType':
+        return matches.matchesType(e);
+      case 'Match':
+        return matches.match(e, want);
       case 'Declare':
         decline(e, 'Declare outside a block');
       case 'Function':
@@ -6458,6 +6476,7 @@ function lowerOnce(
     b,
     rows,
     frames,
+    scopes,
     value,
     scalar,
     wholeRows,
@@ -6505,6 +6524,7 @@ function lowerOnce(
   const lists = listLowering(cx);
   const matrices = matrixLowering(cx, lists);
   const fns = functionLowering(cx, lists);
+  const matches = matchLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));
@@ -6711,6 +6731,7 @@ function lowerOnce(
     root = operatorLiteral(root, rows, undefined, options.vars);
   if (isFunction(root, 'Function') && isLibrary(root)) {
     b.literal = true;
+    if (root.localScope !== undefined) scopes.push(root.localScope);
     // A parameter of no declared type is a real. One that the body reads as
     // a collection (`w ↦ Sum(w)`: the type of the literal is `(w:
     // collection) -> number`) has no settled shape: a list there would be
