@@ -13,6 +13,7 @@ import {
   withDeclaredTypeOnly,
   withShieldedValues,
 } from '../boxed-expression/constraint-subject.js';
+import { isSealedImportValue } from '../boxed-expression/prepared-import-binding.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
 
@@ -384,6 +385,29 @@ export function withSymbolicInputs<T>(
   const hidden: Record<string, unknown> = {};
   for (const name of names) hidden[name] = true;
   return withVarsValuesHidden(expr, hidden, fn);
+}
+
+/**
+ * The sealed value definitions (Document rows, `isSealedImportValue()`)
+ * that the names of `inputs` read in `expr`, in the bodies of the functions
+ * it calls and in the values it reads, from the current scope: each one
+ * whose type holds the type that `inputs` gives its name, as for a typed
+ * input (`isTypedInputValue()`). A row with a narrower type is left out: a
+ * value of the given type could be outside it.
+ */
+export function sealedInputDefinitions(
+  expr: Expression,
+  inputs: Readonly<Record<string, string>>
+): Set<BoxedValueDefinition> {
+  const ce = expr.engine;
+  const result = new Set<BoxedValueDefinition>();
+  for (const [v, name] of inputDefinitions(expr, Object.keys(inputs)))
+    if (
+      isSealedImportValue(v) &&
+      isSubtype(ce.type(inputs[name]).type, v.type.type)
+    )
+      result.add(v);
+  return result;
 }
 
 /**

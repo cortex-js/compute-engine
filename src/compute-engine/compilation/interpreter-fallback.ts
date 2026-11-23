@@ -8,7 +8,10 @@ import type { BoxedDefinition, Expression, Scope } from '../global-types.js';
 import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
 import { rewriteWithBinders } from '../boxed-expression/binders.js';
 import { withBindingValuesFn } from '../engine-declarations.js';
-import { isSealedPreparedNamespace } from '../boxed-expression/prepared-import-binding.js';
+import {
+  isSealedPreparedNamespace,
+  withoutAdmittedValueWrites,
+} from '../boxed-expression/prepared-import-binding.js';
 import {
   collectionElementType,
   resolveTypeAlias,
@@ -685,15 +688,20 @@ function interpreterRun(
                   : ce.number(v as number);
       }
     return ce._inScope(buildScope, () =>
-      withBindingValuesFn(ce, bindings, values, () => {
-        // Each such run rebuilds `expr` with `subs()`: the cost of not
-        // declaring in a sealed namespace.
-        const value = (
-          sealed.size === 0 ? expr : expr.subs(substituted)
-        ).evaluate();
-        observe?.(value);
-        return interpretedRunValue(value, expr.type.type);
-      })
+      withBindingValuesFn(ce, bindings, values, () =>
+        // A write on a sealed row that the caller admitted for the inputs
+        // (CE-1707) is admitted for their write and restore only, not in
+        // the evaluation.
+        withoutAdmittedValueWrites(() => {
+          // Each such run rebuilds `expr` with `subs()`: the cost of not
+          // declaring in a sealed namespace.
+          const value = (
+            sealed.size === 0 ? expr : expr.subs(substituted)
+          ).evaluate();
+          observe?.(value);
+          return interpretedRunValue(value, expr.type.type);
+        })
+      )
     );
   }) as unknown as CompiledRunner;
   return { calling: 'expression', run: fallbackRun };

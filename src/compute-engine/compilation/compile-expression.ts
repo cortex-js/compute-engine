@@ -23,9 +23,11 @@ import {
   holdsEnclosureInputOrResult,
 } from './interval-fallback.js';
 import { compilationScope, inCallerScope } from './compile-scope.js';
+import { withAdmittedValueWrites } from '../boxed-expression/prepared-import-binding.js';
 import { assertCompilationOptionsContract } from '../engine-extension-contracts.js';
 import {
   compileInputNames,
+  sealedInputDefinitions,
   symbolicInputsRead,
   withSymbolicInputs,
   withTypedInputs,
@@ -211,10 +213,27 @@ function compileExpression<
     // definition of that scope, which the bodies of the functions that
     // `expr` calls read too. The expression bound to the declarations of
     // the compilation would give the value to its own occurrences only.
+    // An input that is a Document row is sealed: a run admits the write of
+    // the run's value on the row and its restore (`withAdmittedValueWrites()`),
+    // as the compiled code reads the input in place of the row (CE-1707),
+    // when the row's type holds the given type (`sealedInputDefinitions()`).
+    const inputs = options.inputs;
     const fallback = (decline: CompileDeclineError): CompilationResult<T, R> =>
-      inCallerScope(expr, () =>
-        compileInScope<T, R>(expr, { ...options, inputs: undefined }, decline)
-      );
+      inCallerScope(expr, () => {
+        const result = compileInScope<T, R>(
+          expr,
+          { ...options, inputs: undefined },
+          decline
+        );
+        const rows = sealedInputDefinitions(expr, inputs);
+        const run = result.run as ((...args: unknown[]) => unknown) | undefined;
+        if (rows.size === 0 || run === undefined) return result;
+        return {
+          ...result,
+          run: ((...args: unknown[]) =>
+            withAdmittedValueWrites(rows, () => run(...args))) as never,
+        };
+      });
     const result = withCompileInputs(expr, options, (bound, rest) =>
       compileExpression<T, R>(bound, rest)
     );

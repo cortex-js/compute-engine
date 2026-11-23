@@ -42,6 +42,48 @@ export function isSealedPreparedNamespace(scope: Scope): boolean {
   return writeAdmissions.get(scope) === 'none';
 }
 
+/**
+ * The sealed value definitions whose value `withAdmittedValueWrites()`
+ * lets a write change, or `undefined`.
+ */
+let admittedValueWrites: ReadonlySet<object> | undefined;
+
+/**
+ * Run `fn` with a value write admitted on each sealed value definition of
+ * `defs`: the interpreter fallback of a compilation gives an `inputs` name
+ * that is a Document row its value for one run, and puts the row's value
+ * back before it returns (`withBindingValuesFn()`). The evaluation between
+ * the two runs with no write admitted (`withoutAdmittedValueWrites()`). A
+ * definition write stays refused. Re-entrant: an inner window keeps the
+ * outer one.
+ */
+export function withAdmittedValueWrites<T>(
+  defs: ReadonlySet<object>,
+  fn: () => T
+): T {
+  if (defs.size === 0) return fn();
+  const saved = admittedValueWrites;
+  admittedValueWrites =
+    saved === undefined ? defs : new Set([...saved, ...defs]);
+  try {
+    return fn();
+  } finally {
+    admittedValueWrites = saved;
+  }
+}
+
+/** Run `fn` with no value write on a sealed definition admitted. */
+export function withoutAdmittedValueWrites<T>(fn: () => T): T {
+  const saved = admittedValueWrites;
+  if (saved === undefined) return fn();
+  admittedValueWrites = undefined;
+  try {
+    return fn();
+  } finally {
+    admittedValueWrites = saved;
+  }
+}
+
 export function assertWritableImport(
   name: string,
   binding: object | undefined,
@@ -49,6 +91,12 @@ export function assertWritableImport(
 ): void {
   if (binding === undefined) return;
   const admission = writeAdmissions.get(binding);
+  if (
+    admission === 'none' &&
+    write === 'value' &&
+    admittedValueWrites?.has(binding)
+  )
+    return;
   if (admission === 'none' || (admission === 'value' && write === 'definition'))
     throw new ConstantAssignmentError(name);
 }
