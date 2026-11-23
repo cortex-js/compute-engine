@@ -40,6 +40,7 @@ import {
   isTupleShapedType,
 } from '../collection-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
+import { isAssignedLocal } from './declared-local.js';
 import { declaredBinders } from './binding-sites.js';
 import { callableBindingInContext, readsActivationHalf } from './binders.js';
 import { scopeActivationTemplate } from './ambient-chain.js';
@@ -1108,6 +1109,10 @@ function excludesEveryScalar(t: Type): boolean {
  * returns `undefined` for it and the declaration is the slot.
  *
  * Limitations:
+ * - A parameter that the body writes (`Assign(n, …)`, at any depth) is never
+ *   lifted, and no use of it is evidence, before or after the write: with
+ *   `g(n) := Block(Assign(n, Range(1, n)), Sum(n))`, `g([3, 4])` is applied
+ *   to each element and gives `[6, 10]`. `g(n: list)` takes it whole.
  * - A copy of the parameter into a local is not a use of the parameter:
  *   `function h(xs) { let ys = xs; mean(ys) }` is applied to each element of
  *   a list (user decision 2026-11-14); `h(xs: list)` takes it whole. A
@@ -1161,6 +1166,9 @@ export function wholeCollectionParameterType(
     return undefined;
   const binding = param.valueDefinition;
   if (binding === undefined) return undefined;
+  // A use of a parameter that the body writes describes no argument: the
+  // boxing of the literal makes its type `unknown` for the same reason.
+  if (isAssignedLocal(binding)) return undefined;
 
   // The locals of the body assigned a function literal whose first slot
   // has a collection arm, with that arm. When the body is boxed, the call

@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A function that assigns its own parameter is applied to each element of
+  a list argument, whatever the body does with the parameter** (CE-1507).
+  The parameter had a scalar slot when the body only indexed it after the
+  write, but took the list whole when the body passed it to `Sum` or
+  `Mean`: with `g(n) := Block(Assign(n, Range(1, n)), Sum(n))`, `g([3, 4])`
+  was an `incompatible-type` error, and it is now `[6, 10]`, as
+  `g(3)` is `6`. A body that takes the list whole declares its parameter:
+  with `F(p: list) := Block(Assign(p, [1, 2]), Length(p))`,
+  `F([10, 20, 30])` is `2`.
+
 ### Improvements
 
 - **A recursive function row of a Document whose body has no effect is pure,

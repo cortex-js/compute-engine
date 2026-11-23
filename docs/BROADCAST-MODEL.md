@@ -109,6 +109,17 @@ wrote**, not by the operand shapes:
    parameter in a static error of the body, and the type that compilation
    reads.
 
+   A parameter with no declared type that the body writes (`Assign(p, …)`
+   at any depth) is a scalar parameter: no use of it makes it take a
+   collection whole, because a use no longer describes the argument (user
+   decision 2026-11-22, CE-1507). A self-call that passes it a collection
+   is still evidence (the self-call rule below). So with
+   `F(p) := Block(Assign(p, [1, 2]), [p[k] for k in 1..Length(p)])`,
+   `F([10, 20, 30])` is `[[1, 2], [1, 2], [1, 2]]`, one call per element,
+   and with `g(n) := Block(Assign(n, Range(1, n)), Sum(n))`, `g([3, 4])` is
+   `[6, 10]`. A body that takes the list whole declares its parameter:
+   `F(p: list)` gives `[1, 2]`.
+
    A list at a parameter with no declared type is mapped, one call per
    element, also when another parameter binds its argument whole: a
    parameter typed as a collection, as a union with a collection arm, or

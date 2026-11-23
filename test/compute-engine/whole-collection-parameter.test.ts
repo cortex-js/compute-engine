@@ -564,6 +564,79 @@ describe('Limitations of the rule, as they behave today', () => {
     ).toBe('2');
   });
 
+  test('a parameter that the body writes is not lifted (CE-1507)', () => {
+    // A use of a written parameter is not evidence about the argument,
+    // before or after the write (user decision 2026-11-22): the call is
+    // applied to each element, as the boxing of the literal types the
+    // parameter `unknown`. `g(n: list)` takes the list whole.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        ['Block', ['Assign', 'n', ['Range', 1, 'n']], ['Sum', 'n']],
+        'n',
+      ])
+    );
+    expect(ce.box('g').type.toString()).toBe('(n: unknown) -> number');
+    expect(
+      ce
+        .box(['g', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('[6,10]');
+    expect(ce.box(['g', 3]).evaluate().toString()).toBe('6');
+
+    // The use before the write is not evidence either.
+    ce.assign(
+      'm',
+      ce.box([
+        'Function',
+        ['Block', ['Mean', 'xs'], ['Assign', 'xs', 2], 'xs'],
+        'xs',
+      ])
+    );
+    expect(
+      ce
+        .box(['m', ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('[2,2]');
+
+    // The witness of CE-1507: each element gives the written list.
+    const body: MathJsonExpression = [
+      'Block',
+      ['Assign', 'p', ['List', 1, 2]],
+      [
+        'Comprehension',
+        ['At', 'p', 'k'],
+        ['Element', 'k', ['Range', 1, ['Length', 'p']]],
+      ],
+    ];
+    ce.assign('F', ce.box(['Function', body, 'p']));
+    expect(
+      ce
+        .box(['F', ['List', 10, 20, 30]])
+        .evaluate()
+        .toString()
+    ).toBe('[[1,2],[1,2],[1,2]]');
+    ce.assign('Fd', ce.box(['Function', body, ['Typed', 'p', "'list'"]]));
+    expect(
+      ce
+        .box(['Fd', ['List', 10, 20, 30]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2]');
+
+    // The Epsil route.
+    expect(
+      epsilValue(
+        new ComputeEngine(),
+        'function g(n) { n = 1..n\nsum(n) }\ng([3, 4])'
+      )
+    ).toBe('[6,10]');
+  });
+
   test('a call to a helper that the body assigns a function literal', () => {
     // A local declared with a function literal is a variable of type
     // `function`: the call `h(xs)` applies its value to the list, and the
