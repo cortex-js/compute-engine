@@ -2,6 +2,21 @@
 
 ### Improvements
 
+- **The `///` comments of a protocol and of its members are kept, and the
+  editor functions show them** (CE-1730). `epsilHover()` on a protocol gives
+  its comment, also for a protocol that a prelude declared on the engine,
+  and the signature help and the completion of a member give the member's
+  comment: after `executeEpsil(ce, prelude)`, `c.rotate(` shows "Rotates the
+  figure by `angle` radians…". A call written `rotate(c, ` shows the
+  member's declared signature, `rotate(self: Figure, angle: real, …)`, and
+  not the generic signature of its dispatcher. A value made by a function of
+  the engine has the function's result type, so `let c = circle(…)` gets the
+  members of `Figure` with no annotation. In MathJSON the comments are an
+  optional fourth operand of `DeclareProtocol`, `["Dictionary", description:
+  …, members: ["Dictionary", member: …]]`, and a host documents a protocol
+  with the options `description` and `memberDescriptions` of
+  `ce.declareProtocol()`.
+
 - **`epsilCompletions()` offers the names that the engine defines, such as
   the functions of a prelude that the host ran** (CE-1729). After
   `executeEpsil(ce, prelude)`, typing `circ` in the edited source offers the

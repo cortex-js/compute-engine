@@ -1522,14 +1522,41 @@ export function serializeEpsil(
     // protocols this one extends, printed as `protocol NAME extends P₁, P₂ {`.
     // An empty list is the same as no list, and prints nothing.
     //
+    // The optional fourth operand, `["Dictionary", description: …, members:
+    // ["Dictionary", member: …]]`, is the documentation of the protocol and
+    // of its members, printed as `///` comments before each.
+    //
     DeclareProtocol: (expr: MathJsonExpression): FormattingBlock => {
       const args = operands(expr);
-      if (args.length < 1 || args.length > 3)
+      if (args.length < 1 || args.length > 4)
         return serializeGenericFunction(expr);
+      const doc = (text: string): FormattingBlock[] =>
+        text.split('\n').map((l) => fmt.text(l === '' ? '///' : `/// ${l}`));
+      let description: string | undefined;
+      const memberDocs = new Map<string, string>();
+      if (args.length === 4) {
+        const attributes = attributeEntries(args[3]);
+        if (attributes === null) return serializeGenericFunction(expr);
+        for (const [key, value] of Object.entries(attributes)) {
+          if (key === 'description' && stringValue(value) !== null)
+            description = stringValue(value)!;
+          else if (key === 'members') {
+            const docs = attributeEntries(value);
+            if (docs === null) return serializeGenericFunction(expr);
+            for (const [member, text] of Object.entries(docs)) {
+              if (stringValue(text) === null)
+                return serializeGenericFunction(expr);
+              memberDocs.set(member, stringValue(text)!);
+            }
+          } else return serializeGenericFunction(expr);
+        }
+      }
+      const head = (line: FormattingBlock): FormattingBlock =>
+        description === undefined ? line : fmt.stack(...doc(description), line);
       const rawName = symbol(args[0]) ?? stringValue(args[0]);
       if (rawName === null) return serializeGenericFunction(expr);
       let name = escapeSymbol(rawName);
-      if (args.length === 3) {
+      if (args.length >= 3) {
         if (operator(args[2]) !== 'List') return serializeGenericFunction(expr);
         const parents = operands(args[2]).map(
           (p) => symbol(p) ?? stringValue(p)
@@ -1541,7 +1568,7 @@ export function serializeEpsil(
             .map((p) => escapeProtocolName(p!))
             .join(', ')}`;
       }
-      if (args.length === 1) return fmt.line('protocol ', name, ' {}');
+      if (args.length === 1) return head(fmt.line('protocol ', name, ' {}'));
 
       const entries = attributeEntries(args[1]);
       if (entries === null) return serializeGenericFunction(expr);
@@ -1552,17 +1579,25 @@ export function serializeEpsil(
         const kind = stringValue(operand(spec, 1)) ?? symbol(operand(spec, 1));
         const text = stringValue(operand(spec, 2)) ?? symbol(operand(spec, 2));
         if (text === null) return serializeGenericFunction(expr);
+        const memberDoc = memberDocs.get(member);
+        if (memberDoc !== undefined) members.push(...doc(memberDoc));
         if (kind === 'function')
           members.push(fmt.text(`function ${escapeSymbol(member)}${text}`));
         else if (kind === 'readonly' || kind === 'readwrite')
           members.push(fmt.text(`${kind} ${escapeSymbol(member)}: ${text}`));
         else return serializeGenericFunction(expr);
       }
-      if (members.length === 0) return fmt.line('protocol ', name, ' {}');
-      return fmt.stack(
-        fmt.line('protocol ', name, ' {'),
-        fmt.indent(fmt.stack(...members)),
-        fmt.text('}')
+      // A documented member that the protocol does not declare has no line
+      // to document.
+      if ([...memberDocs.keys()].some((m) => !Object.hasOwn(entries, m)))
+        return serializeGenericFunction(expr);
+      if (members.length === 0) return head(fmt.line('protocol ', name, ' {}'));
+      return head(
+        fmt.stack(
+          fmt.line('protocol ', name, ' {'),
+          fmt.indent(fmt.stack(...members)),
+          fmt.text('}')
+        )
       );
     },
 

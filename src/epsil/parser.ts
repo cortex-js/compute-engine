@@ -2492,6 +2492,7 @@ export class Parser {
     const open = this.advance(); // '{'
     this.brackets.push(open);
     const entries: MathJsonExpression[] = ['Dictionary'];
+    const memberDocs: MathJsonExpression[] = ['Dictionary'];
     // `Self` names the conforming type inside a protocol declaration. Seeded
     // for the member signatures only — it never reaches the engine's type
     // registry (P12), and a user type of the same name is left known.
@@ -2503,12 +2504,25 @@ export class Parser {
         }
         if (this.check('CLOSE_BRACE') || this.check('EOF')) break;
         const startPos = this.pos;
+        // The `///` comment before a member documents it.
+        const memberDoc = docCommentText(this.current);
+        const memberStart = this.current.start;
         const member = this.parseProtocolMember(name);
         if (member === null) {
           this.recoverInBracket();
           break;
         }
         entries.push(member);
+        const memberName = symbol(operand(member, 1));
+        if (memberDoc !== undefined && memberName !== null)
+          memberDocs.push(
+            this.kvPair(
+              memberName,
+              this.wrap({ str: memberDoc }, memberStart, this.current.start),
+              memberStart,
+              this.current.start
+            )
+          );
         if (this.pos === startPos) this.advance();
       }
     } finally {
@@ -2549,11 +2563,40 @@ export class Parser {
     // A SEMANTIC protocol (`protocol Copyable {}`) declares no members, so it
     // carries no dictionary at all, unless it has parents: the parent list is
     // the third operand, so the members operand is then required, an empty
-    // `["Dictionary"]` for a protocol with no members of its own.
-    if (entries.length > 1 || parents.length > 1)
+    // `["Dictionary"]` for a protocol with no members of its own. The `///`
+    // comments of the protocol and of its members are the fourth operand,
+    // `["Dictionary", description: …, members: ["Dictionary", member: …]]`,
+    // and require the two before it.
+    const doc = docCommentText(kw);
+    const attributes: MathJsonExpression[] = ['Dictionary'];
+    if (doc !== undefined)
+      attributes.push(
+        this.kvPair(
+          'description',
+          this.wrap({ str: doc }, kw.start, end),
+          kw.start,
+          end
+        )
+      );
+    if (memberDocs.length > 1)
+      attributes.push(
+        this.kvPair(
+          'members',
+          this.wrap(memberDocs, open.start, end),
+          open.start,
+          end
+        )
+      );
+    const documented = attributes.length > 1;
+    if (entries.length > 1 || parents.length > 1 || documented)
       parts.push(this.wrap(entries, open.start, end));
-    if (parents.length > 1)
-      parts.push(this.wrap(parents, parentsStart, parentsEnd));
+    if (parents.length > 1 || documented)
+      parts.push(
+        parents.length > 1
+          ? this.wrap(parents, parentsStart, parentsEnd)
+          : this.wrap(parents, nameTok.end, nameTok.end)
+      );
+    if (documented) parts.push(this.wrap(attributes, kw.start, end));
     return this.wrap(parts, kw.start, end);
   }
 

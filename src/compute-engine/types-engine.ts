@@ -216,9 +216,15 @@ export type IntegrationProvider = (
 /** One requirement of a protocol. A `function` member's signature is stored
  * VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
  * (ruling P12), never a type the registry can resolve. */
-export type ProtocolMember =
+export type ProtocolMember = (
   | { kind: 'function'; signature: string }
-  | { kind: 'readonly' | 'readwrite'; type: string };
+  | { kind: 'readonly' | 'readwrite'; type: string }
+) & {
+  /** The documentation of the member: the `///` comment before it in an
+   * Epsil `protocol` statement, or `options.memberDescriptions` of
+   * `ce.declareProtocol()`. Markdown. */
+  description?: string;
+};
 
 /**
  * One write of inference evidence onto a definition, as delivered to
@@ -455,6 +461,10 @@ export type SumConformanceRecord = {
 export type ProtocolRecord = {
   name: string;
   members: Record<string, ProtocolMember>;
+  /** The documentation of the protocol: the `///` comment before an Epsil
+   * `protocol` statement, or `options.description` of
+   * `ce.declareProtocol()`. Markdown. */
+  description?: string;
   /** The PARENTS of this protocol, in the order the declaration wrote them
    * (`protocol FloorRing extends LinearOrder, Ring, FloorOrder`). Empty when
    * the protocol extends nothing.
@@ -905,11 +915,19 @@ export interface IComputeEngine {
    * together (`protocol-extends-member-conflict`). An `extends` value that is
    * not an array of strings, or that lists a name twice, throws
    * `invalid-protocol-declaration`; a name that is not a declared protocol
-   * throws `protocol-unknown`. */
+   * throws `protocol-unknown`.
+   *
+   * `options.description` documents the protocol, and
+   * `options.memberDescriptions` its members, by name (markdown): an editor
+   * shows them in the hover of the protocol and in the help of a member. */
   declareProtocol(
     name: string,
     members: ProtocolMembersInput,
-    options?: { extends?: readonly string[] }
+    options?: {
+      extends?: readonly string[];
+      description?: string;
+      memberDescriptions?: Readonly<Record<string, string>>;
+    }
   ): void;
 
   /** Implement `protocol` for `type`, declaring the conformance edge if it is

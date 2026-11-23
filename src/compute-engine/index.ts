@@ -931,6 +931,9 @@ export class ComputeEngine implements IComputeEngine {
         // `protocol-redefinition`
         // (`docs/TYPE-SYSTEM.md`).
         declOrigin: r._declOrigin,
+        // The documentation, replaced with the members: silent, like the
+        // stamp, since no type or dispatch reads it.
+        description: r.description,
       };
     });
     return () => {
@@ -955,6 +958,8 @@ export class ComputeEngine implements IComputeEngine {
         // expression could have read.
         if (s.declOrigin === undefined) delete r._declOrigin;
         else r._declOrigin = s.declOrigin;
+        if (s.description === undefined) delete r.description;
+        else r.description = s.description;
         // The conformance list is MUTATED in place (pushed to), so the
         // snapshot took a copy and the comparison is on contents.
         if (
@@ -1026,14 +1031,21 @@ export class ComputeEngine implements IComputeEngine {
   declareProtocol(
     name: string,
     members: ProtocolMembersInput,
-    options?: { extends?: readonly string[] }
+    options?: {
+      extends?: readonly string[];
+      description?: string;
+      memberDescriptions?: Readonly<Record<string, string>>;
+    }
   ): void {
-    declareProtocolImpl(
-      this,
-      name,
-      members,
-      options?.extends === undefined ? undefined : { extends: options.extends }
-    );
+    declareProtocolImpl(this, name, members, {
+      ...(options?.extends === undefined ? {} : { extends: options.extends }),
+      ...(options?.description === undefined
+        ? {}
+        : { description: options.description }),
+      ...(options?.memberDescriptions === undefined
+        ? {}
+        : { memberDescriptions: options.memberDescriptions }),
+    });
   }
 
   /** See `IComputeEngine.declareProtocolImplementation`. Throws on error —
