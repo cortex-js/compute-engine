@@ -89,6 +89,10 @@
 
 ### Resolved Issues
 
+- **`PolyLog(1, z)` of an exact rational `z` with `0 < z < 1` is a
+  logarithm with no negation** (CE-1596). `PolyLog(1, 1/2).evaluate()` was
+  `-ln(1/2)`, and it is now `ln(2)`; `PolyLog(1, 1/3)` is `ln(3/2)`.
+
 - **`LambertW(x)` is correct for `x` above about `1e154`** (CE-1511). The
   value was the first estimate of the iteration: `N(LambertW(1e300))` was
   `684.2471774347877`, and it is now `684.2472086297608`. Compiled

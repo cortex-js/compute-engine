@@ -67,6 +67,23 @@ describe('PolyLog at 1/2 and 2', () => {
   });
 });
 
+describe('PolyLog of order 1 at an exact rational', () => {
+  // Li₁(z) = −ln(1 − z). For 0 < 1 − z < 1 the result is the logarithm of
+  // 1/(1 − z), with no negation (CE-1596).
+  const cases: [Json, Json][] = [
+    [q(1, 2), ['Ln', 2]],
+    [q(1, 3), ['Ln', q(3, 2)]],
+    [q(-1, 2), ['Negate', ['Ln', q(3, 2)]]],
+    [-1, ['Negate', ['Ln', 2]]],
+  ];
+  for (const [z, expected] of cases)
+    test(`PolyLog(1, ${JSON.stringify(z)}) is ${JSON.stringify(expected)}`, () => {
+      const result = ce.expr(['PolyLog', 1, z]).evaluate();
+      expect(result.json).toEqual(expected);
+      expect(result.N().re).toBeCloseTo(-Math.log(1 - ce.expr(z).re), 14);
+    });
+});
+
 describe('HurwitzZeta and Zeta at a base point of 1/2, 1/4 and 3/4', () => {
   const cases: [Json, number][] = [
     [['HurwitzZeta', q(3, 2), q(1, 2)], 4.776537947554833],

@@ -1613,7 +1613,15 @@ function polylogReduce(
   // Order-specific elementary forms, valid for all z (symbolic or numeric).
   const oneMinusZ = (): Expression =>
     engine.function('Subtract', [engine.One, z]);
-  if (sInt === 1) return engine.function('Ln', [oneMinusZ()]).neg();
+  if (sInt === 1) {
+    // For an exact rational z with 0 < 1 − z < 1, −ln(1 − z) = ln(1/(1 − z)),
+    // a logarithm with a positive value: `Li₁(1/2)` is ln 2, not −ln(1/2).
+    if (isNumber(z) && z.isExact && asRational(z) !== undefined) {
+      const w = engine.One.sub(z);
+      if (w.re > 0 && w.re < 1) return engine.function('Ln', [w.inv()]);
+    }
+    return engine.function('Ln', [oneMinusZ()]).neg();
+  }
   if (sInt === 0) return engine.function('Divide', [z, oneMinusZ()]);
   if (sInt === -1)
     return engine.function('Divide', [
