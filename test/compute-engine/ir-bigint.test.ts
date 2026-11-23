@@ -348,6 +348,73 @@ describe('IR bigint: the interpreter, exactly', () => {
     ) as CompilationResult<'javascript'>;
     expect(r.run!({ n: -7 } as never)).toEqual(-4n);
   });
+  test('(a - Mod(a, c)) / c is the floor division of a by c (CE-1739)', () => {
+    const points = [-7, -6, -1, 0, 1, 5, 6, 7].flatMap((n) =>
+      [-3, 2, 3].map((m) => ({ n, m }))
+    );
+    const big = [
+      { n: P60 + 5n, m: 7 },
+      { n: -(P60 + 5n), m: 7 },
+      { n: P53 * 10n + 7n, m: -9 },
+    ];
+    // The witness: a divisor of a factorial.
+    agrees(
+      [
+        'Divide',
+        ['Subtract', 'n', ['Mod', 'n', ['Factorial', 'm']]],
+        ['Factorial', 'm'],
+      ],
+      [-7, -1, 0, 1, 100].map((n) => ({ n, m: 3 }))
+    );
+    for (const x of [
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'm'],
+      ['Divide', ['Add', ['Negate', ['Mod', 'n', 'm']], 'n'], 'm'],
+      [
+        'Divide',
+        ['Subtract', ['Multiply', 2, 'n'], ['Mod', ['Multiply', 2, 'n'], 'm']],
+        'm',
+      ],
+      // A literal divisor: the product `1/3 · (n - Mod(n, 3))`, and
+      // `2/3 · (n - Mod(n, 3))`.
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 3]], 3],
+      [
+        'Divide',
+        ['Multiply', 2, ['Subtract', 'n', ['Mod', 'n', 3]]],
+        3,
+      ],
+      ['Add', ['Divide', ['Subtract', 'n', ['Mod', 'n', 7]], 7], 1],
+    ])
+      agrees(x, [...points, ...big]);
+    expect(
+      compiled(['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'm']).code
+    ).toMatch(/bfloorDiv/);
+  });
+  test('a quotient that is not (a - Mod(a, c)) / c declines (CE-1739)', () => {
+    for (const x of [
+      // Another divisor, another dividend of Mod.
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 'm']], 'k'],
+      ['Divide', ['Subtract', 'n', ['Mod', 'k', 'm']], 'm'],
+      ['Divide', ['Subtract', 'n', ['Mod', 'n', 3]], 2],
+      // A sum: `n - Mod(n, m) + 1` is not a multiple of `m`.
+      ['Divide', ['Add', 'n', ['Negate', ['Mod', 'n', 'm']], 1], 'm'],
+      // A dividend that writes a variable: the interpreter reads it twice,
+      // and its value at n = 10, m = 3 is 10/3.
+      [
+        'Block',
+        ['Declare', 't', 'integer', 'n'],
+        [
+          'Divide',
+          [
+            'Subtract',
+            ['Block', ['Assign', 't', ['Add', 't', 1]], 't'],
+            ['Mod', ['Block', ['Assign', 't', ['Add', 't', 1]], 't'], 'm'],
+          ],
+          'm',
+        ],
+      ],
+    ])
+      expect(() => compiled(x)).toThrow(/bigint mode/);
+  });
   test('Round of a quotient with another roundingTies declines (CE-1737)', () => {
     const e = new ComputeEngine();
     e.declare('n', 'integer');

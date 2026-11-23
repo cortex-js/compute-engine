@@ -83,6 +83,14 @@
   `Round(3n/4)` compile too. `Round` with a `roundingTies` other than the
   default still falls back, and so does `Floor(n/m)` of two inputs.
 
+- **In the bigint compile mode, `(a − Mod(a, c))/c` of integers compiles**
+  (CE-1739, #638). With `n, m: integer`,
+  `compile((n − Mod(n, m!))/m!, { mode: 'bigint' })` fell back to the
+  interpreter, because a quotient of two integers is not always an integer.
+  This quotient always is: it now compiles to the exact floor division
+  `⌊n/m!⌋`, and at `n = 100n, m = 3n` gives `16n`. A constant divisor,
+  `(n − Mod(n, 3))/3`, compiles too. Another quotient still falls back.
+
 - **A compiled `If` or `Which` with an empty list as one arm compiles on
   JavaScript** (CE-1735, #638). `If(n < 1, [], Range(1, n))` declined with
   "an empty list", so the program fell back to the interpreter. The arm

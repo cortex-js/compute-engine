@@ -2339,7 +2339,9 @@ compile. A loop counts with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)`
 is exact at any `n`. `Floor`, `Ceil`, `Round` and `Truncate` of a product
 of integers and rational constants compile to an exact division of integers:
 `Floor(n/2)`, `Ceil((n + 1)/3)`, `Round(3n/4)` (with the default
-`roundingTies`).
+`roundingTies`). The quotient `(a − Mod(a, c))/c` of integers `a` and `c`
+with no effect is the floor division `⌊a/c⌋`, also of a constant `c`
+(`(n − Mod(n, m!))/m!`, `(n − Mod(n, 3))/3`); another quotient declines.
 
 **What declines.** A node off the integer lane declines with the code
 `'bigint-lane'`; an operator that the mode does not spell declines with

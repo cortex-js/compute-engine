@@ -1001,6 +1001,9 @@ rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` of an operand other
 than a product of rational constants and integers (the syntax does not spell
 them; `Floor(n/3)` is `Floor(1/3·n)`, the floor division `floordiv.int` of `n`
 by 3, and `Round(n/2)` with a `roundingTies` other than the default declines);
+a quotient other than `(a − Mod(a, c))/c` of pure integers, which is
+`floordiv.int(a, c)` (and `p/c·(a − Mod(a, c))` of a constant `c`, which is
+`p·floordiv.int(a, c)`);
 `If` with no else of a number and `Which` with no `True` clause
 (their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`);
 `Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an

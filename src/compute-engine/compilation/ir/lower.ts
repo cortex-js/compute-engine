@@ -2110,8 +2110,13 @@ function lowerOnce(
         if (v !== undefined) return v;
         break;
       }
+      case 'Divide': {
+        const v = bigint ? flooredQuotient(e) : undefined;
+        if (v !== undefined) return v;
+        break;
+      }
       case 'Multiply':
-        return product(e);
+        return (bigint ? flooredQuotient(e) : undefined) ?? product(e);
       case 'Power': {
         // The interval mode (`README.md`, "The interval mode"): `x^(p/q)` of
         // a literal rational is `Root(x, q)^p`, or `pow.principal` of the
@@ -3292,6 +3297,74 @@ function lowerOnce(
     return apply(e, ofOp('div.q'), [v, b.constant(q, 'integer')]);
   };
 
+  /** The numerator and the denominator (`> 0`) of an exact rational literal,
+   *  `undefined` for any other expression. */
+  const rational = (op: Expression): [bigint, bigint] | undefined => {
+    const n = literalNumber(op);
+    if (n === undefined || !n.isExact) return undefined;
+    const nv = n.numericValue;
+    if (typeof nv === 'number')
+      return Number.isInteger(nv) ? [BigInt(nv), 1n] : undefined;
+    return nv instanceof ExactNumericValue &&
+      BigInt(nv.imRational[0]) === 0n &&
+      nv.radical === 1
+      ? [BigInt(nv.rational[0]), BigInt(nv.rational[1])]
+      : undefined;
+  };
+
+  /** The bigint mode: `(a − Mod(a, c)) / c` is `⌊a/c⌋`, the floor division
+   *  `floordiv.int` of the integers `a` and `c`, because `Mod` is the
+   *  remainder with the sign of the divisor. Of a literal `c > 1`, the
+   *  canonical form is the product `p/c · (a − Mod(a, c))`, which is
+   *  `p·⌊a/c⌋`. The interpreter reads `a` and `c` twice and the code reads
+   *  them once, so each must be pure and write no variable. `undefined` when
+   *  `e` is not such a quotient of two integers. */
+  const flooredQuotient = (e: Fn): V | undefined => {
+    if (e.nops !== 2) return undefined;
+    // The dividend `x`, the divisor `c` (an expression, or the literal
+    // denominator `q`), and the factor `p` of the product.
+    let [x, c]: [Expression, Expression | undefined] = [e.ops[0], e.ops[1]];
+    let [p, q]: [bigint, bigint | undefined] = [1n, undefined];
+    if (e.operator === 'Multiply') {
+      const k = e.ops.findIndex((op) => rational(op) !== undefined);
+      if (k < 0) return undefined;
+      [p, q] = rational(e.ops[k])!;
+      if (q === 1n) return undefined;
+      [x, c] = [e.ops[1 - k], undefined];
+    }
+    const library = (y: Expression, name: string, n: number) =>
+      isFunction(y, name) &&
+      y.nops === n &&
+      isLibraryOperator(y as never, name);
+    if (!library(x, 'Add', 2)) return undefined;
+    const [s, t] = (x as Fn).ops;
+    const k = library(s, 'Negate', 1) ? 0 : library(t, 'Negate', 1) ? 1 : -1;
+    if (k < 0) return undefined;
+    const mod = (k === 0 ? s : t) as Fn;
+    const a = k === 0 ? t : s;
+    const m = mod.ops[0];
+    if (!library(m, 'Mod', 2)) return undefined;
+    const [ma, mc] = (m as Fn).ops;
+    if (!ma.isSame(a)) return undefined;
+    if (q !== undefined) {
+      const r = rational(mc);
+      if (r === undefined || r[1] !== 1n || r[0] !== q) return undefined;
+      c = mc;
+    } else if (!mc.isSame(c!)) return undefined;
+    const pure = (y: Expression) =>
+      y.isPure === true && facts(y).writes.size === 0;
+    if (!pure(a) || !pure(c!)) return undefined;
+    const [va, vc] = [value(a)!, value(c!)!];
+    if ([va, vc].some((v) => type(v).lane !== 'integer' || type(v).shape.length))
+      return undefined;
+    const quotient = apply(e, ofOp('floordiv.int'), [va, vc]);
+    if (p === 1n) return quotient;
+    return apply(e, 'Multiply', [
+      b.constant(Number.isSafeInteger(Number(p)) ? Number(p) : p, 'integer'),
+      quotient,
+    ]);
+  };
+
   /** The bigint mode: `Floor`, `Ceil`, `Round` or `Truncate` of a product
    *  of exact rational literals and integers (the canonical form of `n/2`
    *  is `Multiply(1/2, n)`) is the quotient of `a = p · integers` by `q`,
@@ -3309,18 +3382,6 @@ function lowerOnce(
       !isLibraryOperator(x as never, 'Multiply')
     )
       return undefined;
-    const rational = (op: Expression): [bigint, bigint] | undefined => {
-      const n = literalNumber(op);
-      if (n === undefined || !n.isExact) return undefined;
-      const nv = n.numericValue;
-      if (typeof nv === 'number')
-        return Number.isInteger(nv) ? [BigInt(nv), 1n] : undefined;
-      return nv instanceof ExactNumericValue &&
-        BigInt(nv.imRational[0]) === 0n &&
-        nv.radical === 1
-        ? [BigInt(nv.rational[0]), BigInt(nv.rational[1])]
-        : undefined;
-    };
     let [p, q] = [1n, 1n];
     const others: Expression[] = [];
     for (const op of x.ops) {

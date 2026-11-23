@@ -208,7 +208,7 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[[R, R], R, 'div.q']],        { fold: (a: number, b: number) => a / b }),
   // The floor of the quotient of two integers, which the lowering makes in
   // the bigint mode only: the rounding of an integer times a rational
-  // constant (`Floor(n/2)`).
+  // constant (`Floor(n/2)`), and `(a - Mod(a, c))/c`.
   row(undefined,      2,          [[[I, I], I, 'floordiv.int']], {}),
   row('Power',        2,          [...rc('pow', 2), [[I, I], I, 'pow.int']], { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
   row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
