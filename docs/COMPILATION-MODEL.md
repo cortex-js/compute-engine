@@ -1930,7 +1930,7 @@ The result of an expression has `broadcast()`, `broadcastAsync()`,
 is the value of `run()` at that cell, a batch has no batch body, and
 `runAsync()` runs `run()` (no loop goes to the pool). With `mode: 'bigint'` it computes every integer as a `bigint`, with the
 helpers, the inputs, the results and the pole of "The `bigint` mode"; a
-program with a real or complex value anywhere (`n/2`, `Floor(n/3)`,
+program with a real or complex value anywhere (`n/2`, `Floor(n/m)`,
 `n < 7/2`, a real input), and the option `vars`, decline with
 `outside-profile`, not `bigint-lane`. A colour (`Rgb`, `Hsl`, `Hsv`,
 `Oklab`, `Oklch` of three channels, and the five `As*` conversions of a
@@ -2333,7 +2333,10 @@ an else, `Which` with a `True` clause, `Block`, `Sum` and `Product` with
 integer bounds, `List`, `Range`, `Length`, `At`, `Sort`, `Map`, `Filter`,
 `Reduce`, `ReplaceAt`, `Loop` and user functions with integer parameters
 compile. A loop counts with a `bigint` index, so `Sum(Mod(k, 7), k = 1..n)`
-is exact at any `n`.
+is exact at any `n`. `Floor`, `Ceil`, `Round` and `Truncate` of a product
+of integers and rational constants compile to an exact division of integers:
+`Floor(n/2)`, `Ceil((n + 1)/3)`, `Round(3n/4)` (with the default
+`roundingTies`).
 
 **What declines.** A node off the integer lane declines with the code
 `'bigint-lane'`; an operator that the mode does not spell declines with
@@ -2343,7 +2346,8 @@ decline does. Examples, with `n`, `m: integer` and `x: real`:
 | Expression                                    | Reason of the decline                                         |
 | --------------------------------------------- | ------------------------------------------------------------- |
 | `n + x`, `n + 10π`                            | a real value                                                  |
-| `Floor(n/3)`, `n < 7/2`, `Sum(i, i = 1..n/2)` | a rational constant has no `bigint` value                     |
+| `n/3`, `n < 7/2`, `Sum(i, i = 1..n/2)`        | a rational constant has no `bigint` value                     |
+| `Floor(n/m)`                                  | a quotient of two integers is not an integer                  |
 | `Floor(Sqrt(n))`                              | `Sqrt` of an integer is not an integer                        |
 | `n^m`                                         | the exponent is not proved nonnegative (`n^m` is a rational at `m < 0`) |
 | `Factorial2(n)`                               | its value is not an integer (`(−5)!! = 1/3`)                  |

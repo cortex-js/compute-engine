@@ -64,6 +64,14 @@
 
 ### Improvements
 
+- **In the bigint compile mode, `Floor`, `Ceil`, `Round` and `Truncate` of
+  an integer times a rational constant compile.** With `n: integer`,
+  `compile(Floor(n/2), { mode: 'bigint' })` fell back to the interpreter
+  (`1/2` has no `bigint` value). It now compiles to an exact division of
+  integers, and at `n = -7n` gives `-4n`; `Ceil((n + 1)/3)` and
+  `Round(3n/4)` compile too. `Round` with a `roundingTies` other than the
+  default still falls back, and so does `Floor(n/m)` of two inputs.
+
 - **A compiled `If` or `Which` with an empty list as one arm compiles on
   JavaScript** (CE-1735, #638). `If(n < 1, [], Range(1, n))` declined with
   "an empty list", so the program fell back to the interpreter. The arm

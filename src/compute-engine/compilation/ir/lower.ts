@@ -2078,6 +2078,14 @@ function lowerOnce(
         const d = apply(e, 'Add', [p, apply(e, 'Negate', [q])]);
         return apply(e, 'Abs', [d]);
       }
+      case 'Floor':
+      case 'Ceil':
+      case 'Round':
+      case 'Truncate': {
+        const v = bigint ? roundedQuotient(e) : undefined;
+        if (v !== undefined) return v;
+        break;
+      }
       case 'Multiply':
         return product(e);
       case 'Power': {
@@ -3244,6 +3252,81 @@ function lowerOnce(
     } else if (p !== 1) factors = [b.constant(p, 'integer'), ...lists];
     const v = mul(factors);
     return apply(e, ofOp('div.q'), [v, b.constant(q, 'integer')]);
+  };
+
+  /** The bigint mode: `Floor`, `Ceil`, `Round` or `Truncate` of a product
+   *  of exact rational literals and integers (the canonical form of `n/2`
+   *  is `Multiply(1/2, n)`) is the quotient of `a = p · integers` by `q`,
+   *  where `p/q` is the product of the literals and `q > 0`, rounded with
+   *  the floor division of integers: `Ceil` is `-⌊-a/q⌋`, `Truncate` is
+   *  `sign(a)·⌊|a|/q⌋`, and `Round` (ties away from zero, the default
+   *  `roundingTies`) is `sign(a)·⌊(2|a| + q)/2q⌋`. `undefined` when the
+   *  operand is not such a product, or has no literal that is not an
+   *  integer. */
+  const roundedQuotient = (e: Fn): V | undefined => {
+    const [x] = e.ops;
+    if (
+      e.nops !== 1 ||
+      !isFunction(x, 'Multiply') ||
+      !isLibraryOperator(x as never, 'Multiply')
+    )
+      return undefined;
+    const rational = (op: Expression): [bigint, bigint] | undefined => {
+      const n = literalNumber(op);
+      if (n === undefined || !n.isExact) return undefined;
+      const nv = n.numericValue;
+      if (typeof nv === 'number')
+        return Number.isInteger(nv) ? [BigInt(nv), 1n] : undefined;
+      return nv instanceof ExactNumericValue &&
+        BigInt(nv.imRational[0]) === 0n &&
+        nv.radical === 1
+        ? [BigInt(nv.rational[0]), BigInt(nv.rational[1])]
+        : undefined;
+    };
+    let [p, q] = [1n, 1n];
+    const others: Expression[] = [];
+    for (const op of x.ops) {
+      const pq = rational(op);
+      if (pq === undefined) others.push(op);
+      else [p, q] = [p * pq[0], q * pq[1]];
+    }
+    if (q === 1n || others.length === 0) return undefined;
+    if (q < 0n) [p, q] = [-p, -q];
+    if (e.operator === 'Round' && !SETTINGS.roundingTies(ce))
+      decline(e, 'Round with a roundingTies other than the default');
+    const values = others.map((op) => value(op)!);
+    if (
+      values.some((v) => type(v).lane !== 'integer' || type(v).shape.length)
+    )
+      decline(
+        e,
+        `${e.operator} of a product of a rational and a value that is not an integer (the bigint mode)`,
+        BIGINT_LANE
+      );
+    const int = (k: bigint) =>
+      b.constant(Number.isSafeInteger(Number(k)) ? Number(k) : k, 'integer');
+    const mul = (xs: V[]) =>
+      xs.length === 1 ? xs[0] : apply(e, 'Multiply', xs);
+    const a =
+      p === 1n
+        ? mul(values)
+        : p === -1n
+          ? apply(e, 'Negate', [mul(values)])
+          : mul([int(p), ...values]);
+    const floorDiv = (n: V, d: bigint) =>
+      apply(e, ofOp('floordiv.int'), [n, int(d)]);
+    if (e.operator === 'Floor') return floorDiv(a, q);
+    if (e.operator === 'Ceil')
+      return apply(e, 'Negate', [floorDiv(apply(e, 'Negate', [a]), q)]);
+    const magnitude = apply(e, 'Abs', [a]);
+    const k =
+      e.operator === 'Truncate'
+        ? floorDiv(magnitude, q)
+        : floorDiv(
+            apply(e, 'Add', [apply(e, 'Multiply', [int(2n), magnitude]), int(q)]),
+            2n * q
+          );
+    return apply(e, 'Multiply', [apply(e, 'Sign', [a]), k]);
   };
 
   /** The booleans `first`, `next(1)`, … `next(n - 1)` joined by `And`

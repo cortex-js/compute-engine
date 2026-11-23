@@ -523,6 +523,7 @@ export const JS_BIGINT: Syntax = deepFreeze({
     'mul.int': '($0 * $1)',
     'abs.int': '_SYS.babs($0)',
     'mod.int': '_SYS.bfloorMod($0, $1)',
+    'floordiv.int': '_SYS.bfloorDiv($0, $1)',
     'max.int': '_SYS.bmax($0, $1)',
     'min.int': '_SYS.bmin($0, $1)',
     'emax.int': '_SYS.bmax($0, $1)',

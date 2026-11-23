@@ -325,6 +325,40 @@ describe('IR bigint: the interpreter, exactly', () => {
       [{ J: [0, 2, 3, 5], n: 10 }]
     );
   });
+  test('Floor, Ceil, Round and Truncate of an integer times a rational constant (CE-1737)', () => {
+    const points = [-7, -6, -5, -1, 0, 1, 5, 6, 7].map((n) => ({ n, m: 3 }));
+    const big = [P60 + 5n, -(P60 + 5n), P53 * 10n + 7n].map((n) => ({
+      n,
+      m: -3,
+    }));
+    for (const head of ['Floor', 'Ceil', 'Round', 'Truncate'])
+      for (const x of [
+        ['Divide', 'n', 2],
+        ['Divide', ['Multiply', -5, 'n'], 6],
+        ['Divide', ['Add', ['Multiply', 'n', 'm'], 1], 4],
+        ['Multiply', ['Rational', 7, 10], 'n'],
+      ])
+        agrees([head, x], [...points, ...big]);
+    // A structural `Rational`, with no canonical form.
+    const r = compile(
+      ce.box(['Floor', ['Multiply', ['Rational', 1, 2], 'n']], {
+        form: 'structural',
+      }),
+      { ...BIG, fallback: false } as never
+    ) as CompilationResult<'javascript'>;
+    expect(r.run!({ n: -7 } as never)).toEqual(-4n);
+  });
+  test('Round of a quotient with another roundingTies declines (CE-1737)', () => {
+    const e = new ComputeEngine();
+    e.declare('n', 'integer');
+    e.roundingTies = 'to-even';
+    expect(() =>
+      compile(e.box(['Round', ['Divide', 'n', 2]]), {
+        ...BIG,
+        fallback: false,
+      } as never)
+    ).toThrow(/roundingTies/);
+  });
   test('a function literal at the root', () => {
     const r = compiled([
       'Function',
@@ -582,8 +616,9 @@ describe('IR bigint: declines', () => {
   // Each row has its options: a third parameter of the callback with no
   // column is read by Jest as `done`.
   const DECLINES: [string, Json, Record<string, unknown>][] = [
-    ['a quotient under Floor', ['Floor', ['Divide', 'n', 3]], {}],
-    ['a quotient under Ceil', ['Ceil', ['Divide', 'n', 2]], {}],
+    ['a quotient of two integers under Floor', ['Floor', ['Divide', 'n', 'm']], {}],
+    ['a rational times a real under Floor', ['Floor', ['Divide', 'x', 2]], {}],
+    ['a quotient outside of a rounding', ['Add', ['Divide', 'n', 2], 1], {}],
     ['Floor of a square root', ['Floor', ['Sqrt', 'n']], {}],
     [
       'a checked division under an integer promise',

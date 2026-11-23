@@ -337,6 +337,7 @@ export function brangeCount(lo: bigint, hi: bigint, step: bigint): bigint {
 /** The helpers of the mode, as they are added to `_SYS`. */
 export const BIGINT_HELPERS = {
   NonFiniteValue,
+  bfloorDiv,
   bfloorMod,
   bremainder,
   bpow,

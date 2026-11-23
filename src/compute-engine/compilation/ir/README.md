@@ -988,14 +988,16 @@ real `pow` only.
 
 Declined, each with its cause: a real or complex value anywhere (an input that
 is not of a subtype of `integer`, a real literal, `Pi`, a row with no integer
-signature such as `Divide`, `Sqrt` or `Hypot`), so also a quotient under a
-rounding function (`Floor(n/3)` is `Floor(n·1/3)`, and `1/3` has no `bigint`
-value), `Floor(Sqrt(n))`, a division under an integer promise
+signature such as `Divide`, `Sqrt` or `Hypot`), so also `Floor(n/m)`,
+`Floor(Sqrt(n))`, a division under an integer promise
 (`Declare(t, integer, n/m)`) and a comparison with a rational constant
 (`n < 7/2`); a `Power` whose exponent is not proved nonnegative (a constant
 `>= 0`, an `Abs`, an even power, a sum or a product of such values: `n^m` is a
-rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` (the syntax does not
-spell them); `If` with no else of a number and `Which` with no `True` clause
+rational at `m < 0`); `Floor`, `Ceil`, `Round`, `Truncate` of an operand other
+than a product of rational constants and integers (the syntax does not spell
+them; `Floor(n/3)` is `Floor(1/3·n)`, the floor division `floordiv.int` of `n`
+by 3, and `Round(n/2)` with a `roundingTies` other than the default declines);
+`If` with no else of a number and `Which` with no `True` clause
 (their value is `NaN`); `Max` and `Min` of a list (their identity is `±∞`);
 `Factorial2` (`(−5)!!` is `1/3`); a `Sum` or a `Product` with an
 `iterationBudget` (its value over the budget is `NaN`); a random frame, a draw

@@ -206,6 +206,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // lowering makes: exact where the quotient is an integer or a half of
   // one (a GLSL division need not be correctly rounded).
   row(undefined,      2,          [[[R, R], R, 'div.q']],        { fold: (a: number, b: number) => a / b }),
+  // The floor of the quotient of two integers, which the lowering makes in
+  // the bigint mode only: the rounding of an integer times a rational
+  // constant (`Floor(n/2)`).
+  row(undefined,      2,          [[[I, I], I, 'floordiv.int']], {}),
   row('Power',        2,          [...rc('pow', 2), [[I, I], I, 'pow.int']], { fold: realPow, constantOperand: { index: 0, value: Math.E, head: 'Exp' }, leaves: { nonnegative: 0, integer: 1 } }),
   row('Sqrt',         1,          rc('sqrt', 1),                 { fold: Math.sqrt, ...cut }),
   row('Abs',          1,          [...arith('abs', 1), [[C], R, 'cabs']], { fold: Math.abs }),
