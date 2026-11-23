@@ -133,6 +133,24 @@ describe('the message names the written call', () => {
     ['let v = w/2 + 1', 'in Divide argument 1, in Add argument 1'],
     ['let v = -w/2', 'in Divide argument 1'],
     ['let v = Exp(w/2)', 'in Divide argument 1, in Exp argument 1'],
+    // `sqrt(w)/2` is `Multiply(1/2, Sqrt(w))`: the canonical `Sqrt` keeps
+    // the source range of the written call, as `Ln` does.
+    [
+      'let v = sqrt(w)/2 + 1',
+      'in Sqrt argument 1, in Divide argument 1, in Add argument 1',
+    ],
+    [
+      'let v = ln(w)/2 + 1',
+      'in Ln argument 1, in Divide argument 1, in Add argument 1',
+    ],
+    [
+      'let v = Root(w, 3)/2 + 1',
+      'in Root argument 1, in Divide argument 1, in Add argument 1',
+    ],
+    [
+      'let v = Abs(w)/2 + 1',
+      'in Abs argument 1, in Divide argument 1, in Add argument 1',
+    ],
     // The frames of the subtraction still name the canonical `Negate` and
     // `Add` (CE-1717).
     [

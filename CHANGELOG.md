@@ -537,6 +537,11 @@
   "in Power argument 2, in Add argument 1", and that of `w/2 + 1` said "in
   Multiply argument 2, in Add argument 1". They now say "in Exp argument 1"
   and "in Divide argument 1".
+- **In Epsil, the message of an error inside a square root or a root that is
+  divided names the division** (CE-1716). With `w` holding `"s"`, the runtime
+  error of `sqrt(w)/2 + 1` said "in Sqrt argument 1, in Multiply argument 2,
+  in Add argument 1". It now says "in Divide argument 1", as for `ln(w)/2 + 1`.
+  `Root(w, 3)/2 + 1` had the same message.
 
 ## 0.200.0 _2026-11-22_
 

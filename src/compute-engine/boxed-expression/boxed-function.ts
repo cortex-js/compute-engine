@@ -3380,6 +3380,13 @@ export class BoxedFunction
           return [ce._numericValue(1), this];
         return [root, rest];
       }
+      // With no coefficient to extract, return this node, as `Abs` does
+      // below. A new node has no source offsets: in Epsil, the frame of an
+      // error inside `sqrt(w)/2` then named the canonical `Multiply` instead
+      // of the written `Divide` (see `renamedCallFrame()` in
+      // `epsil/error-location.ts`).
+      if (coef.isOne && rest === expr.op1 && expr.isCanonical)
+        return [coef, expr];
       // √(k·u) = √k·√u only holds for k ≥ 0: for k < 0 it splits off a
       // constant imaginary phase, but the true value is region-dependent
       // (±i·√|k|·√|u| across u = 0). Fold the sign into the radicand
@@ -3418,6 +3425,10 @@ export class BoxedFunction
       // exact.
       if (exp % 2 === 0 && coef.sgn() === -1)
         return [ce._numericValue(1), this];
+
+      // With no coefficient to extract, return this node (see `Sqrt` above).
+      if (coef.isOne && rest === expr.op1 && expr.isCanonical)
+        return [coef, expr];
 
       // Extracting an inexact root of an EXACT radicand leaks a float: it
       // either strands a symbolic remainder beside a float coefficient
