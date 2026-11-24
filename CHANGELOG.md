@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **A numerical derivative, integral or limit reads a variable that holds a
+  formula** (CE-1434). With `G := sin(x)`, `ND(x => G, 1)` stayed unevaluated
+  and `NIntegrate(x => G, 0, 1)` gave `NaN`; they now give `cos(1)` and
+  `1 - cos(1)`, as `D` and `Integrate` already did. `NLimit` reads such a
+  variable too: `NLimit(x => G / x, 0)` is `1`.
+
 - **A `Random()` inside `Tan(Arctan(…))` or in the exponent of `e` draws one
   value, not two** (CE-1424). In a seeded frame,
   `WithRandomSeed(7, [Tan(Arctan(Random())), Random()])` gave the second and

@@ -443,7 +443,11 @@ each free symbol of their operand that holds a formula in their variable, and
 an occurrence of the variable's name in that value denotes the variable
 (`formulaValueOf()`, `library/calculus.ts`). With `G := sin(x)`, `D(G, x)` is
 `cos(x)`, `D(2G, x)` is `2cos(x)`, `∫ G dx` is `-cos(x)` and
-`lim_{x→0} G` is `0`; with `H := y·sin(x)`, `D(H, y)` is `sin(x)`. A symbol in
+`lim_{x→0} G` is `0`; with `H := y·sin(x)`, `D(H, y)` is `sin(x)`. `ND`,
+`NIntegrate` and `NLimit` read the body of their function literal in the same
+way: `ND(x ↦ G, 1)` is `cos(1)` and `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
+(`literalWithFormulaValues()`). A bare symbol operand of an implicit form
+(`ND(G, 1)`, `∫_0^1 G`) is not read in this way (CE-1772). A symbol in
 such a value is read in the same way (`K := G + 1`, `D(K, x)` is `cos(x)`). A
 constant, a value that does not mention the variable (`a := 3`, which the
 evaluation of the result reads), a value that is a function literal and a

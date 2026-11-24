@@ -516,6 +516,30 @@ function withFormulaValues(
 }
 
 /**
+ * `f`, the function literal of `Limit`, `NLimit`, `ND` or `NIntegrate`,
+ * with each free symbol of its body whose value is a formula in its
+ * parameter replaced by that value (`withFormulaValues`): with
+ * `G := sin(x)`, `x ↦ G` becomes `x ↦ sin(x)`, whose `x` is the parameter.
+ * `f` itself when it is not a literal of one parameter, or when its body
+ * reads no such symbol.
+ *
+ * The body is read lifted out of the `Block` of the literal
+ * (`liftIntegrand`): the scope of that `Block` binds the names of the body,
+ * which would hide them from the read.
+ */
+function literalWithFormulaValues(
+  ce: ComputeEngine,
+  f: Expression
+): Expression {
+  if (!isFunction(f, 'Function') || f.nops !== 2) return f;
+  const varName = sym(f.op2);
+  if (varName === undefined) return f;
+  const lifted = liftIntegrand(f);
+  const body = withFormulaValues(ce, lifted, [varName]);
+  return body === lifted ? f : ce.function('Function', [body, f.op2]);
+}
+
+/**
  * The call `app` of a parameter of the running function call that holds a
  * function, as an application of that function: `f(x)` becomes
  * `Apply(value, x)`, where `ops` are the operands of `app` after a rewrite.
@@ -7470,6 +7494,10 @@ volumes
         // unevaluated: the stencil would run its effect at every sample. So
         // does an operator that takes no number (`Length`): its compiled
         // call throws for a number argument.
+        // A symbol that holds a formula in the variable is read: with
+        // `G := sin(x)`, `ND(x ↦ G, 1)` is `cos(1)`
+        // (`literalWithFormulaValues`).
+        body = literalWithFormulaValues(engine, body);
         const lit = resolveDerivativeFunctionLiteral(body);
         if (lit !== undefined)
           return stencilDerivativeAt(engine, lit, xValue, 1);
@@ -9809,6 +9837,11 @@ volumes
         const refused = dataSymbolCallError(engine, expression);
         if (refused !== undefined) return refused;
 
+        // A symbol that holds a formula in the variable is read: with
+        // `G := sin(x)`, `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
+        // (`literalWithFormulaValues`).
+        f = literalWithFormulaValues(engine, f);
+
         // Uses compiled JS functions (machine arithmetic). The bounds are
         // evaluated once: their values are passed on to the exact route below
         // (`exactDivergenceValue`), so that a bound with an effect
@@ -10211,18 +10244,8 @@ volumes
         if (refused !== undefined) return refused;
 
         // A symbol that holds a formula in the limit variable is read: with
-        // `G := sin(x)`, `lim_{x→0} G` is `0` (`formulaValueOf`).
-        // The body is read lifted out of the `Block` of the literal
-        // (`liftIntegrand`): the scope of that `Block` binds the names of the
-        // body, which would hide them from the read.
-        if (isFunction(f, 'Function') && f.nops === 2) {
-          const varName = sym(f.op2);
-          if (varName !== undefined) {
-            const lifted = liftIntegrand(f);
-            const body = withFormulaValues(engine, lifted, [varName]);
-            if (body !== lifted) f = engine.function('Function', [body, f.op2]);
-          }
-        }
+        // `G := sin(x)`, `lim_{x→0} G` is `0` (`literalWithFormulaValues`).
+        f = literalWithFormulaValues(engine, f);
 
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
@@ -10339,8 +10362,15 @@ volumes
       },
       evaluate: ([f, x, dir], { engine }) => {
         // Uses compiled JS functions (machine arithmetic). Budgeted for the
-        // same reason as Limit's numeric fallback above.
-        return numericLimitValue(engine, f, x, dir);
+        // same reason as Limit's numeric fallback above. A symbol that holds
+        // a formula in the variable is read, as for `Limit`
+        // (`literalWithFormulaValues`).
+        return numericLimitValue(
+          engine,
+          literalWithFormulaValues(engine, f),
+          x,
+          dir
+        );
       },
     },
   },
