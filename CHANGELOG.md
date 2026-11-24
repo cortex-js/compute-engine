@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **A `Series` at `0` of a root of a parameter times the variable no longer
+  has terms divided by 0** (CE-1441). `Series(Sqrt(a x), x, 0, 3)` was
+  `x·√a/0 − √a/0·x² + 3√a/0·x³ + O(x⁴)`. When the sign of `a` is not known,
+  it now stays `Series(...)`, and so does `Series((a x)^(3/2), x, 0, 3)`.
+  With `a > 0` assumed, it is `√a·√x`.
+
 - **Under `.N()`, a function no longer reads an argument after a later
   argument changed a variable that the first argument uses** (CE-1439). With
   `x := 1` and `g := (y, w) => Floor(3y)`, `g(x/3, Block(x := 5, 1)).N()`
