@@ -2,11 +2,27 @@
 
 ### Resolved Issues
 
+- **A sum over all integers is as fast as a sum over half of them**
+  (CE-1285). `Sum(2^(-Abs(n)), Limits(n, -oo, oo)).N()` took about 2 s,
+  and each half took a few tens of milliseconds. The check that a sum over
+  all integers converges absolutely walked 2¹⁵ terms every time. It now runs
+  only when the terms have both signs, and it walks no further than it
+  must. The sum takes about 30 ms. Also, a sum over all integers whose
+  terms have one sign and fall as a power of `n` gets its value:
+  `Sum(1/(n^2 + 1), Limits(n, -oo, oo)).N()` gives `3.1533480949372006`
+  (π·coth π = 3.15334809493716…), where it stayed unevaluated.
+
 - **The type of an expression follows a later use of a symbol made with
   `ce.symbol()`** (CE-1342). With `x = ce.symbol('x')` and
   `t = ce.function('Tuple', [x])`, the type of `t` stayed `tuple<unknown>`
   after `ce.function('Add', [x, 1])` gave `x` the type `number`. It is now
   `tuple<number>`, as with `x = ce.box('x')`.
+
+- **The incomplete elliptic integrals of a complex amplitude below the real
+  axis keep their digits when the parameter is very small** (CE-1356).
+  `EllipticF(0.3 - 10i, 1e-30).N()` gave `0.3000000040807729 -
+  10.000000012871325i`. It now gives `0.3 - 10i`, as the amplitude above the
+  axis already did. `EllipticE` had the same error.
 
 - **A function that calls a name that held a number calls it once the name is
   a function** (CE-1333). After `f(t) := a(t+1)`, `ce.assign('a', 3)` and
@@ -18,12 +34,6 @@
 
 - **The norm of an element of a list of points has the type of one number**
   (CE-1215). With `LQ: list<tuple<real, real>>`, the type of
-- **The incomplete elliptic integrals of a complex amplitude below the real
-  axis keep their digits when the parameter is very small** (CE-1356).
-  `EllipticF(0.3 - 10i, 1e-30).N()` gave `0.3000000040807729 -
-  10.000000012871325i`. It now gives `0.3 - 10i`, as the amplitude above the
-  axis already did. `EllipticE` had the same error.
-
   `Norm(At(LQ, -1))`, `Norm(First(LQ))`, `Abs(At(LQ, -1))` and
   `Hypot(At(LQ, -1), 1)` was `list<number>`, where the value is one number.
   The arguments of the call (`LQ`, `-1`) were read as the coordinates of the

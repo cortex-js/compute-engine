@@ -3435,6 +3435,15 @@ function seemsDivergent(record: WindowRecord, m: number): boolean {
   return s !== 0 && sign[m - 1] === s && sign[m - 2] === s;
 }
 
+/**
+ * The number of steps from which the check of absolute convergence of
+ * `extrapolatedInfiniteSum()` accepts absolute partial sums that settled
+ * over the last three doublings. A series that diverges as
+ * slowly as `Σ 1/(k·ln k)` adds about 0.2 per doubling at 64 steps, far
+ * above the tolerance of 1e-8.
+ */
+const ABSOLUTE_SETTLED_FROM = 64;
+
 /** The smallest positive normal double, `2^−1022`. */
 const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
 
@@ -3452,6 +3461,26 @@ const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
  * these zeros the walk declined a convergent series; a term that underflows
  * has lost digits. A term that is 0 in exact arithmetic sets the flag too,
  * and the interpreter walk then gives the result.
+ *
+ * On the doubly-infinite walk, the symmetric pairs cancel, so a divergent
+ * series can have settled partial sums (`Σ k` over ℤ pairs to 0 at every
+ * step: the Cauchy principal value, not a sum). Only an absolutely
+ * convergent series has a sum over ℤ that does not depend on the order of
+ * its terms, so an accepted value is returned only when the absolute series
+ * converges too. When every term walked before the acceptance has one sign,
+ * the absolute series is the series, up to its sign, and it converges.
+ * Else the partial sums of the absolute series after 1, 2, 4, … steps,
+ * recorded during the walk, must extrapolate with the tolerance of the
+ * first acceptance below, or settle over the last doubling windows: their
+ * values after n/4, n/2 and n steps differ by at most 1e-8 of the last, for
+ * some power of two n from `ABSOLUTE_SETTLED_FROM` to 2¹⁵. That test walks
+ * further by doublings, from the steps already taken, until the sums settle
+ * or the walk reaches 2¹⁵ steps; during it a compiled term
+ * that is finite and below the smallest normal double does not set
+ * `fast.unreliable`: the value was accepted before the test, and such a
+ * term does not change the absolute sum by more than its tolerance.
+ * (CE-1285: the walk to 2¹⁵ steps ran for every sum over ℤ, and the
+ * compiled `2^−|k|` underflows there, so the interpreter walked 2¹⁶ terms.)
  */
 function extrapolatedInfiniteSum(
   body: Expression,
@@ -3482,11 +3511,17 @@ function extrapolatedInfiniteSum(
     if (root === true || root === undefined) return undefined;
   }
 
+  // Set during the walk by doublings of the check of absolute convergence
+  // (see the doc comment).
+  let absoluteWalk = false;
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {
     if (compiled !== undefined) {
       const v = compiled({ [index]: k });
-      if (!(Number.isFinite(v) && Math.abs(v) >= MIN_NORMAL_DOUBLE))
+      if (
+        !Number.isFinite(v) ||
+        (Math.abs(v) < MIN_NORMAL_DOUBLE && !absoluteWalk)
+      )
         fast.unreliable = true;
       return v;
     }
@@ -3495,27 +3530,22 @@ function extrapolatedInfiniteSum(
   };
   // One schedule step contributes one series term — or, on the symmetric
   // doubly-infinite walk, the pair `f(j) + f(−j)` (`f(0)` alone at j = 0).
-  // `absAccum` tracks the ABSOLUTE series alongside; the doubly-infinite
-  // acceptance requires it to settle in the convergence checks after the
-  // main loop.
+  // `absAccum` is the partial sum of the absolute series, and `signs` has
+  // bit 1 set after a positive term, bit 2 after a negative term.
   let absAccum = 0;
+  let signs = 0;
+  const addTerm = (t: number): number => {
+    absAccum += Math.abs(t);
+    if (t > 0) signs |= 1;
+    else if (t < 0) signs |= 2;
+    return t;
+  };
   const termAt = doubly
-    ? (j: number): number => {
-        if (j === 0) {
-          const t = term(0);
-          absAccum += Math.abs(t);
-          return t;
-        }
-        const p = term(j);
-        const q = term(-j);
-        absAccum += Math.abs(p) + Math.abs(q);
-        return p + q;
-      }
-    : (j: number): number => {
-        const t = term(termIndexAt(j));
-        absAccum += Math.abs(t);
-        return t;
-      };
+    ? (j: number): number =>
+        j === 0 ? addTerm(term(0)) : addTerm(term(j)) + addTerm(term(-j))
+    : (j: number): number => addTerm(term(termIndexAt(j)));
+  // `absAccum` after each step whose number is a power of two.
+  const absAt: number[] = [];
 
   // Partial sum over schedule steps 0..J, accumulated across the strictly
   // increasing (doubling) schedule `extrapolate` samples. Bound total work: on
@@ -3559,6 +3589,7 @@ function extrapolatedInfiniteSum(
       const step = termAt(i);
       cachedSum += step;
       tailSamples.record(i, cachedSum);
+      if ((i & (i - 1)) === 0) absAt[i] = absAccum;
       // The walk to `MAX_TERMS` honors the engine deadline (the extrapolation
       // does through its `deadline` option, this loop must on its own).
       if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
@@ -3611,23 +3642,66 @@ function extrapolatedInfiniteSum(
   });
   if (declined) return undefined;
 
-  // On the symmetric doubly-infinite walk the ± pairing cancels
-  // STRUCTURALLY, so a divergent series can present perfectly settled
-  // partial sums (`Σ n` over ℤ pairs to 0 at every step — the Cauchy
-  // principal value, not a sum). Require the ABSOLUTE series to settle
-  // over the last doubling windows: only absolute convergence makes the
-  // unordered doubly-infinite sum well-defined.
-  if (doubly) {
-    partialSum(MAX_TERMS / 4);
-    const a1 = absAccum;
-    partialSum(MAX_TERMS / 2);
-    const a2 = absAccum;
-    partialSum(MAX_TERMS);
-    const a3 = absAccum;
-    const absTol = 1e-8 * Math.max(1, a3);
-    if (!Number.isFinite(a3) || a3 - a2 > absTol || a2 - a1 > absTol)
-      return undefined;
-  }
+  // The partial sum of the absolute series after `x` steps, for `x` a
+  // power of two: recorded when the walk passed it, else walked to.
+  const absPartialSum = (x: number): number => {
+    const j = Math.round(x);
+    if (j > MAX_TERMS) return NaN;
+    if (j > cachedJ) partialSum(j);
+    return declined ? NaN : (absAt[j] ?? NaN);
+  };
+  // True when the absolute series converges (see the doc comment).
+  const absolutelyConvergent = (): boolean => {
+    if (signs !== 3) return true;
+    const [absVal, absErr] = extrapolate(absPartialSum, Infinity, {
+      contract: 0.5,
+      step: 1,
+      power: 1,
+      atol: 1e-14,
+      rtol: 1e-12,
+      maxeval: 64,
+      deadline: ce._deadline,
+    });
+    if (declined) return false;
+    if (
+      Number.isFinite(absVal) &&
+      absErr <= Math.max(1e-10, 1e-9 * Math.abs(absVal))
+    )
+      return true;
+    // The absolute sums after `n/4`, `n/2` and `n` steps differ by at most
+    // 1e-8 of the last.
+    const settledAt = (n: number): boolean => {
+      const a1 = absAt[n / 4];
+      const a2 = absAt[n / 2];
+      const a3 = absAt[n];
+      const absTol = 1e-8 * Math.max(1, a3);
+      return Number.isFinite(a3) && a3 - a2 <= absTol && a2 - a1 <= absTol;
+    };
+    const walked = 2 ** Math.floor(Math.log2(Math.max(1, cachedJ)));
+    absoluteWalk = true;
+    try {
+      for (
+        let n = Math.max(walked, ABSOLUTE_SETTLED_FROM);
+        n <= MAX_TERMS;
+        n *= 2
+      ) {
+        partialSum(n);
+        if (declined) return false;
+        if (settledAt(n)) return true;
+      }
+    } finally {
+      absoluteWalk = false;
+    }
+    return false;
+  };
+  // The result for an accepted value `v`. A decline for a series that does
+  // not converge absolutely is final: the interpreter walk does not run
+  // again (`acceleratedInfiniteSum()`).
+  const accept = (v: number): Expression | undefined => {
+    if (!doubly || absolutelyConvergent()) return ce.number(v);
+    fast.miss = Infinity;
+    return undefined;
+  };
 
   // Require genuine convergence (a divergent or non-smooth series stalls with
   // a large error estimate) before trusting the accelerated value.
@@ -3664,7 +3738,7 @@ function extrapolatedInfiniteSum(
         shiftedErr <= tol &&
         Math.abs(shifted - val) <= 10 * tol
       )
-        return ce.number(val);
+        return accept(val);
       if (!overflow && Number.isFinite(shifted))
         fast.miss = Math.max(
           shiftedErr / tol,
@@ -3698,13 +3772,13 @@ function extrapolatedInfiniteSum(
     Math.abs(s2 - s1) <= tol &&
     Math.abs(s3 - s0) <= tol
   )
-    return ce.number(s3);
+    return accept(s3);
 
   // Third acceptance, for a smooth tail that is not an expansion in integer
   // powers of 1/N: `Σ 1/n^1.5` (tail ~ N^−0.5) and `Σ ln(n)/n²` (tail
   // ~ ln(N)/N). The walk above reached MAX_TERMS, so every sample is present.
   const fitted = fittedExponentLimit(tailSamples);
-  return fitted === undefined ? undefined : ce.number(fitted);
+  return fitted === undefined ? undefined : accept(fitted);
 }
 
 /**

@@ -2,8 +2,9 @@ import { engine } from '../utils';
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { Expression as MathJson } from '../../src/math-json/types.ts';
 
-// The sum of sinc³ over all integers takes seconds (CE-1285) and runs only in
-// the nightly run (CE_NIGHTLY); the other doubly-infinite sums run always.
+// The sum of sinc³ over all integers walks 2¹⁶ terms in the interpreter,
+// takes seconds, and runs only in the nightly run (CE_NIGHTLY); the other
+// doubly-infinite sums run always.
 const NIGHTLY = process.env.CE_NIGHTLY === '1';
 const testNightly = NIGHTLY ? test : test.skip;
 
@@ -2069,6 +2070,67 @@ describe('DOUBLY-INFINITE SUMS', () => {
       .N();
     expect(r.operator).toBe('Sum');
   });
+
+  // CE-1285: the absolute series of a sum over ℤ is checked only when its
+  // terms have both signs, and the check walks no further than it must.
+  const overZ = (body: unknown) =>
+    engine
+      .expr([
+        'Sum',
+        body,
+        ['Limits', 'n', 'NegativeInfinity', 'PositiveInfinity'],
+      ] as any)
+      .N();
+
+  test('Σ 1/(n² + 1) over all integers = π·coth(π)', () =>
+    expect(overZ(['Divide', 1, ['Add', ['Power', 'n', 2], 1]]).re).toBeCloseTo(
+      Math.PI / Math.tanh(Math.PI),
+      10
+    ));
+
+  test('Σ (−1)^n·2^−|n| over all integers = 1/3 (terms of both signs)', () =>
+    expect(
+      overZ([
+        'Multiply',
+        ['Power', -1, 'n'],
+        ['Power', 2, ['Negate', ['Abs', 'n']]],
+      ]).re
+    ).toBeCloseTo(1 / 3, 10));
+
+  test('a sum over ℤ whose halves converge only conditionally stays unevaluated', () =>
+    // Each half converges, but the absolute series diverges.
+    expect(
+      overZ(['Divide', ['Power', -1, 'n'], ['Add', ['Abs', 'n'], 1]]).operator
+    ).toBe('Sum'));
+
+  test('Σ n·2^−|n| over all integers = 0 (f(0) = 0, odd body)', () =>
+    expect(
+      overZ(['Multiply', 'n', ['Power', 2, ['Negate', ['Abs', 'n']]]]).re
+    ).toBe(0));
+
+  test('Σ n/(n⁴ + 1) over all integers is exactly 0 (odd body)', () =>
+    expect(overZ(['Divide', 'n', ['Add', ['Power', 'n', 4], 1]]).re).toBe(0));
+
+  test('Σ (n − 1)·2^−|n| over all integers = −3 (f(1) = 0)', () =>
+    expect(
+      overZ([
+        'Multiply',
+        ['Subtract', 'n', 1],
+        ['Power', 2, ['Negate', ['Abs', 'n']]],
+      ]).re
+    ).toBeCloseTo(-3, 10));
+
+  test('Σ (−1)^n·e^−|n| over all integers = tanh(1/2)', () =>
+    expect(
+      overZ(['Multiply', ['Power', -1, 'n'], ['Exp', ['Negate', ['Abs', 'n']]]])
+        .re
+    ).toBeCloseTo(Math.tanh(0.5), 10));
+
+  test('a sum over ℤ with a pole at 0 stays unevaluated', () =>
+    expect(overZ(['Divide', 1, ['Power', 'n', 2]]).operator).toBe('Sum'));
+
+  test('a sum over ℤ with one divergent half stays unevaluated', () =>
+    expect(overZ(['Power', 2, 'n']).operator).toBe('Sum'));
 });
 
 // Regression: a `D` node with no operand (produced e.g. when upstream LaTeX
