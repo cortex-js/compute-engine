@@ -263,6 +263,17 @@
 
 ### Resolved Issues
 
+- **The parse option `preserveLatex` no longer changes the meaning of a
+  formula** (CE-1727). With the option, `\log_{2} 3` was `Log(3, 2)` and is
+  now `Lb(3)`, `\mathbb{R}^{+}` was `PseudoInverse(RealNumbers)` and is now
+  `PositiveNumbers`, and `\{a_n\}_{n=1}^{\infty}` was a power of a set and
+  is now `IndexedSequence(a_n, n, 1, PositiveInfinity)`, as without the
+  option. The LaTeX of each part is now added after the parse. More numbers
+  and symbols get their `latex` (the index of a sum, the variable of an
+  integral). A number or a symbol that the parser made, and whose value is
+  also written nearby, can get the LaTeX of the written one (the base `10`
+  of `\lg 10`); a value written with two spellings (`\sum_{\alpha=1}^3 α`)
+  gets no `latex`.
 - **`ReplaceAll` in a block keeps the value of a local variable of the
   block** (CE-1720). `ReplaceAll(Block(Declare(a, "integer"), Assign(a, 5),
   a + Sin(b)), Sin(_a) -> 1)` was `a + 1`; it is now `6`.

@@ -225,13 +225,17 @@ function innerBoundNames(fn: ReadonlyArray<MathJsonExpression>): string[] {
  * that don't mention the index are left untouched. */
 function liftIndexBinding(
   expr: MathJsonExpression,
-  index: MathJsonSymbol
+  index: MathJsonSymbol,
+  parser: _Parser
 ): MathJsonExpression {
   // Fused compound symbol `X_Y` whose subscript is exactly the index.
   if (typeof expr === 'string') {
     const i = expr.indexOf('_');
-    if (i > 0 && expr.substring(i + 1) === index)
-      return [expr.substring(0, i) + '_', index];
+    if (i > 0 && expr.substring(i + 1) === index) {
+      const lifted: MathJsonExpression = [expr.substring(0, i) + '_', index];
+      parser._primitiveLatexCopied(expr, lifted);
+      return lifted;
+    }
     return expr;
   }
   if (!Array.isArray(expr)) return expr;
@@ -244,16 +248,23 @@ function liftIndexBinding(
     mentionsIndex(operand(expr, 2), index)
   ) {
     const base = operand(expr, 1) as string;
-    return [base + '_', liftIndexBinding(operand(expr, 2)!, index)];
+    const lifted: MathJsonExpression = [
+      base + '_',
+      liftIndexBinding(operand(expr, 2)!, index, parser),
+    ];
+    parser._latexCopied(expr, lifted);
+    return lifted;
   }
 
   // Otherwise recurse into operands, leaving the operator head untouched.
-  return [
+  const result = [
     expr[0],
     ...expr
       .slice(1)
-      .map((o) => liftIndexBinding(o as MathJsonExpression, index)),
+      .map((o) => liftIndexBinding(o as MathJsonExpression, index, parser)),
   ] as MathJsonExpression;
+  parser._latexCopied(expr, result);
+  return result;
 }
 
 /** Least element of a set symbol, for mapping `n \in \mathbb{N}` subscripts to
@@ -272,7 +283,10 @@ function setLeastElement(set: MathJsonExpression | null): number | undefined {
  *   - `["Power", ["Subscript", ["Set", term], sub], up]` (with upper bound)
  * where `sub` is `Equal(index, lower)` or `Element(index, set)`. Returns the
  * expression unchanged if it is not a sequence-braces pattern. */
-function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
+function parseIndexedSequence(
+  expr: MathJsonExpression,
+  parser: _Parser
+): MathJsonExpression {
   let upper: MathJsonExpression | undefined;
   let inner: MathJsonExpression | null = expr;
   if (operator(expr) === 'Power') {
@@ -321,7 +335,7 @@ function parseIndexedSequence(expr: MathJsonExpression): MathJsonExpression {
 
   if (index === undefined || lower === undefined) return expr;
 
-  const term = liftIndexBinding(setTerm, index);
+  const term = liftIndexBinding(setTerm, index, parser);
   return upper === undefined
     ? ['IndexedSequence', term, index, lower]
     : ['IndexedSequence', term, index, lower, upper];
@@ -1225,6 +1239,17 @@ export class _Parser implements Parser {
   readonly _primitiveSpans:
     { value: number | string; start: number; end: number }[] | null;
 
+  // With `preserveLatex`, the LaTeX of each expression that `decorate()`
+  // receives, with its source span. The parse keeps the nodes as they are,
+  // so that a parselet sees the same nodes with and without the option, and
+  // `decorateWithLatex()` adds the LaTeX after the parse. An array or an
+  // object is keyed by identity, and the last record is kept: a later call
+  // covers the larger expression that the node became. A number or a string
+  // has no identity, so it is recorded with its value in
+  // `_primitiveLatex`. Both are `null` when the option is off.
+  readonly _exprLatex: WeakMap<object, LatexRecord> | null;
+  readonly _primitiveLatex: (LatexRecord & { value: number | string })[] | null;
+
   /**
    * Record a parse diagnostic spanning `[startToken, endToken)` (token
    * indices, mapped to character offsets into `sourceText()` via
@@ -1612,6 +1637,7 @@ export class _Parser implements Parser {
       // chain on its next step, and `onAmbiguity: 'error'` can then select
       // the chain, or one of its new operands, instead of the whole result.
       this._exprSpans?.delete(lhs);
+      this._exprLatex?.delete(lhs);
       return lhs;
     }
     const result = foldAssociativeOperator(op, lhs, rhs);
@@ -1743,6 +1769,8 @@ export class _Parser implements Parser {
     this.diagnostics = options.diagnostics || ambiguityErrors ? [] : null;
     this._exprSpans = ambiguityErrors ? new WeakMap() : null;
     this._primitiveSpans = ambiguityErrors ? [] : null;
+    this._exprLatex = options.preserveLatex ? new WeakMap() : null;
+    this._primitiveLatex = options.preserveLatex ? [] : null;
 
     const numberLexemes = (
       options as Readonly<ParseLatexOptions> & {
@@ -4557,12 +4585,11 @@ export class _Parser implements Parser {
     const visit = (e: MathJsonExpression): MathJsonExpression => {
       const fn = functionElements(e);
       if (fn === null) return e;
-      const decorated = Array.isArray(e) ? null : (e as MathJsonFunctionObject);
       const name = this._subscriptAtNames.get(fn);
-      if (name !== undefined && names.has(name))
-        return decorated?.latex !== undefined
-          ? { latex: decorated.latex, sym: name }
-          : name;
+      if (name !== undefined && names.has(name)) {
+        this._latexCopied(e, name);
+        return name;
+      }
       // A call that `_subscriptBoundIndexes()` made from a joined name that
       // is this name is written again as it was parsed: in
       // `\sum_{a_k=1}^{2}\sum_{k=1}^{2} a_k(3)`, `a_k(3)` is the product of
@@ -4816,14 +4843,46 @@ export class _Parser implements Parser {
       continuationRanges.add(out as object);
     const span = this._exprSpans?.get(fn);
     if (span !== undefined) this._exprSpans!.set(copy, span);
+    this._latexCopied(e, out);
     return out;
+  }
+
+  /**
+   * `after` replaces `before`, an expression of the parse: with
+   * `preserveLatex`, it gets the LaTeX recorded for `before`.
+   */
+  _latexCopied(before: MathJsonExpression, after: MathJsonExpression): void {
+    if (this._exprLatex === null || typeof before !== 'object') return;
+    const record = this._exprLatex.get(before as object);
+    if (record === undefined) return;
+    if (typeof after === 'object' && after !== null)
+      this._exprLatex.set(after, record);
+    else this._primitiveLatex!.push({ ...record, value: after });
+  }
+
+  /**
+   * `after`, an expression, replaces an occurrence of the number or symbol
+   * `before`: with `preserveLatex`, it gets the LaTeX recorded for `before`
+   * when the records of `before` all have this LaTeX (up to white space). A
+   * value has no identity, so the occurrence is not known otherwise.
+   */
+  _primitiveLatexCopied(before: number | string, after: object): void {
+    if (this._primitiveLatex === null) return;
+    let found: LatexRecord | undefined;
+    for (const p of this._primitiveLatex) {
+      if (p.value !== before) continue;
+      if (found !== undefined && found.latex.trim() !== p.latex.trim()) return;
+      // The last record of a node is the largest one.
+      found = p;
+    }
+    if (found !== undefined) this._exprLatex!.set(after, found);
   }
 
   /**
    * The `If(c, e)` nodes that the restriction postfix `e\{c\}` built. Their
    * condition belongs to the root of the group that holds them, and
    * `_liftRestrictions()` moves it there. The set is keyed by the array of
-   * the node, which a `preserveLatex` decoration (`{ latex, fn }`) keeps.
+   * the node, which the object form of a node (`{ fn }`) keeps.
    */
   private _restrictions = new WeakSet<object>();
   /** True once this parse has built a restriction: until then, closing a
@@ -4877,6 +4936,7 @@ export class _Parser implements Parser {
         continuationRanges.add(out as object);
       const span = this._exprSpans?.get(fn);
       if (span !== undefined) this._exprSpans!.set(copy, span);
+      this._latexCopied(e, out);
       return out;
     };
     let body = visit(expr);
@@ -7392,7 +7452,7 @@ export class _Parser implements Parser {
     //     upper superscript) denotes an indexed sequence, not a set indexed
     //     by an equation. Rewrite to the inert `IndexedSequence` head.
     //
-    if (result !== null) result = parseIndexedSequence(result);
+    if (result !== null) result = parseIndexedSequence(result, this);
 
     //
     // 7c. Norm order notation: `‖v‖_1`, `‖v‖_\infty`, `‖v‖_F`.
@@ -7939,7 +7999,10 @@ export class _Parser implements Parser {
   }
 
   /**
-   * Add LaTeX or other requested metadata to the expression
+   * Record the source span of `expr`, the tokens from `start` to the current
+   * position, for `onAmbiguity: 'error'` and for `preserveLatex`. `expr` is
+   * returned as it is: the LaTeX is added after the parse
+   * (`decorateWithLatex()`).
    */
   decorate(
     expr: MathJsonExpression | null,
@@ -7947,28 +8010,11 @@ export class _Parser implements Parser {
   ): MathJsonExpression | null {
     if (expr === null) return null;
     if (this._exprSpans !== null) this.recordSpan(expr, start);
-    if (!this.options.preserveLatex) return expr;
-
-    const latex = this.latex(start, this.index);
-
-    if (Array.isArray(expr)) {
-      const decorated = { latex, fn: expr } as MathJsonExpression;
-      this._applicationPolicy?.decorated(expr, decorated as object);
-      if (continuationRanges.has(expr))
-        continuationRanges.add(decorated as object);
-      expr = decorated;
-    } else if (typeof expr === 'number') {
-      expr = { latex, num: Number(expr).toString() };
-    } else if (typeof expr === 'string') {
-      // Check if it's a string literal (starts with ')
-      if (expr.startsWith("'")) {
-        // String literal: remove the surrounding quotes
-        expr = { latex, str: expr.slice(1, -1) };
-      } else {
-        expr = { latex, sym: expr };
-      }
-    } else if (typeof expr === 'object' && expr !== null) {
-      (expr as ExpressionObject).latex = latex;
+    if (this._exprLatex !== null) {
+      const [s, e] = this.sourceOffsets(start, this.index);
+      const record = { start: s, end: e, latex: this.latex(start, this.index) };
+      if (typeof expr === 'object') this._exprLatex.set(expr, record);
+      else this._primitiveLatex!.push({ ...record, value: expr });
     }
     return expr;
   }
@@ -8435,7 +8481,10 @@ export function startDefinitionRow(
         const body = parser.parseExpression();
         // The caller reports a body that does not reach the end of the row.
         if (!parser.atEnd || body === null) return null;
-        return finalizeRawTree(parser, body);
+        return finalizeRawTree(
+          parser,
+          parser._exprLatex !== null ? decorateWithLatex(body, parser) : body
+        );
       } finally {
         parser.popSymbolTable();
       }
@@ -8543,6 +8592,259 @@ function settleTextUnits(
     return y;
   });
   return changed ? ([op, ...result] as MathJsonExpression) : expr;
+}
+
+/** The LaTeX of an expression and its source span (`_exprLatex`). */
+type LatexRecord = { start: number; end: number; latex: string };
+
+/**
+ * The parse result `expr` with the LaTeX that `parser` recorded for each
+ * expression (`preserveLatex`): a function expression becomes
+ * `{ latex, fn }`, a number `{ latex, num }`, a symbol `{ latex, sym }`, a
+ * string `{ latex, str }`, and an object gets a `latex` key. An expression
+ * that the parser did not record (an operand that a parselet made, such as
+ * the base `10` of `\lg x`) is kept as it is, except a number or a symbol
+ * that is also written in the same region (below).
+ *
+ * A function expression or an object is found by identity. A number or a
+ * symbol has no identity, so its records are found by value, in the span of
+ * the closest enclosing recorded expression, and outside the spans of the
+ * recorded expressions inside that one. Of two nested records, the outer one
+ * holds the LaTeX (the parser records a node again when it becomes a larger
+ * expression: `{x}` after `x`). The occurrences of the value get the LaTeX
+ * only when the records differ at most in white space: an occurrence cannot
+ * be told from another one, and the tree does not keep the order of the
+ * source (the body of a sum comes before its index), so two spellings
+ * (`\sum_{\alpha=1}^3 α`) are not paired. With as many records as
+ * occurrences, they are paired in order; with another number, each
+ * occurrence gets the first record. A parselet can use a written node twice
+ * (`n` in `|N| = n > 2`, `x` in `\int_0^1 x\,dx`), so an occurrence with no
+ * record of its own gets the LaTeX too; the cost is that a value that a
+ * parselet made gets it when the same value is written in the region (the
+ * base of `\lg 10`).
+ *
+ * `expr` is not modified.
+ */
+function decorateWithLatex(
+  expr: MathJsonExpression,
+  parser: _Parser
+): MathJsonExpression {
+  const records = parser._exprLatex!;
+  type PrimitiveRecord = NonNullable<_Parser['_primitiveLatex']>[number];
+  // The records of each value, by start, and for one start, the outer one
+  // first; of two with the same span, the later one first.
+  const primitivesByValue = new Map<number | string, PrimitiveRecord[]>();
+  parser._primitiveLatex!.forEach((p, order) => {
+    const list = primitivesByValue.get(p.value);
+    const entry = { ...p, order };
+    if (list === undefined) primitivesByValue.set(p.value, [entry]);
+    else list.push(entry);
+  });
+  for (const list of primitivesByValue.values())
+    (list as (PrimitiveRecord & { order: number })[]).sort(
+      (a, b) => a.start - b.start || b.end - a.end || b.order - a.order
+    );
+
+  // The LaTeX of `count` occurrences of `value` in a region with the span
+  // `window`, whose recorded expressions have the spans `holes` (see
+  // `overlapsHole()`), or `null`.
+  const primitiveLatex = (
+    value: number | string,
+    count: number,
+    window: [number, number],
+    holes: [number, number][]
+  ): string[] | null => {
+    const list = primitivesByValue.get(value);
+    if (list === undefined) return null;
+    // The first record that starts in the window.
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid].start < window[0]) lo = mid + 1;
+      else hi = mid;
+    }
+    const outer: PrimitiveRecord[] = [];
+    let outerEnd = -1;
+    for (let i = lo; i < list.length && list[i].start < window[1]; i++) {
+      const p = list[i];
+      if (p.end > window[1]) continue;
+      // Inside an outer record: the same occurrence.
+      if (p.end <= outerEnd) continue;
+      if (overlapsHole(p, holes)) continue;
+      outer.push(p);
+      outerEnd = p.end;
+    }
+    if (outer.length === 0) return null;
+    const text = outer[0].latex.trim();
+    if (outer.some((p) => p.latex.trim() !== text)) return null;
+    if (outer.length === count) return outer.map((p) => p.latex);
+    return new Array<string>(count).fill(outer[0].latex);
+  };
+
+  // True when the span of `p` overlaps one of `holes`: spans sorted by start,
+  // each with the largest end of the spans up to it.
+  const overlapsHole = (
+    p: { start: number; end: number },
+    holes: [number, number][]
+  ): boolean => {
+    // The last hole that starts before the end of `p`.
+    let lo = 0;
+    let hi = holes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (holes[mid][0] < p.end) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo > 0 && holes[lo - 1][1] > p.start;
+  };
+
+  // The passes of `finalizeRawTree()` find an application candidate and a
+  // continuation range by identity: carry them to the copy.
+  const moved = (
+    before: MathJsonExpression,
+    after: MathJsonExpression
+  ): MathJsonExpression => {
+    if (typeof before !== 'object' || before === null) return after;
+    parser._applicationCopied(before, after);
+    if (continuationRanges.has(before)) continuationRanges.add(after as object);
+    return after;
+  };
+
+  const decorateNode = (
+    node: MathJsonExpression,
+    window: [number, number]
+  ): MathJsonExpression => {
+    if (typeof node !== 'object' || node === null) return node;
+    const record = records.get(node);
+    const elements = functionElements(node);
+    let result: MathJsonExpression = node;
+    if (elements !== null) {
+      const fn = decorateRegion(
+        elements,
+        record ? [record.start, record.end] : window
+      );
+      result = (
+        Array.isArray(node) ? fn : { ...(node as object), fn }
+      ) as MathJsonExpression;
+    }
+    if (record !== undefined)
+      result = (
+        Array.isArray(result)
+          ? { latex: record.latex, fn: result }
+          : { ...(result as object), latex: record.latex }
+      ) as MathJsonExpression;
+    return moved(node, result);
+  };
+
+  // The elements of a function expression whose closest recorded expression
+  // has the span `window`, with the numbers and symbols of the region
+  // decorated: the operands, and the operands of the expressions inside it
+  // that the parser did not record.
+  const decorateRegion = (
+    elements: MathJsonExpression[],
+    window: [number, number]
+  ): MathJsonExpression[] => {
+    // The places of the numbers and symbols of the region, in tree order,
+    // and the spans of the recorded expressions at its boundary.
+    const places: { elements: MathJsonExpression[]; index: number }[] = [];
+    const holes: [number, number][] = [];
+    const collect = (els: MathJsonExpression[]) => {
+      for (let k = 1; k < els.length; k++) {
+        const child = els[k];
+        if (typeof child !== 'object' || child === null) {
+          places.push({ elements: els, index: k });
+          continue;
+        }
+        const record = records.get(child);
+        if (record !== undefined) {
+          holes.push([record.start, record.end]);
+          continue;
+        }
+        const inner = functionElements(child);
+        if (inner !== null) collect(inner);
+      }
+    };
+    collect(elements);
+
+    // The decorated copy of each function expression of the region, by
+    // identity of the original.
+    const copies = new Map<MathJsonExpression[], MathJsonExpression[]>();
+    const copyOf = (els: MathJsonExpression[]): MathJsonExpression[] => {
+      let copy = copies.get(els);
+      if (copy === undefined) {
+        copy = [...els];
+        copies.set(els, copy);
+      }
+      return copy;
+    };
+
+    const byValue = new Map<number | string, typeof places>();
+    for (const place of places) {
+      const value = place.elements[place.index] as number | string;
+      const list = byValue.get(value);
+      if (list === undefined) byValue.set(value, [place]);
+      else list.push(place);
+    }
+    // By start, and each end made the largest end so far, so that
+    // `overlapsHole()` reads one hole.
+    holes.sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < holes.length; i++)
+      holes[i][1] = Math.max(holes[i][1], holes[i - 1][1]);
+    for (const [value, occurrences] of byValue) {
+      const latex = primitiveLatex(value, occurrences.length, window, holes);
+      if (latex === null) continue;
+      occurrences.forEach((place, i) => {
+        copyOf(place.elements)[place.index] = latexPrimitive(
+          value,
+          latex[i]
+        );
+      });
+    }
+
+    // Rebuild the region from the copies, and decorate the recorded
+    // expressions at its boundary.
+    const rebuild = (els: MathJsonExpression[]): MathJsonExpression[] => {
+      const out = copies.get(els) ?? [...els];
+      for (let k = 1; k < els.length; k++) {
+        const child = els[k];
+        if (typeof child !== 'object' || child === null) continue;
+        if (records.has(child)) {
+          out[k] = decorateNode(child, window);
+          continue;
+        }
+        const inner = functionElements(child);
+        if (inner === null) continue;
+        const fn = rebuild(inner);
+        out[k] = moved(
+          child,
+          (Array.isArray(child)
+            ? fn
+            : { ...(child as object), fn }) as MathJsonExpression
+        );
+      }
+      return out;
+    };
+    return rebuild(elements);
+  };
+
+  const whole: [number, number] = [0, parser.sourceText().length];
+  if (typeof expr === 'number' || typeof expr === 'string') {
+    const latex = primitiveLatex(expr, 1, whole, []);
+    return latex === null ? expr : latexPrimitive(expr, latex[0]);
+  }
+  return decorateNode(expr, whole);
+}
+
+/** The decorated form of the number or the symbol `value`, with `latex`. */
+function latexPrimitive(
+  value: number | string,
+  latex: string
+): MathJsonExpression {
+  if (typeof value === 'number')
+    return { latex, num: Number(value).toString() };
+  if (value.startsWith("'")) return { latex, str: value.slice(1, -1) };
+  return { latex, sym: value };
 }
 
 /** The elements of `expr` when it is a function expression, as an array or
@@ -8681,6 +8983,7 @@ function ambiguityErrors(
     // recorded by identity: record the copy too, or the hook is not called
     // for it.
     parser._applicationCopied(node as object, copy);
+    parser._latexCopied(node, copy);
     return copy;
   };
 
@@ -8861,6 +9164,11 @@ export function parse(
   // so lose the spans that the parser recorded.
   if (expr !== null && adoptedParser._exprSpans !== null)
     expr = ambiguityErrors(expr, adoptedParser, normalizedPercents);
+
+  // `preserveLatex`: the passes of `finalizeRawTree()` keep the LaTeX of a
+  // node that they rebuild, so the LaTeX is added before them.
+  if (expr !== null && adoptedParser._exprLatex !== null)
+    expr = decorateWithLatex(expr, adoptedParser);
 
   expr = finalizeRawTree(adoptedParser, expr ?? 'Nothing');
 
