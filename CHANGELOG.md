@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **`:=` after `let` is an assignment, as `\coloneq` is** (CE-1239).
+  `\mathrm{let} c := 5; c` parsed as `["Block", ["Declare", "c", "'unknown'",
+  5], ["Error", "'invalid-type'", "''"], "c"]`: the `:` was read as the start
+  of a type. It now parses as `["Block", ["Declare", "c", "'unknown'", 5],
+  "c"]`, as `\mathrm{let} c \coloneq 5; c` does.
+
 - **A sum over all integers is as fast as a sum over half of them**
   (CE-1285). `Sum(2^(-Abs(n)), Limits(n, -oo, oo)).N()` took about 2 s,
   and each half took a few tens of milliseconds. The check that a sum over

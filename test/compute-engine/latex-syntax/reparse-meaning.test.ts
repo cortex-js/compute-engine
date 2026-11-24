@@ -537,6 +537,20 @@ describe('local and outer assignments in a block', () => {
     ).toEqual(['Block', ['Declare', 'k', "'unknown'", 2], ['Add', 'k', 1]]);
   });
 
+  test('after let, := is the assignment, as \\coloneq is', () => {
+    const engine = new ComputeEngine();
+    const expected = ['Block', ['Declare', 'c', "'unknown'", 5], 'c'];
+    for (const latex of [
+      '\\mathrm{let} c := 5; c',
+      '\\operatorname{let}\\, c := 5; c',
+      '\\mathrm{let} c \\coloneq 5; c',
+    ])
+      expect(engine.parse(latex, { form: 'raw' }).json).toEqual(expected);
+    expect(
+      engine.parse('\\mathrm{let} c : integer := 5; c', { form: 'raw' }).json
+    ).toEqual(['Block', ['Declare', 'c', "'integer'", 5], 'c']);
+  });
+
   test('a name is declared once per block', () => {
     const engine = new ComputeEngine();
     expect(
