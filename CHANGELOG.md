@@ -23,6 +23,12 @@
   gives `0.471404520791031682934i·x`, the same coefficient as
   `N((1/3)·√-2)`; `N((1/3)·π·x)` had a wrong 20th digit.
 
+- **A minus sign after an invisible box or a strut at the start of an
+  expression is now a negation** (CE-1175). `\phantom{x}\,-b` parsed as
+  `-b + Error(…)` and is now `-b`; `x = \phantom{x}-b` parsed as
+  `-b + (x = Error("missing"))` and is now `x = -b`. `a\placeholder{}\,-1`
+  was the product `-a` and is now `a - 1`.
+
 ### Performance
 
 - **A compiled formula whose functions call a small function in several sums

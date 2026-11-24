@@ -7407,8 +7407,39 @@ export class _Parser implements Parser {
         (this._authoredNothingEnd > start &&
           this._authoredNothingEnd <= this.index));
     if (authoredNothing) this._authoredNothingEnd = this.index;
+    // The skipped command is not an operand, so what follows it starts the
+    // expression: a prefix operator there applies, with or without visual
+    // space before it, as in `parseExpression()`. `\phantom{x}\,-b` is `-b`
+    // and `x = \phantom{x}-b` is `x = -b`. Without this, the sign had no
+    // left operand (`Subtract(Equal(x, Error("missing")), b)`), or the
+    // spacing command was its left operand
+    // (`Subtract(HorizontalSpacing(3), b)`). Visual space between two such
+    // commands is skipped with them: `\phantom{x}\,\phantom{y}\,-b` is `-b`.
+    // At the right operand of a juxtaposition, the command follows an
+    // operand, and a sign after it is an infix operator: `a\smash{}-b` is
+    // not the product `a·(-b)`. See `_juxtaposedOperandStart`.
     if (result !== null && isEmptySequence(result) && !authoredNothing) {
       this.skipSpace();
+      if (start !== this._juxtaposedOperandStart) {
+        const afterCommand = this.index;
+        this.skipVisualSpace();
+        if (this.index !== afterCommand && this.atDecorationCommand())
+          return this.parsePrimary(until);
+        this.index = afterCommand;
+        if (!this.atBoundary && !this.atTerminator(until)) {
+          const prefixUntil = { ...until, minPrec: 0 };
+          const prefix =
+            this.parsePrefixOperator(prefixUntil) ??
+            this.parsePrefixOperatorAfterSpacing(prefixUntil);
+          if (prefix !== null) return prefix;
+        }
+      } else {
+        // The right operand of the juxtaposition now starts after the
+        // skipped command, so the rule holds for each empty command in a
+        // row: `a\phantom{x}\smash{}-b`. The juxtaposition restores the
+        // field after its operand.
+        this._juxtaposedOperandStart = this.index;
+      }
       return this.parsePrimary(until);
     }
 
