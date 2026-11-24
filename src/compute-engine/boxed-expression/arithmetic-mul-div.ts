@@ -4110,9 +4110,7 @@ export function mulNEvaluated(
   // them below. In the order of `xs`, `10²⁰⁰·10⁻²⁰⁰·10⁻¹²³·x` went through
   // the subnormal `10⁻³²³` at machine precision.
   if (exactFactors.some((x) => x !== undefined)) {
-    const numberAt = xs
-      .flatMap((x, i) => (isNumber(x) ? [i] : []))
-      .reverse();
+    const numberAt = xs.flatMap((x, i) => (isNumber(x) ? [i] : [])).reverse();
     if (numberAt.length >= 2 && numberAt.length < xs.length) {
       const coefficient = mulNEvaluated(
         numberAt.map((i) => exactFactors[i] ?? xs[i]),

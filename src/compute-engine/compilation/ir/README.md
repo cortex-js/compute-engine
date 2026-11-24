@@ -3378,30 +3378,29 @@ and each parameter reads its argument. A call that the copy holds is copied in
 turn when it qualifies (it is in the loop of the call it replaces); a result
 that is a parameter is the argument, and a call stays when that argument has
 another lane than the call's result (`id(k)` of an integer index for a real
-`id`, whose value a build would read as an integer). The copies grow the
-program by at most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and
-4,000 by the rule `'repeated'` (where the sums written out multiply the sites: a
-function read at the 16 terms of each of four sums makes copies of about 1,900
-instructions before the other passes shrink them); past it,
-calls stay, so a chain of functions each calling the previous three times in a
-loop stops there. The growth is the size of the program before the pass, in each
-round, less its size when the passes started, so a copy that the other passes
-shrink gives back its instructions: a copy of `p(k)` of Tycho's
-`voronoi-diagram` with a constant `k` folds its square root and one cosine. In
-one round the copies are at most the budget that is left. Counted at their
-size before the fold, the copies of `F`, `Z`, `u`, `v` and `B` spent the budget,
-and `H`, reached last, kept 16 calls of `n`, each of which computed `F(x, y)`
-again, twice the sines and cosines of the same document with `n` written out
-(CE-1724). A copied call of a function that runs a `Loop` can be moved out of
-the loop by `invariants`, so a program that threw `iteration-limit-exceeded` can
-give its value ("Effects" says it for a direct call):
-`hh := Function(k·LL(p), p, k)`, whose `LL` runs a `Loop` of 100 passes
-(`s := s + p·i`), gives 9090 for `Sum(hh(x, k), Limits(k, 1, 3))` at x = 0.3
-under a budget of 150, where it threw. After the passes, a function that no call
-reaches from the entry (its calls were copied, or removed with a value that
-nothing reads) leaves the program and is not printed, also when the pass is off;
-`symbolDeps` still names it (`captures`). The `bigint` mode does not run the
-pass (it serves `invariants`, which is off there).
+`id`, whose value a build would read as an integer). The copies grow the program
+by at most `INLINE_BUDGET` instructions, 1,000 by the rule `'loop'` and 4,000 by
+the rule `'repeated'` (where the sums written out multiply the sites: a function
+read at the 16 terms of each of four sums makes copies of about 1,900
+instructions before the other passes shrink them); past it, calls stay, so a
+chain of functions each calling the previous three times in a loop stops there.
+The growth is the size of the program before the pass, in each round, less its
+size when the passes started, so a copy that the other passes shrink gives back
+its instructions: a copy of `p(k)` of Tycho's `voronoi-diagram` with a constant
+`k` folds its square root and one cosine. In one round the copies are at most
+the budget that is left. Counted at their size before the fold, the copies of
+`F`, `Z`, `u`, `v` and `B` spent the budget, and `H`, reached last, kept 16
+calls of `n`, each of which computed `F(x, y)` again, twice the sines and
+cosines of the same document with `n` written out (CE-1724). A copied call of a
+function that runs a `Loop` can be moved out of the loop by `invariants`, so a
+program that threw `iteration-limit-exceeded` can give its value ("Effects" says
+it for a direct call): `hh := Function(k·LL(p), p, k)`, whose `LL` runs a `Loop`
+of 100 passes (`s := s + p·i`), gives 9090 for `Sum(hh(x, k), Limits(k, 1, 3))`
+at x = 0.3 under a budget of 150, where it threw. After the passes, a function
+that no call reaches from the entry (its calls were copied, or removed with a
+value that nothing reads) leaves the program and is not printed, also when the
+pass is off; `symbolDeps` still names it (`captures`). The `bigint` mode does
+not run the pass (it serves `invariants`, which is off there).
 
 A statement `DefineFunction(f, Function(…))` of the compiled program (Epsil's
 `f(x) = x^2 + 1` at the top level of a `Program`) writes nothing: its canonical
