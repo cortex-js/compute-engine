@@ -136,16 +136,11 @@ describe('IR slice: the real functions at edge inputs', () => {
     'Arctan', 'Arcsin', 'Arccos', 'Arccot', 'Arcsec', 'Arccsc', 'Haversine', 'Coth',
     'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch', 'Sign', 'Truncate',
     'Fract', 'Log', 'Sinh', 'Cosh', 'Tanh', 'Sec', 'Csc', 'Sech', 'Csch'];
-  // Values of the interpreter that are not the function's: CE-1256
-  // (`Root(x, n)` with a negative integer n given as a value is 0 at
-  // x = 0, 1.333e-100 at x = 1e300 and ±∞ at x = ±1e-300, n = -3); CE-1257 (`Zeta(s)` is -∞
-  // for a tiny negative s at the default precision); `Haversine(x)` is
-  // ½(1 − cos x), 0 for |x| < 1e-8 (the compiled sin²(x/2) is right).
-  const known = (head: string, a: number, b?: number) =>
-    (head === 'Root' &&
-      (Math.abs(a) <= 1e-300 || Math.abs(a) >= 1e300) &&
-      Number.isInteger(b) &&
-      b! < 0) ||
+  // Values of the interpreter that are not the function's: CE-1257
+  // (`Zeta(s)` is -∞ for a tiny negative s at the default precision);
+  // `Haversine(x)` is ½(1 − cos x), 0 for |x| < 1e-8 (the compiled
+  // sin²(x/2) is right).
+  const known = (head: string, a: number) =>
     (head === 'Zeta' && a < 0 && a > -1e-20) ||
     (head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0);
   // Relative 1e-12, with an absolute floor of 1e-300 only (the oracle's
@@ -162,7 +157,7 @@ describe('IR slice: the real functions at edge inputs', () => {
   // the default precision, as its decimal (0.9999999999999999).
   const machine = makeMachineEngine();
   const check = (head: string, args: number[]) => {
-    if (known(head, args[0], args[1])) return;
+    if (known(head, args[0])) return;
     const names = ['x', 'y'].slice(0, args.length);
     const expr = ce.box([head, ...names] as never);
     const point = Object.fromEntries(names.map((n, i) => [n, args[i]]));

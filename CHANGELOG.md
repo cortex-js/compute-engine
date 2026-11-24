@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **The n-th root with a negative index is right for a zero, a very large or a
+  very small radicand** (CE-1256). With `x` and `n` given the values 0 and -2,
+  `Root(x, n)` evaluated to 0; it is now `~oo`, as `Power(0, -1/2)` is. At
+  machine precision, `Root(1e300, -3)` with the values given by
+  `ce.withValues()` was `1.3333333333333502e-100` and `Root(-1e-300, -3)` was
+  `+oo`; they are now `1e-100` and `-1e100`.
+
 - **The type of a declaration is not a name of the expression** (CE-1250).
   For `["Block", ["Declare", "t", "real", 1], ["Add", "t", 1]]`, `unknowns`
   and `freeVariables` were `["real"]` and `symbols` was `["real", "t"]`. They

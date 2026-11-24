@@ -2220,15 +2220,16 @@ export function pow(
 }
 
 /**
- * `Root(a, b)` at the points where one operand is NaN, infinite, or — for
- * the index — 0: `Root(a, b)` IS `Power(a, 1/b)` (ruled 2026-09-01), so
+ * `Root(a, b)` at the points where one operand is NaN or infinite, the
+ * radicand is 0 under a negative index, or the index is 0: `Root(a, b)` IS `Power(a, 1/b)` (ruled 2026-09-01), so
  * the value is `pow`'s at the exponent `1/b`, computed with the engine's
  * extended arithmetic (`1/±∞ = 1/~oo = 0`, `1/0 = ~oo`). Concretely:
  * `Root(2, ±∞) = 2^0 = 1`, `Root(0, ±∞) = 0^0 = NaN`, `Root(±∞, ±∞) =
  * NaN`, `Root(±∞, 3)` and `Root(~oo, 3)` follow `Power`'s infinite-base
- * arms (`−∞`, `~oo`), NaN propagates. An index of 0 is left alone: the
- * `Root` definition declares it a violated precondition (an Error), which
- * the dispatch gate answers before the handler runs.
+ * arms (`−∞`, `~oo`), `Root(0, −2) = 0^(−1/2) = ~oo`, NaN propagates. An
+ * index of 0 is left alone: the `Root` definition declares it a violated
+ * precondition (an Error), which the dispatch gate answers before the
+ * handler runs.
  *
  * Returns `undefined` when no operand is at such a point.
  */
@@ -2248,6 +2249,11 @@ function rootAtExceptionalPoint(
       if (a.isSame(0) || a.isInfinity === true) return ce.NaN;
       return ce.One;
     }
+    // A zero radicand with a negative real index: the exponent `1/b` is
+    // negative, and `0^(1/b)` is `~oo`, as `Power` gives. The exact root
+    // below would otherwise read `0` as the root of `0` for every index.
+    if (isNumber(a) && a.isSame(0) && b.isNegative === true)
+      return ce.ComplexInfinity;
   }
   if (isNumber(a) && a.isInfinity === true && isNumber(b)) {
     // An infinite radicand with a finite non-zero index: `Power`'s
