@@ -5173,12 +5173,11 @@ function getIndexes(
   // (`serializeBigOp()`) writes one superscript item for each clause that
   // has an upper bound, and none for an `Element` clause, so this rule reads
   // the LaTeX of `Element` clauses and of ranges with both bounds back as
-  // the same sum. It does not do so for a range with no upper bound that
-  // comes before a range with one: the serializer writes no superscript
-  // item for the first, so `Limits(i, 1, Nothing), Limits(j, 1, 3)` is
-  // written `_{i=1, j=1}^{3}`, and the `3` is read as the upper bound of
-  // `i`. A superscript item that is left after the last range with no upper
-  // bound is not used.
+  // the same sum. Where this rule would give an upper bound to the wrong
+  // range (a range with no upper bound before a range with one), the
+  // serializer writes nested operators (`groupIndexingSets()`). A
+  // superscript item that is left after the last range with no upper bound
+  // is not used.
   let nextSup = 0;
 
   // EL-3: Process subscripts, attaching conditions to preceding Element expressions
@@ -5459,7 +5458,7 @@ function collectIndexingSets(expr: MathJsonExpression): MathJsonExpression[] {
 function serializeIndexingSet(
   serializer: Serializer,
   indexingSet: MathJsonExpression
-): { sub?: string; sup?: string } {
+): { sub?: string; sup?: string; takesSup?: true } {
   // Handle Element expressions: ["Element", "n", "N"] serializes as
   // `n\in N`, and ["Element", "n", "N", condition] as `n\in N, condition`.
   // The condition must be written: without it, the LaTeX parsed again sums
@@ -5513,7 +5512,7 @@ function serializeIndexingSet(
   const lowerExpr = sanitizeLimitOperand(operand(indexingSet, 2));
   const upperExpr = sanitizeLimitOperand(operand(indexingSet, 3));
 
-  const result: { sub?: string; sup?: string } = {};
+  const result: { sub?: string; sup?: string; takesSup?: true } = {};
   const indexName = indexExpr ? symbol(indexExpr) : null;
   const hasIndex = indexName !== null && indexName !== 'Nothing';
   const indexLatex =
@@ -5524,9 +5523,49 @@ function serializeIndexingSet(
   else if (hasIndex && indexLatex) result.sub = indexLatex;
   else if (lowerExpr !== null) result.sub = serializer.serialize(lowerExpr);
 
+  // `takesSup`: `getIndexAssignment()` reads the `sub` item as a range, so
+  // `getIndexes()` gives it a superscript item. A lower bound with no index
+  // is read as a range only when it is a number.
+  if (hasIndex || (lowerExpr !== null && isNumberExpression(lowerExpr)))
+    result.takesSup = true;
+
   if (upperExpr !== null) result.sup = serializer.serialize(upperExpr);
 
   return result;
+}
+
+/**
+ * The indexing sets of a big operator, in groups that can each be written
+ * as the subscript and superscript of one operator. `getIndexes()` gives the
+ * superscript items, in order, to the subscript items that are ranges with
+ * no upper bound, so a group is correct when its clauses with an upper bound
+ * are exactly the first of its range clauses. A range with no upper bound
+ * before a clause with one, `Limits(i, 1, Nothing), Limits(j, 1, 3)`, or an
+ * upper bound with no subscript item before a range, `Limits(Nothing,
+ * Nothing, 5), Limits(j, 1, 3)`, starts a new group: the operator is written
+ * once for each group, `\sum_{i=1}\sum_{j=1}^{3}`, and that LaTeX parses as
+ * nested operators with the same value.
+ */
+function groupIndexingSets(
+  serializer: Serializer,
+  indexingSets: MathJsonExpression[]
+): { sub?: string; sup?: string }[][] {
+  type Part = ReturnType<typeof serializeIndexingSet>;
+  // The clauses with a `sup` must be the first of the range clauses with a
+  // `sub`, in the same order.
+  const isCorrect = (group: Part[]): boolean => {
+    const ranges = group.filter((p) => p.takesSup);
+    const bounded = group.filter((p) => p.sup !== undefined);
+    return bounded.every((p, i) => ranges[i] === p);
+  };
+  const groups: Part[][] = [];
+  for (const set of indexingSets) {
+    const part = serializeIndexingSet(serializer, set);
+    const last = groups.at(-1);
+    if (last && isCorrect([...last, part])) last.push(part);
+    else groups.push([part]);
+  }
+  return groups;
 }
 
 function serializeBigOp(command: string) {
@@ -5538,21 +5577,18 @@ function serializeBigOp(command: string) {
     // serialized to a bare `\sum`.
     if (body === null) return command;
 
-    const indexingSets = collectIndexingSets(expr);
-    let decoratedCommand = command;
-    if (indexingSets.length > 0) {
-      const subs: string[] = [];
-      const sups: string[] = [];
-      for (const set of indexingSets) {
-        const parts = serializeIndexingSet(serializer, set);
-        if (parts.sub) subs.push(parts.sub);
-        if (parts.sup) sups.push(parts.sup);
-      }
+    const groups = groupIndexingSets(serializer, collectIndexingSets(expr));
+    const commands = groups.map((group) => {
+      let decoratedCommand = command;
+      const subs = group.flatMap((p) => (p.sub ? [p.sub] : []));
+      const sups = group.flatMap((p) => (p.sup ? [p.sup] : []));
       if (subs.length > 0)
         decoratedCommand = supsub('_', decoratedCommand, subs.join(', '));
       if (sups.length > 0)
         decoratedCommand = supsub('^', decoratedCommand, sups.join(', '));
-    }
+      return decoratedCommand;
+    });
+    const decoratedCommand = commands.length > 0 ? commands.join('') : command;
 
     // The body is parsed back at `MULTIPLICATION_PRECEDENCE` (see
     // `parseBigOp`), so a body that binds looser — `Add`/`Subtract`/

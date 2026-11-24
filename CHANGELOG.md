@@ -9,6 +9,13 @@
   `9.332621544394413e+157` (`100!`), as the same function with an untyped
   parameter does.
 
+- **The LaTeX of a `Sum` or a `Product` with a range that has no upper bound
+  before a range that has one now parses back with the same bounds**
+  (CE-1161). `Sum(i*j, Limits(i, 1, Nothing), Limits(j, 1, 3))` was written
+  `\sum_{i=1, j=1}^3ij`, which parses with the upper bound `3` on `i`. It is
+  now written as nested operators, `\sum_{i=1}\sum_{j=1}^3ij`, which parses as
+  a `Sum` of a `Sum` with the same meaning.
+
 ### Performance
 
 - **A compiled formula whose functions call a small function in several sums

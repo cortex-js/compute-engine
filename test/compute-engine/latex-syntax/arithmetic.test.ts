@@ -864,6 +864,64 @@ describe('upper bounds of a sum over a set and a range', () => {
       ['Limits', 'i', 1, 3],
     ]);
   });
+
+  // A range with no upper bound before a range with one has no superscript
+  // item to keep its place, so the serializer writes nested operators. The
+  // LaTeX parses as the nested sum, which has the same meaning.
+  test('a range with no upper bound before a range with one', () => {
+    const expr = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 'Nothing'],
+      ['Limits', 'j', 1, 3],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(`\\sum_{i=1}\\sum_{j=1}^3ij`);
+    expect(ce.parse(expr.latex).json).toEqual([
+      'Sum',
+      ['Sum', ['Multiply', 'i', 'j'], ['Limits', 'j', 1, 3]],
+      ['Limits', 'i', 1, 'Nothing'],
+    ]);
+  });
+
+  test('an upper bound with no subscript item before a range', () => {
+    const expr = ce.box([
+      'Sum',
+      'j',
+      ['Limits', 'Nothing', 'Nothing', 5],
+      ['Limits', 'j', 1, 3],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(`\\sum^5\\sum_{j=1}^3j`);
+    expect(ce.parse(expr.latex).json).toEqual([
+      'Sum',
+      ['Sum', 'j', ['Limits', 'j', 1, 3]],
+      ['Limits', 'Nothing', 'Nothing', 5],
+    ]);
+  });
+
+  test('nested operators only where the pairing needs them', () => {
+    const expr = ce.box([
+      'Product',
+      ['Multiply', 'i', 'j', 'k', 'm'],
+      ['Limits', 'i', 1, 'Nothing'],
+      ['Limits', 'j', 1, 3],
+      ['Element', 'k', ['Set', 1, 2]],
+      ['Limits', 'm', 1, 'Nothing'],
+    ]);
+    expect(expr.latex).toMatchInlineSnapshot(
+      `\\prod_{i=1}\\prod_{j=1, k\\in \\lbrace1, 2\\rbrace, m=1}^3ijkm`
+    );
+    expect(ce.parse(expr.latex).json).toEqual([
+      'Product',
+      [
+        'Product',
+        ['Multiply', 'i', 'j', 'k', 'm'],
+        ['Limits', 'j', 1, 3],
+        ['Element', 'k', ['Set', 1, 2]],
+        ['Limits', 'm', 1, 'Nothing'],
+      ],
+      ['Limits', 'i', 1, 'Nothing'],
+    ]);
+  });
 });
 
 describe('EL-5: Non-enumerable domains stay symbolic', () => {
