@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A user function whose parameter is a union with a point type accepts the
+  point of `NaN` coordinates** (CE-1156). With `F` declared
+  `(tuple<real, real> | string) -> unknown` and `F(p) := p`,
+  `F((NaN, NaN))` and `F(At([(1, 2)], 5))`, a read past the end of a list of
+  points, gave an `incompatible-type` error. They now give `(NaN, NaN)`, as
+  for a parameter declared `tuple<real, real>`. The point must have the
+  arity of a point arm of the union.
+
 - **A number made at a higher precision keeps the digits of a double after
   the precision is set to `'machine'`** (CE-1138). After `ce.precision = 30;
   const a = ce.parse('0.3'); ce.precision = 'machine'`,

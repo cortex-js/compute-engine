@@ -15,6 +15,7 @@ import {
   typeCouldBeNumericTuple,
   typeIsProvablyNonNumericCollection,
   pointArity,
+  acceptsNaNPointAt,
 } from '../collection-utils.js';
 
 import {
@@ -4076,20 +4077,24 @@ function acceptsNaNArgument(
   // The absent value at a point parameter (a tuple of numbers,
   // `pointArity()`) makes the call `Missing`, as at a numeric parameter. A
   // `NaN` point (a tuple whose coordinates are all `NaN`, the value of a
-  // read past the end of a list of points) is accepted there, as `NaN` is
-  // at a numeric parameter. The scalar `NaN` is still refused: it is not a
-  // point.
+  // read past the end of a list of points) is accepted at a point parameter
+  // of its arity, and at a union with a point arm of its arity
+  // (`tuple<real, real> | string`, `acceptsNaNPointAt()`), as `NaN` is at a
+  // numeric parameter. The scalar `NaN` is still refused: it is not a
+  // point. An absent argument at such a union is checked as usual.
   if (!isSubtype(param, 'number')) {
-    if (pointArity(param) === undefined) return false;
     const opType = resolveTypeAlias(op.type.type);
-    return (
-      opType === 'missing' ||
-      isNaNPointValue(op) ||
-      (typeof opType !== 'string' &&
-        opType.kind === 'tuple' &&
-        opType.elements.length > 0 &&
-        opType.elements.every((x) => isSubtype(x.type, 'nan')))
-    );
+    if (opType === 'missing') return pointArity(param) !== undefined;
+    let n: number | undefined;
+    if (isNaNPointValue(op) && isFunction(op)) n = op.nops;
+    else if (
+      typeof opType !== 'string' &&
+      opType.kind === 'tuple' &&
+      opType.elements.length > 0 &&
+      opType.elements.every((x) => isSubtype(x.type, 'nan'))
+    )
+      n = opType.elements.length;
+    return n !== undefined && acceptsNaNPointAt(param, n);
   }
   // An absent argument (the literal `Missing`, typed `missing`) is accepted
   // at a numeric parameter of a user function, as `NaN` is: the call is

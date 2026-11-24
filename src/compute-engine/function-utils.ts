@@ -132,7 +132,11 @@ import {
   scopeActivationTemplate,
 } from './boxed-expression/ambient-chain.js';
 import { isErrorTypedOperand } from './boxed-expression/error-typed-operand.js';
-import { pointArity } from './collection-utils.js';
+import {
+  acceptsNaNPointAt,
+  hasPointArm,
+  pointArity,
+} from './collection-utils.js';
 import {
   GENERIC_DEFAULT_MESSAGE,
   NESTED_DEFAULT_MESSAGE,
@@ -8537,12 +8541,15 @@ function makeLambda(
     if (t !== undefined && isSubtype(t, 'number')) acc.push(i);
     return acc;
   }, []);
-  /** The parameters annotated as a point, where a `NaN` point is accepted. */
-  const pointParamIndexes = params.reduce<number[]>((acc, p, i) => {
+  /** The type of each parameter annotated as a point, or as a union with a
+   * point arm (`hasPointArm()`), where a `NaN` point of the arity of a
+   * point arm is accepted (`acceptsNaNPointAt()`): at
+   * `tuple<real, real> | string`, the point `(NaN, NaN)` is accepted. */
+  const pointParamTypes = new Map<number, Type>();
+  params.forEach((p, i) => {
     const t = functionLiteralParameterType(p);
-    if (t !== undefined && pointArity(t) !== undefined) acc.push(i);
-    return acc;
-  }, []);
+    if (t !== undefined && hasPointArm(t)) pointParamTypes.set(i, t);
+  });
   /** The parameters where `Missing` makes the call `Missing`: the numeric
    * parameters and the parameters annotated as a point. */
   const absentResultParamIndexes = params.reduce<number[]>((acc, p, i) => {
@@ -8562,7 +8569,7 @@ function makeLambda(
     t: Type,
     values: ReadonlyArray<Expression>
   ): Type => {
-    if (numericParamIndexes.length === 0 && pointParamIndexes.length === 0)
+    if (numericParamIndexes.length === 0 && pointParamTypes.size === 0)
       return t;
     if (typeof t === 'string' || t.kind !== 'signature') return t;
     // Slot `i` of `optArgs` (the parameters with a default value) is the
@@ -8574,9 +8581,13 @@ function makeLambda(
     const accept = (arg: NamedElement, i: number): NamedElement => {
       const v = values[i];
       if (v === undefined) return arg;
+      const pointParam = pointParamTypes.get(i);
       const admitted = numericParamIndexes.includes(i)
         ? v.isNaN === true || isAbsentSymbol(v)
-        : pointParamIndexes.includes(i) && isNaNPointValue(v);
+        : pointParam !== undefined &&
+          isNaNPointValue(v) &&
+          isFunction(v) &&
+          acceptsNaNPointAt(pointParam, v.nops);
       if (!admitted) return arg;
       changed = true;
       return { ...arg, type: 'any' as Type };

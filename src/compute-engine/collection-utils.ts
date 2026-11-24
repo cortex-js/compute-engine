@@ -2585,6 +2585,40 @@ export function pointArity(t: Readonly<Type>, depth = 0): number | undefined {
     : undefined;
 }
 
+/** The arities of the point types that `param` accepts: the arity of
+ * `param` when it is a point type (`pointArity()`), else the arity of each
+ * arm of a union that is a point type. Empty for any other type. */
+function pointArmArities(param: Readonly<Type>): number[] {
+  const n = pointArity(param);
+  if (n !== undefined) return [n];
+  const present = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(param))
+  );
+  if (typeof present === 'string' || present.kind !== 'union') return [];
+  return present.types
+    .map((arm) => pointArity(arm))
+    .filter((k): k is number => k !== undefined);
+}
+
+/** Whether `param` is a point type, or a union with an arm that is a point
+ * type, such as `tuple<real, real> | string`: the parameter types where a
+ * point of `NaN` coordinates can be accepted (`acceptsNaNPointAt()`). */
+export function hasPointArm(param: Readonly<Type>): boolean {
+  return pointArmArities(param).length > 0;
+}
+
+/**
+ * Whether the point of `n` coordinates that are all `NaN` is accepted at the
+ * parameter type `param` of a user function: `param` is a point type of
+ * arity `n` (`pointArity()`), or a union with an arm that is a point type of
+ * arity `n`, such as `tuple<real, real> | string` for `n = 2`. That point is
+ * the value of a read past the end of a list of points, and it is accepted
+ * where a point of its arity is, as `NaN` is at a numeric parameter.
+ */
+export function acceptsNaNPointAt(param: Readonly<Type>, n: number): boolean {
+  return pointArmArities(param).includes(n);
+}
+
 /**
  * The point of `n` coordinates that are all `NaN`: the absent value of the
  * domain of a point of arity `n` (`pointArity()`), which a read out of

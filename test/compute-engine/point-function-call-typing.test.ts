@@ -527,3 +527,58 @@ describe('CE-1135: each component of a point is checked at a union parameter wit
     ).toBe('(1.5, 2)');
   });
 });
+
+describe('CE-1156: a NaN point is accepted at a union parameter with a point arm of its arity', () => {
+  /** `F(p) = p` with the parameter `tuple<real, real> | string`. */
+  function engineF(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('F', '(tuple<real, real> | string) -> unknown');
+    ce.parse('F(p) := p').evaluate();
+    return ce;
+  }
+  const errorCode = (e: {
+    operator: string;
+    op1: { op1: { string?: string } };
+  }) => (e.operator === 'Error' ? e.op1.op1.string : undefined);
+
+  test('the NaN point and a read past the end of a list of points are bound', () => {
+    const ce = engineF();
+    const call = ce.box(['F', ['Tuple', 'NaN', 'NaN']]);
+    expect(call.isValid).toBe(true);
+    expect(call.evaluate().toString()).toBe('(NaN, NaN)');
+    expect(
+      ce
+        .box(['F', ['At', ['List', ['Tuple', 1, 2]], 5]])
+        .evaluate()
+        .toString()
+    ).toBe('(NaN, NaN)');
+  });
+
+  test('a function literal with such an annotation binds the NaN point', () => {
+    const ce = new ComputeEngine();
+    const call = ce.box([
+      'Apply',
+      ['Function', 'p', ['Typed', 'p', "'tuple<real, real> | string'"]],
+      ['Tuple', 'NaN', 'NaN'],
+    ]);
+    expect(call.evaluate().toString()).toBe('(NaN, NaN)');
+  });
+
+  test('a NaN point of another arity, the scalar NaN and Missing are refused', () => {
+    const ce = engineF();
+    for (const arg of [['Tuple', 'NaN', 'NaN', 'NaN'], 'NaN', 'Missing']) {
+      const call = ce.box(['F', arg]);
+      expect(call.isValid).toBe(false);
+      expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+    }
+  });
+
+  test('a point parameter refuses a NaN point of another arity', () => {
+    const ce = new ComputeEngine();
+    ce.declare('H', '(tuple<real, real>) -> unknown');
+    ce.parse('H(p) := p').evaluate();
+    const call = ce.box(['H', ['Tuple', 'NaN', 'NaN', 'NaN']]);
+    expect(call.isValid).toBe(false);
+    expect(errorCode(call.evaluate() as any)).toBe('incompatible-type');
+  });
+});
