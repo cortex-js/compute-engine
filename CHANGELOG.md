@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **The length of a reversed, sorted or shuffled string counts the
+  characters of the result** (CE-1403). A combining mark that moves after a
+  letter joins it, so the result can have fewer characters than the
+  original string: `length(reverse("\u{301}a"))` was `2` and is now `1`, and
+  `length(sort("\u{301}ba"))` was `3` and is now `2`. `Count`, `IsEmpty` and
+  `Contains` of a reordered string, and of a string without duplicates
+  (`Unique`), read the result in the same way. The reverse of a sorted
+  string, and the first elements of one, are no longer the empty string:
+  `Reverse(Sort("cab"))` is `"cba"` and `Take(Sort("cab"), 2)` is `"ab"`.
+
 - **`Parse(s)` evaluates the parsed expression, and an operator that holds
   its argument reads the parsed expression** (CE-1402).
   `Evaluate(Parse("1011_2 \cdot 101_2"))` was the product of two `BaseForm`

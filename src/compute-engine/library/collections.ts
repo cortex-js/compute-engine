@@ -909,7 +909,8 @@ function isInertOpaqueHead(expr: Expression): boolean {
 // be stripped — the wrapped and unwrapped collections have the same number of
 // elements, whether the operand is concrete or symbolic, evaluated or not.
 // `Contains` depends only on the SET of elements, so it may additionally strip
-// `Unique` (which drops duplicates but preserves membership).
+// `Unique` (which drops duplicates but preserves membership). A source that
+// can be a string is not stripped (see `peekWrappers`).
 //
 // Why it matters: consumers evaluate their operand first, so an EAGER wrapper
 // (Sort/RandomShuffle) would materialize and reorder the whole collection before
@@ -966,7 +967,14 @@ function peekWrappers(
     // indexed collection; otherwise the consumer evaluates the wrapper, which
     // sorts an untyped list to count it but reports the error for a set.
     (!ORDER_WRAPPERS.includes(result.operator) ||
-      result.op1.type.matches('indexed_collection<any>'))
+      result.op1.type.matches('indexed_collection<any>')) &&
+    // The elements of a string are its grapheme clusters, and a wrapper
+    // returns a string whose clusters are formed again: a combining mark
+    // moved after a letter joins it. So `Reverse` of the string U+0301 "a"
+    // is "a" U+0301, one element where its source has two, and `Contains`
+    // of it is false for "a". Strip a wrapper only when its source cannot
+    // be a string.
+    result.op1.type.isDisjointFrom('string')
   ) {
     result = result.op1;
   }

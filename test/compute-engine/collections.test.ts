@@ -5129,8 +5129,18 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
 
   test('symbolic operand: Count(Sort(xs)) canonicalizes to Count(xs)', () => {
     const local = new ComputeEngine();
+    local.declare('xs', 'list<real>');
     const expr = local.box(['Count', ['Sort', 'xs']]);
     expect(expr.json).toEqual(['Count', 'xs']);
+    expect(expr.isValid).toBe(true);
+  });
+
+  test('symbolic operand that can be a string: Sort is kept', () => {
+    // An undeclared `xs` can hold a string, and the sorted string can have
+    // fewer characters than `xs` (see `order-wrapper-over-string.test.ts`).
+    const local = new ComputeEngine();
+    const expr = local.box(['Count', ['Sort', 'xs']]);
+    expect(expr.json).toEqual(['Count', ['Sort', 'xs']]);
     expect(expr.isValid).toBe(true);
   });
 

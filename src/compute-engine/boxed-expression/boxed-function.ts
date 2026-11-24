@@ -22787,11 +22787,24 @@ function evaluateStringPreservingCollection(
     });
   if (!hasFiniteCount && !operandsAreWalkableStrings) return undefined;
 
-  const parts: string[] = [];
-  for (const c of expr.each()) {
-    if (!isCharacter(c) && !isString(c)) return undefined;
-    parts.push(c.string);
-  }
+  // A walk that misses elements declines: the view reads a source that is
+  // not a string value yet (`Reverse(Sort("cab"))`, `Take(Unique("cab"), 2)`),
+  // whose eager operator answers no element read before it is evaluated, so
+  // the joined characters would be `""`. The walk says so
+  // (`noteIncompleteWalk()`), or it gives fewer elements than the count of
+  // the node. The walk gives the characters before they are joined, one per
+  // element of the count. The evaluation then evaluates the operands and
+  // joins the view over their values (step 3).
+  const parts = unlessWalkMissedElements(() => {
+    const parts: string[] = [];
+    for (const c of expr.each()) {
+      if (!isCharacter(c) && !isString(c)) return undefined;
+      parts.push(c.string);
+    }
+    return parts;
+  });
+  if (parts === undefined) return undefined;
+  if (hasFiniteCount && parts.length !== count) return undefined;
   return expr.engine.string(parts.join(''));
 }
 
