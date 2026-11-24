@@ -29,6 +29,8 @@ A value's type does not match what its context requires — a typed declaration 
 
 The message reads "expected `T`, got `U`": T is what the context requires, U is what the value actually has. A site may follow — "at `x`" quotes the offending subexpression. A type like `list<string^5>` is a list of exactly 5 strings; `integer` is a whole number, finite like every bare numeric type name.
 
+When two arguments of a call are in each other's place, a note says so ("arguments 1 and 2 look exchanged") and the fixit exchanges them: `map([1, 2, 3], x => x^2)` becomes `map(x => x^2, [1, 2, 3])`. `map` takes its function first, because it takes any number of collections after it; `filter`, `reduce` and most other operations take the collection first.
+
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see `epsil doc runtime-error`).
 
 ## `unevaluated-tuple`

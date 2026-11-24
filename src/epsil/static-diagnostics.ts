@@ -98,7 +98,7 @@ import {
   clauseSignatureOf,
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
-import { signatureNotes } from './signature-notes.js';
+import { signatureNotes, swappedArgument } from './signature-notes.js';
 import {
   matchExhaustivenessDiagnostics,
   type AnnotationScope,
@@ -442,6 +442,96 @@ function sourceOffsetsOfBoxed(
     typeof offsets[1] === 'number'
     ? [offsets[0], offsets[1]]
     : undefined;
+}
+
+/**
+ * The note and the fixit of a call whose two arguments are exchanged:
+ * `map([1, 2, 3], x => x^2)` for `map(x => x^2, [1, 2, 3])`.
+ *
+ * `twin` is the boxed `incompatible-type` error, `call` the call as written
+ * and `frame` the operator and the position of the argument at fault in
+ * `call`. The types of the arguments are read from the canonical call, the
+ * expression of `root` that has `twin` as an operand. The fixit replaces the
+ * text from the start of the first of the two arguments to the end of the
+ * second, and keeps the text between them.
+ *
+ * `undefined` when the exchange of two arguments does not fit the signature
+ * (`swappedArgument`), and when the canonical call cannot be compared with
+ * the written call, position by position: canonicalization renamed the call
+ * or changed the number of its operands, or the call has a named argument.
+ * When the other argument has an error too, only the diagnostic of the first
+ * of the two has the fixit, so that the two fixits do not undo each other.
+ */
+function swappedArgumentsFixit(
+  ce: ComputeEngine,
+  root: ReturnType<ComputeEngine['box']> | undefined,
+  twin: ReturnType<ComputeEngine['box']> | undefined,
+  call: MathJsonExpression | undefined,
+  frame: ErrorFrameRef,
+  source: string,
+  calleeTypeAtUse: Type | undefined
+): { message: string; fixit: Fixit } | undefined {
+  if (root === undefined || twin === undefined || call === undefined)
+    return undefined;
+  const written = [...operands(call)];
+  if (
+    operator(call) !== frame.name ||
+    written.some((op) => operator(op) === 'NamedArgument')
+  )
+    return undefined;
+
+  let parent: ReturnType<ComputeEngine['box']> | undefined;
+  const visit = (expr: ReturnType<ComputeEngine['box']>): void => {
+    if (parent !== undefined) return;
+    // The values of a dictionary are walked as `indexBoxedErrors` walks
+    // them: the initializer of a `let` is one.
+    const values = (expr as { values?: readonly (typeof expr)[] }).values;
+    if (Array.isArray(values)) for (const value of values) visit(value);
+    if (!isFunction(expr)) return;
+    if (expr.ops.includes(twin)) parent = expr;
+    else for (const op of expr.ops) visit(op);
+  };
+  visit(root);
+  if (
+    parent === undefined ||
+    !isFunction(parent) ||
+    parent.operator !== frame.name ||
+    parent.ops.length !== written.length ||
+    parent.ops[frame.index - 1] !== twin
+  )
+    return undefined;
+
+  // An argument at fault is an `Error` whose second operand is the argument.
+  const faulted = (op: ReturnType<ComputeEngine['box']>) =>
+    isFunction(op) && op.operator === 'Error' && op.nops >= 2
+      ? op.ops[1]
+      : undefined;
+  const other = swappedArgument(
+    ce,
+    frame.name,
+    frame.index,
+    parent.ops.map((op) => (faulted(op) ?? op).type.type),
+    calleeTypeAtUse
+  );
+  if (other === undefined) return undefined;
+  if (other < frame.index && faulted(parent.ops[other - 1]) !== undefined)
+    return undefined;
+
+  const [i, j] =
+    other < frame.index ? [other, frame.index] : [frame.index, other];
+  const first = sourceRangeOf(written[i - 1]);
+  const second = sourceRangeOf(written[j - 1]);
+  if (first === undefined || second === undefined || first[1] > second[0])
+    return undefined;
+  const value =
+    source.slice(second[0], second[1]) +
+    source.slice(first[1], second[0]) +
+    source.slice(first[0], first[1]);
+
+  return {
+    message: `arguments ${i} and ${j} look exchanged`,
+    fixit: [first[0], second[1], value],
+  };
 }
 
 /** The `[start, end)` source offsets the parser stamped on a node, if any. */
@@ -1122,6 +1212,21 @@ function canonicalizationDiagnostics(
             message: 'first declared here',
             range: [...firstDeclaration],
           });
+        if (code === 'incompatible-type' && frame !== undefined) {
+          const swap = swappedArgumentsFixit(
+            ce,
+            boxed,
+            firstTwin(error),
+            located.call,
+            frame,
+            source,
+            flow.calleeType(firstTwin(error))
+          );
+          if (swap !== undefined) {
+            notes.push({ message: swap.message });
+            diagnostic.fixits = [swap.fixit];
+          }
+        }
         if (notes.length > 0) diagnostic.notes = notes;
         if (code === 'dot-call-not-a-protocol-function') {
           // Payload: [name, receiver type].

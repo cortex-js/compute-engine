@@ -261,7 +261,9 @@ map((x, y) => x + y, [1, 2, 3], [10, 20, 30])
 arguments in another order.
 
 An argument in the wrong position is an `incompatible-type` error:
-`map([1, 2, 3], x => x^2)` reports that the list is not a function.
+`map([1, 2, 3], x => x^2)` reports that the list is not a function. When the
+two arguments are in each other's place, the diagnostic says that they look
+exchanged, and its fixit exchanges them.
 
 The pipe `|>` passes a collection to the next operation, so a sequence of
 operations reads from left to right. The collection fills the argument slot

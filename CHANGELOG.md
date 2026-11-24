@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Improvements
+
+- **An Epsil call with two arguments exchanged has a note and a fixit.**
+  `map` takes its function first, `map(f, xs)`, and `filter`, `reduce` and
+  most other operations take the collection first, `filter(xs, p)`. For
+  `map([1, 2, 3], x => x^2)`, the diagnostic "expected `function`, got
+  `vector<integer^3>`" now has the note "arguments 1 and 2 look exchanged" and
+  a fixit that gives `map(x => x^2, [1, 2, 3])`. This applies to every call
+  where the exchange of two arguments fits the signature, a function of the
+  program included: `pw(2, "a")` for `function pw(s: string, n: integer)`. A
+  call with a named argument has no such fixit. The descriptions of `Map`,
+  `Filter`, `FlatMap` and `Fold`, and the collections reference, now say which
+  argument comes first and why `Map` differs.
+
 ## 0.201.3 _2026-11-24_
 
 ### Performance

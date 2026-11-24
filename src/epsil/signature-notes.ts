@@ -5,6 +5,8 @@ import type {
 } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 import { signatureArms } from '../common/type/utils.js';
+import { isSubtype } from '../common/type/subtype.js';
+import { readTypeVariablesAsBounds } from '../common/type/instantiate.js';
 import type { MathJsonExpression } from '../math-json/types.js';
 import {
   operand,
@@ -131,6 +133,105 @@ export function signatureNotes(
   if (provenance !== undefined) notes.push(provenance);
 
   return notes;
+}
+
+/**
+ * The position (1-based) of the argument that was exchanged with the
+ * argument `index` of a call of `name`, when the call has an
+ * `incompatible-type` error at `index` and one exchange of two arguments
+ * fits the signature: `map(xs, f)` for `map(f, xs)`, `filter(p, xs)` for
+ * `filter(xs, p)`.
+ *
+ * `argTypes` are the types of the arguments in the order of the call;
+ * `undefined` for an argument whose type is not known. The exchange of `i`
+ * and `j` fits an arm of the signature when each argument fits the parameter
+ * at the position of the other: its type is a subtype of the type of the
+ * parameter, or the argument and the parameter are both functions and the
+ * argument is not at a function parameter now. Two functions at two function
+ * parameters are exchanged only when the type of each fits the parameter of
+ * the other.
+ *
+ * The test is a guess, as the fixit of an error is. A function fits every
+ * function parameter, whatever its parameters and its result, because a
+ * named function can have the bare type `function` and because a parameter
+ * `(T) -> U` does not say what `T` is before the collection is known. A type
+ * variable of the signature is read as its bound
+ * (`readTypeVariablesAsBounds`). So `map([1, 2], (s: string) => s)` is
+ * reported as exchanged, and the call with its arguments exchanged has
+ * another error.
+ *
+ * `undefined` when no exchange fits and when more than one does. No
+ * exchange fits when the argument `index` fits its own parameter. A type that
+ * is not known, `unknown`, `any` or `error` fits every parameter and says
+ * nothing: there is no result when the argument `index` has such a type, or
+ * when another argument has one at a position that the argument `index`
+ * fits, because that argument could be the one exchanged.
+ */
+export function swappedArgument(
+  ce: ComputeEngine,
+  name: string,
+  index: number,
+  argTypes: ReadonlyArray<Type | undefined>,
+  calleeTypeAtUse?: Type
+): number | undefined {
+  const type = calleeTypeAtUse ?? calleeType(ce, name);
+  if (type === undefined) return undefined;
+  const arms = signatureArms(readTypeVariablesAsBounds(type));
+  if (arms === undefined) return undefined;
+
+  const known = (t: Type | undefined): t is Type =>
+    t !== undefined && t !== 'unknown' && t !== 'any' && t !== 'error';
+  const at = argTypes[index - 1];
+  if (!known(at)) return undefined;
+  const bothFunctions = (arg: Type, param: Type): boolean =>
+    isSubtype(arg, 'function') && isSubtype(param, 'function');
+
+  let found: number | undefined;
+  for (let j = 1; j <= argTypes.length; j++) {
+    if (j === index) continue;
+    const other = argTypes[j - 1];
+    const fits = arms.some((arm) => {
+      const required = arm.args?.length ?? 0;
+      // An arm that does not take this number of arguments is not the one
+      // that the call is for.
+      if (
+        argTypes.length < required ||
+        (arm.variadicArg === undefined &&
+          argTypes.length > required + (arm.optArgs?.length ?? 0))
+      )
+        return false;
+      const param = (k: number): Type | undefined =>
+        (
+          arm.args?.[k - 1] ??
+          arm.optArgs?.[k - 1 - required] ??
+          arm.variadicArg
+        )?.type;
+      const here = param(index);
+      const there = param(j);
+      if (here === undefined || there === undefined) return false;
+      // The signature does not refuse the argument where it is: the error
+      // is from another check of the operator (`p + 1` for a boolean `p`,
+      // where `Add` takes `value+`), and an exchange does not remove it.
+      if (isSubtype(at, here)) return false;
+      // A function fits a function parameter without the test of its type
+      // only when it comes from a parameter that is not a function. A
+      // function that a function parameter refuses has the wrong
+      // signature, not the wrong position.
+      const atFits =
+        isSubtype(at, there) ||
+        (bothFunctions(at, there) && !isSubtype(here, 'function'));
+      if (!known(other)) return atFits;
+      return (
+        atFits &&
+        (isSubtype(other, here) ||
+          (bothFunctions(other, here) && !isSubtype(there, 'function')))
+      );
+    });
+    if (!fits) continue;
+    if (found !== undefined || !known(other)) return undefined;
+    found = j;
+  }
+  return found;
 }
 
 /**
