@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **A sum or a product whose bounds are integers far above 2^53 gives the
+  `out-of-range` error instead of a wrong number** (CE-1315).
+  `Sum(j, Limits(j, 2^60, 2^60 + 3))` was `2^60`: the two bounds round to the
+  same double, so the range was read as one term. A range with a bound above
+  `Number.MAX_SAFE_INTEGER` now has one term only when both exact bounds are
+  equal and are a double (`Sum(j, Limits(j, 2^60, 2^60))` is `2^60`); exact
+  bounds in reverse order give an empty range (0 for a sum, 1 for a product).
+  The error message gives the exact bounds.
+
 - **A ragged list has the shape of the axes that its items have in common**
   (CE-1390). `Shape([[5, 2, 10, 18], [1, 2, 3]])` and `Shape([1, [2, 3]])`
   were `()` and their `Rank` was 0, the values of a scalar. They are now

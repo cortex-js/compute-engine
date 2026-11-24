@@ -64,6 +64,7 @@ import {
   sameBindingDef,
 } from '../boxed-expression/binders.js';
 import { numericValueOf } from '../boxed-expression/numerics.js';
+import { exactIntegerValue } from '../numeric-value/exact-integer-value.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -3908,6 +3909,14 @@ export type IndexingSet = {
   lower: number;
   upper: number;
   isFinite: boolean;
+  /**
+   * The floor of the exact value of each bound, read only for a finite range
+   * with a bound beyond `Number.MAX_SAFE_INTEGER`, where `lower` and `upper`
+   * can be rounded (`2^60 + 3` reads `2^60`). Absent when a bound has no
+   * exact value to read.
+   */
+  exactLower?: bigint;
+  exactUpper?: bigint;
 };
 
 /**
@@ -3979,7 +3988,50 @@ export function normalizeIndexingSet(indexingSet: Expression): IndexingSet {
     }
   }
 
+  if (
+    isFinite &&
+    (Math.abs(lower) > Number.MAX_SAFE_INTEGER ||
+      Math.abs(upper) > Number.MAX_SAFE_INTEGER)
+  ) {
+    const exactLower = exactIntegerBound(fn.op2);
+    const exactUpper = exactIntegerBound(op3);
+    // Exact bounds in reverse order are an empty range, even when they round
+    // to the same double (`2^60 + 3` and `2^60`): `-Infinity` makes it empty
+    // for every reader of `upper`.
+    if (
+      exactLower !== undefined &&
+      exactUpper !== undefined &&
+      exactUpper < exactLower
+    )
+      upper = -Infinity;
+    return { index, lower, upper, isFinite, exactLower, exactUpper };
+  }
+
   return { index, lower, upper, isFinite };
+}
+
+/**
+ * The floor of the exact value of a big-op bound, or `undefined` when the
+ * bound has no value that can be read exactly: a bound with a free symbol, an
+ * impure bound, or a value that is not a machine double or an exact integer
+ * (an exact rational, a big float).
+ *
+ * A machine double is its own exact value. The bound is evaluated without
+ * `numericApproximation`, so `2^60 + 3` keeps the digits that
+ * `bigopBoundValue` rounds away. As in `bigopBoundValue`, an impure bound is
+ * not evaluated.
+ */
+function exactIntegerBound(bound: Expression): bigint | undefined {
+  let value = bound;
+  if (!isNumber(value)) {
+    if (!bound.isPure) return undefined;
+    value = bound.evaluate();
+    if (!isNumber(value)) return undefined;
+  }
+  const num = value.numericValue;
+  if (typeof num === 'number')
+    return Number.isFinite(num) ? BigInt(Math.floor(num)) : undefined;
+  return exactIntegerValue(num) ?? undefined;
 }
 
 export function normalizeIndexingSets(
@@ -3995,9 +4047,17 @@ export function normalizeIndexingSets(
  * Above `Number.MAX_SAFE_INTEGER` the spacing between representable values is
  * greater than 1, so `current + 1` rounds back to `current` and the odometer
  * wheel can never walk the range: the reduction would silently yield a single
- * term for bounds that nominally describe many. A DEGENERATE range
- * (`lower === upper`) is not affected — it has exactly one term and needs no
- * increment — and neither is an empty one (`upper < lower`).
+ * term for bounds that nominally describe many. An empty range
+ * (`upper < lower`) is not affected: the rounding to a double does not
+ * reverse the order of two values, so the exact range is empty too, and
+ * `normalizeIndexingSet` sets `upper` to `-Infinity` for exact bounds in
+ * reverse order that round to the same double.
+ *
+ * A range that is DEGENERATE at `number` precision (`lower === upper`) has
+ * one term only when the exact bounds are equal and the double is their exact
+ * value: `2^60 + 3` and `2^60` are the same double, and the one term the loop
+ * gives for `Σ_{j=2^60}^{2^60+3} j` is wrong. So such a range is accepted only
+ * when `exactLower`, `exactUpper` and `lower` are the same integer.
  *
  * Only the magnitude of the bounds is considered, not their integrality: a
  * fractional bound (`Σ_{n=1}^{10.5}`) enumerates fine and must keep doing so.
@@ -4005,14 +4065,23 @@ export function normalizeIndexingSets(
 export function nonEnumerableIndexingSet(
   indexingSets: IndexingSet[]
 ): IndexingSet | undefined {
-  return indexingSets.find(({ lower, upper, isFinite }) => {
-    const hi = !isFinite ? lower + MAX_ITERATION : upper;
-    if (hi <= lower) return false;
-    return (
-      Math.abs(lower) > Number.MAX_SAFE_INTEGER ||
-      Math.abs(hi) > Number.MAX_SAFE_INTEGER
-    );
-  });
+  return indexingSets.find(
+    ({ lower, upper, isFinite, exactLower, exactUpper }) => {
+      const hi = !isFinite ? lower + MAX_ITERATION : upper;
+      if (hi < lower) return false;
+      if (
+        Math.abs(lower) <= Number.MAX_SAFE_INTEGER &&
+        Math.abs(hi) <= Number.MAX_SAFE_INTEGER
+      )
+        return false;
+      if (hi > lower) return true;
+      return !(
+        exactLower !== undefined &&
+        exactLower === exactUpper &&
+        exactLower === BigInt(lower)
+      );
+    }
+  );
 }
 
 /**
@@ -4915,7 +4984,9 @@ export function bigOpBoundsError(
   return ce.error([
     'out-of-range',
     `a bound with magnitude at most ${Number.MAX_SAFE_INTEGER}`,
-    set ? `${set.lower}..${set.upper}` : 'unknown',
+    set
+      ? `${set.exactLower ?? set.lower}..${set.exactUpper ?? set.upper}`
+      : 'unknown',
   ]);
 }
 
