@@ -2,6 +2,19 @@
 
 ### Resolved Issues
 
+- **`Parse(s)` evaluates the parsed expression, and an operator that holds
+  its argument reads the parsed expression** (CE-1402).
+  `Evaluate(Parse("1011_2 \cdot 101_2"))` was the product of two `BaseForm`
+  values; it is now `55`, as it already was through a variable
+  (`let p = parse(…); p`). `Parse("x + x")` with `x = 3` is now `6`. `Solve`,
+  `D`, `Integrate`, `Limit` and `Expand` read the parsed expression without
+  evaluating it: `Solve(Parse("161_b + 134_b = 315_b"), b)` is `[0, 8]` and
+  no longer stays unevaluated, and `D(Parse("y^2"), y)` is `2y`, not `0`.
+  Because the parsed expression can read and write any variable, the effects
+  of `Parse` are now `any`: a result that holds `Parse` is not memoized, and
+  a `parallel for` loop or a parallel comprehension whose body calls `parse`
+  gets the `parallel-effect` diagnostic.
+
 - **The type of a function that appends its argument to a list includes the
   argument** (CE-1363). With `ap = (u, t) -> Append(Range(1, u), t)`, the
   type of `ap` was `(u: unknown, t: unknown) -> list<integer>`, but

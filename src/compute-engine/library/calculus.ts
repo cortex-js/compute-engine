@@ -42,6 +42,7 @@ import {
   isOperatorDef,
   isValueDef,
   awaitedOperandOptions,
+  reduceParseHeads,
 } from '../boxed-expression/utils.js';
 import {
   isAbsentArithmeticOperand,
@@ -7274,7 +7275,11 @@ volumes
         // A function that holds a residue class is not differentiated: a
         // class is not a real number, and the rules of differentiation do
         // not apply to it. The derivative stays unevaluated.
-        if (holdsKindValue(ops[0].canonical)) return undefined;
+        // The checks read the parsed expression of a `Parse` operand. The
+        // operand is parsed again inside the value shield below, so that its
+        // symbols are bound where a differentiation variable has no value.
+        const operand = reduceParseHeads(ops[0].canonical);
+        if (holdsKindValue(operand)) return undefined;
 
         // The differentiation variable(s) are bound by `D`: a same-named global
         // assignment (`x := 5`) must not substitute into the result. Shield
@@ -7309,13 +7314,14 @@ volumes
             // the derivative (`independentParameterNames`).
             const independent = independentParameterNames(
               ce,
-              isFunction(ops[0].canonical, 'Function')
-                ? ops[0].canonical.op1
-                : ops[0].canonical,
+              isFunction(operand, 'Function') ? operand.op1 : operand,
               diffVars
             );
             return withValueShield(ce, [...diffVars, ...independent], () => {
-              let f: Expression | undefined = ops[0].canonical;
+              // `D(Parse("y^2"), y)` differentiates the parsed expression.
+              let f: Expression | undefined = reduceParseHeads(
+                ops[0].canonical
+              );
 
               // Unwrap Function literals to get the body for differentiation.
               // For non-Function expressions (e.g., ['f', 'x']), do NOT call
