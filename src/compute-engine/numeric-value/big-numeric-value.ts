@@ -2,7 +2,12 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { SmallInteger } from '../numerics/types.js';
 import { NumericValue, NumericValueData } from './types.js';
 import { ExactNumericValue } from './exact-numeric-value.js';
+import { MachineNumericValue } from './machine-numeric-value.js';
 import { isInMachineRange } from '../numerics/numeric-bignum.js';
+import {
+  MACHINE_PRECISION,
+  isOutsideNormalDoubleRange,
+} from '../numerics/numeric.js';
 import { MathJsonExpression } from '../../math-json/types.js';
 import {
   floatComplexToExpression,
@@ -345,7 +350,8 @@ export class BigNumericValue extends NumericValue {
     return this.clone({ re: this.decimal.neg(), im: this.imDecimal.neg() });
   }
 
-  inv(prec: number = BigDecimal.precision): BigNumericValue {
+  inv(prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION) return toDouble(this.inv(DOUBLE_DIGITS));
     if (this.isOne) return this;
     if (this.isNegativeOne) return this;
     if (!this.isComplex) return this.clone(this.decimal.inv(prec));
@@ -623,6 +629,8 @@ export class BigNumericValue extends NumericValue {
     other: SmallInteger | NumericValue,
     prec: number = BigDecimal.precision
   ): NumericValue {
+    if (prec <= MACHINE_PRECISION)
+      return toDouble(this.div(other, DOUBLE_DIGITS));
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
@@ -695,6 +703,8 @@ export class BigNumericValue extends NumericValue {
     exponent: number | NumericValue | { re: number; im: number },
     prec: number = BigDecimal.precision
   ): NumericValue {
+    if (prec <= MACHINE_PRECISION)
+      return toDouble(this.pow(exponent, DOUBLE_DIGITS));
     console.assert(!Array.isArray(exponent));
     // if (Array.isArray(exponent)) exponent = exponent[0] / exponent[1];
 
@@ -928,6 +938,8 @@ export class BigNumericValue extends NumericValue {
   }
 
   root(exp: number, prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION)
+      return toDouble(this.root(exp, DOUBLE_DIGITS));
     if (!Number.isInteger(exp)) return this._makeExact(NaN);
     if (exp === 0) return this._makeExact(NaN);
     if (exp === 1) return this;
@@ -995,6 +1007,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   sqrt(prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION) return toDouble(this.sqrt(DOUBLE_DIGITS));
     if (this.isZero || this.isOne) return this;
 
     if (this.isComplex) {
@@ -1069,6 +1082,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   abs(prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION) return toDouble(this.abs(DOUBLE_DIGITS));
     if (!this.isComplex)
       return this.decimal.isPositive() ? this : this.clone(this.decimal.neg());
 
@@ -1076,6 +1090,8 @@ export class BigNumericValue extends NumericValue {
   }
 
   ln(base?: number, prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION)
+      return toDouble(this.ln(base, DOUBLE_DIGITS));
     if (this.isZero) return this._makeExact(NaN);
     if (this.isNegativeInfinity) return this._makeExact(NaN);
     if (this.isPositiveInfinity) return this._makeExact(Infinity);
@@ -1126,6 +1142,7 @@ export class BigNumericValue extends NumericValue {
   }
 
   exp(prec: number = BigDecimal.precision): NumericValue {
+    if (prec <= MACHINE_PRECISION) return toDouble(this.exp(DOUBLE_DIGITS));
     if (this.isNaN) return this._makeExact(NaN);
     // A float argument gives a float result: `exp(0.0)` is the float `1`.
     if (this.isZero) return this.clone(1);
@@ -1255,6 +1272,45 @@ function decimalToString(num: BigDecimal): string {
     return num.toFixed(0);
 
   return numStr;
+}
+
+/**
+ * The precision of a kernel that rounds its result, at machine precision: the 17
+ * significant digits of a double and 3 guard digits.
+ *
+ * A big decimal at machine precision is a value made at a higher precision
+ * before the precision was lowered. A kernel at `MACHINE_PRECISION`, 15
+ * digits, gives fewer digits than a double: `√0.3` was `0.547722557505166`,
+ * and the square root of the double `0.3` is `0.5477225575051661`. Thus, at
+ * machine precision, the kernels that round their result (`inv`, `div`,
+ * `pow`, `root`, `sqrt`, `abs`, `ln` and `exp`) compute at this precision,
+ * from all the digits of the operands, and `toDouble()` converts the result
+ * to a machine value, also when the kernel returns its operand (`√1`). The digits of an
+ * operand are not rounded to a double first: the relative error of `ln x`
+ * near `x = 1`, and of `e^x` for a large `x`, would be much larger than the
+ * error of the double of `x`. (`add` and `mul` do not round to the
+ * precision: they keep the digits of their operands.)
+ */
+const DOUBLE_DIGITS = 20;
+
+/** The machine value of `value`, or `value` itself when it is not a big
+ * decimal, or when a part of it is not 0 or a normal double: the big decimal
+ * then keeps a value that a double cannot hold (`e^{-800}`, `1/10^{400}`). */
+function toDouble(value: NumericValue): NumericValue {
+  if (!(value instanceof BigNumericValue)) return value;
+  if (
+    !isDoublePart(value.re, value.decimal) ||
+    !isDoublePart(value.im, value.imDecimal)
+  )
+    return value;
+  return new MachineNumericValue({ re: value.re, im: value.im });
+}
+
+/** Whether `n`, the double of the part `part`, is 0 or a normal double, and
+ * is 0 only when `part` is 0. */
+function isDoublePart(n: number, part: BigDecimal): boolean {
+  if (n === 0) return part.isZero();
+  return !isOutsideNormalDoubleRange(n);
 }
 
 /** The number of guard digits of the complex kernels. */

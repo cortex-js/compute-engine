@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A number made at a higher precision keeps the digits of a double after
+  the precision is set to `'machine'`** (CE-1138). After `ce.precision = 30;
+  const a = ce.parse('0.3'); ce.precision = 'machine'`,
+  `ce.expr(['Sqrt', a]).evaluate()` gave `0.547722557505166`, two digits
+  fewer than the square root of the double `0.3`, `0.5477225575051661`. The
+  square root, the logarithm, the exponential, a quotient, an integer power
+  and the modulus of such a number are now computed from all its digits and
+  give a machine number. The Frobenius norm of a matrix that holds such a
+  number now equals the norm of the same values as a vector.
+
 - **A negative power of a call of a user function named `Divide` is no longer
   read as a power of a quotient** (CE-1133). With `Divide` declared as the
   function `(u, v) ↦ 1000`, `ce.expr(['Power', ['Divide', 'x', 2], -2])` was
