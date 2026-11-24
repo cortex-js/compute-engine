@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **The sum and the difference of two tensors of rank 3 or more are
+  computed** (CE-1329). `T - T`, with `T` the 2x2x2 tensor
+  `[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]`, stayed the unevaluated sum
+  `T + (-T)`; it is now the 2x2x2 tensor of zeros. The sum of two vectors or
+  two matrices was already computed cell by cell; tensors of every rank now
+  are too.
+
 - **A sum or a product whose bounds are integers far above 2^53 gives the
   `out-of-range` error instead of a wrong number** (CE-1315).
   `Sum(j, Limits(j, 2^60, 2^60 + 3))` was `2^60`: the two bounds round to the

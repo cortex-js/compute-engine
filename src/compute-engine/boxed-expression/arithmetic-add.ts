@@ -1207,54 +1207,33 @@ function addTensors(
     return addArray(terms).evaluate();
   };
 
-  // For vectors (rank 1)
-  if (referenceShape.length === 1) {
-    const n = referenceShape[0];
-    const result: Expression[] = [];
-    for (let i = 0; i < n; i++) {
-      // tensor.at() uses 1-based indexing for vectors
-      result.push(
+  // Build the nested `List` of the cell sums, for a tensor of any rank. The
+  // data of a packed tensor and its float mask are in row-major order, so the
+  // cells are visited in the order of their flat index.
+  let flat = 0;
+  const build = (axis: number): Expression => {
+    const items: Expression[] = [];
+    for (let i = 0; i < referenceShape[axis]; i++) {
+      if (axis + 1 < referenceShape.length) {
+        items.push(build(axis + 1));
+        continue;
+      }
+      const k = flat++;
+      items.push(
         cellSum(
           tensors.map((tensor, t) =>
             tensorCellExpression(
               ce,
-              tensor.at(i + 1) ?? ce.Zero,
-              floatMasks[t]?.[i] === true
+              tensor.data[k] ?? ce.Zero,
+              floatMasks[t]?.[k] === true
             )
           )
         )
       );
     }
-    return ce.expr(['List', ...result]);
-  }
-
-  // For matrices (rank 2)
-  if (referenceShape.length === 2) {
-    const [m, n] = referenceShape;
-    const rows: Expression[] = [];
-    for (let i = 0; i < m; i++) {
-      const row: Expression[] = [];
-      for (let j = 0; j < n; j++) {
-        // tensor.at(row, col) uses 1-based indexing
-        row.push(
-          cellSum(
-            tensors.map((tensor, t) =>
-              tensorCellExpression(
-                ce,
-                tensor.at(i + 1, j + 1) ?? ce.Zero,
-                floatMasks[t]?.[i * n + j] === true
-              )
-            )
-          )
-        );
-      }
-      rows.push(ce.expr(['List', ...row]));
-    }
-    return ce.expr(['List', ...rows]);
-  }
-
-  // For higher-rank tensors, return unevaluated for now
-  return ce._fn('Add', [...ops]);
+    return ce.expr(['List', ...items]);
+  };
+  return build(0);
 }
 
 //
