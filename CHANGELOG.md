@@ -263,6 +263,16 @@
 
 ### Resolved Issues
 
+- **`\max_{x \in S} f` is the maximum of `f` over the elements of `S`**
+  (CE-1728), and the same for `\min`, `\sup` and `\inf`.
+  `\max_{x \in \{1,2,3\}} x^2` is `Max(Map(x ↦ x^2, {1, 2, 3}))` and
+  evaluates to `9`; it was `Max(_, x ∈ {1, 2, 3}, x^2)`, with the subscript
+  read as a symbol `_` and `x` free. As in `\sum`, the body stops before a
+  `+`, and `a_n` in the body is `a` indexed by the bound variable:
+  `\max_{n \in \{1,2\}} a_n` is `Max(a_1, a_2)`. Another subscript (a range
+  `1 \le i \le n`, a condition, two variables) is an
+  `expected-set-membership` error. The LaTeX of such an expression is
+  `\max_{x\in S}f`.
 - **In Epsil, the message of an error in the second operand of a subtraction
   names the subtraction** (CE-1717). With `w` holding `"s"`, the runtime error
   of `3 - ln(w)` said "in Ln argument 1, in Negate argument 1, in Add

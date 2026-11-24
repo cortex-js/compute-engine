@@ -48,6 +48,7 @@ import {
   isKeywordText,
 } from './dictionary/definitions-core.js';
 import { resolveUnitText } from './dictionary/definitions-units.js';
+import { extremumOverSet } from './dictionary/definitions-arithmetic.js';
 import { EMOJIS } from '../../math-json/symbols.js';
 
 // ---------------------------------------------------------------------------
@@ -278,6 +279,14 @@ export class Serializer {
         return latex;
       }
     }
+    // An extremum over a set, `\max_{x\in S}x`, reads its body as `\sum`
+    // does, and has the precedence of `\sum`: `\max_{x\in S}x!` is the
+    // maximum of `x!`. Its dictionary entry is a function and has none.
+    if (extremumOverSet(expr) !== null && ADDITION_PRECEDENCE < prec)
+      return this.wrapString(
+        this.serialize(expr),
+        this.options.groupStyle(expr, this.level + 1)
+      );
     if (name && name !== 'Delimiter' && name !== 'Subscript') {
       const def = this.dictionary.ids.get(name);
       // `..` parses its END operand at minPrec 270 (below Add, 275) even
@@ -357,6 +366,8 @@ export class Serializer {
     // 270): `Range(1,n)^2` → `1..n^2` re-parses as `Range(1, n²)`.
     // A `Quantity` is written as a juxtaposition of its magnitude and its
     // unit: `Quantity(2, m)^n` → `2\,\mathrm{m}^{n}` re-parses as `2·m^n`.
+    // An extremum over a set, `\max_{x\in S}x`, reads the next notation into
+    // its body: `\max_{x\in S}x^2` is the maximum of `x^2`.
     const isRoundTripHazard =
       h === 'Add' ||
       h === 'Negate' ||
@@ -365,7 +376,8 @@ export class Serializer {
       h === 'Multiply' ||
       h === 'Mod' ||
       h === 'Range' ||
-      h === 'Quantity';
+      h === 'Quantity' ||
+      extremumOverSet(expr) !== null;
 
     // Anything the dictionary declares as an `expression`, `infix` or
     // `prefix` entry with a precedence looser than `^` reads the same way.
