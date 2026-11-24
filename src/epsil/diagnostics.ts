@@ -66,7 +66,7 @@ export type DiagnosticCode =
   | 'parallel-exit' // %0 = `break`, `continue` or `return` — the statement leaves the parallel loop; an inner loop of the body can use `break` and `continue`
   | 'parallel-comprehension-write' // %0 = variable name — the body of a parallel comprehension changes a variable declared outside it (also with `+=`)
   | 'destructuring-bare-equal' // `(a, b) = (b, a)` — a parenthesized left side is not a binding target, so this COMPARES two tuples and discards the result. Write `(a, b) := (b, a)` to destructure, or `==` if the comparison was meant
-  | 'control-outside-loop' // %0 = `break` or `continue` — used outside a `while`/`for` body. The context resets at every function/lambda boundary, so a `break` inside a lambda defined in a loop is also outside
+  | 'control-outside-loop' // %0 = `break`, `continue`, `Break()` or `Continue()` — used outside a `while`/`for` body. The context resets at every function/lambda boundary, so a `break` inside a lambda defined in a loop is also outside
   | 'parameter-shadows-constant' // %0 = name — a function parameter named after a multi-character engine constant (`f(Pi) = …`): the body's `Pi` is the argument, not π
   | 'zero-index' // literal index 0 — indexing is 1-based
   | 'floor-division-comment' // `//` after code on the same line looks like floor division; it starts a comment

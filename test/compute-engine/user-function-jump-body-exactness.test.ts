@@ -278,3 +278,84 @@ describe('a jump in a statement before the last one under .N()', () => {
     );
   });
 });
+
+// CE-1439. The caller records the written arguments after it evaluated all
+// of them, and a recorded argument is evaluated again later. An argument
+// that is not pure can assign a variable that another argument reads, so
+// then only an argument whose symbols are constants is recorded
+// (`exactArgumentSources` in `function-utils.ts`). The other arguments read
+// their approximation, as an operand that is not pure does under `.N()`
+// (ARCHITECTURE.md, "What `.N()` promises"): `Floor(3·(x/3))` with the float
+// of `1/3` at the working precision is 0. With `x/3` read again after the
+// second argument assigned 5 to `x`, the value was 5.
+describe('an argument that assigns a variable that another argument reads', () => {
+  const assigns = ['Block', ['Assign', 'x', 5], 1];
+  const floor3 = ['Floor', ['Multiply', 3, 'y']];
+  const third = ['Divide', 'x', 3];
+
+  const engine = (): ComputeEngine => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', floor3, 'y', 'w']));
+    ce.declare('k', {
+      type: '(real, real) -> integer',
+      value: ce.box(['Function', floor3, 'y', 'w']),
+    });
+    // A straight-line body with a jump binds the exact value of a cheap
+    // argument (`exactBoundArguments`).
+    ce.assign(
+      'r',
+      ce.box([
+        'Function',
+        ['Block', ['If', ['Greater', 'y', 0], ['Return', floor3]], 7],
+        'y',
+        'w',
+      ])
+    );
+    ce.declare('x', 'integer');
+    ce.assign('x', 1);
+    return ce;
+  };
+
+  test.each([
+    ['a literal held as a value', ['g', third, assigns]],
+    ['a declared function', ['k', third, assigns]],
+    ['Apply', ['Apply', 'g', third, assigns]],
+    ['a body with an early Return', ['r', third, assigns]],
+  ])('%s', (_, call) => {
+    const ce = engine();
+    expect(
+      ce
+        .box(call as any)
+        .N()
+        .toString()
+    ).toBe('0');
+    // The exact evaluation reads `x` before the assignment.
+    ce.assign('x', 1);
+    expect(
+      ce
+        .box(call as any)
+        .evaluate()
+        .toString()
+    ).toBe('1');
+  });
+
+  // A symbol argument records the value of the symbol, read after every
+  // argument was evaluated: 5 where the argument was 1/3.
+  test.each([['g'], ['r']])('a symbol argument of %s', (f) => {
+    const ce = engine();
+    ce.declare('a', 'real');
+    ce.assign('a', ce.box(['Rational', 1, 3]));
+    const call = [f, 'a', ['Block', ['Assign', 'a', 5], 1]];
+    expect(ce.box(call as any).N().toString()).toBe('0');
+  });
+
+  // With every argument pure, an argument that reads a variable is still
+  // recorded: no argument can have changed the variable. The body with an
+  // early Return gave 0, the floor of the float.
+  test('pure arguments that read a variable', () => {
+    const ce = engine();
+    expect(ce.box(['g', third, 1]).N().toString()).toBe('1');
+    expect(ce.box(['k', third, 1]).N().toString()).toBe('1');
+    expect(ce.box(['r', third, 1]).N().toString()).toBe('1');
+  });
+});

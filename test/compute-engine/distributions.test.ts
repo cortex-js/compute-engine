@@ -814,7 +814,8 @@ describe('distribution operators', () => {
       expect(ev(['Quantile', B, ['Rational', 319, 512]])).toBe('5');
       expect(ev(['Quantile', B, ['Rational', 319001, 512000]])).toBe('6');
       // 1/2 + 10^-13 is above CDF(0) = 1/2, so the quantile is 1. The
-      // float search of `.N()` takes it as 1/2 and gives 0.
+      // float search of `.N()` gives 1 too; with 1/2 + 10^-15, within its
+      // tolerance, it gives 0.
       expect(
         ev([
           'Quantile',
@@ -952,6 +953,66 @@ describe('distribution operators', () => {
         expect(
           ce.box(['Quantile', ['PoissonDistribution', 3], p]).N().re
         ).toBe(k);
+      }
+    });
+
+    test('float discrete Quantile just above a CDF jump (CE-1453)', () => {
+      // The tolerance of the float search is relative to the tail, 10^-14:
+      // a p 10^-13 above CDF(0) = 1/2 gives 1, also as a float.
+      const B = ['BinomialDistribution', 1, ['Rational', 1, 2]];
+      for (const p of [0.5000000000001, 0.50000000000001]) {
+        expect(ce.box(['Quantile', B, p]).evaluate().re).toBe(1);
+        expect(ce.box(['Quantile', B, p]).N().re).toBe(1);
+      }
+      expect(ce.box(['Quantile', B, 0.5]).N().re).toBe(0);
+      // A small p: CDF(0) of Binomial(100, 1/2) is 2^-100, so p = 10^-29
+      // (above it, below CDF(1)) gives 1. The absolute tolerance of before
+      // gave 0 for every p below 10^-12.
+      const B100 = ['BinomialDistribution', 100, ['Rational', 1, 2]];
+      expect(ce.box(['Quantile', B100, 1e-29]).N().re).toBe(1);
+      const P150 = ['PoissonDistribution', 150];
+      expect(ce.box(['Quantile', P150, 1e-60]).N().re).toBe(3);
+    });
+
+    test('float discrete Quantile near 1 agrees with the exact search', () => {
+      // Above 1/2 the float search has an absolute tolerance of 6·10^-16 on
+      // 1 − p: down to 1 − p = 10^-14 it gives the exact quantile.
+      const dists = [
+        ['PoissonDistribution', 150],
+        ['BinomialDistribution', 400, ['Rational', 1, 3]],
+        ['BinomialDistribution', 3000, ['Rational', 93, 100]],
+      ];
+      for (const d of dists) {
+        for (const e of [-12, -13, -14]) {
+          const p = ['Subtract', 1, ['Power', 10, e]];
+          const q = ce.box(['Quantile', d, p]);
+          expect([d, e, q.N().re]).toEqual([d, e, q.evaluate().re]);
+        }
+      }
+    });
+
+    test('float discrete Quantile(CDF(k)) = k at each precision', () => {
+      // In the tails, and for a CDF value from a bignum kernel (precision
+      // 50) or a finite sum (Poisson), which can differ from the machine
+      // kernel of the search by more than its tolerance.
+      const cases: [any, number[]][] = [
+        [['BinomialDistribution', 30, 0.93], [1, 5, 12, 25]],
+        [['BinomialDistribution', 400, ['Rational', 1, 3]], [60, 130, 150]],
+        [['BinomialDistribution', 3000, 0.93], [2780, 2797]],
+        [['PoissonDistribution', 150], [2, 25, 72, 135]],
+        [['PoissonDistribution', 20], [5, 10, 24]],
+        [['PoissonDistribution', 3], [7, 15, 20]],
+      ];
+      for (const precision of ['machine', 21, 50] as const) {
+        const ce2 = new ComputeEngine();
+        ce2.precision = precision;
+        for (const [d, ks] of cases) {
+          for (const k of ks) {
+            const p = ce2.box(['CDF', d, k]).N();
+            const q = ce2.box(['Quantile', d, p]).N().re;
+            expect([precision, d, k, q]).toEqual([precision, d, k, k]);
+          }
+        }
       }
     });
 

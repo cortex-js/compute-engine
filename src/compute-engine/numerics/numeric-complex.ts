@@ -4599,13 +4599,11 @@ export function carlsonRCComplex(x: Complex, y: Complex): Complex {
     }
     return sum.div(x.sqrt());
   }
-  // v = acos(√x/√y) / (√(1 − x/y)·√y)
+  // v = acos(√x/√y) / (√(1 − x/y)·√y). `complexAcos()`, not `acos()`: the
+  // complex.js formula loses digits for a large argument below the real axis
   const sx = x.sqrt();
   const sy = y.sqrt();
-  return sx
-    .div(sy)
-    .acos()
-    .div(C_ONE.sub(x.div(y)).sqrt().mul(sy));
+  return complexAcos(sx.div(sy)).div(C_ONE.sub(x.div(y)).sqrt().mul(sy));
 }
 
 /** Carlson R_F(x, y, z), complex (cut plane). */

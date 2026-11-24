@@ -145,7 +145,9 @@ Use \`==\` to compare, or perform the assignment on its own line before the cond
 
 Use \`Floor(a / b)\` for the integer quotient.`,
 
-  'control-outside-loop': `\`break\` and \`continue\` are only valid directly inside a \`while\` or \`for\` body — and the loop context resets at every function and lambda boundary, so a \`break\` inside a lambda DEFINED in a loop is still outside the loop.
+  'control-outside-loop': `\`break\` and \`continue\`, and their call forms \`Break()\` and \`Continue()\`, are only valid directly inside a \`while\` or \`for\` body — and the loop context resets at every function and lambda boundary, so a \`break\` inside a lambda DEFINED in a loop is still outside the loop.
+
+When the program runs anyway, a \`Break\` or \`Continue\` that reaches the end of a function body or the top level of the program is the error \`control-outside-loop\`, and the next statements of the program run.
 
 To stop a pipeline early, restructure with a condition or a Take/Filter stage instead of breaking out of a callback.`,
 

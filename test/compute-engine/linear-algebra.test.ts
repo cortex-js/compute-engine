@@ -183,11 +183,83 @@ describe('Tensor Properties', () => {
       expect(ce.expr(['Shape', x]).evaluate().toString()).toBe(expected);
     });
 
-  it('should not claim a shape for a ragged list of unknown applications', () => {
+  it('should give a ragged list of unknown applications its outer axis', () => {
     const ragged = ['List', ['List', ['a', 1]], ['List', ['a', 2], ['a', 3]]];
     expect(ce.expr(['Shape', ragged as Expression]).evaluate().toString()).toBe(
-      '()'
+      '(2)'
     );
+  });
+
+  // CE-1390: a ragged list has the axes that its items have in common, as
+  // `Dimensions` in Wolfram, not the shape `()` of a scalar.
+  const ragged: [string, Expression, string][] = [
+    [
+      'rows of different lengths',
+      ['List', ['List', 5, 2, 10, 18], ['List', 1, 2, 3]],
+      '(2)',
+    ],
+    ['a number and a row', ['List', 1, ['List', 2, 3]], '(2)'],
+    ['an empty row and a row', ['List', ['List'], ['List', 1]], '(2)'],
+    [
+      'ragged at the third axis',
+      [
+        'List',
+        ['List', ['List', 1, 2], ['List', 3]],
+        ['List', ['List', 4, 5], ['List', 6]],
+      ],
+      '(2, 2)',
+    ],
+    [
+      'ragged at the second axis, deeper rows',
+      [
+        'List',
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+        ['List', ['List', 5, 6]],
+      ],
+      '(2)',
+    ],
+    [
+      'Range rows of different counts',
+      ['List', ['Range', 1, 3], ['Range', 1, 2]],
+      '(2)',
+    ],
+    ['a set and a row', ['List', ['Set', 1, 2], ['List', 3, 4]], '(2)'],
+    [
+      'lazy rows of different counts',
+      ['Map', ['Function', ['Range', 1, 'k'], 'k'], ['Range', 1, 3]],
+      '(3)',
+    ],
+    [
+      'ragged above an infinite Range cell',
+      [
+        'List',
+        ['List', 1, 2],
+        ['List', 3],
+        ['Range', 1, 'PositiveInfinity'],
+      ],
+      '(3)',
+    ],
+  ];
+  for (const [name, x, expected] of ragged)
+    it(`should give a ragged list its common axes: ${name} is ${expected}`, () => {
+      expect(ce.expr(['Shape', x]).evaluate().toString()).toBe(expected);
+      expect(ce.expr(['Rank', x]).evaluate().toString()).toBe(
+        `${expected.split(',').length}`
+      );
+    });
+
+  it('should keep the shape of a list with a valueless list cell unknown', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<number>');
+    const x: Expression = ['List', ['List', 1, 2], 'L'];
+    const shape = ce.expr(['Shape', x]);
+    // `Shape` stays unevaluated, so it does not claim to enumerate.
+    expect(shape.isEnumerableCollection).not.toBe(true);
+    expect(shape.evaluate().toString()).toBe('Shape([[1,2],L])');
+    expect(ce.expr(['Rank', x]).evaluate().toString()).toBe('Rank([[1,2],L])');
+    // Rows of different lengths are ragged whatever `L` holds.
+    const y: Expression = ['List', ['List', 1, 2], ['List', 3], 'L'];
+    expect(ce.expr(['Shape', y]).evaluate().toString()).toBe('(3)');
   });
 });
 

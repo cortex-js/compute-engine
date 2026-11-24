@@ -13,15 +13,62 @@ import type { Rational } from './types.js';
 // so only the discrete distributions need a numeric search here.
 //
 // A discrete `Quantile(p)` is the least integer `k` on the support with
-// `CDF(k) ≥ p`. The CDF is monotone increasing, so we bracket with the normal
-// approximation (`mean ± z·stddev`) and step to the exact integer — O(1) in
-// practice. The result is an exact integer, so a machine-precision CDF is
-// sufficient to identify it even under a high-precision `.N()`.
+// `CDF(k) ≥ p`. The CDF is monotone increasing, so we seed with the normal
+// approximation (`mean ± z·stddev`), bracket and bisect to the exact
+// integer with the machine CDF. A CDF value from another route can differ
+// from the machine kernel by more than the tolerance of the test, so the
+// caller can pass a bignum CDF (`AccurateDiscreteCDF`) that steps the
+// result down, and `Quantile(CDF(k)) = k` then holds for a value of either.
 //
+
+/**
+ * A CDF more accurate than the machine kernel, for the final test of a
+ * discrete quantile search: `cdf(k) = P(X ≤ k)` and `sf(k) = P(X > k)`, each
+ * rounded to a double, `NaN` where it has no value. The caller computes
+ * them with a bignum kernel.
+ */
+export type AccurateDiscreteCDF = {
+  cdf: (k: number) => number;
+  sf: (k: number) => number;
+};
+
+/**
+ * The relative tolerance of `discreteQuantile`, on the tail that holds `p`
+ * (`discreteQuantileTest`): a `p` that is a CDF value rounded to 15
+ * significant digits, the digits of a result under `precision = 'machine'`,
+ * is up to `5·10^−15` away from it, relative to `p`.
+ */
+const DISCRETE_QUANTILE_DIGITS_TOLERANCE = 1e-14;
+
+/**
+ * The absolute tolerance of `discreteQuantile` on the upper tail, for
+ * `p > ½`: the rounding of `p` to 15 significant digits moves `1 − p` by up
+ * to `5·10^−16`, and the rounding to a double by `ε/4` more. Where `1 − p`
+ * is near this term, the term dominates: the search accepts an upper tail
+ * up to about twice `1 − p`, which spans many support points of a wide
+ * distribution (Poisson(10^6) at `1 − 10^−15`).
+ */
+const DISCRETE_QUANTILE_DIGITS_ABSOLUTE = 6e-16;
 
 /**
  * Least integer `k ∈ [kMin, kMax]` with `cdf(k) ≥ prob`, found by a monotone
  * search seeded from the normal approximation. `kMax` may be `+∞` (Poisson).
+ *
+ * The test has a tolerance relative to the tail that holds `prob`
+ * (`DISCRETE_QUANTILE_DIGITS_TOLERANCE`), so that `Quantile(CDF(k)) = k`
+ * holds when `prob` is a CDF value that is rounded. A relative tolerance
+ * keeps the band of a `prob` just above a jump narrow: with the absolute
+ * `10^−12` of before, every `p` within `10^−12` above `CDF(0) = ½` of
+ * Binomial(1, ½) gave 0, and every CDF value below `10^−12` gave the least
+ * point of the support. Above ½ the band also has the absolute
+ * `DISCRETE_QUANTILE_DIGITS_ABSOLUTE`: where `1 − prob` is near it, the
+ * result can be many support points low.
+ *
+ * A CDF value from another route (a bignum kernel, a finite sum) can differ
+ * from the machine kernel by more than the tolerance, about `10^−12` at
+ * `n = 3000`: with `accurate`, the result steps down while the accurate CDF
+ * reaches `prob` too. The result is then the least `k` that either CDF
+ * accepts, and the round trip holds for a value of either.
  */
 export function discreteQuantile(
   cdf: (k: number) => number,
@@ -30,33 +77,42 @@ export function discreteQuantile(
   stddev: number,
   kMin: number,
   kMax: number,
-  deadline?: number
+  deadline?: number,
+  accurate?: AccurateDiscreteCDF
 ): number {
   if (prob <= 0) return kMin;
   if (prob >= 1) return kMax;
 
-  // A tiny tolerance makes the `CDF(k) ≥ p` boundary inclusive against
-  // round-off: when `p` is itself a CDF value (the `Quantile(CDF(k)) = k`
-  // identity) it may be recomputed a few ulps above the machine CDF used in
-  // this search, which would otherwise overshoot by one.
-  const target = prob - 1e-12;
-
   // Seed from the normal-approximation inverse-CDF, then correct.
-  let k = Math.round(mean + Math.SQRT2 * erfInv(2 * prob - 1) * stddev);
-  if (!Number.isFinite(k)) k = Math.round(mean);
-  k = Math.max(k, kMin);
-  if (Number.isFinite(kMax)) k = Math.min(k, kMax);
+  let seed = mean + Math.SQRT2 * erfInv(2 * prob - 1) * stddev;
+  if (!Number.isFinite(seed)) seed = mean;
 
-  let guard = 0;
-  // Step up while the CDF is still below the target probability.
-  while (k < kMax && cdf(k) < target) {
-    k++;
-    if ((++guard & 0x3ff) === 0) checkDeadline(deadline);
-  }
-  // Step down while the previous integer already reaches the target.
-  while (k > kMin && cdf(k - 1) >= target) {
-    k--;
-    if ((++guard & 0x3ff) === 0) checkDeadline(deadline);
+  const test = (
+    cdf: (k: number) => number,
+    sf: (k: number) => number
+  ): ((k: number) => boolean) =>
+    discreteQuantileTest(
+      prob,
+      cdf,
+      sf,
+      DISCRETE_QUANTILE_DIGITS_TOLERANCE,
+      DISCRETE_QUANTILE_DIGITS_ABSOLUTE
+    );
+
+  // The upper tail is `1 − cdf(k)`, exact (Sterbenz) where it is used, for a
+  // CDF above ½.
+  let k = leastIntegerWith(
+    test(cdf, (k) => 1 - cdf(k)),
+    seed,
+    kMin,
+    kMax,
+    deadline
+  );
+  if (accurate === undefined || !Number.isFinite(k)) return k;
+  const reaches = test(accurate.cdf, accurate.sf);
+  while (k > kMin && reaches(k - 1)) {
+    k -= 1;
+    checkDeadline(deadline);
   }
   return k;
 }
@@ -66,7 +122,8 @@ export function binomialQuantile(
   n: number,
   p: number,
   prob: number,
-  deadline?: number
+  deadline?: number,
+  accurate?: AccurateDiscreteCDF
 ): number {
   const mean = n * p;
   const stddev = Math.sqrt(n * p * (1 - p));
@@ -74,28 +131,41 @@ export function binomialQuantile(
   // so the k ≥ n endpoint (CDF = 1) is handled explicitly.
   const cdf = (k: number): number =>
     k >= n ? 1 : k < 0 ? 0 : betaRegularized(1 - p, n - k, k + 1);
-  return discreteQuantile(cdf, prob, mean, stddev, 0, n, deadline);
+  return discreteQuantile(cdf, prob, mean, stddev, 0, n, deadline, accurate);
 }
 
 /** Quantile of Poisson(λ) at probability `prob` (a non-negative integer). */
 export function poissonQuantile(
   lambda: number,
   prob: number,
-  deadline?: number
+  deadline?: number,
+  accurate?: AccurateDiscreteCDF
 ): number {
   const mean = lambda;
   const stddev = Math.sqrt(lambda);
   // CDF(k) = P(X ≤ k) = Q(k+1, λ).
   const cdf = (k: number): number => (k < 0 ? 0 : gammaQ(k + 1, lambda));
-  return discreteQuantile(cdf, prob, mean, stddev, 0, Infinity, deadline);
+  return discreteQuantile(
+    cdf,
+    prob,
+    mean,
+    stddev,
+    0,
+    Infinity,
+    deadline,
+    accurate
+  );
 }
 
 //
 // Exact discrete quantiles. The float search above compares a machine CDF
-// against `p` with a tolerance, so it can miss by one support point when an
-// exact `p` is within that tolerance of a CDF jump. The two functions below
-// decide each test `CDF(k) ≥ p` exactly, with bigint rationals, and use the
-// float search only to choose the first `k` to test. Every input is a
+// against `p` with a tolerance (`10^−14` relative to the tail, and
+// `6·10^−16` absolute above ½), so it can give a support point too low when
+// an exact `p` is within that tolerance above a CDF jump, and several points
+// of a wide distribution when `1 − p` is near the absolute term. The two
+// functions below decide each test `CDF(k) ≥ p` exactly, with bigint
+// rationals, and use the float search only to choose the first `k` to
+// test. Every input is a
 // rational `[numerator, denominator]` with a positive denominator, and
 // `0 < p < 1` (the caller answers `p = 0` and `p = 1`).
 //
@@ -408,12 +478,12 @@ function leastIntegerWith(
 }
 
 /**
- * The RELATIVE tolerance of the float discrete searches below: a `p` that
- * is itself a CDF value can be recomputed a few ulps above the machine CDF,
- * which would otherwise overshoot by one. The target is `p·(1 − tolerance)`.
- * It is relative, not the absolute `1e-12` of `discreteQuantile`, because
- * with a small success probability the masses are small: Geometric(10^−15)
- * has masses of about 10^−15, and `p − 10^−12` is then a thousand support
+ * The RELATIVE tolerance of the float geometric and negative binomial
+ * searches below: a `p` that is itself a CDF value can be recomputed a few
+ * ulps above the machine CDF, which would otherwise overshoot by one. The
+ * target is `p·(1 − tolerance)`. It is relative, not absolute, because with
+ * a small success probability the masses are small: Geometric(10^−15) has
+ * masses of about 10^−15, and `p − 10^−12` is then a thousand support
  * points below the quantile. With `8ε` the shift there is a few points, as
  * near the resolution of a double CDF at 0.5 as a round trip allows.
  */
@@ -462,30 +532,37 @@ export function geometricQuantile(
  * `sf`. A relative tolerance on `prob` itself is an absolute shift of about
  * `2·10^−15` near 1, where the masses can be smaller than that
  * (`Quantile(GeometricDistribution(0.3), 0.9999999999999991)` stopped 3
- * points short).
+ * points short). `tolerance` and `absolute` are those of `upperTailTarget`.
  */
 function discreteQuantileTest(
   prob: number,
   cdf: (k: number) => number,
-  sf: (k: number) => number
+  sf: (k: number) => number,
+  tolerance = DISCRETE_QUANTILE_TOLERANCE,
+  absolute = Number.EPSILON
 ): (k: number) => boolean {
   if (prob <= 0.5) {
-    const target = prob * (1 - DISCRETE_QUANTILE_TOLERANCE);
+    const target = prob * (1 - tolerance);
     return (k) => cdf(k) >= target;
   }
-  const target = upperTailTarget(prob, DISCRETE_QUANTILE_TOLERANCE);
+  const target = upperTailTarget(prob, tolerance, absolute);
   return (k) => sf(k) <= target;
 }
 
 /**
  * The largest upper tail `P(X > k)` that still counts as reaching `prob`,
  * for `prob > ½`: `1 − prob` (exact, Sterbenz) with the relative
- * `tolerance`, and 2 ulps of `prob` more. A `prob` that is a CDF value is
- * that value rounded to a double, which moves `1 − prob` by up to half an
- * ulp; without the absolute term `Quantile(CDF(k))` gave `k + 1` near 1.
+ * `tolerance`, and `absolute` more (by default 2 ulps of `prob`). A `prob`
+ * that is a CDF value is that value rounded to a double, which moves
+ * `1 − prob` by up to half an ulp; without the absolute term
+ * `Quantile(CDF(k))` gave `k + 1` near 1.
  */
-function upperTailTarget(prob: number, tolerance: number): number {
-  return (1 - prob) * (1 + tolerance) + Number.EPSILON;
+function upperTailTarget(
+  prob: number,
+  tolerance: number,
+  absolute = Number.EPSILON
+): number {
+  return (1 - prob) * (1 + tolerance) + absolute;
 }
 
 /**

@@ -973,6 +973,26 @@ function* executeEpsilSteps(
                 d.range[0] === constantSite?.[0] &&
                 d.range[1] === constantSite?.[1]
             )) ||
+          // A `Break` or a `Continue` that reached the statement itself (the
+          // payload `program`, `strayLoopControl()`) is outside every loop
+          // and every function literal of the statement, so the parser
+          // reported it as `control-outside-loop` in the range of the
+          // statement: the error value is the same problem. One that left a
+          // function body (`function`) can come from a function of another
+          // statement, and is reported.
+          (isFunction(markerError, 'Error') &&
+            isFunction(markerError.op1, 'ErrorCode') &&
+            isString(markerError.op1.op1) &&
+            markerError.op1.op1.string === 'control-outside-loop' &&
+            isString(markerError.op1.ops[2]) &&
+            markerError.op1.ops[2].string === 'program' &&
+            diagnostics.some(
+              (d) =>
+                Array.isArray(d.message) &&
+                d.message[0] === 'control-outside-loop' &&
+                d.range[0] >= range[0] &&
+                d.range[1] <= range[1]
+            )) ||
           // A use of a local before it has a value: see
           // `reportedAsBlockLocalError()`.
           (markerError !== undefined &&

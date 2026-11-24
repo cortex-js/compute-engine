@@ -734,7 +734,8 @@ const ALGEBRAIC_OPS = new Set([
 /**
  * Whether `val`, the value of a function or of one of its derivatives at the
  * expansion point, makes the Taylor engines decline: an invalid value, a
- * genuine singularity (pole, essential singularity) or an unresolved `0^e`
+ * genuine singularity (pole, essential singularity, a division by the
+ * number 0 that a parameter keeps unevaluated) or an unresolved `0^e`
  * indeterminate. An unknown symbolic value (`f(0)` for an undeclared `f`)
  * reports `isFinite === false` yet is not infinite, and is kept.
  */
@@ -744,8 +745,23 @@ function isUnusableTaylorValue(val: Expression): boolean {
     val.isNaN === true ||
     val.isInfinity === true ||
     hasIndeterminateZeroPower(val) ||
+    dividesByZero(val) ||
     hasHiddenSingularity(val) ||
     holdsInertLibraryDerivative(val)
+  );
+}
+
+/**
+ * Whether `val` holds a `Divide` by the number 0. The evaluation folds
+ * `1/0` to `ComplexInfinity`, but it keeps `√a/0` when `a` is a parameter
+ * whose value can be 0, and such a value reports neither infinite nor NaN.
+ * The derivative of `√(a·x)` at `x = 0` is `√a/0`: a branch point.
+ */
+function dividesByZero(val: Expression): boolean {
+  const isDivideByZero = (e: Expression): boolean =>
+    isFunction(e, 'Divide') && e.op2.isSame(0);
+  return (
+    isDivideByZero(val) || val.getSubexpressions('Divide').some(isDivideByZero)
   );
 }
 
@@ -1058,8 +1074,9 @@ function hasIndeterminateZeroPower(val: Expression): boolean {
 
 /**
  * Iterated differentiation of `expr` with respect to `varName`, evaluating each
- * derivative at `at`. `resolve` supplies a value when direct substitution is
- * non-finite (used for the ±∞ expansion, where a coefficient is a limit).
+ * derivative at `at`. `resolve` supplies a value when the value from direct
+ * substitution is not usable (`isUnusableTaylorValue()`; used for the ±∞
+ * expansion, where a coefficient is a limit).
  * Returns `null` (defer) on a genuine singularity.
  */
 function expandByDerivative(
@@ -1075,15 +1092,7 @@ function expandByDerivative(
   for (let k = 0; k <= W; k++) {
     checkDeadline(ce._deadlineFrame);
     let val: Expression | undefined = g.subs({ [varName]: at }).evaluate();
-    if (
-      !val ||
-      !val.isValid ||
-      val.isNaN === true ||
-      val.isInfinity === true ||
-      hasIndeterminateZeroPower(val) ||
-      hasHiddenSingularity(val) ||
-      holdsInertLibraryDerivative(val)
-    ) {
+    if (!val || isUnusableTaylorValue(val)) {
       val = resolve ? (resolve(g, k) ?? undefined) : undefined;
       if (!val) return null;
     }

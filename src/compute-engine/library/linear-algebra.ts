@@ -191,7 +191,11 @@ const NUMERIC_OR_OMITTED_TYPE = parseType('number | nothing');
  * `list<never>`, `[[], []]` is `list<list<never>>`), so its `shape` property
  * gives `[]`, the shape of a scalar. Its shape is read from the value
  * instead (`emptyAxisListShape`): `[]` has the shape `[0]` and `[[], []]`
- * the shape `[2, 0]`.
+ * the shape `[2, 0]`. An eager `List` whose type has no dimensions for
+ * another reason (a ragged list, a cell that may be a list) also has its
+ * shape read from the value (`eagerListShape`): a ragged list has the axes
+ * that its items have in common, `[[1, 2], [3]]` has the shape `[2]`.
+ * A lazy collection whose elements are ragged has the shape `[count]` too.
  */
 function shapeOfOperand(
   ce: ComputeEngine,
@@ -229,16 +233,22 @@ function shapeOfOperand(
     // the shape is not known. When all the rows have the same shape, the
     // shape is found from the counts of the lazy rows, and no row is listed
     // (`lazyRowsShape`).
+    // A lazy row that cannot be listed (`Range(1, +oo)`) is a cell that may
+    // be a list, so `eagerListShape` gives a shape only when the list is
+    // ragged above it: `[[1, 2], [3], Range(1, +oo)]` has the shape `[3]`.
     const derived = lazyRowsShape(xs);
+    if (derived === undefined) return eagerListShape(xs);
     if (derived !== null) return derived;
     const listed = listedLazyRows(ce, xs);
-    if (listed === undefined) return undefined;
+    if (listed === undefined) return eagerListShape(xs);
     if (listed !== xs) return shapeOfOperand(ce, listed, next);
     // A cell that may itself be a list (an application of an unknown
     // function: `[[a(1), a(2)]]`) keeps the type from carrying dimensions,
-    // but an unevaluated application is one cell, as in Wolfram.
-    const regular = regularListShape(xs);
-    if (regular !== undefined) return regular;
+    // but an unevaluated application is one cell, as in Wolfram. A ragged
+    // list has the axes that its items have in common. A `List` is not a
+    // scalar: when its structure does not give the shape, the shape is not
+    // known (CE-1390).
+    return eagerListShape(xs);
   }
   if (
     shape.length > 0 ||
@@ -261,30 +271,32 @@ function shapeOfOperand(
   if (count > MAX_LAZY_SHAPE_ELEMENTS) return undefined;
   if (!isFiniteIndexedCollection(xs)) return undefined;
   const rows = [...xs.each()];
-  // A `Nothing` element occupies its position as a scalar: a mixture of
-  // `Nothing` and rows has no rectangular shape.
-  if (rows.some((row) => isSymbol(row, 'Nothing')))
-    return rows.every(
-      (row) => row.isCollection !== true || isTupleShapedType(row.type.type)
-    )
-      ? [count]
-      : undefined;
+  // A `Nothing` element occupies its position as a scalar, so whatever the
+  // other elements are, the elements have no axis in common (CE-1390).
+  if (rows.some((row) => isSymbol(row, 'Nothing'))) return [count];
+  // The elements have the axes that their shapes have in common: rows of
+  // the shapes `[2, 3]` and `[2]` give the shape `[count, 2]` (CE-1390).
   if (rows.some((row) => row.isLazyCollection)) {
     const shapes = rows.map((row) => shapeOfOperand(ce, row, next));
-    const first = shapes[0];
-    if (
-      first === undefined ||
-      shapes.some(
-        (s) =>
-          s === undefined ||
-          s.length !== first.length ||
-          s.some((n, i) => n !== first[i])
-      )
-    )
+    // An extent that is not known (`-1`) may or may not equal another.
+    if (shapes.some((s) => s === undefined || s.some((n) => n < 0)))
       return undefined;
-    return [count, ...first];
+    return [count, ...commonPrefix(shapes as number[][])];
   }
-  return ce.function('List', rows).shape;
+  return shapeOfOperand(ce, ce.function('List', rows), next);
+}
+
+/** The longest list of extents that starts each of the `shapes`. */
+function commonPrefix(shapes: ReadonlyArray<ReadonlyArray<number>>): number[] {
+  const [first, ...rest] = shapes;
+  if (first === undefined) return [];
+  let n = first.length;
+  for (const s of rest) {
+    let i = 0;
+    while (i < n && i < s.length && s[i] === first[i]) i += 1;
+    n = i;
+  }
+  return first.slice(0, n);
 }
 
 /**
@@ -316,30 +328,56 @@ function emptyAxisListShape(xs: Expression): number[] | undefined {
 }
 
 /**
- * The shape of an eager `List` value `xs` read from its structure, or
- * `undefined` when it is ragged, mixes lists and other values at a level, or
- * has a cell that is a collection other than a `List`.
+ * The shape of an eager `List` value `xs` read from its structure: the
+ * extents of the axes that all its items have in common, or `undefined` when
+ * that is not known.
  *
- * Each level must be all `List`s of one length, or none: the cells are the
+ * The value is read level by level. When a level is all `List`s of one
+ * length, that length is the extent of the next axis. The cells are the
  * first level with no `List`, so `[[a(1), a(2)]]` has the shape `[1, 2]`.
+ *
+ * A ragged list has the axes before the first level where its items differ:
+ * a level of `List`s of different lengths (`[[1, 2], [3]]` has the shape
+ * `[2]`), or a level that mixes `List`s and cells (`[1, [2, 3]]` has the
+ * shape `[2]`), as `Dimensions` in Wolfram.
+ *
+ * A cell that may have the value of a list (`mayBeListCell()`) makes the
+ * shape `undefined`, unless the `List`s at its level have different lengths:
+ * the axes of the cell are not known.
  */
-function regularListShape(xs: Expression): number[] | undefined {
+function eagerListShape(xs: Expression): number[] | undefined {
   const dims: number[] = [];
   let level: ReadonlyArray<Expression> = [xs];
   while (true) {
-    if (!level.some((x) => isFunction(x, 'List'))) {
-      return level.some((x) => x.isCollection === true) ? undefined : dims;
-    }
-    if (!level.every((x) => isFunction(x, 'List'))) return undefined;
-    const lists = level as ReadonlyArray<
+    const lists = level.filter((x) => isFunction(x, 'List')) as ReadonlyArray<
       Expression & { ops: ReadonlyArray<Expression> }
     >;
-    const n = lists[0].ops.length;
-    if (lists.some((x) => x.ops.length !== n)) return undefined;
-    dims.push(n);
-    if (n === 0) return dims;
-    level = lists.flatMap((x) => x.ops);
+    const cells = level.filter((x) => !isFunction(x, 'List'));
+    if (lists.length > 0) {
+      const n = lists[0].ops.length;
+      if (lists.some((x) => x.ops.length !== n)) return dims;
+      if (cells.length === 0) {
+        dims.push(n);
+        if (n === 0) return dims;
+        level = lists.flatMap((x) => x.ops);
+        continue;
+      }
+    }
+    return cells.some(mayBeListCell) ? undefined : dims;
   }
+}
+
+/** True when the cell `x` of an eager `List` may have the value of a list:
+ *  an indexed collection other than a `List` (a lazy collection), or a
+ *  symbol with no value whose type is a collection (`L: list<number>`). A
+ *  tuple and a string have the shape `()`, a set or an interval has no
+ *  positions, and a free symbol or an unevaluated application is one cell,
+ *  as in the type of the list. */
+function mayBeListCell(x: Expression): boolean {
+  const t = x.type.type;
+  if (isTupleShapedType(t) || isSubtype(t, 'string')) return false;
+  if (x.isCollection === true) return x.isIndexedCollection !== false;
+  return isValuelessCollectionTyped(x);
 }
 
 /**
@@ -2922,7 +2960,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Corresponds to monadic Shape `⍴` in APL
     Shape: {
       examples: ['Shape([[1, 2, 3], [4, 5, 6]])'],
-      description: 'Return the shape tuple of an expression.',
+      description:
+        'Return the shape tuple of an expression. A ragged list has the axes that its items have in common: `Shape([[1, 2], [3]])` is `(2)`.',
       complexity: 8200,
       signature: '(value) -> tuple',
       // An operand whose type has a known rank `r` (a vector, a matrix, a
@@ -2948,8 +2987,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // that is not indexed, an infinite collection, one with an unknown
       // count, a collection-typed operand with no value, or an operand whose
       // type has an axis of unknown extent (a valueless `m: matrix<integer>`).
-      // A scalar number, a tuple, an eager `List` and an operand whose
-      // type has the dimensions always give a shape tuple. Other operands
+      // A scalar number, a tuple, an operand whose type has the dimensions,
+      // and an eager `List` whose structure gives a shape (`eagerListShape`)
+      // always give a shape tuple. Other operands
       // are decided when they are evaluated. See `canEnumerate`
       // (types-definitions.ts).
       canEnumerate: (expr) => {
@@ -2959,11 +2999,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (xs.shape.some((n) => n < 0)) return false;
         if (
           xs.shape.length > 0 ||
-          isFunction(xs, 'List') ||
           isSubtype(xs.type.type, 'number') ||
           isTupleShapedType(xs.type.type)
         )
           return true;
+        // An eager `List` whose type has no dimensions has the shape that
+        // its structure gives, unless a cell may be a list (CE-1390). The
+        // walk is linear in the size of the literal, not O(1): it stops at
+        // the first ragged level, and the literal is already in memory.
+        if (isFunction(xs, 'List'))
+          return eagerListShape(xs) !== undefined ? true : undefined;
         if (xs.isCollection === true && xs.isIndexedCollection === false)
           return false;
         if (xs.isFiniteCollection === false) return false;

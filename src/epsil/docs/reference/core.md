@@ -913,7 +913,6 @@ Value preserving type conversion/tag indicating the string is a LaTeX string
 
 ```epsil
 parse(LatexString(#"\frac{1}{2}"#))
-// ➔ 1/2
 ```
 
 ### MatchesType
@@ -1109,13 +1108,12 @@ parallel(l, m)
 
 ### parse
 
-MathJSON `Parse` · `(string) -> any`
+MathJSON `Parse` · `(string) any -> any`
 
 Parse a LaTeX string and evaluate to a corresponding expression
 
 ```epsil
 parse(#"\frac{\pi}{2}"#)
-// ➔ 1/2 * pi
 ```
 
 ### perpendicular

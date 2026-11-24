@@ -525,6 +525,37 @@ describe('a `regexp` is a value (D9)', () => {
     expect(ce.box(RE('a+')).isSame(ce.box(RE('a+', 'i')))).toBe(false);
   });
 
+  test('Equal compares the pattern and the set of flags (CE-1404)', () => {
+    expect(sym(['Equal', RE('a.c'), RE('a.c', 'i')])).toBe('False');
+    expect(sym(['NotEqual', RE('a.c'), RE('a.c', 'i')])).toBe('True');
+    expect(sym(['Equal', RE('a.c'), RE('a.c')])).toBe('True');
+    expect(sym(['Equal', RE('a'), RE('b')])).toBe('False');
+    // The order of the flags does not count.
+    expect(sym(['Equal', RE('a', 'im'), RE('a', 'mi')])).toBe('True');
+    // The host adds `u` when no Unicode mode is given.
+    expect(sym(['Equal', RE('a'), RE('a', 'u')])).toBe('True');
+    expect(sym(['Equal', RE('a', 'u'), RE('a', 'v')])).toBe('False');
+    expect(ce.box(RE('a')).isEqual(ce.box(RE('a', 'i')))).toBe(false);
+  });
+
+  test('a regexp is unequal to a string or a number', () => {
+    expect(sym(['Equal', RE('a'), { str: 'a' }])).toBe('False');
+    expect(sym(['Equal', RE('a'), 1])).toBe('False');
+  });
+
+  test('a computed pattern is compared once it has a value', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('p', 'string');
+    ce2.assign('p', ce2.string('a'));
+    ce2.declare('q', 'string');
+    expect(
+      ce2.box(['Equal', ['RegExp', 'p'], RE('a', 'i')]).evaluate().symbol
+    ).toBe('False');
+    expect(
+      ce2.box(['Equal', ['RegExp', 'q'], RE('a')]).evaluate().operator
+    ).toBe('Equal');
+  });
+
   test('round-trips through MathJSON', () => {
     // Serialized as an ordinary `RegExp("…")` call, never as a raw literal:
     // the raw form is one parser's convenience, and MathJSON must be

@@ -3542,6 +3542,15 @@ export function describeError(error: MathJsonExpression): string {
           ? 'cannot assign a value to a constant'
           : `cannot assign a value to the constant \`${payload[0]}\``;
       break;
+    case 'control-outside-loop':
+      // Payload: [`Break` or `Continue`, `function` or `program`]. The value
+      // left a function body or reached a statement of the program
+      // (`strayLoopControl()`, `function-utils.ts`).
+      detail =
+        payload[1] === 'function'
+          ? `\`${payload[0] ?? 'Break'}\` left a function body: it is not inside a loop of the function`
+          : `\`${payload[0] ?? 'Break'}\` is not inside a loop`;
+      break;
     default: {
       // A kebab-case code reads as words; a free-form message (a thrown
       // `Error`'s text captured as the cause) passes through verbatim.

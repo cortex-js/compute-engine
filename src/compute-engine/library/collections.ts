@@ -909,7 +909,8 @@ function isInertOpaqueHead(expr: Expression): boolean {
 // be stripped — the wrapped and unwrapped collections have the same number of
 // elements, whether the operand is concrete or symbolic, evaluated or not.
 // `Contains` depends only on the SET of elements, so it may additionally strip
-// `Unique` (which drops duplicates but preserves membership).
+// `Unique` (which drops duplicates but preserves membership). A source that
+// can be a string is not stripped (see `peekWrappers`).
 //
 // Why it matters: consumers evaluate their operand first, so an EAGER wrapper
 // (Sort/RandomShuffle) would materialize and reorder the whole collection before
@@ -966,7 +967,14 @@ function peekWrappers(
     // indexed collection; otherwise the consumer evaluates the wrapper, which
     // sorts an untyped list to count it but reports the error for a set.
     (!ORDER_WRAPPERS.includes(result.operator) ||
-      result.op1.type.matches('indexed_collection<any>'))
+      result.op1.type.matches('indexed_collection<any>')) &&
+    // The elements of a string are its grapheme clusters, and a wrapper
+    // returns a string whose clusters are formed again: a combining mark
+    // moved after a letter joins it. So `Reverse` of the string U+0301 "a"
+    // is "a" U+0301, one element where its source has two, and `Contains`
+    // of it is false for "a". Strip a wrapper only when its source cannot
+    // be a string.
+    result.op1.type.isDisjointFrom('string')
   ) {
     result = result.op1;
   }
@@ -3647,6 +3655,13 @@ function zipElement(
  * statically-unknown arity keeps the two-argument form, so nothing existing
  * changes meaning — the same convention `sortedIndices` uses to tell a
  * `Sort` key from a `Sort` comparator.
+ *
+ * `Iterate` holds a symbol that names its function (CE-1461), so `fn` can be
+ * a symbol that holds a function literal. The arity is then read from the
+ * type of the literal, as it was when the symbol was evaluated to the
+ * literal: a symbol declared
+ * `function` that holds `t ↦ t/2` is unary, and a symbol declared
+ * `(real, real = 2) -> real` that holds `(u, v) ↦ v - u` is binary.
  */
 function iterateArgs(
   ce: ComputeEngine,
@@ -3654,7 +3669,10 @@ function iterateArgs(
   n: number,
   acc: Expression
 ): Expression[] {
-  if (requiredArity(fn.type.type) === 1) return [acc];
+  const callee =
+    (isSymbol(fn) && fn.valueDefinition !== undefined ? fn.value : undefined) ??
+    fn;
+  if (requiredArity(callee.type.type) === 1) return [acc];
   return [ce.number(n), acc];
 }
 
@@ -6427,12 +6445,55 @@ function parameterIndexReadType(
 }
 
 /**
+ * The requirement that the read `xs[index]`, whose result must be of type
+ * `r`, puts on a base `xs` whose type is a tuple, when `index` is a literal
+ * integer inside the tuple (counted from the end when it is negative). It is
+ * the tuple of `xs` with the component at `index` narrowed by `r`: the read
+ * says nothing about the other components. `undefined` (the general rule
+ * applies) when the type of `xs` is not a tuple, when the index is not such a
+ * literal, or when the component has no common value with `r`.
+ *
+ * The general requirement `indexed_collection<r>` asks it of EVERY component.
+ * A loop variable over `[((1, 2), 2), ((3, 4), 3)]` is a
+ * `tuple<tuple<integer, integer>, integer>`, so `g[2]` in a sum gave it the
+ * type `never` (the meet with `indexed_collection<number>`), and every
+ * expression that read it was typed `never` (CE-1492). The tuple is built
+ * here component by component because `narrow` of two tuples is no
+ * componentwise meet: it is one of the two when it is a subtype of the
+ * other, and `never` otherwise.
+ */
+function tupleComponentRequirement(
+  xs: Expression,
+  index: Expression,
+  r: Type
+): Type | undefined {
+  const t = resolveTypeAlias(xs.type.type);
+  if (typeof t !== 'object' || t.kind !== 'tuple') return undefined;
+  if (!isSubtype(index.type.type, 'integer')) return undefined;
+  const k = toInteger(index);
+  if (k === null) return undefined;
+  const n = t.elements.length;
+  const position = k < 0 ? n + k : k - 1;
+  if (k === 0 || position < 0 || position >= n) return undefined;
+  const component = narrow(t.elements[position].type, r);
+  if (component === 'never') return undefined;
+  return {
+    kind: 'tuple',
+    elements: t.elements.map((e, i) =>
+      i === position ? { ...e, type: component } : e
+    ),
+  };
+}
+
+/**
  * `At`'s side of the same contract. The base learns `indexed_collection<r>`
  * under a numeric index, `dictionary<r>` under a string index, and the
  * two-arm shape its validation already wrote (`dictionary<r> |
  * indexed_collection<r>`) when the index kind is open; each is a subtype of
  * the incumbent two-arm type, so the meet keeps the selected arm and drops
- * the other. Declined, so nothing is written:
+ * the other. A base whose type is a tuple, read at a literal index inside
+ * the tuple, learns that tuple with the one component narrowed by `r`
+ * (`tupleComponentRequirement`). Declined, so nothing is written:
  *
  * - a multi-index access `At(m, i, j)`: the chained single-index form
  *   `m[i][j]` reaches `m` through the engine's forwarding, one level at a
@@ -6472,6 +6533,8 @@ function elementRequirementOfAt(
     return [{ kind: 'dictionary', values: r }, undefined];
   const perIndex = parameterIndexReadType(xs, index, r);
   if (perIndex !== undefined) return [{ replace: perIndex }, undefined];
+  const component = tupleComponentRequirement(xs, index, r);
+  if (component !== undefined) return [component, undefined];
   if (isSubtype(indexType, 'number'))
     return [{ kind: 'indexed_collection', elements: r }, undefined];
   // A PROVABLE gather or mask (a collection-typed index) selects a LIST of
@@ -6857,8 +6920,30 @@ function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 1) return { kind, elements };
   return {
     kind,
-    elements: widen(elements, ...ops.slice(1).map((op) => op.type)),
+    elements: storedElementType(
+      elements,
+      ops.slice(1).map((op) => op.type)
+    ),
   };
+}
+
+/**
+ * The element type of a list that keeps the elements of a collection, of
+ * type `elements`, and holds values of the types `values` as elements of
+ * their own (`Append`, and `ReplaceAt` with more than one position). It is
+ * the `widen` of the types, except for a value typed `unknown`: a parameter
+ * whose type is not inferred (`t` in `(u, t) -> Append(Range(1, u), t)`) can
+ * hold any value, so it is kept as an arm (`joinUnresolvedArm`), and the
+ * reducer reads `integer | unknown` as `unknown`. `widen` drops it, and the
+ * function was typed `-> list<integer>` while `ap(2, 0.5)` is
+ * `[1, 2, 0.5]`. An element type `unknown` of the collection is the
+ * placeholder of a source that says nothing yet (see `appendResultTypeD`):
+ * when no value is typed `unknown`, `widen` drops it, and the values give
+ * the element type.
+ */
+function storedElementType(elements: Type, values: ReadonlyArray<Type>): Type {
+  if (!values.includes('unknown')) return widen(elements, ...values);
+  return reduceType(joinUnresolvedArm([elements, ...values]));
 }
 
 /**
@@ -21838,6 +21923,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!initial) return engine._fn('Iterate', [fn]);
       return engine._fn('Iterate', [fn, initial]);
     },
+    // A symbol that names the function is held, as the lazy `Map` holds it:
+    // the symbol stays the callee, and each step is a call of the symbol,
+    // which fills a missing argument with the default of its declared
+    // signature. Evaluated, the symbol gave its function literal, whose own
+    // default then applied: with `s` declared `(real, real = 5) -> real` and
+    // assigned `(u, v = 7) ↦ v - u`, `Iterate(s, 1)` was `[6, 1, 6, …]`
+    // while `s(1)` is 4. (CE-1461)
+    //
+    // Any other function operand (`mk(2)`, `If(c, f, g)`) is a `value`, as
+    // before: it is evaluated once, with the options of the evaluation
+    // (`.N()`), and `iterateArgs` reads the arity of its value. Held, it would
+    // be evaluated again at each read. The role depends on the operand, not
+    // only on its position: a symbol is a symbol as written and canonical, and
+    // the two roles differ only when the `Iterate` is evaluated.
+    operands: (ops) => [
+      ops[0] !== undefined && isSymbol(ops[0])
+        ? { kind: 'held' }
+        : { kind: 'value' },
+      { kind: 'value' },
+    ],
     collection: {
       isLazy: (_expr) => true,
       callsCallbackOnRead: true,
@@ -22821,7 +22926,7 @@ function replaceAtPathType(source: Type, levels: number, value: Type): Type {
     return (
       listTypeKeptByWrite(source, value) ?? {
         kind: 'list',
-        elements: widen(element, value),
+        elements: storedElementType(element, [value]),
       }
     );
   // An absent row stays absent, so `missing` is read before the requirement

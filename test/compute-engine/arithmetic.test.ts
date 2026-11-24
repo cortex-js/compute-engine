@@ -1584,6 +1584,46 @@ describe('SUM', () => {
     ).toMatchInlineSnapshot(`0`);
   });
 
+  // CE-1315: bounds far above 2^53 that round to the same double
+  // (`2^60 + 3` reads `2^60`) looked like a one-term range, and the loop
+  // gave that one term.
+  it('reports exact bounds that round to the same double as an error', () => {
+    const p60 = ['Power', 2, 60];
+    const sum = ce
+      .expr(['Sum', 'j', ['Limits', 'j', p60, ['Add', p60, 3]]])
+      .evaluate();
+    expect(sum.toString()).toMatchInlineSnapshot(
+      `Error(ErrorCode("out-of-range", "a bound with magnitude at most 9007199254740991", "1152921504606846976..1152921504606846979"))`
+    );
+    expect(
+      ce
+        .expr(['Product', 'j', ['Limits', 'j', p60, ['Add', p60, 2]]])
+        .evaluate().operator
+    ).toBe('Error');
+    // A one-term range whose bound is not a double: the index would read
+    // `2^60`, not `2^60 + 1`.
+    expect(
+      ce
+        .expr([
+          'Sum',
+          'j',
+          ['Limits', 'j', ['Add', p60, 1], ['Add', p60, 1]],
+        ])
+        .evaluate().operator
+    ).toBe('Error');
+    // A one-term range whose bound is a double has its one term.
+    expect(
+      ce
+        .expr(['Sum', 'j', ['Limits', 'j', p60, p60]])
+        .evaluate().re
+    ).toBe(2 ** 60);
+    // Exact bounds in reverse order are an empty range, even when they
+    // round to the same double.
+    const reversed = ['Limits', 'j', ['Add', p60, 3], p60];
+    expect(ce.expr(['Sum', 'j', reversed]).evaluate().re).toBe(0);
+    expect(ce.expr(['Product', 'j', reversed]).evaluate().re).toBe(1);
+  });
+
   // Regression tests for issue #252: Sum with free variables
   it('should handle sum with free variable (issue #252)', () =>
     expect(

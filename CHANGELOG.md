@@ -10,6 +10,208 @@
   `\sum_{n=0}^{3}\frac{1}{2^n}|\sin(2^nx+\frac{[0...999]}{1000})|`, reading the
   elements of `evaluate()` takes about 7% less time. The values do not change.
 
+- **A `Which` in a function called at each element reads a list symbol in its
+  selected value once, not at each call** (CE-1425). With `VS` a list of
+  length `n`, `Map(j ↦ Which(At(CS, j), At(VS, j), True, NaN), Range(1, n))`
+  evaluated the whole list `VS` again at each element, so its time grew with
+  the square of `n`; it now grows with `n`, as the same selection written with
+  `If` does. At `n = 1,600` it takes about 100 ms instead of about 490 ms. The
+  values are the same.
+
+### Resolved Issues
+
+- **A read of one element of a tuple whose elements have different shapes
+  no longer gives the tuple the type `never`** (CE-1492). In the Epsil
+  function
+  `function f(n: integer) { let t = 0.5; for g in [((1, 2), 2), ((3, 4), 3)] { t = t + g[2] }; t }`,
+  the read `g[2]` in the sum required a number of every element of `g`,
+  and its first element is a tuple. `f` was typed `(n: integer) -> never`
+  and did not compile. A read at a literal index now requires a number of
+  that element only: `f` is typed `(n: integer) -> number` and compiles,
+  and `f(2)` is `5.5`.
+
+- **`Iterate` over a variable with a declared signature uses the declared
+  default of a parameter** (CE-1461). With `s` declared
+  `(real, real = 5) -> real` and assigned `(u, v = 7) ↦ v - u`,
+  `Take(Iterate(s, 1), 3)` gave `[6, 1, 6]`: it used the default of the
+  function literal. It now gives `[4, 1, 4]`, as `s(1)`, `Map` and the
+  compiled code do. An evaluated `Iterate(s, 1)` keeps the name `s` instead
+  of the function literal, so its elements use the value that `s` holds
+  when they are read, as for `Map`.
+
+- **A `Series` at `0` of a root of a parameter times the variable no longer
+  has terms divided by 0** (CE-1441). `Series(Sqrt(a x), x, 0, 3)` was
+  `x·√a/0 − √a/0·x² + 3√a/0·x³ + O(x⁴)`. When the sign of `a` is not known,
+  it now stays `Series(...)`, and so does `Series((a x)^(3/2), x, 0, 3)`.
+  With `a > 0` assumed, it is `√a·√x`.
+
+- **Under `.N()`, a function no longer reads an argument after a later
+  argument changed a variable that the first argument uses** (CE-1439). With
+  `x := 1` and `g := (y, w) => Floor(3y)`, `g(x/3, Block(x := 5, 1)).N()`
+  gave `5`. When an argument is not pure, the function now reads an argument
+  that uses a variable from its approximation, as `Floor` does for an operand
+  that is not pure: the value is `0`, the floor of three times the float of
+  `1/3`. When every argument is pure, a function whose body returns early
+  reads such an argument exactly: with
+  `r := y => Block(If(y > 0, Return(Floor(3y))), 7)`, `r(x/3).N()` is now
+  `1`, not `0`.
+
+- **A numerical derivative, integral or limit reads a variable that holds a
+  formula** (CE-1434). With `G := sin(x)`, `ND(x => G, 1)` stayed unevaluated
+  and `NIntegrate(x => G, 0, 1)` gave `NaN`; they now give `cos(1)` and
+  `1 - cos(1)`, as `D` and `Integrate` already did. `NLimit` reads such a
+  variable too: `NLimit(x => G / x, 0)` is `1`.
+
+- **A `Random()` inside `Tan(Arctan(…))` or in the exponent of `e` draws one
+  value, not two** (CE-1424). In a seeded frame,
+  `WithRandomSeed(7, [Tan(Arctan(Random())), Random()])` gave the second and
+  third values of the sequence; it now gives the first and second, as
+  `[Random(), Random()]` does and as the compiled code does. The same holds
+  for `Sin(Arcsin(…))` and the other pairs of a function and its inverse, and
+  for `e^{n - Random()}` when `n` has a value.
+
+- **A `Break()` or `Continue()` outside a loop is an error, and no longer
+  stops the rest of an Epsil program** (CE-1408). `let s = 0; do { Break() };
+  s = 5; s` gave `Break()` and did not run the last two statements; it now
+  gives `5`, with the `control-outside-loop` diagnostic at `Break()`, which
+  the parser now reports for the call forms `Break()` and `Continue()` as it
+  does for `break` and `continue`. A `Break` or `Continue` that reaches the
+  end of a function body is the error `control-outside-loop` and no longer
+  ends a loop of the caller: `fixedPoint(x => if x > 10 { Break(x) } else
+  { x + 1 }, 0)` stayed unevaluated and is now that error. A `Break` or
+  `Continue` in a case of a `match` still ends or continues the loop around
+  the `match`.
+
+- **Two regular expressions are equal when their patterns and their sets of
+  flags are equal** (CE-1404). `RegExp("a.c") == RegExp("a.c", "i")` stayed
+  unevaluated; it is now `False`. The order of the flags does not count, and
+  a regular expression without `u` or `v` is read with `u`:
+  `RegExp("a", "im") == RegExp("a", "mi")` and
+  `RegExp("a") == RegExp("a", "u")` are `True`. A regular expression is now
+  unequal to a string or a number: `RegExp("a") == "a"` is `False`.
+
+- **The length of a reversed, sorted or shuffled string counts the
+  characters of the result** (CE-1403). A combining mark that moves after a
+  letter joins it, so the result can have fewer characters than the
+  original string: `length(reverse("\u{301}a"))` was `2` and is now `1`, and
+  `length(sort("\u{301}ba"))` was `3` and is now `2`. `Count`, `IsEmpty` and
+  `Contains` of a reordered string, and of a string without duplicates
+  (`Unique`), read the result in the same way. The reverse of a sorted
+  string, and the first elements of one, are no longer the empty string:
+  `Reverse(Sort("cab"))` is `"cba"` and `Take(Sort("cab"), 2)` is `"ab"`.
+
+- **`Parse(s)` evaluates the parsed expression, and an operator that holds
+  its argument reads the parsed expression** (CE-1402).
+  `Evaluate(Parse("1011_2 \cdot 101_2"))` was the product of two `BaseForm`
+  values; it is now `55`, as it already was through a variable
+  (`let p = parse(…); p`). `Parse("x + x")` with `x = 3` is now `6`. `Solve`,
+  `D`, `Integrate`, `Limit` and `Expand` read the parsed expression without
+  evaluating it: `Solve(Parse("161_b + 134_b = 315_b"), b)` is `[0, 8]` and
+  no longer stays unevaluated, and `D(Parse("y^2"), y)` is `2y`, not `0`.
+  Because the parsed expression can read and write any variable, the effects
+  of `Parse` are now `any`: a result that holds `Parse` is not memoized, and
+  a `parallel for` loop or a parallel comprehension whose body calls `parse`
+  gets the `parallel-effect` diagnostic.
+
+- **The type of a function that appends its argument to a list includes the
+  argument** (CE-1363). With `ap = (u, t) -> Append(Range(1, u), t)`, the
+  type of `ap` was `(u: unknown, t: unknown) -> list<integer>`, but
+  `ap(2, 0.5)` is `[1, 2, 0.5]`. The type is now
+  `(u: unknown, t: unknown) -> list<unknown>`. The same correction applies to
+  `ReplaceAt` with more than one position, such as
+  `ReplaceAt([Range(1, 3)], 1, 1, g(u))`, now typed `list<list<unknown>>`.
+
+- **Two functions that read different values of a local variable are no
+  longer the same** (CE-1332). With
+  `let f = (k) => do { let y = k; x => x + y }`, `f(1) == f(2)` was `True`,
+  and `dedup([f(1), f(2)])` kept only one of the two functions. The two
+  functions have the same body, but each reads the `y` of its own call. The
+  comparison now stays unevaluated and `dedup` keeps both. Two functions
+  whose bodies read the same values, such as `f(1)` and `f(1)` with
+  `let f = (k) => (x => x + k)`, are still the same.
+
+- **The sum and the difference of two tensors of rank 3 or more are
+  computed** (CE-1329). `T - T`, with `T` the 2x2x2 tensor
+  `[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]`, stayed the unevaluated sum
+  `T + (-T)`; it is now the 2x2x2 tensor of zeros. The sum of two vectors or
+  two matrices was already computed cell by cell; tensors of every rank now
+  are too.
+
+- **A sum or a product whose bounds are integers far above 2^53 gives the
+  `out-of-range` error instead of a wrong number** (CE-1315).
+  `Sum(j, Limits(j, 2^60, 2^60 + 3))` was `2^60`: the two bounds round to the
+  same double, so the range was read as one term. A range with a bound above
+  `Number.MAX_SAFE_INTEGER` now has one term only when both exact bounds are
+  equal and are a double (`Sum(j, Limits(j, 2^60, 2^60))` is `2^60`); exact
+  bounds in reverse order give an empty range (0 for a sum, 1 for a product).
+  The error message gives the exact bounds.
+
+- **A ragged list has the shape of the axes that its items have in common**
+  (CE-1390). `Shape([[5, 2, 10, 18], [1, 2, 3]])` and `Shape([1, [2, 3]])`
+  were `()` and their `Rank` was 0, the values of a scalar. They are now
+  `(2)` and 1, as `Dimensions` in Wolfram; `Shape([[[1, 2], [3]], [[4, 5],
+  [6]]])` is `(2, 2)`. A list with a cell that may be a list, such as a
+  symbol `L` declared `list<number>` with no value, gives `Shape` and `Rank`
+  no value instead of `()` and 0.
+
+- **The float quantile of a binomial or Poisson distribution is right just
+  above a jump of the CDF and in the tails** (CE-1453).
+  `Quantile(BinomialDistribution(1, 1/2), 0.5000000000001)` was `0`; it is
+  now `1`, since `CDF(0) = 1/2` is below `p`. Every `p` below `10^-12` gave
+  `0`: `Quantile(BinomialDistribution(100, 1/2), 1e-29)` is now `1`. The
+  search compared the CDF with `p − 10^-12`; it now uses a tolerance of
+  `10^-14` relative to the tail that holds `p`. `Quantile(CDF(k))` still
+  gives `k` back, also for a CDF value computed at a precision above machine.
+
+- **A double integral with a singular point is faster** (CE-1288). The check
+  for a pole that moves with another integration variable now skips each
+  point of its grid where no divisor of the integrand has a zero near the
+  range. `.N()` of `\int_0^1\int_0^1 \frac{1}{\sqrt{(x-0.5)^2+(y-0.5)^2}} +
+  \frac{1}{\sqrt{(x-0.25)^2+(y-0.25)^2}}\,dy\,dx` takes about 1.5 s instead
+  of 2.5 s, with the same value.
+
+- **A selector accepts a tuple with a slot of type `unknown`** (CE-1265). With
+  `w` declared `unknown`, `Rest((w, 1, 2))` was an `incompatible-type` error;
+  it is now valid and evaluates to `[1, 2]`. The same holds for `Most`,
+  `Take`, `Drop`, `Reverse` and `RotateRight`. A tuple whose other slots do
+  not fit the element type is still refused.
+
+- **The n-th root with a negative index is right for a zero, a very large or a
+  very small radicand** (CE-1256). With `x` and `n` given the values 0 and -2,
+  `Root(x, n)` evaluated to 0; it is now `~oo`, as `Power(0, -1/2)` is. At
+  machine precision, `Root(1e300, -3)` with the values given by
+  `ce.withValues()` was `1.3333333333333502e-100` and `Root(-1e-300, -3)` was
+  `+oo`; they are now `1e-100` and `-1e100`.
+
+- **The type of a declaration is not a name of the expression** (CE-1250).
+  For `["Block", ["Declare", "t", "real", 1], ["Add", "t", 1]]`, `unknowns`
+  and `freeVariables` were `["real"]` and `symbols` was `["real", "t"]`. They
+  are now `[]` and `["t"]`, and `references` no longer lists `real`. The
+  `type` entry of the attributes dictionary of a `Declare` is not listed
+  either.
+
+- **`:=` after `let` is an assignment, as `\coloneq` is** (CE-1239).
+  `\mathrm{let} c := 5; c` parsed as `["Block", ["Declare", "c", "'unknown'",
+  5], ["Error", "'invalid-type'", "''"], "c"]`: the `:` was read as the start
+  of a type. It now parses as `["Block", ["Declare", "c", "'unknown'", 5],
+  "c"]`, as `\mathrm{let} c \coloneq 5; c` does.
+
+- **A sum over all integers is as fast as a sum over half of them**
+  (CE-1285). `Sum(2^(-Abs(n)), Limits(n, -oo, oo)).N()` took about 2 s,
+  and each half took a few tens of milliseconds. The check that a sum over
+  all integers converges absolutely walked 2¹⁵ terms every time. It now runs
+  only when the terms have both signs, and it walks no further than it
+  must. The sum takes about 30 ms. Also, a sum over all integers whose
+  terms have one sign and fall as a power of `n` gets its value:
+  `Sum(1/(n^2 + 1), Limits(n, -oo, oo)).N()` gives `3.1533480949372006`
+  (π·coth π = 3.15334809493716…), where it stayed unevaluated.
+
+- **The incomplete elliptic integrals of a complex amplitude below the real
+  axis keep their digits when the parameter is very small** (CE-1356).
+  `EllipticF(0.3 - 10i, 1e-30).N()` gave `0.3000000040807729 -
+  10.000000012871325i`. It now gives `0.3 - 10i`, as the amplitude above the
+  axis already did. `EllipticE` had the same error.
+
 ## 0.201.2 _2026-11-24_
 
 ### Resolved Issues

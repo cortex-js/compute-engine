@@ -6,6 +6,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
+import { provablyDisjoint } from '../../common/type/subtype.js';
 
 /**
  * Regular expressions (Strings Phase 3).
@@ -167,6 +168,20 @@ function patternOf(
     flags = f;
   }
   return { pattern, flags };
+}
+
+/** The pattern and the sorted host flags of a `RegExp(…)` call whose
+ * operands are string literals, or `undefined`. Nothing is evaluated. */
+function literalPatternOf(
+  expr: Expression
+): { pattern: string; flags: string } | undefined {
+  if (!isFunction(expr, 'RegExp') || expr.nops < 1 || expr.nops > 2)
+    return undefined;
+  const [pattern, flags] = expr.ops;
+  if (!isString(pattern)) return undefined;
+  if (flags !== undefined && !isString(flags)) return undefined;
+  const host = hostFlags(flags?.string ?? '');
+  return { pattern: pattern.string, flags: [...host].sort().join('') };
 }
 
 /**
@@ -459,6 +474,7 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
     description: [
       'A compiled regular expression, using the host JavaScript dialect.',
       'The pattern is written most readably as a raw string literal: `RegExp(#"[0-9]+"#)`.',
+      'Two regular expressions are equal when their patterns are the same and their sets of flags are the same; the order of the flags does not count, and no `u` or `v` flag reads as `u`.',
     ],
     complexity: 8200,
     // A pure container: it STORES its pattern text. The VALUE of a `regexp`
@@ -528,6 +544,24 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
           pattern.toString()
         );
       return ce._fn('RegExp', ops);
+    },
+    // Two `regexp` values are equal when their patterns are the same text and
+    // their sets of host flags are the same (the order of the flags does not
+    // count, and the `u` that `hostFlags()` adds makes `RegExp("a")` equal to
+    // `RegExp("a", "u")`). The handler decides only literal operands, because
+    // it must not evaluate: a computed pattern or flag set stays undecided.
+    // A value whose type cannot be a `regexp` (a string, a number) is
+    // unequal.
+    eq: (a, b) => {
+      if (!isFunction(b, 'RegExp'))
+        return b.unknowns.length === 0 &&
+          provablyDisjoint(a.type.type, b.type.type)
+          ? false
+          : undefined;
+      const x = literalPatternOf(a);
+      const y = literalPatternOf(b);
+      if (x === undefined || y === undefined) return undefined;
+      return x.pattern === y.pattern && x.flags === y.flags;
     },
   },
 

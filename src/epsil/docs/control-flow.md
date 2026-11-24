@@ -1144,8 +1144,8 @@ these rules. `epsil check` reports each one with its own code:
   unspecified value. `epsil check` reports a read written by name in the
   body, also in a function literal written in the body (`L[c] += L[d]`,
   `if s > 3 { … }`), as `parallel-accumulator-read`. A read by another
-  route, such as a function that the body calls, `parse("s")` or a function
-  of the host, is not reported, and its value is unspecified too. The
+  route, such as a function that the body calls or a function of the host,
+  is not reported, and its value is unspecified too. The
   interpreter runs the passes in order, and such a read gives the value that
   the earlier passes gave (see the examples after this list). A loop with no accumulator, and a parallel
   comprehension, can call any function.
@@ -1155,7 +1155,9 @@ these rules. `epsil check` reports each one with its own code:
   for the functions that the body calls: a function that the program defines
   has the effects of its body, and a loop variable or a parameter whose type
   is a function type has the effects of that type. So
-  `parallel for f in [() => print(1)] { f() }` is `parallel-effect`. One case
+  `parallel for f in [() => print(1)] { f() }` is `parallel-effect`. A call
+  of `parse` is `parallel-effect` too: its effects are `any`, because the
+  parsed expression can read and write any variable. One case
   is not seen: a call of a function value whose type is not known, such as a
   function that an unannotated parameter holds, is inferred `pure`, whatever
   function it holds. So `function run(fs) { parallel for f in fs { f() } }`
@@ -1449,13 +1451,19 @@ for x in xs {
 }
 ```
 
-Outside a loop they are a `control-outside-loop` diagnostic:
+Outside a loop they are a `control-outside-loop` diagnostic, and so are their
+call forms `Break()` and `Continue()`:
 
 <!-- epsil-test: expect-diagnostics -->
 
 ```epsil
 if x > 1 { break }
 ```
+
+A program with this diagnostic still runs. A `break` or `continue` that
+reaches the end of a function body or the top level of the program is then
+the error `control-outside-loop`: it does not end a loop of the caller, and
+the next statements of the program run.
 
 The loop context **resets at every function and lambda boundary**. A `break`
 written inside a function or lambda defined in a loop body does not target

@@ -556,6 +556,233 @@ function poleSites(
 }
 
 /**
+ * The operators that {@link interiorPoleScreen} accepts in an integrand.
+ * Each one keeps its form when a variable in it is given a number: the
+ * substitution then makes no new divisor and no new pole lattice. A `Power`
+ * with the variable in its base is accepted only with a number literal as
+ * exponent (see the screen). `eᵘ` is a `Power` of `ExponentialE` in
+ * canonical form; `Exp` is for a form that is not canonical.
+ */
+const SCREEN_OPERATORS = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Sqrt',
+  'Abs',
+  'Exp',
+  'Ln',
+  'Sin',
+  'Cos',
+]);
+
+/**
+ * The distance, relative to the scale of the range, within which a zero of
+ * a divisor counts as near the range in {@link interiorPoleScreen}. The
+ * coefficients of the screen and those of {@link poleSites} are computed by
+ * different routes, so their roots differ by the rounding of each route. A
+ * double root moves by about `√(κ·ε)` for a coefficient error `κ·ε`, which
+ * is below `10⁻³` for a condition `κ` up to about `10¹⁰`.
+ */
+const SCREEN_MARGIN = 1e-3;
+
+/**
+ * The value of `e` as a machine number, with the variables in `values`
+ * given their value, or `undefined` when `e` has another symbol or an
+ * operator other than the arithmetic ones below. A coefficient of a divisor
+ * in {@link interiorPoleScreen} is evaluated by this function at each set of
+ * values, which is faster than a substitution and `N()`.
+ */
+function machineValue(
+  e: Expression,
+  values: Readonly<Record<string, number>>
+): number | undefined {
+  if (isNumber(e) && e.isNumberLiteral) return e.isComplex ? undefined : e.re;
+  if (isSymbol(e)) return values[e.symbol];
+  if (!isFunction(e)) return undefined;
+  const ops: number[] = [];
+  for (const op of e.ops) {
+    const value = machineValue(op, values);
+    if (value === undefined) return undefined;
+    ops.push(value);
+  }
+  switch (e.operator) {
+    case 'Add':
+      return ops.reduce((sum, x) => sum + x, 0);
+    case 'Multiply':
+      return ops.reduce((product, x) => product * x, 1);
+    case 'Subtract':
+      return ops.length === 2 ? ops[0] - ops[1] : undefined;
+    case 'Divide':
+      return ops.length === 2 ? ops[0] / ops[1] : undefined;
+    case 'Negate':
+      return ops.length === 1 ? -ops[0] : undefined;
+    case 'Power':
+      return ops.length === 2 ? Math.pow(ops[0], ops[1]) : undefined;
+    case 'Sqrt':
+      return ops.length === 1 ? Math.sqrt(ops[0]) : undefined;
+    case 'Abs':
+      return ops.length === 1 ? Math.abs(ops[0]) : undefined;
+    case 'Rational':
+      return ops.length === 2 ? ops[0] / ops[1] : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A test, prepared once for an integrand with free variables besides
+ * `variable`, that tells whether
+ * `interiorPoleVerdict(integrand.subs(values), variable, lo, hi, ce)` can
+ * find a pole for the given values of those variables. It is `false` only
+ * when no
+ * divisor of the integrand has a zero in `variable` near the finite range
+ * `[lo, hi]`, which is a condition for a pole site of {@link poleSites}.
+ * `true` means "run the check".
+ *
+ * The test prepares the polynomial coefficients of each divisor once, so
+ * for each set of values it evaluates only the coefficients and finds the
+ * roots of a polynomial of degree at most 2. The verdict itself expands and
+ * substitutes the whole integrand at each call: a scan over a grid of
+ * values, such as the scan of a dependent pole in a multiple integral,
+ * calls it many times on the same integrand.
+ *
+ * The result is `undefined` when the integrand has a form that the test
+ * does not cover: an operator not in {@link SCREEN_OPERATORS}, a `Power`
+ * with `variable` in its base and an exponent that is not a number literal
+ * (with a value, `(t − x)^x` becomes a divisor), a divisor factor that depends on `variable` and is not a
+ * polynomial of degree at most 2 in it, or more nodes than
+ * {@link SCAN_NODE_BUDGET}. The caller then runs the check for every set of
+ * values.
+ */
+export function interiorPoleScreen(
+  integrand: Expression,
+  variable: string,
+  ce: ComputeEngine
+):
+  | ((
+      values: Readonly<Record<string, number>>,
+      lo: number,
+      hi: number
+    ) => boolean)
+  | undefined {
+  // The coefficients of each divisor factor that depends on `variable`,
+  // ascending by power.
+  const divisors: Expression[][] = [];
+  let budget = SCAN_NODE_BUDGET;
+
+  // Mirrors `addDenominatorSites` of `poleSites`: a factor of a product, and
+  // the operand of `−u`, `√u`, `|u|`, `u/v` and of a positive power, has
+  // the zeros of the divisor.
+  const addDivisor = (d: Expression): boolean => {
+    if (budget-- <= 0) return false;
+    if (!d.has(variable)) return true;
+    const coeffs = getPolynomialCoefficients(d, variable);
+    if (coeffs !== null) {
+      if (coeffs.length > 3 || !coeffs.every((c) => c.isPure)) return false;
+      divisors.push(coeffs);
+      return true;
+    }
+    if (!isFunction(d)) return false;
+    if (d.operator === 'Multiply') return d.ops.every(addDivisor);
+    if (
+      d.operator === 'Negate' ||
+      d.operator === 'Sqrt' ||
+      d.operator === 'Abs' ||
+      d.operator === 'Divide'
+    )
+      return addDivisor(d.op1);
+    if (
+      d.operator === 'Power' &&
+      isNumber(d.op2) &&
+      d.op2.isNumberLiteral &&
+      d.op2.re > 0
+    )
+      return addDivisor(d.op1);
+    return false;
+  };
+
+  const walk = (e: Expression): boolean => {
+    if (budget-- <= 0) return false;
+    if (!isFunction(e)) return true;
+    if (!SCREEN_OPERATORS.has(e.operator)) return false;
+    if (e.operator === 'Divide' && !addDivisor(e.op2)) return false;
+    if (e.operator === 'Power') {
+      // An exponent that is not a number literal can become a negative one
+      // with values (`(t − x)^x`), which makes its base a divisor: that is
+      // harmless only for a base without `variable` (`eᵘ`, a constant).
+      const exponent = e.op2;
+      if (!isNumber(exponent) || !exponent.isNumberLiteral) {
+        if (e.op1.has(variable)) return false;
+      } else if (exponent.re < 0 && !addDivisor(e.op1)) return false;
+    }
+    return e.ops.every(walk);
+  };
+  // The body of a function literal can be a `Block` of one expression; the
+  // walk of `poleSites` goes into it as into any other function.
+  while (isFunction(integrand, 'Block') && integrand.nops === 1)
+    integrand = integrand.op1;
+  if (!walk(integrand)) return undefined;
+
+  return (values, lo, hi) => {
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return true;
+    const boxed = () =>
+      Object.fromEntries(
+        Object.entries(values).map(([name, x]) => [name, ce.number(x)])
+      );
+    const margin = SCREEN_MARGIN * Math.max(1, Math.abs(lo), Math.abs(hi));
+    const [a, b] = lo < hi ? [lo, hi] : [hi, lo];
+    // Whether the complex number `re + i·im` is within `margin` of `[a, b]`.
+    const near = (re: number, im: number) =>
+      Math.hypot(Math.max(a - re, 0, re - b), im) <= margin;
+    for (const coeffs of divisors) {
+      const c: number[] = [];
+      for (const coeff of coeffs) {
+        let value = machineValue(coeff, values);
+        if (value === undefined) {
+          const n = coeff.subs(boxed()).N();
+          if (!isNumber(n) || !n.isNumberLiteral || n.isComplex) return true;
+          value = n.re;
+        }
+        if (!Number.isFinite(value)) return true;
+        c.push(value);
+      }
+      while (c.length > 0 && c[c.length - 1] === 0) c.pop();
+      // A divisor that is constant for these values: the verdict decides.
+      if (c.length < 2) return true;
+      if (c.length === 2) {
+        if (near(-c[0] / c[1], 0)) return true;
+        continue;
+      }
+      // Scaled to a largest coefficient of 1, so that the products of the
+      // discriminant do not underflow (`10⁻²⁰⁰·(y² − 3y + 2)`).
+      const scale = Math.max(...c.map(Math.abs));
+      const [c0, c1, c2] = c.map((x) => x / scale);
+      const discriminant = c1 * c1 - 4 * c2 * c0;
+      if (!Number.isFinite(discriminant)) return true;
+      if (discriminant >= 0) {
+        // The form without cancellation: `q = −(c₁ + sign(c₁)·√Δ)/2`, with
+        // the roots `q/c₂` and `c₀/q`. With `(−c₁ ± √Δ)/(2c₂)`, a leading
+        // coefficient that is rounding noise (`3x − 0.3` at `x = 0.1`) puts
+        // the root near `−c₀/c₁` far from its place.
+        const q = -(c1 + (c1 < 0 ? -1 : 1) * Math.sqrt(discriminant)) / 2;
+        if (q === 0) return true;
+        const roots = [q / c2, c0 / q];
+        if (!roots.every(Number.isFinite)) return true;
+        if (roots.some((r) => near(r, 0))) return true;
+      } else {
+        const re = -c1 / (2 * c2);
+        const im = Math.sqrt(-discriminant) / (2 * Math.abs(c2));
+        if (!Number.isFinite(re) || !Number.isFinite(im)) return true;
+        if (near(re, im)) return true;
+      }
+    }
+    return false;
+  };
+}
+
+/**
  * `f(x)` as a sample for the divergence tests: `value` is the real value of
  * the integrand, or its MAGNITUDE `|f(x)|` with `complex` set when the
  * integrand is a complex number there (`x^(−1.5)` at `x < 0`), and `phase`

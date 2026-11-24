@@ -138,3 +138,39 @@ describe('SERIES WITH A DERIVATIVE THE ENGINE CANNOT EVALUATE', () => {
     expect(e.has('Derivative')).toBe(false);
   });
 });
+
+describe('SERIES OF A ROOT OF A PARAMETER TIMES THE VARIABLE', () => {
+  // The derivative of √(a·x) at x = 0 is √a/0: a branch point, not a
+  // coefficient. The expansion √a·√x needs a > 0, which an unknown `a`
+  // does not give, so the expansion declines.
+  test('√(a·x) at 0 stays Series (evaluate)', () => {
+    const e = series(['Sqrt', ['Multiply', 'a', 'x']], 0).evaluate();
+    expect(e.operator).toBe('Series');
+  });
+
+  test('√(a·x) at 0 stays Series (N)', () => {
+    const e = series(['Sqrt', ['Multiply', 'a', 'x']], 0).N();
+    expect(e.operator).toBe('Series');
+  });
+
+  test('(a·x)^(3/2) at 0 stays Series', () => {
+    const f = ['Power', ['Multiply', 'a', 'x'], ['Rational', 3, 2]];
+    expect(series(f, 0).evaluate().operator).toBe('Series');
+  });
+
+  test('√(a·x) at 0 is √a·√x when a > 0', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('b', 'real');
+    ce2.assume(ce2.parse('b>0'));
+    const e = ce2
+      .expr(['Series', ['Sqrt', ['Multiply', 'b', 'x']], 'x', 0, 3] as never)
+      .evaluate();
+    expect(e.has('Divide')).toBe(false);
+    expect(e.toString()).toMatch(/^sqrt\(b\) \* sqrt\(x\)/);
+  });
+
+  test('√(2·x) at 0 is √2·√x', () => {
+    const e = series(['Sqrt', ['Multiply', 2, 'x']], 0).evaluate();
+    expect(e.toString()).toBe('sqrt(2) * sqrt(x)');
+  });
+});

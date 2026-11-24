@@ -171,7 +171,8 @@ export function roundToInteger(x: number, ties: RoundingTies): number {
  * `Math.pow(1000, 1/3)` = 9.999999999999998. Refine with one Newton step on
  * `f(r) = rⁿ − x`, i.e. `r ← ((n−1)·r + x/r^{n−1}) / n`, then snap to the exact
  * integer root when `x` is a perfect n-th power (so `Root(64,3).N()` prints 4,
- * not 3.999…). Callers handle the sign of a negative radicand. (NU-P1-7)
+ * not 3.999…). A negative integer degree `n` gives `1 / machineNthRoot(x, −n)`.
+ * Callers handle the sign of a negative radicand. (NU-P1-7)
  */
 export function machineNthRoot(x: number, n: number): number {
   if (n === 1) return x;
@@ -180,6 +181,10 @@ export function machineNthRoot(x: number, n: number): number {
   // Newton correction and integer snapping only make sense for an integer
   // degree; a non-integer degree is just a power.
   if (!Number.isInteger(n)) return Math.pow(x, 1 / n);
+  // A negative degree is the reciprocal of the root of degree `-n`. The
+  // Newton step below would compute `r^(n-1)`, which underflows to 0 or
+  // overflows for a large or small radicand (`x = 1e300, n = -3`).
+  if (n < 0) return 1 / machineNthRoot(x, -n);
   if (x === 0 || !Number.isFinite(x) || x < 0) return Math.pow(x, 1 / n);
 
   let r = Math.pow(x, 1 / n);

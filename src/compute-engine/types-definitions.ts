@@ -1345,7 +1345,10 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * of the element, exactly as `x + 1` infers a bare `x` as `number`.
      * For a base that is a bare function parameter, `At` answers a
      * `replace` entry that records each index read separately (a tuple for
-     * literal indices). Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
+     * literal indices). For a base whose type is a tuple, read at a literal
+     * index inside the tuple, `At` answers that tuple with the one
+     * component narrowed by `r`. Design and rulings:
+     * `docs/INFERENCE_ROADMAP.md` §5.
      */
     inferOperandTypes?: (
       ops: ReadonlyArray<Expression>,

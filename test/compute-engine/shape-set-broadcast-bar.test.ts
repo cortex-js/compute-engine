@@ -80,7 +80,8 @@ describe('Shape and Rank of a lazy collection or a set', () => {
   // An empty axis is an axis: the empty list has rank 1 and the extent 0,
   // and a list of two empty lists has rank 2 and the extents 2 and 0. The
   // type of such a list has no dimensions (`[]` is `list<never>`), so the
-  // shape is read from the value. A ragged list still has no shape.
+  // shape is read from the value. A ragged list has the axes that its items
+  // have in common (CE-1390).
   test.each<[Json, string]>([
     [['Shape', ['List']], '(0)'],
     [['Rank', ['List']], '1'],
@@ -91,8 +92,8 @@ describe('Shape and Rank of a lazy collection or a set', () => {
     [['Shape', ['Take', ['List', 1, 2], 0]], '(0)'],
     [['Shape', ['Range', 3, 1, 1]], '(0)'],
     [['Rank', ['Range', 3, 1, 1]], '1'],
-    [['Shape', ['List', ['List', 1], ['List']]], '()'],
-    [['Shape', ['List', ['List', 1, 2], ['List', 3]]], '()'],
+    [['Shape', ['List', ['List', 1], ['List']]], '(2)'],
+    [['Shape', ['List', ['List', 1, 2], ['List', 3]]], '(2)'],
   ])('empty axis: %j evaluates to %s', (json, expected) => {
     expect(evalString(json)).toBe(expected);
   });

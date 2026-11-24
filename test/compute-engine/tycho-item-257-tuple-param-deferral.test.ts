@@ -60,11 +60,33 @@ describe('the deferral authority covers tuple parameters', () => {
     expect(defer('tuple<string, string>', 'tuple<number, number>')).toBe(false);
   });
 
-  // Only the tuple/tuple pairing defers; the union distribution means one
+  // The tuple/tuple pairing defers; the union distribution means one
   // admitting pair is enough, so nothing is lost by keeping these strict.
   test('a tuple does not defer at a collection parameter, nor the reverse', () => {
     expect(defer('tuple<number, number>', 'collection<any>')).toBe(false);
     expect(defer('list<number>', 'tuple')).toBe(false);
+  });
+
+  // A tuple with an `unknown` slot defers at a collection parameter when the
+  // tuple, with each `unknown` slot read as the element type, is a subtype
+  // of the parameter (CE-1265).
+  test('a tuple with an unknown slot defers at a collection parameter', () => {
+    expect(
+      defer('tuple<unknown, integer, integer>', 'indexed_collection<integer>')
+    ).toBe(true);
+    expect(defer('tuple<unknown, integer>', 'collection<number>')).toBe(true);
+    expect(defer('tuple<unknown>', 'indexed_collection<integer>')).toBe(true);
+    expect(
+      defer('tuple<unknown, string>', 'indexed_collection<integer>')
+    ).toBe(false);
+    expect(defer('tuple<unknown, real>', 'indexed_collection<integer>')).toBe(
+      false
+    );
+    // A tuple is not a list.
+    expect(defer('tuple<unknown, integer>', 'list<integer>')).toBe(false);
+    expect(defer('tuple<any, integer>', 'indexed_collection<integer>')).toBe(
+      false
+    );
   });
 
   // Design decision D8: the top-type waiver is for a top arriving as the WHOLE
@@ -218,6 +240,28 @@ describe('Tycho 257 — an indexed point carrier reaches the accessors', () => {
     ce.declare('g', '(collection<any> | tuple) -> any');
     expect(ce.box(['PointX', 'w']).isValid).toBe(true);
     expect(ce.box(['g', 'w']).isValid).toBe(true);
+  });
+
+  // CE-1265: the generic parameter of a selector is solved from the known
+  // slots, and the `unknown` slot then defers.
+  test('a selector admits a tuple with a slot of type unknown', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'unknown');
+    const tuple = ['Tuple', 'w', 1, 2];
+    for (const [expr, value] of [
+      [['Rest', tuple], '[1,2]'],
+      [['Most', tuple], '[w,1]'],
+      [['Reverse', tuple], '[2,1,w]'],
+      [['Take', tuple, 2], '[w,1]'],
+      [['Drop', tuple, 1], '[1,2]'],
+      [['RotateRight', tuple], '[2,w,1]'],
+    ] as const) {
+      const e = ce.box(expr as never);
+      expect(e.isValid).toBe(true);
+      expect(e.evaluate().toString()).toBe(value);
+    }
+    ce.declare('s', 'string');
+    expect(ce.box(['Rest', ['Tuple', 'w', 's', 2]]).isValid).toBe(true);
   });
 
   // Deferral is not permission: an operand with NO admitting member is still

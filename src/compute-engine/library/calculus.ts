@@ -42,6 +42,7 @@ import {
   isOperatorDef,
   isValueDef,
   awaitedOperandOptions,
+  reduceParseHeads,
 } from '../boxed-expression/utils.js';
 import {
   isAbsentArithmeticOperand,
@@ -221,6 +222,7 @@ import {
   endpointPoleVerdict,
   halfLineEndpointPoleSign,
   isRealOnInterval,
+  interiorPoleScreen,
   interiorPoleVerdict,
   symbolicExponentBaseZeros,
   symbolicPoleMayBeInside,
@@ -511,6 +513,30 @@ function withFormulaValues(
   return rewriteWithBinders(expr, (s, shadowed) =>
     shadowed?.has(s.symbol) ? s : (formulaValueOf(ce, s, variables, read) ?? s)
   );
+}
+
+/**
+ * `f`, the function literal of `Limit`, `NLimit`, `ND` or `NIntegrate`,
+ * with each free symbol of its body whose value is a formula in its
+ * parameter replaced by that value (`withFormulaValues`): with
+ * `G := sin(x)`, `x ↦ G` becomes `x ↦ sin(x)`, whose `x` is the parameter.
+ * `f` itself when it is not a literal of one parameter, or when its body
+ * reads no such symbol.
+ *
+ * The body is read lifted out of the `Block` of the literal
+ * (`liftIntegrand`): the scope of that `Block` binds the names of the body,
+ * which would hide them from the read.
+ */
+function literalWithFormulaValues(
+  ce: ComputeEngine,
+  f: Expression
+): Expression {
+  if (!isFunction(f, 'Function') || f.nops !== 2) return f;
+  const varName = sym(f.op2);
+  if (varName === undefined) return f;
+  const lifted = liftIntegrand(f);
+  const body = withFormulaValues(ce, lifted, [varName]);
+  return body === lifted ? f : ce.function('Function', [body, f.op2]);
 }
 
 /**
@@ -4718,25 +4744,33 @@ function nIntegrateMultiple(
       const pointValues = (
         k: number,
         shifts: readonly number[]
-      ): Record<string, Expression> => {
-        const values: Record<string, Expression> = {};
+      ): Record<string, number> => {
+        const values: Record<string, number> = {};
         let rest = k;
         others.forEach((e, j) => {
           const i = rest % perDimension;
           rest = Math.floor(rest / perDimension);
-          values[vars[e]] = ce.number(
-            scanPoint(
-              boundFns[e][0]([]),
-              boundFns[e][1]([]),
-              (i + 0.5 + shifts[j]) / perDimension
-            )
+          values[vars[e]] = scanPoint(
+            boundFns[e][0]([]),
+            boundFns[e][1]([]),
+            (i + 0.5 + shifts[j]) / perDimension
           );
         });
         return values;
       };
+      const boxed = (values: Record<string, number>) =>
+        Object.fromEntries(
+          Object.entries(values).map(([name, x]) => [name, ce.number(x)])
+        );
+      // The check substitutes and expands the whole integrand at each
+      // point; the screen, prepared once, skips the points where no divisor
+      // has a zero near the range (see `interiorPoleScreen`).
+      const screen = interiorPoleScreen(body, vars[d], ce);
       for (let k = 0; k < count; k++) {
+        const center = pointValues(k, [0, 0]);
+        if (screen !== undefined && !screen(center, lower, upper)) continue;
         const v = interiorPoleVerdict(
-          body.subs(pointValues(k, [0, 0])),
+          body.subs(boxed(center)),
           vars[d],
           lower,
           upper,
@@ -4755,7 +4789,7 @@ function nIntegrateMultiple(
         // `((x − ½)² + (y − z)²)^(−3/4)`, whose triple integral is finite,
         // was reported divergent.
         const moved = interiorPoleVerdict(
-          body.subs(pointValues(k, [0.3183, 0.2071])),
+          body.subs(boxed(pointValues(k, [0.3183, 0.2071]))),
           vars[d],
           lower,
           upper,
@@ -7265,7 +7299,11 @@ volumes
         // A function that holds a residue class is not differentiated: a
         // class is not a real number, and the rules of differentiation do
         // not apply to it. The derivative stays unevaluated.
-        if (holdsKindValue(ops[0].canonical)) return undefined;
+        // The checks read the parsed expression of a `Parse` operand. The
+        // operand is parsed again inside the value shield below, so that its
+        // symbols are bound where a differentiation variable has no value.
+        const operand = reduceParseHeads(ops[0].canonical);
+        if (holdsKindValue(operand)) return undefined;
 
         // The differentiation variable(s) are bound by `D`: a same-named global
         // assignment (`x := 5`) must not substitute into the result. Shield
@@ -7300,13 +7338,14 @@ volumes
             // the derivative (`independentParameterNames`).
             const independent = independentParameterNames(
               ce,
-              isFunction(ops[0].canonical, 'Function')
-                ? ops[0].canonical.op1
-                : ops[0].canonical,
+              isFunction(operand, 'Function') ? operand.op1 : operand,
               diffVars
             );
             return withValueShield(ce, [...diffVars, ...independent], () => {
-              let f: Expression | undefined = ops[0].canonical;
+              // `D(Parse("y^2"), y)` differentiates the parsed expression.
+              let f: Expression | undefined = reduceParseHeads(
+                ops[0].canonical
+              );
 
               // Unwrap Function literals to get the body for differentiation.
               // For non-Function expressions (e.g., ['f', 'x']), do NOT call
@@ -7455,6 +7494,10 @@ volumes
         // unevaluated: the stencil would run its effect at every sample. So
         // does an operator that takes no number (`Length`): its compiled
         // call throws for a number argument.
+        // A symbol that holds a formula in the variable is read: with
+        // `G := sin(x)`, `ND(x ↦ G, 1)` is `cos(1)`
+        // (`literalWithFormulaValues`).
+        body = literalWithFormulaValues(engine, body);
         const lit = resolveDerivativeFunctionLiteral(body);
         if (lit !== undefined)
           return stencilDerivativeAt(engine, lit, xValue, 1);
@@ -9794,6 +9837,11 @@ volumes
         const refused = dataSymbolCallError(engine, expression);
         if (refused !== undefined) return refused;
 
+        // A symbol that holds a formula in the variable is read: with
+        // `G := sin(x)`, `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
+        // (`literalWithFormulaValues`).
+        f = literalWithFormulaValues(engine, f);
+
         // Uses compiled JS functions (machine arithmetic). The bounds are
         // evaluated once: their values are passed on to the exact route below
         // (`exactDivergenceValue`), so that a bound with an effect
@@ -10196,18 +10244,8 @@ volumes
         if (refused !== undefined) return refused;
 
         // A symbol that holds a formula in the limit variable is read: with
-        // `G := sin(x)`, `lim_{x→0} G` is `0` (`formulaValueOf`).
-        // The body is read lifted out of the `Block` of the literal
-        // (`liftIntegrand`): the scope of that `Block` binds the names of the
-        // body, which would hide them from the read.
-        if (isFunction(f, 'Function') && f.nops === 2) {
-          const varName = sym(f.op2);
-          if (varName !== undefined) {
-            const lifted = liftIntegrand(f);
-            const body = withFormulaValues(engine, lifted, [varName]);
-            if (body !== lifted) f = engine.function('Function', [body, f.op2]);
-          }
-        }
+        // `G := sin(x)`, `lim_{x→0} G` is `0` (`literalWithFormulaValues`).
+        f = literalWithFormulaValues(engine, f);
 
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
@@ -10324,8 +10362,15 @@ volumes
       },
       evaluate: ([f, x, dir], { engine }) => {
         // Uses compiled JS functions (machine arithmetic). Budgeted for the
-        // same reason as Limit's numeric fallback above.
-        return numericLimitValue(engine, f, x, dir);
+        // same reason as Limit's numeric fallback above. A symbol that holds
+        // a formula in the variable is read, as for `Limit`
+        // (`literalWithFormulaValues`).
+        return numericLimitValue(
+          engine,
+          literalWithFormulaValues(engine, f),
+          x,
+          dir
+        );
       },
     },
   },

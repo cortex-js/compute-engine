@@ -863,8 +863,9 @@ function aliasArmsUnfolded(t: Type): Type {
  * only when it is a SUBTYPE of `type`. So `tuple<integer, missing>` is
  * admitted because `tuple<integer>` is, and `tuple<integer, nothing, missing>`
  * is refused because `tuple<integer, nothing>` is. The overlap deferral
- * (`overlapsForDeferredValidation`) is not applied: it never admits a tuple
- * at a collection parameter (it pairs a tuple only with a tuple), so applying
+ * (`overlapsForDeferredValidation`) is not applied: it admits a tuple at a
+ * collection parameter only when a slot is `unknown` and the tuple with that
+ * slot read as the element type is a subtype of the parameter, so applying
  * it here would admit, only because a slot can be absent, a type that the
  * same tuple without that slot is refused (`tuple<integer, missing> |
  * boolean` while `tuple<integer, integer> | boolean` is refused).

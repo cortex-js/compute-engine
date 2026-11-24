@@ -1846,6 +1846,13 @@ function getSymbols(
   // (a list of numbers and failed cells, `_isLiteralData()`) holds no symbol
   // either.
   if (expr._numericStore !== undefined || expr._isLiteralData()) return;
+  // The type of a declaration is not a symbol of the expression.
+  const declaration = declarationOperands(expr);
+  if (declaration !== undefined) {
+    getSymbols(expr.ops[0], result, visited);
+    for (const op of declaration) getSymbols(op, result, visited);
+    return;
+  }
   for (const op of expr.ops) getSymbols(op, result, visited);
 }
 
@@ -2205,21 +2212,18 @@ function collectReferences(
     return;
   }
 
+  // The type of a declaration names no symbol of the program: the walk reads
+  // the other operands only (`declarationOperands()`).
+  const declaration = declarationOperands(expr);
   if (
     mode === 'references' &&
-    isDeclarationStatement(expr) &&
+    declaration !== undefined &&
     (isSymbol(expr.op1) || isFunction(expr.op1, 'Tuple'))
   ) {
     // A declaration target is a write. The enclosing sequence decides
     // whether a read of the same spelling is local or external.
-    for (let i = 1; i < expr.ops.length; i++) {
-      const op = expr.ops[i];
-      if (isFunction(op, 'Dictionary') && op.operatorDefinition === undefined) {
-        for (const pair of op.ops)
-          if (isFunction(pair, 'KeyValuePair'))
-            getReferences(pair.op2, freeVars, refFns, memo, mode);
-      } else getReferences(op, freeVars, refFns, memo, mode);
-    }
+    for (const op of declaration)
+      getReferences(op, freeVars, refFns, memo, mode);
     return;
   }
 
@@ -2238,7 +2242,16 @@ function collectReferences(
         getReferences(p, freeVars, refFns, memo, mode);
     };
     walkPattern(expr.op1);
-    for (const op of expr.ops.slice(1))
+    for (const op of declaration ?? expr.ops.slice(1))
+      getReferences(op, freeVars, refFns, memo, mode);
+    return;
+  }
+
+  // A declaration has no binder: its target and its other operands are read
+  // as the operands of any other function are, without its type.
+  if (declaration !== undefined) {
+    getReferences(expr.ops[0], freeVars, refFns, memo, mode);
+    for (const op of declaration)
       getReferences(op, freeVars, refFns, memo, mode);
     return;
   }
@@ -2649,6 +2662,42 @@ function isDeclarationStatement(
   stmt: Expression | undefined
 ): stmt is Expression & { ops: ReadonlyArray<Expression> } {
   return isFunction(stmt, 'Declare') && !isReferencedFunctionHead(stmt);
+}
+
+/**
+ * The operands after the target of the declaration `expr`, without its
+ * type: the value, and the values of the attributes dictionary other than
+ * its `type` entry. `undefined` when `expr` is not a declaration.
+ *
+ * The type is a symbol second operand (the `real` of `Declare(t, real, 1)`)
+ * or the `type` entry of the attributes dictionary, which is the last operand
+ * (`declareHasValue()`). A type names no symbol of the program, so the walks
+ * of names (`symbols`, `unknowns`, `references`) do not read it.
+ */
+function declarationOperands(expr: Expression): Expression[] | undefined {
+  if (!isDeclarationStatement(expr)) return undefined;
+  const ops = expr.ops;
+  const result: Expression[] = [];
+  for (let i = 1; i < ops.length; i++) {
+    const op = ops[i];
+    if (i === 1 && isSymbol(op)) continue;
+    if (i === ops.length - 1 && isDictionary(op)) {
+      for (const [key, value] of op.entries)
+        if (key !== 'type') result.push(value);
+    } else if (i === ops.length - 1 && isFunction(op, 'Dictionary')) {
+      for (const pair of op.ops) {
+        if (!isFunction(pair, 'KeyValuePair')) continue;
+        const key = pair.op1;
+        const name = isString(key)
+          ? key.string
+          : isSymbol(key)
+            ? key.symbol
+            : undefined;
+        if (name !== 'type') result.push(pair.op2);
+      }
+    } else result.push(op);
+  }
+  return result;
 }
 
 /**

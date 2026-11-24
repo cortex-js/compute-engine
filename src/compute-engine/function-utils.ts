@@ -3420,6 +3420,12 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
  * Nothing is evaluated here: the cost of an exact evaluation is paid only
  * by a re-read near a jump.
  *
+ * The caller has evaluated every argument before it records them, and a
+ * source is read again later still. So when an argument is not pure, it
+ * may have assigned a variable that another argument read
+ * (`g(x/3, Block(x := 5, 1))`), and no source that reads a variable is
+ * recorded: only a source whose symbols are constants.
+ *
  * The application of a function literal with a one-statement body also
  * reads these sources: when one of them differs from its approximated
  * argument, it puts the sources in the body in place of the parameters
@@ -3429,35 +3435,60 @@ export function exactArgumentSources(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression | undefined> {
-  return ops.map((op) => {
-    if (isNumber(op)) return isExactRealLiteral(op) ? op : undefined;
-    if (isSymbol(op)) {
-      const def = ce.lookupDefinition(op.symbol);
-      if (def === undefined || !('value' in def)) return undefined;
-      const recorded = exactArgumentSourceOf(
-        def.value,
-        ce.context.lexicalScope
-      );
-      if (recorded !== undefined) return recorded;
-      const value = ce._getSymbolValue(op.symbol);
-      if (value !== undefined && isExactRealLiteral(value)) return value;
-      // A value that is an expression is recorded as an expression written
-      // in place of the symbol would be (the last rule below).
-      if (
-        value !== undefined &&
-        isFunction(value) &&
-        !containsFreeSymbol(value) &&
-        isTransitivelyPure(value)
-      )
-        return value;
-      // A constant whose value is not an exact literal (`Pi`, whose stored
-      // value is a float held until `.N()`) is its own exact source: it is
-      // pure, and it means the same from inside the function.
-      return def.value.isConstant ? op : undefined;
-    }
-    if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
-    return isTransitivelyPure(op) ? op : undefined;
+  const pure = ops.map((op) => isTransitivelyPure(op));
+  const sources = ops.map((op, i) => exactArgumentSource(ce, op, pure[i]));
+  if (pure.every((p) => p)) return sources;
+  return sources.map((source, i) =>
+    source === undefined ||
+    readsVariable(ce, ops[i]) ||
+    readsVariable(ce, source)
+      ? undefined
+      : source
+  );
+}
+
+/**
+ * True when `expr` reads a symbol that is not a constant: a variable, a
+ * parameter, or a name with no definition here (the index of a `Sum`).
+ */
+function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
+  return expr.symbols.some((s) => {
+    const def = ce.lookupDefinition(s);
+    return def === undefined || !('value' in def) || !def.value.isConstant;
   });
+}
+
+/** The source of one written argument `op` (`exactArgumentSources`);
+ * `pure` tells whether `op` is transitively pure. */
+function exactArgumentSource(
+  ce: ComputeEngine,
+  op: Expression,
+  pure: boolean
+): Expression | undefined {
+  if (isNumber(op)) return isExactRealLiteral(op) ? op : undefined;
+  if (isSymbol(op)) {
+    const def = ce.lookupDefinition(op.symbol);
+    if (def === undefined || !('value' in def)) return undefined;
+    const recorded = exactArgumentSourceOf(def.value, ce.context.lexicalScope);
+    if (recorded !== undefined) return recorded;
+    const value = ce._getSymbolValue(op.symbol);
+    if (value !== undefined && isExactRealLiteral(value)) return value;
+    // A value that is an expression is recorded as an expression written
+    // in place of the symbol would be (the last rule below).
+    if (
+      value !== undefined &&
+      isFunction(value) &&
+      !containsFreeSymbol(value) &&
+      isTransitivelyPure(value)
+    )
+      return value;
+    // A constant whose value is not an exact literal (`Pi`, whose stored
+    // value is a float held until `.N()`) is its own exact source: it is
+    // pure, and it means the same from inside the function.
+    return def.value.isConstant ? op : undefined;
+  }
+  if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
+  return pure ? op : undefined;
 }
 
 /**
@@ -3541,13 +3572,8 @@ function exactBoundArguments(
     if (source === undefined || isSameWritten(source, args[i]))
       return undefined;
     // A source is evaluated again here, after the caller evaluated every
-    // argument: a variable it reads may have been assigned by a later
-    // argument since (`f(x/3, Block(x := 5, 1))`). Only constants are read.
-    const readsVariable = source.symbols.some((s) => {
-      const def = ce.lookupDefinition(s);
-      return def === undefined || !('value' in def) || !def.value.isConstant;
-    });
-    if (readsVariable) return undefined;
+    // argument. It reads a variable only when no argument can have assigned
+    // one (`exactArgumentSources`).
     return isCheapWrittenArgument(source) ? source : undefined;
   };
   if (!args.some((_, i) => candidate(i) !== undefined)) return args;
@@ -3911,6 +3937,9 @@ export function evaluateStatements(
     } finally {
       ce._epsilDeclarationRoute = savedRoute;
     }
+    // A `Break` or a `Continue` that reaches the program is an error, and
+    // the next statements run.
+    if (program) result = strayLoopControl(ce, result, 'program');
     try {
       // Before the hooks below, so that they receive the error of a function
       // that the statement made break a contract.
@@ -4332,6 +4361,8 @@ export async function evaluateStatementsAsync(
     } finally {
       ce._epsilDeclarationRoute = savedRoute;
     }
+    // As on the synchronous route.
+    if (program) result = strayLoopControl(ce, result, 'program');
     try {
       // Before the hooks, as on the synchronous route.
       if (result.operator !== 'Error')
@@ -4463,12 +4494,59 @@ function debugClockOf(
  * Unwrap a `["Return", value]` expression to its value at a function
  * application boundary. `evaluateStatements` propagates `Return` wrapped so
  * that it can escape nested blocks and loops; the function boundary is where
- * it is consumed.
+ * it is consumed. A `Break` or a `Continue` that reaches the boundary is an
+ * error (`strayLoopControl()`).
  */
-function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
-  if (expr.operator === 'Return' && isFunction(expr))
-    return expr.ops.length > 0 ? expr.op1 : ce.Nothing;
-  return expr;
+function unwrapReturn(
+  ce: ComputeEngine,
+  expr: Expression,
+  keepsLoopControl: boolean
+): Expression {
+  const value =
+    expr.operator === 'Return' && isFunction(expr)
+      ? expr.ops.length > 0
+        ? expr.op1
+        : ce.Nothing
+      : expr;
+  return keepsLoopControl ? value : strayLoopControl(ce, value);
+}
+
+/**
+ * The value of a statement list whose value `expr` leaves a function body
+ * (`boundary` is `'function'`) or is the value of a statement of a
+ * `Program` (`'program'`): a `Break` or a `Continue` there has no loop to
+ * take it, so it is the error `control-outside-loop`, with the `Break` or
+ * the `Continue` as its site. The payload of the error code is the operator
+ * and `boundary`. A `Break` that left a function body would otherwise end a
+ * loop of the caller, and one that reached the `Program` would end the
+ * program. Any other value is returned unchanged.
+ */
+function strayLoopControl(
+  ce: ComputeEngine,
+  expr: Expression,
+  boundary: 'function' | 'program' = 'function'
+): Expression {
+  const h = expr.operator;
+  if ((h !== 'Break' && h !== 'Continue') || !isFunction(expr)) return expr;
+  return ce.error(['control-outside-loop', h, boundary], expr.toString());
+}
+
+/** The function literals that apply the guard or the body of a case of a
+ * `Match` (`markCaseClosure()`). */
+const CASE_CLOSURES = new WeakSet<Expression>();
+
+/**
+ * Mark `closure`, a function literal that applies the guard or the body of
+ * a case of a `Match`, and return it. A case is a branch, not a function:
+ * a `Break` or a `Continue` in it leaves the application of the literal
+ * unchanged, to the loop around the `Match` (`strayLoopControl()` does not
+ * apply).
+ */
+export function markCaseClosure<T extends Expression | undefined>(
+  closure: T
+): T {
+  if (closure !== undefined) CASE_CLOSURES.add(closure);
+  return closure;
 }
 
 /**
@@ -8220,6 +8298,11 @@ function makeLambda(
   }
 
   const canonicalExpr = canonicalFunctionLiteral(expr);
+  // The literal of a case of a `Match` passes a `Break` or a `Continue` to
+  // the loop around the `Match` (`markCaseClosure()`).
+  const keepsLoopControl =
+    CASE_CLOSURES.has(expr) ||
+    (canonicalExpr !== undefined && CASE_CLOSURES.has(canonicalExpr));
   // Not a function literal (e.g. a bare string or number): decline so callers
   // fall through to their symbolic `Apply(fn, args)` fallback instead of
   // throwing (`apply()` uses `makeLambda(fn)?.(...)`).
@@ -8260,7 +8343,10 @@ function makeLambda(
     //     instantiate, so evaluate it directly (fast path for plain thunks and
     //     bare-expression bodies).
     if (!onlyBody.isScoped || !onlyBody.localScope)
-      return wrapRecursion(ce, (_args, options) => onlyBody.evaluate(options));
+      return wrapRecursion(ce, (_args, options) => {
+        const value = onlyBody.evaluate(options);
+        return keepsLoopControl ? value : strayLoopControl(ce, value);
+      });
 
     // (b) The body IS a scoped Block: it may declare mutable locals (`let`)
     //     captured by an escaping closure — e.g. a counter factory
@@ -8324,7 +8410,7 @@ function makeLambda(
       );
       let result: Expression;
       const settle = (statements: Expression): void => {
-        result = unwrapReturn(ce, statements);
+        result = unwrapReturn(ce, statements, keepsLoopControl);
         result = resolveEscapingLambda(ce, result);
         // A held view of the body gets a record of this call.
         result = adoptHeldLazyViews(
@@ -8805,7 +8891,9 @@ function makeLambda(
         iterationStatements
       );
       // As the evaluate handler of `NumericApproximation` does.
-      return applied === undefined ? undefined : bodyResultValue(applied.N());
+      if (applied === undefined) return undefined;
+      const value = bodyResultValue(applied.N());
+      return keepsLoopControl ? value : strayLoopControl(ce, value);
     } finally {
       if (switchScope) ce.popScope();
     }
@@ -9020,6 +9108,7 @@ function makeLambda(
     }
     if (result === undefined) return undefined;
     result = bodyResultValue(result);
+    if (!keepsLoopControl) result = strayLoopControl(ce, result);
     // A read of a sequence term that was stopped in this application is not
     // memoized, as on the ordinary route (`sequence-read-stops.ts`).
     // A re-entrant evaluation of a lazy collection node and a re-entrant
@@ -9720,7 +9809,7 @@ function makeLambda(
     // What follows the statements runs the same on both routes: `settle` in
     // the frame, `cleanup` when the frame leaves, `conclude` after.
     const settle = (statements: Expression): void => {
-      result = unwrapReturn(ce, statements);
+      result = unwrapReturn(ce, statements, keepsLoopControl);
 
       // A function body whose final value is a *bare symbol* bound to a
       // user-defined function literal (`helper(x) = …`, which creates an

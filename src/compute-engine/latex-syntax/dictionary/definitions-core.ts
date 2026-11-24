@@ -8524,7 +8524,12 @@ function parseLetStatement(
   const start = parser.index;
   const name = symbol(parser.parseSymbol(terminator));
   parser.skipSpace();
-  if (name !== null && (parser.match('\\colon') || parser.match(':'))) {
+  // The `:` of `:=` starts the assignment, not a type.
+  if (
+    name !== null &&
+    !startsLetAssignment(parser) &&
+    (parser.match('\\colon') || parser.match(':'))
+  ) {
     // A typed declaration: the type text runs to an assignment (`\coloneq`,
     // or `=` as in Epsil) or to the end of the statement (`;`, `,`, the
     // `\\\\` or `&` of an environment, a closing delimiter or a boundary of

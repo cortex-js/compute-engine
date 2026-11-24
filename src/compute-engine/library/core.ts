@@ -21,10 +21,7 @@ import {
   effectsContractStateOf,
   recordEffectsTransition,
 } from '../boxed-expression/effects-provenance.js';
-import {
-  parse as parseLatex,
-  serialize as serializeLatex,
-} from '../latex-syntax/latex-syntax.js';
+import { serialize as serializeLatex } from '../latex-syntax/latex-syntax.js';
 
 import {
   checkType,
@@ -274,6 +271,7 @@ import {
   updateDef,
   boxBignumResult,
   awaitedOperandOptions,
+  parseLatexString,
 } from '../boxed-expression/utils.js';
 import {
   checkTypeConstructorNamespace,
@@ -11057,10 +11055,24 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Parse: {
       description:
         'Parse a LaTeX string and evaluate to a corresponding expression',
-      signature: '(string) -> any',
+      // The parsed expression can read and write any binding (`x + 1`,
+      // `x := 5`) that the operand does not show, so the effects are `any`:
+      // a memo does not keep a result that holds `Parse`.
+      signature: '(string) any -> any',
       examples: ['Parse(#"\\frac{\\pi}{2}"#)'],
-      evaluate: ([s], { engine: ce }) =>
-        ce.expr(parseLatex(isString(s) ? s.string : '') ?? 'Nothing'),
+      // The value is the evaluated parsed expression, as for a symbol that
+      // holds it: `Parse("1 + x")` with `x := 2` gives 3. An operator that
+      // holds its operand reads the parsed expression without evaluating
+      // it (`reduceParseHeads()`).
+      evaluate: ([s], options) =>
+        parseLatexString(options.engine, isString(s) ? s.string : '').evaluate(
+          options
+        ),
+      evaluateAsync: ([s], options) =>
+        parseLatexString(
+          options.engine,
+          isString(s) ? s.string : ''
+        ).evaluateAsync(awaitedOperandOptions(options)),
     },
   },
 

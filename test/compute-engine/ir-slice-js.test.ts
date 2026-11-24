@@ -136,18 +136,10 @@ describe('IR slice: the real functions at edge inputs', () => {
     'Arctan', 'Arcsin', 'Arccos', 'Arccot', 'Arcsec', 'Arccsc', 'Haversine', 'Coth',
     'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch', 'Sign', 'Truncate',
     'Fract', 'Log', 'Sinh', 'Cosh', 'Tanh', 'Sec', 'Csc', 'Sech', 'Csch'];
-  // Values of the interpreter that are not the function's: CE-1256
-  // (`Root(x, n)` with a negative integer n given as a value is 0 at
-  // x = 0, 1.333e-100 at x = 1e300 and ±∞ at x = ±1e-300, n = -3); CE-1257 (`Zeta(s)` is -∞
-  // for a tiny negative s at the default precision); `Haversine(x)` is
+  // Values of the interpreter that are not the function's: `Haversine(x)` is
   // ½(1 − cos x), 0 for |x| < 1e-8 (the compiled sin²(x/2) is right).
-  const known = (head: string, a: number, b?: number) =>
-    (head === 'Root' &&
-      (Math.abs(a) <= 1e-300 || Math.abs(a) >= 1e300) &&
-      Number.isInteger(b) &&
-      b! < 0) ||
-    (head === 'Zeta' && a < 0 && a > -1e-20) ||
-    (head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0);
+  const known = (head: string, a: number) =>
+    head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0;
   // Relative 1e-12, with an absolute floor of 1e-300 only (the oracle's
   // floor of 1e-12 would hide a wrong tiny value, `Haversine(1e-20)`).
   const close = (v: unknown, expected: ReturnType<typeof interpret>) =>
@@ -162,7 +154,7 @@ describe('IR slice: the real functions at edge inputs', () => {
   // the default precision, as its decimal (0.9999999999999999).
   const machine = makeMachineEngine();
   const check = (head: string, args: number[]) => {
-    if (known(head, args[0], args[1])) return;
+    if (known(head, args[0])) return;
     const names = ['x', 'y'].slice(0, args.length);
     const expr = ce.box([head, ...names] as never);
     const point = Object.fromEntries(names.map((n, i) => [n, args[i]]));
@@ -417,23 +409,41 @@ describe('IR slice: the fold is the double arithmetic of the row', () => {
       JSON.stringify(
         sliceProgram(ce.box(json as never), { target }).functions[0].body.body
       );
+    // Each block reads an input, so it is not closed: the slice folds the
+    // local, not the interpreter.
     const integer = [
       'Block',
       ['Declare', 't', 'integer', 3],
-      ['Equal', ['Add', 't', 4], 7],
+      ['Equal', ['Add', 't', 4], ['Add', 'n', 7]],
     ];
     const real = [
       'Block',
       ['Declare', 't', 'real', 0.1],
-      ['Equal', ['Add', 't', 0.2], 0.3],
+      ['Equal', ['Add', 't', 0.2], ['Add', 'x', 0.3]],
     ];
     for (const target of ['javascript', 'glsl'] as const) {
-      expect(ops(integer, target)).not.toMatch(/"add/);
-      expect(ops(real, target)).not.toMatch(/"add/);
+      // `t + 4` and `t + 0.2` are folded to a constant.
+      expect(ops(integer, target)).toContain(
+        '"value":{"lane":"integer","value":7}'
+      );
+      expect(ops(real, target)).toContain(
+        '"value":{"lane":"real","value":0.30000000000000004}'
+      );
     }
     // The double arithmetic, as the code without the passes computes.
-    expect(js(real).run({})).toBe(false);
-    expect(js(integer).run({})).toBe(true);
+    expect(js(real).run({ x: 0 })).toBe(false);
+    expect(js(integer).run({ n: 0 })).toBe(true);
+  });
+  test('a closed block takes the interpreter value', () => {
+    // The type of the declaration is not a free name of the block (CE-1250).
+    const closed = [
+      'Block',
+      ['Declare', 't', 'real', 0.1],
+      ['Equal', ['Add', 't', 0.2], 0.3],
+    ];
+    expect(js(closed).run({})).toBe(
+      interpret(ce, ce.box(closed as never), {})
+    );
   });
 });
 

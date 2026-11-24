@@ -40,7 +40,14 @@ import {
 } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isString,
+  isSymbol,
+  numericValue,
+} from './type-guards.js';
+import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';
@@ -367,7 +374,9 @@ const TRANSFORMER_HEADS = new Set([
  * call. Any other expression is returned unchanged.
  */
 export function reduceTransformerHead(expr: Expression): Expression {
-  return reduceTransformerHeads(inlineLambdaApplications(expr));
+  return reduceTransformerHeads(
+    inlineLambdaApplications(reduceParseHeads(expr))
+  );
 }
 
 /**
@@ -965,7 +974,10 @@ export function reduceTransformerOperand(
 ): Expression {
   return reduceProducerHeads(
     reduceStructuralIndex(
-      resolveBoundSymbols(inlineLambdaApplications(expr), protect)
+      resolveBoundSymbols(
+        inlineLambdaApplications(reduceParseHeads(expr)),
+        protect
+      )
     )
   );
 }
@@ -1000,6 +1012,45 @@ function reduceProducerHeads(expr: Expression): Expression {
 
   const ops = expr.ops;
   const reduced = ops.map(reduceProducerHeads);
+  if (reduced.every((op, i) => op === ops[i])) return expr;
+  return rebuildCall(expr, reduced);
+}
+
+/**
+ * The canonical expression that the LaTeX string `latex` denotes, not
+ * evaluated, or `Nothing` when the string cannot be parsed. `Parse(s)`
+ * evaluates this expression.
+ */
+export function parseLatexString(ce: ComputeEngine, latex: string): Expression {
+  return ce.expr(parseLatex(latex) ?? 'Nothing');
+}
+
+/**
+ * The expression that `Parse(s)` denotes in a held operand: the canonical
+ * parsed expression, not evaluated. The evaluation of `Parse(s)` evaluates
+ * the parsed expression, which would substitute the value of an unknown and
+ * collapse an `Equal` to a boolean, so an operator that holds its operand
+ * (`Solve`, `D`, `Integrate`, `Expand`, …) reads this form instead. The
+ * operand `s` is evaluated when it is not a string literal (a symbol that
+ * holds a string, `LatexString(…)`). When it does not give a string,
+ * `Parse(s)` is returned unchanged.
+ */
+function parsedForm(expr: Expression): Expression {
+  if (!isFunction(expr, 'Parse') || expr.nops !== 1) return expr;
+  const s = isString(expr.op1) ? expr.op1 : expr.op1.evaluate();
+  return isString(s) ? parseLatexString(expr.engine, s.string) : expr;
+}
+
+/**
+ * Replace each `Parse(s)` in `expr` by the expression it denotes
+ * (`parsedForm()`). Every other node is left as it is.
+ */
+export function reduceParseHeads(expr: Expression): Expression {
+  if (isFunction(expr, 'Parse')) return parsedForm(expr);
+  if (!isFunction(expr)) return expr;
+
+  const ops = expr.ops;
+  const reduced = ops.map(reduceParseHeads);
   if (reduced.every((op, i) => op === ops[i])) return expr;
   return rebuildCall(expr, reduced);
 }
