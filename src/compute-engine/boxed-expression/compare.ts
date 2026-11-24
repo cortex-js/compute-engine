@@ -7,6 +7,7 @@ import type {
   BoxedValueDefinition,
   Expression,
   IntervalBounds,
+  Scope,
 } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
 import { beginStoreGuard } from './store-guard.js';
@@ -46,6 +47,11 @@ import {
 } from './kind-compare.js';
 import { engineHasKindValues } from './value-kinds.js';
 import { isMergeable } from './effects-of.js';
+import {
+  activationRecordOf,
+  functionValueTemplateOf,
+  isActivatedDefinition,
+} from './ambient-chain.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -195,6 +201,73 @@ function resolvedBaseDefinition(
   const def = freeBinding(expr);
   if (def === undefined) return undefined;
   return 'value' in def ? def.value : def.operator;
+}
+
+/**
+ * The activation that the `Function` expression `e` keeps: the parent of
+ * the scope of its body, when `e` is a function value
+ * (`captureNestedLocals()`, `function-utils.ts`). `undefined` for a
+ * function literal and for a value whose body is not scoped.
+ */
+function keptActivation(e: Expression): Scope | null | undefined {
+  if (!isFunction(e, 'Function')) return undefined;
+  const scope = e.op1.localScope;
+  if (scope === undefined || functionValueTemplateOf(scope) === undefined)
+    return undefined;
+  return scope.parent;
+}
+
+/**
+ * Do the two `Function` expressions `a` and `b` read the same activation
+ * records? `same()` asks it in addition to the comparison of their
+ * structure.
+ *
+ * A function value has the operands of its literal: two values of one
+ * literal have the same structure, and their free symbols the same
+ * bindings, but each reads the locals of the activation it keeps. The
+ * records that a body reads are those that hold the value of an activated
+ * binding of the body (`activationRecordOf()`) on the chain of the kept
+ * activation, in the order of the walk of the body. With
+ * `let f = (k) => do { let y = k; x => x + y }`, `f(1)` and `f(2)` read
+ * different records and are not the same. With `let f = (k) => (x => x + k)`,
+ * the end of the call writes the value of `k` in the body, which then reads
+ * no record: `f(1)` and `f(1)` are the same.
+ *
+ * The answer is an equality of a key of each side, so `same()` stays an
+ * equivalence relation. When the structure is the same, the bindings read
+ * are the same, so two values that keep the same activation read the same
+ * records: that case needs no walk.
+ */
+function sameActivationRecords(a: Expression, b: Expression): boolean {
+  const ka = keptActivation(a);
+  const kb = keptActivation(b);
+  if (ka === kb || !isFunction(a) || !isFunction(b)) return true;
+  const ra = activationRecordsRead(a.op1, ka);
+  const rb = activationRecordsRead(b.op1, kb);
+  return ra.length === rb.length && ra.every((r, i) => r === rb[i]);
+}
+
+/**
+ * The activation records, on the chain of `activation`, that hold the value
+ * of a binding read by a symbol or a call head of `expr`, each once, in the
+ * order of the walk. Empty when `activation` is `null` or `undefined`.
+ */
+function activationRecordsRead(
+  expr: Expression,
+  activation: Scope | null | undefined,
+  result: Map<object, unknown>[] = []
+): Map<object, unknown>[] {
+  if (!activation) return result;
+  if (isSymbol(expr) || isFunction(expr)) {
+    const def = resolvedBaseDefinition(expr);
+    if (def !== undefined && isActivatedDefinition(def)) {
+      const record = activationRecordOf(def, activation);
+      if (record !== undefined && !result.includes(record)) result.push(record);
+    }
+  }
+  if (isFunction(expr))
+    for (const op of expr.ops) activationRecordsRead(op, activation, result);
+  return result;
 }
 
 /**
@@ -531,6 +604,15 @@ export function same(
     if (!isFunction(b)) return false;
     if (a.nops !== b.nops) return false;
     if (syntactic !== true && !sameCallHead(a, b, boundA, boundB)) return false;
+    // Two function values of one literal are the same only when they read
+    // the same activation records (`sameActivationRecords()`). The modes
+    // that compare symbols by name do not compare them.
+    if (
+      syntactic === false &&
+      a.operator === 'Function' &&
+      !sameActivationRecords(a, b)
+    )
+      return false;
     // Two store-backed lists (`ce.list()`) compare their numbers directly,
     // without boxing: an element is the same when both are `NaN` or when
     // they are `===` (a store never holds `-0`). This is `BoxedNumber.isSame`

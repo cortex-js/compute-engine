@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **Two functions that read different values of a local variable are no
+  longer the same** (CE-1332). With
+  `let f = (k) => do { let y = k; x => x + y }`, `f(1) == f(2)` was `True`,
+  and `dedup([f(1), f(2)])` kept only one of the two functions. The two
+  functions have the same body, but each reads the `y` of its own call. The
+  comparison now stays unevaluated and `dedup` keeps both. Two functions
+  whose bodies read the same values, such as `f(1)` and `f(1)` with
+  `let f = (k) => (x => x + k)`, are still the same.
+
 - **The sum and the difference of two tensors of rank 3 or more are
   computed** (CE-1329). `T - T`, with `T` the 2x2x2 tensor
   `[[[1, 2], [3, 4]], [[5, 6], [7, 8]]]`, stayed the unevaluated sum
