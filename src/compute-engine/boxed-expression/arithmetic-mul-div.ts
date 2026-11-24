@@ -3551,8 +3551,21 @@ function mulImpl(
         !c.isPositiveInfinity &&
         !c.isNegativeInfinity &&
         !c.isComplexInfinity
-      )
+      ) {
+        // A product with no term of negative exponent has no denominator
+        // other than that of its coefficient, and `canonicalDivide` mostly
+        // puts that one back as the coefficient: `|u|/8` is
+        // `Multiply(1/8, |u|)`. Such a product is written as it is: the
+        // split would build and type a numerator and a quotient for nothing
+        // (CE-1018). Where `canonicalDivide` keeps the quotient (a numerator
+        // that could be a tuple, or an infinite one), the product is the
+        // canonical `Multiply(1/2, s)`, with the same value as `s/2`. A term
+        // that is a number (`2`, from `2^{1/3}·2^{2/3}`) is folded with the
+        // coefficient only by the split, so such a product keeps it.
+        if (product.terms.every((t) => t.exponent[0] >= 0 && !isNumber(t.term)))
+          return product.asExpression();
         return product.asRationalExpression();
+      }
     }
     const exp = expandProducts(ce, xs);
     if (exp) {
