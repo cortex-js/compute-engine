@@ -98,7 +98,7 @@ import {
   awaitedOperandOptions,
   boxBignumResult,
 } from '../boxed-expression/utils.js';
-import { machineScaledNorm } from './utils.js';
+import { machineScaledNorm, pointLiteralComponents } from './utils.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
@@ -1323,7 +1323,7 @@ function pointNormBroadcastsOperand(
 ): 'list' | 'gated-list' | undefined {
   // A component typed `list<…> | missing` (a restricted list) broadcasts
   // too (`broadcastingComponentKind`).
-  const components = operandOperands(d);
+  const components = pointLiteralComponents(d);
   const kinds =
     components !== undefined
       ? components.map((c) =>
@@ -1372,7 +1372,7 @@ function pointNormTypeOf(d: OperandDescriptor, engine: PureEngineView): string {
   const broadcast = pointNormBroadcastsOperand(d, engine);
   if (broadcast === 'gated-list') return 'list<number> | nan';
   if (broadcast === 'list') return 'list<number>';
-  const components = operandOperands(d);
+  const components = pointLiteralComponents(d);
   if (components === undefined) return 'number';
   return euclideanNormTypeOf(components);
 }

@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **The norm of an element of a list of points has the type of one number**
+  (CE-1215). With `LQ: list<tuple<real, real>>`, the type of
+  `Norm(At(LQ, -1))`, `Norm(First(LQ))`, `Abs(At(LQ, -1))` and
+  `Hypot(At(LQ, -1), 1)` was `list<number>`, where the value is one number.
+  The arguments of the call (`LQ`, `-1`) were read as the coordinates of the
+  point. The type is now the type of the norm of a point
+  (`Norm(P)` for `P: tuple<real, real>`), and a point whose coordinate is a
+  list still has the type `list<number>`.
+
 - **The LaTeX of an applied derivative of order 4 or more of a function that
   is not declared reads back as a derivative** (CE-1350). With `f` not
   declared, `ce.parse("f''''(x)").latex` is `f^{(4)}(x)`, which read back as

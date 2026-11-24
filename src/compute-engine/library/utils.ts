@@ -108,6 +108,19 @@ export function operandChildren(
   return undefined;
 }
 
+/** The component descriptors of a point written out as a `Tuple` literal;
+ * `undefined` for any other operand. A tuple-typed application
+ * (`At(LQ, -1)`, `First(LQ)`) is not written out: its children are the
+ * arguments of the call, not the components of the point: its broadcast is
+ * read from its tuple type, and its scalar norm type stays the wide
+ * `number`. */
+export function pointLiteralComponents(
+  d: OperandDescriptor
+): ReadonlyArray<OperandDescriptor> | undefined {
+  const s = d.structureOf?.();
+  return s?.kind === 'tuple' ? s.elements : undefined;
+}
+
 /** Is this operand's TYPE a tuple — the bare `tuple` primitive or a composite
  * `tuple<…>` — the descriptor half of `isTuple` (`collection-utils.ts`)? The
  * value half of that predicate — a symbol whose HELD value is a tuple behind
@@ -129,7 +142,8 @@ export function isTupleTypedOperand(d: OperandDescriptor): boolean {
  * collections in the type lattice but bind atomically): the norm of
  * `((3,4), 12)` takes the inner point's norm and stays scalar.
  *
- * A point that is not written out (a tuple-TYPED symbol or parameter) has no
+ * A point that is not written out (a tuple-TYPED symbol or parameter, or a
+ * call such as `At(L, i)`) has no
  * components to walk — its declared element types are inspected instead, so
  * `p: tuple<list<real>, real>` reports the same broadcast its evaluation
  * produces.
@@ -148,7 +162,7 @@ export function pointNormBroadcasts(d: OperandDescriptor): boolean {
 function pointNormBroadcastKind(
   d: OperandDescriptor
 ): 'list' | 'gated-list' | undefined {
-  const children = operandChildren(d);
+  const children = pointLiteralComponents(d);
   const kinds =
     children !== undefined
       ? children.map((c) =>
@@ -230,7 +244,7 @@ export function pointNormType(d: OperandDescriptor): string {
   const broadcast = pointNormBroadcastKind(d);
   if (broadcast === 'gated-list') return 'list<number> | nan';
   if (broadcast === 'list') return 'list<number>';
-  const children = operandChildren(d);
+  const children = pointLiteralComponents(d);
   if (children === undefined) return 'number';
   return euclideanNormType(children);
 }
