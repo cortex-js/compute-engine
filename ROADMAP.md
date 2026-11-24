@@ -1105,16 +1105,6 @@ name of the program and the library.
 
 ## Performance
 
-### CE-624. The interpreter cannot compute a nested integral of a user-function call
-
-**Status:** ready; capability. Found 2026-10-28 while fixing CE-614. Approved 2026-11-01.
-**Witness:** corpus; Tycho row 476 definitions; `NIntegrate` gives NaN with jit off.
-
-With Tycho's row-476 definitions (`c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`)
-and `L := 0.5`, `.N()` of `\int_0^1 y\,c(y, L, 0.001)\,dy` gives 1.98376 only
-through the compiled route; with `jit = 'off'` it stays unevaluated, and
-`NIntegrate` gives NaN after about 6 s.
-
 ### CE-314. Worker threads for parallel numeric kernels: the Epsil route and the API name
 
 **Status:** ready; capability. User decision 2026-10-20: the Epsil asynchronous
@@ -1198,73 +1188,27 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24: "one
   formula, many points"; `runMany` says less).
 
-### CE-334. Each call of a user function invalidates every generation-keyed cache
-
-**Status:** ready; performance. Decision 2026-09-24: no general per-call cache
-design now; reduce the per-call costs instead. Approved 2026-11-01.
-**Witness:** corpus; Tycho document `hyvhlz4chj`; same cause as CE-321.
-
-`invoke` → `declareParameterActivation` declares the parameters of the function
-in a new activation scope, and the `declare` state event advances the `any`
-cache axis. So a value cached against `ce._cacheGeneration()` misses after any
-user-function call in between.
-
-2026-10-24: a declaration no longer scans or types again a list argument that is
-written-out data, so the declaration cost does not grow with the length of the
-list. For a scalar call the declaration is about 10% of the call: about 4%
-building `_BoxedValueDefinition` and 2.6% `isValidSymbol` on the parameter name.
-
-What remains: the cost of each parameter declaration
-(`declareParameterActivation`). The closed form of `Derivative(f, n)`
-(`symbolic/derivative.ts`) is now keyed on the definitions it reads, and
-`skipBroadcastForVectorOps` returns early when the operator declares no
-broadcast exemption.
-
-- Marking every activation declaration `scratch` (it advances no axis) is NOT
-  sound: three tests of `lambda-param-collection-inference.test.ts` overflow the
-  stack (`countdown(xs)` with the body
-  `if Length(xs) == 0 { 0 } else { 1 + countdown(Rest(xs)) }`, and the two
-  mutual-recursion tests). The body node `Length(xs) == 0` is shared by every
-  call and its value cache is keyed on the generation, so the second call reads
-  the answer of the first call (4) and the base case is never reached. The type
-  and sign of a body SYMBOL are safe (its definition is fixed when it is boxed),
-  but a cached answer of a compound body node can read the values of the call
-  through `_contextValue()`. A sound version needs the caches of a body node to
-  depend on the call: for example a per-activation stamp in the key of the value
-  and facet caches of a node that reads a parameter, or an axis that only
-  activation declarations advance. See the `declare` case of `axisMaskOf`
-  (`engine-configuration-lifecycle.ts`).
-- Measured 2026-09-24 at machine precision, with the unsound `scratch` change as
-  an upper bound: removing every activation advance saves nothing measurable on
-  realistic interpreted workloads (the noise functions of Tycho document
-  `hyvhlz4chj` on a 20×20 grid, 18,820 calls: 465 → 442 ms), and 30% on a list
-  recursion (77 → 52 ms).
-- Profile of the Tycho case (40×40 grid, 1,264 ms, top self time):
-  development-only `console.assert` calls 8.0%, `viewOfExpression` 7.4%, a V8
-  built-in 5.7%, garbage collection 5.1%, then `isSubtype`, `lookup` and
-  `declareParameterActivation` at 1–2% each.
-
 ### CE-350. Bignum kernels: remaining speed-ups against mpmath
 
 **Status:** ready; performance, low priority. Approved 2026-11-01.
 **Witness:** corpus; mpmath benchmark.
 
 At 1000 digits, `ln`, `exp`, `kˣ`, `sqrt` and `Γ` are as fast as mpmath or
-faster.
+within a factor of 2. The general branch of `gammalnCore` (and so `Γ`, `ln Γ`
+and `β`) runs on the base-2 grid: about 1.5 times mpmath at 1000 digits, 3 times
+at 200 and 5 times at 50, where the engine's own cost of a call dominates.
 
 - **CE-350.1** r-step / rectangular splitting in `fpexp`. The kernel gets about
   3× faster, but it is less than 10 % of `exp(.N())` time, so users see little
   change. Lowest priority.
-- **CE-350.2** Base-2 special-function kernels (`gammaln` and others). `Γ` is
-  still about 5 to 7 times slower than mpmath at 200 digits. The elementary
-  kernels run on a base-2 fixed-point grid, where "round to p bits" is a free
-  bit shift. The special functions (`gammalnCore` and the Bernoulli Stirling
-  code, `digamma`/`trigamma`/`polygamma`, `zeta`, `beta`) still run on base-10
-  `BigDecimal` and pay for the rounding. The port is large: the argument-shift
-  product, the Bernoulli-rational series, the reflection formula and the
-  `exp`/`ln` glue all move to `bits`-scaled `bigint`s. It should close most of
-  the gap. The remaining factor of about 2 is V8 `BigInt` against GMP and needs
-  a different bigint backend (for example WASM GMP). The special functions are
-  already 130 to 170 times faster than 0.59.0, so this is not a correctness or
-  capability gap.
+- **CE-350.2** Base-2 kernels for the other special functions. `zeta` is 1.4
+  to 6 times slower than mpmath (6 times at 50 digits, 1.4 times at 1000), and
+  `digamma` 2 to 5 times at 50 and 200 digits (it is faster than mpmath at
+  1000). `digamma`/`trigamma`/`polygamma` and `zeta` still run on base-10
+  `BigDecimal` and pay for the rounding of each step. The method of
+  `gammalnCore` applies: the shift product as a binary mantissa and exponent,
+  the series powers as binary floats (they fall below an absolute grid while
+  the Bernoulli coefficients grow past 10^p), the coefficients converted once
+  per grid width. The remaining factor of about 1.5 is V8 `BigInt` against
+  GMP and needs a different bigint backend (for example WASM GMP).
 

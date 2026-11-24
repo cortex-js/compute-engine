@@ -2542,6 +2542,46 @@ function nIntegratePoleVerdict(
 }
 
 /**
+ * The samples of an integrand that the interpreter evaluates (`app`, from
+ * `applicable()`). A sample is evaluated exactly, as the integrand is
+ * written. When that gives a compound expression that is not an error (an
+ * integral in the body of a function that the integrand calls has no closed
+ * form, and stays an `Integrate` expression), its numeric value is taken
+ * (`.N()`), which computes such an integral by quadrature. The integrand is
+ * not applied again, so an effect in it runs once for the sample. From then
+ * on each sample is applied once with a numeric request: its exact
+ * evaluation would try the same closed forms again. A sample that is a
+ * number, a symbol (`Nothing`, `Missing`) or an error is returned as it is.
+ *
+ * Only a transitively pure integrand (`pure`) takes the numeric value: the
+ * `.N()` of a sample can call a function of the integrand again (a handler
+ * that answers only a numeric request leaves its call in the exact
+ * sample), and an effect would then run twice at that point. The samples
+ * of an impure integrand are its exact values.
+ */
+function interpretedSampler(
+  ce: ComputeEngine,
+  app: ReturnType<typeof applicable>,
+  pure: boolean
+): (xs: ReadonlyArray<number>) => Expression | undefined {
+  let numericFirst = false;
+  return (xs) => {
+    const args = xs.map((x) => ce.number(x));
+    if (numericFirst) return app(args, { numericApproximation: true });
+    const exact = app(args);
+    if (
+      !pure ||
+      exact === undefined ||
+      !isFunction(exact) ||
+      exact.operator === 'Error'
+    )
+      return exact;
+    numericFirst = true;
+    return exact.N();
+  };
+}
+
+/**
  * The integrand `fn` as the two parts (real, imaginary) that the quadrature
  * integrates (`numericIntegrandParts`), and whether it compiled. An integrand
  * that does not compile is evaluated by the interpreter. `shield` runs the
@@ -2561,9 +2601,9 @@ function integrandPartsOf(
         withLogSpaceFallback(ce, fn, compiled.run as (x: number) => unknown)
       )
     : (
-        (app) => (x: number) =>
-          app([ce.number(x)])
-      )(applicable(fn));
+        (sample) => (x: number) =>
+          sample([x])
+      )(interpretedSampler(ce, applicable(fn), isTransitivelyPure(fn)));
   return {
     integrand: numericIntegrandParts(raw),
     compiled: compiled?.success === true,
@@ -4756,12 +4796,15 @@ function nIntegrateMultiple(
       compiled.run as (...args: number[]) => unknown
     );
   else {
-    const app = applicable(fnExpr);
+    const sample = interpretedSampler(
+      ce,
+      applicable(fnExpr),
+      isTransitivelyPure(fnExpr)
+    );
     // Only the arguments of the parameters are passed: the arguments after
     // them are the variables of the dimensions in which the integrand is
     // constant.
-    raw = (...args: number[]) =>
-      app(args.slice(0, params.length).map((x) => ce.number(x)));
+    raw = (...args: number[]) => sample(args.slice(0, params.length));
   }
   const integrand = numericIntegrandParts(raw);
   // The part being integrated: the real part first, then — only when a

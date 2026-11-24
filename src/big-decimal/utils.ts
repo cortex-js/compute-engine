@@ -464,7 +464,7 @@ function fplnDirect(x: bigint, bits: number): bigint {
  * which depends on ln 2). "Compute high, downshift for lower."
  */
 let _ln2Cache: { bits: number; value: bigint } | null = null;
-function lnTwoFixed(bits: number): bigint {
+export function lnTwoFixed(bits: number): bigint {
   if (_ln2Cache !== null) {
     if (_ln2Cache.bits === bits) return _ln2Cache.value;
     if (_ln2Cache.bits > bits)

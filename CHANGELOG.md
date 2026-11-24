@@ -13,6 +13,103 @@
   `Math.cos` per point instead of 1,141, and runs about 2.5 times faster.
   The values are the same.
 
+## 0.201.1 _2026-11-23_
+
+### Performance
+
+- **`Gamma`, `GammaLn` and `Beta` evaluate about five times faster at high
+  precision**, for an argument other than an integer or a half-integer up to
+  20,000. With `ce.precision = 200`, `Gamma(11/3).N()`
+  took about 0.7 ms and takes about 0.14 ms; at `ce.precision = 1000` it took
+  about 20 ms and takes about 3.6 ms. At 50 digits the gain is about three
+  times. The digits are the same as before.
+
+### Resolved Issues
+
+- **A formula over a range that ends at the length of a computed list no
+  longer computes the list when it is read** (CE-1723). The type of
+  `q(0, Range(1, Length(P)))`, `Sin(Range(1, Length(P)))` or
+  `Range(1, Length(P)) + 1` is now read from the type of the range. Before,
+  it counted the range, which evaluated every element of `P`: the prepare of
+  a Document with such a row took 1952 ms instead of 7 ms for a list of
+  1029 points. With `P` a `Filter` of a list, boxing the formula could also
+  throw `Filter predicate must return "True" or "False"`, or give a wrong
+  value (`Sin(Range(1, Length(P)))` evaluated to `[Sin(1), 0]`).
+- **The parse option `preserveLatex` no longer changes the meaning of a
+  formula** (CE-1727). With the option, `\log_{2} 3` was `Log(3, 2)` and is
+  now `Lb(3)`, `\mathbb{R}^{+}` was `PseudoInverse(RealNumbers)` and is now
+  `PositiveNumbers`, and `\{a_n\}_{n=1}^{\infty}` was a power of a set and
+  is now `IndexedSequence(a_n, n, 1, PositiveInfinity)`, as without the
+  option. The LaTeX of each part is now added after the parse. More numbers
+  and symbols get their `latex` (the index of a sum, the variable of an
+  integral). A number or a symbol that the parser made, and whose value is
+  also written nearby, can get the LaTeX of the written one (the base `10`
+  of `\lg 10`); a value written with two spellings (`\sum_{\alpha=1}^3 α`)
+  gets no `latex`.
+- **`ReplaceAll` in a block keeps the value of a local variable of the
+  block** (CE-1720). `ReplaceAll(Block(Declare(a, "integer"), Assign(a, 5),
+  a + Sin(b)), Sin(_a) -> 1)` was `a + 1`; it is now `6`.
+- **`\max_{x \in S} f` is the maximum of `f` over the elements of `S`**
+  (CE-1728), and the same for `\min`, `\sup` and `\inf`.
+  `\max_{x \in \{1,2,3\}} x^2` is `Max(Map(x ↦ x^2, {1, 2, 3}))` and
+  evaluates to `9`; it was `Max(_, x ∈ {1, 2, 3}, x^2)`, with the subscript
+  read as a symbol `_` and `x` free. As in `\sum`, the body stops before a
+  `+`, and `a_n` in the body is `a` indexed by the bound variable:
+  `\max_{n \in \{1,2\}} a_n` is `Max(a_1, a_2)`. Another subscript (a range
+  `1 \le i \le n`, a condition, two variables) is an
+  `expected-set-membership` error. The LaTeX of such an expression is
+  `\max_{x\in S}f`.
+- **In Epsil, the message of an error in the second operand of a subtraction
+  names the subtraction** (CE-1717). With `w` holding `"s"`, the runtime error
+  of `3 - ln(w)` said "in Ln argument 1, in Negate argument 1, in Add
+  argument 1", which names a negation and a sum that the program does not
+  contain. It now says "in Ln argument 1, in Subtract argument 2".
+- **A breakpoint in the body of a function with no parameters stops the
+  debugger** (CE-1725). In a debug run of `executeEpsilAsync()`, and with
+  `applyEpsilAsync(ce, cb, [], { debug })`, the statements of
+  `let cb = () => do { a = a + 1; a }` did not call `beforeStatement` when
+  the program called `cb()`; with one parameter (`t => do { … }`) they did.
+  For the same cause, `evaluateAsync()` of
+  `["Apply", ["Function", ["Block", …]]]` did not evaluate an operator in the
+  block that has only an `evaluateAsync` handler.
+- **The derivative of the CDF of a gamma, chi-square, beta, F or t
+  distribution is its density** (CE-1726). `D(CDF(GammaDistribution(2, 3),
+  x), x)` was `Which(x <= 0, 0, True, -1/3 * Apply(Derivative(
+  "GammaRegularized", 0, 1), 2, x/3))`; it is now
+  `Which(x <= 0, 0, True, 1/9 * x * e^(-x/3))`. For the same cause,
+  `D(GammaRegularized(a, x), x)` is `-x^(a - 1) e^(-x)/Gamma(a)` and
+  `D(BetaRegularized(x, a, b), x)` is `x^(a - 1) (1 - x)^(b - 1)/Beta(a, b)`,
+  also in the three- and four-operand forms. The partial derivatives in the
+  parameters stay unevaluated.
+- **In Epsil, more errors in an element of a list are underlined at that
+  element** (CE-1719). With `function g(x) { Ln(x) + 1 }` and `let y = 5`,
+  each of `let v = [y, z + 1, g("a")]`, `let v = [y + 1, ...w, g("a")]`,
+  `m[1] = [y + 1, g("a")]` and `let v = [y + 1, g("a")] + 1` underlined `y`
+  or `z`, and now underlines `g("a")`. A variable before the element counts
+  for the number of values it holds, a spread for the elements of its list,
+  and a call for the values its type allows. The list can be the value
+  stored by an assignment to an element, or the operand of `+`, `-`, `*` or
+  `/` with numbers.
+- **A fraction times a complex number has a correct last digit at the
+  default precision** (CE-1718). `N((1/3)·√-2)` gave `0.471…682933i`, where
+  `N(√-2/3)` gives `0.471…682934i`, and `N((1/3)·e^i)` and
+  `N((1/3)·1.5i)` (`0.4999…95i`) had the same error. The fraction is now
+  applied as a product and a division with guard digits, as for a real
+  number: `N((1/3)·1.5i)` is `0.5i`.
+- **In Epsil, the message of an error inside a square root or a root that is
+  divided names the division** (CE-1716). With `w` holding `"s"`, the runtime
+  error of `sqrt(w)/2 + 1` said "in Sqrt argument 1, in Multiply argument 2,
+  in Add argument 1". It now says "in Divide argument 1", as for `ln(w)/2 + 1`.
+  `Root(w, 3)/2 + 1` had the same message.
+- **With `jit = 'off'`, an integral of a function whose body is an integral with
+  no closed form gets a value** (CE-624). With
+  `g(y) := \int_0^1 e^{-x^2y}\cos(x)\,dx`, `\int_0^1 g(y)\,dy` stayed
+  unevaluated under `.N()`, and `NIntegrate(y ↦ g(y), 0, 1)` was `NaN`; both are
+  now `0.74079733663767`, the value of the compiled route. Each such sample
+  computes the inner integral by quadrature in the interpreter, so the integral
+  takes seconds or, for a hard inner integrand, minutes. An integrand that calls
+  a function declared `pure: false` still stays unevaluated.
+
 ## 0.201.0 _2026-11-23_
 
 ### New Features
@@ -242,64 +339,6 @@
   does not decide, and `N(x, p)` with fewer than 15 digits; and every record on
   GLSL and `interval-js`. A result that is a record cannot be broadcast.
 
-### Resolved Issues
-
-- **A formula over a range that ends at the length of a computed list no
-  longer computes the list when it is read** (CE-1723). The type of
-  `q(0, Range(1, Length(P)))`, `Sin(Range(1, Length(P)))` or
-  `Range(1, Length(P)) + 1` is now read from the type of the range. Before,
-  it counted the range, which evaluated every element of `P`: the prepare of
-  a Document with such a row took 1952 ms instead of 7 ms for a list of
-  1029 points. With `P` a `Filter` of a list, boxing the formula could also
-  throw `Filter predicate must return "True" or "False"`, or give a wrong
-  value (`Sin(Range(1, Length(P)))` evaluated to `[Sin(1), 0]`).
-- **The parse option `preserveLatex` no longer changes the meaning of a
-  formula** (CE-1727). With the option, `\log_{2} 3` was `Log(3, 2)` and is
-  now `Lb(3)`, `\mathbb{R}^{+}` was `PseudoInverse(RealNumbers)` and is now
-  `PositiveNumbers`, and `\{a_n\}_{n=1}^{\infty}` was a power of a set and
-  is now `IndexedSequence(a_n, n, 1, PositiveInfinity)`, as without the
-  option. The LaTeX of each part is now added after the parse. More numbers
-  and symbols get their `latex` (the index of a sum, the variable of an
-  integral). A number or a symbol that the parser made, and whose value is
-  also written nearby, can get the LaTeX of the written one (the base `10`
-  of `\lg 10`); a value written with two spellings (`\sum_{\alpha=1}^3 α`)
-  gets no `latex`.
-- **`ReplaceAll` in a block keeps the value of a local variable of the
-  block** (CE-1720). `ReplaceAll(Block(Declare(a, "integer"), Assign(a, 5),
-  a + Sin(b)), Sin(_a) -> 1)` was `a + 1`; it is now `6`.
-- **`\max_{x \in S} f` is the maximum of `f` over the elements of `S`**
-  (CE-1728), and the same for `\min`, `\sup` and `\inf`.
-  `\max_{x \in \{1,2,3\}} x^2` is `Max(Map(x ↦ x^2, {1, 2, 3}))` and
-  evaluates to `9`; it was `Max(_, x ∈ {1, 2, 3}, x^2)`, with the subscript
-  read as a symbol `_` and `x` free. As in `\sum`, the body stops before a
-  `+`, and `a_n` in the body is `a` indexed by the bound variable:
-  `\max_{n \in \{1,2\}} a_n` is `Max(a_1, a_2)`. Another subscript (a range
-  `1 \le i \le n`, a condition, two variables) is an
-  `expected-set-membership` error. The LaTeX of such an expression is
-  `\max_{x\in S}f`.
-- **In Epsil, the message of an error in the second operand of a subtraction
-  names the subtraction** (CE-1717). With `w` holding `"s"`, the runtime error
-  of `3 - ln(w)` said "in Ln argument 1, in Negate argument 1, in Add
-  argument 1", which names a negation and a sum that the program does not
-  contain. It now says "in Ln argument 1, in Subtract argument 2".
-- **A breakpoint in the body of a function with no parameters stops the
-  debugger** (CE-1725). In a debug run of `executeEpsilAsync()`, and with
-  `applyEpsilAsync(ce, cb, [], { debug })`, the statements of
-  `let cb = () => do { a = a + 1; a }` did not call `beforeStatement` when
-  the program called `cb()`; with one parameter (`t => do { … }`) they did.
-  For the same cause, `evaluateAsync()` of
-  `["Apply", ["Function", ["Block", …]]]` did not evaluate an operator in the
-  block that has only an `evaluateAsync` handler.
-- **The derivative of the CDF of a gamma, chi-square, beta, F or t
-  distribution is its density** (CE-1726). `D(CDF(GammaDistribution(2, 3),
-  x), x)` was `Which(x <= 0, 0, True, -1/3 * Apply(Derivative(
-  "GammaRegularized", 0, 1), 2, x/3))`; it is now
-  `Which(x <= 0, 0, True, 1/9 * x * e^(-x/3))`. For the same cause,
-  `D(GammaRegularized(a, x), x)` is `-x^(a - 1) e^(-x)/Gamma(a)` and
-  `D(BetaRegularized(x, a, b), x)` is `x^(a - 1) (1 - x)^(b - 1)/Beta(a, b)`,
-  also in the three- and four-operand forms. The partial derivatives in the
-  parameters stay unevaluated.
-
 ## 0.200.1 _2026-11-23_
 
 ### New Features
@@ -380,15 +419,6 @@
   name, and when each element before the failed one is a literal, a list or
   an arithmetic call: a variable or another call can give a `Sequence`,
   which moves the elements, and the location is then as before.
-- **In Epsil, more errors in an element of a list are underlined at that
-  element** (CE-1719). With `function g(x) { Ln(x) + 1 }` and `let y = 5`,
-  each of `let v = [y, z + 1, g("a")]`, `let v = [y + 1, ...w, g("a")]`,
-  `m[1] = [y + 1, g("a")]` and `let v = [y + 1, g("a")] + 1` underlined `y`
-  or `z`, and now underlines `g("a")`. A variable before the element counts
-  for the number of values it holds, a spread for the elements of its list,
-  and a call for the values its type allows. The list can be the value
-  stored by an assignment to an element, or the operand of `+`, `-`, `*` or
-  `/` with numbers.
 
 ### Improvements
 
@@ -574,12 +604,6 @@
   with more digits than the precision and a wrong last digit, where
   `N(√2·(1/3))` gives `0.4714045207910316829338962`. The cell is now the
   same value. A tuple of fractions times `√2` had the same digits.
-- **A fraction times a complex number has a correct last digit at the
-  default precision** (CE-1718). `N((1/3)·√-2)` gave `0.471…682933i`, where
-  `N(√-2/3)` gives `0.471…682934i`, and `N((1/3)·e^i)` and
-  `N((1/3)·1.5i)` (`0.4999…95i`) had the same error. The fraction is now
-  applied as a product and a division with guard digits, as for a real
-  number: `N((1/3)·1.5i)` is `0.5i`.
 - **In Epsil, an error in the second operand of a subtraction whose first
   operand has a unary minus underlines the operand that made the error**
   (CE-1129). With `s` holding `"a"`, the type error of `-(y + 2) - s`
@@ -591,11 +615,6 @@
   "in Power argument 2, in Add argument 1", and that of `w/2 + 1` said "in
   Multiply argument 2, in Add argument 1". They now say "in Exp argument 1"
   and "in Divide argument 1".
-- **In Epsil, the message of an error inside a square root or a root that is
-  divided names the division** (CE-1716). With `w` holding `"s"`, the runtime
-  error of `sqrt(w)/2 + 1` said "in Sqrt argument 1, in Multiply argument 2,
-  in Add argument 1". It now says "in Divide argument 1", as for `ln(w)/2 + 1`.
-  `Root(w, 3)/2 + 1` had the same message.
 
 ## 0.200.0 _2026-11-22_
 
