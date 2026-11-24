@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **A selector accepts a tuple with a slot of type `unknown`** (CE-1265). With
+  `w` declared `unknown`, `Rest((w, 1, 2))` was an `incompatible-type` error;
+  it is now valid and evaluates to `[1, 2]`. The same holds for `Most`,
+  `Take`, `Drop`, `Reverse` and `RotateRight`. A tuple whose other slots do
+  not fit the element type is still refused.
+
 - **The n-th root with a negative index is right for a zero, a very large or a
   very small radicand** (CE-1256). With `x` and `n` given the values 0 and -2,
   `Root(x, n)` evaluated to 0; it is now `~oo`, as `Power(0, -1/2)` is. At

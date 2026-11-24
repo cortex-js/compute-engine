@@ -3441,6 +3441,36 @@ function isCompositeSlotType(t: Readonly<Type>): boolean {
   );
 }
 
+/**
+ * Whether a tuple operand with the slots `slots` and at least one `unknown`
+ * slot defers at the collection parameter `param`: the tuple with each
+ * `unknown` slot replaced by the element type of `param` is a subtype of
+ * `param`. An `unknown` slot is a placeholder, as in the tuple/tuple pairing
+ * of `overlapsDeferred`, so it refutes nothing; every other slot must fit
+ * the element type exactly.
+ *
+ * `Rest((w, 1, 2))` with `w` declared `unknown` is the case: the operand
+ * type `tuple<unknown, integer, integer>` at `indexed_collection<integer>`
+ * (the parameter after `T` is solved from the known slots) defers. With a
+ * `string` slot in place of `1`, the operand is still refused. A tuple is
+ * not a list, so a `list<integer>` parameter still refuses it.
+ */
+function unknownSlotsFitCollection(
+  slots: ReadonlyArray<NamedElement>,
+  param: Readonly<Type>
+): boolean {
+  if (!slots.some((s) => s.type === 'unknown')) return false;
+  const element = immediateElementType(param);
+  if (element === undefined) return false;
+  const filled: Type = {
+    kind: 'tuple',
+    elements: slots.map((s) =>
+      s.type === 'unknown' ? { ...s, type: element } : s
+    ),
+  };
+  return isSubtype(filled, param as Type);
+}
+
 export function overlapsForDeferredValidation(
   t: Readonly<Type>,
   param: Readonly<Type>
@@ -3532,13 +3562,16 @@ function overlapsDeferred(
   // satisfies the parameter exactly — while a user `g` of the same signature
   // admitted it (Tycho item 257).
   //
-  // Only the tuple/tuple pairing defers. A tuple operand at a collection
-  // parameter, or a collection operand at a tuple parameter, keeps the
-  // refusal it has today; the union distribution above means one admitting
-  // pair is enough to admit the whole operand.
+  // The tuple/tuple pairing defers. A tuple operand with `unknown` slots at a
+  // collection parameter defers too (`unknownSlotsFitCollection`). Any other
+  // tuple operand at a collection parameter, and a collection operand at a
+  // tuple parameter, is refused; the union distribution above means one
+  // admitting pair is enough to admit the whole operand.
   const paramTupleSlots = tupleSlots(param);
   const opTupleSlots = tupleSlots(t);
   if (paramTupleSlots !== 'not-a-tuple' || opTupleSlots !== 'not-a-tuple') {
+    if (paramTupleSlots === 'not-a-tuple' && Array.isArray(opTupleSlots))
+      return unknownSlotsFitCollection(opTupleSlots, param);
     if (paramTupleSlots === 'not-a-tuple' || opTupleSlots === 'not-a-tuple')
       return false;
     // A bare tuple constrains neither arity nor slot contents.
