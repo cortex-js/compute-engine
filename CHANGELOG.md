@@ -29,6 +29,19 @@
   function are unchanged: `scene` still has the `scope` effect of its
   callback.
 
+### Resolved Issues
+
+- **A fold of `LCM` or `GCD` at machine precision gives the right value**
+  (CE-1774). At machine precision, or at precision 15,
+  `N(Reduce(1..100, (u, v) => lcm(u, v), 1))` gave `3.12e101`; it now gives
+  `6.972e40`, the least common multiple of 1 to 100. A machine number above 2^53
+  has lost its last digits, so the GCD or LCM of two integers, one of them that
+  large, is now `NaN`, in the interpreter for a float operand and in compiled
+  JavaScript, and a fold that gives `NaN` is computed again exactly.
+  `GCD(1e30, 0.5)` is still `0.5`. A float operand next to an exact integer
+  above 2^53 also gives `NaN`: `\gcd(2^{60}, 4.0)` was 4 and is now `NaN`;
+  `\gcd(2^{60}, 4)` gives the exact 4.
+
 ### Performance
 
 - **The LaTeX of a product with a power to a symbolic exponent is faster to

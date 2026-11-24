@@ -1730,12 +1730,20 @@ beyond `±(2^53 − 1)` (`Number.MAX_SAFE_INTEGER`) is the rounding of the value
 that produced it: `2^60 + 1` is held as `2^60`. The remainder or the common
 divisor of that double is a different number, not a less precise one:
 `Mod(2^60 + 1, 10)` on the double is `6`, and the interpreter answers `7`.
-The compiled code has no guard of any kind for such an operand: the value
-of `Mod`, `Remainder`, `GCD` or `LCM` of an integer of 2^53 or more is the
-value of the double, an unspecified value. `Mod(n!, 7)` at `n = 25` gives
-`6`, where the interpreter gives `0`. A closed node keeps the interpreter's
-value (`Mod(2^60 + 1, 3)` is `2`). The remedy for the host is the `bigint`
-mode.
+The compiled code has no guard for such an operand in `Mod` and
+`Remainder`: their value for an integer of 2^53 or more is the value of the
+double, an unspecified value. `Mod(n!, 7)` at `n = 25` gives `6`, where the
+interpreter gives `0`. On the JavaScript target, `GCD` and `LCM` of two
+integers, one of them of magnitude 2^53 or more, give `NaN`; an operand
+that is not an integer keeps the tolerant float GCD (`GCD(1e30, 0.5)` is
+`0.5`). The runtime calls `realGcd` and `realLcm` (`numerics/numeric.ts`),
+which the interpreter also uses for a float operand: there the `NaN` sends
+a fold of `LCM` at machine precision to the exact fold (CE-1774). The
+interpreter's value for exact integers is exact, so compiled `GCD(n!, 7)`
+at `n = 25` is `NaN` where the interpreter gives `7`. The interval target
+calls the integer `gcd` and `lcm`, with no such test: its value is the
+value of the double. A closed node keeps the interpreter's value
+(`Mod(2^60 + 1, 3)` is `2`). The remedy for the host is the `bigint` mode.
 
 `IsPrime`, `MoebiusMu`, `PrimeNu`, `PrimeOmega` and `Totient` read the
 factors of their operand, so they throw a `RangeError` for an operand
@@ -2318,11 +2326,12 @@ The remaining quiet-machine performance measurement is tracked in
 ### The `bigint` mode
 
 **What it is for.** In the other modes every number is a double, so an
-integer past `2^53 − 1` is rounded, and `Mod`, `Remainder`, `GCD` and `LCM`
-of such an operand give the value of the double ("Integer operations
-beyond the safe integer range"). The `bigint` mode computes every integer
-value as a JavaScript `bigint`, so a counting function (a binomial sum, a
-ballot number, the unranking of a Dyck path) is exact at any size. With
+integer past `2^53 − 1` is rounded: `Mod` and `Remainder` of such an
+operand give the value of the double, and `GCD` and `LCM` give `NaN`
+("Integer operations beyond the safe integer range"). The `bigint` mode
+computes every integer value as a JavaScript `bigint`, so a counting
+function (a binomial sum, a ballot number, the unranking of a Dyck path) is
+exact at any size. With
 `n: integer`, the Catalan form `Binomial(2n, n) − Binomial(2n, n + 1)` at
 `n = 40n` gives `2622127042276492108820n`, and `Mod(n, 10)` at
 `n = 2^60 + 1` gives `7n` (GitHub issue #503).

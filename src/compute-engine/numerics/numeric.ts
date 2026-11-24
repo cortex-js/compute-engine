@@ -323,6 +323,27 @@ export function lcm(a: number, b: number): number {
 export const REAL_GCD_TOLERANCE = 1e-6;
 
 /**
+ * Whether one of the magnitudes `a` and `b` is above 2^53 − 1. A double above
+ * that bound has no unit digit: it can be the rounded value of an integer
+ * that has other factors, so the integer GCD or LCM computed from it is a
+ * wrong number, and {@linkcode realGcd} and {@linkcode realLcm} give NaN for
+ * two integers instead. With a non-integer operand the tolerant float GCD
+ * applies as before: every double above the bound is a multiple of `0.5`, so
+ * `realGcd(1e30, 0.5)` is `0.5` whatever digits were lost.
+ * The fold of `Reduce(1..100, LCM).N()` at machine precision gave 3.1·10¹⁰¹
+ * where the value is 7.0·10⁴⁰ (CE-1774); the NaN sends it to the exact fold
+ * (`withExactFoldFallback()` in `library/collections.ts`). Under `N`, an
+ * operand of the interpreter's `GCD` or `LCM` that can be evaluated exactly
+ * takes the bigint path (`exactIntegerOriginals()`). A call with a float
+ * operand passes every operand to these functions as a double, an exact one
+ * too: `\gcd(3^{40}, 3.0)` is NaN, as is `\gcd(2^{60}, 4.0)`, whose double
+ * happens to be exact.
+ */
+function beyondExactIntegers(a: number, b: number): boolean {
+  return a > Number.MAX_SAFE_INTEGER || b > Number.MAX_SAFE_INTEGER;
+}
+
+/**
  * GCD extended to non-integer reals via a tolerant floating Euclidean
  * algorithm — the standard "float GCD" (repeated `a mod b`, terminating at a
  * small `|b|` relative to the input scale rather than exact zero). Integer
@@ -343,6 +364,7 @@ export function realGcd(
   if (b === 0) return a;
   // Exact integer path: preserves large-integer correctness, no tolerance.
   if (Number.isInteger(a) && Number.isInteger(b)) {
+    if (beyondExactIntegers(a, b)) return NaN;
     while (b !== 0) [a, b] = [b, a % b];
     return a;
   }
@@ -370,7 +392,8 @@ export function realLcm(
   eps = REAL_GCD_TOLERANCE
 ): number {
   if (a === 0 || b === 0) return 0;
-  if (Number.isInteger(a) && Number.isInteger(b)) return lcm(a, b);
+  if (Number.isInteger(a) && Number.isInteger(b))
+    return beyondExactIntegers(Math.abs(a), Math.abs(b)) ? NaN : lcm(a, b);
   const g = realGcd(a, b, eps);
   if (!Number.isFinite(g) || g === 0) return NaN;
   return Math.abs((a * b) / g);
