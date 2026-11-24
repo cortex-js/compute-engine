@@ -453,14 +453,18 @@ function checkThreadableOperand(
  * elements (a literal list, or a symbol that holds one) is not refused here:
  * the application maps over its elements and reports an error for each
  * element that does not fit, with the position of that element.
+ *
+ * The test of a finite collection comes last, after the tests of the types,
+ * which decide most calls. For a lazy view it can evaluate a source: the
+ * count of `Range(1, Length(P))` evaluates `P`, with each of its elements.
  */
 function liftedOperandCannotFit(op: Expression, param: Type): boolean {
-  if (isFiniteIndexedCollection(op)) return false;
   const t = op.type.type;
   if (typesOverlap(t, param)) return false;
   const element = collectionElementType(t);
   if (element === undefined || typesOverlap(element, param)) return false;
-  return !typesOverlap(broadcastCellTypeOf(t), param);
+  if (typesOverlap(broadcastCellTypeOf(t), param)) return false;
+  return !isFiniteIndexedCollection(op);
 }
 
 /**

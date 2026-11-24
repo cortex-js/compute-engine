@@ -79,12 +79,17 @@ describe('Tycho item 182 — collection-facet probe storm', () => {
     expect(expr.isValid).toBe(true);
     // Measured 32 on 2026-08-14; the pre-fix storm ran hundreds of
     // thousands of computes (unbounded — OOM without a deadline). Generous
-    // headroom, still three orders below the disease.
+    // headroom, still three orders below the disease. Since CE-1723 the
+    // broadcast typing reads the type of the range before its count, and
+    // the parse computes no facet.
     expect(delta).toBeLessThan(200);
-    // Non-vacuity: the parse DOES probe facets — a zero delta would mean
-    // the counter (or the probe path) is disconnected, not that the storm
-    // is fixed.
-    expect(delta).toBeGreaterThanOrEqual(1);
+    // Non-vacuity: a read of a facet of the range is counted, so a zero
+    // delta above means that the parse probed no facet, not that the
+    // counter is disconnected.
+    const range = ce.box(['Range', 0, ['Subtract', ['Length', 'D'], 1]]);
+    const beforeRead = facetComputeCount();
+    expect(range.count).toBe(100);
+    expect(facetComputeCount() - beforeRead).toBeGreaterThanOrEqual(1);
   });
 
   test('a re-parse of the same head runs on a warm memo', () => {

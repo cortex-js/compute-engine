@@ -277,6 +277,15 @@
 
 ### Resolved Issues
 
+- **A formula over a range that ends at the length of a computed list no
+  longer computes the list when it is read** (CE-1723). The type of
+  `q(0, Range(1, Length(P)))`, `Sin(Range(1, Length(P)))` or
+  `Range(1, Length(P)) + 1` is now read from the type of the range. Before,
+  it counted the range, which evaluated every element of `P`: the prepare of
+  a Document with such a row took 1952 ms instead of 7 ms for a list of
+  1029 points. With `P` a `Filter` of a list, boxing the formula could also
+  throw `Filter predicate must return "True" or "False"`, or give a wrong
+  value (`Sin(Range(1, Length(P)))` evaluated to `[Sin(1), 0]`).
 - **The parse option `preserveLatex` no longer changes the meaning of a
   formula** (CE-1727). With the option, `\log_{2} 3` was `Log(3, 2)` and is
   now `Lb(3)`, `\mathbb{R}^{+}` was `PseudoInverse(RealNumbers)` and is now

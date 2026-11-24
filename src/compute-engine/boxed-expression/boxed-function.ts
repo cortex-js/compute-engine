@@ -14891,12 +14891,16 @@ function* threadConditional(
  * type (`lambdaBroadcastType`) and its element count
  * (`BoxedFunction._lambdaBroadcastCount`). A scalar operand is a lift and
  * never participates.
+ *
+ * The tests of the type come first. The test of a finite collection can
+ * evaluate the source of a lazy view (the count of `Range(1, Length(P))`
+ * evaluates `P`), and the type of the call is read while it is boxed.
  */
 function isLambdaBroadcastParticipant(x: Expression): boolean {
   return (
-    isFiniteBroadcastParticipant(x) ||
     isBroadcastCollectionType(x) ||
-    isFixedShapeCollection(x)
+    isFixedShapeCollection(x) ||
+    isFiniteBroadcastParticipant(x)
   );
 }
 
@@ -15029,9 +15033,9 @@ function lambdaCallOperandOfDescriptor(
     type: d.type,
     participates:
       !unknownCapture &&
-      (view.finiteBroadcastParticipant ||
-        isBroadcastCollectionTypeOf(d.type) ||
-        (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions)),
+      (isBroadcastCollectionTypeOf(d.type) ||
+        (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions) ||
+        view.finiteBroadcastParticipant),
     possiblyCollectionTyped: descriptorMayBeOpenCollection(d, view),
     holdsUnindexedCollection: false,
     unknownCapture,
