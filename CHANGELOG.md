@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **A call of a user function named `Sqrt` is no longer read as a square
+  root in a product or a sum** (CE-1122). With `Sqrt` declared as the function
+  `u ↦ 1000`, `ce.box(['Multiply', 2, ['Sqrt', 4]])` gave `4` and now gives
+  `2000`; `.mul()` and `.add()` with such a call gave the same wrong values.
+  A product of the library `Sqrt` made in the scope of the user function now
+  stays a call of the library `Sqrt`.
+
 - **`NIntegrate` of a function whose parameter has a declared type now gives
   the right value when the integrand overflows at some samples.**
   `NIntegrate(Function(x^100 * Exp(-x), Typed(x, 'real')), 0, +oo)` gave a

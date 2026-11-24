@@ -31,6 +31,8 @@ import {
   markLibraryCall,
   noteStructuralScope,
   sameOperator,
+  shadowsLibraryName,
+  shadowsLibraryOperator,
   structuralScope,
 } from '../library-shadowing.js';
 import { walkInvariantValue } from './walk-invariant-values.js';
@@ -3251,9 +3253,24 @@ export class BoxedFunction
 
     const ce = this.engine;
 
+    // The cases below select the node by its operator name. A call bound to
+    // a user definition of a library name (`shadowsLibraryOperator()`), such
+    // as a user function `Sqrt`, is a value with no coefficient: reading it
+    // as a square root gave `2·Sqrt(4)` the value `4`.
+    if (shadowsLibraryOperator(this)) return [ce._numericValue(1), this];
+
     if (this.operator === 'Complex') {
       return [ce._numericValue({ re: this.op1.re, im: this.op2.re }), ce.One];
     }
+
+    // The node that this function builds again (`Sqrt(u)` from `Sqrt(4u)`)
+    // is bound to the library operator, as this node is, also in a scope
+    // where a user definition of the same name shadows it. Only then is it
+    // a marked library call (`ce._libraryCall()`): elsewhere it is built by
+    // name, as a node boxed from MathJSON is.
+    const libraryCall = (name: string, ops: Expression[]): Expression =>
+      (shadowsLibraryName(ce, name) ? ce._libraryCall(name, ops) : undefined) ??
+      ce.function(name, ops);
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let expr: Expression = this;
@@ -3336,7 +3353,7 @@ export class BoxedFunction
       if (coef2.isZero) return [ce._numericValue(1), this];
       const coef = coef1.div(coef2, ce.precision);
       if (denom.isSame(1)) return [coef, numer];
-      return [coef, ce.function('Divide', [numer, denom])];
+      return [coef, libraryCall('Divide', [numer, denom])];
     }
 
     //
@@ -3355,7 +3372,7 @@ export class BoxedFunction
       if (exponent !== null)
         return [
           coef.pow(exponent, ce.precision),
-          ce.function('Power', [base, expr.op2]),
+          libraryCall('Power', [base, expr.op2]),
         ];
 
       return [ce._numericValue(1), this];
@@ -3402,8 +3419,8 @@ export class BoxedFunction
         coef instanceof ExactNumericValue
       )
         return [ce._numericValue(1), this];
-      if (coef.sgn() === -1) return [root, ce.function('Sqrt', [rest.neg()])];
-      return [root, ce.function('Sqrt', [rest])];
+      if (coef.sgn() === -1) return [root, libraryCall('Sqrt', [rest.neg()])];
+      return [root, libraryCall('Sqrt', [rest])];
     }
 
     if (isFunction(expr, 'Root')) {
@@ -3444,7 +3461,7 @@ export class BoxedFunction
         (!rest.isSame(1) || coef instanceof ExactNumericValue)
       )
         return [ce._numericValue(1), this];
-      return [root, ce.function('Root', [rest, expr.op2])];
+      return [root, libraryCall('Root', [rest, expr.op2])];
     }
 
     //
@@ -3458,7 +3475,7 @@ export class BoxedFunction
       // for each of its terms at each evaluation.
       if (coef.isOne && rest === expr.op1 && expr.isCanonical)
         return [coef, expr];
-      return [coef.abs(ce.precision), ce.function('Abs', [rest])];
+      return [coef.abs(ce.precision), libraryCall('Abs', [rest])];
     }
     console.assert(expr.operator !== 'Complex');
 

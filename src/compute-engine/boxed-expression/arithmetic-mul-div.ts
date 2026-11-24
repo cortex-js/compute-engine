@@ -28,7 +28,11 @@ import {
   machinePairBroadcast,
 } from './machine-broadcast.js';
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
-import { isLibraryOperator } from '../library-shadowing.js';
+import {
+  isLibraryOperator,
+  shadowsLibraryName,
+  shadowsLibraryOperator,
+} from '../library-shadowing.js';
 import {
   isNumber,
   isFunction,
@@ -266,6 +270,18 @@ type ProductTerm = {
   quotient?: boolean;
 };
 
+/** The radicals that a `Product` builds again by name when it writes a term
+ * with a fractional exponent (`termsAsExpression()`, `pow()`). */
+const RADICAL_NAMES: ReadonlyArray<string> = ['Sqrt', 'Root'];
+
+/** The library operators that a `Product` splits into a base and a
+ * fractional exponent, so that a radical is built again from them. */
+const SPLIT_INTO_RADICAL: ReadonlySet<string> = new Set([
+  'Sqrt',
+  'Root',
+  'Power',
+]);
+
 export class Product {
   engine: ComputeEngine;
 
@@ -310,6 +326,28 @@ export class Product {
   // only from `false` to `true`: `mul()` sets it to `true` when it receives a
   // matrix after the answer was computed.
   private _hasMatrix: boolean | undefined = undefined;
+
+  // The answer of `rebuildsByShadowedName()`, or `undefined` before it is
+  // first computed.
+  private _shadowedRebuild: boolean | undefined = undefined;
+
+  /**
+   * Is a radical that this product builds again by name (`Sqrt`, `Root`)
+   * shadowed in the current scope (`shadowsLibraryName()`)? The product
+   * splits `Sqrt(y)` into the base `y` and the exponent ½, and writes it
+   * again as `Sqrt(y)` in the current scope, so in a scope with a user
+   * function `Sqrt` the factor became a call of that function.
+   *
+   * A `Power` with an integer exponent is built again by name too (`y·y` is
+   * `Power(y, 2)`), also from plain symbols, so this test does not make it
+   * sound in a scope with a user function `Power`: see CE-1759.
+   */
+  private rebuildsByShadowedName(): boolean {
+    this._shadowedRebuild ??= RADICAL_NAMES.some((n) =>
+      shadowsLibraryName(this.engine, n)
+    );
+    return this._shadowedRebuild;
+  }
 
   static from(expr: Expression): Product {
     return new Product(expr.engine, [expr]);
@@ -384,6 +422,22 @@ export class Product {
 
     if (isNumber(term) && term.isNaN) {
       this.coefficient = this.engine._numericValue(NaN);
+      return;
+    }
+
+    // The cases below select the term by its operator name. A call bound to
+    // a user definition of a library name (`shadowsLibraryOperator()`), such
+    // as a user function `Sqrt`, is an opaque factor: read as a square root,
+    // `2·Sqrt(4)` was `4`. A call of the library operator is an opaque factor
+    // too when the product would build it again by a name that the current
+    // scope shadows (`rebuildsByShadowedName()`).
+    if (
+      isFunction(term) &&
+      (shadowsLibraryOperator(term) ||
+        (SPLIT_INTO_RADICAL.has(term.operator) &&
+          this.rebuildsByShadowedName()))
+    ) {
+      this.tallyInOrder(term, exp ?? [1, 1], inversePower);
       return;
     }
 
@@ -1989,8 +2043,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
 
   // Note: (-1)/a ≠ -(a^-1). We distribute Negate over Divide.
 
-  // √a/√b = (1/b)√(ab) as a numeric value
-  if (isFunction(op1, 'Sqrt') && isFunction(op2) && op2.operator === 'Sqrt') {
+  // √a/√b = (1/b)√(ab) as a numeric value. A call of a user function `Sqrt`
+  // is not a square root.
+  const sqrt1 = isLibraryOperator(op1, 'Sqrt');
+  const sqrt2 = isLibraryOperator(op2, 'Sqrt');
+  if (sqrt1 && sqrt2 && isFunction(op1) && isFunction(op2)) {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
@@ -2002,13 +2059,13 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
           rational: [1, a < 0 && b < 0 ? -b : b],
         })
       );
-  } else if (isFunction(op1, 'Sqrt')) {
+  } else if (sqrt1 && isFunction(op1)) {
     // √a/b = (1/b)√a as a numeric value
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2);
     if (a !== null && b !== null)
       return ce.number(ce._numericValue({ radical: a, rational: [1, b] }));
-  } else if (isFunction(op2, 'Sqrt')) {
+  } else if (sqrt2 && isFunction(op2)) {
     // a/√b = (a/b)√b as a numeric value
     const a = asSmallInteger(op1);
     const b = asSmallInteger(op2.op1);
@@ -2787,9 +2844,11 @@ export function canonicalMultiply(
     // floats, infinity and NaN are excluded from folding).
 
     if (isNumber(x) && !x.isInfinity && !x.isNaN) {
-      // Do we have a Sqrt expression?
+      // Do we have a Sqrt expression? (A call of a user function `Sqrt` is
+      // not a square root.)
       if (
         isFunction(next, 'Sqrt') &&
+        isLibraryOperator(next, 'Sqrt') &&
         isNumber(next.op1) &&
         next.op1.type.matches('integer')
       ) {

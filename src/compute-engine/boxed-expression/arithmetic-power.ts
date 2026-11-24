@@ -269,8 +269,12 @@ function zeroOfInfiniteFold(
   return hasFloatOperand(ops) ? asFloat(ce.Zero) : ce.Zero;
 }
 
+/** True when `expr` is a square root: a call of the library `Sqrt`, or of
+ * the library `Power` or `Root` with the exponent ½ or the index 2. A call
+ * of a user function with one of these names (`isLibraryOperator()`) is a
+ * value, not a square root. */
 function isSqrt(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
+  if (!isFunction(expr) || !isLibraryOperator(expr)) return false;
   return (
     expr.operator === 'Sqrt' ||
     (expr.operator === 'Power' && expr.op2.im === 0 && expr.op2.re === 0.5) ||
