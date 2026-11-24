@@ -145,7 +145,7 @@ function toFixedPoint(x: BigDecimal, precision: number): [bigint, number] {
  * Convert a base-2 fixed-point bigint (value = fp / 2^bits) back to a
  * BigDecimal, rounding to `targetPrecision` significant decimal digits.
  */
-function fromFixedPoint(
+export function fromFixedPoint(
   fp: bigint,
   bits: number,
   targetPrecision: number

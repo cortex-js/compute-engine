@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Performance
+
+- **`Gamma`, `GammaLn` and `Beta` evaluate about five times faster at high
+  precision**, for an argument other than an integer or a half-integer up to
+  20,000. With `ce.precision = 200`, `Gamma(11/3).N()`
+  took about 0.7 ms and takes about 0.14 ms; at `ce.precision = 1000` it took
+  about 20 ms and takes about 3.6 ms. At 50 digits the gain is about three
+  times. The digits are the same as before.
+
 ## 0.201.0 _2026-11-23_
 
 ### New Features

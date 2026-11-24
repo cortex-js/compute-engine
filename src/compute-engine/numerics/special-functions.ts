@@ -2,6 +2,13 @@ import { Complex } from 'complex.js';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
+import { fromFixedPoint } from '../../big-decimal/transcendentals.js';
+import {
+  bitLength,
+  fpln,
+  lnTwoFixed,
+  pow10,
+} from '../../big-decimal/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
 import { erf, erfc } from './error-functions.js';
@@ -1271,32 +1278,9 @@ function gammalnCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
   const zNum = z.toNumber();
   const m = Math.max(0, Math.ceil(shiftTarget - zNum));
 
-  // ln Γ(z) = ln Γ(z+m) − ln∏_{i=0}^{m-1}(z+i). Accumulate the shift as a single
-  // product and take ONE logarithm of it, rather than summing m separate (and
-  // expensive) ln(z+i).
-  // NB: `BigDecimal.mul` returns the *full* product (it does not round to the
-  // working precision), so an accumulating product grows its significand by ~p
-  // digits every step — making each successive multiply more expensive and the
-  // whole loop O(m²·…). Rounding back to p digits after each step keeps every
-  // operand at p digits (O(m) multiplies of bounded size). This single change is
-  // the dominant high-precision speedup.
-  let shiftProduct = BigDecimal.ONE;
-  let w = z;
-  for (let i = 0; i < m; i++) {
-    if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
-    shiftProduct = shiftProduct._mulToPrecision(w, p);
-    w = w.add(BigDecimal.ONE, prec);
-  }
-  const logProduct = m > 0 ? shiftProduct.ln(prec) : BigDecimal.ZERO;
-
-  // The series converges (tol break) in ≈0.4·p terms at this shift; bound the
-  // Bernoulli table generously above that rather than at the old π·w (which,
-  // with the larger shift, would needlessly compute ~8× more Bernoulli numbers).
-  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
-  const bernoulliRationals = getBernoulliRationals(ce, maxTerms);
-
-  // Stirling: (w - 1/2)*ln(w) - w + ln(2*pi)/2 + sum B_{2k}/(2k*(2k-1)*w^{2k-1})
-  let result = w
+  // Stirling: (w − 1/2)·ln(w) − w + ln(2π)/2 + the series, with w = z + m.
+  const w = z.add(new BigDecimal(m), prec);
+  const leading = w
     .sub(BigDecimal.HALF, prec)
     .mul(w.ln(prec))
     .sub(w, prec)
@@ -1308,34 +1292,158 @@ function gammalnCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
       prec
     );
 
-  // Evaluate Σ B_{2k}/(2k(2k-1)) · w^{-(2k-1)} forward, multiplying by a
-  // precomputed u = 1/w² each step instead of dividing by the growing w^{2k-1}
-  // (the Bernoulli coefficient's only division is then by its *small* integer
-  // denominator). As above, round each running power/term back to p digits so
-  // significands stay bounded.
-  const inv = BigDecimal.ONE.div(w, prec); // 1/w
-  const u = inv._mulToPrecision(inv, p); // 1/w²
-  let pw = inv; // w^{-(2k-1)}, starting at w^{-1}
-  const tol = new BigDecimal(10).pow(-(p + guard), prec);
-  const nTerms = Math.min(maxTerms, bernoulliRationals.length);
-  for (let k = 0; k < nTerms; k++) {
-    // Each term divides by a Bernoulli rational of thousands of digits at a
-    // high precision, so the time limit is checked at every term.
-    checkDeadline(ce._deadlineFrame);
-    const twoK = 2 * (k + 1);
-    const [bNum, bDen] = bernoulliRationals[k];
-    const denom = BigInt(twoK) * BigInt(twoK - 1);
-    const coeff = new BigDecimal(bNum.toString()).div(
-      new BigDecimal((bDen * denom).toString()),
+  // For w ≥ 10^((p + guard)/2 + 1) (then m = 0), the terms after the first,
+  // 1/(12w), are below 10^−(p+guard) of the result, which exceeds w. The
+  // grid below would hold w as an integer of about log2(w) bits, so such a
+  // w stays in decimal.
+  if (z.exponent + z._digitCount() - 1 > Math.ceil((p + guard) / 2)) {
+    return leading.add(
+      BigDecimal.ONE.div(w.mul(new BigDecimal(12)), prec),
       prec
     );
-    const term = coeff._mulToPrecision(pw, p);
-    if (k > 0 && term.abs().lt(tol)) break;
-    result = result.add(term, prec);
-    pw = pw._mulToPrecision(u, p);
   }
 
-  return result.sub(logProduct, prec);
+  // ln Γ(z) = ln Γ(w) − ln∏_{i=0}^{m-1}(z+i). The shift
+  // product and the series run on a base-2 fixed-point grid of `bits`
+  // fractional bits, where a rounding is a shift (a rounding to p decimal
+  // digits divides by a power of ten). The grid carries the guard digits of
+  // the series, then 64 bits for the truncation of the m + 0.6·p steps
+  // (each loses at most one unit of the grid).
+  const bits = Math.ceil((p + guard) * Math.log2(10)) + 64;
+  const B = BigInt(bits);
+  const one = 1n << B;
+  let wFp = toGridBits(z, B);
+
+  // The product is `mant · 2^exp`. `mant` keeps at least `bits + 32`
+  // significant bits; it is shifted down when it has 512 bits more.
+  let mant = one << 32n;
+  let exp = -(bits + 32);
+  const keep = bits + 32;
+  for (let i = 0; i < m; i++) {
+    if ((i & 0xff) === 0) {
+      checkDeadline(ce._deadlineFrame);
+      const excess = bitLength(mant) - keep;
+      if (excess > 512) {
+        mant >>= BigInt(excess);
+        exp += excess;
+      }
+    }
+    mant = (mant * wFp) >> B;
+    wFp += one;
+  }
+  // ln(mant · 2^exp) = ln(mant / 2^(len−1)) + (exp + len − 1)·ln 2, with
+  // mant / 2^(len−1) in [1, 2).
+  let logProductFp = 0n;
+  if (m > 0) {
+    const len = bitLength(mant);
+    const top = len - 1 - bits;
+    const normalized = top >= 0 ? mant >> BigInt(top) : mant << BigInt(-top);
+    logProductFp =
+      fpln(normalized, bits) + BigInt(exp + len - 1) * lnTwoFixed(bits);
+  }
+
+  // The series converges (tol break) in ≈0.4·p terms at this shift; bound the
+  // Bernoulli table generously above that rather than at the old π·w (which,
+  // with the larger shift, would needlessly compute ~8× more Bernoulli numbers).
+  const maxTerms = Math.max(20, Math.ceil(0.6 * p) + 20);
+  // The coefficients are on a grid of `coeffBits ≥ bits`: a term is shifted
+  // down by the difference as well.
+  const { coeffs, bits: coeffBits } = stirlingCoefficientsFixed(
+    ce,
+    maxTerms,
+    bits
+  );
+  const coeffShift = coeffBits - bits;
+
+  // Σ B_{2k}/(2k(2k−1)) · w^{−(2k−1)}, forward, multiplying by u = 1/w² at
+  // each step. The power w^{−(2k−1)} falls below the grid long before the
+  // series ends while the coefficient grows past 10^p, so the power is a
+  // binary float `pwM · 2^(−pwE)` of `K` significant bits, not a value on
+  // the grid. The coefficients and the sum are on the grid.
+  const K = bits + 32;
+  const K1 = BigInt(K - 1);
+  const wBits = bitLength(wFp) - bits; // ⌈log2 w⌉ or one less
+  let pwE = K + wBits;
+  let pwM = (1n << BigInt(pwE + bits)) / wFp; // 2^pwE / w: K or K+1 bits
+  // 1/w² = uM · 2^(−uE), with uM of exactly K bits. A step multiplies by
+  // uM and drops K − 1 bits, so pwM gains at most one bit; it is trimmed
+  // back every 64 steps.
+  const square = pwM * pwM;
+  const uShift = bitLength(square) - K;
+  const uM = square >> BigInt(uShift);
+  const uE = 2 * pwE - uShift;
+  const tol = one / pow10(p + guard);
+  let seriesFp = 0n;
+  const nTerms = Math.min(maxTerms, coeffs.length);
+  for (let k = 0; k < nTerms; k++) {
+    if ((k & 0x3f) === 0) {
+      checkDeadline(ce._deadlineFrame);
+      const excess = bitLength(pwM) - (K + 1);
+      if (excess > 0) {
+        pwM >>= BigInt(excess);
+        pwE -= excess;
+      }
+    }
+    const term = (coeffs[k] * pwM) >> BigInt(pwE + coeffShift);
+    if (k > 0 && (term < 0n ? -term : term) < tol) break;
+    seriesFp += term;
+    pwM = (pwM * uM) >> K1;
+    pwE += uE - (K - 1);
+  }
+
+  return leading.add(
+    fromFixedPoint(seriesFp - logProductFp, bits, prec),
+    prec
+  );
+}
+
+/** `x · 2^bits` truncated to an integer (`x` finite). */
+function toGridBits(x: BigNum, B: bigint): bigint {
+  if (x.exponent >= 0) return (x.significand * pow10(x.exponent)) << B;
+  return (x.significand << B) / pow10(-x.exponent);
+}
+
+/**
+ * The coefficients `B_{2k} / (2k(2k−1)) · 2^b` of the Stirling series of
+ * ln Γ, for k = 1, 2, …, `minTerms` of them or more, on a grid of `b` bits
+ * with `b ≥ bits` (returned as `bits`). The table of the widest grid asked
+ * for is kept per engine: a narrower request shifts its products down, so
+ * calls at alternating precisions do not rebuild it.
+ */
+const stirlingCoefficientCache = new WeakMap<
+  ComputeEngine,
+  { bits: number; coeffs: bigint[] }
+>();
+
+function stirlingCoefficientsFixed(
+  ce: ComputeEngine,
+  minTerms: number,
+  bits: number
+): { bits: number; coeffs: bigint[] } {
+  let entry = stirlingCoefficientCache.get(ce);
+  if (entry === undefined || entry.bits < bits) {
+    // A multiple of 256 bits: a small rise of the precision keeps the table.
+    entry = { bits: Math.ceil(bits / 256) * 256, coeffs: [] };
+    stirlingCoefficientCache.set(ce, entry);
+  }
+  const coeffs = entry.coeffs;
+  if (coeffs.length >= minTerms) return entry;
+  const rationals = getBernoulliRationals(ce, minTerms);
+  const B = BigInt(entry.bits);
+  // The shared Bernoulli table can be much longer than this call needs.
+  const end = Math.min(rationals.length, minTerms);
+  for (let k = coeffs.length; k < end; k++) {
+    // Each step divides numbers of up to tens of thousands of bits at a high
+    // precision. A throw leaves a valid prefix of the table.
+    if ((k & 0x3f) === 0) checkDeadline(ce._deadlineFrame);
+    const twoK = BigInt(2 * (k + 1));
+    const [num, den] = rationals[k];
+    // `den` is positive (`computeBernoulliEven`); round to nearest.
+    const d = den * twoK * (twoK - 1n);
+    const n = num << B;
+    coeffs.push((n + (n < 0n ? -d : d) / 2n) / d);
+  }
+  return entry;
 }
 
 /**
