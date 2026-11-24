@@ -300,6 +300,14 @@
   `Math.cos` per point instead of 1,141, and runs about 2.5 times faster.
   The values are the same.
 
+- **A `Which` in a function called at each element reads a list symbol in its
+  selected value once, not at each call** (CE-1425). With `VS` a list of
+  length `n`, `Map(j ↦ Which(At(CS, j), At(VS, j), True, NaN), Range(1, n))`
+  evaluated the whole list `VS` again at each element, so its time grew with
+  the square of `n`; it now grows with `n`, as the same selection written with
+  `If` does. At `n = 1,600` it takes about 100 ms instead of about 490 ms. The
+  values are the same.
+
 ## 0.201.1 _2026-11-23_
 
 ### Performance

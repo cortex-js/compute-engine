@@ -3907,6 +3907,29 @@ async function evaluateWhichAsync(
   return fallback(args);
 }
 
+/**
+ * The options with which `Which` evaluates the arm that a scalar `True`
+ * condition selects: the numeric request and the materialization request of
+ * the `Which`, and no other key. The options of a handler also hold
+ * `engine`, `expression` and other keys that are not evaluation options, and
+ * a symbol evaluated with such a key does not use the memo of its stored
+ * value (`_dereferenceMemoized`). So an arm `At(VS, j)` in a function called
+ * at each element evaluated the whole list `VS` again at each call. A
+ * materializing evaluation still does not use that memo: `materialization`
+ * changes the value of a lazy arm, so it is kept.
+ */
+function selectedArmOptions(
+  options: Partial<EvaluateOptions>
+): Partial<EvaluateOptions> | undefined {
+  const materialization = options.materialization ?? false;
+  if (!options.numericApproximation && materialization === false)
+    return undefined;
+  return {
+    ...(options.numericApproximation ? { numericApproximation: true } : {}),
+    ...(materialization !== false ? { materialization } : {}),
+  };
+}
+
 function evaluateWhich(
   args: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> & { engine: ComputeEngine }
@@ -3928,7 +3951,7 @@ function evaluateWhich(
       // A selected clause with no arm has no value to answer: `Missing`, the
       // position-preserving absent datum (no-selection ruling 2026-08-27).
       if (!args[i + 1]) return options.engine.Missing;
-      return args[i + 1].evaluate(options);
+      return args[i + 1].evaluate(selectedArmOptions(options));
     } else if (cond !== 'False') {
       // An absent guard (`Missing`) never reaches this point:
       // `evaluateCondition` reads it as `False`, and the next clause is
