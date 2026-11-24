@@ -18,6 +18,12 @@
 
 - **The norm of an element of a list of points has the type of one number**
   (CE-1215). With `LQ: list<tuple<real, real>>`, the type of
+- **The incomplete elliptic integrals of a complex amplitude below the real
+  axis keep their digits when the parameter is very small** (CE-1356).
+  `EllipticF(0.3 - 10i, 1e-30).N()` gave `0.3000000040807729 -
+  10.000000012871325i`. It now gives `0.3 - 10i`, as the amplitude above the
+  axis already did. `EllipticE` had the same error.
+
   `Norm(At(LQ, -1))`, `Norm(First(LQ))`, `Abs(At(LQ, -1))` and
   `Hypot(At(LQ, -1), 1)` was `list<number>`, where the value is one number.
   The arguments of the call (`LQ`, `-1`) were read as the coordinates of the

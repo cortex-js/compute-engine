@@ -149,6 +149,20 @@ describe('INCOMPLETE ELLIPTIC INTEGRALS FAR FROM THE REAL AXIS', () => {
     }
   });
 
+  test('F and E at a tiny m are φ on both sides of the real axis', () => {
+    // F(φ|m) = φ + O(m) and E(φ|m) = φ + O(m); 1 − m·sin²φ rounds to 1, so
+    // R_F reduces to R_C(cos²φ, 1), whose arccos takes a large argument
+    // below the real axis when Im φ < 0
+    for (const [re, im] of [
+      [0.3, -10],
+      [0.3, 10],
+      [-2, -15],
+    ]) {
+      close(value('EllipticF', complex(re, im), 1e-30), [re, im], 1e-15);
+      close(value('EllipticE', complex(re, im), 1e-30), [re, im], 1e-15);
+    }
+  });
+
   test('both are odd in φ', () => {
     for (const m of [0.5, -2, complex(1.5, 0.5)]) {
       for (const head of ['EllipticF', 'EllipticE']) {
