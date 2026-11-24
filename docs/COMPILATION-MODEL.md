@@ -234,14 +234,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `D(g(x), x)` gives `cos(x)`, the closed form of the library's `Sin`. The
   program the handler describes, `D(Cos(x), x)`, gives `-sin(x)`. Written
   without the function, `D(Sin(x), x)` declines.
-- `javascript`, `z: complex`, both modes: an
-  intermediate double overflows and the code gives `NaN`
-  where the interpreter has a finite value:
-  - `Tanh(z)` at `z = 1000` gives `NaN`; the interpreter gives `1`.
-  - `Cot(z)`, `Sec(z)`, `Csc(z)` at `z = 0.5 + 1000i` give `NaN`; the
-    interpreter gives `0`.
-  - `Sech(z)`, `Csch(z)` at `z = 1000 + 0.5i` give `NaN`; the interpreter
-    gives `0`.
 - `javascript` (crafted), `z: complex`:
   the complex `Cot` kernel loses precision near 0, off the pole: `Cot(z)` at
   `z = 1e-8 + 2e-8i` gives `1.8014e7 − 3.6029e7i`; the interpreter gives

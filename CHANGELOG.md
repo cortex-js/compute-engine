@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **The tangent, the secant and their cofunctions and hyperbolic forms of a
+  complex number with a large part give a number** (CE-1211).
+  `Tanh(Complex(1000, 0.5)).N()` and `Tan(Complex(0.5, 1000)).N()` gave
+  `NaN`, and `Coth(Complex(1000, 0.5)).N()` gave `0`: the computation
+  divided by `cosh(2t)`, which overflows when the real part (hyperbolic
+  functions) or the imaginary part (circular functions) is more than about
+  355. They now give `1`, `i` and `1`. Compiled JavaScript, which gave
+  `NaN` for `Tan`, `Cot`, `Sec`, `Csc`, `Tanh`, `Coth`, `Sech` and `Csch` of
+  such a value, now gives the same values as the interpreter.
+
 - **The logarithm of a complex number whose real part holds a square or a cube
   keeps its imaginary part** (CE-1208). `Ln(Complex(9, 9)).evaluate()` gave
   `2 Ln(3)` and `Log(Complex(4, 1)).evaluate()` gave `2 Log(2, 10)`: the

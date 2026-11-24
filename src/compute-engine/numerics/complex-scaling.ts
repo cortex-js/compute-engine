@@ -2,7 +2,8 @@ import { Complex } from 'complex.js';
 
 //
 // Scaled replacements for the `complex.js` methods that square the parts of
-// a complex number.
+// a complex number, and for the quotient functions that overflow for a
+// large part (see the end of this header).
 //
 // `complex.js` (version 2.4) computes `|z|`, `ln|z|` and `1/z` from
 // `a² + b²` without scaling: `hypot()` scales only a part of `10⁸` or more,
@@ -79,6 +80,16 @@ import { Complex } from 'complex.js';
 // integral in `numerics/lerch-phi.ts` calls `atan()`, whose absolute error
 // there stays near 10⁻¹⁶.
 //
+// The quotient functions `tan`, `cot`, `sec`, `csc`, `tanh`, `coth`, `sech`
+// and `csch` are replaced too. The original methods divide by
+// `cosh(2t) ± cos(2s)`, with `t` the real part for the hyperbolic functions
+// and the imaginary part for the circular ones. `cosh(2t)` overflows when
+// `|t|` is more than about 355, and the quotient is then `NaN` or `0`,
+// although the value is finite (`tanh(1000 + 0.5i)` is about 1). When `|t|`
+// is finite and more than `QUOTIENT_LARGE`, a replacement uses the leading
+// term of the expansion in `e^(−|t|)` (see `installQuotientFunctions()`).
+// Otherwise it returns the result of the original method.
+//
 
 /** The low end of the range of most methods. */
 const SMALL = 2 ** -500;
@@ -112,6 +123,12 @@ const MIN_NORMAL = 2 ** -1022;
 
 const HALF_PI = Math.PI / 2;
 
+/** Above this `|t|`, the quotient functions use their expansions in
+ * `e^(−|t|)`. At 350, `cosh(2t)` is about `5·10³⁰³` (finite), and the terms
+ * that the expansions leave out are smaller than the leading term by a
+ * factor of about `e^(−700)`. */
+const QUOTIENT_LARGE = 350;
+
 /** The names of the replaced methods. */
 const METHODS = [
   'abs',
@@ -132,6 +149,14 @@ const METHODS = [
   'acoth',
   'acsch',
   'asech',
+  'tan',
+  'cot',
+  'sec',
+  'csc',
+  'tanh',
+  'coth',
+  'sech',
+  'csch',
 ] as const;
 
 type MethodName = (typeof METHODS)[number];
@@ -230,6 +255,11 @@ function asinLogParts(a: number, b: number): [number, number] {
  * of the original method, bit for bit, except for `atanh()` of a value
  * that is not real and is very near 1 or −1, where the original method is
  * not correct.
+ *
+ * Also replace the quotient functions (`tan`, `tanh`, ...) with versions
+ * that do not overflow for a large part (`installQuotientFunctions()`). A
+ * value whose relevant part is at most `QUOTIENT_LARGE` in magnitude gets
+ * the result of the original method, bit for bit.
  *
  * `numerics/numeric-complex.ts` calls this function when it loads. Every
  * bundle that contains `complex.js` (the engine, the `core`, `numerics`,
@@ -557,6 +587,126 @@ export function installComplexScaling(): void {
     if (b === 0) return new Complex(l, a < 0 ? Math.PI : 0);
     return new Complex(l, Math.atan2(-b, a));
   });
+
+  installQuotientFunctions(proto, orig);
+}
+
+/**
+ * Replace the quotient functions of `Complex.prototype` (see the header of
+ * this file). For `z = a + bi`, `t` is `a` for a hyperbolic function and
+ * `b` for a circular one, and `s` is the other part. When `|t|` is finite
+ * and more than `QUOTIENT_LARGE`, with `σ = sign(t)` and `E = e^(−|t|)`:
+ *
+ * | Function | Value                  |
+ * | -------- | ---------------------- |
+ * | `tanh`   | `σ + 2i·sin(2b)·E²`    |
+ * | `coth`   | `σ − 2i·sin(2b)·E²`    |
+ * | `sech`   | `2E·(cos b − iσ·sin b)` |
+ * | `csch`   | `2E·(σ·cos b − i·sin b)` |
+ * | `tan`    | `2·sin(2a)·E² + iσ`    |
+ * | `cot`    | `2·sin(2a)·E² − iσ`    |
+ * | `sec`    | `2E·(cos a + iσ·sin a)` |
+ * | `csc`    | `2E·(sin a − iσ·cos a)` |
+ *
+ * They follow from `cosh t = e^|t|/2·(1 + e^(−2|t|))` and
+ * `sinh t = σ·e^|t|/2·(1 − e^(−2|t|))`: the terms left out are smaller than
+ * the terms kept by a factor of about `E²`, less than `e^(−700)`. The code
+ * writes `sin(2s)` as `2·sin(s)·cos(s)`, because `2s` overflows when `|s|`
+ * is more than half of the largest double. A part that underflows is 0 or
+ * subnormal, with the sign of its leading term (see `twoExp()`).
+ */
+function installQuotientFunctions(proto: Complex, orig: ComplexMethods): void {
+  const isLarge = (t: number): boolean =>
+    Math.abs(t) > QUOTIENT_LARGE && Math.abs(t) <= Number.MAX_VALUE;
+
+  proto.tanh = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(a)) return orig.tanh.call(this);
+    const s2 = 2 * Math.sin(b) * Math.cos(b);
+    return new Complex(Math.sign(a), twoExp(s2, 2 * Math.abs(a)));
+  };
+
+  proto.coth = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(a)) return orig.coth.call(this);
+    const s2 = 2 * Math.sin(b) * Math.cos(b);
+    return new Complex(Math.sign(a), twoExp(-s2, 2 * Math.abs(a)));
+  };
+
+  proto.sech = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(a)) return orig.sech.call(this);
+    const x = Math.abs(a);
+    return new Complex(
+      twoExp(Math.cos(b), x),
+      twoExp(-Math.sign(a) * Math.sin(b), x)
+    );
+  };
+
+  proto.csch = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(a)) return orig.csch.call(this);
+    const x = Math.abs(a);
+    return new Complex(
+      twoExp(Math.sign(a) * Math.cos(b), x),
+      twoExp(-Math.sin(b), x)
+    );
+  };
+
+  proto.tan = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(b)) return orig.tan.call(this);
+    const s2 = 2 * Math.sin(a) * Math.cos(a);
+    return new Complex(twoExp(s2, 2 * Math.abs(b)), Math.sign(b));
+  };
+
+  proto.cot = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(b)) return orig.cot.call(this);
+    const s2 = 2 * Math.sin(a) * Math.cos(a);
+    return new Complex(twoExp(s2, 2 * Math.abs(b)), -Math.sign(b));
+  };
+
+  proto.sec = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(b)) return orig.sec.call(this);
+    const x = Math.abs(b);
+    return new Complex(
+      twoExp(Math.cos(a), x),
+      twoExp(Math.sign(b) * Math.sin(a), x)
+    );
+  };
+
+  proto.csc = function (this: Complex): Complex {
+    const a = this.re;
+    const b = this.im;
+    if (!isLarge(b)) return orig.csc.call(this);
+    const x = Math.abs(b);
+    return new Complex(
+      twoExp(Math.sin(a), x),
+      twoExp(-Math.sign(b) * Math.cos(a), x)
+    );
+  };
+}
+
+/**
+ * `2·f·e^(−x)` for `x > 0`, as `(2f·h)·h` with `h = e^(−x/2)`. When the
+ * product is subnormal, `e^(−x)` alone can be subnormal or 0 and lose digits
+ * that the product has (`2·e^(−745.5)` is the smallest subnormal, but
+ * `e^(−745.5)` is 0). Up to `x = 1416`, `h` is a normal double, so only the
+ * last multiplication rounds to a subnormal. Above, the product is below the
+ * smallest subnormal, and the result is a zero with the sign of `f`.
+ */
+function twoExp(f: number, x: number): number {
+  const h = Math.exp(-x / 2);
+  return 2 * f * h * h;
 }
 
 /**

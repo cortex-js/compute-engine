@@ -1,5 +1,6 @@
 import { Complex } from 'complex.js';
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   installComplexScaling,
   originalComplexMethods,
@@ -477,5 +478,147 @@ describe('engine', () => {
     const s = ce.box(['Sign', z]).N();
     expect(relativeError(s.re, a / ref)).toBeLessThanOrEqual(4);
     expect(relativeError(s.im, b / ref)).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('quotient functions of a value with a large part', () => {
+  // `tan`, `cot`, `sec`, `csc`, `tanh`, `coth`, `sech` and `csch` divide by
+  // `cosh(2t) ± cos(2s)`, which overflows when `|t|` (the real part for a
+  // hyperbolic function, the imaginary part for a circular one) is more
+  // than about 355. Above 350, the replacements use the leading terms of
+  // the expansions in `e^(−|t|)`.
+  const QUOTIENTS = [
+    'tan',
+    'cot',
+    'sec',
+    'csc',
+    'tanh',
+    'coth',
+    'sech',
+    'csch',
+  ] as const;
+  const isHyperbolic = (name: string) => name.endsWith('h');
+  /** The value with `t` as the part that can overflow. */
+  const value = (name: string, t: number, s: number): [number, number] =>
+    isHyperbolic(name) ? [t, s] : [s, t];
+
+  const S = [0, -0, 0.5, -1.3, 2.9, 1e-300, 100, -7e5];
+
+  test.each(QUOTIENTS)('%s gives the original result for |t| ≤ 350', (name) => {
+    const mismatches: string[] = [];
+    for (const t of [0, 1, -20, 349, 350, -350, 200.25])
+      for (const s of S) {
+        const [a, b] = value(name, t, s);
+        const r1 = new Pristine(a, b)[name]();
+        const r2 = new Complex(a, b)[name]();
+        if (!Object.is(r1.re, r2.re) || !Object.is(r1.im, r2.im))
+          mismatches.push(`${a} + ${b}i`);
+      }
+    expect(mismatches).toEqual([]);
+  });
+
+  // Between 350 and 355, the original method is still correct, and the
+  // expansions agree with it. Up to 353, the parts of size `e^(−2|t|)` are
+  // normal doubles, which a relative error can compare.
+  test.each(QUOTIENTS)(
+    '%s agrees with the original method in (350, 353]',
+    (name) => {
+      for (const t of [350.5, 351, 353, -351, -352.75])
+        for (const s of S) {
+          const [a, b] = value(name, t, s);
+          const r1 = new Pristine(a, b)[name]();
+          const r2 = new Complex(a, b)[name]();
+          expect(relativeError(r2.re, r1.re)).toBeLessThanOrEqual(4);
+          expect(relativeError(r2.im, r1.im)).toBeLessThanOrEqual(4);
+        }
+    }
+  );
+
+  test.each([
+    ['tanh', 1000, 0.5, 1, 0],
+    ['tanh', -1000, 0.5, -1, 0],
+    ['coth', 1000, 0.5, 1, -0],
+    ['coth', -1000, -0.5, -1, 0],
+    ['sech', 1000, 0.5, 0, -0],
+    ['csch', -1000, 0.5, -0, -0],
+    ['tan', 0.5, 1000, 0, 1],
+    ['tan', 0.5, -1000, 0, -1],
+    ['cot', 0.5, 1000, 0, -1],
+    ['cot', -0.5, -1000, -0, 1],
+    ['sec', 0.5, 1000, 0, 0],
+    ['csc', 0.5, -1000, 0, 0],
+  ] as const)('%s(%p + %pi)', (name, a, b, re, im) => {
+    const r = new Complex(a, b)[name]();
+    expect(r.re).toBe(re);
+    expect(r.im).toBe(im);
+  });
+
+  // `sech(360 + i)` is `2e^(−360)·(cos 1 − i·sin 1)`, a normal double.
+  test('a small result keeps its digits', () => {
+    const r = new Complex(360, 1).sech();
+    const e = 2 * Math.exp(-360);
+    expect(relativeError(r.re, e * Math.cos(1))).toBeLessThanOrEqual(2);
+    expect(relativeError(r.im, -e * Math.sin(1))).toBeLessThanOrEqual(2);
+  });
+
+  // `2·e^(−745.5)` rounds to the smallest subnormal, although `e^(−745.5)`
+  // rounds to 0.
+  test('a subnormal result is not lost', () => {
+    expect(new Complex(745.5, 0).sech().re).toBe(Number.MIN_VALUE);
+    expect(new Complex(0, -745.5).csc().im).toBe(Number.MIN_VALUE);
+    expect(new Complex(746, 0).sech().re).toBe(0);
+    // `2e^(−710)`, correctly rounded (50-digit reference from the engine).
+    expect(new Complex(710, 0).sech().re).toBe(8.95257245135026e-309);
+  });
+
+  // `2s` overflows for such an `s`; `sin(2s)` is computed as
+  // `2·sin(s)·cos(s)`.
+  test('the other part near the largest double', () => {
+    for (const name of QUOTIENTS) {
+      const [a, b] = value(name, 1000, 1e308);
+      const r = new Complex(a, b)[name]();
+      expect(Number.isNaN(r.re) || Number.isNaN(r.im)).toBe(false);
+    }
+  });
+
+  test('an infinite part gives the original result', () => {
+    for (const name of QUOTIENTS) {
+      const [a, b] = value(name, Infinity, 0.5);
+      const r1 = new Pristine(a, b)[name]();
+      const r2 = new Complex(a, b)[name]();
+      expect([r2.re, r2.im]).toEqual([r1.re, r1.im]);
+    }
+  });
+
+  // The interpreter and compiled JavaScript use these methods.
+  describe('engine and compiled code', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', 'complex');
+    test.each([
+      ['Tanh', 1000, 0.5, 1, 0],
+      ['Coth', 1000, 0.5, 1, 0],
+      ['Coth', -1000, 0.5, -1, 0],
+      ['Tan', 0.5, 1000, 0, 1],
+      ['Cot', 0.5, 1000, 0, -1],
+      ['Sec', 0.5, 1000, 0, 0],
+      ['Csc', 0.5, 1000, 0, 0],
+      ['Sech', 1000, 0.5, 0, 0],
+      ['Csch', 1000, 0.5, 0, 0],
+    ] as const)('%s(%p + %pi)', (op, a, b, re, im) => {
+      const n = ce.box([op, ['Complex', a, b]]).N();
+      // A zero part is compared without its sign.
+      expect(n.re === 0 ? 0 : n.re).toBe(re);
+      expect(n.im === 0 ? 0 : n.im).toBe(im);
+      const ev = ce.box([op, ['Complex', a, b]]).evaluate();
+      expect([ev.re, ev.im]).toEqual([n.re, n.im]);
+
+      const f = compile(ce.box([op, 'z']), { to: 'javascript' });
+      expect(f.success).toBe(true);
+      const v = f.run!({ z: { re: a, im: b } }) as
+        number | { re: number; im: number };
+      const [vr, vi] = typeof v === 'number' ? [v, 0] : [v.re, v.im];
+      expect(vr === 0 ? 0 : vr).toBe(re);
+      expect(vi === 0 ? 0 : vi).toBe(im);
+    });
   });
 });
