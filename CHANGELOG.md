@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **Two regular expressions are equal when their patterns and their sets of
+  flags are equal** (CE-1404). `RegExp("a.c") == RegExp("a.c", "i")` stayed
+  unevaluated; it is now `False`. The order of the flags does not count, and
+  a regular expression without `u` or `v` is read with `u`:
+  `RegExp("a", "im") == RegExp("a", "mi")` and
+  `RegExp("a") == RegExp("a", "u")` are `True`. A regular expression is now
+  unequal to a string or a number: `RegExp("a") == "a"` is `False`.
+
 - **The length of a reversed, sorted or shuffled string counts the
   characters of the result** (CE-1403). A combining mark that moves after a
   letter joins it, so the result can have fewer characters than the
