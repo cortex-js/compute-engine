@@ -115,6 +115,26 @@ describe('an integrand that is a product overflowing against itself', () => {
     }
   });
 
+  test('NIntegrate of an integrand with a typed parameter is 100! (CE-1193)', () => {
+    // The log-space fallback read the parameter names with `sym()`, which
+    // gives no name for `Typed(x, 'real')`, and Monte Carlo gave about 10¹¹⁴.
+    const exact = factorial(100);
+    for (const parameter of [
+      ['Typed', 'x', "'real'"],
+      ['Typed', 'x', "'number'"],
+    ]) {
+      const v = ce
+        .box([
+          'NIntegrate',
+          ['Function', integrand(100), parameter],
+          0,
+          'PositiveInfinity',
+        ])
+        .evaluate();
+      expect(Math.abs(v.re / exact - 1)).toBeLessThan(1e-9);
+    }
+  });
+
   test('an integral larger than the doubles can hold is NaN, not a random value', () => {
     // `170! ≈ 7·10³⁰⁶`: the change of variable of the quadrature overflows.
     const N = ce

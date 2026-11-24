@@ -1849,7 +1849,11 @@ function withLogSpaceFallback<A extends number[]>(
   if (!isTransitivelyPure(fn)) return run;
   run = withComplexAtNaN(ce, fn, run);
   const parameters = fn.ops.slice(1);
-  const names = parameters.map((p) => sym(p));
+  // A typed parameter (`Typed(x, 'real')`) is read by its name; a
+  // destructuring pattern has none.
+  const names = parameters.map(
+    (p) => functionLiteralParameterName(p) || undefined
+  );
   if (names.some((n) => n === undefined)) return run;
   const body = logSpaceProduct(fn.op1, names as string[]);
   if (body === undefined) return run;

@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **`NIntegrate` of a function whose parameter has a declared type now gives
+  the right value when the integrand overflows at some samples.**
+  `NIntegrate(Function(x^100 * Exp(-x), Typed(x, 'real')), 0, +oo)` gave a
+  different wrong value at each call, about `10¹¹⁴`, and now gives
+  `9.332621544394413e+157` (`100!`), as the same function with an untyped
+  parameter does.
+
 ### Performance
 
 - **A compiled formula whose functions call a small function in several sums
