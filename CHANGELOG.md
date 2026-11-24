@@ -14,6 +14,18 @@
   `Filter`, `FlatMap` and `Fold`, and the collections reference, now say which
   argument comes first and why `Map` differs.
 
+### Performance
+
+- **The LaTeX of a product with a power to a symbolic exponent is faster to
+  compute.** To write `Multiply(Abs(x), Power(2, Negate(n)))` as
+  `\frac{|x|}{2^n}`, the serializer first tried to split the product into a
+  numerator and a denominator, which built and typed new expressions and gave
+  the same product back. It no longer tries when the exponent of a power is not
+  an exact rational number (`2^{-n}`, `e^{-2x}`, `10^n`, `x^{1.5}`). For the
+  1,000 members of `\sum_{n=0}^{3}\frac{1}{2^n}|\sin(2^nx+\frac{k}{1000})|`, `k`
+  from 0 to 999, boxing each member and reading its `latex` takes about a third
+  less time. The LaTeX does not change.
+
 ## 0.201.3 _2026-11-24_
 
 ### Performance

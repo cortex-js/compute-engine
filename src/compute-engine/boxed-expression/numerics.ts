@@ -17,6 +17,23 @@ import { exactIntegerValue } from '../numeric-value/exact-integer-value.js';
 import { MathJsonExpression } from '../types.js';
 import { isNumber } from './type-guards.js';
 
+/**
+ * The exponent `x` of a power (or the index of a root) as a rational, when
+ * it is exact. A float exponent is not read as a rational, also when its
+ * value is an integer: `x^{2.0}` keeps its float exponent, and is grouped as
+ * a term with an exponent that is not a rational, as `x^{2.5}` is. Reading
+ * `2.0` as the rational `2` made `3x^{2.0}` evaluate to `3x^2`.
+ *
+ * `Product` takes a power or a root apart only when this gives a rational,
+ * and the prettified MathJSON serializer skips the split of a product into
+ * a numerator and a denominator with the same test
+ * (`mayContributeDenominator()` in `serialize.ts`).
+ */
+export function exactRationalExponent(x: Expression): Rational | undefined {
+  if (isNumber(x) && !x.isExact) return undefined;
+  return asRational(x);
+}
+
 export function asRational(expr: Expression): Rational | undefined {
   if (!isNumber(expr)) return undefined;
   const num = expr.numericValue;

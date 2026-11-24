@@ -14,6 +14,7 @@ import {
   machineDenominator,
   machineNumerator,
   isZero,
+  isNeg,
   neg,
 } from '../numerics/rationals.js';
 import {
@@ -31,7 +32,11 @@ import { displayDigits } from '../numeric-value/big-numeric-value.js';
 
 import { order } from './order.js';
 import { mayBeMatrixPowerBase } from './matrix-operand.js';
-import { asRational, asSmallInteger } from './numerics.js';
+import {
+  asRational,
+  asSmallInteger,
+  exactRationalExponent,
+} from './numerics.js';
 import type {
   IComputeEngine as ComputeEngine,
   Metadata,
@@ -182,10 +187,17 @@ function serializeSubtract(
  * (`Product.asNumeratorDenominator()`). `Product` takes an exact integer
  * exponent out of a power and splits its base too (`(a/x)^2` is `a^2·x^{-2}`),
  * and it splits a negation and a nested product into their parts, so the
- * test looks into them the same way: a `Divide`, a power or root whose
- * exponent is not a known non-negative real number or whose base can
- * contribute a denominator, and a negation or product of such a factor. Any
- * other factor stays in the numerator, so a product of such factors is not a
+ * test looks into them the same way: a `Divide`, a power or root with an
+ * exact rational exponent that is negative or whose base can contribute a
+ * denominator, and a negation or product of such a factor. Any other factor
+ * stays in the numerator, so a product of such factors is not a fraction.
+ *
+ * `Product` takes a power or a root apart only when its exponent is an exact
+ * rational number (`exactRationalExponent()`). A power with any other
+ * exponent (`2^{-n}`, `x^{1.5}`) is one factor with the exponent 1, in the
+ * numerator, whatever its base. So `Multiply(|u|, 2^{-n})` is written as it
+ * is, without the split: the split gives the same product back. Its LaTeX is
+ * still `\frac{|u|}{2^n}`: the LaTeX serializer of `Multiply` makes that
  * fraction.
  *
  * A number literal is never in the denominator, also a rational one such as
@@ -203,11 +215,11 @@ function mayContributeDenominator(x: Expression): boolean {
   if (op === 'Negate' || op === 'Multiply')
     return x.ops.some(mayContributeDenominator);
   if (op === 'Sqrt') return mayContributeDenominator(x.op1);
-  if (op === 'Power' || op === 'Root')
-    return (
-      mayContributeDenominator(x.op1) ||
-      !(isNumber(x.op2) && x.op2.isExact && x.op2.im === 0 && x.op2.re >= 0)
-    );
+  if (op === 'Power' || op === 'Root') {
+    const r = exactRationalExponent(x.op2);
+    if (r === undefined) return false;
+    return isNeg(r) || mayContributeDenominator(x.op1);
+  }
   return false;
 }
 

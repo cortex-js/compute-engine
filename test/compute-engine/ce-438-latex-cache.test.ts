@@ -194,6 +194,42 @@ describe('CE-1018: a product with a number literal factor', () => {
     }
   });
 
+  // `Product` takes a power apart only when its exponent is an exact rational
+  // number; any other power is a factor of the numerator, so these products
+  // are not split. The LaTeX serializer of `Multiply` still writes the first
+  // and the last as fractions. The LaTeX and the MathJSON read back as the
+  // same expression, except the LaTeX of the first, which reads back as a
+  // quotient (CE-1779).
+  test.each([
+    ['|x|\\cdot2^{-n}', '\\frac{\\vert x\\vert}{2^{n}}', false],
+    ['xe^{-2x}', 'x\\exp(-2x)', true],
+    [
+      'y\\cdot(\\frac{n}{e})^n',
+      'y\\times(\\frac{n}{\\exponentialE})^{n}',
+      true,
+    ],
+    ['x^{1.5}y', 'yx^{1.5}', true],
+    ['3\\cdot10^n', '3\\times10^{n}', true],
+    ['\\frac{1}{2}e^{w}', '\\frac{\\exponentialE^{w}}{2}', true],
+  ])(
+    '%s, with no power of exact rational exponent, is written %s with no split',
+    (input, expected, latexRoundTrip) => {
+      const ce = new ComputeEngine();
+      const e = ce.parse(input);
+      const { calls, restore } = countingProducts();
+      let json: unknown;
+      try {
+        expect(e.latex).toBe(expected);
+        json = e.toMathJson();
+        expect(calls()).toBe(0);
+      } finally {
+        restore();
+      }
+      expect(ce.parse(e.latex).isSame(e)).toBe(latexRoundTrip);
+      expect(ce.box(json as never).isSame(e)).toBe(true);
+    }
+  );
+
   test.each([
     ['\\frac{1}{2}\\cdot\\frac{1}{x}\\cdot y', '\\frac{y}{2x}'],
     ['\\frac{1}{2}x^{-2}', '\\frac{1}{2x^2}'],

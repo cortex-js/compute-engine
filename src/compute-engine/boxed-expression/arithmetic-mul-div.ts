@@ -114,7 +114,11 @@ import {
   flattenHoldingBarriers,
   flattenKeepingNotationalProducts,
 } from './flatten.js';
-import { asRational, asSmallInteger } from './numerics.js';
+import {
+  asRational,
+  asSmallInteger,
+  exactRationalExponent,
+} from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { addArray } from './arithmetic-add.js';
@@ -204,18 +208,6 @@ function isLiteral(op: Expression, n: number): boolean {
   if (!isNumber(op)) return false;
   if (n !== 0 && !op.isExact) return false;
   return op.isSame(n);
-}
-
-/**
- * The exponent `x` of a power (or the index of a root) as a rational, when
- * it is exact. A float exponent is not read as a rational, also when its
- * value is an integer: `x^{2.0}` keeps its float exponent, and is grouped as
- * a term with an exponent that is not a rational, as `x^{2.5}` is. Reading
- * `2.0` as the rational `2` made `3x^{2.0}` evaluate to `3x^2`.
- */
-function exactRationalExponent(x: Expression): Rational | undefined {
-  if (isNumber(x) && !x.isExact) return undefined;
-  return asRational(x);
 }
 
 //
