@@ -359,4 +359,30 @@ describe('BINDING UNITS: CACHES', () => {
     expect(v).toBe(10);
     expect(c2).toBeGreaterThan(0);
   });
+
+  // CE-1342
+  test('a type cached before a write on a symbol made outside a boxing sees the write', () => {
+    const ce = engine();
+    const x = ce.symbol('x');
+    const t = ce.function('Tuple', [x]);
+    expect(t.type.toString()).toBe('tuple<unknown>');
+    ce.function('Add', [x, 1]);
+    expect(x.type.toString()).toBe('number');
+    expect(t.type.toString()).toBe('tuple<number>');
+
+    // A name whose definition has the type `unknown`.
+    ce.declare('y', 'unknown');
+    const y = ce.symbol('y');
+    const u = ce.function('Tuple', [y]);
+    expect(u.type.toString()).toBe('tuple<unknown>');
+    ce.function('Add', [y, 1]);
+    expect(u.type.toString()).toBe('tuple<number>');
+  });
+
+  test('two constructions that start with an interned symbol are separate units', () => {
+    const ce = engine();
+    ce.function('Add', [ce.Pi, 'z']);
+    const t = ce.function('Tuple', [ce.Pi, 'z']);
+    expect(t.op2.type.toString()).toBe('unknown');
+  });
 });

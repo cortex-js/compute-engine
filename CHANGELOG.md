@@ -2,6 +2,12 @@
 
 ### Resolved Issues
 
+- **The type of an expression follows a later use of a symbol made with
+  `ce.symbol()`** (CE-1342). With `x = ce.symbol('x')` and
+  `t = ce.function('Tuple', [x])`, the type of `t` stayed `tuple<unknown>`
+  after `ce.function('Add', [x, 1])` gave `x` the type `number`. It is now
+  `tuple<number>`, as with `x = ce.box('x')`.
+
 - **A function that calls a name that held a number calls it once the name is
   a function** (CE-1333). After `f(t) := a(t+1)`, `ce.assign('a', 3)` and
   `a(x) := x^2`, `f(1)` gave `2a`: the body kept the product `a·(t+1)`

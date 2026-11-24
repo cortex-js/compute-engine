@@ -22,8 +22,11 @@ export function initializeCommonSymbols(
   commonSymbols: CommonSymbolTable
 ): void {
   for (const symbol of Object.keys(commonSymbols)) {
+    // No environment: an interned symbol is shared by all expressions, and
+    // its type is explicit, so no use writes a requirement on it.
     commonSymbols[symbol] = new BoxedSymbol(engine, symbol, {
       def: lookupDefinition(engine, symbol),
+      env: undefined,
     });
   }
 }

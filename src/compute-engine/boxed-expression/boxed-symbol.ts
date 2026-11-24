@@ -388,10 +388,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   /**
    * The environment of the binding unit of this occurrence: that of the
-   * outermost boxing that made it (`binding-unit.ts`). A symbol made outside
-   * a boxing gets an environment of its own at the first requirement
-   * written on it. A field of every symbol, so that all symbols have one
-   * shape; the constructor sets it only for a symbol that a boxing makes.
+   * outermost boxing that made it (`binding-unit.ts`). A canonical symbol
+   * made outside a boxing gets an environment of its own when it is made.
+   * A field of every symbol, so that all symbols have one shape; it is
+   * undefined for a symbol that is not canonical, and for a symbol that the
+   * engine shares between all expressions (`ce.Pi`) and its copies (the
+   * `env` option of the constructor).
    * @internal
    */
   #env: UnitEnvironment | undefined;
@@ -481,6 +483,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       /** With `def`: the scope whose chain gave `def`. The current scope by
        * default. */
       defHome?: Scope;
+      /** When the key is present: the environment of the occurrence, also
+       * `undefined`, in place of the one that the constructor chooses. A
+       * copy of an occurrence keeps its environment (`_unshared()`). A
+       * symbol that the engine shares between all expressions (`ce.Pi`)
+       * has none, so that the constructions that use it stay separate
+       * units (`unitEnvironmentOfOperands()`). */
+      env?: UnitEnvironment;
     }
   ) {
     super(ce, options?.metadata);
@@ -494,8 +503,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     this.#def = options?.def;
     if (options?.def !== undefined)
       this._defHome = options.defHome ?? ce.context?.lexicalScope;
-    const env = ce._boxingState.unitEnvironment();
-    if (env !== undefined) this._env = env;
+    // A canonical symbol made outside a boxing gets an environment of its
+    // own now, not at its first write: a type cached before that write
+    // records the read of this environment, and a read recorded with no
+    // environment does not see a later write in it.
+    if (options !== undefined && 'env' in options) this._env = options.env;
+    else {
+      const env = ce._boxingState.unitEnvironment();
+      if (env !== undefined) this._env = env;
+      else if (options?.def !== undefined || options?.homeScope !== undefined)
+        this._env = new UnitEnvironment();
+    }
     if (options?.def === undefined && options?.homeScope !== undefined) {
       noteFreeNameMade(ce, name);
       // A free name that an operation makes takes the home scope of the
@@ -556,9 +574,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       },
       def: this._def,
       defHome: this._defHome,
+      // A copy is the same occurrence: it keeps the unit and the home scope.
+      env: this._env,
     });
-    // A copy is the same occurrence: it keeps the unit and the home scope.
-    result._env = this._env;
     if (this._homeScope !== undefined) result._homeScope = this._homeScope;
     result._parseScope = this._parseScope;
     // A copy for diagnostics keeps the structural form of its source.
@@ -1381,7 +1399,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * (`_resolvedFreeSymbol()`), or this occurrence when the evaluation gave
    * `resolved` itself (the definition has no value, or holds it). The
    * occurrence keeps the environment of its unit, and so the type that the
-   * uses of the unit require; `resolved` has none.
+   * uses of the unit require; `resolved` is a new occurrence, which is not
+   * in that unit.
    */
   private _orFreeName(resolved: BoxedSymbol, result: Expression): Expression {
     return result === resolved ? this : result;
