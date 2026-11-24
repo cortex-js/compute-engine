@@ -102,6 +102,34 @@ describe('Statements that can pause', () => {
     expect(run.reached).toEqual(expect.arrayContaining(['let k = t', 'k + 1']));
   });
 
+  test('the body of a function with no parameters', async () => {
+    const run = await check(
+      'let a = 0\nlet cb = () => do {\n  a = a + 1\n  a\n}\ncb()'
+    );
+    expect(run.value).toBe('1');
+    expect(run.reached).toEqual([
+      'let a = 0',
+      'let cb = () => do {\n  a = a + 1\n  a\n}',
+      'cb()',
+      'a = a + 1',
+      'a',
+    ]);
+  });
+
+  test('the body of a recursive function with no parameters', async () => {
+    const run = await check(
+      'let n = 0\nlet f = () => do {\n  n = n + 1\n  if n < 2 { f() } else { n }\n}\nf()'
+    );
+    expect(run.value).toBe('2');
+    expect(run.reached.filter((s) => s === 'n = n + 1')).toHaveLength(2);
+  });
+
+  test('the body of a function with no parameters that is not a block', async () => {
+    const run = await check('let a = 1\nlet g = () => a + 1\ng()');
+    expect(run.value).toBe('2');
+    expect(run.reached).toContain('a + 1');
+  });
+
   test('the predicate of `any` and `all`', async () => {
     const run = await check(
       'let a = any([1, 2, 3], k => do { let t = k; t > 1 })\nlet b = all([1, 2, 3], k => do { let u = k; u > 0 })\na && b'

@@ -261,6 +261,17 @@
   `NaN`), and `x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does,
   still fall back to the interpreter.
 
+### Resolved Issues
+
+- **A breakpoint in the body of a function with no parameters stops the
+  debugger** (CE-1725). In a debug run of `executeEpsilAsync()`, and with
+  `applyEpsilAsync(ce, cb, [], { debug })`, the statements of
+  `let cb = () => do { a = a + 1; a }` did not call `beforeStatement` when
+  the program called `cb()`; with one parameter (`t => do { … }`) they did.
+  For the same cause, `evaluateAsync()` of
+  `["Apply", ["Function", ["Block", …]]]` did not evaluate an operator in the
+  block that has only an `evaluateAsync` handler.
+
 ## 0.200.1 _2026-11-23_
 
 ### New Features
