@@ -3420,6 +3420,12 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
  * Nothing is evaluated here: the cost of an exact evaluation is paid only
  * by a re-read near a jump.
  *
+ * The caller has evaluated every argument before it records them, and a
+ * source is read again later still. So when an argument is not pure, it
+ * may have assigned a variable that another argument read
+ * (`g(x/3, Block(x := 5, 1))`), and no source that reads a variable is
+ * recorded: only a source whose symbols are constants.
+ *
  * The application of a function literal with a one-statement body also
  * reads these sources: when one of them differs from its approximated
  * argument, it puts the sources in the body in place of the parameters
@@ -3429,35 +3435,60 @@ export function exactArgumentSources(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression | undefined> {
-  return ops.map((op) => {
-    if (isNumber(op)) return isExactRealLiteral(op) ? op : undefined;
-    if (isSymbol(op)) {
-      const def = ce.lookupDefinition(op.symbol);
-      if (def === undefined || !('value' in def)) return undefined;
-      const recorded = exactArgumentSourceOf(
-        def.value,
-        ce.context.lexicalScope
-      );
-      if (recorded !== undefined) return recorded;
-      const value = ce._getSymbolValue(op.symbol);
-      if (value !== undefined && isExactRealLiteral(value)) return value;
-      // A value that is an expression is recorded as an expression written
-      // in place of the symbol would be (the last rule below).
-      if (
-        value !== undefined &&
-        isFunction(value) &&
-        !containsFreeSymbol(value) &&
-        isTransitivelyPure(value)
-      )
-        return value;
-      // A constant whose value is not an exact literal (`Pi`, whose stored
-      // value is a float held until `.N()`) is its own exact source: it is
-      // pure, and it means the same from inside the function.
-      return def.value.isConstant ? op : undefined;
-    }
-    if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
-    return isTransitivelyPure(op) ? op : undefined;
+  const pure = ops.map((op) => isTransitivelyPure(op));
+  const sources = ops.map((op, i) => exactArgumentSource(ce, op, pure[i]));
+  if (pure.every((p) => p)) return sources;
+  return sources.map((source, i) =>
+    source === undefined ||
+    readsVariable(ce, ops[i]) ||
+    readsVariable(ce, source)
+      ? undefined
+      : source
+  );
+}
+
+/**
+ * True when `expr` reads a symbol that is not a constant: a variable, a
+ * parameter, or a name with no definition here (the index of a `Sum`).
+ */
+function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
+  return expr.symbols.some((s) => {
+    const def = ce.lookupDefinition(s);
+    return def === undefined || !('value' in def) || !def.value.isConstant;
   });
+}
+
+/** The source of one written argument `op` (`exactArgumentSources`);
+ * `pure` tells whether `op` is transitively pure. */
+function exactArgumentSource(
+  ce: ComputeEngine,
+  op: Expression,
+  pure: boolean
+): Expression | undefined {
+  if (isNumber(op)) return isExactRealLiteral(op) ? op : undefined;
+  if (isSymbol(op)) {
+    const def = ce.lookupDefinition(op.symbol);
+    if (def === undefined || !('value' in def)) return undefined;
+    const recorded = exactArgumentSourceOf(def.value, ce.context.lexicalScope);
+    if (recorded !== undefined) return recorded;
+    const value = ce._getSymbolValue(op.symbol);
+    if (value !== undefined && isExactRealLiteral(value)) return value;
+    // A value that is an expression is recorded as an expression written
+    // in place of the symbol would be (the last rule below).
+    if (
+      value !== undefined &&
+      isFunction(value) &&
+      !containsFreeSymbol(value) &&
+      isTransitivelyPure(value)
+    )
+      return value;
+    // A constant whose value is not an exact literal (`Pi`, whose stored
+    // value is a float held until `.N()`) is its own exact source: it is
+    // pure, and it means the same from inside the function.
+    return def.value.isConstant ? op : undefined;
+  }
+  if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
+  return pure ? op : undefined;
 }
 
 /**
@@ -3541,13 +3572,8 @@ function exactBoundArguments(
     if (source === undefined || isSameWritten(source, args[i]))
       return undefined;
     // A source is evaluated again here, after the caller evaluated every
-    // argument: a variable it reads may have been assigned by a later
-    // argument since (`f(x/3, Block(x := 5, 1))`). Only constants are read.
-    const readsVariable = source.symbols.some((s) => {
-      const def = ce.lookupDefinition(s);
-      return def === undefined || !('value' in def) || !def.value.isConstant;
-    });
-    if (readsVariable) return undefined;
+    // argument. It reads a variable only when no argument can have assigned
+    // one (`exactArgumentSources`).
     return isCheapWrittenArgument(source) ? source : undefined;
   };
   if (!args.some((_, i) => candidate(i) !== undefined)) return args;

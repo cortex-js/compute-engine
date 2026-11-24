@@ -2,6 +2,17 @@
 
 ### Resolved Issues
 
+- **Under `.N()`, a function no longer reads an argument after a later
+  argument changed a variable that the first argument uses** (CE-1439). With
+  `x := 1` and `g := (y, w) => Floor(3y)`, `g(x/3, Block(x := 5, 1)).N()`
+  gave `5`. When an argument is not pure, the function now reads an argument
+  that uses a variable from its approximation, as `Floor` does for an operand
+  that is not pure: the value is `0`, the floor of three times the float of
+  `1/3`. When every argument is pure, a function whose body returns early
+  reads such an argument exactly: with
+  `r := y => Block(If(y > 0, Return(Floor(3y))), 7)`, `r(x/3).N()` is now
+  `1`, not `0`.
+
 - **A numerical derivative, integral or limit reads a variable that holds a
   formula** (CE-1434). With `G := sin(x)`, `ND(x => G, 1)` stayed unevaluated
   and `NIntegrate(x => G, 0, 1)` gave `NaN`; they now give `cos(1)` and
