@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **The float quantile of a binomial or Poisson distribution is right just
+  above a jump of the CDF and in the tails** (CE-1453).
+  `Quantile(BinomialDistribution(1, 1/2), 0.5000000000001)` was `0`; it is
+  now `1`, since `CDF(0) = 1/2` is below `p`. Every `p` below `10^-12` gave
+  `0`: `Quantile(BinomialDistribution(100, 1/2), 1e-29)` is now `1`. The
+  search compared the CDF with `p − 10^-12`; it now uses a tolerance of
+  `10^-14` relative to the tail that holds `p`. `Quantile(CDF(k))` still
+  gives `k` back, also for a CDF value computed at a precision above machine.
+
 - **A double integral with a singular point is faster** (CE-1288). The check
   for a pole that moves with another integration variable now skips each
   point of its grid where no divisor of the integrand has a zero near the

@@ -42,6 +42,7 @@ import {
   evaluateRegularizedBetaBetween,
 } from './generalized-special-forms.js';
 import {
+  type AccurateDiscreteCDF,
   bigRational,
   binomialQuantile,
   binomialQuantileExact,
@@ -58,6 +59,8 @@ import {
   poissonQuantile,
   poissonQuantileExact,
 } from '../numerics/distributions.js';
+import type { BigNum } from '../numerics/types.js';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { asRational, asSmallInteger } from '../boxed-expression/numerics.js';
 import {
   guardDigitsN,
@@ -2015,6 +2018,51 @@ export function continuousDistributionClosedForms(
   );
 }
 
+/** Digits of the bignum CDF that confirms a float discrete quantile: enough
+ * to resolve a few ulps of a double `p` relative to the tail that holds it,
+ * since that tail is at least `2^−53` for a double `p` below 1. */
+const ACCURATE_DISCRETE_CDF_DIGITS = 30;
+
+/** The largest `λ` of a Poisson whose float quantile is confirmed with the
+ * bignum CDF: `bigGammaQ` does not check the deadline, and its cost grows
+ * with `λ` (about 50 ms at `10^7`, 500 ms at `10^9`). Above it the float
+ * search uses the machine kernel alone. */
+const ACCURATE_POISSON_MAX_LAMBDA = 1e7;
+
+/**
+ * The bignum CDF of a discrete distribution that `discreteQuantile` uses to
+ * confirm its result (`AccurateDiscreteCDF`). `kernel(k, prec)` is
+ * `P(X ≤ k)` at the integer `k`, computed with `prec` digits, NaN where it
+ * has no value. Each `k` is computed once.
+ */
+function accurateDiscreteCDF(
+  kernel: (k: number, prec: number) => BigNum
+): AccurateDiscreteCDF {
+  const values = new Map<number, BigNum>();
+  const at = (k: number): BigNum => {
+    let v = values.get(k);
+    if (v === undefined) {
+      v = kernel(k, ACCURATE_DISCRETE_CDF_DIGITS);
+      values.set(k, v);
+    }
+    return v;
+  };
+  return {
+    cdf: (k) => at(k).toNumber(),
+    sf: (k) => BigDecimal.ONE.sub(at(k)).toNumber(),
+  };
+}
+
+/** The value of the real expression `x` as a bignum with
+ * `ACCURATE_DISCRETE_CDF_DIGITS` digits, NaN when it has none. */
+function accurateBignum(ce: ComputeEngine, x: Expression): BigNum {
+  const v = ce._withTransientPrecision(ACCURATE_DISCRETE_CDF_DIGITS, () =>
+    x.N()
+  );
+  if (!isNumber(v) || v.im !== 0) return BigDecimal.NAN;
+  return v.bignumRe ?? ce.bignum(v.re);
+}
+
 function distributionQuantile(
   ce: ComputeEngine,
   dist: Expression,
@@ -2066,11 +2114,14 @@ function distributionQuantile(
         return isFiniteRealLiteral(n) ? n : ce.PositiveInfinity;
       // A discrete quantile has no closed form. Under `.N()` (or with a
       // float operand) it is the float search of `numerics/distributions.ts`,
-      // which compares the machine CDF against `p` with a tolerance
-      // (`prob - 1e-12`) so that the `Quantile(CDF(k)) = k` round trip
-      // survives round-off, and can therefore miss by one support point when
-      // `p` is within that tolerance of a CDF jump
-      // (`Quantile(Binomial(1, 1/2), 1/2 + 10^-13)`). Under `evaluate()` with
+      // which compares the machine CDF, and a bignum CDF (`accurate`),
+      // against `p` with a tolerance (`10^−14` relative to the tail, and
+      // `6·10^−16` absolute above ½) so that the `Quantile(CDF(k)) = k`
+      // round trip survives round-off, and can therefore give a support
+      // point too low when `p` is within that tolerance above a CDF jump
+      // (`Quantile(Binomial(1, 1/2), 1/2 + 10^-15)`), several points of a
+      // wide distribution when `1 − p` is near `10^−15`.
+      // Under `evaluate()` with
       // exact operands it is the exact search, which decides each
       // `CDF(k) ≥ p` with bigint rationals; it gives no value (the
       // application stays symbolic) for an operand that is not rational or
@@ -2092,7 +2143,23 @@ function distributionQuantile(
       const ppv = litVal(p0);
       if (nn === undefined || ppv === undefined || pv === undefined)
         return undefined;
-      return ce.number(binomialQuantile(nn, ppv, pv, ce._deadline));
+      // CDF(k) = I_{1−p}(n−k, k+1), as `CDF` evaluates it at a precision
+      // above machine.
+      const q = accurateBignum(ce, sub(ce.One, p0));
+      const accurate = accurateDiscreteCDF((k, prec) =>
+        k >= nn
+          ? BigDecimal.ONE
+          : k < 0
+            ? BigDecimal.ZERO
+            : bigBetaRegularized(
+                ce,
+                q,
+                ce.bignum(nn - k),
+                ce.bignum(k + 1),
+                prec
+              )
+      );
+      return ce.number(binomialQuantile(nn, ppv, pv, ce._deadline, accurate));
     }
 
     case 'PoissonDistribution': {
@@ -2117,7 +2184,15 @@ function distributionQuantile(
       }
       const lv = litVal(lambda);
       if (lv === undefined || pv === undefined) return undefined;
-      return ce.number(poissonQuantile(lv, pv, ce._deadline));
+      // CDF(k) = Q(k+1, λ).
+      let accurate: AccurateDiscreteCDF | undefined;
+      if (lv <= ACCURATE_POISSON_MAX_LAMBDA) {
+        const l = accurateBignum(ce, lambda);
+        accurate = accurateDiscreteCDF((k, prec) =>
+          k < 0 ? BigDecimal.ZERO : bigGammaQ(ce, ce.bignum(k + 1), l, prec)
+        );
+      }
+      return ce.number(poissonQuantile(lv, pv, ce._deadline, accurate));
     }
 
     case 'StudentTDistribution':
