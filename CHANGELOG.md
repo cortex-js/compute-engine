@@ -14,6 +14,21 @@
   `Filter`, `FlatMap` and `Fold`, and the collections reference, now say which
   argument comes first and why `Map` differs.
 
+- **A function that passes a callback to a function that keeps it no longer
+  needs a `scope` declaration** (CE-1773). In Epsil, with
+  `function later(h) { register([h]) }` (where the host function `register`
+  keeps the handler and calls it later),
+  `function scene() { later(e => do { r = r + 1 }) }` was refused with
+  "writes outside a function require a declared `scope` effect", although
+  `scene` does not change `r`. It is now accepted: a callback given to a
+  function defined in the program, or to a protocol method, counts as a write
+  by the caller only when the body of that function visibly calls it. With
+  `function callIt(g) { g(1) }`,
+  `function f() { callIt(x => do { r = r + x }) }` is still refused, and so is
+  `function f() { map(x => do { r = r + x }, [1, 2]) }`. The effects of a
+  function are unchanged: `scene` still has the `scope` effect of its
+  callback.
+
 ### Performance
 
 - **The LaTeX of a product with a power to a symbolic exponent is faster to

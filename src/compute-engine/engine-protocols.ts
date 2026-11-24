@@ -100,7 +100,11 @@ import {
   isValueDef,
   updateDef,
 } from './boxed-expression/utils.js';
-import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
+import {
+  isReplaceableOperatorShell,
+  PROTOCOL_DISPATCHER_MARK,
+  PROTOCOL_LIBRARY_TWIN_MARK,
+} from './boxed-expression/definition-guards.js';
 import { checkArity, checkType } from './boxed-expression/validate.js';
 import { flatten } from './boxed-expression/flatten.js';
 import {
@@ -4805,13 +4809,13 @@ export function declareProtocolImplementationImpl(
  * exempt from `OPERATOR_DEF_KEYS` validation (a spread of a boxed definition
  * carries them), and every other marker in the engine is stamped post-install
  * for that reason. */
-const DISPATCHER = '_protocolDispatcher';
+const DISPATCHER = PROTOCOL_DISPATCHER_MARK;
 
 /** Second marker on a dispatcher installed in an Epsil batch: the standard
  * library operator whose Epsil spelling is the member name (`Fill` for
  * `fill`). A bare call falls back to it when no implementation of the member
  * applies to the first argument (CE-1552, {@link libraryTwinOf}). */
-const LIBRARY_TWIN = '_protocolLibraryTwin';
+const LIBRARY_TWIN = PROTOCOL_LIBRARY_TWIN_MARK;
 
 interface DispatcherMarker {
   [DISPATCHER]?: true;

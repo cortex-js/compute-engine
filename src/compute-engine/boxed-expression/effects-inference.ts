@@ -72,6 +72,7 @@ import {
   sym,
 } from './type-guards.js';
 import { restrictionParts } from './conditional-value.js';
+import { protocolDispatcherMarks } from './definition-guards.js';
 import {
   effectiveDischarge,
   blockStatementsOf,
@@ -89,6 +90,7 @@ import {
 import { substituteDeclaredBounds } from './generic-instantiation.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import {
+  functionLiteralParameterName,
   functionLiteralParameterNames,
   destructuringParameterType,
   functionLiteralBody,
@@ -153,8 +155,10 @@ export interface InferredLiteralEffects {
   /** True when the walk POSITIVELY proved a world mutation: an unconfined
    * write or `Assume` in the body, or an application of a resolved callee /
    * annotated callback parameter whose effect set concretely contains
-   * `scope`. Unlike the `scope` label in {@link effects}, this bit survives
-   * the `any` collapse AND is never set by conservatism (an unresolved head's
+   * `scope`. A callback given to a call is such a proof only when the call
+   * is known to invoke it (`Walker.provesInvocation`); its effects join
+   * {@link effects} either way. Unlike the `scope` label in
+   * {@link effects}, this bit survives the `any` collapse AND is never set by conservatism (an unresolved head's
    * `{any}` does not set it) — it is the trigger of the default-`!scope`
    * ceiling on bare-slot definitions (`docs/EFFECTS-MODEL.md`, "Scope is
    * opt-in"; ruled 2026-08-15). */
@@ -3561,37 +3565,140 @@ class Walker {
     for (let i = start; i < ops.length; i++) {
       if (def !== undefined && !def.invokesAt(i)) continue;
       const op = ops[i];
-
-      // An inline literal in an invoking position: project its latent set.
-      if (isFunction(op, 'Function')) {
-        walkLiteral(
-          this.ce,
-          op,
-          this.state,
-          this.selfName,
-          this.depth + 1,
-          this.expanding
-        );
-        continue;
-      }
-
+      const literal = isFunction(op, 'Function');
       const name = sym(op);
-      if (name === undefined) continue;
 
-      // `applyNamed` already encodes every resolution rule — parameter
-      // shadowing, local literals, the neutral self-reference, operator
-      // definitions (with the `draws` / `readsRandomFrame` bits), value
-      // bindings, and the unresolved-`{any}` case. Reuse it rather than
-      // reimplement it; the guard below is only about WHICH names may reach
-      // its unresolved arm.
+      // An inline literal in an invoking position projects its latent set.
+      // For a name, `applyNamed` already encodes every resolution rule —
+      // parameter shadowing, local literals, the neutral self-reference,
+      // operator definitions (with the `draws` / `readsRandomFrame` bits),
+      // value bindings, and the unresolved-`{any}` case. Reuse it rather
+      // than reimplement it; the guard below is only about WHICH names may
+      // reach its unresolved arm.
       if (
-        this.params.has(name) ||
-        this.localLiterals.has(name) ||
-        name === this.selfName ||
-        this.isFunctionValued(name) ||
-        acceptsCallable(def)
+        !literal &&
+        (name === undefined ||
+          !(
+            this.params.has(name) ||
+            this.localLiterals.has(name) ||
+            name === this.selfName ||
+            this.isFunctionValued(name) ||
+            acceptsCallable(def)
+          ))
       )
-        this.applyNamed(name);
+        continue;
+      const project = (): void => {
+        if (literal)
+          walkLiteral(
+            this.ce,
+            op,
+            this.state,
+            this.selfName,
+            this.depth + 1,
+            this.expanding
+          );
+        else this.applyNamed(name);
+      };
+
+      // The latent set always joins the effects. It is PROOF of a mutation
+      // (`escapingWrite`) only when the call is known to invoke the operand:
+      // see {@link provesInvocation}.
+      if (
+        this.state.escapingWrite ||
+        this.provesInvocation(head, ops, i, start)
+      )
+        project();
+      else this.withoutProof(project);
+    }
+  }
+
+  /**
+   * Whether the call `head(ops)` is KNOWN to invoke its operand `i` during
+   * the call, so that a mutation in the latent set of that operand is a
+   * proven mutation of the body being walked (`docs/EFFECTS-MODEL.md`,
+   * "Scope is opt-in", "Proof through a function that takes a callback").
+   *
+   * A function defined by a literal (a user function, a local, a value
+   * binding) and a protocol member are known to invoke the operand only when
+   * a body VISIBLY calls the parameter it binds ({@link literalCallsOperand}):
+   * `function timer(ms, f) { register([ms, f]) }` keeps `f` and the host
+   * calls it later, so `function scene() { timer(16, t => do { r = r + 1 }) }`
+   * does not write `r`. An operator with no body to read (a library operator
+   * such as `Map`, a host operator) keeps the answer of its `invokes`
+   * metadata, which the caller has already read. A function that the walk
+   * cannot read is no proof: a head with no definition yet (a function
+   * defined later in the program), a variable that holds no function yet, a
+   * parameter of this literal, a callee that is computed.
+   *
+   * @param start 1 for `Apply(f, …)`, whose function is the operand 0.
+   */
+  private provesInvocation(
+    head: string,
+    ops: readonly Expression[],
+    i: number,
+    start: number
+  ): boolean {
+    let name = head;
+    let args = ops;
+    let at = i;
+    if (start === 1) {
+      const callee = ops[0];
+      args = ops.slice(1);
+      at = i - 1;
+      if (isFunction(callee, 'Function'))
+        return literalCallsOperand(this.ce, callee, args, at);
+      const calleeName = sym(callee);
+      if (calleeName === undefined) return false;
+      name = calleeName;
+    }
+    if (this.params.has(name)) return false;
+    const local = this.localLiterals.get(name);
+    if (local !== undefined)
+      return literalCallsOperand(this.ce, local.literal, args, at);
+    return headCallsOperand(this.ce, name, args, at, false);
+  }
+
+  /**
+   * Run `project` with its contributions kept out of the proven-mutation
+   * bit: the effects, the frame bits and the dependency bits that it adds
+   * join this walk, and `escapingWrite` does not.
+   *
+   * The projection writes to an accumulator of its own, which starts as a
+   * copy of this one, with the literals this one has already walked
+   * (`expandedLiterals`): the walk then stops and skips where a walk into
+   * this accumulator would (the saturation test of {@link visit}, the depth
+   * guard), so the effects are the same. The caller runs this only while
+   * `escapingWrite` is false, so the copy has nothing proven. When the
+   * projection proved nothing, the literals it walked are recorded for this
+   * accumulator too. When it proved a mutation they are not: this body
+   * walks such a literal again where it applies it at a position that does
+   * prove the mutation.
+   */
+  private withoutProof(project: () => void): void {
+    const outer = this.state;
+    const inner: WalkState = { ...outer, escapingWrite: false };
+    const outerWalked = expandedLiterals.get(outer);
+    const innerWalked = new Map(outerWalked);
+    expandedLiterals.set(inner, innerWalked);
+    this.state = inner;
+    try {
+      project();
+    } finally {
+      this.state = outer;
+    }
+    outer.effects = unionEffectSets(outer.effects, inner.effects);
+    outer.readsRandomFrame ||= inner.readsRandomFrame;
+    outer.draws ||= inner.draws;
+    outer.unresolvedHead ||= inner.unresolvedHead;
+    outer.consultsRegistry ||= inner.consultsRegistry;
+    if (!inner.escapingWrite && innerWalked.size > 0) {
+      if (outerWalked === undefined) expandedLiterals.set(outer, innerWalked);
+      else
+        for (const [literal, depth] of innerWalked) {
+          const prior = outerWalked.get(literal);
+          if (prior === undefined || prior > depth)
+            outerWalked.set(literal, depth);
+        }
     }
   }
 
@@ -3992,6 +4099,372 @@ function acceptsCallable(def: BoxedOperatorDefinition | undefined): boolean {
     if (params.some((p) => isCallableType(p.type))) return true;
   }
   return false;
+}
+
+/**
+ * Whether a call of the name `name` with the operands `args` is known to
+ * invoke its operand `at`.
+ *
+ * - A function defined by a literal: a body that visibly calls the parameter
+ *   ({@link literalCallsOperand}).
+ * - A protocol dispatcher: an implementation that visibly calls it, or a
+ *   library twin that takes a callback.
+ * - An operator with no body to read (a library or a host operator), at a
+ *   position that its `invokes` metadata does not exclude: `true` for the
+ *   call that the walk is projecting (`strict` false), which keeps the
+ *   answer the metadata gave; inside the body of a wrapper (`strict` true),
+ *   only an operator that declares a callback parameter
+ *   ({@link acceptsCallable}), so that `ListFrom(args)` and `g + 1` are not
+ *   calls of `g`.
+ * - A name with no function that the walk can read (no definition yet, a
+ *   variable that holds no function literal): `false`.
+ */
+function headCallsOperand(
+  ce: ComputeEngine,
+  name: string,
+  args: readonly Expression[],
+  at: number,
+  strict: boolean
+): boolean {
+  const def = operatorDefinitionOf(ce, name);
+  if (def !== undefined) {
+    if (!def.invokesAt(at)) return false;
+    if (def._lambdaLiteral !== undefined)
+      return literalCallsOperand(ce, def._lambdaLiteral, args, at);
+    const marks = protocolDispatcherMarks(def);
+    if (marks.dispatcher)
+      return dispatcherCallsOperand(ce, name, marks.twin, args, at);
+    return strict ? acceptsCallable(def) : true;
+  }
+  const stored = storedFunctionLiteral(ce, name);
+  if (stored !== undefined)
+    return literalCallsOperand(ce, stored.literal, args, at, stored.home);
+  return false;
+}
+
+/**
+ * Whether a call of the protocol member `member` is known to invoke its
+ * operand `at`: an implementation that a call can reach visibly calls the
+ * parameter, or the library twin (the operator that a bare call falls back
+ * to) takes a callback. A pending conformance is not a dispatch candidate.
+ * A host implementation has no body to read, and is no proof.
+ */
+function dispatcherCallsOperand(
+  ce: ComputeEngine,
+  member: string,
+  twin: string | undefined,
+  args: readonly Expression[],
+  at: number
+): boolean {
+  if (twin !== undefined) {
+    const twinDef = ce.lookupDefinition(twin);
+    if (
+      twinDef !== undefined &&
+      'operator' in twinDef &&
+      twinDef.operator.invokesAt(at) &&
+      acceptsCallable(twinDef.operator)
+    )
+      return true;
+  }
+  for (const record of Object.values(ce._protocolRegistry)) {
+    if (record.members[member]?.kind !== 'function') continue;
+    for (const edge of record.conformances) {
+      if (edge.pending) continue;
+      const impl = edge.impl?.[member];
+      if (impl === undefined) continue;
+      if (typeof (impl as { host?: unknown }).host === 'function') continue;
+      if (literalCallsOperand(ce, impl as Expression, args, at)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a call of the function literal `literal` with the operands `args`
+ * visibly calls the function that its operand `at` binds: the parameter at
+ * that position is one of {@link calledParameters}. After a `Spread` operand
+ * the position does not name a parameter, and the answer is whether the body
+ * calls any parameter.
+ */
+function literalCallsOperand(
+  ce: ComputeEngine,
+  literal: Expression,
+  args: readonly Expression[],
+  at: number,
+  home?: Scope
+): boolean {
+  if (!isFunction(literal, 'Function')) return false;
+  const called = calledParameters(ce, literal, home);
+  if (called.size === 0) return false;
+  for (let k = 0; k < at; k++) if (isFunction(args[k], 'Spread')) return true;
+  const params = literal.ops.slice(1);
+  const rest = restParameterIndex(params);
+  const param = rest >= 0 && at >= rest ? params[rest] : params[at];
+  if (param === undefined || isDestructuringParameter(param)) return false;
+  return called.has(functionLiteralParameterName(param));
+}
+
+interface CalledParameters {
+  readonly called: ReadonlySet<string>;
+  readonly conformanceVersion: number;
+  readonly callableVersion: number;
+}
+
+const CALLED_PARAMETERS = new WeakMap<Expression, CalledParameters>();
+
+/**
+ * The scans of {@link calledParameters} in progress, innermost last, each
+ * with the literals that a back edge reached during it (its cuts). A cycle
+ * (a function that passes its parameter to itself, two functions that pass
+ * it to each other) answers "no call" at the back edge: the result of the
+ * cut literal, and of every scan that started after it, is then one pass
+ * over the cycle and can miss a call. Such a result depends on which scan
+ * started first, so it is not kept after the query.
+ */
+const calledParametersInFlight: {
+  literal: Expression;
+  cuts: Set<Expression>;
+}[] = [];
+
+/**
+ * The results of the scans of one query (the outermost call of
+ * {@link calledParameters}), each with the cut literals it depends on that
+ * are still being scanned. They are kept while the engine may discard what
+ * it declared, when {@link CALLED_PARAMETERS} is not written, so that a
+ * chain of functions in which each body calls the next one twice is scanned
+ * once per function, not once per path. A result that depends on a cut is
+ * removed when the scan of the cut literal ends: a later scan then sees the
+ * finished result of that literal.
+ */
+let calledParametersQuery:
+  | Map<Expression, { result: CalledParameters; cuts: ReadonlySet<Expression> }>
+  | undefined = undefined;
+
+/** Record that every scan in progress from the scan of `literal` on depends
+ * on the incomplete answer of `literal`. */
+function noteCalledParametersCut(literal: Expression): void {
+  const from = calledParametersInFlight.findIndex((f) => f.literal === literal);
+  if (from < 0) return;
+  for (let k = from; k < calledParametersInFlight.length; k++)
+    calledParametersInFlight[k].cuts.add(literal);
+}
+
+/**
+ * The parameters of the function literal `literal` that its body VISIBLY
+ * calls during a call of the literal:
+ *
+ * - the parameter is the head of a call (`g(1)`), or the callee of an
+ *   `Apply`;
+ * - the parameter is an operand, as a symbol, of a call that is known to
+ *   invoke that operand ({@link headCallsOperand}, strict): `map(g, xs)`,
+ *   or a function whose body visibly calls the parameter that receives it;
+ * - one of these holds in a nested literal that the call runs: a literal
+ *   that is applied where it is written, or that is an operand of a call
+ *   known to invoke it (`map(x => g(x), xs)`).
+ *
+ * Every other use is no proof of a call: the parameter in a list, bound to
+ * a local, returned, passed to a function that keeps it or to a head with
+ * no definition, mentioned in a literal that the body keeps or returns. The
+ * scan reads the text of the body and follows no value, so a call through
+ * an alias (`let h = g; h(1)`) is not seen.
+ *
+ * An answer in either direction gives a sound effect set: the scan decides
+ * only whether a mutation by the callback is PROVEN for the caller.
+ *
+ * @param home The scope that the names of the literal are read from, when
+ * it is not the scope of its body: see {@link walkLiteral}.
+ */
+function calledParameters(
+  ce: ComputeEngine,
+  literal: Expression & FunctionInterface,
+  home?: Scope
+): ReadonlySet<string> {
+  const current = (c: CalledParameters | undefined): c is CalledParameters =>
+    c !== undefined &&
+    c.conformanceVersion === ce._conformanceVersion &&
+    c.callableVersion === ce._callableVersion;
+  const kept = CALLED_PARAMETERS.get(literal);
+  if (current(kept)) return kept.called;
+  const inQuery = calledParametersQuery?.get(literal);
+  if (inQuery !== undefined && current(inQuery.result)) {
+    // The scans in progress now depend on what this result depends on.
+    for (const cut of inQuery.cuts) noteCalledParametersCut(cut);
+    return inQuery.result.called;
+  }
+  if (calledParametersInFlight.some((f) => f.literal === literal)) {
+    noteCalledParametersCut(literal);
+    return new Set();
+  }
+
+  const outermost = calledParametersQuery === undefined;
+  const query = (calledParametersQuery ??= new Map());
+  const frame = { literal, cuts: new Set<Expression>() };
+  calledParametersInFlight.push(frame);
+  try {
+    const result: CalledParameters = {
+      conformanceVersion: ce._conformanceVersion,
+      callableVersion: ce._callableVersion,
+      called: scanCalledParameters(ce, literal, home),
+    };
+    // The results that depend on the incomplete answer of this literal are
+    // dropped: the next scan reads the finished one.
+    for (const [other, entry] of query)
+      if (entry.cuts.has(literal)) query.delete(other);
+    const cycle = frame.cuts.size > 0;
+    const pending = new Set(frame.cuts);
+    pending.delete(literal);
+    query.set(literal, { result, cuts: pending });
+    // A result read while the engine may discard what it declared (the
+    // Epsil static check, the trial of an overload arm) is not kept past
+    // the query: the definitions it read may not survive.
+    if (!cycle && !ce._resultMayBeDiscarded())
+      CALLED_PARAMETERS.set(literal, result);
+    return result.called;
+  } finally {
+    calledParametersInFlight.pop();
+    if (outermost) calledParametersQuery = undefined;
+  }
+}
+
+/**
+ * The names that the node `node` binds again for its operands: the binders
+ * of its scope (the variable of a loop, the index of a `Sum`), and the names
+ * that a statement of a `Block` declares. The bindings of the scope are not
+ * read: a scope also holds a binding for each outer name that its node only
+ * uses.
+ */
+function reboundNames(node: Expression & FunctionInterface): string[] {
+  const names: string[] = [...(node.localScope?.binderNames ?? [])];
+  if (node.operator === 'Block')
+    for (const statement of node.ops)
+      if (
+        isFunction(statement, 'Declare') ||
+        isFunction(statement, 'DefineFunction')
+      ) {
+        const name = sym(statement.ops[0]);
+        if (name !== undefined) names.push(name);
+      }
+  return names;
+}
+
+/** The scan behind {@link calledParameters}, with no memo and no cycle
+ * guard of its own. */
+function scanCalledParameters(
+  ce: ComputeEngine,
+  literal: Expression & FunctionInterface,
+  home: Scope | undefined
+): Set<string> {
+  const called = new Set<string>();
+  const names = new Set(functionLiteralBoundNames(literal.ops.slice(1)));
+  const body = functionLiteralBody(literal);
+  if (body === undefined || names.size === 0) return called;
+
+  // A node reached again along another path, with the same live parameters,
+  // adds nothing: the scan only adds names, and what a node adds depends on
+  // the node and on the live parameters only.
+  const seen = new Map<ReadonlySet<string>, Set<Expression>>();
+
+  // `live` holds the parameters that no enclosing nested literal, block or
+  // binder binds again.
+  const scan = (node: Expression, live: ReadonlySet<string>): void => {
+    if (called.size === names.size) return;
+    // A literal that the body only produces is not run by the call.
+    if (isFunction(node, 'Function')) return;
+    const dictionary = isDictionary(node);
+    if (!dictionary && !isFunction(node)) return;
+    let visited = seen.get(live);
+    if (visited === undefined) {
+      visited = new Set();
+      seen.set(live, visited);
+    }
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (isDictionary(node)) {
+      for (const v of node.values) scan(v, live);
+      return;
+    }
+    if (!isFunction(node)) return;
+
+    // A name that this node binds again (a `let` of a block, the variable
+    // of a loop) is not the parameter in its operands.
+    const rebound = reboundNames(node);
+    if (rebound.some((n) => live.has(n)))
+      live = new Set([...live].filter((n) => !rebound.includes(n)));
+
+    const head = node.operator;
+    if (live.has(head)) called.add(head);
+    const apply = head === 'Apply' || head === 'ApplyWhole';
+    if (apply) {
+      const callee = node.ops[0];
+      const calleeName = sym(callee);
+      if (calleeName !== undefined && live.has(calleeName))
+        called.add(calleeName);
+      if (isFunction(callee, 'Function')) scanLiteral(callee, live);
+    }
+    // The operands of a node with a scope of its own (a block, a loop) read
+    // their names from that scope: a local function of a nested block is
+    // found there.
+    const outer = walkHome;
+    if (node.localScope !== undefined) walkHome = node.localScope;
+    try {
+      node.ops.forEach((op, k) => {
+        if (apply && k === 0) return;
+        const name = sym(op);
+        const parameter = name !== undefined && live.has(name);
+        const nested = isFunction(op, 'Function');
+        if ((parameter || nested) && operandIsCalled(node, k)) {
+          if (parameter) called.add(name!);
+          else scanLiteral(op, live);
+        }
+        if (!nested) scan(op, live);
+      });
+    } finally {
+      walkHome = outer;
+    }
+  };
+
+  const scanLiteral = (nested: Expression, live: ReadonlySet<string>): void => {
+    if (!isFunction(nested, 'Function')) return;
+    const bound = functionLiteralBoundNames(nested.ops.slice(1));
+    const inner = bound.some((n) => live.has(n))
+      ? new Set([...live].filter((n) => !bound.includes(n)))
+      : live;
+    const nestedBody = functionLiteralBody(nested);
+    if (nestedBody !== undefined) scan(nestedBody, inner);
+  };
+
+  const operandIsCalled = (
+    node: Expression & FunctionInterface,
+    k: number
+  ): boolean => {
+    let name = node.operator;
+    let args = node.ops;
+    let at = k;
+    if (name === 'Apply' || name === 'ApplyWhole') {
+      const callee = node.ops[0];
+      args = node.ops.slice(1);
+      at = k - 1;
+      // `(h => h(1))(g)`: the literal is applied where it is written.
+      if (isFunction(callee, 'Function'))
+        return literalCallsOperand(ce, callee, args, at);
+      const calleeName = sym(callee);
+      if (calleeName === undefined) return false;
+      name = calleeName;
+    }
+    // A parameter as the head is a function that the body does not know.
+    if (names.has(name)) return false;
+    return headCallsOperand(ce, name, args, at, true);
+  };
+
+  // The names of the literal are read from the scope it was boxed in.
+  const outerHome = walkHome;
+  walkHome = home ?? literalHome(literal) ?? outerHome;
+  try {
+    scan(body, names);
+  } finally {
+    walkHome = outerHome;
+  }
+  return called;
 }
 
 /**

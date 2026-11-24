@@ -159,3 +159,30 @@ function isDefaultOperatorFlags(def: BoxedOperatorDefinition): boolean {
     !d.readsRandomFrame
   );
 }
+
+/**
+ * The marker on the operator definition of a protocol DISPATCHER (the one
+ * definition that a member name of a protocol has), and the marker that
+ * holds its library twin: the standard library operator that a bare call
+ * falls back to. `engine-protocols.ts` stamps both after the install. They
+ * are here, in a leaf module, for the modules that `engine-protocols.ts`
+ * imports and that read them.
+ */
+export const PROTOCOL_DISPATCHER_MARK = '_protocolDispatcher';
+export const PROTOCOL_LIBRARY_TWIN_MARK = '_protocolLibraryTwin';
+
+/** Whether `def` is the dispatcher of a protocol member, and its library
+ * twin when it has one. */
+export function protocolDispatcherMarks(def: BoxedOperatorDefinition): {
+  dispatcher: boolean;
+  twin: string | undefined;
+} {
+  const marks = def as unknown as {
+    [PROTOCOL_DISPATCHER_MARK]?: true;
+    [PROTOCOL_LIBRARY_TWIN_MARK]?: string;
+  };
+  return {
+    dispatcher: marks[PROTOCOL_DISPATCHER_MARK] === true,
+    twin: marks[PROTOCOL_LIBRARY_TWIN_MARK],
+  };
+}

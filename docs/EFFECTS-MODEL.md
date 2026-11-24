@@ -396,6 +396,65 @@ zero in the real-program corpus. Mechanics:
   recursion install bare exactly as before. The bit also survives the
   `any` collapse, so a body that both writes and calls an unresolved head
   is still refused.
+- **Proof through a function that takes a callback** *(user decision
+  2026-11-24, CE-1773)*. A callback given to a call (an inline literal, or
+  a name whose effects concretely contain `scope`) always adds its latent
+  set to the effects of the body, as "Projection and discharge" says. It
+  sets the proven-mutation bit only when the call is **known to invoke**
+  it during the call:
+  - An operator with no body to read (a library operator such as `Map`, a
+    host operator): at each position that its `invokes` metadata does not
+    exclude, as before. A host function that keeps a callback declares
+    `invokes: false`.
+  - A function defined by a literal (a `function`, a local function, a
+    variable that holds a literal): only when its body **visibly calls**
+    the parameter that receives the callback. The parameter is the head of
+    a call (`g(1)`) or the callee of an `Apply`; or it is an operand of a
+    call known to invoke that operand (`map(g, xs)`, or a function whose
+    body visibly calls the parameter that receives it; inside a body, an
+    operator with no body to read counts only when it declares a callback
+    parameter, so `ListFrom(args)` is not a call); or one of these holds in
+    a nested literal that the call runs (`map(x => g(x), xs)`, a literal
+    applied where it is written). After a `Spread` argument a position
+    does not name a parameter, and the answer is whether the body calls
+    any parameter.
+  - A protocol member: when an implementation that a call can reach
+    visibly calls the parameter, or the library twin of the member
+    declares a callback parameter. A host implementation has no body to
+    read and is no proof.
+  - A function that the walk cannot read is no proof: a variable that
+    holds no function when the caller is defined (a top-level `let` runs
+    after the `function` statements are installed), a parameter used as
+    the head, a computed callee. A `function` defined later in the program
+    is read when it is defined: the caller is derived again then, and
+    refused when the function visibly calls the callback.
+
+  The scan reads the text of the body and follows no value. A call
+  through an alias (`function alias(g) { let h = g; h(1) }`) or of a
+  returned parameter is not seen. A cycle of functions that pass the
+  callback to each other is read in one pass, and the result does not
+  depend on which function is read first: a call that is reached only
+  around the cycle is not seen. In these cases the caller is accepted
+  with no `scope` declaration, and its effect set still holds the effects
+  of the callback (`scope`, or `any`). An error of the scan, in either direction,
+  changes only whether a definition is refused; `invokes`, `effectsOf`
+  and every effect set are as before.
+
+  The motivating case is a notebook event handler or timer callback
+  created in a function. The host calls the callback later; `timer` and
+  `scene` do not:
+
+  ```epsil
+  function timer(...args) -> string { figureTimer(listFrom(args)) }
+  let r = 1
+  function scene() { timer(16, t => do { r = r + 1 }) }
+  scene()
+  ```
+
+  `scene` is accepted with no declaration, with the effects `scope` and
+  those of `timer`. `function f() { map(x => do { r = r + x }, [1, 2]) }`
+  and, with `function callIt(g) { g(1) }`,
+  `function f() { callIt(x => do { r = r + x }) }` are still refused.
 - **The gate sits at the operator-definition construction seam** (the
   single point where `inferFunctionLiteralEffects` stamps a definition).
   The violation is an `EffectContractError` with a dedicated rendering

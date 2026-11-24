@@ -332,6 +332,25 @@ function bump() scope { n = n + 1; n }
 // ➔ [1, 2, 2]
 ```
 
+A function that passes a lambda to a function that **keeps** it does not
+need the `scope` effect for the assignments of the lambda: they happen when
+the lambda is called, later. Here the host function `register` keeps a
+handler and calls it at a click:
+
+```epsil
+let n = 0
+function later(h) { register([h]) }
+function scene() { later(e => do { n = n + 1 }) }
+```
+
+`scene` needs no effect specifier. A lambda given to a function of the
+program, or to a method of a protocol, counts as an assignment by the caller
+only when the body of that function visibly calls it: with
+`function callIt(g) { g(1) }`, the function
+`function f() { callIt(x => do { n = n + x }) }` must declare `scope`, and so
+must `function f() { map(x => do { n = n + x }, [1, 2]) }`. The type of
+`scene` still has the `scope` effect of its lambda.
+
 The declarations of a program are known when its function bodies are
 prepared, including variables declared later in the text. A function can
 therefore assign such a variable when called after its initialization:
