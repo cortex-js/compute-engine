@@ -3655,6 +3655,13 @@ function zipElement(
  * statically-unknown arity keeps the two-argument form, so nothing existing
  * changes meaning — the same convention `sortedIndices` uses to tell a
  * `Sort` key from a `Sort` comparator.
+ *
+ * `Iterate` holds a symbol that names its function (CE-1461), so `fn` can be
+ * a symbol that holds a function literal. The arity is then read from the
+ * type of the literal, as it was when the symbol was evaluated to the
+ * literal: a symbol declared
+ * `function` that holds `t ↦ t/2` is unary, and a symbol declared
+ * `(real, real = 2) -> real` that holds `(u, v) ↦ v - u` is binary.
  */
 function iterateArgs(
   ce: ComputeEngine,
@@ -3662,7 +3669,10 @@ function iterateArgs(
   n: number,
   acc: Expression
 ): Expression[] {
-  if (requiredArity(fn.type.type) === 1) return [acc];
+  const callee =
+    (isSymbol(fn) && fn.valueDefinition !== undefined ? fn.value : undefined) ??
+    fn;
+  if (requiredArity(callee.type.type) === 1) return [acc];
   return [ce.number(n), acc];
 }
 
@@ -21868,6 +21878,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!initial) return engine._fn('Iterate', [fn]);
       return engine._fn('Iterate', [fn, initial]);
     },
+    // A symbol that names the function is held, as the lazy `Map` holds it:
+    // the symbol stays the callee, and each step is a call of the symbol,
+    // which fills a missing argument with the default of its declared
+    // signature. Evaluated, the symbol gave its function literal, whose own
+    // default then applied: with `s` declared `(real, real = 5) -> real` and
+    // assigned `(u, v = 7) ↦ v - u`, `Iterate(s, 1)` was `[6, 1, 6, …]`
+    // while `s(1)` is 4. (CE-1461)
+    //
+    // Any other function operand (`mk(2)`, `If(c, f, g)`) is a `value`, as
+    // before: it is evaluated once, with the options of the evaluation
+    // (`.N()`), and `iterateArgs` reads the arity of its value. Held, it would
+    // be evaluated again at each read. The role depends on the operand, not
+    // only on its position: a symbol is a symbol as written and canonical, and
+    // the two roles differ only when the `Iterate` is evaluated.
+    operands: (ops) => [
+      ops[0] !== undefined && isSymbol(ops[0])
+        ? { kind: 'held' }
+        : { kind: 'value' },
+      { kind: 'value' },
+    ],
     collection: {
       isLazy: (_expr) => true,
       callsCallbackOnRead: true,

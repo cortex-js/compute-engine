@@ -36,6 +36,13 @@ ce.declare('q', 'function');
 ce.assign('q', ce.parse('t \\mapsto t/2'));
 ce.declare('s', '(real, real = 2) -> real');
 ce.assign('s', ce.box(['Function', ['Add', ['Negate', 'u'], 'v'], 'u', 'v']));
+// A declared default that differs from the default of the literal (`w`,
+// unary): the declared default applies, as in a call `w(x)` (CE-1461).
+ce.declare('w', '(real, real = 5) -> real');
+ce.assign(
+  'w',
+  ce.box(['Function', ['Subtract', 'v', 'u'], 'u', ['Optional', 'v', 7]])
+);
 // User functions with defaults: in the literal (`d`, `p`, a constant
 // default `Pi`), in a declared signature (`gm`), and an argument that is a
 // sort key (`c`).
@@ -194,6 +201,7 @@ describe('IR: Iterate', () => {
     ['a name declared function holding a unary literal', ['Take', ['Iterate', 'q', 'x'], 'n']],
     ['a declared signature with a default, a literal of two parameters', ['Take', ['Iterate', 's', 'x'], 'n']],
     ['a function whose second parameter has a default (unary)', ['Take', ['Iterate', 'd', 'x'], 'n']],
+    ['a declared default that differs from the default of the literal', ['Take', ['Iterate', 'w', 'x'], 'n']],
     ['no initial value, a function of the index alone', ['Take', ['Iterate', lambda(['Multiply', 'i', 'i'], 'i', 'a')], 'n']],
     ['a constant count', ['Take', ['Iterate', double, 'x'], 4]],
     ['a count of 0', ['Take', ['Iterate', double, 'x'], 0]],

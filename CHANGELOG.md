@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **`Iterate` over a variable with a declared signature uses the declared
+  default of a parameter** (CE-1461). With `s` declared
+  `(real, real = 5) -> real` and assigned `(u, v = 7) ↦ v - u`,
+  `Take(Iterate(s, 1), 3)` gave `[6, 1, 6]`: it used the default of the
+  function literal. It now gives `[4, 1, 4]`, as `s(1)`, `Map` and the
+  compiled code do. An evaluated `Iterate(s, 1)` keeps the name `s` instead
+  of the function literal, so its elements use the value that `s` holds
+  when they are read, as for `Map`.
+
 - **A `Series` at `0` of a root of a parameter times the variable no longer
   has terms divided by 0** (CE-1441). `Series(Sqrt(a x), x, 0, 3)` was
   `x·√a/0 − √a/0·x² + 3√a/0·x³ + O(x⁴)`. When the sign of `a` is not known,

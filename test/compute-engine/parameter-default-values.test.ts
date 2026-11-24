@@ -947,6 +947,62 @@ describe('PARAMETER DEFAULT VALUES: A VARIABLE WITH A DECLARED SIGNATURE', () =>
     ).toBe(8);
   });
 
+  test('`Iterate` holds the name of its function (CE-1461)', () => {
+    ce.assign('g', ce.box(['Function', ['Multiply', 'x', 'k'], 'x', 'k']));
+    // The literal takes two parameters, so `Iterate` passes the index and
+    // the previous value: g(1, 1), g(2, 1), g(3, 2).
+    expect(
+      ce.box(['Take', ['Iterate', 'g', 1], 3]).evaluate().toString()
+    ).toBe('[1,2,6]');
+    expect(ce.box(['Iterate', 'g', 1]).evaluate().json).toEqual([
+      'Iterate',
+      'g',
+      1,
+    ]);
+  });
+
+  test('`Iterate` uses the declared default, not the default of the literal (CE-1461)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('s', '(real, real = 5) -> real');
+    ce.assign(
+      's',
+      ce.box(['Function', ['Subtract', 'v', 'u'], 'u', ['Optional', 'v', 7]])
+    );
+    expect(ce.box(['s', 1]).evaluate().json).toBe(4);
+    expect(
+      ce.box(['Take', ['Iterate', 's', 1], 3]).evaluate().toString()
+    ).toBe('[4,1,4]');
+    expect(ce.box(['At', ['Iterate', 's', 1], 2]).evaluate().json).toBe(1);
+    expect(ce.box(['Map', 's', ['List', 1]]).evaluate().toString()).toBe(
+      '[4]'
+    );
+  });
+
+  test('`Iterate` evaluates a function operand that is not a symbol, and reads its arity from the value (CE-1461)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('mk', '(real) -> function');
+    ce.assign(
+      'mk',
+      ce.box(['Function', ['Function', ['Add', 'x', 'k'], 'x'], 'k'])
+    );
+    ce.declare('q', 'function');
+    ce.assign('q', ce.box(['Function', ['Divide', 't', 2], 't']));
+    ce.declare('c', 'boolean');
+    ce.assign('c', true);
+    expect(
+      ce.box(['Take', ['Iterate', ['mk', 2], 0], 3]).evaluate().toString()
+    ).toBe('[2,4,6]');
+    expect(
+      ce
+        .box(['Take', ['Iterate', ['If', 'c', 'q', 'q'], 8], 3])
+        .evaluate()
+        .toString()
+    ).toBe('[4,2,1]');
+    expect(
+      ce.box(['Take', ['Iterate', 'q', 8], 3]).evaluate().toString()
+    ).toBe('[4,2,1]');
+  });
+
   test('the value passed to a parameter is not filled (limit of the canonical fill)', () => {
     ce.assign('g', ce.box(['Function', ['Multiply', 'x', 'k'], 'x', 'k']));
     // `f` holds the function literal, not the name `g`: the call `f(3)` has
