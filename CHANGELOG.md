@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **The type of a function that appends its argument to a list includes the
+  argument** (CE-1363). With `ap = (u, t) -> Append(Range(1, u), t)`, the
+  type of `ap` was `(u: unknown, t: unknown) -> list<integer>`, but
+  `ap(2, 0.5)` is `[1, 2, 0.5]`. The type is now
+  `(u: unknown, t: unknown) -> list<unknown>`. The same correction applies to
+  `ReplaceAt` with more than one position, such as
+  `ReplaceAt([Range(1, 3)], 1, 1, g(u))`, now typed `list<list<unknown>>`.
+
 - **Two functions that read different values of a local variable are no
   longer the same** (CE-1332). With
   `let f = (k) => do { let y = k; x => x + y }`, `f(1) == f(2)` was `True`,

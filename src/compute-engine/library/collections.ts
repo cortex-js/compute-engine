@@ -6857,8 +6857,30 @@ function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 1) return { kind, elements };
   return {
     kind,
-    elements: widen(elements, ...ops.slice(1).map((op) => op.type)),
+    elements: storedElementType(
+      elements,
+      ops.slice(1).map((op) => op.type)
+    ),
   };
+}
+
+/**
+ * The element type of a list that keeps the elements of a collection, of
+ * type `elements`, and holds values of the types `values` as elements of
+ * their own (`Append`, and `ReplaceAt` with more than one position). It is
+ * the `widen` of the types, except for a value typed `unknown`: a parameter
+ * whose type is not inferred (`t` in `(u, t) -> Append(Range(1, u), t)`) can
+ * hold any value, so it is kept as an arm (`joinUnresolvedArm`), and the
+ * reducer reads `integer | unknown` as `unknown`. `widen` drops it, and the
+ * function was typed `-> list<integer>` while `ap(2, 0.5)` is
+ * `[1, 2, 0.5]`. An element type `unknown` of the collection is the
+ * placeholder of a source that says nothing yet (see `appendResultTypeD`):
+ * when no value is typed `unknown`, `widen` drops it, and the values give
+ * the element type.
+ */
+function storedElementType(elements: Type, values: ReadonlyArray<Type>): Type {
+  if (!values.includes('unknown')) return widen(elements, ...values);
+  return reduceType(joinUnresolvedArm([elements, ...values]));
 }
 
 /**
@@ -22821,7 +22843,7 @@ function replaceAtPathType(source: Type, levels: number, value: Type): Type {
     return (
       listTypeKeptByWrite(source, value) ?? {
         kind: 'list',
-        elements: widen(element, value),
+        elements: storedElementType(element, [value]),
       }
     );
   // An absent row stays absent, so `missing` is read before the requirement
