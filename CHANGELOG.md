@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **A function literal declared or assigned with a signature over residue
+  classes in an inner scope now reads the variables of the scope where it was
+  made** (CE-1131). With `k = 1`, `f = x ↦ k·x`, and an inner scope that
+  declares another `k = 2`, `ce.declare('g', { signature: '(residue) ->
+  residue', evaluate: f })` made `g(ResidueClass(2, 5))` give
+  `ResidueClass(4, 5)`; it now gives `ResidueClass(2, 5)`, as
+  `Apply(f, ResidueClass(2, 5))` does. An assignment of `f` to a symbol
+  declared `(residue) -> residue` had the same wrong value.
+
 - **A call of a user function named `Sqrt` is no longer read as a square
   root in a product or a sum** (CE-1122). With `Sqrt` declared as the function
   `u ↦ 1000`, `ce.box(['Multiply', 2, ['Sqrt', 4]])` gave `4` and now gives

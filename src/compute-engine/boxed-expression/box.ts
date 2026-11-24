@@ -148,6 +148,7 @@ import {
 } from '../collection-utils.js';
 import {
   annotateFunctionLiteralParams,
+  bindsAsInCurrentScope,
   lookupApplicable,
   shadowsQualifiedName,
   writtenUntypedFunctionLiteral,
@@ -203,7 +204,6 @@ import {
   indexReadTupleExtension,
   isIndexReadTuple,
 } from './index-read-tuple.js';
-import { isLibraryDefinition } from './implicit-variable-rule.js';
 import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
@@ -3186,75 +3186,6 @@ function inlineLiteral(
   if (raw.isCanonical || !isFunction(raw, 'Function') || raw.nops < 2)
     return undefined;
   return raw;
-}
-
-/**
- * True when canonicalizing `written`, the written form of the canonical
- * function literal `fn`, in the current scope binds each name as `fn` binds
- * it.
- *
- * The written form of a literal boxed before a call is canonicalized again
- * in the scope of the call (`annotateCallbacksFromContextualSolve()`) when
- * that scope is the one where the literal was boxed, or when this function
- * returns `true`; otherwise it is canonicalized again in the scope where it
- * was boxed. Two tests, with the parameters of `fn` left out:
- * - each symbol of the body of `fn`, and the operator of each application,
- *   is bound in `fn` to the definition that a lookup of its name in the
- *   current scope returns;
- * - each name of `written` that the body of `fn` does not hold, because
- *   canonicalization removed it (`Subtract` becomes `Add`), is a name of
- *   the library in the current scope. A library name that the first scope
- *   declared again is not removed by canonicalization, so the first test
- *   reads it.
- *
- * A name bound inside the body (the parameter of a nested literal, a local
- * of a `Block`) is not visible in the current scope, and an application
- * whose operator has no operator definition (a function held by a variable)
- * cannot be compared: both give `false`, so the caller canonicalizes the
- * literal again in the scope where it was boxed.
- */
-function bindsAsInCurrentScope(
-  ce: ComputeEngine,
-  fn: Expression,
-  written: Expression
-): boolean {
-  if (!isFunction(fn, 'Function') || fn.nops < 2) return false;
-  if (!isFunction(written, 'Function') || written.nops !== fn.nops)
-    return false;
-  const params = new Set<string>();
-  for (const p of fn.ops.slice(1)) {
-    if (!isSymbol(p)) return false;
-    params.add(p.symbol);
-  }
-  const current = (name: string): object | undefined => {
-    const def = ce.lookupDefinition(name);
-    if (def === undefined) return undefined;
-    return 'value' in def ? def.value : def.operator;
-  };
-  // The names of the canonical body whose binding is the current one.
-  const checked = new Set<string>();
-  for (const x of fn.ops[0].subexpressions) {
-    if (isSymbol(x)) {
-      if (params.has(x.symbol)) continue;
-      const own = x.valueDefinition ?? x.operatorDefinition;
-      if (own === undefined || own !== current(x.symbol)) return false;
-      checked.add(x.symbol);
-    } else if (isFunction(x)) {
-      const own = x.operatorDefinition;
-      if (own === undefined || own !== current(x.operator)) return false;
-      checked.add(x.operator);
-    }
-  }
-  for (const x of written.ops[0].subexpressions) {
-    const name = isSymbol(x)
-      ? x.symbol
-      : isFunction(x)
-        ? x.operator
-        : undefined;
-    if (name === undefined || params.has(name) || checked.has(name)) continue;
-    if (!isLibraryDefinition(ce, name, current(name))) return false;
-  }
-  return true;
 }
 
 /** An instantiated contextual arrow parameter type this trigger will stamp, or

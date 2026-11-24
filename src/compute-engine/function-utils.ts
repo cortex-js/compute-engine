@@ -144,6 +144,7 @@ import {
   literalParameterDefault,
   typeHasParameterDefault,
 } from './boxed-expression/parameter-defaults.js';
+import { isLibraryDefinition } from './boxed-expression/implicit-variable-rule.js';
 import {
   errorValue,
   isInvalidNonCollection,
@@ -761,7 +762,12 @@ export function annotateFunctionLiteralParams(
  * `literal` is the MathJSON or the boxed value of a declaration
  * (`ce.declare('g', { signature, evaluate: literal })`) or of an assignment
  * to a symbol declared with a function type. A canonical literal is read
- * from its written form (`writtenUntypedFunctionLiteral()`).
+ * from its written form (`writtenUntypedFunctionLiteral()`). The result is
+ * not canonical, except for a canonical literal boxed in another scope
+ * whose names do not all bind there as in the current scope
+ * (`bindsAsInCurrentScope()`): the result is then canonicalized in the
+ * scope where the literal was boxed, so that a free name of its body keeps
+ * the binding of the boxed literal.
  *
  * The body of an untyped parameter is canonicalized with the parameter
  * `unknown`, which folds `x/x` to `1` before a call can pass a kind value.
@@ -789,15 +795,23 @@ export function declarationTypedFunctionLiteral(
   declared: Type
 ): Expression | undefined {
   let input: ExpressionInput;
+  // For a canonical literal boxed in another scope, the scope in which its
+  // written form is canonicalized again (see below).
+  let boxedIn: Scope | undefined = undefined;
   if (Array.isArray(literal) && literal[0] === 'Function')
     input = literal as unknown as ExpressionInput;
   else if (isExpression(literal) && isFunction(literal, 'Function')) {
     const x = literal as Expression;
-    const written = x.isCanonical
-      ? writtenUntypedFunctionLiteral(x)?.literal
-      : x;
-    if (written === undefined) return undefined;
-    input = written;
+    if (x.isCanonical) {
+      const written = writtenUntypedFunctionLiteral(x);
+      if (written === undefined) return undefined;
+      input = written.literal;
+      if (
+        written.scope !== ce.context.lexicalScope &&
+        !bindsAsInCurrentScope(ce, x, written.literal)
+      )
+        boxedIn = written.scope;
+    } else input = x;
   } else return undefined;
   const arms = signatureArms(declared);
   if (arms === undefined) return undefined;
@@ -820,7 +834,86 @@ export function declarationTypedFunctionLiteral(
     );
   }
   if (types.every((t) => t === undefined)) return undefined;
-  return annotateFunctionLiteralParams(ce, input, types);
+  const annotated = annotateFunctionLiteralParams(ce, input, types);
+  // A free name of the body binds as it did when the literal was boxed:
+  // `x ↦ k·x` boxed where `k = 1`, and declared or assigned with the type
+  // `(residue) -> residue` in a scope that declares another `k = 2`, reads
+  // `k = 1`, as `Apply` of the boxed literal does. The literal is then
+  // canonicalized here, in the scope where it was boxed, as a callback is
+  // (`annotateCallbacksFromContextualSolve()` in `box.ts`).
+  if (annotated === undefined || boxedIn === undefined) return annotated;
+  return ce._inScope(boxedIn, () => annotated.canonical);
+}
+
+/**
+ * True when canonicalizing `written`, the written form of the canonical
+ * function literal `fn`, in the current scope binds each name as `fn` binds
+ * it.
+ *
+ * The written form of a literal boxed before a call or a declaration is
+ * canonicalized again in the current scope
+ * (`annotateCallbacksFromContextualSolve()` in `box.ts`,
+ * `declarationTypedFunctionLiteral()`) when that scope is the one where the
+ * literal was boxed, or when this function returns `true`; otherwise it is
+ * canonicalized again in the scope where it was boxed. Two tests, with the
+ * parameters of `fn` left out:
+ * - each symbol of the body of `fn`, and the operator of each application,
+ *   is bound in `fn` to the definition that a lookup of its name in the
+ *   current scope returns;
+ * - each name of `written` that the body of `fn` does not hold, because
+ *   canonicalization removed it (`Subtract` becomes `Add`), is a name of
+ *   the library in the current scope. A library name that the first scope
+ *   declared again is not removed by canonicalization, so the first test
+ *   reads it.
+ *
+ * A name bound inside the body (the parameter of a nested literal, a local
+ * of a `Block`) is not visible in the current scope, and an application
+ * whose operator has no operator definition (a function held by a variable)
+ * cannot be compared: both give `false`, so the caller canonicalizes the
+ * literal again in the scope where it was boxed.
+ */
+export function bindsAsInCurrentScope(
+  ce: ComputeEngine,
+  fn: Expression,
+  written: Expression
+): boolean {
+  if (!isFunction(fn, 'Function') || fn.nops < 2) return false;
+  if (!isFunction(written, 'Function') || written.nops !== fn.nops)
+    return false;
+  const params = new Set<string>();
+  for (const p of fn.ops.slice(1)) {
+    if (!isSymbol(p)) return false;
+    params.add(p.symbol);
+  }
+  const current = (name: string): object | undefined => {
+    const def = ce.lookupDefinition(name);
+    if (def === undefined) return undefined;
+    return 'value' in def ? def.value : def.operator;
+  };
+  // The names of the canonical body whose binding is the current one.
+  const checked = new Set<string>();
+  for (const x of fn.ops[0].subexpressions) {
+    if (isSymbol(x)) {
+      if (params.has(x.symbol)) continue;
+      const own = x.valueDefinition ?? x.operatorDefinition;
+      if (own === undefined || own !== current(x.symbol)) return false;
+      checked.add(x.symbol);
+    } else if (isFunction(x)) {
+      const own = x.operatorDefinition;
+      if (own === undefined || own !== current(x.operator)) return false;
+      checked.add(x.operator);
+    }
+  }
+  for (const x of written.ops[0].subexpressions) {
+    const name = isSymbol(x)
+      ? x.symbol
+      : isFunction(x)
+        ? x.operator
+        : undefined;
+    if (name === undefined || params.has(name) || checked.has(name)) continue;
+    if (!isLibraryDefinition(ce, name, current(name))) return false;
+  }
+  return true;
 }
 
 /**

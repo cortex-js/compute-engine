@@ -3402,6 +3402,7 @@ function assignNamedValue(
   // has those parameters typed from the declaration before its body is
   // canonicalized, as for `ce.declare()` with a body
   // (`declarationTypedFunctionLiteral()`): an untyped parameter folds `x/x` to `1`.
+  let declarationTyped: Expression | undefined = undefined;
   {
     const declared = ce.lookupDefinition(id);
     if (
@@ -3414,7 +3415,10 @@ function assignNamedValue(
         arg2,
         declared.value.type.type
       );
-      if (typed !== undefined) arg2 = typed as AssignValue;
+      if (typed !== undefined) {
+        declarationTyped = typed;
+        arg2 = typed as AssignValue;
+      }
     }
   }
 
@@ -3473,13 +3477,15 @@ function assignNamedValue(
         // its function shorthand collapses the literal (dropping the
         // parameter list).
         //
-        // Only a canonical literal is boxed again. A literal that is not
-        // canonical yet (the literal that `declarationTypedFunctionLiteral()`
-        // annotated above, or one boxed with `form: 'raw'`) is canonicalized
-        // later, when the self-reference is already declared. A re-box from
-        // the MathJSON would also drop the annotations that are marked as
-        // inferred, and so fold `x/x` to `1` in a recursive literal over a
-        // value kind.
+        // Only a canonical literal is boxed again, and not the literal that
+        // `declarationTypedFunctionLiteral()` annotated above. That literal
+        // is not canonical yet, and is canonicalized later, when the
+        // self-reference is already declared, or it was canonicalized in the
+        // scope where it was boxed, so that each name of its body binds as
+        // in the boxed literal. The same holds for a literal boxed with
+        // `form: 'raw'`. A copy boxed again would also drop the annotations
+        // that are marked as inferred (`rawCopyWithSourceOffsets()`), and so
+        // fold `x/x` to `1` in a recursive literal over a value kind.
         //
         // A valid literal is copied as a raw expression that keeps shared
         // nodes shared (`rawCopyWithSourceOffsets()`), and the copy is
@@ -3487,7 +3493,7 @@ function assignNamedValue(
         // shared node for each path: `Max(t, t)` nested 18 deep took about
         // 20 s to box again. An invalid literal is boxed again from its MathJSON
         // (see `rawCopyWithSourceOffsets()` for the reason).
-        if (boxedFn?.isCanonical)
+        if (boxedFn?.isCanonical && boxedFn !== declarationTyped)
           arg2 = (
             boxedFn.isValid
               ? ce.box(rawCopyWithSourceOffsets(ce, boxedFn))
