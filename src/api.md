@@ -696,6 +696,10 @@ not an array of strings, or that lists a name twice, throws
 `invalid-protocol-declaration`; a name that is not a declared protocol
 throws `protocol-unknown`.
 
+`options.description` documents the protocol, and
+`options.memberDescriptions` its members, by name (markdown): an editor
+shows them in the hover of the protocol and in the help of a member.
+
 ####### name
 
 `string`
@@ -709,6 +713,14 @@ throws `protocol-unknown`.
 ####### extends?
 
 readonly `string`[]
+
+####### description?
+
+`string`
+
+####### memberDescriptions?
+
+`Readonly`\<`Record`\<`string`, `string`\>\>
 
 </MemberCard>
 
@@ -12472,7 +12484,7 @@ antiderivative was found. The argument is backward-compatible: the plain
 ### ProtocolMember {#protocolmember}
 
 ```ts
-type ProtocolMember = 
+type ProtocolMember = (
   | {
   kind: "function";
   signature: string;
@@ -12480,12 +12492,24 @@ type ProtocolMember =
   | {
   kind: "readonly" | "readwrite";
   type: string;
+ }) & {
+  description: string;
 };
 ```
 
 One requirement of a protocol. A `function` member's signature is stored
 VERBATIM, with `Self` unsubstituted: `Self` is a textual substitution token
 (ruling P12), never a type the registry can resolve.
+
+#### ProtocolMember.description?
+
+```ts
+description?: string;
+```
+
+The documentation of the member: the `///` comment before it in an
+Epsil `protocol` statement, or `options.memberDescriptions` of
+`ce.declareProtocol()`. Markdown.
 
 </MemberCard>
 
@@ -12673,6 +12697,7 @@ wrong body for another.
 type ProtocolRecord = {
   name: string;
   members: Record<string, ProtocolMember>;
+  description: string;
   extends: string[];
   conformances: ConformanceRecord[];
   declaredByStatement: boolean;
@@ -13330,6 +13355,10 @@ not an array of strings, or that lists a name twice, throws
 `invalid-protocol-declaration`; a name that is not a declared protocol
 throws `protocol-unknown`.
 
+`options.description` documents the protocol, and
+`options.memberDescriptions` its members, by name (markdown): an editor
+shows them in the hover of the protocol and in the help of a member.
+
 ####### name
 
 `string`
@@ -13343,6 +13372,14 @@ throws `protocol-unknown`.
 ####### extends?
 
 readonly `string`[]
+
+####### description?
+
+`string`
+
+####### memberDescriptions?
+
+`Readonly`\<`Record`\<`string`, `string`\>\>
 
 </MemberCard>
 
@@ -17277,7 +17314,7 @@ If not a canonical expression, return `undefined`.
 
 <MemberCard>
 
-##### Expression.description {#description-1}
+##### Expression.description {#description-2}
 
 ```ts
 readonly description: string[] | undefined;

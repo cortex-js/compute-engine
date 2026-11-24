@@ -631,9 +631,55 @@ export function runtimeOf(
 }
 
 /**
+ * The engine's value of the value `x` of the code, of the IR type `t` and
+ * the tuple mark `mark`, as the interpreter holds it (CE-1652, step 5;
+ * `README.md`, "Records"): a record of a named tuple type is the
+ * application of the constructor of its type to its fields, the record of
+ * the arguments of a rest parameter the `Tuple` of its fields and
+ * `ListFrom` of it their `List` (`IRType.head`), a list a `List` and a
+ * tuple (the axis of its mark) a `Tuple` of its elements, a field of the
+ * lane `nothing` the symbol `Nothing`, a string a string, a boolean `True`
+ * or `False`, and a number a number. `unboxable()` of `lower.ts` admits no
+ * other type (a record of no names, a colour, a complex number).
+ */
+function boxValue(
+  ce: ComputeEngine,
+  t: IRType,
+  mark: number | undefined,
+  x: unknown
+): Expression {
+  if (t.lane === 'record') {
+    const xs = x as readonly unknown[];
+    return ce.function(
+      t.nominal ?? t.head!,
+      (t.fields ?? []).map((f, k) => boxValue(ce, f, t.marks?.[k], xs[k]))
+    );
+  }
+  if (t.shape.length > 0) {
+    const inner: IRType = { lane: t.lane, shape: t.shape.slice(1) };
+    const m = mark === undefined || mark === 0 ? undefined : mark - 1;
+    return ce.function(
+      mark === 0 ? 'Tuple' : 'List',
+      Array.from(x as ArrayLike<unknown>, (y) => boxValue(ce, inner, m, y))
+    );
+  }
+  switch (t.lane) {
+    case 'nothing':
+      return ce.symbol('Nothing');
+    case 'boolean':
+      return x ? ce.True : ce.False;
+    case 'string':
+      return ce.string(x as string);
+    default:
+      return ce.number(x as number);
+  }
+}
+
+/**
  * The function that the code calls for a call of the function `h` of the
  * host (`hostCall()` of `lower.ts`): it boxes each argument (a number, a
- * boolean or a string), evaluates the call in the engine, as the
+ * boolean or a string; a list, a tuple or a record with
+ * `boxValue()`), evaluates the call in the engine, as the
  * interpreter evaluates it, and gives its value on the lane of `h`: a
  * machine number (NaN for a value that is not a real number), a boolean
  * (a `TypeError` for another value), or NaN for `nothing`, whose value the
@@ -650,13 +696,17 @@ function hostCaller(
   };
   return (...args) => {
     const ops = args.map((x, k) =>
-      h.args[k] === 'boolean'
-        ? x
-          ? ce.True
-          : ce.False
-        : h.args[k] === 'string'
-          ? ce.string(x as string)
-          : ce.number(x as number)
+      h.types[k].shape.length > 0 ||
+      h.marks[k] !== undefined ||
+      h.types[k].lane === 'record'
+        ? boxValue(ce, h.types[k], h.marks[k], x)
+        : h.args[k] === 'boolean'
+          ? x
+            ? ce.True
+            : ce.False
+          : h.args[k] === 'string'
+            ? ce.string(x as string)
+            : ce.number(x as number)
     );
     const value = call._withSameBinding(ops).evaluate();
     if (h.result === 'nothing') return NaN;

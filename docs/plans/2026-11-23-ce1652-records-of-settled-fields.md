@@ -1,7 +1,16 @@
 # CE-1652: compiling a function that builds a figure (records of settled fields)
 
-Status: approved by the user 2026-11-23, with Q1 (c), Q2 (b) and Q3 (a) of
-section 9. No code is written.
+Status: implemented, steps 1 to 6 (approved by the user 2026-11-23, with
+Q1 (c), Q2 (b) and Q3 (a) of section 9). Commits: step 1
+`ad84baac4036014f1ba6b52b5416280e3324d89b`, step 2
+`0e697e6d622dd4dcedc33c7074887f9b8a6d5add`, step 3
+`4eef8dd3666249e1e4e816980338b2510725687b`, step 4
+`643e8dd4b4edea165890f5dbba343162819641e7`, step 4b
+`1552478f8c8c1e4badc8da453cab82d424188cbf` and
+`6a1331792f2f4ceab680e6918593448a3cd35c88`, step 4c
+`3fe7957ebe9970ef2f0680883152e2ae7dd2fe96`, step 5
+`a77758019c53574264d57a9ed520671562b51e76`; step 6 is the commit of the
+acceptance tests (section 7).
 
 Issue: `issues/CE-1652.md`, option (b), user decision 2026-11-22. Scope: the
 `javascript` target of the IR compiler (`src/compute-engine/compilation/ir/`);
@@ -338,25 +347,50 @@ The whole is size L, as the issue says.
 
 ## 7. Acceptance
 
-A test file `test/compute-engine/compile-records.test.ts` holds a reduced
-prelude (the type `Figure`, the protocol `Drawable` with `translate`,
-`rotateAbout` and `fill`, `figureOf`, `figureCompose`, `figureTransform`,
-`figureTransformAbout`, `figureRotation`, `circle`, `label`, `draw` over a host
-`figureDraw` that records its argument), copied from the prelude of Tycho, not
-imported. For each case: compiled on JavaScript, and the value (or the
-argument that the host receives) equals the interpreter's within 1e-12:
+`test/compute-engine/compile-records-acceptance.test.ts` holds a reduced
+prelude copied from Tycho's prelude version 25, not imported: the type
+`Figure`, the protocol `Drawable` (`translate`, `rotate` with
+`about: any = figureDefault`, `rotateAbout`, `scale`, `fill`, `stroke`,
+`strokeWidth`, `dash`, `center`), `figureOf`, `figureCompose`,
+`figureTransform`, `figureTransformAbout`, `figureRotation`, `figureScaling`,
+`figureBox`, `figureKindBox` and `figureBoxCenter` (the box read by index,
+`box is nothing`), `circle`, `label`, `group`, `bitmap`, and
+`draw(...args) -> nothing { figureDraw(listFrom(args)) }` over a host
+`figureDraw` declared `(any) -> nothing`, `pure: false`, that records its
+argument. Each case is compiled on JavaScript with `fallback: false`, and the
+value of `run()`, or the argument that `figureDraw` receives, equals the
+interpreter's: numbers within 1e-12, structure exact.
 
-- `t => circle((cos(t), sin(t)), 0.2)`;
-- `t => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))`;
-- `t => draw(circle((cos(t), 0), 0.1))` and `t => draw(circle((0, 0), 1),
-  label((0, 1), "a"))` (two records of different types in one `draw`);
-- `t => circle((0, 0), t).fill("red").translate((1, 2))`;
-- `t => circle((0, 0), t).fill(rgb(t, 0, 0))` (a color field, through
-  `draw` too).
+| Program                                                                     | Outcome                                                                 |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `t => circle((cos(t), sin(t)), 0.2)`                                        | compiles; an object with the field names                                |
+| `t => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))`                    | compiles                                                                |
+| `t => circle((0, 0), t).fill("red").translate((1, 2))`                      | compiles                                                                |
+| `t => circle((0, 0), t).fill(rgb(t, 0, 0))`                                 | compiles; `fillPaint` is the compiled colour, the other fields agree    |
+| `t => circle((t, 0), 1).center()`                                           | compiles                                                                |
+| `t => draw(circle((cos(t), 0), 0.1))`                                       | compiles                                                                |
+| `t => draw(circle((t, 0), 1).rotate(t))`, `.scale(2)`, `.stroke("blue")`    | compiles                                                                |
+| `t => draw(circle((0, 0), t).fill("red").translate((1, 2)))`                | compiles                                                                |
+| `t => draw(circle((0, 0), 1), circle((t, 0), 0.5).fill("red"))`             | compiles (two record types in one `draw`)                               |
+| the orbit of Tycho's `EPSIL_ANIMATION.md` § 1, the three figures built once | compiles                                                                |
+| the Game of Life state update, n = 12, `t => do { g = step(g) }`            | compiles; `g` equals the interpreter's after five ticks                 |
+| `t => draw(circle((0, 0), 1), label((0, 1), "a"))`                          | declines: the parameter `geom` of `figureOf` is not a scalar (list)     |
+| `t => draw(circle((0, 0), t).fill(rgb(t, 0, 0)))`                           | declines: a colour at the host (the compiled colour is in OKLCh)        |
+| `if t > 0 { circle(…) } else { label(…) }`                                  | declines: the label's `geom`, as above                                  |
+| `if t > 0 { circle(…) } else { circle(…).fill("red") }`                     | declines: arms of two types (R3)                                        |
+| a figure of kind `"group"` (`draw`, `.rotate(t)`, `.center()`)              | declines: the group's `geom`, a list of figures, at `figureOf`          |
+| `t => draw(circle((0, 0), 1).dash([t, 2]))`                                 | declines: a record with a field of a run-time length (user decision)    |
+| `t => do { g = step(g); draw(bitmap(g, …)) }`                               | declines: a host call in a function that assigns a variable of the engine (user decision; Tycho compiles the update and interprets the `draw`) |
+| every case that compiles, on GLSL and `interval-js`                         | declines: records, strings, rest parameters and engine assignments compile on JavaScript only |
 
-Declines, each with its reason: an `if` whose arms give a `circle` and a
-`label`; a `group` (recursive `figureBox`); `.rotate(a)` without a pivot when
-it reaches `figureBox` of a group; GLSL and `interval-js` of every case above.
+The orbit is
+`draw([orbit, sun, earth.rotateAbout(t / 1000, (0, 0))])`, with
+`sun = circle((0, 0), 0.5).fill("orange")`,
+`earth = circle((2, 0), 0.2).fill("blue")` and
+`orbit = circle((0, 0), 2).stroke("gray")` declared by `let` before the
+callback. A `label` and a colour at the host decline by the rules of step 5,
+and a group declines at its geometry before its recursive `figureBox` is
+reached.
 
 ## 8. Risks
 

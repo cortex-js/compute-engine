@@ -19,6 +19,7 @@ import {
   mapLengths,
   outsOf,
   regionsOf,
+  sameFields,
   sameShape,
   scalarType,
   typeToString,
@@ -174,6 +175,29 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
             fail(`field v${i.out}: not a field of a record`);
           if (!equal(type(i.out), f!))
             fail(`field v${i.out}: the result is not ${typeToString(f!)}`);
+          return;
+        }
+        // A call of a function of the host (`Program.hosts`): each operand
+        // of the lane and the rank of the argument it was made for (a
+        // record of the same fields), and a scalar of the lane of its
+        // value (CE-1652, step 5).
+        const host = /^call\.host(\d+)$/.exec(i.op);
+        const h = host === null ? undefined : p.hosts?.[Number(host[1])];
+        if (h !== undefined) {
+          if (i.args.length !== h.types.length)
+            fail(`${i.op} has ${i.args.length} operands`);
+          i.args.forEach((a, k) => {
+            const [t, u] = [type(a), h.types[k]];
+            if (
+              t.lane !== u.lane ||
+              t.shape.length !== u.shape.length ||
+              !sameFields(t, u, 'loose')
+            )
+              fail(`${i.op}: operand ${k} is ${typeToString(t)}`);
+          });
+          const r = scalarType(h.result === 'nothing' ? 'real' : h.result);
+          if (!equal(type(i.out), r))
+            fail(`${i.op} v${i.out}: the result is not ${typeToString(r)}`);
           return;
         }
         const found =

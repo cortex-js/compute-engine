@@ -76,6 +76,13 @@ export type IRType = {
    *  type of a value never holds it, the lowering keeps the constant of a
    *  value aside (`Lowering.known()`). */
   readonly constant?: string;
+  /** A record of no names whose value in the engine is the application of
+   *  `head` to its fields (`boxValue()` of `print-js.ts`; CE-1652, step 5):
+   *  the arguments of a call of a function with a rest parameter
+   *  (`...args`), which the interpreter binds to a `Tuple`, and `ListFrom`
+   *  of them, a `List`. A record of no names made by a `Tuple` or a `List`
+   *  literal has none: its type does not say which one made it. */
+  readonly head?: 'Tuple' | 'List';
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`
@@ -233,12 +240,18 @@ export type Program = {
  *  function (CE-1621): its name, a call of the program (which the code
  *  rebuilds over the values of the arguments, bound to the same
  *  definition), that definition, the lane of each argument, and the lane
- *  of its value, or `nothing` for a value that the code does not read. */
+ *  of its value, or `nothing` for a value that the code does not read.
+ *  `types` and `marks`: the IR type and the tuple mark of each argument,
+ *  from which the code makes the engine's value of a record, a list or a
+ *  tuple before the call (`boxValue()` of `print-js.ts`; CE-1652, step 5);
+ *  a run-time length is `-1` there. */
 export type HostCall = {
   readonly name: string;
   readonly call: Expression;
   readonly definition: BoxedOperatorDefinition;
   readonly args: readonly Lane[];
+  readonly types: readonly IRType[];
+  readonly marks: readonly (number | undefined)[];
   readonly result: Lane | 'nothing';
 };
 
@@ -378,6 +391,7 @@ export function sameFields(
   return (
     a.lane === b.lane &&
     a.nominal === b.nominal &&
+    a.head === b.head &&
     f.length === g.length &&
     a.names?.join('\u0000') === b.names?.join('\u0000') &&
     f.every(
@@ -452,7 +466,7 @@ export function typeToString(
   if (t.constant !== undefined) return JSON.stringify(t.constant);
   // A record: its fields, named or not.
   if (t.lane === 'record')
-    return `${t.nominal ?? 'record'}(${(t.fields ?? [])
+    return `${t.nominal ?? t.head ?? 'record'}(${(t.fields ?? [])
       .map(
         (f, j) =>
           `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`
