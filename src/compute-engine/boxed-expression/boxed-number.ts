@@ -964,8 +964,10 @@ export class BoxedNumber
       }
     }
 
+    // `ln(a·b²) = ln a + 2 ln b` for a positive integer. The argument must be
+    // real: `this.re` alone would read `ln(9 + 9i)` as `ln 9 = 2 ln 3`.
     const f = this.re;
-    if (Number.isInteger(f) && f > 0) {
+    if (this.im === 0 && Number.isInteger(f) && f > 0) {
       let [factor, root] = canonicalInteger(f, 3);
       if (factor !== 1)
         return ce.number(factor).ln(base).mul(3).add(ce.number(root).ln(base));

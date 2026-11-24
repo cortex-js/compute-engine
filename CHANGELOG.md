@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **The logarithm of a complex number whose real part holds a square or a cube
+  keeps its imaginary part** (CE-1208). `Ln(Complex(9, 9)).evaluate()` gave
+  `2 Ln(3)` and `Log(Complex(4, 1)).evaluate()` gave `2 Log(2, 10)`: the
+  rewrite `ln 9 = 2 ln 3` read only the real part of the argument. It now
+  applies only to a real argument, and these logarithms stay exact and
+  unevaluated, with the value of `N()`.
+
 - **A sum or a product whose set of values names another index gives a
   number** (CE-1190). `Sum(i*j, Limits(i, 1, 3), Element(j, Range(1, i)))`
   stayed unevaluated. It now gives 25, the value of the same sum written with
