@@ -263,6 +263,9 @@
 
 ### Resolved Issues
 
+- **`ReplaceAll` in a block keeps the value of a local variable of the
+  block** (CE-1720). `ReplaceAll(Block(Declare(a, "integer"), Assign(a, 5),
+  a + Sin(b)), Sin(_a) -> 1)` was `a + 1`; it is now `6`.
 - **`\max_{x \in S} f` is the maximum of `f` over the elements of `S`**
   (CE-1728), and the same for `\min`, `\sup` and `\inf`.
   `\max_{x \in \{1,2,3\}} x^2` is `Max(Map(x ↦ x^2, {1, 2, 3}))` and
