@@ -349,6 +349,67 @@ describe('SCOPED_UNKNOWNS', () => {
     expect(block.unknowns).not.toContain('z');
   });
 
+  it('Block: the type of a declaration is not a name of the block', () => {
+    const block = engine.expr([
+      'Block',
+      ['Declare', 't', 'real', 1],
+      ['Add', 't', 1],
+    ]);
+    expect(block.unknowns).toEqual([]);
+    expect(block.symbols).toEqual(['t']);
+    expect(block.references).toEqual([]);
+    expect(
+      engine.expr(['Block', ['Declare', 't', 'integer', 1], 't']).unknowns
+    ).toEqual([]);
+    // A symbol in the value is still read.
+    const reads = engine.expr([
+      'Block',
+      ['Declare', 't', 'real', 'x'],
+      ['Add', 't', 1],
+    ]);
+    expect(reads.unknowns).toEqual(['x']);
+    expect(reads.symbols).toEqual(['t', 'x']);
+    // The type of a destructuring declaration.
+    expect(
+      engine.expr([
+        'Block',
+        ['Declare', ['Tuple', 'p', 'q'], 'any', ['Tuple', 1, 2]],
+        ['Add', 'p', 'q'],
+      ]).unknowns
+    ).toEqual([]);
+    // The `type` entry of an attributes dictionary.
+    const attributes = engine.expr([
+      'Block',
+      [
+        'Declare',
+        't',
+        [
+          'Dictionary',
+          ['KeyValuePair', "'type'", 'real'],
+          ['KeyValuePair', "'value'", 'y'],
+        ],
+      ],
+      ['Add', 't', 1],
+    ]);
+    expect(attributes.unknowns).toEqual(['y']);
+    expect(attributes.symbols).toEqual(['t', 'y']);
+    expect(attributes.references).toEqual(['y']);
+    // A dictionary value before the attributes is a value: its `type` entry
+    // is read. The `type` entry of the attributes is not.
+    const valueThenAttributes = engine.expr([
+      'Block',
+      [
+        'Declare',
+        't',
+        "'unknown'",
+        ['Dictionary', ['KeyValuePair', "'type'", 'u']],
+        ['Dictionary', ['KeyValuePair', "'type'", 'w']],
+      ],
+      't',
+    ]);
+    expect(valueThenAttributes.symbols).toEqual(['t', 'u']);
+  });
+
   it('Block: should exclude a function the block defines', () => {
     // `f` is defined by the block (the Epsil `f(x) = x + 1`); `z` is free.
     const block = engine.expr([

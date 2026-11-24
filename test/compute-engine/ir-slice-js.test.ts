@@ -417,23 +417,41 @@ describe('IR slice: the fold is the double arithmetic of the row', () => {
       JSON.stringify(
         sliceProgram(ce.box(json as never), { target }).functions[0].body.body
       );
+    // Each block reads an input, so it is not closed: the slice folds the
+    // local, not the interpreter.
     const integer = [
       'Block',
       ['Declare', 't', 'integer', 3],
-      ['Equal', ['Add', 't', 4], 7],
+      ['Equal', ['Add', 't', 4], ['Add', 'n', 7]],
     ];
     const real = [
       'Block',
       ['Declare', 't', 'real', 0.1],
-      ['Equal', ['Add', 't', 0.2], 0.3],
+      ['Equal', ['Add', 't', 0.2], ['Add', 'x', 0.3]],
     ];
     for (const target of ['javascript', 'glsl'] as const) {
-      expect(ops(integer, target)).not.toMatch(/"add/);
-      expect(ops(real, target)).not.toMatch(/"add/);
+      // `t + 4` and `t + 0.2` are folded to a constant.
+      expect(ops(integer, target)).toContain(
+        '"value":{"lane":"integer","value":7}'
+      );
+      expect(ops(real, target)).toContain(
+        '"value":{"lane":"real","value":0.30000000000000004}'
+      );
     }
     // The double arithmetic, as the code without the passes computes.
-    expect(js(real).run({})).toBe(false);
-    expect(js(integer).run({})).toBe(true);
+    expect(js(real).run({ x: 0 })).toBe(false);
+    expect(js(integer).run({ n: 0 })).toBe(true);
+  });
+  test('a closed block takes the interpreter value', () => {
+    // The type of the declaration is not a free name of the block (CE-1250).
+    const closed = [
+      'Block',
+      ['Declare', 't', 'real', 0.1],
+      ['Equal', ['Add', 't', 0.2], 0.3],
+    ];
+    expect(js(closed).run({})).toBe(
+      interpret(ce, ce.box(closed as never), {})
+    );
   });
 });
 

@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **The type of a declaration is not a name of the expression** (CE-1250).
+  For `["Block", ["Declare", "t", "real", 1], ["Add", "t", 1]]`, `unknowns`
+  and `freeVariables` were `["real"]` and `symbols` was `["real", "t"]`. They
+  are now `[]` and `["t"]`, and `references` no longer lists `real`. The
+  `type` entry of the attributes dictionary of a `Declare` is not listed
+  either.
+
 - **`:=` after `let` is an assignment, as `\coloneq` is** (CE-1239).
   `\mathrm{let} c := 5; c` parsed as `["Block", ["Declare", "c", "'unknown'",
   5], ["Error", "'invalid-type'", "''"], "c"]`: the `:` was read as the start
