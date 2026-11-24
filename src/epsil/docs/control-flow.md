@@ -1451,13 +1451,19 @@ for x in xs {
 }
 ```
 
-Outside a loop they are a `control-outside-loop` diagnostic:
+Outside a loop they are a `control-outside-loop` diagnostic, and so are their
+call forms `Break()` and `Continue()`:
 
 <!-- epsil-test: expect-diagnostics -->
 
 ```epsil
 if x > 1 { break }
 ```
+
+A program with this diagnostic still runs. A `break` or `continue` that
+reaches the end of a function body or the top level of the program is then
+the error `control-outside-loop`: it does not end a loop of the caller, and
+the next statements of the program run.
 
 The loop context **resets at every function and lambda boundary**. A `break`
 written inside a function or lambda defined in a loop body does not target

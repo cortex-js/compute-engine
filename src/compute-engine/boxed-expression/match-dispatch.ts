@@ -4,7 +4,11 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { apply, canonicalFunctionLiteralArguments } from '../function-utils.js';
+import {
+  apply,
+  canonicalFunctionLiteralArguments,
+  markCaseClosure,
+} from '../function-utils.js';
 import {
   isDictionary,
   isFunction,
@@ -432,19 +436,23 @@ export function evaluateMatchReference(
     const args = captures.map((c) => sub[c.key] ?? ce.Nothing);
 
     if (vc.guard !== undefined) {
-      const guardClosure = canonicalFunctionLiteralArguments(ce, [
-        vc.guard,
-        ...names.map((n) => ce.symbol(n, { canonical: false })),
-      ]);
+      const guardClosure = markCaseClosure(
+        canonicalFunctionLiteralArguments(ce, [
+          vc.guard,
+          ...names.map((n) => ce.symbol(n, { canonical: false })),
+        ])
+      );
       if (guardClosure === undefined) continue;
       if (sym(apply(guardClosure, args, undefined, 'bind')) !== 'True')
         continue;
     }
 
-    const bodyClosure = canonicalFunctionLiteralArguments(ce, [
-      vc.body,
-      ...names.map((n) => ce.symbol(n, { canonical: false })),
-    ]);
+    const bodyClosure = markCaseClosure(
+      canonicalFunctionLiteralArguments(ce, [
+        vc.body,
+        ...names.map((n) => ce.symbol(n, { canonical: false })),
+      ])
+    );
     if (bodyClosure === undefined) return ce.Nothing;
     return apply(bodyClosure, args, options, 'bind');
   }
@@ -473,10 +481,12 @@ export function buildCaseClosure(
   operand: Expression,
   names: ReadonlyArray<string>
 ): Expression | undefined {
-  return canonicalFunctionLiteralArguments(ce, [
-    operand,
-    ...names.map((n) => ce.symbol(n, { canonical: false })),
-  ]);
+  return markCaseClosure(
+    canonicalFunctionLiteralArguments(ce, [
+      operand,
+      ...names.map((n) => ce.symbol(n, { canonical: false })),
+    ])
+  );
 }
 
 /** Run a compiled case against `subject`; return the body value if the case is

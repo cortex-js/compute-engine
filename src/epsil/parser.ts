@@ -8992,16 +8992,35 @@ export class Parser {
     // lambda could later emit `Break()` into an unrelated running loop — the
     // non-local control flow the boundary exists to prevent. Every other head
     // keeps the surrounding context: a `do` block or a `match` inside a loop
-    // body is still inside that loop.
-    const isFunctionLiteral = symbolNameOf(callee) === 'Function';
+    // body is still inside that loop. The call spelling of a loop,
+    // `Loop(…)` or `ParallelLoop(…)` (the serializer writes it for a loop
+    // that has no `for`/`while` spelling), is a loop: its arguments are one
+    // level deeper. A function of the program with one of these names is an
+    // ordinary call.
+    const head = symbolNameOf(callee);
+    const isProgramFunction =
+      head !== null && this.functionNameScopes.some((names) => names.has(head));
+    const isFunctionLiteral = head === 'Function';
+    const isLoop =
+      (head === 'Loop' || head === 'ParallelLoop') && !isProgramFunction;
     // Spread arguments (`f(...t)`) and named arguments (`f(rate: 0.05)`) are
     // admitted in call argument lists only.
+    const parseArguments = () =>
+      this.parseBracketedList('CLOSE_PAREN', ')', false, true, true);
     const { values, end } = isFunctionLiteral
-      ? this.inLoopContext(0, () =>
-          this.parseBracketedList('CLOSE_PAREN', ')', false, true, true)
-        )
-      : this.parseBracketedList('CLOSE_PAREN', ')', false, true, true);
-    const head = symbolNameOf(callee);
+      ? this.inLoopContext(0, parseArguments)
+      : isLoop
+        ? this.inLoopContext(this.loopDepth + 1, parseArguments)
+        : parseArguments();
+    // The call form `Break()` / `Continue()` (the form the serializer writes)
+    // has the context of the keywords `break` / `continue`: outside a loop
+    // body it is a `control-outside-loop` diagnostic.
+    if (
+      (head === 'Break' || head === 'Continue') &&
+      this.loopDepth === 0 &&
+      !isProgramFunction
+    )
+      this.error(['control-outside-loop', `${head}()`], start, end);
     if (head !== null)
       return this.wrap([head, ...values] as MathJsonExpression[], start, end);
     return this.wrap(

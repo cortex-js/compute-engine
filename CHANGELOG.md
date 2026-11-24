@@ -2,6 +2,18 @@
 
 ### Resolved Issues
 
+- **A `Break()` or `Continue()` outside a loop is an error, and no longer
+  stops the rest of an Epsil program** (CE-1408). `let s = 0; do { Break() };
+  s = 5; s` gave `Break()` and did not run the last two statements; it now
+  gives `5`, with the `control-outside-loop` diagnostic at `Break()`, which
+  the parser now reports for the call forms `Break()` and `Continue()` as it
+  does for `break` and `continue`. A `Break` or `Continue` that reaches the
+  end of a function body is the error `control-outside-loop` and no longer
+  ends a loop of the caller: `fixedPoint(x => if x > 10 { Break(x) } else
+  { x + 1 }, 0)` stayed unevaluated and is now that error. A `Break` or
+  `Continue` in a case of a `match` still ends or continues the loop around
+  the `match`.
+
 - **Two regular expressions are equal when their patterns and their sets of
   flags are equal** (CE-1404). `RegExp("a.c") == RegExp("a.c", "i")` stayed
   unevaluated; it is now `False`. The order of the flags does not count, and

@@ -429,15 +429,31 @@ describe('EPSIL Mod spelling', () => {
   });
 });
 
+// The corpus expressions with a `Break` or a `Continue` outside a loop. They
+// re-parse to the same node, with a `control-outside-loop` diagnostic for
+// each such `Break` or `Continue`: it is an error when it runs (CE-1408).
+const STRAY_LOOP_CONTROL: Record<string, string[][]> = {
+  'top-level Break': [['control-outside-loop', 'Break()']],
+  'top-level Continue': [['control-outside-loop', 'Continue()']],
+  'Break in a function literal in a loop': [
+    ['control-outside-loop', 'Break()'],
+  ],
+  'loop in a function literal in a loop': [
+    ['control-outside-loop', 'Break()'],
+  ],
+};
+
 describe('EPSIL ROUND-TRIP', () => {
-  test.each(CORPUS)('%s', (_label, expr) => {
+  test.each(CORPUS)('%s', (label, expr) => {
     const src = serializeEpsil(expr);
     expect(typeof src).toBe('string');
 
     const [value, diagnostics] = parseEpsil(src);
 
-    // No corpus expression may re-parse with a diagnostic.
-    expect(diagnostics.map((d) => d.message)).toEqual([]);
+    // No other corpus expression may re-parse with a diagnostic.
+    expect(diagnostics.map((d) => d.message)).toEqual(
+      STRAY_LOOP_CONTROL[label] ?? []
+    );
 
     // The serializer writes a library name with its Epsil spelling
     // (`apply(…)` for `Apply`); the resolution pass reads it back.
@@ -494,6 +510,8 @@ describe('EPSIL LOOP SPELLING', () => {
     // `break` written inside a lambda defined in a loop is outside that loop,
     // so the node keeps its call form there. Both literal spellings — the
     // annotated arrow and the generic `Function(…)` call — are boundaries.
+    // The call form there is the `control-outside-loop` diagnostic, in the
+    // source and in its spelling (CE-1408).
     [
       'for x in xs { g((y: integer) => Break()) }',
       'for x in xs {g((y: integer) => Break())}',
@@ -515,10 +533,14 @@ describe('EPSIL LOOP SPELLING', () => {
     ],
   ])('%s', (src, expected) => {
     expect(spell(src)).toBe(expected);
-    // …and the spelling re-parses to what the source parsed to.
+    // …and the spelling re-parses to what the source parsed to, with the
+    // same diagnostics.
     const [reparsed, diagnostics] = parseEpsil(expected);
-    expect(diagnostics.map((d) => d.message)).toEqual([]);
-    expect(normalize(reparsed)).toEqual(normalize(parseEpsil(src)[0]));
+    const [parsed, sourceDiagnostics] = parseEpsil(src);
+    expect(diagnostics.map((d) => d.message)).toEqual(
+      sourceDiagnostics.map((d) => d.message)
+    );
+    expect(normalize(reparsed)).toEqual(normalize(parsed));
   });
 
   test('a multi-statement body stacks like a parsed one', () => {

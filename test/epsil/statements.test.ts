@@ -1,5 +1,6 @@
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
+import { operand, operands, operator } from '../../src/math-json/utils';
 import { validEpsil } from '../utils';
 
 //
@@ -692,19 +693,30 @@ describe('EPSIL `break` AND `continue`', () => {
   });
 
   test('they round-trip in call form outside a loop', () => {
-    // Outside a loop the call form is the only faithful spelling: a bare
+    // Outside a loop the call form is the spelling of the node: a bare
     // `break` reached at the top level, or inside a function literal defined
-    // in a loop, has no enclosing loop and re-parses as the
-    // `control-outside-loop` error above rather than as this node.
+    // in a loop, re-parses as the `control-outside-loop` error above rather
+    // than as this node. The call form re-parses as this node, with the same
+    // diagnostic (CE-1408): it is an error when it runs.
     expect(serializeEpsil(['Break'])).toBe('Break()');
     expect(serializeEpsil(['Continue'])).toBe('Continue()');
-    expect(validEpsil('Break()')).toStrictEqual(['Break']);
-    expect(validEpsil('Continue()')).toStrictEqual(['Continue']);
+    for (const [src, head] of [
+      ['Break()', 'Break'],
+      ['Continue()', 'Continue'],
+    ]) {
+      const [value, diags] = parseEpsil(src);
+      const node = operand(value, 1);
+      expect(operator(node)).toBe(head);
+      expect(operands(node)).toHaveLength(0);
+      expect(diags.map((d) => d.message)).toStrictEqual([
+        ['control-outside-loop', src],
+      ]);
+    }
     // A function literal is a boundary for the serializer exactly as it is
     // for the parser, so the literal's body keeps the call form even though
     // the literal itself sits in a loop body.
     expect(
-      serializeEpsil(validEpsil('for x in xs { g(Function(Break())) }'))
+      serializeEpsil(parseEpsil('for x in xs { g(Function(Break())) }')[0])
     ).toBe('for x in xs {g(Function(Break()))}');
   });
 

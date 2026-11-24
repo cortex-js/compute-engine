@@ -1111,12 +1111,17 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
     Break: {
       description:
         'Exit the enclosing loop immediately, optionally with a value ' +
-        '(`Break(v)`) that becomes the loop value.',
+        '(`Break(v)`) that becomes the loop value. A `Break` that reaches ' +
+        'the end of a function body or a statement of a `Program` is the ' +
+        'error `control-outside-loop`: it does not end a loop of the caller.',
       signature: '(value:any?) -> nothing',
     },
 
     Continue: {
-      description: 'Skip to the next iteration of the enclosing loop.',
+      description:
+        'Skip to the next iteration of the enclosing loop. A `Continue` ' +
+        'that reaches the end of a function body or a statement of a ' +
+        '`Program` is the error `control-outside-loop`.',
       signature: '() -> nothing',
     },
 
