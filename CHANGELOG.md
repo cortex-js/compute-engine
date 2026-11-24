@@ -2,6 +2,16 @@
 
 ### Resolved Issues
 
+- **A read of one element of a tuple whose elements have different shapes
+  no longer gives the tuple the type `never`** (CE-1492). In the Epsil
+  function
+  `function f(n: integer) { let t = 0.5; for g in [((1, 2), 2), ((3, 4), 3)] { t = t + g[2] }; t }`,
+  the read `g[2]` in the sum required a number of every element of `g`,
+  and its first element is a tuple. `f` was typed `(n: integer) -> never`
+  and did not compile. A read at a literal index now requires a number of
+  that element only: `f` is typed `(n: integer) -> number` and compiles,
+  and `f(2)` is `5.5`.
+
 - **`Iterate` over a variable with a declared signature uses the declared
   default of a parameter** (CE-1461). With `s` declared
   `(real, real = 5) -> real` and assigned `(u, v = 7) ↦ v - u`,

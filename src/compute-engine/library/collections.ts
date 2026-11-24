@@ -6445,12 +6445,55 @@ function parameterIndexReadType(
 }
 
 /**
+ * The requirement that the read `xs[index]`, whose result must be of type
+ * `r`, puts on a base `xs` whose type is a tuple, when `index` is a literal
+ * integer inside the tuple (counted from the end when it is negative). It is
+ * the tuple of `xs` with the component at `index` narrowed by `r`: the read
+ * says nothing about the other components. `undefined` (the general rule
+ * applies) when the type of `xs` is not a tuple, when the index is not such a
+ * literal, or when the component has no common value with `r`.
+ *
+ * The general requirement `indexed_collection<r>` asks it of EVERY component.
+ * A loop variable over `[((1, 2), 2), ((3, 4), 3)]` is a
+ * `tuple<tuple<integer, integer>, integer>`, so `g[2]` in a sum gave it the
+ * type `never` (the meet with `indexed_collection<number>`), and every
+ * expression that read it was typed `never` (CE-1492). The tuple is built
+ * here component by component because `narrow` of two tuples is no
+ * componentwise meet: it is one of the two when it is a subtype of the
+ * other, and `never` otherwise.
+ */
+function tupleComponentRequirement(
+  xs: Expression,
+  index: Expression,
+  r: Type
+): Type | undefined {
+  const t = resolveTypeAlias(xs.type.type);
+  if (typeof t !== 'object' || t.kind !== 'tuple') return undefined;
+  if (!isSubtype(index.type.type, 'integer')) return undefined;
+  const k = toInteger(index);
+  if (k === null) return undefined;
+  const n = t.elements.length;
+  const position = k < 0 ? n + k : k - 1;
+  if (k === 0 || position < 0 || position >= n) return undefined;
+  const component = narrow(t.elements[position].type, r);
+  if (component === 'never') return undefined;
+  return {
+    kind: 'tuple',
+    elements: t.elements.map((e, i) =>
+      i === position ? { ...e, type: component } : e
+    ),
+  };
+}
+
+/**
  * `At`'s side of the same contract. The base learns `indexed_collection<r>`
  * under a numeric index, `dictionary<r>` under a string index, and the
  * two-arm shape its validation already wrote (`dictionary<r> |
  * indexed_collection<r>`) when the index kind is open; each is a subtype of
  * the incumbent two-arm type, so the meet keeps the selected arm and drops
- * the other. Declined, so nothing is written:
+ * the other. A base whose type is a tuple, read at a literal index inside
+ * the tuple, learns that tuple with the one component narrowed by `r`
+ * (`tupleComponentRequirement`). Declined, so nothing is written:
  *
  * - a multi-index access `At(m, i, j)`: the chained single-index form
  *   `m[i][j]` reaches `m` through the engine's forwarding, one level at a
@@ -6490,6 +6533,8 @@ function elementRequirementOfAt(
     return [{ kind: 'dictionary', values: r }, undefined];
   const perIndex = parameterIndexReadType(xs, index, r);
   if (perIndex !== undefined) return [{ replace: perIndex }, undefined];
+  const component = tupleComponentRequirement(xs, index, r);
+  if (component !== undefined) return [component, undefined];
   if (isSubtype(indexType, 'number'))
     return [{ kind: 'indexed_collection', elements: r }, undefined];
   // A PROVABLE gather or mask (a collection-typed index) selects a LIST of
