@@ -114,6 +114,15 @@
   `-b + (x = Error("missing"))` and is now `x = -b`. `a\placeholder{}\,-1`
   was the product `-a` and is now `a - 1`.
 
+- **The LaTeX of a held `Annotated` expression applies its string styles**
+  (CE-1398). The Epsil expression
+  `Latex(Hold(Annotated(pi, {"color" -> "blue"})))` gave
+  `\mathrm{Hold}(\textcolor{'blue'}{\pi})` and now gives
+  `\mathrm{Hold}(\textcolor{blue}{\pi})`. A `fontWeight`, `fontStyle`,
+  `fontFamily` or `mathStyle` given as a string was ignored and now gives
+  `\textbf{…}`, `\textit{…}`, `\texttt{…}`, `{\displaystyle …}` and the other
+  style commands.
+
 ### Performance
 
 - **A compiled formula whose functions call a small function in several sums

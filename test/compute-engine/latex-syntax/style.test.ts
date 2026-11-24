@@ -218,6 +218,64 @@ describe('TEXT FONT STYLING', () => {
   });
 });
 
+describe('ANNOTATED WITH A DICTIONARY IN THE OPERATOR FORM', () => {
+  // A held `Annotated` keeps its dictionary in the operator form, whose
+  // string values are MathJSON strings with their quotes (`'blue'`). The
+  // serializer reads them as the same style values as the `{dict: …}` form.
+  const annotated = (
+    body: string,
+    key: string,
+    value: string
+  ): [
+    'Annotated',
+    string,
+    ['Dictionary', ['KeyValuePair', string, string]],
+  ] => ['Annotated', body, ['Dictionary', ['KeyValuePair', `'${key}'`, value]]];
+
+  test.each([
+    ['color', "'blue'", '\\textcolor{blue}{x}'],
+    ['backgroundColor', "'yellow'", '\\colorbox{yellow}{x}'],
+    ['fontWeight', "'bold'", '\\textbf{x}'],
+    ['fontStyle', "'italic'", '\\textit{x}'],
+    ['fontStyle', "'normal'", '\\textup{x}'],
+    ['fontFamily', "'monospace'", '\\texttt{x}'],
+    ['fontFamily', "'sans-serif'", '\\textsf{x}'],
+    ['mathStyle', "'normal'", '{\\displaystyle x}'],
+    ['mathStyle', "'compact'", '{\\textstyle x}'],
+    ['mathStyle', "'script'", '{\\scriptstyle x}'],
+    ['mathStyle', "'scriptscript'", '{\\scriptscriptstyle x}'],
+  ])('%s -> %s', (key, value, expected) => {
+    expect(serialize(annotated('x', key, value))).toBe(expected);
+    // The `{dict: …}` form gives the same LaTeX
+    expect(
+      serialize(['Annotated', 'x', { dict: { [key]: value.slice(1, -1) } }])
+    ).toBe(expected);
+  });
+
+  test('a symbol value is read as its name', () => {
+    expect(serialize(annotated('x', 'color', 'red'))).toBe(
+      '\\textcolor{red}{x}'
+    );
+  });
+
+  test('a string body with a text style is written as raw text', () => {
+    expect(serialize(annotated("'abc'", 'fontWeight', "'bold'"))).toBe(
+      '\\textbf{abc}'
+    );
+  });
+
+  test('Latex of a held Annotated', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['Latex', ['Hold', annotated('Pi', 'color', "'blue'")]])
+      .evaluate();
+    expect(result.json).toEqual([
+      'LatexString',
+      "'\\mathrm{Hold}(\\textcolor{blue}{\\pi})'",
+    ]);
+  });
+});
+
 describe('MATH-MODE BOLD', () => {
   // `\bold`, `\boldsymbol`, `\bm` are aliases of `\mathbf` (math-mode bold),
   // producing a `_bold`-suffixed symbol rather than a text run.

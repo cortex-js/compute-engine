@@ -673,6 +673,21 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const dict = dictionaryFromExpression(operand(expr, 2));
       if (dict === null || dict === undefined) return result;
 
+      // A value of the operator form `["Dictionary", ["KeyValuePair", …]]`,
+      // which a held `Annotated` keeps, is a MathJSON string with its quotes
+      // (`'blue'`); a value of the `{dict: …}` form is the bare JS string.
+      const style = (key: string): string | undefined => {
+        const v = dict.dict[key];
+        if (typeof v !== 'string') return undefined;
+        return stringValue(v) ?? v;
+      };
+      const mathStyle = style('mathStyle');
+      const fontFamily = style('fontFamily');
+      const fontWeight = style('fontWeight');
+      const fontStyle = style('fontStyle');
+      const color = style('color');
+      const backgroundColor = style('backgroundColor');
+
       // Text-family styling commands (`\textbf`, `\textit`, `\texttt`, …) are
       // themselves text-mode wrappers, so a plain-string body should be
       // emitted as raw text, not re-wrapped in `\text{…}` — otherwise
@@ -681,24 +696,24 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       const rawText = stringValue(operand(expr, 1));
       if (
         rawText !== null &&
-        (dict.dict.fontFamily === 'monospace' ||
-          dict.dict.fontFamily === 'sans-serif' ||
-          dict.dict.fontWeight === 'bold' ||
-          dict.dict.fontStyle === 'italic' ||
-          dict.dict.fontStyle === 'normal')
+        (fontFamily === 'monospace' ||
+          fontFamily === 'sans-serif' ||
+          fontWeight === 'bold' ||
+          fontStyle === 'italic' ||
+          fontStyle === 'normal')
       )
         result = rawText;
 
       //
       // Display: "math style"
       //
-      if (dict.dict.mathStyle === 'normal')
+      if (mathStyle === 'normal')
         result = joinLatex(['{\\displaystyle', result, '}']);
-      else if (dict.dict.mathStyle === 'compact')
+      else if (mathStyle === 'compact')
         result = joinLatex(['{\\textstyle', result, '}']);
-      else if (dict.dict.mathStyle === 'script')
+      else if (mathStyle === 'script')
         result = joinLatex(['{\\scriptstyle', result, '}']);
-      else if (dict.dict.mathStyle === 'scriptscript')
+      else if (mathStyle === 'scriptscript')
         result = joinLatex(['{\\scriptscriptstyle', result, '}']);
 
       //
@@ -728,42 +743,28 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       //
       // Font family
       //
-      if (dict.dict.fontFamily === 'monospace')
+      if (fontFamily === 'monospace')
         result = joinLatex(['\\texttt{', result, '}']);
-      else if (dict.dict.fontFamily === 'sans-serif')
+      else if (fontFamily === 'sans-serif')
         result = joinLatex(['\\textsf{', result, '}']);
 
-      if (dict.dict.fontWeight === 'bold')
-        result = joinLatex(['\\textbf{', result, '}']);
+      if (fontWeight === 'bold') result = joinLatex(['\\textbf{', result, '}']);
 
-      if (dict.dict.fontStyle === 'italic')
+      if (fontStyle === 'italic')
         result = joinLatex(['\\textit{', result, '}']);
-      else if (dict.dict.fontStyle === 'normal')
+      else if (fontStyle === 'normal')
         result = joinLatex(['\\textup{', result, '}']);
 
       //
       // Color
       //
-      if (dict.dict.color)
-        result = joinLatex([
-          '\\textcolor{',
-          dict.dict.color as string,
-          '}{',
-          result,
-          '}',
-        ]);
+      if (color) result = joinLatex(['\\textcolor{', color, '}{', result, '}']);
 
       //
       // Background Color
       //
-      if (dict.dict.backgroundColor)
-        result = joinLatex([
-          '\\colorbox{',
-          dict.dict.backgroundColor as string,
-          '}{',
-          result,
-          '}',
-        ]);
+      if (backgroundColor)
+        result = joinLatex(['\\colorbox{', backgroundColor, '}{', result, '}']);
 
       //
       // Border
