@@ -1105,16 +1105,6 @@ name of the program and the library.
 
 ## Performance
 
-### CE-624. The interpreter cannot compute a nested integral of a user-function call
-
-**Status:** ready; capability. Found 2026-10-28 while fixing CE-614. Approved 2026-11-01.
-**Witness:** corpus; Tycho row 476 definitions; `NIntegrate` gives NaN with jit off.
-
-With Tycho's row-476 definitions (`c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`)
-and `L := 0.5`, `.N()` of `\int_0^1 y\,c(y, L, 0.001)\,dy` gives 1.98376 only
-through the compiled route; with `jit = 'off'` it stays unevaluated, and
-`NIntegrate` gives NaN after about 6 s.
-
 ### CE-314. Worker threads for parallel numeric kernels: the Epsil route and the API name
 
 **Status:** ready; capability. User decision 2026-10-20: the Epsil asynchronous

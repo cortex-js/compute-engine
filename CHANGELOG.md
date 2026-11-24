@@ -86,6 +86,14 @@
   error of `sqrt(w)/2 + 1` said "in Sqrt argument 1, in Multiply argument 2,
   in Add argument 1". It now says "in Divide argument 1", as for `ln(w)/2 + 1`.
   `Root(w, 3)/2 + 1` had the same message.
+- **With `jit = 'off'`, an integral of a function whose body is an integral with
+  no closed form gets a value** (CE-624). With
+  `g(y) := \int_0^1 e^{-x^2y}\cos(x)\,dx`, `\int_0^1 g(y)\,dy` stayed
+  unevaluated under `.N()`, and `NIntegrate(y ↦ g(y), 0, 1)` was `NaN`; both are
+  now `0.74079733663767`, the value of the compiled route. Each such sample
+  computes the inner integral by quadrature in the interpreter, so the integral
+  takes seconds or, for a hard inner integrand, minutes. An integrand that calls
+  a function declared `pure: false` still stays unevaluated.
 
 ## 0.201.0 _2026-11-23_
 
