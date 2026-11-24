@@ -14553,7 +14553,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'With a single collection, equivalent to `[f(x) for x in xs]`. With',
       'multiple collections, combines them element-wise (like `zipWith`): ',
       '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
-      'shortest input. The mapping function is always the FIRST argument.',
+      'shortest input.',
+      'The mapping function is the first argument, because `Map` takes any number of collections after it. Most other operations that take a function, such as `Filter`, `FlatMap` and `Reduce`, take one collection and put it first: `Filter(xs, p)`. `Map(xs, f)` is an `incompatible-type` error.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
@@ -15017,6 +15018,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return the elements of the collection for which the predicate function returns True.',
       'Equivalent to `[x for x in xs if p(x)]`.',
+      'The collection is the first argument and the predicate the second. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.',
     ],
     complexity: 8200,
     // A restricted source, `[1,2]{c}`, is ONE held restriction over the list and
@@ -15512,8 +15514,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
   // shares Reduce's evaluation, laziness, and inert-when-symbolic behavior.
   Fold: {
     examples: ['Fold((a, b) => a + b, 0, [1, 2, 3, 4])'],
-    description:
+    description: [
       'Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.',
+      'The function is the first argument and the collection the last. `Reduce` does the same with the collection first: `Reduce(xs, f, initial)`.',
+    ],
     complexity: 8200,
     lazy: true,
     // Design D phase 2: `Reduce`'s contextual slot with the operands flipped —
@@ -16205,6 +16209,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['FlatMap([1, 2, 3], x => [x, x])'],
     description: [
       'Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.',
+      'The collection is the first argument, as for `Filter`. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.',
     ],
     complexity: 8200,
     lazy: true,

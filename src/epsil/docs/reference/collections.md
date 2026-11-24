@@ -255,11 +255,33 @@ countIf([5, 2, 10, 18], _ > 5)
 // ➔ 2
 ```
 
+### Where the function goes
+
+An operation that takes one collection and a function takes the collection
+first and the function second: `filter(xs, p)`, `flatMap(xs, f)`,
+`sort(xs, key)`, `reduce(xs, f, initial)`.
+
+`map` is the exception: the function is its first argument, `map(f, xs)`.
+`map` takes any number of collections and calls the function with one element
+of each, so the function has the one fixed position and the collections
+follow it:
+
+```epsil
+map((x, y) => x + y, [1, 2, 3], [10, 20, 30])
+// ➔ [11, 22, 33]
+```
+
+`fold(f, initial, xs)` also takes its function first. It is `reduce` with the
+arguments in another order.
+
+An argument in the wrong position is an `incompatible-type` error:
+`map([1, 2, 3], x => x^2)` reports that the list is not a function.
+
 The pipe `|>` passes a collection to the next operation, so a sequence of
 operations reads from left to right. The collection fills the argument slot
-the operation is missing: `xs |> filter(isPrime)` is `filter(xs, isPrime)`,
-and `xs |> map(f)` is `map(f, xs)`, because the function is `map`'s first
-argument. A
+the operation is missing, so the pipe is the same for both orders:
+`xs |> filter(isPrime)` is `filter(xs, isPrime)`, and `xs |> map(f)` is
+`map(f, xs)`. A
 [comprehension](/epsil/syntax/#comprehensions) is another way to make a
 filtered and transformed list:
 
@@ -718,6 +740,8 @@ Return the elements of the collection for which the predicate function returns T
 
 Equivalent to `[x for x in xs if p(x)]`.
 
+The collection is the first argument and the predicate the second. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.
+
 ```epsil
 filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 // ➔ [2,4,6]
@@ -751,6 +775,8 @@ MathJSON `FlatMap` · `(collection<T>, mapping: (T) any -> U) -> list where T, U
 
 Map a function over a collection and concatenate the results into a single list, splicing collection-valued results and keeping scalar results as single elements.
 
+The collection is the first argument, as for `Filter`. `Map` has the opposite order, `Map(f, xs)`, because it takes any number of collections after its function.
+
 ```epsil
 flatMap([1, 2, 3], x => [x, x])
 // ➔ [1,1,2,2,3,3]
@@ -761,6 +787,8 @@ flatMap([1, 2, 3], x => [x, x])
 MathJSON `Fold` · `(reducer: (unknown, T) any -> unknown, initial: value, collection<T>) -> value where T`
 
 Fold a collection to a single value, applying a binary function f(accumulator, element) left to right from an initial value.
+
+The function is the first argument and the collection the last. `Reduce` does the same with the collection first: `Reduce(xs, f, initial)`.
 
 ```epsil
 fold((a, b) => a + b, 0, [1, 2, 3, 4])
@@ -1014,7 +1042,9 @@ Return the collection where each element has been transformed by the mapping fun
 
 With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): 
 
-`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input. The mapping function is always the FIRST argument.
+`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input.
+
+The mapping function is the first argument, because `Map` takes any number of collections after it. Most other operations that take a function, such as `Filter`, `FlatMap` and `Reduce`, take one collection and put it first: `Filter(xs, p)`. `Map(xs, f)` is an `incompatible-type` error.
 
 ```epsil
 map(x => x^2, [1, 2, 3])

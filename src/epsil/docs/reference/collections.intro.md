@@ -241,11 +241,33 @@ countIf([5, 2, 10, 18], _ > 5)
 // ➔ 2
 ```
 
+### Where the function goes
+
+An operation that takes one collection and a function takes the collection
+first and the function second: `filter(xs, p)`, `flatMap(xs, f)`,
+`sort(xs, key)`, `reduce(xs, f, initial)`.
+
+`map` is the exception: the function is its first argument, `map(f, xs)`.
+`map` takes any number of collections and calls the function with one element
+of each, so the function has the one fixed position and the collections
+follow it:
+
+```epsil
+map((x, y) => x + y, [1, 2, 3], [10, 20, 30])
+// ➔ [11, 22, 33]
+```
+
+`fold(f, initial, xs)` also takes its function first. It is `reduce` with the
+arguments in another order.
+
+An argument in the wrong position is an `incompatible-type` error:
+`map([1, 2, 3], x => x^2)` reports that the list is not a function.
+
 The pipe `|>` passes a collection to the next operation, so a sequence of
 operations reads from left to right. The collection fills the argument slot
-the operation is missing: `xs |> filter(isPrime)` is `filter(xs, isPrime)`,
-and `xs |> map(f)` is `map(f, xs)`, because the function is `map`'s first
-argument. A
+the operation is missing, so the pipe is the same for both orders:
+`xs |> filter(isPrime)` is `filter(xs, isPrime)`, and `xs |> map(f)` is
+`map(f, xs)`. A
 [comprehension](/epsil/syntax/#comprehensions) is another way to make a
 filtered and transformed list:
 
