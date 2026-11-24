@@ -16,6 +16,13 @@
   now written as nested operators, `\sum_{i=1}\sum_{j=1}^3ij`, which parses as
   a `Sum` of a `Sum` with the same meaning.
 
+- **The numeric value of a product of a fraction, another number and a
+  symbol now has the correct last digit** (CE-1747). The fraction was
+  rounded before the product with the other number. At the default
+  precision, `N((1/3)·√-2·x)` gave `0.471404520791031682933i·x` and now
+  gives `0.471404520791031682934i·x`, the same coefficient as
+  `N((1/3)·√-2)`; `N((1/3)·π·x)` had a wrong 20th digit.
+
 ### Performance
 
 - **A compiled formula whose functions call a small function in several sums

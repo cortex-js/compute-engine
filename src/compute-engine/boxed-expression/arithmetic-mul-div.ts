@@ -4039,6 +4039,30 @@ export function mulNEvaluated(
     if (xs.some((x) => isTuple(x)) && !hasUnresolvedTupleCofactor(xs))
       return mulTuples(ce, xs, true);
   }
+  // Beside a factor that is not a number literal, the number factors are
+  // first folded into one float coefficient by the route of a product of
+  // number literals, which keeps each exact rational literal exact (see the
+  // numericizing map above): the coefficient is rounded once. With the
+  // rounded `1/3`, `N((1/3)·√-2·x)` kept the error of that rounding in the
+  // product with the big decimal of `√2` (CE-1747). The coefficient is a
+  // float, so `expandProducts` cannot rebuild a `Divide` from it. The
+  // factors go in reverse order: that route folds from the right, so the
+  // floats are multiplied in the canonical order, as `Product` multiplies
+  // them below. In the order of `xs`, `10²⁰⁰·10⁻²⁰⁰·10⁻¹²³·x` went through
+  // the subnormal `10⁻³²³` at machine precision.
+  if (exactFactors.some((x) => x !== undefined)) {
+    const numberAt = xs
+      .flatMap((x, i) => (isNumber(x) ? [i] : []))
+      .reverse();
+    if (numberAt.length >= 2 && numberAt.length < xs.length) {
+      const coefficient = mulNEvaluated(
+        numberAt.map((i) => exactFactors[i] ?? xs[i]),
+        numberAt.map((i) => exactFactors[i] === undefined)
+      );
+      xs = [coefficient, ...xs.filter((x) => !isNumber(x))];
+      exactFactors = xs.map(() => undefined);
+    }
+  }
   // Same gate as `mulFactored`: `.N()` is `evaluate()` with floats, so a
   // product of sums must reach the user FACTORED on this route too —
   // `2(x+1).N()` is `2(x + 1)`, matching `evaluate()`, not `2x + 2`. Only the
