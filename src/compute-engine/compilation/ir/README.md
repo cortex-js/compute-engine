@@ -3532,14 +3532,17 @@ two types"); `admits()` refuses the lane there too.
   parameter's arguments are lowered before the function is chosen at each call.
   A parameter of a nominal tuple type takes a record of that nominal type only,
   or of a nominal type that the static type of the argument proves a subtype of
-  it; any other record declines (R5). In a constructor, an operand of no stated
-  type or of type `any` (such a parameter) proves the declared type of its field
-  by its lane (a string, a colour, a boolean, a number, `nothing`) in the
-  function lowered for it. A field of a record parameter is read as on a local
-  record (the operation `field`), so `x is T` of a field is decided by its lane
-  and a `match` on a field compares at run time. A recursive call on a cycle of
-  calls through a function whose parameter or declared result is a record, or
-  whose arguments hold a record, declines before a function is lowered for it
+  it; any other record declines (R5). A parameter declared `list` takes no
+  record: Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
+  figures) decline at `figureOf(kind: string, geom: list)` ("the parameter geom
+  of figureOf is not a scalar"). In a constructor, an operand of no stated type
+  or of type `any` (such a parameter) proves the declared type of its field by
+  its lane (a string, a colour, a boolean, a number, `nothing`) in the function
+  lowered for it. A field of a record parameter is read as on a local record
+  (the operation `field`), so `x is T` of a field is decided by its lane and a
+  `match` on a field compares at run time. A recursive call on a cycle of calls
+  through a function whose parameter or declared result is a record, or whose
+  arguments hold a record, declines before a function is lowered for it
   (`recordCycle()`): the type of a record on a cycle is a fixed point that the
   lowering does not compute, and a record that grows at each call would lower a
   new function at each.
@@ -3616,7 +3619,11 @@ two types"); `admits()` refuses the lane there too.
   `list`) is lowered once per shape of its argument (a scalar, a point `p2`, a
   flat list `w3` that binds whole, of strings `w1s` on JavaScript; `laneKey()`),
   so its arguments are lowered before the function is chosen at every call, not
-  only the first. `N(x, p)` of a list or a tuple of reals (by its static type,
+  only the first. A list of strings declines in a record field, also as a
+  literal (`figureOf("invalid", ["message"])`,
+  `Figure("invalid", ["message"], …)`), and where a body reads one given to such
+  a parameter (`g[1]` of `g: list` given `["a", "b"]`): "a list of strings other
+  than a literal…". `N(x, p)` of a list or a tuple of reals (by its static type,
   or by its IR type when the static type is `any` or `unknown`) is `x`; in the
   interval and the `bigint` mode it declines. A record field from a list
   parameter of a run-time length (`N(pattern, 15)` of `pattern: list<real>`)

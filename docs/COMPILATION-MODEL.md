@@ -895,7 +895,8 @@ too.
 Compiled code settles the shape of every value at compile time, and emits no
 run-time test of a type. The shape of a value is the form of its
 representation: a number, a complex number, a string, a list, a point (a
-tuple) or a matrix. It comes from the declared or inferred static type of the
+tuple), a matrix or a record (on JavaScript, "Records" under "User functions
+and dispatch"). It comes from the declared or inferred static type of the
 value and from the literal structure of its operands. The compiler does not
 follow the paths of control flow to find a shape. The rule has six parts.
 
@@ -2677,87 +2678,18 @@ These decline:
   (`do { s = s + t; hostDraw(s) }`): the host function could read the
   variable before the code writes it back.
 
-A value of a named tuple type of the program is a record on JavaScript
-(`compilation/ir/README.md`, "Records"; CE-1652): each field has a settled
-shape, from its declared type, or, for a field typed `any`, `list` or
-`string | color | nothing`, from the value that the constructor receives. With
-`type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
-`f(t)` compiles, and `run({ t: 1 })` gives the object `{ x: 0.5403…,
-y: 0.8414… }`; a `Nothing` field is `null`. A `Tuple` or a `List` of
-elements of several lanes (`[t, "a"]`) is a record with no names, an array at
-`run()`. A record is read at a constant position only (`p.x`, `q[1]`). Two
-records of one engine type whose fields have different shapes (a filled and
-an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
-whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
-decline a record. A parameter of a user function of no stated type, of type
-`any` or of a named tuple type takes a record (one of no stated type or `any`
-also a string or a colour), and the function is compiled once for each type
-of record it is given: with `shift(p: P, d: real) = P(p.x + d, p.y)`,
-`shift(P(cos(t), sin(t)), 1)` compiles. A parameter of a named tuple type
-takes a record of that type only (R5), and a recursive function whose
-parameter or result is a record declines. A list of elements of several lanes
-given to a parameter that the interpreter maps over a list (`tag(x) =
-("sample", x)`, `tag([t, "a"])`) declines; a tuple there is passed whole
-(`tag((t, "a"))` compiles). A local declared with no type widens a real to
-`number` (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and Block
-contracts"), so `let m = fig.matrix` is a `tuple<number, …>`, and a field
-typed `real` given `m[1]` declines (R5). A local declared with a tuple type
-declines too; read the field where it is used (`fig.matrix[1]`), or declare
-a local of each element (`let a: real = fig.matrix[1]`). A method of a
-protocol called on a record (`circle((2, 0), 0.2).rotateAbout(t, (0, 0))`)
-is dispatched when the code is compiled, from the nominal type `T` of the
-record: it compiles when exactly one conformance overlaps `T`, holds `T`, has
-no condition and is implemented in Epsil, so the interpreter selects it for
-every value of `T`; a parameter that the call leaves out takes the default of
-the requirement (a constant default is in `symbolDeps`; a symbol default with
-no value declines), and a body that does not prove the result that the
-implementation declares declines. Two protocols that implement the member
-for `T`, a conditional conformance, an implementation of the host, a first
-operand that is not a record, and a record of no named type decline. A
-function is compiled once for each type of its arguments, so inside one copy
-a parameter of no stated type or of type `any` that holds a record, a string
-or a colour (and, of type `any`, a real or an integer whose static type
-proves it, or `Nothing`; and a point, a list of points or a flat list at a
-parameter that takes the shape of its argument) has a settled type: `x is T`
-of it is `true` or `false` when that type decides it (`x is Figure` of a
-`Figure`, `c is string` of a colour, `box is nothing` of a box
-`((x0, y0), (x1, y1))`, `x is tuple` of a point or of a list), and
-declines otherwise (`k is integer` of a real; `p is tuple<real, real>` of a
-point, whose coordinate can be `NaN`; `x is tuple` of `(t, "a")`, which
-compiles as `[t, "a"]` does). A parameter of type `any`
-takes a real or an integer, and one whose type settles no shape (no stated
-type, `any`, `list`) a point or a flat list of a stated length (of strings
-too: `figureOf("invalid", ["message"])`), one copy per type and shape. `a == b` and `a != b` of a string and a real, an integer, a boolean,
-`Nothing` or a point are the interpreter's `False` and `True`
-(`(0, 0) == "default"`); of a string and a record or a colour (which the
-interpreter leaves unevaluated) they decline. On JavaScript, a program that
-declines where a string of a known value was (a literal, a protocol default,
-a parameter given such a string, a field of a record made from one) is
-compiled again with these values kept (CE-1652, step 4c): `==` and `!=` of two
-such strings and a `match` on one are decided, and the conditional lowers only
-the arm taken, so `rotate(self, a, about: any = figureDefault)` with
-`if about == figureDefault { … } else { about }`, and
-`match fig.kind { == "group" => figureBox(g, m); … }` on a circle, compile. A
-function is compiled once per value only at a parameter or a field whose value
-such a test reads (two fill colours make one copy). A program that compiles
-without the values keeps its code, and a string computed at run time (an `if`
-of two literals with a run-time condition) is compared at run time.
-`N(x, 15)` of a list or a tuple
-of reals is the list or the tuple. A record whose field is a list parameter
-of a run-time length (`dash(self, pattern: list<real>)` storing
-`N(pattern, 15)`) declines.
-
 A function whose one parameter is a rest parameter
 (`function draw(...args) -> nothing { figureDraw(listFrom(args)) }`)
-compiles on JavaScript (CE-1652, step 5): `args` is the `Tuple` of the
-arguments of each call, whose number and types are known there, and the
-function is compiled once for each list of argument types. `listFrom(args)`,
+compiles on JavaScript (CE-1652): `args` is the `Tuple` of the arguments of
+each call, whose number and types are known there, and the function is
+compiled once for each list of argument types. `listFrom(args)`,
 `length(args)` and `args[k]` of a constant `k` read it; another reader
-declines. A function of result `nothing` is read only where a function of
-the host of that result is. A function of the host takes a list, a tuple or a
-record (one of a named tuple type, the arguments of a rest parameter, or a
-`Tuple` or `List` literal of several types), and receives the engine's
-value, as the interpreter passes it: with Tycho's drawing prelude,
+declines, and so does a rest parameter beside other parameters. A function of
+result `nothing` is read only where a function of the host of that result is.
+A function of the host takes a list, a tuple or a record ("Records" below:
+one of a named tuple type, the arguments of a rest parameter, or a `Tuple` or
+`List` literal of several types), and receives the engine's value, as the
+interpreter passes it: with Tycho's drawing prelude,
 `t => draw(circle((cos(t), 0), 0.1))` calls `figureDraw` with
 `List(Figure("circle", List(0.5403…, 0, 0.1), Tuple(1, 0, 0, 1, 0, 0),
 Nothing, Nothing, Nothing, Nothing, Nothing))`. A number is passed as its
@@ -2767,10 +2699,111 @@ lazy collection, which the code holds as an array, so a list is taken only
 where the compiler knows that it is a `List` or a `Tuple` literal of the
 program (also through a record field, a parameter and the result of a
 function): `draw(1..3)`, `figureDraw(reverse([1, t]))`, `figureDraw([1, t]
-+ 1)` and a list constant decline. A colour declines (the code holds
-`rgb(t, 0, 0)` in OKLCh, where the interpreter keeps `Rgb(t, 0, 0)`), and so
-does a rest parameter beside other parameters. The result of a function of the
-host must still be `real`, `integer`, `boolean` or `nothing`.
++ 1)` and a list constant decline. A colour declines: the code holds
+`rgb(t, 0, 0)` in OKLCh, where the interpreter keeps `Rgb(t, 0, 0)`, so
+`draw(circle((0, 0), t).fill(rgb(t, 0, 0)))` declines, and the same figure
+returned by `run()` compiles.
+
+### Records
+
+A value of a named tuple type of the program is a record on JavaScript
+(`compilation/ir/README.md`, "Records"; CE-1652): each field has a settled
+shape, from its declared type, or, for a field typed `any`, `list` or
+`string | color | nothing`, from the value that the constructor receives. With
+`type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
+`f(t)` compiles, and `run({ t: 1 })` gives the object `{ x: 0.5403…,
+y: 0.8414… }`; a `Nothing` field is `null`, and a colour field holds the
+compiled colour. A `Tuple` or a `List` of elements of several lanes
+(`[t, "a"]`) is a record with no names, an array at `run()`. A record is read
+at a constant position only (`p.x`; `q[1]` of a record with no names). Two
+records of one engine type whose fields have different shapes (a filled and
+an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
+whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
+decline a record (user decision). These decline too:
+
+- a field of a run-time length (user decision): Tycho's
+  `dash(self, pattern: list<real>)` stores `N(pattern, 15)`, so
+  `circle((0, 0), 1).dash([t, 2])` declines;
+- a record or a list of several lanes given to a parameter declared `list`:
+  Tycho's `label` (the geometry `[x, y, text]`) and `group` (a list of
+  figures) decline at `figureOf(kind: string, geom: list)`;
+- a list of strings in a field, also as a literal: Tycho's invalid figure,
+  `figureOf("invalid", ["message"])`;
+- a recursive function whose parameter or result is a record.
+
+**Parameters.** A parameter of a user function of no stated type, of type
+`any` or of a named tuple type takes a record (one of no stated type or `any`
+also a string or a colour), and the function is compiled once for each type
+of record it is given: with `shift(p: P, d: real) = P(p.x + d, p.y)`,
+`shift(P(cos(t), sin(t)), 1)` compiles. A parameter of a named tuple type
+takes a record of that type only (R5). A list of elements of several lanes
+given to a parameter that the interpreter maps over a list
+(`tag(x) = ("sample", x)`, `tag([t, "a"])`) declines; a tuple there is passed
+whole (`tag((t, "a"))` compiles). A local declared with no type widens a real
+to `number` (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and Block
+contracts"), so `let m = fig.matrix` is a `tuple<number, …>`, and a field
+typed `real` given `m[1]` declines (R5). A local declared with a tuple type
+declines too; read the field where it is used (`fig.matrix[1]`), or declare a
+local of each element (`let a: real = fig.matrix[1]`).
+
+**Protocol methods.** A method of a protocol called on a record
+(`circle((2, 0), 0.2).rotateAbout(t, (0, 0))`) is dispatched when the code
+is compiled, from the nominal type `T` of the record: it compiles when exactly
+one conformance overlaps `T`, holds `T`, has no condition and is implemented
+in Epsil, so the interpreter selects it for every value of `T`; a parameter
+that the call leaves out takes the default of the requirement (a constant
+default is in `symbolDeps`; a symbol default with no value declines), and a
+body that does not prove the result that the implementation declares
+declines. Two protocols that implement the member for `T`, a conditional
+conformance, an implementation of the host, a first operand that is not a
+record, and a record of no named type decline.
+
+**Tests decided from types.** A function is compiled once for each type of
+its arguments, so inside one copy a parameter of no stated type or of type
+`any` that holds a record, a string or a colour (and, of type `any`, a real
+or an integer whose static type proves it, or `Nothing`; and a point, a list
+of points or a flat list at a parameter that takes the shape of its argument)
+has a settled type: `x is T` of it is `true` or `false` when that type
+decides it (`x is Figure` of a `Figure`, `c is string` of a colour,
+`box is nothing` of a box `((x0, y0), (x1, y1))`, `x is tuple` of a point or
+of a list), and declines otherwise (`k is integer` of a real;
+`p is tuple<real, real>` of a point, whose coordinate can be `NaN`;
+`x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does). A parameter
+of type `any` takes a real or an integer, and one whose type settles no shape
+(no stated type, `any`, `list`) a point or a flat list of a stated length,
+one copy per type and shape. `a == b` and `a != b` of a string and a real,
+an integer, a boolean, `Nothing` or a point are the interpreter's `False` and
+`True` (`(0, 0) == "default"`); of a string and a record or a colour (which
+the interpreter leaves unevaluated) they decline. `N(x, 15)` of a list or a
+tuple of reals is the list or the tuple. A condition made only of such tests
+lowers only the arm taken (the second exception to the comparison of the
+arms of a conditional, under "Fail closed").
+
+**String constants.** On JavaScript, a program that declines where a string
+of a known value was (a literal, a protocol default, a parameter given such a
+string, a field of a record made from one) is compiled again with these
+values kept: `==` and `!=` of two such strings and a `match` on one are
+decided, and the conditional lowers only the arm taken, so
+`rotate(self, a, about: any = figureDefault)` with
+`if about == figureDefault { … } else { about }`, and
+`match fig.kind { == "group" => figureBox(g, m); … }` on a circle, compile. A
+function is compiled once per value only at a parameter or a field whose
+value such a test reads (two fill colours make one copy). A program that
+compiles without the values keeps its code, and a string computed at run time
+(an `if` of two literals with a run-time condition) is compared at run time.
+
+With these rules, Tycho's drawing prelude (version 25) compiles a timer
+callback that builds and draws figures: `t => draw(circle((t, 0),
+1).rotate(t))`, with `.scale(2)` or `.stroke("blue")` in place of
+`.rotate(t)`, two figures in one `draw`, `circle((t, 0), 1).center()`, and the
+orbit
+`draw([orbit, sun, earth.rotateAbout(t / 1000, (0, 0))])` with the three
+figures built by `let`s before the callback
+(`test/compute-engine/compile-records-acceptance.test.ts`). A callback that
+assigns a variable of the engine and calls the host (the Game of Life,
+`do { g = step(g); draw(bitmap(g, …)) }`) declines by the rule of "Functions
+of the host" above (user decision); the assignment alone compiles ("Lists of
+two run-time lengths").
 
 ## Collections
 

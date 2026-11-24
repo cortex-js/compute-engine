@@ -170,110 +170,62 @@
   the host declares with a signature (`ce.declare("draw", "(real) ->
   nothing")`) is offered as a function.
 
-- **`compile()` compiles `Match`, `MatchesType` and `N`, which it refused**
-  (CE-1652). A `Match` (the Epsil `match`) compiles when each case is a string
-  or a number constant, `_`, or a `Tuple` of names:
-  `match k { == "square" => x^2; == "circle" => π x^2; _ => 0 }` gives `9` for
-  `k = "square"`, `x = 3`, and `match P { (a, b) => a + b; _ => 0 }` gives `3`
-  for `P = (1, 2)`. A `Tuple` pattern is chosen from the type of the subject,
-  and a constant subject keeps one case. `x is T` compiles to `true` or
-  `false` when the type of `x` decides it (`x is string` of a real `x` is
-  `false`), and `N(x)` or `N(x, 15)` of a number, a string or a boolean
-  compiles to `x`. A case with a guard, a `Match` with no `_` case, an `x is
-  T` that the type of `x` does not decide and `N(x, p)` with fewer than 15
-  digits still fall back to the interpreter.
-- **`compile()` compiles a value of a named tuple type, and a `Tuple` or a
-  list of elements of several kinds, which it refused** (CE-1652). With
-  `type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
-  `f(t)` compiles on JavaScript, and `run({ t: 1 })` returns the object
-  `{ x: 0.5403…, y: 0.8414… }`, keyed by the field names; a field whose value
-  is `Nothing` is `null`, and a value of a named tuple type in a field is an
-  object too. `f(t: real) = [t, "a"]` and `("a", t)` compile and return the
-  array `[1, "a"]`. A field is read by its name (`p.x`) or at a constant
-  index (`q[1]`), and a field typed `any` or `string | color | nothing` takes
-  the shape of the value it is given. A value whose kind depends on a run-time
-  condition (`if t > 0 { P(t, 1) } else { Q("a") }`), a field read at an
-  index that is not a constant, and such a value on GLSL or `interval-js` still
-  fall back to the interpreter. A result of this kind cannot be broadcast.
-- **`compile()` compiles a call of a user function that takes a value of a
-  named tuple type, which it refused** (CE-1652). With `shift(p: P, d: real)
-  = P(p.x + d, p.y)`, `shift(P(cos(t), sin(t)), 1)` compiles on JavaScript.
-  A parameter of no stated type, of type `any` or of a named tuple type takes
-  such a value, and one of no stated type or `any` also takes a string or a
-  colour: with `fill(fig: Figure, p: any)`, `fill(circle((0, 0), t), "red")`
-  and `fill(circle((0, 0), t), rgb(t, 0, 0))` compile. A function called with
-  values of two shapes (`fill` of an unfilled and of a filled figure) is
-  compiled once for each. A parameter of a named tuple type given a value of
-  another named type, a recursive function that takes or returns such a
-  value, and such a call on GLSL or `interval-js` still fall back to the
-  interpreter.
-- **`compile()` compiles a call of a protocol method on a value of a named
-  tuple type, which it refused** (CE-1652). With a protocol `Drawable` that
-  `Figure` implements, `(t: real) => circle((2, 0), 0.2).rotateAbout(t / 1000,
-  (0, 0))` and `rotateAbout(circle((1, 0), 1), t, (0, 0))` compile on
-  JavaScript: the implementation is chosen when the code is compiled, from the
-  type of the value, and an argument that the call leaves out takes the
-  default of the protocol (`grow(self: Self, k: real = figureScale)`). A call
-  that two protocols implement for the type, an implementation given by the
-  host, a value that is not of a named tuple type, and such a call on GLSL or
-  `interval-js` still fall back to the interpreter.
-- **`compile()` compiles a test of the type of a parameter typed `any`, and
-  `==` of a string and a number or a point, which it refused** (CE-1652). A
-  function is compiled once for each type of value it is given, so in each
-  copy `x is Figure`, `c is string` or `k is real` of a parameter `x: any`
-  that holds a value of a named tuple type, a string, a colour or a number is
-  `true` or `false`, and the arm of the `if` that is not taken is not
-  compiled: `figureBox(x: any) = if x is Figure { … } else { reduce(x, …) }`
-  compiles for a figure. `(0, 0) == "default"`, `2 == "a"` and `t != "a"`
-  are `false`, `false` and `true`, as the interpreter gives them. A parameter
-  typed `any` takes a real, an integer or a point (`scale(k: any)` with `2`,
-  `t` or `(2, t)`), and `N(x, 15)` of a list or a tuple of real numbers is
-  that list or tuple. A test that the type of the value does not decide
-  (`x is integer` of a real), `==` of a record or a colour and a string, two
-  strings compared at run time whose `if` arms have different kinds of value,
-  and a list parameter of no stated length stored in a value of a named tuple
-  type still fall back to the interpreter.
-- **`compile()` compiles `==`, `!=` and `match` of strings whose values are
-  known when the code is compiled, which it refused when the arms of the
-  `if` or the `match` had different kinds of value** (CE-1652). A string
-  literal, a protocol default, a parameter given such a string and a field
-  of a value of a named tuple type made from one keep their value inside the
-  compiled code, so `w == figureDefault` with the default `"default"`, and
-  `match fig.kind { == "group" => …; == "circle" => …; … }` on a figure made
-  by `figureOf("circle", …)`, are decided and only the arm taken is
-  compiled: `circle((t, 0), 1).rotate(t)`, `.scale(2)`, `.reflect("x")`,
-  `.skew(t, 0.5)` and `.stroke("blue")` of a drawing prelude compile. A
-  function is then compiled once per value of such a string that a test
-  reads (not per colour of a fill that no test reads). A program that
-  compiled before keeps its code; a string computed at run time (`if t > 0
-  { "x" } else { "y" }`) is compared at run time as before; a figure of
-  kind `"group"` (a recursive `figureBox`) still falls back to the
-  interpreter.
-- **`compile()` compiles `x is T` of a parameter typed `any` that is given a
-  point, a list or a box (a tuple of two points), which it refused** (CE-1652).
-  As the interpreter gives it, `box is nothing` is `false` for a box
-  `((x0, y0), (x1, y1))`, `x is tuple` is `true` for `(t, 1)` and `false` for
-  `[t, 1]`, and the arm not taken is not compiled: with a drawing prelude whose
-  `figureBoxCenter(box: any)` begins with `if box is nothing`,
-  `circle((t, 0), 1).rotate(t)`, `.scale(2)`, `.scale((2, t))`, `.reflect("x")`,
-  `.skew(t, 0)`, `.center()` and `.anchor("center")` compile. A test of the type
-  of a number in the value (`(t, 1) is tuple<real, real>`: the number can be
-  `NaN`), and `x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does,
-  still fall back to the interpreter.
-- **`compile()` compiles a call of a function whose one parameter is a rest
-  parameter, and passes a list, a tuple or a value of a named tuple type to a
-  function of the host, which it refused** (CE-1652). With a drawing prelude
-  whose `function draw(...args) -> nothing { figureDraw(listFrom(args)) }` calls
-  a host function `figureDraw` declared `(any) -> nothing`,
-  `t => draw(circle((cos(t), 0), 0.1))`,
-  `t => draw(circle((t, 0), 1).rotate(t))` and
-  `t => draw(circle((0, 0), 1), circle((t, 0), 0.5).fill("red"))` compile, and
-  `figureDraw` receives the value that the interpreter passes,
-  `List(Figure("circle", List(…), Tuple(…), Nothing, …))`, its numbers as
-  machine numbers. `length(args)` and `args[k]` compile too. A list that the
-  interpreter holds as a lazy collection (`draw(1..3)`, `reverse([1, t])`), a
-  colour, a rest parameter beside other parameters, and a function of the host
-  whose result is `any` still fall back to the interpreter.
+- **`compile()` compiles a program that builds values of a named tuple type
+  and passes them to a function of the host, such as a drawing library whose
+  figures are records, which it refused** (CE-1652). On JavaScript:
+
+  - A value of a named tuple type is a record. With
+    `type P = tuple<x: real, y: real>` and `f(t: real) = P(cos(t), sin(t))`,
+    `f(t)` compiles, and `run({ t: 1 })` returns the object
+    `{ x: 0.5403…, y: 0.8414… }`, keyed by the field names; a field whose
+    value is `Nothing` is `null`. `[t, "a"]` and `("a", t)`, of elements of
+    several kinds, compile and return an array. A field is read by its name
+    (`p.x`) or at a constant index, and a field typed `any`, `list` or
+    `string | color | nothing` takes the shape of the value it is given.
+  - A user function compiles once for each kind of value it is given: a
+    parameter of no stated type, of type `any` or of a named tuple type takes
+    a record, and one of no stated type or `any` also a string or a colour
+    (`any`: also a number or a point). With
+    `shift(p: P, d: real) = P(p.x + d, p.y)`, `shift(P(cos(t), sin(t)), 1)`
+    compiles. A protocol method called on a record is chosen when the code is
+    compiled, from the type of the record, and an argument that the call
+    leaves out takes the default of the protocol:
+    `t => circle((2, 0), 0.2).rotateAbout(t / 1000, (0, 0))` compiles.
+  - `match`, `x is T` and `N` compile. A `match` whose cases are string or
+    number constants, `_` or a tuple of names compiles:
+    `(k: string, x: real) => match k { == "square" => x^2; _ => 0 }` gives
+    `9` for `("square", 3)`. In each compiled copy of a function, `x is T` of
+    a parameter is `true` or `false` when the kind of its value decides it
+    (`x is Figure` of a figure, `box is nothing` of a box
+    `((x0, y0), (x1, y1))`), `==` and `!=` of a string and a number or a point
+    are `false` and `true` as the interpreter gives them, and `==`, `!=` and
+    `match` of strings known when the code is compiled (a literal, a protocol
+    default) are decided; the arm of an `if` or a `match` that is not taken is not
+    compiled. `N(x)` and `N(x, 15)` of a number, a string, a boolean, or a
+    list or a tuple of real numbers are `x`.
+  - A function whose one parameter is a rest parameter compiles once for
+    each list of argument types, and a function of the host takes a list, a
+    tuple or a record and receives the interpreter's value. With
+    `function draw(...args) -> nothing { figureDraw(listFrom(args)) }` and a
+    host function `figureDraw` declared `(any) -> nothing`,
+    `t => draw(circle((cos(t), 0), 0.1))`, `.rotate(t)`, `.scale(2)` and
+    `.stroke("blue")` of the circle, two figures in one `draw`, and
+    `draw([orbit, sun, earth.rotateAbout(t / 1000, (0, 0))])` with the three
+    figures built before the callback compile, and `figureDraw` receives
+    `List(Figure("circle", List(…), Tuple(…), Nothing, …))`, its numbers as
+    machine numbers.
+
+  These still fall back to the interpreter: a value whose kind depends on a
+  run-time condition (`if t > 0 { circle(…) } else { circle(…).fill("red") }`);
+  a field of a run-time length (`.dash([t, 2])`); a record, or a list of
+  several kinds, given to a parameter declared `list`; a list of strings in a
+  field; a recursive function that takes or returns a record; a colour, a lazy
+  collection (`draw(1..3)`) or a function of the host whose result is `any` at
+  the host; a call of the host in a function that assigns a variable of the
+  engine; a rest parameter beside other parameters; a `match` case with a
+  guard, a `match` with no `_` case, an `x is T` that the kind of the value
+  does not decide, and `N(x, p)` with fewer than 15 digits; and every record on
+  GLSL and `interval-js`. A result that is a record cannot be broadcast.
 
 ## 0.200.1 _2026-11-23_
 
