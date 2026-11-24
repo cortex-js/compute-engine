@@ -2665,12 +2665,18 @@ clauses or a method of a protocol (those are the program's own functions).
 These decline:
 
 - another target, `interval-js` and the `bigint` mode;
-- an argument that is not a real, an integer, a boolean or a string (a list,
-  a tuple, a complex number), and more than four arguments;
+- an argument that is not a real, an integer, a boolean, a string, `Nothing`
+  or a record (a list, a tuple of one lane, a complex number, a colour, a
+  record with a complex or a colour field), and more than four arguments. A
+  colour is held in OKLCh in compiled code, where the interpreter keeps the
+  colour of its constructor (`Rgb(1, 0, 0)`);
 - a static type of the call other than `real`, `integer`, `boolean` or
   `nothing`: `(real) -> any` gives no settled shape (R3);
 - a value `nothing` read anywhere but as the value of the root function
-  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read;
+  literal (`[hostDraw(t)]`, `'possible-nothing'`); a statement is not read.
+  The value of a user function whose body is such a call
+  (`function draw(...args) { figureDraw(listFrom(args)) }`) is that
+  `Nothing`, and the same rule applies to each call of it;
 - a call in a function that assigns a variable of the engine
   (`do { s = s + t; hostDraw(s) }`): the host function could read the
   variable before the code writes it back.
@@ -2743,8 +2749,24 @@ of two literals with a run-time condition) is compared at run time.
 `N(x, 15)` of a list or a tuple
 of reals is the list or the tuple. A record whose field is a list parameter
 of a run-time length (`dash(self, pattern: list<real>)` storing
-`N(pattern, 15)`) declines. A record passed to a function of the host still
-declines (CE-1652, step 5).
+`N(pattern, 15)`) declines. A parameter of type `list` takes a record that
+a `List` literal of several lanes makes (`label`'s `[x, y, "a"]` at
+`figureOf(kind: string, geom: list)`).
+
+A rest parameter (`function draw(...args)`) is bound at each call to a
+record of the arguments from its position, the `Tuple` that the
+interpreter binds, whatever their types: `draw(circle((0, 0), 1),
+label((0, 1), "a"))` compiles. It is read at a constant position
+(`args[2]`), and `listFrom(args)` is the `List` of its elements; another
+read (`length(args)`) declines, as on any record. A function of the host
+given a record receives the engine's value: a record of a named tuple type
+is the application of its constructor (`["Figure", "'circle'", ["List", …],
+…]`), a record of no names a `Tuple` or, from a `List` literal or
+`listFrom`, a `List`, and a `Nothing` field `Nothing`; a record with a
+colour field declines (`circle(…).fill(rgb(t, 0, 0))`; a colour string,
+`fill("red")`, compiles). The numbers are machine numbers. So `t => draw(circle((cos(t /
+1000), 0), 0.1))` over Tycho's drawing prelude compiles, when the host
+declares `figureDraw` with the result `nothing` (CE-1652).
 
 ## Collections
 

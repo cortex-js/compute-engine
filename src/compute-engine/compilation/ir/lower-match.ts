@@ -63,8 +63,7 @@ function engineTypeOf(
  *  - a record of a named tuple type that is not parameterized: that type;
  *  - a record of no names, which a `Tuple` or a `List` literal makes when
  *    its elements do not make a list: the union of the tuple of its fields
- *    and the list of them, because the IR type does not say which literal
- *    made it (a box `((x0, y0), (x1, y1))`: `is nothing` and `is string`
+ *    and the list of them (a box `((x0, y0), (x1, y1))`: `is nothing` and `is string`
  *    are `False`, `is tuple` and `is list` are not decided);
  *  - an axis of a list (`list<…>`, of no length) or the axis of the tuple
  *    mark (`tuple<…>` of its length);
@@ -93,10 +92,10 @@ function valueTypeOf(
       kind: 'tuple',
       elements: types.map((type) => ({ type })),
     };
-    // The IR type of a record of no names does not say whether a `Tuple`
-    // or a `List` literal made it (`make()` of `lower-records.ts` resolves
-    // the lengths that `fitsList()` reads): both readings, and a test is
-    // decided only when they agree.
+    // A record of no names: both readings, a tuple and a list, and a test
+    // is decided only when they agree (`IRType.list` tells which literal
+    // made it, but whether the interpreter's `is` holds a tuple as a list
+    // is not decided here).
     return {
       kind: 'union',
       types: [tuple, { kind: 'list', elements: { kind: 'union', types } }],

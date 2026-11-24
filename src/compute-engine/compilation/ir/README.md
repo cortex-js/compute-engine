@@ -3657,6 +3657,30 @@ two types"); `admits()` refuses the lane there too.
   `nothing` field is `null`, a colour keeps its run-time object, and a record
   with no names stays an array. A record result has no batch: `broadcast()` and
   `broadcastAsync()` throw.
+- **Rest parameters and the host** (CE-1652, step 5). A record of no names
+  that a `List` literal or `ListFrom` makes has `list` in its IR type
+  (`sameFields()` compares it), so a `Tuple` and a `List` of the same fields
+  are two record types. A rest parameter (`Spread(args)`, the last parameter
+  of a function literal; `signatureTypes()`, `rest`) is bound at each call to
+  the record of the arguments from its position (`rest()` of
+  `lower-records.ts`), the `Tuple` that the interpreter binds; the parameter
+  holds its type (`held()`), so the function is lowered once per type of the
+  arguments. `call()` keeps the operand of each parameter (`ops`: the call
+  stands for the rest arguments) and declines a call that maps over a list.
+  `ListFrom(r)` of a record of no names is the `List` of its fields
+  (`listFrom()`); of a record of a named type, it declines. A parameter of type
+  `list` holds a record with `list` (`'list'` in `held()`). A function of the
+  host (`hostCall()`) takes a record with no complex or colour field, or
+  `Nothing`, as an argument (a colour is in OKLCh at run time, where the
+  interpreter keeps the colour of its constructor): `HostCall.types` holds the
+  IR type of each argument, and `engineValue()` of `print-js.ts` builds from
+  it, when the code is made, the function that gives the engine's value at run
+  time (the constructor of a named type, `Tuple` or `List`, `Nothing`). A value `nothing` of the host is read as the value of the
+  root only (`atRoot()` of `lower.ts`); the body of a user function being
+  lowered is such a place, which marks the function (`Lowering.bodies`,
+  `UserFunction.nothing`), and each call of it is then checked in turn
+  (`read` of `call()`). A declared result `nothing` is the NaN of that value,
+  and a body that is not such a value declines.
 
 ## How to add
 

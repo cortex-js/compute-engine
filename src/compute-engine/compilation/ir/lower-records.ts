@@ -102,14 +102,16 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
 
   /** The record of the values `values`, of the field types `fields` (the
    *  types of the values when absent), of a nominal type and its field
-   *  names. A field of a
+   *  names, or with no nominal type, a `List` of the engine when `list`
+   *  (`IRType.list`). A field of a
    *  run-time length declines: the length is a value of the function that
    *  makes the record, which a reader in another function cannot name. */
   const make = (
     e: Expression,
     values: V[],
     nominal?: { nominal: string; names?: readonly string[] },
-    fields: (IRType | undefined)[] = []
+    fields: (IRType | undefined)[] = [],
+    list = false
   ): V => {
     const types = values.map((v, k): IRType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
@@ -140,6 +142,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
       marks: values.map((x) => tuples.get(x)),
       ...(nominal === undefined ? {} : { nominal: nominal.nominal }),
       ...(nominal?.names === undefined ? {} : { names: nominal.names }),
+      ...(list ? { list: true as const } : {}),
     });
     parts.set(v, values);
     return v;
@@ -166,7 +169,33 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
    *  record when they do not make a list (`fitsList()`), else
    *  `undefined`, the list of today. */
   const literal = (e: Fn, elements: V[], tuple: boolean): V | undefined =>
-    !javascript || fitsList(elements, tuple) ? undefined : make(e, elements);
+    !javascript || fitsList(elements, tuple)
+      ? undefined
+      : make(e, elements, undefined, [], !tuple);
+
+  /** The arguments `values` of a call of a function with a rest parameter
+   *  (`(...args) => …`), from the position of that parameter: the `Tuple`
+   *  that the interpreter binds to it, a record of no names whatever its
+   *  elements are (README, "Records"). JavaScript only. */
+  const rest = (e: Fn, values: V[]): V => {
+    if (!javascript)
+      decline(
+        e,
+        `a call of ${e.operator}, a function with a rest parameter: its arguments are a record, and records compile on javascript only`
+      );
+    return make(e, values);
+  };
+
+  /** `ListFrom(r)` of a record of no names: the `List` of its fields. A
+   *  record of a named tuple type declines. */
+  const listFrom = (e: Fn, r: V): V => {
+    const t = type(r);
+    if (t.nominal !== undefined)
+      decline(e, `ListFrom of a record of the type ${t.nominal}`);
+    if (t.list) return r;
+    const values = (t.fields ?? []).map((_, k) => field(r, k));
+    return make(e, values, undefined, [], true);
+  };
 
   /** `P(a, b, …)`, the constructor of the named tuple type `P`: each
    *  operand is lowered for the declared type of its field. An operand
@@ -273,5 +302,5 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     return field(r, k);
   };
 
-  return { construct, literal, at, named };
+  return { construct, literal, rest, listFrom, at, named };
 }

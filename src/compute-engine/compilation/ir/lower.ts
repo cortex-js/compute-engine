@@ -92,6 +92,7 @@ import {
   lengthValues,
   mapLengths,
   regionsOf,
+  sameFields,
   sameShape,
   scalarType,
   typeToString,
@@ -880,7 +881,10 @@ function lowerOnce(
   // reader that tells an absent list from a list of NaN. Another node that
   // is not in the program (an expression of a compile handler) has no known
   // reader.
-  const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
+  const bodies = new Map<
+    Expression,
+    { nan: () => boolean; read: boolean; nothing?: boolean }
+  >();
   // For each held value that `expression()` lowers, the names that hold it,
   // and whether one of them is read other than by a node of the program
   // (in the value of another name, in an expression of a compile handler).
@@ -1982,12 +1986,19 @@ function lowerOnce(
         dispatched.call,
         dispatched.binding,
         dispatched.values,
-        () => nanForAbsent(e)
+        () => nanForAbsent(e),
+        () => want && !atRoot(e)
       );
     }
     if (user !== undefined || fns.recursive(e)) {
       if (user !== undefined) reachBody(user.literal.ops[0]);
-      return fns.call(e, user, undefined, () => nanForAbsent(e));
+      return fns.call(
+        e,
+        user,
+        undefined,
+        () => nanForAbsent(e),
+        () => want && !atRoot(e)
+      );
     }
     // A host's handler (of a library head, or of a host operator): its
     // expression is lowered in place of `e`.
@@ -2847,6 +2858,10 @@ function lowerOnce(
       // Every list of the slice is listed: `ListFrom(L)` is `L`.
       case 'ListFrom': {
         const v = e.nops === 1 ? value(e.ops[0])! : undefined;
+        // A record of no names (the arguments of a rest parameter): the
+        // `List` of its fields (`lower-records.ts`).
+        if (v !== undefined && type(v).lane === 'record')
+          return records.listFrom(e, v);
         if (
           v === undefined ||
           tuples.get(v) === 0 ||
@@ -7103,8 +7118,8 @@ function lowerOnce(
   // The target holds records (JavaScript, not the interval or the
   // `bigint` mode).
   const javascript = options.javascript === true && !bigint && !interval;
-  const fns = functionLowering(cx, lists, javascript);
   const records = recordLowering(cx, javascript);
+  const fns = functionLowering(cx, lists, records, javascript);
   const matches = matchLowering(cx, records);
   const protocols = protocolLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).
@@ -7147,16 +7162,43 @@ function lowerOnce(
   // The functions of the host that the program calls (`hostCall()`).
   const hosts: HostCall[] = [];
 
+  /** The node `x` is the value of the root function literal, the last
+   *  operand of a `Block` or the value of a `Typed` that is, or the body of
+   *  a user function being lowered (`bodies`), which is then marked
+   *  `nothing`: each call of that function is checked in turn (`call()` of
+   *  `lower-functions.ts`). A `Nothing` there is read as NaN, as the value
+   *  of the root (CE-1652). */
+  const atRoot = (x: Expression): boolean => {
+    const body = bodies.get(x);
+    if (body !== undefined) {
+      body.nothing = true;
+      return true;
+    }
+    const places = readers.get(x) ?? [];
+    return (
+      places.length > 0 &&
+      places.every(
+        ([r, i]) =>
+          (r === root && r.operator === 'Function' && i === 0) ||
+          (r.operator === 'Block' && i === r.nops - 1 && atRoot(r)) ||
+          (r.operator === 'Typed' && i === 0 && atRoot(r))
+      )
+    );
+  };
+
   /** The value of `e`, a call of a function that the host declared with an
    *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
    *  operation that calls the interpreter for the call at run time
    *  (`_SYS.hosts` of `print-js.ts`), at each evaluation of `e`, in the
    *  order of the program. Each argument is a scalar of the lane `real`,
-   *  `integer`, `boolean` or `string`, at most `MAX_HOST_ARGUMENTS` of them.
+   *  `integer`, `boolean`, `string` or `nothing`, or a record with no
+   *  field of the lane `complex` or `color` (CE-1652), at most
+   *  `MAX_HOST_ARGUMENTS` of them; a list or a tuple declines.
    *  The static type of the call is `real`, `integer` or `boolean`, the
    *  lane of the value, or `nothing`, which the code reads only as the value
    *  of the root function literal (NaN there, as the interpreter's `Nothing`
-   *  is). Plain JavaScript only: the shader targets cannot call the host,
+   *  is), also through the result of user functions (`atRoot()`). Plain
+   *  JavaScript only: the shader targets cannot call the host,
    *  the interval and `bigint` modes have no lane of its values. A function
    *  that assigns a variable of the engine (`assignedNames()`) declines: the
    *  host function would read the variable before the code writes it back. */
@@ -7183,42 +7225,53 @@ function lowerOnce(
       why(
         `of type ${engineTypeToString(t)}, not real, integer, boolean or nothing`
       );
-    // The value of the root function literal, or the last operand of a
-    // `Block` that is: a `Nothing` read as NaN.
-    const atRoot = (x: Expression): boolean => {
-      const places = readers.get(x) ?? [];
-      return (
-        places.length > 0 &&
-        places.every(
-          ([r, i]) =>
-            (r === root && r.operator === 'Function' && i === 0) ||
-            (r.operator === 'Block' && i === r.nops - 1 && atRoot(r))
-        )
-      );
-    };
     if (result === 'nothing' && want && !atRoot(e))
       why('whose value Nothing is read', POSSIBLE_NOTHING);
     const args = e.ops.map((op) => {
-      const v = value(op)!;
+      // `Nothing`: a value of the type `nothing` (CE-1652).
+      const v = isSymbol(op, 'Nothing')
+        ? b.op('nothing', [], { lane: 'nothing', shape: [] })
+        : value(op)!;
       const a = type(v);
       if (
         a.shape.length > 0 ||
         tuples.has(v) ||
         !['real', 'integer', 'boolean', 'string'].includes(a.lane)
-      )
+      ) {
+        // A record or `Nothing` (CE-1652): the code converts it to the
+        // engine's value (`hostCaller()` of `print-js.ts`). A record with
+        // a field of the lane `complex` or `color` declines: a complex
+        // value at run time is not converted, and a colour at run time is
+        // in OKLCh, where the interpreter keeps the colour of its
+        // constructor (`Rgb(1, 0, 0)`).
+        const unconverted = (t: IRType): boolean =>
+          t.lane === 'complex' ||
+          t.lane === 'color' ||
+          (t.fields ?? []).some(unconverted);
+        if (
+          a.shape.length === 0 &&
+          !tuples.has(v) &&
+          (a.lane === 'record' || a.lane === 'nothing') &&
+          !unconverted(a)
+        )
+          return v;
         why(
-          `with an argument of type ${typeToString(a)}, not a real, an integer, a boolean or a string`
+          `with an argument of type ${typeToString(a)}, not a real, an integer, a boolean, a string, Nothing or a record with no complex or colour field`
         );
+      }
       return v;
     });
-    const lanes = args.map((v) => type(v).lane);
+    const types = args.map((v) => type(v));
+    const lanes = types.map((t) => t.lane);
     const def = e.operatorDefinition!;
     let k = hosts.findIndex(
       (h) =>
         h.definition === def &&
         h.result === result &&
-        h.args.length === lanes.length &&
-        h.args.every((l, j) => l === lanes[j])
+        h.types.length === types.length &&
+        h.types.every(
+          (t, j) => t.lane === types[j].lane && sameFields(t, types[j], 'loose')
+        )
     );
     if (k < 0) {
       k = hosts.length;
@@ -7227,6 +7280,7 @@ function lowerOnce(
         call: e,
         definition: def,
         args: lanes,
+        types,
         result: result!,
       });
     }

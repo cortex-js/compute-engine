@@ -61,7 +61,10 @@ export type Length = number | { readonly v: V };
  *  order, `marks` the tuple mark of each (`Lowering.tuples`), `nominal` the
  *  name of the nominal tuple type of the value and `names` its field names
  *  (none for a `Tuple` or a `List` literal of mixed lanes). A field of the
- *  lane `nothing` holds `Nothing`. */
+ *  lane `nothing` holds `Nothing`. `list`: a record of no names that is a
+ *  `List` of the engine (a `List` literal, `ListFrom`); with no `list`, a
+ *  record of no names is a `Tuple` (a `Tuple` literal, the arguments of a
+ *  rest parameter). */
 export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
@@ -70,6 +73,7 @@ export type IRType = {
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;
   readonly names?: readonly string[];
+  readonly list?: true;
   /** A field of the lane `string` whose value is known when the code is
    *  emitted (CE-1652, step 4c; `README.md`, "Records"): two records whose
    *  constant fields differ are two record types. Only in `fields`: the
@@ -232,13 +236,16 @@ export type Program = {
 /** A call of a function that the host declared with an `evaluate`
  *  function (CE-1621): its name, a call of the program (which the code
  *  rebuilds over the values of the arguments, bound to the same
- *  definition), that definition, the lane of each argument, and the lane
- *  of its value, or `nothing` for a value that the code does not read. */
+ *  definition), that definition, the lane of each argument and its IR type
+ *  (a record with its fields, which the code converts to the engine's
+ *  value; CE-1652), and the lane of its value, or `nothing` for a value
+ *  that the code does not read. */
 export type HostCall = {
   readonly name: string;
   readonly call: Expression;
   readonly definition: BoxedOperatorDefinition;
   readonly args: readonly Lane[];
+  readonly types: readonly IRType[];
   readonly result: Lane | 'nothing';
 };
 
@@ -361,8 +368,9 @@ export function isSubType(
   );
 }
 
-/** `a` and `b` are records of one nominal type and the same fields (types,
- *  tuple marks and names), compared field by field, or neither is a
+/** `a` and `b` are records of one nominal type, of one `list`, and of the
+ *  same fields (types, tuple marks and names), compared field by field, or
+ *  neither is a
  *  record. The constant of a string field (`IRType.constant`; CE-1652,
  *  step 4c): the same in `a` and `b` (`same`), the same or absent in `b`
  *  (`sub`: a value of type `a` stands where `b` is read), or not compared
@@ -378,6 +386,7 @@ export function sameFields(
   return (
     a.lane === b.lane &&
     a.nominal === b.nominal &&
+    a.list === b.list &&
     f.length === g.length &&
     a.names?.join('\u0000') === b.names?.join('\u0000') &&
     f.every(
@@ -450,9 +459,11 @@ export function typeToString(
 ): string {
   // A string field of a known value (CE-1652, step 4c).
   if (t.constant !== undefined) return JSON.stringify(t.constant);
-  // A record: its fields, named or not.
+  // A record: its fields, named or not; `list(…)` for a record of no names
+  // that is a `List` (`IRType.list`), so the keys of `laneKey()` and of the
+  // passes tell it from a `Tuple` of the same fields.
   if (t.lane === 'record')
-    return `${t.nominal ?? 'record'}(${(t.fields ?? [])
+    return `${t.nominal ?? (t.list ? 'list' : 'record')}(${(t.fields ?? [])
       .map(
         (f, j) =>
           `${t.names === undefined ? '' : `${t.names[j]}: `}${typeToString(f, t.marks?.[j] ?? (axis === false ? false : -1))}`
