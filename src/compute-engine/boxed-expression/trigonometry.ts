@@ -3035,6 +3035,10 @@ export function imaginaryArgumentValue(
  * hyperbolic functions and their inverses call this ahead of the numeric
  * kernel. `expression` is the call before its operand is evaluated, because
  * `.N()` has already turned `Arcsin(5)` into a complex number by then.
+ *
+ * `undefined` for an operand that is not pure: the handler's operand was
+ * evaluated from it once, and the value read here is evaluated again, so a
+ * `Random()` in it would draw twice (`Tan(Arctan(Random()))`).
  */
 export function compositionValue(
   operator: string,
@@ -3042,6 +3046,7 @@ export function compositionValue(
 ): Expression | undefined {
   if (!isFunction(expression) || expression.nops !== 1) return undefined;
   const operand = expression.op1;
+  if (!operand.isPure) return undefined;
   return (
     inverseCompositionValue(operator, operand) ??
     principalBranchValue(operator, operand)

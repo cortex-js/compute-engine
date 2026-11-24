@@ -1506,10 +1506,15 @@ export function pow(
      * Only ever an addition to what is known: a caller without one, or a raw
      * exponent with no exact rational (a float, `Pi`, `Ln(2)`), falls back to
      * the reconstruction unchanged.
+     *
+     * A raw exponent that is not pure is ignored: `exp` was evaluated from it
+     * once, and the rules below evaluate its terms again, so a `Random()` in
+     * it would draw twice (`e^{n - Random()}`).
      */
     rawExponent?: Expression;
   }
 ): Expression {
+  if (rawExponent !== undefined && !rawExponent.isPure) rawExponent = undefined;
   if (
     !(x.isCanonical || x.isStructural) ||
     (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))

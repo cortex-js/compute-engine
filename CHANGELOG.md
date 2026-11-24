@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A `Random()` inside `Tan(Arctan(…))` or in the exponent of `e` draws one
+  value, not two** (CE-1424). In a seeded frame,
+  `WithRandomSeed(7, [Tan(Arctan(Random())), Random()])` gave the second and
+  third values of the sequence; it now gives the first and second, as
+  `[Random(), Random()]` does and as the compiled code does. The same holds
+  for `Sin(Arcsin(…))` and the other pairs of a function and its inverse, and
+  for `e^{n - Random()}` when `n` has a value.
+
 - **A `Break()` or `Continue()` outside a loop is an error, and no longer
   stops the rest of an Epsil program** (CE-1408). `let s = 0; do { Break() };
   s = 5; s` gave `Break()` and did not run the last two statements; it now

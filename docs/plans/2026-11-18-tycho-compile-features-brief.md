@@ -82,8 +82,7 @@ with `source: tycho` and the Tycho program that needs it
   that touches shared code.
 - Random programs against the interpreter:
   `CE_NIGHTLY=1 npx jest test/compute-engine/ir-slice-random.test.ts test/compute-engine/nightly/js-parity-fuzz.test.ts`;
-  `CE_RANDOM_SEED=<n>` runs other seeds (seed 10 fails on CE-1424, an
-  interpreter defect).
+  `CE_RANDOM_SEED=<n>` runs other seeds.
 - Corpus: `_TASKS/2026-11-14-ir-batches/replay-texts.mts` prints a hash of
   the code of every program of Tycho's corpus for one tree
   (`CE_ROOT=<tree> [SHARD=k/n] npx tsx replay-texts.mts <out.jsonl>`); run it
