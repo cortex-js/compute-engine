@@ -3,7 +3,8 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 //
 // The derivative of ErfInv, HurwitzZeta and LerchPhi in `a`, Beta,
-// BarnesG, LogBarnesG, the complete EllipticK and EllipticE and ClausenCl.
+// BarnesG, LogBarnesG, the complete EllipticK and EllipticE, ClausenCl, and
+// GammaRegularized and BetaRegularized in their points.
 // Each closed form is compared with a central difference of the function
 // itself, under evaluate() and N(), and compiled. An operand with no closed
 // form (∂ₛζ(s, a)) keeps the inert Derivative. `D(f, [x, n])` is the n-th
@@ -43,6 +44,12 @@ const FUNCTIONS: [Json, number][] = [
   [['ClausenCl', 2, 'x'], 1.1],
   [['ClausenCl', 3, 'x'], 1.1],
   [['ClausenCl', 4, 'x'], 1.1],
+  [['GammaRegularized', 2.5, 'x'], 1.3],
+  [['GammaRegularized', 2.5, ['Square', 'x']], 1.3],
+  [['GammaRegularized', 2.5, 'x', ['Multiply', 2, 'x']], 1.3],
+  [['BetaRegularized', 'x', 2, 3], 0.3],
+  [['BetaRegularized', 'x', 1.5, 2.5], 0.7],
+  [['BetaRegularized', 'x', ['Multiply', 2, 'x'], 1.5, 2.5], 0.2],
 ];
 
 describe('THE DERIVATIVE OF A SPECIAL FUNCTION', () => {
@@ -144,12 +151,43 @@ describe('THE DERIVATIVE OF A SPECIAL FUNCTION', () => {
   }
 });
 
+// The CDF of these distributions expands to GammaRegularized or
+// BetaRegularized: its derivative is the density.
+describe('THE DERIVATIVE OF A CDF IS THE PDF', () => {
+  const distributions: Json[] = [
+    ['GammaDistribution', 2, 3],
+    ['GammaDistribution', 2.5, 1.5],
+    ['ChiSquareDistribution', 3],
+    ['BetaDistribution', 2, 3],
+    ['FRatioDistribution', 3, 4],
+    ['StudentTDistribution', 3],
+  ];
+  for (const dist of distributions) {
+    const name = JSON.stringify(dist);
+    test(`D(CDF(${name}, x), x) is PDF(${name}, x)`, () => {
+      const d = ce.expr(['D', ['CDF', dist, 'x'], 'x'] as never).evaluate();
+      expect(d.has('Derivative')).toBe(false);
+      for (const x0 of [-0.5, 0.3, 0.8, 2.2]) {
+        const got = d.subs({ x: x0 }).N();
+        const want = ce
+          .expr(['PDF', dist, 'x'] as never)
+          .subs({ x: x0 })
+          .N().re;
+        expect(Math.abs(got.re - want)).toBeLessThan(1e-9);
+        expect(Math.abs(got.im)).toBeLessThan(1e-12);
+      }
+    });
+  }
+});
+
 describe('NO CLOSED FORM KEEPS THE INERT DERIVATIVE', () => {
   const inert: [string, Json][] = [
     ['∂ₛ HurwitzZeta(s, 2)', ['HurwitzZeta', 'x', 2]],
     ['Zeta(s)', ['Zeta', 'x']],
     ['ClausenCl in a symbolic order', ['ClausenCl', 'x', 1.1]],
     ['∂ₙ ClausenCl(n, 1)', ['ClausenCl', 'x', 1]],
+    ['∂ₐ GammaRegularized(a, 2)', ['GammaRegularized', 'x', 2]],
+    ['∂ₐ BetaRegularized(0.3, a, 2)', ['BetaRegularized', 0.3, 'x', 2]],
   ];
   for (const [name, f] of inert) {
     test(`D(${name}) stays an Apply(Derivative)`, () => {

@@ -271,6 +271,15 @@
   For the same cause, `evaluateAsync()` of
   `["Apply", ["Function", ["Block", …]]]` did not evaluate an operator in the
   block that has only an `evaluateAsync` handler.
+- **The derivative of the CDF of a gamma, chi-square, beta, F or t
+  distribution is its density** (CE-1726). `D(CDF(GammaDistribution(2, 3),
+  x), x)` was `Which(x <= 0, 0, True, -1/3 * Apply(Derivative(
+  "GammaRegularized", 0, 1), 2, x/3))`; it is now
+  `Which(x <= 0, 0, True, 1/9 * x * e^(-x/3))`. For the same cause,
+  `D(GammaRegularized(a, x), x)` is `-x^(a - 1) e^(-x)/Gamma(a)` and
+  `D(BetaRegularized(x, a, b), x)` is `x^(a - 1) (1 - x)^(b - 1)/Beta(a, b)`,
+  also in the three- and four-operand forms. The partial derivatives in the
+  parameters stay unevaluated.
 
 ## 0.200.1 _2026-11-23_
 
