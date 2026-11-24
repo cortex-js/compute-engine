@@ -2,6 +2,13 @@
 
 ### Resolved Issues
 
+- **A double integral with a singular point is faster** (CE-1288). The check
+  for a pole that moves with another integration variable now skips each
+  point of its grid where no divisor of the integrand has a zero near the
+  range. `.N()` of `\int_0^1\int_0^1 \frac{1}{\sqrt{(x-0.5)^2+(y-0.5)^2}} +
+  \frac{1}{\sqrt{(x-0.25)^2+(y-0.25)^2}}\,dy\,dx` takes about 1.5 s instead
+  of 2.5 s, with the same value.
+
 - **A selector accepts a tuple with a slot of type `unknown`** (CE-1265). With
   `w` declared `unknown`, `Rest((w, 1, 2))` was an `incompatible-type` error;
   it is now valid and evaluates to `[1, 2]`. The same holds for `Most`,

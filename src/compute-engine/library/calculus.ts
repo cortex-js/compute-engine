@@ -221,6 +221,7 @@ import {
   endpointPoleVerdict,
   halfLineEndpointPoleSign,
   isRealOnInterval,
+  interiorPoleScreen,
   interiorPoleVerdict,
   symbolicExponentBaseZeros,
   symbolicPoleMayBeInside,
@@ -4718,25 +4719,33 @@ function nIntegrateMultiple(
       const pointValues = (
         k: number,
         shifts: readonly number[]
-      ): Record<string, Expression> => {
-        const values: Record<string, Expression> = {};
+      ): Record<string, number> => {
+        const values: Record<string, number> = {};
         let rest = k;
         others.forEach((e, j) => {
           const i = rest % perDimension;
           rest = Math.floor(rest / perDimension);
-          values[vars[e]] = ce.number(
-            scanPoint(
-              boundFns[e][0]([]),
-              boundFns[e][1]([]),
-              (i + 0.5 + shifts[j]) / perDimension
-            )
+          values[vars[e]] = scanPoint(
+            boundFns[e][0]([]),
+            boundFns[e][1]([]),
+            (i + 0.5 + shifts[j]) / perDimension
           );
         });
         return values;
       };
+      const boxed = (values: Record<string, number>) =>
+        Object.fromEntries(
+          Object.entries(values).map(([name, x]) => [name, ce.number(x)])
+        );
+      // The check substitutes and expands the whole integrand at each
+      // point; the screen, prepared once, skips the points where no divisor
+      // has a zero near the range (see `interiorPoleScreen`).
+      const screen = interiorPoleScreen(body, vars[d], ce);
       for (let k = 0; k < count; k++) {
+        const center = pointValues(k, [0, 0]);
+        if (screen !== undefined && !screen(center, lower, upper)) continue;
         const v = interiorPoleVerdict(
-          body.subs(pointValues(k, [0, 0])),
+          body.subs(boxed(center)),
           vars[d],
           lower,
           upper,
@@ -4755,7 +4764,7 @@ function nIntegrateMultiple(
         // `((x − ½)² + (y − z)²)^(−3/4)`, whose triple integral is finite,
         // was reported divergent.
         const moved = interiorPoleVerdict(
-          body.subs(pointValues(k, [0.3183, 0.2071])),
+          body.subs(boxed(pointValues(k, [0.3183, 0.2071]))),
           vars[d],
           lower,
           upper,
