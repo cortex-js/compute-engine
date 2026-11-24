@@ -424,7 +424,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // (a/b)^{-n} -> a^{-n} / b^{-n} = b^n / a^n
   // Only distribute when exponent is negative to normalize negative exponents on fractions
   // e.g., (a/b)^{-2} -> b^2 / a^2
-  if (isFunction(a, 'Divide') && b.isNegative === true) {
+  // A call of a user function `Divide` is a value, not a quotient.
+  if (
+    isFunction(a, 'Divide') &&
+    isLibraryOperator(a, 'Divide') &&
+    b.isNegative === true
+  ) {
     const num = a.op1;
     const denom = a.op2;
     // Only distribute when exponent is integer or both operands are non-negative
@@ -1990,7 +1995,8 @@ export function pow(
 
   // (a/b)^c -> a^c / b^c
   // Only distribute when exponent is integer or both operands are non-negative
-  if (isFunction(x, 'Divide')) {
+  // A call of a user function `Divide` is a value, not a quotient.
+  if (isFunction(x, 'Divide') && isLibraryOperator(x, 'Divide')) {
     const [num, denom] = x.ops;
     const expIsInteger =
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;

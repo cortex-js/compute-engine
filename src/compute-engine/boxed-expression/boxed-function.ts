@@ -4416,6 +4416,20 @@ export class BoxedFunction
     if (this._isOne) return this;
     if (this._isNegativeOne) return this;
 
+    // The reciprocal `1/this` is bound to the library `Divide`, also in a
+    // scope where a user definition of `Divide` shadows it.
+    const ce = this.engine;
+    const reciprocal = (): Expression =>
+      (shadowsLibraryName(ce, 'Divide')
+        ? ce._libraryCall('Divide', [ce.One, this])
+        : undefined) ?? ce._fn('Divide', [ce.One, this]);
+
+    // The cases below select the node by its operator name. A call bound to
+    // a user definition of a library name (a user function `Divide`) is a
+    // value: reading it as a quotient gave `Divide(x, 2)^{-1}` the value
+    // `2/x`.
+    if (shadowsLibraryOperator(this)) return reciprocal();
+
     // 1/√u = √(1/u) only holds for u ≥ 0: on the negative real axis the
     // principal branch gives 1/√(-a) = -i/√a but √(-1/a) = +i/√a
     if (this.operator === 'Sqrt' && this.op1.isNonNegative === true)
@@ -4438,7 +4452,7 @@ export class BoxedFunction
     if (this.operator === 'Rational') return this.op2.div(this.op1);
     if (this.operator === 'Negate') return this.op1.inv().neg();
 
-    return this.engine._fn('Divide', [this.engine.One, this]);
+    return reciprocal();
   }
 
   abs(): Expression {

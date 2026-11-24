@@ -2,6 +2,15 @@
 
 ### Resolved Issues
 
+- **A negative power of a call of a user function named `Divide` is no longer
+  read as a power of a quotient** (CE-1133). With `Divide` declared as the
+  function `(u, v) ↦ 1000`, `ce.expr(['Power', ['Divide', 'x', 2], -2])` was
+  rewritten as `4/x²`, which then called the user function and gave `1000` at
+  `x = 4`. It now stays a power of the call and gives `1/1000000`. The
+  exponent `-1` and `.pow()` gave the same kind of wrong value. In the scope
+  of such a function, the reciprocal of a function call, such as
+  `Power(Sin(x), -1)`, is now a quotient of the library `Divide`.
+
 - **A function literal declared or assigned with a signature over residue
   classes in an inner scope now reads the variables of the scope where it was
   made** (CE-1131). With `k = 1`, `f = x ↦ k·x`, and an inner scope that
