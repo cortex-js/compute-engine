@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A ragged list has the shape of the axes that its items have in common**
+  (CE-1390). `Shape([[5, 2, 10, 18], [1, 2, 3]])` and `Shape([1, [2, 3]])`
+  were `()` and their `Rank` was 0, the values of a scalar. They are now
+  `(2)` and 1, as `Dimensions` in Wolfram; `Shape([[[1, 2], [3]], [[4, 5],
+  [6]]])` is `(2, 2)`. A list with a cell that may be a list, such as a
+  symbol `L` declared `list<number>` with no value, gives `Shape` and `Rank`
+  no value instead of `()` and 0.
+
 - **The float quantile of a binomial or Poisson distribution is right just
   above a jump of the CDF and in the tails** (CE-1453).
   `Quantile(BinomialDistribution(1, 1/2), 0.5000000000001)` was `0`; it is

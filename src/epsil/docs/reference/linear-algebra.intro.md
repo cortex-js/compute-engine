@@ -76,6 +76,14 @@ shape([[1, 2, 3], [4, 5, 6]])
 // ➔ (2, 3)
 ```
 
+A list whose items have different shapes (a ragged list) has the axes that its
+items have in common. Rows of different lengths give a shape with one axis:
+
+```epsil
+shape([[5, 2, 10, 18], [1, 2, 3]])
+// ➔ (2)
+```
+
 The **rank** is the number of axes, that is the length of the shape. In this
 library, `rank` always has this meaning:
 
