@@ -1097,6 +1097,21 @@ export type OperatorDefinition = Partial<BaseDefinition> &
       | Expression;
 
     /**
+     * Evaluate this integer-valued operator modulo a positive integer
+     * without materializing its value. `ops` are canonical and not evaluated.
+     * Return the residue in `[0, modulus)`, or `undefined` to decline.
+     * `context.mod` reduces another expression through the same hooks.
+     */
+    evaluateMod?: (
+      ops: ReadonlyArray<Expression>,
+      modulus: bigint,
+      context: {
+        engine: ComputeEngine;
+        mod: (x: Expression) => bigint | undefined;
+      }
+    ) => bigint | undefined;
+
+    /**
      * An asynchronous version of `evaluate`.
      *
      * A handler that evaluates an operand with `evaluateAsync` passes its
@@ -3718,6 +3733,15 @@ export interface BoxedOperatorDefinition
   derivative?: OperatorDerivative;
 
   compile?: OperatorCompileHandler;
+
+  evaluateMod?: (
+    ops: ReadonlyArray<Expression>,
+    modulus: bigint,
+    context: {
+      engine: ComputeEngine;
+      mod: (x: Expression) => bigint | undefined;
+    }
+  ) => bigint | undefined;
 
   /** The arithmetic of the value kind this operator constructs, as given by
    * the `arithmetic` field of its definition. See

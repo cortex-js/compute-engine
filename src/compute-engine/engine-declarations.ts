@@ -164,9 +164,11 @@ import {
   lookup,
 } from './function-utils.js';
 import {
+  compileInheritedLibraryOperator,
   extendedLibraryOperator,
   hidesLibraryBinding,
   inSerializationScope,
+  markCompileInheritedLibrary,
   markLibraryExtension,
 } from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
@@ -209,6 +211,7 @@ import {
   restParameterIndex,
 } from './boxed-expression/function-literal.js';
 import { typeToString } from '../common/type/serialize.js';
+import type { OperatorCompileHandler } from './types-expression.js';
 import { assertWritableImport } from './boxed-expression/prepared-import-binding.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
 import {
@@ -2337,6 +2340,24 @@ function asBoxedType(t: unknown): BoxedType | undefined {
   return undefined;
 }
 
+
+const INHERITED_COMPILE_HANDLERS = new WeakMap<object, OperatorCompileHandler>();
+
+function rememberInheritedCompileHandler(
+  wrapper: object,
+  source: OperatorCompileHandler
+): void {
+  INHERITED_COMPILE_HANDLERS.set(wrapper, source);
+}
+
+function inheritedCompileHandler(
+  handler: unknown
+): OperatorCompileHandler | undefined {
+  return typeof handler === 'function'
+    ? INHERITED_COMPILE_HANDLERS.get(handler)
+    : undefined;
+}
+
 /**
  * Build the definition that `ce.declare(id, patch, { extend: true })`
  * installs: the fields of the operator definition visible for `id` from
@@ -2442,7 +2463,20 @@ function extendedOperatorDefinition(
       `Cannot extend "${id}": give either \`signature\` or \`addSignature\`, not both`
     );
 
-  const def: OperatorDefinition = { ...old, ...fields };
+  const compileInherit = fields.compile === 'inherit';
+  const compileHandler = typeof fields.compile === 'function' ? fields.compile : undefined;
+  const def: OperatorDefinition = { ...old, ...fields } as OperatorDefinition;
+  if (compileInherit) def.compile = old.compile;
+  if (compileHandler !== undefined) {
+    const inherited = inheritedCompileHandler(old.compile) ?? old.compile;
+    const wrapped = (
+      args: readonly import('./global-types.js').Expression[],
+      compile: (expr: import('./global-types.js').Expression) => string,
+      context: import('./types-expression.js').OperatorCompileContext
+    ) => compileHandler(args, compile, { ...context, inherited });
+    rememberInheritedCompileHandler(wrapped, compileHandler);
+    def.compile = wrapped;
+  }
 
   // The collection handlers of a host operator are installed wrapped
   // (`withHostCollectionHandlers`, `shared-evaluation-memo.ts`). The new
@@ -2612,18 +2646,25 @@ function extendedOperatorDefinition(
   const replacesLibraryPart =
     'evaluate' in fields ||
     'canonical' in fields ||
-    'compile' in fields ||
+    ('compile' in fields && !compileInherit) ||
     'derivative' in fields;
   const systemBinding = ce.contextStack[0]?.lexicalScope.bindings.get(id);
-  const library = replacesLibraryPart
-    ? undefined
-    : systemBinding !== undefined &&
-        isOperatorDef(systemBinding) &&
-        systemBinding.operator === old
+  const visibleLibrary =
+    systemBinding !== undefined &&
+    isOperatorDef(systemBinding) &&
+    systemBinding.operator === old
       ? old
       : extendedLibraryOperator(old);
+  const library = replacesLibraryPart ? undefined : visibleLibrary;
+  const compileLibrary =
+    compileInheritedLibraryOperator(old) ??
+    ((compileInherit || compileHandler !== undefined) && visibleLibrary !== undefined
+      ? visibleLibrary
+      : undefined);
 
   const carry = (installed: BoxedOperatorDefinition): void => {
+    if (compileLibrary !== undefined)
+      markCompileInheritedLibrary(installed, compileLibrary);
     if (keepsPurityStatement) installed._purityStated = old._purityStated;
     if (copiesDeriver) installed._deriveEffects = old._deriveEffects;
     if (copiesSkeleton) installed._signatureSkeleton = old._signatureSkeleton;

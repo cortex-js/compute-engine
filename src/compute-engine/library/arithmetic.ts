@@ -75,7 +75,14 @@ import {
   recordRefusedOperand,
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
-import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
+import {
+  evaluateModAdd,
+  evaluateModMultiply,
+  evaluateModNegate,
+  evaluateModPower,
+  evaluateModSubtract,
+  reduceModulo,
+} from '../boxed-expression/modular-arithmetic.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 import {
@@ -8609,6 +8616,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // computes on is numeric — §3.A/§5 of the missing-value typing design).
       missingBehavior: 'propagate',
       type: addTypeHandler,
+      evaluateMod: evaluateModAdd,
 
       sgn: (ops) => {
         if (ops.some((x) => x.isNaN)) return 'unsigned';
@@ -11763,6 +11771,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Multiply'),
       signature: '(number*) -> number',
+      evaluateMod: evaluateModMultiply,
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
@@ -12922,6 +12931,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q715358',
       complexity: 2000,
       broadcastable: true,
+      evaluateMod: evaluateModNegate,
       // Numeric tuples negate component-wise (`negate`), and the type handler
       // passes a collection operand's own type through — the generic
       // broadcast machinery must not fan the tuple out or re-wrap the type.
@@ -13151,6 +13161,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       keywords: ['exponent', 'exponentiation'],
       wikidata: 'Q33456',
       broadcastable: true,
+      evaluateMod: evaluateModPower,
       complexity: 3500,
       // The signature declares, PER SLOT, exactly the points where the
       // power has a value (ruled 2026-09-01):
@@ -14724,6 +14735,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
       signature: '(number+) -> number',
+      evaluateMod: evaluateModSubtract,
       examples: ['5 - 3 - x'],
       type: subtractTypeHandler,
       canonical: (args, { engine }) => {

@@ -188,6 +188,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'canonical',
   'evaluate',
   'evaluateAsync',
+  'evaluateMod',
   'evalDimension',
   'compile',
   'derivative',
@@ -859,6 +860,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   ) => Expression;
 
   compile?: OperatorCompileHandler;
+
+  evaluateMod?: (
+    ops: ReadonlyArray<Expression>,
+    modulus: bigint,
+    context: {
+      engine: ComputeEngine;
+      mod: (x: Expression) => bigint | undefined;
+    }
+  ) => bigint | undefined;
+
 
   /** The partial derivatives of the operator, as given by the `derivative`
    * key of its definition: an array of function literals, one for each
@@ -2321,6 +2332,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
     this.compile = def.compile ?? this.compile;
+    this.evaluateMod = def.evaluateMod ?? this.evaluateMod;
     if (def.derivative !== undefined)
       assertValidDerivativeKey(this.name, def.derivative);
     this.derivative = def.derivative ?? this.derivative;

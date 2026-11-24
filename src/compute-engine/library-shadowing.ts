@@ -807,3 +807,21 @@ export function markLibraryExtension(
 export function extendedLibraryOperator(operator: object): object | undefined {
   return LIBRARY_EXTENSIONS.get(operator);
 }
+
+const COMPILE_INHERITED_LIBRARY = new WeakMap<object, object>();
+
+/** Record that `extension` may use the library lowering of
+ * `libraryOperator` when its compile handling defers. */
+export function markCompileInheritedLibrary(
+  extension: object,
+  libraryOperator: object
+): void {
+  COMPILE_INHERITED_LIBRARY.set(extension, libraryOperator);
+}
+
+/** The library operator whose lowering `operator` may use in compilation. */
+export function compileInheritedLibraryOperator(
+  operator: object
+): object | undefined {
+  return COMPILE_INHERITED_LIBRARY.get(operator);
+}

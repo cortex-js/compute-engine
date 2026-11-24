@@ -71,6 +71,7 @@ import {
   resolvedValueDefinition,
 } from '../../boxed-expression/type-guards.js';
 import {
+  compileInheritedLibraryOperator,
   isLibraryOperator,
   isShadowedSymbol,
   shadowsLibraryName,
@@ -2058,7 +2059,10 @@ function lowerOnce(
     // A closed form is computed with the library's operators.
     if ((e.operator === 'D' || e.operator === 'Integrate') && facts(e).answered)
       decline(e, `${e.operator} of an operator that a compile handler lowers`);
-    if (!isLibraryOperator(e as never, e.operator)) {
+    const inheritsLibraryCompile =
+      e.operatorDefinition !== undefined &&
+      compileInheritedLibraryOperator(e.operatorDefinition) !== undefined;
+    if (!inheritsLibraryCompile && !isLibraryOperator(e as never, e.operator)) {
       if (isHostDefinition(e)) return hostCall(e, want);
       // The constructor of a named tuple type: a record.
       if (recordConstructor(e) !== undefined) return records.construct(e);

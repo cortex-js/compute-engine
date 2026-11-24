@@ -28,12 +28,94 @@ function floorMod(x: bigint, m: bigint): bigint {
  * materialized evaluable exponents such as `3^{20}` into the literal
  * `3486784401`, so no extra evaluation is needed.
  */
+type EvaluateModContext = {
+  engine: Expression['engine'];
+  mod: (x: Expression) => bigint | undefined;
+};
+
+/** Modular reduction of a sum, for the public `evaluateMod` hook. */
+export function evaluateModAdd(
+  ops: ReadonlyArray<Expression>,
+  m: bigint,
+  { mod }: EvaluateModContext
+): bigint | undefined {
+  let sum = 0n;
+  for (const op of ops) {
+    const r = mod(op);
+    if (r === undefined) return undefined;
+    sum = (sum + r) % m;
+  }
+  return sum;
+}
+
+/** Modular reduction of a product, for the public `evaluateMod` hook. */
+export function evaluateModMultiply(
+  ops: ReadonlyArray<Expression>,
+  m: bigint,
+  { mod }: EvaluateModContext
+): bigint | undefined {
+  let product = 1n;
+  for (const op of ops) {
+    const r = mod(op);
+    if (r === undefined) return undefined;
+    product = (product * r) % m;
+  }
+  return product;
+}
+
+/** Modular reduction of a negation, for the public `evaluateMod` hook. */
+export function evaluateModNegate(
+  ops: ReadonlyArray<Expression>,
+  m: bigint,
+  { mod }: EvaluateModContext
+): bigint | undefined {
+  const u = mod(ops[0]);
+  return u === undefined ? undefined : (m - u) % m;
+}
+
+/** Modular reduction of a subtraction, for the public `evaluateMod` hook. */
+export function evaluateModSubtract(
+  ops: ReadonlyArray<Expression>,
+  m: bigint,
+  { mod }: EvaluateModContext
+): bigint | undefined {
+  const a = mod(ops[0]);
+  const b = mod(ops[1]);
+  return a === undefined || b === undefined ? undefined : floorMod(a - b, m);
+}
+
+/** Modular reduction of a power, for the public `evaluateMod` hook. */
+export function evaluateModPower(
+  ops: ReadonlyArray<Expression>,
+  m: bigint,
+  { mod }: EvaluateModContext
+): bigint | undefined {
+  const base = mod(ops[0]);
+  if (base === undefined) return undefined;
+  const exp = toBigint(ops[1]);
+  if (exp === null) return undefined;
+  if (exp >= 0n) return modPow(base, exp, m);
+  const inv = modularInverse(base, m);
+  return inv === null ? undefined : modPow(inv, -exp, m);
+}
+
 export function reduceModulo(expr: Expression, m: bigint): bigint | null {
   if (m <= 0n) return null;
 
   // A literal or bound integer symbol reduces directly.
   const direct = toBigint(expr);
   if (direct !== null) return floorMod(direct, m);
+
+  const hook = isFunction(expr)
+    ? expr.operatorDefinition?.evaluateMod
+    : undefined;
+  if (hook !== undefined) {
+    const residue = hook((expr as unknown as { ops: readonly Expression[] }).ops, m, {
+      engine: expr.engine,
+      mod: (x) => reduceModulo(x, m) ?? undefined,
+    });
+    if (residue !== undefined) return floorMod(residue, m);
+  }
 
   if (isFunction(expr, 'Negate')) {
     const u = reduceModulo(expr.op1, m);

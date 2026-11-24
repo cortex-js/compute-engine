@@ -42,7 +42,11 @@ import type { UnitEnvironment } from './binding-unit.js';
 import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
 import type { StatementSources } from '../common/debug-hook.js';
 
-import type { Expression, ExpressionInput } from './types-expression.js';
+import type {
+  Expression,
+  ExpressionInput,
+  OperatorCompileHandler,
+} from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
 import type { ContourInput, ContourIntegralResult } from './types-contour.js';
 export type * from './types-contour.js';
@@ -599,7 +603,11 @@ export type InferResult = {
  *
  * @category Definitions
  */
-export type OperatorDefinitionPatch = OperatorDefinition & {
+export type OperatorDefinitionPatch = Omit<OperatorDefinition, 'compile'> & {
+  /** Keep or extend the library lowering of the operator. A compile handler
+   * receives the previous one as `context.inherited`; returning `undefined`
+   * defers to the inherited library lowering. */
+  compile?: OperatorCompileHandler | 'inherit';
   addSignature?: Type | TypeString;
 };
 

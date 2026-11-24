@@ -644,6 +644,15 @@ interface BoxedOperatorDefinition
         options: { engine: ComputeEngine; argument: number }
       ) => Expression | undefined);
   compile?: OperatorCompileHandler;
+
+  evaluateMod?: (
+    ops: ReadonlyArray<Expression>,
+    modulus: bigint,
+    context: {
+      engine: ComputeEngine;
+      mod: (x: Expression) => bigint | undefined;
+    }
+  ) => bigint | undefined;
   _update(def: unknown): void;
   /** Re-attach the definition's effect set to its signature after the
    * signature object was replaced by type inference. @internal */
@@ -714,6 +723,9 @@ export type OperatorCompileContext = {
   /** The operand type including facts established by this compilation's local
    * bindings. The expression's type remains the target-independent contract. */
   readonly typeOf?: (expr: Expression) => Type;
+  /** The compile handler of the definition extended with
+   * `ce.declare(name, patch, { extend: true })`, when there was one. */
+  readonly inherited?: OperatorCompileHandler;
 };
 
 /**

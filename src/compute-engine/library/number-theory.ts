@@ -6,6 +6,7 @@ import type {
   SymbolDefinitions,
 } from '../global-types.js';
 import { asRational, toBigint } from '../boxed-expression/numerics.js';
+import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import type { Type } from '../../common/type/types.js';
 import { nonNegativeSign } from '../boxed-expression/sgn.js';
@@ -1065,7 +1066,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           // The signature admits a rational exponent; `toBigint` would round it.
           const exponent = asRational(bOp);
           const m = mOp.isInteger === true ? toBigint(mOp) : null;
-          const a = m === null ? null : baseResidue(aOp, m);
+          const a =
+            m === null
+              ? null
+              : (aOp.isInteger === true ? reduceModulo(aOp, m) : null) ??
+                baseResidue(aOp, m);
           if (exponent === undefined || a === null || m === null)
             return undefined;
           const root = leastPowerModRoot(
@@ -1083,7 +1088,9 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const m = toBigint(mOp);
         if (b === null || m === null) return undefined;
         if (m <= 0n) return undefined; // modulus must be positive
-        const a = baseResidue(aOp, m);
+        const a =
+          (aOp.isInteger === true ? reduceModulo(aOp, m) : null) ??
+          baseResidue(aOp, m);
         if (a === null) return undefined;
         if (m === 1n) return result(0);
         if (b >= 0n) return result(modPow(a, b, m));
