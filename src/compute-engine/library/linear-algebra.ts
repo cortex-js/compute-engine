@@ -1361,7 +1361,7 @@ function pointNormBroadcastsOperand(
 ): 'list' | 'gated-list' | undefined {
   // A component typed `list<…> | missing` (a restricted list) broadcasts
   // too (`broadcastingComponentKind`).
-  const components = pointLiteralComponents(d);
+  const components = pointLiteralComponents(d, engine);
   const kinds =
     components !== undefined
       ? components.map((c) =>
@@ -1410,7 +1410,7 @@ function pointNormTypeOf(d: OperandDescriptor, engine: PureEngineView): string {
   const broadcast = pointNormBroadcastsOperand(d, engine);
   if (broadcast === 'gated-list') return 'list<number> | nan';
   if (broadcast === 'list') return 'list<number>';
-  const components = pointLiteralComponents(d);
+  const components = pointLiteralComponents(d, engine);
   if (components === undefined) return 'number';
   return euclideanNormTypeOf(components);
 }

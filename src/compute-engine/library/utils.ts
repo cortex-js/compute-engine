@@ -6,6 +6,8 @@ import type {
   OperandDescriptor,
   Scope,
 } from '../global-types.js';
+import type { PureEngineView } from '../types-definitions.js';
+import { resolvesToSystemBinding } from '../boxed-expression/operand-descriptor.js';
 import type { EffectHandlers } from '../types-effects.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import { advanceIterationScope } from '../engine-scope.js';
@@ -109,17 +111,34 @@ export function operandChildren(
   return undefined;
 }
 
-/** The component descriptors of a point written out as a `Tuple` literal;
- * `undefined` for any other operand. A tuple-typed application
- * (`At(LQ, -1)`, `First(LQ)`) is not written out: its children are the
- * arguments of the call, not the components of the point: its broadcast is
- * read from its tuple type, and its scalar norm type stays the wide
- * `number`. */
+/** The component descriptors of a point written out as a `Tuple` literal or
+ * as a call of the library `PointList`, whose arguments are its components
+ * (`PointList(3, 4)` is the point `(3, 4)`); `undefined` for any other
+ * operand. A `PointList` with a list argument is a list of points, not a
+ * point, and its callers do not read it here: they read a tuple-typed
+ * operand only. A function of the user named `PointList` is not the library
+ * operator, and its arguments say nothing about the point it returns. The
+ * test reads the binding of the name in the current scope, not the binding
+ * of the call: a library `PointList` boxed before a scope that defines a
+ * `PointList` of the user, and read inside that scope, keeps the wide type
+ * of its tuple, which is sound.
+ * Another tuple-typed application (`At(LQ, -1)`, `First(LQ)`) is not
+ * written out: its children are the arguments of the call, not the
+ * components of the point: its broadcast is read from its tuple type, and
+ * its scalar norm type stays the wide `number`. */
 export function pointLiteralComponents(
-  d: OperandDescriptor
+  d: OperandDescriptor,
+  engine: PureEngineView
 ): ReadonlyArray<OperandDescriptor> | undefined {
   const s = d.structureOf?.();
-  return s?.kind === 'tuple' ? s.elements : undefined;
+  if (s?.kind === 'tuple') return s.elements;
+  if (
+    s?.kind === 'application' &&
+    s.head === 'PointList' &&
+    resolvesToSystemBinding(engine, 'PointList')
+  )
+    return s.children;
+  return undefined;
 }
 
 /** Is this operand's TYPE a tuple — the bare `tuple` primitive or a composite
@@ -149,8 +168,11 @@ export function isTupleTypedOperand(d: OperandDescriptor): boolean {
  * `p: tuple<list<real>, real>` reports the same broadcast its evaluation
  * produces.
  */
-export function pointNormBroadcasts(d: OperandDescriptor): boolean {
-  return pointNormBroadcastKind(d) !== undefined;
+export function pointNormBroadcasts(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  return pointNormBroadcastKind(d, engine) !== undefined;
 }
 
 /**
@@ -161,9 +183,10 @@ export function pointNormBroadcasts(d: OperandDescriptor): boolean {
  * broadcast.
  */
 function pointNormBroadcastKind(
-  d: OperandDescriptor
+  d: OperandDescriptor,
+  engine: PureEngineView
 ): 'list' | 'gated-list' | undefined {
-  const children = pointLiteralComponents(d);
+  const children = pointLiteralComponents(d, engine);
   const kinds =
     children !== undefined
       ? children.map((c) =>
@@ -238,14 +261,17 @@ export function euclideanNormType(
  * point whose components the structural view exposes carries the scalar
  * claim; a point-TYPED symbol keeps the wide `number`.
  */
-export function pointNormType(d: OperandDescriptor): string {
+export function pointNormType(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): string {
   // A list component that may be absent gives one norm per element when it
   // is present, and `NaN` (the norm of a point with an absent coordinate)
   // when it is absent.
-  const broadcast = pointNormBroadcastKind(d);
+  const broadcast = pointNormBroadcastKind(d, engine);
   if (broadcast === 'gated-list') return 'list<number> | nan';
   if (broadcast === 'list') return 'list<number>';
-  const children = pointLiteralComponents(d);
+  const children = pointLiteralComponents(d, engine);
   if (children === undefined) return 'number';
   return euclideanNormType(children);
 }

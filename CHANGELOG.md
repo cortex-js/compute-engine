@@ -42,6 +42,12 @@
   above 2^53 also gives `NaN`: `\gcd(2^{60}, 4.0)` was 4 and is now `NaN`;
   `\gcd(2^{60}, 4)` gives the exact 4.
 
+- **The length of a point written with `PointList` is a real number again**
+  (CE-1767). Since 0.201.2, `Norm(PointList(3, 4))` was typed `+oo | nan | real`
+  and `Abs(PointList(3, 4))` was typed `number`; both are `real`, as for
+  `Tuple(3, 4)`. A function of the user named `PointList` is not read as a
+  point.
+
 ### Performance
 
 - **The LaTeX of a product with a power to a symbolic exponent is faster to

@@ -8555,7 +8555,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: ([x], context) =>
         BoxedType.forResult(
           x && isTupleTypedOperand(x)
-            ? pointNormType(x)
+            ? pointNormType(x, context.engine)
             : absFunctionTypeOnTypes(x),
           context.engine._typeResolver
         ),

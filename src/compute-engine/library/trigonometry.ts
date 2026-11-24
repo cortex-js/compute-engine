@@ -622,11 +622,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // absent, and the hypotenuse is then `NaN` (`pointNormType`).
         const broadcastLegs = [x, y].filter(
           (leg) =>
-            leg && isTupleShapedType(leg.type) && pointNormBroadcasts(leg)
+            leg &&
+            isTupleShapedType(leg.type) &&
+            pointNormBroadcasts(leg, context.engine)
         );
         if (broadcastLegs.length > 0)
           return BoxedType.forResult(
-            broadcastLegs.some((leg) => pointNormType(leg) !== 'list<number>')
+            broadcastLegs.some(
+              (leg) => pointNormType(leg, context.engine) !== 'list<number>'
+            )
               ? 'list<number> | nan'
               : 'list<number>',
             context.engine._typeResolver
