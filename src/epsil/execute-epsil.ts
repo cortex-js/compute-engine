@@ -1329,11 +1329,13 @@ function reportWalkFailure(
  * returns, in the order of {@link traceFrames}: a frame of a call that
  * canonicalization renamed is there the frame of the written call, so that
  * the error of `exp(w) + 1` is `in Exp argument 1`, not `in Power argument 2`.
- * Without it, the frames are as recorded.
+ * A `null` entry is a frame that the entry before it names with it: the
+ * frames `Negate argument 1, Add argument 1` of `3 - ln(w)` are the one frame
+ * `Subtract argument 2`. Without `written`, the frames are as recorded.
  */
 export function errorFrameChain(
   error: MathJsonExpression,
-  written?: readonly ErrorFrameRef[]
+  written?: readonly (ErrorFrameRef | null)[]
 ): string {
   const ops = [...operands(error)];
   const trace = ops[ops.length - 1];
@@ -1359,11 +1361,13 @@ export function errorFrameChain(
     const recordedIndex = machineValue(operand(frame, 2));
     // `traceFrames` skips the same frames.
     if (recordedName === null || recordedIndex === null) continue;
-    const { name, index } = written?.[k] ?? {
+    const entry = written?.[k];
+    k += 1;
+    if (entry === null) continue;
+    const { name, index } = entry ?? {
       name: recordedName,
       index: recordedIndex,
     };
-    k += 1;
     // `Block` and `Function` frames are evaluation structure the engine
     // inserted (a lambda body, a statement block) — not calls the user
     // wrote — so they add no information a reader can act on.
@@ -1394,7 +1398,7 @@ function narrowErrorRange(
   fallback: [number, number],
   boxedStmt?: Expression,
   element?: MathJsonExpression
-): { range: [number, number]; frames: ErrorFrameRef[] } {
+): { range: [number, number]; frames: (ErrorFrameRef | null)[] } {
   const elementRange =
     element === undefined ? undefined : sourceOffsetsOf(element);
   if (element !== undefined && elementRange !== undefined) {

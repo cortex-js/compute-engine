@@ -263,6 +263,11 @@
 
 ### Resolved Issues
 
+- **In Epsil, the message of an error in the second operand of a subtraction
+  names the subtraction** (CE-1717). With `w` holding `"s"`, the runtime error
+  of `3 - ln(w)` said "in Ln argument 1, in Negate argument 1, in Add
+  argument 1", which names a negation and a sum that the program does not
+  contain. It now says "in Ln argument 1, in Subtract argument 2".
 - **A breakpoint in the body of a function with no parameters stops the
   debugger** (CE-1725). In a debug run of `executeEpsilAsync()`, and with
   `applyEpsilAsync(ce, cb, [], { debug })`, the statements of

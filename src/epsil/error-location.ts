@@ -188,8 +188,10 @@ export function enclosingFrame(
  * the value of the statement or the argument that an outer frame of the
  * statement selected ({@link rejectFramesOutsideScope}). The result holds
  * these frames as `frames`, in the order of `frames`, so that a message names
- * the written call: `Exp argument 1`, not `Power argument 2`. Every other
- * frame is as recorded.
+ * the written call: `Exp argument 1`, not `Power argument 2`. The two frames
+ * `Negate argument 1, Add argument k` of the canonical sum of a written
+ * subtraction become one frame, `Subtract argument 2`, followed by `null`
+ * ({@link subtractionFrames}). Every other frame is as recorded.
  */
 export function locateError(
   frames: readonly ErrorFrameRef[],
@@ -228,13 +230,20 @@ export function locateError(
 ): {
   range: [number, number];
   call?: MathJsonExpression;
-  frames: ErrorFrameRef[];
+  /** The frames as the message names them, in the order of the recorded
+   * frames. `null` is a frame that the frame before it names with it. */
+  frames: (ErrorFrameRef | null)[];
 } {
   // The frames as recorded name the canonical calls. `rejectFramesOutsideScope`
   // changes the frames of renamed calls in `written`, which is used from
   // here on, and compares the frames as recorded with the canonical operands.
+  const recorded = frames;
   const written = [...frames];
   const rejected: Rejected = { frames: new Set(), calls: new Set() };
+  const accepted = new Map<
+    number,
+    { call: MathJsonExpression; arg: MathJsonExpression }
+  >();
   rejectFramesOutsideScope(
     written,
     frames,
@@ -242,9 +251,11 @@ export function locateError(
     frameIndexOrder,
     slotNamesFor,
     canonicalOrder,
-    rejected
+    rejected,
+    accepted
   );
   frames = written;
+  const named = subtractionFrames(written, recorded, accepted);
   for (let k = 0; k < frames.length; k++) {
     if (rejected.frames.has(k)) continue;
     const { name } = frames[k];
@@ -346,10 +357,65 @@ export function locateError(
     // The matched CALL travels with the range: a caller quoting the error's
     // surroundings wants `IndexOf(digits, cs[i], 23)`, not the one argument
     // the range underlines and not the whole enclosing statement.
-    if (range !== undefined)
-      return { range, call: found.call, frames: written };
+    if (range !== undefined) return { range, call: found.call, frames: named };
   }
-  return { range: fallback, frames: written };
+  return { range: fallback, frames: named };
+}
+
+/**
+ * The frames `written` as a message names them: each pair of frames
+ * `Negate argument 1, Add argument k` that the canonical sum of a written
+ * subtraction recorded for its second operand is one frame,
+ * `Subtract argument 2`, followed by `null`.
+ *
+ * The canonical form of `3 - ln(w)` is `Add(3, Negate(Ln(w)))`, so the error
+ * of `ln(w)` has the frames `Ln argument 1, Negate argument 1,
+ * Add argument 1`, and the statement has no written `Negate` and no written
+ * sum. The message is then `in Ln argument 1, in Subtract argument 2`.
+ *
+ * A pair is changed only when {@link rejectFramesOutsideScope} matched its
+ * `Add` frame to a written sum of the statement (`accepted`), and the operand
+ * that the frame selected is the second operand of a written subtraction of
+ * that sum. A pair recorded in an earlier statement or in a called function
+ * is not matched, and is kept. So is the pair of a written unary minus in a
+ * sum (`1 + -ln(w)`): the operand that the `Add` frame selects is the
+ * `-ln(w)`, whose parent is not a subtraction. Without `canonicalOrder` (the
+ * static check), or when the frame indexes count written arguments, nothing
+ * is matched and the frames are kept.
+ */
+function subtractionFrames(
+  written: readonly ErrorFrameRef[],
+  recorded: readonly ErrorFrameRef[],
+  accepted: ReadonlyMap<
+    number,
+    { call: MathJsonExpression; arg: MathJsonExpression }
+  >
+): (ErrorFrameRef | null)[] {
+  const result: (ErrorFrameRef | null)[] = [...written];
+  for (let k = 0; k + 1 < written.length; k++) {
+    if (
+      written[k].name !== 'Negate' ||
+      written[k].index !== 1 ||
+      recorded[k].name !== 'Negate' ||
+      written[k + 1].name !== 'Add' ||
+      recorded[k + 1].name !== 'Add'
+    )
+      continue;
+    const selected = accepted.get(k + 1);
+    if (selected === undefined) continue;
+    const path: MathJsonExpression[] = [];
+    if (!pathTo(selected.call, selected.arg, path) || path.length < 2) continue;
+    const parent = path[path.length - 2];
+    if (
+      operator(parent) !== 'Subtract' ||
+      subtrahendAt(parent, 1) !== selected.arg
+    )
+      continue;
+    result[k] = { name: 'Subtract', index: 2 };
+    result[k + 1] = null;
+    k += 1;
+  }
+  return result;
 }
 
 /**
@@ -526,7 +592,10 @@ function rejectFramesOutsideScope(
     | ((operatorName: string) => readonly (string | undefined)[] | undefined)
     | undefined,
   canonicalOrder: CanonicalOrder | undefined,
-  rejected: Rejected
+  rejected: Rejected,
+  /** Set to the written call and the argument that each frame of the
+   * statement selected, by index in `frames`. */
+  accepted: Map<number, { call: MathJsonExpression; arg: MathJsonExpression }>
 ): void {
   // The frame index of a named call counts declaration slots, and the source
   // range of the canonical operand is the only check of the argument.
@@ -603,6 +672,7 @@ function rejectFramesOutsideScope(
     )
       return;
 
+    accepted.set(j, { call: selected.call, arg: selected.arg });
     scope = selected.arg;
   }
 }
