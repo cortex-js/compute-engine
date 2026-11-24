@@ -586,9 +586,9 @@ type string is Copyable
 
 ### DeclareProtocol
 
-`(string | symbol, members: dictionary<any>?, parents: any?) scope -> nothing`
+`(string | symbol, members: dictionary<any>?, parents: any?, attributes: dictionary<any>?) scope -> nothing`
 
-Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `["List", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`["Dictionary"]` when there are none). Evaluates to `Nothing`.
+Declare a PROTOCOL: a set of function and property requirements a type may declare itself to satisfy. Protocols are engine-global (not lexically scoped) and are NOT types, so this is only valid at the top level of a program. The name is a symbol (or a string); the optional members ride as a dictionary of `member -> ["Pair", "function"|"readonly"|"readwrite", signature]`, with the signature as a type-expression string. A `function` member's first parameter must be typed `Self`, the substitution token standing for the conforming type. A protocol with no members is a SEMANTIC protocol (a marker). An optional third operand `["List", parent, …]` names the protocols this one EXTENDS: a type that conforms to it conforms to each of them, and its implementation block may implement their members. The members operand is then required (`["Dictionary"]` when there are none). An optional fourth operand documents the protocol: `["Dictionary", description: string, members: ["Dictionary", member: string]]` (the `///` comments of an Epsil `protocol` statement); the two operands before it are then required. Evaluates to `Nothing`.
 
 ```epsil
 protocol Area { function area(self: Self) -> number }
