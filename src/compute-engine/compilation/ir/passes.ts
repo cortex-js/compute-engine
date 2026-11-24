@@ -111,9 +111,13 @@ export const ALL_PASSES: PassOptions = Object.freeze({
 });
 
 /** The most instructions of a body that `inline` copies (arms included),
- *  and of all its copies in one program, by the rule of the sites. The
- *  rule `'repeated'` is JavaScript's, where the sums written out
- *  multiply the sites: a function read at 16 terms of each of four sums. */
+ *  and the most instructions by which its copies grow the program, by the
+ *  rule of the sites. The growth is measured at the start of each round of
+ *  the passes, so a copy that the other passes shrink (a call with a
+ *  constant argument folds) gives back its instructions; in one round the
+ *  copies are at most the budget that is left. The rule `'repeated'` is
+ *  JavaScript's, where the sums written out multiply the sites: a function
+ *  read at 16 terms of each of four sums. */
 export const INLINE_SIZE = 64;
 export const INLINE_BUDGET = { loop: 1000, repeated: 4000 } as const;
 
@@ -149,10 +153,13 @@ export function runPasses(
     run('scalarize', (q, r) =>
       scalarize(q, r, options.scalarize ? SCALARIZE_LIMIT : short)
     );
-  const budget = {
-    left: options.inline ? INLINE_BUDGET[options.inline] : 0,
-    grown: new Set<string>(),
-  };
+  // The budget of `inline` (`INLINE_BUDGET`) bounds the growth of the
+  // program since the passes started, measured before `inline` in each
+  // round.
+  const cap = options.inline ? INLINE_BUDGET[options.inline] : 0;
+  const total = () => p.functions.reduce((n, f) => n + size(f.body), 0);
+  const start = total();
+  const budget = { left: cap, grown: new Set<string>() };
   for (let round = 0; round < 8; round++) {
     let changed = false;
     const lists = options.fold === 'lists';
@@ -161,6 +168,7 @@ export function runPasses(
     if (options.hoist) changed = run('hoist', hoist) || changed;
     if (options.strength) changed = run('strength', strength) || changed;
     const where = options.inline;
+    if (where) budget.left = Math.min(cap, cap - (total() - start));
     if (where)
       changed =
         run('inline', (q, r) => inline(q, r, where, budget, short)) || changed;

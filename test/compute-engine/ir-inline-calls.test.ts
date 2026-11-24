@@ -344,16 +344,20 @@ describe('IR profile, batch G21: a call that stays a call', () => {
 
   test('past the budget of the program', () => {
     // A body under the size limit, called with 80 other arguments in one
-    // loop: the copies stop at the budget.
+    // loop: the copies stop at the budget. The six sines differ, so the
+    // other passes do not shrink a copy.
     // prettier-ignore
-    define('s1', ['Function', ['Add', ...Array.from({ length: 6 }, (_, i) => ['Multiply', i + 2, ['Sin', 'q']])], 'q']);
+    define('s1', ['Function', ['Add', ...Array.from({ length: 6 }, (_, i) => ['Multiply', i + 2, ['Sin', ['Add', 'q', i + 1]]])], 'q']);
     // prettier-ignore
     const json = ['Sum', ['Add', ...Array.from({ length: 80 }, (_, i) => ['s1', ['Add', 'x', 'k', i]])], ['Limits', 'k', 1, 2]];
     const r = check(json, [{ x: 0.3 }, { x: 2.5 }]);
     const left = calls(r, 's1');
     expect(left).toBeGreaterThan(0);
     expect(left).toBeLessThan(80);
-    expect(80 - left).toBeLessThanOrEqual(INLINE_BUDGET.loop);
+    // Each copy keeps 18 instructions that no pass removes (six sums, six
+    // sines, six products) and removes the call it replaces, so it grows the
+    // program by at least 17. The copies grow it by at most the budget.
+    expect((80 - left) * 17).toBeLessThanOrEqual(INLINE_BUDGET.loop);
   });
 
   test('the budget of the rule of repeated calls is larger', () => {

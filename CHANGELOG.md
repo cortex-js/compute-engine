@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Performance
+
+- **A compiled formula whose functions call a small function in several sums
+  now copies each of those calls,** so a call that every term makes with the
+  same arguments is computed once. The size limit of the copies counted each
+  copy before the constant arguments folded, so the last function compiled
+  kept its calls: with `n(x, y, k) := e^{-5000(D(x, y, k) - F(x, y))}` and
+  `H(x, y) := \sum_{k=1}^{16} \operatorname{mod}(0.567k, 1)\, n(x, y, k)`,
+  each of the 16 calls of `n` in `H` computed `F(x, y)` again. A formula of
+  this form compiled to JavaScript now makes 520 calls of `Math.sin` and
+  `Math.cos` per point instead of 1,141, and runs about 2.5 times faster.
+  The values are the same.
+
 ## 0.201.0 _2026-11-23_
 
 ### New Features
