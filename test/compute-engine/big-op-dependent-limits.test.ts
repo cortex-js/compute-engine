@@ -125,6 +125,71 @@ describe('Sum and Product with a bound that depends on another index', () => {
     expect(ce.box('h').evaluate().json).toEqual(['List', 1, 1, 2]);
   });
 
+  // CE-1190: an `Element` clause whose set or condition names another index
+  // is nested inside the clause of that index, as a `Limits` clause is.
+  test('Sum with an Element clause whose Range names the outer index', () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 3],
+      ['Element', 'j', ['Range', 1, 'i']],
+    ]);
+    expect(e.evaluate().toString()).toBe('25');
+    expect(e.N().toString()).toBe('25');
+  });
+
+  test('Sum with the dependent Element clause first', () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'k', 'n'],
+      ['Element', 'k', ['Range', 1, 'n']],
+      ['Limits', 'n', 1, 3],
+    ]);
+    expect(e.evaluate().toString()).toBe('25');
+  });
+
+  test('Product with two Element clauses', () => {
+    // Over n = 1..3, k = 1..n: 2 · (3·4) · (4·5·6) = 2880
+    const e = ce.box([
+      'Product',
+      ['Add', 'n', 'k'],
+      ['Element', 'n', ['Range', 1, 3]],
+      ['Element', 'k', ['Range', 1, 'n']],
+    ]);
+    expect(e.evaluate().toString()).toBe('2880');
+  });
+
+  test('Sum with an Element condition that names the outer index', () => {
+    // Over i = 1..3, j in 1..3 with j < i: 2·1 + 3·(1+2) = 11
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 3],
+      ['Element', 'j', ['Range', 1, 3], ['Less', 'j', 'i']],
+    ]);
+    expect(e.evaluate().toString()).toBe('11');
+  });
+
+  test('Element clauses that name each other stay symbolic', () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'm', 'k'],
+      ['Element', 'm', ['Range', 1, 'k']],
+      ['Element', 'k', ['Range', 1, 'm']],
+    ]);
+    expect(e.evaluate().operator).toBe('Sum');
+  });
+
+  test('async evaluation of an Element clause agrees', async () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'i', 1, 3],
+      ['Element', 'j', ['Range', 1, 'i']],
+    ]);
+    expect((await e.evaluateAsync()).toString()).toBe('25');
+  });
+
   test('async evaluation agrees', async () => {
     const e = ce.box([
       'Sum',

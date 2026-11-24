@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A sum or a product whose set of values names another index gives a
+  number** (CE-1190). `Sum(i*j, Limits(i, 1, 3), Element(j, Range(1, i)))`
+  stayed unevaluated. It now gives 25, the value of the same sum written with
+  `Limits(j, 1, i)`. An `Element` clause whose set or condition names the
+  index of another clause is evaluated inside the operator of that index, in
+  any order of the clauses, as a `Limits` clause whose bounds name another
+  index already was.
+
 - **A user function whose parameter is a union with a point type accepts the
   point of `NaN` coordinates** (CE-1156). With `F` declared
   `(tuple<real, real> | string) -> unknown` and `F(p) := p`,

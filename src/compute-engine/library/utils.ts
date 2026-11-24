@@ -362,14 +362,17 @@ export function withDefaultBigOpBounds(
 }
 
 /**
- * A `Sum` or `Product` with several `Limits` clauses where a bound of one
- * clause names the index of another (`Sum(k, Limits(n, 1, 10), Limits(k, 1,
- * n))`), written as nested operators: the clause whose bounds depend on no
- * other index is the outermost one. Returns `undefined` when no bound names
- * another index, when a clause is not a `Limits`, or when the dependencies
- * form a cycle; the caller then evaluates the clauses as one multi-index
- * walk, which cannot follow a bound that depends on another index.
- * The result is not evaluated. (CE-115)
+ * A `Sum` or `Product` with several indexing clauses where a clause names the
+ * index of another, written as nested operators: the clause that depends on
+ * no other index is the outermost one. A `Limits` clause depends on the
+ * indexes that its bounds name (`Sum(k, Limits(n, 1, 10), Limits(k, 1, n))`,
+ * CE-115). An `Element` clause depends on the indexes that its set or its
+ * condition names (`Sum(i*j, Limits(i, 1, 3), Element(j, Range(1, i)))`,
+ * CE-1190): the walk over all the clauses at once reads each set before any
+ * index has a value. Returns `undefined` when no clause names another index,
+ * when a clause has no index symbol, or when the dependencies form a cycle;
+ * the caller then evaluates the clauses as one multi-index walk.
+ * The result is not evaluated.
  */
 export function nestDependentLimits(
   kind: 'Sum' | 'Product',
@@ -379,15 +382,18 @@ export function nestDependentLimits(
 ): Expression | undefined {
   if (clauses.length < 2) return undefined;
   const names: string[] = [];
-  const bounds: Expression[][] = [];
+  // `ranges[i]`: the bounds of a `Limits` clause, or the set and the
+  // condition of an `Element` clause.
+  const ranges: Expression[][] = [];
   for (const c of clauses) {
-    if (!isFunction(c, 'Limits') || !isSymbol(c.op1)) return undefined;
+    if (!isFunction(c) || !isSymbol(c.op1)) return undefined;
+    if (c.operator !== 'Limits' && c.operator !== 'Element') return undefined;
     names.push(c.op1.symbol);
-    bounds.push([c.op2, c.op3]);
+    ranges.push(c.ops.slice(1));
   }
   // `after[i]`: the indexes that clause `i` must be inside of.
   const after = clauses.map((_, i) =>
-    names.filter((n, j) => j !== i && bounds[i].some((b) => b.has(n)))
+    names.filter((n, j) => j !== i && ranges[i].some((b) => b.has(n)))
   );
   if (after.every((a) => a.length === 0)) return undefined;
   // Order the clauses from the outermost to the innermost.
