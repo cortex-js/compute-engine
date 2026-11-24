@@ -3,12 +3,7 @@ import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { fromFixedPoint } from '../../big-decimal/transcendentals.js';
-import {
-  bitLength,
-  fpln,
-  lnTwoFixed,
-  pow10,
-} from '../../big-decimal/utils.js';
+import { bitLength, fpln, lnTwoFixed, pow10 } from '../../big-decimal/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { bigStieltjesGamma, STIELTJES_MAX_ORDER } from './stieltjes.js';
 import { erf, erfc } from './error-functions.js';
@@ -1391,10 +1386,7 @@ function gammalnCore(ce: ComputeEngine, z: BigNum, prec: number): BigNum {
     pwE += uE - (K - 1);
   }
 
-  return leading.add(
-    fromFixedPoint(seriesFp - logProductFp, bits, prec),
-    prec
-  );
+  return leading.add(fromFixedPoint(seriesFp - logProductFp, bits, prec), prec);
 }
 
 /** `x · 2^bits` truncated to an integer (`x` finite). */

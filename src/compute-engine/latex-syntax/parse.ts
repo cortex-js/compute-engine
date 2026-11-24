@@ -8795,10 +8795,7 @@ function decorateWithLatex(
       const latex = primitiveLatex(value, occurrences.length, window, holes);
       if (latex === null) continue;
       occurrences.forEach((place, i) => {
-        copyOf(place.elements)[place.index] = latexPrimitive(
-          value,
-          latex[i]
-        );
+        copyOf(place.elements)[place.index] = latexPrimitive(value, latex[i]);
       });
     }
 
