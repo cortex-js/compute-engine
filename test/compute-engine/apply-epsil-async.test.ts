@@ -52,6 +52,18 @@ describe('applyEpsilAsync', () => {
     expect(ce._epsilDebugRun).toBeUndefined();
   });
 
+  test('calls the hooks for the statements of a callback with no parameters', async () => {
+    const { ce, callback } = cell(
+      'let a = 0\nlet cb = () => do {\n  a = a + 1\n  a\n}'
+    );
+    const before: string[] = [];
+    const result = await applyEpsilAsync(ce, callback, [], {
+      debug: { beforeStatement: (at) => void before.push(line(at)) },
+    });
+    expect(result.value.json).toBe(1);
+    expect(before).toEqual(['cell@1:a = a + 1', 'cell@1:a']);
+  });
+
   test('applies a function by its name, with no hooks', async () => {
     const { ce } = cell('function f(x, y) {\n  x * y\n}');
     const result = await applyEpsilAsync(ce, ce.symbol('f'), [
@@ -147,7 +159,9 @@ describe('applyEpsilAsync', () => {
   });
 
   test('a timeout is an error value with its cause, and a pause does not count', async () => {
-    const { ce } = cell('let spin = n => do {\n  while true {\n    n += 1\n  }\n}');
+    const { ce } = cell(
+      'let spin = n => do {\n  while true {\n    n += 1\n  }\n}'
+    );
     const spin = ce.box('spin').evaluate();
     let pending!: Promise<ExecuteEpsilResult>;
     ce.withTimeLimit({ ms: 50 }, () => {

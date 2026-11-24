@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 // `evaluateAsync()` of an anonymous application (`Apply`) and of a pipe
 // (`Pipe`) awaits the application, so that an operator in the body that has
@@ -58,6 +59,69 @@ describe('APPLY AWAITS ITS APPLICATION', () => {
         1,
       ])
     ).toBe('6');
+  });
+
+  test('a function literal with no parameters whose body is a block', async () => {
+    expect(
+      await asyncValue([
+        'Apply',
+        [
+          'Function',
+          [
+            'Block',
+            ['Declare', 'z', 'integer'],
+            ['Assign', 'z', 2],
+            ['Add', 'z', ['AsyncOnly', 1]],
+          ],
+        ],
+      ])
+    ).toBe('8');
+    expect(
+      await asyncValue(
+        ['Apply', ['Function', ['Block', ['Divide', ['AsyncOnly', 1], 8]]]],
+        true
+      )
+    ).toBe('0.75');
+  });
+
+  test('two overlapping applications of a function with no parameters', async () => {
+    // The second application waits until the first one ends: each one reads
+    // the value of `c` that it wrote.
+    const ce = engine();
+    executeEpsil(
+      ce,
+      'let c = 0\nlet g = () => do {\n  c = c + 1\n  AsyncOnly(c)\n}'
+    );
+    const [a, b] = await Promise.all([
+      ce.box(['Apply', 'g']).evaluateAsync(),
+      ce.box(['Apply', 'g']).evaluateAsync(),
+    ]);
+    expect([a.toString(), b.toString()]).toEqual(['6', '7']);
+  });
+
+  test('an abort cancels an application that waits for another one', async () => {
+    // The first application is suspended in `Gate` until `open()`. The
+    // second one waits for it to end, and its abort cancels the wait.
+    const ce = engine();
+    let open: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    ce.declare('Gate', {
+      signature: '(number) -> number',
+      evaluateAsync: async ([x]) => {
+        await gate;
+        return x;
+      },
+    } as never);
+    executeEpsil(ce, 'let g = () => do {\n  let k = 1\n  Gate(k)\n}');
+    const first = ce.box(['Apply', 'g']).evaluateAsync();
+    const controller = new AbortController();
+    const second = ce
+      .box(['Apply', 'g'])
+      .evaluateAsync({ signal: controller.signal });
+    controller.abort();
+    await expect(second).rejects.toThrow();
+    open();
+    expect((await first).toString()).toBe('1');
   });
 
   test('a map over a list argument awaits each cell', async () => {

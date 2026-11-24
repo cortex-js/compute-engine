@@ -144,16 +144,27 @@ describe('AN ELSE IF INSIDE ANOTHER CONSTRUCT', () => {
 });
 
 describe('WHEN THE WALK CANNOT DECIDE', () => {
-  test('two ifs in a list, which records no frame: the whole statement', () => {
+  test('two ifs in a list, which records no frame: the element of the list', () => {
     // The only frame is `If argument 2`, and there are two `if` in the
-    // statement that are not inside one another. The locator does not guess.
+    // statement that are not inside one another, so the walk does not
+    // guess. The list selects the element: each `if` gives at most one value
+    // (its type is a number), and the value has two, so the error is in the
+    // second element, where the frame selects the branch.
     const source =
       G +
       'let n = 2\nlet v = [if n == 1 { 0 } else { 1 }, if n == 2 { g("a") } else { n }]\nv';
     const r = run(source);
     expect(r.frames).toEqual(['in If argument 2']);
+    expect(r.at).toEqual(['{ g("a") }']);
+  });
+
+  test('two ifs in a call that records no frame: the whole statement', () => {
+    const source =
+      G +
+      'let n = 2\nlet v = Tuple(if n == 1 { 0 } else { 1 }, if n == 2 { g("a") } else { n }) + 0\nv';
+    const r = run(source);
     expect(r.at).toEqual([
-      'let v = [if n == 1 { 0 } else { 1 }, if n == 2 { g("a") } else { n }]',
+      'let v = Tuple(if n == 1 { 0 } else { 1 }, if n == 2 { g("a") } else { n }) + 0',
     ]);
   });
 });

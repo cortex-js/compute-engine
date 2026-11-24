@@ -562,6 +562,35 @@ export class BigNumericValue extends NumericValue {
       );
     }
 
+    // A complex product with an exact Gaussian rational `p₁/q₁ + (p₂/q₂)i`
+    // is `((a + bi)(p₁q₂ + p₂q₁i)) / (q₁q₂)`, with 5 guard digits, as the
+    // real product above is. With the quotients rounded first, the product
+    // was wrong past the working precision: `(1/3)·√-2` at 21 digits was
+    // `0.471…682933i` where `√2/3` is `0.471…682934` (CE-1718).
+    if (
+      other instanceof ExactNumericValue &&
+      other.radical === 1 &&
+      other.imRadical === 1 &&
+      (other.rational[1] != 1 || other.imRational[1] != 1)
+    ) {
+      const [p1, q1] = other.rational.map((x) => new BigDecimal(x));
+      const [p2, q2] = other.imRational.map((x) => new BigDecimal(x));
+      const c = p1.mul(q2);
+      const d = p2.mul(q1);
+      const q = q1.mul(q2);
+      const b = this.imDecimal;
+      return this.clone({
+        re: this.decimal
+          .mul(c)
+          .subBounded(b.mul(d), prec)
+          .div(q, prec + 5),
+        im: this.decimal
+          .mul(d)
+          .addBounded(b.mul(c), prec)
+          .div(q, prec + 5),
+      });
+    }
+
     // (a + bi)(c + di) = (ac − bd) + (ad + bc)i, with every part a big
     // decimal. The double projections are not enough: for
     // `10^{400} · (1 + 10^{-400}i)` the real part `a` is `Infinity` as a

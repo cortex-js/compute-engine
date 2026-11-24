@@ -6905,6 +6905,135 @@ function blockingAsyncApplication(
 }
 
 /**
+ * On the asynchronous route (`ApplyOptions.awaitStatements`), an application
+ * of the literal whose body scope is `bodyScope` that a suspended application
+ * of the same literal blocks (`blockingAsyncApplication()`) waits until each
+ * blocking application ends, and then starts again with `restart`. The answer
+ * is a `Promise` of the value of `restart`, or `undefined` when no
+ * application blocks this one and it can start now. An abort of
+ * `options.signal` during the wait rejects the `Promise` with a
+ * `CancellationError`.
+ */
+function afterBlockingApplications(
+  ce: ComputeEngine,
+  bodyScope: Scope,
+  options: ApplyOptions,
+  restart: () => Expression | undefined
+): Expression | undefined {
+  const {
+    signal,
+    _effects: effects,
+    _contextStack: stack,
+    _precisionWindow: precision,
+  } = options;
+  const contexts = stack ?? ce._evalContextStack;
+  let blocking = blockingAsyncApplication(bodyScope, contexts);
+  if (blocking === undefined) return undefined;
+  const aborted = () => new CancellationError({ cause: signal!.reason });
+  return (async () => {
+    while (blocking !== undefined) {
+      if (signal?.aborted) throw aborted();
+      if (signal === undefined) await blocking.done;
+      else {
+        let onAbort: () => void = () => {};
+        try {
+          await Promise.race([
+            blocking.done,
+            new Promise<never>((_, reject) => {
+              onAbort = () => reject(aborted());
+              signal.addEventListener('abort', onAbort, { once: true });
+            }),
+          ]);
+        } finally {
+          signal.removeEventListener('abort', onAbort);
+        }
+      }
+      blocking = blockingAsyncApplication(bodyScope, contexts);
+    }
+    return runWithEvaluationEffects(ce, effects!, restart, stack, precision);
+    // The lambda is typed synchronous: a `Promise` comes back only for the
+    // caller that set `awaitStatements`.
+  })() as unknown as Expression;
+}
+
+/**
+ * Run the statements of the body `body` of the literal `literal` in the call
+ * frame `frame` on the asynchronous route (`ApplyOptions.awaitStatements`),
+ * with each statement awaited (`evaluateStatementsAsync`), and answer the
+ * value that `conclude` gives.
+ *
+ * The frame is already pushed on `stack`, the own copy of the context stack
+ * of the application, which is the engine's stack on entry. Everything after
+ * the first `await` runs with the registry of `options._effects` and with
+ * `stack` in place of the engine's: other evaluations run in between. While
+ * the statements run, the application is in flight (`asyncInFlight`) and its
+ * frame is an awaited frame (`awaitedFrames`). `settle` reads the value of
+ * the statements in the frame, `cleanup` pops the frame, and `conclude` runs
+ * after.
+ */
+function awaitBodyStatements(
+  ce: ComputeEngine,
+  literal: Expression,
+  body: Expression & FunctionInterface,
+  frame: Scope,
+  stack: ComputeEngine['_evalContextStack'],
+  options: ApplyOptions,
+  numericApproximation: true | undefined,
+  settle: (statements: Expression) => void,
+  cleanup: () => void,
+  conclude: () => Expression
+): Promise<Expression> {
+  const { signal, _precisionWindow: precision } = options;
+  const effects = options._effects!;
+  const inContext = <T>(f: () => T): T =>
+    runWithEvaluationEffects(ce, effects, f, stack, precision);
+  const bodyScope = body.localScope!;
+  let finish: () => void = () => {};
+  const application: AsyncApplication = {
+    frame,
+    done: new Promise<void>((resolve) => (finish = resolve)),
+    finish: () => finish(),
+  };
+  let applications = asyncInFlight.get(bodyScope);
+  if (applications === undefined) {
+    applications = [];
+    asyncInFlight.set(bodyScope, applications);
+  }
+  applications.push(application);
+  const key = literal.hash;
+  awaitedFrames.set(frame, key);
+  awaitedApplicationCount.set(key, (awaitedApplicationCount.get(key) ?? 0) + 1);
+  return (async () => {
+    try {
+      try {
+        const statements = await evaluateStatementsAsync(
+          ce,
+          body.ops,
+          signal,
+          effects,
+          stack,
+          numericApproximation,
+          precision
+        );
+        inContext(() => settle(statements));
+      } finally {
+        inContext(cleanup);
+      }
+    } finally {
+      const index = applications.lastIndexOf(application);
+      if (index >= 0) applications.splice(index, 1);
+      if (applications.length === 0) asyncInFlight.delete(bodyScope);
+      awaitedFrames.delete(frame);
+      const count = (awaitedApplicationCount.get(key) ?? 1) - 1;
+      if (count > 0) awaitedApplicationCount.set(key, count);
+      else awaitedApplicationCount.delete(key);
+      application.finish();
+    }
+    return inContext(conclude);
+  })();
+}
+
+/**
  * Does an evaluated argument contain a free symbol — a symbol occurrence,
  * not bound by a binder inside the argument, whose binding has no value? That
  * is the argument a recursive definition is not unrolled over.
@@ -8017,7 +8146,22 @@ function makeLambda(
     //     that scope. Unlike `invoke`, arguments are ignored rather than
     //     arity-checked, preserving the nullary contract.
     const nullaryBody = onlyBody as Expression & FunctionInterface;
-    return wrapRecursion(ce, (_args, options) => {
+    const nullary = wrapRecursion(ce, (_args, options) => {
+      // On the asynchronous route (`awaitStatements`), the statements are
+      // awaited, as on the parameterized `invoke` path: an application that
+      // another suspended application of this literal blocks waits until it
+      // ends (see `asyncInFlight`), and then starts again.
+      const awaiting =
+        options?.awaitStatements === true && options._effects !== undefined;
+      if (awaiting) {
+        const waited = afterBlockingApplications(
+          ce,
+          nullaryBody.localScope!,
+          options,
+          () => nullary(_args, options)
+        );
+        if (waited !== undefined) return waited;
+      }
       const bodyScope = bodyScopeTemplate(nullaryBody.localScope!);
       const capturedScope =
         definingScopeOf(ce, nullaryBody.localScope!) ?? ce.context.lexicalScope;
@@ -8034,23 +8178,27 @@ function makeLambda(
       // the parameterized `invoke` path.
       holdBodyLocals(freshScope, bodyScope);
       noteCallFrame(freshScope, bodyScope);
+      // An application whose statements are awaited puts its call frame on
+      // its own copy of the evaluation-context stack, as on the
+      // parameterized `invoke` path.
+      const enclosingStack = ce._evalContextStack;
+      const ownStack = awaiting ? copyContextStack(enclosingStack) : undefined;
+      if (ownStack !== undefined) ce._evalContextStack = ownStack;
       // Named 'call': a function-application activation frame. The debugger's
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
       ce.pushScope(freshScope, 'call');
+      // The last statement of the body takes the numeric request itself
+      // (see `resultStatementRequest`); the statements before it run
+      // exactly.
+      const statementRequest = resultStatementRequest(
+        fnExpr,
+        nullaryBody.ops,
+        options
+      );
       let result: Expression;
-      try {
-        // The last statement of the body takes the numeric request itself
-        // (see `resultStatementRequest`); the statements before it run
-        // exactly.
-        result = unwrapReturn(
-          ce,
-          evaluateStatements(
-            ce,
-            nullaryBody.ops,
-            resultStatementRequest(fnExpr, nullaryBody.ops, options)
-          )
-        );
+      const settle = (statements: Expression): void => {
+        result = unwrapReturn(ce, statements);
         result = resolveEscapingLambda(ce, result);
         // A held view of the body gets a record of this call.
         result = adoptHeldLazyViews(
@@ -8065,12 +8213,39 @@ function makeLambda(
         result = resultOverRunLocals(ce, result);
         if (options?.numericApproximation)
           result = result.evaluate({ numericApproximation: true });
-      } finally {
+      };
+      const cleanup = (): void => {
         ce.popScope();
         exitAppliedBodyScope(bodyScope);
+      };
+      if (ownStack !== undefined) {
+        const answer = awaitBodyStatements(
+          ce,
+          fnExpr,
+          nullaryBody,
+          freshScope,
+          ownStack,
+          options!,
+          statementRequest?.numericApproximation,
+          settle,
+          cleanup,
+          () => bodyResultValue(result)
+        );
+        // The part of the application before its first `await` ran with the
+        // own stack of the application in place of the engine's.
+        ce._evalContextStack = enclosingStack;
+        // The lambda is typed synchronous: a `Promise` comes back only for
+        // the caller that set `awaitStatements`.
+        return answer as unknown as Expression;
       }
-      return bodyResultValue(result);
+      try {
+        settle(evaluateStatements(ce, nullaryBody.ops, statementRequest));
+      } finally {
+        cleanup();
+      }
+      return bodyResultValue(result!);
     });
+    return nullary;
   }
 
   const [body, ...params] = fnExpr.ops;
@@ -8759,29 +8934,13 @@ function makeLambda(
       options._effects !== undefined &&
       iterationStatements === undefined
     ) {
-      const {
-        _effects: effects,
-        _contextStack: stack,
-        _precisionWindow: precision,
-      } = options;
-      const contexts = stack ?? ce._evalContextStack;
-      let blocking = blockingAsyncApplication(bodyFn.localScope!, contexts);
-      if (blocking !== undefined)
-        return (async () => {
-          while (blocking !== undefined) {
-            await blocking.done;
-            blocking = blockingAsyncApplication(bodyFn.localScope!, contexts);
-          }
-          return runWithEvaluationEffects(
-            ce,
-            effects,
-            () => lambda(args, options),
-            stack,
-            precision
-          );
-          // The lambda is typed synchronous: a `Promise` comes back only for
-          // the caller that set `awaitStatements`.
-        })() as unknown as Expression;
+      const waited = afterBlockingApplications(
+        ce,
+        bodyFn.localScope!,
+        options,
+        () => lambda(args, options)
+      );
+      if (waited !== undefined) return waited;
     }
 
     // The scope the literal was defined in — the parent of every call frame
@@ -9585,34 +9744,8 @@ function makeLambda(
       return bodyResultValue(result);
     };
 
-    // Await the statements (`awaiting`). Everything after the first `await`
-    // runs with this evaluation's registry and this application's context
-    // stack in place of the engine's: other evaluations run in between.
+    // Await the statements (`awaiting`).
     if (ownStack !== undefined) {
-      const { signal, _effects, _precisionWindow: precision } = options!;
-      const effects = _effects!;
-      const stack = ownStack;
-      const inContext = <T>(f: () => T): T =>
-        runWithEvaluationEffects(ce, effects, f, stack, precision);
-      let finish: () => void = () => {};
-      const application: AsyncApplication = {
-        frame: freshScope,
-        done: new Promise<void>((resolve) => (finish = resolve)),
-        finish: () => finish(),
-      };
-      let inFlight = asyncInFlight.get(bodyFn.localScope!);
-      if (inFlight === undefined) {
-        inFlight = [];
-        asyncInFlight.set(bodyFn.localScope!, inFlight);
-      }
-      inFlight.push(application);
-      const applications = inFlight;
-      const literal = fnExpr.hash;
-      awaitedFrames.set(freshScope, literal);
-      awaitedApplicationCount.set(
-        literal,
-        (awaitedApplicationCount.get(literal) ?? 0) + 1
-      );
       // Other evaluations run while the statements are awaited. A result
       // computed before one of them wrote a value the body reads must not
       // enter the memo, whose record is stamped at store time: the
@@ -9622,42 +9755,24 @@ function makeLambda(
         memoKey === undefined ? undefined : snapshotMemoDeps(fnExpr);
       const worldBefore = ce._worldVersion;
       const epochBefore = ce._objectStoreEpoch;
-      const answer = (async () => {
-        try {
-          try {
-            const statements = await evaluateStatementsAsync(
-              ce,
-              bodyFn.ops,
-              signal,
-              effects,
-              stack,
-              statementRequest?.numericApproximation,
-              precision
-            );
-            inContext(() => settle(statements));
-          } finally {
-            inContext(cleanup);
-          }
-        } finally {
-          const index = applications.lastIndexOf(application);
-          if (index >= 0) applications.splice(index, 1);
-          if (applications.length === 0)
-            asyncInFlight.delete(bodyFn.localScope!);
-          awaitedFrames.delete(freshScope);
-          const count = (awaitedApplicationCount.get(literal) ?? 1) - 1;
-          if (count > 0) awaitedApplicationCount.set(literal, count);
-          else awaitedApplicationCount.delete(literal);
-          application.finish();
-        }
-        return inContext(() =>
+      const answer = awaitBodyStatements(
+        ce,
+        fnExpr,
+        bodyFn,
+        freshScope,
+        ownStack,
+        options!,
+        statementRequest?.numericApproximation,
+        settle,
+        cleanup,
+        () =>
           conclude(
             depsBefore !== undefined &&
               ce._worldVersion === worldBefore &&
               ce._objectStoreEpoch === epochBefore &&
               memoDepsStillValid(fnExpr, depsBefore)
           )
-        );
-      })();
+      );
       // The part of the application before its first `await` ran with the
       // own stack of the application in place of the engine's.
       ce._evalContextStack = enclosingStack;

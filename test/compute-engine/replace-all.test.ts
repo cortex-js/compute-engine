@@ -154,3 +154,29 @@ describe('ReplaceAll with a compound left side', () => {
     expect(e.N().re).toBe(3);
   });
 });
+
+describe('ReplaceAll in a block with a local variable', () => {
+  const block = (...body: any[]) => ['Block', ['Declare', 'a', 'integer'], ...body];
+
+  test('a pattern rule keeps the value of the local', () => {
+    const target = ce.box(block(['Assign', 'a', 5], ['Add', 'a', ['Sin', 'b']]));
+    const rule = ce.box(['Rule', ['Sin', '_a'], 1]);
+    expect(ce.function('ReplaceAll', [target, rule]).evaluate().toString()).toBe('6');
+    // The rebuilt block shares the scope of `target`: `target` keeps its
+    // value, and a second replacement gives the same result.
+    expect(target.evaluate().toString()).toBe('sin(b) + 5');
+    expect(ce.function('ReplaceAll', [target, rule]).evaluate().toString()).toBe('6');
+  });
+
+  test('a pattern rule and a rule for a name', () => {
+    expect(
+      evalStr(['ReplaceAll', block(['Assign', 'a', 5], ['Add', 'a', ['Sin', 'b']]), ['List', ['Rule', 'b', 3], ['Rule', ['Sin', '_a'], 1]]])
+    ).toBe('6');
+  });
+
+  test('a replacement in the value that the local is assigned', () => {
+    expect(
+      evalStr(['ReplaceAll', block(['Assign', 'a', ['Sin', 'b']], ['Add', 'a', 1]), ['Rule', ['Sin', '_a'], 4]])
+    ).toBe('5');
+  });
+});

@@ -61,7 +61,11 @@ describe('an error in the body of a called function', () => {
       'let v = y + h(1, g("a"))',
       'g("a")',
     ],
-    ['function g(x) { Ln(x) + 1 }', 'let v = 0\nv = y + g("a")', 'v = y + g("a")'],
+    [
+      'function g(x) { Ln(x) + 1 }',
+      'let v = 0\nv = y + g("a")',
+      'v = y + g("a")',
+    ],
   ])('%s, %s underlines %s', (fn, stmt, expected) => {
     expect(underlines(`${fn}\nlet y = 5\n${stmt}\n0`)).toEqual([expected]);
   });
@@ -87,17 +91,60 @@ describe('an error in an element of a written list or tuple', () => {
     ['let v = (y + 1, g("a"))', 'g("a")'],
     ['let v = [[y + 1], [g("a")]]', 'g("a")'],
     ['let v = [1, "b", g("a")]', 'g("a")'],
-    // A variable or a call before the element can give a `Sequence`, which
-    // the list splices, so its position is not known: the whole statement.
-    ['let v = [y, g("a")]', 'let v = [y, g("a")]'],
+    // A variable or a call can give a `Sequence`, which the list splices.
+    // The value of a variable gives its count of values, and so does the
+    // static type of a call.
+    ['let v = [y, g("a")]', 'g("a")'],
+    ['let z = 2\nlet v = [y, z + 1, g("a")]', 'g("a")'],
     [
       'let s = Sequence(1, 2)\nlet t = Sequence()\nlet v = [s, g("a"), t]',
-      'let v = [s, g("a"), t]',
+      'g("a")',
     ],
+    ['let t = Sequence()\nlet v = [1, t, g("a")]', 'g("a")'],
+    ['function f(x) { x }\nlet v = [f(y + 1), g("a")]', 'g("a")'],
+    ['function f(x) { x }\nlet v = [y + 1, g("a"), f(2)]', 'g("a")'],
+    // The static type of `k()` is a tuple and that of `h()` is `nothing`:
+    // two counts are not known, so the position of `g("a")` is not known.
     [
       'function h() { Sequence() }\nfunction k() { Sequence(1, 2) }\nlet v = [k(), g("a"), h()]',
       'let v = [k(), g("a"), h()]',
     ],
+    [
+      'function h() { Sequence() }\nfunction k() { Sequence(1, 2) }\nlet v = [h(), g("a"), k()]',
+      'let v = [h(), g("a"), k()]',
+    ],
+    // The type of `e(x)` is `integer`, and `e(-1)` gives an empty `Sequence`:
+    // a count from a static type is 0 or 1, so the positions after it are not
+    // known, and neither `e(-1)` nor `y` is underlined.
+    [
+      'function e(x) { if x > 0 { x } else { Sequence() } }\nfunction k() { Sequence(1, 2) }\nlet v = [e(-1), g("a"), k()]',
+      'let v = [e(-1), g("a"), k()]',
+    ],
+    [
+      'function e(x) { if x > 0 { x } else { Sequence() } }\nlet v = [e(-1), y, g("a")]',
+      'let v = [e(-1), y, g("a")]',
+    ],
+    // A spread of a variable gives the elements of its list.
+    ['let w = [1]\nlet v = [y + 1, ...w, g("a")]', 'g("a")'],
+    ['let w = []\nlet v = [...w, g("a")]', 'g("a")'],
+    // The assignment changed `fs`, so its value does not give the count of
+    // the spread: the whole statement.
+    [
+      'let fs = [1]\nfs = [y + 1, ...fs, g("a")]',
+      'fs = [y + 1, ...fs, g("a")]',
+    ],
+    // The assignment to an element: its position in the new collection.
+    ['let m = [[1, 2], [3, 4]]\nm[1] = [y + 1, g("a")]', 'g("a")'],
+    ['let m = [[1, 2], [3, 4]]\nm[-1] = [y + 1, g("a")]', 'g("a")'],
+    ['let m = [[1, 2], [3, 4]]\nlet i = 2\nm[i] = [y + 1, g("a")]', 'g("a")'],
+    // A list that is an operand of an element-wise call. The frame of the
+    // call is not used inside the element.
+    ['let v = [y + 1, g("a")] + 1', 'g("a")'],
+    ['let v = 2 * [y + 1, g("a")]', 'g("a")'],
+    ['let z = 2\nlet v = [y + 1, g("a")] / z', 'g("a")'],
+    ['let v = -[y + 1, g("a")]', 'g("a")'],
+    ['let w: any = "s"\nlet v = [1, y + Ln(w)] + 1', 'w'],
+    ['let v = [[y + 1, g("a")] * 2, 3]', 'g("a")'],
     // An element after the error does not move it.
     ['let v = [g("a"), y]', 'g("a")'],
     // Another list of the statement does not compete with the element.
@@ -128,6 +175,13 @@ describe('an error in an element of a written list or tuple', () => {
   test('the list is a statement of a function body', () => {
     const src = `${fn}function f() {\n  [y + 1, g("a")]\n  1\n}\nlet v = f()\n0`;
     expect(underlines(src, '[y + 1')).toEqual(['g("a")']);
+  });
+
+  test('a stored value that gives no value is not the element', () => {
+    // `e(-1)` gives an empty `Sequence`, so position 1 of the new `m` holds
+    // its old element 2, which the `let` of `m` made.
+    const src = `${fn}let m = [1, g("a")]\nfunction e(x) { if x > 0 { x } else { Sequence() } }\nm[1] = e(-1)\n0`;
+    expect(underlines(src, 'm[1] =')).toEqual(['m[1] = e(-1)']);
   });
 });
 

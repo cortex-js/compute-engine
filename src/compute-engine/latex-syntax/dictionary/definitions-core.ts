@@ -7188,8 +7188,6 @@ function parseAssignStatement(
       stringValue(sub) !== null
     )
       return definition;
-    // The subscript of a parse that keeps the LaTeX of each node
-    // (`preserveLatex`) can be the object `{ sym: 'n', latex: 'n' }`.
     const index = symbol(sub);
     const joinedName = index !== null ? `${fn}_${index}` : null;
     if (joinedName === null)

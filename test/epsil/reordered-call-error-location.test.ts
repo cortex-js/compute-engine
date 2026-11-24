@@ -118,9 +118,7 @@ describe('an error in an operand of a sum or product', () => {
   test('a second product inside an operand does not hide the argument', () => {
     // The frames `Sin argument 1, Multiply argument 2` select the `w` of
     // `Sin(w)`, not an operand of the product `x * y`.
-    expect(underlines(`${prefix}let v = Ln(x * y) * Sin(w)\n0`)).toEqual([
-      'w',
-    ]);
+    expect(underlines(`${prefix}let v = Ln(x * y) * Sin(w)\n0`)).toEqual(['w']);
   });
 
   test('in a nested statement', () => {
@@ -467,7 +465,7 @@ describe('an argument whose value the logarithm refuses', () => {
   }
 
   test.each([
-    ['let v = 3 - ln(w)', 'in Ln argument 1, in Negate argument 1, in Add argument 1'],
+    ['let v = 3 - ln(w)', 'in Ln argument 1, in Subtract argument 2'],
     ['let v = ln(w) * 2', 'in Ln argument 1, in Multiply argument 2'],
     ['let v = -ln(w)', 'in Ln argument 1, in Negate argument 1'],
     ['let v = sqrt(w) + 1', 'in Sqrt argument 1, in Add argument 1'],
@@ -482,6 +480,90 @@ describe('an argument whose value the logarithm refuses', () => {
     expect(runtime('let v = ln(w) + ln(2)').at).toBe('w');
     expect(runtime('let v = ln(2) + ln(w)').at).toBe('w');
     expect(runtime('let v = ln(x) * ln(w)').at).toBe('w');
+  });
+});
+
+describe('the frames of an error in the second operand of a subtraction', () => {
+  // `a - b` is `Add(a, Negate(b))` in canonical form. The two frames
+  // `Negate argument 1, Add argument k` that the canonical sum records for
+  // `b` are the one frame `Subtract argument 2` of the written subtraction.
+  const prefix = 'let w: any = "s"\n';
+
+  function runtimeFrames(program: string): string[] {
+    const src = `${prefix}${program}\n0`;
+    return executeEpsil(new ComputeEngine(), src)
+      .diagnostics.filter(
+        (x) => Array.isArray(x.message) && x.message[0] === 'runtime-error'
+      )
+      .map((d) => String(d.message[2]));
+  }
+
+  test.each([
+    ['let v = 2 - w', 'in Subtract argument 2'],
+    ['let v = 1 + 2 - ln(w)', 'in Ln argument 1, in Subtract argument 2'],
+    ['let v = 1 - ln(w) - 2', 'in Ln argument 1, in Subtract argument 2'],
+    // Two subtractions: the canonical operand of the frame `Add argument 2`
+    // is made from the `ln(w)` of the inner one.
+    [
+      'let y = 2\nlet v = y - ln(w) - ln(2)',
+      'in Ln argument 1, in Subtract argument 2',
+    ],
+    ['let v = [1 - ln(w), 2]', 'in Ln argument 1, in Subtract argument 2'],
+    [
+      'let v = Sin(3 - ln(w))',
+      'in Ln argument 1, in Subtract argument 2, in Sin argument 1',
+    ],
+    // A written unary minus in a sum is not a subtraction.
+    [
+      'let v = 1 + -ln(w)',
+      'in Ln argument 1, in Negate argument 1, in Add argument 1',
+    ],
+    // The subtraction of a number is `Add(ln(w), -3)`, with no `Negate`.
+    ['let v = ln(w) - 3', 'in Ln argument 1, in Add argument 1'],
+    // The `Add` frame of the unary minus selects `-ln(w)`, which is not the
+    // second operand of a subtraction. The subtraction `2 - ln(y)` elsewhere
+    // in the statement does not change it.
+    [
+      'let y = 2\nlet v = Cos(1 + -ln(w)) + Sin(2 - ln(y))',
+      'in Ln argument 1, in Negate argument 1, in Add argument 1, in Cos argument 1, in Add argument 1',
+    ],
+    // The inner pair names the unary minus inside the subtrahend.
+    [
+      'let v = 2 - Sin(1 + -ln(w))',
+      'in Ln argument 1, in Negate argument 1, in Add argument 1, in Sin argument 1, in Subtract argument 2',
+    ],
+  ])('%s', (program, expected) => {
+    expect(runtimeFrames(program)).toEqual([expected]);
+  });
+
+  test('the frames of an earlier statement are not changed', () => {
+    // The first two frames after `Ln` were recorded by `1 + -Ln(x)` in the
+    // body of `g`, and the last two by the subtraction of the statement.
+    expect(
+      runtimeFrames('function g(x) { 1 + -Ln(x) }\nlet v = 5 - g(w)')
+    ).toEqual([
+      'in Ln argument 1, in Negate argument 1, in Add argument 1, in Subtract argument 2',
+    ]);
+    // The error of `x` is reported for its statement, and again for the
+    // statement that reads `x`.
+    expect(runtimeFrames('let x = 1 - ln(w)\nlet v = 5 - x')).toEqual([
+      'in Ln argument 1, in Subtract argument 2',
+      'in Ln argument 1, in Negate argument 1, in Add argument 1, in Subtract argument 2',
+    ]);
+  });
+
+  test('a pair of an earlier statement is not matched to a subtraction', () => {
+    // The frames `Negate argument 1, Add argument 2` were recorded by the
+    // unary minus in the statement of `x`. The pipe records an `Apply` frame
+    // that no written call of the statement matches, so no frame of the
+    // statement selects an operand, and the subtraction `Sin(_) - ln(y)`
+    // does not name them.
+    const frames = runtimeFrames(
+      'let y = 2\nlet x = y + -ln(w)\nlet v = x |> Sin(_) - ln(y)'
+    );
+    expect(frames[frames.length - 1]).toBe(
+      'in Ln argument 1, in Negate argument 1, in Add argument 2, in Apply argument 2'
+    );
   });
 });
 

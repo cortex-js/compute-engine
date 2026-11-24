@@ -252,7 +252,11 @@ import {
 } from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
-import { evaluateInOwnBindings } from '../boxed-expression/binders.js';
+import {
+  evaluateInOwnBindings,
+  withCallableBinding,
+} from '../boxed-expression/binders.js';
+import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { markQualifiedName, shadowsLibraryName } from '../library-shadowing.js';
 import { arityBounds } from '../boxed-expression/overload.js';
 import {
@@ -13774,7 +13778,29 @@ function replaceTopDown(expr: Expression, rules: Rule[]): Expression {
     if (r !== op) changed = true;
     return r;
   });
-  return changed ? expr.engine.function(expr.operator, ops) : expr;
+  return changed ? rebuildPart(expr, ops) : expr;
+}
+
+/**
+ * `expr` with the operands `ops`, for `replaceTopDown()` and
+ * `replaceAllMixed()`. A node that has a local scope (a `Block`, a
+ * `Function`, a `Sum`) is rebuilt onto that scope: the parts that were not
+ * replaced keep their bindings to it, and a fresh scope would hold other
+ * definitions of the same names, so a `Block` that assigns its local `a`
+ * would assign a different `a` from the one its body reads
+ * (`docs/SCOPING-MODEL.md`, "Rebuilding a scoped node"). A call keeps the
+ * function it was written with (`withCallableBinding()`), as in `replace()`.
+ */
+function rebuildPart(
+  expr: Expression & { operator: string },
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const ce = expr.engine;
+  return withCallableBinding(expr, () =>
+    ce.function(expr.operator, ops, {
+      scope: scopeForRebuild(expr.localScope, ce, expr.operator, ops),
+    })
+  );
 }
 
 /** A rule of `ReplaceAll`: a rule for a name, or a pattern rule. */
@@ -13839,7 +13865,7 @@ function replaceAllMixed(
     if (!expr.subs(substitution).isSame(ce.function(expr.operator, separate)))
       return null;
     const ops = parts.map((x, i) => (x.hit ? x.expr : separate[i]));
-    return { expr: ce.function(expr.operator, ops), hit: true };
+    return { expr: rebuildPart(expr, ops), hit: true };
   };
 
   const result = walk(target);

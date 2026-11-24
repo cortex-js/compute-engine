@@ -145,8 +145,6 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
     (structure?.kind !== 'number' && isTupleShapedType(resolved));
   const textAtom =
     structure?.kind === 'string' || isSubtype(resolved, 'string');
-  const finiteIndexed =
-    d.facts.indexed === true && d.facts.finiteCollection === true;
   const dims =
     typeof resolved !== 'string' && resolved.kind === 'list'
       ? resolved.dimensions
@@ -164,7 +162,18 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
       structure.local === true &&
       blockLocalTypeMayHoldList(t),
     isCollection: d.facts.collection === true,
-    finiteBroadcastParticipant: finiteIndexed && !tuple && !textAtom,
+    // A getter, as on the expression route: the `finiteCollection` fact of
+    // a descriptor over an expression reads its count, which can evaluate
+    // the source of a lazy view (the count of `Range(1, Length(P))`
+    // evaluates `P`). The readers test the type first.
+    get finiteBroadcastParticipant() {
+      return (
+        !tuple &&
+        !textAtom &&
+        d.facts.indexed === true &&
+        d.facts.finiteCollection === true
+      );
+    },
     tuple,
     textAtom,
     tensorShape:
@@ -1725,11 +1734,14 @@ export function tupleBroadcastArityOnViews(
       else if (t.elements.length !== arity) return undefined;
       continue;
     }
+    // The tests of the type come first: `finiteBroadcastParticipant` can
+    // evaluate the source of a lazy view (the count of
+    // `Range(1, Length(P))` evaluates `P`).
     if (
-      v.finiteBroadcastParticipant ||
       isBroadcastCollectionTypeOf(v.type) ||
       isFixedShapeCollectionTypeOf(v.type) ||
-      isPossiblyCollectionTypedView(v)
+      isPossiblyCollectionTypedView(v) ||
+      v.finiteBroadcastParticipant
     )
       return undefined;
   }
@@ -2725,13 +2737,15 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // Arm 1 (statically-visible collection): a materialized finite indexed
   // collection, an operand typed as an unbounded list / indexed collection,
   // or — unless the handler owns its collection typing — a fixed-shape
-  // (dimensioned) intermediate such as `10^4·[1,2,3]`.
+  // (dimensioned) intermediate such as `10^4·[1,2,3]`. The tests of the
+  // type come first: `finiteBroadcastParticipant` can evaluate the source of
+  // a lazy view (the count of `Range(1, Length(P))` evaluates `P`).
   const broadcasting = views.filter(
     (v, i) =>
       mappable(i) &&
-      (v.finiteBroadcastParticipant ||
-        isBroadcastCollectionTypeOf(v.type) ||
-        (!deferToHandler && isFixedShapeCollectionTypeOf(v.type)))
+      (isBroadcastCollectionTypeOf(v.type) ||
+        (!deferToHandler && isFixedShapeCollectionTypeOf(v.type)) ||
+        v.finiteBroadcastParticipant)
   );
   if (broadcasting.length > 0) {
     // An operand of an abstract collection type whose element is itself an

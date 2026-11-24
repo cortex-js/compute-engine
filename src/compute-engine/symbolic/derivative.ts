@@ -598,6 +598,15 @@ const DERIVATIVES_TABLE = {
  * - `ClausenCl(n, θ)` for a literal order (`θ` in radians in every angular
  *   unit): `Cl₁′ = −½cot(θ/2)`, and
  *   `Clₙ′ = Clₙ₋₁` for an even `n`, `−Clₙ₋₁` for an odd one.
+ * - `GammaRegularized(a, z)` in `z`: `∂_z Q(a, z) = −z^(a−1)e^(−z)/Γ(a)`
+ *   (DLMF 8.8.13); the form `Q(a, z₀) − Q(a, z₁)` has the opposite partials in
+ *   its two endpoints. The parameter keeps the inert partial.
+ * - `BetaRegularized(x, a, b)` in `x`: `∂ₓIₓ(a, b) = x^(a−1)(1 − x)^(b−1)/B(a, b)`
+ *   (DLMF 8.17.2); the form `I_z₁(a, b) − I_z₀(a, b)` has the opposite
+ *   partials in its two endpoints. The parameters keep the inert partial.
+ *
+ * These two are the densities of the gamma, chi-square, beta, F and t
+ * distributions, whose `CDF` expands to them.
  */
 const SPECIAL_FUNCTION_PARTIALS: Record<
   string,
@@ -727,6 +736,45 @@ const SPECIAL_FUNCTION_PARTIALS: Record<
     }
     const lower: ExpressionInput = ['ClausenCl', order - 1, theta];
     return [undefined, ce.expr(order % 2 === 0 ? lower : ['Negate', lower])];
+  },
+  GammaRegularized: (ce, ops) => {
+    if (ops.length !== 2 && ops.length !== 3) return undefined;
+    const a = ops[0];
+    // The density z^(a−1)e^(−z)/Γ(a), which is −∂_z Q(a, z).
+    const density = (z: Expression): ExpressionInput => [
+      'Divide',
+      ['Multiply', ['Power', z, ['Subtract', a, 1]], ['Exp', ['Negate', z]]],
+      ['Gamma', a],
+    ];
+    if (ops.length === 2)
+      return [undefined, ce.expr(['Negate', density(ops[1])])];
+    return [
+      undefined,
+      ce.expr(['Negate', density(ops[1])]),
+      ce.expr(density(ops[2])),
+    ];
+  },
+  BetaRegularized: (ce, ops) => {
+    if (ops.length !== 3 && ops.length !== 4) return undefined;
+    const [a, b] = ops.slice(-2);
+    // The density x^(a−1)(1 − x)^(b−1)/B(a, b), which is ∂ₓIₓ(a, b).
+    const density = (x: Expression): ExpressionInput => [
+      'Divide',
+      [
+        'Multiply',
+        ['Power', x, ['Subtract', a, 1]],
+        ['Power', ['Subtract', 1, x], ['Subtract', b, 1]],
+      ],
+      ['Beta', a, b],
+    ];
+    if (ops.length === 3)
+      return [ce.expr(density(ops[0])), undefined, undefined];
+    return [
+      ce.expr(['Negate', density(ops[0])]),
+      ce.expr(density(ops[1])),
+      undefined,
+      undefined,
+    ];
   },
 };
 

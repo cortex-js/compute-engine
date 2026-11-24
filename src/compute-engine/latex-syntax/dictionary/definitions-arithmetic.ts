@@ -1214,6 +1214,18 @@ function foldMultiplyChain(
 const BODY_ABSORBING_OPERATORS = new Set(['Sum', 'Product', 'Limit']);
 
 /**
+ * Whether the body of `expr` runs to the end of the product it stands in: a
+ * `BODY_ABSORBING_OPERATORS` operator, or an extremum over a set
+ * (`\max_{x\in S} f`, read as the body of `\sum`).
+ */
+function absorbsBody(expr: MathJsonExpression | null): boolean {
+  return (
+    BODY_ABSORBING_OPERATORS.has(operator(expr)) ||
+    extremumOverSet(expr) !== null
+  );
+}
+
+/**
  * Serialize `power`, a number raised to a power, as a factor of a product
  * after the text `before`.
  *
@@ -1441,8 +1453,7 @@ function serializeMultiply(
     // `\prod_{i=1}^{10}P_1(i)P_0(r)` re-parses with `P_0(r)` inside the
     // product (Tycho ledger row 388). Unless it is the last factor, it is
     // written in parentheses.
-    const absorbsNextFactor =
-      i < count - 1 && BODY_ABSORBING_OPERATORS.has(operator(arg) ?? '');
+    const absorbsNextFactor = i < count - 1 && absorbsBody(arg);
     // The wrap is forced: `wrap()` compares dictionary precedences, and the
     // `\lim` entry has none (it defaults to the highest), so a precedence
     // test would never fence a `Limit`.
@@ -2349,7 +2360,7 @@ function serializeReciprocalProduct(
   // `\prod_{i=1}^{n}i\times b^{-1}` reads back as the product of `i/b`. The
   // parentheses are forced, as in `serializeMultiply()`: the `\lim` entry
   // has no precedence, so a precedence test would never fence a `Limit`.
-  const numerLatex = BODY_ABSORBING_OPERATORS.has(operator(numer) ?? '')
+  const numerLatex = absorbsBody(numer)
     ? serializer.wrapString(
         serializer.serialize(numer),
         serializer.options.applyFunctionStyle(numer, serializer.level)
@@ -2455,7 +2466,7 @@ function serializeFraction(
     // `\lim_{x\to1}2x^{-1}` reads back as the limit of `2/x`.
     const reciprocal = supsub(
       '^',
-      BODY_ABSORBING_OPERATORS.has(operator(denom) ?? '')
+      absorbsBody(denom)
         ? serializer.wrapString(
             serializer.serialize(denom),
             serializer.options.applyFunctionStyle(denom, serializer.level)
@@ -2500,8 +2511,7 @@ function serializeFraction(
       .map((x, i) =>
         // A big operator before another factor would read that factor
         // into its body: it is fenced, as in a product.
-        i < factors.length - 1 &&
-        BODY_ABSORBING_OPERATORS.has(operator(x) ?? '')
+        i < factors.length - 1 && absorbsBody(x)
           ? serializer.wrapString(
               serializer.serialize(x),
               serializer.options.applyFunctionStyle(denom, serializer.level)
@@ -4116,24 +4126,64 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\max',
     kind: 'function',
     arguments: 'implicit',
+    serialize: serializeExtremum('\\max'),
   },
   {
     name: 'Min',
     latexTrigger: '\\min',
     kind: 'function',
     arguments: 'implicit',
+    serialize: serializeExtremum('\\min'),
   },
   {
     name: 'Supremum',
     latexTrigger: '\\sup',
     kind: 'function',
     arguments: 'implicit',
+    serialize: serializeExtremum('\\sup'),
   },
   {
     name: 'Infimum',
     latexTrigger: '\\inf',
     kind: 'function',
     arguments: 'implicit',
+    serialize: serializeExtremum('\\inf'),
+  },
+  // `\max_{x \in S} f`, the extremum of `f` over the elements of `S`, and
+  // the same for `\min`, `\sup` and `\inf`. These entries come after the
+  // entries of the names, so the parser tries them first (a later entry of a
+  // trigger is tried first, `prependIndexedEntry()`). They decline when there
+  // is no subscript, and the plain function reading follows (`\max(a, b)`,
+  // `\max\{1, 2\}`).
+  {
+    latexTrigger: '\\max',
+    kind: 'function',
+    parse: parseExtremumOverSet('Max'),
+  },
+  {
+    latexTrigger: '\\min',
+    kind: 'function',
+    parse: parseExtremumOverSet('Min'),
+  },
+  {
+    latexTrigger: '\\sup',
+    kind: 'function',
+    parse: parseExtremumOverSet('Supremum'),
+  },
+  {
+    latexTrigger: '\\inf',
+    kind: 'function',
+    parse: parseExtremumOverSet('Infimum'),
+  },
+  {
+    symbolTrigger: 'max',
+    kind: 'function',
+    parse: parseExtremumOverSet('Max'),
+  },
+  {
+    symbolTrigger: 'min',
+    kind: 'function',
+    parse: parseExtremumOverSet('Min'),
   },
 
   {
@@ -5567,6 +5617,140 @@ function parseExp(
     sup,
     () => ['Ln', args[0]] as MathJsonExpression
   );
+}
+
+/**
+ * Parse `\max_{x \in S} f` (or `\min`, `\sup`, `\inf`) as the extremum of
+ * `f` over the elements of `S`: `["Max", ["Map", ["Function", f, "x"], S]]`.
+ * The `Function` binds `x`. The body is read as the body of `\sum`: it stops
+ * before a `+` (`\max_{x \in S} x^2 + 1` is `\max_{x \in S}(x^2) + 1`).
+ *
+ * Without a subscript, return `null`: the next entry reads `\max(a, b)`. A
+ * subscript that is not one clause `x \in S` (a range `1 \le i \le n`, a
+ * condition, two variables) is an `expected-set-membership` error.
+ */
+function parseExtremumOverSet(name: 'Max' | 'Min' | 'Supremum' | 'Infimum') {
+  return (parser: Parser): MathJsonExpression | null => {
+    parser.skipSpace();
+    if (parser.peek !== '_') return null;
+    const diagCp = parser._diagnosticsCheckpoint();
+    // The variable is local to the subscript and the body, as the index of
+    // `\sum` is (`parseBigOp`).
+    parser.pushSymbolTable();
+    const subStart = parser.index;
+    parser.match('_');
+    const sub = parser.parseGroup() ?? parser.parseToken();
+    const subEnd = parser.index;
+    const variable =
+      operator(sub) === 'Element' && operand(sub, 3) === null
+        ? parser.binderSymbol(operand(sub, 1))
+        : null;
+    const names = new Set<string>(variable === null ? [] : [variable]);
+    const bodyStart = parser.index;
+    let body = parser.parseExpression({
+      minPrec: MULTIPLICATION_PRECEDENCE,
+      condition: (p) => endsTabularCell(p.peek),
+    });
+    if (body !== null) {
+      // A restriction in the body covers the body, as in `\sum`.
+      body = parser._liftRestrictions(body);
+      body = parser.rebindSubscripts(body, names) ?? body;
+      body = parser._subscriptBoundIndexes(body, names);
+    }
+    parser.popSymbolTable();
+    parser._pruneUndeclared(names, diagCp, bodyStart, [[subStart, subEnd]]);
+    if (variable === null)
+      return [name, parser.error('expected-set-membership', subStart)];
+    // The index `n` of `a_n` is read by value, `a_{(n)}`: the parameter of a
+    // `Function` has no integer type, so the canonical `Subscript(a, n)` would
+    // be the name `a_n`, and `\max_{n \in \{1, 2\}} a_n` the maximum of
+    // `a_n` instead of `a_1` and `a_2` (as `\sum` reads it).
+    if (body !== null) body = indexByValue(body, variable);
+    return [
+      name,
+      [
+        'Map',
+        ['Function', body ?? parser.error('missing', parser.index), variable],
+        operand(sub, 2)!,
+      ],
+    ];
+  };
+}
+
+/**
+ * `expr` with each `["Subscript", a, variable]` replaced by
+ * `["Subscript", a, ["Delimiter", variable]]`, the subscript whose index is
+ * read by value. A node with no such subscript is returned as it is.
+ */
+function indexByValue(
+  expr: MathJsonExpression,
+  variable: string
+): MathJsonExpression {
+  const head = operator(expr);
+  if (head === '') return expr;
+  const ops = operands(expr);
+  if (head === 'Subscript' && ops.length === 2 && symbol(ops[1]) === variable)
+    return ['Subscript', ops[0], ['Delimiter', ops[1]]];
+  const visited = ops.map((x) => indexByValue(x, variable));
+  if (visited.every((x, i) => x === ops[i])) return expr;
+  return [head, ...visited] as MathJsonExpression;
+}
+
+const EXTREMUM_OPERATORS = new Set(['Max', 'Min', 'Supremum', 'Infimum']);
+
+/**
+ * The parts of an extremum over a set,
+ * `["Max", ["Map", ["Function", body, variable], set]]` (or `Min`,
+ * `Supremum`, `Infimum`), which is written `\max_{x\in S} f`. `null` for
+ * another expression.
+ */
+export function extremumOverSet(expr: MathJsonExpression | null): {
+  variable: string;
+  set: MathJsonExpression;
+  body: MathJsonExpression;
+} | null {
+  if (!EXTREMUM_OPERATORS.has(operator(expr))) return null;
+  const map = operand(expr, 1);
+  const fn = operand(map, 1);
+  const set = operand(map, 2);
+  const variable = symbol(operand(fn, 2));
+  let body = operand(fn, 1);
+  // A canonical `Function` holds its body in a `Block`.
+  if (operator(body) === 'Block' && operand(body, 2) === null)
+    body = operand(body, 1);
+  if (
+    operand(expr, 2) !== null ||
+    operator(map) !== 'Map' ||
+    operand(map, 3) !== null ||
+    operator(fn) !== 'Function' ||
+    operand(fn, 3) !== null ||
+    variable === null ||
+    set === null ||
+    body === null ||
+    operator(body) === 'Block'
+  )
+    return null;
+  return { variable, set, body };
+}
+
+/**
+ * Serialize `Max`, `Min`, `Supremum` or `Infimum`. The extremum over a set
+ * is written `\max_{x\in S} f`, which `parseExtremumOverSet()` reads back.
+ * Other forms are written as a function call, `\max(a, b)`.
+ */
+function serializeExtremum(command: string) {
+  return (serializer: Serializer, expr: MathJsonExpression): string => {
+    const parts = extremumOverSet(expr);
+    if (parts === null) return command + serializer.wrapArguments(expr);
+    return joinLatex([
+      supsub(
+        '_',
+        command,
+        serializer.serialize(['Element', parts.variable, parts.set])
+      ),
+      serializer.wrap(parts.body, MULTIPLICATION_PRECEDENCE),
+    ]);
+  };
 }
 
 function parseLog(
