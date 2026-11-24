@@ -234,13 +234,14 @@ describe('an element with no settled shape declines (rule R3)', () => {
   test('a literal list of elements of two shapes (decision D7)', () => {
     // `[1, [2, 3]]` has the element type `number | vector<2>`. The
     // interpreter gives `[3, [5, 7]]`; the compiled code would need a
-    // run-time test of each element to choose the map.
+    // run-time test of each element to choose the map. The literal compiles
+    // as a tuple of two lanes, which `Map` does not take.
     const ce = makeEngine();
     const expr = ['Map', 'f', ['List', 1, ['List', 2, 3]]];
     expect(ce.box(expr as never).evaluate().toString()).toBe('[3,[5,7]]');
     const r = compile(ce.box(expr as never), { constantFold: false } as never)!;
     expect(r.success).toBe(false);
-    expect(r.diagnostic?.code).toBe('unsettled-shape');
+    expect(r.diagnostic?.code).toBe('outside-profile');
   });
 
   test('a fold whose accumulator is a scalar, then a list', () => {

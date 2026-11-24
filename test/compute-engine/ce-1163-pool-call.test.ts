@@ -118,15 +118,19 @@ describe('the call task of the kernel pool', () => {
     expect(value).toEqual([3, 5, 7]);
     expect(L).toEqual([1, 2, 3]);
 
-    // A lambda that falls back to the interpreter (a list of a number and a
-    // list) has no stored code: the pool refuses it, and the caller makes
-    // the call itself.
-    const pair = compile(ce.parse('(n: integer) \\mapsto [n, [n+1, 2n]]'));
-    expect(pair.success).toBe(false);
+    // A lambda that falls back to the interpreter (branches of two shapes)
+    // has no stored code: the pool refuses it, and the caller makes the call
+    // itself.
+    const unsettled = compile(
+      ce.parse(
+        '(n: integer) \\mapsto \\begin{cases} [n] & n > 1 \\\\ n & \\text{otherwise}\\end{cases}'
+      )
+    );
+    expect(unsettled.success).toBe(false);
     await expect(
-      calls.runCall(pair, [4], undefined, undefined)
+      calls.runCall(unsettled, [4], undefined, undefined)
     ).rejects.toThrow(/no runtimeVersion/);
-    expect(pair.run!(4)).toEqual([4, [5, 8]]);
+    expect(unsettled.run!(4)).toEqual([4]);
 
     // A boolean and a string argument, and a value that holds a
     // `Float64Array` at the top level of an array and deeper.

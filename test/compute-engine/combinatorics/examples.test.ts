@@ -2,8 +2,9 @@
 // runs the Epsil definition, so the standard run takes the other routes (.N(),
 // the Epsil route) on the first row of each head, and
 // leaves out the rows of a slow statistic (`slow.ts`) beyond size 3; the
-// nightly (CE_NIGHTLY=1) takes every row on every route. The compiler's
-// refusal is tested once per area: no statistic has a compiled form.
+// nightly (CE_NIGHTLY=1) takes every row on every route. The compiled route
+// is tested once per area: a statistic compiles as a call to its interpreted
+// definition.
 const NIGHTLY = process.env.CE_NIGHTLY === '1';
 
 import { ComputeEngine } from '../../../src/compute-engine';
@@ -54,14 +55,14 @@ for (const area of ['permutations', 'partitions']) {
         expect(result.diagnostics).toEqual([]);
         expect(result.value.json).toEqual(row.expected);
       });
-      // A statistic has no compiled form: the compiler declines it, and with
-      // fallback the call runs in the interpreter.
+      // A statistic has no compiled body: the compiled code calls the
+      // interpreted definition with the list.
       if (compileTested && !NIGHTLY) continue;
       compileTested = true;
-      test(`${shown} does not compile (${row.id})`, () => {
-        expect(() => compile(ce.box(row.input), { fallback: false })).toThrow(
-          /Could not compile/
-        );
+      test(`${shown} = ${row.expected} compiled (${row.id})`, () => {
+        const result = compile(ce.box(row.input), { fallback: false });
+        expect(result.success).toBe(true);
+        expect(result.run!()).toEqual(row.expected);
       });
     }
   });
