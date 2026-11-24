@@ -37,7 +37,7 @@ Inside a `Match` pattern, `Alternatives(p1, p2, …)` matches if any alternative
 
 `(value: any?) -> nothing`
 
-Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value.
+Exit the enclosing loop immediately, optionally with a value (`Break(v)`) that becomes the loop value. A `Break` that reaches the end of a function body or a statement of a `Program` is the error `control-outside-loop`: it does not end a loop of the caller.
 
 ### Comprehension
 
@@ -55,7 +55,7 @@ Test whether a value satisfies one or more conditions.
 
 `() -> nothing`
 
-Skip to the next iteration of the enclosing loop.
+Skip to the next iteration of the enclosing loop. A `Continue` that reaches the end of a function body or a statement of a `Program` is the error `control-outside-loop`.
 
 ### fixedPoint
 

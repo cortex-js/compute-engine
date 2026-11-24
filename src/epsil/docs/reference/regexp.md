@@ -35,6 +35,8 @@ A compiled regular expression, using the host JavaScript dialect.
 
 The pattern is written most readably as a raw string literal: `RegExp(#"[0-9]+"#)`.
 
+Two regular expressions are equal when their patterns are the same and their sets of flags are the same; the order of the flags does not count, and no `u` or `v` flag reads as `u`.
+
 ### stringMatch
 
 MathJSON `StringMatch` · `(subject: character | string, pattern: regexp) -> nothing | record`

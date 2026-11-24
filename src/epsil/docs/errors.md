@@ -190,7 +190,9 @@ Use `Floor(a / b)` for the integer quotient.
 
 ## `control-outside-loop`
 
-`break` and `continue` are only valid directly inside a `while` or `for` body — and the loop context resets at every function and lambda boundary, so a `break` inside a lambda DEFINED in a loop is still outside the loop.
+`break` and `continue`, and their call forms `Break()` and `Continue()`, are only valid directly inside a `while` or `for` body — and the loop context resets at every function and lambda boundary, so a `break` inside a lambda DEFINED in a loop is still outside the loop.
+
+When the program runs anyway, a `Break` or `Continue` that reaches the end of a function body or the top level of the program is the error `control-outside-loop`, and the next statements of the program run.
 
 To stop a pipeline early, restructure with a condition or a Take/Filter stage instead of breaking out of a callback.
 
@@ -336,13 +338,13 @@ Write the change as `+=`: `L[c] += 1`, `s += x`. A variable that the body change
 
 The body of a `parallel for` loop reads a variable that it also changes with `+=` (an accumulator). While the loop runs, the value of an accumulator depends on which passes have run, so a read of it in the body gives an unspecified value. (This is the rule of the Dex language and of OpenMP.)
 
-`epsil check` reports a read written by name in the body, also in a function literal written in the body: `L[c] += L[d]` and `if s > 3 { … }`. A read by another route cannot be found before the program runs, and is not reported: a function that the body calls (`s += total(k)` with `function total(x) { s + x }`), a function of the host. Its value is still unspecified. The interpreter and the JavaScript target run the passes in order and give the value that this order gives, but a target that runs the passes in parallel declines such a loop, and a later version can give another value.
+`epsil check` reports a read written by name in the body, also in a function literal written in the body: `L[c] += L[d]` and `if s > 3 { … }`. A read by another route cannot be found before the program runs, and is not reported: a function that the body calls (`s += total(k)` with `function total(x) { s + x }`), `parse("s")`, a function of the host. Its value is still unspecified. The interpreter and the JavaScript target run the passes in order and give the value that this order gives, but a target that runs the passes in parallel declines such a loop, and a later version can give another value.
 
 Read the value after the loop. To use a value of the list from before the loop, copy it first: `let H = L` before the loop, then `L[c] += H[d]` in the body.
 
 ## `parallel-effect`
 
-The body of a parallel loop or a parallel comprehension can have only the `random` effect. Its passes can run in any order, so an effect such as `console` (`print`) or `state` would happen in an order that is not specified. The message lists the effects that the engine inferred for the body, also for the functions that it calls: a function of the program has the effects of its body, and a loop variable or a parameter whose type is a function type has the effects of that type. `any` means that the body calls a function that can have any effect, such as `parse`, whose parsed expression can read and write any variable.
+The body of a parallel loop or a parallel comprehension can have only the `random` effect. Its passes can run in any order, so an effect such as `console` (`print`) or `state` would happen in an order that is not specified. The message lists the effects that the engine inferred for the body, also for the functions that it calls: a function of the program has the effects of its body, and a loop variable or a parameter whose type is a function type has the effects of that type. `any` means that the body calls a function that can have any effect.
 
 Move the effect out of the loop: collect the values with a parallel comprehension, then print them after it. A random draw is accepted: inside `WithRandomSeed`, each pass draws from its own frame, so the values do not depend on the order of the passes.
 
