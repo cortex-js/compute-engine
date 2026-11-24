@@ -171,6 +171,7 @@ import {
 } from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
 import {
+  hasAnyProvisionalDependents,
   hasProvisionalDependents,
   provisionalLiteral,
   provisionalRegistryRollbackPoint,
@@ -882,7 +883,12 @@ export function setSymbolValue(
   if (!isValueDef(def))
     throw new Error(`Cannot assign a value to operator symbol "${id}"`);
 
-  const repair = hasProvisionalDependents(ce, id);
+  // A definition that read the value of `id` as a product operand waits on
+  // `id` too (`noteValueProduct()`), and only a function value changes it.
+  const repair =
+    hasProvisionalDependents(ce, id) ||
+    (value?.type.matches('function') === true &&
+      hasAnyProvisionalDependents(ce, id));
   if (repair)
     withDependentEffectRollback(ce, () =>
       storeValueAndRepair(ce, id, def, value, true)

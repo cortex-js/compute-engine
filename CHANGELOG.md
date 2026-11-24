@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **A function that calls a name that held a number calls it once the name is
+  a function** (CE-1333). After `f(t) := a(t+1)`, `ce.assign('a', 3)` and
+  `a(x) := x^2`, `f(1)` gave `2a`: the body kept the product `a·(t+1)`
+  that it read while `a` held a number. It now gives `4`, as a function
+  defined after `a(x) := x^2` does. The same holds when `a` held a number,
+  or was declared `real`, before `f` was defined. A new number given to `a`
+  keeps the product, and `ce.withValues()` still accepts `a`.
+
 - **The norm of an element of a list of points has the type of one number**
   (CE-1215). With `LQ: list<tuple<real, real>>`, the type of
   `Norm(At(LQ, -1))`, `Norm(First(LQ))`, `Abs(At(LQ, -1))` and

@@ -1636,7 +1636,7 @@ export function prepareDocument(
               member.binding = binding;
             }
             const provisional = provisionalLiteral(body);
-            if (provisional !== undefined)
+            if (provisional !== undefined && provisional.heads.size > 0)
               return reject(
                 name,
                 ce.error(

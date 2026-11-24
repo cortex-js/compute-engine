@@ -25,9 +25,12 @@ import {
   typeIsLinearAlgebraCollection,
 } from '../collection-utils.js';
 import {
+  isProvisionalCaptureOpen,
   noteProvisionalApplication,
   noteProvisionalCall,
+  noteValueProduct,
 } from './provisional-application.js';
+import { isLibraryDefinition } from './implicit-variable-rule.js';
 import {
   hasKindArm,
   stripMissingFromType,
@@ -242,11 +245,13 @@ function canonicalJuxtaposition(
       // declared function in parentheses is a head. Record the product so
       // the expression is re-derived when the name gains a definition
       // (`provisional-application.ts`).
-      if (
-        isSymbol(lhsCanon) &&
-        couldBecomeFunction(ce.lookupDefinition(lhsCanon.symbol), lhsCanon)
-      )
-        noteProvisionalApplication(lhsCanon.symbol);
+      if (isSymbol(lhsCanon))
+        noteProductReading(
+          ce,
+          lhsCanon.symbol,
+          ce.lookupDefinition(lhsCanon.symbol),
+          lhsCanon
+        );
     } else if (
       isSymbol(lhsCanon) &&
       isDeclaredFunction(ce, lhsCanon.symbol, lhsCanon)
@@ -270,14 +275,12 @@ function canonicalJuxtaposition(
         });
         if (applied !== undefined) return applied;
       }
-      if (couldBecomeFunction(def, lhsCanon)) {
-        // The product reading below rests on the symbol having no function
-        // definition YET: record the application so the expression can be
-        // re-derived if the symbol later gains one
-        // (`provisional-application.ts`), as the bare-argument-list branch
-        // records its own.
-        noteProvisionalApplication(lhsCanon.symbol);
-      }
+      // The product reading below rests on the symbol having no function
+      // definition YET: record the application so the expression can be
+      // re-derived if the symbol later gains one
+      // (`provisional-application.ts`), as the bare-argument-list branch
+      // records its own.
+      noteProductReading(ce, lhsCanon.symbol, def, lhsCanon);
     }
 
     if (!factorHead && isSymbol(lhsCanon) && isFunction(rhs, 'Delimiter')) {
@@ -398,8 +401,7 @@ function canonicalJuxtaposition(
         // definition *yet*: record it so a `Function` literal canonicalized now
         // can be re-derived if the symbol later gains one (see
         // `provisional-application.ts`).
-        if (couldBecomeFunction(def, lhsCanon))
-          noteProvisionalApplication(lhsCanon.symbol);
+        noteProductReading(ce, lhsCanon.symbol, def, lhsCanon);
         return ce.function(
           'Multiply',
           splicedFactors([lhsCanon, ...args], [undefined, inner]) ?? [
@@ -434,6 +436,10 @@ function canonicalJuxtaposition(
         (def && !isOperatorDef(def) && def.value && isScalable(lhsCanon)) ||
         (oracleType !== undefined && typeIsScalable(oracleType))
       ) {
+        // A head that only the `resolveSymbol` handler vouches for has no
+        // definition to follow: nothing is noted for it.
+        if (def !== undefined)
+          noteProductReading(ce, lhsCanon.symbol, def, lhsCanon);
         return ce.function(
           'Multiply',
           splicedFactors([lhsCanon, ...args], [undefined, inner]) ?? [
@@ -1202,12 +1208,10 @@ function combineFunctionApplications(
           continue;
         }
       }
-      if (couldBecomeFunction(def, occurrence)) {
-        // The postfix pair stays two multiplication operands only because
-        // the symbol has no function definition YET — record it, as for a
-        // bare argument list below.
-        noteProvisionalApplication(op.symbol);
-      }
+      // The postfix pair stays two multiplication operands only because
+      // the symbol has no function definition YET — record it, as for a
+      // bare argument list below.
+      noteProductReading(ce, op.symbol, def, occurrence);
     }
     if (
       i < ops.length - 1 &&
@@ -1285,8 +1289,7 @@ function combineFunctionApplications(
       // The pair stays two multiplication operands only because `symName` has
       // no function definition *yet* — record it (see the same note in
       // `canonicalInvisibleOperator`).
-      if (couldBecomeFunction(def, occurrence))
-        noteProvisionalApplication(symName);
+      noteProductReading(ce, symName, def, occurrence);
     }
     result.push(ops[i]);
     i++;
@@ -1529,6 +1532,38 @@ function couldBecomeFunction(
   if (def === undefined) return true;
   if (isOperatorDef(def)) return false;
   return def.value.type.isUnknown;
+}
+
+/** Note, in the `Function` literal being canonicalized, that the symbol
+ * `name` followed by an argument list was read as a product operand, so that
+ * the literal is derived again when `name` gets a function definition
+ * (`provisional-application.ts`). A name with no definition, or with a value
+ * of type `unknown`, is noted as a provisional application
+ * (`couldBecomeFunction()`). A name whose user definition holds a value is
+ * noted as a value product (`noteValueProduct()`): `a(t+1)` with `a`
+ * assigned `3` is an application once `a(x) := x^2` is defined. A constant,
+ * a library definition and a parameter of the literal are not noted: no
+ * later definition replaces them. */
+function noteProductReading(
+  ce: ComputeEngine,
+  name: string,
+  def: ReturnType<ComputeEngine['lookupDefinition']>,
+  occurrence?: Expression
+): void {
+  if (couldBecomeFunction(def, occurrence)) {
+    noteProvisionalApplication(name);
+    return;
+  }
+  if (
+    !isProvisionalCaptureOpen() ||
+    def === undefined ||
+    isOperatorDef(def) ||
+    def.value.isConstant ||
+    ce._isShadowedParameter(name) ||
+    isLibraryDefinition(ce, name, def)
+  )
+    return;
+  noteValueProduct(name);
 }
 
 /** The canonical occurrence of the

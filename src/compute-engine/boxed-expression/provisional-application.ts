@@ -57,11 +57,14 @@ export type ProvisionalDependent =
   BoxedOperatorDefinition | BoxedValueDefinition;
 
 /** What a `Function` literal needs to be re-derived: the raw operands it was
- * canonicalized from, the scope it was canonicalized in, and the symbols whose
- * juxtaposition reading was provisional. */
+ * canonicalized from, the scope it was canonicalized in, the symbols whose
+ * juxtaposition reading was provisional (`heads`), and the symbols it read
+ * as a product operand because their user definition held a value that is
+ * not a function (`follows`). */
 export type ProvisionalLiteral = {
   ops: ReadonlyArray<Expression>;
   heads: ReadonlySet<string>;
+  follows?: ReadonlySet<string>;
   scope: Scope | undefined;
 };
 
@@ -72,6 +75,7 @@ export type ProvisionalLiteral = {
 /** What the canonicalization of one `Function` literal body noted. */
 export type ProvisionalCapture = {
   heads?: Set<string>;
+  follows?: Set<string>;
 };
 
 // A frame stays `undefined` until something is actually noted in it: every
@@ -102,6 +106,10 @@ export function endProvisionalCapture(
       parent.heads ??= new Set();
       for (const name of frame.heads) parent.heads.add(name);
     }
+    if (frame.follows !== undefined) {
+      parent.follows ??= new Set();
+      for (const name of frame.follows) parent.follows.add(name);
+    }
   }
   return frame;
 }
@@ -130,6 +138,18 @@ export function noteProvisionalApplication(name: string): void {
  * and needs no repair. */
 export function noteProvisionalCall(name: string): void {
   noteProvisionalApplication(name);
+}
+
+/** Record that `name`, followed by an argument list, was read as a
+ * multiplication operand because its user definition holds a value that is
+ * not a function (`a(t+1)` with `a` assigned `3`). A later definition of
+ * `name` as a function makes it an application, so the literal waits on
+ * `name` too, but a value given to `name` does not count as an application
+ * of it (`hasProvisionalDependents()`). */
+export function noteValueProduct(name: string): void {
+  const depth = FRAMES.length;
+  if (depth === 0) return;
+  ((FRAMES[depth - 1] ??= {}).follows ??= new Set()).add(name);
 }
 
 //
@@ -230,6 +250,10 @@ const DEPENDENTS = new WeakMap<object, Map<string, Waiting>>();
 type Registration = {
   ce: IComputeEngine;
   names: Set<string>;
+  /** The names of `names` that the body applies, or reads as a product only
+   * because they have no function definition yet (`heads`). The others are
+   * names of `follows`. */
+  applies: Set<string>;
   ref: WeakRef<ProvisionalDependent>;
 };
 
@@ -253,12 +277,17 @@ export function registerProvisionalDependents(
 
   let registration = REGISTRATIONS.get(def);
   if (registration === undefined || registration.ce !== ce) {
-    registration = { ce, names: new Set(), ref: new WeakRef(def) };
+    registration = {
+      ce,
+      names: new Set(),
+      applies: new Set(),
+      ref: new WeakRef(def),
+    };
     REGISTRATIONS.set(def, registration);
   }
   const ref = registration.ref;
 
-  for (const name of info.heads) {
+  const add = (name: string): void => {
     let waiting = byName.get(name);
     if (waiting === undefined) {
       waiting = newWaiting();
@@ -270,7 +299,12 @@ export function registerProvisionalDependents(
     // read.
     if (waiting.refs.size >= waiting.sweepAt) sweep(waiting);
     registration.names.add(name);
+  };
+  for (const name of info.heads) {
+    add(name);
+    registration.applies.add(name);
   }
+  for (const name of info.follows ?? []) add(name);
 }
 
 /** Drop a definition object that is no longer installed from every set it
@@ -327,21 +361,54 @@ export function _provisionalReferenceCount(
   return DEPENDENTS.get(ce)?.get(name)?.refs.size ?? 0;
 }
 
-/** Is at least one definition waiting on `name` in this engine? A
- * definition that was collected does not count, and its reference is
- * removed. */
+/** Does at least one definition of this engine wait on `name` because its
+ * body applies `name`, or reads it as a product only because `name` has no
+ * function definition yet? A value given to `name` rewrites such a body. A
+ * definition that waits on `name` only because it read the value of `name`
+ * as a product operand (`noteValueProduct()`) does not count: a value does
+ * not change that reading. A definition that was collected does not count,
+ * and its reference is removed. */
 export function hasProvisionalDependents(
   ce: IComputeEngine,
   name: string
 ): boolean {
+  return hasWaitingDefinitions(ce, name, true);
+}
+
+/** Is at least one definition waiting on `name` in this engine, for any
+ * reason, including a product read from the value of `name`
+ * (`noteValueProduct()`)? */
+export function hasAnyProvisionalDependents(
+  ce: IComputeEngine,
+  name: string
+): boolean {
+  return hasWaitingDefinitions(ce, name, false);
+}
+
+/** Is at least one definition waiting on `name` in this engine, for any
+ * reason? With `applying`, only the definitions that apply `name` count
+ * (`hasProvisionalDependents()`). A definition that was collected does not
+ * count, and its reference is removed. */
+function hasWaitingDefinitions(
+  ce: IComputeEngine,
+  name: string,
+  applying: boolean
+): boolean {
   const byName = DEPENDENTS.get(ce);
   const waiting = byName?.get(name);
   if (waiting === undefined) return false;
+  let live = false;
   for (const ref of waiting.refs) {
-    if (ref.deref() !== undefined) return true;
-    waiting.refs.delete(ref);
+    const def = ref.deref();
+    if (def === undefined) {
+      waiting.refs.delete(ref);
+      continue;
+    }
+    live = true;
+    if (!applying || REGISTRATIONS.get(def)?.applies.has(name) === true)
+      return true;
   }
-  byName!.delete(name);
+  if (!live) byName!.delete(name);
   return false;
 }
 
@@ -357,14 +424,17 @@ export function provisionalRegistryRollbackPoint(
   const byName = DEPENDENTS.get(ce);
   const waiting = new Map<string, Waiting>();
   const existing = new Map<ProvisionalDependent, Registration>();
-  const names = new Map<Registration, string[]>();
+  const names = new Map<Registration, [string[], string[]]>();
   for (const [name, w] of byName ?? []) {
     waiting.set(name, { refs: new Set(w.refs), sweepAt: w.sweepAt });
     for (const { def } of liveDependents(w)) {
       const registration = REGISTRATIONS.get(def);
       if (registration === undefined || existing.has(def)) continue;
       existing.set(def, registration);
-      names.set(registration, [...registration.names]);
+      names.set(registration, [
+        [...registration.names],
+        [...registration.applies],
+      ]);
     }
   }
   return () => {
@@ -376,7 +446,9 @@ export function provisionalRegistryRollbackPoint(
       DEPENDENTS.set(ce, restored);
     }
     for (const [def, registration] of existing) {
-      registration.names = new Set(names.get(registration));
+      const [saved, applies] = names.get(registration)!;
+      registration.names = new Set(saved);
+      registration.applies = new Set(applies);
       REGISTRATIONS.set(def, registration);
     }
   };
@@ -404,7 +476,11 @@ export function takeProvisionalDependents(
   if (taken.length === 0) return undefined;
   if (taken.length === live.length) byName!.delete(name);
   else for (const entry of taken) waiting.refs.delete(entry.ref);
-  for (const entry of taken) REGISTRATIONS.get(entry.def)?.names.delete(name);
+  for (const entry of taken) {
+    const registration = REGISTRATIONS.get(entry.def);
+    registration?.names.delete(name);
+    registration?.applies.delete(name);
+  }
   return taken.map((entry) => entry.def);
 }
 
@@ -467,7 +543,20 @@ export function repairProvisionalDependents(
   declaredIn?: Scope,
   boundIn?: Scope
 ): void {
-  if (!hasProvisionalDependents(ce, name)) return;
+  // A definition that waits on `name` only because it read the value of
+  // `name` as a product operand (`noteValueProduct()`) is derived again only
+  // when `name` becomes a function. A definition installed for `name` that is
+  // not a function skips the wave when no other definition waits, so that a
+  // number given to such a name costs one lookup. Without `justInstalled`
+  // (the drain of deferred waves), the wave runs and `repairWave()` tests
+  // each definition.
+  if (!hasProvisionalDependents(ce, name)) {
+    const callable =
+      justInstalled === undefined ||
+      'signature' in justInstalled ||
+      (justInstalled as BoxedValueDefinition).type.matches('function');
+    if (!callable || !hasWaitingDefinitions(ce, name, false)) return;
+  }
   // `declaredIn` is the scope that now holds the new binding of `name`, when
   // the caller knows it. A waiting literal resolves `name` from the scope it
   // was canonicalized in, through that scope's ancestors. The repair

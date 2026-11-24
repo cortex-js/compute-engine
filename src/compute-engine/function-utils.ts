@@ -1782,11 +1782,17 @@ export function canonicalFunctionLiteralArguments(
   // literal's own operands): its body is then the very `Block` recorded the
   // first time round, and the raw operands to re-derive from are the ones
   // recorded with it.
+  // A juxtaposition read as a product because its leading symbol holds a
+  // value (`captured.follows`) is kept the same way: a later definition of
+  // that symbol as a function makes it an application.
   const provisional =
-    captured?.heads !== undefined
+    captured?.heads !== undefined || captured?.follows !== undefined
       ? {
           ops,
-          heads: captured.heads,
+          heads: captured.heads ?? new Set<string>(),
+          ...(captured.follows !== undefined
+            ? { follows: captured.follows }
+            : {}),
           scope: ce.context.lexicalScope,
         }
       : provisionalLiteral(ops[0]);
@@ -2032,6 +2038,19 @@ let DEFERRED: {
   declaredIn: Scope | undefined;
   boundIn: Scope | undefined;
 }[] = [];
+
+/** Whether `name`, looked up from `scope`, has an operator definition or a
+ * value definition of a function type. */
+function resolvesToFunction(
+  ce: ComputeEngine,
+  name: string,
+  scope: Scope | undefined
+): boolean {
+  const def = ce._inScope(scope, () => ce.lookupDefinition(name));
+  if (def === undefined) return false;
+  if (isOperatorDef(def)) return true;
+  return def.value.type.matches('function');
+}
 
 /** Whether the scopes `a` and `b` stand for the same lexical level, for the
  * selection of `repairWave()`. Two scope objects do when they are the same
@@ -2280,7 +2299,17 @@ function repairWave(
       if (def === justInstalled) continue;
       const literal = dependentLiteral(def);
       const info = provisionalLiteral(literal);
-      if (info === undefined || !info.heads.has(name)) continue;
+      if (info === undefined) continue;
+      if (!info.heads.has(name)) {
+        if (info.follows?.has(name) !== true) continue;
+        // The body read the value of `name` as a product operand
+        // (`noteValueProduct()`). Only a function definition of `name`
+        // changes that reading: until then, the definition keeps waiting.
+        if (!resolvesToFunction(ce, name, info.scope)) {
+          registerProvisionalDependents(ce, literal, def);
+          continue;
+        }
+      }
       const rebuilds = (REBUILD_COUNTS ??= new WeakMap());
       const spent = rebuilds.get(def) ?? 0;
       if (spent >= MAX_REBUILDS_PER_WAVE) {
