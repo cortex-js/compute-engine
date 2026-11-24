@@ -394,14 +394,8 @@ export type Lowering = {
   /** The body of each user function being lowered: `nan()`, a list of NaN
    *  can stand for an absent value of it (every reader of the calls that
    *  the IR function serves reads the two alike); `read`, the lowering of
-   *  the body relied on `nan()` (`nanForAbsent()` of `lower.ts`);
-   *  `nothing`, the value of the body is the `Nothing` of a function of the
-   *  host (`hostCall()` of `lower.ts`), so a call of the function whose
-   *  value is read declines (`call()` of `lower-functions.ts`). */
-  readonly bodies: Map<
-    Expression,
-    { nan: () => boolean; read: boolean; nothing?: boolean }
-  >;
+   *  the body relied on `nan()` (`nanForAbsent()` of `lower.ts`). */
+  readonly bodies: Map<Expression, { nan: () => boolean; read: boolean }>;
   /** The `iterationBudget`: a `Sum` or a `Product` of more passes is NaN. */
   readonly budget?: number;
   /** The target holds a list of a run-time length (`LowerOptions`). */

@@ -260,20 +260,6 @@
   of a number in the value (`(t, 1) is tuple<real, real>`: the number can be
   `NaN`), and `x is tuple` of `(t, "a")`, which compiles as `[t, "a"]` does,
   still fall back to the interpreter.
-- **`compile()` compiles a function that draws a figure through a function
-  of the host, which it refused** (CE-1652). With a drawing prelude whose
-  `function draw(...args) { figureDraw(listFrom(args)) }` calls a function
-  `figureDraw` that the host declares with the signature `(any) -> nothing`,
-  `(t: real) => draw(circle((cos(t), 0), 0.1))` and `draw(circle((0, 0), 1),
-  label((0, 1), "a"))` compile on JavaScript, and `figureDraw` receives the
-  value that the interpreter gives it, such as `["List", ["Figure",
-  "'circle'", ["List", 0.54, 0, 0.1], …]]`. A rest parameter takes the
-  arguments of each call, whatever their kinds; a function of the host takes
-  a value of a named tuple type, a tuple or a list of several kinds, or
-  `Nothing`. A list of numbers or a color given to a function of the host
-  (also in a field: `fill(rgb(t, 0, 0))`; `fill("red")` compiles), `length`
-  of a rest parameter, and a value `Nothing` of the host that the program
-  reads (`[draw(c)]`) still fall back to the interpreter.
 
 ### Resolved Issues
 

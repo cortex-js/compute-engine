@@ -42,7 +42,6 @@ import {
   hasUnsettledShape,
   isUntyped,
   LANE_MISMATCH,
-  POSSIBLE_NOTHING,
   tupleBody,
   UNSETTLED_SHAPE,
   type Binding,
@@ -58,7 +57,6 @@ import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
 import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
 import { typedByMatch } from './lower-match.js';
-import type { recordLowering } from './lower-records.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
@@ -309,20 +307,6 @@ const loose = (t: Type) =>
   (typeof t === 'object' &&
     (t.kind === 'broadcastable' || (t.kind === 'union' && !inputType(t))));
 
-/** `t` is a list of any elements and of no stated length (`list`,
- *  `list<any>`). */
-function anyList(t: Type): boolean {
-  t = present(t);
-  return (
-    t === 'list' ||
-    (typeof t === 'object' &&
-      t.kind === 'list' &&
-      (t.elements === 'any' || t.elements === 'unknown') &&
-      (t.dimensions == null ||
-        (t.dimensions.length === 1 && t.dimensions[0] < 0)))
-  );
-}
-
 /** The number of elements of the tuple type `t` when each is loose or a
  *  real or integer scalar (a point), or `undefined`. */
 function pointLength(t: Type): number | undefined {
@@ -396,19 +380,8 @@ function signatureTypes(
     : vd !== undefined && !vd.inferredType
       ? vd._signatureSkeleton
       : undefined;
-  // A rest parameter (`Spread(args)`, the last one): its name, bound at
-  // each call to the record of the arguments from its position
-  // (`records.rest()`, CE-1652).
-  const last = literal.ops.at(-1);
-  const rest =
-    literal.nops > 1 && isFunction(last, 'Spread') && isSymbol(last.op1)
-      ? literal.nops - 2
-      : undefined;
-  const names = literal.ops.slice(1).map((p, i) => {
-    const n =
-      i === rest && isFunction(p, 'Spread') && isSymbol(p.op1)
-        ? p.op1.symbol
-        : parameterName(p);
+  const names = literal.ops.slice(1).map((p) => {
+    const n = parameterName(p);
     if (n === undefined)
       decline(literal, `a parameter of ${e.operator} that is not a name`);
     return n;
@@ -466,18 +439,14 @@ function signatureTypes(
           // No stated type, or `number`: the lane of a scalar argument,
           // a real or a complex (`laneKey()`).
           open: present(t) === 'unknown' || present(t) === 'number',
-          // No stated type, `any`, `list` or a nominal tuple type: the
-          // type of a record argument (`held()`); `true` for any record,
-          // `'list'` for a record that is a `List` of the engine
-          // (`IRType.list`, CE-1652), else the nominal type that the
-          // record must have.
+          // No stated type, `any`, or a nominal tuple type: the type of a
+          // record argument (`held()`); `true` for any record, else the
+          // nominal type that the record must have.
           record: isUntyped(t)
             ? (true as const)
-            : anyList(t)
-              ? ('list' as const)
-              : tupleBody(t) !== undefined
-                ? (t as TypeReference)
-                : undefined,
+            : tupleBody(t) !== undefined
+              ? (t as TypeReference)
+              : undefined,
           // Of type `any`: also the lane of a number (`held()`).
           any: isUntyped(t) && present(t) !== 'unknown',
         };
@@ -570,7 +539,6 @@ function signatureTypes(
     !shaped &&
     grid === undefined &&
     r !== 'color' &&
-    r !== 'nothing' &&
     (scalarResult === undefined || scalarResult.shape.length > 0);
   const result: IRType | undefined =
     open ||
@@ -582,15 +550,10 @@ function signatureTypes(
       ? undefined
       : r === 'color'
         ? { lane: 'color', shape: [] }
-        : // A result `nothing`: the NaN that stands for the `Nothing` of
-          // a function of the host (`define()`, CE-1652).
-          r === 'nothing'
-          ? { lane: 'real', shape: [] }
-          : scalarOf(literal, r!, `the result of ${e.operator}`);
+        : scalarOf(literal, r!, `the result of ${e.operator}`);
   return {
     names,
     params,
-    rest,
     result,
     record,
     list,
@@ -709,9 +672,6 @@ type UserFunction = {
     shape: readonly (number | 'run-time')[];
     tuple?: 0 | 1;
   };
-  /** The value of the body is the `Nothing` of a function of the host
-   *  (`Lowering.bodies`): a call whose value is read declines (`call()`). */
-  nothing?: boolean;
   /** The first call that took `declared` while the body is lowered. */
   assumed?: Fn;
   /** The calls made while the body is lowered (recursive calls), and
@@ -723,7 +683,6 @@ type UserFunction = {
 export function functionLowering(
   cx: Lowering,
   lists: ReturnType<typeof listLowering>,
-  records: ReturnType<typeof recordLowering>,
   /** The target holds records and text (JavaScript, not the interval or
    *  the `bigint` mode). */
   javascript = false
@@ -835,8 +794,7 @@ export function functionLowering(
         ? undefined
         : { lane: 'string', shape: [], constant: known };
     }
-    // At a parameter `list`, a record that is a `List` only (CE-1652).
-    if (t.lane === 'record') return p.record !== 'list' || t.list ? t : undefined;
+    if (t.lane === 'record') return t;
     if (
       !javascript ||
       p.record !== true ||
@@ -918,16 +876,14 @@ export function functionLowering(
 
   /** The IR function of the user function of `key`, lowered once. `args`:
    *  the arguments of the first call, whose stated lengths a list parameter
-   *  of a run-time length takes (a target without run-time lengths).
-   *  `ops`: the operand of each parameter (`call()`). */
+   *  of a run-time length takes (a target without run-time lengths). */
   const define = (
     e: Fn,
     key: object,
     literal: Fn,
     sig: ReturnType<typeof signatureTypes>,
     args: V[] | undefined,
-    nanForAbsent: () => boolean,
-    ops: readonly Expression[] = e.ops
+    nanForAbsent: () => boolean
   ): UserFunction => {
     begun += 1;
     const {
@@ -946,14 +902,13 @@ export function functionLowering(
       // A record (or, at a parameter of no stated type or `any`, a string
       // or a colour): the parameter has the type of the argument, and the
       // function is lowered once per such type (`laneKey()`).
-      const h = held(declared, args?.[i], ops[i], `${e.operator}#${i}`);
+      const h = held(declared, args?.[i], e.ops[i], `${e.operator}#${i}`);
       if (h !== undefined) {
         // A parameter of a nominal tuple type takes a record of that type
         // only, or of a type that the static type of the argument proves
         // a subtype of it (R5).
-        const nominal = (declared as { record?: true | 'list' | TypeReference })
-          .record;
-        const s = ops[i]?.type.type;
+        const nominal = (declared as { record?: true | TypeReference }).record;
+        const s = e.ops[i]?.type.type;
         if (
           typeof nominal === 'object' &&
           h.nominal !== nominal.name &&
@@ -965,7 +920,7 @@ export function functionLowering(
           )
         )
           decline(
-            ops[i] ?? e,
+            e.ops[i] ?? e,
             `an argument of ${e.operator} for the parameter ${names[i]} of type ${nominal.name} that is ${h.nominal === undefined ? 'a record of no named type' : `a record of the type ${h.nominal}`}`
           );
         return { lane: h.lane, shape: [], type: h };
@@ -991,11 +946,11 @@ export function functionLowering(
       // A list of lists of two lengths not stated, bound whole (`rowsAt()`):
       // the parameter is of the lane `rows`, of the lane of the elements of
       // the argument of the first call.
-      if (t?.lane === 'rows' && rowsAt(sig, i, ops[i]))
+      if (t?.lane === 'rows' && rowsAt(sig, i, e.ops[i]))
         return {
           lane: 'rows' as const,
           shape: [],
-          element: cx.rowsLaneOf(ops[i])!,
+          element: cx.rowsLaneOf(e.ops[i])!,
         };
       if (
         cx.tuples.get(v!) === 0 &&
@@ -1113,7 +1068,7 @@ export function functionLowering(
     if (variants === undefined) functions.set(key, (variants = new Map()));
     // While the body is lowered, the function is the one of the lane
     // (`call()`); after, the one of its kind of call, or of both kinds.
-    const lane = laneKey(sig, args, ops, e.operator);
+    const lane = laneKey(sig, args, e.ops, e.operator);
     variants.set(lane + '?', fn);
     // The function of this name being lowered, if any (another lane of
     // the same binding, `laneKey()`): restored after this one.
@@ -1135,7 +1090,7 @@ export function functionLowering(
     // readers lead back to the body) is `false`.
     const prior = cx.bodies.get(literal.ops[0]);
     let nan: boolean | undefined;
-    const reads: { nan: () => boolean; read: boolean; nothing?: boolean } = {
+    const reads = {
       nan: () => {
         if (nan === undefined) {
           nan = false;
@@ -1303,14 +1258,6 @@ export function functionLowering(
     // A body whose lowering did not rely on the kind of its call serves
     // both kinds.
     variants.delete(lane + '?');
-    // A result `nothing`: the body is the `Nothing` of a function of the
-    // host, which the IR function gives as NaN (`atRoot()` of `lower.ts`).
-    if (reads.nothing === true) fn.nothing = true;
-    else if (sig.r === 'nothing')
-      decline(
-        literal,
-        `the result of ${e.operator}, Nothing, that is not the value of a function of the host`
-      );
     for (const k of reads.read
       ? [lane + (reads.nan() ? 'n' : '')]
       : [lane, lane + 'n'])
@@ -1373,16 +1320,12 @@ export function functionLowering(
    *  the value of `e` reads a list of NaN as an absent list. A body that
    *  holds an `If` with no else has one IR function for such calls and one
    *  for the others, where the `If` declines (`conditional()` of
-   *  `lower.ts`). `read`: the value of `e` is read other than as the value
-   *  of the root (`atRoot()` of `lower.ts`); a function whose value is the
-   *  `Nothing` of a function of the host (`UserFunction.nothing`) then
-   *  declines. */
+   *  `lower.ts`). */
   const call = (
     e: Fn,
     binding?: { key: object; literal: Fn; implementation?: boolean },
     given?: V[],
-    nanForAbsent: () => boolean = () => false,
-    read: () => boolean = () => true
+    nanForAbsent: () => boolean = () => false
   ): number => {
     let fn = (binding ? undefined : pending.get(e.operator)) as UserFunction;
     // Without run-time lengths, the arguments of the first call are lowered
@@ -1391,9 +1334,6 @@ export function functionLowering(
     // call for a parameter that takes the lane of its argument
     // (`laneKey()`).
     let early = given;
-    // The operand of each parameter: with a rest parameter, the call `e`
-    // stands for the arguments that it takes (`records.rest()`).
-    let ops: readonly Expression[] = e.ops;
     if (binding !== undefined) {
       let sig = signatures.get(binding.key);
       if (sig === undefined) {
@@ -1404,15 +1344,6 @@ export function functionLowering(
           binding.implementation
         );
         signatures.set(binding.key, sig);
-      }
-      // A rest parameter: the arguments from its position are one record,
-      // the `Tuple` that the interpreter binds to it (CE-1652). A call that
-      // a list maps over (`given`) declines.
-      const rest = sig.rest;
-      if (rest !== undefined) {
-        if (given !== undefined || e.nops < rest)
-          decline(e, `${e.operator} with ${e.nops} arguments`);
-        ops = [...e.ops.slice(0, rest), e];
       }
       // A parameter declared as a point maps a list of points
       // (`pointsMapAt()`): its arguments are lowered first to tell.
@@ -1439,45 +1370,24 @@ export function functionLowering(
                 !cx.runtimeLengths &&
                 p.shape[0] === 'run-time')
           ))
-      ) {
-        // `Nothing` at a parameter of no stated type or of type `any`: a
-        // value of the type `nothing`, which the parameter holds
-        // (`held()`; CE-1652, step 4b).
-        const nothing = (op: Expression, i: number) => {
+      )
+        early = e.ops.map((op, i) => {
+          // `Nothing` at a parameter of no stated type or of type `any`: a
+          // value of the type `nothing`, which the parameter holds
+          // (`held()`; CE-1652, step 4b).
           const p = sig.params[i];
-          return (
-            javascript &&
+          return javascript &&
             isSymbol(op, 'Nothing') &&
             p !== undefined &&
             'record' in p &&
             p.record === true
-          );
-        };
-        early = (rest === undefined ? e.ops : e.ops.slice(0, rest)).map(
-          (op, i) =>
-            nothing(op, i)
-              ? b.op('nothing', [], { lane: 'nothing', shape: [] })
-              : argument(op, rowsAt(sig, i, op) ? 'rows' : sig.params[i]?.lane)
-        );
-        if (rest !== undefined)
-          early.push(
-            records.rest(
-              e,
-              e.ops
-                .slice(rest)
-                .map((op) =>
-                  nothing(op, rest)
-                    ? b.op('nothing', [], { lane: 'nothing', shape: [] })
-                    : argument(op, undefined)
-                )
-            )
-          );
-      }
+            ? b.op('nothing', [], { lane: 'nothing', shape: [] })
+            : argument(op, rowsAt(sig, i, op) ? 'rows' : p?.lane);
+        });
       // A list of points there: the call maps, one point per call, each
       // other argument as at any mapped call (`mapOver()`).
       const lowered = early;
       if (
-        rest === undefined &&
         given === undefined &&
         pointsAt &&
         lowered !== undefined &&
@@ -1521,10 +1431,9 @@ export function functionLowering(
       // maps the function over the elements, the parameter would hold the
       // record whole. A tuple binds whole.
       if (lowered !== undefined)
-        ops.forEach((op, i) => {
+        e.ops.forEach((op, i) => {
           const s = op.type.type;
           if (
-            i !== rest &&
             type(lowered[i]).lane === 'record' &&
             sig.mapsAt(i, false) &&
             (s === 'list' || (typeof s === 'object' && s.kind === 'list'))
@@ -1547,40 +1456,26 @@ export function functionLowering(
         sig,
         early
       );
-      const lane = laneKey(sig, early, ops, e.operator);
+      const lane = laneKey(sig, early, e.ops, e.operator);
       const both = variants?.get(lane);
       fn = variants?.get(lane + '?') as UserFunction;
       if (fn === undefined)
         if (variants?.get(lane + 'n') === both)
           fn =
             both ??
-            define(
-              e,
-              binding.key,
-              binding.literal,
-              sig,
-              early,
-              nanForAbsent,
-              ops
-            );
+            define(e, binding.key, binding.literal, sig, early, nanForAbsent);
         else {
           const nan = nanForAbsent();
           fn =
             variants?.get(lane + (nan ? 'n' : '')) ??
-            define(e, binding.key, binding.literal, sig, early, () => nan, ops);
+            define(e, binding.key, binding.literal, sig, early, () => nan);
         }
     }
     if (lowering.has(fn)) {
       recordCycle(e, [fn]);
       fn.recursive.push([e, nanForAbsent]);
     }
-    if (fn.nothing === true && read())
-      decline(
-        e,
-        `a call of ${e.operator}, whose value Nothing (of a function of the host) is read`,
-        POSSIBLE_NOTHING
-      );
-    if (ops.length !== fn.params.length)
+    if (e.nops !== fn.params.length)
       decline(e, `${e.operator} with ${e.nops} arguments`);
     // A call back to a lane of the function that another lane of it hides
     // (a body of the complex lane that calls the real one, still being
@@ -1594,7 +1489,7 @@ export function functionLowering(
     // scalar parameter, which the call maps over (`mapOver()`).
     const values: V[] = [];
     let mapped = false;
-    const args = ops.flatMap((op, i) => {
+    const args = e.ops.flatMap((op, i) => {
       const p = fn.params[i];
       values.push(early?.[i] ?? argument(op, p?.lane));
       // A list (not a point) that the parameter would take whole, where
@@ -1724,7 +1619,7 @@ export function functionLowering(
       // slot where the call maps: the interpreter zips it with the list
       // when it is a list and binds it whole otherwise (R3), as beside a
       // list of points above.
-      ops.forEach((op, i) => {
+      e.ops.forEach((op, i) => {
         if (
           fn.params[i].shape.length === 0 &&
           fn.mapsAt(i, false) &&

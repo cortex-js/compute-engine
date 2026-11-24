@@ -406,12 +406,7 @@ describe('a record declines', () => {
   });
 
   test('Equal of two records', () => {
-    // `g(t)` is `[t, "a"]`, a record of no names that is a `List`.
-    expectDeclines(
-      ce,
-      ['Equal', ['g', 't'], ['g', 't']],
-      /Equal of list\(real, string\)/
-    );
+    expectDeclines(ce, ['Equal', ['g', 't'], ['g', 't']], /Equal of record/);
   });
 
   test('on GLSL and interval-js', () => {

@@ -631,59 +631,9 @@ export function runtimeOf(
 }
 
 /**
- * The function that gives the engine's value of a value of the IR type `t`
- * at run time, with the tuple mark `mark` (CE-1652): a number, a boolean, a
- * string, `Nothing` (`null` in the code), a list or a tuple (an array, a
- * `Tuple` on the axis of the mark, a `List` on the others), a record of a
- * named tuple type (the application of its constructor, the engine's value
- * of the type), and a record of no names (a `List` when `IRType.list`,
- * else a `Tuple`). Built once from the IR type, when the code is made.
- */
-function engineValue(
-  ce: ComputeEngine,
-  t: IRType,
-  mark?: number
-): (x: unknown) => Expression {
-  if (t.lane === 'record') {
-    const fields = (t.fields ?? []).map((f, k) =>
-      engineValue(ce, f, t.marks?.[k])
-    );
-    const head = t.nominal ?? (t.list ? 'List' : 'Tuple');
-    return (x) =>
-      ce.function(
-        head,
-        fields.map((f, k) => f((x as unknown[])[k]))
-      );
-  }
-  if (t.shape.length > 0) {
-    const element = engineValue(
-      ce,
-      { lane: t.lane, shape: t.shape.slice(1) },
-      mark === undefined || mark === 0 ? undefined : mark - 1
-    );
-    const head = mark === 0 ? 'Tuple' : 'List';
-    return (x) =>
-      ce.function(head, Array.from(x as ArrayLike<unknown>, element));
-  }
-  switch (t.lane) {
-    case 'nothing':
-      return () => ce.symbol('Nothing');
-    case 'boolean':
-      return (x) => (x ? ce.True : ce.False);
-    case 'string':
-      return (x) => ce.string(x as string);
-    case 'real':
-    case 'integer':
-      return (x) => ce.number(x as number);
-  }
-  throw new Error(`slice: no engine value of ${t.lane} for the host`);
-}
-
-/**
  * The function that the code calls for a call of the function `h` of the
  * host (`hostCall()` of `lower.ts`): it boxes each argument (a number, a
- * boolean, a string, `Nothing` or a record, `engineValue()`),
- * evaluates the call in the engine, as the
+ * boolean or a string), evaluates the call in the engine, as the
  * interpreter evaluates it, and gives its value on the lane of `h`: a
  * machine number (NaN for a value that is not a real number), a boolean
  * (a `TypeError` for another value), or NaN for `nothing`, whose value the
@@ -698,9 +648,16 @@ function hostCaller(
   const call = h.call as unknown as {
     _withSameBinding(ops: ReadonlyArray<Expression>): Expression;
   };
-  const boxes = h.types.map((t) => engineValue(ce, t));
   return (...args) => {
-    const ops = args.map((x, k) => boxes[k](x));
+    const ops = args.map((x, k) =>
+      h.args[k] === 'boolean'
+        ? x
+          ? ce.True
+          : ce.False
+        : h.args[k] === 'string'
+          ? ce.string(x as string)
+          : ce.number(x as number)
+    );
     const value = call._withSameBinding(ops).evaluate();
     if (h.result === 'nothing') return NaN;
     if (h.result === 'boolean') {
