@@ -37,10 +37,13 @@ describe('CE-1597 \\psi^{(m)}(z) parses as PolyGamma', () => {
       'psi',
       ['Delimiter', 1],
     ]);
+    // With two arguments, the Lagrange derivative of a function that is not
+    // declared, as `\psi'(x, y)` is.
     expect(ce.parse('\\psi^{(1)}(x, y)', { form: 'raw' }).json).toEqual([
-      'InvisibleOperator',
-      ['Power', 'psi', ['Delimiter', 1]],
-      ['Delimiter', ['Sequence', 'x', 'y'], "'(,)'"],
+      'Apply',
+      ['Derivative', 'psi', 1],
+      'x',
+      'y',
     ]);
   });
 

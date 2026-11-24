@@ -4296,8 +4296,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'postfix',
     parse: (parser: Parser, lhs, until) => {
       const sym = symbol(lhs);
-      if (!sym || !parser.resolveSymbol(sym)?.type.matches('function'))
-        return null;
+      if (!sym) return null;
+      // A symbol that is not declared, or whose type is unknown, is read as
+      // a function only when an argument list follows, as `g'(t)` is
+      // (`parsePrime`): `f^{(4)}(x)` is `Apply(Derivative(f, 4), x)`, the
+      // text that the serializer writes for it. Without arguments, `f^{(4)}`
+      // stays a power of `f`.
+      const type = parser.resolveSymbol(sym)?.type;
+      const isFunction = type?.matches('function') === true;
+      if (!isFunction && type !== undefined && !type.isUnknown) return null;
 
       parser.addBoundary([')']);
       const expr = parser.parseExpression(until);
@@ -4318,7 +4325,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       else if (operator(expr) === 'Tuple')
         orders = operands(expr) as MathJsonExpression[];
 
-      return ['Derivative', lhs, ...orders] as MathJsonExpression;
+      const derivative = ['Derivative', lhs, ...orders] as MathJsonExpression;
+      if (isFunction) return derivative;
+
+      parser.skipSpace();
+      const args = parser.parseArguments('enclosure');
+      if (!args || args.length === 0) return null;
+      return ['Apply', derivative, ...args] as MathJsonExpression;
     },
   },
 

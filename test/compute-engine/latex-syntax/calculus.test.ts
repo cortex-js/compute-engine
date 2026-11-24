@@ -1696,6 +1696,37 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
       expect(ce.parse(ce.box(j).latex).json).toEqual(j);
   });
 
+  test('an applied Derivative of a function that is not declared round-trips', () => {
+    // `f^{(4)}(x)` read as `x f^4` when `f` was not declared a function.
+    const ce2 = new ComputeEngine();
+    const e = ce2.parse("f''''(x)");
+    expect(e.latex).toBe('f^{(4)}(x)');
+    expect(ce2.parse(e.latex).json).toEqual(e.json);
+    for (const j of [
+      ['Apply', ['Derivative', 'f', 0], 'x'],
+      ['Apply', ['Derivative', 'f', 4], 'x'],
+      ['Apply', ['Derivative', 'f', 'k'], 'x'],
+      ['Apply', ['Derivative', 'f', 1.5], 'x'],
+    ] as const) {
+      const ce3 = new ComputeEngine();
+      expect(ce3.parse(ce3.box(j).latex).json).toEqual(j);
+    }
+    expect(new ComputeEngine().parse('f^{(1,0)}(x,y)').json).toEqual([
+      'Apply',
+      ['Derivative', 'f', 1, 0],
+      'x',
+      'y',
+    ]);
+    // Without arguments, or with a variable that is declared, it is a power.
+    expect(ce2.parse('g^{(4)}').json).toEqual(['Power', 'g', 4]);
+    ce2.declare('y', 'real');
+    expect(ce2.parse('y^{(2)}(x)').json).toEqual([
+      'Multiply',
+      'x',
+      ['Power', 'y', 2],
+    ]);
+  });
+
   test('a negative Derivative order is a function call that round-trips', () => {
     // `f^{(-1)}` would read as a power of `f` when `f` is not declared.
     const ce2 = new ComputeEngine();

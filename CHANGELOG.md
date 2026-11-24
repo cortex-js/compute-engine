@@ -2,6 +2,14 @@
 
 ### Resolved Issues
 
+- **The LaTeX of an applied derivative of order 4 or more of a function that
+  is not declared reads back as a derivative** (CE-1350). With `f` not
+  declared, `ce.parse("f''''(x)").latex` is `f^{(4)}(x)`, which read back as
+  `x f^4`. `f^{(n)}(x)` now reads as `["Apply", ["Derivative", "f", n], "x"]`
+  when `f` is not declared or its type is unknown, as `f'(x)` already does,
+  for any order `n`, a symbolic one included. Without an argument list, or
+  with `f` declared a variable, `f^{(4)}` is still a power of `f`.
+
 - **The tangent, the secant and their cofunctions and hyperbolic forms of a
   complex number with a large part give a number** (CE-1211).
   `Tanh(Complex(1000, 0.5)).N()` and `Tan(Complex(0.5, 1000)).N()` gave
