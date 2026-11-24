@@ -379,6 +379,15 @@
   name, and when each element before the failed one is a literal, a list or
   an arithmetic call: a variable or another call can give a `Sequence`,
   which moves the elements, and the location is then as before.
+- **In Epsil, more errors in an element of a list are underlined at that
+  element** (CE-1719). With `function g(x) { Ln(x) + 1 }` and `let y = 5`,
+  each of `let v = [y, z + 1, g("a")]`, `let v = [y + 1, ...w, g("a")]`,
+  `m[1] = [y + 1, g("a")]` and `let v = [y + 1, g("a")] + 1` underlined `y`
+  or `z`, and now underlines `g("a")`. A variable before the element counts
+  for the number of values it holds, a spread for the elements of its list,
+  and a call for the values its type allows. The list can be the value
+  stored by an assignment to an element, or the operand of `+`, `-`, `*` or
+  `/` with numbers.
 
 ### Improvements
 

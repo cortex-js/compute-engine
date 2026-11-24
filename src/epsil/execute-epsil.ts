@@ -39,6 +39,7 @@ import {
 import {
   isDictionary,
   isFunction,
+  isNumber,
   isString,
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
@@ -847,7 +848,7 @@ function* executeEpsilSteps(
           stmt,
           range,
           boxedStmt,
-          heldElement(value, heldErrors[0], stmt)
+          heldElement(ce, value, heldErrors[0], stmt, boxedStmt)
         ).range;
     });
     // A runtime problem in a NON-final statement would otherwise vanish —
@@ -1389,7 +1390,10 @@ export function errorFrameChain(
  * `element` is the written element of a list or a tuple of the statement
  * that holds the error in the value of the statement ({@link heldElement}).
  * When it has a source range, the error is located inside it, as in a
- * statement whose value is the element.
+ * statement whose value is the element. The last frames of the error that
+ * the element-wise calls around the element recorded
+ * (`HeldElement.elementwise`) are not used there: they name calls outside the
+ * element.
  */
 function narrowErrorRange(
   ce: ComputeEngine,
@@ -1397,13 +1401,19 @@ function narrowErrorRange(
   stmt: MathJsonExpression,
   fallback: [number, number],
   boxedStmt?: Expression,
-  element?: MathJsonExpression
+  held?: HeldElement
 ): { range: [number, number]; frames: (ErrorFrameRef | null)[] } {
+  let frames = traceFrames(error);
   const elementRange =
-    element === undefined ? undefined : sourceOffsetsOf(element);
-  if (element !== undefined && elementRange !== undefined) {
-    stmt = element;
+    held === undefined ? undefined : sourceOffsetsOf(held.element);
+  if (held !== undefined && elementRange !== undefined) {
+    stmt = held.element;
     fallback = elementRange;
+    for (let k = 0; k < held.elementwise; k++) {
+      const last = frames[frames.length - 1];
+      if (last === undefined || !ELEMENTWISE_CALLS.has(last.name)) break;
+      frames = frames.slice(0, -1);
+    }
   }
   // The engine resolves the callee's declared parameter names so a NAMED
   // call's frame index (which counts declaration slots after the seam's
@@ -1411,7 +1421,7 @@ function narrowErrorRange(
   // (error-location.ts). The seam's own normalization failures were never
   // permuted; their index counts written positions and is used directly.
   return locateError(
-    traceFrames(error),
+    frames,
     stmt,
     fallback,
     calleeSlotNamesResolver(ce),
@@ -1435,56 +1445,284 @@ function narrowErrorRange(
  * selects the `y` of `y + 1`. Inside the element, it matches no call.
  *
  * The written value of the statement is `stmt` itself, the value of a `let`
- * of a name, or the right side of an assignment to a name. A literal is read
- * only when the node of `value` at its place has the same operator and the
- * same number of operands. A `Sequence` is spliced into a list, also when a
- * variable or a call gives it: with `s = Sequence(1, 2)` and
- * `t = Sequence()`, the value of `[s, g("a"), t]` is `[1, 2, Error]`, and its
- * position 3 is not the written `t`. So the element at position `i` of
- * `value` is taken as the written element `i` only when each written
- * element before it surely gives one value ({@link isSingleValued}). The
- * elements after it do not move it. The assignment to an element
- * (`m[1] = [a, b]`) is not read: its value can be the whole collection `m`.
+ * of a name, or the right side of an assignment to a name. In it, the walk
+ * reads three forms:
+ *
+ * - A list or a tuple literal, when the node of `value` at its place has the
+ *   same operator. The positions of the value are mapped to the written
+ *   elements by {@link heldIndex}.
+ * - The assignment to an element, `m[k] = x`, which is
+ *   `m = ReplaceAt(m, k, x)`: when `k` is an integer ({@link numberOperand})
+ *   and the node is a list, its position `k` is the value of `x`, which is
+ *   the element, when `x` surely gives one value ({@link valueCount}).
+ * - An element-wise arithmetic call with one list literal operand and
+ *   numbers as its other operands ({@link numberOperand}: `[a, b] + 1`,
+ *   `2 * [a, b]`, `[a, b] / n`): the
+ *   value is a list whose element `i` is made from the element `i` of the
+ *   list literal, so the walk continues in the literal.
+ *
  * The first element that holds `error` is selected, and the walk continues
- * in it while it is also a written literal.
+ * in it while it is also one of these forms.
+ *
+ * `boxedStmt` is the canonical form of `stmt`, which gives the static type of
+ * a call that is an element ({@link valueCount}).
  */
 function heldElement(
+  ce: ComputeEngine,
   value: Expression,
   error: Expression,
-  stmt: MathJsonExpression
-): MathJsonExpression | undefined {
+  stmt: MathJsonExpression,
+  boxedStmt: Expression | undefined
+): HeldElement | undefined {
+  const holds = (op: Expression) => op === error || op.errors.includes(error);
+  // The value of a variable is read after the statement ran. The name that
+  // the statement assigns had another value while it ran: in
+  // `fs = [...fs, g("a")]`, the spread read the `fs` before the assignment.
+  const head = operator(stmt);
+  const assigned =
+    head === 'Assign' || head === 'Declare' ? symbol(operand(stmt, 1)) : null;
+  const read: ElementReader = {
+    value: (name) => (name === assigned ? undefined : ce._getSymbolValue(name)),
+    type: canonicalTypes(boxedStmt),
+  };
   let written: MathJsonExpression | undefined = writtenStatementValue(stmt);
   let node = value;
-  let element: MathJsonExpression | undefined;
+  let result: HeldElement | undefined;
+  let elementwise = 0;
   while (written !== undefined && node !== error) {
     const head = operator(written);
+    const ops = operands(written);
+    if (head === 'ReplaceAt') {
+      const k = ops.length === 3 ? numberOperand(ops[1], read) : null;
+      if (k === null || !Number.isInteger(k) || !isFunction(node, 'List'))
+        break;
+      // `ReplaceAt` splices a `Sequence`: position `k` is the first value of
+      // `x` only when `x` gives one value or more, and position `-k` counts
+      // from the end only when it gives exactly one.
+      const [lo, hi] = valueCount(ops[2], read);
+      if (k > 0 ? lo < 1 : lo !== 1 || hi !== 1) break;
+      const i = k > 0 ? k - 1 : node.nops + k;
+      if (k === 0 || i < 0 || i >= node.nops || !holds(node.ops[i])) break;
+      result = { element: ops[2], elementwise };
+      written = ops[2];
+      node = node.ops[i];
+      continue;
+    }
+    if (ELEMENTWISE_CALLS.has(head)) {
+      const lists = ops.filter((op) => operator(op) === 'List');
+      if (
+        lists.length !== 1 ||
+        !isFunction(node, 'List') ||
+        !ops.every((op) => op === lists[0] || numberOperand(op, read) !== null)
+      )
+        break;
+      written = lists[0];
+      elementwise += 1;
+      continue;
+    }
     if (head !== 'List' && head !== 'Tuple') break;
-    const elements = operands(written);
-    if (!isFunction(node, head) || node.nops !== elements.length) break;
-    const index = node.ops.findIndex(
-      (op) => op === error || op.errors.includes(error)
-    );
-    if (index < 0 || !elements.slice(0, index).every(isSingleValued)) break;
-    element = elements[index];
-    written = element;
-    node = node.ops[index];
+    if (!isFunction(node, head)) break;
+    const held = heldIndex(ops, node.ops, holds, read);
+    if (held === undefined) break;
+    result = { element: ops[held.index], elementwise };
+    written = ops[held.index];
+    node = node.ops[held.position];
   }
-  return element;
+  return result;
 }
 
 /**
- * Whether the written element `x` (raw MathJSON) of a list gives exactly one
- * element of the evaluated list: a number or a string, a list or a tuple
- * literal, or a call of an arithmetic operator or of an elementary function
- * (`SINGLE_VALUED_CALLS`), which gives one value also when an operand is a
- * `Sequence`. A variable, a spread, or another call can give a `Sequence`,
- * which the list splices ({@link heldElement}).
+ * The real part of the written operand `x` (raw MathJSON) when it is a number
+ * literal or a variable whose value is a number, and `null` otherwise. Such
+ * an operand is not a list, and holds no error.
  */
-function isSingleValued(x: MathJsonExpression): boolean {
-  const head = operator(x);
-  if (head === '') return symbol(x) === null;
-  return head === 'List' || head === 'Tuple' || SINGLE_VALUED_CALLS.has(head);
+function numberOperand(
+  x: MathJsonExpression,
+  read: ElementReader
+): number | null {
+  const literal = machineValue(x);
+  if (literal !== null) return literal;
+  const name = symbol(x);
+  const value = name === null ? undefined : read.value(name);
+  return isNumber(value) ? value.re : null;
 }
+
+/**
+ * The element that {@link heldElement} selects, with the number of
+ * element-wise calls (`[…] + 1`) around it: each one records one frame, the
+ * last frames of the error.
+ */
+type HeldElement = { element: MathJsonExpression; elementwise: number };
+
+/**
+ * What {@link heldElement} reads about the written elements of a statement:
+ * the value of a variable after the statement ran (`undefined` when it is
+ * not known), and the static type of a call (see {@link canonicalTypes}).
+ */
+type ElementReader = {
+  value: (name: string) => Expression | undefined;
+  type: (x: MathJsonExpression) => Expression['type'] | undefined;
+};
+
+/**
+ * The static type of each call of the canonical statement `boxedStmt`, by
+ * the source range of the call, or `undefined` for a call that is not there.
+ * The canonical nodes keep the source range of the written nodes.
+ */
+function canonicalTypes(
+  boxedStmt: Expression | undefined
+): (x: MathJsonExpression) => Expression['type'] | undefined {
+  let byRange: Map<string, Expression['type']> | undefined;
+  return (x) => {
+    const range = sourceOffsetsOf(x);
+    if (range === undefined || boxedStmt === undefined) return undefined;
+    if (byRange === undefined) {
+      byRange = new Map();
+      const pending: Expression[] = [boxedStmt];
+      while (pending.length > 0) {
+        const node = pending.pop()!;
+        const offsets = node.sourceOffsets;
+        if (offsets !== undefined && isFunction(node)) {
+          const key = `${offsets[0]}:${offsets[1]}`;
+          if (!byRange.has(key)) byRange.set(key, node.type);
+        }
+        if (isDictionary(node)) pending.push(...node.values);
+        else if (isFunction(node)) pending.push(...node.ops);
+      }
+    }
+    return byRange.get(`${range[0]}:${range[1]}`);
+  };
+}
+
+/**
+ * The written element of `elements` (raw MathJSON) that gives the first
+ * position of the evaluated `values` that `holds`, with that position, or
+ * `undefined` when it cannot be known.
+ *
+ * A `Sequence` is spliced into a list, also when a variable, a spread or a
+ * call gives it: with `s = Sequence(1, 2)` and `t = Sequence()`, the value
+ * of `[s, g("a"), t]` is `[1, 2, Error]`. So the bounds of the count of
+ * values of each written element are read ({@link valueCount}).
+ *
+ * From the start, the first position of an element is known while the
+ * count of each element before it is known. The element surely gives the
+ * positions from there up to its least count: its lower bound, or the
+ * length of `values` less its first position and the upper bounds of the
+ * elements after it. The same holds from the end. In
+ * `[y + 1, g("a"), f(2)]`, the count of `g("a")` is not known, and that of
+ * `f(2)` is 0 or 1, so `g("a")` surely gives the second of three values.
+ */
+function heldIndex(
+  elements: readonly MathJsonExpression[],
+  values: readonly Expression[],
+  holds: (value: Expression) => boolean,
+  read: ElementReader
+): { index: number; position: number } | undefined {
+  const bounds = elements.map((x) => valueCount(x, read));
+  const n = values.length;
+  // The bounds do not agree with the value: a variable changed while the
+  // statement ran.
+  const least = bounds.reduce((sum, [lo]) => sum + lo, 0);
+  const most = bounds.reduce((sum, [, hi]) => sum + hi, 0);
+  if (least > n || most < n) return undefined;
+  // The sum of the upper bounds of the elements before `j` (`mostBefore[j]`)
+  // and after `j` (`mostAfter[j]`). An upper bound can be `Infinity`.
+  const k = bounds.length;
+  const mostBefore = new Array<number>(k).fill(0);
+  const mostAfter = new Array<number>(k).fill(0);
+  for (let j = 1; j < k; j++) {
+    mostBefore[j] = mostBefore[j - 1] + bounds[j - 1][1];
+    mostAfter[k - 1 - j] = mostAfter[k - j] + bounds[k - j][1];
+  }
+  const heldIn = (start: number, count: number): number | undefined => {
+    for (let p = Math.max(start, 0); p < Math.min(start + count, n); p++)
+      if (holds(values[p])) return p;
+    return undefined;
+  };
+  let start = 0;
+  for (let j = 0; j < elements.length; j++) {
+    const [lo, hi] = bounds[j];
+    const count = Math.max(lo, n - start - mostAfter[j]);
+    const position = heldIn(start, count);
+    if (position !== undefined) return { index: j, position };
+    if (lo !== hi) break;
+    start += lo;
+  }
+  let end = n;
+  for (let j = elements.length - 1; j >= 0; j--) {
+    const [lo, hi] = bounds[j];
+    const count = Math.max(lo, end - mostBefore[j]);
+    const position = heldIn(end - count, count);
+    if (position !== undefined) return { index: j, position };
+    if (lo !== hi) break;
+    end -= lo;
+  }
+  return undefined;
+}
+
+/**
+ * The least and the greatest number of values that the written element `x`
+ * (raw MathJSON) of a list gives to the evaluated list: `[0, Infinity]` when
+ * nothing is known.
+ *
+ * A number or a string, a list or a tuple literal, or a call of an
+ * arithmetic operator or of an elementary function (`SINGLE_VALUED_CALLS`,
+ * which gives one value also when an operand is a `Sequence`) gives one
+ * value. A variable gives the number of values of its `Sequence` value, and
+ * one value otherwise; a spread of a variable gives the number of elements
+ * of its list value. The value is read in the current scope, which is the
+ * scope of the statement when it is reported, after the statement ran
+ * (`ElementReader.value`). A call in the statement that assigns a
+ * `Sequence` of another length to such a variable makes the count wrong;
+ * no program is known to do this.
+ *
+ * Another call gives at most one value when its static type (`read.type`)
+ * is a number, a string, a boolean or a list: a type that admits a tuple
+ * (`Sequence(1, 2)`) does not match. It can still give none: `Sequence()`
+ * has the type `nothing`, which is the bottom type, so a function that gives
+ * an empty `Sequence` on one branch and a number on the other has the type
+ * of the number. Its count is 0 or 1. Nothing is known of the count of a
+ * call of another type.
+ */
+function valueCount(
+  x: MathJsonExpression,
+  read: ElementReader
+): [lo: number, hi: number] {
+  const unknown: [number, number] = [0, Infinity];
+  const head = operator(x);
+  if (head === '') {
+    const name = symbol(x);
+    if (name === null) return [1, 1];
+    const value = read.value(name);
+    if (value === undefined) return unknown;
+    const count = isFunction(value, 'Sequence') ? value.nops : 1;
+    return [count, count];
+  }
+  if (head === 'Spread') {
+    const name = symbol(operand(x, 1));
+    const value = name === null ? undefined : read.value(name);
+    return isFunction(value, 'List') ? [value.nops, value.nops] : unknown;
+  }
+  if (head === 'List' || head === 'Tuple' || SINGLE_VALUED_CALLS.has(head))
+    return [1, 1];
+  return read.type(x)?.matches('number | string | boolean | list')
+    ? [0, 1]
+    : unknown;
+}
+
+/**
+ * The calls that apply to each element of a list operand, when their other
+ * operands are numbers: `[a, b] + 1` is `[a + 1, b + 1]`. A matrix power or
+ * the norm of a vector is not element-wise, so `Power` and `Abs` are not
+ * here.
+ */
+const ELEMENTWISE_CALLS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+]);
 
 const SINGLE_VALUED_CALLS = new Set([
   'Add',
@@ -1625,7 +1863,9 @@ function errorValueDiagnostic(
     stmt,
     fallback,
     boxedStmt,
-    value === undefined ? undefined : heldElement(value, error, stmt)
+    value === undefined
+      ? undefined
+      : heldElement(ce, value, error, stmt, boxedStmt)
   );
   const range = located.range;
   const frames = errorFrameChain(error.json, located.frames);
