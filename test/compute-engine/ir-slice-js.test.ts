@@ -136,13 +136,10 @@ describe('IR slice: the real functions at edge inputs', () => {
     'Arctan', 'Arcsin', 'Arccos', 'Arccot', 'Arcsec', 'Arccsc', 'Haversine', 'Coth',
     'Arsinh', 'Arcosh', 'Artanh', 'Arcoth', 'Arsech', 'Arcsch', 'Sign', 'Truncate',
     'Fract', 'Log', 'Sinh', 'Cosh', 'Tanh', 'Sec', 'Csc', 'Sech', 'Csch'];
-  // Values of the interpreter that are not the function's: CE-1257
-  // (`Zeta(s)` is -∞ for a tiny negative s at the default precision);
-  // `Haversine(x)` is ½(1 − cos x), 0 for |x| < 1e-8 (the compiled
-  // sin²(x/2) is right).
+  // Values of the interpreter that are not the function's: `Haversine(x)` is
+  // ½(1 − cos x), 0 for |x| < 1e-8 (the compiled sin²(x/2) is right).
   const known = (head: string, a: number) =>
-    (head === 'Zeta' && a < 0 && a > -1e-20) ||
-    (head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0);
+    head === 'Haversine' && Math.abs(a) < 1e-8 && a !== 0;
   // Relative 1e-12, with an absolute floor of 1e-300 only (the oracle's
   // floor of 1e-12 would hide a wrong tiny value, `Haversine(1e-20)`).
   const close = (v: unknown, expected: ReturnType<typeof interpret>) =>
