@@ -6,7 +6,12 @@ import type {
 
 import type { Type } from '../../common/type/types.js';
 
-import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFreeCallHead,
+  isFunction,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import { functionLiteralDefiningScope } from '../function-utils.js';
 import { isValueDef } from '../boxed-expression/definition-guards.js';
 import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
@@ -389,6 +394,15 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   // `w` does not hold the element, and the call would stay unevaluated. The
   // general path binds the parameter to the element and applies it.
   if (names.includes(body.operator)) return undefined;
+
+  // A body whose head had no definition when it was boxed (a free call head,
+  // `isFreeCallHead()`) resolves its head when the call is evaluated. The
+  // lowered path rebuilds the call with `ce._fn(op, args)`, which does not
+  // record the home scope of the head, so the call was not canonical: in
+  // `Length(Filter(Map(k ↦ g(k), 1..3), k ↦ k < 2.5))` with `g` not
+  // declared, the comparison of `g(1)` threw "Not canonical" (CE-1753). The
+  // general path keeps the node.
+  if (isFreeCallHead(body)) return undefined;
 
   // Scope safety. The general path runs the body inside a FRESH function
   // frame; the lowered path evaluates the application in the AMBIENT scope. A

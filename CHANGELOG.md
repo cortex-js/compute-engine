@@ -31,6 +31,14 @@
 
 ### Resolved Issues
 
+- **A `Filter` over a `Map` that calls a function with no definition no longer
+  throws "Not canonical"** (CE-1753). With `g` not declared,
+  `Length(Filter(Map(k ↦ g(k), 1..3), k ↦ k < 2.5))` threw "Not canonical",
+  because the elements `g(1)`, `g(2)`, `g(3)` of the `Map` were not canonical.
+  They are now canonical, and the `Filter` reports its predicate as it does for
+  the list `[g(1), g(2), g(3)]`: "Filter predicate must return True or False".
+  When `g` is defined, the length is 2.
+
 - **A fold of `LCM` or `GCD` at machine precision gives the right value**
   (CE-1774). At machine precision, or at precision 15,
   `N(Reduce(1..100, (u, v) => lcm(u, v), 1))` gave `3.12e101`; it now gives
