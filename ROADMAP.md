@@ -735,6 +735,31 @@ needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
 no site needs only a counting loop. The 7 gather sites need a gather/reduce
 fusion, which is a new lowering.
 
+### CE-1806. Compiled JavaScript still builds the array of some `Map` and `Filter` views
+
+**Status:** ready; performance, M. Approved 2026-11-25. Related: CE-253.
+**Witness:** plausible; `sum(map(f, 1..n))` with `n: integer`, and `first(map(x => x * 2, 1..30))`.
+
+The passes `forward` and `filters` of `compilation/ir/passes.ts` read a `Map`
+or a `Filter` with a pure callback where it is, with no array
+(`docs/COMPILATION-MODEL.md`, "Where a view is a list"). These views keep the
+array:
+
+- **CE-1806.4** A source whose length is a count known at run time
+  (`map(f, 1..n)`, `Repeat(x, n)`). A build refuses 2^32 elements and a loop
+  accepts 2^32 passes, so the passes take only a length known to be below 2^32.
+  A guard operation that refuses the same count gives these views back; it
+  adds an operation to `operators.ts` and `print-js.ts`.
+- **CE-1806.5** A read of one position of a `Map` of integers or booleans
+  (`first(map(x => x * 2, 1..30))`): the IR has no value of those lanes for an
+  index out of range.
+- **CE-1806.6** A read of one position of a `Map` whose callback has an effect:
+  `First(Map(x ↦ hostSq(x t), [1, 2, 3]))` calls `hostSq` three times, and the
+  interpreter once (a known limitation). A pass cannot remove an effectful
+  instruction (the effect-trace check of `runPasses`), so this is a change of
+  the lowering of `First` and `At` of a `Map`, with the seeded-draw warning
+  and the order of host calls to settle.
+
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
 **Status:** waits for user (design); capability.
