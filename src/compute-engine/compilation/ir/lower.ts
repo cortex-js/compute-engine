@@ -2031,7 +2031,10 @@ function lowerOnce(
     if (isString(e)) return b.constant(e.string, 'string');
     if (isDictionary(e)) return records.dictionary(e);
     if (!isFunction(e))
-      decline(e, 'not a number, a symbol, a string, a dictionary or a function');
+      decline(
+        e,
+        'not a number, a symbol, a string, a dictionary or a function'
+      );
     // An invalid sub-expression (`Sin(Tuple(w))` of a vector `w`): the
     // interpreter has no value for it.
     if (e.operator !== 'Error' && e.type.type === 'error')

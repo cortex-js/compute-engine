@@ -986,11 +986,12 @@ export type ParseLatexOptions = NumberFormat & {
   /**
    * Internal hook invoked (when `diagnostics` is enabled) with each bound-
    * variable name a binder parselet deliberately processed via
-   * `_pruneUndeclared()`. `ce.parse()` uses this to exempt those names from its
-   * bound-only post-check assertion: a surviving `undeclared-symbol` for a
-   * processed name is a deliberately-kept *free* occurrence (e.g. the lower
-   * bound in `\int_x^1 x\,dx`), not a wiring gap. Not part of the public
-   * parsing surface.
+   * `_pruneUndeclared()`, or whose diagnostics it kept because a domain reads
+   * the name (`\{S \mid S \in S(t)\}`). `ce.parse()` uses this to exempt those
+   * names from its bound-only post-check assertion: a surviving
+   * `undeclared-symbol` for a processed name is a deliberately-kept *free*
+   * occurrence (e.g. the lower bound in `\int_x^1 x\,dx`), not a wiring gap.
+   * Not part of the public parsing surface.
    *
    * @internal
    */

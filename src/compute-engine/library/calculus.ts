@@ -9922,7 +9922,10 @@ volumes
         // (`literalWithFormulaValues`). A lone symbol that holds a formula is
         // read as its value: `NIntegrate(G, 0, 1)` is `1 − cos(1)` too
         // (`loneFormulaLiteral`).
-        f = literalWithFormulaValues(engine, loneFormulaLiteral(engine, f) ?? f);
+        f = literalWithFormulaValues(
+          engine,
+          loneFormulaLiteral(engine, f) ?? f
+        );
 
         // Uses compiled JS functions (machine arithmetic). The bounds are
         // evaluated once: their values are passed on to the exact route below
@@ -10332,7 +10335,10 @@ volumes
         // A lone symbol that holds a formula is read as its value, with the
         // variable chosen from the symbols of the value: `Limit(G, 0)` is `0`
         // too (`loneFormulaLiteral`).
-        f = literalWithFormulaValues(engine, loneFormulaLiteral(engine, f) ?? f);
+        f = literalWithFormulaValues(
+          engine,
+          loneFormulaLiteral(engine, f) ?? f
+        );
 
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The

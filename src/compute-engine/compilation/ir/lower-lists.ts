@@ -1498,7 +1498,8 @@ export function listLowering(cx: Lowering) {
         }),
       e
     );
-    if (b.changes() > effects) decline(e, 'Sort by a comparator with an effect');
+    if (b.changes() > effects)
+      decline(e, 'Sort by a comparator with an effect');
     return reindexed(e, s, s.length, at(order));
   };
 
@@ -2447,7 +2448,8 @@ export function listLowering(cx: Lowering) {
       init: start(),
       body: region,
     });
-    if (b.changes() > effects) decline(e, 'Reduce by a function with an effect');
+    if (b.changes() > effects)
+      decline(e, 'Reduce by a function with an effect');
     return outs[outs.length - 1];
   };
 

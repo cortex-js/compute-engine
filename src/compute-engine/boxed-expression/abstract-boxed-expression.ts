@@ -2569,8 +2569,7 @@ function addBlockLocals(
         getReferences(target, reads, readFns, memo, mode);
       // The operands after the target, without the type of a `Declare`
       // (`declarationOperands()`).
-      const values =
-        declarationOperands(statement) ?? statement.ops.slice(1);
+      const values = declarationOperands(statement) ?? statement.ops.slice(1);
       for (const value of values) {
         if (!isFunction(value, 'Function')) {
           getReferences(value, reads, readFns, memo, mode);

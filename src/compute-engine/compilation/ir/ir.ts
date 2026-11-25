@@ -679,11 +679,7 @@ export class Builder {
    *  body are not counted in `effects` and `impure`: they are not the
    *  caller's, which counts the call by the function's effect. */
   define(fn: IRFunction, f: () => V[]): void {
-    const [open, counts, impure] = [
-      this.open,
-      this.mark(),
-      this.impure.length,
-    ];
+    const [open, counts, impure] = [this.open, this.mark(), this.impure.length];
     this.open = [fn.body];
     try {
       fn.body.yields = f();

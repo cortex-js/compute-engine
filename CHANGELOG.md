@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.201.5 _2026-11-25_
 
 ### Improvements
 
@@ -74,68 +74,6 @@
   standard deviation, as in Desmos), `Sort` and `Unique`. With the
   `dotNotation` serialization option, a one-operand call of these operators
   serializes back to the member form: `L.\operatorname{mean}`.
-
-- **A Document row with a range type, given as `real` by the `inputs`
-  compilation option, is an input also when a function row reads it**
-  (CE-1733). With the rows `k = \max(y_w, 0.01)` (type `real<0.01..>`) and
-  `X(x, y) = kx/y`, `compile(X(x, y), { to: "glsl", vars: { k: "u_k", … },
-  inputs: { k: "real" } })` declined with "the name "k" of the `inputs` option
-  has no declared type", while `kx` compiled. It now compiles and reads
-  `u_k`. The body of `X` is typed with the given type for the compilation, as
-  an occurrence of `k` in the expression is, so a value outside the range of
-  the row, such as `k = -4`, gives the value of the formula for that `k`. A
-  given numeric type that overlaps the type of the row (`real<-5..5>`) also
-  compiles. A given type of another shape (`list<real>` for a `real` row)
-  still declines.
-
-- **`Zeta(z, a)` of a complex `z` and a real `a`, and `Digamma(z)` of a complex
-  `z`, compile on JavaScript and GLSL** (CE-1732), so a domain coloring of
-  `\zeta(z, a)` or of `\operatorname{Digamma}(z)` draws on the GPU. Both
-  declined with "Zeta of complex, real" and "Digamma of complex", while
-  `HurwitzZeta(z, a)` and `PolyGamma(0, z)` compiled. On JavaScript they give
-  the interpreter's value. On GLSL `Digamma(z)` is `PolyGamma(0, z)`, and
-  `Zeta(z, a)` is `HurwitzZeta(z, a)` for `a > 0`; for `a < 0` it adds the
-  terms `|a + k|^(-z)` left of 0, as the interpreter does, with an error of
-  about 1e-5 of the sizes of the terms, as `HurwitzZeta`. `Zeta(z, a)` of a
-  complex `a` still declines.
-
-- **An Epsil call with two arguments exchanged has a note and a fixit.**
-  `map` takes its function first, `map(f, xs)`, and `filter`, `reduce` and
-  most other operations take the collection first, `filter(xs, p)`. For
-  `map([1, 2, 3], x => x^2)`, the diagnostic "expected `function`, got
-  `vector<integer^3>`" now has the note "arguments 1 and 2 look exchanged" and
-  a fixit that gives `map(x => x^2, [1, 2, 3])`. This applies to every call
-  where the exchange of two arguments fits the signature, a function of the
-  program included: `pw(2, "a")` for `function pw(s: string, n: integer)`. A
-  call with a named argument has no such fixit. The descriptions of `Map`,
-  `Filter`, `FlatMap` and `Fold`, and the collections reference, now say which
-  argument comes first and why `Map` differs.
-
-- **A function that passes a callback to a function that keeps it no longer
-  needs a `scope` declaration** (CE-1773). In Epsil, with
-  `function later(h) { register([h]) }` (where the host function `register`
-  keeps the handler and calls it later),
-  `function scene() { later(e => do { r = r + 1 }) }` was refused with
-  "writes outside a function require a declared `scope` effect", although
-  `scene` does not change `r`. It is now accepted: a callback given to a
-  function defined in the program, or to a protocol method, counts as a write
-  by the caller only when the body of that function visibly calls it. With
-  `function callIt(g) { g(1) }`,
-  `function f() { callIt(x => do { r = r + x }) }` is still refused, and so is
-  `function f() { map(x => do { r = r + x }, [1, 2]) }`. The effects of a
-  function are unchanged: `scene` still has the `scope` effect of its
-  callback.
-
-- **A search in a list by a condition that reads a name of the `vars`
-  compilation option now compiles** (CE-1612). With
-  `compile(expr, { vars: { T: '_.T' } })`, the expression
-  `["CountIf", "L", ["Function", ["Greater", "t", "T"], "t"]]` was refused with
-  "CountIf with an effect (the interpreter stops at the first element that
-  decides)", although the same expression compiled without `vars`. It now
-  compiles, and so do `Find`, `IndexWhere`, `Position`, `Any`, `All`,
-  `TakeWhile`, `Reduce`, `Iterate`, `Zip`, a `Comprehension` with a condition and
-  `ArgMin` of a `Map` whose function reads such a name. A condition that draws
-  a random number is still refused.
 
 ### Resolved Issues
 
@@ -334,6 +272,74 @@
   longer given the type of the other arguments of a generic operator, so
   `r = (t) -> Remainder(3, t)` is now typed `(t: unknown) -> number`, not
   `(t: unknown) -> integer | nan`: `r(0.7)` is `0.2`.
+
+## 0.201.4 _2026-11-25_
+
+### Improvements
+
+- **A Document row with a range type, given as `real` by the `inputs`
+  compilation option, is an input also when a function row reads it**
+  (CE-1733). With the rows `k = \max(y_w, 0.01)` (type `real<0.01..>`) and
+  `X(x, y) = kx/y`, `compile(X(x, y), { to: "glsl", vars: { k: "u_k", … },
+  inputs: { k: "real" } })` declined with "the name "k" of the `inputs` option
+  has no declared type", while `kx` compiled. It now compiles and reads
+  `u_k`. The body of `X` is typed with the given type for the compilation, as
+  an occurrence of `k` in the expression is, so a value outside the range of
+  the row, such as `k = -4`, gives the value of the formula for that `k`. A
+  given numeric type that overlaps the type of the row (`real<-5..5>`) also
+  compiles. A given type of another shape (`list<real>` for a `real` row)
+  still declines.
+
+- **`Zeta(z, a)` of a complex `z` and a real `a`, and `Digamma(z)` of a complex
+  `z`, compile on JavaScript and GLSL** (CE-1732), so a domain coloring of
+  `\zeta(z, a)` or of `\operatorname{Digamma}(z)` draws on the GPU. Both
+  declined with "Zeta of complex, real" and "Digamma of complex", while
+  `HurwitzZeta(z, a)` and `PolyGamma(0, z)` compiled. On JavaScript they give
+  the interpreter's value. On GLSL `Digamma(z)` is `PolyGamma(0, z)`, and
+  `Zeta(z, a)` is `HurwitzZeta(z, a)` for `a > 0`; for `a < 0` it adds the
+  terms `|a + k|^(-z)` left of 0, as the interpreter does, with an error of
+  about 1e-5 of the sizes of the terms, as `HurwitzZeta`. `Zeta(z, a)` of a
+  complex `a` still declines.
+
+- **An Epsil call with two arguments exchanged has a note and a fixit.**
+  `map` takes its function first, `map(f, xs)`, and `filter`, `reduce` and
+  most other operations take the collection first, `filter(xs, p)`. For
+  `map([1, 2, 3], x => x^2)`, the diagnostic "expected `function`, got
+  `vector<integer^3>`" now has the note "arguments 1 and 2 look exchanged" and
+  a fixit that gives `map(x => x^2, [1, 2, 3])`. This applies to every call
+  where the exchange of two arguments fits the signature, a function of the
+  program included: `pw(2, "a")` for `function pw(s: string, n: integer)`. A
+  call with a named argument has no such fixit. The descriptions of `Map`,
+  `Filter`, `FlatMap` and `Fold`, and the collections reference, now say which
+  argument comes first and why `Map` differs.
+
+- **A function that passes a callback to a function that keeps it no longer
+  needs a `scope` declaration** (CE-1773). In Epsil, with
+  `function later(h) { register([h]) }` (where the host function `register`
+  keeps the handler and calls it later),
+  `function scene() { later(e => do { r = r + 1 }) }` was refused with
+  "writes outside a function require a declared `scope` effect", although
+  `scene` does not change `r`. It is now accepted: a callback given to a
+  function defined in the program, or to a protocol method, counts as a write
+  by the caller only when the body of that function visibly calls it. With
+  `function callIt(g) { g(1) }`,
+  `function f() { callIt(x => do { r = r + x }) }` is still refused, and so is
+  `function f() { map(x => do { r = r + x }, [1, 2]) }`. The effects of a
+  function are unchanged: `scene` still has the `scope` effect of its
+  callback.
+
+- **A search in a list by a condition that reads a name of the `vars`
+  compilation option now compiles** (CE-1612). With
+  `compile(expr, { vars: { T: '_.T' } })`, the expression
+  `["CountIf", "L", ["Function", ["Greater", "t", "T"], "t"]]` was refused with
+  "CountIf with an effect (the interpreter stops at the first element that
+  decides)", although the same expression compiled without `vars`. It now
+  compiles, and so do `Find`, `IndexWhere`, `Position`, `Any`, `All`,
+  `TakeWhile`, `Reduce`, `Iterate`, `Zip`, a `Comprehension` with a condition and
+  `ArgMin` of a `Map` whose function reads such a name. A condition that draws
+  a random number is still refused.
+
+### Resolved Issues
 
 - **The type of the incomplete gamma function `Gamma(s, z)` is `real` only
   where its value is real** (CE-1619). For a negative `z`, `Γ(s, z)` is

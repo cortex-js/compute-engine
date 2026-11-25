@@ -669,8 +669,15 @@ function pruneSetBuilderVariables(
     };
     memberships(condition);
   }
-  for (const name of names)
-    if (domains.some((domain) => reads(domain, name))) names.delete(name);
+  for (const name of names) {
+    if (!domains.some((domain) => reads(domain, name))) continue;
+    names.delete(name);
+    // The diagnostics of this name are kept on purpose. `freeVariables` does
+    // not list the head of a function, so the canonical result of
+    // `\{S \mid S \in S(t)\}` has `S` only as a bound symbol: tell the
+    // bound-only check of `ce.parse()` that the name was processed.
+    parser.options.onBoundVariable?.(name);
+  }
   parser._pruneUndeclared(names, parser.matchfixBodyDiagnosticCheckpoint);
 }
 

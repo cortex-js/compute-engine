@@ -97,6 +97,8 @@ Limit(f, x, a) is the limit of f as x approaches a.
 
 Limit(f, a) does not write the variable: it is the first, in sorted order (an uppercase letter before a lowercase one), of the symbols that the expression f reads from outside: not a constant, a library name, a function, or a symbol bound inside f such as the index of a Sum. A symbol with an assigned value is a candidate too, so an assignment does not change the variable. A bare symbol f names a function: Limit(Sin, a) is the limit of sin(t) as t approaches a.
 
+A bare symbol f that holds a formula is read as that formula, and the variable is chosen from it: with G := sin(x), Limit(G, 0) is 0.
+
 The variable is bound: it never takes the value assigned to a symbol of the same name.
 
 Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.
@@ -113,7 +115,7 @@ MathJSON `ND` · `(function, at: number) -> list<number> | number | tuple`
 
 Numerical derivative evaluated at a point.
 
-The function is an expression (ND(Sin(x), 1)), a function literal or the name of a function (ND(Sin, 1)): each gives cos(1).
+The function is an expression (ND(Sin(x), 1)), a function literal or the name of a function (ND(Sin, 1)): each gives cos(1). A symbol that holds a formula is read as that formula: with G := sin(x), ND(G, 1) is cos(1).
 
 ### ndSolve
 
@@ -141,7 +143,7 @@ Numerical approximation of the limit of a function.
 
 NLimit(f, a) finds its variable with the same rule as Limit(f, a):
 
-the first of the symbols written in the expression f, in sorted order, also when it has an assigned value. A bare symbol f names a function.
+the first of the symbols written in the expression f, in sorted order, also when it has an assigned value. A bare symbol f names a function, or, when it holds a formula (G := sin(x)), is read as that formula, whose variable is chosen with the same rule.
 
 ### normal
 
