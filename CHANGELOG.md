@@ -98,6 +98,14 @@
 
 ### Resolved Issues
 
+- **An expression kept from a boxed expression no longer keeps the
+  discarded functions boxed with it** (CE-1645). With
+  `p = ce.box(['Tuple', ['Function', ['Add', 'a', 'other'], 'a'],
+  ['Function', ['Add', 'b', 'kept'], 'b']])`, keeping only the symbol `kept`
+  of the second function kept the parameter `a` of the first function and
+  its definition in memory once the type of the first body was read. They
+  are now collected, as before version 0.196.0.
+
 - **The message of a dot-call of a function that is not a protocol member
   quotes the receiver as written** (CE-1688). With `let xs = [3, 1, 2]`, the
   `dot-call-not-a-protocol-function` message of `sort(xs).reverse()` ended
