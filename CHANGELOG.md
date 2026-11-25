@@ -98,6 +98,12 @@
 
 ### Resolved Issues
 
+- **The set difference of a text or a list holds each element once**
+  (CE-1623). With `s` assigned `"hello"`, `SetMinus(s).evaluate()` held the
+  character `l` twice, and only a second evaluation removed the copy. With `L`
+  assigned `[1, 1, 2]`, `SetMinus(L)` gave `Set(1, 1, 2)`. Each element is now
+  kept once at the first evaluation: `SetMinus(L)` is `Set(1, 2)`.
+
 - **The length of a sorted list that a symbol holds is found at the first
   evaluation** (CE-1622). With `x` declared `real` and `d` assigned
   `Sort([3, x, 1])`, `Length(d).evaluate()` gave `Length([3, x, 1])`, and only

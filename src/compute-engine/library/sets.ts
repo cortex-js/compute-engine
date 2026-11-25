@@ -2354,6 +2354,13 @@ function setMinus(
   // computed (`QuotientRing(Integers, 5)`, `Range(1, n)`), is not an
   // absence: `x` may be an integer, so `SetMinus(Set(1, x), Integers)` stays
   // unevaluated.
+  //
+  // A source that is not a set (a symbol that holds a list or a string) can
+  // hold the same element twice: keep its first occurrence only, as the
+  // iterator and the count of the unevaluated form do (`firstOccurrence`), so
+  // that `SetMinus(s)` with `s := "hello"` holds one `l`. Two draws are both
+  // kept.
+  const isNew = firstOccurrence(col);
   const elements: Expression[] = [];
   for (const element of col.each()) {
     let excluded: boolean | undefined = false;
@@ -2366,7 +2373,7 @@ function setMinus(
       if (result === undefined) excluded = undefined;
     }
     if (excluded === undefined) return undefined;
-    if (!excluded) elements.push(element);
+    if (!excluded && isNew(element)) elements.push(element);
   }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
