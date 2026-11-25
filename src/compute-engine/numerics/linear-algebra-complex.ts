@@ -32,7 +32,11 @@ import { complexDivide } from './numeric-complex.js';
  *  The result is also `undefined` when an entry of `m` is infinite or NaN,
  *  or when an entry of the inverse is (an intermediate value was out of the
  *  range of a double): the elimination has no test for these values, and
- *  its result for them is not the inverse. */
+ *  its result for them is not the inverse. A running bound adds moduli with
+ *  no cancellation, so it can be infinite where the entry is finite; the
+ *  pivot is then refused, and a regular matrix with entries near the top of
+ *  the range of a double (`[[1e308, 1e308], [1e308·i, -1e308]]`) has no
+ *  result though its inverse is in range. */
 export function complexMatrixInverse(
   m: readonly (readonly Complex[])[]
 ): Complex[][] | undefined {
