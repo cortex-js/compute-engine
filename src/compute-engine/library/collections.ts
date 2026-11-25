@@ -23,6 +23,7 @@ import {
   run,
   runAsync,
 } from '../../common/interruptible.js';
+import { isDebugHookFailure } from '../../common/debug-hook.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -25751,13 +25752,15 @@ function snapshotListJoin(
       }
     }
   } catch (e) {
-    // A deadline or a cancellation by the host stops the evaluation. Any
-    // other failure keeps the view.
+    // A deadline or a cancellation by the host stops the evaluation, and so
+    // does a debugger command that unwinds the evaluation from the hook of a
+    // statement of a callback. Any other failure keeps the view.
     if (
       e instanceof CancellationError &&
       e.cause !== 'iteration-limit-exceeded'
     )
       throw e;
+    if (isDebugHookFailure(e)) throw e;
     return undefined;
   }
   return ce._fn('List', elements);

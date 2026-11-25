@@ -98,6 +98,14 @@
 
 ### Resolved Issues
 
+- **A debugger can stop a program inside the function of a `map` that a list
+  literal spreads** (CE-1638). In
+  `[...map(v => do { let w = v; w }, ys), 9]`, an exception that the debug
+  statement hook threw at `let w = v` (the way a debugger ends a run) was
+  discarded, and the program continued to its next statement. The exception
+  now ends the run of `executeEpsil()` and `executeEpsilAsync()`, as it does
+  when the `map` is the value of the program.
+
 - **The set difference of a text or a list holds each element once**
   (CE-1623). With `s` assigned `"hello"`, `SetMinus(s).evaluate()` held the
   character `l` twice, and only a second evaluation removed the copy. With `L`

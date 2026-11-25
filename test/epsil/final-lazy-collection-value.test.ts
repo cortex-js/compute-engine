@@ -382,6 +382,34 @@ describe('a canceled walk of the final collection gives an error value', () => {
     ]);
   });
 
+  test('the exception of a debugger hook in the callback of a spread operand is thrown to the host', async () => {
+    // A list literal lists the elements of a `map` that it spreads when it
+    // is evaluated. The exception of the hook in the callback must end the
+    // run, and not keep the lazy view and continue to the next statement.
+    const stop = new Error('debugger: stop');
+    const source =
+      'let ys = [5, 6]\n[...map(v => do { let w = v; w }, ys), 9]\n7';
+    let stops = 0;
+    setDebugStatementHook((statement) => {
+      const s = statement as { operator?: string; json?: unknown };
+      if (s.operator === 'Declare' && JSON.stringify(s.json).includes('"w"')) {
+        stops += 1;
+        throw stop;
+      }
+    });
+    try {
+      expect(() => executeEpsil(new ComputeEngine(), source)).toThrow(stop);
+      expect(stops).toBe(1);
+      await expect(executeEpsilAsync(new ComputeEngine(), source)).rejects.toBe(
+        stop
+      );
+    } finally {
+      setDebugStatementHook(undefined);
+    }
+    // Without the hook, the program gives the value of its last statement.
+    expect(executeEpsil(new ComputeEngine(), source).value.json).toEqual(7);
+  });
+
   test('a later run on the same engine is not canceled', () => {
     const ce = new ComputeEngine();
     const first = executeEpsil(ce, programs[0][1], { statementTimeLimitMs: 50 });
