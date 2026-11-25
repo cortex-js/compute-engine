@@ -822,24 +822,46 @@ export function prepareDocument(
       // not show these edges. An unfinished base is an initialization cycle.
       const indexedBases = new Map<string, Set<string>>();
 
+      // The error of each declared row that states a type that does not
+      // parse, by row ID.
+      const statedTypeErrors = new Map<string, Expression>();
+
+      /** The error of the first type that the declared `row` states and
+       * that does not parse: the type of a formal in `params`, then the
+       * result type of a function row or the value type of a value row.
+       * The engine parses each one alone, so that a type that the host
+       * declared by name is known, and so that a type that parses only as
+       * a part of the row's signature (`real+`) is an error too. */
+      function statedTypeError(
+        row: DraftRow,
+        params: readonly string[]
+      ): Expression | undefined {
+        const stated = params.map((param) => row.formalTypes?.[param]);
+        stated.push(row.role === 'function' ? row.resultType : row.valueType);
+        for (const type of stated) {
+          if (type === undefined) continue;
+          try {
+            ce.type(type);
+          } catch (error) {
+            return signatureStringError(ce, type, error);
+          }
+        }
+        return undefined;
+      }
+
       /** The types of the formals `params` of `row` while its LaTeX body is
-       * read. The engine parses each stated type, so that a type that the
-       * host declared by name is known. When a stated type does not parse,
-       * the row's error. */
+       * read. The body of a row with a stated type that does not parse
+       * (`statedTypeError()`) is not read. */
       function formalTypes(
         row: DraftRow,
         params: readonly string[]
-      ): Map<string, BoxedType> | Expression {
-        const types = new Map<string, BoxedType>();
-        for (const param of params) {
-          const stated = row.formalTypes?.[param] ?? 'unknown';
-          try {
-            types.set(param, ce.type(stated));
-          } catch (error) {
-            return signatureStringError(ce, stated, error);
-          }
-        }
-        return types;
+      ): Map<string, BoxedType> {
+        return new Map(
+          params.map((param) => [
+            param,
+            ce.type(row.formalTypes?.[param] ?? 'unknown'),
+          ])
+        );
       }
 
       /** Record `diagnostic` as the body of `row`. The declaration is
@@ -879,14 +901,8 @@ export function prepareDocument(
             bases.add(name);
           },
           resolveSymbol: (name: string) => {
-            if (inBody() && formals().includes(name)) {
-              // `readRow` rejects a row whose formal type does not parse
-              // before its body is read.
-              const types = formalTypes(row, [name]);
-              return {
-                type: types instanceof Map ? types.get(name)! : 'unknown',
-              };
-            }
+            if (inBody() && formals().includes(name))
+              return { type: formalTypes(row, [name]).get(name)! };
             const declaration = declarations.get(name);
             if (!inBody() || declaration === undefined || bodies.has(name))
               return (
@@ -933,9 +949,10 @@ export function prepareDocument(
               params = initial.head.params;
               cursors.set(row.id, () => {
                 active = true;
-                const types = formalTypes(row, params);
-                if (!(types instanceof Map)) return { failure: types };
-                const body = state.finish(types, syntax.formalsAreFactors);
+                const body = state.finish(
+                  formalTypes(row, params),
+                  syntax.formalsAreFactors
+                );
                 if (body === null)
                   return { failure: 'Incomplete definition body' };
                 const entry = syntax.normalize([
@@ -992,6 +1009,13 @@ export function prepareDocument(
         }
         row.role = recognized.role;
         declarations.set(head.name, { row, head });
+        const typeError = statedTypeError(row, head.params);
+        if (typeError !== undefined) {
+          // The diagnostic replaces the body, on every path that gives one.
+          statedTypeErrors.set(row.id, typeError);
+          cursors.delete(row.id);
+          rejectRow(row, typeError);
+        }
       }
 
       function readRow(row: DraftRow, params: readonly string[] = []) {
@@ -1012,8 +1036,6 @@ export function prepareDocument(
             );
           raw = body;
         } else {
-          const types = formalTypes(row, params);
-          if (!(types instanceof Map)) return rejectRow(row, types);
           const options = {
             ...rowOptions(
               row,
@@ -1161,6 +1183,13 @@ export function prepareDocument(
           assumedEffects: EffectSet = []
         ): void {
           for (const name of group) {
+            // The row's contract cannot be built from a type that does not
+            // parse, so the row is refused before its body is checked.
+            const typeError = statedTypeErrors.get(
+              declarations.get(name)!.row.id
+            );
+            if (typeError !== undefined)
+              return rejectComponent(group, name, typeError);
             const invalid = references.get(name)!.find((ref) => {
               const declaration = declarations.get(ref);
               return (

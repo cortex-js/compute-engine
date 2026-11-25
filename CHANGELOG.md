@@ -65,6 +65,17 @@
 
 ### Resolved Issues
 
+- **A Document row that states a type that does not parse is an error of
+  that row** (CE-1799). This holds for a type in `formalTypes`, for the
+  `resultType` of a function row and for the `valueType` of a value row.
+  `prepare()` of the row `g(q)=q` with `formalTypes: { q: 'Nope' }` and
+  `resultType: 'real'` threw `Failed to parse type "(Nope) any -> real"`, and
+  no row of the document was prepared; when the host gave the body of the row
+  as MathJSON and no `resultType`, `q` was read as `unknown` with no message.
+  The row now has the error `invalid-type-annotation` in `rowErrors`, and the
+  other rows are prepared. Each type is parsed alone, so a type that is valid
+  only inside a signature, such as `real+` or `x: real`, is an error too.
+
 - **An Epsil program no longer warns about a call, in the body of a lambda,
   of a function that the program defines** (CE-1778). When a library or an
   earlier function has a near name (`draw`),
