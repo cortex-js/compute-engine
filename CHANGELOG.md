@@ -88,6 +88,15 @@
 
 ### Resolved Issues
 
+- **`1^M` with a matrix or a list `M` keeps the shape of `M`** (CE-1495).
+  The canonical form of `1^b` was `1` for every finite exponent, also when
+  `b` is a collection by its type, so `1^M` with `M` declared `matrix<2x2>`
+  evaluated to the scalar `1`. In the function `x ↦ (\det(x), 1^x)` applied
+  to `[[1, 2], [3, 4]]`, the second component was `1`, not `[[1, 1], [1, 1]]`.
+  A power of `1` by an exponent that is a collection by its type now stays a
+  power, and its value is a collection of ones of the shape of the exponent.
+  `1^x` with `x` undeclared, or with `x` declared as a number, is still `1`.
+
 - **The type of a parameter read by index does not depend on the order of its
   uses** (CE-1493). With `function other(q) { q[1] + q[5] }` and a function
   `touches(p, q)` that reads `p[1]` to `p[3]`, the body
