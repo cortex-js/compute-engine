@@ -75,6 +75,14 @@
 
 ### Resolved Issues
 
+- **A grid variable updated from its own cells holds the next grid**
+  (CE-1746). After `g = map(i => map(j => 1 - g[i][j], Range(1, n)),
+  Range(1, n))`, the rows of `g` were lazy `Map`s that read `g`, so they read
+  the new `g`, that is, themselves: a read of `g` gave a recursion error or
+  `NaN`. An assignment now lists a lazy collection that is an element of a
+  listed collection and reads a variable, as it already did for the outer
+  collection, so `g` holds a list of lists computed with the old `g`.
+
 - **A double sum or product whose index is named `i` is correct when the inner
   clause comes first** (CE-1762).
   `["Sum", ["Multiply", "i", "j"], ["Element", "j", ["Range", 1, "i"]], ["Limits", "i", 1, 3]]`

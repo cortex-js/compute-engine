@@ -4031,6 +4031,10 @@ function randomListType(
  * nested list and tuple literals. Without this, `h = g` after the statement
  * changed `r[1]`, while the compiled code and the same list written with
  * calls (`[[h(1), h(2)]]`) keep the values computed with the first `h`.
+ * The list that a lazy collection is replaced with is walked in the same
+ * way: each element of `g = map(i => map(j => 1 - g[i][j], …), …)` is a
+ * lazy `Map` that reads `g`, and stored as it is, it would read the new
+ * value of `g`, that is, itself.
  * The evaluation of the literal itself already lists each finite lazy
  * element, within a budget of `ce.maxCollectionSize` elements
  * (`listedLiteralElements()` in `boxed-expression/listed-element.ts`), so most literals
@@ -4127,7 +4131,11 @@ function listedAssignedValueUncached(
     const listed = ce
       .function(isSet ? 'SetFrom' : 'ListFrom', [value])
       .evaluate();
-    return isFunction(listed, isSet ? 'Set' : 'List') ? listed : kept();
+    if (!isFunction(listed, isSet ? 'Set' : 'List')) return kept();
+    // An element of the list can itself be a lazy collection that reads a
+    // variable (the rows of a grid built with nested `Map`s). The walk does
+    // not enter a set.
+    return listedAssignedValue(ce, listed, memo);
   } catch (e) {
     // A cancellation (an abort, an iteration limit, the deadline of a
     // caller) is not an enumeration failure: it propagates, and the

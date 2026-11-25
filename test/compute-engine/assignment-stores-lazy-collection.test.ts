@@ -65,6 +65,31 @@ describe('a variable assigned a lazy collection over itself', () => {
     ).toBe('2');
   });
 
+  // CE-1746: the outer `Map` is listed, and each of its elements is an inner
+  // `Map` that reads `g`. Stored lazy, each row read the new `g`, itself.
+  test('a nested map holds lists of lists', () => {
+    const grid = `let n = 3
+let g = map(i => map(j => Mod(i + j, 2), Range(1, n)), Range(1, n))`;
+    expect(
+      run(
+        `${grid}\ng = map(i => map(j => 1 - g[i][j], Range(1, n)), Range(1, n))\ng`
+      )
+    ).toBe('[[1,0,1],[0,1,0],[1,0,1]]');
+    expect(
+      run(
+        `${grid}\ncount(g: list, i: integer, j: integer) = g[i][j]\nlet tick = (t: real) => do { g = map(i => map(j => count(g, i, j) * 0.5, Range(1, n)), Range(1, n)) }\ntick(16)\ntick(16)\ng`
+      )
+    ).toBe('[[0,0.25,0],[0.25,0,0.25],[0,0.25,0]]');
+  });
+
+  test('a nested map over another variable does not follow it', () => {
+    expect(
+      run(
+        'let xs = [1, 2]\nlet ys = map(i => map(j => xs[i] + j, [1, 2]), [1, 2])\nxs = [7, 8]\nys'
+      )
+    ).toBe('[[2,3],[3,4]]');
+  });
+
   test('an inferred number list rebuilt in a loop compiles', () => {
     // A list local rebuilt whole (CE-1481): the compiled value is the
     // interpreter's.
