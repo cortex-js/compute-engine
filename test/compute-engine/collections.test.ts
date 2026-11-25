@@ -5234,6 +5234,29 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
     expect(expr.json).toEqual(['Count', ['List', 3, 1, 2]]);
     expect(expr.isValid).toBe(true);
   });
+
+  // A symbol can hold a wrapper that does not evaluate: `Sort` cannot order
+  // `x`, so the value of `d` stays `Sort([3, x, 1])`, which is not a
+  // collection. The evaluate handlers strip the wrapper from the evaluated
+  // operand, so one evaluation gives the answer.
+  describe('a symbol that holds a Sort that cannot order its elements', () => {
+    const local = new ComputeEngine();
+    local.declare('x', 'real');
+    local.assign('d', local.expr(['Sort', ['List', 3, 'x', 1]]));
+    local.assign('u', local.expr(['Unique', ['Sort', ['List', 3, 'x', 1]]]));
+
+    test.each<[Expression, Expression]>([
+      [['Length', 'd'], 3],
+      [['Count', 'd'], 3],
+      [['IsEmpty', 'd'], 'False'],
+      [['Contains', 'd', 1], 'True'],
+      [['Contains', 'd', 'x'], 'True'],
+      [['Contains', 'd', 2], 'False'],
+      [['Contains', 'u', 3], 'True'],
+    ])('%j evaluates to %j at once', (input, expected) => {
+      expect(local.expr(input).evaluate().json).toEqual(expected);
+    });
+  });
 });
 
 describe('A collection parameter that is not yet evaluated (Tycho item 107)', () => {

@@ -98,6 +98,12 @@
 
 ### Resolved Issues
 
+- **The length of a sorted list that a symbol holds is found at the first
+  evaluation** (CE-1622). With `x` declared `real` and `d` assigned
+  `Sort([3, x, 1])`, `Length(d).evaluate()` gave `Length([3, x, 1])`, and only
+  a second evaluation gave `3`. It now gives `3` at once. `IsEmpty(d)` and
+  `Contains(d, 1)` give `False` and `True` at once too.
+
 - **An index written in another base reads back as an index** (CE-1613).
   `Subscript(x, BaseForm(42, 2))` was written `x_{101010_{2}}`, which reads
   back as the symbol `x_101010_2`. It is now written `x_{{101010_{2}}}`, which

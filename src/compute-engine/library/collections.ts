@@ -12532,7 +12532,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const adjusted = validateAgainstDeclaration(ce, 'Length', stripped);
       return ce._fn('Length', adjusted ?? stripped);
     },
-    evaluate: ([xs], { engine }) => {
+    evaluate: ([operand], { engine }) => {
+      // The evaluated operand loses the wrappers that `canonical` strips from
+      // the written one. A symbol can hold a wrapper (`d := Sort([3, x,
+      // 1])`), and a wrapper that does not evaluate, a `Sort` that cannot
+      // order `x`, is not a collection: without the strip, `Length(d)` stays
+      // unevaluated and gives 3 only at a second evaluation. `IsEmpty` and
+      // `Contains` do the same.
+      const xs = peekCountPreserving(operand) ?? operand;
       // `Length(5)` and `Length(True)` are decided non-collections and answer
       // an `incompatible-type` error; an operand that is merely not decided
       // yet keeps the inert form (see `nonCollectionSizeOperandError`). An
@@ -14089,8 +14096,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
-    evaluate: ([xs, value], { engine: ce }) => {
+    evaluate: ([operand, value], { engine: ce }) => {
       if (searchedValueStatus(value) === 'undecided') return undefined;
+      // The evaluated operand loses the wrappers that `canonical` strips, as
+      // in `Length`.
+      const xs = peekMembershipPreserving(operand) ?? operand;
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
       // hits its iteration limit) stays inert rather than collapsing to False.
       const found = xs.contains(value);
@@ -14449,7 +14459,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('IsEmpty', adjusted ?? stripped);
     },
-    evaluate: ([xs], { engine: ce }) => {
+    evaluate: ([operand], { engine: ce }) => {
+      // The evaluated operand loses the wrappers that `canonical` strips, as
+      // in `Length`.
+      const xs = peekCountPreserving(operand) ?? operand;
       // Three-valued: an indeterminate emptiness (e.g. a bounded Filter walk
       // that hits its iteration limit) stays inert rather than collapsing to
       // False.
