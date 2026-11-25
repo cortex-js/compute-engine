@@ -770,7 +770,28 @@ function lowerOnce(
     ids.set(e, k);
     return k;
   };
-  const known = new WeakMap<Expression, Facts>();
+  // Emptied once the variables of the engine that the root function
+  // literal assigns are known (`assignedNames()`): the facts of a call of a
+  // user function count those that it reads and writes (CE-1776).
+  let known = new WeakMap<Expression, Facts>();
+  // For each user function that the root function literal calls, the
+  // variables of the engine of `assigns` that it reads or writes, itself or
+  // through its calls (`Lowering.stateOf()`; set by `assignedNames()`).
+  const stateUses = new Map<
+    object,
+    { uses: readonly Assigned[]; writes: readonly string[] }
+  >();
+  const noState = { uses: [], writes: [] } as const;
+  // The calls of user functions that `assignedNames()` scanned: a call
+  // that the lowering makes (`Map(f, L)` calls `f(_p1)`) is not one, and
+  // a variable of `assigns` that its function reads declines (`free()`):
+  // the facts of the node that holds it do not count the read.
+  const scanned = new WeakSet<Expression>();
+  const stateOf = (key: object) => stateUses.get(key) ?? noState;
+  // The depth of the `Loop`s around the node being lowered (`loop()`): a
+  // variable of the engine that a user function writes is not carried by
+  // a loop (`stateWrite()`).
+  let loops = 0;
   // The answers of the host's `compile` handlers, per node of this lowering
   // (`handlerAnswer()`; not of a control-flow head other than `Which`, whose
   // handler is ignored), and the nodes that an answer created (not a
@@ -1308,6 +1329,13 @@ function lowerOnce(
     const sum = h === 'AddTo' ? e.ops[0] : undefined;
     const target = isFunction(sum, 'At') ? sum.ops[0] : sum;
     if (isSymbol(target)) info.writes.add(target.symbol);
+    // A call of a user function reads and writes the variables of the
+    // engine that its body does (`stateOf()`, CE-1776).
+    if (user) {
+      const s = stateOf(userBinding(e)!.key);
+      for (const x of s.uses) info.names.add(x.name);
+      for (const n of s.writes) info.writes.add(n);
+    }
     // A handler's answer is read in place of the node (its names, its loops).
     for (const op of typeof answer === 'object' ? [...e.ops, answer] : e.ops) {
       const t = facts(op);
@@ -4407,6 +4435,26 @@ function lowerOnce(
     def?: BoxedValueDefinition
   ): V => {
     let known = lookup(name)?.binding;
+    // At the root, a variable of the engine that the root function literal
+    // assigns, in the binding that the function reads: its value here
+    // (CE-1776), at a call that `assignedNames()` scanned.
+    const state = assigns.find((x) => x.name === name);
+    if (state !== undefined && !scanned.has(e))
+      decline(
+        e,
+        `a call of ${e.operator}, which reads the variable ${name} of the engine, where the function is not called by name in the source (a function given to Map or another operator)`
+      );
+    if (
+      cx.inFunction === undefined &&
+      state !== undefined &&
+      known !== undefined &&
+      known === frames[0].names.get(name) &&
+      known.role === 'local' &&
+      def === state.definition
+    ) {
+      note(name, t);
+      return known.v;
+    }
     if (known !== undefined && known.role !== 'input') {
       const outer = frames[0].names.get(name);
       const param =
@@ -6136,13 +6184,18 @@ function lowerOnce(
         parallel && j === 1
       );
     };
-    if (bare)
-      counted(
-        b.constant(0, 'integer'),
-        b.constant(2 ** 53 - 1, 'integer'),
-        () => clause(1)
-      );
-    else clause(1);
+    loops += 1;
+    try {
+      if (bare)
+        counted(
+          b.constant(0, 'integer'),
+          b.constant(2 ** 53 - 1, 'integer'),
+          () => clause(1)
+        );
+      else clause(1);
+    } finally {
+      loops -= 1;
+    }
     return undefined;
   };
 
@@ -6478,6 +6531,19 @@ function lowerOnce(
   const writable = (e: Fn, name: Expression): Binding => {
     if (!isSymbol(name)) decline(e, 'a write that is not to a name');
     const known = lookup(name.symbol);
+    // In the body of a user function, a variable of the engine that the
+    // root function literal assigns: the input of the function that its
+    // body captured first (`define()`), which the function returns
+    // (CE-1776).
+    const s = assigns.find((x) => x.name === name.symbol);
+    if (
+      cx.inFunction !== undefined &&
+      s !== undefined &&
+      cx.stateWrites?.includes(s.name) === true &&
+      known?.binding.role === 'input' &&
+      definitionIn(name, scopes.at(-1)) === s.definition
+    )
+      return stateWrite(e, name.symbol);
     if (known?.binding.role === 'constant')
       decline(
         e,
@@ -6488,6 +6554,31 @@ function lowerOnce(
     if (known.outer)
       decline(e, 'a write in a loop to a local declared outside it');
     return known.binding;
+  };
+
+  /** `Lowering.stateWrite()`: the binding of the variable `name` of the
+   *  engine in the frame of the root function literal (a local) or of the
+   *  user function being lowered (its input, `define()`), when the
+   *  innermost binding of `name` is that one; a write in a `Loop` or in a
+   *  frame of a loop declines: the loop does not carry it (CE-1776). */
+  const stateWrite = (e: Fn, name: string): Binding => {
+    const known = lookup(name);
+    const home = frames[0].names.get(name);
+    if (
+      known === undefined ||
+      known.binding !== home ||
+      home.role !== (cx.inFunction === undefined ? 'local' : 'input')
+    )
+      decline(
+        e,
+        `a write of the variable ${name} of the engine where a local or a parameter hides it`
+      );
+    if (known.outer || loops > 0)
+      decline(
+        e,
+        `a write of the variable ${name} of the engine by a user function, in a loop`
+      );
+    return home;
   };
 
   const assign = (e: Fn, want: boolean): V | undefined => {
@@ -7206,6 +7297,11 @@ function lowerOnce(
     list,
     isLibrary,
     free,
+    stateOf,
+    stateWrite: (e, name) => stateWrite(e, name),
+    // `records` is made after this context, before any lowering.
+    pack: (e, values) => records.make(e, values),
+    field: (r, k) => records.field(r, k),
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     interval,
@@ -7458,19 +7554,68 @@ function lowerOnce(
    *  stated length (`list<number>`, CE-1662), or a list of lists of
    *  integers or reals of two lengths not stated (`list<list<number>>`,
    *  CE-1721) that only an `Assign` that is a statement of the body
-   *  writes, on the plain JavaScript target; another one declines. A
-   *  function that `f` calls and that reads such a name declines
-   *  (`free()`): it would read the value before the call. */
+   *  writes, on the plain JavaScript target; another one declines. So
+   *  are the names that a user function that `f` calls assigns, itself or
+   *  through its calls, where the name in its body is that variable: a
+   *  scalar only (CE-1776). Each such function reads and writes them as
+   *  inputs and results (`stateOf()`). */
   const assignedNames = (f: Fn): Assigned[] => {
     const out: Assigned[] = [];
+    // For each user function that the body calls: the variables of the
+    // engine that its body reads and writes, and the functions it calls.
+    type Touch = { reads: Set<string>; writes: Set<string>; calls: object[] };
+    const touched = new Map<object, Touch>();
+    // A name of the body of a user function that is the variable of the
+    // engine of that name (not a local or a parameter of the function).
+    const engineName = (
+      x: Expression & { symbol: string },
+      scope: Scope | undefined
+    ): boolean => {
+      const h = held(x.symbol);
+      return (
+        h !== undefined && !h.library && definitionIn(x, scope) === h.definition
+      );
+    };
     // The statements of the body: the only places where a list of lists is
     // written (`assign()`).
     const body = f.ops[0];
     const statements = isFunction(body, 'Block') ? body.ops : [body];
     // `bound`: the names that a parameter of a function literal or a
     // `Declare` of a `Block` around `x` binds.
-    const visit = (x: Expression, bound: ReadonlySet<string>): void => {
+    // `scope`: the innermost local scope around `x` in the body of the
+    // user function `helper`.
+    const visit = (
+      x: Expression,
+      bound: ReadonlySet<string>,
+      helper?: Touch,
+      outer?: Scope
+    ): void => {
+      if (isSymbol(x) && helper !== undefined && !bound.has(x.symbol))
+        if (engineName(x, outer)) helper.reads.add(x.symbol);
+      // The attributes of a `Declare` (`let a = f(t)`): their values.
+      if (isDictionary(x))
+        x.values.forEach((v) => visit(v, bound, helper, outer));
       if (!isFunction(x)) return;
+      const scope = x.localScope ?? outer;
+      // A call of a user function: its body, once.
+      const user = userBinding(x);
+      if (user !== undefined) {
+        scanned.add(x);
+        helper?.calls.push(user.key);
+        if (!touched.has(user.key)) {
+          const t: Touch = { reads: new Set(), writes: new Set(), calls: [] };
+          touched.set(user.key, t);
+          const params = user.literal.ops
+            .slice(1)
+            .map((p) => parameterName(p) ?? '');
+          visit(
+            user.literal.ops[0],
+            new Set(params),
+            t,
+            user.literal.localScope
+          );
+        }
+      }
       const binds =
         x.operator === 'Function'
           ? x.ops.slice(1).map((p) => parameterName(p) ?? '')
@@ -7492,8 +7637,17 @@ function lowerOnce(
       const targets = isFunction(target, 'Tuple') ? target.ops : [target];
       for (const t of targets) {
         if (!isSymbol(t) || inner.has(t.symbol)) continue;
+        if (helper !== undefined && !engineName(t, scope)) continue;
         const why = (reason: string) =>
           decline(x, `an assignment of ${t.symbol}, ${reason}`);
+        // A list written by a user function: its length can change at
+        // each call, which a result of the function does not hold.
+        const scalar = (s: Assigned) => {
+          if (helper === undefined) return;
+          helper.writes.add(s.name);
+          if (s.list || s.rows)
+            why('a list, by a user function that the body calls');
+        };
         // A list of lists is written by an `Assign` of the name that is a
         // statement of the body, so that its value after the body is that
         // of the last such write, a list of rank 2.
@@ -7513,6 +7667,7 @@ function lowerOnce(
         const seen = out.find((s) => s.name === t.symbol);
         if (seen !== undefined) {
           grid(seen);
+          scalar(seen);
           continue;
         }
         const h = held(t.symbol);
@@ -7538,6 +7693,7 @@ function lowerOnce(
             rows: true,
           };
           grid(s);
+          scalar(s);
           out.push(s);
           continue;
         }
@@ -7546,16 +7702,46 @@ function lowerOnce(
         const lane = ir?.shape.length === 0 || list ? ir!.lane : undefined;
         if (lane !== 'real' && lane !== 'integer' && lane !== 'boolean')
           return why(`of type ${engineTypeToString(def.type.type)}`);
-        out.push({
+        const s: Assigned = {
           name: t.symbol,
           definition: def,
           lane,
           ...(list ? { list: true } : {}),
-        });
+        };
+        scalar(s);
+        out.push(s);
       }
-      x.ops.forEach((op) => visit(op, inner));
+      x.ops.forEach((op) => visit(op, inner, helper, scope));
     };
     visit(f, new Set());
+    // The variables that each function reads and writes, through its
+    // calls too.
+    const closure = (key: object) => {
+      const [reads, writes] = [new Set<string>(), new Set<string>()];
+      const seen = new Set<object>();
+      const walk = (k: object) => {
+        if (seen.has(k)) return;
+        seen.add(k);
+        const t = touched.get(k)!;
+        t.reads.forEach((n) => reads.add(n));
+        t.writes.forEach((n) => writes.add(n));
+        t.calls.forEach(walk);
+      };
+      walk(key);
+      return { reads, writes };
+    };
+    if (out.length > 0)
+      for (const key of touched.keys()) {
+        const { reads, writes } = closure(key);
+        const uses = out.filter((s) => reads.has(s.name) || writes.has(s.name));
+        if (uses.length > 0)
+          stateUses.set(key, {
+            uses,
+            writes: uses.filter((s) => writes.has(s.name)).map((s) => s.name),
+          });
+      }
+    // The facts of a call count the variables that it reads and writes.
+    if (stateUses.size > 0) known = new WeakMap();
     return out;
   };
   // A root function literal: its parameters, by position, come first. A
@@ -7661,6 +7847,24 @@ function lowerOnce(
     const v = value(root)!;
     return result(rootParts ?? v);
   });
+}
+
+/** The definition of the value that the symbol `x` reads: its own, or,
+ *  for a name that is not bound (the target of an `Assign`), the binding
+ *  of its name in the local scope `scope` or in a scope that encloses it,
+ *  as the interpreter finds it (CE-1776). */
+function definitionIn(
+  x: Expression & { symbol: string },
+  scope: Scope | undefined
+): BoxedValueDefinition | undefined {
+  const own = resolvedValueDefinition(x);
+  if (own !== undefined) return own;
+  for (let s: Scope | null | undefined = scope; s; s = s.parent) {
+    const binding = s.bindings.get(x.symbol);
+    if (binding !== undefined)
+      return 'value' in binding ? binding.value : undefined;
+  }
+  return undefined;
 }
 
 /** The key of a number for `idOf()`: its kind and its exact value (a

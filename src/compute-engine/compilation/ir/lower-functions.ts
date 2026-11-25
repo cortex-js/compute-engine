@@ -700,6 +700,14 @@ type UserFunction = {
    *  whether every reader of each reads a list of NaN as an absent list
    *  (`call()`). */
   recursive: [call: Fn, nanForAbsent: () => boolean][];
+  /** The variables of the engine that the root function literal assigns
+   *  and that the body writes, itself or through its calls
+   *  (`Lowering.stateOf()`, CE-1776): the IR function returns the record
+   *  of the value of the body and of the value of each after the body,
+   *  which a call reads (`call()`). */
+  writes: readonly string[];
+  /** The value of the body, before it is put in that record. */
+  value?: V;
 };
 
 export function functionLowering(
@@ -881,6 +889,8 @@ export function functionLowering(
   let settled = new Map<string, Effect>();
   // The lowerings of a function begun (`cx.attempt()`).
   let begun = 0;
+  // The depth of the calls of `mapOver()` (CE-1776).
+  let mapping = 0;
   const noResult = (call: Fn): never =>
     decline(
       call,
@@ -1023,6 +1033,8 @@ export function functionLowering(
         );
       return p;
     });
+    // The variables of the engine that the body reads or writes (CE-1776).
+    const state = cx.stateOf(key);
     const ir: IRFunction = {
       name: `u${count++}_${e.operator.replace(/[^A-Za-z0-9]/g, '')}`,
       source: e.operator,
@@ -1095,6 +1107,7 @@ export function functionLowering(
       self: [],
       declared: list && { lane: list.lane, shape: list.shape, tuple },
       recursive: [],
+      writes: state.writes,
     };
     let variants = functions.get(key);
     if (variants === undefined) functions.set(key, (variants = new Map()));
@@ -1117,6 +1130,8 @@ export function functionLowering(
     });
     const caller = cx.inFunction;
     cx.inFunction = e.operator;
+    const callerWrites = cx.stateWrites;
+    cx.stateWrites = fn.writes;
     // The kind of the call is found only where the body relies on it. A
     // kind that depends on itself (a call of another lane in the body, whose
     // readers lead back to the body) is `false`.
@@ -1137,6 +1152,29 @@ export function functionLowering(
     if (scope !== undefined) cx.scopes.push(scope);
     try {
       b.define(ir, () => {
+        // Each variable of the engine that the body reads or writes is an
+        // input from the start of the body, so that a write in an arm
+        // rebinds a binding of the frame (`arm()` of `lower.ts`).
+        for (const s of state.uses) {
+          cx.free(e, s.name, s.definition.type.type, s.definition);
+          cx.frames[0].names.get(s.name)!.lane = s.lane;
+        }
+        // The value of the body, and of each variable that it writes.
+        const out = (v: V): V[] => {
+          fn.value = v;
+          if (fn.writes.length === 0) return [v];
+          if (fn.self.length > 0 || fn.called || fn.recursive.length > 0)
+            decline(
+              literal,
+              `a recursive function ${e.operator} that assigns the variable ${fn.writes[0]} of the engine`
+            );
+          return [
+            cx.pack(literal, [
+              v,
+              ...fn.writes.map((n) => cx.frames[0].names.get(n)!.v),
+            ]),
+          ];
+        };
         // A declared result `nothing`: the body is lowered for its effects
         // and the value is the `Nothing` of the target, NaN, whatever the
         // body computes. The interpreter gives `Nothing` only where the
@@ -1159,7 +1197,7 @@ export function functionLowering(
               `a body of ${e.operator} whose value is not Nothing, its declared result`
             );
           cx.value(x, false);
-          return [b.constant(NaN, 'real')];
+          return out(b.constant(NaN, 'real'));
         }
         const body =
           list || open || points !== undefined || shaped || grid || record
@@ -1293,7 +1331,7 @@ export function functionLowering(
             literal,
             `a row at an index known at run time as the result of ${e.operator}`
           );
-        return [v];
+        return out(v);
       });
       // A body that relies on a list of NaN for its absent value cannot
       // serve its recursive call whose reader tells the two apart.
@@ -1308,6 +1346,7 @@ export function functionLowering(
       if (scope !== undefined) cx.scopes.pop();
       cx.frames.splice(0, cx.frames.length, ...outer);
       cx.inFunction = caller;
+      cx.stateWrites = callerWrites;
       if (prior === undefined) cx.bodies.delete(literal.ops[0]);
       else cx.bodies.set(literal.ops[0], prior);
     }
@@ -1321,7 +1360,7 @@ export function functionLowering(
     // A length value of the body that is a constant is its number: a call
     // then has one result of that length.
     if (fn.result === undefined) {
-      const t = type(ir.body.yields[0]);
+      const t = type(fn.value!);
       fn.result = {
         ...t,
         // On the declared lane where a recursive call took it.
@@ -1331,8 +1370,10 @@ export function functionLowering(
         ),
       };
     }
-    ir.results.push(fn.result);
-    if (!fn.guess && !fn.assumed) fn.listed = listedOf(cx, ir.body.yields[0]);
+    ir.results.push(
+      fn.writes.length > 0 ? type(ir.body.yields[0]) : fn.result
+    );
+    if (!fn.guess && !fn.assumed) fn.listed = listedOf(cx, fn.value!);
     // A call in the body passes the inputs, parameters of the body.
     for (const a of fn.self) a.push(...ir.body.params.slice(fn.own));
     if (before === undefined) pending.delete(e.operator);
@@ -1838,10 +1879,31 @@ export function functionLowering(
     );
     const all = [...args, ...inputs];
     if (self) fn.self.push(all);
+    // A function that writes a variable of the engine (CE-1776): the
+    // record of its value and of the new value of each variable, which
+    // rebinds the variable here, in the order of the program.
+    if (fn.writes.length > 0) {
+      if (lowering.has(fn))
+        decline(
+          e,
+          `a recursive call of ${e.operator}, which assigns the variable ${fn.writes[0]} of the engine`
+        );
+      if (mapping > 0)
+        decline(
+          e,
+          `a call of ${e.operator} that maps over a list, which assigns the variable ${fn.writes[0]} of the engine`
+        );
+      const r = b.newValue(type(fn.ir.body.yields[0]));
+      b.emit({ k: 'call', outs: [r], fn: fn.ir.name, args: all });
+      fn.writes.forEach((n, k) => (cx.stateWrite(e, n).v = cx.field(r, k + 1)));
+      const v = cx.field(r, 0);
+      if (fn.listed !== undefined) cx.listed.set(v, fn.listed);
+      return v;
+    }
     b.emit({ k: 'call', outs: [...outs, out], fn: fn.ir.name, args: all });
     const axis =
       fn.ir.body.yields.length > 0
-        ? cx.tuples.get(fn.ir.body.yields[0])
+        ? cx.tuples.get(fn.value!)
         : fn.declared?.tuple;
     if (axis !== undefined) cx.tuples.set(out, axis);
     if (fn.listed !== undefined) cx.listed.set(out, fn.listed);
@@ -1891,11 +1953,17 @@ export function functionLowering(
       index,
       '',
       (k) => {
-        const out = call(
-          e,
-          binding,
-          args.map((v, i) => sources[i]?.at(k) ?? v)
-        );
+        mapping += 1;
+        let out: V;
+        try {
+          out = call(
+            e,
+            binding,
+            args.map((v, i) => sources[i]?.at(k) ?? v)
+          );
+        } finally {
+          mapping -= 1;
+        }
         if (type(out).shape.length > 0 && cx.tuples.get(out) !== 0)
           decline(
             e,

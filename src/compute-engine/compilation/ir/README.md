@@ -3887,8 +3887,18 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   writes the new values back after it (`assigningRun()` of `adapter.ts`); the
   result is not `shippable`, and `implicitCompile()` gives no result for it.
   Another target, the interval and `bigint` modes, an inferred type, a constant
-  and another lane decline; so does a user function that the body calls and that
-  reads the name (`free()`: the name is a local of the entry). A warning of a
+  and another lane decline. A user function that the body calls, itself or
+  through its calls, can read and write such a scalar name (CE-1776):
+  `assignedNames()` scans the body of each user function that is called, where a
+  name counts when it resolves to the variable (`definitionIn()`), and
+  `Lowering.stateOf()` gives the names that each function reads and writes; the
+  `facts()` of a call count them. The function captures each name that it uses
+  at the start of its body (so that an arm rebinds a binding of the frame,
+  `arm()`), and when it writes one its IR function returns the record of the
+  value of the body and of each name it writes; the call reads the fields and
+  rebinds the names (`Lowering.stateWrite()`). A write in a `Loop` or a loop
+  frame, a call that maps over a list (`mapOver()`), a recursive writer and a
+  list name written by a function decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the

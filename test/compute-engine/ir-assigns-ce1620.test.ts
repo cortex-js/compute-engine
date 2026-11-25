@@ -201,15 +201,15 @@ let spin = (t: real) => do { theta = theta + pi / 30; theta }`);
     );
   });
 
-  test('a read of the state by a function that the body calls declines', () => {
+  test('a function that the body calls reads the state at the call (CE-1776)', () => {
     const ce = engine(`let s = 0.5
 let get = () => s
 let f = (t: real) => do { s = s + 1; get() }`);
-    expect(declined(fn(ce, 'f'))).toMatch(
-      'a call of get, which reads the input s'
-    );
-    // The stored value is back after the compilation.
-    expect(valueOf(ce, 's')).toBe(0.5);
+    const { result, run } = compiled(fn(ce, 'f'));
+    expect(result.assigns).toEqual(['s']);
+    expect(run(0)).toBe(1.5);
+    expect(valueOf(ce, 's')).toBe(1.5);
+    ce.assign('s', 0.5);
     expect(ce.box(['f', 0]).evaluate().json).toBe(1.5);
   });
 

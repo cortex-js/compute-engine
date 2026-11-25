@@ -34,6 +34,19 @@
   `Keys`, arithmetic) still decline. GLSL and the interval mode still
   decline a dictionary.
 
+- **A compiled callback can call a helper that updates its state**
+  (CE-1776). A function literal compiled to JavaScript that calls
+  `function moveBall(dt: real) scope { ballX = ballX + dt; ballX }`, where
+  `ballX` is a declared variable of the engine, declined with "a write to a
+  name that is not a local", and a helper that only read such a variable
+  declined too. Both now compile: the helper receives the current value of
+  each variable it uses, the call writes back the new values in the order of
+  the program, and `assigns` lists the variable, so `run()` writes it to the
+  engine. `tick = (dt: real) => moveBall(dt)` gives `2.5`, then `5.5`, as
+  the interpreter does. A call of such a helper in a loop, a `Sum` or a
+  `Map`, a call that maps over a list, a recursive helper and a helper that
+  assigns a list variable still decline.
+
 - **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
   `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a
   `Sequence` with an `unexpected-operator` error, so a row defined that way
