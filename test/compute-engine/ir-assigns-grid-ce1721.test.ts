@@ -118,14 +118,13 @@ let tick = (t: real) => ${body}`,
   });
 
   test('a write of a map that reads the grid gives the next grid', () => {
-    // The interpreter holds the inner maps lazily and they read the new
-    // `g` (CE-1746): the expected values are the step of the grid.
-    const ce = engine(`let n = 3
+    const source = `let n = 3
 let g = map(i => map(j => Mod(i + j, 2), Range(1, n)), Range(1, n))
-let tick = (t: real) => do { g = map(i => map(j => 1 - g[i][j], Range(1, n)), Range(1, n)) }`);
-    const { run } = compiled(fn(ce, 'tick'));
-    run(16);
-    expect(valueOf(ce, 'g')).toEqual([
+let tick = (t: real) => do { g = map(i => map(j => 1 - g[i][j], Range(1, n)), Range(1, n)) }`;
+    sameAsInterpreter(source);
+    const ref = engine(source);
+    ref.box(['tick', 16]).evaluate();
+    expect(valueOf(ref, 'g')).toEqual([
       'List',
       ['List', 1, 0, 1],
       ['List', 0, 1, 0],

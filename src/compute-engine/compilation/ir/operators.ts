@@ -395,6 +395,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // coordinates, a point of NaN.
   row('At',           2,          [[['list', R], 'element', 'atu']], list),
   row('At',           3,          [[['list', R, I], 'element', 'atp']], list),
+  // Of a list of lists of numbers of stated lengths (CE-1540): the row, or
+  // `undefined` out of range, where the `At` is the whole program
+  // (`lower.ts`), so that no operation reads it.
+  row('At',           2,          [[['list', R], 'element', 'atrow']], list),
   // Of a list of strings (CE-1556): the element, conditioned, or
   // `undefined` out of range, which only a discharge or the result reads
   // (`stringListRefusal()` of `index.ts`).

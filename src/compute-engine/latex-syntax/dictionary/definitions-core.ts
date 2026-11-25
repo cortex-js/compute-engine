@@ -83,6 +83,13 @@ const COMPONENT_ACCESS_HEADS: Record<string, string> = {
   total: 'Sum',
   max: 'Max',
   min: 'Min',
+  // Desmos list members. Desmos `stdev` is the sample standard deviation, and
+  // `unique` keeps the first occurrence of each element, as `Unique` does.
+  mean: 'Mean',
+  median: 'Median',
+  stdev: 'StandardDeviation',
+  sort: 'Sort',
+  unique: 'Unique',
 };
 
 function memberHead(name: string): string | null {
@@ -96,8 +103,9 @@ function memberHead(name: string): string | null {
 // `(...)` as its argument list, whereas an accessor must leave `(...)` for
 // implicit multiplication (`L.\operatorname{total}(x+1)` is `Sum(L)·(x+1)`, not
 // `Sum(L, x+1)`). Only `join` occurs with arguments in the document corpus, so
-// it is the only method mapped here; other Desmos list methods (`sort`,
-// `shuffle`, `random`) can be added when a document needs them.
+// it is the only method mapped here; other Desmos list methods (`shuffle`,
+// `random`) can be added when a document needs them. `sort` is an accessor
+// above: the corpus has `.sort` with no argument list only.
 const COMPONENT_METHOD_HEADS: Record<string, string> = {
   join: 'Join',
 };
@@ -4130,6 +4138,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         const index = indices
           ? indices.map((x) => serializer.serialize(x)).join(', ')
           : serializer.serialize(sub);
+        // An index that is a numeral in another base is braced: inside a
+        // subscript, the parser joins a numeral and its own subscript into
+        // the name of a symbol, so `x_{101010_{2}}` reads back as the symbol
+        // `x_101010_2`, and `x_{{101010_{2}}}` reads back as
+        // `Subscript(x, BaseForm(42, 2))`.
+        if (operator(sub) === 'BaseForm' && /_\{[^{}]*\}$/.test(index))
+          return `${braced ? `{${lhs}}` : lhs}_{{${index}}}`;
         return (
           (braced ? `{${lhs}}` : lhs) +
           '_{' +

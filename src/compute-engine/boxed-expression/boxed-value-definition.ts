@@ -85,6 +85,7 @@ import {
   withArrowEffects,
 } from './effects-inference.js';
 import { noteOverlapAdmitted } from './store-admission.js';
+import { recordSingleFunctionSignature } from './declared-local.js';
 import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { installParameterDefaults } from './parameter-defaults.js';
@@ -766,14 +767,15 @@ export class _BoxedValueDefinition
     const v = this._heldValue();
     // A static type does not depend on a value: in a type computation
     // (`static-typing-view.ts`) a definition that is not a constant has no
-    // value. The exception is a variable that holds a function literal: the
-    // signature of a user function comes from its value, and a write of such
-    // a value moves the type version (`typeRead` in the `value` setter).
+    // value. The exception is a variable whose value is a function, or holds
+    // one (`givesSignature()`): the signature of a user function comes from
+    // its value, and a write of such a value moves the type version
+    // (`typeRead` in the `value` setter).
     if (
       v !== undefined &&
       inStaticTypingView(this._engine) &&
       !this._isConstant &&
-      !holdsFunctionLiteral(v)
+      !givesSignature(v)
     )
       return undefined;
     return v;
@@ -2445,6 +2447,21 @@ function holdsFunctionLiteral(x0: Expression | null | undefined): boolean {
 }
 
 /**
+ * True when the value `v` gives the signature of a user function: `v` is a
+ * `Function` literal, or it holds one as an operand and its type has a
+ * signature (`[x ↦ x, x ↦ 2x]`). A value that applies a function literal
+ * (`Filter(xs, k ↦ k < 3)`, `Apply(k ↦ k + 1, 2)`) is not a function: in a
+ * type computation the variable that holds it has no value, as any other
+ * variable. Its value read there would apply the literal with its
+ * parameters unbound (`static-typing-view.ts`).
+ */
+function givesSignature(v: Expression): boolean {
+  if (v.operator === 'Function') return true;
+  if (!holdsFunctionLiteral(v)) return false;
+  return containsSignatureArm(v.type.type);
+}
+
+/**
  * The type that a local of a block takes from its first value, the value
  * type `t` widened: every numeric type to `number`, a string type to
  * `string`, a boolean type to `boolean`, and the element types of a list, a
@@ -2501,6 +2518,11 @@ export function initializeLocalContract(
     return;
   const target = binding.value;
   if (target._fixedInitializationType) return;
+  // A local that holds one function literal for the whole block keeps the
+  // signature of the literal for its named calls: the widened type
+  // `function` gives no parameter names.
+  if (typeof type === 'object' && type.kind === 'signature')
+    recordSingleFunctionSignature(target, type);
   const next = constant ? type : widenLocalType(ce, type);
   const wasCallable = containsSignatureArm(target.type.type);
   target._setType(() => ce.type(next));

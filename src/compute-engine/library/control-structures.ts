@@ -15,6 +15,7 @@ import {
 } from '../boxed-expression/binders.js';
 import {
   canonicalValueOperand,
+  isAbsentScalarSymbol,
   isUntypedAtCollectionSlot,
 } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -154,6 +155,7 @@ import {
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
+import { admissionOf } from '../boxed-expression/value-membership.js';
 import {
   runOperandSteps,
   runOperandStepsAsync,
@@ -209,7 +211,10 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import { markDeclaredLocal } from '../boxed-expression/declared-local.js';
+import {
+  markDeclaredLocal,
+  markSingleFunctionLocal,
+} from '../boxed-expression/declared-local.js';
 
 /**
  * The supertype a restriction condition is checked against to be typed as a
@@ -497,6 +502,20 @@ function untypedArm(
     return !unknownCallMayBeRecursive(engine, s.head);
   return s.children.every(
     (c) => c.type !== 'unknown' || untypedArm(c, engine, depth + 1)
+  );
+}
+
+/** The pattern of a `MatchCase` is a wildcard (`_`, `_x`, `__x`, `___x`, or
+ * a `Wildcard` form): it takes every value of the subject (`isWildcard()`,
+ * `pattern-utils.ts`). */
+function isWildcardPattern(pattern: OperandDescriptor): boolean {
+  const s = pattern.structureOf?.();
+  if (s?.kind === 'symbol') return s.name.startsWith('_');
+  return (
+    s?.kind === 'application' &&
+    (s.head === 'Wildcard' ||
+      s.head === 'WildcardSequence' ||
+      s.head === 'WildcardOptionalSequence')
   );
 }
 
@@ -1347,20 +1366,39 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // of its last child), never an operand expression.
       type: (ops, context) => {
         // Result is the widened type of the case bodies (the last operand of
-        // each `MatchCase`), mirroring `If`/`Which`. Bodies reference capture
-        // names free at this scope, so most resolve to `unknown` — widen is a
-        // best-effort hint.
+        // each `MatchCase`), mirroring `If`/`Which`. The bodies are raw, so
+        // only a literal body (a number, a string) has a type; any other
+        // body is `unknown`, and it makes the `Match` `unknown`, because
+        // `widen()` would leave it out: `match s { == "a" => t / 2; _ => 0 }`
+        // is not an `integer` (its value at `t = 3` is `3/2`). A case whose
+        // structure the descriptor does not show (a descriptor made from a
+        // type alone) is `unknown` too.
+        // Without a case that takes every value (a wildcard pattern and no
+        // guard), the value can be `Error("match-no-case", subject)`, which
+        // no case body gives, so the `Match` is `unknown`:
+        // `match n { == 0 => 1 }` is not an `integer` at `n = 3`.
         const bodyTypes: Type[] = [];
+        let takesEveryValue = false;
         for (const c of ops.slice(1)) {
           const st = c?.structureOf?.();
-          if (st?.kind !== 'application' || st.head !== 'MatchCase') continue;
-          if (st.children.length < 2) continue;
+          if (
+            st?.kind !== 'application' ||
+            st.head !== 'MatchCase' ||
+            st.children.length < 2
+          ) {
+            bodyTypes.push('unknown');
+            continue;
+          }
           bodyTypes.push(st.children[st.children.length - 1].type);
+          if (st.children.length === 2 && isWildcardPattern(st.children[0]))
+            takesEveryValue = true;
         }
         if (bodyTypes.length === 0)
           return BoxedType.forResult('nothing', context.engine._typeResolver);
         return BoxedType.forResult(
-          widen(...bodyTypes),
+          !takesEveryValue || bodyTypes.includes('unknown')
+            ? 'unknown'
+            : widen(...bodyTypes),
           context.engine._typeResolver
         );
       },
@@ -4263,6 +4301,8 @@ export function closedLiteralType(
  *   or from an initial value that is a closed literal (`closedLiteralType()`).
  * - `explicitlyDeclared`: the names of `declaredTypes` whose type the
  *   statement declares, not read from an initial value.
+ * - `functionInitialized`: the names of a `Declare` that states no type and
+ *   whose initial value is a function literal.
  *
  * `ops` may be non-canonical (the held operands of a `Block`, or the raw
  * statements of an Epsil program boxed with `{ canonical: false }`).
@@ -4297,6 +4337,7 @@ export function staticDeclarations(
   declaredTypes: Map<string, Type>;
   explicitlyDeclared: Set<string>;
   declaredConstants: Set<string>;
+  functionInitialized: Set<string>;
 } {
   const declaredNames: string[] = [];
   // The statically-readable declared type of each `Declare(name, "type")`
@@ -4316,6 +4357,9 @@ export function staticDeclarations(
   // literal initial value (see `markDeclaredLocal`).
   const explicitlyDeclared = new Set<string>();
   const declaredConstants = new Set<string>();
+  // The names whose `Declare` states no type and has a function literal as
+  // its initial value (`let h = (x, y) => x - y`).
+  const functionInitialized = new Set<string>();
   for (const statement of ops) {
     const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
@@ -4410,6 +4454,8 @@ export function staticDeclarations(
               : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
+          if (isFunction(valueOp, 'Function'))
+            functionInitialized.add(nameExpr.symbol);
         }
       }
     }
@@ -4419,6 +4465,7 @@ export function staticDeclarations(
     declaredTypes,
     explicitlyDeclared,
     declaredConstants,
+    functionInitialized,
   };
 }
 
@@ -4778,7 +4825,34 @@ function canonicalSequence(
     declaredTypes,
     explicitlyDeclared,
     declaredConstants,
+    functionInitialized,
   } = staticDeclarations(ce, acceptedStatements, program);
+  // The locals of a block that hold one function literal for the whole
+  // block (`markSingleFunctionLocal()`): one `Declare` with a function
+  // literal and no type, and no `Assign` of the block, at any depth, whose
+  // target names the local. The test of the target is by spelling, so an
+  // `Assign` of a local of the same name in a nested scope also counts.
+  const singleFunctionLocals = new Set<string>();
+  if (!program && functionInitialized.size > 0) {
+    const assigned = new Set<string>();
+    const targetNames = (e: Expression): void => {
+      const name = sym(e);
+      if (name !== undefined) assigned.add(name);
+      else if (isFunction(e)) for (const x of e.ops) targetNames(x);
+    };
+    const collect = (e: Expression): void => {
+      if (!isFunction(e)) return;
+      if (e.operator === 'Assign') targetNames(e.op1);
+      for (const x of e.ops) collect(x);
+    };
+    for (const statement of ops) collect(statement);
+    for (const name of functionInitialized)
+      if (
+        !assigned.has(name) &&
+        declaredNames.filter((n) => n === name).length === 1
+      )
+        singleFunctionLocals.add(name);
+  }
   constantDeclarations = declaredConstants;
   if (program)
     for (const statement of acceptedStatements) {
@@ -4867,6 +4941,8 @@ function canonicalSequence(
         !declareHasValue(declared.ops) &&
         !functions.has(name);
       markDeclaredLocal(hoisted.value);
+      if (singleFunctionLocals.has(name) && !declaredConstants.has(name))
+        markSingleFunctionLocal(hoisted.value);
       if (explicitlyDeclared.has(name)) {
         hoisted.value._fixedInitializationType = true;
         hoisted.value.inferredType = false;
@@ -6143,11 +6219,13 @@ function canonicalLoopLike(
         : guard.canonical;
     if (patternError !== undefined)
       return ce._fn('Element', [patternError, collCanonical]);
+    const domain =
+      nonCollectionDomainError(ce, collCanonical, 'static') ?? collCanonical;
     return ce._fn(
       'Element',
       guardCanonical === undefined
-        ? [idxCanonical, collCanonical]
-        : [idxCanonical, collCanonical, guardCanonical]
+        ? [idxCanonical, domain]
+        : [idxCanonical, domain, guardCanonical]
     );
   });
   // The body of a `Loop` is a branch: a `Declare` there is a static error.
@@ -6171,6 +6249,48 @@ function canonicalLoopLike(
   return ce._fn(head, [canonicalBody, ...canonicalIterators], {
     scope: loopScope,
   });
+}
+
+/**
+ * The `incompatible-type` error of the domain `domain` of an `Element` clause
+ * of a loop or a comprehension that cannot be a collection (a number, a
+ * boolean, a function), or `undefined`. Without it, `for i in n { … }` with
+ * `n = 5` would run no iteration and report nothing. An operand that is
+ * already an error, whose type is not known, or that is absent (`Missing`,
+ * which a collection operator propagates, `validate.ts`) is not refused.
+ *
+ * - `'static'`, for the canonical form: only a type that is not derived from
+ *   a value is read, as the refusal of a collection operand does
+ *   (`validate.ts`). A symbol can be reassigned to a collection before the
+ *   loop is evaluated, so a domain that holds a symbol whose type was
+ *   inferred (from its value or from an earlier use: `y` or `-y` with `y`
+ *   assigned `5`) is not refused here.
+ * - `'value'`, for the evaluated domain of a loop (`runNested`): the value is
+ *   read.
+ */
+function nonCollectionDomainError(
+  ce: ComputeEngine,
+  domain: Expression,
+  mode: 'static' | 'value'
+): Expression | undefined {
+  if (!domain.isValid || domain.isCollection) return undefined;
+  if (isAbsentScalarSymbol(domain)) return undefined;
+  const type = domain.type.type;
+  if (mode === 'static') {
+    if (type === 'unknown' || type === 'any' || type === 'value')
+      return undefined;
+    if (holdsInferredSymbol(domain)) return undefined;
+    if (!provablyDisjoint(type, COLLECTION_SHAPE_TYPE)) return undefined;
+  } else if (admissionOf(domain, COLLECTION_SHAPE_TYPE) !== 'refute')
+    return undefined;
+  return ce.typeError('collection', type, domain);
+}
+
+/** True when `expr` is, or has as an operand at any depth, a symbol whose
+ * type was inferred (`hasInferredType()`). */
+function holdsInferredSymbol(expr: Expression): boolean {
+  if (isSymbol(expr)) return hasInferredType(expr);
+  return isFunction(expr) && expr.ops.some(holdsInferredSymbol);
 }
 
 /**
@@ -6208,6 +6328,10 @@ interface LoopState {
    * `Comprehension` records a failed walk with it (`noteFailedWalk()`), so
    * that the error is the value of the whole comprehension. */
   domainError?: Expression;
+  /** True for the walk of a `Loop` or a `ParallelLoop` (`runLoop`): a clause
+   * domain whose value cannot be a collection is then the domain error, the
+   * `incompatible-type` error (`nonCollectionDomainError()`). */
+  loop?: boolean;
   /** For a `ParallelLoop` or a `ParallelComprehension`: the elements of the
    * first clause are passes, each with its own random frame
    * (`parallelPassValues()`). */
@@ -6397,6 +6521,7 @@ function* runLoop(
   const state: LoopState = {
     stopped: false,
     count: 0,
+    loop: true,
     parallel,
     awaitBody,
   };
@@ -7718,6 +7843,20 @@ function* runNested(
       state.domainError = embedded;
       return;
     }
+  }
+  // A loop over a value that cannot be a collection (`for i in n { … }` with
+  // `n = 5`, a boolean, a function) stops on the `incompatible-type` error,
+  // the error that a comprehension over a symbol of that value gives
+  // (`settleHeldEagerSources()`, `boxed-function.ts`). Without it, the loop
+  // ran no iteration and reported nothing.
+  const refused =
+    state.loop === true && collection !== undefined
+      ? nonCollectionDomainError(ce, collection, 'value')
+      : undefined;
+  if (refused !== undefined) {
+    state.stopped = true;
+    state.domainError = refused;
+    return;
   }
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.

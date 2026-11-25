@@ -295,6 +295,11 @@ trade exactness at a measure-zero point for a simpler canonical form.
 | `0 / x`                    | `0`                      |
 | `x / ∞`                    | `0`                      |
 
+An operand that is a collection by its type is not generic in this sense: the
+operation is element-wise, so its value has the shape of that operand. With `M`
+declared `matrix<2x2>`, `1^M` and `0/M` stay as they are and evaluate to a 2×2
+matrix of ones and of zeros.
+
 The cancellation **asserts genericity**: `x/x → 1` treats `x` as a generic
 (hence non-zero) value. This is why the fold survives a later substitution —
 `ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `NaN`, because

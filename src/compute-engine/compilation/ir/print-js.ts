@@ -266,6 +266,7 @@ export const JS: Syntax = deepFreeze({
     'at': { text: '_at($0, $1)', helpers: ['_at'] },
     'atu': { text: '_atu($0, $1)', helpers: ['_atu'] },
     'atp': { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
+    'atrow': { text: '_atu($0, $1)', helpers: ['_atu'] },
     // A list local written in place (`operators.ts`).
     'copy': '$0.slice()',
     'wix': { text: '_wix($0, $1)', helpers: ['_wix'] },
@@ -650,6 +651,17 @@ function boxValue(
 ): Expression {
   if (t.lane === 'record') {
     const xs = x as readonly unknown[];
+    // A dictionary literal (CE-1771): the dictionary of its keys.
+    if (t.head === 'Dictionary')
+      return ce.function(
+        'Dictionary',
+        (t.fields ?? []).map((f, k) =>
+          ce.function('KeyValuePair', [
+            ce.string(t.names![k]),
+            boxValue(ce, f, t.marks?.[k], xs[k]),
+          ])
+        )
+      );
     return ce.function(
       t.nominal ?? t.head!,
       (t.fields ?? []).map((f, k) => boxValue(ce, f, t.marks?.[k], xs[k]))

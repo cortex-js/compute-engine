@@ -23,7 +23,6 @@ import {
   decline,
   isUntyped,
   STATIC_TYPE_ERROR,
-  userBinding,
   type Fn,
   type Lowering,
 } from './lower-context.js';
@@ -85,6 +84,8 @@ function valueTypeOf(
         TypeReference | undefined;
       return r === undefined || (r.typeParams?.length ?? 0) > 0 ? undefined : r;
     }
+    // A dictionary (CE-1771): no test is decided by its IR type.
+    if (t.head === 'Dictionary') return undefined;
     const fields = t.fields ?? [];
     const types = fields.map((f, k) => valueTypeOf(e, f, t.marks?.[k]));
     if (fields.length === 0 || !types.every((x) => x !== undefined))
@@ -141,37 +142,6 @@ type Arm =
   | { kind: 'default'; body: Expression }
   | { kind: 'tuple'; names: (string | undefined)[]; body: Expression };
 
-/** `e` is, or holds, a `Match`, or a call of a user function whose body
- *  holds one (at any depth of calls). The engine types a `Match` by those
- *  of its case bodies that are literals, and a call of a function whose
- *  inferred result is `unknown` as `nothing` (CE-1731): the static type of
- *  such a node, and of a result inferred from it, is not the type of its
- *  value. */
-export function typedByMatch(
-  e: Expression,
-  seen: Set<Expression> = new Set()
-): boolean {
-  // Each node once: a shared graph is not walked as a tree.
-  if (seen.has(e)) return false;
-  seen.add(e);
-  // A name: the body of the literal of a user function passed by name
-  // (`Map(f, L)`), or the stored value of a name, which can be a formula
-  // that holds a `Match`.
-  if (isSymbol(e)) {
-    const od = e.operatorDefinition as
-      { _isLambda?: boolean; _lambdaLiteral?: Expression } | undefined;
-    const v = od?._isLambda ? od._lambdaLiteral : e.valueDefinition?.value;
-    if (v === undefined) return false;
-    return typedByMatch(isFunction(v, 'Function') ? v.ops[0] : v, seen);
-  }
-  if (!isFunction(e)) return false;
-  if (e.operator === 'Match') return true;
-  const user = userBinding(e as Fn);
-  if (user !== undefined && typedByMatch(user.literal.ops[0], seen))
-    return true;
-  return e.ops.some((op) => typedByMatch(op, seen));
-}
-
 /** The reads of a record that `MatchesType` of a field needs: the `named`
  *  and `at` of `recordLowering()` (`lower-records.ts`). Declared here, not
  *  imported, because `lower-records.ts` imports this module. */
@@ -182,28 +152,6 @@ type RecordReads = {
 
 export function matchLowering(cx: Lowering, records: RecordReads) {
   const { b } = cx;
-
-  /** `e` reads a name that the walk binds as a local of a block or a
-   *  capture of a case: its type is the type of its value, which can be a
-   *  `Match` (CE-1731). An input, a parameter, a loop index and a free name
-   *  have a declared type, or the type of a value known at compile time. */
-  const readsLocal = (
-    e: Expression,
-    seen: Set<Expression> = new Set()
-  ): boolean => {
-    // Each node once: a shared graph is not walked as a tree.
-    if (seen.has(e)) return false;
-    seen.add(e);
-    if (isSymbol(e)) {
-      for (let i = cx.frames.length - 1; i >= 0; i--) {
-        const binding = cx.frames[i].names.get(e.symbol);
-        if (binding !== undefined)
-          return binding.role !== 'input' && binding.role !== 'index';
-      }
-      return false;
-    }
-    return isFunction(e) && e.ops.some((op) => readsLocal(op, seen));
-  };
 
   /** `f` run in the innermost local scope of the walk (`Lowering.scopes`),
    *  or `scope` when given. */
@@ -274,7 +222,7 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
   /** `MatchesType(x, T)` (`x is T`): `True` when the static type of `x` is
    *  a subtype of `T`, `False` when the two types do not overlap; the
    *  subject is lowered only for its effect. When the static type does not
-   *  decide, or cannot be trusted (CE-1731), a subject that is a field of
+   *  decide, a subject that is a field of
    *  a record (`Field`, `At`) is decided by the lane of the field: a value
    *  of the lane `nothing`, `string`, `boolean` or `color` is of that
    *  engine type, settled by the operand of the record's constructor.
@@ -309,12 +257,7 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
         : !typesOverlap(t, settled.type)
           ? false
           : undefined;
-    const untrusted = typedByMatch(subject)
-      ? 'MatchesType of a subject whose static type comes from a Match (CE-1731)'
-      : readsLocal(subject)
-        ? 'MatchesType of a subject that reads a local, whose type can come from a Match (CE-1731)'
-        : undefined;
-    const verdict = untrusted === undefined ? decide(s) : undefined;
+    const verdict = decide(s);
     if (verdict !== undefined) {
       if (subject.isPure !== true) cx.value(subject, false);
       return b.constant(verdict, 'boolean');
@@ -363,8 +306,7 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     if (known === undefined)
       decline(
         e,
-        untrusted ??
-          `MatchesType of a value of type ${typeToString(s)}, which neither proves nor excludes ${settled.canonicalText}`
+        `MatchesType of a value of type ${typeToString(s)}, which neither proves nor excludes ${settled.canonicalText}`
       );
     return b.constant(known, 'boolean');
   };
@@ -376,8 +318,8 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
    *  only for its effect. The interpreter maps the set to the same type
    *  (`membershipKleene()`, `library/sets.ts`), and the host supplies a
    *  value of the declared type. `NotElement(x, S)` is the negation.
-   *  `undefined` when the static type does not decide, cannot be trusted
-   *  (CE-1731) or is `nothing` or `never`, or when `S` is not such a set:
+   *  `undefined` when the static type does not decide or is `nothing` or
+   *  `never`, or when `S` is not such a set:
    *  `Element` then goes to the list operators, which lower the call or
    *  decline, and `NotElement` declines. */
   const element = (e: Fn): V | undefined => {
@@ -395,7 +337,6 @@ export function matchLowering(cx: Lowering, records: RecordReads) {
     // `nothing` is the type of an absent value, and `never` is a subtype
     // of every type: neither is decided here.
     if (s === 'nothing' || s === 'never') return undefined;
-    if (typedByMatch(x) || readsLocal(x)) return undefined;
     const verdict = isSubtype(s, t)
       ? true
       : !typesOverlap(s, t)

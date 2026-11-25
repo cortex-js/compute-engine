@@ -1902,15 +1902,20 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
 
   /**
    * When `true`, member-access heads serialize to dot notation:
-   * - `First(p)` → `p.x`
-   * - `Second(p)` → `p.y`
-   * - `Third(p)` → `p.z`
+   * - `PointX(p)` → `p.x`
+   * - `PointY(p)` → `p.y`
+   * - `PointZ(p)` → `p.z`
    * - `Real(z)` → `z.\operatorname{real}`
    * - `Imaginary(z)` → `z.\operatorname{imag}`
    * - `Length(L)` → `L.\operatorname{count}`
    * - `Sum(L)` → `L.\operatorname{total}`
    * - `Max(L)` → `L.\max`
    * - `Min(L)` → `L.\min`
+   * - `Mean(L)` → `L.\operatorname{mean}`
+   * - `Median(L)` → `L.\operatorname{median}`
+   * - `StandardDeviation(L)` → `L.\operatorname{stdev}`
+   * - `Sort(L)` → `L.\operatorname{sort}`
+   * - `Unique(L)` → `L.\operatorname{unique}`
    *
    * When `false` (default), the standard function-call form is used.
    *

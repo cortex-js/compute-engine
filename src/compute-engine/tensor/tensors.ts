@@ -1,6 +1,7 @@
 import { Complex } from 'complex.js';
 import { getSupertype, makeTensorField } from './tensor-fields.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { numberMatrixInverse } from '../numerics/linear-algebra.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -828,6 +829,25 @@ export abstract class AbstractTensor<
     // Check it's a square matrix
     const [m, n] = this.shape;
     if (m !== n) return undefined;
+
+    // A matrix of machine numbers: the kernel of compiled JavaScript. Its
+    // test of a singular matrix is relative to the magnitude of the
+    // entries; the exact test of a pivot for 0 below misses the rounding
+    // residue of a singular matrix (`[[3, 2, 1], [1, 1, 1], [4, 3, 2]]`)
+    // and gives entries of about 1e15.
+    if (this.dtype === 'float64') {
+      const data = this.data as number[];
+      const rows: number[][] = [];
+      for (let i = 0; i < n; i++) rows.push(data.slice(i * n, (i + 1) * n));
+      const inverse = numberMatrixInverse(rows);
+      if (inverse === undefined) return undefined;
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
+        shape: [n, n],
+        data: inverse.flat() as DataTypeMap[DT][],
+      });
+    }
 
     if (m === 2) {
       const [a, b, c, d] = this.data;

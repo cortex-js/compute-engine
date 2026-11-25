@@ -994,13 +994,18 @@ const EMPTY_NAME_SET: ReadonlySet<string> = new Set<string>();
  * `g := [x²y, x+y]`, `JacobianMatrix(g, [x,y])` must still differentiate a list
  * of `x`, not of `5`. Unlike `reduceTransformerOperand`, the list elements are
  * left exactly as stored.
+ *
+ * The symbol is read through the binding of its occurrence
+ * (`valueDefinitionOfOccurrence()`), not by its name in the scope of the
+ * caller: with `F := t ↦ g`, the `g` of `F(1)` is the `g` of the scope of
+ * `F`, also when `JacobianMatrix(F(1), [u, v])` is evaluated in a function
+ * with a parameter `g`.
  */
 export function resolveToList(expr: Expression): Expression {
   const inlined = inlineLambdaApplications(expr);
   if (isFunction(inlined, 'List')) return inlined;
   if (isSymbol(inlined)) {
-    const def = inlined.engine.lookupDefinition(inlined.symbol);
-    const value = isValueDef(def) ? def.value.value : undefined;
+    const value = valueDefinitionOfOccurrence(inlined)?.value;
     if (value !== undefined && isFunction(value, 'List')) return value;
   }
   return inlined;

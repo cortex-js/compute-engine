@@ -8498,7 +8498,9 @@ export function startDefinitionRow(
     head,
     operator: separator === '=' ? ('Equal' as const) : ('Assign' as const),
     finish(
-      formals: ReadonlyMap<string, TypeString>,
+      // The caller boxes each type with the engine's type resolver, so that
+      // a type that the host declared by name is known.
+      formals: ReadonlyMap<string, BoxedType>,
       formalsAreFactors = false
     ): MathJsonExpression | null {
       if (finished) throw new Error('Definition row already consumed');
@@ -8506,8 +8508,7 @@ export function startDefinitionRow(
       parser.index = bodyStart;
       parser.pushSymbolTable();
       try {
-        for (const [name, type] of formals)
-          parser.addSymbol(name, new BoxedType(type));
+        for (const [name, type] of formals) parser.addSymbol(name, type);
         if (formalsAreFactors) parser.definitionFormals = parser.symbolTable;
         const body = parser.parseExpression();
         // The caller reports a body that does not reach the end of the row.

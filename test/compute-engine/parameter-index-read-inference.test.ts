@@ -338,7 +338,7 @@ describe('an index-read tuple does not fix the length', () => {
   // requires a longer tuple than the reads of the caller made. The parameter
   // of the caller takes that tuple, whether the reads or the call come
   // first, and the tuple keeps the index-read mark: the call does not prove
-  // the length. (A shorter slot after a longer one adds nothing: CE-1493.)
+  // the length.
   test('a call of a function whose slot index reads made, in either order', () => {
     for (const body of [
       ['Block', ['Add', ['At', 'c', 1], 1], ['t', 'c']],
@@ -361,6 +361,93 @@ describe('an index-read tuple does not fix the length', () => {
         'indexed_collection<number>'
       );
     }
+  });
+
+  // CE-1493: a slot that index reads made, SHORTER than the reads of the
+  // caller, or of the same length with other components, is merged too: the
+  // tuple is as long as the longer of the two, each component is the meet of
+  // the two at its position, and the type does not depend on the order.
+  test('a call of a function whose slot index reads made is merged at any length', () => {
+    for (const body of [
+      ['Block', ['Add', ['At', 'c', 2], ['At', 'c', 5]], ['t', 'c']],
+      ['Block', ['t', 'c'], ['Add', ['At', 'c', 2], ['At', 'c', 5]]],
+    ] as MathJsonExpression[]) {
+      const ce = new ComputeEngine();
+      ce.assign(
+        't',
+        ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 3]], 'p'])
+      );
+      const fn = ce.box(['Function', body, 'c']);
+      expect(fn.isValid).toBe(true);
+      expect(fn.type.toString()).toBe(
+        '(c: tuple<number, number, number, unknown, number>) -> number'
+      );
+      // The merged tuple keeps the index-read mark: a later read past its
+      // end is one more component.
+      const longer = ce.box([
+        'Function',
+        ['Block', body, ['Add', ['At', 'c', 7], 1]],
+        'c',
+      ]);
+      expect(longer.type.toString()).toBe(
+        '(c: tuple<number, number, number, unknown, number, unknown, number>) -> number'
+      );
+    }
+  });
+
+  // CE-1493: a read that gives no element type (`c[5] > 0`) leaves
+  // `dictionary<any> | indexed_collection<any>`, which holds no evidence. A
+  // later slot that index reads made narrows it, as it narrows `unknown`, so
+  // the type does not depend on the order. (Such a read records no index, so
+  // the tuple is not lengthened to 5; it keeps the index-read mark, which
+  // proves no length.)
+  test('a read with no element type, then a call of a function whose slot index reads made', () => {
+    const types = [
+      ['Block', ['Greater', ['At', 'c', 5], 0], ['t', 'c']],
+      ['Block', ['t', 'c'], ['Greater', ['At', 'c', 5], 0]],
+    ].map((body) => {
+      const ce = new ComputeEngine();
+      ce.assign(
+        't',
+        ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 3]], 'p'])
+      );
+      const fn = ce.box(['Function', body as MathJsonExpression, 'c']);
+      expect(fn.isValid).toBe(true);
+      // The result is the last statement of the block, so it differs.
+      return fn.type.toString().replace(/ -> .*$/, '');
+    });
+    expect(types[0]).toMatch(/^\(c: tuple<number, unknown, number[,>]/);
+    expect(types[1]).toBe(types[0]);
+  });
+
+  test('Epsil: two functions that read a parameter at different lengths, in either order', () => {
+    const header = `function touches(p, q) {
+  let d = sqrt((p[2] - q[2])^2 + (p[3] - q[3])^2)
+  let rp = 1 / p[1]; let rq = 1 / q[1]
+  abs(d - abs(rp + rq)) < 1e-6 || abs(d - abs(rp - rq)) < 1e-6
+}
+function other(q) { q[1] + q[5] }
+`;
+    const types = (body: string): string => {
+      const ce = new ComputeEngine();
+      const r = executeEpsil(ce, `${header}function f(p, c) { ${body} }`);
+      expect(r.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+      const call = ce.box([
+        'f',
+        ['Tuple', -1, 0, 0],
+        ['Tuple', 2, 0.5, 0, 7, 3],
+      ] as MathJsonExpression);
+      expect(call.evaluate().json).toBe('True');
+      return ce.box('f').type.toString();
+    };
+    const calls = types('touches(c, p) && other(c) > 0');
+    expect(calls).toBe(
+      '(p: tuple<number, number, number>, c: tuple<number, number, number, unknown, number>) -> boolean'
+    );
+    expect(types('other(c) > 0 && touches(c, p)')).toBe(calls);
+    const read = types('touches(c, p) && c[5] > 0');
+    expect(read).toMatch(/c: tuple<number, number, number[,>]/);
+    expect(types('c[5] > 0 && touches(c, p)')).toBe(read);
   });
 
   test('Epsil: a parameter read at index 1, then passed to a function that reads three', () => {

@@ -1309,7 +1309,7 @@ function toDouble(value: NumericValue): NumericValue {
 
 /** Whether `n`, the double of the part `part`, is 0 or a normal double, and
  * is 0 only when `part` is 0. */
-function isDoublePart(n: number, part: BigDecimal): boolean {
+export function isDoublePart(n: number, part: BigDecimal): boolean {
   if (n === 0) return part.isZero();
   return !isOutsideNormalDoubleRange(n);
 }

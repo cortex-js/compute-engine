@@ -7,9 +7,12 @@
  * (`atu`, where the interpreter gives `Missing`), of points a point of NaN
  * coordinates (`atp`, the interpreter's value). No operation on a boolean
  * fails on `undefined`, so the read is pure. A real index that is not an
- * integer is out of range, as in the interpreter (no floor). A list of
- * complex numbers and another list of lists decline (a read of an absent
- * row must not fail), as do GLSL, the interval mode and the bigint mode.
+ * integer is out of range, as in the interpreter (no floor). A row of a
+ * list of lists of numbers of stated lengths compiles where the `At` is the
+ * whole program (`atrow`, `undefined` out of range; CE-1540). A list of
+ * complex numbers and another read of a list of lists decline (a read of an
+ * absent row must not fail), as do GLSL, the interval mode and the bigint
+ * mode.
  */
 
 import { compile } from '../../src/compile';
@@ -137,10 +140,17 @@ const KINDS: [string, Json, number][] = [
   ['booleans of a comparison', ['At', ['Less', ['Abs', 'X'], 2], 'i'], 3],
   ['points', ['At', 'P', 'i'], 3],
 ];
+// A row of a list of lists of numbers of stated lengths, the whole program
+// (CE-1540): the row, or `undefined` out of range, where the interpreter
+// gives `Missing`.
+const ROWS: [string, Json, number][] = [
+  ['a matrix input', ['At', 'M', 'i'], 2],
+  ['a literal list of lists', ['At', LL, 'i'], 3],
+];
 const DECLINED: [string, Json][] = [
   ['complex numbers', ['At', Z, 'i']],
-  ['a matrix input', ['At', 'M', 'i']],
-  ['a literal list of lists', ['At', LL, 'i']],
+  ['a row of a matrix input in a tuple', ['Tuple', ['At', 'M', 'i'], 1]],
+  ['a row of a literal list of lists in a list', ['List', ['At', LL, 'i']]],
   ['the length of a row', ['Length', ['At', 'M', 'i']]],
   ['a row of a row', ['At', ['At', 'M', 'i'], 2]],
   ['a tuple of booleans', ['At', ['Tuple', 'True', 'False'], 'i']],
@@ -178,6 +188,20 @@ describe('At of a run-time index, out of range, on JavaScript', () => {
           expect(got).toBeUndefined();
           expect(want).toBeUndefined();
         }
+      }
+    });
+
+  for (const [what, json, n] of ROWS)
+    test(`${what}, the whole program: the row, or undefined out of range`, () => {
+      const r = js(json);
+      for (const i of [1, n, -1, -n]) {
+        const want = interpreted(json, { ...VALUES, i });
+        expect(Array.isArray(want)).toBe(true);
+        expect(agree(r.run({ ...VALUES, i }), want)).toBe(true);
+      }
+      for (const i of [0, n + 1, -n - 1, 1.5]) {
+        expect(r.run({ ...VALUES, i })).toBeUndefined();
+        expect(interpreted(json, { ...VALUES, i })).toBeUndefined();
       }
     });
 
@@ -297,7 +321,7 @@ describe('the other kinds and the other targets decline', () => {
       expect(failure(() => js(json))).toMatch(MESSAGE);
     });
   const message = MESSAGE;
-  for (const [what, json] of [...KINDS, ...DECLINED.slice(0, 3)]) {
+  for (const [what, json] of [...KINDS, ...ROWS, ...DECLINED.slice(0, 3)]) {
     test(`GLSL: ${what}`, () => {
       expect(failure(() => compile(box(json), { ...IR, to: 'glsl' }))).toMatch(
         what === 'an input of booleans' ? /./ : message

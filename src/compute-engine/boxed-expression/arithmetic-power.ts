@@ -60,6 +60,7 @@ import {
   mayBeMatrixPowerBase,
   mayBeMatrixValued,
 } from './matrix-operand.js';
+import { isCollectionShaped } from '../collection-utils.js';
 
 /** The `matrix` type, parsed once when the module loads. */
 const MATRIX_TYPE = parseType('matrix');
@@ -491,7 +492,17 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // intentionally excluded — it has `isFinite === false` / `isNaN === true` and
   // falls through to the NaN handling further down. (Matches SymPy / Mathematica,
   // which both reduce `1^x → 1`.)
-  if (isExactLiteral(a, 1) && b.isFinite !== false && b.isNaN !== true)
+  // An exponent that is a collection by its type (a list, a vector, a
+  // matrix: `1^M` with `M: matrix<2x2>`) keeps the power: the power of a
+  // number by a collection is element-wise, so its value is a collection of
+  // ones of the shape of the exponent, not the scalar `1`. `0/L` keeps its
+  // quotient for the same reason (`canonicalDivide()`).
+  if (
+    isExactLiteral(a, 1) &&
+    b.isFinite !== false &&
+    b.isNaN !== true &&
+    !isCollectionShaped(b)
+  )
     return ce.One;
 
   // Onwards, the focus on operations is where is a *numeric* exponent.

@@ -649,7 +649,12 @@ machinery.
 
 A clause variable has one of two KINDS, decided by where it occurs. A
 variable that occurs only at type positions is a type variable, solved by
-joining the types of the operands it meets. A variable that occurs in a
+joining the types of the operands it meets. A symbol with no type, at a
+parameter that is a bare type variable, is narrowed to the bound of the
+variable, not to its solved type: in `Remainder(x, 3)`
+(`(T, T) -> T where T: number`), `x` is narrowed to `number`, not to
+`integer`, and in `(t) -> Insert(Range(1, 3), 1, t)` `t` keeps its type
+(`inferenceTypeWithKindsAt()`, `validate.ts`). A variable that occurs in a
 collection's length slot (`list<T^N>`, `vector<T^N>`, `matrix<T^(MxN)>`), or
 that fills a nominal type's value parameter, is a VALUE variable: it stands
 for a non-negative integer length, it is solved by equality across every position
@@ -1733,9 +1738,16 @@ invalidates no cached type: the type version (`typeVersion`,
 
 - In a type computation (`withStaticTypingView`) a definition that is not a
   constant has no value (`storedValue`, `boxed-value-definition.ts`). One
-  exception: a variable whose value holds a function literal, because the
-  signature of a user function comes from its value; the write of such a
-  value moves the type version. A definition whose value an activation holds
+  exception: a variable whose value is a function literal, or holds one and
+  has a function in its type (`[x ↦ 2x, x ↦ x + 1]`), because the signature
+  of a user function comes from its value; the write of such a value moves
+  the type version. A value that applies a function literal
+  (`Filter(L, k ↦ k < 3)`) is not such a value: in the view a parameter of
+  the literal has no value, so the literal does not judge an element there.
+  A `Filter` by a function literal or by a user function (`Filter(L, p)`
+  with `p(k) := k < 3`) has no count, no emptiness, no membership and no
+  elements in the view; an operator that the host or the library defines is
+  applied to the element itself. A definition whose value an activation holds
   (a parameter, a local of a block) has no value there either, also a
   constant: `const h = (k) => k + 1` in a block holds a value of one run of
   the block. Its prepared constant signature can still type `Map(h, [1, 2])`
@@ -1982,11 +1994,13 @@ Type-cache versions exclude activation declarations and frame pops because
 those events do not change the static bindings. Sign, value, effect and other
 evaluation caches still depend on parameter values: their static-view entries
 use distinct keys (`staticViewDiverges`, `_cacheGeneration`, `_effectsOf`).
-Three memos are bypassed instead, because their keys do not change inside the
+Four memos are bypassed instead, because their keys do not change inside the
 view: the application memo of function literals, the memo of shared nodes
-(keyed on the frame of the call) and the lazy value memo of `BoxedFunction`
-(keyed on the generation and the lexical scope). A type handler can evaluate a
-node: the type of `self(self, Take(f, Len(f) - 1))` reads whether the `Take` is
+(keyed on the frame of the call), the lazy value memo of `BoxedFunction`
+(keyed on the generation and the lexical scope) and the element memo of a
+lazy collection (`collection-element-memo.ts`, keyed on the world version).
+A type handler can evaluate a node: the type of
+`self(self, Take(f, Len(f) - 1))` reads whether the `Take` is
 finite, which evaluates `Len(f)` with `f` unbound. An entry stored then would
 be served to the evaluation of the call (GitHub issue #507). An application
 suspended on another stack

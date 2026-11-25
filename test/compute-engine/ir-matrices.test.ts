@@ -340,7 +340,8 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
 
   // Exactly singular integer matrices whose elimination in doubles leaves a
   // rounding residue in place of a zero pivot: NaN, where the interpreter
-  // leaves `Inverse` unevaluated (`matrixInverse()` of `matrix-runtime.ts`).
+  // leaves `Inverse` unevaluated, with `evaluate()` and with `.N()`
+  // (`numberMatrixInverse()` of `numerics/linear-algebra.ts`, CE-1542).
   it('Inverse of a singular matrix with a rounding residue is NaN', () => {
     const SINGULAR: Array<[string, number[][]]> = [
       [
@@ -389,6 +390,16 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
     for (const [name, m] of SINGULAR) {
       const ce = new ComputeEngine();
       expect(ce.box(['Inverse', toJson(m)]).evaluate().operator).toBe(
+        'Inverse'
+      );
+      expect(ce.box(['Inverse', toJson(m)]).N().operator).toBe('Inverse');
+      expect(ce.box(['PseudoInverse', toJson(m)]).N().operator).toBe(
+        'PseudoInverse'
+      );
+      // Entries such as 1.5 are machine numbers: `evaluate()` takes the
+      // numeric kernel too.
+      const halves = m.map((row) => row.map((x) => x * 0.5));
+      expect(ce.box(['Inverse', toJson(halves)]).evaluate().operator).toBe(
         'Inverse'
       );
       const n = m.length;

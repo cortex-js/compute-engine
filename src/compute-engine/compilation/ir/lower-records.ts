@@ -12,7 +12,10 @@ import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSymbol } from '../../boxed-expression/type-guards.js';
-import type { Expression } from '../../global-types.js';
+import type {
+  DictionaryInterface,
+  Expression,
+} from '../../global-types.js';
 import {
   decline,
   hasUnsettledShape,
@@ -24,7 +27,6 @@ import {
   type Lowering,
 } from './lower-context.js';
 import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
-import { typedByMatch } from './lower-match.js';
 import {
   elementIndex,
   isSubType,
@@ -109,9 +111,9 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
   const make = (
     e: Expression,
     values: V[],
-    nominal?: { nominal: string; names?: readonly string[] },
+    nominal?: { nominal?: string; names?: readonly string[] },
     fields: (IRType | undefined)[] = [],
-    head?: 'List' | 'Tuple'
+    head?: IRType['head']
   ): V => {
     const types = values.map((v, k): IRType => {
       const place = `${nominal?.nominal ?? 'record'}.${k}`;
@@ -140,7 +142,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
       shape: [],
       fields: types,
       marks: values.map((x) => tuples.get(x)),
-      ...(nominal === undefined ? {} : { nominal: nominal.nominal }),
+      ...(nominal?.nominal === undefined ? {} : { nominal: nominal.nominal }),
       ...(nominal?.names === undefined ? {} : { names: nominal.names }),
       ...(head === undefined ? {} : { head }),
     });
@@ -215,11 +217,6 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
         fields.push(t);
         return b.op('nothing', [], t);
       }
-      if (typedByMatch(op))
-        decline(
-          op,
-          `${what}: a value whose static type comes from a Match (CE-1731)`
-        );
       // A value of no stated type or of type `any` (a parameter that holds
       // the type of its argument, `held()` of `lower-functions.ts`): its
       // lane proves the field's type, in the function lowered for it.
@@ -252,6 +249,23 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     return make(e, values, c, fields);
   };
 
+  /** A dictionary literal `{k1 -> a, k2 -> b, …}` (CE-1771): the record of
+   *  its values, in the order of its keys, whose field names are the keys
+   *  and whose head is `Dictionary` (`IRType.head`). The keys of a
+   *  dictionary are strings, so each one is known when the code is emitted.
+   *  A read of a key (`d.k`, `d["k"]`) is the field of that name; a key
+   *  that the literal does not have declines. */
+  const dictionary = (e: Expression & DictionaryInterface): V => {
+    if (!javascript)
+      decline(e, 'a dictionary, a record: records compile on javascript only');
+    // The result of the code is an object literal of the keys, where
+    // `"__proto__"` sets the prototype instead of a key.
+    if (e.keys.includes('__proto__'))
+      decline(e, 'a dictionary with the key __proto__');
+    const values = e.values.map((x) => cx.value(x)!);
+    return make(e, values, { names: e.keys }, [], 'Dictionary');
+  };
+
   /** The field `k` (from 0) of the record `r`: the value it was made of,
    *  or its read. The read of a string field of a known value is that
    *  value (`Lowering.known()`); its type does not hold it. */
@@ -274,7 +288,17 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
   /** `At(r, i)` of a record: the field at the constant index `i` (from 1,
    *  or from the end when negative); another index declines. */
   const at = (e: Expression, r: V, i: V): V => {
-    const k = elementIndex(type(r).fields!.length, cx.constant(i));
+    const t = type(r);
+    // A dictionary is read by its keys only: `d["k"]` is the field `k`. Of
+    // another index the interpreter's value is not the field at that
+    // position.
+    if (t.head === 'Dictionary') {
+      const key = b.constants.get(i);
+      if (typeof key !== 'string')
+        decline(e, 'At of a dictionary at an index that is not a constant key');
+      return named(e, r, key);
+    }
+    const k = elementIndex(t.fields!.length, cx.constant(i));
     if (k === undefined)
       decline(
         e,
@@ -284,8 +308,8 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
   };
 
   /** `Field(r, name)`: the field of that name of a record of a named tuple
-   *  type. */
-  const named = (e: Fn, r: V, name: string | undefined): V => {
+   *  type or of a dictionary. */
+  const named = (e: Expression, r: V, name: string | undefined): V => {
     const t = type(r);
     if (t.lane !== 'record')
       decline(e, 'Field of a value that is not a record');
@@ -298,5 +322,5 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     return field(r, k);
   };
 
-  return { construct, literal, at, named };
+  return { construct, literal, dictionary, at, named };
 }

@@ -36,10 +36,13 @@ export const BOUND_ROLE: OperandRole = Object.freeze({ kind: 'bound' });
 export const CLAUSE_ROLE: OperandRole = Object.freeze({ kind: 'clause' });
 
 /** An indexing set whose index, in a range-shaped clause, is an integer (the
- * clauses of `Sum` and `Product`). */
+ * clauses of `Sum` and `Product`). The clauses are unordered: the evaluation
+ * nests them by their dependencies (`nestDependentLimits()`, `utils.ts`), so
+ * an earlier clause sees the index of a later one. */
 export const INTEGER_CLAUSE_ROLE: OperandRole = Object.freeze({
   kind: 'clause',
   type: 'integer',
+  unordered: true,
 });
 
 /** An `operands` handler that gives operand `i` the role `first[i]`, and

@@ -23,6 +23,7 @@ import {
   run,
   runAsync,
 } from '../../common/interruptible.js';
+import { isDebugHookFailure } from '../../common/debug-hook.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -119,6 +120,7 @@ import {
   noteIncompleteWalk,
   unlessWalkMissedElements,
 } from '../boxed-expression/incomplete-walks.js';
+import { staticViewDiverges } from '../static-typing-view.js';
 import {
   isFiniteCount,
   normalizeCount,
@@ -372,6 +374,7 @@ import {
   protocolPropertyTypeOfReceiver,
   protocolsWithMember,
 } from '../engine-protocols.js';
+import { createErrorExpression } from '../engine-validation-entrypoints.js';
 
 // The list types the `Range` type handler reports, parsed once when the
 // module loads instead of on each type computation.
@@ -1885,6 +1888,35 @@ function predicateErrorValue(
   if (pred === undefined || pred.isValid) return undefined;
   if (pred.operator === 'Error') return pred;
   return pred.errors[0];
+}
+
+/**
+ * True when `expr`, a `Filter`, is read in a type computation of its engine
+ * (`staticViewDiverges()`, `static-typing-view.ts`) and its predicate is or
+ * holds a function literal, or names a user function (`p := k ↦ k < 3` or
+ * `p(k) := k < 3`, then `Filter(xs, p)`). There the parameters of the
+ * literal have no value, so an application of the predicate does not judge
+ * the element: `k ↦ k < 3` answers `k < 3`, and a host predicate
+ * `k ↦ Keep(k)` reads a symbol. The `Filter` then has no count, no emptiness
+ * and no membership, and its walk misses every element. An operator that
+ * the host or the library defines (`Filter(xs, Keep)`) receives the element
+ * itself.
+ */
+function predicateUnboundInView(expr: Expression): boolean {
+  if (!isFunction(expr) || !staticViewDiverges(expr.engine)) return false;
+  const pred = expr.op2;
+  if (pred === undefined) return false;
+  if (isSymbol(pred)) {
+    if (pred.operatorDefinition?.isUserFunctionDefinition === true) return true;
+    const value = pred.value;
+    return value !== undefined && isFunction(value, 'Function');
+  }
+  return isFunction(pred, 'Function') || holdsFunctionLiteralOperand(pred);
+}
+
+/** True when an operand of `x` is a `Function` literal. */
+function holdsFunctionLiteralOperand(x: Expression): boolean {
+  return isFunction(x) && x.ops.some((op) => isFunction(op, 'Function'));
 }
 
 /**
@@ -6947,6 +6979,19 @@ function storedElementType(elements: Type, values: ReadonlyArray<Type>): Type {
 }
 
 /**
+ * The type of the list that `Insert` or `ReplaceAt` with one position gives
+ * for a collection of type `source` and a stored value typed `unknown`:
+ * `list<E | unknown>` (`storedElementType`), which reduces to
+ * `list<unknown>`. `undefined` for a source with no element type, which the
+ * signature types.
+ */
+function listWithUnknownStored(source: Type): Type | undefined {
+  const element = collectionElementType(source);
+  if (element === undefined) return undefined;
+  return { kind: 'list', elements: storedElementType(element, ['unknown']) };
+}
+
+/**
  * The result type of `Slice` over a string: `string`, and `undefined` for
  * every other value, which keeps the type that the resolver gives.
  *
@@ -9068,13 +9113,10 @@ function canonicalMemberCall(
     // protocol — the same advice the bare call's ambiguity gives.
     const names =
       applicable.length > 1 ? applicable : owners.map((r) => r.name);
-    return ce.error(
-      [
-        'protocol-call-ambiguous',
-        `\`${name}\` is a function member of ${names.map((p) => `\`${p}\``).join(' and ')}, and the bare name \`${name}\` is taken by a definition of your own. Qualify it — \`x.(${names[0]}.${name})(…)\` — to name the one you meant.`,
-      ],
-      sym(base) ?? base.toString()
-    );
+    return receiverError(ce, base, [
+      'protocol-call-ambiguous',
+      `\`${name}\` is a function member of ${names.map((p) => `\`${p}\``).join(' and ')}, and the bare name \`${name}\` is taken by a definition of your own. Qualify it — \`x.(${names[0]}.${name})(…)\` — to name the one you meant.`,
+    ]);
   }
 
   // 4. A known function that is not a protocol member, on a value that has
@@ -9099,11 +9141,34 @@ function canonicalMemberCall(
     isApplicableDef(known) &&
     protocolPropertyTypeOfReceiver(ce, t, name) === undefined
   )
-    return ce.error(
-      ['dot-call-not-a-protocol-function', name, typeToString(t)],
-      sym(base) ?? base.toString()
-    );
+    return receiverError(ce, base, [
+      'dot-call-not-a-protocol-function',
+      name,
+      typeToString(t),
+    ]);
   return storedCall();
+}
+
+/**
+ * The error of a dot-call `base.name(…)`, with the receiver as its site.
+ *
+ * A symbol receiver is its name, and a string receiver is its quoted
+ * spelling (`"abc"`): a message prints a string site as its text, so the
+ * string itself would read as a name. Any other receiver is the expression
+ * itself, so that a message renders it as the author wrote it
+ * (`sort(xs)`): its `toString()` is the engine form (`Sort(xs)`), and the
+ * renderer quotes the symbols of a text site again (`Sort("xs")`).
+ */
+function receiverError(
+  ce: ComputeEngine,
+  base: Expression,
+  message: string[]
+): Expression {
+  return createErrorExpression(
+    ce,
+    message,
+    sym(base) ?? (isString(base) ? base.toString() : base)
+  );
 }
 
 /**
@@ -12489,7 +12554,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const adjusted = validateAgainstDeclaration(ce, 'Length', stripped);
       return ce._fn('Length', adjusted ?? stripped);
     },
-    evaluate: ([xs], { engine }) => {
+    evaluate: ([operand], { engine }) => {
+      // The evaluated operand loses the wrappers that `canonical` strips from
+      // the written one. A symbol can hold a wrapper (`d := Sort([3, x,
+      // 1])`), and a wrapper that does not evaluate, a `Sort` that cannot
+      // order `x`, is not a collection: without the strip, `Length(d)` stays
+      // unevaluated and gives 3 only at a second evaluation. `IsEmpty` and
+      // `Contains` do the same.
+      const xs = peekCountPreserving(operand) ?? operand;
       // `Length(5)` and `Length(True)` are decided non-collections and answer
       // an `incompatible-type` error; an operand that is merely not decided
       // yet keeps the inert form (see `nonCollectionSizeOperandError`). An
@@ -14046,8 +14118,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('Contains', adjusted ?? stripped);
     },
-    evaluate: ([xs, value], { engine: ce }) => {
+    evaluate: ([operand, value], { engine: ce }) => {
       if (searchedValueStatus(value) === 'undecided') return undefined;
+      // The evaluated operand loses the wrappers that `canonical` strips, as
+      // in `Length`.
+      const xs = peekMembershipPreserving(operand) ?? operand;
       // Three-valued: an indeterminate membership (e.g. a bounded walk that
       // hits its iteration limit) stays inert rather than collapsing to False.
       const found = xs.contains(value);
@@ -14406,7 +14481,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
       return ce._fn('IsEmpty', adjusted ?? stripped);
     },
-    evaluate: ([xs], { engine: ce }) => {
+    evaluate: ([operand], { engine: ce }) => {
+      // The evaluated operand loses the wrappers that `canonical` strips, as
+      // in `Length`.
+      const xs = peekCountPreserving(operand) ?? operand;
       // Three-valued: an indeterminate emptiness (e.g. a bounded Filter walk
       // that hits its iteration limit) stays inert rather than collapsing to
       // False.
@@ -15118,6 +15196,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isEmptyCollection === true) return true;
+        // See the `iterator` handler.
+        if (predicateUnboundInView(expr)) return undefined;
         // A source that cannot be enumerated leaves emptiness UNKNOWN: the
         // walk below would find nothing and report a definite `true`, which is
         // how `Filter(xs, p)` answered `[]` for a valueless `xs`.
@@ -15152,6 +15232,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
+        // See the `iterator` handler: the walk below would count 0.
+        if (predicateUnboundInView(expr)) return undefined;
         // A FACET query stays cheap: past `ce.iterationLimit` matching
         // elements the count is reported as UNKNOWN rather than walked to the
         // end. This bound is the count's OWN, deliberately separate from the
@@ -15193,6 +15275,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // same `Filter` read the same elements.
         const inSource = selectedSourceContains(walkedSource(expr.op1), target);
         if (inSource !== true) return inSource === false ? false : undefined;
+        // See the `iterator` handler.
+        if (predicateUnboundInView(expr)) return undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);
         // Mirror the iterator's verdicts on the predicate result, so a query
@@ -15222,6 +15306,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // In a type computation the parameters of a function literal have no
+        // value (`static-typing-view.ts`), so its verdicts are not the
+        // verdicts of the elements: the walk misses every element, and its
+        // readers stay unevaluated (`noteIncompleteWalk()`).
+        if (predicateUnboundInView(expr))
+          return {
+            next: () => {
+              noteIncompleteWalk();
+              return { value: undefined, done: true };
+            },
+          };
         // A sub-expression of the predicate that does not depend on the
         // element is evaluated once in the walk (`walk-invariant-values.ts`).
         const f = walkInvariantApplicable(expr.op2, applicable(expr.op2));
@@ -19250,6 +19345,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
+    // The signature gives the result type, except for a value typed
+    // `unknown`: the solve of `T` drops it, so `Insert(Range(1, u), 1, t)`,
+    // with a parameter `t` whose type is not inferred, was typed
+    // `list<integer>`. The value is kept as an arm of the element type
+    // (`storedElementType`), as `Append` keeps it.
+    type: (ops, { engine: ce }) => {
+      if (ops.length !== 3 || ops[2].type !== 'unknown') return undefined;
+      const result = listWithUnknownStored(ops[0].type);
+      return result && BoxedType.forResult(result, ce._typeResolver);
+    },
     evaluate: ([xs, idx, value], { engine: ce }) => {
       const refused = unindexedCollectionOperandError(ce, 'Insert', xs);
       if (refused) return refused;
@@ -19591,9 +19696,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           .some((position) => provablyDisjoint(position.type, 'integer'))
       )
         return BoxedType.forResult('error', ce._typeResolver);
+      // With one position, the signature gives the result type when the
+      // write does not keep the list type, except for a value typed
+      // `unknown`, which the solve of `T` drops (see `Insert`).
       const result =
         ops.length === 3
-          ? listTypeKeptByWrite(source, value)
+          ? value === 'unknown'
+            ? listWithUnknownStored(source)
+            : listTypeKeptByWrite(source, value)
           : replaceAtPathType(source, ops.length - 2, value);
       return result && BoxedType.forResult(result, ce._typeResolver);
     },
@@ -25663,13 +25773,15 @@ function snapshotListJoin(
       }
     }
   } catch (e) {
-    // A deadline or a cancellation by the host stops the evaluation. Any
-    // other failure keeps the view.
+    // A deadline or a cancellation by the host stops the evaluation, and so
+    // does a debugger command that unwinds the evaluation from the hook of a
+    // statement of a callback. Any other failure keeps the view.
     if (
       e instanceof CancellationError &&
       e.cause !== 'iteration-limit-exceeded'
     )
       throw e;
+    if (isDebugHookFailure(e)) throw e;
     return undefined;
   }
   return ce._fn('List', elements);

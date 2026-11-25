@@ -2231,6 +2231,13 @@ function literalBodyResultTypeInContext(
         ].includes(expr.operator)
       )
         return undefined;
+      // The bodies of the cases of a `Match` are raw, and they read the
+      // names that their pattern captures: the walk cannot type them, and
+      // the call keeps its declared result. A walk of the cases would type
+      // each `MatchCase` by its signature, `nothing`: with
+      // `f := n ↦ Match(n, MatchCase(_, 2n))`, `f(3) + 1` would be an
+      // `incompatible-type` error.
+      if (expr.operator === 'Match') return undefined;
       // A call whose head is a parameter or a local of the literal (a
       // function-valued parameter `h` in `(h, a) ↦ h(a)`) is not a call of
       // the function of that name in the engine's scope: nothing is known

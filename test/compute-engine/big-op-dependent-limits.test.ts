@@ -190,6 +190,71 @@ describe('Sum and Product with a bound that depends on another index', () => {
     expect((await e.evaluateAsync()).toString()).toBe('25');
   });
 
+  // CE-1762: the clauses are unordered, so an earlier clause sees the index
+  // of a later one. Before, the `i` of the first clause was the imaginary
+  // unit, and the sum was 6 (or stayed unevaluated with a `Limits` clause).
+  test('an index named i in an earlier Element clause', () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Element', 'j', ['Range', 1, 'i']],
+      ['Limits', 'i', 1, 3],
+    ]);
+    expect(e.json).toEqual([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Element', 'j', ['Range', 1, 'i']],
+      ['Limits', 'i', 1, 3],
+    ]);
+    expect(e.freeVariables).toEqual([]);
+    expect(e.evaluate().toString()).toBe('25');
+  });
+
+  test('an index named i in an earlier Limits clause', () => {
+    const sum = ce.box([
+      'Sum',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'j', 1, 'i'],
+      ['Limits', 'i', 1, 3],
+    ]);
+    expect(sum.evaluate().toString()).toBe('25');
+    // Over i = 1..3, j = 1..i: 1 · (2·4) · (3·6·9) = 1296
+    const product = ce.box([
+      'Product',
+      ['Multiply', 'i', 'j'],
+      ['Limits', 'j', 1, 'i'],
+      ['Limits', 'i', 1, 3],
+    ]);
+    expect(product.evaluate().toString()).toBe('1296');
+  });
+
+  test('the flat spelling with an index named i', () => {
+    const e = ce.box(['Sum', ['Multiply', 'i', 'j'], 'j', 1, 'i', 'i', 1, 3]);
+    expect(e.evaluate().toString()).toBe('25');
+  });
+
+  test('a later index is not a free variable of an earlier clause', () => {
+    const e = ce.box([
+      'Sum',
+      ['Multiply', 'k', 'n'],
+      ['Limits', 'k', 1, 'n'],
+      ['Limits', 'n', 1, 'm'],
+    ]);
+    expect(e.freeVariables).toEqual(['m']);
+    expect(e.subs({ m: 3 }).evaluate().toString()).toBe('25');
+  });
+
+  test('the bound of a clause is outside the scope of its own index', () => {
+    // The upper bound `k` of the second clause is the enclosing `k`.
+    const e = ce.box([
+      'Sum',
+      'k',
+      ['Limits', 'j', 1, 2],
+      ['Limits', 'k', 1, 'k'],
+    ]);
+    expect(e.freeVariables).toEqual(['k']);
+  });
+
   test('async evaluation agrees', async () => {
     const e = ce.box([
       'Sum',

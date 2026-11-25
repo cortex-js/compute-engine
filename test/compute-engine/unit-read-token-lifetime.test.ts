@@ -95,6 +95,37 @@ describe('THE LIFETIME OF A READ OF A UNIT ENVIRONMENT', () => {
     }
   );
 
+  // The table of tokens of an environment is weak on its keys: an occurrence
+  // that is kept keeps the environment that it shares with a discarded
+  // sibling, and not the scope and the definitions of that sibling.
+  test('an occurrence kept from a tuple does not keep a discarded sibling function', async () => {
+    function sample() {
+      const ce = new ComputeEngine();
+      const pair = ce.box([
+        'Tuple',
+        ['Function', ['Add', 'a', 'other'], 'a'],
+        ['Function', ['Add', 'b', 'kept'], 'b'],
+      ]);
+      const body = pair.ops![0].op1.ops![0];
+      const parameter = body.ops!.find((op) => op.symbol === 'a')!;
+      const kept = pair.ops![1].op1.ops![0].ops!.find(
+        (op) => op.symbol === 'kept'
+      )!;
+      // Typing the body reads `a` through the environment of the tuple.
+      expect(body.type.toString()).toBe('number');
+      return {
+        kept,
+        sibling: new WeakRef(parameter),
+        definition: new WeakRef(parameter.valueDefinition!),
+      };
+    }
+    const { kept, sibling, definition } = sample();
+    await collect(12);
+    expect(kept.json).toBe('kept');
+    expect(sibling.deref()).toBeUndefined();
+    expect(definition.deref()).toBeUndefined();
+  });
+
   test('boxing function literals in one job does not keep them', () => {
     const ce = new ComputeEngine();
     const literal: MathJsonExpression = [

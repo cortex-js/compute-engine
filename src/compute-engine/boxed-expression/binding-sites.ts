@@ -64,7 +64,25 @@ export type BindingSite = {
    * parameters) wants.
    */
   clauseLocal?: boolean;
+
+  /**
+   * For a `clauseLocal` site, the operand index the binding is visible from
+   * when it is not the site's own operand (`path[0]`): the first clause of
+   * the run of an `unordered` clause role (`Sum`, `Product`), whose earlier
+   * clauses see the index of a later one. Read it with
+   * {@link siteVisibleFrom}.
+   */
+  visibleFrom?: number;
 };
+
+/**
+ * The operand index from which the binding of `site` is visible: 0 for a site
+ * that is not clause-local, otherwise its `visibleFrom` or its own operand.
+ */
+export function siteVisibleFrom(site: BindingSite): number {
+  if (!site.clauseLocal) return 0;
+  return site.visibleFrom ?? site.path[0];
+}
 
 /**
  * The binding sites of a binder among its operands `ops`. The boxed operator
@@ -177,7 +195,12 @@ function clauseRunSites(
     const role = roles[i];
     const type = role?.kind === 'clause' ? role.type : undefined;
     const flatSpan = isSymbol(ops[i]) ? span(i) : 1;
-    sites.push(...indexingSetSite(ops[i], i, type, ops, flatIndexes, flatSpan));
+    const found = indexingSetSite(ops[i], i, type, ops, flatIndexes, flatSpan);
+    // The index of an unordered clause is visible from the first clause of
+    // the run (`BindingSite.visibleFrom`).
+    if (role?.kind === 'clause' && role.unordered === true)
+      for (const site of found) sites.push({ ...site, visibleFrom: start });
+    else sites.push(...found);
     i += flatSpan - 1;
   }
   return sites;
@@ -677,10 +700,18 @@ function computeIsNextIndex(
  * first clause — the body, which sits inside all of them. An earlier clause may
  * therefore mention a later clause's name as an ordinary ambient symbol, and
  * `Comprehension(…, Element(i, [j, j+1]), Element(j, …))` relies on it: that
- * `j` is the enclosing one, not the comprehension's.
+ * `j` is the enclosing one, not the comprehension's. The clauses of `Sum` and
+ * `Product` are unordered (`BindingSite.visibleFrom`): each of their indexes
+ * is visible from the first clause.
+ *
+ * `boundAt` maps a clause-local name to the operand of the first clause that
+ * binds it, which `visibleFrom` does not give for an unordered clause: the
+ * bounds of that clause are outside the scope of its own index
+ * (`ownIndexClause()`). A name that is not clause-local maps to 0.
  */
 export interface DeclaredBinders {
   readonly visibleFrom: ReadonlyMap<string, number>;
+  readonly boundAt: ReadonlyMap<string, number>;
   readonly firstClause: number;
   /** The names bound by CLAUSE-LOCAL sites — the indexing-set clauses of
    * `Sum`, `Product`, `Comprehension`, … — as opposed to a plain operand
@@ -731,17 +762,24 @@ export function declaredBinders(
         visibleFrom.set(n, 0);
     return visibleFrom.size === 0
       ? undefined
-      : { visibleFrom, firstClause: Number.POSITIVE_INFINITY, clauseLocal };
+      : {
+          visibleFrom,
+          boundAt: visibleFrom,
+          firstClause: Number.POSITIVE_INFINITY,
+          clauseLocal,
+        };
   }
 
   const sites = bindingSiteSelectorOf(expr);
   if (sites === undefined) return undefined;
 
+  const boundAt = new Map<string, number>();
   let firstClause = Number.POSITIVE_INFINITY;
   for (const site of sites(expr.ops, phase)) {
     const sym = symbolAtSite(expr.ops, site.path);
     if (sym === undefined) continue;
-    const from = site.clauseLocal ? site.path[0] : 0;
+    const from = siteVisibleFrom(site);
+    const at = site.clauseLocal ? site.path[0] : 0;
     if (site.clauseLocal) {
       firstClause = Math.min(firstClause, site.path[0]);
       clauseLocal.add(sym.symbol);
@@ -750,17 +788,20 @@ export function declaredBinders(
       sym.symbol,
       Math.min(visibleFrom.get(sym.symbol) ?? from, from)
     );
+    boundAt.set(sym.symbol, Math.min(boundAt.get(sym.symbol) ?? at, at));
   }
   return visibleFrom.size === 0
     ? undefined
-    : { visibleFrom, firstClause, clauseLocal };
+    : { visibleFrom, boundAt, firstClause, clauseLocal };
 }
 
 /**
  * Is `name`, bound by `binders`, in scope in operand `operandIndex`? A name
  * `binders` does not list is not bound by this node at all (`false`); a
- * clause-local name is in scope from its own clause onward and in every
- * operand before the first clause (the body); any other bound name is in
+ * clause-local name is in scope from the operand it is visible from (its own
+ * clause, or the first clause of an unordered run: `Sum`, `Product`) onward
+ * and in every operand before the first clause (the body); any other bound
+ * name is in
  * scope throughout.
  */
 export function binderBoundAt(
@@ -1203,9 +1244,9 @@ const ELEMENT_COLLECTION = (j: number): boolean => j === 1;
 /**
  * When `clause`, operand `operandIndex` of a binder whose operator is
  * `binder`, is a `Limits` or `Element` clause of a binder of
- * `OWN_INDEX_OUTSIDE_BINDERS`, and the index of the clause becomes visible
- * at this clause (`visibleFrom`, the clause ordering of the binder), the
- * index and the operands of the clause that are outside its scope.
+ * `OWN_INDEX_OUTSIDE_BINDERS`, and this clause is the first one that binds
+ * its index (`boundAt`, `DeclaredBinders`), the index and the operands of
+ * the clause that are outside its scope.
  * Otherwise `undefined`: the index is in scope in its whole clause.
  *
  * A clause of a node that is not canonical can have another range-shaped
@@ -1225,7 +1266,7 @@ export function ownIndexClause(
   binder: string,
   clause: Expression,
   operandIndex: number,
-  visibleFrom: ReadonlyMap<string, number>
+  boundAt: ReadonlyMap<string, number>
 ): OwnIndexClause | undefined {
   if (!OWN_INDEX_OUTSIDE_BINDERS.has(binder)) return undefined;
   if (!isFunction(clause)) return undefined;
@@ -1239,7 +1280,7 @@ export function ownIndexClause(
         : undefined;
   if (outside === undefined) return undefined;
   const name = index.symbol;
-  if (visibleFrom.get(name) !== operandIndex) return undefined;
+  if (boundAt.get(name) !== operandIndex) return undefined;
   return { name, outside };
 }
 
@@ -1296,7 +1337,7 @@ export function ownIndexClauseAt(
     expr.operator,
     expr.ops[operandIndex],
     operandIndex,
-    binders.visibleFrom
+    binders.boundAt
   );
 }
 
@@ -1337,7 +1378,7 @@ export function flatBoundIndexAt(
   const ops = expr.ops;
   for (let i = binders.firstClause; i < operandIndex && i < ops.length; i++) {
     const op = ops[i];
-    if (!isSymbol(op) || binders.visibleFrom.get(op.symbol) !== i) continue;
+    if (!isSymbol(op) || binders.boundAt.get(op.symbol) !== i) continue;
     const span = flatLimitsSpan(ops, i);
     if (operandIndex < i + span) return op.symbol;
     i += span - 1;

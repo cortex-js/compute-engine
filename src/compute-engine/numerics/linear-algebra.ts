@@ -33,6 +33,72 @@ export function determinant(matrix: number[][]): number {
   return det;
 }
 
+/** The inverse of the square matrix `m` of machine numbers, or `undefined`
+ *  when the matrix is singular. For `2 × 2` the adjugate divided by the
+ *  determinant; otherwise the elimination of Gauss and Jordan on `[m | I]`
+ *  with partial pivoting. This is the kernel of `.N()` of `Inverse` on a
+ *  matrix of numbers, and of `Inverse` in compiled JavaScript.
+ *
+ *  A test of a pivot for an exact 0 does not see a singular matrix whose
+ *  elimination in doubles leaves a rounding residue
+ *  (`[[3, 2, 1], [1, 1, 1], [4, 3, 2]]` gives entries of about 1e15). Here
+ *  an entry of the elimination is 0 when it is at most `1024ε` times its
+ *  running bound (`bound`: the sum of the magnitudes of the terms that made
+ *  it), and the matrix is singular when a pivot is: a residue was at most
+ *  `261ε` of its bound over 9,000 random singular integer matrices of
+ *  orders 3 to 6, where the pivots of the regular ones were at least
+ *  `1.8e11·ε` of theirs. For `2 × 2` the determinant is 0 when it is at
+ *  most `1024ε` times the larger of its two products. So a regular matrix
+ *  as ill-conditioned as the Hilbert matrix of order 11 is singular here. */
+export function numberMatrixInverse(
+  m: readonly (readonly number[])[]
+): number[][] | undefined {
+  const n = m.length;
+  const tiny = 1024 * Number.EPSILON;
+  if (n === 2) {
+    const [[a, b], [c, d]] = m;
+    const det = a * d + -(b * c);
+    if (Math.abs(det) <= tiny * Math.max(Math.abs(a * d), Math.abs(b * c)))
+      return undefined;
+    return [
+      [d / det, -(b / det)],
+      [-(c / det), a / det],
+    ];
+  }
+  const aug = m.map((row, i) => [
+    ...row,
+    ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
+  ]);
+  const bound = m.map((row) => row.map(Math.abs));
+  for (let k = 0; k < n; k++) {
+    let pivotRow = k;
+    for (let r = k + 1; r < n; r++)
+      if (Math.abs(aug[r][k]) > Math.abs(aug[pivotRow][k])) pivotRow = r;
+    if (pivotRow !== k) {
+      [aug[k], aug[pivotRow]] = [aug[pivotRow], aug[k]];
+      [bound[k], bound[pivotRow]] = [bound[pivotRow], bound[k]];
+    }
+    const pivot = aug[k][k];
+    if (Math.abs(pivot) <= tiny * bound[k][k]) return undefined;
+    for (let j = 0; j < 2 * n; j++) aug[k][j] = aug[k][j] / pivot;
+    for (let j = 0; j < n; j++) bound[k][j] = bound[k][j] / Math.abs(pivot);
+    for (let i = 0; i < n; i++) {
+      if (i === k) continue;
+      const factor = aug[i][k];
+      if (factor === 0) continue;
+      for (let j = 0; j < 2 * n; j++)
+        aug[i][j] = aug[i][j] - factor * aug[k][j];
+      for (let j = 0; j < n; j++) {
+        bound[i][j] = bound[i][j] + Math.abs(factor) * bound[k][j];
+        // A residue of the rounding is 0: a column whose remaining
+        // entries are all residues gives a pivot of 0.
+        if (Math.abs(aug[i][j]) <= tiny * bound[i][j]) aug[i][j] = 0;
+      }
+    }
+  }
+  return aug.map((row) => row.slice(n));
+}
+
 /**
  * The spectral norm of a finite `m × n` matrix, in machine precision: its
  * largest singular value, `√(λ_max(Aᴴ A))`.

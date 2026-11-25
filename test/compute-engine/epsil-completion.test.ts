@@ -268,6 +268,19 @@ describe('EPSIL COMPLETION: LIKELY VALUES', () => {
     ).toEqual([]);
   });
 
+  test('a variant with no payload is its name before `(` and after `|>`', () => {
+    const light = 'type light = red | green\n';
+    for (const source of [
+      `${light}let a = gree▮()`,
+      `${light}let a = gree▮ ()`,
+      `${light}let x = 1\nlet a = x |> gree▮`,
+    ]) {
+      const green = item(complete(source), 'green');
+      expect(green).toMatchObject({ kind: 'function', label: 'green' });
+      expect(green?.insertText).toBeUndefined();
+    }
+  });
+
   test('a variant known only from the options is a name, not a type', () => {
     const options = { typeNames: ['shape'], sumVariants: { circle: 'shape' } };
     const value = epsilCompletions(ce, 'let a = ', 8, options);
@@ -1900,11 +1913,12 @@ describe('EPSIL COMPLETION: NAMED ARGUMENTS', () => {
     ]);
     expect(names(`${signature}h(1, ▮`)).toEqual([]);
     expect(labels(complete(`${signature}h(1, ▮`))).toContain('abs');
-    // A variable with no declared type. In a function body a call by name
-    // is an error; at the top level the engine reads the names of the value
-    // (CE-1681), but only a declared type counts here.
+    // A variable with no declared type. The engine reads the names of the
+    // lambda that it holds, at the top level and in a function body that
+    // does not assign it again (CE-1681), but only a declared type counts
+    // here.
     const body = 'function m() -> number {\n  let h = (x, y) => x + y\n  h(1, ';
-    expect(codes(`${body}y: 2)\n}`)).toEqual(['argument-names-unavailable']);
+    expect(codes(`${body}y: 2)\n}`)).toEqual([]);
     expect(names(`${body}▮`)).toEqual([]);
     expect(names('let h = (x, y) => x + y\nh(1, ▮')).toEqual([]);
   });
@@ -2046,10 +2060,38 @@ describe('EPSIL COMPLETION: EXPECTED TYPES OF COMMON POSITIONS', () => {
         VARS + 'let t = 0\nfor c in s { t = t + 1 }\nt'
       ).value.json
     ).toBe(1);
-    // A comprehension over a number or a boolean is an error. (A `for` loop
-    // over one runs no iteration and reports nothing: CE-1682.)
-    expect(run('[i for i in n]')).toBe('Error');
-    expect(run('[i for i in b]')).toBe('Error');
+    // A loop or a comprehension over a number or a boolean is reported by
+    // the static check (CE-1682).
+    for (const source of [
+      '[i for i in n]',
+      '[i for i in b]',
+      'for i in n { 1 }',
+      'for i in b { 1 }',
+    ])
+      expect(codes(source)).toEqual(['incompatible-type']);
+  });
+
+  test('the loop variable is not offered in its own collection', () => {
+    const vars = (source: string) =>
+      labels(complete('let xs = [1, 2]\n' + source), 'variable');
+    expect(vars('for i in ▮ {}')).toEqual(['xs']);
+    expect(vars('parallel for i in ▮ {}')).toEqual(['xs']);
+    expect(vars('for i in [1, ▮] {}')).toEqual(['xs']);
+    expect(vars('[i for i in ▮]')).toEqual(['xs']);
+    expect(vars('[x for x in ▮, y in xs]')).toEqual(['xs']);
+    // The variable is offered in the body, in the guard and in a later
+    // clause.
+    expect(vars('for i in xs { ▮ }')).toContain('i');
+    expect(vars('[▮ for i in xs]')).toContain('i');
+    expect(vars('[i for i in xs if ▮]')).toContain('i');
+    expect(vars('[x for x in xs, y in ▮]')).toEqual(['xs', 'x']);
+    // The collection reads an outer binding of the same name.
+    expect(labels(complete('let i = [1]\nfor i in ▮ {}'), 'variable')).toEqual([
+      'i',
+    ]);
+    expect(item(complete('let i = [1]\nfor i in ▮ {}'), 'i')?.detail).toBe(
+      'list<number>'
+    );
   });
 
   test('an operand of + with a numeric other operand expects a number', () => {

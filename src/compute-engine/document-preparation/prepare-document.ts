@@ -49,6 +49,7 @@ import {
   optionalParameterTarget,
 } from '../boxed-expression/function-literal.js';
 import { isLibraryOperator } from '../library-shadowing.js';
+import { signatureStringError } from '../function-utils.js';
 import { declaredBinderNamesOf } from '../boxed-expression/binding-sites.js';
 
 type Head = { name: string; params: readonly string[] };
@@ -806,7 +807,7 @@ export function prepareDocument(
       // A cursor returns the body, or the message of a row-content failure.
       const cursors = new Map<
         string,
-        () => MathJsonExpression | { failure: string }
+        () => MathJsonExpression | { failure: string | Expression }
       >();
       const parsed = new Map<string, MathJsonExpression>();
       const rawRows = new Map<string, MathJsonExpression>();
@@ -820,6 +821,34 @@ export function prepareDocument(
       // subscript of such a base into a name, so the row's references need
       // not show these edges. An unfinished base is an initialization cycle.
       const indexedBases = new Map<string, Set<string>>();
+
+      /** The types of the formals `params` of `row` while its LaTeX body is
+       * read. The engine parses each stated type, so that a type that the
+       * host declared by name is known. When a stated type does not parse,
+       * the row's error. */
+      function formalTypes(
+        row: DraftRow,
+        params: readonly string[]
+      ): Map<string, BoxedType> | Expression {
+        const types = new Map<string, BoxedType>();
+        for (const param of params) {
+          const stated = row.formalTypes?.[param] ?? 'unknown';
+          try {
+            types.set(param, ce.type(stated));
+          } catch (error) {
+            return signatureStringError(ce, stated, error);
+          }
+        }
+        return types;
+      }
+
+      /** Record `diagnostic` as the body of `row`. The declaration is
+       * rejected when its component settles. */
+      function rejectRow(row: DraftRow, diagnostic: Expression) {
+        if (!rawRows.has(row.id)) rawRows.set(row.id, diagnostic.json);
+        parsed.set(row.id, diagnostic.json);
+        return diagnostic.json;
+      }
 
       function rowOptions(
         row: DraftRow,
@@ -850,8 +879,14 @@ export function prepareDocument(
             bases.add(name);
           },
           resolveSymbol: (name: string) => {
-            if (inBody() && formals().includes(name))
-              return { type: row.formalTypes?.[name] ?? 'unknown' };
+            if (inBody() && formals().includes(name)) {
+              // `readRow` rejects a row whose formal type does not parse
+              // before its body is read.
+              const types = formalTypes(row, [name]);
+              return {
+                type: types instanceof Map ? types.get(name)! : 'unknown',
+              };
+            }
             const declaration = declarations.get(name);
             if (!inBody() || declaration === undefined || bodies.has(name))
               return (
@@ -898,15 +933,9 @@ export function prepareDocument(
               params = initial.head.params;
               cursors.set(row.id, () => {
                 active = true;
-                const body = state.finish(
-                  new Map(
-                    params.map((param) => [
-                      param,
-                      row.formalTypes?.[param] ?? 'unknown',
-                    ])
-                  ),
-                  syntax.formalsAreFactors
-                );
+                const types = formalTypes(row, params);
+                if (!(types instanceof Map)) return { failure: types };
+                const body = state.finish(types, syntax.formalsAreFactors);
                 if (body === null)
                   return { failure: 'Incomplete definition body' };
                 const entry = syntax.normalize([
@@ -974,15 +1003,17 @@ export function prepareDocument(
         let raw: MathJsonExpression;
         if (resume !== undefined) {
           const body = resume();
-          if (typeof body === 'object' && body !== null && 'failure' in body) {
-            // The declaration is rejected when its component settles.
-            const diagnostic = ce.error(body.failure);
-            if (!rawRows.has(row.id)) rawRows.set(row.id, diagnostic.json);
-            parsed.set(row.id, diagnostic.json);
-            return diagnostic.json;
-          }
+          if (typeof body === 'object' && body !== null && 'failure' in body)
+            return rejectRow(
+              row,
+              typeof body.failure === 'string'
+                ? ce.error(body.failure)
+                : body.failure
+            );
           raw = body;
         } else {
+          const types = formalTypes(row, params);
+          if (!(types instanceof Map)) return rejectRow(row, types);
           const options = {
             ...rowOptions(
               row,

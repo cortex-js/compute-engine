@@ -148,6 +148,53 @@ describe('LogGamma(z), the continuation of ln Γ', () => {
     });
   });
 
+  test('a long exact rational next to the zero of ln|Γ| at x ≈ −2.457, at 30 digits', () => {
+    // ln|Γ(x)| ≈ 1.5e-20 there: the result is 20 orders below the rounding
+    // error of x read with the guard digits, so the kernel reads x again at
+    // the precision of its retry. The digits are those of the 80-digit
+    // value; the same digits as a decimal operand give the same value.
+    const x = [
+      'Rational',
+      { num: '-245702473822080062302945414765117954323659791' },
+      { num: '1' + '0'.repeat(44) },
+    ];
+    withPrecision(30, () => {
+      expect(ce.expr(['LogGamma', x]).N().toString()).toContain(
+        '1.51560344802165732168564106779e-20'
+      );
+      expect(
+        ce
+          .expr([
+            'LogGamma',
+            { num: '-2.45702473822080062302945414765117954323659791' },
+          ])
+          .N()
+          .toString()
+      ).toContain('1.51560344802165732168564106779e-20');
+      // GammaLn, ln|Γ|, has the same real value and the same cancellation.
+      expect(ce.expr(['GammaLn', x]).N().toString()).toBe(
+        '1.51560344802165732168564106779e-20'
+      );
+    });
+  });
+
+  test('closer to the zero than the retry reaches, LogGamma and GammaLn stay unevaluated', () => {
+    // x matches the zero of ln|Γ| at x ≈ −2.457 to 61 digits: ln|Γ(x)| ≈
+    // 7.5e-61 is past the guard digits of the retry at 30 digits. GammaLn
+    // is not answered by the complex kernel.
+    const x = [
+      'Rational',
+      {
+        num: '-2457024738220800623039454147651179543236597909033784420964794',
+      },
+      { num: '1' + '0'.repeat(60) },
+    ];
+    withPrecision(30, () => {
+      expect(ce.expr(['LogGamma', x]).N().operator).toBe('LogGamma');
+      expect(ce.expr(['GammaLn', x]).N().operator).toBe('GammaLn');
+    });
+  });
+
   test('infinities: +Infinity at +Infinity, NaN at -Infinity (no limit)', () => {
     expect(
       ce.expr(['LogGamma', 'PositiveInfinity']).evaluate().toString()

@@ -496,6 +496,22 @@ describe('the fixit of `dot-call-not-a-protocol-function`', () => {
     });
   });
 
+  test('the message quotes the receiver as written', () => {
+    const message = (source: string) =>
+      checkEpsil(new ComputeEngine(), source).diagnostics.find(
+        (d) => d.code === 'dot-call-not-a-protocol-function'
+      )?.message[1];
+    expect(message('let xs = [3, 1, 2]; sort(xs).reverse()')).toBe(
+      '`reverse` is not a protocol function on a value of type `list<number>`: write `reverse(x)` or `x |> reverse` at `sort(xs)`'
+    );
+    expect(
+      message('let xs = [3, 1, 2]; take(sort(xs), 2).reverse()')
+    ).toMatch(/ at `take\(sort\(xs\), 2\)`$/);
+    expect(message('[3, 1, 2].reverse()')).toMatch(/ at `\[3, 1, 2\]`$/);
+    expect(message('"abc".reverse()')).toMatch(/ at `"abc"`$/);
+    expect(message('let xs = [3, 1, 2]; xs.reverse()')).toMatch(/ at `xs`$/);
+  });
+
   test('in a function body, a `let` and an operand', () => {
     expect(
       fixAll('function f(ys: list<number>) { ys.sort() }; f([2, 1])').fixed

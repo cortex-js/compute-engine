@@ -75,6 +75,11 @@ const DOT_NOTATION_MAP: Readonly<Record<string, string>> = {
   Sum: '.\\operatorname{total}',
   Max: '.\\max',
   Min: '.\\min',
+  Mean: '.\\operatorname{mean}',
+  Median: '.\\operatorname{median}',
+  StandardDeviation: '.\\operatorname{stdev}',
+  Sort: '.\\operatorname{sort}',
+  Unique: '.\\operatorname{unique}',
 };
 
 /**

@@ -155,6 +155,21 @@ describe('A lone symbol that holds a formula', () => {
     expect(() => ce2.parse('\\int_0^1 G').N()).not.toThrow();
   });
 
+  test('ND of a lone point or list formula stays unevaluated', () => {
+    // The type of `ND(G, 1)` is `number`: a value that is a point or a list
+    // would contradict it.
+    for (const value of [
+      ['Tuple', ['Cos', 't'], ['Sin', 't']],
+      ['List', ['Cos', 't'], ['Sin', 't']],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.assign('G', ce.box(value as any));
+      const nd = ce.box(['ND', 'G', 1]);
+      expect(nd.type.toString()).toBe('number');
+      expect(nd.evaluate().operator).toBe('ND');
+    }
+  });
+
   test('a parameter is not read through the argument of a call', () => {
     const ce = new ComputeEngine();
     // At definition, `t` is the variable: f is the constant ∫₀¹ t dt.

@@ -2609,7 +2609,12 @@ export type BroadcastExemption =
  *   `canonical` handler can narrow from the collection. The index is not a
  *   free variable of the expression. It is visible in its own clause, in
  *   the later clauses and in the operands before the first clause (the
- *   body), not in an earlier clause. Consecutive `clause` operands are read as the clauses of
+ *   body), not in an earlier clause. With `unordered: true`, it is visible
+ *   in the earlier clauses of the run of consecutive `clause` operands too,
+ *   for an operator that evaluates its clauses in the order of their
+ *   dependencies, not in the written order: `Sum` and `Product`, where
+ *   `Sum(i·j, Element(j, Range(1, i)), Limits(i, 1, 3))` is the sum over
+ *   `i` of the sum over `j`. Consecutive `clause` operands are read as the clauses of
  *   `Sum`, with the flat spelling: in `Sum(body, k, 1, 10)` the operands
  *   after the symbol `k` are its bounds, not indexes. An operand that holds
  *   no index declares nothing. The operand is not evaluated before the
@@ -2632,7 +2637,7 @@ export type OperandRole =
   | { kind: 'raw' }
   | { kind: 'opaque' }
   | { kind: 'bound'; type?: TypeString }
-  | { kind: 'clause'; type?: TypeString };
+  | { kind: 'clause'; type?: TypeString; unordered?: boolean };
 
 /**
  * An operator definition can have some flags to indicate specific
@@ -3418,6 +3423,7 @@ export interface BoxedOperatorDefinition
     path: readonly number[];
     type?: TypeString;
     clauseLocal?: boolean;
+    visibleFrom?: number;
   }[];
 
   complexity: number;

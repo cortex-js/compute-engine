@@ -423,8 +423,10 @@ function argumentClause(
     default:
       // `incompatible-type`: the message already says which type was expected
       // and which arrived, so the note only has to say which parameter that
-      // was.
-      return param === undefined
+      // was. A parameter of type `any` admits every value, so its signature
+      // does not explain the error (the domain of a loop clause,
+      // `Element(i, n)` with `n = 5`), and there is no note.
+      return param === undefined || param.type === 'any'
         ? undefined
         : `; argument ${index} is \`${elementText(param)}\``;
   }

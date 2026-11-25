@@ -660,7 +660,10 @@ function binderSitesWithMemo(
         const variable = symbolAtPath(node, site.path);
         if (variable === undefined || bound.has(variable)) continue;
         bound.add(variable);
-        const own = site.path[0];
+        // A clause-local index is visible from its own clause, or from the
+        // first clause of an unordered run (`Sum`, `Product`;
+        // `BindingSite.visibleFrom`, `binding-sites.ts`).
+        const own = site.visibleFrom ?? site.path[0];
         sites.push({
           name: variable,
           operands: site.clauseLocal

@@ -2,6 +2,38 @@
 
 ### Improvements
 
+- **A row of a list of fixed-length rows compiles on JavaScript as the
+  result** (CE-1540). With `P: list<list<real^2>>`, `compile(P[i])` declined
+  with "an index that can be out of range … of lists". It now gives the row,
+  `[1, 2]` for `P = [[1, 2], [3, 4]]` and `i = 1`, and `undefined` where the
+  index is out of range (the interpreter gives `Missing`). The same holds for
+  the body of a function literal, `(Q: list<list<real^2>>, k: integer) ↦ Q[k]`,
+  and for `First(P)` and `Last(P)`. Any other use of the row (`P[i] + P[j]`,
+  `Length(P[i])`, `IsMissing(P[i])`) still declines, as do GLSL, the interval
+  mode and the bigint mode.
+
+- **A dictionary literal compiles on JavaScript** (CE-1771). A function
+  whose body holds `{w -> t, fill -> "red"}` declined with "not a number, a
+  symbol or a function", so a Tycho animation that styles a figure with an
+  options dictionary, `t => draw(circle((t, 0), 1, {fill -> "red"}))`, ran
+  interpreted. The literal is now a record of its values: `d.w` and `d["w"]`
+  read a key, a parameter of type `any` takes the dictionary, a function of
+  the host receives it as the interpreter's dictionary, and as the result of
+  the code `run()` gives an object of the keys (`{ w: 2, fill: "red" }`). A
+  read of a key that the literal does not have, an index that is not a
+  constant key (`d[1]`), and other operations on the dictionary (`Length`,
+  `Keys`, arithmetic) still decline. GLSL and the interval mode still
+  decline a dictionary.
+
+- **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
+  `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a
+  `Sequence` with an `unexpected-operator` error, so a row defined that way
+  was not an equation. It now gives `["Equal", "a", ["Mean", ["List", 1, 2,
+  3]]]`. The members map to `Mean`, `Median`, `StandardDeviation` (the sample
+  standard deviation, as in Desmos), `Sort` and `Unique`. With the
+  `dotNotation` serialization option, a one-operand call of these operators
+  serializes back to the member form: `L.\operatorname{mean}`.
+
 - **A Document row with a range type, given as `real` by the `inputs`
   compilation option, is an input also when a function row reads it**
   (CE-1733). With the rows `k = \max(y_w, 0.01)` (type `real<0.01..>`) and
@@ -65,6 +97,202 @@
   a random number is still refused.
 
 ### Resolved Issues
+
+- **An expression kept from a boxed expression no longer keeps the
+  discarded functions boxed with it** (CE-1645). With
+  `p = ce.box(['Tuple', ['Function', ['Add', 'a', 'other'], 'a'],
+  ['Function', ['Add', 'b', 'kept'], 'b']])`, keeping only the symbol `kept`
+  of the second function kept the parameter `a` of the first function and
+  its definition in memory once the type of the first body was read. They
+  are now collected, as before version 0.196.0.
+
+- **The message of a dot-call of a function that is not a protocol member
+  quotes the receiver as written** (CE-1688). With `let xs = [3, 1, 2]`, the
+  `dot-call-not-a-protocol-function` message of `sort(xs).reverse()` ended
+  with "at `Sort("xs")`". It now ends with "at `sort(xs)`". The same holds
+  for `protocol-call-ambiguous`. The `Error` expression of such a call has
+  the receiver expression as its site, not its text.
+
+- **A function held in a `let` of a function body can be called by name**
+  (CE-1681). In `function m() { let h = (x, y) => x - y; h(y: 2, x: 10) }`,
+  the call gave the error `argument-names-unavailable`, but the same two
+  statements at the top level of a program gave `8`. The call in the body now
+  gives `8` too. When an assignment of the body writes `h`, `h` can hold a
+  function with other parameter names, and a call by name is still an error:
+  declare the type of `h` as a signature with parameter names.
+
+- **A `for` loop over a number, a boolean or a function is an error**
+  (CE-1682). With `let n = 5`, `for i in n { t = t + i }` ran no iteration
+  and reported nothing, so a program that meant `for i in 1..n` gave a wrong
+  result with no error. `checkEpsil()` now reports `incompatible-type`
+  ("expected `collection`, got `number`") for the domain of a loop or a
+  comprehension whose type cannot be a collection. At run time, a loop whose
+  domain has such a value (a variable of type `any` that holds `5`) stops on
+  the `incompatible-type` error, the error that a comprehension gives.
+
+- **The Jacobian matrix of a list that a function returns is correct inside
+  a function with a parameter of the name of that list** (CE-1639). With
+  `g := [uv, u + v]`, `F := t ↦ g` and `h := g ↦ JacobianMatrix(F(1), [u, v])`,
+  `h(7)` gave `[0, 0]`: the `g` of the body of `F` was read as the parameter
+  `g` of `h`. It now gives `[[v, u], [1, 1]]`.
+
+- **A debugger can stop a program inside the function of a `map` that a list
+  literal spreads** (CE-1638). In
+  `[...map(v => do { let w = v; w }, ys), 9]`, an exception that the debug
+  statement hook threw at `let w = v` (the way a debugger ends a run) was
+  discarded, and the program continued to its next statement. The exception
+  now ends the run of `executeEpsil()` and `executeEpsilAsync()`, as it does
+  when the `map` is the value of the program.
+
+- **The set difference of a text or a list holds each element once**
+  (CE-1623). With `s` assigned `"hello"`, `SetMinus(s).evaluate()` held the
+  character `l` twice, and only a second evaluation removed the copy. With `L`
+  assigned `[1, 1, 2]`, `SetMinus(L)` gave `Set(1, 1, 2)`. Each element is now
+  kept once at the first evaluation: `SetMinus(L)` is `Set(1, 2)`.
+
+- **The length of a sorted list that a symbol holds is found at the first
+  evaluation** (CE-1622). With `x` declared `real` and `d` assigned
+  `Sort([3, x, 1])`, `Length(d).evaluate()` gave `Length([3, x, 1])`, and only
+  a second evaluation gave `3`. It now gives `3` at once. `IsEmpty(d)` and
+  `Contains(d, 1)` give `False` and `True` at once too.
+
+- **An index written in another base reads back as an index** (CE-1613).
+  `Subscript(x, BaseForm(42, 2))` was written `x_{101010_{2}}`, which reads
+  back as the symbol `x_101010_2`. It is now written `x_{{101010_{2}}}`, which
+  reads back as `Subscript(x, BaseForm(42, 2))`.
+
+- **The `references`, `defines` and `unknowns` of a `Program` follow the
+  order of its statements** (CE-1576). A `Program` that declares the
+  recursive function
+  `f := m ↦ If(m ≤ 0, 1, f(m − 1))` and then calls `f(2)` had the references
+  `['f']` and no defines, so a dependency graph took its own function for an
+  input. It now has no references and the defines `['f']`. A name that a
+  statement of the program writes (`Assign`, `Declare`, `DefineFunction`) is
+  in `defines`, and it is a reference only when a statement reads it before
+  the first write: `Program(Assign(a, a + 1), a)` still references `a`.
+
+- **`LogGamma` and `GammaLn` of a long exact rational next to a zero of
+  ln|Γ| at a negative argument have all their digits** (CE-1573). At 30
+  digits, the real part of
+  `LogGamma(-245702473822080062302945414765117954323659791/10^44).N()` was
+  `1.51560344802165732168532430667e-20`, wrong from the 19th digit; it is now
+  `1.51560344802165732168564106779e-20`. The value is far below the rounding
+  error of the operand, and the computation now reads the exact operand again
+  at the higher precision of its retry. `GammaLn` at a negative argument now
+  checks this cancellation too, and stays unevaluated when the digits are
+  not reached.
+
+- **The numeric inverse of a singular matrix stays unevaluated** (CE-1542).
+  `Inverse([[3, 2, 1], [1, 1, 1], [4, 3, 2]]).N()` gave entries of about
+  `4.5e15`, because rounding left a small nonzero pivot in place of 0. It now
+  stays unevaluated, as `evaluate()` does. The same holds for `evaluate()` of
+  a matrix with entries such as `1.5`, for `PseudoInverse(…).N()` and for
+  `MatrixPower` with a negative exponent. The numeric inverse now uses
+  partial pivoting, and it is the same as the inverse in compiled JavaScript.
+  A pivot is zero when it is very small relative to the entries, so a regular
+  matrix as ill-conditioned as the Hilbert matrix of order 11 with
+  machine-number entries also stays unevaluated.
+
+- **`1^M` with a matrix or a list `M` keeps the shape of `M`** (CE-1495).
+  The canonical form of `1^b` was `1` for every finite exponent, also when
+  `b` is a collection by its type, so `1^M` with `M` declared `matrix<2x2>`
+  evaluated to the scalar `1`. In the function `x ↦ (\det(x), 1^x)` applied
+  to `[[1, 2], [3, 4]]`, the second component was `1`, not `[[1, 1], [1, 1]]`.
+  A power of `1` by an exponent that is a collection by its type now stays a
+  power, and its value is a collection of ones of the shape of the exponent.
+  `1^x` with `x` undeclared, or with `x` declared as a number, is still `1`.
+
+- **The type of a parameter read by index does not depend on the order of its
+  uses** (CE-1493). With `function other(q) { q[1] + q[5] }` and a function
+  `touches(p, q)` that reads `p[1]` to `p[3]`, the body
+  `other(c) > 0 && touches(c, p)` typed `c` as
+  `tuple<number, unknown, unknown, unknown, number>`, and
+  `touches(c, p) && other(c) > 0` as
+  `tuple<number, number, number, unknown, number>`. Both orders now give the
+  second type. In the same way, `c[5] > 0 && touches(c, p)` typed `c` as
+  `dictionary<any> | indexed_collection<any>`; it is now
+  `tuple<number, number, number>`, as with the call first. As for every type
+  that index reads give, the length is not a contract: the interpreter
+  accepts a longer tuple.
+
+- **A grid variable updated from its own cells holds the next grid**
+  (CE-1746). After `g = map(i => map(j => 1 - g[i][j], Range(1, n)),
+  Range(1, n))`, the rows of `g` were lazy `Map`s that read `g`, so they read
+  the new `g`, that is, themselves: a read of `g` gave a recursion error or
+  `NaN`. An assignment now lists a lazy collection that is an element of a
+  listed collection and reads a variable, as it already did for the outer
+  collection, so `g` holds a list of lists computed with the old `g`.
+
+- **A double sum or product whose index is named `i` is correct when the inner
+  clause comes first** (CE-1762).
+  `["Sum", ["Multiply", "i", "j"], ["Element", "j", ["Range", 1, "i"]], ["Limits", "i", 1, 3]]`
+  was `6` instead of `25`: the `i` of the first clause was the imaginary unit.
+  With `["Limits", "j", 1, "i"]` in place of the `Element` clause, the sum
+  stayed unevaluated. Now each clause of a `Sum` or a `Product` sees the index
+  of every clause, as the evaluation already nested the clauses by their
+  dependencies, whatever their order. So a later index is no longer a free
+  variable of an earlier clause, and `subs()` no longer replaces it there:
+  `Sum(x, Limits(y, 1, x), Limits(x, 1, 3)).freeVariables` is `[]`, not `["x"]`.
+  The bounds of a clause still read the enclosing binding of its own index. A
+  custom binder gets the same rule with the new `unordered: true` option of the
+  `clause` operand role.
+
+- **The norm of a range that ends at the length of a filtered list is correct**
+  (CE-1754). With `L = Map(k ↦ 2k, Range(1, 40))`, `P = Filter(L, k ↦ Keep(k))`
+  for a host predicate `Keep`, and `c = Norm(Range(1, Length(P)))`, `c` was `1`
+  instead of `2√310`. With the predicate `k ↦ k < 2.5`, the type of the formula
+  threw `Filter predicate must return "True" or "False"`. The computation of the
+  type read the value of `P` and applied the predicate with `k` unbound, and the
+  result of that walk was kept and used by the evaluation. Now, in a type
+  computation, a variable has no value unless it holds a function, a `Filter` by
+  a function literal or a user function has no count, and the elements that a
+  walk of a lazy collection computes are not kept.
+
+- **The completion at the collection of an Epsil `for` no longer offers the
+  loop variable** (CE-1687). In `let xs = [1, 2]` followed by `for i in ▮ {}`,
+  `epsilCompletions()` offered `xs` and `i`, but `i` is not defined in its
+  own collection. It now offers `xs` only, and with `let i = [1]` it offers
+  the outer `i`, which the collection reads. The same holds for the
+  collection of a comprehension clause (`[i for i in ▮]`), which also does not
+  see the later clauses.
+
+- **A recursive Epsil function written with `match` gives its value**
+  (CE-1731). `function fac(n) { match n { == 0 => n + 1; _ => n * fac(n - 1) } }`
+  gave an `incompatible-type` error for `fac(3)`. It now gives `6`. A call of a
+  function whose result type is `unknown` and whose body is a `match` was
+  typed `nothing`, so `f(3) + 1` was an error. The static type of a `match`
+  is also correct now. A case that is not a literal makes it `unknown`, and so
+  does a `match` with no case that takes every value. Before,
+  `function half(s: string, t: real) { match s { == "a" => t / 2; _ => 0 } }`
+  had the type `(s: string, t: real) -> integer`, and `half("a", 3)` is `3/2`.
+  Compiled code no longer has its own guards for a `match`: `x is T` and
+  `x ∈ S` of a value from a `match` now compile when the static type decides
+  them.
+
+- **The completion of an Epsil sum-type variant with no payload no longer
+  adds a second `()`** (CE-1680). With `type light = red | green`, accepting
+  `green` in `let a = gree()` gave `let a = green()()`, and after `|>`
+  (`x |> gree`) it gave the call `green()`. Before `(` and after `|>`,
+  `epsilCompletions()` now inserts the name alone, as it does for a function.
+
+- **A Document row whose parameter has a type that the host declared by name
+  is prepared** (CE-1658). After `ce.declareType('Pt', 'tuple<real, real>',
+  { alias: true })`, `prepare()` of the row `g(q)=q+1` with
+  `formalTypes: { q: 'Pt' }` threw `Failed to parse type "Pt"` when CE read
+  the LaTeX body of the row, and no row of the document was prepared. The row
+  is now read with `q` of type `Pt`. A formal type that does not parse, such
+  as `tuple<`, is now an error of its row (`invalid-type-annotation`), not a
+  throw.
+
+- **The type of a function that inserts its argument into a list, or writes
+  it over one element, includes the argument** (CE-1769). With
+  `ins = (u, t) -> Insert(Range(1, u), 1, t)`, the type of `ins` was
+  `(u: unknown, t: unknown) -> list<integer>`, but `ins(2, 0.5)` is
+  `[0.5, 1, 2]`. The type is now `(u: unknown, t: unknown) -> list<unknown>`,
+  and the same applies to `ReplaceAt(Range(1, u), 1, t)`. A parameter is no
+  longer given the type of the other arguments of a generic operator, so
+  `r = (t) -> Remainder(3, t)` is now typed `(t: unknown) -> number`, not
+  `(t: unknown) -> integer | nan`: `r(0.7)` is `0.2`.
 
 - **The type of the incomplete gamma function `Gamma(s, z)` is `real` only
   where its value is real** (CE-1619). For a negative `z`, `Γ(s, z)` is

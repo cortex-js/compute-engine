@@ -44,11 +44,13 @@ export class UnitEnvironment {
   private _types: Map<object, Map<string, BoxedType>> | undefined = undefined;
 
   /** The tokens of the reads by the occurrences of this environment
-   * (`unitReadToken()`), by key and by name. A map of the environment, not
-   * a weak map keyed on it: a root construction makes a new environment,
-   * and the keys are the home scopes and the definitions that its
-   * occurrences hold. */
-  _readTokens: Map<object, Map<string, UnitReadTokenPair>> | undefined =
+   * (`unitReadToken()`), by key and by name. A table of the environment,
+   * not one keyed on it: a root construction makes a new environment. The
+   * table is weak on its keys, the home scopes and the definitions that its
+   * occurrences hold: an occurrence that outlives its siblings keeps the
+   * environment, and must not keep the scopes and the definitions of the
+   * discarded siblings. */
+  _readTokens: WeakMap<object, Map<string, UnitReadTokenPair>> | undefined =
     undefined;
 
   /** For an entry whose type is a scalar numeric type: true when every use
@@ -672,11 +674,8 @@ function unitReadToken(
   name: string,
   variable: boolean
 ): UnitReadToken {
-  let byKey:
-    | Map<object, Map<string, UnitReadTokenPair>>
-    | WeakMap<object, Map<string, UnitReadTokenPair>>
-    | undefined;
-  if (env !== undefined) byKey = env._readTokens ??= new Map();
+  let byKey: WeakMap<object, Map<string, UnitReadTokenPair>> | undefined;
+  if (env !== undefined) byKey = env._readTokens ??= new WeakMap();
   else {
     byKey = contextReadTokens.get(context);
     if (byKey === undefined)

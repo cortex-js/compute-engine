@@ -1530,9 +1530,15 @@ range. On JavaScript, of a list of booleans it is `atu`, `undefined` out of
 range where the interpreter gives `Missing` (`At(X > 0, 5)` of a list `X` of
 three numbers), a pure read: no operation on a boolean fails on `undefined`; of
 a list of real points it is `atp`, a point of NaN coordinates out of range, the
-interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of complex numbers
-or another list of lists it declines: a read of an absent row must not fail, and
-no program of Tycho's corpus reads one. GLSL, the interval and the bigint modes
+interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of lists of numbers
+of stated lengths (`P: list<list<real^2>>`) it is `atrow`, the row, or
+`undefined` out of range where the interpreter gives `Missing`, only where the
+`At` (or a `First`, a `Last`) is the whole program (the root, or the body of a root function literal,
+in a `Block` of one expression or not; CE-1540): no operation reads the row,
+so none folds it away (`Length` of the row is a constant, a discharge reads a
+list as present). Of a list of complex numbers or another read of a list of
+lists it declines: a read of an absent row must not fail, and no program of
+Tycho's corpus reads one. GLSL, the interval and the bigint modes
 decline every such index. `build` and `filter` are region rows. A `Length`, a
 reduction, a `Map` or a `Filter` of a `Range` reads its count and the arithmetic
 of its elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no
@@ -3438,19 +3444,16 @@ program whose last statement is a definition is `Nothing` and declines.
   `x: real`). The subject is held raw: its type is the type of its canonical
   form in the innermost local scope of the walk (`Lowering.scopes`: a `Block`,
   the function literal whose body is lowered, the root literal), and it is
-  lowered only for its effect. A subject whose type comes from a `Match`
-  declines (`typedByMatch()`, CE-1731), and so does a subject that reads a local
-  of a block or a capture of a case: the type of a local is the type of its
-  value, which can be a `Match`. A name that the walk binds as an input, a
-  parameter or a loop index, and a free name, are read by their type.
+  lowered only for its effect. A local of a block is read by the type of its
+  value; a capture of a case is `unknown`, also when it has the name of a
+  parameter.
 - `Element(x, S)` of a number set that `domainToType()` maps to a type
   (`Integers`, `RationalNumbers`, `RealNumbers`, `ComplexNumbers`,
   `ImaginaryNumbers`, `Numbers` and the extended sets) is decided as
   `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is `True`,
   `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the same
-  type. A subject typed `nothing`, a subject whose type comes from a `Match` or
-  that reads a local, and a type that does not decide (`x ∈ ℤ` of `x: real`) go
-  to the list operators, which decline for a set. Another set
+  type. A subject typed `nothing`, and a type that does not decide (`x ∈ ℤ` of
+  `x: real`) go to the list operators, which decline for a set. Another set
   (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the negation of
   the same constant; when it is not decided, it declines.
 - `Match(subject, case…)`: the subject is lowered once. A case of a string or a
@@ -3472,13 +3475,15 @@ program whose last statement is a definition is `Nothing` and declines.
   (a name, `Pin`, a list, a range), a `Match` with no case that takes every
   value, and cases whose results have two shapes (`arms of two types`) decline.
   A string compiles on JavaScript only.
-- The engine types a `Match` by its case bodies that are literals (CE-1731). A
-  user function whose result is inferred, not declared, from a body that holds a
-  `Match` (or calls a function whose body holds one) takes its result from the
-  lowered body, as a result of no stated type. A declared result
-  (`function f(s: string) -> boolean { match s { … } }`, the body
-  `Typed(…, "boolean")`; a signature that the host declares) is kept, and a body
-  that contradicts it declines. `typedByMatch()` visits each node once.
+- The engine types a `Match` as the join of the types of its case bodies, which
+  are raw: a body that is not a literal makes the `Match` `unknown`, and so does
+  the lack of a case that takes every value (a wildcard with no guard), since
+  the value is then `Error("match-no-case", …)` when no case is taken. A user
+  function whose result is inferred from such a body has the result `unknown`,
+  and takes its result from the lowered body, as a result of no stated type. A
+  declared result (`function f(s: string) -> boolean { match s { … } }`, the
+  body `Typed(…, "boolean")`; a signature that the host declares) is kept, and a
+  body that contradicts it declines.
 
 ## Records
 
@@ -3565,6 +3570,24 @@ two types"); `admits()` refuses the lane there too.
   (`recordCycle()`): the type of a record on a cycle is a fixed point that the
   lowering does not compute, and a record that grows at each call would lower a
   new function at each.
+- **Dictionaries** (CE-1771). A dictionary literal `{w -> t, fill -> "red"}`
+  is a record of its values, in the order of its keys (`dictionary()` of
+  `lower-records.ts`): its `names` are the keys and its `head` is `Dictionary`
+  (`IRType.head`), so two dictionaries of other keys are two record types and
+  an `If` whose arms have two sets of keys declines ("arms of two types").
+  `Field(d, "w")` (`d.w`) and `At(d, "w")` (`d["w"]`) give the field of that
+  name; `At` of an index that is not a constant key (`d[1]`), `First`, `Last`
+  and `Length` of a dictionary decline, as does a key that the literal does not
+  have, and a dictionary with the key `__proto__` (an object literal of the
+  result would set the prototype). `MatchesType` of a dictionary is not decided by its IR type
+  (`valueTypeOf()` gives `undefined`). A parameter of no stated type or `any`
+  holds a dictionary as it holds another record; one whose stated or inferred
+  type is a `dictionary` or a `record` type declines ("not a scalar"). As the
+  result of the code a dictionary is an object of its keys, and at a function
+  of the host it is the engine's dictionary of its keys (`boxValue()` of
+  `print-js.ts`). The nodes in a dictionary are not in `readers`, so a list or
+  a tuple value of a dictionary is not listed (`Listed`), and a function of the
+  host that receives it declines.
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type
