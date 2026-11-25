@@ -75,6 +75,12 @@
 
 ### Resolved Issues
 
+- **The completion of an Epsil sum-type variant with no payload no longer
+  adds a second `()`** (CE-1680). With `type light = red | green`, accepting
+  `green` in `let a = gree()` gave `let a = green()()`, and after `|>`
+  (`x |> gree`) it gave the call `green()`. Before `(` and after `|>`,
+  `epsilCompletions()` now inserts the name alone, as it does for a function.
+
 - **A Document row whose parameter has a type that the host declared by name
   is prepared** (CE-1658). After `ce.declareType('Pt', 'tuple<real, real>',
   { alias: true })`, `prepare()` of the row `g(q)=q+1` with

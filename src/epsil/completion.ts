@@ -819,8 +819,10 @@ export function epsilCompletions(
   }
 
   // The variants of the sum types, as constructors. A variant is a call,
-  // also when it has no payload (`green()`); a variant known only from the
-  // options has an unknown payload, and is inserted as its name.
+  // also when it has no payload (`green()`), except before `(`
+  // (`gree▮()`) and after `|>`, where the left side is the argument; a
+  // variant known only from the options has an unknown payload, and is
+  // inserted as its name.
   for (const [sum, declared] of sourceTypes) {
     if (declared.kind !== 'sum') continue;
     for (const variant of declared.variants) {
@@ -834,7 +836,7 @@ export function epsilCompletions(
         rank: fit === 'match' ? 2 : 4,
         ...(fit === undefined ? {} : { fit }),
         tier: 1,
-        ...(payload?.length === 0
+        ...(payload?.length === 0 && !called && !piped
           ? { insertText: `${spelling}()` }
           : spelling === variant.name
             ? {}

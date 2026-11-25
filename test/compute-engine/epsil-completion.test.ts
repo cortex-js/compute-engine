@@ -268,6 +268,19 @@ describe('EPSIL COMPLETION: LIKELY VALUES', () => {
     ).toEqual([]);
   });
 
+  test('a variant with no payload is its name before `(` and after `|>`', () => {
+    const light = 'type light = red | green\n';
+    for (const source of [
+      `${light}let a = gree▮()`,
+      `${light}let a = gree▮ ()`,
+      `${light}let x = 1\nlet a = x |> gree▮`,
+    ]) {
+      const green = item(complete(source), 'green');
+      expect(green).toMatchObject({ kind: 'function', label: 'green' });
+      expect(green?.insertText).toBeUndefined();
+    }
+  });
+
   test('a variant known only from the options is a name, not a type', () => {
     const options = { typeNames: ['shape'], sumVariants: { circle: 'shape' } };
     const value = epsilCompletions(ce, 'let a = ', 8, options);
