@@ -94,6 +94,7 @@ import {
   hasFloatOperand,
 } from '../boxed-expression/float-result.js';
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
+import { withSourceOffsetsOf } from '../boxed-expression/negate.js';
 import { numericCanonicalHandler } from '../boxed-expression/canonical-numeric.js';
 import { recordNumericCanonicalDefinitions } from '../boxed-expression/numeric-canonical-registry.js';
 import { rangeCount } from '../numerics/range-count.js';
@@ -14740,7 +14741,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return engine.typeError('number', args[0].type, args[0]);
         const first = args[0];
         const rest = args.slice(1);
-        return canonicalAdd(engine, [first, ...rest.map((x) => x.neg())]);
+        return canonicalAdd(engine, [
+          first,
+          ...rest.map((x) => withSourceOffsetsOf(x.neg(), x)),
+        ]);
       },
     },
 

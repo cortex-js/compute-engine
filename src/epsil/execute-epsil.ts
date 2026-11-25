@@ -1808,6 +1808,31 @@ function canonicalOrderOf(
   boxedStmt: Expression | undefined
 ): CanonicalOrder | undefined {
   if (boxedStmt === undefined) return undefined;
+  // Operand `index` (1-based) of the canonical call of `operatorName` whose
+  // source range is `callRange`.
+  const operandAt = (
+    operatorName: string,
+    callRange: [number, number],
+    index: number
+  ): Expression | undefined => {
+    const pending: Expression[] = [boxedStmt];
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+      // The value of a `let` is in the `Dictionary` of its `Declare`.
+      if (isDictionary(node)) pending.push(...node.values);
+      if (!isFunction(node)) continue;
+      const o = node.sourceOffsets;
+      if (
+        node.operator === operatorName &&
+        o !== undefined &&
+        o[0] === callRange[0] &&
+        o[1] === callRange[1]
+      )
+        return node.ops[index - 1];
+      pending.push(...node.ops);
+    }
+    return undefined;
+  };
   return {
     reorders: (operatorName) => {
       const def = ce.lookupDefinition(operatorName);
@@ -1815,34 +1840,22 @@ function canonicalOrderOf(
       return def.operator.commutative || def.operator.associative;
     },
     argumentOffsets: (operatorName, callRange, index) => {
-      const pending: Expression[] = [boxedStmt];
-      while (pending.length > 0) {
-        const node = pending.pop()!;
-        // The value of a `let` is in the `Dictionary` of its `Declare`.
-        if (isDictionary(node)) pending.push(...node.values);
-        if (!isFunction(node)) continue;
-        const o = node.sourceOffsets;
-        if (
-          node.operator === operatorName &&
-          o !== undefined &&
-          o[0] === callRange[0] &&
-          o[1] === callRange[1]
-        ) {
-          const op: Expression | undefined = node.ops[index - 1];
-          if (op === undefined) return undefined;
-          if (op.sourceOffsets !== undefined) return op.sourceOffsets;
-          // A subtracted term `a - t` is `Negate(t)` in the canonical sum,
-          // and an operand refused at canonicalization (`1 + "a"`) is
-          // `Error(code, "a")`. Only `t` and `"a"` have a source range.
-          if (op.operator === 'Negate' && isFunction(op))
-            return op.op1.sourceOffsets;
-          if (op.operator === 'Error' && isFunction(op))
-            return op.ops[1]?.sourceOffsets;
-          return undefined;
-        }
-        pending.push(...node.ops);
-      }
+      const op = operandAt(operatorName, callRange, index);
+      if (op === undefined) return undefined;
+      if (op.sourceOffsets !== undefined) return op.sourceOffsets;
+      // The negation of a term of a sum that canonicalization distributed
+      // (`1 - (2 + t)`) is `Negate(t)`, and an operand refused at
+      // canonicalization (`1 + "a"`) is `Error(code, "a")`. Only `t` and
+      // `"a"` have a source range.
+      if (op.operator === 'Negate' && isFunction(op))
+        return op.op1.sourceOffsets;
+      if (op.operator === 'Error' && isFunction(op))
+        return op.ops[1]?.sourceOffsets;
       return undefined;
+    },
+    argumentOperator: (operatorName, callRange, index) => {
+      const op = operandAt(operatorName, callRange, index);
+      return op !== undefined && isFunction(op) ? op.operator : undefined;
     },
   };
 }

@@ -77,7 +77,10 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
-import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import {
+  ExactNumericValue,
+  bigComplexProduct,
+} from '../numeric-value/exact-numeric-value.js';
 import type { Rational } from '../numerics/types.js';
 import {
   add as rationalAdd,
@@ -4187,6 +4190,10 @@ export function mulNEvaluated(
       return r.operator === 'Multiply' ? r : floatLiteral(r);
     }
   }
+  if (factors.length >= 3 && !bignumPreferred(ce)) {
+    const r = foldThroughOutOfRangePartialProduct(ce, factors);
+    if (r !== undefined) return r;
+  }
   const exp = expandProducts(ce, factors);
   if (exp) {
     if (exp.operator !== 'Multiply') return floatLiteral(exp);
@@ -4196,6 +4203,74 @@ export function mulNEvaluated(
   return new Product(ce, factors).asExpression({
     numericApproximation: true,
   });
+}
+
+/**
+ * In the machine lane, the product of the real number literals `factors`,
+ * computed with big decimals, when a partial product of the fold of
+ * `expandProducts` (from the right) is outside the normal double range.
+ * Otherwise, `undefined`, and the product keeps the order of its float
+ * products.
+ *
+ * In doubles, `10²⁰⁰·(10⁻²⁰⁰·10⁻¹²³)` goes through the subnormal `10⁻³²³`,
+ * which has 3 significant digits, and gives `9.88131291682493e-124`. The
+ * big-decimal product is exact, so the only rounding is the conversion of
+ * the result to a double: `1e-123`.
+ *
+ * A complex factor is multiplied with the big decimals of its two parts
+ * (`bigComplexProduct()`), so no partial product is rounded to a double
+ * either; the test reads its modulus. A factor that is 0, or whose real or
+ * imaginary part is not finite, gives `undefined`: its 0, ±∞ or NaN is then
+ * the value of the product. The test costs one double product for each
+ * factor.
+ */
+function foldThroughOutOfRangePartialProduct(
+  ce: ComputeEngine,
+  factors: ReadonlyArray<Expression>
+): Expression | undefined {
+  let p = 1;
+  let outOfRange = false;
+  for (let i = factors.length - 1; i >= 0; i--) {
+    const x = factors[i];
+    if (!isNumber(x)) return undefined;
+    const nv = x.numericValue;
+    const m =
+      typeof nv === 'number'
+        ? Math.abs(nv)
+        : nv.isComplex
+          ? Math.hypot(nv.re, nv.im)
+          : Math.abs(nv.re);
+    if (m === 0 || !Number.isFinite(m)) return undefined;
+    p *= m;
+    // The last product is the result: outside the range, it is the double
+    // nearest to the true product.
+    if (i > 0 && isOutsideNormalDoubleRange(p)) outOfRange = true;
+  }
+  if (!outOfRange) return undefined;
+  // `bignumReAt` of an exact rational has at least the working digits (see
+  // `ExactNumericValue`); a double converts to a big decimal exactly.
+  let re = BigDecimal.ONE;
+  let im = BigDecimal.ZERO;
+  for (const x of factors) {
+    if (!isNumber(x)) return undefined;
+    const nv = x.numericValue;
+    if (typeof nv === 'number') {
+      re = re.mul(nv);
+      im = im.mul(nv);
+      continue;
+    }
+    const a = nv.bignumReAt(ce.precision) ?? new BigDecimal(nv.re);
+    if (!nv.isComplex) {
+      re = re.mul(a);
+      im = im.mul(a);
+      continue;
+    }
+    const b = nv.bignumImAt(ce.precision) ?? new BigDecimal(nv.im);
+    ({ re, im } = bigComplexProduct(re, im, a, b, ce.precision));
+  }
+  return ce
+    .number(ce._numericValue(im.isZero() ? re : { re, im }))
+    .N();
 }
 
 /**

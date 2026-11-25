@@ -42,6 +42,14 @@
 
 ### Resolved Issues
 
+- **A product of three or more numbers at machine precision no longer loses
+  digits through a tiny or huge intermediate product** (CE-1757). At machine
+  precision, `N(10^{200}·10^{-200}·10^{-123})` gave `9.88131291682493e-124`,
+  because a partial product, `10^{-323}`, was below the smallest normal double.
+  It now gives `1e-123`. When a partial product is outside the range of a
+  normal double, the product is computed exactly and rounded once. Other
+  products are unchanged.
+
 - **A `Filter` over a `Map` that calls a function with no definition no longer
   throws "Not canonical"** (CE-1753). With `g` not declared,
   `Length(Filter(Map(k ↦ g(k), 1..3), k ↦ k < 2.5))` threw "Not canonical",
@@ -49,6 +57,15 @@
   They are now canonical, and the `Filter` reports its predicate as it does for
   the list `[g(1), g(2), g(3)]`: "Filter predicate must return True or False".
   When `g` is defined, the length is 2.
+
+- **In Epsil, the message of an error in a product or a sum that is the second
+  operand of a subtraction names the subtraction** (CE-1749). With `w` holding
+  `"s"`, the runtime error of `3 - 2*ln(w)` said "in Ln argument 1, in
+  Multiply argument 2, in Add argument 1", and that of `1 - (2 + ln(w))` said
+  "in Ln argument 1, in Negate argument 1, in Add argument 1": these name a sum
+  or a negation that the program does not contain. They now say "in Ln
+  argument 1, in Multiply argument 2, in Subtract argument 2" and "in Ln
+  argument 1, in Subtract argument 2".
 
 - **A fold of `LCM` or `GCD` at machine precision gives the right value**
   (CE-1774). At machine precision, or at precision 15,

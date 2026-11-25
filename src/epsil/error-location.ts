@@ -57,6 +57,16 @@ export type CanonicalOrder = {
     callRange: [number, number],
     index: number
   ): [number, number] | undefined;
+  /** The operator of operand `index` (1-based) of the canonical call of
+   * `operatorName` whose source range is `callRange`: `Negate` for the
+   * operand made from `ln(w)` in the canonical sum `Add(1, Negate(Ln(w)))`
+   * of `1 - ln(w)`. `undefined` when there is no such canonical call or the
+   * operand is not a function expression. */
+  argumentOperator(
+    operatorName: string,
+    callRange: [number, number],
+    index: number
+  ): string | undefined;
 };
 
 /**
@@ -188,10 +198,13 @@ export function enclosingFrame(
  * the value of the statement or the argument that an outer frame of the
  * statement selected ({@link rejectFramesOutsideScope}). The result holds
  * these frames as `frames`, in the order of `frames`, so that a message names
- * the written call: `Exp argument 1`, not `Power argument 2`. The two frames
- * `Negate argument 1, Add argument k` of the canonical sum of a written
- * subtraction become one frame, `Subtract argument 2`, followed by `null`
- * ({@link subtractionFrames}). Every other frame is as recorded.
+ * the written call: `Exp argument 1`, not `Power argument 2`. The frame
+ * `Add argument k` of the canonical sum of a written subtraction, for an
+ * operand made from its second operand, becomes `Subtract argument 2`. When
+ * the frame `Negate argument 1` of the `Negate` that canonicalization made
+ * for that operand comes before it, the two frames become
+ * `Subtract argument 2`, followed by `null` ({@link subtractionFrames}).
+ * Every other frame is as recorded.
  */
 export function locateError(
   frames: readonly ErrorFrameRef[],
@@ -244,6 +257,7 @@ export function locateError(
     number,
     { call: MathJsonExpression; arg: MathJsonExpression }
   >();
+  const negations = new Set<number>();
   rejectFramesOutsideScope(
     written,
     frames,
@@ -252,10 +266,11 @@ export function locateError(
     slotNamesFor,
     canonicalOrder,
     rejected,
-    accepted
+    accepted,
+    negations
   );
   frames = written;
-  const named = subtractionFrames(written, recorded, accepted);
+  const named = subtractionFrames(written, recorded, accepted, negations);
   for (let k = 0; k < frames.length; k++) {
     if (rejected.frames.has(k)) continue;
     const { name } = frames[k];
@@ -363,25 +378,37 @@ export function locateError(
 }
 
 /**
- * The frames `written` as a message names them: each pair of frames
- * `Negate argument 1, Add argument k` that the canonical sum of a written
- * subtraction recorded for its second operand is one frame,
- * `Subtract argument 2`, followed by `null`.
+ * The frames `written` as a message names them: a frame `Add argument k`
+ * that the canonical sum of a written subtraction recorded for an operand
+ * made from its second operand is `Subtract argument 2`. The frame
+ * `Negate argument 1` of a `Negate` that canonicalization made for a written
+ * operand (`negations`) and the frame of the written call after it are one
+ * frame, that of the written call, followed by `null`: `3 - ln(w)` gives
+ * `Subtract argument 2`, and `3 - ln(w)/y`, whose canonical form is
+ * `Add(Divide(Negate(Ln(w)), y), 3)`, gives `Divide argument 1`.
  *
  * The canonical form of `3 - ln(w)` is `Add(3, Negate(Ln(w)))`, so the error
  * of `ln(w)` has the frames `Ln argument 1, Negate argument 1,
  * Add argument 1`, and the statement has no written `Negate` and no written
- * sum. The message is then `in Ln argument 1, in Subtract argument 2`.
+ * sum. The message is then `in Ln argument 1, in Subtract argument 2`. The
+ * canonical form of `3 - 2*ln(w)` is `Add(Multiply(-2, Ln(w)), 3)`, with no
+ * `Negate`, so its frames `Ln argument 1, Multiply argument 2,
+ * Add argument 1` are named `in Ln argument 1, in Multiply argument 2,
+ * in Subtract argument 2`. The operand can also be inside the second operand
+ * of the subtraction, in a written sum or subtraction that the canonical sum
+ * merges: `1 - (2 + ln(w))` is `Add(Negate(Ln(w)), -1)`, and its message is
+ * `in Ln argument 1, in Subtract argument 2`.
  *
- * A pair is changed only when {@link rejectFramesOutsideScope} matched its
- * `Add` frame to a written sum of the statement (`accepted`), and the operand
- * that the frame selected is the second operand of a written subtraction of
- * that sum. A pair recorded in an earlier statement or in a called function
- * is not matched, and is kept. So is the pair of a written unary minus in a
- * sum (`1 + -ln(w)`): the operand that the `Add` frame selects is the
- * `-ln(w)`, whose parent is not a subtraction. Without `canonicalOrder` (the
- * static check), or when the frame indexes count written arguments, nothing
- * is matched and the frames are kept.
+ * A frame is changed only when {@link rejectFramesOutsideScope} matched it to
+ * a written sum of the statement (`accepted`), and the operand that the frame
+ * selected is inside the second operand of a written subtraction of that
+ * sum. A frame recorded in an earlier statement or in a called function is
+ * not matched, and is kept. So is the frame of a sum with a written unary
+ * minus (`1 + -ln(w)`): the operand that the `Add` frame selects is the
+ * `-ln(w)`, which is not inside a subtraction, and its `Negate` frame names
+ * the written `-`. Without `canonicalOrder` (the static check), or when the
+ * frame indexes count written arguments, nothing is matched and the frames
+ * are kept.
  */
 function subtractionFrames(
   written: readonly ErrorFrameRef[],
@@ -389,33 +416,44 @@ function subtractionFrames(
   accepted: ReadonlyMap<
     number,
     { call: MathJsonExpression; arg: MathJsonExpression }
-  >
+  >,
+  negations: ReadonlySet<number>
 ): (ErrorFrameRef | null)[] {
   const result: (ErrorFrameRef | null)[] = [...written];
-  for (let k = 0; k + 1 < written.length; k++) {
-    if (
-      written[k].name !== 'Negate' ||
-      written[k].index !== 1 ||
-      recorded[k].name !== 'Negate' ||
-      written[k + 1].name !== 'Add' ||
-      recorded[k + 1].name !== 'Add'
-    )
-      continue;
-    const selected = accepted.get(k + 1);
-    if (selected === undefined) continue;
-    const path: MathJsonExpression[] = [];
-    if (!pathTo(selected.call, selected.arg, path) || path.length < 2) continue;
-    const parent = path[path.length - 2];
-    if (
-      operator(parent) !== 'Subtract' ||
-      subtrahendAt(parent, 1) !== selected.arg
-    )
-      continue;
+  for (const [k, selected] of accepted) {
+    if (written[k].name !== 'Add' || recorded[k].name !== 'Add') continue;
+    if (!isInSubtrahend(selected.call, selected.arg)) continue;
     result[k] = { name: 'Subtract', index: 2 };
+  }
+  // The frame of a `Negate` that canonicalization made is named with the
+  // frame of the written call after it.
+  for (const k of negations) {
+    result[k] = result[k + 1];
     result[k + 1] = null;
-    k += 1;
   }
   return result;
+}
+
+/**
+ * Whether the written operand `arg` of the written sum `call` (an operand
+ * read through the nested sums and subtractions that canonicalization
+ * merges, see {@link clusterLeaves}) is inside the second operand of a
+ * subtraction of `call`: `ln(w)` in `1 - (2 + ln(w))`, but not in
+ * `ln(w) - 2` or `1 + -ln(w)`.
+ */
+function isInSubtrahend(
+  call: MathJsonExpression,
+  arg: MathJsonExpression
+): boolean {
+  const path: MathJsonExpression[] = [];
+  if (!pathTo(call, arg, path)) return false;
+  for (let i = 0; i + 1 < path.length; i++)
+    if (
+      operator(path[i]) === 'Subtract' &&
+      subtrahendAt(path[i], 1) === path[i + 1]
+    )
+      return true;
+  return false;
 }
 
 /**
@@ -595,7 +633,11 @@ function rejectFramesOutsideScope(
   rejected: Rejected,
   /** Set to the written call and the argument that each frame of the
    * statement selected, by index in `frames`. */
-  accepted: Map<number, { call: MathJsonExpression; arg: MathJsonExpression }>
+  accepted: Map<number, { call: MathJsonExpression; arg: MathJsonExpression }>,
+  /** Set to the index in `frames` of each frame `Negate argument 1` of a
+   * `Negate` that canonicalization made for a written operand, such as the
+   * second operand of a subtraction (see {@link subtractionFrames}). */
+  negations: Set<number>
 ): void {
   // The frame index of a named call counts declaration slots, and the source
   // range of the canonical operand is the only check of the argument.
@@ -674,6 +716,29 @@ function rejectFramesOutsideScope(
 
     accepted.set(j, { call: selected.call, arg: selected.arg });
     scope = selected.arg;
+
+    // `1 - (2 + ln(w))` is `Add(Negate(Ln(w)), -1)`, and `3 - ln(w)/y` is
+    // `Add(Divide(Negate(Ln(w)), y), 3)`: the canonical operand is a `Negate`
+    // that canonicalization made for the written operand `ln(w)`. Its frame
+    // `Negate argument 1` names no written call, and the next inner frame is
+    // read in the same scope. A written operand `-t` is the call of its
+    // frame, and is read as any other call.
+    if (
+      j > 0 &&
+      canonicalFrames[j - 1].name === 'Negate' &&
+      canonicalFrames[j - 1].index === 1 &&
+      operator(selected.arg) !== 'Negate' &&
+      callRange !== undefined &&
+      canonicalOrder.argumentOperator(
+        canonicalFrames[j].name,
+        callRange,
+        canonicalFrames[j].index
+      ) === 'Negate'
+    ) {
+      negations.add(j - 1);
+      rejected.frames.add(j - 1);
+      j -= 1;
+    }
   }
 }
 

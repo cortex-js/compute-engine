@@ -135,7 +135,7 @@ export function negate(expr: Expression): Expression {
     // Distribute over addition
     // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
     if (expr.operator === 'Add') {
-      const negated = expr.ops.map((x) => negate(x));
+      const negated = expr.ops.map((x) => withSourceOffsetsOf(negate(x), x));
       // A sum with a continuation operand (`1 + 2 + … + n`) is notational:
       // the order of its terms is the order of the pattern, so the negated
       // terms are not sorted (CE-163: the sorted form was `−n − 2 − 1 − …`).
@@ -154,6 +154,33 @@ export function negate(expr: Expression): Expression {
   }
 
   return ce._fn('Negate', [expr]);
+}
+
+/**
+ * `negated`, the negation of `x`, with the source range of `x` when
+ * `negated` is a function expression that has none.
+ *
+ * Canonicalization negates the second operand of a subtraction, and the
+ * terms of a sum that it negates, and the negation can make a new
+ * expression: `3 - 2*ln(w)` is `Add(Multiply(-2, Ln(w)), 3)`. With the range,
+ * the location of an error in an Epsil program maps the operand of the
+ * canonical sum back to the written `2*ln(w)` (`src/epsil/error-location.ts`).
+ * A number is not given a range, because it can be an interned value that
+ * other expressions share.
+ */
+export function withSourceOffsetsOf(
+  negated: Expression,
+  x: Expression
+): Expression {
+  if (
+    x.sourceOffsets !== undefined &&
+    negated !== x &&
+    isFunction(negated) &&
+    negated.sourceOffsets === undefined
+  )
+    (negated as { sourceOffsets?: [number, number] }).sourceOffsets =
+      x.sourceOffsets;
+  return negated;
 }
 
 // Given a list of terms in a product, find the "best" one to negate in

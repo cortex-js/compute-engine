@@ -89,6 +89,55 @@ describe('ARITHMETIC WITH MANY OPERANDS', () => {
     }
   });
 
+  test('a product of number literals only does not go through a subnormal product', () => {
+    // The product of number literals only is folded from the right, so
+    // `10²⁰⁰·(10⁻²⁰⁰·10⁻¹²³)` went through the subnormal `10⁻³²³` and gave
+    // `9.88131291682493e-124` (CE-1757).
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    const big = { num: '1e200' };
+    const small = { num: '1e-200' };
+    const tiny = { num: '1e-123' };
+    expect(engine.box(['Multiply', small, tiny, big]).N().re).toBe(1e-123);
+    expect(
+      engine.box(['Multiply', small, small, big, big, tiny]).N().re
+    ).toBe(1e-123);
+    // An intermediate product above the largest double.
+    expect(
+      engine
+        .box(['Multiply', { num: '1e300' }, { num: '1e300' }, { num: '1e-300' }])
+        .N().re
+    ).toBe(1e300);
+    // A product built without the canonical form keeps the order of its
+    // factors, beside an exact rational and a complex factor.
+    const f = (...xs: any[]) =>
+      engine._fn(
+        'Multiply',
+        xs.map((x) => engine.box(x))
+      );
+    expect(f(big, small, tiny).N().re).toBe(1e-123);
+    expect(f(big, ['Rational', 1, 3], small, tiny).N().re).toBe(1e-123 / 3);
+    const z = f(big, small, ['Complex', 1, 1], tiny).N();
+    expect([z.re, z.im]).toEqual([1e-123, 1e-123]);
+    // The complex factors are multiplied with big decimals too: in doubles,
+    // `(1e200 + 1e200i)²` is above the largest double, and the partial
+    // product `10⁻²⁰⁰·10⁻²⁰⁰` below the smallest one.
+    const w = f(
+      ['Complex', 1e200, 1e200],
+      ['Complex', 1e200, 1e200],
+      ['Complex', 1e-200, 1e-200],
+      ['Complex', 1e-123, 1e-123]
+    ).N();
+    expect([w.re, w.im]).toEqual([-4e77, 0]);
+    const v = f(['Complex', 1e300, 1e300], small, small, 1e-10, 1e10).N();
+    expect([v.re, v.im]).toEqual([1e-100, 1e-100]);
+    // A true product below the smallest double is 0.
+    expect(engine.box(['Multiply', small, small, small]).N().re).toBe(0);
+    // Without an intermediate outside the normal range, the order of the
+    // float products is kept.
+    expect(f(0.1, 0.2, 0.3).N().re).toBe(0.1 * (0.2 * 0.3));
+  });
+
   test('a repeated factor merges with its first occurrence', () => {
     // x_0·x_1·…·x_999·x_0·x_1·…·x_999 = x_0²·x_1²·…·x_999²
     const symbols = Array.from({ length: 1_000 }, (_, i) => `x_${i}`);

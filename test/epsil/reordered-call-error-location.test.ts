@@ -527,6 +527,54 @@ describe('the frames of an error in the second operand of a subtraction', () => 
       'let y = 2\nlet v = Cos(1 + -ln(w)) + Sin(2 - ln(y))',
       'in Ln argument 1, in Negate argument 1, in Add argument 1, in Cos argument 1, in Add argument 1',
     ],
+    // The negation is folded into the coefficient of the product
+    // (`Add(Multiply(-2, Ln(w)), 3)`), so there is no `Negate` frame.
+    [
+      'let v = 3 - 2*ln(w)',
+      'in Ln argument 1, in Multiply argument 2, in Subtract argument 2',
+    ],
+    [
+      'let v = 3 - ln(w)/2',
+      'in Ln argument 1, in Divide argument 1, in Subtract argument 2',
+    ],
+    // The negation is given to the dividend (`Divide(Negate(Ln(w)), y)`),
+    // and its `Negate` names no written call.
+    [
+      'let y = 2\nlet v = 3 - ln(w)/y',
+      'in Ln argument 1, in Divide argument 1, in Subtract argument 2',
+    ],
+    [
+      'let y = 2\nlet v = 1 - (2 + ln(w)/y)',
+      'in Ln argument 1, in Divide argument 1, in Subtract argument 2',
+    ],
+    // A written unary minus in a quotient keeps its frame.
+    [
+      'let y = 2\nlet v = 3 + (-ln(w))/y',
+      'in Ln argument 1, in Negate argument 1, in Divide argument 1, in Add argument 1',
+    ],
+    // The negation is distributed over the sum of the second operand
+    // (`Add(Negate(Ln(w)), -1)`), and its `Negate` names no written call.
+    ['let v = 1 - (2 + ln(w))', 'in Ln argument 1, in Subtract argument 2'],
+    ['let v = 1 - (ln(w) + 2)', 'in Ln argument 1, in Subtract argument 2'],
+    ['let v = 1 - (2 - ln(w))', 'in Ln argument 1, in Subtract argument 2'],
+    [
+      'let v = 1 - (2 + 2*ln(w))',
+      'in Ln argument 1, in Multiply argument 2, in Subtract argument 2',
+    ],
+    // A written unary minus inside the distributed sum keeps its frame.
+    [
+      'let v = 1 - (2 + Sin(-ln(w)))',
+      'in Ln argument 1, in Negate argument 1, in Sin argument 1, in Subtract argument 2',
+    ],
+    // The frames of a subtraction inside the second operand of another one.
+    [
+      'let v = 3 - Sin(1 - ln(w))',
+      'in Ln argument 1, in Subtract argument 2, in Sin argument 1, in Subtract argument 2',
+    ],
+    [
+      'let v = 3 - 2*Sin(1 - ln(w))',
+      'in Ln argument 1, in Subtract argument 2, in Sin argument 1, in Multiply argument 2, in Subtract argument 2',
+    ],
     // The inner pair names the unary minus inside the subtrahend.
     [
       'let v = 2 - Sin(1 + -ln(w))',
@@ -543,6 +591,13 @@ describe('the frames of an error in the second operand of a subtraction', () => 
       runtimeFrames('function g(x) { 1 + -Ln(x) }\nlet v = 5 - g(w)')
     ).toEqual([
       'in Ln argument 1, in Negate argument 1, in Add argument 1, in Subtract argument 2',
+    ]);
+    // `1 - (2 - g(w))` is `Add(g(w), -1)`, with no `Negate`: the
+    // `Negate argument 1` frame is the one of the body of `g`.
+    expect(
+      runtimeFrames('function g(x) { -ln(x) }\nlet v = 1 - (2 - g(w))')
+    ).toEqual([
+      'in Ln argument 1, in Negate argument 1, in Subtract argument 2',
     ]);
     // The error of `x` is reported for its statement, and again for the
     // statement that reads `x`.
