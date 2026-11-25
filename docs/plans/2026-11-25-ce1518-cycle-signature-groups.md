@@ -97,9 +97,12 @@ definition the head holds now, also for a call boxed as a forward
 reference). The graph is static: it reads the literals, never a type.
 
 The **component** of a member is its strongly connected component in that
-graph (Tarjan, over the members reachable from it). The component is cached
-on the member with the key that `_wildcardSkeleton` uses
-(`declaredResultMemoKey`): a new definition or assignment moves it.
+graph (Tarjan, over the members reachable from it). It is computed only for
+a member whose literal reaches its own name (`callsReach(literal, name)`);
+every other member has no component and keeps the present path. The answer
+of that test and the component are cached on the member with the key that
+`_wildcardSkeleton` uses (`declaredResultMemoKey`): a new definition or
+assignment moves it.
 
 An edge that the graph misses (a function passed as a value and applied
 by a parameter: `F(n) = G(F, n)` with `G := (h, n) ↦ h(n − 1)`) leaves the
@@ -212,6 +215,32 @@ every value.
   read the effects of the literal after the derivation, as today. With the
   memos stored, those reads do not derive again.
 
+### 3.7 Cost on the other paths
+
+The group path, the memo checked before the literal's type, and the fresh
+boxing of each round run only for a member of a component of two members or
+more. What each other case pays:
+
+| Case                                                                                 | Today                                                                                                                                                           | With the plan                                                                     |
+| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| function with a full declared signature, or a signature inferred at assignment       | no derivation                                                                                                                                                   | unchanged: not a member                                                           |
+| member read when its memo answers                                                    | the literal's type, then the memo                                                                                                                               | unchanged, plus a read of the cached component (a version compare)                |
+| member whose literal does not reach its own name                                     | declared `function`: a cached `callsReach` per engine version (`_isDerivableRecursiveLiteral`), no derivation; declared with a skeleton: a derivation per memo miss, in which `verifiedListHypothesis` runs `callsReach` unless the result is `unknown` or `any` | declared `function`: unchanged; declared with a skeleton: one cached `callsReach` per engine version, then the present path |
+| member that calls only itself                                                        | the present path                                                                                                                                                | the cached `callsReach`, one Tarjan walk per engine version, then the present path |
+| member of a component of two or more                                                 | nested derivations, taints, no memo (13.1 s on the witness)                                                                                                     | the group derivation (3.2), then a memo hit before the literal's type             |
+
+The walks are of the same kind as `callsReach`: they read each node of the
+literal and of the literals it reaches once, and type nothing. The first
+three rows must not get slower; step 1 adds the counters that check it, and
+steps 3 and 5 run the benchmarks of section 6.
+
+The case that can get slower is a cycle that is fast today in a favorable
+order: on the witness, reading `a_2` first takes 2 ms. The group path boxes
+every body of the component in each round, whatever head is read first.
+For three small bodies this is an estimated few milliseconds; for a large
+component it is bounded by `MAX_GROUP_ROUNDS` times the members, and it is
+measured (section 7).
+
 ## 4. What it removes or changes
 
 - The nested derivations of cycle members, and their taints, for every
@@ -235,7 +264,10 @@ every value.
    `failClosedCounts`). The acceptance programs of section 6 as tests that
    assert the types, the values and a bound on the derivation count, not a
    time. The tests that main fails stay skipped until the step that fixes
-   them.
+   them. Count tests for the first three rows of 3.7: a non-recursive
+   function declared `(unknown) -> unknown`, one declared `function`, and a
+   self-recursive one, each read several times; the counts of derivations
+   and body boxings are recorded on main and must stay the same.
 2. **The component.** `signatureComponent(member)`, with its cache and
    unit tests: a cycle of three, a pair with self-calls, a forward
    reference, a call in a nested function literal, a member with a full
@@ -281,6 +313,15 @@ Each step is one commit with its tests. Size L.
   `census-head-new-declines.test.ts`, `scope-advanced.test.ts` (mutual
   recursion), `definition-order.test.ts`, and the Tycho test
   `tests/node/graph-paper/scalar-parameter-signature.test.ts`.
+- The count tests of step 1 for the paths outside a cycle: the same counts
+  as on main.
+- Benchmarks, against a main build, under the box lock (`benchmarks/README.md`):
+  `effects-registration.ts` (120 interdependent functions with declared
+  signatures: not members, so no change beyond noise) and the
+  `tycho-document-open` replay (`evaluate.ts`, `rebind.ts`). A slowdown
+  beyond noise on either stops the work for a decision.
+- The witness read first in the favorable order (`a_2`), and a cycle of six
+  heads: the times are reported against main.
 
 ## 7. Risks
 
@@ -298,8 +339,11 @@ Each step is one commit with its tests. Size L.
 - **Cost of a round.** A fresh boxing of each body per round. For a large
   component (dozens of members, Tycho's signature-analysis scope), the
   rounds times the members may cost more than today's first read of the
-  head that happens to be fast. Step 5 measures a cycle of six heads;
-  `MAX_GROUP_ROUNDS` bounds the rest.
+  head that happens to be fast (3.7). Step 5 measures a cycle of six heads;
+  `MAX_GROUP_ROUNDS` bounds the rest. If the favorable order of a small
+  cycle gets slower by more than a few milliseconds, the round is reduced to
+  the members that call a member whose candidate changed in the round
+  before (a worklist), before any other change.
 - **Read order.** The canonical order of 3.2 makes the result the same
   whichever head is read first. A test that pins a type that today depends
   on the order can change; such a change is reported, not hidden.

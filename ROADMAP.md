@@ -1055,22 +1055,17 @@ removed (decision D9 of `docs/plans/2026-11-11-bound-once-spec.md`).
 
 ### CE-1255. One route for an Epsil program, the sites of its names, and a program runner
 
-**Status:** ready (approved 2026-11-12); capability, L. Starts after step 1 of `docs/plans/2026-11-11-bound-once-spec.md` is on main. Spec: `docs/plans/2026-11-12-program-operator-spec.md`.
+**Status:** ready (approved 2026-11-12); capability, L. CE-1255.1 is on main; the plan of CE-1255.2 is approved (2026-11-25), and CE-1628 is delivered with it. Spec: `docs/plans/2026-11-12-program-operator-spec.md`.
 **Witness:** corpus; Tycho's prelude runner (`~/dev/tycho/src/plot-core/prelude-runner.ts`) holds a copy of the engine's scoping rules and compiles a program statement by statement by hand.
 
 Tycho does not hold a copy of the engine's scoping rules: the engine gives
-what the prelude runner derives by hand. Three pieces, in this order; the
-third is the one delivered to Tycho.
+what the prelude runner derives by hand. Two pieces remain, in this order;
+the second is the one delivered to Tycho.
 
-- **CE-1255.1** The `Program` operator: `parseEpsil()` gives `Program(…)`, and
-  every route (the runner, the debugger, the editor, `compile()`) evaluates
-  that one expression. The spec has the rule and the answers that change.
-  First step: the count of the tests that change, shown to the user before
-  they are moved.
 - **CE-1255.2** The sites query: for a parsed program, each symbol site with
   its role, its source range and the binding it resolves to, and for each
   statement the top-level names it reads and the names it defines or
-  assigns. Draft [Program source sites](docs/plans/2026-11-19-program-sites.md).
+  assigns. Spec [Program source sites](docs/plans/2026-11-19-program-sites.md).
 - **CE-1255.3** The program runner (a separate entry above `compile()`, with
   an asynchronous form): each value statement is a compile unit, a statement
   that declines runs in the interpreter and the run continues compiled,

@@ -1,5 +1,8 @@
 # Program source sites
 
+Status: APPROVED by the user on 2026-11-25. The public API spelling is
+settled by the implementation, as the last section says.
+
 CE-1255.2 defines a query over one prepared Epsil Program and its original
 source. It returns authored name sites and summarizes the Program bindings
 each direct statement reads, defines or writes. Querying the result executes
