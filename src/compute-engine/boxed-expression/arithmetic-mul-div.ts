@@ -30,6 +30,7 @@ import {
 import { bignumPreferred, hasAssignedVariable } from './utils.js';
 import {
   isLibraryOperator,
+  libraryFn,
   shadowsLibraryName,
   shadowsLibraryOperator,
 } from '../library-shadowing.js';
@@ -1682,7 +1683,7 @@ function tupleArity(expr: Expression): number | undefined {
  */
 export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const ce = op1.engine;
-  if (!op1.isValid || !op2.isValid) return ce._fn('Divide', [op1, op2]);
+  if (!op1.isValid || !op2.isValid) return libraryFn(ce, 'Divide', [op1, op2]);
 
   // An operand with the EMPTY type `never` (for example a symbol declared
   // with an empty range, `integer<2<..<3>`) has no value — but the bottom
@@ -1708,7 +1709,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   if (op1.type.type === 'never' || op2.type.type === 'never') {
     if (isLiteral(op2, 1)) return op1;
     if (isLiteral(op2, -1)) return op1.neg();
-    return ce._fn('Divide', [op1, op2]);
+    return libraryFn(ce, 'Divide', [op1, op2]);
   }
 
   // A `NaN` operand folds to `NaN` HERE, at canonicalization, unlike the
@@ -1815,7 +1816,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
         !isAbsentScalarTerm(op2)
       )
         return ce.tuple(...op1.ops.map((c) => canonicalDivide(c, op2)));
-      return ce._fn('Divide', [op1, op2]);
+      return libraryFn(ce, 'Divide', [op1, op2]);
     }
   }
 
@@ -1825,7 +1826,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // `holdsKindValue()`). A point divisor was rejected above, as for
   // any numerator. Division by an exact 1 is the same in every ring.
   if (holdsKindValue(op1) || holdsKindValue(op2))
-    return isLiteral(op2, 1) ? op1 : ce._fn('Divide', [op1, op2]);
+    return isLiteral(op2, 1) ? op1 : libraryFn(ce, 'Divide', [op1, op2]);
 
   // An absent operand (`Missing`) folds to `Missing` here: `Missing` is a
   // result only, and an operator over it gives `Missing`
@@ -1880,11 +1881,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // folded to `ComplexInfinity`.
   if (isLiteral(op2, 0)) {
     if (typeMayCarryQuotientShape(op1.type.type))
-      return ce._fn('Divide', [op1, op2]);
+      return libraryFn(ce, 'Divide', [op1, op2]);
     if (isLiteral(op1, 0)) return ce.NaN;
     return isProvablyNonZeroNumerator(op1)
       ? ce.ComplexInfinity
-      : ce._fn('Divide', [op1, op2]);
+      : libraryFn(ce, 'Divide', [op1, op2]);
   }
 
   // 0/a = 0 (a≠0, a is finite)
@@ -1893,7 +1894,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     // with `L: list<real>` is a list of zeros of the length of `L`, not the
     // scalar `0`. The quotient stays, and evaluation broadcasts it over the
     // value of `L`.
-    if (isCollectionShaped(op2)) return ce._fn('Divide', [op1, op2]);
+    if (isCollectionShaped(op2)) return libraryFn(ce, 'Divide', [op1, op2]);
     // Be conservative with constant (no-unknown) denominators that aren't
     // already a literal number. Avoid 0/(1-1) -> 0 during canonicalization.
     // Use structural mode so the expression is bound and can evaluate later.
@@ -1914,11 +1915,11 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // folds: the quotient is kept, and its evaluation reads the value.
   if (staticallyTrue(op2, (x) => x.isInfinity)) {
     if (staticallyTrue(op1, (x) => x.isInfinity)) return ce.NaN;
-    if (op1.isInfinity) return ce._fn('Divide', [op1, op2]);
+    if (op1.isInfinity) return libraryFn(ce, 'Divide', [op1, op2]);
     // Same shape exemption as the a/0 rule above: [1,2]/∞ broadcasts to
     // [0, 0] at evaluation rather than collapsing to the scalar 0.
     if (typeMayCarryQuotientShape(op1.type.type))
-      return ce._fn('Divide', [op1, op2]);
+      return libraryFn(ce, 'Divide', [op1, op2]);
     // A float numerator gives the float `0` (`2.5/∞` is `0.0`): a float
     // operand makes a numeric result a float.
     return isNumber(op1) && !op1.isExact ? asFloat(ce.Zero) : ce.Zero;
@@ -2011,7 +2012,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     isFunction(op2, 'Divide') && isLibraryOperator(op2, 'Divide')
       ? op2
       : undefined;
-  if (q2 && isLiteral(q2.op2, 0)) return ce._fn('Divide', [op1, op2]);
+  if (q2 && isLiteral(q2.op2, 0)) return libraryFn(ce, 'Divide', [op1, op2]);
 
   // (a/b)/(c/d) = (a*d)/(b*c)
   if (q1 && q2) {
@@ -2095,7 +2096,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
         const q = nv1.div(nv2, ce.precision);
         if (q.isExact) return ce.number(q);
       }
-      return ce._fn('Divide', [op1, op2]);
+      return libraryFn(ce, 'Divide', [op1, op2]);
     }
 
     // a/b with a and b integer literals -> a/b rational
@@ -2169,13 +2170,13 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
               n = n.neg();
               d = d.neg();
             }
-            return ce._fn('Divide', [ce.number(n), ce.number(d)]);
+            return libraryFn(ce, 'Divide', [ce.number(n), ce.number(d)]);
           }
         }
       }
     }
 
-    return ce._fn('Divide', [op1, op2]);
+    return libraryFn(ce, 'Divide', [op1, op2]);
   }
 
   // At least one of op1 or op2 are not numeric value.
@@ -2191,7 +2192,7 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // A zero-coefficient numerator factors out fine (0·(t1/t2)), but a
   // zero-coefficient denominator must NOT: c1/0 = ±∞ would assume a sign
   // for `x/(0.0·y)`. Keep the division structural.
-  if (c2.isZero) return ce._fn('Divide', [op1, op2]);
+  if (c2.isZero) return libraryFn(ce, 'Divide', [op1, op2]);
 
   const c = c1.div(c2, ce.precision);
 
@@ -2212,10 +2213,12 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   const unitRemovable = c1.isExact === c2.isExact;
 
   if (c.isOne && unitRemovable)
-    return isLiteral(t2, 1) ? t1 : ce._fn('Divide', [t1, t2]);
+    return isLiteral(t2, 1) ? t1 : libraryFn(ce, 'Divide', [t1, t2]);
 
   if (c.isNegativeOne && unitRemovable)
-    return isLiteral(t2, 1) ? t1.neg() : ce._fn('Divide', [t1.neg(), t2]);
+    return isLiteral(t2, 1)
+      ? t1.neg()
+      : libraryFn(ce, 'Divide', [t1.neg(), t2]);
 
   // If c is exact, use as a product: `c * (t1/t2)`
   // So, π/4 -> 1/4 * π (prefer multiplication over division)
@@ -2223,12 +2226,12 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     if (isLiteral(t1, 1) && isLiteral(t2, 1)) return ce.number(c);
     if (isLiteral(t2, 1)) return canonicalMultiply(ce, [ce.number(c), t1]);
 
-    return ce._fn('Divide', [
+    return libraryFn(ce, 'Divide', [
       canonicalMultiply(ce, [ce.number(c.numerator), t1]),
       canonicalMultiply(ce, [ce.number(c.denominator), t2]),
     ]);
   }
-  return ce._fn('Divide', [op1, op2]);
+  return libraryFn(ce, 'Divide', [op1, op2]);
 }
 
 /** True when the factors `xs` hold a point (a tuple) and a tensor of rank 3
@@ -2380,14 +2383,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
         typeMayCarryQuotientShape(num.type.type) ||
         !isProvablyNonZeroNumerator(num)
       )
-        return ce._fn('Divide', [num, ce.number(0)]);
+        return libraryFn(ce, 'Divide', [num, ce.number(0)]);
       return ce.ComplexInfinity;
     }
     // An infinite divisor reaches a/∞ = 0 through the Product tail below,
     // which would collapse a shaped numerator the same way — keep it inert
     // instead ([1,2]/∞ → [0, 0] at evaluation). NaN was handled above.
     if (!Number.isFinite(denom) && typeMayCarryQuotientShape(num.type.type))
-      return ce._fn('Divide', [num, ce.number(denom)]);
+      return libraryFn(ce, 'Divide', [num, ce.number(denom)]);
 
     if (isNumber(num)) {
       const n = num.numericValue;
@@ -2411,7 +2414,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
       denom.ops.some((op) => isLiteral(op, 0)) &&
       isCollectionShaped(denom)
     )
-      return ce._fn('Divide', [num, denom]);
+      return libraryFn(ce, 'Divide', [num, denom]);
     if (isLiteral(num, 0)) {
       // 0/0 is the indeterminate form. 0/∞ and 0/~oo are 0, as
       // `canonicalDivide` answers (not an indeterminate form; this answered
@@ -2420,11 +2423,13 @@ export function div(num: Expression, denom: number | Expression): Expression {
       // A divisor that is a collection by its type gives a list of zeros of its
       // length, as in `canonicalDivide`: the quotient stays, and evaluation
       // broadcasts it.
-      if (isCollectionShaped(denom)) return ce._fn('Divide', [num, denom]);
+      if (isCollectionShaped(denom))
+        return libraryFn(ce, 'Divide', [num, denom]);
       // A divisor that is a constant whose value may be zero keeps the
       // quotient (`isConstantThatMayBeZero()`): `0/z` with `z` a constant of
       // value 0 is `0/0`, and its evaluation gives `NaN`.
-      if (isConstantThatMayBeZero(denom)) return ce._fn('Divide', [num, denom]);
+      if (isConstantThatMayBeZero(denom))
+        return libraryFn(ce, 'Divide', [num, denom]);
       // A float `0` numerator is kept (`0.0/∞` is the float `0`), as in the
       // JavaScript-number branch above. A float divisor gives a float `0`
       // (`0/2.5` is `0.0`).
@@ -2450,7 +2455,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
         typeMayCarryQuotientShape(num.type.type) ||
         !isProvablyNonZeroNumerator(num)
       )
-        return ce._fn('Divide', [num, denom]);
+        return libraryFn(ce, 'Divide', [num, denom]);
       return ce.ComplexInfinity;
     }
 
@@ -2459,7 +2464,7 @@ export function div(num: Expression, denom: number | Expression): Expression {
     // instead ([1,2]/∞ → [0, 0] at evaluation). A NaN divisor was handled
     // above.
     if (denom.isInfinity && typeMayCarryQuotientShape(num.type.type))
-      return ce._fn('Divide', [num, denom]);
+      return libraryFn(ce, 'Divide', [num, denom]);
 
     // ∞/a = ±∞ for a finite and definitely nonzero (a known sign). The Product
     // path below returns NaN for an infinite numerator over a symbolic finite

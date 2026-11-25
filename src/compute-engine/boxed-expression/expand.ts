@@ -14,6 +14,7 @@ import { mayBeMatrixValued, typeMayHoldNumber } from './matrix-operand.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { isMergeable } from './effects-of.js';
 import { isConstantThatMayBeZero } from './maybe-zero.js';
+import { libraryFn } from '../library-shadowing.js';
 
 const binomials = [
   [1],
@@ -256,7 +257,7 @@ export function expandFunction(
     // `(x + 1)/r(t)` is not `x/r(t) + 1/r(t)`.
     if (isFunction(num, 'Add') && isMergeable(ops[1]))
       return add(...num.ops.map((x) => x.div(ops[1])));
-    return ce._fn('Divide', [num, ops[1]]);
+    return libraryFn(ce, 'Divide', [num, ops[1]]);
   }
 
   //

@@ -66,6 +66,18 @@
 
 ### Resolved Issues
 
+- **In a scope with a user function named `Divide`, a reciprocal is the
+  library quotient** (CE-1760). After `ce.declare('Divide', 'function')` and
+  `ce.assign('Divide', ce.expr(['Function', 1000, 'u', 'v']))`,
+  `ce.expr(['Power', 'y', -1]).subs({ y: 4 }).evaluate()` gave `1000`: the
+  reciprocal `1/y` was a call of the user function. It now gives `1/4`. The
+  same applies to `y^{-1/3}`, `Root(-8, 0.5)`, and to the `inv()`, `div()`,
+  `pow()` and `root()` methods. In such a scope, the reciprocal serializes as
+  a call of the library operator (`["Apply", ["Module", "Divide"], 1, "y"]`),
+  so that it is not read as a call of the user function. A call
+  `Divide(1, y)` that the program writes is still a call of the user
+  function.
+
 - **A product of three or more numbers at machine precision no longer loses
   digits through a tiny or huge intermediate product** (CE-1757). At machine
   precision, `N(10^{200}·10^{-200}·10^{-123})` gave `9.88131291682493e-124`,

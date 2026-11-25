@@ -28,6 +28,7 @@ import {
   inSerializationScope,
   isLibraryCall,
   isLibraryOperator,
+  libraryFn,
   markLibraryCall,
   noteStructuralScope,
   sameOperator,
@@ -4420,9 +4421,7 @@ export class BoxedFunction
     // scope where a user definition of `Divide` shadows it.
     const ce = this.engine;
     const reciprocal = (): Expression =>
-      (shadowsLibraryName(ce, 'Divide')
-        ? ce._libraryCall('Divide', [ce.One, this])
-        : undefined) ?? ce._fn('Divide', [ce.One, this]);
+      libraryFn(ce, 'Divide', [ce.One, this]);
 
     // The cases below select the node by its operator name. A call bound to
     // a user definition of a library name (a user function `Divide`) is a
@@ -4620,7 +4619,7 @@ export class BoxedFunction
     // `Root(x, -3)` (#13). Placed after the reduction cases above so nested
     // radicals still combine first (`1/∛√x → 1/Root(x, 6)`).
     if (e !== undefined && e < 0 && Number.isInteger(e))
-      return this.engine._fn('Divide', [this.engine.One, this.root(-e)]);
+      return libraryFn(this.engine, 'Divide', [this.engine.One, this.root(-e)]);
 
     return this.engine._fn('Root', [this, this.engine.expr(exp)]);
   }

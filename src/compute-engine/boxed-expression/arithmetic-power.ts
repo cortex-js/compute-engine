@@ -44,6 +44,7 @@ import { isConstantThatMayBeZero, isConstantZero } from './maybe-zero.js';
 import {
   isLibraryOperator,
   isShadowedSymbol,
+  libraryFn,
   shadowsLibraryName,
 } from '../library-shadowing.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -68,6 +69,25 @@ const MATRIX_TYPE = parseType('matrix');
  * but an expression with no value has no shape to rewrite for. */
 export function isMatrixTyped(x: Expression): boolean {
   return x.type.type !== 'never' && x.type.matches(MATRIX_TYPE);
+}
+
+/** The canonical reciprocal `1/x` of a canonical `x`, bound to the library
+ * `Divide` also in a scope where a user `Divide` shadows it. Outside such a
+ * scope it is `ce.function('Divide', [1, x])`, which canonicalizes. While
+ * `ce._libraryCall()` boxes a library `Divide`, `ce._fn()` builds it: it
+ * binds the call to the library definition (`ce._qualifiedHead`), but
+ * `ce.function()` boxes a nested call, which binds the call by its name. */
+function libraryReciprocal(
+  ce: Expression['engine'],
+  x: Expression
+): Expression {
+  if (ce._qualifiedHead?.name === 'Divide')
+    return ce._fn('Divide', [ce.One, x]);
+  return (
+    (shadowsLibraryName(ce, 'Divide')
+      ? ce._libraryCall('Divide', [ce.One, x])
+      : undefined) ?? ce.function('Divide', [ce.One, x])
+  );
 }
 
 /** A number literal denoting the direction-less complex infinity `~oo` —
@@ -833,9 +853,11 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // against the integrand 1/Sqrt(1-x^2), breaking antiderivative checks.
   if (r !== undefined && r[0] === -1 && Math.abs(Number(r[1])) !== 1) {
     const root = canonicalRoot(a, ce.number(Math.abs(Number(r[1]))));
-    return a.isCanonical || a.isStructural
-      ? ce.function('Divide', [ce.One, root])
-      : ce._fn('Divide', [ce.One, root], { canonical: false });
+    // The quotient is bound to the library `Divide`, also in a scope where a
+    // user `Divide` shadows it.
+    if (!(a.isCanonical || a.isStructural))
+      return ce._fn('Divide', [ce.One, root], { canonical: false });
+    return libraryReciprocal(ce, root);
   }
 
   // Fold exact numeric powers: Power(2, 3) → 8, Power(1/2, 2) → 1/4
@@ -974,7 +996,7 @@ export function canonicalRoot(
   // (`Root(a, -n)`, which serializes as the nonstandard, unparseable
   // `\sqrt[-n]{a}`) is never produced — uniform with `x^{-1/2} → 1/√x` (#13).
   if (exp !== undefined && exp < 0 && Number.isInteger(exp))
-    return ce._fn('Divide', [ce.One, canonicalRoot(a, -exp)]);
+    return libraryFn(ce, 'Divide', [ce.One, canonicalRoot(a, -exp)]);
 
   // An exact NON-INTEGER rational index `p/q` is the power `a^(q/p)`
   // (`Root(a, b)` is `Power(a, 1/b)` at every point, ruled 2026-09-01):
@@ -2265,7 +2287,7 @@ function rootAtExceptionalPoint(
     // infinite-base arms decide (`(−∞)^(1/3) = −∞`, `(+∞)^(1/2) = +∞`,
     // `(~oo)^(1/n) = ~oo`, a negative index gives 0).
     // The canonical `Divide` keeps `1/b` exact (`1/3` stays a rational).
-    return pow(a, ce.function('Divide', [ce.One, b]), {
+    return pow(a, libraryReciprocal(ce, b), {
       numericApproximation: false,
     });
   }
@@ -2320,7 +2342,7 @@ export function root(
       // `pow`, which reads the exponent the way `Power` does. Found while
       // fixing Tycho ledger row 400 (2026-10-19): `Root(-8, 0.5)` was −64.
       if (isNegative && b.isInteger !== true) {
-        return pow(a, a.engine.function('Divide', [a.engine.One, b]), {
+        return pow(a, libraryReciprocal(a.engine, b), {
           numericApproximation: true,
         });
       }

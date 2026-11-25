@@ -108,6 +108,31 @@ export function shadowsLibraryNameInOperand(
 }
 
 /**
+ * The call `name(...ops)` of the library operator `name`, from canonical
+ * operands. `ce._fn()` binds a call by its name in the current scope, so in
+ * a scope where a user definition shadows `name`, the node that an
+ * arithmetic function builds (the reciprocal `Divide(1, y)` of `y.inv()`)
+ * would be a call of the user function. In such a scope only, the call is a
+ * marked library call (`ce._libraryCall()`); elsewhere `ce._fn()` builds it.
+ */
+export function libraryFn<T>(
+  ce: Parameters<typeof shadowsLibraryName>[0] & {
+    _libraryCall(
+      name: string,
+      ops: ReadonlyArray<NoInfer<T>>
+    ): NoInfer<T> | undefined;
+    _fn(name: string, ops: ReadonlyArray<NoInfer<T>>): NoInfer<T>;
+  },
+  name: string,
+  ops: ReadonlyArray<T>
+): T {
+  return (
+    (shadowsLibraryName(ce, name) ? ce._libraryCall(name, ops) : undefined) ??
+    ce._fn(name, ops)
+  );
+}
+
+/**
  * True when `node` is a call of the library operator `name`: a library rule
  * (a canonical fold, a simplification rule, a derivative table, a compiled
  * lowering) is a fact about the library operator, and it applies to the node

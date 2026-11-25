@@ -11,7 +11,7 @@ import type {
   MathJsonSymbol,
 } from '../../math-json/types.js';
 import { isValidSymbol, validateSymbol } from '../../math-json/symbols.js';
-import { hidesLibraryBinding } from '../library-shadowing.js';
+import { hidesLibraryBinding, libraryFn } from '../library-shadowing.js';
 
 import type { Type, TypeString } from '../../common/type/types.js';
 import {
@@ -764,7 +764,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   inv(): Expression {
-    return this.engine._fn('Divide', [this.engine.One, this]);
+    // Bound to the library `Divide`, also in a scope where a user `Divide`
+    // shadows it (`libraryFn()`).
+    return libraryFn(this.engine, 'Divide', [this.engine.One, this]);
   }
 
   abs(): Expression {
@@ -856,7 +858,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // A negative root index denotes a reciprocal; normalize to
     // `1/Root(a, n)` rather than the nonstandard `Root(a, -n)` (#13).
     if (e !== undefined && e < 0 && Number.isInteger(e))
-      return ce._fn('Divide', [ce.One, this.root(-e)]);
+      return libraryFn(ce, 'Divide', [ce.One, this.root(-e)]);
 
     return ce._fn('Root', [this, ce.expr(n)]);
   }

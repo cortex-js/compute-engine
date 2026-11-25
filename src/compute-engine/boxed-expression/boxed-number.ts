@@ -8,6 +8,7 @@ import type {
 } from '../../math-json.js';
 
 import { mul, div } from './arithmetic-mul-div.js';
+import { libraryFn } from '../library-shadowing.js';
 
 import { canonicalInteger, gcd, SMALL_INTEGER } from '../numerics/numeric.js';
 import { primeFactors } from '../numerics/primes.js';
@@ -776,7 +777,7 @@ export class BoxedNumber
     // rather than the nonstandard `Root(a, -n)` (#13). Placed before the
     // numeric computation below, which is defined for positive indices only.
     if (typeof n === 'number' && n < 0 && Number.isInteger(n))
-      return this.engine._fn('Divide', [this.engine.One, this.root(-n)]);
+      return libraryFn(this.engine, 'Divide', [this.engine.One, this.root(-n)]);
 
     if (Number.isInteger(n)) {
       if (typeof this._value === 'number') {
