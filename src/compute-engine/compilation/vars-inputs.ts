@@ -12,7 +12,9 @@ import {
   contextAssumedValues,
   withDeclaredTypeOnly,
   withShieldedValues,
+  withTypedAs,
 } from '../boxed-expression/constraint-subject.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
 import { isSealedImportValue } from '../boxed-expression/prepared-import-binding.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
@@ -47,20 +49,50 @@ export function withTypedInputs<T>(
  * is an input of the compilation in progress: `name` is a name of the
  * `inputs` option, and the type given there is a subtype of the type of `v`,
  * so the body that reads `v`, which was typed with the type of `v`, holds
- * every value the host can give. A Document row bound to a formula
+ * every value the host can give; or the type of `v` is a subtype of the
+ * given type, or both are numeric scalar types (`real<-5..5>` for a row
+ * typed `real<0.01..>`), and the body is typed with the given type for the
+ * time of the compilation (`widenedInputType()`). A given type of another
+ * shape (`list<real>` for a `real` row) is refused: the bodies were
+ * canonicalized with the shape of `v`. A Document row bound to a formula
  * (`k = 2x_w`, typed `real`) read through a function row (`X(x, y) = kx/y`)
- * is such a definition (CE-1706). Its value is then hidden with its type
- * kept (`withShieldedValues()`).
+ * is such a definition (CE-1706), and so is a row typed `real<0.01..>`
+ * (`k = \max(y_w, 0.01)`) given as `real` (CE-1733). Its value is then
+ * hidden (`withShieldedValues()`).
  */
 function isTypedInputValue(name: string, v: BoxedValueDefinition): boolean {
   const given = typedInputs?.get(name);
+  if (
+    given === undefined ||
+    !v.inferredType ||
+    v.isConstant ||
+    v.storedValue?.operator === 'Function'
+  )
+    return false;
+  const own = v.type.type;
   return (
-    given !== undefined &&
-    v.inferredType &&
-    !v.isConstant &&
-    v.storedValue?.operator !== 'Function' &&
-    isSubtype(given, v.type.type)
+    isSubtype(given, own) ||
+    isSubtype(own, given) ||
+    (isSubtype(given, 'number') && isSubtype(own, 'number'))
   );
+}
+
+/**
+ * The type given by the `inputs` option to `v`, a typed input
+ * (`isTypedInputValue()`), when it is not a subtype of the type of `v`, or
+ * `undefined`. The bodies that read `v` were typed with its own type, which
+ * a value of the given type can be outside of (a row `k = \max(y_w, 0.01)`
+ * typed `real<0.01..>`, given as `real`): for the time of the compilation,
+ * `v` is typed with the given type (`withTypedAs()`), as an occurrence of
+ * `name` in the expression is (`withCompileInputs()`).
+ */
+function widenedInputType(
+  name: string,
+  v: BoxedValueDefinition
+): Type | undefined {
+  const given = typedInputs?.get(name);
+  if (given === undefined || isSubtype(given, v.type.type)) return undefined;
+  return given;
 }
 
 /**
@@ -134,13 +166,17 @@ export function withVarsValuesHidden<T>(
   let hidden: [BoxedValueDefinition, Expression][] | undefined;
   let shielded: Set<BoxedValueDefinition> | undefined;
   let typedShield: Set<BoxedValueDefinition> | undefined;
+  let widened: Map<BoxedValueDefinition, BoxedType> | undefined;
   const ce = expr.engine;
   const assumed = contextAssumedValues(ce);
   for (const [v, name] of inputDefinitions(expr, Object.keys(vars))) {
     // A definition with an inferred type that is a typed input: its value is
-    // shielded, so its type, which depends on the value, is kept.
+    // shielded, so its type, which depends on the value, is kept, or
+    // replaced by the wider type that `inputs` gives it.
     if (isTypedInputValue(name, v)) {
       (typedShield ??= new Set()).add(v);
+      const type = widenedInputType(name, v);
+      if (type !== undefined) (widened ??= new Map()).set(v, ce.type(type));
       continue;
     }
     if (v.isConstant || v.inferredType) continue;
@@ -152,13 +188,20 @@ export function withVarsValuesHidden<T>(
   }
   if (typedShield !== undefined) {
     const values = typedShield;
+    const types = widened;
     const inner = fn;
     // An `assumption` state event on entry and on exit moves the cache
-    // generation, as for the shield of an assumed value below.
+    // generation, as for the shield of an assumed value below. A widened
+    // type changes the types of the nodes that read the definition, which
+    // that event does not move: the compilation then runs under a cache
+    // key of its own (`_withValueShieldKey()`).
     fn = () => {
       ce._noteStateEvent({ kind: 'assumption' });
       try {
-        return withShieldedValues(values, inner);
+        if (types === undefined) return withShieldedValues(values, inner);
+        return ce._withValueShieldKey(() =>
+          withTypedAs(types, () => withShieldedValues(values, inner))
+        );
       } finally {
         ce._noteStateEvent({ kind: 'assumption' });
       }
@@ -391,9 +434,11 @@ export function withSymbolicInputs<T>(
  * The sealed value definitions (Document rows, `isSealedImportValue()`)
  * that the names of `inputs` read in `expr`, in the bodies of the functions
  * it calls and in the values it reads, from the current scope: each one
- * whose type holds the type that `inputs` gives its name, as for a typed
- * input (`isTypedInputValue()`). A row with a narrower type is left out: a
- * value of the given type could be outside it.
+ * whose type holds the type that `inputs` gives its name. A row with a
+ * narrower type is left out: a value of the given type could be outside it,
+ * and the interpreter, unlike a compilation (`widenedInputType()`), reads the
+ * row with its own type. The run of the fallback then refuses the write of
+ * the input on that row, and throws.
  */
 export function sealedInputDefinitions(
   expr: Expression,

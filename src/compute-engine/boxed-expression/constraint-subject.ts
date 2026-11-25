@@ -643,6 +643,45 @@ export function isDeclaredTypeOnly(def: BoxedValueDefinition): boolean {
 }
 
 /**
+ * The definitions that take a type other than their own for the time of a
+ * window, each with that type. A compilation sets this for a definition
+ * whose type was inferred from its value and that the `inputs` option gives
+ * a wider type (`withVarsValuesHidden` in `compilation/vars-inputs.ts`): the
+ * compiled code reads a value of the wider type, so the bodies that read the
+ * definition must be typed with it. Module state for the same reason as the
+ * sets above. The caller runs the window under a cache key of its own
+ * (`IComputeEngine._withValueShieldKey`), so a type computed inside it is
+ * not served outside it, and the reverse.
+ */
+let _typedAsDefinitions:
+  | ReadonlyMap<BoxedValueDefinition, BoxedType>
+  | undefined;
+
+/** Run `fn` with each definition of `types` typed with its type there
+ * ({@link typedAs}). Re-entrant: an inner window restores the outer one, and
+ * an entry of the inner window replaces the entry of the outer one. */
+export function withTypedAs<T>(
+  types: ReadonlyMap<BoxedValueDefinition, BoxedType>,
+  fn: () => T
+): T {
+  if (types.size === 0) return fn();
+  const saved = _typedAsDefinitions;
+  _typedAsDefinitions =
+    saved === undefined ? types : new Map([...saved, ...types]);
+  try {
+    return fn();
+  } finally {
+    _typedAsDefinitions = saved;
+  }
+}
+
+/** The type that a window of {@link withTypedAs} gives this definition, or
+ * `undefined`. */
+export function typedAs(def: BoxedValueDefinition): BoxedType | undefined {
+  return _typedAsDefinitions?.get(def);
+}
+
+/**
  * Whether the fact keyed by a list of assertions holds.
  *
  * One key can carry several assertions — an inner scope inherits the

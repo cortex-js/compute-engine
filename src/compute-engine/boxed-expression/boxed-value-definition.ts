@@ -66,6 +66,7 @@ import {
   getFactIndex,
   isDeclaredTypeOnly,
   isValueShielded,
+  typedAs,
   typeFor,
 } from './constraint-subject.js';
 import type { LatexString } from '../latex-syntax/types.js';
@@ -1148,8 +1149,11 @@ export class _BoxedValueDefinition
    * declaration and the stored value only, never from an assumption, so a
    * type derived from it and stored elsewhere stays true when a fact is
    * retracted (`docs/plans/2026-08-29-assumptions-as-facts-type.md` §2.2).
+   * In a window of `withTypedAs()`, it is the type that the window gives.
    */
   get declaredType(): BoxedType {
+    const typed = typedAs(this);
+    if (typed !== undefined) return typed;
     const t = this._type;
     if (this._fixedInitializationType) return t ?? BoxedType.unknown;
     // A static type does not depend on a value: a variable with no type is

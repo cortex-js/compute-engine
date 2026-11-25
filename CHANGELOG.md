@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **A Document row with a range type, given as `real` by the `inputs`
+  compilation option, is an input also when a function row reads it**
+  (CE-1733). With the rows `k = \max(y_w, 0.01)` (type `real<0.01..>`) and
+  `X(x, y) = kx/y`, `compile(X(x, y), { to: "glsl", vars: { k: "u_k", … },
+  inputs: { k: "real" } })` declined with "the name "k" of the `inputs` option
+  has no declared type", while `kx` compiled. It now compiles and reads
+  `u_k`. The body of `X` is typed with the given type for the compilation, as
+  an occurrence of `k` in the expression is, so a value outside the range of
+  the row, such as `k = -4`, gives the value of the formula for that `k`. A
+  given numeric type that overlaps the type of the row (`real<-5..5>`) also
+  compiles. A given type of another shape (`list<real>` for a `real` row)
+  still declines.
+
 - **`Zeta(z, a)` of a complex `z` and a real `a`, and `Digamma(z)` of a complex
   `z`, compile on JavaScript and GLSL** (CE-1732), so a domain coloring of
   `\zeta(z, a)` or of `\operatorname{Digamma}(z)` draws on the GPU. Both
