@@ -1766,6 +1766,15 @@ function lowerOnce(
     return region('build', [length], [k], () => [point(k)], node)[0];
   };
 
+  /** Whether `e` is the whole program: the root, or the body of a root
+   *  function literal, inside a `Block` of one expression or not. */
+  const wholeProgram = (e: Expression): boolean => {
+    let r =
+      isFunction(root, 'Function') && isLibrary(root) ? root.ops[0] : root;
+    while (isFunction(r, 'Block') && r.nops === 1) r = r.ops[0];
+    return r === e;
+  };
+
   /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
   const at = (e: Expression, l: V, i: V): V => {
     const t = type(l);
@@ -1779,9 +1788,13 @@ function lowerOnce(
     // points `atp` a point of NaN, the absent values of
     // `docs/COMPILATION-MODEL.md`; the other kinds decline (a read of an
     // absent row must not fail, and no program of Tycho's corpus reads
-    // one), as do GLSL, the interval mode and the bigint mode. The `fold`
-    // pass makes a constant index in range an element (of colours,
-    // `admits()` declines the rest).
+    // one), as do GLSL, the interval mode and the bigint mode. The one
+    // exception is a row of a list of lists of numbers of stated lengths
+    // where the `At` is the whole program (CE-1540): `atrow` gives
+    // `undefined` there, and no operation reads it, so that none can fold
+    // it away (`Length` of the row is a constant, a discharge reads a list
+    // as present). The `fold` pass makes a constant index in range an
+    // element (of colours, `admits()` declines the rest).
     if (
       (t.lane === 'boolean' || t.lane === 'complex' || t.shape.length > 1) &&
       !(
@@ -1794,6 +1807,16 @@ function lowerOnce(
     ) {
       const reals = points && isSubLane(t.lane, 'real');
       const booleans = flat && t.lane === 'boolean';
+      if (
+        options.javascript &&
+        !bigint &&
+        !tuples.has(l) &&
+        isSubLane(t.lane, 'real') &&
+        t.shape.length > 1 &&
+        t.shape.slice(1).every((m) => typeof m === 'number') &&
+        wholeProgram(e)
+      )
+        return apply(e, ofOp('atrow'), [l, i]);
       if (!options.javascript || bigint || !(reals || booleans))
         decline(
           e,

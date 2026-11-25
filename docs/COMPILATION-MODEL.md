@@ -67,7 +67,13 @@ when it compiles. A difference that this list does not name is a defect.
   value as present. The one exception is the row `g[i]` of a
   `list<list<integer>>` or `list<list<real>>` input at an index known at run
   time, whose `Length` is `NaN` out of range, the absent value that the
-  discharges test (see "Lists of two run-time lengths"). A colour read out
+  discharges test (see "Lists of two run-time lengths"). A row of a list of
+  lists of numbers of stated lengths (`P: list<list<real^2>>`) at an index
+  that can be out of range compiles on `javascript` only when the `At` is
+  the whole program (`At(P, i)`, `First(P)`, `Last(P)`, or the body of a
+  root function literal):
+  it is `undefined` out of range, and every other read of it declines
+  (`IsMissing(P[i])`, `Length(P[i])`, `P[i] + P[j]`, `(P[i], 1)`). A colour read out
   of range refuses after the passes, so `IsMissing` of a colour declines,
   while `Coalesce` and `AssertPresent` keep the colour as their value. A
   string read out of range (`At` of a list of strings) is `undefined` on

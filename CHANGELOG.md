@@ -2,6 +2,16 @@
 
 ### Improvements
 
+- **A row of a list of fixed-length rows compiles on JavaScript as the
+  result** (CE-1540). With `P: list<list<real^2>>`, `compile(P[i])` declined
+  with "an index that can be out of range … of lists". It now gives the row,
+  `[1, 2]` for `P = [[1, 2], [3, 4]]` and `i = 1`, and `undefined` where the
+  index is out of range (the interpreter gives `Missing`). The same holds for
+  the body of a function literal, `(Q: list<list<real^2>>, k: integer) ↦ Q[k]`,
+  and for `First(P)` and `Last(P)`. Any other use of the row (`P[i] + P[j]`,
+  `Length(P[i])`, `IsMissing(P[i])`) still declines, as do GLSL, the interval
+  mode and the bigint mode.
+
 - **A dictionary literal compiles on JavaScript** (CE-1771). A function
   whose body holds `{w -> t, fill -> "red"}` declined with "not a number, a
   symbol or a function", so a Tycho animation that styles a figure with an

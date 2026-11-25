@@ -1530,9 +1530,15 @@ range. On JavaScript, of a list of booleans it is `atu`, `undefined` out of
 range where the interpreter gives `Missing` (`At(X > 0, 5)` of a list `X` of
 three numbers), a pure read: no operation on a boolean fails on `undefined`; of
 a list of real points it is `atp`, a point of NaN coordinates out of range, the
-interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of complex numbers
-or another list of lists it declines: a read of an absent row must not fail, and
-no program of Tycho's corpus reads one. GLSL, the interval and the bigint modes
+interpreter's value (`At(P, 0)` is `[NaN, NaN]`). Of a list of lists of numbers
+of stated lengths (`P: list<list<real^2>>`) it is `atrow`, the row, or
+`undefined` out of range where the interpreter gives `Missing`, only where the
+`At` (or a `First`, a `Last`) is the whole program (the root, or the body of a root function literal,
+in a `Block` of one expression or not; CE-1540): no operation reads the row,
+so none folds it away (`Length` of the row is a constant, a discharge reads a
+list as present). Of a list of complex numbers or another read of a list of
+lists it declines: a read of an absent row must not fail, and no program of
+Tycho's corpus reads one. GLSL, the interval and the bigint modes
 decline every such index. `build` and `filter` are region rows. A `Length`, a
 reduction, a `Map` or a `Filter` of a `Range` reads its count and the arithmetic
 of its elements, so `Length(Range(1, n))` makes no list. On GLSL, which has no

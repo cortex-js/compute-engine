@@ -266,6 +266,7 @@ export const JS: Syntax = deepFreeze({
     'at': { text: '_at($0, $1)', helpers: ['_at'] },
     'atu': { text: '_atu($0, $1)', helpers: ['_atu'] },
     'atp': { text: '_atp($0, $1, $2)', helpers: ['_atp'] },
+    'atrow': { text: '_atu($0, $1)', helpers: ['_atu'] },
     // A list local written in place (`operators.ts`).
     'copy': '$0.slice()',
     'wix': { text: '_wix($0, $1)', helpers: ['_wix'] },
