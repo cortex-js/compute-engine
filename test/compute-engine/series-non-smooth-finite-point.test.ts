@@ -240,3 +240,77 @@ describe('SERIES OF A LOGARITHM AT A ZERO OR A POLE OF ITS ARGUMENT', () => {
       expect(gap(f, point, -0.01)).toBeLessThan(1e-6);
     });
 });
+
+//
+// An argument of a logarithm that is a negative real number at the point and
+// is not real for every real x crosses the cut of ln there, or is below it:
+// ln has a jump of 2πi, and ln(−1) = iπ is the value above the cut only. At
+// +∞ the expansion holds for large x only, where −1 − i/x is below the cut.
+//
+
+describe('SERIES OF A LOGARITHM WHOSE ARGUMENT CROSSES THE CUT', () => {
+  const ix = ['Multiply', 'ImaginaryUnit', 'x'];
+  const iOverX = ['Divide', 'ImaginaryUnit', 'x'];
+  const inf = 'PositiveInfinity';
+  const quarter = ['Rational', 1, 4];
+
+  const declined: [string, unknown, unknown][] = [
+    // iπ + i·x + … for x < 0, −iπ + i·x + … for x > 0.
+    ['ln(−1 − i·x) at 0', ['Ln', ['Subtract', -1, ix]], 0],
+    ['ln(−1 + i·x) at 0', ['Ln', ['Add', -1, ix]], 0],
+    ['log₁₀(−1 − i·x) at 0', ['Log', ['Subtract', -1, ix]], 0],
+    ['ln(−1 − i·x)/x at 0', ['Divide', ['Ln', ['Subtract', -1, ix]], 'x'], 0],
+    [
+      'ln((x − 1)·e^{i·x}) at 0',
+      ['Ln', ['Multiply', ['Subtract', 'x', 1], ['Exp', ix]]],
+      0,
+    ],
+    // ln(x) − iπ + i/x + … for large x: the leading coefficient is −1.
+    [
+      'ln(−x − i) at +∞',
+      ['Ln', ['Subtract', ['Negate', 'x'], 'ImaginaryUnit']],
+      inf,
+    ],
+    // −iπ + i/x + … for large x: the Taylor engine at s = 1/x = 0.
+    ['ln(−1 − i/x) at +∞', ['Ln', ['Subtract', -1, iOverX]], inf],
+    // e^{i·x} is −1 plus a rounding error at a floating-point π.
+    ['ln(e^{i·x}) at 3.14159…', ['Ln', ['Exp', ix]], Math.PI],
+    // Sound but not precise: these expansions hold. −1 + i/x is above the
+    // cut for large x; √x − 1 and ln x are real near the point only.
+    ['ln(−1 + i/x) at +∞', ['Ln', ['Add', -1, iOverX]], inf],
+    ['ln(√x − 1) at 1/4', ['Ln', ['Subtract', ['Sqrt', 'x'], 1]], quarter],
+    ['ln(ln x) at 1/2', ['Ln', ['Ln', 'x']], half],
+  ];
+  for (const [name, f, point] of declined)
+    test(`${name} stays Series`, () =>
+      expect(series(f, point).operator).toBe('Series'));
+
+  /** `|f − Normal(Series(f))|` at `x`. */
+  const gap = (f: unknown, point: unknown, x: number): number => {
+    const s = series(f, point);
+    expect(s.operator).not.toBe('Series');
+    const normal = ce.expr(['Normal', s.json] as never).evaluate();
+    const d = ce
+      .expr(['Subtract', f, normal.json] as never)
+      .subs({ x })
+      .N();
+    return Math.hypot(d.re, d.im);
+  };
+
+  // The argument stays on the cut (real), or is not near it.
+  const held: [string, unknown, unknown, number[]][] = [
+    ['ln(x − 1) at 0', ['Ln', ['Subtract', 'x', 1]], 0, [-0.01, 0.01]],
+    ['ln(1 + i·x) at 0', ['Ln', ['Add', 1, ix]], 0, [-0.01, 0.01]],
+    [
+      'ln(−x − 1) at +∞',
+      ['Ln', ['Subtract', ['Negate', 'x'], 1]],
+      inf,
+      [50, 200],
+    ],
+    ['ln(x + i) at +∞', ['Ln', ['Add', 'x', 'ImaginaryUnit']], inf, [50, 200]],
+  ];
+  for (const [name, f, point, xs] of held)
+    test(`${name} holds`, () => {
+      for (const x of xs) expect(gap(f, point, x)).toBeLessThan(1e-6);
+    });
+});

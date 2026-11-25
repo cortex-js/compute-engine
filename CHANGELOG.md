@@ -66,6 +66,19 @@
 
 ### Resolved Issues
 
+- **A `Series` of a logarithm whose argument crosses the negative real axis at
+  the point no longer gives a series that is off by `2πi` on one side**
+  (CE-1617). `Series(Ln(-1 - i*x), x, 0, 3)` was `ln(-1) + i*x + x^2/2 + …`,
+  which is wrong by `2πi` for `x > 0`, where `-1 - i*x` is below the cut.
+  `Series(Ln(-x - i), x, +oo, 3)` and `Series(Ln(-1 - i/x), x, +oo, 3)` were
+  wrong by `2πi` for every large `x`. Each one now stays `Series(...)`, and so
+  does `Log` of such an argument. A logarithm whose argument is real for every
+  real `x` is unchanged: `Series(Ln(x - 1), x, 0, 3)` is
+  `ln(-1) - x - x^2/2 - x^3/3 + O(x^4)`. Some series that hold also stay
+  `Series(...)` now: `Ln(-1 + i/x)` at `+∞`, and an argument that is real
+  only near the point, such as `Ln(Sqrt(x) - 1)` at `1/4` and `Ln(Ln(x))` at
+  `1/2`.
+
 - **At a high precision, the harmonic number of a complex number shows only
   the digits that are correct** (CE-1585). With `ce.precision = 50`,
   `HarmonicNumber(1+i)` evaluates to `1.1718659855240086 + 0.5766740474685813i`,

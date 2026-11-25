@@ -1879,7 +1879,11 @@ function isRealOnRealAxis(e: Expression, x: string): boolean {
  * would exceed `MAX_SERIES_ORDER`. Because the Taylor engines already handle
  * regular points, this only fires at a genuine zero or pole of `g`. A `Series`
  * at a finite point defers when the identity holds for `t > 0` only
- * (`lnHoldsBelow()`).
+ * (`lnHoldsBelow()`). Every expansion defers when `c₀` is negative, or near
+ * the negative real axis (`isNearNegativeReal()`), and `g` is not real for
+ * every real `x` (`isRealOnRealAxis()`): `g` can then be below
+ * the cut of `ln` for `t > 0`, where the constant term of `ln(g)` is
+ * `ln|c₀| − iπ`, not `ln(c₀) = ln|c₀| + iπ`.
  *
  * With `forGammaLn`, `arg` is `Γ(u)` and the expansion is the one of
  * `GammaLn(u)`. `GammaLn(u)` is `ln|Γ(u)|` for a real `u`, which is
@@ -1916,6 +1920,10 @@ function lnLaurent(
   const c0 = coeffAt(ce, inner, m);
   if (c0.has(x)) return null; // log-carrying leading coeff (e.g. ln(ln x))
   if (forGammaLn && c0.isPositive !== true) return null;
+  // With `c₀ < 0`, `c₀·t^m` is on the cut of `ln` for `t > 0`, and a term of
+  // `h` that is not real puts `1 + h` on one side of it: `−x − i` at +∞ is
+  // below the cut, where `ln` is `ln(x) − iπ + …`, not `ln(x) + iπ + …`.
+  if (!isRealOnRealAxis(arg, x) && isNearNegativeReal(c0)) return null;
   if (bothSides && !lnHoldsBelow(arg, x, inner, m, c0)) return null;
   const d = inner.d;
   if (W * d > MAX_SERIES_ORDER) return null; // window too large — defer
@@ -2580,6 +2588,7 @@ function computeSeriesInCall(
   if (holdsHypergeometricOnCut(f, x, x0)) return undefined;
   // The expansion is a series in `x − x0` on both sides of the point.
   if (!isSmoothAt(f, x, x0)) return undefined;
+  if (lnCrossesCutAt(f, x, x0)) return undefined;
   bothSides = true;
 
   const xExpr = ce.symbol(x);
@@ -2620,6 +2629,45 @@ function holdsBranch(e: Expression): boolean {
   if (['Sqrt', 'Root', 'Ln', 'Log'].includes(e.operator)) return true;
   if (e.operator === 'Power' && asSmallInteger(e.op2) === null) return true;
   return e.ops.some(holdsBranch);
+}
+
+/**
+ * Whether a logarithm in `f` has, at `x = x0`, an argument that is a negative
+ * real number and that is not real for every real `x` (`isRealOnRealAxis()`).
+ * Such an argument can cross the negative real axis, the cut of `ln`, at the
+ * point, where `ln` has a jump of `2πi`, so no series holds on both sides:
+ * `ln(−1 − i·x)` at 0 is `iπ + i·x + …` for `x < 0` and `−iπ + i·x + …` for
+ * `x > 0`. The Taylor engines would give `ln(−1) + i·x + …` on both sides.
+ * At ±∞, `f` is the function of `s` at `s = 0`, and the expansion holds for
+ * `s > 0` only, which is below the cut for `ln(−1 − i·s)`. The argument of
+ * `ln(x − 1)` stays on the cut, where the imaginary part of `ln` is `π`.
+ *
+ * The test is simple and sound, and it declines some expansions that hold:
+ * `ln(−1 + i·s)`, which is above the cut for `s > 0`, and an argument that is
+ * real near the point only, such as `ln(√x − 1)` at 1/4 and `ln(ln x)` at 1/2
+ * (`isRealOnRealAxis()` is false for a root or a logarithm of `x`).
+ */
+function lnCrossesCutAt(f: Expression, x: string, x0: Expression): boolean {
+  if (!isFunction(f) || !f.has(x)) return false;
+  if (f.operator === 'Ln' || f.operator === 'Log') {
+    for (const arg of f.ops) {
+      if (!arg.has(x) || isRealOnRealAxis(arg, x)) continue;
+      if (isNearNegativeReal(arg.subs({ [x]: x0 }).evaluate())) return true;
+    }
+  }
+  return f.ops.some((op) => lnCrossesCutAt(op, x, x0));
+}
+
+/** Whether the constant `u` is a negative real number, or a number whose
+ * distance to the negative real axis is below `SMOOTH_POINT_TOLERANCE`
+ * (relative to its real part above 1): at a floating-point point (`3.14159…`
+ * for `π`), `e^{i·x}` is `−1` plus a rounding error in its imaginary part. */
+function isNearNegativeReal(u: Expression): boolean {
+  if (u.isNegative === true) return true;
+  if (u.isNonNegative === true) return false;
+  const n = u.N();
+  if (!isNumber(n) || !Number.isFinite(n.re) || n.re >= 0) return false;
+  return Math.abs(n.im) <= SMOOTH_POINT_TOLERANCE * Math.max(1, -n.re);
 }
 
 /** Operators that are analytic off the real axis, where they are defined. */
@@ -2920,6 +2968,7 @@ function seriesAtInfinity(
     .simplify();
   // The simplification can write `√(s²)` as `|s|`.
   if (holdsNonSmooth(g, s)) return undefined;
+  if (lnCrossesCutAt(g, s, ce.Zero)) return undefined;
 
   // Coefficients are evaluated at s = 0. When direct substitution is
   // non-finite, the coefficient is a one-sided limit: c_0 is lim_{x→±∞} f, and
