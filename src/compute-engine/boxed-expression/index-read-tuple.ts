@@ -10,6 +10,28 @@ import {
 } from '../../common/type/utils.js';
 
 /**
+ * True when `t` is `dictionary<any> | indexed_collection<any>`: the type that
+ * the validation of `At` writes on an undeclared base before a read gives an
+ * element type (`c[5] > 0` alone). Its `any` means "no element type yet"
+ * (`parameterIndexReadType()` in `library/collections.ts`), so it holds no
+ * evidence beyond "a collection read by a key or an index".
+ */
+export function isUnreadIndexShape(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r !== 'object' || r.kind !== 'union' || r.types.length !== 2)
+    return false;
+  let dictionary = false;
+  let indexed = false;
+  for (const m of r.types) {
+    if (typeof m !== 'object') return false;
+    if (m.kind === 'dictionary' && m.values === 'any') dictionary = true;
+    else if (m.kind === 'indexed_collection' && m.elements === 'any')
+      indexed = true;
+  }
+  return dictionary && indexed;
+}
+
+/**
  * The tuple types that only the index reads of a bare function parameter
  * made.
  *
@@ -135,8 +157,9 @@ function unionOfResults(types: Type[], marked: ReadonlyArray<Type>): Type {
 
 /**
  * The type that a parameter whose current type `current` is an index-read
- * tuple takes at a call that requires the LONGER tuple `param`, or
- * `undefined` when the rule does not apply.
+ * tuple takes at a call that requires the LONGER tuple `param`, or at a call
+ * whose slot is an index-read tuple of any length, or `undefined` when the
+ * rule does not apply.
  *
  * Index reads do not prove the length of the argument, so a call such as
  * `g(p)` with `g: (tuple<number, number>) -> number` after the single read
@@ -150,7 +173,13 @@ function unionOfResults(types: Type[], marked: ReadonlyArray<Type>): Type {
  * the result keeps the index-read mark. Without the extension, the type
  * depended on the order of the uses: `c ↦ {c[1] > 0; touches(c, p)}` typed
  * `c` as `tuple<number>`, and `c ↦ {touches(c, p); c[1] > 0}` as the
- * three-element tuple of the slot (CE-1489). A `current` that is a union
+ * three-element tuple of the slot (CE-1489). Such a slot is merged at any
+ * length: the result is as long as the longer tuple, and each component is
+ * the meet of the two components at its position. With `other(q)` reading
+ * `q[1]` and `q[5]`, `touches(c, p) && other(c) > 0` and
+ * `other(c) > 0 && touches(c, p)` both type `c` as
+ * `tuple<number, number, number, unknown, number>`; before, a shorter slot
+ * after a longer tuple added nothing (CE-1493). A `current` that is a union
  * with other members (a list) is not extended by such a slot.
  *
  * When `current` is the union a union collection slot stored
@@ -163,10 +192,11 @@ function unionOfResults(types: Type[], marked: ReadonlyArray<Type>): Type {
  * list alternative.
  *
  * The rule does not apply when `current` holds no index-read tuple, when
- * `param` is not a tuple or is not longer than every index-read tuple of
- * `current` (the ordinary narrowing handles a tuple of the same length), or
- * when a component of the reads has no common value with the component of
- * `param` (the call is then an error, as for any other conflict).
+ * `param` is not a tuple, when `param` is a contract that is not longer than
+ * every index-read tuple of `current` (the ordinary narrowing handles a
+ * tuple of the same length), or when a component of the reads has no common
+ * value with the component of `param` (the call is then an error, as for any
+ * other conflict).
  */
 export function indexReadTupleExtension(
   current: Type,
@@ -183,7 +213,7 @@ export function indexReadTupleExtension(
   if (fromReads && members.others.length > 0) return undefined;
   const results: Type[] = [];
   for (const tuple of members.marked) {
-    const extended = extendIndexReadTuple(tuple, p);
+    const extended = extendIndexReadTuple(tuple, p, fromReads);
     if (extended !== undefined)
       results.push(fromReads ? markIndexReadTuple(extended) : extended);
   }
@@ -194,18 +224,30 @@ export function indexReadTupleExtension(
   return unionOfResults(results, extensions);
 }
 
-/** The extension of the one index-read tuple `current` to the longer tuple
- * `p` (see `indexReadTupleExtension`), or `undefined`. */
+/** The extension of the one index-read tuple `current` to the tuple `p` (see
+ * `indexReadTupleExtension`), or `undefined`. A tuple `p` that is a contract
+ * extends `current` only when it is longer. A tuple `p` that index reads made
+ * (`fromReads`) is merged at any length: the result is as long as the longer
+ * of the two, and each component is the meet of the components that the two
+ * give at its position (an `unknown` component takes the other one). */
 function extendIndexReadTuple(
   current: TupleType,
-  p: TupleType
+  p: TupleType,
+  fromReads: boolean
 ): Type | undefined {
-  if (p.elements.length <= current.elements.length) return undefined;
+  const n = Math.max(p.elements.length, current.elements.length);
+  if (!fromReads && p.elements.length <= current.elements.length)
+    return undefined;
   const elements: NamedElement[] = [];
-  for (const [i, e] of p.elements.entries()) {
+  for (let i = 0; i < n; i++) {
+    const e = p.elements[i] ?? current.elements[i];
     const read = current.elements[i]?.type;
     const type =
-      read === undefined || read === 'unknown' ? e.type : narrow(read, e.type);
+      read === undefined || read === 'unknown'
+        ? e.type
+        : e.type === 'unknown'
+          ? read
+          : narrow(read, e.type);
     if (type === 'never') return undefined;
     elements.push({ ...e, type });
   }

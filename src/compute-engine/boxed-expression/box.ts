@@ -204,6 +204,7 @@ import { namedLiteralSignatureType } from './effects-inference.js';
 import {
   indexReadTupleExtension,
   isIndexReadTuple,
+  isUnreadIndexShape,
 } from './index-read-tuple.js';
 import {
   isProvisionalCaptureOpen,
@@ -4803,25 +4804,36 @@ function narrowArgsFromInferredSignature(
       if (!isSymbol(arg)) continue;
       if (!hasInferredType(arg)) continue;
       const paramType = sigArgs[i].type;
-      if (arg.type.type !== 'unknown') {
-        // A parameter typed by its index reads at a slot that requires a
-        // longer tuple (`c[1] > 0` then `touches(c, p)`, whose body reads
-        // `p[1]` to `p[3]`) takes that tuple, as at a call that is validated
-        // (`indexReadTupleExtension()`). Without it, the parameter kept the
-        // shorter tuple when the read came first, and the longer one when
-        // the call came first (CE-1489).
+      const current = arg.type.type;
+      if (current !== 'unknown') {
+        // A parameter typed by its index reads at a slot that index reads
+        // typed too, or at a slot that requires a longer tuple (`c[1] > 0`
+        // then `touches(c, p)`, whose body reads `p[1]` to `p[3]`), takes
+        // the tuple that holds both, as at a call that is validated
+        // (`indexReadTupleExtension()`). Without it, the type depended on
+        // the order of the uses (CE-1489, CE-1493).
         const extended =
           resolvedValueDefinition(arg)?.value === undefined
-            ? indexReadTupleExtension(arg.type.type, paramType)
+            ? indexReadTupleExtension(current, paramType)
             : undefined;
-        if (extended !== undefined) arg._infer(() => extended, 'replace');
-        continue;
+        if (extended !== undefined) {
+          arg._infer(() => extended, 'replace');
+          continue;
+        }
+        // A read that gives no element type (`c[5] > 0`) leaves the shape
+        // that holds no evidence (`isUnreadIndexShape()`). The slot narrows
+        // it as it narrows `unknown`, so `c[5] > 0 && touches(c, p)` types
+        // `c` as `touches(c, p) && c[5] > 0` does (CE-1493). Such a read
+        // records no index in either order, so the tuple of the slot is
+        // not lengthened; its index-read mark proves no length.
+        if (!isUnreadIndexShape(current)) continue;
       }
       if (!isCollectionOnlyType(paramType)) continue;
       const argType =
         !isBare(i) || arg.engine._isShadowedParameter(arg.symbol)
           ? paramType
           : oneElementTypeOf(paramType);
+      if (current !== 'unknown' && !isSubtype(argType, current)) continue;
       arg._infer(() => argType, 'narrow');
     }
   });

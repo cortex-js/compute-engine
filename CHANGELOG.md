@@ -88,6 +88,19 @@
 
 ### Resolved Issues
 
+- **The type of a parameter read by index does not depend on the order of its
+  uses** (CE-1493). With `function other(q) { q[1] + q[5] }` and a function
+  `touches(p, q)` that reads `p[1]` to `p[3]`, the body
+  `other(c) > 0 && touches(c, p)` typed `c` as
+  `tuple<number, unknown, unknown, unknown, number>`, and
+  `touches(c, p) && other(c) > 0` as
+  `tuple<number, number, number, unknown, number>`. Both orders now give the
+  second type. In the same way, `c[5] > 0 && touches(c, p)` typed `c` as
+  `dictionary<any> | indexed_collection<any>`; it is now
+  `tuple<number, number, number>`, as with the call first. As for every type
+  that index reads give, the length is not a contract: the interpreter
+  accepts a longer tuple.
+
 - **A grid variable updated from its own cells holds the next grid**
   (CE-1746). After `g = map(i => map(j => 1 - g[i][j], Range(1, n)),
   Range(1, n))`, the rows of `g` were lazy `Map`s that read `g`, so they read
