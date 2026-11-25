@@ -162,6 +162,50 @@ describe('an error in an element of a written list or tuple', () => {
     ['let v: any = 0\nv = [y + 1, g("a")]', 'g("a")'],
     // The element reads an error made by an earlier statement.
     ['let x = g("a")\nlet v = [y + 1, x]', 'x'],
+    // The element that holds the error is not known, and another element
+    // calls a function: the frames of its body select no element.
+    [
+      'let u = [1, 2]\nlet v = [y + 1, g("a")] + u',
+      'let v = [y + 1, g("a")] + u',
+    ],
+    ['let v = [y + 1, g("a")] + [1, 2]', 'let v = [y + 1, g("a")] + [1, 2]'],
+    ['let v = [y + 1, g("a")]^2', 'let v = [y + 1, g("a")]^2'],
+    ['let v = Sqrt([y + 1, g("a")])', 'let v = Sqrt([y + 1, g("a")])'],
+    [
+      'let m = [[1, 2], [3, 4]]\nm[1][2] = [y + 1, g("a")]',
+      'm[1][2] = [y + 1, g("a")]',
+    ],
+    [
+      'function k() { Sequence(1, 2) }\nlet v = [k(), y + 1, g("a")]',
+      'let v = [k(), y + 1, g("a")]',
+    ],
+    [
+      'function h(a) { a }\nlet v = h([y + 1, g("a")])',
+      'let v = h([y + 1, g("a")])',
+    ],
+    [
+      'let u = [1, 2]\nlet v = [[y + 1], [g("a")]] + u',
+      'let v = [[y + 1], [g("a")]] + u',
+    ],
+    ['let u = [1, 2]\nlet v = [[y + 1, g("a")] + u, 3]', '[y + 1, g("a")] + u'],
+    [
+      'let u = [1, 2]\nlet x = g("a")\nlet v = [y + 1, x] + u',
+      'let v = [y + 1, x] + u',
+    ],
+    // The frames select the element that calls the function, or no other
+    // element calls a function.
+    ['let u = [1, 2]\nlet v = [y + 1, Sqrt(g("a"))] + u', 'g("a")'],
+    ['let u = [1, 2]\nlet w: any = "s"\nlet v = [1, y + Ln(w)] + u', 'w'],
+    ['let w: any = "s"\nlet v = Ln(w) + Length([g(1), 2])', 'w'],
+    // A set literal records no frame for its elements either.
+    ['let v = {y + 1, g("a")}', 'let v = {y + 1, g("a")}'],
+    ['let v = [{y + 1, g("a")}, 2]', '{y + 1, g("a")}'],
+    // The argument of the parameter of a function literal can be an error
+    // made in a function body.
+    [
+      'let v = Map((x) => [Ln(y) + 1, x]^2, [g("a")])',
+      'let v = Map((x) => [Ln(y) + 1, x]^2, [g("a")])',
+    ],
   ])('%s underlines %s', (stmt, expected) => {
     expect(underlines(`${fn}${stmt}\n0`)).toEqual([expected]);
   });

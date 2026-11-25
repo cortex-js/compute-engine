@@ -1414,6 +1414,11 @@ export function errorFrameChain(
  * the element-wise calls around the element recorded
  * (`HeldElement.elementwise`) are not used there: they name calls outside the
  * element.
+ *
+ * A range in one element of a list or a tuple literal is not used when
+ * another element can hold an error made outside the statement
+ * ({@link isAcrossElements}): the range of the statement, or of `element`,
+ * is the range then.
  */
 function narrowErrorRange(
   ce: ComputeEngine,
@@ -1424,6 +1429,7 @@ function narrowErrorRange(
   held?: HeldElement
 ): { range: [number, number]; frames: (ErrorFrameRef | null)[] } {
   let frames = traceFrames(error);
+  const read = elementReader(ce, stmt, boxedStmt);
   const elementRange =
     held === undefined ? undefined : sourceOffsetsOf(held.element);
   if (held !== undefined && elementRange !== undefined) {
@@ -1440,7 +1446,7 @@ function narrowErrorRange(
   // permutation) lands on the argument as WRITTEN — see `argumentAtSlot`
   // (error-location.ts). The seam's own normalization failures were never
   // permuted; their index counts written positions and is used directly.
-  return locateError(
+  const located = locateError(
     frames,
     stmt,
     fallback,
@@ -1449,6 +1455,12 @@ function narrowErrorRange(
     canonicalOrderOf(ce, boxedStmt),
     offendingValue(error)
   );
+  if (
+    located.range !== fallback &&
+    isAcrossElements(ce, stmt, located.range, read)
+  )
+    return { range: fallback, frames: located.frames };
+  return located;
 }
 
 /**
@@ -1495,16 +1507,7 @@ function heldElement(
   boxedStmt: Expression | undefined
 ): HeldElement | undefined {
   const holds = (op: Expression) => op === error || op.errors.includes(error);
-  // The value of a variable is read after the statement ran. The name that
-  // the statement assigns had another value while it ran: in
-  // `fs = [...fs, g("a")]`, the spread read the `fs` before the assignment.
-  const head = operator(stmt);
-  const assigned =
-    head === 'Assign' || head === 'Declare' ? symbol(operand(stmt, 1)) : null;
-  const read: ElementReader = {
-    value: (name) => (name === assigned ? undefined : ce._getSymbolValue(name)),
-    type: canonicalTypes(boxedStmt),
-  };
+  const read = elementReader(ce, stmt, boxedStmt);
   let written: MathJsonExpression | undefined = writtenStatementValue(stmt);
   let node = value;
   let result: HeldElement | undefined;
@@ -1583,6 +1586,109 @@ type ElementReader = {
   value: (name: string) => Expression | undefined;
   type: (x: MathJsonExpression) => Expression['type'] | undefined;
 };
+
+/**
+ * The {@link ElementReader} of the statement `stmt` (raw MathJSON), whose
+ * canonical form is `boxedStmt`.
+ *
+ * The value of a variable is read after the statement ran. The name that
+ * the statement assigns had another value while it ran: in
+ * `fs = [...fs, g("a")]`, the spread read the `fs` before the assignment, so
+ * the value of that name is not known.
+ */
+function elementReader(
+  ce: ComputeEngine,
+  stmt: MathJsonExpression,
+  boxedStmt: Expression | undefined
+): ElementReader {
+  const head = operator(stmt);
+  const assigned =
+    head === 'Assign' || head === 'Declare' ? symbol(operand(stmt, 1)) : null;
+  return {
+    value: (name) => (name === assigned ? undefined : ce._getSymbolValue(name)),
+    type: canonicalTypes(boxedStmt),
+  };
+}
+
+/**
+ * Whether the range `range`, which the frames of an error selected in
+ * `region` (raw MathJSON), is inside an element of a written list, tuple or
+ * set literal of `region` whose other elements include one that can hold an
+ * error with frames recorded outside the statement
+ * ({@link hasOuterFrames}).
+ *
+ * Such a literal records no frame for its elements. When the error came
+ * from the body of a called function, its first frames were recorded there,
+ * and they can match a call of another element: with
+ * `function g(x) { Ln(x) + 1 }`, the frame `Add argument 1` of the error of
+ * `[y + 1, g("a")] + u` selects the `y` of `y + 1`. {@link heldElement}
+ * finds the element that holds the error only in some forms; in the other
+ * forms, the selected range can be in the wrong element, and the range of
+ * the whole region is used. This also drops a correct range when the error
+ * was made in the element that the frames select, as in
+ * `[g(1), y + Ln(w)] + u`, and in `Map((x) => [x, Ln(w)] + u, [1])`: the
+ * parameter `x` has no value after the statement, and its argument can be
+ * an error made in a function body (`Map((x) => [Ln(y) + 1, x]^2, [g("a")])`).
+ */
+function isAcrossElements(
+  ce: ComputeEngine,
+  region: MathJsonExpression,
+  range: [number, number],
+  read: ElementReader
+): boolean {
+  const pending: MathJsonExpression[] = [region];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    const head = operator(node);
+    const ops = operands(node);
+    if (head === 'List' || head === 'Tuple' || head === 'Set') {
+      const at = ops.findIndex((op) => {
+        const o = sourceOffsetsOf(op);
+        return o !== undefined && o[0] <= range[0] && range[1] <= o[1];
+      });
+      if (
+        at >= 0 &&
+        ops.some((op, j) => j !== at && hasOuterFrames(ce, op, read))
+      )
+        return true;
+    }
+    pending.push(...ops);
+  }
+  return false;
+}
+
+/**
+ * Whether the written expression `x` (raw MathJSON) can hold an error whose
+ * frames were recorded outside the statement: in the body of a called
+ * function, or in the earlier statement that assigned a variable. It holds
+ * a call of a function that is not a library function (a function of the
+ * program or a function value), or a variable whose value holds an error,
+ * is a function, or is not known ({@link ElementReader.value}).
+ */
+function hasOuterFrames(
+  ce: ComputeEngine,
+  x: MathJsonExpression,
+  read: ElementReader
+): boolean {
+  const pending: MathJsonExpression[] = [x];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    const head = operator(node);
+    if (head === '') {
+      const name = symbol(node);
+      if (name === null) continue;
+      const value = read.value(name);
+      if (value === undefined) {
+        if (!ce._isLibraryFunction(name)) return true;
+      } else if (value.type.matches('function') || value.errors.length > 0)
+        return true;
+      continue;
+    }
+    if (!ce._isLibraryFunction(head)) return true;
+    pending.push(...operands(node));
+  }
+  return false;
+}
 
 /**
  * The static type of each call of the canonical statement `boxedStmt`, by

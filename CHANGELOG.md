@@ -74,6 +74,15 @@
   normal double, the product is computed exactly and rounded once. Other
   products are unchanged.
 
+- **In Epsil, an error in a function that an element of a list calls no
+  longer underlines another element** (CE-1752). With
+  `function g(x) { Ln(x) + 1 }` and `let y = 5`, each of
+  `let v = [y + 1, g("a")] + u`, `let v = Sqrt([y + 1, g("a")])`,
+  `m[1][2] = [y + 1, g("a")]` and `let v = [k(), y + 1, g("a")]` underlined
+  `y`. When the element that holds the error is not known and another element
+  of the list, tuple or set calls a function or reads a variable that holds
+  an error, the whole statement is now underlined.
+
 - **A `Filter` over a `Map` that calls a function with no definition no longer
   throws "Not canonical"** (CE-1753). With `g` not declared,
   `Length(Filter(Map(k ↦ g(k), 1..3), k ↦ k < 2.5))` threw "Not canonical",
