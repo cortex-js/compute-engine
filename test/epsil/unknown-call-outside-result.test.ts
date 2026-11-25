@@ -80,6 +80,53 @@ describe('unknown call that does not reach the result', () => {
     ).toEqual({ value: 1, diagnostics: [] });
   });
 
+  // CE-1778: the value of `let f = () => redraw()` is the lambda, and its
+  // body is not evaluated. `draw` is a near name, as in a notebook whose
+  // prelude defines it.
+  test('a bound function called in the body of a lambda value', () => {
+    const prelude = 'function draw(x) { x }; ';
+    expect(
+      run(prelude + 'let redraw = () => 1; let f = () => redraw(); f()')
+    ).toEqual({ value: 1, diagnostics: [] });
+    expect(
+      run(prelude + 'let redraw = () => 1; let f = (e) => do { redraw() }; f(1)')
+    ).toEqual({ value: 1, diagnostics: [] });
+    // Bound by a later statement.
+    expect(
+      run(prelude + 'let f = () => redraw(); let redraw = () => 1; f()')
+    ).toEqual({ value: 1, diagnostics: [] });
+    // Bound by an earlier program on the same engine.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, prelude + 'let redraw = () => 1');
+    expect(run('let f = () => redraw(); f()', ce)).toEqual({
+      value: 1,
+      diagnostics: [],
+    });
+    // A parameter of a lambda of an earlier program.
+    executeEpsil(ce, 'let g = (rnage) => rnage(1)');
+    expect(run('g', ce).diagnostics).toEqual([]);
+    // The lambda is the final value of the program.
+    expect(
+      run(prelude + 'let redraw = () => 1; () => redraw()').diagnostics
+    ).toEqual([]);
+  });
+
+  test('an unbound function called in the body of a lambda value', () => {
+    expect(
+      run('function draw(x) { x }; let f = () => redraw(); 1')
+    ).toEqual({
+      value: 1,
+      diagnostics: [['unknown-function', 'redraw', 'draw']],
+    });
+    // The lambda comes from an earlier program: no statement of this program
+    // holds its body.
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'let f = () => rnage(1)');
+    expect(run('f', ce).diagnostics).toEqual([
+      ['unknown-function', 'rnage', 'Range'],
+    ]);
+  });
+
   test('a capture of a match pattern is a binding', () => {
     // The capture `puts` is lowered to the wildcard `_puts`, and the body
     // calls the bare name: the call invokes the captured function.

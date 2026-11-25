@@ -1032,7 +1032,9 @@ function* executeEpsilSteps(
         reportedUnknowns,
         diagnostics,
         stmt,
-        source
+        source,
+        undefined,
+        programNames
       )
     );
     if (programNames !== undefined)
@@ -2751,6 +2753,14 @@ function scanConstantShadowingParams(
  * `collectNonHeadSymbols()`) or when its definition is a callable value
  * (`bindsACallableNotShell()`, for a binding of an earlier program or of the
  * host).
+ *
+ * Without `bound`, `expr` is a result, and `literalNames` gives the names
+ * that the program can bind. A function literal in a result
+ * (`let f = () => redraw()` gives its lambda) is not evaluated, so its body
+ * holds the calls of bound functions as the canonical form does: the scan
+ * continues in the literal with `literalNames` and the parameters of the
+ * literal as `bound`. When `literalNames` is `undefined`, the literal is not
+ * scanned.
  */
 function scanUnknownFunctions(
   ce: ComputeEngine,
@@ -2759,7 +2769,8 @@ function scanUnknownFunctions(
   diagnostics: ParsingDiagnostic[],
   stmt: MathJsonExpression,
   source: string,
-  bound?: ReadonlySet<string>
+  bound?: ReadonlySet<string>,
+  literalNames?: ReadonlySet<string>
 ): void {
   const head = operator(expr);
   if (head === '') return; // Not a function application (number/symbol/string).
@@ -2818,8 +2829,22 @@ function scanUnknownFunctions(
     }
   }
 
+  if (bound === undefined && head === 'Function') {
+    if (literalNames === undefined) return;
+    bound = withBoundParameters(expr, literalNames);
+  }
+
   for (const op of operands(expr))
-    scanUnknownFunctions(ce, op, reported, diagnostics, stmt, source, bound);
+    scanUnknownFunctions(
+      ce,
+      op,
+      reported,
+      diagnostics,
+      stmt,
+      source,
+      bound,
+      literalNames
+    );
 }
 
 /**

@@ -48,6 +48,16 @@
   that are not real or integer numbers, GLSL, the interval target and the
   `bigint` mode still decline.
 
+### Resolved Issues
+
+- **An Epsil program no longer warns about a call, in the body of a lambda,
+  of a function that the program defines** (CE-1778). When a library or an
+  earlier function has a near name (`draw`),
+  `let redraw = () => 1; let f = () => redraw(); f()` gave the warning
+  `unknown-function` ("Unknown function "redraw"; did you mean "draw"?") and
+  now gives none. The value, `1`, is not changed. A call of a function that
+  nothing defines (`let f = () => redraw()` alone) still gives the warning.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements
