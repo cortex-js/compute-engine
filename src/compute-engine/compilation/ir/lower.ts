@@ -475,6 +475,9 @@ export type LowerOptions = {
  *  lane `lane`: an effectful operation, spelled as the host's text. */
 export const hostVarOp = (k: number, lane: Lane) => `host${k}.${lane}`;
 
+/** `op` is the read of a `vars` name (`hostVarOp()`). */
+export const isHostVarOp = (op: string) => /^host\d+\./.test(op);
+
 /** The IR operation of a call of the function of the host of index `k`
  *  (`Program.hosts`): an effectful operation, spelled as a call of
  *  `_SYS.hosts[k]`. */
@@ -707,7 +710,8 @@ function lowerOnce(
         : i.k === 'call'
           ? fns.effect(i.fn) !== 'pure'
           : i.k === 'loop' ||
-            (i.k === 'region' && regionRow(i.op)?.effect !== 'pure')
+            (i.k === 'region' && regionRow(i.op)?.effect !== 'pure'),
+    (i) => i.k === 'op' && isHostVarOp(i.op)
   );
   const frames: Frame[] = [{ names: new Map(), loop: false }];
   // The local scopes of the engine around the node being lowered
@@ -2155,9 +2159,9 @@ function lowerOnce(
       // interpreter stops at the shortest list, so a list with an effect
       // declines.
       case 'Zip': {
-        const before = b.effects;
+        const before = b.changes();
         const v = pointList(e);
-        if (b.effects > before)
+        if (b.changes() > before)
           decline(
             e,
             'Zip of a list with an effect (the interpreter reads the lists up to the shortest)'
@@ -6145,27 +6149,28 @@ function lowerOnce(
    *  when it is not real, and when it holds a loop or a call, whose function
    *  would stay defined after the region is discarded. Its only effects are
    *  reads of `vars` entries, which in the interval mode read the inputs
-   *  object: they are not counted there; `effects` is their number. */
+   *  object: they are not counted there; `effects` is the number of its
+   *  effects and `reads` the number of those reads (`Builder.reads`). */
   const closedRegion = (ask: () => Expression | undefined) => {
-    let effects = 0;
+    let [effects, reads] = [0, 0];
     const r = trial(() => {
       const c = ask();
       if (c === undefined || facts(c).loop || !facts(c).slice) return undefined;
-      const before = b.effects;
+      const [e0, r0] = b.mark();
       const v = scalar(c);
-      effects = b.effects - before;
+      [effects, reads] = [b.effects - e0, b.reads - r0];
       return v;
     }, true);
     return r && isSubLane(type(r.yields[0]).lane, 'real')
-      ? Object.assign(r, { effects })
+      ? Object.assign(r, { effects, reads })
       : undefined;
   };
   /** The region of the value that `f` lowers, which is not emitted, or
-   *  `undefined` when `f` gives no value or declines; `b.effects` is
-   *  restored. A decline after a user function began to be lowered in `f`
-   *  is rethrown, unless `any`. */
+   *  `undefined` when `f` gives no value or declines; the counts of `b`
+   *  (`mark()`) are restored. A decline after a user function began to be
+   *  lowered in `f` is rethrown, unless `any`. */
   const trial = (f: () => V | undefined, any = false): Region | undefined => {
-    const [effects, begun, outer] = [b.effects, fns.begun(), quadrature];
+    const [counts, begun, outer] = [b.mark(), fns.begun(), quadrature];
     let v: V | undefined;
     const r = b.region([], () => {
       try {
@@ -6182,7 +6187,7 @@ function lowerOnce(
       }
       return v === undefined ? [] : [v];
     });
-    b.effects = effects;
+    b.restore(counts);
     return v === undefined ? undefined : r;
   };
   /** The interval mode: `x` is safe to compute before an integral whose
@@ -6321,9 +6326,9 @@ function lowerOnce(
           : c;
       });
       if (c !== undefined) {
-        const effects = b.effects;
+        const [effects, reads] = b.mark();
         c.body.forEach((i) => b.emit(i));
-        b.effects = effects + c.effects;
+        b.restore([effects + c.effects, reads + c.reads]);
         const v = c.yields[0];
         // The closed form is NaN at a bound where the integrand has an
         // integrable singularity (`∫ ln(t) dt` from `a` = 0 is

@@ -29,6 +29,17 @@
   function are unchanged: `scene` still has the `scope` effect of its
   callback.
 
+- **A search in a list by a condition that reads a name of the `vars`
+  compilation option now compiles** (CE-1612). With
+  `compile(expr, { vars: { T: '_.T' } })`, the expression
+  `["CountIf", "L", ["Function", ["Greater", "t", "T"], "t"]]` was refused with
+  "CountIf with an effect (the interpreter stops at the first element that
+  decides)", although the same expression compiled without `vars`. It now
+  compiles, and so do `Find`, `IndexWhere`, `Position`, `Any`, `All`,
+  `TakeWhile`, `Reduce`, `Iterate`, `Zip`, a `Comprehension` with a condition and
+  `ArgMin` of a `Map` whose function reads such a name. A condition that draws
+  a random number is still refused.
+
 ### Resolved Issues
 
 - **A `Filter` over a `Map` that calls a function with no definition no longer

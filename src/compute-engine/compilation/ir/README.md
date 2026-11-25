@@ -1801,6 +1801,18 @@ above; so do a point written whole and an empty list of no stated type (no
 lane). GLSL (no run-time length), the interval mode and the `bigint` mode
 decline such a local.
 
+A list operator that declines an effect in an element, in its function or in a
+list operand, because the interpreter evaluates fewer elements, in another
+order or lazily (each "with an effect declines" of this section, and `Zip`),
+does not count a read of a `vars` name (`Builder.changes()`): a `vars` entry is
+a value, the same at each read (the compile guide), and no instruction of the
+program writes it, so each read gives the value of the name that the
+interpreter reads once (`CountIf(L, t ↦ t > T)` with `vars: {T: …}` compiles;
+CE-1612). A draw, a write and a call of a function of the host still decline.
+The text is still read at each use, once per element evaluated; a text with an
+effect (`'_.draw()'`) runs that many times, and its result is unspecified, as
+the guide says.
+
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
 of `L` by `cond`, then a build of `body` over the elements kept. The
@@ -3819,7 +3831,8 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   throw an error that names the option. `vars` declines in the `bigint` mode.
 - **`vars`.** A mapped name is read as the host's text at each use, in program
   order (an effectful operation, so `w - w` with `w: '_.draw()'` calls `draw`
-  twice), in the scope of the entry, where `_` is the inputs object. The mapping
+  twice), in the scope of the entry, where `_` is the inputs object; a list
+  operator does not decline it as an effect of an element ("Lists"). The mapping
   wins over the engine's value of the name and is never folded; a local of the
   same name shadows it. Its lane is the name's type (a wide or `any` type is a
   real). A read in a root function literal (no such scope), or in a user

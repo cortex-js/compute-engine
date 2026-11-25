@@ -584,6 +584,9 @@ export class Builder {
   private readonly made = new Map<string, { v: V; region: Region }>();
   /** The number of effectful instructions emitted so far. */
   effects = 0;
+  /** The number of those that read the host's text (`compile()`'s `vars`):
+   *  `changes()` leaves them out. */
+  reads = 0;
   /** The instructions emitted so far that are not pure (that can throw,
    *  not terminate or have an effect), in the order of their emission. */
   readonly impure: Instr[] = [];
@@ -595,8 +598,30 @@ export class Builder {
   constructor(
     private readonly pure: (op: string) => boolean,
     private readonly effectful: (i: Instr) => boolean,
-    private readonly notPure: (i: Instr) => boolean = () => false
+    private readonly notPure: (i: Instr) => boolean = () => false,
+    private readonly hostRead: (i: Instr) => boolean = () => false
   ) {}
+
+  /** The number of effectful instructions emitted so far that are not a
+   *  read of the host's text. A list operator that declines an effect in an
+   *  element, because the interpreter evaluates fewer elements, compares
+   *  it: such a read gives the same value at each element, as the
+   *  interpreter's one value of the name (`lower-lists.ts`). */
+  changes(): number {
+    return this.effects - this.reads;
+  }
+
+  /** The counts `effects` and `reads`, which `restore()` sets back, so
+   *  that the instructions of a region that is not emitted are not
+   *  counted. */
+  mark(): readonly [number, number] {
+    return [this.effects, this.reads];
+  }
+
+  restore([effects, reads]: readonly [number, number]): void {
+    this.effects = effects;
+    this.reads = reads;
+  }
 
   newValue(type: IRType): V {
     this.types.push(type);
@@ -652,9 +677,9 @@ export class Builder {
    *  body are not counted in `effects` and `impure`: they are not the
    *  caller's, which counts the call by the function's effect. */
   define(fn: IRFunction, f: () => V[]): void {
-    const [open, effects, impure] = [
+    const [open, counts, impure] = [
       this.open,
-      this.effects,
+      this.mark(),
       this.impure.length,
     ];
     this.open = [fn.body];
@@ -662,7 +687,7 @@ export class Builder {
       fn.body.yields = f();
     } finally {
       this.open = open;
-      this.effects = effects;
+      this.restore(counts);
       this.impure.length = impure;
     }
     this.functions.push(fn);
@@ -681,7 +706,10 @@ export class Builder {
   }
 
   emit(i: Instr): void {
-    if (this.effectful(i)) this.effects++;
+    if (this.effectful(i)) {
+      this.effects++;
+      if (this.hostRead(i)) this.reads++;
+    }
     if (this.notPure(i)) this.impure.push(i);
     if (i.k === 'op') this.defs.set(i.out, i);
     this.current().body.push(i);

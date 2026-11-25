@@ -789,9 +789,9 @@ export function listLowering(cx: Lowering) {
         e,
         `Map of ${ls.length} lists and a function that is not a literal of ${ls.length} parameters of distinct names`
       );
-    const before = b.effects;
+    const before = b.changes();
     const sources = ls.map((l) => source(l));
-    if (b.effects > before)
+    if (b.changes() > before)
       decline(
         e,
         'Map of a list with an effect (the interpreter reads the lists up to the shortest)'
@@ -934,10 +934,10 @@ export function listLowering(cx: Lowering) {
       );
     const name = c.ops[0].symbol;
     let s = source(c.ops[1]);
-    const before = b.effects;
+    const before = b.changes();
     if (c.nops === 3) s = listSource(over(e, s, name, c.ops[2], true, c));
     const v = over(e, s, name, e.ops[0], false, e);
-    if (b.effects > before)
+    if (b.changes() > before)
       decline(
         e,
         'a Comprehension with an effect (the interpreter evaluates its elements lazily)'
@@ -952,7 +952,7 @@ export function listLowering(cx: Lowering) {
    *  it (exact for a total below 2^53). */
   const product = (e: Fn): V => {
     const names: string[] = [];
-    const before = b.effects;
+    const before = b.changes();
     const sources = e.ops.slice(1).map((c) => {
       if (
         !isFunction(c, 'Element') ||
@@ -993,7 +993,7 @@ export function listLowering(cx: Lowering) {
         }),
       e
     );
-    if (b.effects > before)
+    if (b.changes() > before)
       decline(
         e,
         'a Comprehension of several clauses with an effect (the interpreter evaluates a list once for each element of the clauses before it, and its elements lazily)'
@@ -1273,7 +1273,7 @@ export function listLowering(cx: Lowering) {
    *  first element that decides, so an effect in the list or in `p`
    *  declines. */
   const quantifier = (e: Fn): V => {
-    const effects = b.effects;
+    const effects = b.changes();
     const s = source(e.ops[0]);
     let kept: V;
     if (e.nops === 1) kept = over(e, s, '', (x) => x, true, e);
@@ -1289,7 +1289,7 @@ export function listLowering(cx: Lowering) {
         );
       kept = over(e, s, param, f.ops[0], true, f);
     }
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(
         e,
         `${e.operator} with an effect (the interpreter stops at the first element that decides)`
@@ -1335,7 +1335,7 @@ export function listLowering(cx: Lowering) {
         e,
         `${e.operator} of a value that the interpreter may hold exactly`
       );
-    const effects = b.effects;
+    const effects = b.changes();
     const s = source(l);
     const v = cx.scalar(needle);
     const real = (x: V) =>
@@ -1353,7 +1353,7 @@ export function listLowering(cx: Lowering) {
       true,
       e
     );
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(
         e,
         `${e.operator} of a list with an effect (the interpreter stops at the first match)`
@@ -1442,7 +1442,7 @@ export function listLowering(cx: Lowering) {
     const sign = (c: V, then: () => V, otherwise: () => V) =>
       cx.branch(e, c, then, otherwise, true)!;
     const nan = (v: V) => cx.apply(e, op('isnan'), [v]);
-    const effects = b.effects;
+    const effects = b.changes();
     const [order] = cx.region(
       'sortby',
       [s.length],
@@ -1498,7 +1498,7 @@ export function listLowering(cx: Lowering) {
         }),
       e
     );
-    if (b.effects > effects) decline(e, 'Sort by a comparator with an effect');
+    if (b.changes() > effects) decline(e, 'Sort by a comparator with an effect');
     return reindexed(e, s, s.length, at(order));
   };
 
@@ -1545,7 +1545,7 @@ export function listLowering(cx: Lowering) {
       isSymbol(x) ? x.symbol === params[1] : isFunction(x) && x.ops.some(names);
     if (it.nops !== 2 && (arity === 1 || names((f as Fn).ops[0])))
       decline(it, 'Iterate with no initial value of a function that reads it');
-    const effects = b.effects;
+    const effects = b.changes();
     const real = (v: V) =>
       type(v).shape.length === 0 && isSubLane(type(v).lane, 'real');
     const init = it.nops === 2 ? cx.scalar(it.ops[1]) : integer(0);
@@ -1583,10 +1583,10 @@ export function listLowering(cx: Lowering) {
     // accumulator is a real. The trial region is not emitted.
     let lane = type(init).lane;
     if (lane === 'integer') {
-      const before = b.effects;
+      const before = b.mark();
       const [ps, yields] = pass(lane);
       const r = b.region(ps, yields);
-      b.effects = before;
+      b.restore(before);
       if (type(r.yields[0]).lane !== 'integer') lane = 'real';
     }
     const [ps, yields] = pass(lane);
@@ -1594,7 +1594,7 @@ export function listLowering(cx: Lowering) {
     // A guard: the trial above lowered the same body on the same lane.
     if (lane === 'integer' && type(out).lane !== 'integer')
       decline(it, 'an accumulator that changes lane');
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(
         it,
         'Iterate with an effect (the interpreter computes its elements lazily)'
@@ -1797,9 +1797,9 @@ export function listLowering(cx: Lowering) {
   /** The element of `s` at 0, lowered in a region that is not emitted
    *  (its type and its tuple mark). */
   const elementOf = (s: Source): V => {
-    const before = b.effects;
+    const before = b.mark();
     const r = b.region([], () => [s.at(integer(0))]);
-    b.effects = before;
+    b.restore(before);
     return r.yields[0];
   };
 
@@ -1847,7 +1847,7 @@ export function listLowering(cx: Lowering) {
    *  first element that decides, so a predicate with an effect declines. */
   const where = (e: Fn, s: Source, g: Expression, negate = false): V => {
     const { names, body, site } = literalOf(e, g, 1);
-    const effects = b.effects;
+    const effects = b.changes();
     const kept = over(
       e,
       { length: s.length, at: (k) => k },
@@ -1861,7 +1861,7 @@ export function listLowering(cx: Lowering) {
       true,
       site
     );
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(
         e,
         `${e.operator} with an effect (the interpreter stops at the first element that decides)`
@@ -2105,7 +2105,7 @@ export function listLowering(cx: Lowering) {
     const [x, k] = e.ops;
     // The list as `source()` reads it, and its value when it is not a
     // `Range`.
-    const effects = b.effects;
+    const effects = b.changes();
     const range = isFunction(x, 'Range') && cx.isLibrary(x);
     const l = range ? undefined : cx.value(x)!;
     if (l !== undefined && cx.tuples.get(l) === 0)
@@ -2114,7 +2114,7 @@ export function listLowering(cx: Lowering) {
       decline(x, 'a scalar where a list is required');
     const s = l === undefined ? source(x) : listSource(l);
     // The interpreter's list is lazy: it reads the elements it needs only.
-    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    if (b.changes() > effects) decline(e, `${h} of a list with an effect`);
     const n = s.length;
     const predicate = h === 'Partition' && !k.type.matches('number');
     const c = predicate ? undefined : count(k);
@@ -2240,10 +2240,10 @@ export function listLowering(cx: Lowering) {
     };
     let lane = type(x0).lane;
     if (lane === 'integer') {
-      const before = b.effects;
+      const before = b.mark();
       const [ps, yields] = pass(lane);
       const r = b.region(ps, yields);
-      b.effects = before;
+      b.restore(before);
       if (type(r.yields[0]).lane !== 'integer') lane = 'real';
     }
     const [ps, yields] = pass(lane);
@@ -2272,7 +2272,7 @@ export function listLowering(cx: Lowering) {
   const reduceBy = (e: Fn): V => {
     if (cx.interval) decline(e, 'Reduce by a function on interval-js');
     const { names, body } = literalOf(e, e.ops[1], 2);
-    const effects = b.effects;
+    const effects = b.changes();
     const s = source(e.ops[0]);
     const seedless = e.nops === 2;
     const seed = e.ops[2];
@@ -2282,7 +2282,7 @@ export function listLowering(cx: Lowering) {
       : empty
         ? undefined
         : cx.value(seed)!;
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(e, 'Reduce of a list or an initial value with an effect');
     const it = init === undefined ? undefined : type(init);
     const tuple = init !== undefined && cx.tuples.get(init) === 0;
@@ -2348,7 +2348,7 @@ export function listLowering(cx: Lowering) {
     };
     /** `pass`, on the real lane when an integer one gives reals. */
     const settle = (lane0: Lane, fixed: number | undefined) => {
-      const before = b.effects;
+      const before = b.mark();
       let lane = lane0;
       if (lane === 'integer') {
         try {
@@ -2357,7 +2357,7 @@ export function listLowering(cx: Lowering) {
           if (!(m instanceof Mismatch) || m.lane !== 'real') throw m;
           lane = 'real';
         } finally {
-          b.effects = before;
+          b.restore(before);
         }
       }
       return { lane, ...pass(lane, fixed) };
@@ -2376,11 +2376,11 @@ export function listLowering(cx: Lowering) {
       );
       let last: unknown;
       for (const [i, [lane, f]] of tries.entries()) {
-        const before = b.effects;
+        const before = b.mark();
         try {
           return { ...settle(lane, f), fixed: f };
         } catch (m) {
-          b.effects = before;
+          b.restore(before);
           if (!(m instanceof Mismatch || m instanceof Decline)) throw m;
           last = m;
           if (i + 1 === tries.length) {
@@ -2447,7 +2447,7 @@ export function listLowering(cx: Lowering) {
       init: start(),
       body: region,
     });
-    if (b.effects > effects) decline(e, 'Reduce by a function with an effect');
+    if (b.changes() > effects) decline(e, 'Reduce by a function with an effect');
     return outs[outs.length - 1];
   };
 
@@ -2478,9 +2478,9 @@ export function listLowering(cx: Lowering) {
         e,
         `${e.operator} of a value that the interpreter may hold exactly`
       );
-    const effects = b.effects;
+    const effects = b.changes();
     const [s, t] = [numbers(e, l), numbers(e, p)];
-    if (b.effects > effects)
+    if (b.changes() > effects)
       decline(e, `${e.operator} of a list with an effect`);
     const [n, m] = [s.length, t.length];
     const and = rowOfHead(cx.rows, 'And')!;
@@ -2563,7 +2563,7 @@ export function listLowering(cx: Lowering) {
       const lengths = e.ops
         .slice(1)
         .map((x) => int(e, 'Max', count(x, true), zero));
-      const effects = b.effects;
+      const effects = b.changes();
       const nest = (j: number, at: V[]): V =>
         j === lengths.length
           ? applied(
@@ -2580,7 +2580,7 @@ export function listLowering(cx: Lowering) {
               e
             );
       const v = nest(0, []);
-      if (b.effects > effects)
+      if (b.changes() > effects)
         decline(
           e,
           'Tabulate with an effect (the interpreter evaluates its elements lazily)'
@@ -2630,7 +2630,7 @@ export function listLowering(cx: Lowering) {
       return typeof r === 'number' ? r : r.rows();
     }
     // The operators of a list.
-    const effects = b.effects;
+    const effects = b.changes();
     const s =
       h === 'Append' ||
       h === 'DeleteAt' ||
@@ -2654,7 +2654,7 @@ export function listLowering(cx: Lowering) {
         : undefined;
     if (s === undefined) return undefined;
     // The interpreter's list is lazy: it reads the elements it needs only.
-    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    if (b.changes() > effects) decline(e, `${h} of a list with an effect`);
     const n = s.length;
     const flat = () => {
       const x = elementOf(s);
@@ -2861,9 +2861,9 @@ export function listLowering(cx: Lowering) {
       // kept: the build of the values, then the elements of the rows in
       // order. A row of a length known at run time declines (`over()`).
       const { names, body, site } = literalOf(e, e.ops[1], 1);
-      const before = b.effects;
+      const before = b.changes();
       const rows = over(e, s, names[0], body, false, site);
-      if (b.effects > before)
+      if (b.changes() > before)
         decline(
           e,
           'FlatMap with an effect (the interpreter evaluates its elements lazily)'
@@ -2899,7 +2899,7 @@ export function listLowering(cx: Lowering) {
       flat();
       // The interpreter evaluates the initial value only when it reads an
       // element: an initial value with an effect declines, as a body.
-      const before = b.effects;
+      const before = b.changes();
       const init = e.nops === 3 ? cx.scalar(e.ops[2]) : undefined;
       const v = scanned(e, n, init ?? zero, (k, acc) => {
         const step = () => applied(names, [acc, s.at(k)], body);
@@ -2907,7 +2907,7 @@ export function listLowering(cx: Lowering) {
           ? step()
           : when(e, 'Equal', k, zero, () => s.at(k), step);
       });
-      if (b.effects > before)
+      if (b.changes() > before)
         decline(
           e,
           'Scan with an effect (the interpreter evaluates its elements lazily)'
@@ -3038,13 +3038,13 @@ export function listLowering(cx: Lowering) {
     if (h === 'Take' && isIterate(e.ops[0])) return iterateTake(e);
     const other = more(e);
     if (other !== undefined) return other;
-    const effects = b.effects;
+    const effects = b.changes();
     const s = source(e.ops[0], false, true);
     const n = s.length;
     if (h === 'Count' || h === 'IsEmpty')
       return h === 'Count' ? n : cx.apply(e, 'Equal', [n, integer(0)]);
     // The interpreter's list is lazy: it reads the elements kept only.
-    if (b.effects > effects) decline(e, `${h} of a list with an effect`);
+    if (b.changes() > effects) decline(e, `${h} of a list with an effect`);
     const [zero, one] = [integer(0), integer(1)];
     if (h === 'Rest' || h === 'Most') {
       const length = int(e, 'Max', int(e, 'Subtract', n, one), zero);
