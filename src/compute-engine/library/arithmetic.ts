@@ -7149,6 +7149,97 @@ function harmonicNumberNearZero(
   return undefined;
 }
 
+/** The most terms of the series of `harmonicNumberNearZeroComplexOrder()`. */
+const MAX_COMPLEX_ORDER_HARMONIC_TERMS = 64;
+
+/**
+ * The largest relative error of each part that
+ * `harmonicNumberNearZeroComplexOrder()` answers, from the error estimates
+ * of the kernels and the rounding of the products: 10 of the 16 digits.
+ */
+const COMPLEX_ORDER_HARMONIC_TOLERANCE = 1e-10;
+
+/**
+ * The generalized harmonic number `H_n^(r)` of a complex order r and a real
+ * or complex `0 < |n| < 0.1`, in machine complex arithmetic (the precision of
+ * `hurwitzZetaComplex`), where the continuation `ζ(r) − ζ(r, 1 + n)` can
+ * cancel (to 0 at `n = 1e-30`). First the series
+ * `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)` of `harmonicNumberNearZero()`.
+ * The argument of `ζ(r + j)` is passed with `r + j − 1`, known exactly where
+ * it is small, which `1 + (r + j − 1)` would round next to the pole. Past
+ * `Re(r + j) = 2`, `|ζ(r + j)| ≤ ζ(2) < 1.65`, and where
+ * `ρ = |n|·max(1, (|r| + j)/(j + 1)) < 1/2` the rest of the series is below
+ * `1.65·|(r)_j/j!|·|n|^j·ρ/(1 − ρ)`; the series ends when that bound is below
+ * 2⁻⁵³ of each part. When the series needs more than
+ * `MAX_COMPLEX_ORDER_HARMONIC_TERMS` terms (a large |r|·|n|), a kernel
+ * declines, or the error bound fails, the continuation. Either value is the
+ * answer only when its error bound, the error estimates of the kernels plus
+ * one rounding of each of the about `2j + 4` products of a term (of each of
+ * the two values of the continuation), is below
+ * `COMPLEX_ORDER_HARMONIC_TOLERANCE` of each part: a part that is much
+ * smaller than the terms (an order next to a real number) or a continuation
+ * that cancels gives `undefined`. The error estimate of a kernel is one
+ * bound for both parts, so an order within about 1e-4 of the real axis
+ * declines also where the continuation is accurate (`n = 0.099`,
+ * `r = 2 − 10⁻⁶i`).
+ */
+function harmonicNumberNearZeroComplexOrder(
+  n: Complex,
+  r: Complex
+): Complex | undefined {
+  const one = new Complex(1, 0);
+  const accept = (value: Complex, error: number) =>
+    Number.isFinite(value.re) &&
+    Number.isFinite(value.im) &&
+    error <=
+      COMPLEX_ORDER_HARMONIC_TOLERANCE *
+        Math.min(Math.abs(value.re), Math.abs(value.im));
+
+  const series = (): { value: Complex; error: number } | undefined => {
+    const absN = n.abs();
+    const absR = r.abs();
+    const minusN = n.neg();
+    let c = one;
+    let power = one;
+    let sum = new Complex(0, 0);
+    let error = 0;
+    for (let j = 1; j <= MAX_COMPLEX_ORDER_HARMONIC_TERMS; j++) {
+      // `d = r + j − 1` is exact where it is small (Sterbenz).
+      const d = new Complex(r.re + (j - 1), r.im);
+      c = c.mul(d).div(j);
+      power = power.mul(minusN);
+      const cp = c.mul(power);
+      const zeta = hurwitzZetaComplexWithError(
+        new Complex(r.re + j, r.im),
+        one,
+        d
+      );
+      if (zeta === undefined) return undefined;
+      const t = cp.mul(zeta.value);
+      if (!Number.isFinite(t.re) || !Number.isFinite(t.im)) return undefined;
+      sum = sum.sub(t);
+      error += cp.abs() * zeta.error + (2 * j + 4) * 2 ** -53 * t.abs();
+      const rho = absN * Math.max(1, (absR + j) / (j + 1));
+      if (r.re + j <= 2 || rho >= 0.5) continue;
+      const rest = (1.65 * cp.abs() * rho) / (1 - rho);
+      if (rest <= Math.min(Math.abs(sum.re), Math.abs(sum.im)) * 2 ** -53)
+        return { value: sum, error: error + rest };
+    }
+    return undefined;
+  };
+  const fromSeries = series();
+  if (fromSeries !== undefined && accept(fromSeries.value, fromSeries.error))
+    return fromSeries.value;
+
+  const z1 = hurwitzZetaComplexWithError(r, one);
+  const z2 = hurwitzZetaComplexWithError(r, n.add(1));
+  if (z1 === undefined || z2 === undefined) return undefined;
+  const value = z1.value.sub(z2.value);
+  const error =
+    z1.error + z2.error + 2 ** -52 * (z1.value.abs() + z2.value.abs());
+  return accept(value, error) ? value : undefined;
+}
+
 /**
  * The generalized harmonic number `H_n^(r)` of a real `0 < |n| < 0.1` by the
  * analytic continuation `ψ(1 + n) + γ` (no `r`) or `ζ(r) − ζ(r, 1 + n)`, at a
@@ -7261,7 +7352,10 @@ function harmonicNumberNonpositiveOrder(
  *   (`harmonicNumberRaised()`), which declines when it still cancels. A
  *   complex n with an integer r ≤ 0 is the exact difference of
  *   `harmonicNumberNonpositiveOrder()`; with another real r or none, a
- *   complex `|n| < 0.1` takes the same series when it is short.
+ *   complex `|n| < 0.1` takes the same series when it is short. A complex
+ *   order with a real or complex `0 < |n| < 0.1` takes the series or the
+ *   continuation of `harmonicNumberNearZeroComplexOrder()` at machine
+ *   precision, and stays unevaluated when neither has a bounded error.
  */
 function evaluateHarmonicNumber(
   engine: ComputeEngine,
@@ -7326,6 +7420,26 @@ function evaluateHarmonicNumber(
   // would cancel in the same part, or read a part too small for a double
   // as 0.
   const realR = r === undefined || (!r.isComplex && Number.isFinite(r.re));
+  // A complex order takes the series of complex coefficients at machine
+  // precision, the precision of the continuation.
+  if (
+    r !== undefined &&
+    isNumber(r) &&
+    r.isComplex &&
+    Number.isFinite(r.re) &&
+    Number.isFinite(r.im) &&
+    Number.isFinite(n.re) &&
+    Number.isFinite(n.im)
+  ) {
+    const absN = Math.hypot(n.re, n.im);
+    if (absN > 0 && absN < 0.1) {
+      const value = harmonicNumberNearZeroComplexOrder(
+        engine.complex(n.re, n.im),
+        engine.complex(r.re, r.im)
+      );
+      return value === undefined ? undefined : engine.number(value);
+    }
+  }
   if (n.isComplex && rInt !== null && rInt <= 0 && r !== undefined) {
     const value = harmonicNumberNonpositiveOrder(engine, n, -rInt);
     if (value !== undefined) return value;

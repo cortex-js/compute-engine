@@ -66,6 +66,15 @@
 
 ### Resolved Issues
 
+- **The harmonic number of a very small number with a complex order is
+  correct** (CE-1584). `HarmonicNumber(10^{-30}(1+i), 2+i)` evaluates to about
+  `1.552e-30 + 3.173e-30i`, where it was `0`. A complex order `r` with
+  `0 < |n| < 0.1` now takes the series in `n`, with complex coefficients, at
+  machine precision, or the continuation `ζ(r) − ζ(r, 1 + n)` where the series
+  is too long. When neither value keeps 10 digits in each part, the value stays
+  unevaluated: this is the case for an order very close to the real axis, such
+  as `HarmonicNumber(0.05, -3 + 10^{-9}i)`.
+
 - **A power, a root, an angle and a logarithm with a base of a number made at
   a higher precision keep the digits of a double after the precision is set
   to `'machine'`** (CE-1761). After `ce.precision = 30;

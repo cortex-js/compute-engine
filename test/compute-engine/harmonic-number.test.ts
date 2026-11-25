@@ -431,3 +431,61 @@ describe('HarmonicNumber NEAR 0 OF A COMPLEX n (CE-1572)', () => {
     }
   });
 });
+
+describe('HarmonicNumber NEAR 0 OF A COMPLEX ORDER (CE-1584)', () => {
+  // [Re n, Im n, Re r, Im r, Re H, Im H], with mpmath's
+  // `zeta(r) - zeta(r, n + 1)` at 60 digits. The series answers the first
+  // ones; the continuation answers a large |r|·|n|, where the series is too
+  // long, and a part 300 times smaller than the other, where the error
+  // estimate of the series is too large.
+  const cases: [number, number, number, number, number, number][] = [
+    [1e-30, 1e-30, 2, 1, 1.5520870099659354e-30, 3.1733523581160526e-30],
+    [1e-30, 0, 2, 1, 2.362719684040994e-30, 8.106326740750586e-31],
+    [0.05, 0.03, 2, 1, 0.0960436242771228, 0.0995943959175323],
+    [-0.06, 0.02, 0.5, 3, -0.08046400397649313, -0.1302213355460278],
+    [0.09, 0, 1.5, -2, 0.1597490165061994, -0.11173335816194091],
+    [0.01, -0.07, 3, 10, 0.5480836517812276, -0.06093664727745727],
+    [1e-20, 0, 2, 0.01, 2.4041096442539664e-20, 8.058048981654098e-23],
+    [0.05, 0, 2, 0.01, 0.11257661646392919, 0.0003455210998128868],
+    [0.05, 0, 2, 120, 0.3408411779984618, -0.7752897853693601],
+    [0.03, 0, -100, 1, 2.0369750610719384e77, 5.91945825426179e76],
+  ];
+
+  for (const precision of [undefined, 50]) {
+    test(`each part keeps its digits at precision ${precision ?? 'default'}`, () => {
+      const ce = new ComputeEngine();
+      if (precision !== undefined) ce.precision = precision;
+      for (const [a, b, c, d, re, im] of cases) {
+        const v = ce
+          .function('HarmonicNumber', [
+            ce.number(ce.complex(a, b)),
+            ce.number(ce.complex(c, d)),
+          ])
+          .N();
+        const errors = [
+          Math.abs(v.re - re) / Math.abs(re),
+          Math.abs(v.im - im) / Math.abs(im),
+        ];
+        expect([a, b, c, d, errors.every((e) => e < 1e-12)]).toEqual([
+          a,
+          b,
+          c,
+          d,
+          true,
+        ]);
+      }
+    });
+  }
+
+  test('a part much smaller than its terms stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    // The imaginary part, about 5e-12, is 8 digits below the real part.
+    const v = ce
+      .function('HarmonicNumber', [
+        ce.number(0.05),
+        ce.number(ce.complex(-3, 1e-9)),
+      ])
+      .N();
+    expect(v.operator).toBe('HarmonicNumber');
+  });
+});
