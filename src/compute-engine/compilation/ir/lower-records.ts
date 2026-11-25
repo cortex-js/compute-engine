@@ -12,10 +12,7 @@ import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSymbol } from '../../boxed-expression/type-guards.js';
-import type {
-  DictionaryInterface,
-  Expression,
-} from '../../global-types.js';
+import type { DictionaryInterface, Expression } from '../../global-types.js';
 import {
   decline,
   hasUnsettledShape,
