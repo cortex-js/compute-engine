@@ -75,6 +75,15 @@
 
 ### Resolved Issues
 
+- **A Document row whose parameter has a type that the host declared by name
+  is prepared** (CE-1658). After `ce.declareType('Pt', 'tuple<real, real>',
+  { alias: true })`, `prepare()` of the row `g(q)=q+1` with
+  `formalTypes: { q: 'Pt' }` threw `Failed to parse type "Pt"` when CE read
+  the LaTeX body of the row, and no row of the document was prepared. The row
+  is now read with `q` of type `Pt`. A formal type that does not parse, such
+  as `tuple<`, is now an error of its row (`invalid-type-annotation`), not a
+  throw.
+
 - **The type of a function that inserts its argument into a list, or writes
   it over one element, includes the argument** (CE-1769). With
   `ins = (u, t) -> Insert(Range(1, u), 1, t)`, the type of `ins` was

@@ -2647,7 +2647,8 @@ function bodySlotSignature(
 /**
  * The error expression for a signature-string annotation — the E1 sugar's
  * parameter-slot string or the E2 body-slot marker — that is signature-shaped
- * but does not parse as a type.
+ * but does not parse as a type. A Document row also uses it for a stated
+ * formal type that does not parse.
  *
  * A structured `TypeVariableError` code (`generic-alias-arity`,
  * `variance-violation`, …) becomes the error's own code, so the real cause
@@ -2656,7 +2657,7 @@ function bodySlotSignature(
  * also the head of a `TypeVariableError`'s message, so it is stripped from the
  * detail rather than repeated.
  */
-function signatureStringError(
+export function signatureStringError(
   ce: ComputeEngine,
   signature: string,
   e: unknown
