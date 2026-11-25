@@ -616,11 +616,16 @@ const cse: Pass = (p, rows) => {
 const some = (i: Instr, test: (x: Instr) => boolean): boolean =>
   test(i) || regionsOf(i).some((r) => r.body.some((x) => some(x, test)));
 
-/** The body that a `loop`, a `build` or a `filter` repeats. */
+/** The body that a `loop`, a `build` or a `filter` repeats (also of the
+ *  lane `rows`). */
 const repeated = (i: Instr): Region | undefined =>
   i.k === 'loop'
     ? i.body
-    : i.k === 'region' && (i.op === 'build' || i.op === 'filter')
+    : i.k === 'region' &&
+        (i.op === 'build' ||
+          i.op === 'filter' ||
+          i.op === 'rows.build' ||
+          i.op === 'rows.filter')
       ? i.regions[0]
       : undefined;
 

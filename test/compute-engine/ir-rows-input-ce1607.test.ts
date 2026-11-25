@@ -149,7 +149,7 @@ describe('CE-1607: the element of a list of rows of different lengths', () => {
 
 describe('CE-1607: every other read declines', () => {
   const READ = 'other than in an element read';
-  test.each([['g'], ['g + 1'], ['untyped(g)']])('%s', (body) => {
+  test.each([['g + 1'], ['untyped(g)']])('%s', (body) => {
     expect(declined(epsil(`(g: list<list<integer>>) => ${body}`))).toContain(
       READ
     );
@@ -157,20 +157,25 @@ describe('CE-1607: every other read declines', () => {
 
   // The rows are read one by one by `Length`, `Map` and the other readers
   // of a list, also at an index known at run time (#638,
-  // `ir-rows-input-readers.test.ts`); a row as the result, and a list of
-  // the rows, still decline.
-  test.each([
-    ['g[1]', 'a row at an index known at run time as the result'],
-    ['map(r => r, g)', 'a list of lists of run-time length'],
-  ])('%s', (body, why) => {
-    expect(declined(epsil(`(g: list<list<integer>>) => ${body}`))).toContain(
-      why
+  // `ir-rows-input-readers.test.ts`); a row as the result still declines.
+  // The input as the result, and a list of its rows, are the lane `rows`
+  // (CE-1736, `ir-rows-build-ce1736.test.ts`).
+  test('g[1]', () => {
+    expect(declined(epsil('(g: list<list<integer>>) => g[1]'))).toContain(
+      'a row at an index known at run time as the result'
     );
   });
 
-  test('a list that the program makes, at a parameter of that type', () => {
+  test.each([['g'], ['map(r => r, g)']])('%s is the rows', (body) => {
+    const J = [[1, 2, 3], [4], []];
+    expect(
+      compiled(epsil(`(g: list<list<integer>>) => ${body}`))(J)
+    ).toEqual(J);
+  });
+
+  test('a list of rank 2 that the program makes, at a parameter of that type', () => {
     expect(declined(epsil('(g: list<list<integer>>) => sq(sq(g))'))).toContain(
-      'that is not an input or a parameter of that type'
+      'that is not a list of lists of run-time length'
     );
   });
 
@@ -225,7 +230,8 @@ describe('CE-1607: a list of lists of a constant inner length', () => {
     );
   });
 
-  test('an inner list of no element declines', () => {
+  // A length of 0 is not a shape of the IR: the rows (CE-1736).
+  test('an inner list of no element is the lane rows', () => {
     const e = ce.box([
       'Map',
       [
@@ -235,6 +241,10 @@ describe('CE-1607: a list of lists of a constant inner length', () => {
       ],
       ['Range', 1, 20],
     ]);
-    expect(declined(e)).toContain('a list of lists of run-time length');
+    const result = compile(e, { to: 'javascript', fallback: false });
+    expect(result.rows).toBe(true);
+    expect((result.run as Run)()).toEqual(
+      interpreted('map(i => map(j => i * j, Range(1, 0, 1)), Range(1, 20))')
+    );
   });
 });

@@ -226,6 +226,14 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
             sub(a, t.fields![k], `record v${i.out}`)
           );
         }
+        // A list of lists of run-time length (the value of the lane `rows`,
+        // not a list of them): one flat list of numbers per row.
+        if (t.lane === 'rows' && t.shape.length === 0)
+          return i.args.forEach((a) => {
+            const r = type(a);
+            if (r.shape.length !== 1 || !(r.lane === 'integer' || r.lane === 'real'))
+              fail(`rows v${i.out}: a row of type ${typeToString(r)}`);
+          });
         const element = elementType(t);
         if (t.shape[0] !== i.args.length)
           fail(`list v${i.out}: length ${JSON.stringify(t.shape[0])}`);

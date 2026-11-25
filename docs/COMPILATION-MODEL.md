@@ -65,8 +65,8 @@ when it compiles. A difference that this list does not name is a defect.
   a point of `NaN` coordinates is absent). No compiled list is absent, nor
   a boolean on `glsl` (their producers decline): a discharge reads such a
   value as present. The one exception is the row `g[i]` of a
-  `list<list<integer>>` or `list<list<real>>` input at an index known at run
-  time, whose `Length` is `NaN` out of range, the absent value that the
+  `list<list<integer>>` or `list<list<real>>` input (or of such a list that
+  the program makes) at an index known at run time, whose `Length` is `NaN` out of range, the absent value that the
   discharges test (see "Lists of two run-time lengths"). A row of a list of
   lists of numbers of stated lengths (`P: list<list<real^2>>`) at an index
   that can be out of range compiles on `javascript` only when the `At` is
@@ -182,6 +182,19 @@ interpreter's value. A line is removed when the case declines or is fixed.
   compares the subject exactly; the interpreter compares with the tolerance of
   `isEqual`. `Match(x, MatchCase(0.3, 1), MatchCase(_, 0))` at
   `x = 0.1 + 0.2` gives `0`; the interpreter gives `1`. CE-1652.
+- `plausible?` — `javascript`, `n, m: integer`: a matrix operator of a
+  table that the program builds, when the table has no row or its rows have
+  no element. With `T = Map(i ↦ Map(j ↦ i + 10j, Range(1, m, 1)), Range(1, n, 1))`,
+  `Transpose(T)` at `n = 0`, `m = 3` gives `[[], [], []]`, and with
+  `S = Map(i ↦ Map(j ↦ i + j, Range(1, n, 1)), Range(1, n, 1))`,
+  `MatrixMultiply(S, S)` at `n = 0` gives `[]`; the interpreter (of the
+  tables in `ListFrom`) leaves both unevaluated. CE-1736.
+- `javascript` (crafted): `MatrixMultiply` of two lists of rows of constant
+  lengths and run-time counts does not compare its inner lengths. With
+  `n, m: integer`,
+  `MatrixMultiply(Map(i ↦ [i, i], Range(1, n, 1)), Map(i ↦ [i], Range(1, m, 1)))`
+  at `n = 2`, `m = 3` gives `[[3], [6]]`; the interpreter (of the operands
+  in `ListFrom`) gives the error `incompatible-dimensions`. CE-1736.
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
@@ -1655,8 +1668,7 @@ local that a `Loop` assigns it, the accumulator or the initial value of a
 declines with `outside-profile`, so the interpreter evaluates it:
 with `g: list<list<integer>>`, `(g) ↦ g[2][1]` at `g = [[1, 2, 3], [4]]` gives
 `4`, `g[2][3]` gives `NaN`, `Length(g)` gives 2, `Map(r ↦ Reduce(r, Add, 0), g)`
-gives `[6, 4]`, `Sum(g[1])` gives 6 and `Length(g[3])` gives `NaN`, while
-`Map(r ↦ 2r, g)` (a list of rows) declines. The size of a tree from its
+gives `[6, 4]`, `Sum(g[1])` gives 6 and `Length(g[3])` gives `NaN`. The size of a tree from its
 adjacency list compiles as the recursive
 `sz := (g, v) ↦ 1 + Reduce(Map(c ↦ sz(g, c), g[v]), Add, 0)` with `sz`
 declared `(list<list<integer>>, integer) -> integer`: `sz(A, 1)` at
@@ -1666,7 +1678,7 @@ the body settles: with `n = 32`,
 `step(g: list<list<integer>>) = map(i ↦ map(j ↦ f(g, i, j), Range(1, n)), Range(1, n))`
 compiles as `(g: list<list<integer>>) ↦ step(g)` and as `step(G)` with `G`
 declared `list<list<integer>>`, and `run()` returns an array of 32 arrays of
-32 numbers. Its result is not such an input: `step(step(g))` declines. An
+32 numbers. An
 element type `number` is read as `real` (`list<list<number>>`, the type of
 `let g = map(i ↦ map(j ↦ Mod(i + j, 2), Range(1, n)), Range(1, n))`), except in
 the mode `complex`, where such an input declines. A parameter of a user function
@@ -1683,6 +1695,58 @@ writes a list of rank 2, and `run()` writes it back to the engine as a `List` of
 literal, an `AddTo` of it, and a write of a value that is not a list of rank 2
 of numbers of its element type decline; after the write the name holds that
 list of rank 2, not such an input, so a second write `g = step(g)` declines.
+
+A list of lists of real or integer numbers that the program makes, whose
+rows have a run-time length, is such a value too, on `javascript` outside the
+bigint and interval modes (CE-1736, #638): a `Map` or a `Comprehension` whose
+value is a list of a run-time length, a `Filter` that keeps rows, a user
+function whose body is one, an `If` or a `Coalesce` of two such values, and a
+local that holds one. With `g: list<list<integer>>` at `g = [[1, 2, 3], [4]]`,
+`Map(r ↦ 2r, g)` gives `[[2, 4, 6], [8]]`, `Filter(g, r ↦ Length(r) > 1)`
+gives `[[1, 2, 3]]`, and with
+`step(g: list<list<integer>>) = map(r ↦ map(x ↦ x + 1, r), g)`,
+`step(step(g))` gives `[[3, 4, 5], [6]]`; `Map(i ↦ Range(1, i), Range(1, n))`
+at `n = 3` gives `[[1], [1, 2], [1, 2, 3]]`. It is read as an input is read,
+and as the result of the program `run()` returns the array of arrays with
+`rows: true`. A row at an index known at run time as an element of such a
+list (`Map(i ↦ g[i], Range(1, n))`, where the interpreter gives `Missing` for
+an absent row), elements of another type (booleans, complex numbers, points),
+a list of such lists, `Scan` of one, a `List` literal of a row and a scalar,
+and a `Join` of such a list and a flat list decline with `outside-profile`,
+so the interpreter evaluates them. A `List` literal of flat lists of numbers, one of
+them of a run-time length, is such a list (with `P: list<integer>` at
+`P = [4, 5]`, `List(Map(i ↦ i + 1, P), List(Length(P)))` gives
+`[[5, 6], [2]]`; a literal whose rows all have constant lengths compiles as
+before), and so are `Join`, `ListJoin` and `Append` of such lists and rows
+(at `g = [[1, 2, 3], [4]]` and `n = 2`, `Append(g, Range(1, n))` gives
+`[[1, 2, 3], [4], [1, 2]]`) and a `Fold` from `List()` whose step gives one:
+`Fold((a, i) ↦ Join(a, [Range(1, i)]), [], Range(1, n))` at `n = 3` gives
+`[[1], [1, 2], [1, 2, 3]]`. A `Loop`, a `Reduce`
+and a `Fold` carry such a list, and a local that holds one can be written
+again: at `g = [[1, 2, 3], [4]]`, `let t = g` followed by three passes of
+`t = step(t)` gives `[[4, 5, 6], [7]]`, and `Fold((a, i) ↦ step(a), g,
+Range(1, 2))` gives `[[3, 4, 5], [6]]`. A write or a step that gives reals
+where the list held integers gives reals, as the interpreter's.
+
+A matrix operator reads a list of lists of run-time length only when the
+program settles that its rows have one length: a `Map` (or a `Filter` of
+one) whose row length does not depend on the element, read directly or
+through a local, a `Map` of each element of it, or a `Transpose` of it.
+`Transpose`, `ConjugateTranspose` and `MatrixMultiply` then compile, and
+`Trace` too when the number of rows and the length of the rows are one value;
+`MatrixMultiply` compiles only when its inner lengths are one value or
+equal constants, since the compiled code tests no length at run time (the
+interpreter gives `incompatible-dimensions` where they differ). At `n = 2`
+and `m = 3`, `Transpose(Map(i ↦ Map(j ↦ i + 10j, Range(1, m)), Range(1, n)))`
+gives `[[11, 12], [21, 22], [31, 32]]`, and with
+`T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
+`MatrixMultiply(T, T)` gives `[[13, 18], [18, 25]]`. The other matrix
+operators (`Determinant`, `Inverse`) decline such a list: its order is known
+at run time only. An input, a value after an `If` or a `Coalesce`, a value
+that a loop carries, the result of a call, a join and a literal decline,
+since their rows can have different lengths: with `g: list<list<integer>>`,
+`Transpose(g)` and `Transpose(Map(i ↦ Range(1, i), Range(1, n)))` decline
+with `outside-profile`, so the interpreter evaluates them.
 Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with
@@ -2952,7 +3016,10 @@ loaders throw); a consumer that reduces each row, `Map(r ↦ Sum(r), Chunk(L, k)
 `Length(Partition(L, n))` or `At(Partition(L, p), 1)`, reads the rows one by
 one. Where the interpreter leaves the form unevaluated (a count below 1, a
 count of `Chunk` above 10,000), a constant count declines and a count known at
-run time throws a `RangeError`. Any other use of the value declines, and so does
+run time throws a `RangeError`. A consumer whose value holds a row,
+`Map(r ↦ r, Chunk(L, 2))` (`[[1, 2], [3]]` at `L = [1, 2, 3]`), makes a list of
+lists of run-time length ("Lists of two run-time lengths"). Any other use of the
+value declines, and so does
 `Chunk` of a computed list (a `Range`, a `Map`): the interpreter leaves it
 unevaluated past `maxCollectionSize` (`compilation/ir/README.md`, "The rows
 lane").

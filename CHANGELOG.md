@@ -20,6 +20,34 @@
   `hostSum(map(x => x * 2, [1, 2]))`, `hostSum([1, 2] + 1)`, and a list
   constant) now compile, where they declined.
 
+### Improvements
+
+- **Compiled JavaScript builds a list of lists whose rows have run-time
+  lengths** (CE-1736, #638). With `g: list<list<integer>>`,
+  `Map(r ↦ 2r, g)`, `Filter(g, r ↦ Length(r) > 1)` and
+  `Map(i ↦ Range(1, i), Range(1, n))` declined with "a list of lists of
+  run-time length", so the program fell back to the interpreter. They now
+  compile: as the result, `run()` returns an array of arrays (at
+  `g = [[1, 2, 3], [4]]`, `Map(r ↦ 2r, g)` gives `[[2, 4, 6], [8]]`), and
+  `Length`, `Count`, `Map`, `At(At(v, i), j)`, `Flatten`, `Reduce` and
+  `Fold` read the value as they read such an input. A local, an `If` or a
+  `Coalesce` can hold it, and a user function can return it, so with
+  `step(g: list<list<integer>>) = map(r ↦ map(x ↦ x + 1, r), g)`,
+  `step(step(g))` compiles. A `Loop`, a `Reduce` or a `Fold` can carry
+  it: at `g = [[1, 2, 3], [4]]`, `let t = g` followed by three passes of
+  `t = step(t)` gives `[[4, 5, 6], [7]]`. A list literal of such rows,
+  `Join`, `ListJoin` and `Append` make one, and so does a `Fold` from `[]`:
+  `Fold((a, i) ↦ Join(a, [Range(1, i)]), [], Range(1, n))` at `n = 3` gives
+  `[[1], [1, 2], [1, 2, 3]]`. `Transpose`, `MatrixMultiply` and `Trace`
+  read such a list when the program settles that its rows have one length:
+  with `T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
+  `MatrixMultiply(T, T)` at `n = 2` gives `[[13, 18], [18, 25]]`, and
+  `MatrixMultiply` declines when its inner lengths are not provably equal.
+  The matrix operators of an input or of a value whose rows can have
+  different lengths, `Determinant` and `Inverse` of such a list, elements
+  that are not real or integer numbers, GLSL, the interval target and the
+  `bigint` mode still decline.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements

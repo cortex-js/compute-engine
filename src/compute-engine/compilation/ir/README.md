@@ -935,24 +935,84 @@ carried count is a new value that `rowLengths` does not name; a reducer of an
 absent row is unspecified (`Sum` gives 0). A row of a `Chunk` or a `Partition`
 is read at a constant index in range of a constant count only. Every other read
 of the name declines (`symbol()` of `lower.ts`, which admits only the occurrence
-that `wholeRows()` lowers): a `Map` or a `Filter` whose value is a list of rows
-("a list of lists of run-time length"), arithmetic, `g` as the result, a binding
-to a local, an argument of a parameter of another type, and a list that the
-program makes at such a parameter (`sq(sq(g))`). A list of lists of booleans,
+that `wholeRows()` lowers): arithmetic, an argument of a parameter of another
+type, and a list that the program makes at such a parameter (`sq(sq(g))`). A list of lists of booleans,
 the bigint and the interval modes and GLSL decline the input. The entry checks
 it as a list (a string or a typed array is refused), and a batch shares it
 between its cells.
 
+A list of lists of real or integer numbers that the program makes, whose rows
+have a run-time length, is of the lane too, on JavaScript outside the interval
+and the bigint modes (CE-1736, #638). A `Map` (also of several lists, and a
+`Comprehension`: `over()` of `lower-lists.ts`) whose value is a flat list of a
+length that is not a constant (`runTimeRow()`) builds it in the region
+`rows.build`, an array of the rows; a `Filter` (or a `Comprehension` with a
+condition) that keeps rows is `rows.filter`, which pushes each row kept. The
+lane of the elements is in `rowsElements`, not in the op: one region for
+integers and reals. The value is gated as an input is (`rowsParams`): it is read
+whole only where `wholeRows()` admits it, by a reader of its rows (`chunks()`,
+which reads any value of the lane through `rowsOf()`: `Map`, `Filter`,
+`Length`, `Count`, `At(At(v, i), j)`, `Flatten`, `Reduce`, `Fold`, `FlatMap`),
+at a parameter of that lane, as the value of a local and as the result. A
+`Block` (its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed` and a
+`WithRandomSeed` pass the admission to the operands that give their value
+(`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read declines ("a
+list of lists of run-time length read whole other than by a reader of its rows
+…"). The join of two arms of the lane (`branch()`) is of the lane, of reals
+where one arm is. A call of a user function whose body is such a list
+(`step(g: list<list<integer>>) = map(r => map(x => x + 1, r), g)`) is of the
+lane, so `step(step(g))` compiles. A local that holds such a list is written
+again by an `Assign` of another one (`assign()`, `Binding.rows`), and a `Loop`
+carries it as one value (`carry` of `loop()`), whose parameter has the lane of
+the elements of the local; a write of reals to a local of integers puts the
+local on the real lane from its declaration (`WidenList`). A `Reduce` or a
+`Fold` from such a list carries it the same way (`reduceRows()` of
+`lower-lists.ts`): each step must give one, and a step from integers that gives
+reals puts the accumulator on the real lane (a trial lowering, as for a
+scalar). A `List` literal whose elements are flat lists of reals or integers,
+one of them of a run-time length (`List(Map(i ↦ i + 1, P), List(Length(P)))`),
+is of the lane too (`rowsLiteral()` of `lower-lists.ts`: the `list`
+instruction of the lane, `[a, b]`); a literal whose rows all have constant
+lengths keeps its list of rank 2 or its record of lists ("Records").
+`Join` and `ListJoin` of lists of lists, one of them of the lane, are the rows
+of the operands in order (`rowsJoin()`, the operation `rows.join`,
+`[...$0, ...$1]`), a list of rank 2 of numbers read as its rows (a
+`rows.build` of them); `Append(a, r_1, …)` of such a list `a` and flat lists is
+`a` joined with the literal of the `r_i`. A `Reduce` or a `Fold` from `List()`
+whose static type is a list of lists of numbers first tries an accumulator of
+the lane from an empty list of rows, the lane of its elements the body's
+(`reduceRows()`); a body that declines there takes the path of a flat list
+(in `cx.attempt()`, as the rows paths of `Join` and `Append` are, so that an
+operand is lowered once). A `rows.build` or a `rows.filter` whose row length is
+a value made before the region, or made in it by pure operations of such values
+and constants, records "every row has this length" in the side table
+`rowWidths` (the operations made again after the region, where an equal
+operation of equal operands is one value), and a `rows.build` records its count
+in `rowCounts`; `rowsOf()` reads both, so a `Map` of each element of such a
+value, a `Filter` of it and a local that holds it keep the fact. A join of two
+arms, a value that a loop carries, a call, a parameter, a join of lists and a
+literal have none. The matrix operators read the fact ("Matrices").
+Declined: a row of the lane at an index known at run time as an element of a
+list (`Map(i ↦ At(g, i), Range(1, n))`: the interpreter gives `Missing` where
+the row is absent), elements that are booleans, complex numbers, points or
+strings, a list of such lists (rank 3), a step of a `Reduce` from one that
+gives another value, `Scan` of one, a `List` literal of a row and a scalar (a
+record), a `Join` of such a list and a flat list, an `Append` of a scalar, a
+parallel `Assign` of a local that holds one, the matrix operators of one without
+the fact (`Transpose(v)`: "its rows can have different lengths"), GLSL and the
+interval and the bigint modes.
+
 A user function whose result type is such a list (declared, or inferred from a
 body `Map(i ↦ Map(j ↦ …, Range(1, n)), Range(1, n))`) has the type of its body,
 which must be a list of rank 2 of integers or reals (not of points), of the
-lengths that the body settles: the result is not of the lane `rows`. A `build`
+lengths that the body settles, or a value of the lane `rows` that the body makes
+(above). A `build`
 whose element is a list of a length value that is a constant (the count of
 `Range(1, 32)`, made in the region) has an element of that number of elements
 (`region()` of `lower.ts`), so
 `Map(i ↦ Map(j ↦ i·j, Range(1, 20)), Range(1, 20))` keeps its two loops and is a
-list of 20 lists of 20; an element of a run-time length still declines ("a list
-of lists of run-time length"). So one step of the Game of Life on a 32 × 32
+list of 20 lists of 20; an element of a run-time length is `rows.build` (above).
+So one step of the Game of Life on a 32 × 32
 grid, `step(g: list<list<integer>>)` with `n = 32`, compiles for a root literal
 `(g: list<list<integer>>) ↦ step(g)` and for `step(G)` with `G` declared
 `list<list<integer>>`.
@@ -2219,8 +2279,9 @@ built the same way, with the interpreter's value for every length, also 0:
   for rows of one length. The groups of a predicate are read by `Length`,
   `Count` and `At` only: the interpreter leaves `Map` of them unevaluated, so
   every other reader declines. A consumer whose value holds a row
-  (`Map(r ↦ r, Chunk(L, 3))`, a `Filter` or an `Any` that keeps rows, `ListJoin`
-  and `Join` of such rows) declines ("a list of lists of run-time length"). On
+  (`Map(r ↦ r, Chunk(L, 3))`) makes the lane `rows` on JavaScript ("The rows
+  lane"); `ListJoin` and `Join` of such rows decline ("a list of lists of
+  run-time length"). On
   GLSL a consumer compiles only when every row has a constant length of at least
   1 (`Map(r ↦ Sum(r), Partition(L6, 4))` of `L6: list<real^6>`).
 - `TakeWhile(L, p)` and `DropWhile(L, p)` split `L` at the first index of a
@@ -2438,10 +2499,18 @@ lengths, declines.
 ## Matrices
 
 A matrix is a list of rank 2 of real or integer numbers whose rows have a stated
-length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a build
-makes no list of lists of a run-time length, so an input of type
-`list<list<real>>`, whose rows can have two lengths, is refused, as before
-(`docs/COMPILATION-MODEL.md`). The matrix operators (`lower-matrices.ts`) settle
+length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a list
+of lists of a run-time length (an input of type `list<list<real>>`, a build
+whose rows have a run-time length) is the lane `rows` ("The rows lane"), which
+the matrix operators decline (`docs/COMPILATION-MODEL.md`), except a value
+whose rows have one length (`rowWidths`): `Transpose` and `ConjugateTranspose`
+of it are the rows of its columns (`rows.get`), whose length is its number of
+rows; `Trace` of it is the sum of its diagonal when its number of rows and the
+length of its rows are one value; `MatrixMultiply` of it and such a value, a
+matrix or a list is the product when the inner lengths are one value or equal
+constants, and otherwise declines (the interpreter's `incompatible-dimensions`
+where they differ; no test at run time). The other operators decline it: their
+order is known at run time only. The matrix operators (`lower-matrices.ts`) settle
 the shape of their value from the shapes of their operands; a tuple, a list of
 tuples, complex and boolean elements, a rank above 2 and another number of
 operands decline. On JavaScript:
@@ -3521,8 +3590,11 @@ two types"); `admits()` refuses the lane there too.
   not make a list (two lanes that do not join, lists of two lengths, a tuple and
   a list, a record) is a record with no names (`Tuple("a", t)`, `[t, "a"]`); a
   `Tuple` or `List` of one lane stays the tuple or the list of "Tuples" and
-  "Lists". A field of a run-time length declines (its length is a value of the
-  function that makes the record), and so does a field of the lane `rows`. A
+  "Lists". On JavaScript a `List` of flat lists of numbers, one of them of a
+  run-time length, is a list of lists of the lane `rows` ("The rows lane"),
+  not a record. A field of a run-time length declines (its length is a value
+  of the function that makes the record), and so does a field of the lane
+  `rows`. A
   list of records (an element of a build, a filter or a random frame) declines.
 - **Reading a record.** `Field(r, name)` of a record of a named tuple type and
   `At(r, k)` (`First`, `Last`) of a constant `k` in range give the field (the

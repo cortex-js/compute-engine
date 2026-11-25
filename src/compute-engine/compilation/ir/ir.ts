@@ -642,6 +642,12 @@ export class Builder {
     return this.open.includes(r);
   }
 
+  /** `v` is a parameter of an open region (an input that the entry reads
+   *  where it is first read is one). */
+  isOpenParam(v: V): boolean {
+    return this.open.some((r) => r.params.includes(v));
+  }
+
   /** The program whose entry body is the region made by `f`; when `f`
    *  gives several values, the entry returns the array of them (`tuple`). */
   program(f: () => V | V[]): Program {

@@ -120,6 +120,7 @@ import {
 } from './operators.js';
 import {
   Decline,
+  WidenList,
   BIGINT_LANE,
   decline,
   fullyListed,
@@ -506,18 +507,6 @@ type Misuse = 'write' | 'read' | undefined;
 const worse = (a: Misuse, b: Misuse): Misuse =>
   a === 'write' || b === 'write' ? 'write' : (a ?? b);
 
-/** The decline of a real written to a list local written in place whose
- *  integer lane comes from its value (`listWrite()`): `lower()` lowers the
- *  program again with the local of the declaration `declaration` on the
- *  real lane, as the interpreter widens the list. */
-class WidenList extends Decline {
-  constructor(
-    d: Decline,
-    readonly declaration: Expression
-  ) {
-    super(d.node, d.cause, d.head, d.reason);
-  }
-}
 
 /** The decline of a call of a function of the host with a list, a tuple
  *  or a record as an argument in a lowering that does not track the
@@ -1036,9 +1025,10 @@ function lowerOnce(
   if (!isFunction(rootTuple, 'Tuple')) rootTuple = undefined;
   let rootParts: V[] | undefined;
   const tuples = new Map<V, number>();
-  /** The inputs and the parameters of the lane `rows` (a list of lists of
-   *  two lengths not stated, `rowsElementLane()`), and the occurrence of a
-   *  name that `wholeRows()` lowers, the only one that may read one. */
+  /** The values of the lane `rows` (a list of lists of two lengths not
+   *  stated, `rowsElementLane()`): the inputs, the parameters and the
+   *  values that the program makes (CE-1736). `rowsRead` is the occurrence
+   *  that `wholeRows()` lowers, the only one that may read one whole. */
   const rowsParams = new Set<V>();
   /** The tests decided by the IR types of their operands
    *  (`Lowering.typeTests`). */
@@ -1080,6 +1070,8 @@ function lowerOnce(
     if (place !== undefined) strings.read.add(place);
   };
   const rowsElements = new Map<V, 'integer' | 'real'>();
+  const rowWidths = new Map<V, V>();
+  const rowCounts = new Map<V, V>();
   let rowsRead: Expression | undefined;
   /** The count of the elements of a row `At(g, i)` of such a name at an
    *  index known at run time (0 where `i` is out of range), and the value
@@ -1897,6 +1889,11 @@ function lowerOnce(
 
   /** Lower `e`. With `want` false its value is not used (a statement). */
   const value = (e: Expression, want = true): V | undefined => {
+    // A name is admitted by `symbol()`; another node here, and the node
+    // that passes its value on (`rowsNode`) by its handler.
+    const admitted = !isSymbol(e) && rowsRead === e;
+    if (!isSymbol(e)) rowsRead = undefined;
+    rowsNode = admitted ? e : undefined;
     // The root `Tuple` is lowered where it is (`rootParts`).
     const shared =
       want && isFunction(e) && e !== rootTuple && facts(e).writes.size === 0;
@@ -1915,7 +1912,8 @@ function lowerOnce(
               ? typeTests.delete(x)
               : typeTests.set(x, tests[i])
           );
-        return unlisted(e, m.v);
+        rowsNode = undefined;
+        return unlisted(e, wholeOnly(e, m.v, admitted));
       }
     }
     const region = b.current();
@@ -1924,9 +1922,10 @@ function lowerOnce(
     if (scope !== undefined) scopes.push(scope);
     let v: V | undefined;
     try {
-      v = node(e, want);
+      v = wholeOnly(e, node(e, want), admitted);
     } finally {
       if (scope !== undefined) scopes.pop();
+      rowsNode = undefined;
     }
     const lane = v === undefined ? undefined : type(v).lane;
     if (bigint && (lane === 'real' || lane === 'complex' || lane === 'color'))
@@ -2022,6 +2021,37 @@ function lowerOnce(
     } finally {
       rowsRead = undefined;
     }
+  };
+
+  /** The node whose value `value()` admits whole (`wholeRows()`) while it
+   *  is lowered: a `Block`, an `If`, a `Which`, a `Coalesce` or a `Typed`
+   *  passes the admission on to the operand that gives its value
+   *  (`passesWhole()`). */
+  let rowsNode: Expression | undefined;
+
+  /** Whether the handler of `e` lowers the operand that gives its value
+   *  with `wholeRows()`: `e` is admitted whole, read before the handler
+   *  lowers any operand. */
+  const passesWhole = (e: Expression): boolean => {
+    const whole = rowsNode === e;
+    rowsNode = undefined;
+    return whole;
+  };
+
+  /** `v`, the value of the node `e` other than a name (`symbol()` checks a
+   *  name): a value of the lane `rows` that the program made (`rowsParams`)
+   *  is read whole only where `wholeRows()` admits it (`admitted`). */
+  const wholeOnly = (
+    e: Expression,
+    v: V | undefined,
+    admitted: boolean
+  ): V | undefined => {
+    if (v !== undefined && !admitted && !isSymbol(e) && rowsParams.has(v))
+      decline(
+        e,
+        'a list of lists of run-time length read whole other than by a reader of its rows (Map, Filter, Length, Count, At, Flatten, FlatMap, Reduce, Fold), as the result, as the value of a local, or as an argument of a parameter of that type'
+      );
+    return v;
   };
 
   let lowered = 0;
@@ -2143,7 +2173,8 @@ function lowerOnce(
     const closed = closedValue(e);
     if (closed !== undefined) return closed;
     switch (e.operator) {
-      case 'If':
+      case 'If': {
+        const whole = passesWhole(e);
         // `If(c, a, b)` of a list condition is `Which(c, a, True, b)`, as
         // in the interpreter: a selection at each position.
         // With no `else`, the interpreter restricts a list arm to the mask
@@ -2157,9 +2188,14 @@ function lowerOnce(
           e,
           [[e.ops[0], e.ops[1]]],
           e.ops[2] ?? (e.ops[1].type.type === 'boolean' ? ce.False : undefined),
-          want
+          want,
+          undefined,
+          undefined,
+          whole
         );
+      }
       case 'Which': {
+        const whole = passesWhole(e);
         if (e.nops % 2 !== 0) decline(e, 'an odd number of operands');
         const clauses: [Expression, Expression][] = [];
         for (let i = 0; i < e.nops; i += 2)
@@ -2173,14 +2209,35 @@ function lowerOnce(
         if (reached.some(([c]) => mask(c)))
           return select(e, reached, dflt < 0 ? undefined : clauses[dflt][1]);
         if (last !== undefined && isSymbol(last[0], 'True'))
-          return conditional(e, clauses.slice(0, -1), last[1], want);
-        return conditional(e, clauses, undefined, want);
+          return conditional(
+            e,
+            clauses.slice(0, -1),
+            last[1],
+            want,
+            undefined,
+            undefined,
+            whole
+          );
+        return conditional(
+          e,
+          clauses,
+          undefined,
+          want,
+          undefined,
+          undefined,
+          whole
+        );
       }
       case 'Block':
         return block(e, want);
       case 'List': {
-        // A list, or a record of elements of several lanes.
+        // A list, or a record of elements of several lanes; a list of
+        // lists of run-time length is of the lane `rows` (CE-1736).
         const elements = e.ops.map((op) => value(op)!);
+        // (JavaScript only, outside the interval and the bigint modes:
+        // `rowLane()` declines elsewhere).
+        const rowsValue = lists.rowsLiteral(e, elements);
+        if (rowsValue !== undefined) return rowsValue;
         return (
           records.literal(e, elements, false, readers.has(e)) ??
           literalListed(e, elements, list(e, elements))
@@ -3042,8 +3099,12 @@ function lowerOnce(
         return lists.reduce(e, r, [lists.source(l)], scalar(init));
       }
       case 'Typed':
-        return value(e.ops[0], want);
+        return passesWhole(e) && want
+          ? wholeRows(e.ops[0])
+          : value(e.ops[0], want);
       case 'WithRandomSeed': {
+        // The value of the frame, admitted whole where the frame is.
+        const whole = passesWhole(e);
         // `WithRandomSeed(537911, Random())`, the random constant of a host:
         // a number as the seed and one draw give one value at every call,
         // the interpreter's, as a literal.
@@ -3073,7 +3134,12 @@ function lowerOnce(
         const seed = scalar(e.ops[0]);
         if (e.nops !== 2 || !isSubLane(type(seed).lane, 'real'))
           decline(e, 'a seed that is not a number');
-        return seededFrame(e, seed, () => value(e.ops[1], want), want);
+        return seededFrame(
+          e,
+          seed,
+          () => (whole && want ? wholeRows(e.ops[1]) : value(e.ops[1], want)),
+          want
+        );
       }
       case 'Assign':
         return assign(e, want);
@@ -3305,19 +3371,19 @@ function lowerOnce(
         const whole = declared.map((d) => (d?.shape.length ?? 0) > 0);
         const values = args.map((a, i) => {
           const d = declared[i];
-          // A parameter of the lane `rows` binds an input or a parameter of
-          // that lane whole, as a parameter of a user function does: of
-          // lists of integers, one of lists of integers only.
+          // A parameter of the lane `rows` binds a list of lists of
+          // run-time length whole, as a parameter of a user function does:
+          // of lists of integers, one of lists of integers only.
           if (d?.lane === 'rows') {
             const raw = wholeRows(a);
             if (type(raw).lane !== 'rows')
               decline(
                 a,
-                `an argument of Apply for the parameter ${names[i]}, a list of lists of two lengths not stated, that is not an input or a parameter of that type`
+                `an argument of Apply for the parameter ${names[i]}, a list of lists of two lengths not stated, that is not a list of lists of run-time length`
               );
             if (
               rowsElementLane(d.t) === 'integer' &&
-              rowsLaneOf(a) !== 'integer'
+              (rowsElements.get(raw) ?? rowsLaneOf(a)) !== 'integer'
             )
               decline(
                 a,
@@ -3498,7 +3564,7 @@ function lowerOnce(
         if (e.nops !== 1) break;
         return absent(e, e.ops[0], value(e.ops[0])!);
       case 'Coalesce':
-        return coalesce(e, 0);
+        return coalesce(e, 0, passesWhole(e));
       case 'AssertPresent':
         if (e.nops !== 1) break;
         return present(e, value(e.ops[0])!);
@@ -4657,7 +4723,10 @@ function lowerOnce(
       return { v: length };
     });
     const param = b.param(name, { lane: ir.lane, shape });
-    if (ir.lane === 'rows') rowsParams.add(param);
+    if (ir.lane === 'rows') {
+      rowsParams.add(param);
+      rowsElements.set(param, rowsElementLane(t, cx.wide)!);
+    }
     // A string is read once, as the engine boxes it (`text.in`); a list of
     // strings is read by `StringJoin` only, which conditions its elements.
     const v =
@@ -4843,10 +4912,29 @@ function lowerOnce(
           t === undefined ? cause : 'arms of a tuple and a list',
           t !== undefined || n.length !== m.length ? UNSETTLED_SHAPE : undefined
         );
+      // Two lists of lists of run-time length that the program reads row by
+      // row (`rowsParams`, CE-1736): one of the same rows, of reals where
+      // either arm is (on JavaScript a number holds both lanes).
+      const [ex, ey] = [rowsElements.get(x), rowsElements.get(y)];
+      const gated =
+        t.lane === 'rows' && (rowsParams.has(x) || rowsParams.has(y));
+      if (gated && (ex === undefined || ey === undefined))
+        decline(
+          node,
+          'arms of a list of lists of run-time length and of another value'
+        );
       a.region.yields.push(widenIn(a.region, x, t));
       c.region.yields.push(widenIn(c.region, y, t));
       outs.push(keep(x, b.newValue(t)));
-      return outs[outs.length - 1];
+      const out = outs[outs.length - 1];
+      if (gated) {
+        rowsParams.add(out);
+        rowsElements.set(
+          out,
+          ex === 'real' || ey === 'real' ? 'real' : 'integer'
+        );
+      }
+      return out;
     };
     const changed = bindings.filter(
       (_, i) => a.after[i] !== before[i] || c.after[i] !== before[i]
@@ -4872,9 +4960,11 @@ function lowerOnce(
   };
 
   /** The region instruction of the row `op`, of the operands `args` and the
-   *  region `f` with `params`: its results, typed by its row. */
+   *  region `f` with `params`: its results, typed by its row. A function
+   *  `op` names the row once `f` has made the region (a build whose element
+   *  is a list of run-time length is `rows.build`). */
   const region = (
-    op: string,
+    which: string | (() => string),
     args: V[],
     params: V[],
     f: () => V[],
@@ -4882,8 +4972,9 @@ function lowerOnce(
     pieces?: number,
     closed?: Region
   ): V[] => {
-    const r = regionRow(op)!;
     const body = b.region(params, f);
+    const op = typeof which === 'string' ? which : which();
+    const r = regionRow(op)!;
     // A list of records, or a record from a region, has no type here.
     if (body.yields.some((y) => ['record', 'nothing'].includes(type(y).lane)))
       decline(site, 'a record made in a build, a filter or a random frame');
@@ -5050,7 +5141,13 @@ function lowerOnce(
       site: text(node),
     });
     changed.forEach((x, j) => (x.v = outs[lengths.length + j]));
-    return want ? outs[outs.length - 1] : undefined;
+    // A list of lists of run-time length (`rowsParams`, CE-1736).
+    const out = outs[outs.length - 1];
+    if (want && rowsParams.has(result!)) {
+      rowsParams.add(out);
+      rowsElements.set(out, rowsElements.get(result!)!);
+    }
+    return want ? out : undefined;
   };
 
   /** `c` is a list of booleans by its static type: a condition of an `If`
@@ -5292,15 +5389,20 @@ function lowerOnce(
     otherwise: Expression | undefined,
     want: boolean,
     first?: V,
-    start = b.types.length
+    start = b.types.length,
+    whole = false
   ): V | undefined => {
+    // `whole`: the conditional is admitted whole (`passesWhole()`), and so
+    // is each arm (a list of lists of run-time length, CE-1736).
+    const lowered = (x: Expression): V | undefined =>
+      whole && want ? wholeRows(x) : value(x, want);
     // An arm `List()` of a conditional whose type is a flat list of
     // integers or reals (the other arms give the element type,
     // `If(n < 1, [], Range(1, n))`): the empty list of that lane, which
     // `branch()` joins with the other arms as lists of two lengths.
     const arm = (x: Expression): V | undefined => {
       const lane = want ? emptyListLane(x, node.type.type) : undefined;
-      return lane === undefined ? value(x, want) : emptyList(x as Fn, lane);
+      return lane === undefined ? lowered(x) : emptyList(x as Fn, lane);
     };
     if (clauses.length === 0) {
       if (otherwise !== undefined) return arm(otherwise);
@@ -5416,18 +5518,18 @@ function lowerOnce(
       (interval || (options.fold !== false && scalarArms)
         ? b.constants.get(cond)
         : undefined);
-    if (decided === true) return value(then, want);
+    if (decided === true) return lowered(then);
     if (
       decided === false &&
       (rest.length > 0 || otherwise !== undefined || first !== undefined)
     )
-      return conditional(node, rest, otherwise, want, first, start);
+      return conditional(node, rest, otherwise, want, first, start, whole);
     const at = b.types.length;
     return branch(
       node,
       cond,
       () => (first = arm(then)),
-      () => conditional(node, rest, otherwise, want, first, at),
+      () => conditional(node, rest, otherwise, want, first, at, whole),
       want
     );
   };
@@ -5532,14 +5634,15 @@ function lowerOnce(
 
   /** `Coalesce(a, b, …)`: the first operand that is not absent, or the
    *  last; each operand after the first is lowered in an arm, only when
-   *  the operands before it are absent. Arms of two shapes decline. */
-  const coalesce = (e: Fn, i: number): V => {
-    const v = value(e.ops[i])!;
+   *  the operands before it are absent. Arms of two shapes decline.
+   *  `whole`: each operand is admitted whole (`passesWhole()`). */
+  const coalesce = (e: Fn, i: number, whole: boolean): V => {
+    const v = whole ? wholeRows(e.ops[i]) : value(e.ops[i])!;
     if (i === e.nops - 1) return v;
     return branch(
       e,
       absent(e, e.ops[i], v),
-      () => coalesce(e, i + 1),
+      () => coalesce(e, i + 1, whole),
       () => v,
       true
     )!;
@@ -5739,8 +5842,10 @@ function lowerOnce(
     return xs.some(power) ? 'real' : t;
   };
 
-  const block = (e: Fn, want: boolean): V | undefined =>
-    withFrame(false, (frame) => {
+  const block = (e: Fn, want: boolean): V | undefined => {
+    // The value of the block, admitted whole where the block is.
+    const wholeValue = passesWhole(e);
+    return withFrame(false, (frame) => {
       let result: V | undefined;
       /** Bind `n`, declared by the statement `s` of index `i` with the
        *  value `v` (of the expression `x`, when there is one) and the type
@@ -5789,11 +5894,23 @@ function lowerOnce(
               : 'real';
         result = local(s, v, lane);
         const unwritten = !e.ops.some((y) => facts(y).writes.has(n));
+        // A list of lists of run-time length that the program makes or an
+        // input (not one of `Chunk` or `Partition`): its elements are of the
+        // real lane where a write of reals widens it (`WidenList`, CE-1736).
+        const elements = lane === 'rows' ? rowsElements.get(v) : undefined;
         frame.names.set(n, {
           v: result,
           lane,
           role: isSymbol(constant, 'True') ? 'constant' : 'local',
           exact: unwritten && x !== undefined ? literalNumber(x) : undefined,
+          ...(elements !== undefined
+            ? {
+                rows: {
+                  lane: wide.has(s) ? 'real' : elements,
+                  declaration: s,
+                },
+              }
+            : {}),
         });
       };
       const statement = (s: Expression, i: number) => {
@@ -5883,8 +6000,9 @@ function lowerOnce(
             return void (result = owned.v);
           }
           // A list (or a tuple) local of no stated type is its value, a
-          // local that no `Assign` writes (`assign()` declines one).
-          const v = cx.value(value)!;
+          // local that no `Assign` writes (`assign()` declines one). A list
+          // of lists of run-time length is its value too (CE-1736).
+          const v = wholeRows(value);
           if (rebuilt && (!scalarLocal || type(v).shape.length > 0)) {
             if (isSymbol(constant, 'True'))
               decline(s, 'a write to a constant list local');
@@ -5964,7 +6082,10 @@ function lowerOnce(
           const before = whole;
           if (own?.role === 'list') whole = own;
           try {
-            result = value(s, want && i === e.nops - 1);
+            result =
+              wholeValue && want && i === e.nops - 1
+                ? wholeRows(s)
+                : value(s, want && i === e.nops - 1);
           } finally {
             whole = before;
           }
@@ -5999,6 +6120,7 @@ function lowerOnce(
       if (want && result === undefined) decline(e, 'a block with no value');
       return result;
     });
+  };
 
   /** The list `l` of a `Loop` clause when it is a literal `List` of
    *  `Tuple`s of one length of which a part is a tuple (a tuple of tuples,
@@ -6101,7 +6223,16 @@ function lowerOnce(
       );
       const k = b.newValue(scalarType('integer'));
       const params = carried.flatMap((x) => {
-        if (x.whole === undefined) return [b.newValue(scalarType(x.lane!))];
+        if (x.whole === undefined) {
+          const p = b.newValue(scalarType(x.lane!));
+          // A list of lists of run-time length (CE-1736): the lane of its
+          // elements is that of the local.
+          if (x.rows !== undefined) {
+            rowsParams.add(p);
+            rowsElements.set(p, x.rows.lane);
+          }
+          return [p];
+        }
         const n = b.newValue(scalarType('integer'));
         const shape = [{ v: n }, ...x.whole.inner];
         const l = b.newValue({ lane: x.lane!, shape });
@@ -6122,6 +6253,11 @@ function lowerOnce(
             b.newValue(mapLengths(type(v), (n) => outs[params.indexOf(n)]))
           )
         );
+      for (const [i, v] of params.entries())
+        if (rowsParams.has(v)) {
+          rowsParams.add(outs[i]);
+          rowsElements.set(outs[i], rowsElements.get(v)!);
+        }
       b.emit({
         k: 'loop',
         outs,
@@ -6656,6 +6792,38 @@ function lowerOnce(
       binding.v = fitWhole(e, x, binding.whole, binding.lane!);
       return binding.v;
     }
+    if (binding.rows !== undefined) {
+      // A local that holds a list of lists of run-time length (CE-1736):
+      // the value is another such list. A list of reals written to one of
+      // integers widens it, as the interpreter does: the lowering again
+      // puts the local on the real lane from its declaration (`WidenList`).
+      const x = wholeRows(e.ops[1]);
+      const elements = rowsElements.get(x);
+      if (type(x).lane !== 'rows' || elements === undefined)
+        decline(
+          e,
+          `a value of type ${typeToString(type(x), tuples.get(x) ?? -1)} written to a local that holds a list of lists of run-time length`
+        );
+      if (binding.rows.lane === 'integer' && elements === 'real')
+        try {
+          decline(
+            e,
+            'a list of lists of reals written to a local that holds one of integers'
+          );
+        } catch (d) {
+          throw new WidenList(d as Decline, binding.rows.declaration);
+        }
+      binding.v = x;
+      // The value of the write is read whole only where it is admitted
+      // (`wholeOnly()`): a statement gives none.
+      return want ? x : undefined;
+    }
+    // The rows of `Chunk` or `Partition` are the result only.
+    if (binding.lane === 'rows')
+      decline(
+        e,
+        `a write of ${isSymbol(name) ? name.symbol : 'a local'}, a local that holds the rows of a Chunk or a Partition`
+      );
     const v = local(e, scalar(e.ops[1]), binding.lane!);
     binding.v = v;
     return v;
@@ -6674,6 +6842,15 @@ function lowerOnce(
     if (new Set(seen).size !== seen.length)
       decline(e, 'a parallel assignment that writes a name twice');
     const bindings = names.ops.map((x) => writable(e, x));
+    // A local that holds a list of lists of run-time length is written by
+    // `assign()` only, which checks the lane of its elements.
+    bindings.forEach((x, k) => {
+      if (x.lane === 'rows')
+        decline(
+          e,
+          `a parallel write of ${seen[k] || 'a local'}, a local that holds a list of lists of run-time length`
+        );
+    });
     const vs = values.ops.map((x, k) => local(e, scalar(x), bindings[k].lane!));
     bindings.forEach((x, k) => (x.v = vs[k]));
     if (want) decline(e, 'the value of a parallel assignment');
@@ -7302,6 +7479,7 @@ function lowerOnce(
     scalar,
     wholeRows,
     rowsParams,
+    root,
     heldParams: new Set<V>(),
     typeTests,
     listed: new Map(),
@@ -7321,6 +7499,8 @@ function lowerOnce(
     rowsElementLane: (t) =>
       rowsElementLane(t, options.mode === 'complex' ? 'complex' : 'real'),
     rowsElements,
+    rowWidths,
+    rowCounts,
     rowsLaneOf,
     apply,
     type,
@@ -7874,7 +8054,9 @@ function lowerOnce(
         input(p, name, declared, true);
       });
       const states = assignedNames(root);
-      if (states.length === 0) return result(value(root.ops[0])!);
+      // The result is read whole: a list of lists of run-time length is the
+      // host's array of arrays (CE-1736).
+      if (states.length === 0) return result(wholeRows(root.ops[0]));
       // Each name is a local whose value is a positional parameter after
       // the arguments, and the code returns the value of the body and the
       // value of each name after it (`Program.assigns`). The stored value
@@ -7925,7 +8107,9 @@ function lowerOnce(
       const want = !['Assign', 'Declare', 'DefineFunction'].includes(
         last?.operator ?? ''
       );
-      const v = withVarsValuesHidden(root, hidden, () => value(body, want));
+      const v = withVarsValuesHidden(root, hidden, () =>
+        want ? wholeRows(body) : value(body, false)
+      );
       return [
         want && v !== undefined ? result(v) : b.constant(NaN, 'real'),
         ...states.map((s) => frames[0].names.get(s.name)!.v),
@@ -7933,7 +8117,7 @@ function lowerOnce(
     });
   }
   return program(() => {
-    const v = value(root)!;
+    const v = wholeRows(root);
     return result(rootParts ?? v);
   });
 }
