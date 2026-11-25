@@ -454,6 +454,18 @@ interpreter's value. A line is removed when the case declines or is fixed.
   interpreter does, and calls `hostSq` three times; the interpreter calls it
   once. Its `Map` is a lazy view that evaluates only the positions read,
   where the compiled `Map` builds every element ("Functions of the host").
+- `javascript` (crafted: the host changes a setting after the compilation),
+  `hostSum` a function of the host: the code passes `hostSum(1..6)` a `List`
+  when `ce.maxCollectionSize` was at least 6 at the compilation; the
+  interpreter reads the setting at the call, and passes the `Range` when it
+  is then below 6 ("Functions of the host").
+- `javascript` (crafted: a view with an effect held in a local, then given
+  to a function of the host beside another effect), `tick` and `hostPair`
+  functions of the host:
+  `Block(Assign(s, Map(x ↦ tick(x), [1, 2, 3])), hostPair(s, tick(0)))`
+  calls `tick` with 1, 2, 3 at the assignment, then with 0; the interpreter
+  keeps `s` as a view and calls `tick` with 0 first, then lists `s`
+  ("Functions of the host").
 - `javascript` (crafted), `D: list<real>`: the root `Tuple` is
   recognised by node identity, so one node `t = Tuple(D, a)`, made with
   `ce.function()`, that is both the root result and an operand in the block
@@ -2703,9 +2715,9 @@ These decline:
 
 - another target, `interval-js` and the `bigint` mode;
 - an argument that is not a real, an integer, a boolean, a string, or a
-  list, a tuple or a record that the interpreter holds as the literal that
-  the code makes of it (below; a complex number, a colour, a `Range`), and
-  more than four arguments;
+  list, a tuple or a record that the interpreter passes as the literal that
+  the code makes of it (below; a complex number, a colour, an endless
+  `Range`), and more than four arguments;
 - a static type of the call other than `real`, `integer`, `boolean` or
   `nothing`: `(real) -> any` gives no settled shape (R3);
 - a value `nothing` read anywhere but as the value of the root function
@@ -2730,12 +2742,37 @@ interpreter passes it: with Tycho's drawing prelude,
 `List(Figure("circle", List(0.5403…, 0, 0.1), Tuple(1, 0, 0, 1, 0, 0),
 Nothing, Nothing, Nothing, Nothing, Nothing))`. A number is passed as its
 machine number, as for a scalar argument (the interpreter's `N(x, 15)` keeps
-15 digits). The interpreter holds a `Range`, a `Linspace` or a `Reverse` as a
-lazy collection, which the code holds as an array, so a list is taken only
-where the compiler knows that it is a `List` or a `Tuple` literal of the
-program (also through a record field, a parameter and the result of a
-function): `draw(1..3)`, `figureDraw(reverse([1, t]))`, `figureDraw([1, t]
-+ 1)` and a list constant decline. A colour declines: the code holds
+15 digits).
+
+An argument that evaluates to a finite lazy indexed collection (a `Range`,
+a `Linspace`, a `Reverse`, a `Map`, a `Filter`, a `Take`, a comprehension)
+reaches the function of the host as the `List` of its elements, in the
+interpreter and in the code (CE-1807): with
+`hostSum: (indexed_collection<real>) -> real`, `hostSum(1..3)`,
+`hostSum(reverse([1, 2]))`, `hostSum(map(x => x * 2, [1, 2]))` and
+`hostSum([1, 2] + 1)` each pass a `List` (`List(1, 2, 3)`, `List(2, 1)`,
+`List(2, 4)`, `List(2, 3)`), and so does a list constant (`const L = [1, 2,
+3]`, `figureDraw(L)`). The interpreter lists the arguments after all of them
+are evaluated and before `evaluate` is called, so a `Map` callback with an
+effect runs once for each element, in order, before the call and after the
+other arguments. A list argument whose expression has an effect where it
+stands declines in the code (`hostSum(map(x => tick(x), [1, 2, 3]))`), which
+would compute it there. An argument stays as it is in the interpreter when it is endless or
+its count is not known (`1..oo`), when it has more than
+`ce.maxCollectionSize` elements (10,000 by default), when it is a set or a
+dictionary, when it is a view with an effect whose count has no bound
+without a call of its callback (`tabulate(i => tick(i), 3)`), and when the
+function is `lazy` (it receives its operands as written). A view nested in the
+argument follows the rule of a list literal: a `Range` element stays a range.
+So the code takes a list that the interpreter can hold as a lazy collection
+only at the top of an argument, of scalars, and of a length known when the
+code is compiled and at most `ce.maxCollectionSize`; elsewhere a list is
+taken only where the compiler knows that it is a `List` or a `Tuple` literal
+of the program (also through a record field, a parameter and the result of a
+function). `draw(1..3)` declines: the interpreter passes
+`List(Range(1, 3, 1))` to `figureDraw`, a range in the list of the arguments
+of `draw`; `hostSum(filter([1, 2, 3], x => x > 1))` and `hostSum(1..n)`
+decline, lists of a run-time length. A colour declines: the code holds
 `rgb(t, 0, 0)` in OKLCh, where the interpreter keeps `Rgb(t, 0, 0)`, so
 `draw(circle((0, 0), t).fill(rgb(t, 0, 0)))` declines, and the same figure
 returned by `run()` compiles.

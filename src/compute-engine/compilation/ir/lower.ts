@@ -144,6 +144,7 @@ import {
   type Source,
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
+import { isHostFunctionDefinition } from '../../boxed-expression/definition-guards.js';
 import {
   listLowering,
   literalList,
@@ -490,27 +491,10 @@ const MAX_HOST_ARGUMENTS = 4;
 /** A definition that the host gave with `ce.declare()` and an `evaluate`
  *  function: not of the library, not a function literal (`userBinding()`),
  *  not a definition with clauses, not the dispatcher of a protocol method,
- *  and not lazy. */
+ *  and not lazy. The interpreter uses the same predicate to list the
+ *  arguments of the call (`isHostFunctionDefinition()`). */
 function isHostDefinition(e: Fn): boolean {
-  const def = e.operatorDefinition as
-    | {
-        evaluate?: unknown;
-        lazy?: boolean;
-        _standardLibrary?: boolean;
-        _isLambda?: boolean;
-        _isMultiClause?: boolean;
-        _protocolDispatcher?: unknown;
-      }
-    | undefined;
-  return (
-    def !== undefined &&
-    typeof def.evaluate === 'function' &&
-    def.lazy !== true &&
-    def._standardLibrary !== true &&
-    def._isLambda !== true &&
-    def._isMultiClause !== true &&
-    def._protocolDispatcher === undefined
-  );
+  return isHostFunctionDefinition(e.operatorDefinition);
 }
 
 /** A use of a list local written in place that it cannot have
@@ -7460,6 +7444,26 @@ function lowerOnce(
     return undefined;
   };
 
+  /** Whether the interpreter passes the `List` of the elements of the value
+   *  `v` of the argument `op` of a call of a function of the host, the
+   *  value that the code makes of `v` (CE-1807): the interpreter lists an
+   *  argument that is a finite lazy indexed collection, within
+   *  `ce.maxCollectionSize` elements (`listedHostArguments()` of
+   *  `listed-element.ts`), and a `List` stays a `List`. Only a list of
+   *  scalars of a length known when the code is compiled, at most that
+   *  size, of an argument whose static type is a list: a nested list can
+   *  hold a `Range`, which the interpreter does not list, a run-time length
+   *  can be above the size, and a tuple, a record or a set is not listed. */
+  const listedByHost = (op: Expression, v: V): boolean => {
+    const t = type(v);
+    if (t.lane === 'record' || t.shape.length !== 1) return false;
+    if (tuples.get(v) !== undefined) return false;
+    if (!isSubtype(op.type.type, 'list')) return false;
+    const n = t.shape[0];
+    const length = typeof n === 'number' ? n : cx.constant(n.v);
+    return length !== undefined && length <= op.engine.maxCollectionSize;
+  };
+
   /** The value of `e`, a call of a function that the host declared with an
    *  `evaluate` function (`isHostDefinition()`, CE-1621): an effectful
    *  operation that calls the interpreter for the call at run time
@@ -7501,6 +7505,7 @@ function lowerOnce(
     if (result === 'nothing' && want && !nothingPlace(e))
       why('whose value Nothing is read', POSSIBLE_NOTHING);
     const args = e.ops.map((op) => {
+      const effects = b.changes();
       const v = value(op)!;
       const a = type(v);
       // A list, a tuple or a record: the engine's value is the one that
@@ -7518,10 +7523,18 @@ function lowerOnce(
         why(
           `with an argument of type ${typeToString(a, tuples.get(v) ?? -1)}, ${refused}`
         );
-      if (whole) {
-        if (!fullyListed(listedOf(cx, v)))
+      if (whole && !fullyListed(listedOf(cx, v))) {
+        if (!listedByHost(op, v))
           why(
             `with an argument that holds a list or a tuple that the interpreter can hold as a lazy collection (Range, Reverse, Linspace) or that the code does not know as a List or a Tuple literal`
+          );
+        // The interpreter lists a view after it evaluated every argument,
+        // and keeps a view with an effect whose count it cannot bound
+        // without a call (a `Tabulate`); the code builds the list where
+        // the argument stands.
+        if (b.changes() > effects)
+          why(
+            `with a list argument that has an effect (the interpreter computes its elements after the other arguments, or keeps it as a lazy collection)`
           );
       }
       return v;

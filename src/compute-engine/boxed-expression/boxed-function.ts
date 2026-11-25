@@ -167,9 +167,11 @@ import {
   evaluatedSetLiteral,
   evaluatedSetLiteralAsync,
   listedBroadcastCells,
+  listedHostArguments,
   mayBeSetComprehension,
   producesKeyed,
 } from './listed-element.js';
+import { isHostFunctionDefinition } from './definition-guards.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
@@ -10648,12 +10650,22 @@ export class BoxedFunction
         );
         if (unindexed !== undefined) return unindexed;
       }
+      // A function of the host receives the `List` of each argument that is
+      // a finite lazy indexed collection, as compiled code passes it
+      // (`listedHostArguments()`, CE-1807).
+      const hostOperands = isHostFunctionDefinition(def)
+        ? listedHostArguments(this.engine, tail, numericApproximation)
+        : tail;
       if (
         this.engine.strict &&
         def.lazy !== true &&
         def.evaluate !== undefined
       ) {
-        const nonconforming = genericRuntimeConformance(this.engine, def, tail);
+        const nonconforming = genericRuntimeConformance(
+          this.engine,
+          def,
+          hostOperands
+        );
         if (nonconforming !== undefined) return nonconforming;
         if (declaredLiteralCallUndecided(def, tail))
           return this._withSameBinding(tail);
@@ -10674,7 +10686,7 @@ export class BoxedFunction
       //
       // 6/ Call the `evaluate` handler
       //
-      const handlerOperands = tail;
+      const handlerOperands = hostOperands;
       const walksBefore = walksMeasuredBy(def, handlerOperands);
       const failuresBefore = failedWalksMeasuredBy(def);
       // A handler of a host operator that states `pure: true` can still
@@ -12184,12 +12196,22 @@ export class BoxedFunction
         );
         if (unindexed !== undefined) return unindexed;
       }
+      // A function of the host receives the `List` of each argument that is
+      // a finite lazy indexed collection, as on the synchronous route; so
+      // does one that has only an `evaluateAsync` handler.
+      const hostOperands = isHostFunctionDefinition(def, true)
+        ? listedHostArguments(this.engine, tail, numericApproximation)
+        : tail;
       if (
         this.engine.strict &&
         def.lazy !== true &&
         (def.evaluateAsync !== undefined || def.evaluate !== undefined)
       ) {
-        const nonconforming = genericRuntimeConformance(this.engine, def, tail);
+        const nonconforming = genericRuntimeConformance(
+          this.engine,
+          def,
+          hostOperands
+        );
         if (nonconforming !== undefined) return nonconforming;
         if (declaredLiteralCallUndecided(def, tail))
           return this._withSameBinding(tail);
@@ -12259,7 +12281,7 @@ export class BoxedFunction
       // place).
       let handlerCalled = false;
       // The operands that the handler received, when it was called.
-      let handlerOperands: ReadonlyArray<Expression> = tail;
+      let handlerOperands: ReadonlyArray<Expression> = hostOperands;
       try {
         const opts: Partial<EvaluateOptions> & {
           engine: ComputeEngine;
@@ -12326,7 +12348,7 @@ export class BoxedFunction
         // long operand yields and honors the abort signal; the handler then
         // evaluates values. Not under `.N()`: a comparison near a tie
         // re-reads the operand as written to decide it exactly.
-        let handlerOps: ReadonlyArray<Expression> = tail;
+        let handlerOps: ReadonlyArray<Expression> = hostOperands;
         let operandsEvaluated = false;
         if (
           demandsOperands &&
@@ -12403,11 +12425,13 @@ export class BoxedFunction
                 return kindAnswer.value;
               if (kindAnswer !== undefined) handlerOps = kindAnswer.operands;
               handlerCalled = true;
-              // An `evaluateAsync` handler receives `tail` unless an
-              // apply-site hook gave other operands; see its call below.
+              // An `evaluateAsync` handler receives `hostOperands` (`tail`,
+              // with each finite lazy argument of a function of the host
+              // listed) unless an apply-site hook gave other operands; see
+              // its call below.
               handlerOperands =
                 def.evaluateAsync !== undefined && kindAnswer === undefined
-                  ? tail
+                  ? hostOperands
                   : handlerOps;
               if (def.evaluateAsync !== undefined) {
                 // A walk that failed in the synchronous part of the call
@@ -12426,7 +12450,7 @@ export class BoxedFunction
                 let answer: ReturnType<typeof def.evaluateAsync>;
                 try {
                   answer = def.evaluateAsync(
-                    kindAnswer !== undefined ? handlerOps : tail,
+                    kindAnswer !== undefined ? handlerOps : hostOperands,
                     opts
                   );
                 } catch (e) {

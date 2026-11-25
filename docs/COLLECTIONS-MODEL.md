@@ -172,6 +172,16 @@ finite view that reads a variable (`docs/SCOPING-MODEL.md`, "Callable
 resolution"), so the callbacks of `let s = map(x => x + t1(), xs)` run at the
 assignment and not again. Decision of the user, 2026-11-25.
 
+The argument of a function of the host is another place where a finite view
+becomes a list: a function declared with `ce.declare()` and an `evaluate`
+handler, not `lazy`, receives the `List` of the elements of each argument
+that evaluates to a finite lazy indexed collection, within
+`ce.maxCollectionSize` elements (`listedHostArguments()` in
+`boxed-expression/listed-element.ts`; `docs/COMPILATION-MODEL.md`,
+"Functions of the host"). An endless view, a set, a dictionary and the
+operands of a `lazy` function stay as they are. Decision of the user,
+2026-11-25 (CE-1807).
+
 A source that is provably not a collection is refused when the call is boxed,
 as for an eager operator: `Dedup(5)` is `Dedup(Error(incompatible-type,
 collection, 5))`, an invalid call typed `error`

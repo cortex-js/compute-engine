@@ -3741,9 +3741,14 @@ two types"); `admits()` refuses the lane there too.
   parameter of a function given a listed argument at its first call, and a call
   of a function whose body is listed. The interpreter holds a `Range`, a
   `Linspace` or a `Reverse` as a lazy collection, which the code holds as the
-  array of its elements: such a value, the elements of a `Range` of constants
-  that the lowering lists, an element-wise sum, a constant read from its value
-  and an `if` of two lists decline. A function lowered for a listed argument
+  array of its elements: such a value inside a list, a tuple or a record
+  declines. At the top of an argument the interpreter passes the `List` of the
+  elements of a finite lazy indexed collection (`listedHostArguments()` of
+  `listed-element.ts`, CE-1807), so there a list of scalars whose static type
+  is a list and whose length is a constant of at most `ce.maxCollectionSize`
+  is taken whatever made it (`listedByHost()` of `lower.ts`): a `Range`, a
+  `Map`, an element-wise sum, a constant, an `if` of two lists. A list of a
+  run-time length there declines. A function lowered for a listed argument
   declines a later call with an argument that is not (`coversListed()`). The
   tracking runs in a second lowering of a program whose first lowering reaches
   such a host argument (`NeedsListed`), so a program with no such argument keeps

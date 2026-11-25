@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **A custom function receives a list where an argument is a finite lazy
+  collection** (CE-1807). A function declared with `ce.declare()` and an
+  `evaluate` handler that is not `lazy` now receives the `List` of the
+  elements of an argument that evaluates to a finite `Range`, `Linspace`,
+  `Reverse`, `Map`, `Filter`, `Take` or comprehension, up to
+  `ce.maxCollectionSize` elements (10,000 by default). With
+  `hostSum: (indexed_collection<real>) -> real`, `hostSum(1..3)` passed
+  `Range(1, 3, 1)` and now passes `List(1, 2, 3)`;
+  `hostSum(map(x => x * 2, [1, 2]))` passed the `Map` and now passes
+  `List(2, 4)`, with the callback called once for each element before the
+  handler. An endless collection, a set, a dictionary, a library function
+  and a user function are not changed. A handler that needs the collection
+  as written declares the function `lazy: true`, and receives its operands
+  unevaluated, as before. Compiled JavaScript passes the same `List`, so
+  these calls (`hostSum(1..3)`, `hostSum(reverse([1, 2]))`,
+  `hostSum(map(x => x * 2, [1, 2]))`, `hostSum([1, 2] + 1)`, and a list
+  constant) now compile, where they declined.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements

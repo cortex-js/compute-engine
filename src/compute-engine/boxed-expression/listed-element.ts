@@ -314,7 +314,8 @@ export function listedElement(
   x: Expression,
   budget: SnapshotBudget,
   allowImpure = true,
-  admitKeyed = false
+  admitKeyed = false,
+  admitRange = false
 ): Expression {
   if (!x.isValid || !x.isLazyCollection) return x;
   if (isFunction(x, 'Which') || isFunction(x, 'If')) return x;
@@ -324,8 +325,10 @@ export function listedElement(
   // the value of `Tuple(Range(1, 3))` would be `([1, 2, 3])`, typed
   // `tuple<vector<integer^3>>`, which is not in the static type
   // `tuple<range>`, and a variable declared `list<range>` would hold
-  // `[[1, 2, 3]]` (user decision 2026-10-25, ROADMAP CE-39.3).
-  if (isFunction(x, 'Range')) return x;
+  // `[[1, 2, 3]]` (user decision 2026-10-25, ROADMAP CE-39.3). With
+  // `admitRange`, the argument of a function of the host, a range is listed
+  // (`listedHostArguments()`); a range inside it is not.
+  if (isFunction(x, 'Range') && !admitRange) return x;
   // A view whose callback applies an operator that has only an
   // `evaluateAsync` handler stays lazy: the walk below is synchronous and
   // would store the applications unevaluated (`holdsAsyncOnlyOperator`).
@@ -449,6 +452,48 @@ export function listedLiteralElements(
     if (result !== undefined) result.push(listed);
   }
   return result;
+}
+
+/**
+ * The arguments `ops` of a call of a function of the host
+ * (`isHostFunctionDefinition()`), after they were evaluated, with each
+ * argument that is a finite lazy indexed collection (a `Range`, a
+ * `Linspace`, a `Reverse`, a `Map`, a `Filter`, a `Take`, a comprehension)
+ * replaced by the `List` of its elements, or `ops` itself when no argument
+ * was replaced. Compiled JavaScript passes the `List` that it builds from
+ * its array at the same call, so both pass the same value
+ * (`docs/COMPILATION-MODEL.md`, "Functions of the host").
+ *
+ * The listing is `listedElement()`, with a budget of
+ * `ce.maxCollectionSize` elements for each argument, and a `Range` is
+ * listed too. An argument stays as it is when it is not a lazy collection,
+ * when it is not indexed (a set, a dictionary), when it is not known to be
+ * finite or its count is not known, when its elements would use more than
+ * the budget, and in the other cases where `listedElement()` keeps a view.
+ * A view nested in the argument, or in a `List` or `Tuple` argument, is
+ * listed by the rules of `listedElement()`: a nested `Range` stays a range.
+ * Under a numeric approximation, a listed argument is approximated, as an
+ * element of a list literal is (`listedLiteralElements()`).
+ */
+export function listedHostArguments(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): ReadonlyArray<Expression> {
+  let result: Expression[] | undefined;
+  for (let i = 0; i < ops.length; i++) {
+    const x = ops[i];
+    let listed = x;
+    if (x.isValid && x.isLazyCollection && x.isIndexedCollection === true) {
+      const budget = { used: 0, max: ce.maxCollectionSize };
+      listed = listedElement(ce, x, budget, true, false, true);
+      if (listed !== x && numericApproximation)
+        listed = listed.evaluate({ numericApproximation });
+    }
+    if (listed !== x && result === undefined) result = ops.slice(0, i);
+    if (result !== undefined) result.push(listed);
+  }
+  return result ?? ops;
 }
 
 /**

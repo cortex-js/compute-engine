@@ -108,9 +108,12 @@ describe('checked CE permutation entry routes', () => {
       ['List', 3, 1, 2],
     ]);
   });
-  test('explicit materialization permits finite views; constructors do not enumerate them', () => {
+  test('a finite view is listed before the constructor reads it; an endless one is not', () => {
     expect(run(ce, 'Permutation(listFrom(1..3))').json).toEqual(identity);
-    expect(run(ce, 'Permutation(1..3)').operator).toBe('Error');
+    // The engine lists a finite view argument of a function that a library
+    // loaded after its creation declares (CE-1807).
+    expect(run(ce, 'Permutation(1..3)').json).toEqual(identity);
+    expect(run(ce, 'Permutation(1..oo)').operator).toBe('Error');
   });
   test('action checks keep fixed points and reject incompatible support', () => {
     expect(
