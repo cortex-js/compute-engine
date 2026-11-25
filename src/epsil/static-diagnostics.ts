@@ -166,6 +166,8 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // The rules of block locals (`docs/ERROR-MODEL.md`): a declaration that is
   // not a statement of a program or of a block has a value
   // (`declaration-without-value`, minted by the `Declare` canonical
+  // handler), the attributes dictionary of a declaration has only attribute
+  // keys (`invalid-declaration-attribute`, minted by the `Declare` canonical
   // handler), a declaration is a statement of a block and not in a branch
   // or a loop body (`declaration-below-statement`, minted by the `Declare`
   // canonical handler), an assignment writes a declared name
@@ -178,6 +180,7 @@ const CANONICALIZATION_ERROR_CODES = new Set([
   // minted by the `Assign` canonical handler). All are settled before
   // anything runs.
   'declaration-without-value',
+  'invalid-declaration-attribute',
   'declaration-below-statement',
   'assignment-to-undeclared-variable',
   'read-before-declaration',
@@ -3580,6 +3583,14 @@ export function describeError(error: MathJsonExpression): string {
           : payload[1] === 'function'
             ? `\`${payload[0]}\` is declared without a value: define \`${payload[0]}\` with a function statement in the same block, or give the declaration a value`
             : `\`${payload[0]}\` is declared without a value: write \`let ${payload[0]} = …\``;
+      break;
+    case 'invalid-declaration-attribute':
+      // Payload: [key]. A key of the attributes dictionary of a `Declare`
+      // that is not an attribute.
+      detail =
+        payload.length === 0
+          ? 'a key of the attributes of a declaration is not an attribute'
+          : `\`${payload[0]}\` is not an attribute of a declaration: the attributes are \`type\`, \`value\`, \`constant\` and \`holdUntil\``;
       break;
     case 'declaration-below-statement':
       // Payload: [name]. A `let` or a `const` in a branch of a conditional

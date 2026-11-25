@@ -4327,6 +4327,39 @@ function markConstantLocal(
   (binding.value as unknown as { _isConstant: boolean })._isConstant = true;
 }
 
+/** The keys that `Declare` reads in its attributes dictionary. */
+const DECLARE_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'type',
+  'value',
+  'constant',
+  'holdUntil',
+]);
+
+/**
+ * The first key of the attributes dictionary of the `Declare` with the
+ * operands `args` (not canonical) that is not an attribute name, or
+ * `undefined`. The attributes dictionary is the last operand when it is a
+ * dictionary. `Declare` reads no other key, so a dictionary given as the
+ * value (`Declare(d, "unknown", {a: 3})`) would leave the name without a
+ * value. A dictionary that is not boxed yet is read from its raw pairs, as
+ * `declareHasValue()` does.
+ */
+function invalidDeclareAttribute(
+  args: ReadonlyArray<Expression>
+): string | undefined {
+  if (args.length < 2 || args.length > 4) return undefined;
+  const attributes = args[args.length - 1];
+  if (isDictionary(attributes))
+    return attributes.keys.find((key) => !DECLARE_ATTRIBUTES.has(key));
+  if (!isFunction(attributes, 'Dictionary')) return undefined;
+  for (const pair of attributes.ops) {
+    if (!isFunction(pair) || pair.ops.length !== 2) continue;
+    const key = isString(pair.ops[0]) ? pair.ops[0].string : sym(pair.ops[0]);
+    if (key !== undefined && !DECLARE_ATTRIBUTES.has(key)) return key;
+  }
+  return undefined;
+}
+
 /**
  * The initial value of the `Declare` with the operands `args` (not
  * canonical) when the declaration states no type: the positional value
@@ -8299,7 +8332,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'Declare a symbol in the current scope, optionally assigning a type ' +
         'and an initial value. An optional trailing attributes dictionary ' +
         '(with keys `type`, `value`, `constant` and `holdUntil`) can further ' +
-        'describe the definition, e.g. to declare a constant. With a value, ' +
+        'describe the definition, e.g. to declare a constant. Another key in ' +
+        'that dictionary is the error `invalid-declaration-attribute`: a ' +
+        'dictionary given as the initial value is the `value` attribute, or ' +
+        'is followed by an attributes dictionary. With a value, ' +
         'evaluates to that value; otherwise evaluates to `Nothing`.',
       lazy: true,
       // The attributes dictionary of `let y = f(x)` holds the initial value,
@@ -8348,6 +8384,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               ? tuplePatternNames(symbolExpr)[0]
               : sym(symbolExpr)) ?? 'Nothing',
           ]);
+
+        // A key of the attributes dictionary that is not an attribute name
+        // is a static error: the key is not read, and a dictionary meant as
+        // the value would leave the name without a value.
+        const invalidAttribute = invalidDeclareAttribute(args);
+        if (invalidAttribute !== undefined)
+          return ce.error(['invalid-declaration-attribute', invalidAttribute]);
 
         // Sequence declarations reserve a slot; execution initializes it only
         // when its initializer or a later assignment runs.

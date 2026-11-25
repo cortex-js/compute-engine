@@ -2936,6 +2936,7 @@ const BLOCK_LOCAL_ERROR_CODES = [
   'read-before-initialization',
   'variable-redeclaration',
   'declaration-without-value',
+  'invalid-declaration-attribute',
   'declaration-below-statement',
   'assignment-to-undeclared-variable',
   'assignment-in-operand',

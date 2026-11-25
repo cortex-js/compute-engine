@@ -307,7 +307,7 @@ describe('IR slice: the forms of a declaration', () => {
       [
         [
           'Block',
-          ['Declare', 't', { dict: { value: 1, description: "'d'" } }],
+          ['Declare', 't', { dict: { value: 1, holdUntil: "'evaluate'" } }],
           't',
         ],
         /attributes/,

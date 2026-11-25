@@ -294,6 +294,12 @@ A `Declare` expression with no value is not a statement of a program or of a blo
 
 In Epsil every `let` is a statement of a program or of a block, so a `let` with no value is valid: `let x: integer`. A read of the variable before an assignment gives it a value is the error `read-before-initialization` (see `epsil doc read-before-initialization`).
 
+## `invalid-declaration-attribute`
+
+The last operand of a `Declare` expression is a dictionary with a key that is not an attribute of a declaration. A dictionary in that position is the attributes of the declaration, with the keys `type`, `value`, `constant` and `holdUntil`, and not the initial value: `["Declare", "d", "'unknown'", {"dict": {"a": 3}}]` is this error for the key `a`. To give a dictionary as the initial value, make it the `value` attribute, `["Declare", "d", {"dict": {"value": {"dict": {"a": 3}}}}]`, or add an attributes dictionary after it: `["Declare", "d", "'unknown'", {"dict": {"a": 3}}, {"dict": {}}]`.
+
+In Epsil, `let d = {"a" -> 3}` gives the value as the `value` attribute, so a `let` or a `const` does not give this error.
+
 ## `declaration-below-statement`
 
 A `let` or a `const` is in a branch of an `if` or a `match`, or in the body of a loop, without a block around it. A local is declared by a statement of a block or of a function body, and is a local of that block in all of it. Write the declaration as a statement of the block: `let t = 0; if c { t = 1 }; t`, or put the branch in a block when the name is a local of the branch only: `if c { let t = 1; f(t) }`.

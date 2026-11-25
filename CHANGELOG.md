@@ -91,6 +91,19 @@
 
 ### Resolved Issues
 
+- **A `Declare` with a dictionary as its last operand, and a key that is not
+  an attribute, is an error at the declaration** (CE-1805). A dictionary in
+  that position is the attributes of the declaration (`type`, `value`,
+  `constant`, `holdUntil`), not its value, and another key was ignored. So
+  `["Block", ["Declare", "d", "'unknown'", {dict: {a: 3}}], "d"]` gave
+  `read-before-initialization` for `d`, with nothing that named the cause. It
+  now gives the error `invalid-declaration-attribute` with the key (`a`), in a
+  block and at the top level, and compiled code declines. To declare a
+  dictionary value, give it as the `value` attribute
+  (`["Declare", "d", {dict: {value: {dict: {a: 3}}}}]`, which the Epsil
+  `let d = {"a" -> 3}` emits) or add an attributes dictionary after it
+  (`["Declare", "d", "'unknown'", {dict: {a: 3}}, {dict: {}}]`).
+
 - **A Document row that states a type that does not parse is an error of
   that row** (CE-1799). This holds for a type in `formalTypes`, for the
   `resultType` of a function row and for the `valueType` of a value row.

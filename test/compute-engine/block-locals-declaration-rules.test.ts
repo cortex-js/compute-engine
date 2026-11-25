@@ -611,6 +611,109 @@ describe('REVIEW FIXES OF THE RULES OF BLOCK LOCALS', () => {
     );
   });
 
+  // CE-1805: a trailing dictionary is the attributes of the declaration. A
+  // key that is not an attribute is an error at the declaration, where the
+  // name had no value and a read gave `read-before-initialization`.
+  describe('a key of the attributes dictionary that is not an attribute', () => {
+    const pair = (key: string): MathJsonExpression => [
+      'Dictionary',
+      ['KeyValuePair', key, 3],
+    ];
+    const error = 'Error(ErrorCode("invalid-declaration-attribute", "a"))';
+
+    test.each<[string, MathJsonExpression]>([
+      ['after a type', ['Declare', 'd', "'unknown'", pair("'a'")]],
+      ['with no type', ['Declare', 'd', pair("'a'")]],
+      ['with a symbol key', ['Declare', 'd', pair('a')]],
+      ['as a boxed dictionary', ['Declare', 'd', { dict: { a: 3 } }]],
+      ['after a value', ['Declare', 'd', "'unknown'", 3, pair("'a'")]],
+      [
+        'beside an attribute',
+        [
+          'Declare',
+          'd',
+          [
+            'Dictionary',
+            ['KeyValuePair', 'value', 3],
+            ['KeyValuePair', 'a', 3],
+          ],
+        ],
+      ],
+    ])('is an error in a block and at the top level: %s', (_, declare) => {
+      const inBlock = run(['Block', declare, 'd']);
+      expect(inBlock.canonical).toContain(error);
+      expect(inBlock.value).toBe(error);
+      const topLevel = run(declare);
+      expect(topLevel.canonical).toBe(error);
+      expect(topLevel.value).toBe(error);
+    });
+
+    test('a dictionary value is the `value` attribute, or has an attributes dictionary after it', () => {
+      expect(
+        run([
+          'Block',
+          [
+            'Declare',
+            'd',
+            ['Dictionary', ['KeyValuePair', 'value', pair("'a'")]],
+          ],
+          'd',
+        ]).value
+      ).toBe('{"a" -> 3}');
+      expect(
+        run([
+          'Block',
+          ['Declare', 'd', "'unknown'", pair("'a'"), ['Dictionary']],
+          'd',
+        ]).value
+      ).toBe('{"a" -> 3}');
+      expect(epsil('let d = {"a" -> 3}\nd["a"]').codes).toEqual([]);
+    });
+
+    test('the attribute keys and an empty dictionary are valid', () => {
+      expect(
+        run([
+          'Block',
+          [
+            'Declare',
+            'd',
+            [
+              'Dictionary',
+              ['KeyValuePair', 'type', "'integer'"],
+              ['KeyValuePair', 'value', 3],
+              ['KeyValuePair', 'constant', 'True'],
+              ['KeyValuePair', 'holdUntil', "'evaluate'"],
+            ],
+          ],
+          'd',
+        ]).value
+      ).toBe('3');
+      expect(
+        run([
+          'Block',
+          ['Declare', 'd', "'unknown'", ['Dictionary']],
+          ['Assign', 'd', 2],
+          'd',
+        ]).value
+      ).toBe('2');
+    });
+
+    test('a `Declare` call in an Epsil program gives the static error', () => {
+      expect(
+        epsil('do { Declare(d, "unknown", {"a" -> 3}); d }').codes
+      ).toEqual(['invalid-declaration-attribute']);
+      expect(epsil('Declare(d, "unknown", {"a" -> 3})\nd').codes).toEqual([
+        'invalid-declaration-attribute',
+      ]);
+    });
+
+    test('the code has an explanation', () => {
+      expect(explainErrorCode('invalid-declaration-attribute')).toContain(
+        '`holdUntil`'
+      );
+    });
+  });
+
   test('a static error does not hide a run-time error with the same code in another statement', () => {
     expect(
       epsil(

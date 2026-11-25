@@ -337,11 +337,17 @@ value and reports its error; a failed RHS does not overwrite a numeric slot.
 | ----------------------------------- | ---------------------------------------------------- | --------------------------------------------------- |
 | `read-before-initialization`        | `Block(Declare(x, "integer"), x)`                   | initialize `x` before reading it                     |
 | `declaration-below-statement`       | `Block(If(c, Declare(t, "unknown", 1)), t)`          | `Block(Declare(t, "unknown", 0), If(c, Assign(t, 1)), t)` |
+| `invalid-declaration-attribute`     | `Block(Declare(d, "unknown", {a: 3}), d)`            | `Block(Declare(d, "unknown", {a: 3}, {}), d)`        |
 | `assignment-to-undeclared-variable` | `Block(Assign(a, 1), a)`, `If(c, Assign(a, 1))`      | `Block(Declare(a, "unknown", 1), a)`                |
 | `read-before-declaration`           | `Block(Declare(b, "unknown", k), Declare(k, "integer", 2))` | declare `k` before the first use             |
 | `assignment-in-operand`             | `f(Assign(a, 2))`, `Assign(t, Assign(u, v))`         | `Block(Declare(a, "unknown", 2), f(a))`             |
 | `assignment-type-mismatch`          | `Block(Declare(a, "unknown", 1), Assign(a, "x"), a)` | use another name                                    |
 
+- A dictionary that is the last operand of a `Declare` is its attributes
+  (`type`, `value`, `constant`, `holdUntil`), not its value. A key that is
+  not one of these is the error `invalid-declaration-attribute` with the
+  key, in a block and at the top level. A dictionary value is the `value`
+  attribute, or is followed by an attributes dictionary.
 - A declaration is `Declare(x, type, v)`, a `Declare` whose attributes
   dictionary has a `value` entry, or a declaration reserving a slot without a
   value. The three-operand `Declare(x, "unknown",
