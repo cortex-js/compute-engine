@@ -277,6 +277,11 @@ only step 7 fails, fix the cause and run the push command that the
 script prints. When only step 8 fails, fix the cause and run
 `bash scripts/package-vsix.sh`.
 
+After the upload, npm validates the version before the registry serves it. Until
+then `npm view` gives E404 and `latest` names the previous version. This is not
+a failed publish: when the user says a release is published, tag the release
+commit and push the tag without a registry lookup.
+
 A local release takes no box lock, except for the full test suite, which
 `scripts/ci-nightly.sh run --priority` runs under the lock: it waits only for the
 current holder and for earlier priority entries, not for the other sessions in
