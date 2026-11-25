@@ -334,9 +334,9 @@ export class Product {
    * again as `Sqrt(y)` in the current scope, so in a scope with a user
    * function `Sqrt` the factor became a call of that function.
    *
-   * A `Power` with an integer exponent is built again by name too (`y·y` is
-   * `Power(y, 2)`), also from plain symbols, so this test does not make it
-   * sound in a scope with a user function `Power`: see CE-1759.
+   * A `Power` is not built by name: `pow()` and `libraryPower()` build a
+   * call of the library `Power` in a scope where a user function shadows
+   * it, so `y·y` is the library `Power(y, 2)` there.
    */
   private rebuildsByShadowedName(): boolean {
     this._shadowedRebuild ??= RADICAL_NAMES.some((n) =>
@@ -1096,10 +1096,11 @@ export class Product {
   private tallyNumericPower(base: Expression, exponent: Rational): void {
     const e = reducedRational(exponent);
     const negative = isNeg(e);
-    const power = this.engine.function('Power', [
+    const power = libraryPower(
+      this.engine,
       base,
-      this.engine.number(negative ? neg(e) : e),
-    ]);
+      this.engine.number(negative ? neg(e) : e)
+    );
     this.tally(power, negative ? [-1, 1] : [1, 1]);
   }
 
@@ -1560,6 +1561,24 @@ function isMatrixInversePower(
   );
 }
 
+/**
+ * The canonical call `Power(base, exponent)` of the library `Power`.
+ * `ce.function()` binds a call by its name in the current scope, so in a
+ * scope where a user function `Power` shadows the library one, the power of
+ * a factor of a product would be a call of the user function.
+ */
+function libraryPower(
+  ce: ComputeEngine,
+  base: Expression,
+  exponent: Expression
+): Expression {
+  return (
+    (shadowsLibraryName(ce, 'Power')
+      ? ce._libraryCall('Power', [base, exponent])
+      : undefined) ?? ce.function('Power', [base, exponent])
+  );
+}
+
 function termsAsExpression(
   ce: ComputeEngine,
   matrixContext: boolean,
@@ -1577,7 +1596,7 @@ function termsAsExpression(
     // same-base tallying produces the canonical exact form, not an improper
     // Power that later terms cannot recognize as like.
     if (isNumber(base))
-      return ce.function('Power', [base, ce.number(exponent)]).evaluate();
+      return libraryPower(ce, base, ce.number(exponent)).evaluate();
     return base.pow(ce.number(exponent));
   });
 

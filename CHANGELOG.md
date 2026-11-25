@@ -116,6 +116,17 @@
   `Divide(1, y)` that the program writes is still a call of the user
   function.
 
+- **In a scope with a user function named `Power`, the product of a factor
+  with itself is the library power** (CE-1759). After
+  `ce.declare('Power', 'function')` and
+  `ce.assign('Power', ce.expr(['Function', ['Add', 'a', 'b', 100], 'a', 'b']))`,
+  `y.mul(y)` was a call of the user function, and gave `105` at `y = 3`. It
+  now gives `9`. The same applies to the `pow()` method and to a product with
+  a power factor (`y·y^2`, `x·2^{2/3}`). In such a scope, the power serializes
+  as a call of the library operator (`["Apply", ["Module", "Power"], "y", 2]`).
+  A call `Power(x, 3)` that the program writes is still a call of the user
+  function, and `pow()` of it is a power of its value.
+
 - **A product of three or more numbers at machine precision no longer loses
   digits through a tiny or huge intermediate product** (CE-1757). At machine
   precision, `N(10^{200}·10^{-200}·10^{-123})` gave `9.88131291682493e-124`,
