@@ -79,6 +79,23 @@
   only near the point, such as `Ln(Sqrt(x) - 1)` at `1/4` and `Ln(Ln(x))` at
   `1/2`.
 
+- **A `Series` of a root whose base is not real for real `x` no longer has the
+  wrong sign or the wrong value when the base is on the negative real axis at
+  the point** (CE-1618). `Series(Sqrt(-1 - i*x^20), x, 0, 3)` was
+  `i + O(x^4)`, but `Sqrt(-1 - i*x^20)` is near `-i` on both sides of 0.
+  `Series(Root(x + i*x^20, 3), x, 0, 3)` was `Root(x, 3) + …`, which is the
+  real root, wrong for `x < 0`. The term that is not real was past the
+  computed terms. Each one now stays `Series(...)`, and so does
+  `Sqrt(-1 - i*x)` at 0 and a power with an exponent that is not an integer
+  of such a base. At a complex point, a base that is real for real `x` is not
+  real along the point: `Series(Sqrt(x^2 + 1), x, 2i, 2)` was
+  `sqrt(3)i + …` and `Series(Ln(x^2 + 1), x, 2i, 2)` was `ln(-3) + …`, both
+  wrong on one side, and both now stay `Series(...)`. A root of a base that
+  is real for every real `x` is unchanged at a real point:
+  `Series(Sqrt(-1 - x), x, 0, 3)` is `i + i*x/2 + …`. Some series that hold
+  also stay `Series(...)` now: `Sqrt(-1 + i/x)` and `Sqrt(1 - Sqrt(x))` at
+  `+∞`, and `Sqrt(Sqrt(x) - 1)` at `1/4`.
+
 - **At a high precision, the harmonic number of a complex number shows only
   the digits that are correct** (CE-1585). With `ce.precision = 50`,
   `HarmonicNumber(1+i)` evaluates to `1.1718659855240086 + 0.5766740474685813i`,
