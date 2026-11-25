@@ -764,7 +764,11 @@ sub-item.
   view, with no array: `sum(map(f, L))` is one loop, and
   `sum(filter(map(f, L), p))` is one loop where it is three today. The
   readers: `Sum`, `Product`, `Min`, `Max`, `Mean`, `Reduce`, `Any`, `All`,
-  `Length` of a `Filter` (a count).
+  `Length` of a `Filter` (a count). The same holds for a `Tabulate` and for a
+  `Map` over a `Range`: `Sum(Map(x ↦ x², Range(1, n)))` and
+  `Max(Tabulate(x ↦ x², n))` with `n: integer` are a `build` loop that fills
+  an array and a second loop that reads it. A view whose element is pure
+  can be a source `{ length, at }` of `lower-lists.ts`, as a `Range` is.
 - **CE-1806.2** A read of one position of a `Map` applies the callback to
   that element of the source: `first(map(f, L))` and `map(f, L)[k]` are
   `f(L[k])` with the range check of `At`.
