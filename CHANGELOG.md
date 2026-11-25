@@ -98,6 +98,17 @@
 
 ### Resolved Issues
 
+- **The numeric inverse of a singular matrix stays unevaluated** (CE-1542).
+  `Inverse([[3, 2, 1], [1, 1, 1], [4, 3, 2]]).N()` gave entries of about
+  `4.5e15`, because rounding left a small nonzero pivot in place of 0. It now
+  stays unevaluated, as `evaluate()` does. The same holds for `evaluate()` of
+  a matrix with entries such as `1.5`, for `PseudoInverse(…).N()` and for
+  `MatrixPower` with a negative exponent. The numeric inverse now uses
+  partial pivoting, and it is the same as the inverse in compiled JavaScript.
+  A pivot is zero when it is very small relative to the entries, so a regular
+  matrix as ill-conditioned as the Hilbert matrix of order 11 with
+  machine-number entries also stays unevaluated.
+
 - **`1^M` with a matrix or a list `M` keeps the shape of `M`** (CE-1495).
   The canonical form of `1^b` was `1` for every finite exponent, also when
   `b` is a collection by its type, so `1^M` with `M` declared `matrix<2x2>`

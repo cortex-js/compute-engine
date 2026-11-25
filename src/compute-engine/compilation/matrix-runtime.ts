@@ -5,9 +5,9 @@
  * the power and the row echelon form are the interpreter's kernels on
  * machine numbers (`determinant()` of `tensor/tensors.ts`, `rref()` and
  * `MatrixPower` of `library/linear-algebra.ts`), with the same operations in
- * the same order, so their value is the value of `.N()`. The inverse
- * differs from the interpreter's `inverse()` in its test of a singular
- * matrix and its pivots (`matrixInverse()`). The compiler settles the
+ * the same order, so their value is the value of `.N()`. The inverse is
+ * the interpreter's kernel itself (`numberMatrixInverse()` of
+ * `numerics/linear-algebra.ts`). The compiler settles the
  * shapes (`ir/lower-matrices.ts`): every matrix here is square, except the
  * operand of `matrixRowReduce`, which is rectangular.
  *
@@ -16,6 +16,7 @@
  * shape of the result.
  */
 
+import { numberMatrixInverse } from '../numerics/linear-algebra.js';
 import { MAX_MATRIX_POWER_EXPONENT } from '../numerics/value-scaled-caps.js';
 
 /** The `n × n` matrix of `NaN`. */
@@ -72,66 +73,11 @@ function matrixDeterminant(a: readonly number[], n: number): number {
 }
 
 /** The inverse of the square matrix `m`, or a matrix of `NaN` where the
- *  interpreter leaves `Inverse` unevaluated: a singular matrix. For `2 × 2`
- *  the adjugate divided by the determinant, as the interpreter's; otherwise
- *  the elimination of Gauss and Jordan on `[m | I]` with partial pivoting.
- *
- *  The interpreter's numeric kernel tests a pivot for an exact 0, so an
- *  exactly singular matrix whose elimination in doubles leaves a rounding
- *  residue (`[[3, 2, 1], [1, 1, 1], [4, 3, 2]]`) gives entries of about
- *  1e15 there. Here an entry of the elimination is 0 when it is at most
- *  `1024ε` times its running bound (`bound`: the sum of the magnitudes of
- *  the terms that made it), and the matrix is singular when a pivot is: a
- *  residue was at most `261ε` of its bound over 9,000 random singular
- *  integer matrices of orders 3 to 6, where the pivots of the regular ones
- *  were at least `1.8e11·ε` of theirs. For `2 × 2` the determinant is 0
- *  at most `1024ε` times the larger of its two products. So a regular
- *  matrix as ill-conditioned as the Hilbert matrix of order 11 gives NaN. */
+ *  interpreter leaves `Inverse` unevaluated: a singular matrix. The kernel
+ *  is the interpreter's (`numberMatrixInverse()`), so the value is the
+ *  value of `.N()`. */
 function matrixInverse(m: readonly (readonly number[])[]): number[][] {
-  const n = m.length;
-  const tiny = 1024 * Number.EPSILON;
-  if (n === 2) {
-    const [[a, b], [c, d]] = m;
-    const det = a * d + -(b * c);
-    if (Math.abs(det) <= tiny * Math.max(Math.abs(a * d), Math.abs(b * c)))
-      return nanMatrix(2);
-    return [
-      [d / det, -(b / det)],
-      [-(c / det), a / det],
-    ];
-  }
-  const aug = m.map((row, i) => [
-    ...row,
-    ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)),
-  ]);
-  const bound = m.map((row) => row.map(Math.abs));
-  for (let k = 0; k < n; k++) {
-    let pivotRow = k;
-    for (let r = k + 1; r < n; r++)
-      if (Math.abs(aug[r][k]) > Math.abs(aug[pivotRow][k])) pivotRow = r;
-    if (pivotRow !== k) {
-      [aug[k], aug[pivotRow]] = [aug[pivotRow], aug[k]];
-      [bound[k], bound[pivotRow]] = [bound[pivotRow], bound[k]];
-    }
-    const pivot = aug[k][k];
-    if (Math.abs(pivot) <= tiny * bound[k][k]) return nanMatrix(n);
-    for (let j = 0; j < 2 * n; j++) aug[k][j] = aug[k][j] / pivot;
-    for (let j = 0; j < n; j++) bound[k][j] = bound[k][j] / Math.abs(pivot);
-    for (let i = 0; i < n; i++) {
-      if (i === k) continue;
-      const factor = aug[i][k];
-      if (factor === 0) continue;
-      for (let j = 0; j < 2 * n; j++)
-        aug[i][j] = aug[i][j] - factor * aug[k][j];
-      for (let j = 0; j < n; j++) {
-        bound[i][j] = bound[i][j] + Math.abs(factor) * bound[k][j];
-        // A residue of the rounding is 0: a column whose remaining
-        // entries are all residues gives a pivot of 0.
-        if (Math.abs(aug[i][j]) <= tiny * bound[i][j]) aug[i][j] = 0;
-      }
-    }
-  }
-  return aug.map((row) => row.slice(n));
+  return numberMatrixInverse(m) ?? nanMatrix(m.length);
 }
 
 /** The product of two square matrices of `n` rows, each entry the sum
