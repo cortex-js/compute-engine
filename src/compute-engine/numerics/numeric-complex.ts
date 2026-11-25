@@ -1366,6 +1366,16 @@ function nearPoleBracket(
  *  series takes Γ(s) and its k = n term together (`nearPoleBracket`). */
 const NEAR_POLE_RADIUS = 0.5;
 
+/** From this n on, `upperGammaDirectSeriesComplex` leaves out the term
+ * (−1)^n/n!·(ψ(n+1) − ln z) at s = −n, and the term of `nearPoleBracket`
+ * next to −n: they are 0 as a double. ln(400!) > 1998, and the bracket that
+ * 1/n! multiplies is below e^{380} for every double z and |s + n| ≤ 1/2
+ * (ψ(n+1) is below 710 and |ln z| below 745), so the term is below
+ * e^{−1600}, far below the smallest double, e^{−744.4}. Their computation
+ * takes a loop of n steps (200·n next to the pole), which does not end for
+ * n = 1e300. */
+const LEAD_UNDERFLOW_ORDER = 400;
+
 /**
  * Γ(s, z) = Γ(s) − γ(s, z) with the lower function summed as the direct
  * power series γ(s, z) = z^s Σ_{k≥0} (−z)^k / (k!·(s + k)).
@@ -1379,7 +1389,8 @@ const NEAR_POLE_RADIUS = 0.5;
  * term are both about 1/(n!·|s + n|) and cancel: summed separately, the
  * rounding error of Γ(s) alone is about ε/(n!·|s + n|). They are taken
  * together instead (`nearPoleBracket`), and the loop skips the k = n term,
- * as it does at s = −n.
+ * as it does at s = −n. From n = `LEAD_UNDERFLOW_ORDER` on, the term
+ * with 1/n! is 0 as a double and is left out.
  *
  * The terms have magnitude up to about e^{|z|} and the sum about e^{−Re z}
  * (times powers of |z|), so the relative cancellation is about
@@ -1432,6 +1443,8 @@ function upperGammaDirectSeriesComplex(
   const tailScale =
     powExpAbs(z, power, C_ZERO, weightedSum) +
     powExpAbs(z, power, C_ZERO, sum.abs()) * power.abs() * z.log().abs();
+  if (skip >= LEAD_UNDERFLOW_ORDER)
+    return { value: C_ZERO.sub(tail), scale: tailScale };
   if (skip >= 0) {
     let harmonic = 0;
     let factorial = 1;

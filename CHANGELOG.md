@@ -66,6 +66,13 @@
 
 ### Resolved Issues
 
+- **`LerchPhi(z, s, a)` at a very large order `s` ends** (CE-1527).
+  `ce.box(['LerchPhi', 0.5, 1e300, 2]).N()` did not end. It now stays
+  `LerchPhi(0.5, 1e300, 2)` within a few milliseconds, as other large orders
+  that no route can vouch for do, and compiled `LerchPhi` gives `NaN`. The
+  same fix applies to the complex upper incomplete gamma `Gamma(s, z)` at a
+  very large negative integer order, which `LerchPhi` calls.
+
 - **A `Series` of a logarithm whose argument crosses the negative real axis at
   the point no longer gives a series that is off by `2πi` on one side**
   (CE-1617). `Series(Ln(-1 - i*x), x, 0, 3)` was `ln(-1) + i*x + x^2/2 + …`,
