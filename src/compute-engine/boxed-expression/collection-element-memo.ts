@@ -33,6 +33,7 @@ import { subscriptEvaluateReads } from './transitive-purity';
 import { beginStoreGuard, type StoreGuard } from './store-guard';
 import { cacheOff } from '../../common/cache-switches';
 import { CancellationError } from '../../common/interruptible';
+import { staticViewDiverges } from '../static-typing-view';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -1215,6 +1216,22 @@ export function validElementMemo(
   return entry;
 }
 
+/**
+ * True when no entry is served or stored (see the store sites):
+ * - inside a transient precision window (`_withTransientPrecision`, the
+ *   window of a `N(x, p)` call), the elements that a read would compute have
+ *   more digits than the ones a memo holds, and the ones a read inside the
+ *   window would store would be served later at the precision of the engine;
+ * - inside a type computation (`staticViewDiverges()`,
+ *   `static-typing-view.ts`), a variable and a parameter of a function
+ *   literal have no value, so an element computed there is not the element,
+ *   and an entry stored there would be served to the evaluation
+ *   (`Filter(L, k ↦ k < 3)` walked with `k` unbound).
+ */
+function memoSuspended(ce: Expression['engine']): boolean {
+  return ce._atTransientConfiguration || staticViewDiverges(ce);
+}
+
 /** The still-valid cache entry for this instance, or `undefined`. Unlike
  * `validElementMemo`, this does not hand the entry's object dependencies to
  * the enclosing collectors: the caller does that only when it serves an
@@ -1222,12 +1239,7 @@ export function validElementMemo(
 function validEntryOf(expr: Expression): ElementMemoCache | undefined {
   const ce = expr.engine;
   if (cacheOff('element')) return undefined;
-  // Inside a transient precision window (`_withTransientPrecision`, the
-  // window of a `N(x, p)` call), the elements that a read would compute have
-  // more digits than the ones a memo holds, and the ones a read inside the
-  // window would store would be served later at the precision of the
-  // engine: no entry is served or stored there (see the store sites).
-  if (ce._atTransientConfiguration) return undefined;
+  if (memoSuspended(ce)) return undefined;
   const entry = elementMemoCaches.get(expr);
   if (!entry) {
     if (CACHE_STATS) recordCache('elementMemo', 'missCold');
@@ -1375,8 +1387,9 @@ function commitRecordedWalk(
   // window moves no engine version, so the pulls themselves must record it.
   // Without this, a walk started outside a window, pulled inside it and
   // finished outside it stored elements computed at the precision of the
-  // window (ROADMAP CE-645).
-  if (transientPull || expr.engine._atTransientConfiguration) return;
+  // window (ROADMAP CE-645). The same holds for a type computation
+  // (`memoSuspended()`).
+  if (transientPull || memoSuspended(expr.engine)) return;
   elementMemoCaches.set(expr, {
     worldVersion: expr.engine._worldVersion,
     factsHidden: expr.engine._factsHidden(),
@@ -1497,12 +1510,13 @@ function* recordingStream(
    * committed. Neither engine version moves for an ordinary scope change. */
   let suspendedScopeChange = false;
   /** An element was pulled while a transient precision or angular-unit
-   * window was open (`_atTransientConfiguration`). The element then has the
-   * digits, or the unit, of the window, not of the engine, and the buffer is
-   * not committed (`commitRecordedWalk`). The test is made before each pull:
-   * a window that the element body opens closes before its pull returns, and
-   * a window that the consumer opens between two pulls is open when the next
-   * pull begins. */
+   * window was open (`_atTransientConfiguration`), or inside a type
+   * computation (`memoSuspended()`). The element then has the digits, or the
+   * unit, of the window, not of the engine, or was computed with unbound
+   * variables, and the buffer is not committed (`commitRecordedWalk`). The
+   * test is made before each pull: a window that the element body opens
+   * closes before its pull returns, and a window that the consumer opens
+   * between two pulls is open when the next pull begins. */
   let transientPull = false;
   let drained = false;
   const startDeps = boundary.deps;
@@ -1536,7 +1550,7 @@ function* recordingStream(
     if (ce._semanticVersion !== gen) suspendedWrite = true;
     if (ce._worldVersion !== epoch) suspendedEpochChange = true;
     if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
-    if (ce._atTransientConfiguration) transientPull = true;
+    if (memoSuspended(ce)) transientPull = true;
     let result = pull();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
     // observed across a yield boundary is the consumer's. Configuration
@@ -1555,7 +1569,7 @@ function* recordingStream(
       if (ce._semanticVersion !== gen) suspendedWrite = true;
       if (ce._worldVersion !== epoch) suspendedEpochChange = true;
       if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
-      if (ce._atTransientConfiguration) transientPull = true;
+      if (memoSuspended(ce)) transientPull = true;
       result = pull();
       gen = ce._semanticVersion;
       epoch = ce._worldVersion;
@@ -1677,9 +1691,9 @@ export function elementMemoFillTo(
     deps !== undefined &&
     !elements.some(containsObject) &&
     guard.movedOnly(...ELEMENT_MEMO_ACCEPTED) &&
-    // Elements computed inside a transient precision window are not stored
-    // (see `validElementMemo`).
-    !expr.engine._atTransientConfiguration
+    // Elements computed inside a transient precision window or a type
+    // computation are not stored (`memoSuspended()`).
+    !memoSuspended(expr.engine)
   ) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
@@ -1697,14 +1711,14 @@ export function elementMemoFillTo(
 /**
  * Whether the element memo can keep a complete walk of `expr` now: the
  * memo is on (`cacheOff('element')`), no transient precision window is
- * open, and the memo can follow every dependency of the instance (the
- * snapshot that `commitRecordedWalk()` takes). A walk can still be refused
- * for its own content (an element that holds a mutable object, a store
- * guard that moved, more than `ELEMENT_MEMO_CAP` elements).
+ * open and no type computation runs (`memoSuspended()`), and the memo can
+ * follow every dependency of the instance (the snapshot that
+ * `commitRecordedWalk()` takes). A walk can still be refused for its own
+ * content (an element that holds a mutable object, a store guard that
+ * moved, more than `ELEMENT_MEMO_CAP` elements).
  */
 export function elementMemoCanKeep(expr: Expression): boolean {
-  if (cacheOff('element') || expr.engine._atTransientConfiguration)
-    return false;
+  if (cacheOff('element') || memoSuspended(expr.engine)) return false;
   return snapshotDeps(expr, true) !== undefined;
 }
 
@@ -1764,7 +1778,8 @@ export function elementMemoAt(
  * - the instance is impure and the complete walk is not kept: the instance
  *   is not finite by its form, or has more than `ELEMENT_MEMO_CAP` elements,
  *   or the memo refuses the walk for its content;
- * - the read is in a transient precision window (`validElementMemo`);
+ * - the read is in a transient precision window or a type computation
+ *   (`memoSuspended()`);
  * - the element is, or holds, a mutable object (the rule of
  *   `commitRecordedWalk`);
  * - a read of a sequence term was stopped, or a walk missed elements, while
@@ -1779,7 +1794,7 @@ export function elementMemoComputeCell(
 ): Expression | undefined {
   const ce = expr.engine;
   if (!Number.isInteger(index) || index < 1) return compute();
-  if (ce._atTransientConfiguration || cacheOff('element')) return compute();
+  if (memoSuspended(ce) || cacheOff('element')) return compute();
   if (!expr.isPure) {
     const fromWalk = impureElementFromCompleteWalk(expr, index);
     return fromWalk === null ? compute() : fromWalk;
@@ -1799,7 +1814,7 @@ export function elementMemoComputeCell(
     // Host code ran, a sequence read was stopped, or a walk missed elements
     // (`store-guard.ts`; the other counts: `ELEMENT_MEMO_ACCEPTED`).
     !guard.movedOnly(...ELEMENT_MEMO_ACCEPTED) ||
-    ce._atTransientConfiguration
+    memoSuspended(ce)
   )
     return value;
   // The entry is validated AFTER the computation, so a dependency that the

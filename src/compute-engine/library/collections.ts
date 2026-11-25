@@ -119,6 +119,7 @@ import {
   noteIncompleteWalk,
   unlessWalkMissedElements,
 } from '../boxed-expression/incomplete-walks.js';
+import { staticViewDiverges } from '../static-typing-view.js';
 import {
   isFiniteCount,
   normalizeCount,
@@ -1885,6 +1886,35 @@ function predicateErrorValue(
   if (pred === undefined || pred.isValid) return undefined;
   if (pred.operator === 'Error') return pred;
   return pred.errors[0];
+}
+
+/**
+ * True when `expr`, a `Filter`, is read in a type computation of its engine
+ * (`staticViewDiverges()`, `static-typing-view.ts`) and its predicate is or
+ * holds a function literal, or names a user function (`p := k ↦ k < 3` or
+ * `p(k) := k < 3`, then `Filter(xs, p)`). There the parameters of the
+ * literal have no value, so an application of the predicate does not judge
+ * the element: `k ↦ k < 3` answers `k < 3`, and a host predicate
+ * `k ↦ Keep(k)` reads a symbol. The `Filter` then has no count, no emptiness
+ * and no membership, and its walk misses every element. An operator that
+ * the host or the library defines (`Filter(xs, Keep)`) receives the element
+ * itself.
+ */
+function predicateUnboundInView(expr: Expression): boolean {
+  if (!isFunction(expr) || !staticViewDiverges(expr.engine)) return false;
+  const pred = expr.op2;
+  if (pred === undefined) return false;
+  if (isSymbol(pred)) {
+    if (pred.operatorDefinition?.isUserFunctionDefinition === true) return true;
+    const value = pred.value;
+    return value !== undefined && isFunction(value, 'Function');
+  }
+  return isFunction(pred, 'Function') || holdsFunctionLiteralOperand(pred);
+}
+
+/** True when an operand of `x` is a `Function` literal. */
+function holdsFunctionLiteralOperand(x: Expression): boolean {
+  return isFunction(x) && x.ops.some((op) => isFunction(op, 'Function'));
 }
 
 /**
@@ -15131,6 +15161,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isEmpty: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.op1.isEmptyCollection === true) return true;
+        // See the `iterator` handler.
+        if (predicateUnboundInView(expr)) return undefined;
         // A source that cannot be enumerated leaves emptiness UNKNOWN: the
         // walk below would find nothing and report a definite `true`, which is
         // how `Filter(xs, p)` answered `[]` for a valueless `xs`.
@@ -15165,6 +15197,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is finite (capped at 2) yet has nothing to walk, and the loop below
         // would report that empty walk as a count of 0. See `isEnumerableSource`.
         if (!isEnumerableSource(expr.op1)) return undefined;
+        // See the `iterator` handler: the walk below would count 0.
+        if (predicateUnboundInView(expr)) return undefined;
         // A FACET query stays cheap: past `ce.iterationLimit` matching
         // elements the count is reported as UNKNOWN rather than walked to the
         // end. This bound is the count's OWN, deliberately separate from the
@@ -15206,6 +15240,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // same `Filter` read the same elements.
         const inSource = selectedSourceContains(walkedSource(expr.op1), target);
         if (inSource !== true) return inSource === false ? false : undefined;
+        // See the `iterator` handler.
+        if (predicateUnboundInView(expr)) return undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);
         // Mirror the iterator's verdicts on the predicate result, so a query
@@ -15235,6 +15271,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
+        // In a type computation the parameters of a function literal have no
+        // value (`static-typing-view.ts`), so its verdicts are not the
+        // verdicts of the elements: the walk misses every element, and its
+        // readers stay unevaluated (`noteIncompleteWalk()`).
+        if (predicateUnboundInView(expr))
+          return {
+            next: () => {
+              noteIncompleteWalk();
+              return { value: undefined, done: true };
+            },
+          };
         // A sub-expression of the predicate that does not depend on the
         // element is evaluated once in the walk (`walk-invariant-values.ts`).
         const f = walkInvariantApplicable(expr.op2, applicable(expr.op2));

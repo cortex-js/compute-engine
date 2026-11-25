@@ -75,6 +75,17 @@
 
 ### Resolved Issues
 
+- **The norm of a range that ends at the length of a filtered list is correct**
+  (CE-1754). With `L = Map(k ↦ 2k, Range(1, 40))`, `P = Filter(L, k ↦ Keep(k))`
+  for a host predicate `Keep`, and `c = Norm(Range(1, Length(P)))`, `c` was `1`
+  instead of `2√310`. With the predicate `k ↦ k < 2.5`, the type of the formula
+  threw `Filter predicate must return "True" or "False"`. The computation of the
+  type read the value of `P` and applied the predicate with `k` unbound, and the
+  result of that walk was kept and used by the evaluation. Now, in a type
+  computation, a variable has no value unless it holds a function, a `Filter` by
+  a function literal or a user function has no count, and the elements that a
+  walk of a lazy collection computes are not kept.
+
 - **The completion at the collection of an Epsil `for` no longer offers the
   loop variable** (CE-1687). In `let xs = [1, 2]` followed by `for i in ▮ {}`,
   `epsilCompletions()` offered `xs` and `i`, but `i` is not defined in its
