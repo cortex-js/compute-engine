@@ -2,6 +2,7 @@ import { Complex } from 'complex.js';
 import { getSupertype, makeTensorField } from './tensor-fields.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { numberMatrixInverse } from '../numerics/linear-algebra.js';
+import { complexMatrixInverse } from '../numerics/linear-algebra-complex.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -840,6 +841,24 @@ export abstract class AbstractTensor<
       const rows: number[][] = [];
       for (let i = 0; i < n; i++) rows.push(data.slice(i * n, (i + 1) * n));
       const inverse = numberMatrixInverse(rows);
+      if (inverse === undefined) return undefined;
+      return makeTensor(this.ce, {
+        dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
+        shape: [n, n],
+        data: inverse.flat() as DataTypeMap[DT][],
+      });
+    }
+
+    // A matrix of complex machine numbers: the kernel for complex entries,
+    // whose test of a singular matrix is relative to the modulus of the
+    // entries. (`[[3 + i, 2, 1], [1, 1, 1], [4 + i, 3, 2]]` gave entries of
+    // about 5e15.)
+    if (this.dtype === 'complex128' || this.dtype === 'complex64') {
+      const data = this.data as Complex[];
+      const rows: Complex[][] = [];
+      for (let i = 0; i < n; i++) rows.push(data.slice(i * n, (i + 1) * n));
+      const inverse = complexMatrixInverse(rows);
       if (inverse === undefined) return undefined;
       return makeTensor(this.ce, {
         dtype: this.dtype,

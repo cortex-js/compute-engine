@@ -91,6 +91,18 @@
 
 ### Resolved Issues
 
+- **The numeric inverse of a singular matrix with complex entries stays
+  unevaluated** (CE-1803).
+  `Inverse([[3 + i, 2, 1], [1, 1, 1], [4 + i, 3, 2]]).N()` gave entries of
+  about `5e15`, because rounding left a small nonzero pivot in place of 0. It
+  now stays unevaluated, as `evaluate()` does. The same holds for `evaluate()`
+  of a matrix with entries such as `0.9 + 0.3i`, for `PseudoInverse(…).N()`
+  and for `MatrixPower` with a negative exponent. The inverse of a matrix of
+  complex machine numbers now uses partial pivoting, and a pivot is zero when
+  it is very small relative to the entries, so a regular matrix that is very
+  ill-conditioned also stays unevaluated. A matrix of complex machine numbers
+  with an infinite or `NaN` entry stays unevaluated too.
+
 - **The sum, the product, the maximum, the minimum and the count of a value
   of a sorted list are found when an element is a variable** (CE-1804). With
   `x` declared `real`, `Sum(Sort([3, x, 1]))`, `Max(Sort([3, x, 1]))` and
