@@ -17,11 +17,15 @@ import {
   withSignatureResult,
   beginSignatureDerivation,
   endSignatureDerivation,
-  nextDerivationPhase,
   noteReentrantSignatureRead,
   type SignatureDerivationFrame,
   type HomeScope,
 } from './declared-parameter-result.js';
+import {
+  groupSignature,
+  hasHomeScope,
+  type SignatureGroupMember,
+} from './signature-group.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { noteArithmeticDefinition } from './arithmetic-order-override.js';
 import {
@@ -993,12 +997,87 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       noteReentrantSignatureRead(this);
       return this._recursiveReadSignature();
     }
+    // A function of a cycle of calls is derived with the other functions of
+    // the cycle (`groupSignature`, `signature-group.ts`).
+    const member = this._signatureGroupMember();
+    if (member !== undefined) {
+      const grouped = groupSignature(this.engine, member);
+      if (grouped !== undefined) return grouped;
+    }
     const frame = beginSignatureDerivation(this);
     try {
       return this._deriveSignatureOnce(stored, skeleton, literal, frame);
     } finally {
       endSignatureDerivation(frame);
     }
+  }
+
+  /**
+   * This definition as a member of a group derivation
+   * (`signature-group.ts`), or `undefined` when its signature result is
+   * not derived from a lambda literal: the signature skeleton must have the
+   * result `unknown` and as many slots as the stored signature, and the
+   * literal a home scope, where the group types its body afresh.
+   * @internal
+   */
+  _signatureGroupMember(): SignatureGroupMember | undefined {
+    const stored = this._signature;
+    const skeleton = this._signatureSkeleton;
+    const literal = this._lambdaLiteral;
+    if (
+      skeleton === undefined ||
+      literal === undefined ||
+      !this._isLambda ||
+      this.inferredSignature ||
+      typeof skeleton !== 'object' ||
+      skeleton.kind !== 'signature' ||
+      skeleton.result !== 'unknown' ||
+      !hasHomeScope(literal)
+    )
+      return undefined;
+    const t = stored.type;
+    if (
+      typeof t !== 'object' ||
+      t.kind !== 'signature' ||
+      (t.args?.length ?? 0) !== (skeleton.args?.length ?? 0)
+    )
+      return undefined;
+    return {
+      owner: this,
+      name: this.name,
+      literal,
+      skeleton,
+      recorded: stored,
+      enter: (candidate) => {
+        this._derivingSignature = true;
+        this._recursionResult = candidate;
+      },
+      leave: () => {
+        this._derivingSignature = false;
+        this._recursionResult = undefined;
+      },
+      build: (literalType, result) => {
+        // The placeholders are put back into the stored signature, which
+        // keeps the effect specifier, then refined, as in
+        // `_deriveSignatureOnce`.
+        const base: FunctionSignature = { ...t, result: 'unknown' };
+        if (t.args !== undefined)
+          base.args = t.args.map((a, i) =>
+            skeleton.args?.[i]?.type === 'unknown'
+              ? { ...a, type: 'unknown' }
+              : a
+          );
+        return new BoxedType(
+          refineDeclaredPlaceholders(
+            base,
+            withSignatureResult(literalType.type, result)
+          ),
+          this.engine._typeResolver
+        );
+      },
+      noted: (type, homes) => this._noted(type, homes),
+      freeDefinitions: () => [],
+    };
   }
 
   /** The body of {@link _deriveSignature}, run inside the derivation frame
@@ -1010,13 +1089,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     frame: SignatureDerivationFrame
   ): BoxedType {
     let lambdaType: BoxedType;
-    nextDerivationPhase(frame);
     this._derivingSignature = true;
     try {
       lambdaType = literal.type;
     } finally {
       this._derivingSignature = false;
-      nextDerivationPhase(frame);
     }
     // The memo keys on the lambda's type by CONTENT: the object is rebuilt
     // whenever the cache generation moves, which the computation below does
@@ -1070,7 +1147,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // that read answer the stored signature, as for the lambda's type
       // above. Without it, each level boxed the body again, without end.
       let typedResult: Type | undefined;
-      nextDerivationPhase(frame);
       this._derivingSignature = true;
       try {
         ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
@@ -1078,7 +1154,6 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         ));
       } finally {
         this._derivingSignature = false;
-        nextDerivationPhase(frame);
       }
       // A self-recursive body whose result is an abstract collection is
       // re-typed under the hypothesis that the result is a list, and the
@@ -1093,14 +1168,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         this.name,
         typedResult ?? functionResult(lambdaType.type),
         (candidate, thunk) => {
-          nextDerivationPhase(frame);
           this._recursionResult = candidate;
           this._derivingSignature = true;
           try {
             return thunk();
           } finally {
             this._derivingSignature = false;
-            nextDerivationPhase(frame);
             this._recursionResult = undefined;
           }
         }
