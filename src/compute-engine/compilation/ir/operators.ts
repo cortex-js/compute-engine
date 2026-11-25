@@ -508,6 +508,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // operator, so that the check is kept and runs once before them.
   row(undefined,      2,          [[[I, I], I, 'rows.agree']], { ...list, effect: 'may-fail' }),
   row(undefined,      2,          [[[I, I], I, 'rows.square']], { ...list, effect: 'may-fail' }),
+  // The order of a square matrix of the lane `rows` whose two lengths the
+  // lowering does not prove equal (`order()`): the number of rows where
+  // they are equal, a `RangeError` where they differ, the interpreter's
+  // `expected-square-matrix`. The kernels below read it, so that the check
+  // runs before them.
+  row(undefined,      2,          [[[I, I], I, 'rows.order']], { ...list, effect: 'may-fail' }),
+  // The inverse and the power by an integer of a square matrix of the lane
+  // `rows` of the order read last (`matrix-runtime.ts`): rows of reals of
+  // that order.
+  row(undefined,      2,          [[['rows', I], 'rows', 'rows.inverse']], list),
+  row(undefined,      3,          [[['rows', I, I], 'rows', 'rows.power']], list),
   row(undefined,      3,          [[['rows', I, I], R, 'rows.get'], [['rows', I, I], I, 'rows.get.int']], list),
   // The row `At(g, i)` at an index known at run time: the index of the
   // row from 0 (from the end when `i` is negative), -1 where `i` is out of

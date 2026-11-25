@@ -397,6 +397,9 @@ describe('CE-1736: the matrix operators of a table whose rows have one length', 
     ['a vector times a table', (w) => ['MatrixMultiply', w(count), w(nm)], false],
     ['a table times a matrix of rows of a constant length', (w) => ['MatrixMultiply', w(nm), w(['Map', F(['List', 'i', ['Multiply', 2, 'i']]), ['Range', 1, 'm', 1]])], false],
     ['Trace of the census table', (w) => ['Trace', w(census)], false],
+    ['Determinant of the census table', (w) => ['Determinant', w(census)], false],
+    ['MatrixPower of the census table', (w) => ['MatrixPower', w(census), 2], true],
+    ['Diagonal of an n × m table', (w) => ['Diagonal', w(nm)], false],
   ] as [string, (w: (x: Json) => Json) => Json, boolean][])('%s', (_, form, rows) => {
     const r = compile(box(form(same)), { fallback: false });
     expect(r.success).toBe(true);
@@ -428,10 +431,22 @@ describe('CE-1736: the matrix operators of a table whose rows have one length', 
     ['a value after a Loop', ['Block', ['Declare', 't', "'unknown'", nm], ['Loop', ['Assign', 't', step('t')], ['Element', 'j', count]], ['Transpose', 't']], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a call result', ['Transpose', ['square', 'n']], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a Join', ['Transpose', ['Join', nm, nm]], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
-    ['Determinant', ['Determinant', census], /Determinant of a matrix whose number of rows is known at run time only/],
-    ['Inverse', ['Inverse', census], /Inverse of a matrix whose number of rows is known at run time only/],
   ])('%s declines', (_, json, cause) => {
     expect(declines(json)).toMatch(cause);
+  });
+
+  // `Inverse` of the census table, regular at n = 1 and n = 2 (rank 2):
+  // the kernel of its run-time order, rows of that order.
+  test('Inverse of the census table', () => {
+    const r = compile(box(['Inverse', census]), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.rows).toBe(true);
+    for (const n of [1, 2]) {
+      const want = ce.withValues({ n: ce.number(n) } as never, () =>
+        read(box(['Inverse', listed(census)]).evaluate())
+      );
+      expect(agree(r.run!({ n } as never), want)).toBe(true);
+    }
   });
 
   // Two lengths that the lowering does not prove equal are compared once at

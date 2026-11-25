@@ -333,6 +333,7 @@ export const JS: Syntax = deepFreeze({
     'rows.width': '($0.length === 0 ? 0 : $0[0].length)',
     'rows.agree': { text: '_agree($0, $1)', helpers: ['_agree'] },
     'rows.square': { text: '_square($0, $1)', helpers: ['_square'] },
+    'rows.order': { text: '_order($0, $1)', helpers: ['_order'] },
     'rows.get': '$0[$1][$2]',
     'rows.get.int': '$0[$1][$2]',
     // The row at an index known at run time.
@@ -344,6 +345,9 @@ export const JS: Syntax = deepFreeze({
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',
+    // Of a matrix of the lane `rows`, of the order `rows.order`.
+    'rows.inverse': '_SYS.matrixInverse($0, $1)',
+    'rows.power': '_SYS.matrixPower($0, $1, $2)',
     'mrowreduce': '_SYS.matrixRowReduce($0, $1)',
     'binomial': '_SYS.binomial($0, $1)',
     // A count that is NaN (a bound with no value) is an empty list.
@@ -477,6 +481,11 @@ export const JS: Syntax = deepFreeze({
       "const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (${a} and ${b})`); return 0; };",
     _square:
       "const _square = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: Trace of a matrix of ${a} rows and ${b} columns`); return 0; };",
+    // The order of the matrix of `Determinant`, `Inverse` and
+    // `MatrixPower`: the interpreter's value of another is the error
+    // `expected-square-matrix`.
+    _order:
+      "const _order = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: a matrix of ${a} rows and ${b} columns`); return a; };",
     // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
     // where `i` is out of range of `g` or `j` of its row.
     _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',

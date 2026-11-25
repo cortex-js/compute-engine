@@ -47,6 +47,22 @@ const TABLE_HEADS: ReadonlySet<string> = new Set([
   'ConjugateTranspose',
   'Trace',
   'MatrixMultiply',
+  'Rank',
+  'Shape',
+  'Diagonal',
+  'Determinant',
+  'Inverse',
+  'MatrixPower',
+]);
+
+/** The operators of a square matrix: a list of rank 2 of a run-time size
+ *  is read as its rows (`matrixRows()`), whose order is checked at run
+ *  time (`rowsKernel()`, `agree()`). */
+const SQUARE_HEADS: ReadonlySet<string> = new Set([
+  'Trace',
+  'Determinant',
+  'Inverse',
+  'MatrixPower',
 ]);
 
 export function matrixLowering(
@@ -197,14 +213,23 @@ export function matrixLowering(
       ? integer(0)
       : b.op(check, [x, y], scalarType('integer'));
 
-  /** `Transpose`, `ConjugateTranspose` and `Trace` of `m`, a value of the
-   *  lane `rows` of reals or integers whose rows have one length (CE-1736,
-   *  `rowWidths`): the transpose, rows of the elements of a column, whose
-   *  rows have the number of rows of `m` as their length; the trace, whose
-   *  number of rows and length of the rows are compared (`agree()`). */
+  /** `Transpose`, `ConjugateTranspose`, `Trace`, `Rank` and `Shape` of `m`,
+   *  a value of the lane `rows` of reals or integers whose rows have one
+   *  length (CE-1736, `rowWidths`): the transpose, rows of the elements of
+   *  a column, whose rows have the number of rows of `m` as their length;
+   *  the trace, whose number of rows and length of the rows are compared
+   *  (`agree()`); the rank 2 and the tuple of the number of rows and the
+   *  length of the rows (the interpreter's empty list of rows has rank 1,
+   *  a known limitation of `docs/COMPILATION-MODEL.md`). */
   const table = (e: Fn, m: V): V => {
     const w = cx.rowWidths.get(m)!;
     const n = rowCount(m);
+    if (e.operator === 'Rank') return integer(2);
+    if (e.operator === 'Shape') {
+      const v = cx.list(e, [n, w]);
+      cx.tuples.set(v, 0);
+      return v;
+    }
     if (e.operator === 'Trace') {
       const [cn, cw] = [cx.constant(n), cx.constant(w)];
       if (cn !== undefined && cw !== undefined && cn !== cw)
@@ -212,7 +237,65 @@ export function matrixLowering(
       const zero = agree(n, w, 'rows.square');
       return sum(e, n, (k) => rowsAt(m, k, k), zero);
     }
+    if (e.operator === 'Diagonal')
+      return build(e, cx.apply(e, 'Min', [n, w]), (k) => rowsAt(m, k, k));
+    if (
+      e.operator === 'Determinant' ||
+      e.operator === 'Inverse' ||
+      e.operator === 'MatrixPower'
+    )
+      return rowsKernel(e, m, n, w);
     return build(e, w, (j) => build(e, n, (i) => rowsAt(m, i, j)));
+  };
+
+  /** `Determinant`, `Inverse` and `MatrixPower` of `m`, a value of the lane
+   *  `rows` whose rows have one length, of `n` rows of `w` elements: the
+   *  kernels of a square matrix, of the order `n`. Where `same()` does not
+   *  prove `n` and `w` equal, the order is `rows.order`, which throws a
+   *  `RangeError` where they differ (the interpreter's
+   *  `expected-square-matrix`); each kernel reads the order, so that the
+   *  check runs before it, and the rows of `Inverse` and `MatrixPower` have
+   *  that order as their count and their length, so that a reader of the
+   *  result that reads no element runs the check too. */
+  const rowsKernel = (e: Fn, m: V, n: V, w: V): V => {
+    const [cn, cw] = [cx.constant(n), cx.constant(w)];
+    if (cn !== undefined && cw !== undefined && cn !== cw)
+      decline(e, `${e.operator} of a matrix that is not square`);
+    const order = same(n, w)
+      ? n
+      : b.op('rows.order', [n, w], scalarType('integer'));
+    // The kernel reads the elements row by row (`rows.flat`) and the order;
+    // its value at the order 1 is the element.
+    if (e.operator === 'Determinant')
+      return cx.apply(e, op('mdet'), [
+        rowsFlat(e, m, cx.rowsElements.get(m)!),
+        order,
+      ]);
+    const out =
+      e.operator === 'Inverse'
+        ? b.op('rows.inverse', [m, order], scalarType('rows'))
+        : b.op('rows.power', [m, exponent(e), order], scalarType('rows'));
+    cx.rowsParams.add(out);
+    cx.rowsElements.set(out, 'real');
+    cx.rowCounts.set(out, order);
+    cx.rowWidths.set(out, order);
+    return out;
+  };
+
+  /** The exponent of `MatrixPower(m, p)`: the interpreter's value of a
+   *  power by a real exponent is a root of the matrix for a half-integer,
+   *  which no kernel computes. A literal exponent past the cap of the
+   *  interpreter, which keeps the power unevaluated
+   *  (`value-scaled-caps.ts`), declines; a computed one is a matrix of NaN
+   *  at run time (`matrixPower()`). */
+  const exponent = (e: Fn): V => {
+    const x = e.ops[1];
+    if (isNumber(x) && Math.abs(x.re) > MAX_MATRIX_POWER_EXPONENT)
+      decline(e, 'MatrixPower by an exponent past the cap of the interpreter');
+    const p = cx.scalar(e.ops[1]);
+    if (type(p).lane !== 'integer')
+      decline(e, 'MatrixPower by an exponent that is not an integer');
+    return p;
   };
 
   /** `MatrixMultiply(A, B)` of matrices and vectors: the matrix product,
@@ -469,9 +552,21 @@ export function matrixLowering(
       if (v !== undefined) return v;
     }
     const m = numbers(e, e.ops[0]);
-    // `Transpose` and `Trace` of a list of lists of run-time length whose
+    // The matrix operators of a list of lists of run-time length whose
     // rows have one length (CE-1736).
     if (type(m).lane === 'rows' && h !== 'Flatten') return table(e, m);
+    // An operator of a square matrix of a list of rank 2 of a run-time
+    // size (a build of a constant row length): its rows, whose order is
+    // checked at run time.
+    if (
+      checks &&
+      SQUARE_HEADS.has(h) &&
+      type(m).shape.length === 2 &&
+      type(m).shape.some((d) => typeof d !== 'number')
+    ) {
+      const rows = lists.matrixRows(e, m);
+      if (rows !== undefined) return table(e, rows);
+    }
     // `Flatten` of a list of lists of run-time length that the program
     // made (CE-1736): the elements of its rows.
     if (type(m).lane === 'rows') {
@@ -483,18 +578,9 @@ export function matrixLowering(
       return rowsFlat(e, m, cx.rowsElements.get(m)!);
     }
     const rank = type(m).shape.length;
-    // An empty list of rows has rank 1 and the shape `(0)` in the
-    // interpreter: a matrix whose number of rows is known at run time only
-    // has no settled rank.
-    if (
-      (h === 'Rank' || h === 'Shape') &&
-      rank === 2 &&
-      typeof type(m).shape[0] !== 'number'
-    )
-      decline(
-        e,
-        `${h} of a matrix whose number of rows is known at run time only (an empty list has rank 1)`
-      );
+    // A matrix whose number of rows is known at run time only has rank 2:
+    // the interpreter's empty list of rows has rank 1 and the shape `(0)`,
+    // a known limitation of `docs/COMPILATION-MODEL.md`.
     if (h === 'Rank') return integer(rank);
     if (h === 'Shape') {
       if (rank === 0) decline(e, 'Shape of a scalar (an empty tuple)');
@@ -566,19 +652,7 @@ export function matrixLowering(
         ? at(at(m, integer(0)), integer(0))
         : cx.apply(e, op('mdet'), [flatten(e, m), integer(n)]);
     if (h === 'Inverse') return cx.apply(e, op('minverse'), [m]);
-    // `MatrixPower(m, p)`: the interpreter's value of a power by a real
-    // exponent is a root of the matrix for a half-integer, which no kernel
-    // computes.
-    // A literal exponent past the cap of the interpreter, which keeps the
-    // power unevaluated (`value-scaled-caps.ts`), declines; a computed one
-    // is a matrix of NaN at run time (`matrixPower()`).
-    const exponent = e.ops[1];
-    if (isNumber(exponent) && Math.abs(exponent.re) > MAX_MATRIX_POWER_EXPONENT)
-      decline(e, 'MatrixPower by an exponent past the cap of the interpreter');
-    const p = cx.scalar(e.ops[1]);
-    if (type(p).lane !== 'integer')
-      decline(e, 'MatrixPower by an exponent that is not an integer');
-    return cx.apply(e, op('mpower'), [m, p]);
+    return cx.apply(e, op('mpower'), [m, exponent(e)]);
   };
 
   return { matrix };

@@ -83,9 +83,22 @@
   comparison runs when an element of the result is read. This also
   holds for a list of rows of a run-time count, and for a stated length
   beside a run-time one (`MatrixMultiply(K, v)` with `K: matrix<real^2x3>`
-  and `v: list<real>`), which gave an unspecified value before. A
-  `list<list<real>>` argument at a parameter of a matrix type, `Determinant`
-  and `Inverse` of a matrix of run-time size, matrices of complex numbers or
+  and `v: list<real>`), which gave an unspecified value before.
+  `Shape(M)` gives `(2, 3)` and `Rank(M)` gives 2; they also compile for a
+  table that the program builds, of a run-time number of rows. A parameter
+  of a matrix type takes a matrix of stated size, a literal and a build of a
+  constant row length: with `tr := m ↦ Transpose(m)` declared
+  `(matrix<real>) -> list<list<real>>`, `tr([[1, 2], [3, 4]])` gives
+  `[[1, 3], [2, 4]]`. An `Apply` whose body is a list of rows gives it whole:
+  `Apply((m: matrix<real>) ↦ Transpose(m), M)` gives
+  `[[1, 4], [2, 5], [3, 6]]`. `Determinant`, `Inverse`, `MatrixPower` and
+  `Diagonal` of a matrix of run-time size compile too: at
+  `M = [[1, 2], [3, 4]]`, `Determinant(M)` gives -2 and `Inverse(M)` gives
+  `[[-2, 1], [1.5, -0.5]]`, and for a matrix that is not square
+  `Determinant(M)` throws
+  `RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
+  A `list<list<real>>` argument and a call result at a parameter of a
+  matrix type, `RowReduce` of a matrix of run-time size, matrices of complex numbers or
   of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
   the interval target and the `bigint` mode decline.
 

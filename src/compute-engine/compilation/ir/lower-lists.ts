@@ -1092,6 +1092,26 @@ export function listLowering(cx: Lowering) {
     return out;
   };
 
+  /** The value `v` at a parameter of a matrix type of no stated dimensions
+   *  (`isFreeMatrix()` of `lower-functions.ts`), whose rows must have one
+   *  length: a value of the lane `rows` with that fact (`rowWidths`) is
+   *  itself; a list of rank 2 of reals or integers (a stated size, a
+   *  literal, a build of a constant row length) is its rows (`asRows()`),
+   *  whose count and length are its two lengths. `undefined` for another
+   *  value: its rows can have different lengths. */
+  const matrixRows = (e: Fn, v: V): V | undefined => {
+    if (type(v).lane === 'rows')
+      return cx.rowWidths.has(v) && cx.rowsElements.has(v) ? v : undefined;
+    const out = asRows(e, v);
+    if (out === undefined) return undefined;
+    const [r, c] = type(v).shape.map((n) =>
+      typeof n === 'number' ? integer(n) : n.v
+    );
+    cx.rowCounts.set(out, r);
+    cx.rowWidths.set(out, c);
+    return out;
+  };
+
   /** The rows of the values `vs` of the lane `rows`, in order
    *  (`rows.join`), of reals where one of them is. */
   const rowsJoined = (vs: V[]): V => {
@@ -3536,6 +3556,7 @@ export function listLowering(cx: Lowering) {
     comprehension,
     join,
     rowsLiteral,
+    matrixRows,
     joinLists,
     isIterate,
     iterateTo,

@@ -27,6 +27,7 @@ ce.declare('C', 'matrix<complex>');
 ce.declare('Z', 'matrix<boolean>');
 ce.declare('H', 'matrix<real^2x?>');
 ce.declare('K', 'matrix<real^2x3>');
+ce.declare('n', 'integer');
 
 const box = (json: Json): Expression => ce.box(json as never);
 const F = (body: Json, ...params: Json[]) => ['Function', body, ...params];
@@ -72,7 +73,15 @@ function agree(v: unknown, w: unknown): boolean {
   );
 }
 
-type Point = { M: Grid; A: Grid; I: Grid; Q: Grid; v: number[] };
+type Point = {
+  M: Grid;
+  A: Grid;
+  I: Grid;
+  Q: Grid;
+  v: number[];
+  K: Grid;
+  n: number;
+};
 
 // 2 × 3, 3 × 2 and 1 × 1, of integers and of reals; `A` is 2 × 2 or
 // 3 × 3, so that `MatrixMultiply(M, A)` agrees at some points only.
@@ -83,6 +92,8 @@ const POINTS: Point[] = [
     I: [[1, 2], [3, 4], [5, 6]],
     Q: [[0.25, 2]],
     v: [1, -2, 0.5],
+    K: [[1, 2, 3], [4, 5, 6]],
+    n: 2,
   },
   {
     M: [[1.5, -2], [0.25, 4], [3, 1]],
@@ -90,14 +101,26 @@ const POINTS: Point[] = [
     I: [[7]],
     Q: [[1], [2], [3]],
     v: [3, 4],
+    K: [[0.5, -1, 2], [3, 0, 1]],
+    n: 1,
   },
-  { M: [[7]], A: [[1, 2, 3], [4, 5, 6], [7, 8, 9]], I: [[-3, 2]], Q: [[5]], v: [2, 3] },
+  {
+    M: [[7]],
+    A: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+    I: [[-3, 2]],
+    Q: [[5]],
+    v: [2, 3],
+    K: [[1, 1, 1], [2, 2, 2]],
+    n: 3,
+  },
   {
     M: [[1, 2, 3], [4, 5, 6], [7, 8, 10]],
     A: [[0.5, 1, 2], [1, 1, 1], [3, 2, 1]],
     I: [[1, 2], [3, 4]],
     Q: [[1, 2], [3, 4]],
     v: [1, 1, 1],
+    K: [[2, 0, 1], [1, 3, 5]],
+    n: 4,
   },
 ];
 
@@ -109,6 +132,8 @@ function interpreted(json: Json, p: Point): unknown {
     I: list(p.I),
     Q: list(p.Q),
     v: box(['List', ...p.v]),
+    K: list(p.K),
+    n: ce.number(p.n),
   };
   return ce.withValues(values as never, () => {
     const r = box(json).evaluate();
@@ -257,17 +282,127 @@ describe('a parameter of a matrix type', () => {
     expect(engine.box('S').evaluate().json).toEqual(['List', ['List', 91, 2]]);
   });
 
-  // A call result has no fact of its rows: the matrix operators decline it,
-  // and so does a parameter of a matrix type, which takes a value whose
-  // rows have one length only (the interpreter gives `incompatible-type`
-  // for rows of different lengths).
+  // A call result has no fact of its rows (the interpreter does not check
+  // the declared result type of a user function: `f := m ↦ [[1, 2], [3]]`
+  // declared `(matrix<real>) -> matrix<real>` gives the ragged list): the
+  // matrix operators decline it, and so does a parameter of a matrix type,
+  // which takes a value whose rows have one length only (the interpreter
+  // gives `incompatible-type` for rows of different lengths).
   test.each([
     ['Transpose of a call', ['Transpose', ['tr', 'M']], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a call of a call', ['tr', ['tr', 'M']], /an argument of tr for the parameter 1, a matrix, whose rows can have different lengths/],
     ['a list<list<real>> argument', ['tr', 'g'], /an argument of tr for the parameter 1, a matrix, whose rows can have different lengths/],
     ['a list<list<real>> argument of Apply', ['Apply', F(['Length', 'm'], typed('m', 'matrix<real>')), 'g'], /an argument of Apply for the parameter m, a matrix, whose rows can have different lengths/],
+    ['a Filter inside the rows', ['tr', ['Map', F(['Filter', 'r', F(['Greater', 'x', 1], 'x')], 'r'), 'M']], /an argument of tr for the parameter 1, a matrix, whose rows can have different lengths/],
+    ['reals at a parameter of integers', ['Apply', F(['Transpose', 'm'], typed('m', 'matrix<integer>')), 'K'], /an argument of Apply of type matrix<real\^\(2x3\)> for the parameter m of lists of integers/],
   ])('%s declines', (_, json, cause) => {
     expect(declines(json)).toMatch(cause);
+  });
+});
+
+/** A table of `n` rows of 3 elements (a list of rank 2), and a table of
+ *  `n` rows of `n` elements (the lane `rows`, with the fact). */
+const build3 = [
+  'Map',
+  F(['Map', F(['Add', 'i', ['Multiply', 10, 'j']], 'j'), ['Range', 1, 3]], 'i'),
+  ['Range', 1, 'n', 1],
+];
+const square = [
+  'Map',
+  F(['Map', F(['Add', 'i', ['Multiply', 0.5, 'j']], 'j'), ['Range', 1, 'n', 1]], 'i'),
+  ['Range', 1, 'n', 1],
+];
+const lit = ['List', ['List', 1, 2], ['List', 3, 4]];
+/** The interpreter leaves a matrix operator of a lazy table unevaluated:
+ *  its value is compared with the operator of the listed table. */
+const listed = (x: Json) => ['ListFrom', x];
+
+// An argument whose rows provably have one length: a value of stated size,
+// a literal, a build of a constant row length (the rows of the list,
+// `matrixRows()`), and a built table that carries the fact.
+describe('an argument of one row length at a parameter of a matrix type', () => {
+  test.each([
+    ['a matrix of stated size', ['tr', 'K']],
+    ['a literal', ['tr', lit]],
+    ['a build of a constant row length', ['gram', build3], ['gram', listed(build3)]],
+    ['a square build', ['gram', square], ['gram', listed(square)]],
+    ['a Map of each element', ['tr', twice('M')]],
+    ['Apply of a matrix of stated size', ['Apply', F(['MatrixMultiply', 'm', ['Transpose', 'm']], typed('m', 'matrix<real>')), 'K']],
+    ['Apply of a literal', ['Apply', F(['Trace', 'm'], typed('m', 'matrix<real>')), lit]],
+    ['Apply of a build', ['Apply', F(['Transpose', 'm'], typed('m', 'matrix<real>')), build3]],
+    ['Apply of a square build', ['Apply', F(['Trace', 'm'], typed('m', 'matrix<real>')), square], ['Trace', listed(square)]],
+    ['a literal of integers at a parameter of integers', ['Apply', F(['Transpose', 'm'], typed('m', 'matrix<integer>')), lit]],
+  ] as [string, Json, Json?][])('%s', (...row) => {
+    // A rest parameter: jest passes a callback at a missing third element.
+    const [, json, interp] = row;
+    const { errors } = check(json, undefined, interp);
+    expect(errors).toBe(0);
+  });
+
+  // The rows of a stated size: the two lengths are constants, so `Trace`
+  // of a matrix that is not square declines, as the interpreter's error.
+  test('Trace of a parameter bound to a 2 × 3 matrix declines', () => {
+    expect(
+      declines(['Apply', F(['Trace', 'm'], typed('m', 'matrix<real>')), 'K'])
+    ).toMatch(/Trace of a matrix that is not square/);
+  });
+});
+
+describe('Shape and Rank of a matrix of run-time size', () => {
+  test.each([
+    ['Shape(M)', ['Shape', 'M']],
+    ['Rank(M)', ['Rank', 'M']],
+    ['Shape(I)', ['Shape', 'I']],
+    ['Shape of a transpose', ['Shape', ['Transpose', 'M']]],
+    ['Shape of a product', ['Shape', ['MatrixMultiply', 'M', ['Transpose', 'M']]]],
+    ['Shape of a build of a constant row length', ['Shape', build3]],
+    ['Rank of a build of a constant row length', ['Rank', build3]],
+    ['Shape of a square build', ['Shape', square]],
+    ['Rank of a square build', ['Rank', square]],
+    ['Shape of a typed parameter', ['Apply', F(['Shape', 'm'], typed('m', 'matrix<real>')), 'M']],
+  ])('%s', (_, json) => {
+    const { errors } = check(json);
+    expect(errors).toBe(0);
+  });
+
+  // `[[]]` is a value of the type, of shape `(1, 0)`; `[]` is not (the
+  // engine refuses it as the value of `M`).
+  test('a matrix of one empty row', () => {
+    const shape = compile(box(['Shape', 'M']), { fallback: false });
+    const rank = compile(box(['Rank', 'M']), { fallback: false });
+    expect(shape.run!({ M: [[]] } as never)).toEqual([1, 0]);
+    expect(rank.run!({ M: [[]] } as never)).toBe(2);
+    ce.withValues({ M: list([[]]) } as never, () => {
+      expect(box(['Shape', 'M']).evaluate().json).toEqual(['Tuple', 1, 0]);
+      expect(box(['Rank', 'M']).evaluate().json).toBe(2);
+    });
+  });
+
+  // A known limitation (`docs/COMPILATION-MODEL.md`): the interpreter's
+  // empty list of rows has rank 1 and the shape `(0)`.
+  test('a table that the program builds, of no row', () => {
+    const shape = compile(box(['Shape', build3]), { fallback: false });
+    const rank = compile(box(['Rank', square]), { fallback: false });
+    expect(shape.run!({ n: 0 } as never)).toEqual([0, 3]);
+    expect(rank.run!({ n: 0 } as never)).toBe(2);
+    ce.withValues({ n: ce.number(0) } as never, () => {
+      expect(box(['Shape', build3]).evaluate().json).toEqual(['Tuple', 0]);
+      expect(box(['Rank', square]).evaluate().json).toBe(1);
+    });
+  });
+});
+
+describe('Apply whose value is a list of rows', () => {
+  const T = ['Apply', F(['Transpose', 'm'], typed('m', 'matrix<real>')), 'M'];
+  test.each([
+    ['the transpose of a parameter', T],
+    ['a matrix operator of it (the fact)', ['MatrixMultiply', T, 'M']],
+    ['Transpose of it', ['Transpose', T]],
+    ['a body of a parameter of lists of lists', ['Apply', F(twice('m'), typed('m', 'list<list<real>>')), 'M']],
+    ['the parameter itself', ['Apply', F('m', typed('m', 'matrix<integer>')), 'I']],
+  ])('%s', (_, json) => {
+    const { errors } = check(json);
+    expect(errors).toBe(0);
   });
 });
 
@@ -320,8 +455,8 @@ describe('a matrix type of stated dimensions keeps its code', () => {
 
 describe('what declines', () => {
   test.each([
-    ['Determinant', ['Determinant', 'M'], {}, /Determinant of a matrix whose number of rows is known at run time only/],
-    ['Inverse', ['Inverse', 'M'], {}, /Inverse of a matrix whose number of rows is known at run time only/],
+    ['RowReduce', ['RowReduce', 'M'], {}, /RowReduce of a matrix whose number of rows is known at run time only/],
+    ['Determinant of a list<list<real>> input', ['Determinant', 'g'], {}, /Determinant of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['Transpose of a list<list<real>> input', ['Transpose', 'g'], {}, /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a complex matrix', ['Transpose', 'C'], {}, /the input C of type matrix<complex>/],
     ['a boolean matrix', ['Transpose', 'Z'], {}, /the input Z of type matrix<boolean>/],
@@ -332,5 +467,147 @@ describe('what declines', () => {
     ['the bigint mode', ['Length', 'M'], { mode: 'bigint' }, /the input M of type matrix<real>/],
   ] as [string, Json, object, RegExp][])('%s', (_, json, options, cause) => {
     expect(declines(json, options)).toMatch(cause);
+  });
+});
+
+// `Determinant`, `Inverse`, `MatrixPower` and `Diagonal` of a matrix of
+// run-time size: the order is the number of rows, compared with the length
+// of the rows at run time where the compiler does not prove them equal
+// (`rows.order`, a `RangeError` where the interpreter gives
+// `expected-square-matrix`).
+describe('the kernels of a matrix of run-time size', () => {
+  ce.declare('X', 'matrix<real>');
+  ce.declare('Y', 'matrix<integer>');
+  const REALS: Grid[] = [
+    [[7]],
+    [[1.5, -2], [0.25, 4]],
+    [[0.5, 1, 2], [1, 1, 1], [3, 2, 1]],
+    [[2, 1, 0, 3], [1, 3, 2, 0], [0, 1, 4, 1], [3, 0, 1, 5]],
+    [[1, 2], [2, 4]],
+    [[1, 2, 3], [4, 5, 6]],
+    [[1], [2]],
+  ];
+  const INTEGERS: Grid[] = [
+    [[-3]],
+    [[1, 2], [3, 4]],
+    [[2, 0, 1], [1, 3, 2], [1, 1, 2]],
+    [[2, 0, 1], [1, 3, 2], [1, 1, 1]],
+    [[1, 2, 3], [4, 5, 6]],
+  ];
+
+  /** `json` of `X` (reals) or `Y` (integers) compiles, and at each grid
+   *  gives the interpreter's value, a `RangeError` where the interpreter
+   *  gives an error, and a matrix of NaN where it leaves an `Inverse`
+   *  unevaluated (a singular matrix). The counts of each case. */
+  function kernel(json: Json, name: 'X' | 'Y') {
+    const r = compile(box(json), { fallback: false });
+    expect(r.success).toBe(true);
+    const counts = { value: 0, error: 0, singular: 0 };
+    for (const grid of name === 'X' ? REALS : INTEGERS) {
+      const run = () => r.run!({ [name]: grid } as never);
+      const want = ce.withValues({ [name]: list(grid) } as never, () =>
+        box(json).evaluate()
+      );
+      if (want.operator === 'Error') {
+        expect(run).toThrow(RangeError);
+        counts.error += 1;
+      } else if (JSON.stringify(want.json).includes('"Inverse"')) {
+        // A matrix of NaN, of the order of the matrix (its `Length`), as
+        // for a matrix of stated order.
+        const got = run();
+        if (typeof got === 'number') expect(got).toBe(grid.length);
+        else expect([got].flat(2).every((x) => Number.isNaN(x))).toBe(true);
+        counts.singular += 1;
+      } else {
+        const got = run();
+        if (!agree(got, read(want)))
+          throw new Error(
+            `${JSON.stringify(json)} at ${JSON.stringify(grid)}: ${JSON.stringify(got)}, the interpreter ${JSON.stringify(read(want))}`
+          );
+        counts.value += 1;
+      }
+    }
+    return { r, counts };
+  }
+
+  test.each([
+    ['Determinant', ['Determinant', 'X']],
+    ['Inverse', ['Inverse', 'X']],
+    ['MatrixPower by 2', ['MatrixPower', 'X', 2]],
+    ['MatrixPower by 5', ['MatrixPower', 'X', 5]],
+    ['MatrixPower by 1', ['MatrixPower', 'X', 1]],
+    ['MatrixPower by 0', ['MatrixPower', 'X', 0]],
+    ['MatrixPower by -1', ['MatrixPower', 'X', -1]],
+    ['MatrixPower by -2', ['MatrixPower', 'X', -2]],
+    ['the length of an inverse', ['Length', ['Inverse', 'X']]],
+    ['the shape of a power', ['Shape', ['MatrixPower', 'X', 2]]],
+    ['Transpose of an inverse', ['Transpose', ['Inverse', 'X']]],
+    ['Determinant of integers', ['Determinant', 'Y']],
+    ['Inverse of integers', ['Inverse', 'Y']],
+    ['MatrixPower of integers', ['MatrixPower', 'Y', 3]],
+  ] as [string, Json][])('%s', (label, json) => {
+    const name = label.endsWith('integers') ? 'Y' : 'X';
+    const { r, counts } = kernel(json, name);
+    // Each non-square grid is a `RangeError`, read where no element of the
+    // result is (`Length`): the kernels and the count read the order.
+    expect(counts.error).toBe(name === 'X' ? 2 : 1);
+    expect(r.code).toMatch(/_order\(/);
+  });
+
+  test('Diagonal: the elements of the main diagonal of any shape', () => {
+    expect(kernel(['Diagonal', 'X'], 'X').counts).toEqual({
+      value: REALS.length,
+      error: 0,
+      singular: 0,
+    });
+    expect(kernel(['Diagonal', 'Y'], 'Y').counts.value).toBe(INTEGERS.length);
+  });
+
+  // The order is one value: nothing to compare.
+  test.each([
+    ['Determinant of a product', ['Determinant', ['MatrixMultiply', 'M', ['Transpose', 'M']]]],
+    ['MatrixPower of a product', ['MatrixPower', ['MatrixMultiply', ['Transpose', 'A'], 'A'], 2]],
+  ])('%s: no comparison', (_, json) => {
+    const { r } = check(json);
+    expect(r.code).not.toMatch(/_order/);
+  });
+
+  const vander = [
+    'Map',
+    F(['Map', F(['Power', 'i', ['Subtract', 'j', 1]], 'j'), ['Range', 1, 'n', 1]], 'i'),
+    ['Range', 1, 'n', 1],
+  ];
+  // A table that the program builds: a square one, and one of 3 columns,
+  // square at `n = 3` only (the other points are a `RangeError`).
+  test.each([
+    ['Determinant of a square build', ['Determinant', square], ['Determinant', listed(square)], 0],
+    ['Inverse of a Vandermonde build', ['Inverse', vander], ['Inverse', listed(vander)], 0],
+    ['Determinant of a build of 3 columns', ['Determinant', build3], ['Determinant', listed(build3)], 3],
+    ['MatrixPower of a build of 3 columns', ['MatrixPower', build3, 2], ['MatrixPower', listed(build3), 2], 3],
+    ['Trace of a build of 3 columns', ['Trace', build3], ['Trace', listed(build3)], 3],
+  ] as [string, Json, Json, number][])('%s', (_, json, interp, errors) => {
+    const { errors: got } = check(json, undefined, interp);
+    expect(got).toBe(errors);
+  });
+
+  test('the message of a matrix that is not square', () => {
+    const r = compile(box(['Determinant', 'X']), { fallback: false });
+    expect(() => r.run!({ X: [[1, 2, 3], [4, 5, 6]] } as never)).toThrow(
+      'expected-square-matrix: a matrix of 2 rows and 3 columns'
+    );
+  });
+
+  // A matrix of stated order keeps its code: no comparison, the kernel of
+  // the order 1 is the element.
+  test('a matrix of stated order', () => {
+    ce.declare('P', 'matrix<real^2x2>');
+    ce.declare('S', 'matrix<real^1x1>');
+    const code = (json: Json) => compile(box(json), { fallback: false }).code;
+    expect(code(['Determinant', 'S'])).toBe(
+      ['(() => {', '  return _.S[0][0];', '})()'].join('\n')
+    );
+    expect(code(['Inverse', 'P'])).toBe(
+      ['(() => {', '  return _SYS.matrixInverse(_.P);', '})()'].join('\n')
+    );
   });
 });

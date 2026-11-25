@@ -75,9 +75,13 @@ function matrixDeterminant(a: readonly number[], n: number): number {
 /** The inverse of the square matrix `m`, or a matrix of `NaN` where the
  *  interpreter leaves `Inverse` unevaluated: a singular matrix. The kernel
  *  is the interpreter's (`numberMatrixInverse()`), so the value is the
- *  value of `.N()`. */
-function matrixInverse(m: readonly (readonly number[])[]): number[][] {
-  return numberMatrixInverse(m) ?? nanMatrix(m.length);
+ *  value of `.N()`. `n` is the order: the code of a matrix of a run-time
+ *  size passes the order that its check gives (`rows.order`). */
+function matrixInverse(
+  m: readonly (readonly number[])[],
+  n: number = m.length
+): number[][] {
+  return numberMatrixInverse(m) ?? nanMatrix(n);
 }
 
 /** The product of two square matrices of `n` rows, each entry the sum
@@ -100,9 +104,13 @@ function squareProduct(
  *  interpreter's `MatrixPower`: the identity for 0; else the power by
  *  squaring of `|p|`, the first factor `m` itself (so `m^1` is `m`), then
  *  the inverse of that power for a negative `p`. A matrix of `NaN` past
- *  `MAX_MATRIX_POWER_EXPONENT`, where the interpreter keeps the power. */
-function matrixPower(m: readonly (readonly number[])[], p: number): number[][] {
-  const n = m.length;
+ *  `MAX_MATRIX_POWER_EXPONENT`, where the interpreter keeps the power. `n`
+ *  is the order, as for `matrixInverse`. */
+function matrixPower(
+  m: readonly (readonly number[])[],
+  p: number,
+  n: number = m.length
+): number[][] {
   if (p === 0)
     return Array.from({ length: n }, (_, i) =>
       Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))

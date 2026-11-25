@@ -80,7 +80,19 @@ nightly run, tell the user; do not take over that investigation unless asked.
   every input with a value of its declared type; otherwise the result is
   undefined and can differ between targets. The rule is in
   `docs/COMPILATION-MODEL.md`, "Shapes are settled at compile time" (R1 to R6).
-- A decline that the rule above requires is not a defect, and no analysis is
+- A run-time check of a value (a length, a dimension, an order, a range) is
+  judged by its cost against the cost of the operation it guards. An
+  operation whose cost is one or a few machine operations (arithmetic, a
+  comparison, a boolean operator, a string operation, one read of an element)
+  gets no check that the interpreter's value does not require: the check
+  would be most of its cost, so the case is a caveat or a decline. An
+  operation that already costs a loop over its operand (a matrix product, a
+  determinant, an inverse, a transpose, a kernel of the runtime) may run a
+  check once, outside its loops, when the check removes a decline or a wrong
+  value: it throws where the interpreter gives an error. This does not change
+  the rule above: a check compares values of a settled shape, and never
+  chooses between two shapes or two types.
+- A decline that the shape rule requires is not a defect, and no analysis is
   added to remove it: the remedy is a declaration by the host or a change to the
   program, and the case is documented with an example. When another rule that
   compiled code must follow needs a hard static analysis, implement the simple,

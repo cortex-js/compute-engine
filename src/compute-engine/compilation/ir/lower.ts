@@ -3303,7 +3303,10 @@ function lowerOnce(
         // application of the function literal of the derivative, which
         // declines with none, and at a total order of 3 or more of a large
         // body (the rule of the forward mode, `prefersJetDerivative()`)
-        // before the engine is asked.
+        // before the engine is asked. An `Apply` admitted whole passes the
+        // admission to the body (`passesWhole()`): a list of rows as its
+        // value.
+        const wholeValue = passesWhole(e);
         const [g, ...args] = e.ops;
         let f: Expression | undefined = g;
         if (isFunction(g, 'Derivative')) {
@@ -3376,7 +3379,11 @@ function lowerOnce(
           // run-time length whole, as a parameter of a user function does:
           // of lists of integers, one of lists of integers only.
           if (d?.lane === 'rows') {
-            const raw = wholeRows(a);
+            let raw = wholeRows(a);
+            // A parameter of a matrix type binds a list of rank 2 as its
+            // rows (`matrixRows()`), whose rows have its stated length.
+            if (isFreeMatrix(d.t) && type(raw).lane !== 'rows')
+              raw = lists.matrixRows(e, raw) ?? raw;
             if (type(raw).lane !== 'rows')
               decline(
                 a,
@@ -3501,7 +3508,7 @@ function lowerOnce(
           names.forEach((n, i) =>
             frame.names.set(n, { v: values[i], role: 'index' })
           );
-          return value(f.ops[0], want);
+          return wholeValue ? wholeRows(f.ops[0]) : value(f.ops[0], want);
         });
       }
       // An order of two strings or two characters (CE-1574): the order of

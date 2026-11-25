@@ -219,8 +219,10 @@ is a real. An integer value of 2^53 or more is a double and its low digits are
 unspecified (`Mod(2^60 + n, 3)`; rule 3 of
 `docs/plans/2026-11-12-js-route-course-correction.md`): the compiler makes no
 analysis of integer ranges. A closed node keeps the interpreter's value
-(`Mod(2^60 + 1, 3)` is 2). At run time there is no guard of any kind for an
-integer of 2^53 or more: `Mod(n!, 7)` at n = 25 is 0, and the compiled code
+(`Mod(2^60 + 1, 3)` is 2). At run time `Mod` and `Remainder` have no guard for an
+integer of 2^53 or more (one or two machine operations: a check would be
+most of their cost; `IsPrime`, `Totient` and the factor readers, which
+loop, throw a `RangeError` there): `Mod(n!, 7)` at n = 25 is 0, and the compiled code
 gives 6, the remainder of the double. The remedy for the host is the `bigint`
 mode. On GLSL `mod()` of a value beyond 2^24 is the remainder of the float,
 unspecified.
@@ -957,10 +959,18 @@ and is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every
 reader of the lane reads it, a row read by `chunks()` has that length (a `Map`
 of each element keeps the fact), and the matrix operators read it
 ("Matrices"). An argument at a parameter of a matrix type, of a user function
-or of `Apply`, must have the fact: a `list<list<real>>` input, a call result
-and a join decline ("…, a matrix, whose rows can have different lengths"),
-since the interpreter gives `incompatible-type` for rows of different
-lengths. The element `number` is a real outside the mode `complex`; a matrix
+or of `Apply`, must have rows of one length (`matrixRows()` of
+`lower-lists.ts`): a value of the lane with the fact is taken as it is, and a
+list of rank 2 of reals or integers (a matrix of stated size, a literal, a
+build of a constant row length) is taken as its rows, a `rows.build` of them
+(`asRows()`) whose `rowCounts` and `rowWidths` are its two lengths; a
+`list<list<real>>` input, a value whose rows can differ (a `Filter` inside
+the rows), a call result and a join decline ("…, a matrix, whose rows can
+have different lengths"), since the interpreter gives `incompatible-type`
+for rows of different lengths. A call result has no fact even when the
+declared result type of the user function is a matrix type: the interpreter
+does not check that type (a body `[[1, 2], [3]]` gives that list). The
+element `number` is a real outside the mode `complex`; a matrix
 of one stated dimension (`matrix<real^2x?>`), of complex numbers or of
 booleans, GLSL and the interval and the bigint modes decline the input, with
 its type in the cause. A matrix type of stated dimensions
@@ -979,8 +989,9 @@ whole only where `wholeRows()` admits it, by a reader of its rows (`chunks()`,
 which reads any value of the lane through `rowsOf()`: `Map`, `Filter`,
 `Length`, `Count`, `At(At(v, i), j)`, `Flatten`, `Reduce`, `Fold`, `FlatMap`),
 at a parameter of that lane, as the value of a local and as the result. A
-`Block` (its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed` and a
-`WithRandomSeed` pass the admission to the operands that give their value
+`Block` (its last statement), an `If`, a `Which`, a `Coalesce`, a `Typed`, a
+`WithRandomSeed` and an `Apply` of a function literal (its body, when no
+argument is mapped over) pass the admission to the operands that give their value
 (`passesWhole()` and `wholeOnly()` of `lower.ts`); every other read declines ("a
 list of lists of run-time length read whole other than by a reader of its rows
 …"). The join of two arms of the lane (`branch()`) is of the lane, of reals
@@ -2567,7 +2578,11 @@ whose rows have one length (`rowWidths`: a build, an input or a parameter of
 a matrix type): `Transpose` and `ConjugateTranspose` of it are the rows of its
 columns (`rows.get`), whose length is its number of rows; `Trace` of it is the
 sum of its diagonal; `MatrixMultiply` of it and such a value, a matrix or a
-list is the product. Two lengths that must be equal (the inner lengths of
+list is the product; `Rank` of it is 2 and `Shape` the tuple of `rows.count`
+(or its `rowCounts`) and its `rowWidths`; `Diagonal` of it is the build of
+its `Min(rows, columns)` diagonal elements; `Determinant`, `Inverse` and
+`MatrixPower` of it are the kernels of its order (`rowsKernel()`, below).
+Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
 `same()` does not prove equal (one value, or equal constants) are compared
 once at run time on JavaScript, in one place, `agree()` of
@@ -2580,8 +2595,24 @@ constant length stays written out), and it throws a `RangeError` (`incompatible-
 A reader that reads no element of the result (`Length` of the product) reads
 no sum, so `dce` removes the check there: a known limitation of
 `docs/COMPILATION-MODEL.md`.
-Two constants that differ decline. The other operators decline it: their
-order is known at run time only. The matrix operators (`lower-matrices.ts`) settle
+Two constants that differ decline. The order of `Determinant`, `Inverse` and
+`MatrixPower` is the number of rows where `same()` proves it equal to the
+length of the rows, and otherwise the operation `rows.order` (`may-fail`;
+`_order`), which gives the number of rows and throws a `RangeError`
+(`expected-square-matrix: …`) where they differ. Its value is read by the
+kernel, so `dce` keeps it before the kernel: `mdet` of the elements row by
+row (`rows.flat`) and the order, whose value at the order 1 is the element
+(the constant order 1 keeps its read of the element), and `rows.inverse`,
+`rows.power` (`_SYS.matrixInverse($0, $1)`, `_SYS.matrixPower($0, $1, $2)`:
+the order is the last argument of the kernel, the order of its matrix of
+NaN). Their value is of the lane `rows`, of reals, whose `rowCounts` and
+`rowWidths` are the order, so a reader that reads no element (`Length`,
+`Shape`) reads the check too; `Rank`, a constant, and a statement whose
+value is dropped do not (a known limitation). A list of rank 2 of a run-time size (a build
+of a constant row length) is read as its rows (`matrixRows()` of
+`lower-lists.ts`) by `Trace`, `Determinant`, `Inverse` and `MatrixPower`
+(`SQUARE_HEADS`), so its order is checked the same way. `RowReduce` and the
+other operators decline it. The matrix operators (`lower-matrices.ts`) settle
 the shape of their value from the shapes of their operands; a tuple, a list of
 tuples, complex and boolean elements, a rank above 2 and another number of
 operands decline. On JavaScript:
@@ -2589,9 +2620,11 @@ operands decline. On JavaScript:
 - `Matrix(m)` is `m` (`Vector(a, b, c)` is the column `Matrix` of its canonical
   form). `Rank(m)` is the number of axes, a constant (0 for a scalar);
   `Shape(m)` the tuple of the lengths (a run-time length is its value; a scalar
-  declines, the empty tuple). Both decline a matrix whose number of rows is
-  known at run time only: the interpreter's empty list of rows has rank 1 and
-  the shape `(0)`. `Flatten(m)` is the build of the elements row by row (a list
+  declines, the empty tuple). Of a matrix whose number of rows is known at
+  run time only they are 2 and its two lengths, also where it has no row,
+  where the interpreter's empty list of rows has rank 1 and the shape `(0)`:
+  a known limitation of `docs/COMPILATION-MODEL.md` (the value of a matrix
+  type has a row; `[]` is not one). `Flatten(m)` is the build of the elements row by row (a list
   is itself, a scalar the list of it); with a depth, a constant non-negative
   integer or `+oo`, depth 0 is `m` and any other is the same build, as a matrix
   has one level (another depth declines). `Reshape(m, Tuple(d1, …, dk))` of
@@ -2636,9 +2669,9 @@ operands decline. On JavaScript:
   within the precision of a double of it, except where a value of the kernel is
   discontinuous: a singular matrix (above) and `RowReduce`, whose tolerance
   `1e-10` makes 0 a pivot of an exact matrix (a known limitation). The first
-  three read a square matrix: both lengths stated and equal; a matrix that is
-  not square (the interpreter's `expected-square-matrix`) and one whose number
-  of rows is known at run time only decline. `Determinant` of a `1 × 1` matrix
+  three read a square matrix: both lengths stated and equal, or a run-time
+  order checked by `rows.order` (above); a matrix of two stated lengths that
+  differ (the interpreter's `expected-square-matrix`) declines. `Determinant` of a `1 × 1` matrix
   is its element; otherwise `mdet` reads the elements row by row (`Flatten`) and
   the order, so that its result is a real scalar (`real-element`). `Inverse` of
   a singular matrix and `MatrixPower` past `MAX_MATRIX_POWER_EXPONENT` are a

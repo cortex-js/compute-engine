@@ -191,13 +191,35 @@ interpreter's value. A line is removed when the case declines or is fixed.
   tables in `ListFrom`) leaves both unevaluated. CE-1736. The same holds
   for an input of a matrix type whose rows have no element: with
   `M: matrix<real>`, `Transpose(M)` at `M = [[]]` (a `matrix` of the engine)
-  gives `[]`, and the interpreter leaves it unevaluated.
+  gives `[]`, and the interpreter leaves it unevaluated. `Shape` and `Rank`
+  of a table of no row are `(0, m)` and 2, where the interpreter's empty
+  list of rows has the shape `(0)` and rank 1: `Shape(T)` at `n = 0`,
+  `m = 3` gives `[0, 3]` and `Rank(T)` gives 2, and so does a list of rank 2
+  whose number of rows is known at run time only,
+  `C = Map(i ↦ Map(j ↦ i + 10j, Range(1, 3)), Range(1, n, 1))`, at `n = 0`,
+  and an input of a list type of a stated row length: with
+  `P: list<list<real^2>>`, `Shape(P)` at `P = []` gives `[0, 2]` and
+  `Rank(P)` gives 2.
+  Such a table at a parameter of a matrix type, which takes it as its rows:
+  with `tr := m ↦ Transpose(m)` declared `(matrix<real>) -> list<list<real>>`,
+  `tr(C)` at `n = 0` gives `[]`, and the interpreter leaves the `Transpose`
+  unevaluated. `Inverse(S)` and `Diagonal(S)` at `n = 0` give `[]`, where
+  the interpreter gives `incompatible-type` and leaves `Diagonal`
+  unevaluated, and `Diagonal(M)` at `M = [[]]` gives `[]`, where the
+  interpreter leaves it unevaluated. An input of a matrix type always has a row (the engine
+  refuses `[]` as its value), so its `Shape` and `Rank` are the
+  interpreter's.
 - `javascript` (crafted), `M, A: matrix<real>`: the run-time comparison of
   two lengths of `MatrixMultiply` or `Trace` is the start value of the
   operator's sums, so it does not run when no element of the result is
   read. `Length(MatrixMultiply(M, A))` at `M = [[1, 2, 3], [4, 5, 6]]`,
   `A = [[1, 0], [0, 1]]` gives `2`, and `Map(r ↦ 1, MatrixMultiply(M, A))`
   gives `[1, 1]`; the interpreter gives the error `incompatible-dimensions`.
+  The squareness comparison of `Determinant`, `Inverse` and `MatrixPower`
+  is read by the kernel and by the lengths of its result, so it does not
+  run where neither is read: `Rank(Inverse(M))` gives `2` and
+  `Block(Determinant(M), 5)` gives `5` at that `M`, where the interpreter
+  gives `expected-square-matrix`.
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
@@ -927,6 +949,19 @@ tuple), a matrix or a record (on JavaScript, "Records" under "User functions
 and dispatch"). It comes from the declared or inferred static type of the
 value and from the literal structure of its operands. The compiler does not
 follow the paths of control flow to find a shape. The rule has six parts.
+
+A check of a value is a different thing from a test of a shape, and it is
+judged by its cost. An operation that costs one or a few machine operations
+(arithmetic, a comparison, a boolean operator, a string operation, one read
+of an element) gets no check that the interpreter's value does not require:
+the check would be most of the cost of the operation. An operation that
+already costs a loop over its operand (a matrix product, a determinant, an
+inverse) may compare two lengths once, outside its loops, where that removes
+a decline: with `M, A: matrix<real>`, `MatrixMultiply(M, A)` compares the
+row length of `M` with the number of rows of `A` once and throws a
+`RangeError` where they differ ("Lists of two run-time lengths"). Such a
+check compares values of a settled shape; it never chooses between two
+shapes.
 
 **R1. Every input has a type.** An input is a free symbol of the compiled
 code, as `freeSymbols` lists it. An input whose static type is `unknown` or
@@ -1746,7 +1781,14 @@ the length of the first row as the length of every row: the type states it,
 and a value with rows of different lengths is outside the type (R5; the
 engine refuses one as the value of such a variable, and the interpreter gives
 `incompatible-type` for one at such a parameter, so a call whose argument is
-a `list<list<real>>` input or a call result there declines). The element type
+a `list<list<real>>` input, a value whose rows can differ or a call result
+there declines; the interpreter does not check the declared result type of
+a user function, so a call result has no row length even when that type is
+a matrix type). Such a parameter also takes a list whose rows have one
+stated length, as its rows: a matrix of stated size (`matrix<real^2x3>`), a
+literal and a build of a constant row length. With
+`tr := m ↦ Transpose(m)` declared `(matrix<real>) -> list<list<real>>`,
+`tr([[1, 2], [3, 4]])` gives `[[1, 3], [2, 4]]`. The element type
 `number` is a real outside the mode `complex`; a matrix of one stated
 dimension (`matrix<real^2x?>`), of complex numbers or of booleans, GLSL and
 the interval and the bigint modes decline such an input. With
@@ -1754,8 +1796,13 @@ the interval and the bigint modes decline such an input. With
 `[[1, 4], [2, 5], [3, 6]]`, `MatrixMultiply(M, Transpose(M))` gives
 `[[14, 32], [32, 77]]`, `Map(r ↦ Sum(r), M)` gives `[6, 15]` and
 `Length(M)` gives 2.
-`Transpose`, `ConjugateTranspose`, `MatrixMultiply` and `Trace` then
-compile. Two lengths that must be equal (the inner lengths of
+`Transpose`, `ConjugateTranspose`, `MatrixMultiply`, `Trace`, `Rank` and
+`Shape` then compile: `Shape(M)` gives `(2, 3)` (`run()` returns `[2, 3]`)
+and `Rank(M)` gives 2, also for a list of rank 2 whose number of rows is
+known at run time only (a known limitation where it has no row). An `Apply`
+of a function literal whose body is such a list gives it whole:
+`Apply((m: matrix<real>) ↦ Transpose(m), M)` gives
+`[[1, 4], [2, 5], [3, 6]]`. Two lengths that must be equal (the inner lengths of
 `MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that the
 compiler does not prove equal are compared once at run time, and the compiled
 code throws a `RangeError` where they differ, where the interpreter gives
@@ -1773,9 +1820,21 @@ and `Trace(M)` throws
 and `m = 3`, `Transpose(Map(i ↦ Map(j ↦ i + 10j, Range(1, m)), Range(1, n)))`
 gives `[[11, 12], [21, 22], [31, 32]]`, and with
 `T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
-`MatrixMultiply(T, T)` gives `[[13, 18], [18, 25]]`. The other matrix
-operators (`Determinant`, `Inverse`, `Rank`, `Shape`) decline such a list:
-its order is known at run time only. A `list<list<…>>` input, a value after
+`MatrixMultiply(T, T)` gives `[[13, 18], [18, 25]]`. `Diagonal`,
+`Determinant`, `Inverse` and `MatrixPower` compile too, also for a list of
+rank 2 of a run-time number of rows (`Determinant`, `Inverse`, `MatrixPower`
+and `Trace` of `P: list<list<real^2>>`): the number of rows and the length
+of the rows are compared at run time where the compiler does not prove them
+equal, and the compiled code throws a `RangeError` where they differ (the
+interpreter's `expected-square-matrix`), also where only a length of the
+result is read (`Length(Inverse(M))`, `Shape(MatrixPower(M, 2))`). At `M = [[1, 2], [3, 4]]`, `Determinant(M)` gives -2,
+`Inverse(M)` gives `[[-2, 1], [1.5, -0.5]]` and `MatrixPower(M, 2)` gives
+`[[7, 10], [15, 22]]`; at `M = [[1, 2, 3], [4, 5, 6]]`, `Diagonal(M)` gives
+`[1, 5]`, and `Determinant(M)` and `Length(Inverse(M))` throw
+`RangeError: expected-square-matrix: a matrix of 2 rows and 3 columns`.
+`Inverse` of a singular matrix is a matrix of NaN, as for a matrix of
+stated order. `RowReduce`, `Reshape` and the transpose of such a list of
+rank 2 decline. A `list<list<…>>` input, a value after
 an `If` or a `Coalesce`, a value that a loop carries, the result of a call, a
 join and a literal decline, since their rows can have different lengths:
 with `g: list<list<integer>>`, `Transpose(g)` and
