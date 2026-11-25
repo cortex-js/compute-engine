@@ -98,6 +98,13 @@
 
 ### Resolved Issues
 
+- **The message of a dot-call of a function that is not a protocol member
+  quotes the receiver as written** (CE-1688). With `let xs = [3, 1, 2]`, the
+  `dot-call-not-a-protocol-function` message of `sort(xs).reverse()` ended
+  with "at `Sort("xs")`". It now ends with "at `sort(xs)`". The same holds
+  for `protocol-call-ambiguous`. The `Error` expression of such a call has
+  the receiver expression as its site, not its text.
+
 - **A function held in a `let` of a function body can be called by name**
   (CE-1681). In `function m() { let h = (x, y) => x - y; h(y: 2, x: 10) }`,
   the call gave the error `argument-names-unavailable`, but the same two

@@ -374,6 +374,7 @@ import {
   protocolPropertyTypeOfReceiver,
   protocolsWithMember,
 } from '../engine-protocols.js';
+import { createErrorExpression } from '../engine-validation-entrypoints.js';
 
 // The list types the `Range` type handler reports, parsed once when the
 // module loads instead of on each type computation.
@@ -9112,13 +9113,10 @@ function canonicalMemberCall(
     // protocol — the same advice the bare call's ambiguity gives.
     const names =
       applicable.length > 1 ? applicable : owners.map((r) => r.name);
-    return ce.error(
-      [
-        'protocol-call-ambiguous',
-        `\`${name}\` is a function member of ${names.map((p) => `\`${p}\``).join(' and ')}, and the bare name \`${name}\` is taken by a definition of your own. Qualify it — \`x.(${names[0]}.${name})(…)\` — to name the one you meant.`,
-      ],
-      sym(base) ?? base.toString()
-    );
+    return receiverError(ce, base, [
+      'protocol-call-ambiguous',
+      `\`${name}\` is a function member of ${names.map((p) => `\`${p}\``).join(' and ')}, and the bare name \`${name}\` is taken by a definition of your own. Qualify it — \`x.(${names[0]}.${name})(…)\` — to name the one you meant.`,
+    ]);
   }
 
   // 4. A known function that is not a protocol member, on a value that has
@@ -9143,11 +9141,34 @@ function canonicalMemberCall(
     isApplicableDef(known) &&
     protocolPropertyTypeOfReceiver(ce, t, name) === undefined
   )
-    return ce.error(
-      ['dot-call-not-a-protocol-function', name, typeToString(t)],
-      sym(base) ?? base.toString()
-    );
+    return receiverError(ce, base, [
+      'dot-call-not-a-protocol-function',
+      name,
+      typeToString(t),
+    ]);
   return storedCall();
+}
+
+/**
+ * The error of a dot-call `base.name(…)`, with the receiver as its site.
+ *
+ * A symbol receiver is its name, and a string receiver is its quoted
+ * spelling (`"abc"`): a message prints a string site as its text, so the
+ * string itself would read as a name. Any other receiver is the expression
+ * itself, so that a message renders it as the author wrote it
+ * (`sort(xs)`): its `toString()` is the engine form (`Sort(xs)`), and the
+ * renderer quotes the symbols of a text site again (`Sort("xs")`).
+ */
+function receiverError(
+  ce: ComputeEngine,
+  base: Expression,
+  message: string[]
+): Expression {
+  return createErrorExpression(
+    ce,
+    message,
+    sym(base) ?? (isString(base) ? base.toString() : base)
+  );
 }
 
 /**
