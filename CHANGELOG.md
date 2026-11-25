@@ -98,6 +98,12 @@
 
 ### Resolved Issues
 
+- **The Jacobian matrix of a list that a function returns is correct inside
+  a function with a parameter of the name of that list** (CE-1639). With
+  `g := [uv, u + v]`, `F := t ↦ g` and `h := g ↦ JacobianMatrix(F(1), [u, v])`,
+  `h(7)` gave `[0, 0]`: the `g` of the body of `F` was read as the parameter
+  `g` of `h`. It now gives `[[v, u], [1, 1]]`.
+
 - **A debugger can stop a program inside the function of a `map` that a list
   literal spreads** (CE-1638). In
   `[...map(v => do { let w = v; w }, ys), 9]`, an exception that the debug

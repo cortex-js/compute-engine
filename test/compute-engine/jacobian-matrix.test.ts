@@ -151,6 +151,36 @@ describe('JacobianMatrix: system detection is semantic', () => {
     expect(J(ce, ce.symbol('g'), S(ce, 'x', 'y')).toString()).toBe(expected);
   });
 
+  // The `g` of the body of `F` is the global list, not the parameter `g` of
+  // the function that calls `F`.
+  test('a function that returns a symbol bound to a list, in a function with a parameter of that name', () => {
+    const ce = new ComputeEngine();
+    const run = (json: any) => ce.box(json).evaluate();
+    run(['Assign', 'g', ['List', ['Multiply', 'x', 'x', 'y'], ['Add', 'x', 'y']]]);
+    run(['Assign', 'F', ['Function', 'g', 't']]);
+    run([
+      'Assign',
+      'h',
+      ['Function', ['JacobianMatrix', ['F', 1], ['List', 'x', 'y']], 'g'],
+    ]);
+    expect(run(['h', 7]).toString()).toBe(expected);
+  });
+
+  // A parameter that holds a list is read with the value of the call.
+  test('a parameter that holds a list', () => {
+    const ce = new ComputeEngine();
+    const run = (json: any) => ce.box(json).evaluate();
+    run(['Assign', 'g', ['List', 'x', 'y']]);
+    run([
+      'Assign',
+      'h',
+      ['Function', ['JacobianMatrix', 'g', ['List', 'x', 'y']], 'g'],
+    ]);
+    expect(
+      run(['h', ['List', ['Multiply', 'x', 'x', 'y'], ['Add', 'x', 'y']]]).toString()
+    ).toBe(expected);
+  });
+
   // The static type is decided the same way, so a directly-nested
   // `Determinant(JacobianMatrix(F(…), …))` for a list-returning user function
   // typechecks. (A syntactic-only type handler reported `vector` here, and the
