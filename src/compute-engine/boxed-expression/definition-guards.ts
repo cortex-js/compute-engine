@@ -186,3 +186,46 @@ export function protocolDispatcherMarks(def: BoxedOperatorDefinition): {
     twin: marks[PROTOCOL_LIBRARY_TWIN_MARK],
   };
 }
+
+/**
+ * Whether `def` is a function of the host: a definition that the host gave
+ * (`ce.declare()`, a library of the host) with an `evaluate` function, that
+ * is not of the standard library, not lazy, and not a function literal, a
+ * definition with clauses or the dispatcher of a protocol method (those are
+ * the program's own functions). The compiler calls such a function through
+ * the engine (`hostCall()` of `compilation/ir/lower.ts`), and the
+ * interpreter lists each argument of it that is a finite lazy indexed
+ * collection (`listedHostArguments()` of `listed-element.ts`), so that both
+ * pass the same value.
+ *
+ * With `orAsync`, a definition with an `evaluateAsync` function and no
+ * `evaluate` function is one too: the asynchronous route of the
+ * interpreter lists the arguments of such a function as well (compiled
+ * code cannot call it).
+ */
+export function isHostFunctionDefinition(
+  def: BoxedOperatorDefinition | undefined,
+  orAsync = false
+): boolean {
+  const d = def as
+    | {
+        evaluate?: unknown;
+        evaluateAsync?: unknown;
+        lazy?: boolean;
+        _standardLibrary?: boolean;
+        _isLambda?: boolean;
+        _isMultiClause?: boolean;
+        [PROTOCOL_DISPATCHER_MARK]?: unknown;
+      }
+    | undefined;
+  return (
+    d !== undefined &&
+    (typeof d.evaluate === 'function' ||
+      (orAsync && typeof d.evaluateAsync === 'function')) &&
+    d.lazy !== true &&
+    d._standardLibrary !== true &&
+    d._isLambda !== true &&
+    d._isMultiClause !== true &&
+    d[PROTOCOL_DISPATCHER_MARK] === undefined
+  );
+}

@@ -56,6 +56,10 @@ function read(e: Expression): unknown {
   if (isNumber(e)) return e.re;
   if (e.symbol === 'True' || e.symbol === 'False') return e.symbol === 'True';
   if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e.ops.map(read);
+  // A lazy `FlatMap` of rows of run-time lengths does not know that it is
+  // finite: its elements.
+  if (isFunction(e, 'FlatMap') && e.isCollection && !e.isFiniteCollection)
+    return [...e.each()].map((x) => read(x.N()));
   if (isFunction(e) && e.isCollection && e.isFiniteCollection)
     return read(e.engine.function('ListFrom', [e]).evaluate().N());
   throw new Error(`no value: ${e.toString()}`);
@@ -186,6 +190,9 @@ describe('CE-1531: list operators, the interpreter value', () => {
     ['FlatMap of a list', ['FlatMap', 'L', ['Function', ['List', 't', 't'], 't']], POINTS],
     ['FlatMap of a scalar', ['FlatMap', 'L', ['Function', ['Multiply', 't', 2], 't']], POINTS],
     ['FlatMap of three', ['FlatMap', 'L', ['Function', ['List', 't', ['Multiply', 't', 'x'], 1], 't']], POINTS],
+    // Rows of run-time lengths: the lane `rows`, whose elements `rows.flat`
+    // copies in order (CE-1736).
+    ['FlatMap of rows of run-time lengths', ['FlatMap', 'J', ['Function', ['Range', 1, 't'], 't']], POINTS],
     // Scan.
     ['Scan', ['Scan', 'L', add2], POINTS],
     ['Scan from a value', ['Scan', 'L', sub2, 10], POINTS],
@@ -317,10 +324,9 @@ describe('CE-1531: where the interpreter gives no list, the compiled code throws
 describe('CE-1531: declines', () => {
   // prettier-ignore
   test.each([
-    // A list of lists whose rows can have two lengths: rows of run-time
-    // lengths (`Chunk` and `Partition` of such rows are
-    // `ir-ragged-rows-ce1549.test.ts`).
-    ['FlatMap of rows of run-time lengths', ['FlatMap', 'J', ['Function', ['Range', 1, 't'], 't']], 'javascript', 'a list of lists of run-time length'],
+    // A list of lists whose rows can have two lengths, on GLSL (`Chunk` and
+    // `Partition` of such rows are `ir-ragged-rows-ce1549.test.ts`).
+    ['FlatMap of rows of run-time lengths, on GLSL', ['FlatMap', 'J', ['Function', ['Range', 1, 't'], 't']], 'glsl', 'a list of lists of run-time length'],
     ['FlatMap of a point', ['FlatMap', 'L', ['Function', ['Tuple', 't', 't'], 't']], 'javascript', 'a tuple'],
     // The interpreter's list is lazy: an effect declines.
     ['TakeWhile of a list with an effect', ['TakeWhile', ['Map', ['Function', ['Add', 't', ['Random']], 't'], 'L'], pred('Less', 2.5)], 'javascript', 'with an effect'],

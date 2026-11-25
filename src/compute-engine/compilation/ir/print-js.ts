@@ -153,8 +153,8 @@ const number = (x: number) =>
   Object.is(x, -0) ? '(-0)' : x < 0 ? `(${x})` : String(x);
 
 /** The regions `build` and `filter` of the integers `z`, whose count of
- *  the list `out` is `count(out)`. A build fills an array of its length; a
- *  filter pushes. */
+ *  the list `out` is `count(out)`, and `rows.build` and `rows.filter`. A
+ *  build fills an array of its length; a filter pushes. */
 const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
   const toNumber = z.toNumber;
   const open = (out: string, n: string, k: string, filter: boolean) => [
@@ -176,6 +176,16 @@ const builds = (z: Ints, count: Wrap): Syntax['regions'] => {
         `const ${c} = ${count(out)};`,
       ],
     }),
+    // A list of lists of run-time length (the lane `rows`): an array whose
+    // element `k` is the array of the row `k`.
+    'rows.build': ({ outs: [out], args: [n], params: [k] }) => ({
+      open: open(out, n, k, false),
+      close: ([y]) => [`  ${out}[${toNumber(k)}] = ${y};`, '}'],
+    }),
+    'rows.filter': ({ outs: [out], args: [n], params: [k] }) => ({
+      open: open(out, n, k, true),
+      close: ([keep, y]) => [`  if (${keep}) ${out}.push(${y});`, '}'],
+    }),
   };
 };
 
@@ -190,9 +200,10 @@ const OTHER_LANES = {
   'rlcm': '_SYS.ir.lcm($0, $1)',
 };
 
-/** `Flatten` of an input or a parameter of the lane `rows` (`rows.flat`,
- *  `rows.flat.int`): the elements of the host's rows, arrays or typed
- *  arrays, in order, and their count. */
+/** `Flatten` of a value of the lane `rows` (`rows.flat`,
+ *  `rows.flat.int`): the elements of its rows (the host's arrays or typed
+ *  arrays, or the arrays that the program built), in order, and their
+ *  count. */
 const flatRows: RegionSpelling = ({ outs: [c, out], args: [g] }) => ({
   open: [
     `const ${out} = [];`,
@@ -323,6 +334,8 @@ export const JS: Syntax = deepFreeze({
     'rows.row': { text: '_rowr($0, $1)', helpers: ['_rowr'] },
     'rows.rowlen': { text: '_lenr($0, $1, 0)', helpers: ['_lenr'] },
     'rows.rowlen.nan': { text: '_lenr($0, $1, NaN)', helpers: ['_lenr'] },
+    // The rows of two values of the lane, in order.
+    'rows.join': '[...$0, ...$1]',
     'mdet': '_SYS.matrixDeterminant($0, $1)',
     'minverse': '_SYS.matrixInverse($0)',
     'mpower': '_SYS.matrixPower($0, $1)',

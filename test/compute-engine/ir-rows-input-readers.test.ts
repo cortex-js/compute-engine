@@ -554,23 +554,59 @@ describe('Flatten of the rows (CE-1734)', () => {
   );
 });
 
-describe('what still declines', () => {
+// A list of lists of run-time length that the program makes, or a local
+// that holds the rows, is of the lane `rows` too (CE-1736,
+// `ir-rows-build-ce1736.test.ts`).
+describe('the lane rows of a value that the program makes', () => {
+  /** The interpreter's list of lists. */
+  const nested = (expr: MathJsonExpression, g: number[][], n = 0) => {
+    const read = (x: any): unknown =>
+      x.isCollection ? [...x.each()].map(read) : x.re;
+    return read(
+      ce
+        .box(expr)
+        .subs({ L: ce.box(['List', ...g.map((x) => ['List', ...x])]), n })
+        .evaluate()
+    );
+  };
+
   it.each([
     ['a Map whose value is a row', map('r')],
     [
       'a Filter of the rows',
       ['Filter', 'L', row(['Greater', ['Length', 'r'], 1])],
     ],
-    ['the rows as a value', ['Add', 'L', 1]],
-    [
-      'the rows held by a local',
-      ['Block', ['Declare', 'h', "'unknown'", 'L'], ['Length', 'h']],
-    ],
-    [
-      'a list of lists of run-time length that the program makes',
-      ['Map', ['Function', ['Range', 1, 'i'], 'i'], ['Range', 1, 'n']],
-    ],
   ] as [string, MathJsonExpression][])('%s', (_, expr) => {
+    const c = compile(ce.box(expr), { fallback: false }) as any;
+    for (const L of GRAPHS) expect(c.run({ L })).toEqual(nested(expr, L));
+  });
+
+  it('the rows held by a local', () => {
+    const expr: MathJsonExpression = [
+      'Block',
+      ['Declare', 'h', "'unknown'", 'L'],
+      ['Length', 'h'],
+    ];
+    const c = compile(ce.box(expr), { fallback: false }) as any;
+    for (const L of GRAPHS) expect(c.run({ L })).toEqual(expected(expr, 'L', L));
+  });
+
+  it('a list of lists of run-time length that the program makes', () => {
+    const expr: MathJsonExpression = [
+      'Map',
+      ['Function', ['Range', 1, 'i'], 'i'],
+      ['Range', 1, 'n'],
+    ];
+    const c = compile(ce.box(expr), { fallback: false }) as any;
+    for (const n of [0, 1, 4]) expect(c.run({ n })).toEqual(nested(expr, [], n));
+  });
+});
+
+describe('what still declines', () => {
+  it.each([['the rows as a value', ['Add', 'L', 1]]] as [
+    string,
+    MathJsonExpression,
+  ][])('%s', (_, expr) => {
     expect(() => compile(ce.box(expr), { fallback: false })).toThrow();
   });
 

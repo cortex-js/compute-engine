@@ -256,7 +256,7 @@ describe('a value that is not pure (CE-1396)', () => {
     }
   });
 
-  test('the declines: GLSL, a write, a list of lists', () => {
+  test('the declines: GLSL, a write', () => {
     expect(failure(() => glsl(['Sum', R(3)]))).toMatch(/Random on glsl/);
     // A write to an outer local in the value declines, as in a Map body.
     const write = ['Block', ['Assign', 'c', ['Add', 'c', 1]], 'c'];
@@ -274,10 +274,19 @@ describe('a value that is not pure (CE-1396)', () => {
         expect(failure(() => to(program(list)))).toMatch(
           /a write in a loop to a local declared outside/
         );
-    // The inner list is a build of a run-time length.
-    expect(failure(() => js(['Repeat', R('n'), 2]))).toMatch(
-      /a list of lists of run-time length/
-    );
+  });
+
+  // The inner list is a build of a run-time length: the lane `rows`
+  // (CE-1736), a draw for each element of each row, in order.
+  test('a list of lists of run-time length: the values and the draws', () => {
+    const json = seeded(['Repeat', R('n'), 2]);
+    const r = compile(m.box(json as never), IR);
+    expect(r.rows).toBe(true);
+    for (const p of POINTS) {
+      const got = r.run(p);
+      const want = interpret(m, m.box(json as never), p);
+      expect([json, p, agrees(got, want)]).toEqual([json, p, true]);
+    }
   });
 });
 
@@ -294,11 +303,23 @@ describe('the declines', () => {
     );
   });
 
-  test('a value of a run-time length', () => {
-    for (const n of [2, 'n'])
-      expect(failure(() => js(['Repeat', 'D', n]))).toMatch(
-        /a list of lists of run-time length/
-      );
+  // A value of a run-time length: the lane `rows` (CE-1736).
+  test('a value of a run-time length is the rows', () => {
+    for (const n of [2, 'n']) {
+      const json = ['Repeat', 'D', n];
+      const r = js(json);
+      expect(r.rows).toBe(true);
+      for (const p of POINTS)
+        expect([json, p, agrees(r.run(p), interpret(ce, box(json), p))]).toEqual(
+          [json, p, true]
+        );
+    }
+  });
+
+  test('a value of a run-time length, on GLSL', () => {
+    expect(failure(() => glsl(['Repeat', 'D', 2]))).toMatch(
+      /a list of lists of run-time length/
+    );
   });
 
   test('a constant count that is not an integer: an error of the canonical form', () => {

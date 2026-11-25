@@ -446,10 +446,10 @@ describe('MATRIX OPERATORS: THE INTERPRETER VALUE ON JAVASCRIPT', () => {
 
 describe('MATRIX OPERATORS: DECLINES', () => {
   const DECLINES: Array<[any, RegExp]> = [
-    // The rows of a `list<list<real>>` can have two lengths: the input is
-    // read only by an element read `M[i][j]` (`docs/COMPILATION-MODEL.md`).
-    [['Determinant', 'M'], /M of type list<list<real>> other than in an element read/],
-    [['Transpose', 'M'], /M of type list<list<real>> other than in an element read/],
+    // The rows of a `list<list<real>>` can have two lengths: a matrix
+    // operator does not read the input (`docs/COMPILATION-MODEL.md`).
+    [['Determinant', 'M'], /Determinant of a list of lists of run-time length \(its rows can have different lengths\)/],
+    [['Transpose', 'M'], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     // A matrix that is not square, or whose number of rows is known at run
     // time only.
     [['Trace', 'B'], /not square/],

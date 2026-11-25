@@ -260,10 +260,14 @@ describe('a call of a function of the host that declines', () => {
     expect(declined(fn(ce, 'f'))).toMatch(/whose value Nothing is read/);
   });
 
-  test('a list argument that the interpreter holds as a Range (CE-1652, step 5)', () => {
-    // A `List` or a `Tuple` literal compiles (`compile-records-host.test.ts`).
-    const { ce } = engine('let f = (t: real) => hostDraw(1..3)');
-    expect(declined(fn(ce, 'f'))).toMatch(/lazy collection/);
+  test('a list argument that the interpreter holds as a Range (CE-1807)', () => {
+    // The interpreter passes the `List` of the elements of the `Range` to a
+    // function of the host, and so does the code
+    // (`host-lazy-arguments-ce1807.test.ts`).
+    const { ce, calls } = engine('let f = (t: real) => hostDraw(1..3)');
+    const { run } = compiled(fn(ce, 'f'));
+    run(0);
+    expect(calls).toEqual([['draw', ['List', 1, 2, 3]]]);
   });
 
   test('a value of type any', () => {

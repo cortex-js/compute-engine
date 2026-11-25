@@ -1,3 +1,53 @@
+## [Unreleased]
+
+### Breaking Changes
+
+- **A custom function receives a list where an argument is a finite lazy
+  collection** (CE-1807). A function declared with `ce.declare()` and an
+  `evaluate` handler that is not `lazy` now receives the `List` of the
+  elements of an argument that evaluates to a finite `Range`, `Linspace`,
+  `Reverse`, `Map`, `Filter`, `Take` or comprehension, up to
+  `ce.maxCollectionSize` elements (10,000 by default). With
+  `hostSum: (indexed_collection<real>) -> real`, `hostSum(1..3)` passed
+  `Range(1, 3, 1)` and now passes `List(1, 2, 3)`;
+  `hostSum(map(x => x * 2, [1, 2]))` passed the `Map` and now passes
+  `List(2, 4)`, with the callback called once for each element before the
+  handler. An endless collection, a set, a dictionary, a library function
+  and a user function are not changed. A handler that needs the collection
+  as written declares the function `lazy: true`, and receives its operands
+  unevaluated, as before. Compiled JavaScript passes the same `List`, so
+  these calls (`hostSum(1..3)`, `hostSum(reverse([1, 2]))`,
+  `hostSum(map(x => x * 2, [1, 2]))`, `hostSum([1, 2] + 1)`, and a list
+  constant) now compile, where they declined.
+
+### Improvements
+
+- **Compiled JavaScript builds a list of lists whose rows have run-time
+  lengths** (CE-1736, #638). With `g: list<list<integer>>`,
+  `Map(r ↦ 2r, g)`, `Filter(g, r ↦ Length(r) > 1)` and
+  `Map(i ↦ Range(1, i), Range(1, n))` declined with "a list of lists of
+  run-time length", so the program fell back to the interpreter. They now
+  compile: as the result, `run()` returns an array of arrays (at
+  `g = [[1, 2, 3], [4]]`, `Map(r ↦ 2r, g)` gives `[[2, 4, 6], [8]]`), and
+  `Length`, `Count`, `Map`, `At(At(v, i), j)`, `Flatten`, `Reduce` and
+  `Fold` read the value as they read such an input. A local, an `If` or a
+  `Coalesce` can hold it, and a user function can return it, so with
+  `step(g: list<list<integer>>) = map(r ↦ map(x ↦ x + 1, r), g)`,
+  `step(step(g))` compiles. A `Loop`, a `Reduce` or a `Fold` can carry
+  it: at `g = [[1, 2, 3], [4]]`, `let t = g` followed by three passes of
+  `t = step(t)` gives `[[4, 5, 6], [7]]`. A list literal of such rows,
+  `Join`, `ListJoin` and `Append` make one, and so does a `Fold` from `[]`:
+  `Fold((a, i) ↦ Join(a, [Range(1, i)]), [], Range(1, n))` at `n = 3` gives
+  `[[1], [1, 2], [1, 2, 3]]`. `Transpose`, `MatrixMultiply` and `Trace`
+  read such a list when the program settles that its rows have one length:
+  with `T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
+  `MatrixMultiply(T, T)` at `n = 2` gives `[[13, 18], [18, 25]]`, and
+  `MatrixMultiply` declines when its inner lengths are not provably equal.
+  The matrix operators of an input or of a value whose rows can have
+  different lengths, `Determinant` and `Inverse` of such a list, elements
+  that are not real or integer numbers, GLSL, the interval target and the
+  `bigint` mode still decline.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements
@@ -62,9 +112,14 @@
   each variable it uses, the call writes back the new values in the order of
   the program, and `assigns` lists the variable, so `run()` writes it to the
   engine. `tick = (dt: real) => moveBall(dt)` gives `2.5`, then `5.5`, as
-  the interpreter does. A call of such a helper in a loop, a `Sum` or a
-  `Map`, a call that maps over a list, a recursive helper and a helper that
-  assigns a list variable still decline.
+  the interpreter does, also when the call or the write is in a `for` or
+  `while` loop. A helper that reads the variable can also be given by name
+  to `map`, `filter` or `reduce` (`map(getX, L)`). A call of such a helper
+  in a `Sum` or a `Map` callback, a lazy collection that reads the variable
+  only through such a helper (`map(getX, [1, 2])`, which the interpreter
+  computes at each read), a
+  call that maps over a list, a recursive helper and a helper that assigns a
+  list variable still decline.
 
 - **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
   `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a

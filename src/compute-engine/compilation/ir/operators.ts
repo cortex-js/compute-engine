@@ -506,6 +506,9 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row(undefined,      2,          [[['rows', R], I, 'rows.row']], list),
   row(undefined,      2,          [[['rows', I], I, 'rows.rowlen']], list),
   row(undefined,      2,          [[['rows', I], I, 'rows.rowlen.nan']], list),
+  // The rows of two values of the lane `rows`, in order (`Join`,
+  // `ListJoin`, `Append`; CE-1736).
+  row(undefined,      2,          [[['rows', 'rows'], 'rows', 'rows.join']], list),
   // The matrix kernels of the runtime (`matrix-runtime.ts`), of a matrix
   // whose shape the lowering settles (`lower-matrices.ts`): the determinant
   // of the entries of an `n × n` matrix row by row and `n`; the inverse;
@@ -642,6 +645,11 @@ const listOf = (element: IRType, n: Length): IRType => ({
   shape: [n, ...element.shape],
 });
 
+/** `t` is a flat list of reals or integers: a row of a value of the lane
+ *  `rows`. */
+const rowElement = (t: IRType): boolean =>
+  t.shape.length === 1 && (t.lane === R || t.lane === I);
+
 export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
   {
     op: 'build',
@@ -716,7 +724,35 @@ export const REGION_ROWS: readonly RegionRow[] = deepFreeze([
           ]
         : undefined,
   },
-  // `Flatten(g)` of an input or a parameter `g` of the lane `rows`, of
+  // A list of lists of run-time length (CE-1736): the build (`rows.build`)
+  // and the filter (`rows.filter`) whose element is a flat list of reals or
+  // integers of any length, a value of the lane `rows` (`README.md`, "The
+  // rows lane"). The lane of the elements is the lowering's
+  // (`rowsElements`). JavaScript only.
+  {
+    op: 'rows.build',
+    effect: 'may-fail',
+    args: [I],
+    params: [I],
+    results: (_, ys) =>
+      ys.length === 1 && rowElement(ys[0])
+        ? [{ lane: 'rows', shape: [] }]
+        : undefined,
+  },
+  {
+    op: 'rows.filter',
+    effect: 'may-fail',
+    args: [I],
+    params: [I],
+    results: (_, ys) =>
+      ys.length === 2 &&
+      ys[0].lane === B &&
+      ys[0].shape.length === 0 &&
+      rowElement(ys[1])
+        ? [{ lane: 'rows', shape: [] }]
+        : undefined,
+  },
+  // `Flatten(g)` of a value `g` of the lane `rows`, of
   // reals (`rows.flat`) or of integers (`rows.flat.int`): the elements of
   // its rows, in order (its body is empty); the results are the count and
   // the list. JavaScript only.

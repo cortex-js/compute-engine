@@ -194,7 +194,6 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
 
   test.each([
     ['complex elements', 'list<complex>'],
-    ['nested lists', 'list<list<number>>'],
     ['strings', 'list<string>'],
     ['no provable element type', 'list'],
   ])(
@@ -205,14 +204,31 @@ describe('Tycho item 218: shapes the zip lowering must refuse (fail closed, the 
       const r = js(ce, ['Map', F2, ['Range', 1, 'N'], 'S']);
       expect(r.success).toBe(false);
       // A list of strings is admitted as an input (CE-1548): it declines at
-      // the first operation that reads its elements as numbers. A list of
-      // lists of numbers is the host's rows (CE-1721), which `Map` does not
-      // read element by element.
+      // the first operation that reads its elements as numbers.
       expect(r.diagnostic?.message).toMatch(
-        /the input S of type|Add of integer, string|a list of lists of run-time length/
+        /the input S of type|Add of integer, string/
       );
     }
   );
+
+  // A list of lists of numbers is the host's rows (CE-1721): each value of
+  // the function is a row of run-time length, so the result is the lane
+  // `rows` (CE-1736), the interpreter's value.
+  test('a source of nested lists gives the rows of the interpreter', () => {
+    const ce = engine();
+    ce.declare('S', 'list<list<number>>');
+    const json: ExpressionInput = ['Map', F2, ['Range', 1, 'N'], 'S'];
+    const r = compile(ce.box(json), { to: 'javascript', fallback: false });
+    const S = [[1, 2], [3], []];
+    expect(r.run({ N: 3, S } as never)).toEqual([[2, 3], [5], []]);
+    expect(
+      ce
+        .box(json)
+        .subs({ N: 3, S: ce.box(['List', ['List', 1, 2], ['List', 3], ['List']]) })
+        .evaluate()
+        .toString()
+    ).toBe('[[2,3],[5],[]]');
+  });
 
   test('a source with observable effects declines — the interpreter stops at the shortest source', () => {
     const ce = engine();

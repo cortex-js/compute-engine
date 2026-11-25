@@ -1074,6 +1074,18 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      *
      * It is not necessary to further simplify or evaluate the arguments.
      *
+     * A function of the host (a handler that is a JavaScript function, of a
+     * definition that is not `lazy`) receives a `List` for an argument that
+     * evaluates to a finite lazy indexed collection: `f(1..3)` receives
+     * `List(1, 2, 3)`, not `Range(1, 3, 1)`, and `f(map(x => 2x, [1, 2]))`
+     * receives `List(2, 4)`, with the callback called for each element
+     * before the handler. Compiled JavaScript passes the same `List`. An
+     * endless collection, one whose count is not known, one of more than
+     * `ce.maxCollectionSize` elements, a set, a dictionary and a `Tabulate`
+     * whose callback has an effect are passed as they are. A handler that needs the collection as written (to read the
+     * bounds of a `Range`, or to read only some elements) declares the
+     * function `lazy: true` and evaluates the operand itself.
+     *
      * If performing numerical calculations and `options.numericalApproximation`
      * is `false` return an exact numeric value, for example return a rational
      * number or a square root, rather than a floating point approximation.

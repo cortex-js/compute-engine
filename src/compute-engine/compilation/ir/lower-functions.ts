@@ -982,7 +982,7 @@ export function functionLowering(
         return {
           lane: 'rows' as const,
           shape: [],
-          element: cx.rowsLaneOf(e.ops[i])!,
+          element: cx.rowsElements.get(v!) ?? cx.rowsLaneOf(e.ops[i])!,
         };
       if (
         cx.tuples.get(v!) === 0 &&
@@ -1199,10 +1199,14 @@ export function functionLowering(
           cx.value(x, false);
           return out(b.constant(NaN, 'real'));
         }
+        // A list of lists of two lengths not stated is read whole: a body of
+        // run-time inner lengths is of the lane `rows` (CE-1736).
         const body =
-          list || open || points !== undefined || shaped || grid || record
-            ? cx.value(literal.ops[0])!
-            : cx.scalar(literal.ops[0]);
+          grid !== undefined
+            ? cx.wholeRows(literal.ops[0])
+            : list || open || points !== undefined || shaped || record
+              ? cx.value(literal.ops[0])!
+              : cx.scalar(literal.ops[0]);
         const t = type(body);
         // A result that is not a scalar: a record, of the nominal type of
         // the result type when it is one.
@@ -1230,12 +1234,16 @@ export function functionLowering(
             );
         }
         // A list of lists of two lengths not stated: a list of rank 2 of
-        // the lengths that the body settles.
+        // the lengths that the body settles, or of the lane `rows` whose
+        // elements are of the lane of the result (CE-1736).
+        const rows = t.lane === 'rows' ? cx.rowsElements.get(body) : undefined;
         if (
           grid !== undefined &&
-          (t.shape.length !== 2 ||
-            cx.tuples.has(body) ||
-            !isSubLane(t.lane, grid))
+          (rows !== undefined
+            ? !isSubLane(rows, grid)
+            : t.shape.length !== 2 ||
+              cx.tuples.has(body) ||
+              !isSubLane(t.lane, grid))
         )
           decline(
             literal,
@@ -1667,12 +1675,12 @@ export function functionLowering(
           `a list argument of ${e.operator} that the parameter ${i + 1}, a list or a point, would take whole (the interpreter maps the function over the list)`
         );
       if (mapped) return [];
-      // A parameter of the lane `rows` takes an input or a parameter of
-      // that lane only, not a list that the program makes.
+      // A parameter of the lane `rows` takes a list of lists of run-time
+      // length only.
       if (p.lane === 'rows' && type(values[i]).lane !== 'rows')
         decline(
           op,
-          `an argument of ${e.operator} for the parameter ${i + 1}, a list of lists of two lengths not stated, that is not an input or a parameter of that type`
+          `an argument of ${e.operator} for the parameter ${i + 1}, a list of lists of two lengths not stated, that is not a list of lists of run-time length`
         );
       // The lane does not hold the lane of the elements: a list of lists of
       // reals at a parameter of lists of integers would put a real on the
@@ -1680,7 +1688,7 @@ export function functionLowering(
       if (
         p.lane === 'rows' &&
         p.element === 'integer' &&
-        cx.rowsLaneOf(op) !== 'integer'
+        (cx.rowsElements.get(values[i]) ?? cx.rowsLaneOf(op)) !== 'integer'
       )
         decline(
           op,
@@ -1901,6 +1909,16 @@ export function functionLowering(
       return v;
     }
     b.emit({ k: 'call', outs: [...outs, out], fn: fn.ir.name, args: all });
+    // A list of lists of run-time length (CE-1736): read row by row, of the
+    // lane of the elements of the body.
+    const rows =
+      result.lane === 'rows' && fn.value !== undefined
+        ? cx.rowsElements.get(fn.value)
+        : undefined;
+    if (rows !== undefined) {
+      cx.rowsParams.add(out);
+      cx.rowsElements.set(out, rows);
+    }
     const axis =
       fn.ir.body.yields.length > 0
         ? cx.tuples.get(fn.value!)
@@ -2017,7 +2035,10 @@ export function functionLowering(
         hasUnsettledShape(t) ? UNSETTLED_SHAPE : undefined
       );
     const v = param(fn.ir, name, ir as IRType);
-    if (ir.lane === 'rows') cx.rowsParams.add(v);
+    if (ir.lane === 'rows') {
+      cx.rowsParams.add(v);
+      cx.rowsElements.set(v, cx.rowsElementLane(read)!);
+    }
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.inputs.push(t);
     fn.defs.push(def);

@@ -237,6 +237,10 @@ const WITNESSES = [
   '(t: real) => figureDraw((t, "a"))',
   '(t: real) => figureDraw([t, "a"])',
   '(t: real) => draw([circle((t, 0), 1), circle((0, t), 1)])',
+  // A lazy collection given to the host function directly: the interpreter
+  // passes the `List` of its elements, as the code does (CE-1807).
+  '(t: real) => figureDraw(reverse([1, t]))',
+  '(t: real) => figureDraw([1, t] + 1)',
 ];
 
 describe('a function with a rest parameter that calls the host', () => {
@@ -282,15 +286,12 @@ describe('a rest parameter or a host argument that declines', () => {
   });
 
   test('a lazy collection of the interpreter', () => {
-    // The interpreter passes `Range(1, 3, 1)` and `Reverse(List(1, t))`,
-    // which the code holds as the arrays of their elements.
+    // The interpreter passes `List(Range(1, 3, 1))`: a `Range` in the list
+    // of the arguments of `draw` stays a range, which the code holds as the
+    // array of its elements.
     expectDeclines('(t: real) => draw(1..3)', /lazy collection/);
     // The elements of the `Range` share their value with the literal.
     expectDeclines('(t: real) => draw([1, 2, 3], 1..3)', /lazy collection/);
-    expectDeclines(
-      '(t: real) => figureDraw(reverse([1, t]))',
-      /lazy collection/
-    );
     // A function lowered for a list literal, called again with a `Range`.
     expectDeclines(
       '(t: real) => draw(same([1, 2, 3]), same(1..3))',

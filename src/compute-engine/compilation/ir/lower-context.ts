@@ -82,6 +82,21 @@ export class Decline extends Error {
   }
 }
 
+/** The decline of a real written to a list local written in place whose
+ *  integer lane comes from its value (`listWrite()` of `lower.ts`), or of
+ *  reals written to a local that holds a list of lists of run-time length
+ *  of integers (`assign()`): `lower()` lowers the program again with the
+ *  local of the declaration `declaration` on the real lane, as the
+ *  interpreter widens the list. */
+export class WidenList extends Decline {
+  constructor(
+    d: Decline,
+    readonly declaration: Expression
+  ) {
+    super(d.node, d.cause, d.head, d.reason);
+  }
+}
+
 /** A program whose inputs `names` have the type `unknown` or `any`: the
  *  adapters refuse it with the diagnostic `untyped-input`
  *  (`sliceError()`). */
@@ -250,6 +265,11 @@ export type Binding = {
   grid?: 'integer' | 'real';
   /** The carried accumulator of a `Reduce` by a function literal. */
   accumulator?: boolean;
+  /** A local of the lane `rows` (CE-1736): the lane of the elements of
+   *  the value that a loop carries (`rowsElements` of its parameter), and
+   *  the declaration that `WidenList` puts on the real lane where a write
+   *  gives reals. */
+  rows?: { lane: 'integer' | 'real'; declaration: Expression };
 };
 /** The names of one scope. A loop frame stops writes to outer locals. */
 export type Frame = { names: Map<string, Binding>; loop: boolean };
@@ -324,10 +344,12 @@ export type Lowering = {
   value(e: Expression, want?: boolean): V | undefined;
   /** The value of `e`, which must be a scalar. */
   scalar(e: Expression): V;
-  /** The value of `e`, which may be an input or a parameter of the lane
-   *  `rows` (`rowsParams`): a read of such a value is admitted only here,
-   *  where `rows.at` or a parameter of that lane takes it whole; every
-   *  other read declines. */
+  /** The value of `e`, which may be of the lane `rows` (`rowsParams`): a
+   *  read of such a value is admitted only here, where a reader of its rows,
+   *  a parameter of that lane, a local or the result takes it whole; a
+   *  `Block`, an `If`, a `Which`, a `Coalesce`, a `Typed` and a
+   *  `WithRandomSeed` pass the admission to the operands that give their
+   *  value. Every other read declines. */
   wholeRows(e: Expression): V;
   /** The parameters of user functions that hold the IR type of their
    *  argument (`held()` of `lower-functions.ts`): a parameter of no stated
@@ -381,8 +403,14 @@ export type Lowering = {
   /** A decision (`==`, a `Match`) read the known string `v`: the places
    *  its value came through keep their constant (`keepKnown()`). */
   readKnown(v: V): void;
-  /** The inputs and the parameters of the lane `rows`. */
+  /** The values of the lane `rows`: the inputs, the parameters, and the
+   *  values that the program makes (`rows.build`, `rows.filter`, a call,
+   *  a join of two arms, CE-1736). */
   readonly rowsParams: Set<V>;
+  /** The expression being compiled: the site of a region that reads a
+   *  value of the lane `rows` made where no node is at hand
+   *  (`listSource()` of `lower-lists.ts`). */
+  readonly root: Expression;
   /** The count of the elements of a row `At(g, i)` of such a value at an
    *  index known at run time, 0 where `i` is out of range, and the value
    *  of `Length` of the row, NaN there (`lower.ts`). */
@@ -390,9 +418,19 @@ export type Lowering = {
   /** The lane of the elements of a value of the engine type `t` that is of
    *  the lane `rows` as an input or a parameter (`rowsElementLane()`). */
   rowsElementLane(t: Type): 'integer' | 'real' | undefined;
-  /** The lane of the elements of each parameter of the lane `rows` of a
-   *  user function (`rowsParams`). */
+  /** The lane of the elements of each value of the lane `rows`
+   *  (`rowsParams`). */
   readonly rowsElements: Map<V, 'integer' | 'real'>;
+  /** The length of every row of a value of the lane `rows` that a
+   *  `rows.build` or a `rows.filter` made, where it is one value made
+   *  before the region (`over()` of `lower-lists.ts`): the number of
+   *  columns that the matrix operators read (CE-1736). A value made from
+   *  it by another instruction (a join of two arms, a loop, a call, a
+   *  join of lists) has none. */
+  readonly rowWidths: Map<V, V>;
+  /** The number of rows of a value of the lane `rows` that a `rows.build`
+   *  made: the count of its region. */
+  readonly rowCounts: Map<V, V>;
   /** The lane of the elements of `e` where it is of the lane `rows`: that
    *  of the parameter that the name `e` binds (`rowsElements`), whose
    *  declared type can state no lane (`g: list`, CE-1721), or else that of
@@ -413,9 +451,10 @@ export type Lowering = {
     want: boolean
   ): V | undefined;
   withFrame<T>(loop: boolean, f: (frame: Frame) => T): T;
-  /** The region row `op` over the region `f` makes from `params`. */
+  /** The region row `op` over the region `f` makes from `params`; a
+   *  function `op` names the row once `f` has made the region. */
   region(
-    op: string,
+    op: string | (() => string),
     args: V[],
     params: V[],
     f: () => V[],
@@ -443,8 +482,9 @@ export type Lowering = {
   /** The binding of the variable `name` of the engine (a name of
    *  `Program.assigns`) that the call `e` of a user function that writes
    *  it rebinds here, at the root or in the body of a user function. A
-   *  call in a loop, or where a local or a parameter hides the variable,
-   *  declines (CE-1776). */
+   *  `Loop` carries it; a call in a frame of a loop (the body of a `Sum`,
+   *  a callback of `Map`), or where a local or a parameter hides the
+   *  variable, declines (CE-1776). */
   stateWrite(e: Fn, name: string): Binding;
   /** The record of the values `values` (`make()` of `lower-records.ts`),
    *  and the field `k` of the record `r` (`field()`). */

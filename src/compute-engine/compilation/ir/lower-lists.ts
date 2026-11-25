@@ -44,6 +44,7 @@ import { isTupleOrTupleUnionShapedType } from '../../collection-utils.js';
 import {
   decline,
   Decline,
+  WidenList,
   type Fn,
   type Lowering,
   type Source,
@@ -54,6 +55,20 @@ import { emptyBigOpValue } from '../../symbolic/big-op-identity.js';
 import { MAX_CHUNK_COUNT } from '../../numerics/value-scaled-caps.js';
 import { brangeCount } from '../bigint-runtime.js';
 import { textOrder } from './lower-strings.js';
+
+/** The rows of a list of lists whose rows can have different lengths
+ *  (`chunks()`): `source()` reads them one by one, `rows()` makes the value
+ *  of the lane `rows`. Of a value of the lane, `lane` is the lane of its
+ *  elements, and `row(i)` the row at the index `i` from 1 known at run
+ *  time with `length`, the value of its `Length`, NaN where `i` is out of
+ *  range. */
+type Rows = {
+  source: () => Source;
+  rows: () => V;
+  groups?: readonly V[];
+  lane?: 'integer' | 'real';
+  row?: (i: V) => { row: V; length: V };
+};
 
 /** The name of a parameter of a function literal: a symbol, or a symbol
  *  with a type (`Typed(z, "real")`), also with a default value
@@ -238,6 +253,11 @@ const STATISTICS: ReadonlyMap<string, string | undefined> = new Map([
 /** The heads that keep a slice of a list as a list. */
 const SLICES = new Set(['Drop', 'Take', 'Rest', 'Most', 'Reverse']);
 
+/** The decline of a read of the rows of `Chunk` or `Partition`, which
+ *  have no element lane, as a list. */
+const CHUNK_ROWS =
+  'the rows of a Chunk or a Partition read as a list (the result of the program only)';
+
 export function listLowering(cx: Lowering) {
   const { b, type } = cx;
   const op = (name: string) => rowOfOp(cx.rows, name)!.row;
@@ -267,6 +287,15 @@ export function listLowering(cx: Lowering) {
    *  computed index: `Find` (`s.at(head(kept))`) declines for strings, and
    *  `elementOf()` reads in a region that is not emitted. */
   const listSource = (l: V): Source => {
+    // A list of lists of run-time length (an input, a parameter or a value
+    // that the program makes, CE-1736): its rows, as `chunks()` reads them.
+    // The rows of `Chunk` or `Partition` have no element lane: the result
+    // of the program only.
+    if (type(l).lane === 'rows') {
+      const lane = cx.rowsElements.get(l);
+      if (lane === undefined) decline(cx.root, CHUNK_ROWS);
+      return rowsOf(cx.root, l, lane).source();
+    }
     const n = type(l).shape[0];
     // An element of a list of tuples is a tuple.
     const axis = cx.tuples.get(l);
@@ -305,13 +334,13 @@ export function listLowering(cx: Lowering) {
   function source(e: Expression, scalars: true, tuple?: boolean): Source | V;
   function source(e: Expression, scalars = false, tuple = false): Source | V {
     // The rows of a `Chunk` or a `Partition`, each made where it is read.
+    // Of another expression, its value (`chunks()` lowers it).
     const r = chunks(e);
-    if (r !== undefined)
-      return typeof r === 'number' ? listSource(r) : r.source();
+    if (r !== undefined && typeof r !== 'number') return r.source();
     // A host's `Range` (a handler, `cx.isLibrary()`) is lowered in
     // `cx.value()`.
-    if (!isFunction(e, 'Range') || !cx.isLibrary(e)) {
-      const l = cx.value(e)!;
+    if (r !== undefined || !isFunction(e, 'Range') || !cx.isLibrary(e)) {
+      const l = r ?? cx.value(e)!;
       if (cx.tuples.get(l) === 0 && !tuple)
         decline(e, 'a tuple where a list is read');
       if (type(l).shape.length > 0) return listSource(l);
@@ -883,8 +912,21 @@ export function listLowering(cx: Lowering) {
       if (v !== undefined) return v;
     }
     const k = b.newValue(scalarType('integer'));
+    // The lane of the elements of the rows when the element is a flat list
+    // of a run-time length: the region is `rows.build` (`rows.filter`),
+    // whose value is of the lane `rows` (CE-1736).
+    let rows: 'integer' | 'real' | undefined;
+    // The length of the row that the body gives (`rowWidths`).
+    let width: V | undefined;
     const outs = cx.region(
-      filter ? 'filter' : 'build',
+      () =>
+        rows === undefined
+          ? filter
+            ? 'filter'
+            : 'build'
+          : filter
+            ? 'rows.filter'
+            : 'rows.build',
       [s.length],
       [k],
       () =>
@@ -892,26 +934,218 @@ export function listLowering(cx: Lowering) {
           const x = s.at(k);
           frame.names.set(name, { v: x, role: 'index' });
           const v = element(x, k);
-          // An element whose length is a constant value (the count of
-          // `Range(1, 32)`) has that length (`region()` of `lower.ts`); a
-          // length of 0 is not a shape of the IR.
-          if (
-            lengthValues(type(v)).some(
-              (n) => filter || !((cx.constant(n) ?? 0) > 0)
-            )
-          )
-            decline(e, 'a list of lists of run-time length');
-          if (!filter) return [v];
+          if (!filter) {
+            if (runTimeRow(v)) {
+              rows = rowLane(e, v);
+              width = (type(v).shape[0] as { v: V }).v;
+              return [v];
+            }
+            // An element whose length is a constant value (the count of
+            // `Range(1, 32)`) has that length (`region()` of `lower.ts`).
+            if (lengthValues(type(v)).some((n) => !((cx.constant(n) ?? 0) > 0)))
+              decline(e, 'a list of lists of run-time length');
+            return [v];
+          }
           if (type(v).lane !== 'boolean' || type(v).shape.length > 0)
             decline(site, 'a predicate that is not a boolean');
           // An element kept is a row of a list of lists (`chunks()`).
+          if (runTimeRow(x)) {
+            rows = rowLane(e, x);
+            width = (type(x).shape[0] as { v: V }).v;
+            return [v, x];
+          }
           if (lengthValues(type(x)).length > 0)
             decline(e, 'a list of lists of run-time length');
           return [v, x];
         }),
       e
     );
-    return outs[outs.length - 1];
+    const out = outs[outs.length - 1];
+    if (rows !== undefined) {
+      cx.rowsParams.add(out);
+      cx.rowsElements.set(out, rows);
+      // Every row has one length when the length is a value made before
+      // the region, or made in it by pure operations of such values and
+      // constants, which are made again here (CE-1736).
+      const w = width === undefined ? undefined : before(width, k);
+      if (w !== undefined) cx.rowWidths.set(out, w);
+      if (!filter) cx.rowCounts.set(out, s.length);
+    }
+    return out;
+  };
+
+  /** The value `v` as a value made before the value `mark` (the index of
+   *  a region): itself when it is one or a parameter of an open region (an
+   *  input read first in the region), or else, when it is a constant
+   *  integer or a pure operation of such values, the operation made again
+   *  where the builder is (an equal operation of equal operands is one
+   *  value); `undefined` for another value, which depends on the index. */
+  const before = (v: V, mark: V): V | undefined => {
+    if (v < mark || b.isOpenParam(v)) return v;
+    const t = type(v);
+    const c = cx.constant(v);
+    if (c !== undefined)
+      return t.lane === 'integer' && t.shape.length === 0
+        ? integer(c)
+        : undefined;
+    const def = b.defs.get(v);
+    if (def === undefined || rowOfOp(cx.rows, def.op)?.row.effect !== 'pure')
+      return undefined;
+    const args: V[] = [];
+    for (const a of def.args) {
+      const x = before(a, mark);
+      if (x === undefined) return undefined;
+      args.push(x);
+    }
+    return b.op(def.op, args, t);
+  };
+
+  /** `v` is a flat list whose length is a value that is not a constant
+   *  above 0 (a length of 0 is not a shape of the IR): an element of a
+   *  list of lists of the lane `rows`. */
+  const runTimeRow = (v: V): boolean => {
+    const n = type(v).shape;
+    return (
+      n.length === 1 &&
+      typeof n[0] !== 'number' &&
+      !((cx.constant(n[0].v) ?? 0) > 0)
+    );
+  };
+
+  /** The lane of the elements of the row `v` of a list of lists of the
+   *  lane `rows` that `e` makes, or a decline: on JavaScript only, outside
+   *  the interval and the bigint modes, of reals or integers (not of
+   *  points, booleans, complex numbers or strings), and not a row at an
+   *  index known at run time, which can be absent where the interpreter
+   *  gives `Missing`. */
+  const rowLane = (e: Fn, v: V): 'integer' | 'real' => {
+    if (!cx.runtimeLengths || cx.interval || cx.bigint)
+      decline(
+        e,
+        'a list of lists of run-time length (JavaScript only, outside the interval and the bigint modes)'
+      );
+    const t = type(v);
+    if (cx.tuples.has(v)) decline(e, 'a list of lists of run-time length of points');
+    if (t.lane !== 'integer' && t.lane !== 'real')
+      decline(
+        e,
+        `a list of lists of run-time length of ${t.lane === 'boolean' ? 'booleans' : t.lane === 'complex' ? 'complex numbers' : t.lane === 'string' ? 'strings' : `values of the lane ${t.lane}`}`
+      );
+    const n = t.shape[0];
+    if (typeof n !== 'number' && cx.rowLengths.has(n.v))
+      decline(
+        e,
+        'a row at an index known at run time as an element of a list (the interpreter gives Missing where it is absent)'
+      );
+    return t.lane;
+  };
+
+  /** A value of the lane `rows` whose rows are `rows`, flat lists of reals
+   *  or integers (the `List` literal of them, CE-1736): an array of their
+   *  arrays, of reals where one row is. */
+  const rowsList = (e: Fn, rows: V[]): V => {
+    const lanes = rows.map((v) => rowLane(e, v));
+    const out = b.list(rows, { lane: 'rows', shape: [] });
+    cx.rowsParams.add(out);
+    cx.rowsElements.set(out, lanes.includes('real') ? 'real' : 'integer');
+    return out;
+  };
+
+  /** The `List` literal `e` of the values `elements` when it is a list of
+   *  lists of run-time length: every element a flat list (not a point), one
+   *  of them of a length that is not a constant. `undefined` otherwise: a
+   *  literal of rows of constant lengths keeps its list of rank 2 or its
+   *  record of lists. */
+  const rowsLiteral = (e: Fn, elements: V[]): V | undefined => {
+    if (
+      elements.length === 0 ||
+      !elements.every((v) => type(v).shape.length === 1 && !cx.tuples.has(v))
+    )
+      return undefined;
+    if (
+      elements.every((v) => {
+        const n = type(v).shape[0];
+        return typeof n === 'number' || cx.constant(n.v) !== undefined;
+      })
+    )
+      return undefined;
+    return rowsList(e, elements);
+  };
+
+  /** The value `v` as a value of the lane `rows`: itself, or the rows of a
+   *  list of rank 2 of reals or integers (a build of its rows); `undefined`
+   *  for another value. */
+  const asRows = (e: Fn, v: V): V | undefined => {
+    if (type(v).lane === 'rows') return cx.rowsElements.has(v) ? v : undefined;
+    const t = type(v);
+    if (
+      t.shape.length !== 2 ||
+      cx.tuples.has(v) ||
+      (t.lane !== 'integer' && t.lane !== 'real')
+    )
+      return undefined;
+    const s = listSource(v);
+    const k = b.newValue(scalarType('integer'));
+    const [out] = cx.region('rows.build', [s.length], [k], () => [s.at(k)], e);
+    cx.rowsParams.add(out);
+    cx.rowsElements.set(out, t.lane);
+    return out;
+  };
+
+  /** The rows of the values `vs` of the lane `rows`, in order
+   *  (`rows.join`), of reals where one of them is. */
+  const rowsJoined = (vs: V[]): V => {
+    const lane = vs.some((v) => cx.rowsElements.get(v) === 'real')
+      ? 'real'
+      : 'integer';
+    const out = vs
+      .slice(1)
+      .reduce((a, x) => b.op('rows.join', [a, x], scalarType('rows')), vs[0]);
+    cx.rowsParams.add(out);
+    cx.rowsElements.set(out, lane);
+    return out;
+  };
+
+  /** `Join` or `ListJoin` of lists of lists, one of them of the lane
+   *  `rows` (CE-1736): the rows of the operands in order; a list of rank 2
+   *  is its rows, and an operand of another shape declines. `undefined`
+   *  when no operand is of the lane, or no operand is a list of lists of
+   *  numbers by its engine type: the operands are lowered in an attempt
+   *  (`cx.attempt()`), which is then discarded, so that the other paths
+   *  lower each operand once. */
+  const rowsJoin = (e: Fn): V | undefined => {
+    if (!cx.runtimeLengths || cx.interval || cx.bigint || e.nops === 0)
+      return undefined;
+    if (!e.ops.some((x) => x.type.matches('list<list<number>>')))
+      return undefined;
+    // The operand that is not a list of lists of numbers, and the reason.
+    let refused: [Expression, string] | undefined;
+    const v = cx.attempt(
+      () => {
+        const vs = e.ops.map((x) => cx.wholeRows(x));
+        if (!vs.some((v) => type(v).lane === 'rows' && cx.rowsElements.has(v)))
+          return undefined;
+        const rows: V[] = [];
+        for (const [i, v] of vs.entries()) {
+          const x = asRows(e, v);
+          if (x === undefined) {
+            refused = [
+              e.ops[i],
+              type(v).lane === 'rows'
+                ? CHUNK_ROWS
+                : `an operand of ${e.operator} of a list of lists of run-time length that is not a list of lists of numbers`,
+            ];
+            return undefined;
+          }
+          rows.push(x);
+        }
+        return rowsJoined(rows);
+      },
+      () => true,
+      () => {}
+    );
+    if (refused !== undefined) decline(refused[0], refused[1]);
+    return v;
   };
 
   /** `Comprehension(body, Element(i, L))`, and with a condition
@@ -935,7 +1169,13 @@ export function listLowering(cx: Lowering) {
     const name = c.ops[0].symbol;
     let s = source(c.ops[1]);
     const before = b.changes();
-    if (c.nops === 3) s = listSource(over(e, s, name, c.ops[2], true, c));
+    if (c.nops === 3) {
+      // The rows kept of a list of lists of run-time length are of the lane
+      // `rows` (CE-1736).
+      const kept = over(e, s, name, c.ops[2], true, c);
+      const lane = cx.rowsElements.get(kept);
+      s = lane === undefined ? listSource(kept) : rowsOf(e, kept, lane).source();
+    }
     const v = over(e, s, name, e.ops[0], false, e);
     if (b.changes() > before)
       decline(
@@ -1007,6 +1247,8 @@ export function listLowering(cx: Lowering) {
    *  is the element of the first list whose end is after `k`. */
   const join = (e: Fn): V => {
     if (e.nops === 0) decline(e, 'ListJoin with no operand');
+    const rows = rowsJoin(e);
+    if (rows !== undefined) return rows;
     const parts = e.ops.map((x) => {
       if (!isTupleOrTupleUnionShapedType(x.type.type)) return source(x, true);
       const v = cx.value(x)!;
@@ -1782,7 +2024,8 @@ export function listLowering(cx: Lowering) {
     names: string[],
     values: V[],
     body: Expression,
-    accumulator?: number
+    accumulator?: number,
+    whole = false
   ): V =>
     cx.withFrame(true, (frame) => {
       names.forEach((n, j) =>
@@ -1792,7 +2035,8 @@ export function listLowering(cx: Lowering) {
           ...(j === accumulator ? { accumulator: true } : {}),
         })
       );
-      return cx.value(body)!;
+      // `whole`: the value may be a list of lists of run-time length.
+      return whole ? cx.wholeRows(body) : cx.value(body)!;
     });
 
   /** The element of `s` at 0, lowered in a region that is not emitted
@@ -2032,26 +2276,63 @@ export function listLowering(cx: Lowering) {
     return isFunction(x.value, 'List');
   };
 
-  /** `Chunk(L, k)`, `Partition(L, n)` and `Partition(L, p)` of a
-   *  predicate `p` (`README.md`, "Lists", the list operators): the list of
-   *  lists when every row has one length, else its rows, which `source()`
-   *  makes each where it is read and `rows()` makes the value of the lane
-   *  `rows`, the result of the program only (`README.md`, "The rows
-   *  lane"). `undefined` for another expression, and in the interval
-   *  mode. Of an input or a parameter, `row(i)` is the row at the index
-   *  `i` from 1 known at run time, and `length` the value of its `Length`,
-   *  NaN where `i` is out of range. */
-  const chunks = (
-    e: Expression
-  ):
-    | V
-    | {
-        source: () => Source;
-        rows: () => V;
-        groups?: readonly V[];
-        row?: (i: V) => { row: V; length: V };
-      }
-    | undefined => {
+  /** The rows of `g`, a value of the lane `rows` of elements of `lane`
+   *  (an input, a parameter, or a value that `rows.build` or `rows.filter`
+   *  made): each row a build over the elements of the row of `g`. */
+  const rowsOf = (e: Expression, g: V, lane: 'integer' | 'real'): Rows => {
+    const get = lane === 'integer' ? 'rows.get.int' : 'rows.get';
+    const built = (i: V, n: V): V => {
+      const k = b.newValue(scalarType('integer'));
+      return cx.region(
+        'build',
+        [n],
+        [k],
+        () => [b.op(get, [g, i, k], scalarType(lane))],
+        e
+      )[0];
+    };
+    return {
+      // A value whose rows have one length reads it (`rowWidths`).
+      source: () => ({
+        length:
+          cx.rowCounts.get(g) ?? b.op('rows.count', [g], scalarType('integer')),
+        at: (i) =>
+          built(
+            i,
+            cx.rowWidths.get(g) ??
+              b.op('rows.len', [g, i], scalarType('integer'))
+          ),
+      }),
+      rows: () => g,
+      lane,
+      // Out of range the row is a build of no element, so `At`, `First`
+      // and `Last` of it are NaN.
+      row: (i) => {
+        const k = b.op('rows.row', [g, i], scalarType('integer'));
+        return {
+          row: built(k, b.op('rows.rowlen', [g, k], scalarType('integer'))),
+          length: b.op('rows.rowlen.nan', [g, k], scalarType('integer')),
+        };
+      },
+    };
+  };
+
+  /** The rows of `e` (`README.md`, "Lists", the list operators, and "The
+   *  rows lane"):
+   *  - `Rows` for an input, a parameter or a value that the program makes
+   *    of the lane `rows` (`rowsOf()`: `row(i)` is the row at the index `i`
+   *    from 1 known at run time, and `length` the value of its `Length`,
+   *    NaN where `i` is out of range), and for `Chunk(L, k)`,
+   *    `Partition(L, n)` and `Partition(L, p)` of a predicate whose rows
+   *    can have two lengths, which `source()` makes each where it is read
+   *    and `rows()` makes the value of the lane `rows`, the result of the
+   *    program only;
+   *  - the list of lists of `Chunk` or `Partition` when every row has one
+   *    length, and the `V` of any other function expression, which it
+   *    lowers whole (`wholeRows()`);
+   *  - `undefined` for a name that is not of the lane `rows`, for another
+   *    expression, and in the interval mode. */
+  const chunks = (e: Expression): V | Rows | undefined => {
     // An input or a parameter of the lane `rows` (a list of lists of two
     // lengths not stated, `rowsElementLane()`), or such a part of a tuple
     // input read part by part (`At(G, 2)`, `tupleParts()`): its rows, each
@@ -2066,33 +2347,28 @@ export function listLowering(cx: Lowering) {
     if (lane !== undefined && !cx.interval) {
       const g = cx.wholeRows(e);
       if (type(g).lane !== 'rows') return undefined;
-      const get = lane === 'integer' ? 'rows.get.int' : 'rows.get';
-      const built = (i: V, n: V): V => {
-        const k = b.newValue(scalarType('integer'));
-        return cx.region(
-          'build',
-          [n],
-          [k],
-          () => [b.op(get, [g, i, k], scalarType(lane))],
-          e
-        )[0];
-      };
-      return {
-        source: () => ({
-          length: b.op('rows.count', [g], scalarType('integer')),
-          at: (i) => built(i, b.op('rows.len', [g, i], scalarType('integer'))),
-        }),
-        rows: () => g,
-        // Out of range the row is a build of no element, so `At`, `First`
-        // and `Last` of it are NaN.
-        row: (i) => {
-          const k = b.op('rows.row', [g, i], scalarType('integer'));
-          return {
-            row: built(k, b.op('rows.rowlen', [g, k], scalarType('integer'))),
-            length: b.op('rows.rowlen.nan', [g, k], scalarType('integer')),
-          };
-        },
-      };
+      return rowsOf(e, g, lane);
+    }
+    // Another expression, which can make a value of the lane `rows` (a
+    // `Map` whose value for an element is a list of run-time length, a
+    // call of a user function whose body is one, CE-1736): its value, read
+    // whole, and its rows when it is of the lane. A `Range` stays a source
+    // that makes no list (`source()`).
+    if (
+      !cx.interval &&
+      isFunction(e) &&
+      !(isFunction(e, 'Range') && cx.isLibrary(e)) &&
+      !(
+        (e.operator === 'Chunk' || e.operator === 'Partition') &&
+        e.nops === 2 &&
+        cx.isLibrary(e)
+      )
+    ) {
+      const g = cx.wholeRows(e);
+      if (type(g).lane !== 'rows') return g;
+      const made = cx.rowsElements.get(g);
+      if (made === undefined) return g;
+      return rowsOf(e, g, made);
     }
     if (
       cx.interval ||
@@ -2282,9 +2558,30 @@ export function listLowering(cx: Lowering) {
       ? s.at(position(e, s.length, e.engine.One))
       : empty
         ? undefined
-        : cx.value(seed)!;
+        : cx.wholeRows(seed);
     if (b.changes() > effects)
       decline(e, 'Reduce of a list or an initial value with an effect');
+    if (init !== undefined && type(init).lane === 'rows')
+      return reduceRows(e, names, body, s, init, effects);
+    // From `List()` to a list of lists (CE-1736): the accumulator is of the
+    // lane `rows` from no row, its lane of elements the body's. A body that
+    // declines there takes the path of a flat list, in an attempt
+    // (`cx.attempt()`): a decline after a user function began to be lowered
+    // is the program's, and a widening lowers the program again.
+    if (
+      empty &&
+      cx.runtimeLengths &&
+      !cx.interval &&
+      !cx.bigint &&
+      e.type.matches('list<list<number>>')
+    ) {
+      const v = cx.attempt(
+        () => reduceRows(e, names, body, s, rowsList(e, []), effects),
+        () => true,
+        () => {}
+      );
+      if (v !== undefined) return v;
+    }
     const it = init === undefined ? undefined : type(init);
     const tuple = init !== undefined && cx.tuples.get(init) === 0;
     const kind: 'scalar' | 'list' =
@@ -2382,7 +2679,13 @@ export function listLowering(cx: Lowering) {
           return { ...settle(lane, f), fixed: f };
         } catch (m) {
           b.restore(before);
-          if (!(m instanceof Mismatch || m instanceof Decline)) throw m;
+          // A widening lowers the program again (`lowerWide()`), as in
+          // `trial()` of `lower.ts`.
+          if (
+            !(m instanceof Mismatch || m instanceof Decline) ||
+            m instanceof WidenList
+          )
+            throw m;
           last = m;
           if (i + 1 === tries.length) {
             if (m instanceof Decline && !empty) throw m;
@@ -2451,6 +2754,66 @@ export function listLowering(cx: Lowering) {
     if (b.changes() > effects)
       decline(e, 'Reduce by a function with an effect');
     return outs[outs.length - 1];
+  };
+
+  /** `Reduce(L, f, init)` whose accumulator is a list of lists of run-time
+   *  length (the lane `rows`, CE-1736): a loop that carries it, each step
+   *  such a list. The lane of its elements is that of `init`, or real where
+   *  a step from integers gives reals (a trial lowering, not emitted). */
+  const reduceRows = (
+    e: Fn,
+    names: string[],
+    body: Expression,
+    s: Source,
+    init: V,
+    effects: number
+  ): V => {
+    const lane0 = cx.rowsElements.get(init);
+    if (lane0 === undefined)
+      decline(
+        e,
+        `${e.operator} from a list of lists of run-time length of no element lane`
+      );
+    const pass = (lane: 'integer' | 'real') => {
+      const k = b.newValue(scalarType('integer'));
+      const acc = b.newValue(scalarType('rows'));
+      cx.rowsParams.add(acc);
+      cx.rowsElements.set(acc, lane);
+      let elements: 'integer' | 'real' | undefined;
+      const region = b.region([k, acc], () => {
+        const y = applied(names, [acc, s.at(k)], body, 0, true);
+        elements = cx.rowsElements.get(y);
+        if (type(y).lane !== 'rows' || elements === undefined)
+          decline(
+            e,
+            `${e.operator} from a list of lists of run-time length by a function whose value is not one`
+          );
+        return [y];
+      });
+      return { region, elements: elements! };
+    };
+    let lane = lane0;
+    if (lane === 'integer') {
+      const before = b.mark();
+      if (pass(lane).elements === 'real') lane = 'real';
+      b.restore(before);
+    }
+    const { region, elements } = pass(lane);
+    if (lane === 'integer' && elements !== 'integer')
+      decline(e, 'an accumulator that changes lane');
+    const out = b.newValue(scalarType('rows'));
+    cx.rowsParams.add(out);
+    cx.rowsElements.set(out, lane);
+    b.emit({
+      k: 'loop',
+      outs: [out],
+      lo: integer(0),
+      hi: cx.apply(e, 'Subtract', [s.length, integer(1)]),
+      init: [init],
+      body: region,
+    });
+    if (b.changes() > effects) decline(e, 'Reduce by a function with an effect');
+    return out;
   };
 
   /** `StartsWith`, `EndsWith` and `ContainsSequence` of two lists of real
@@ -2630,6 +2993,41 @@ export function listLowering(cx: Lowering) {
     if (h === 'Chunk' || (h === 'Partition' && e.nops === 2)) {
       const r = chunks(e)!;
       return typeof r === 'number' ? r : r.rows();
+    }
+    // `Append(a, r1, …)` of a list of lists of run-time length and flat
+    // lists: the rows of `a`, then the rows `r1`, … (CE-1736).
+    if (
+      h === 'Append' &&
+      e.nops >= 2 &&
+      cx.runtimeLengths &&
+      !cx.interval &&
+      !cx.bigint &&
+      e.ops[0].type.matches('list<list<number>>')
+    ) {
+      // The first operand is lowered in an attempt, discarded when it is
+      // not of the lane, so that the other path lowers it once.
+      const a = cx.attempt(
+        () => {
+          const v = cx.wholeRows(e.ops[0]);
+          return type(v).lane === 'rows' && cx.rowsElements.has(v)
+            ? v
+            : undefined;
+        },
+        () => true,
+        () => {}
+      );
+      if (a !== undefined) {
+        const xs = e.ops.slice(1).map((x) => {
+          const v = cx.value(x)!;
+          if (type(v).shape.length !== 1 || cx.tuples.has(v))
+            decline(
+              x,
+              'an element of Append of a list of lists of run-time length that is not a flat list of numbers'
+            );
+          return v;
+        });
+        return rowsJoined([a, rowsList(e, xs)]);
+      }
     }
     // The operators of a list.
     const effects = b.changes();
@@ -2861,7 +3259,8 @@ export function listLowering(cx: Lowering) {
     if (h === 'FlatMap') {
       // `f` of each element; a list value is spliced (one level), a scalar
       // kept: the build of the values, then the elements of the rows in
-      // order. A row of a length known at run time declines (`over()`).
+      // order. Rows of run-time lengths are of the lane `rows` (`over()`),
+      // whose elements `rows.flat` copies in order (CE-1736).
       const { names, body, site } = literalOf(e, e.ops[1], 1);
       const before = b.changes();
       const rows = over(e, s, names[0], body, false, site);
@@ -2871,6 +3270,15 @@ export function listLowering(cx: Lowering) {
           'FlatMap with an effect (the interpreter evaluates its elements lazily)'
         );
       const t = type(rows);
+      const lane = cx.rowsElements.get(rows);
+      if (t.lane === 'rows' && lane !== undefined)
+        return cx.region(
+          lane === 'integer' ? 'rows.flat.int' : 'rows.flat',
+          [rows],
+          [],
+          () => [],
+          e
+        )[1];
       if (cx.tuples.has(rows))
         decline(e, 'FlatMap of a function whose value is a tuple');
       if (t.shape.length === 1) return rows;
@@ -3127,6 +3535,7 @@ export function listLowering(cx: Lowering) {
     over,
     comprehension,
     join,
+    rowsLiteral,
     joinLists,
     isIterate,
     iterateTo,

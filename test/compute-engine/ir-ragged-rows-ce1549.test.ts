@@ -64,6 +64,9 @@ function read(e: Expression): unknown {
   if (isNumber(e)) return e.re;
   if (e.symbol === 'True' || e.symbol === 'False') return e.symbol === 'True';
   if (isFunction(e, 'List') || isFunction(e, 'Tuple')) return e.ops.map(read);
+  // A lazy `FlatMap` does not know that it is finite: its elements.
+  if (isFunction(e, 'FlatMap') && e.isCollection)
+    return [...e.each()].map((x) => read(x.N()));
   if (isFunction(e) && e.isCollection && e.isFiniteCollection)
     return read(e.engine.function('ListFrom', [e]).evaluate().N());
   throw new Error(`no value: ${e.toString()}`);
@@ -230,6 +233,16 @@ describe('CE-1549: the consumers read the rows one by one', () => {
     expect(r.rows).toBeUndefined();
   });
 
+  // A consumer whose value holds a row (CE-1736): the rows of the lane
+  // `rows` that the program makes, each a copy of a row of the chunks.
+  // prettier-ignore
+  test.each([
+    ['a consumer that yields a row', ['Map', ['Function', 'r', 'r'], ['Chunk', 'L', 3]]],
+    ['a consumer that keeps rows', ['Any', ['Chunk', 'L', 3], ['Function', ['Greater', ['Length', 'r'], 1], 'r']]],
+  ])('%s', (_, json) => {
+    check(json, POINTS);
+  });
+
   test('on GLSL, rows of constant lengths', () => {
     expect(
       js(['Map', sum, ['Partition', 'L6', 4]], { to: 'glsl' }).success
@@ -240,8 +253,7 @@ describe('CE-1549: the consumers read the rows one by one', () => {
 describe('CE-1549: declines', () => {
   // prettier-ignore
   test.each([
-    ['a consumer that yields a row', ['Map', ['Function', 'r', 'r'], ['Chunk', 'L', 3]], 'javascript', 'a list of lists of run-time length'],
-    ['a consumer that keeps rows', ['Any', ['Chunk', 'L', 3], ['Function', ['Greater', ['Length', 'r'], 1], 'r']], 'javascript', 'a list of lists of run-time length'],
+    ['a consumer that yields a row, on GLSL', ['Map', ['Function', 'r', 'r'], ['Chunk', 'L', 3]], 'glsl', ''],
     ['Map of the groups of a predicate (the interpreter leaves it unevaluated)', ['Map', size, ['Partition', 'L', pred('Less', 3)]], 'javascript', 'a group of Partition by a predicate read one by one'],
     ['At of a run-time count of rows', ['At', ['Partition', 'L', 2], 1], 'javascript', 'At of a Chunk or a Partition'],
     ['a Range', ['Chunk', ['Range', 1, 10001], 2], 'javascript', 'Chunk of a computed list'],
