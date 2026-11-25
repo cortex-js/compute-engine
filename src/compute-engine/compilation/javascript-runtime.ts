@@ -145,6 +145,7 @@ import {
   gamma as complexGamma,
   incompleteGammaUpperComplex,
   polygammaComplex,
+  zetaGeneralizedComplexWithError,
 } from '../numerics/numeric-complex.js';
 import { logGammaComplex } from '../numerics/log-gamma.js';
 import {
@@ -2568,6 +2569,19 @@ export const COMPLEX_FUNCTIONS = Object.freeze({
   cpolygamma: (n: number, z: Cx): Cx =>
     continuedKernel([{ re: n, im: 0 }, z], SYS_HELPERS.polygamma, (n, z) =>
       n.re === -1 ? logGammaComplex(z) : polygammaComplex(n.re, z)
+    ),
+  // `Digamma(z)` of a complex `z`: the kernels of the interpreter's
+  // `Digamma`, the real one on the real axis (a pole is +∞) and
+  // `polygammaComplex` of order 0 elsewhere (CE-1732).
+  cdigamma: (z: Cx): Cx =>
+    continuedKernel([z], SYS_HELPERS.digamma, (z) => polygammaComplex(0, z)),
+  // `Zeta(s, a)` of a complex `s` and a real `a`: the interpreter's kernel
+  // of Wolfram's generalized zeta (CE-1732).
+  czetagen: (s: Cx, a: number): Cx =>
+    continuedKernel(
+      [s, { re: a, im: 0 }],
+      zetaGeneralized,
+      (s, a) => zetaGeneralizedComplexWithError(s, a)?.value
     ),
   // ζ(s) = ζ(s, 1): the interpreter evaluates `Zeta` of a complex `s` with
   // the Hurwitz kernel at `a = 1` (CE-1600).

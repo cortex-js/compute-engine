@@ -835,6 +835,13 @@ export const GLSL: Syntax = deepFreeze({
     'czeta': helperCall('_gpu_ir_czeta', 1),
     'churwitzzeta': helperCall('_gpu_ir_churwitz_zeta', 2),
     'cpolygamma': helperCall('_gpu_ir_cpolygamma', 2),
+    // `Zeta(s, a)` of a complex `s` and a real `a`, and `Digamma(z)` as
+    // `PolyGamma(0, z)` (CE-1732).
+    'czetagen': helperCall('_gpu_ir_czeta_generalized', 2),
+    'cdigamma': {
+      text: '_gpu_ir_cpolygamma(0.0, $0)',
+      helpers: helpersOf('_gpu_ir_cpolygamma'),
+    },
     'clerchphi': helperCall('_gpu_ir_clerch_phi', 3),
     'cpolylog': helperCall('_gpu_ir_cpolylog', 2),
     'asoklch': '$0',

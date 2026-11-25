@@ -19,6 +19,15 @@
  *   takes the functional equation for Re s < 0. +∞ (both parts) at s = 1
  *   and where a + k = 0 for Re s > 0; NaN where an intermediate overflows
  *   (next to the largest float, and Re s below about -30).
+ * - `Zeta(s, a)` of a real a (`_gpu_ir_czeta_generalized`), Wolfram's
+ *   generalized zeta Σ |k + a|^-s (CE-1732): ζ(s, a) for a > 0, ζ(s) for
+ *   a = 0; below, the terms (-(a + k))^-s while a + k < 0, then ζ(s, c) at
+ *   c = a + ceil(-a) (ζ(s) at c = 0: the term a + k = 0 is left out), as
+ *   the interpreter's `zetaGeneralizedComplexWithError`. As for ζ(s, a),
+ *   the error is about 1e-5 of the sum of the sizes of these terms and of
+ *   those of ζ(s, c), absolute next to a zero and where the terms cancel.
+ *   NaN below a = -4200 (the shift limit of ζ(s, a)). `Digamma(z)` is
+ *   ψ⁽⁰⁾(z) (`_gpu_ir_cpolygamma(0.0, z)`).
  * - ψ⁽ⁿ⁾(z), n >= 1 (`_gpu_ir_cpolygamma`): (-1)^(n+1) n! ζ(n+1, z) by the
  *   kernel above; n = 0 (`_gpu_ir_cdigamma`): the recurrence
  *   ψ(z) = ψ(z+1) - 1/z up to Re z >= 10, then ln z - 1/(2z) -
@@ -175,6 +184,21 @@ export const GLSL_COMPLEX_SPECIAL_HELPERS: Readonly<Record<string, string>> = {
   vec2 u = vec2(1.0, 0.0) - s;
   vec2 l = s * 0.6931471805599453 + (s - vec2(1.0, 0.0)) * 1.1447298858494002 + _gpu_ir_clnsinpi(0.5 * s) + _gpu_ir_clngamma_lanczos(u) + _gpu_ir_cz_ln(_gpu_ir_churwitz_emm(u, -s, vec2(1.0, 0.0)).xy);
   return _gpu_ir_cz_exp(l);
+}`,
+  // Zeta(s, a) of a real a, Wolfram's generalized zeta (see the header).
+  _gpu_ir_czeta_generalized: `vec2 _gpu_ir_czeta_generalized(vec2 s, float a) {
+  if (s.y == 0.0) return vec2(_gpu_ir_zeta_generalized(s.x, a), 0.0);
+  if (a > 0.0) return _gpu_ir_churwitz_zeta(s, vec2(a, 0.0));
+  if (a == 0.0) return _gpu_ir_czeta(s);
+  if (!(a >= -4200.0)) return vec2(${NAN});
+  int n = int(ceil(-a));
+  vec2 sum = vec2(0.0);
+  for (int k = 0; k < 4200; k++) {
+    if (k >= n) break;
+    sum += _gpu_ir_cz_powm(vec2(-(a + float(k)), 0.0), s);
+  }
+  float c = a + float(n);
+  return sum + (c == 0.0 ? _gpu_ir_czeta(s) : _gpu_ir_churwitz_zeta(s, vec2(c, 0.0)));
 }`,
   // ψ(z) off the real axis (see the header).
   _gpu_ir_cdigamma: `vec2 _gpu_ir_cdigamma(vec2 z) {

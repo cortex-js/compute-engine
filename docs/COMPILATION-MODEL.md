@@ -306,6 +306,14 @@ interpreter's value. A line is removed when the case declines or is fixed.
   where the interpreter gives `0.01606 - 0.01961i`. `Zeta(z)` for Re z < 0
   takes the functional equation: from Re z = -4 to 0 and |Im z| <= 40, its
   error is at most `2.2e-5` of the larger of the value and 1.
+- `glsl`, `z: complex`, `a: real`: `Zeta(z, a)` for `a < 0` adds the terms
+  `|a + k|^(-z)` left of 0 to `HurwitzZeta(z, c)` at the first `c > 0`, or to
+  `Zeta(z)` when `a` is an integer. As for `HurwitzZeta(z, a)` above, the
+  error is about 1e-5 of the sum of the sizes of all these terms, not of the
+  value, so it is large where the terms cancel: at `z = 1/2 + 25i`,
+  `Zeta(z, -15/2)` is `0.1236 - 0.0224i` and the terms left of 0 have a
+  size of about 5. It gives `NaN` for `a < -4200` (CE-1732). A complex `a`
+  declines.
 - `glsl` (crafted), `n: integer`, `z: complex`: `PolyGamma(n, z)` at the
   order `-1` gives `NaN` off the positive real axis (at `z = -2.5`, where
   the interpreter and the `javascript` target give `-0.0562 - 9.4248i`, the

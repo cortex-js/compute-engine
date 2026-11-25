@@ -2,6 +2,17 @@
 
 ### Improvements
 
+- **`Zeta(z, a)` of a complex `z` and a real `a`, and `Digamma(z)` of a complex
+  `z`, compile on JavaScript and GLSL** (CE-1732), so a domain coloring of
+  `\zeta(z, a)` or of `\operatorname{Digamma}(z)` draws on the GPU. Both
+  declined with "Zeta of complex, real" and "Digamma of complex", while
+  `HurwitzZeta(z, a)` and `PolyGamma(0, z)` compiled. On JavaScript they give
+  the interpreter's value. On GLSL `Digamma(z)` is `PolyGamma(0, z)`, and
+  `Zeta(z, a)` is `HurwitzZeta(z, a)` for `a > 0`; for `a < 0` it adds the
+  terms `|a + k|^(-z)` left of 0, as the interpreter does, with an error of
+  about 1e-5 of the sizes of the terms, as `HurwitzZeta`. `Zeta(z, a)` of a
+  complex `a` still declines.
+
 - **An Epsil call with two arguments exchanged has a note and a fixit.**
   `map` takes its function first, `map(f, xs)`, and `filter`, `reduce` and
   most other operations take the collection first, `filter(xs, p)`. For

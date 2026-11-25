@@ -285,8 +285,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // Of a complex `s`, the interpreter's Hurwitz kernel at `a = 1`
   // (`czeta`), as the interpreter evaluates it (CE-1600).
   row('Zeta',         1,          rc('zeta', 1),                 { fold: F.zeta }),
-  // `Zeta(s, a)`: the generalized zeta of Wolfram's convention.
-  row('Zeta',         2,          [[[R, R], R, 'zetagen']],      { fold: F.zetagen }),
+  // `Zeta(s, a)`: the generalized zeta of Wolfram's convention. Of a complex
+  // `s` and a real `a`, the interpreter's kernel (CE-1732); a complex `a`
+  // declines.
+  row('Zeta',         2,          [[[R, R], R, 'zetagen'], [[C, R], C, 'czetagen']], { fold: F.zetagen }),
   // `Chop(x, tol)`; `Chop(x)` takes the engine's tolerance (`lower.ts`).
   row('Chop',         2,          [[[R, R], R, 'chop']],         { fold: F.chop }),
   // The special functions and steps of the library: of real operands, the
@@ -309,7 +311,8 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   row('Gamma',        2,          rc('gammaupper', 2),           { fold: F.gammaupper, ...domain }),
   row('HarmonicNumber', 1,        [[[R], R, 'harmonic']],        { fold: F.harmonic }),
   row('HarmonicNumber', 2,        [[[R, R], R, 'harmonic2']],    { fold: F.harmonic2, ...domain }),
-  row('Digamma',      1,          [[[R], R, 'digamma']],         { fold: F.digamma }),
+  // Of a complex `z`, `PolyGamma(0, z)`, as the interpreter (CE-1732).
+  row('Digamma',      1,          [[[R], R, 'digamma'], [[C], C, 'cdigamma']], { fold: F.digamma }),
   row('Trigamma',     1,          [[[R], R, 'trigamma']],        { fold: F.trigamma }),
   row('PolyGamma',    2,          [[[I, R], R, 'polygamma'], [[I, C], C, 'cpolygamma']], { fold: F.polygamma, ...domain }),
   row('AiryAi',       1,          [[[R], R, 'airyai']],          { fold: F.airyai }),
