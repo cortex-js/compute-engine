@@ -240,3 +240,158 @@ describe('SERIES OF A LOGARITHM AT A ZERO OR A POLE OF ITS ARGUMENT', () => {
       expect(gap(f, point, -0.01)).toBeLessThan(1e-6);
     });
 });
+
+//
+// An argument of a logarithm that is a negative real number at the point and
+// is not real for every real x crosses the cut of ln there, or is below it:
+// ln has a jump of 2πi, and ln(−1) = iπ is the value above the cut only. At
+// +∞ the expansion holds for large x only, where −1 − i/x is below the cut.
+//
+
+describe('SERIES OF A LOGARITHM WHOSE ARGUMENT CROSSES THE CUT', () => {
+  const ix = ['Multiply', 'ImaginaryUnit', 'x'];
+  const iOverX = ['Divide', 'ImaginaryUnit', 'x'];
+  const inf = 'PositiveInfinity';
+  const quarter = ['Rational', 1, 4];
+
+  const declined: [string, unknown, unknown][] = [
+    // iπ + i·x + … for x < 0, −iπ + i·x + … for x > 0.
+    ['ln(−1 − i·x) at 0', ['Ln', ['Subtract', -1, ix]], 0],
+    ['ln(−1 + i·x) at 0', ['Ln', ['Add', -1, ix]], 0],
+    ['log₁₀(−1 − i·x) at 0', ['Log', ['Subtract', -1, ix]], 0],
+    ['ln(−1 − i·x)/x at 0', ['Divide', ['Ln', ['Subtract', -1, ix]], 'x'], 0],
+    [
+      'ln((x − 1)·e^{i·x}) at 0',
+      ['Ln', ['Multiply', ['Subtract', 'x', 1], ['Exp', ix]]],
+      0,
+    ],
+    // ln(x) − iπ + i/x + … for large x: the leading coefficient is −1.
+    [
+      'ln(−x − i) at +∞',
+      ['Ln', ['Subtract', ['Negate', 'x'], 'ImaginaryUnit']],
+      inf,
+    ],
+    // −iπ + i/x + … for large x: the Taylor engine at s = 1/x = 0.
+    ['ln(−1 − i/x) at +∞', ['Ln', ['Subtract', -1, iOverX]], inf],
+    // e^{i·x} is −1 plus a rounding error at a floating-point π.
+    ['ln(e^{i·x}) at 3.14159…', ['Ln', ['Exp', ix]], Math.PI],
+    // Sound but not precise: these expansions hold. −1 + i/x is above the
+    // cut for large x; √x − 1 and ln x are real near the point only.
+    ['ln(−1 + i/x) at +∞', ['Ln', ['Add', -1, iOverX]], inf],
+    ['ln(√x − 1) at 1/4', ['Ln', ['Subtract', ['Sqrt', 'x'], 1]], quarter],
+    ['ln(ln x) at 1/2', ['Ln', ['Ln', 'x']], half],
+  ];
+  for (const [name, f, point] of declined)
+    test(`${name} stays Series`, () =>
+      expect(series(f, point).operator).toBe('Series'));
+
+  /** `|f − Normal(Series(f))|` at `x`. */
+  const gap = (f: unknown, point: unknown, x: number): number => {
+    const s = series(f, point);
+    expect(s.operator).not.toBe('Series');
+    const normal = ce.expr(['Normal', s.json] as never).evaluate();
+    const d = ce
+      .expr(['Subtract', f, normal.json] as never)
+      .subs({ x })
+      .N();
+    return Math.hypot(d.re, d.im);
+  };
+
+  // The argument stays on the cut (real), or is not near it.
+  const held: [string, unknown, unknown, number[]][] = [
+    ['ln(x − 1) at 0', ['Ln', ['Subtract', 'x', 1]], 0, [-0.01, 0.01]],
+    ['ln(1 + i·x) at 0', ['Ln', ['Add', 1, ix]], 0, [-0.01, 0.01]],
+    [
+      'ln(−x − 1) at +∞',
+      ['Ln', ['Subtract', ['Negate', 'x'], 1]],
+      inf,
+      [50, 200],
+    ],
+    ['ln(x + i) at +∞', ['Ln', ['Add', 'x', 'ImaginaryUnit']], inf, [50, 200]],
+  ];
+  for (const [name, f, point, xs] of held)
+    test(`${name} holds`, () => {
+      for (const x of xs) expect(gap(f, point, x)).toBeLessThan(1e-6);
+    });
+});
+
+//
+// A root, or a power with an exponent that is not an integer, of a base that
+// is not real for every real x: a term of a high order that is not real, past
+// the coefficients that the expansion computes, moves the base across the cut
+// of the root, or makes the real odd root not apply. √(−1 − i·x²⁰) is
+// −i + …, not √(−1) = i, on both sides; ∛(−1 − i·x²⁰) is e^{−iπ/3} + …, not
+// −1; for x < 0, ∛(x + i·x²⁰) is the principal root of a number below the
+// negative real axis, not the real root −∛|x|.
+//
+
+describe('SERIES OF A ROOT WHOSE BASE HAS A COMPLEX TERM OF A HIGH ORDER', () => {
+  const ix20 = ['Multiply', 'ImaginaryUnit', ['Power', 'x', 20]];
+  const ix = ['Multiply', 'ImaginaryUnit', 'x'];
+  const inf = 'PositiveInfinity';
+  const declined: [string, unknown, unknown][] = [
+    ['√(−1 − i·x²⁰) at 0', ['Sqrt', ['Subtract', -1, ix20]], 0],
+    ['∛(−1 − i·x²⁰) at 0', ['Root', ['Subtract', -1, ix20], 3], 0],
+    ['∛(x + i·x²⁰) at 0', ['Root', ['Add', 'x', ix20], 3], 0],
+    ['(−1 − i·x²⁰)^{1/2} at 0', ['Power', ['Subtract', -1, ix20], half], 0],
+    ['√(−1 − i·x) at 0', ['Sqrt', ['Subtract', -1, ix]], 0],
+    [
+      '√(−x² − i·x²⁰) at 0',
+      ['Sqrt', ['Subtract', ['Negate', ['Power', 'x', 2]], ix20]],
+      0,
+    ],
+    // −i/x + … for large x: below the cut, where √ is −i + ….
+    [
+      '√(−1 − i/x) at +∞',
+      ['Sqrt', ['Subtract', -1, ['Divide', 'ImaginaryUnit', 'x']]],
+      inf,
+    ],
+    // A base that is real for real x is not real along a complex point:
+    // x² + 1 at 2i is −3 + 4i·t + t², on both sides of the cut.
+    [
+      '√(x² + 1) at 2i',
+      ['Sqrt', ['Add', ['Power', 'x', 2], 1]],
+      ['Complex', 0, 2],
+    ],
+    [
+      'ln(x² + 1) at 2i',
+      ['Ln', ['Add', ['Power', 'x', 2], 1]],
+      ['Complex', 0, 2],
+    ],
+    // Sound but not precise: these expansions hold. 1 − √x and √x − 1 are
+    // real near the point only.
+    ['√(1 − √x) at +∞', ['Sqrt', ['Subtract', 1, ['Sqrt', 'x']]], inf],
+    [
+      '√(√x − 1) at 1/4',
+      ['Sqrt', ['Subtract', ['Sqrt', 'x'], 1]],
+      ['Rational', 1, 4],
+    ],
+  ];
+  for (const [name, f, point] of declined)
+    test(`${name} stays Series`, () =>
+      expect(series(f, point).operator).toBe('Series'));
+
+  /** `|f − Normal(Series(f))|` at `x`. */
+  const gap = (f: unknown, x: number): number => {
+    const s = series(f);
+    expect(s.operator).not.toBe('Series');
+    const normal = ce.expr(['Normal', s.json] as never).evaluate();
+    const d = ce
+      .expr(['Subtract', f, normal.json] as never)
+      .subs({ x })
+      .N();
+    return Math.hypot(d.re, d.im);
+  };
+
+  // A real base on the cut, and a complex base away from the cut.
+  const held: [string, unknown][] = [
+    ['√(−1 − x)', ['Sqrt', ['Subtract', -1, 'x']]],
+    ['∛(x − x²)', ['Root', ['Subtract', 'x', ['Power', 'x', 2]], 3]],
+    ['∛(−1 − x)', ['Root', ['Subtract', -1, 'x'], 3]],
+    ['√(1 + i·x)', ['Sqrt', ['Add', 1, ix]]],
+  ];
+  for (const [name, f] of held)
+    test(`${name} at 0 holds on both sides`, () => {
+      for (const x of [-0.01, 0.01]) expect(gap(f, x)).toBeLessThan(1e-6);
+    });
+});

@@ -984,8 +984,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // float `3.14…`, not the exact `π` of `exactArctan2()`.
         const floatAngle = (u = y, v = x) =>
           radiansToAngle(
-            apply2(u, v, Math.atan2, (a, b) =>
-              BigDecimal.atan2(a, b, ce.precision)
+            apply2(u, v, Math.atan2, (a, b, prec) =>
+              BigDecimal.atan2(a, b, prec)
             )
           );
         // The other operand can be an exact constant that is not a number

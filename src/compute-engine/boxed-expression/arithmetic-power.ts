@@ -1501,6 +1501,10 @@ function complexPowN(
  *
  * See https://docs.sympy.org/latest/modules/core.html#sympy.core.power.Pow
  *
+ * A `Power` that this function builds is a call of the library `Power`,
+ * also in a scope where a user function `Power` shadows it (`libraryFn()`),
+ * so that `y.pow(2)`, and the product `y.mul(y)` that a `Product` writes as
+ * `y.pow(2)`, is the square of `y` and not a call of the user function.
  */
 export function pow(
   x: Expression,
@@ -1786,7 +1790,7 @@ export function pow(
             x,
             exp,
             (x, exp) => Math.pow(x, exp),
-            (x, exp) => x.pow(exp, ce.precision),
+            (x, exp, prec) => x.pow(exp, prec),
             (x, exp) => x.pow(exp)
           ) ?? pow(x, exp, { numericApproximation: false })
         );
@@ -2008,7 +2012,8 @@ export function pow(
   // (a^b)^c -> a^(b*c) only when mathematically safe: base non-negative, or
   // outer exponent c integer. An odd inner exponent is NOT sufficient — see
   // the matching note in canonicalPower for why (principal-branch phase).
-  if (isFunction(x, 'Power')) {
+  // A call of a user function `Power` is a value, not a power.
+  if (isFunction(x, 'Power') && isLibraryOperator(x, 'Power')) {
     const [base, power] = x.ops;
     const expExpr = typeof exp === 'number' ? ce.number(exp) : exp;
     const outerIsInteger =
@@ -2162,7 +2167,7 @@ export function pow(
       // The exact result is too large to materialize (magnitude guard) or is
       // not representable (e.g. a big/negative Gaussian power): keep the power
       // symbolic. `.N()` still produces the float / overflow-to-infinity.
-      return ce._fn('Power', [x, ce.expr(exp)]);
+      return libraryFn(ce, 'Power', [x, ce.expr(exp)]);
     }
 
     // An inexact base (a real or a complex float) numericizes — an
@@ -2175,7 +2180,7 @@ export function pow(
           (x) => Math.pow(x, e as number),
           (x) => x.pow(e as number, ce.precision),
           (x) => x.pow(e as number)
-        ) ?? ce._fn('Power', [x, ce.expr(exp)])
+        ) ?? libraryFn(ce, 'Power', [x, ce.expr(exp)])
       );
     } else {
       return ce.number(n!.pow(e!, ce.precision));
@@ -2243,7 +2248,7 @@ export function pow(
     }
   }
 
-  return ce._fn('Power', [x, ce.expr(exp)]);
+  return libraryFn(ce, 'Power', [x, ce.expr(exp)]);
 }
 
 /**
@@ -2368,11 +2373,11 @@ export function root(
           // exact integer. `nthRoot` is integer-degree only — a non-integer
           // degree (Root(2, 0.5)) falls back to the full-precision power.
           // (NU-P1-7)
-          (a, b) => {
+          (a, b, bigPrec) => {
             const n = b.toNumber();
             const result = Number.isInteger(n)
-              ? a.nthRoot(n, prec)
-              : a.pow(b.pow(-1, prec), prec);
+              ? a.nthRoot(n, bigPrec)
+              : a.pow(b.pow(-1, bigPrec), bigPrec);
             if (isNegative && !isEven) return result.neg();
             return result;
           },

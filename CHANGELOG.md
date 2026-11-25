@@ -66,6 +66,86 @@
 
 ### Resolved Issues
 
+- **The type of the incomplete gamma function `Gamma(s, z)` is `real` only
+  where its value is real** (CE-1619). For a negative `z`, `Γ(s, z)` is
+  complex unless `s` is a positive integer: `Gamma(1/2, -1)`, whose value is
+  `√π·erfc(i) ≈ 1.77 − 2.93i`, had the type `real` and now has the type
+  `number`. The type stays `real` for a positive `z` (`Gamma(s, 2)`) or a
+  positive integer `s` (`Gamma(2, z)` with `z: real`). When `z` can be `0`, the
+  type also admits an infinity (`infinity | real`), because `Gamma(0, 0)` is
+  `~oo`. The three-operand form `Gamma(s, z0, z1)` follows the same rules.
+
+- **`evaluateAsync()` runs a host function that has only an `evaluateAsync`
+  handler when its call is a value of a dictionary** (CE-1615). With such a
+  function `g`, `ce.box(['Dictionary', ['Tuple', {str: 'a'}, ['g']]])
+  .evaluateAsync()` gave `{"a" -> g()}` and did not call `g`. It now gives
+  the value of `g()`, as for an element of a list or a tuple. The values are
+  evaluated in the order of the entries.
+
+- **`LerchPhi(z, s, a)` at a very large order `s` ends** (CE-1527).
+  `ce.box(['LerchPhi', 0.5, 1e300, 2]).N()` did not end. It now stays
+  `LerchPhi(0.5, 1e300, 2)` within a few milliseconds, as other large orders
+  that no route can vouch for do, and compiled `LerchPhi` gives `NaN`. The
+  same fix applies to the complex upper incomplete gamma `Gamma(s, z)` at a
+  very large negative integer order, which `LerchPhi` calls.
+
+- **A `Series` of a logarithm whose argument crosses the negative real axis at
+  the point no longer gives a series that is off by `2πi` on one side**
+  (CE-1617). `Series(Ln(-1 - i*x), x, 0, 3)` was `ln(-1) + i*x + x^2/2 + …`,
+  which is wrong by `2πi` for `x > 0`, where `-1 - i*x` is below the cut.
+  `Series(Ln(-x - i), x, +oo, 3)` and `Series(Ln(-1 - i/x), x, +oo, 3)` were
+  wrong by `2πi` for every large `x`. Each one now stays `Series(...)`, and so
+  does `Log` of such an argument. A logarithm whose argument is real for every
+  real `x` is unchanged: `Series(Ln(x - 1), x, 0, 3)` is
+  `ln(-1) - x - x^2/2 - x^3/3 + O(x^4)`. Some series that hold also stay
+  `Series(...)` now: `Ln(-1 + i/x)` at `+∞`, and an argument that is real
+  only near the point, such as `Ln(Sqrt(x) - 1)` at `1/4` and `Ln(Ln(x))` at
+  `1/2`.
+
+- **A `Series` of a root whose base is not real for real `x` no longer has the
+  wrong sign or the wrong value when the base is on the negative real axis at
+  the point** (CE-1618). `Series(Sqrt(-1 - i*x^20), x, 0, 3)` was
+  `i + O(x^4)`, but `Sqrt(-1 - i*x^20)` is near `-i` on both sides of 0.
+  `Series(Root(x + i*x^20, 3), x, 0, 3)` was `Root(x, 3) + …`, which is the
+  real root, wrong for `x < 0`. The term that is not real was past the
+  computed terms. Each one now stays `Series(...)`, and so does
+  `Sqrt(-1 - i*x)` at 0 and a power with an exponent that is not an integer
+  of such a base. At a complex point, a base that is real for real `x` is not
+  real along the point: `Series(Sqrt(x^2 + 1), x, 2i, 2)` was
+  `sqrt(3)i + …` and `Series(Ln(x^2 + 1), x, 2i, 2)` was `ln(-3) + …`, both
+  wrong on one side, and both now stay `Series(...)`. A root of a base that
+  is real for every real `x` is unchanged at a real point:
+  `Series(Sqrt(-1 - x), x, 0, 3)` is `i + i*x/2 + …`. Some series that hold
+  also stay `Series(...)` now: `Sqrt(-1 + i/x)` and `Sqrt(1 - Sqrt(x))` at
+  `+∞`, and `Sqrt(Sqrt(x) - 1)` at `1/4`.
+
+- **At a high precision, the harmonic number of a complex number shows only
+  the digits that are correct** (CE-1585). With `ce.precision = 50`,
+  `HarmonicNumber(1+i)` evaluates to `1.1718659855240086 + 0.5766740474685813i`,
+  where it showed 50 digits of the real part and only the first 16 were right.
+  With a complex `n` or a complex order `r`, the value comes from machine
+  kernels, and is now computed at machine precision.
+
+- **The harmonic number of a very small number with a complex order is
+  correct** (CE-1584). `HarmonicNumber(10^{-30}(1+i), 2+i)` evaluates to about
+  `1.552e-30 + 3.173e-30i`, where it was `0`. A complex order `r` with
+  `0 < |n| < 0.1` now takes the series in `n`, with complex coefficients, at
+  machine precision, or the continuation `ζ(r) − ζ(r, 1 + n)` where the series
+  is too long. When neither value keeps 10 digits in each part, the value stays
+  unevaluated: this is the case for an order very close to the real axis, such
+  as `HarmonicNumber(0.05, -3 + 10^{-9}i)`.
+
+- **A power, a root, an angle and a logarithm with a base of a number made at
+  a higher precision keep the digits of a double after the precision is set
+  to `'machine'`** (CE-1761). After `ce.precision = 30;
+  const a = ce.parse('0.3'); ce.precision = 'machine'`,
+  `ce.expr(['Power', 2, a]).evaluate()` gave `1.23114441334492`, two digits
+  fewer than `2 ** 0.3`, `1.2311444133449163`. The same applied to
+  `Power(a, 0.5)`, `Root(a, 3)`, `Arctan2(a, 1)`, `Log(a, 2)` and the other
+  functions of two arguments. They now give the digits of a double. A result
+  that a double cannot hold, such as `Power(10^{-800}, 0.5)`, keeps its value
+  (`1e-400`), where it was `0`.
+
 - **An integral, a limit or a numerical derivative of a lone variable that
   holds a formula is computed with the variable of that formula** (CE-1772).
   After `ce.assign('G', ce.parse('\\sin(x)'))`, `\int_0^1 G` gave `0.5` (the
@@ -88,6 +168,17 @@
   so that it is not read as a call of the user function. A call
   `Divide(1, y)` that the program writes is still a call of the user
   function.
+
+- **In a scope with a user function named `Power`, the product of a factor
+  with itself is the library power** (CE-1759). After
+  `ce.declare('Power', 'function')` and
+  `ce.assign('Power', ce.expr(['Function', ['Add', 'a', 'b', 100], 'a', 'b']))`,
+  `y.mul(y)` was a call of the user function, and gave `105` at `y = 3`. It
+  now gives `9`. The same applies to the `pow()` method and to a product with
+  a power factor (`y·y^2`, `x·2^{2/3}`). In such a scope, the power serializes
+  as a call of the library operator (`["Apply", ["Module", "Power"], "y", 2]`).
+  A call `Power(x, 3)` that the program writes is still a call of the user
+  function, and `pow()` of it is a power of its value.
 
 - **A product of three or more numbers at machine precision no longer loses
   digits through a tiny or huge intermediate product** (CE-1757). At machine

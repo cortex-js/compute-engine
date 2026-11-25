@@ -36,7 +36,17 @@ import type { EffectLabel, Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
 import { effectsOf, publicEffects } from './effects-of.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
-import { beginTopLevelEvaluation } from './evaluation-epoch.js';
+import {
+  asyncEvaluationOf,
+  beginAsyncEvaluation,
+  beginTopLevelEvaluation,
+  capturedPrecisionWindow,
+} from './evaluation-epoch.js';
+import { hasAsyncOnlyApplication } from './async-only-descendants.js';
+import {
+  releaseHostEagerSourceValues,
+  releaseKeptEagerSourceValues,
+} from './eager-source-values.js';
 
 /** Keys a `record{…}` type can carry unescaped: what the type lexer reads back
  * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords.
@@ -655,6 +665,76 @@ export class BoxedDictionary
       ce._evaluationDepth -= 1;
       if (outermost) dictionaryEvaluationMemo = undefined;
     }
+  }
+
+  /**
+   * The synchronous `evaluate()` cannot run an operator that has only an
+   * `evaluateAsync` handler, so a value that applies one is awaited here:
+   * each value is evaluated with `evaluateAsync()`, one at a time, in the
+   * order of the entries, with the options of this evaluation (the
+   * capability registry, the context stack, the precision window), read
+   * when it starts. A dictionary with no such application takes the
+   * synchronous route, with its once-per-node record
+   * (`dictionaryEvaluationMemo`), as `Sum` and `Block` do
+   * (`hasAsyncOnlyApplication()`). The asynchronous route keeps no record: a
+   * dictionary that several paths share is evaluated once per path, which
+   * gives the same value when it is pure.
+   */
+  override evaluateAsync(
+    options?: Partial<EvaluateOptions>
+  ): Promise<Expression> {
+    if (!hasAsyncOnlyApplication(this)) return super.evaluateAsync(options);
+    const ce = this.engine;
+    // As `BoxedSymbol.evaluateAsync()`: a call that carries the stack of no
+    // asynchronous evaluation starts one, and the values are parts of it.
+    let contextStack = options?._contextStack;
+    let evaluation = asyncEvaluationOf(contextStack);
+    if (evaluation === undefined) {
+      ({ stack: contextStack, evaluation } = beginAsyncEvaluation(
+        ce,
+        contextStack
+      ));
+      ce._captureAsyncOperation(evaluation, this);
+    }
+    // The registry and the precision window are read now, as in
+    // `BoxedFunction.evaluateAsync()`: the values after the first `await`
+    // start when the registry slot and the transient precision of the caller
+    // are no longer in place.
+    const carried: Partial<EvaluateOptions> = {
+      ...options,
+      _effects: options?._effects ?? ce._evaluationEffects ?? ce.effects,
+      _contextStack: contextStack,
+      _precisionWindow:
+        options?._precisionWindow ?? capturedPrecisionWindow(ce),
+    };
+    // The evaluation is pending between two values, so that the values that
+    // it keeps for its whole run (`eager-source-values.ts`) are not released
+    // when one value settles.
+    const pending = evaluation;
+    ce._inFlightAsyncEvaluations += 1;
+    pending.pending += 1;
+    return this._evaluateValuesAsync(carried).finally(() => {
+      ce._inFlightAsyncEvaluations -= 1;
+      pending.pending -= 1;
+      releaseKeptEagerSourceValues(ce);
+      if (pending.pending === 0)
+        releaseHostEagerSourceValues(ce, pending.epoch);
+    });
+  }
+
+  private async _evaluateValuesAsync(
+    options: Partial<EvaluateOptions>
+  ): Promise<Expression> {
+    const ce = this.engine;
+    const pairs: Expression[] = [];
+    for (const [k, v] of Object.entries(this._keyValues))
+      pairs.push(
+        ce._fn('KeyValuePair', [ce.string(k), await v.evaluateAsync(options)])
+      );
+    return ce.withEvaluationContext(
+      options,
+      () => new BoxedDictionary(ce, ce._fn('Dictionary', pairs))
+    );
   }
 
   match(

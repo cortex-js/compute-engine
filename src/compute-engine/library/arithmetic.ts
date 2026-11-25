@@ -388,6 +388,7 @@ import {
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
   provablyLess as provablyLessOnTypes,
+  provablyGreater as provablyGreaterOnTypes,
   provablyGreaterEqual as provablyGreaterEqualOnTypes,
   operandNonFiniteNumber as operandNonFiniteNumberOnTypes,
   absFunctionType as absFunctionTypeOnTypes,
@@ -6069,6 +6070,59 @@ function besselResultType(
 }
 
 /**
+ * One element of an operand of a broadcastable head: the element type of a
+ * collection operand, without its sign, which describes the collection and
+ * not its elements.
+ */
+function elementDescriptor(d: OperandDescriptor): OperandDescriptor {
+  return d.facts.collection === true
+    ? { type: broadcastOperandType(d), facts: { ...d.facts, sgn: undefined } }
+    : d;
+}
+
+/**
+ * The result type of the incomplete gamma function, `Gamma(s, z)` or
+ * `Gamma(s, z0, z1)` (`Γ(s, z0) − Γ(s, z1)`). `specialFunctionType` claims
+ * `real` when every operand is real, which holds only where the value is
+ * real:
+ *
+ * - For a negative `z`, `Γ(s, z)` is complex unless `s` is a positive
+ *   integer (`Γ(1/2, −1) = √π·erfc(i) ≈ 1.77 − 2.93i`); `Γ(n, z)` of a
+ *   positive integer `n` is `(n − 1)!·e⁻ᶻ` times a polynomial in `z`, real
+ *   for every real `z`.
+ * - At `z = 0`, `Γ(s, 0) = Γ(s)`, which has a pole (`~oo`) at each
+ *   non-positive integer `s`. With two operands the claim widens to
+ *   `real | ~oo` there, as for `Γ(s)`; with three, to `number`, since the
+ *   difference of two poles is `NaN`.
+ *
+ * Otherwise the claim widens to `number`.
+ */
+function incompleteGammaType(
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): Type | undefined {
+  const t = specialFunctionType(ops);
+  if (t !== 'real') return t;
+  const [s, ...zs] = ops;
+  if (s === undefined) return 'number';
+  const order = elementDescriptor(s);
+  if (factsOf(order.type).integer && provablyGreaterOnTypes(order, 0))
+    return t;
+  const points = zs.map((z) =>
+    z === undefined ? undefined : elementDescriptor(z)
+  );
+  if (points.some((z) => z === undefined || !provablyGreaterEqualOnTypes(z, 0)))
+    return 'number';
+  if (points.every((z) => z !== undefined && provablyGreaterOnTypes(z, 0)))
+    return t;
+  return realOrPoleOnTypes(
+    t,
+    order,
+    0,
+    ops.length === 2 ? REAL_OR_COMPLEX_INFINITY_TYPE : 'number'
+  );
+}
+
+/**
  * Result type of `LambertW`. W_k(x) is real only on the real branches, for
  * an argument in their real domain: W₀ on [−1/e, ∞] and W₋₁ on [−1/e, 0).
  * Everywhere else on the real line the value is complex (`W₀(−1)`,
@@ -6086,10 +6140,7 @@ function lambertWType(
   const t = specialFunctionType(ops);
   const [x, k] = ops;
   if (t === undefined || x === undefined) return t;
-  const element: OperandDescriptor =
-    x.facts.collection === true
-      ? { type: broadcastOperandType(x), facts: { ...x.facts, sgn: undefined } }
-      : x;
+  const element = elementDescriptor(x);
   if (!isSubtype(element.type, EXTENDED_REAL_TYPE)) return t;
   const branch = k === undefined ? 0 : operandTypeValue(k);
   const isReal =
@@ -7149,6 +7200,97 @@ function harmonicNumberNearZero(
   return undefined;
 }
 
+/** The most terms of the series of `harmonicNumberNearZeroComplexOrder()`. */
+const MAX_COMPLEX_ORDER_HARMONIC_TERMS = 64;
+
+/**
+ * The largest relative error of each part that
+ * `harmonicNumberNearZeroComplexOrder()` answers, from the error estimates
+ * of the kernels and the rounding of the products: 10 of the 16 digits.
+ */
+const COMPLEX_ORDER_HARMONIC_TOLERANCE = 1e-10;
+
+/**
+ * The generalized harmonic number `H_n^(r)` of a complex order r and a real
+ * or complex `0 < |n| < 0.1`, in machine complex arithmetic (the precision of
+ * `hurwitzZetaComplex`), where the continuation `ζ(r) − ζ(r, 1 + n)` can
+ * cancel (to 0 at `n = 1e-30`). First the series
+ * `Σ_{j ≥ 1} −(−n)^j (r)_j / j! ζ(r + j)` of `harmonicNumberNearZero()`.
+ * The argument of `ζ(r + j)` is passed with `r + j − 1`, known exactly where
+ * it is small, which `1 + (r + j − 1)` would round next to the pole. Past
+ * `Re(r + j) = 2`, `|ζ(r + j)| ≤ ζ(2) < 1.65`, and where
+ * `ρ = |n|·max(1, (|r| + j)/(j + 1)) < 1/2` the rest of the series is below
+ * `1.65·|(r)_j/j!|·|n|^j·ρ/(1 − ρ)`; the series ends when that bound is below
+ * 2⁻⁵³ of each part. When the series needs more than
+ * `MAX_COMPLEX_ORDER_HARMONIC_TERMS` terms (a large |r|·|n|), a kernel
+ * declines, or the error bound fails, the continuation. Either value is the
+ * answer only when its error bound, the error estimates of the kernels plus
+ * one rounding of each of the about `2j + 4` products of a term (of each of
+ * the two values of the continuation), is below
+ * `COMPLEX_ORDER_HARMONIC_TOLERANCE` of each part: a part that is much
+ * smaller than the terms (an order next to a real number) or a continuation
+ * that cancels gives `undefined`. The error estimate of a kernel is one
+ * bound for both parts, so an order within about 1e-4 of the real axis
+ * declines also where the continuation is accurate (`n = 0.099`,
+ * `r = 2 − 10⁻⁶i`).
+ */
+function harmonicNumberNearZeroComplexOrder(
+  n: Complex,
+  r: Complex
+): Complex | undefined {
+  const one = new Complex(1, 0);
+  const accept = (value: Complex, error: number) =>
+    Number.isFinite(value.re) &&
+    Number.isFinite(value.im) &&
+    error <=
+      COMPLEX_ORDER_HARMONIC_TOLERANCE *
+        Math.min(Math.abs(value.re), Math.abs(value.im));
+
+  const series = (): { value: Complex; error: number } | undefined => {
+    const absN = n.abs();
+    const absR = r.abs();
+    const minusN = n.neg();
+    let c = one;
+    let power = one;
+    let sum = new Complex(0, 0);
+    let error = 0;
+    for (let j = 1; j <= MAX_COMPLEX_ORDER_HARMONIC_TERMS; j++) {
+      // `d = r + j − 1` is exact where it is small (Sterbenz).
+      const d = new Complex(r.re + (j - 1), r.im);
+      c = c.mul(d).div(j);
+      power = power.mul(minusN);
+      const cp = c.mul(power);
+      const zeta = hurwitzZetaComplexWithError(
+        new Complex(r.re + j, r.im),
+        one,
+        d
+      );
+      if (zeta === undefined) return undefined;
+      const t = cp.mul(zeta.value);
+      if (!Number.isFinite(t.re) || !Number.isFinite(t.im)) return undefined;
+      sum = sum.sub(t);
+      error += cp.abs() * zeta.error + (2 * j + 4) * 2 ** -53 * t.abs();
+      const rho = absN * Math.max(1, (absR + j) / (j + 1));
+      if (r.re + j <= 2 || rho >= 0.5) continue;
+      const rest = (1.65 * cp.abs() * rho) / (1 - rho);
+      if (rest <= Math.min(Math.abs(sum.re), Math.abs(sum.im)) * 2 ** -53)
+        return { value: sum, error: error + rest };
+    }
+    return undefined;
+  };
+  const fromSeries = series();
+  if (fromSeries !== undefined && accept(fromSeries.value, fromSeries.error))
+    return fromSeries.value;
+
+  const z1 = hurwitzZetaComplexWithError(r, one);
+  const z2 = hurwitzZetaComplexWithError(r, n.add(1));
+  if (z1 === undefined || z2 === undefined) return undefined;
+  const value = z1.value.sub(z2.value);
+  const error =
+    z1.error + z2.error + 2 ** -52 * (z1.value.abs() + z2.value.abs());
+  return accept(value, error) ? value : undefined;
+}
+
 /**
  * The generalized harmonic number `H_n^(r)` of a real `0 < |n| < 0.1` by the
  * analytic continuation `ψ(1 + n) + γ` (no `r`) or `ζ(r) − ζ(r, 1 + n)`, at a
@@ -7255,13 +7397,17 @@ function harmonicNumberNonpositiveOrder(
  *   continuation: H_z = ψ(z+1) + γ (DLMF 5.15.2) and, for r ≠ 1,
  *   H_z^(r) = ζ(r) − ζ(r, z+1) (DLMF 25.11.1), through `Digamma` and
  *   `HurwitzZeta` so every route and precision is theirs. A non-finite
- *   answer declines. For a real `|n| < 0.1` and a real r, where that
- *   difference cancels, the series of `harmonicNumberNearZero()` when it is
- *   short, else the continuation at a raised precision
- *   (`harmonicNumberRaised()`), which declines when it still cancels. A
- *   complex n with an integer r ≤ 0 is the exact difference of
+ *   answer declines. With a complex n or r, whose kernels are machine
+ *   kernels, the continuation is at machine precision. For a real
+ *   `|n| < 0.1` and a real r, where that difference cancels, the series of
+ *   `harmonicNumberNearZero()` when it is short, else the continuation at a
+ *   raised precision (`harmonicNumberRaised()`), which declines when it
+ *   still cancels. A complex n with an integer r ≤ 0 is the exact difference of
  *   `harmonicNumberNonpositiveOrder()`; with another real r or none, a
- *   complex `|n| < 0.1` takes the same series when it is short.
+ *   complex `|n| < 0.1` takes the same series when it is short. A complex
+ *   order with a real or complex `0 < |n| < 0.1` takes the series or the
+ *   continuation of `harmonicNumberNearZeroComplexOrder()` at machine
+ *   precision, and stays unevaluated when neither has a bounded error.
  */
 function evaluateHarmonicNumber(
   engine: ComputeEngine,
@@ -7326,6 +7472,26 @@ function evaluateHarmonicNumber(
   // would cancel in the same part, or read a part too small for a double
   // as 0.
   const realR = r === undefined || (!r.isComplex && Number.isFinite(r.re));
+  // A complex order takes the series of complex coefficients at machine
+  // precision, the precision of the continuation.
+  if (
+    r !== undefined &&
+    isNumber(r) &&
+    r.isComplex &&
+    Number.isFinite(r.re) &&
+    Number.isFinite(r.im) &&
+    Number.isFinite(n.re) &&
+    Number.isFinite(n.im)
+  ) {
+    const absN = Math.hypot(n.re, n.im);
+    if (absN > 0 && absN < 0.1) {
+      const value = harmonicNumberNearZeroComplexOrder(
+        engine.complex(n.re, n.im),
+        engine.complex(r.re, r.im)
+      );
+      return value === undefined ? undefined : engine.number(value);
+    }
+  }
   if (n.isComplex && rInt !== null && rInt <= 0 && r !== undefined) {
     const value = harmonicNumberNonpositiveOrder(engine, n, -rInt);
     if (value !== undefined) return value;
@@ -7398,7 +7564,17 @@ function evaluateHarmonicNumber(
         engine.function('Zeta', [r!]),
         engine.function('HurwitzZeta', [r!, shifted]),
       ]);
-  const result = value.N();
+  // The kernels of a complex `n` or `r` (`Digamma`, `Zeta`, `HurwitzZeta`)
+  // are machine kernels: above machine precision, a sum with `γ` or `ζ(r)`
+  // at the working precision would show digits that are those of the
+  // constant, not of the kernel. The continuation is then at machine
+  // precision.
+  const machineKernels =
+    bignumPreferred(engine) &&
+    (n.isComplex || (r !== undefined && r.isComplex));
+  const result = machineKernels
+    ? engine._withTransientPrecision(MACHINE_PRECISION, () => value.N())
+    : value.N();
   // A pole or an unevaluated kernel is not an answer.
   if (!isNumber(result) || result.isNaN) return undefined;
   return result;
@@ -10027,14 +10203,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       ],
       nanBehavior: 'propagate',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
-      // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
-      // operand declines (`specialFunctionType` records what that buys:
-      // the derived claim stays `number` for a `number`-result head).
+      // incomplete Γ(s, z) is complex for a negative z
+      // (`incompleteGammaType`). A provably-NaN operand declines
+      // (`specialFunctionType` records what that buys: the derived claim
+      // stays `number` for a `number`-result head).
       type: (ops, context) =>
         BoxedType.forResult(
           ops.length === 1
             ? gammaPoleTypeOnTypes(ops[0])
-            : specialFunctionType(ops),
+            : incompleteGammaType(ops),
           context.engine._typeResolver
         ),
 
@@ -10311,7 +10488,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           n,
           x,
           (n, x) => polygamma(n, x),
-          (n, x) => bigPolygamma(engine, n, x, engine.precision),
+          (n, x, prec) => bigPolygamma(engine, n, x, prec),
           (n, x) => polygammaComplex(n.re, x)
         );
         // The kernels answer NaN where they cannot give an accurate value:
@@ -10755,7 +10932,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           a,
           b,
           beta,
-          (a, b) => bigBeta(engine, a, b, engine.precision),
+          (a, b, prec) => bigBeta(engine, a, b, prec),
           (a, b) =>
             betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
         );
@@ -11333,10 +11510,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 return lz / lb;
               return ce.complex(lz).div(lb);
             },
-            (z, b) =>
+            (z, b, prec) =>
               z.isNegative() || b.isNegative()
                 ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
-                : z.log(b, ce.precision),
+                : z.log(b, prec),
             (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
           );
         }
@@ -11571,7 +11748,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // below, or `.sgn` and `.evaluate()` disagree on the same
             // expression (P0-7).
             floorModDouble,
-            (a, b) => a.mod(b).add(b, n.engine.precision).mod(b)
+            (a, b, prec) => a.mod(b).add(b, prec).mod(b)
           );
           return v?.sgn ?? undefined;
         }
@@ -13790,7 +13967,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[0],
             ops[1],
             (a, b) => a / b,
-            (a, b) => a.div(b, ce.precision),
+            (a, b, prec) => a.div(b, prec),
             (a, b) => complexDivide(a, b)
           );
         }
@@ -14168,8 +14345,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a tie of the quotient toward `+∞` (`floatRemainder()`,
         // `bigRemainder()`). An exact operand beside a float one is its value
         // at the working precision, as in every float lane.
-        return apply2(a, b, floatRemainder, (a, b) =>
-          bigRemainder(a, b, engine.precision)
+        return apply2(a, b, floatRemainder, (a, b, prec) =>
+          bigRemainder(a, b, prec)
         );
       },
     },
@@ -19312,8 +19489,9 @@ function bigRealOf(
  * `BigDecimal.add()` is exact.
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
-  const prec = a.engine.precision;
-  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b, prec).mod(b));
+  return apply2(a, b, floorModDouble, (a, b, prec) =>
+    a.mod(b).add(b, prec).mod(b)
+  );
 }
 
 /**

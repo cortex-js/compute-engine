@@ -4,6 +4,11 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 
 import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
+import {
+  BigNumericValue,
+  DOUBLE_DIGITS,
+} from '../numeric-value/big-numeric-value.js';
+import { isOutsideNormalDoubleRange } from '../numerics/numeric.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
@@ -401,11 +406,33 @@ export function applyN(
   return boxKernelResult(ce, result, ops);
 }
 
+/** Whether `x` is finite and not 0, and its double is 0, a subnormal
+ * double or not finite. */
+function isBeyondDouble(x: BigDecimal): boolean {
+  if (!x.isFinite() || x.isZero()) return false;
+  const n = x.toNumber();
+  return n === 0 || isOutsideNormalDoubleRange(n);
+}
+
+/**
+ * Binary kernel dispatcher.
+ *
+ * `bigFn` gets the precision `prec` at which it computes. It is the working
+ * precision, except at machine precision for an operand that is a float with
+ * a big decimal (a value made before the precision was lowered): `prec` is
+ * then `DOUBLE_DIGITS`, so that the result has the digits of a double and
+ * not 15 (`0.3^{0.5}` with a `0.3` made at 30 digits). The result is boxed
+ * as a machine value, as the kernels of `BigNumericValue` do.
+ */
 export function apply2(
   expr1: Expression,
   expr2: Expression,
   fn: (x1: number, x2: number) => number | Complex,
-  bigFn?: (x1: BigDecimal, x2: BigDecimal) => BigDecimal | Complex | number,
+  bigFn?: (
+    x1: BigDecimal,
+    x2: BigDecimal,
+    prec: number
+  ) => BigDecimal | Complex | number,
   complexFn?: (x1: Complex, x2: number | Complex) => Complex | number,
   numericValueFn?: (
     x1: NumericValue,
@@ -455,9 +482,19 @@ export function apply2(
     let bigRe1 = expr1.bignumRe;
     let bigRe2 = expr2.bignumRe;
     if (bigRe1 !== undefined || bigRe2 !== undefined) {
+      // At machine precision, a float with a big decimal was made at a
+      // higher precision: the kernel computes at `DOUBLE_DIGITS`. An exact
+      // operand alone (an integer from a function call) keeps the working
+      // precision (CE-1790).
+      const isBigFloat = (x: typeof expr1) =>
+        !x.isExact && x.bignumRe !== undefined;
+      const prec =
+        !bignumPreferred(ce) && (isBigFloat(expr1) || isBigFloat(expr2))
+          ? DOUBLE_DIGITS
+          : ce.precision;
       bigRe1 ??= ce.bignum(expr1.re);
       bigRe2 ??= ce.bignum(expr2.re);
-      result = bigFn(bigRe1, bigRe2);
+      result = bigFn(bigRe1, bigRe2, prec);
     }
   }
   if (result === undefined) {
@@ -470,7 +507,8 @@ export function apply2(
         // float when no bignum is available — matching `applyN`'s pattern above.
         result = bigFn(
           expr1.bignumRe ?? ce.bignum(re1),
-          expr2.bignumRe ?? ce.bignum(re2)
+          expr2.bignumRe ?? ce.bignum(re2),
+          ce.precision
         );
       else result = fn(re1, re2);
     }
@@ -485,5 +523,10 @@ export function apply2(
   // wrong and inconsistent with the single-argument `apply` above.
   if (typeof result === 'number')
     return boxMachineNumber(ce, result, [expr1, expr2]);
+  // At machine precision, a result that a double cannot hold (`√(10^{-800})`
+  // is `10^{-400}`, which a double reads as `0`) keeps its big decimal, as
+  // `toDouble()` in `big-numeric-value.ts` does.
+  if (!bignumPreferred(ce) && isBeyondDouble(result))
+    return ce.number(new BigNumericValue(result));
   return boxKernelResult(ce, result, [expr1, expr2]);
 }

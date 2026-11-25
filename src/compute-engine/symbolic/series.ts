@@ -1708,16 +1708,18 @@ function asSmallNonIntegerRational(
  *
  * With an odd `r`, the engine takes the real root of a negative real number
  * (`(−8)^{1/3} = −2`), which is multiplicative on the reals: the step holds
- * when every coefficient of the base is real.
+ * when the base is real for every real `t` (`realBase`, `isRealAlongAxis()`).
  *
  * When `U0 < 0`, `U` stays on the negative real axis, the cut of `u^{p/r}`,
- * only when every coefficient is real and the base has no fractional power:
- * `√(−x⁴ + i·x⁵)` crosses the cut at `x = 0`. A leading coefficient that is
- * not a real number of known sign, and a base with a fractional power
- * (`bs.d > 1`) that vanishes at the point, do not hold.
+ * only when the base is real for every real `t` and has no fractional power:
+ * `√(−x⁴ + i·x⁵)` crosses the cut at `x = 0`. The coefficients of the window
+ * do not show a term of a higher order that is not real (`√(−1 − i·x²⁰)`). A
+ * leading coefficient that is not a real number of known sign, and a base
+ * with a fractional power (`bs.d > 1`) that vanishes at the point, do not
+ * hold.
  */
 function puiseuxHoldsBelow(
-  ce: ComputeEngine,
+  realBase: boolean,
   bs: Laurent,
   m: number,
   U0: Expression,
@@ -1726,7 +1728,7 @@ function puiseuxHoldsBelow(
 ): boolean {
   const positive = U0.isPositive === true;
   if (!positive && U0.isNegative !== true) return false;
-  const real = bs.d === 1 && hasRealCoefficients(ce, bs, m);
+  const real = bs.d === 1 && realBase;
   if (!positive && !real) return false;
   if (m === 0) return true;
   if (bs.d !== 1) return false;
@@ -1735,26 +1737,17 @@ function puiseuxHoldsBelow(
   return (k * p) % r === 0;
 }
 
-/** Whether each coefficient of `L` from the power `from` to `L.hi` is real. */
-function hasRealCoefficients(
-  ce: ComputeEngine,
-  L: Laurent,
-  from: number
-): boolean {
-  for (let k = from; k <= L.hi; k++) {
-    const c = coeffAt(ce, L, k);
-    if (!c.type.matches('real') && !c.isSame(0)) return false;
-  }
-  return true;
-}
-
 /**
  * Puiseux expansion of `base^{p/r}` (`r ≥ 2`) about `x0`. Factors the base as
  * `G = t^{m/d}·U` with unit part `U` (leading coefficient `≠ 0`); the result is
  * `t^{m·p/(d·r)}·U^{p/r}`, a Laurent value with ramification `d·r` (`U^{p/r}`
  * via the binomial `powerOuter` machinery). Returns `null` (defer) at a genuine
  * branch obstruction: a base that vanishes identically, a log-carrying leading
- * coefficient, or a window that would exceed `MAX_SERIES_ORDER`.
+ * coefficient, or a window that would exceed `MAX_SERIES_ORDER`. Every
+ * expansion defers when `U0` is negative, or near the negative real axis
+ * (`isNearNegativeReal()`), and the base is not real for every real `t`
+ * (`isRealAlongAxis()`); a `Series` at a finite point defers when the step
+ * holds for `t > 0` only (`puiseuxHoldsBelow()`).
  */
 function puiseuxPower(
   ce: ComputeEngine,
@@ -1772,7 +1765,12 @@ function puiseuxPower(
   if (m > bs.hi) return null; // leading term past the reliable window
   const U0 = coeffAt(ce, bs, m);
   if (U0.isSame(0) || U0.has(x)) return null; // log-carrying leading coeff
-  if (bothSides && !puiseuxHoldsBelow(ce, bs, m, U0, p, r)) return null;
+  // With `U0 < 0`, `U` is on the cut of `u^{p/r}` for `t > 0` too, and a term
+  // that is not real puts it on one side: `√(−1 − i·x²⁰)` is `−i + …`, not
+  // `i + …`. With an odd `r`, the real root of `U0` does not apply either.
+  const realBase = isRealAlongAxis(base, x, x0);
+  if (!realBase && isNearNegativeReal(U0)) return null;
+  if (bothSides && !puiseuxHoldsBelow(realBase, bs, m, U0, p, r)) return null;
   const dB = bs.d;
   const D = dB * r;
   if (W * D > MAX_SERIES_ORDER) return null; // window too large — defer
@@ -1867,6 +1865,16 @@ function isRealOnRealAxis(e: Expression, x: string): boolean {
 }
 
 /**
+ * Whether `e` is real at `x = x0 + t` for every real `t`: `e` is real for
+ * every real `x` (`isRealOnRealAxis()`) and `x0` is real. At a complex point
+ * the base `x² + 1` is not real: at `2i` it is `−3 + 4i·t + t²`, which is
+ * above the cut of the root for `t > 0` and below it for `t < 0`.
+ */
+function isRealAlongAxis(e: Expression, x: string, x0: Expression): boolean {
+  return x0.type.matches('real') && isRealOnRealAxis(e, x);
+}
+
+/**
  * Log-aware Laurent expansion of `ln(g)` about `x0`. Writing
  * `g = c₀·t^{m/d}·(1 + h)` (leading coefficient `c₀ ≠ 0`, `h` of valuation ≥ 1),
  *
@@ -1879,7 +1887,11 @@ function isRealOnRealAxis(e: Expression, x: string): boolean {
  * would exceed `MAX_SERIES_ORDER`. Because the Taylor engines already handle
  * regular points, this only fires at a genuine zero or pole of `g`. A `Series`
  * at a finite point defers when the identity holds for `t > 0` only
- * (`lnHoldsBelow()`).
+ * (`lnHoldsBelow()`). Every expansion defers when `c₀` is negative, or near
+ * the negative real axis (`isNearNegativeReal()`), and `g` is not real for
+ * every real `x` (`isRealOnRealAxis()`): `g` can then be below
+ * the cut of `ln` for `t > 0`, where the constant term of `ln(g)` is
+ * `ln|c₀| − iπ`, not `ln(c₀) = ln|c₀| + iπ`.
  *
  * With `forGammaLn`, `arg` is `Γ(u)` and the expansion is the one of
  * `GammaLn(u)`. `GammaLn(u)` is `ln|Γ(u)|` for a real `u`, which is
@@ -1916,6 +1928,10 @@ function lnLaurent(
   const c0 = coeffAt(ce, inner, m);
   if (c0.has(x)) return null; // log-carrying leading coeff (e.g. ln(ln x))
   if (forGammaLn && c0.isPositive !== true) return null;
+  // With `c₀ < 0`, `c₀·t^m` is on the cut of `ln` for `t > 0`, and a term of
+  // `h` that is not real puts `1 + h` on one side of it: `−x − i` at +∞ is
+  // below the cut, where `ln` is `ln(x) − iπ + …`, not `ln(x) + iπ + …`.
+  if (!isRealOnRealAxis(arg, x) && isNearNegativeReal(c0)) return null;
   if (bothSides && !lnHoldsBelow(arg, x, inner, m, c0)) return null;
   const d = inner.d;
   if (W * d > MAX_SERIES_ORDER) return null; // window too large — defer
@@ -2580,6 +2596,7 @@ function computeSeriesInCall(
   if (holdsHypergeometricOnCut(f, x, x0)) return undefined;
   // The expansion is a series in `x − x0` on both sides of the point.
   if (!isSmoothAt(f, x, x0)) return undefined;
+  if (crossesCutAt(f, x, x0)) return undefined;
   bothSides = true;
 
   const xExpr = ce.symbol(x);
@@ -2620,6 +2637,54 @@ function holdsBranch(e: Expression): boolean {
   if (['Sqrt', 'Root', 'Ln', 'Log'].includes(e.operator)) return true;
   if (e.operator === 'Power' && asSmallInteger(e.op2) === null) return true;
   return e.ops.some(holdsBranch);
+}
+
+/**
+ * Whether a logarithm, a root or a power with an exponent that is not an
+ * integer in `f` has, at `x = x0`, an argument (the base of a root or a
+ * power) that is a negative real number and that is not real at `x0 + t` for
+ * every real `t` (`isRealAlongAxis()`). Such an argument can cross the negative real
+ * axis, the cut of `ln` and of the principal root, at the point, where the
+ * function has a jump, so no series holds on both sides: `ln(−1 − i·x)` at 0
+ * is `iπ + i·x + …` for `x < 0` and `−iπ + i·x + …` for `x > 0`. The Taylor
+ * engines would give `ln(−1) + i·x + …` on both sides. An argument such as
+ * `−1 − i·x²⁰` is below the cut on both sides: `√(−1 − i·x²⁰)` is
+ * `−i + …`, not `√(−1) = i`, and the real root `∛(−1) = −1` does not apply to
+ * it. At ±∞, `f` is the function of `s` at `s = 0`, and the expansion holds
+ * for `s > 0` only, which is below the cut for `ln(−1 − i·s)`. The argument
+ * of `ln(x − 1)` stays on the cut, where the imaginary part of `ln` is `π`;
+ * the argument of `ln(x² + 1)` at `2i` crosses it.
+ *
+ * The test is simple and sound, and it declines some expansions that hold:
+ * `ln(−1 + i·s)`, which is above the cut for `s > 0`, and an argument that is
+ * real near the point only, such as `ln(√x − 1)` and `√(√x − 1)` at 1/4,
+ * `ln(ln x)` at 1/2 and `√(1 − √x)` at +∞ (`isRealOnRealAxis()` is false for
+ * a root or a logarithm of `x`).
+ */
+function crossesCutAt(f: Expression, x: string, x0: Expression): boolean {
+  if (!isFunction(f) || !f.has(x)) return false;
+  const op = f.operator;
+  let args: ReadonlyArray<Expression> = [];
+  if (op === 'Ln' || op === 'Log') args = f.ops;
+  else if (op === 'Sqrt' || op === 'Root') args = [f.op1];
+  else if (op === 'Power' && asSmallInteger(f.op2) === null) args = [f.op1];
+  for (const arg of args) {
+    if (!arg.has(x) || isRealAlongAxis(arg, x, x0)) continue;
+    if (isNearNegativeReal(arg.subs({ [x]: x0 }).evaluate())) return true;
+  }
+  return f.ops.some((operand) => crossesCutAt(operand, x, x0));
+}
+
+/** Whether the constant `u` is a negative real number, or a number whose
+ * distance to the negative real axis is below `SMOOTH_POINT_TOLERANCE`
+ * (relative to its real part above 1): at a floating-point point (`3.14159…`
+ * for `π`), `e^{i·x}` is `−1` plus a rounding error in its imaginary part. */
+function isNearNegativeReal(u: Expression): boolean {
+  if (u.isNegative === true) return true;
+  if (u.isNonNegative === true) return false;
+  const n = u.N();
+  if (!isNumber(n) || !Number.isFinite(n.re) || n.re >= 0) return false;
+  return Math.abs(n.im) <= SMOOTH_POINT_TOLERANCE * Math.max(1, -n.re);
 }
 
 /** Operators that are analytic off the real axis, where they are defined. */
@@ -2920,6 +2985,7 @@ function seriesAtInfinity(
     .simplify();
   // The simplification can write `√(s²)` as `|s|`.
   if (holdsNonSmooth(g, s)) return undefined;
+  if (crossesCutAt(g, s, ce.Zero)) return undefined;
 
   // Coefficients are evaluated at s = 0. When direct substitution is
   // non-finite, the coefficient is a one-sided limit: c_0 is lim_{x→±∞} f, and

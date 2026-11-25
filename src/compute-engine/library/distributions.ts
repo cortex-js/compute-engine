@@ -784,7 +784,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
             a,
             z,
             (a, z) => gammaQ(a, z),
-            (a, z) => bigGammaQNegativeOrder(ce, a, z, ce.precision)
+            (a, z, prec) => bigGammaQNegativeOrder(ce, a, z, prec)
           );
           if (
             q !== undefined &&
@@ -810,7 +810,7 @@ export const DISTRIBUTIONS_LIBRARY: SymbolDefinitions[] = [
           a,
           z,
           (a, z) => gammaQ(a, z),
-          (a, z) => bigGammaQ(ce, a, z, ce.precision)
+          (a, z, prec) => bigGammaQ(ce, a, z, prec)
         );
       }),
     },
@@ -1806,7 +1806,7 @@ function distributionCDF(
             a,
             z,
             (a, z) => gammaP(a, z),
-            (a, z) => bigGammaP(ce, a, z, ce.precision)
+            (a, z, prec) => bigGammaP(ce, a, z, prec)
           );
           if (r !== undefined) return r;
         }

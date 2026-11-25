@@ -521,11 +521,10 @@ function evaluateBinomial(
     // agree. The big-number Γ quotient is `NaN` when a Γ value overflows
     // (from about `n = 10²⁰`); the log form gives the value there
     // (`Binomial(1e300, 0.5)` ≈ 1.128·10¹⁵⁰).
-    const value = apply2(nExpr, kExpr, machineBinomial, (n, k) => {
+    const value = apply2(nExpr, kExpr, machineBinomial, (n, k, prec) => {
       // A negative non-integer `k`: the Γ quotient goes through the
       // reflection formula of `Γ(k+1)`, whose sine has no correct digits
       // for a large `|k|`. The log form reduces `k` exactly first.
-      const prec = ce.precision;
       if (k.isNegative() && !k.isInteger()) {
         const v = bigBinomialLogForm(ce, n, k, prec);
         if (v !== undefined) return v;
@@ -740,11 +739,8 @@ function evaluatePochhammer(
     aExpr,
     kExpr,
     (a, k) => gamma(a + k) / gamma(a),
-    (a, k) =>
-      bigGamma(ce, a.add(k, ce.precision), ce.precision).div(
-        bigGamma(ce, a, ce.precision),
-        ce.precision
-      )
+    (a, k, prec) =>
+      bigGamma(ce, a.add(k, prec), prec).div(bigGamma(ce, a, prec), prec)
   );
 }
 
