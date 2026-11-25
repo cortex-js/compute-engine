@@ -4217,6 +4217,11 @@ function letFunctionLiteral(
  * no definition in this scope, unless a variable of the same name exists:
  * the answer is then `true` although the literal reads its own parameter,
  * and the caller lists a collection that did not need it, which is harmless.
+ *
+ * The names are read from `namesIn()`, which keeps the names of each function
+ * node: a loop that writes the elements of a long list (`xs[k] = v`) stores a
+ * view over the view of the turn before at each turn, and a walk of the
+ * whole value at each turn costs the length of the list.
  */
 function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
   const isVariable = (name: string): boolean => {
@@ -4229,8 +4234,61 @@ function readsVariable(ce: ComputeEngine, expr: Expression): boolean {
   };
   if (isSymbol(expr)) return isVariable(expr.symbol);
   if (!isFunction(expr)) return false;
-  if (isVariable(expr.operator)) return true;
-  return expr.ops.some((op) => readsVariable(ce, op));
+  for (const name of namesIn(expr)) if (isVariable(name)) return true;
+  return false;
+}
+
+/** The result of `namesIn()` for each function node it has read. A node and
+ * its operands do not change, so an entry stays correct. */
+const NAMES_IN = new WeakMap<Expression, ReadonlySet<string>>();
+
+const NO_NAMES: ReadonlySet<string> = new Set();
+
+/** For an operator name, the set that holds this name only. */
+const OPERATOR_NAME_ONLY = new Map<string, ReadonlySet<string>>();
+
+/**
+ * The names that the function node `expr` holds, at any depth: each symbol
+ * and the operator of each function node. The set is kept (`NAMES_IN`). A node
+ * whose names are all in the set of one operand shares that set, so a chain
+ * of views over a long list costs one set, and each new view of the chain
+ * costs its own operands only.
+ */
+function namesIn(expr: Expression): ReadonlySet<string> {
+  if (!isFunction(expr)) return NO_NAMES;
+  const known = NAMES_IN.get(expr);
+  if (known !== undefined) return known;
+  // The largest set of an operand, and the names that are not in it.
+  let largest = NO_NAMES;
+  const own: string[] = [expr.operator];
+  const parts: ReadonlySet<string>[] = [];
+  for (const op of expr.ops) {
+    if (isSymbol(op)) own.push(op.symbol);
+    else if (isFunction(op)) {
+      const names = namesIn(op);
+      if (names.size > largest.size) largest = names;
+      parts.push(names);
+    }
+  }
+  let result: Set<string> | undefined;
+  const add = (name: string): void => {
+    if (result === undefined && largest.has(name)) return;
+    result ??= new Set(largest);
+    result.add(name);
+  };
+  for (const name of own) add(name);
+  for (const part of parts)
+    if (part !== largest) for (const name of part) add(name);
+  let names: ReadonlySet<string> = result ?? largest;
+  // A node whose only name is its operator (`Tuple(1, 2)`, a row of a
+  // matrix) shares one set with the other nodes of that operator.
+  if (names.size === 1 && names !== largest) {
+    const shared = OPERATOR_NAME_ONLY.get(expr.operator);
+    if (shared === undefined) OPERATOR_NAME_ONLY.set(expr.operator, names);
+    else names = shared;
+  }
+  NAMES_IN.set(expr, names);
+  return names;
 }
 
 /**

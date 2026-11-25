@@ -4046,8 +4046,9 @@ function walkOfListedSource(
  * elements), the answer is `undefined`.
  *
  * A larger source with a count is also read when it is a chain of
- * {@link MAX_REBUILD_VIEW_DEPTH} or more of these views, and it has at most
- * `maxCollectionSize` elements. A loop that updates a large list
+ * {@link MAX_REBUILD_VIEW_DEPTH} of these views, and either it has at most
+ * `maxCollectionSize` elements or the chain is over a `List`, whose elements
+ * are in memory already. A loop that updates a large list
  * (`L = ReplaceAt(L, k, v)` with 901 elements) otherwise wraps the view of
  * the previous turn in a new view at each turn. Each read of an element, and
  * each walk of the value (its `json`, its `structural` form), then goes
@@ -4055,20 +4056,22 @@ function walkOfListedSource(
  * turns the walk exceeds the JavaScript call stack. With this rule, the
  * chain has at most that many levels, and a loop pays one copy of the list
  * for each `MAX_REBUILD_VIEW_DEPTH` turns. One view over a large source
- * stays lazy.
+ * stays lazy, and so does a chain over a source that is not a `List` and has
+ * more than `maxCollectionSize` elements (a long `Range`).
  */
 function eagerElementsOf(xs: Expression): Expression[] | undefined {
   const size = xs.count;
   if (size === undefined) return listFiniteUncountedCollection(xs);
-  if (
-    size > MAX_SIZE_EAGER_COLLECTION &&
-    !(
-      size <= xs.engine.maxCollectionSize &&
-      rebuildViewDepth(xs) >= MAX_REBUILD_VIEW_DEPTH
-    )
-  )
+  if (size <= MAX_SIZE_EAGER_COLLECTION)
+    return Array.from(xs.each()) as Expression[];
+  const chain = rebuildViewChain(xs);
+  if (chain.depth < MAX_REBUILD_VIEW_DEPTH) return undefined;
+  if (size > xs.engine.maxCollectionSize && !isFunction(chain.source, 'List'))
     return undefined;
-  return Array.from(xs.each()) as Expression[];
+  return (
+    elementsOfWritesOverList(xs, chain.source) ??
+    (Array.from(xs.each()) as Expression[])
+  );
 }
 
 /**
@@ -4079,30 +4082,74 @@ function eagerElementsOf(xs: Expression): Expression[] | undefined {
  */
 const MAX_REBUILD_VIEW_DEPTH = 32;
 
-/**
- * The number of nested lazy views of `Insert`, `DeleteAt` and `ReplaceAt`
- * (with one position) at the start of `xs`, read through the collection
- * operand of each view. The count stops at
- * {@link MAX_REBUILD_VIEW_DEPTH}. A node of a user operator with one of these
- * names is not counted. The count also stops at the first view of another
- * operator, so a loop that wraps each write in a lazy view of another
- * operator still makes a chain without a limit.
- */
-function rebuildViewDepth(xs: Expression): number {
-  let depth = 0;
-  let node = xs;
-  while (
-    depth < MAX_REBUILD_VIEW_DEPTH &&
+/** True when `node` is a lazy view of `Insert`, `DeleteAt` or `ReplaceAt`
+ * (with one position) of the library. A node of a user operator with one of
+ * these names is not one. */
+function isRebuildView(
+  node: Expression
+): node is Expression & FunctionInterface {
+  return (
     isFunction(node) &&
     ((node.operator === 'ReplaceAt' && node.nops === 3) ||
       (node.operator === 'Insert' && node.nops === 3) ||
       (node.operator === 'DeleteAt' && node.nops === 2)) &&
     isLibraryOperator(node, node.operator)
-  ) {
+  );
+}
+
+/**
+ * The chain of nested lazy views of `Insert`, `DeleteAt` and `ReplaceAt`
+ * (`isRebuildView()`) at the start of `xs`, read through the collection
+ * operand of each view: `depth` is the number of views, and `source` is the
+ * collection operand of the last one. The walk stops at
+ * {@link MAX_REBUILD_VIEW_DEPTH} views, and `source` is then the collection
+ * that this number of views is over. The walk also stops at the first view of
+ * another operator, so a loop that wraps each write in a lazy view of another
+ * operator still makes a chain without a limit.
+ */
+function rebuildViewChain(xs: Expression): {
+  depth: number;
+  source: Expression;
+} {
+  let depth = 0;
+  let source = xs;
+  while (depth < MAX_REBUILD_VIEW_DEPTH && isRebuildView(source)) {
     depth += 1;
-    node = node.op1;
+    source = source.op1;
   }
-  return depth;
+  return { depth, source };
+}
+
+/**
+ * The elements of `xs`, a chain of `ReplaceAt` views over the `List`
+ * `source` (`rebuildViewChain()`), or `undefined` when a view of the chain is
+ * of another operator, when `source` is not a `List`, or when a view has no
+ * position to write.
+ *
+ * The elements are the ones that a walk of `xs` gives: each view replaces
+ * the element at its position and keeps the count of its source. The walk
+ * goes through one iterator for each view and each element; this function
+ * copies the list once and then stores the value of each view, from the
+ * innermost to the outermost.
+ */
+function elementsOfWritesOverList(
+  xs: Expression,
+  source: Expression
+): Expression[] | undefined {
+  if (!isFunction(source, 'List')) return undefined;
+  const views: (Expression & FunctionInterface)[] = [];
+  for (let node = xs; node !== source; node = views[views.length - 1].op1) {
+    if (!isFunction(node, 'ReplaceAt') || !isRebuildView(node))
+      return undefined;
+    views.push(node);
+  }
+  const elements = Array.from(source.each()) as Expression[];
+  for (let i = views.length - 1; i >= 0; i--) {
+    const position = targetPositionOf(views[i], elements.length);
+    if (position === undefined) return undefined;
+    elements[position - 1] = views[i].op3;
+  }
+  return elements;
 }
 
 /**

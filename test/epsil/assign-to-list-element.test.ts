@@ -259,6 +259,76 @@ describe('a write that does not give a list is an error, and the variable keeps 
     expect(chainDepth(value)).toBeLessThanOrEqual(32);
   });
 
+  // The chain was listed only for a list of at most `ce.maxCollectionSize`
+  // (10 000) elements. For a longer list, the chain had one level for each
+  // write, and 2000 writes exceeded the call stack.
+  test('a loop of writes to a list of more than 10 000 elements (CE-1796)', () => {
+    const { value, diagnostics } = run(
+      'let fb: list<integer> = [0 for k in 1..12000]\nfor k in 1..300 { fb[k] = k % 256 }\nfb'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.count).toBe(12000);
+    expect(chainDepth(value)).toBeLessThanOrEqual(32);
+    const elements = [...value.each()].map((x) => x.re);
+    expect(elements.slice(0, 300)).toEqual(
+      Array.from({ length: 300 }, (_, i) => (i + 1) % 256)
+    );
+    expect(elements.slice(300).every((x) => x === 0)).toBe(true);
+  });
+
+  test('the writes of a chain are applied in their order, with negative positions (CE-1796)', () => {
+    // 40 writes: the chain is listed once, at 32 views. Positions 1 and -1
+    // are each written 20 times; the last write of each is the value.
+    const { value, diagnostics } = run(
+      'let xs = [0 for k in 1..10500]\nfor k in 1..20 { xs[1] = k; xs[-1] = -k }\n[xs[1], xs[2], xs[10500], count(xs)]'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.json).toEqual(['List', 20, 0, -20, 10500]);
+  });
+
+  test('another variable keeps the list it held before the writes (CE-1796)', () => {
+    const { value, diagnostics } = run(
+      'let xs = [0 for k in 1..10500]\nxs[1] = 1\nlet ys = xs\nfor k in 1..40 { xs[2] = k }\n[ys[1], ys[2], xs[1], xs[2]]'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.json).toEqual(['List', 1, 0, 1, 40]);
+  });
+
+  test('a chain of `Insert` and `ReplaceAt` over a list of more than 10 000 elements (CE-1796)', () => {
+    const ce = new ComputeEngine();
+    let xs = ce.function(
+      'List',
+      Array.from({ length: 10500 }, (_, i) => ce.number(i))
+    );
+    const expected = Array.from({ length: 10500 }, (_, i) => i);
+    for (let k = 1; k <= 40; k++) {
+      if (k % 2 === 0) {
+        xs = ce.function('Insert', [xs, ce.number(k), ce.number(-k)]).evaluate();
+        expected.splice(k - 1, 0, -k);
+      } else {
+        xs = ce
+          .function('ReplaceAt', [xs, ce.number(-k), ce.number(-k)])
+          .evaluate();
+        expected[expected.length - k] = -k;
+      }
+    }
+    expect(chainDepth(xs)).toBeLessThanOrEqual(32);
+    expect([...xs.each()].map((x) => x.re)).toEqual(expected);
+  });
+
+  test('a chain over a range of more than 10 000 elements stays a chain (CE-1796)', () => {
+    // The elements of a range are not in memory, and a list of them can be
+    // larger than `ce.maxCollectionSize` allows. Such a chain has no limit
+    // of depth: issue CE-1832.
+    const ce = new ComputeEngine();
+    let xs = ce.function('Range', [ce.number(1), ce.number(20000)]).evaluate();
+    for (let k = 1; k <= 40; k++)
+      xs = ce.function('ReplaceAt', [xs, ce.number(k), ce.number(0)]).evaluate();
+    expect(chainDepth(xs)).toBe(40);
+    expect(xs.at(40)?.re).toBe(0);
+    expect(xs.at(41)?.re).toBe(41);
+  });
+
   test('a write to an element of an undeclared list is assignment-to-undeclared-variable', () => {
     const { value, diagnostics } = run('ys[1] = 9\nys');
     expect(diagnostics.map((d) => d.message[3])).toEqual([

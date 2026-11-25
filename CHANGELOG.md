@@ -131,6 +131,18 @@
 
 ### Resolved Issues
 
+- **A loop that writes the elements of a list of more than 10,000 elements
+  gives its value** (CE-1796). With
+  `let fb: list<integer> = [0 for k in 1..20000]`, the loop
+  `for k in 1..2000 { fb[k] = k % 256 }` ended with the error
+  `Maximum call stack size exceeded`, and `fb[2000]` now gives `208`. Each
+  write made a lazy view over the view of the write before; the views are
+  listed into one list at each 32 writes, as they were for a shorter list.
+  The loop is also faster: 2000 writes to a list of 5,000 elements took
+  about 2.1 seconds and take about 1.1 seconds. A variable that holds a
+  range of more than 10,000 elements (`let xs: list<integer> = 1..20000`)
+  still gives the error; start from a list (`[k for k in 1..20000]`).
+
 - **A derivative, an integral or a limit with no variable written, of a
   formula that reads a variable that holds a formula, is computed with the
   variable of that formula** (CE-1787). After
