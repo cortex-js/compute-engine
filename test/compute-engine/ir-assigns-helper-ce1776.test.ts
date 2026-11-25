@@ -154,15 +154,92 @@ let tick = (dt: real) => do { ballX = ballX + 1; f(dt) + ballX }`);
   });
 });
 
+describe('a loop carries the variables that a user function writes', () => {
+  const MOVE = `function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
+`;
+  const cases: [string, string, number[]][] = [
+    [
+      'a call in a for loop of the body',
+      `let tick = (dt: real) => do { for i in 1..3 { moveBall(dt) }; ballX }`,
+      [6.5, 15.5, 15.5, 0],
+    ],
+    [
+      'the value of the call in the loop',
+      `let tick = (dt: real) => do { let s = 0; for i in 1..3 { s = s + moveBall(dt * i) }; s + ballX }`,
+      [34, 98, 30.5, 0],
+    ],
+    [
+      'a write in a loop of the helper',
+      `function f(dt: real) scope { for i in 1..3 { ballX = ballX + dt * i }; ballX }
+let tick = (dt: real) => f(dt)`,
+      [12.5, 30.5, 30.5, 0],
+    ],
+    [
+      'a loop of the helper that calls a helper, two variables',
+      `function f(dt: real) scope { for i in 1..3 { moveBall(dt); n = n + 1 }; ballX + n }
+let tick = (dt: real) => f(dt) + f(1)`,
+      [25, 61, 21.5, 12],
+    ],
+    [
+      'nested loops',
+      `let tick = (dt: real) => do { for i in 1..2 { for j in 1..2 { moveBall(dt) } }; ballX }`,
+      [8.5, 20.5, 20.5, 0],
+    ],
+    [
+      'a call in an arm in a loop',
+      `let tick = (dt: real) => do { for i in 1..4 { if (i > 2) { moveBall(dt) } else { n = n + 1 } }; ballX + n }`,
+      [6.5, 14.5, 10.5, 4],
+    ],
+    [
+      'a break',
+      `let tick = (dt: real) => do { for i in 1..10 { if (ballX > 6) { break }; moveBall(dt) }; ballX }`,
+      [6.5, 6.5, 6.5, 0],
+    ],
+    [
+      'a while loop',
+      `let tick = (dt: real) => do { while (ballX < 6) { moveBall(dt) }; ballX }`,
+      [6.5, 6.5, 6.5, 0],
+    ],
+  ];
+  test.each(cases)('%s', (_, body, want) => {
+    const { code, interpreted } = both(MOVE + body);
+    expect(code).toEqual(want);
+    expect(code).toEqual(interpreted);
+  });
+});
+
 describe('the cases that decline', () => {
-  test('a call in a loop, a write in a loop of the helper', () => {
+  test('a loop that declares a local of the name after the call', () => {
+    // The facts of the loop body drop the name its Block declares: the
+    // loop would not carry the write (2.5 for 6.5, or an IR error).
+    const MOVE = `function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
+`;
+    const why = 'in a loop that does not carry it';
+    expect(
+      declined(
+        MOVE +
+          `let tick = (dt: real) => do { for i in 1..3 { moveBall(dt); let ballX = 1 }; ballX }`
+      )
+    ).toMatch(why);
+    expect(
+      declined(
+        MOVE +
+          `function f(dt: real) scope { for i in 1..3 { moveBall(dt); let ballX = 1 }; ballX }
+let tick = (dt: real) => f(dt)`
+      )
+    ).toMatch(why);
+    expect(
+      declined(
+        MOVE +
+          `let tick = (dt: real) => do { let k = 0; while (k < 3) { moveBall(dt); k = k + 1; let ballX = 7 }; ballX }`
+      )
+    ).toMatch(why);
+  });
+
+  test('a call in a callback of map, in a loop', () => {
     expect(
       declined(`function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
-let tick = (dt: real) => do { for i in 1..3 { moveBall(dt) }; ballX }`)
-    ).toMatch('a write of the variable ballX of the engine by a user function, in a loop');
-    expect(
-      declined(`function moveBall(dt: real) scope { for i in 1..3 { ballX = ballX + dt }; ballX }
-let tick = (dt: real) => moveBall(dt)`)
+let tick = (dt: real) => do { let s = 0; for i in 1..2 { s = s + map((x) => moveBall(x), [dt])[1] }; s }`)
     ).toMatch('a write of the variable ballX of the engine by a user function, in a loop');
   });
 

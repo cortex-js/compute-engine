@@ -2644,14 +2644,15 @@ ce.box('ballX').evaluate(); // 5.5
 
 The function takes the value of each such variable that it reads or writes
 at the call, and the call rebinds each variable that it writes, in the order
-of the program: two calls, a call in an arm of an `If` and a write in an arm
-of the function give the interpreter's values. A name in the body of the
+of the program: two calls, a call in an arm of an `If`, a call in a `for` or
+`while` loop (with `break` too) and a write in an arm or in a loop of the
+function give the interpreter's values. A name in the body of the
 function counts only where it is the variable of the engine, not a local or
 a parameter of the same name. These decline:
 
-- a call of such a function in a `Loop`, in a `Sum`, a `Map` or another
-  construct that evaluates its body several times, and a write of the
-  variable in such a construct in the function: the loop does not carry the
+- a call of such a function in a `Sum`, in a callback of `Map` or of another
+  operator that evaluates its body several times, and a write of the
+  variable in such a body in the function: that body does not carry the
   value that the function returns;
 - a call that maps the function over a list (`moveBall([dt, dt])`);
 - a recursive function, or a cycle of functions, that assigns the variable;

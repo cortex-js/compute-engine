@@ -443,8 +443,9 @@ export type Lowering = {
   /** The binding of the variable `name` of the engine (a name of
    *  `Program.assigns`) that the call `e` of a user function that writes
    *  it rebinds here, at the root or in the body of a user function. A
-   *  call in a loop, or where a local or a parameter hides the variable,
-   *  declines (CE-1776). */
+   *  `Loop` carries it; a call in a frame of a loop (the body of a `Sum`,
+   *  a callback of `Map`), or where a local or a parameter hides the
+   *  variable, declines (CE-1776). */
   stateWrite(e: Fn, name: string): Binding;
   /** The record of the values `values` (`make()` of `lower-records.ts`),
    *  and the field `k` of the record `r` (`field()`). */

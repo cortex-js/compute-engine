@@ -788,10 +788,11 @@ function lowerOnce(
   // the facts of the node that holds it do not count the read.
   const scanned = new WeakSet<Expression>();
   const stateOf = (key: object) => stateUses.get(key) ?? noState;
-  // The depth of the `Loop`s around the node being lowered (`loop()`): a
-  // variable of the engine that a user function writes is not carried by
-  // a loop (`stateWrite()`).
-  let loops = 0;
+  // The bindings that each `Loop` around the node being lowered carries,
+  // and the user function whose body has the loop (`loop()`): a write of
+  // a variable of the engine by a call in the loop rebinds a carried
+  // binding, or declines (`stateWrite()`, CE-1776).
+  const loopCarries: { fn: string | undefined; bindings: Binding[] }[] = [];
   // The answers of the host's `compile` handlers, per node of this lowering
   // (`handlerAnswer()`; not of a control-flow head other than `Which`, whose
   // handler is ignored), and the nodes that an answer created (not a
@@ -6048,9 +6049,17 @@ function lowerOnce(
       role: 'local',
     });
     const done = heads & 1 || bare ? flag() : undefined;
+    // A local, and in the body of a user function a variable of the engine
+    // that the function captured (`stateWrite()`, CE-1776).
     const carried = [...facts(e).writes].flatMap((n) => {
       const x = lookup(n);
-      return x?.binding.role === 'local' && !x.outer ? [x.binding] : [];
+      if (x === undefined || x.outer) return [];
+      const state =
+        cx.inFunction !== undefined &&
+        x.binding.role === 'input' &&
+        x.binding === frames[0].names.get(n) &&
+        assigns.some((s) => s.name === n);
+      return x.binding.role === 'local' || state ? [x.binding] : [];
     });
     if (done) carried.push(done);
     // A list local written whole is carried as two values: its length, then
@@ -6187,7 +6196,7 @@ function lowerOnce(
         parallel && j === 1
       );
     };
-    loops += 1;
+    loopCarries.push({ fn: cx.inFunction, bindings: carried });
     try {
       if (bare)
         counted(
@@ -6197,7 +6206,7 @@ function lowerOnce(
         );
       else clause(1);
     } finally {
-      loops -= 1;
+      loopCarries.pop();
     }
     return undefined;
   };
@@ -6562,8 +6571,9 @@ function lowerOnce(
   /** `Lowering.stateWrite()`: the binding of the variable `name` of the
    *  engine in the frame of the root function literal (a local) or of the
    *  user function being lowered (its input, `define()`), when the
-   *  innermost binding of `name` is that one; a write in a `Loop` or in a
-   *  frame of a loop declines: the loop does not carry it (CE-1776). */
+   *  innermost binding of `name` is that one; a write in a frame of a loop
+   *  (the body of a `Sum`, a callback of `Map`) declines: the frame does
+   *  not carry it. A `Loop` carries it (`loop()`; CE-1776). */
   const stateWrite = (e: Fn, name: string): Binding => {
     const known = lookup(name);
     const home = frames[0].names.get(name);
@@ -6576,10 +6586,23 @@ function lowerOnce(
         e,
         `a write of the variable ${name} of the engine where a local or a parameter hides it`
       );
-    if (known.outer || loops > 0)
+    // A `Loop` carries the variable (`loop()`); a frame of a loop (the
+    // body of a `Sum`, of a callback of `Map`) does not.
+    if (known.outer)
       decline(
         e,
         `a write of the variable ${name} of the engine by a user function, in a loop`
+      );
+    // A `Loop` of this body that does not carry the binding: its facts
+    // miss the write (a `Declare` of the name later in the loop body).
+    if (
+      loopCarries.some(
+        (l) => l.fn === cx.inFunction && !l.bindings.includes(home)
+      )
+    )
+      decline(
+        e,
+        `a write of the variable ${name} of the engine by a user function, in a loop that does not carry it (a local of that name is declared in the loop)`
       );
     return home;
   };

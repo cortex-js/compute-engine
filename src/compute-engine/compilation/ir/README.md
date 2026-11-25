@@ -3896,9 +3896,10 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   at the start of its body (so that an arm rebinds a binding of the frame,
   `arm()`), and when it writes one its IR function returns the record of the
   value of the body and of each name it writes; the call reads the fields and
-  rebinds the names (`Lowering.stateWrite()`). A write in a `Loop` or a loop
-  frame, a call that maps over a list (`mapOver()`), a recursive writer and a
-  list name written by a function decline. A warning of a
+  rebinds the names (`Lowering.stateWrite()`). A `Loop` carries such a name,
+  as it carries a local (`loop()`). A write in a loop frame (a `Sum`, a
+  callback of `Map`), a call that maps over a list (`mapOver()`), a recursive
+  writer and a list name written by a function decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.
 - **Stored code.** The result has the fields of stored code
   (`StoredJavaScript`): `preambleOnce` (and `preamble`, the same text) holds the
