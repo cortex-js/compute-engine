@@ -66,6 +66,17 @@
 
 ### Resolved Issues
 
+- **A power, a root, an angle and a logarithm with a base of a number made at
+  a higher precision keep the digits of a double after the precision is set
+  to `'machine'`** (CE-1761). After `ce.precision = 30;
+  const a = ce.parse('0.3'); ce.precision = 'machine'`,
+  `ce.expr(['Power', 2, a]).evaluate()` gave `1.23114441334492`, two digits
+  fewer than `2 ** 0.3`, `1.2311444133449163`. The same applied to
+  `Power(a, 0.5)`, `Root(a, 3)`, `Arctan2(a, 1)`, `Log(a, 2)` and the other
+  functions of two arguments. They now give the digits of a double. A result
+  that a double cannot hold, such as `Power(10^{-800}, 0.5)`, keeps its value
+  (`1e-400`), where it was `0`.
+
 - **An integral, a limit or a numerical derivative of a lone variable that
   holds a formula is computed with the variable of that formula** (CE-1772).
   After `ce.assign('G', ce.parse('\\sin(x)'))`, `\int_0^1 G` gave `0.5` (the

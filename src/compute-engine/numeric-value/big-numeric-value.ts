@@ -1289,9 +1289,10 @@ function decimalToString(num: BigDecimal): string {
  * operand are not rounded to a double first: the relative error of `ln x`
  * near `x = 1`, and of `e^x` for a large `x`, would be much larger than the
  * error of the double of `x`. (`add` and `mul` do not round to the
- * precision: they keep the digits of their operands.)
+ * precision: they keep the digits of their operands.) `apply2()` gives
+ * the big-decimal kernels of the two-argument functions this precision too.
  */
-const DOUBLE_DIGITS = 20;
+export const DOUBLE_DIGITS = 20;
 
 /** The machine value of `value`, or `value` itself when it is not a big
  * decimal, or when a part of it is not 0 or a normal double: the big decimal

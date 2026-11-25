@@ -1786,7 +1786,7 @@ export function pow(
             x,
             exp,
             (x, exp) => Math.pow(x, exp),
-            (x, exp) => x.pow(exp, ce.precision),
+            (x, exp, prec) => x.pow(exp, prec),
             (x, exp) => x.pow(exp)
           ) ?? pow(x, exp, { numericApproximation: false })
         );
@@ -2368,11 +2368,11 @@ export function root(
           // exact integer. `nthRoot` is integer-degree only — a non-integer
           // degree (Root(2, 0.5)) falls back to the full-precision power.
           // (NU-P1-7)
-          (a, b) => {
+          (a, b, bigPrec) => {
             const n = b.toNumber();
             const result = Number.isInteger(n)
-              ? a.nthRoot(n, prec)
-              : a.pow(b.pow(-1, prec), prec);
+              ? a.nthRoot(n, bigPrec)
+              : a.pow(b.pow(-1, bigPrec), bigPrec);
             if (isNegative && !isEven) return result.neg();
             return result;
           },

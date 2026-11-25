@@ -10311,7 +10311,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           n,
           x,
           (n, x) => polygamma(n, x),
-          (n, x) => bigPolygamma(engine, n, x, engine.precision),
+          (n, x, prec) => bigPolygamma(engine, n, x, prec),
           (n, x) => polygammaComplex(n.re, x)
         );
         // The kernels answer NaN where they cannot give an accurate value:
@@ -10755,7 +10755,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           a,
           b,
           beta,
-          (a, b) => bigBeta(engine, a, b, engine.precision),
+          (a, b, prec) => bigBeta(engine, a, b, prec),
           (a, b) =>
             betaComplex(a, typeof b === 'number' ? engine.complex(b, 0) : b)
         );
@@ -11333,10 +11333,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 return lz / lb;
               return ce.complex(lz).div(lb);
             },
-            (z, b) =>
+            (z, b, prec) =>
               z.isNegative() || b.isNegative()
                 ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
-                : z.log(b, ce.precision),
+                : z.log(b, prec),
             (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
           );
         }
@@ -11571,7 +11571,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // below, or `.sgn` and `.evaluate()` disagree on the same
             // expression (P0-7).
             floorModDouble,
-            (a, b) => a.mod(b).add(b, n.engine.precision).mod(b)
+            (a, b, prec) => a.mod(b).add(b, prec).mod(b)
           );
           return v?.sgn ?? undefined;
         }
@@ -13790,7 +13790,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[0],
             ops[1],
             (a, b) => a / b,
-            (a, b) => a.div(b, ce.precision),
+            (a, b, prec) => a.div(b, prec),
             (a, b) => complexDivide(a, b)
           );
         }
@@ -14168,8 +14168,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // a tie of the quotient toward `+∞` (`floatRemainder()`,
         // `bigRemainder()`). An exact operand beside a float one is its value
         // at the working precision, as in every float lane.
-        return apply2(a, b, floatRemainder, (a, b) =>
-          bigRemainder(a, b, engine.precision)
+        return apply2(a, b, floatRemainder, (a, b, prec) =>
+          bigRemainder(a, b, prec)
         );
       },
     },
@@ -19312,8 +19312,9 @@ function bigRealOf(
  * `BigDecimal.add()` is exact.
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
-  const prec = a.engine.precision;
-  return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b, prec).mod(b));
+  return apply2(a, b, floorModDouble, (a, b, prec) =>
+    a.mod(b).add(b, prec).mod(b)
+  );
 }
 
 /**

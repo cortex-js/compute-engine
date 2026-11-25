@@ -83,6 +83,49 @@ describe('A BIG DECIMAL AT MACHINE PRECISION', () => {
     expect(ce.expr(['Ln', x]).evaluate().re).toBe(1e-21);
   });
 
+  // The two-argument kernels (`apply2()`): `Power` with a float exponent,
+  // `Root`, `Arctan2`, `Log` with a base.
+  test('has a power with a float exponent with the digits of a double', () => {
+    const { ce, values } = engineWithValues(['0.3']);
+    const [a] = values;
+    expect(ce.expr(['Power', a, 0.5]).evaluate().toString()).toBe(
+      '0.5477225575051661'
+    );
+    expect(ce.expr(['Power', 2, a]).evaluate().re).toBe(Math.pow(2, 0.3));
+  });
+
+  test('has a root with the digits of a double', () => {
+    const { ce, values } = engineWithValues(['0.3']);
+    const [a] = values;
+    expect(ce.expr(['Root', a, 3]).evaluate().re).toBe(Math.cbrt(0.3));
+    expect(ce.expr(['Root', a, 4]).evaluate().re).toBe(0.7400828044922853);
+  });
+
+  test('has an angle and a logarithm with a base with the digits of a double', () => {
+    const { ce, values } = engineWithValues(['0.3']);
+    const [a] = values;
+    expect(ce.expr(['Arctan2', a, 1]).evaluate().re).toBe(Math.atan(0.3));
+    // The correctly rounded `log₂ 0.3`: `Math.log2(0.3)` is one unit in the
+    // last place away.
+    expect(ce.expr(['Log', a, 2]).N().re).toBe(-1.736965594166206);
+  });
+
+  // The kernel of `Mod` is exact (`BigDecimal.add()` does not round to its
+  // precision argument), so this test pins the machine-precision lane only.
+  test('has a floored remainder with the digits of a double', () => {
+    const { ce, values } = engineWithValues(['0.123456789012345678']);
+    const [a] = values;
+    expect(ce.expr(['Mod', a, 1]).evaluate().re).toBe(0.12345678901234568);
+  });
+
+  test('keeps a big decimal for a power that a double cannot hold', () => {
+    const { ce, values } = engineWithValues(['10^{-800}']);
+    const [tiny] = values;
+    expect(ce.expr(['Power', tiny, 0.5]).evaluate().toString()).toBe(
+      '1e-400'
+    );
+  });
+
   test('keeps the digits of a raised precision', () => {
     const ce = new ComputeEngine();
     ce.precision = 30;
