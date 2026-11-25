@@ -4292,9 +4292,7 @@ function foldThroughOutOfRangePartialProduct(
     const b = nv.bignumImAt(ce.precision) ?? new BigDecimal(nv.im);
     ({ re, im } = bigComplexProduct(re, im, a, b, ce.precision));
   }
-  return ce
-    .number(ce._numericValue(im.isZero() ? re : { re, im }))
-    .N();
+  return ce.number(ce._numericValue(im.isZero() ? re : { re, im })).N();
 }
 
 /**

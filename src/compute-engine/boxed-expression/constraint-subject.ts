@@ -654,8 +654,7 @@ export function isDeclaredTypeOnly(def: BoxedValueDefinition): boolean {
  * not served outside it, and the reverse.
  */
 let _typedAsDefinitions:
-  | ReadonlyMap<BoxedValueDefinition, BoxedType>
-  | undefined;
+  ReadonlyMap<BoxedValueDefinition, BoxedType> | undefined;
 
 /** Run `fn` with each definition of `types` typed with its type there
  * ({@link typedAs}). Re-entrant: an inner window restores the outer one, and

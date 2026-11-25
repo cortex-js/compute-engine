@@ -1802,16 +1802,15 @@ lane). GLSL (no run-time length), the interval mode and the `bigint` mode
 decline such a local.
 
 A list operator that declines an effect in an element, in its function or in a
-list operand, because the interpreter evaluates fewer elements, in another
-order or lazily (each "with an effect declines" of this section, and `Zip`),
-does not count a read of a `vars` name (`Builder.changes()`): a `vars` entry is
-a value, the same at each read (the compile guide), and no instruction of the
-program writes it, so each read gives the value of the name that the
-interpreter reads once (`CountIf(L, t ↦ t > T)` with `vars: {T: …}` compiles;
-CE-1612). A draw, a write and a call of a function of the host still decline.
-The text is still read at each use, once per element evaluated; a text with an
-effect (`'_.draw()'`) runs that many times, and its result is unspecified, as
-the guide says.
+list operand, because the interpreter evaluates fewer elements, in another order
+or lazily (each "with an effect declines" of this section, and `Zip`), does not
+count a read of a `vars` name (`Builder.changes()`): a `vars` entry is a value,
+the same at each read (the compile guide), and no instruction of the program
+writes it, so each read gives the value of the name that the interpreter reads
+once (`CountIf(L, t ↦ t > T)` with `vars: {T: …}` compiles; CE-1612). A draw, a
+write and a call of a function of the host still decline. The text is still read
+at each use, once per element evaluated; a text with an effect (`'_.draw()'`)
+runs that many times, and its result is unspecified, as the guide says.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`

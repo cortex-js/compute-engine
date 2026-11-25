@@ -6105,8 +6105,7 @@ function incompleteGammaType(
   const [s, ...zs] = ops;
   if (s === undefined) return 'number';
   const order = elementDescriptor(s);
-  if (factsOf(order.type).integer && provablyGreaterOnTypes(order, 0))
-    return t;
+  if (factsOf(order.type).integer && provablyGreaterOnTypes(order, 0)) return t;
   const points = zs.map((z) =>
     z === undefined ? undefined : elementDescriptor(z)
   );
