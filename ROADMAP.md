@@ -15,14 +15,14 @@ design, the steps), and it links the other record.
 
 ## How to use this file
 
-**References.** Each entry has a reference `CE-<n>`. A sub-item that can be
-done alone has a reference `CE-<n>.<m>`. Use the reference in commit messages,
-code comments, plans and replies, for example "CE-42.3".
+**References.** Each entry has a reference `CE-<n>`. A sub-item that can be done
+alone has a reference `CE-<n>.<m>`. Use the reference in commit messages, code
+comments, plans and replies, for example "CE-42.3".
 
 - A reference does not change. Do not renumber entries, and do not give the
   number of a removed entry to a new entry.
-- A new entry takes the number in `issues/NEXT.md`, the counter that issue
-  files and this file share, and increases that file in the same edit.
+- A new entry takes the number in `issues/NEXT.md`, the counter that issue files
+  and this file share, and increases that file in the same edit.
   `node scripts/issues.mjs lint` fails when the counter is not above every
   `CE-<n>` here.
 - Put a new entry in the section of its topic. In a section, entries are not in
@@ -47,15 +47,16 @@ code comments, plans and replies, for example "CE-42.3".
     ("approved 2026-11-01"). A request from Tycho or a GitHub issue that asks
     for a capability is `ready` when the user says so.
   - `waits for user (<reason>)`: the user acts before an agent starts. The
-    reason is `decision` (the entry states the question, the options with
-    their costs, and the option the agent recommends), `design` (the next step
-    is a design document that the user approves; an agent that judges the
-    change worth it writes the document and says so in its report), or
-    `approval` (an idea the user has not approved yet; the user makes the
-    entry `ready`, with the date, or deletes it).
+    reason is `decision` (the entry states the question, the options with their
+    costs, and the option the agent recommends), `design` (the next step is a
+    design document that the user approves; an agent that judges the change
+    worth it writes the document and says so in its report), or `approval` (an
+    idea the user has not approved yet; the user makes the entry `ready`, with
+    the date, or deletes it).
 
   There is no `in progress`: the session that starts an item removes the entry
   (see "Started and finished work").
+
 - `<kind>` is `capability`, `performance` (an improvement with no reported
   problem), `design` or `task`.
 - `<size>` is an estimate: `S` (one function or file and its tests), `M`
@@ -65,34 +66,33 @@ code comments, plans and replies, for example "CE-42.3".
   benchmark, a program a host sent) or `plausible` (a program a user would
   write); `docs/ISSUE_TRACKING.md` defines both. The line is optional for an
   idea the user recorded.
-- An idea for a capability, a performance change, a design or a task goes in
-  the agent's report to the user, and becomes an entry
-  (`waits for user (approval)`) only when the user says to record it. A defect
-  that an agent finds is an issue file, never an entry here.
+- An idea for a capability, a performance change, a design or a task goes in the
+  agent's report to the user, and becomes an entry (`waits for user (approval)`)
+  only when the user says to record it. A defect that an agent finds is an issue
+  file, never an entry here.
 - Record a user decision once, in the status line, as `approved <date>`; the
-  body of the entry states what was decided, with no date and no "decided by
-  the user". Link the plan document, the GitHub issue or PR, and the issue
-  file when there is one.
-- Write what a person needs to do the work: the design, the files and
-  functions, the options and their costs. Do not record who found the item,
-  when, or how.
+  body of the entry states what was decided, with no date and no "decided by the
+  user". Link the plan document, the GitHub issue or PR, and the issue file when
+  there is one.
+- Write what a person needs to do the work: the design, the files and functions,
+  the options and their costs. Do not record who found the item, when, or how.
 
 **Started and finished work.** An entry is removed when its work starts, not
-when it ends: the session that does the work keeps the entry's content where
-it needs it (the plan document, the task brief, the handoff file), and the
-commit and `CHANGELOG.md` record the result. When the work stops before it is
-done, the session writes the entry again, with the same reference, saying only
-what remains. When a sub-item starts, delete its bullet and keep the numbers of
-the other sub-items. An entry that waits for a decision or a design stays
-until the decision is made or the design is written; then the work starts and
-the entry goes.
+when it ends: the session that does the work keeps the entry's content where it
+needs it (the plan document, the task brief, the handoff file), and the commit
+and `CHANGELOG.md` record the result. When the work stops before it is done, the
+session writes the entry again, with the same reference, saying only what
+remains. When a sub-item starts, delete its bullet and keep the numbers of the
+other sub-items. An entry that waits for a decision or a design stays until the
+decision is made or the design is written; then the work starts and the entry
+goes.
 
-**Related documents.** `docs/ISSUE_TRACKING.md` (issues), `docs/epsil/ROADMAP.md`
-(Epsil language and tools), `docs/TYPE_SYSTEM_ROADMAP.md` and
-`docs/INFERENCE_ROADMAP.md` (type system), `docs/rubi/RUBI.md` (Rubi
-integration rules), `docs/fungrim/FUNGRIM.md` (Fungrim identities),
-`docs/mathnet/README.md` (MathNet parser corpus), `benchmarks/README.md`
-(benchmarks), `docs/plans/` (plans and design records).
+**Related documents.** `docs/ISSUE_TRACKING.md` (issues),
+`docs/epsil/ROADMAP.md` (Epsil language and tools),
+`docs/TYPE_SYSTEM_ROADMAP.md` and `docs/INFERENCE_ROADMAP.md` (type system),
+`docs/rubi/RUBI.md` (Rubi integration rules), `docs/fungrim/FUNGRIM.md` (Fungrim
+identities), `docs/mathnet/README.md` (MathNet parser corpus),
+`benchmarks/README.md` (benchmarks), `docs/plans/` (plans and design records).
 
 ## Sections
 
@@ -111,7 +111,8 @@ integration rules), `docs/fungrim/FUNGRIM.md` (Fungrim identities),
 
 **Status:** ready; capability. User decision 2026-10-06: `at()` and the readers
 that compute an index from the count accept a `bigint` index. Issue #416.
-**Witness:** corpus; Ready with user decision 2026-10-06; GitHub issue #416 (`Last(Range(1, 10^20))` stays unevaluated).
+**Witness:** corpus; Ready with user decision 2026-10-06; GitHub issue #416
+(`Last(Range(1, 10^20))` stays unevaluated).
 
 A collection count that is not a safe integer is a `bigint` (`expr.count`, the
 `count` collection handler; see `smallCount()` in
@@ -127,15 +128,15 @@ these give their value.
 
 **Status:** waits for user (design); capability, L. GitHub #531. The type
 system's goal of refinement types: `docs/TYPE_SYSTEM_ROADMAP.md`, §1.
-**Witness:** corpus; GitHub #531: the combinatorics library declares its
-domains `permutation` and `integer_partition` as aliases of `list<integer>`,
-and each statistic's `evaluate` checks membership itself.
+**Witness:** corpus; GitHub #531: the combinatorics library declares its domains
+`permutation` and `integer_partition` as aliases of `list<integer>`, and each
+statistic's `evaluate` checks membership itself.
 
 A declaration could say which lists a type admits: `permutation` is a
 `list<integer>` that is a bijection of `1..n`, `integer_partition` one whose
-parts are positive and non-increasing. The check then lives in one place,
-the signature documents the domain, and two operators could differ by domain
-(today `MajorIndex` and `WordMajorIndex` are two names because two aliases of
+parts are positive and non-increasing. The check then lives in one place, the
+signature documents the domain, and two operators could differ by domain (today
+`MajorIndex` and `WordMajorIndex` are two names because two aliases of
 `list<integer>` cannot be told apart).
 
 The design must settle:
@@ -152,31 +153,31 @@ The design must settle:
 ### CE-1743. A signature may name a type that is declared later
 
 **Status:** waits for user (design); capability, M. GitHub #531. Forward
-references inside type declarations: `docs/TYPE_SYSTEM_ROADMAP.md`, §1
-(the `type name<T>` marker).
-**Witness:** corpus; GitHub #531: a combinatorics statistic accepts the
-group-theory `Permutation` only when `loadGroupTheory` ran before
-`loadCombinatorics`; loaded in the other order, the statistics do not accept
-it. `ce.declare('f', '(Permutation) -> integer')` before the type exists fails
-with `Unknown type "Permutation"`.
+references inside type declarations: `docs/TYPE_SYSTEM_ROADMAP.md`, §1 (the
+`type name<T>` marker). **Witness:** corpus; GitHub #531: a combinatorics
+statistic accepts the group-theory `Permutation` only when `loadGroupTheory` ran
+before `loadCombinatorics`; loaded in the other order, the statistics do not
+accept it. `ce.declare('f', '(Permutation) -> integer')` before the type exists
+fails with `Unknown type "Permutation"`.
 
 A type declaration can already refer to a type declared later (a forward
 reference, fulfilled when the type is declared). A signature of `ce.declare`
-cannot. With a forward reference there, a library can name the type of
-another optional library in any load order: until the type is declared, no
-value matches that part of the signature.
+cannot. With a forward reference there, a library can name the type of another
+optional library in any load order: until the type is declared, no value matches
+that part of the signature.
 
-The design must settle how a misspelled type name is still reported, since
-today the same error catches it: an explicit marker for a forward reference
-in a signature, or an error when the reference is still unfulfilled at a
-defined point (the first evaluation of the operator).
+The design must settle how a misspelled type name is still reported, since today
+the same error catches it: an explicit marker for a forward reference in a
+signature, or an error when the reference is still unfulfilled at a defined
+point (the first evaluation of the operator).
 
 ## Evaluation, canonical forms and scoping
 
 ### CE-111. Some lazy operators still run synchronously under `evaluateAsync`
 
-**Status:** ready; capability. Issue #392. Approved 2026-11-01.
-**Witness:** corpus; CE-111.4 approved 2026-10-31 (async iterator, spec ready); CE-111.1, .5 are design (keep); rest proposed under issue #392.
+**Status:** ready; capability. Issue #392. Approved 2026-11-01. **Witness:**
+corpus; CE-111.4 approved 2026-10-31 (async iterator, spec ready); CE-111.1, .5
+are design (keep); rest proposed under issue #392.
 
 An operator opts in to the asynchronous route with `evaluatesOperands` ("the
 handler demands and evaluates every held operand and reads nothing else of their
@@ -203,8 +204,8 @@ collection through `runAsync`) already yield and honour an abort signal.
   `ND`, `NDSolve`, `InterpolatingFunction`, `EvaluateAt`.
 - **CE-111.1** These operators stay synchronous, can have a long operand, and
   need a design: `Assign` (the right-hand side is evaluated in about ten
-  branches, interleaved with writes to the scope), `When` and
-  `Match` (conditional evaluation of a branch, with a large handler), `Timing` (a
+  branches, interleaved with writes to the scope), `When` and `Match`
+  (conditional evaluation of a branch, with a large handler), `Timing` (a
   wall-clock measure that would include the yields), `WithRandomSeed` and
   `HoldValues` (their frame, a seed or a value shield, cannot span an `await`),
   and `NumericApproximation` (the marker of a lazy `Map`, evaluated per
@@ -218,35 +219,34 @@ collection through `runAsync`) already yield and honour an abort signal.
   whether a predicate step met a collection whose elements are not known (an
   incomplete walk) only up to the first `await` of that step. The synchronous
   search (`searchIndex`, `library/collections.ts`) gives no answer when the
-  predicate meets such a collection, so that a missed element can never
-  become a "found" or "not found" answer. The asynchronous walk
-  (`indexWhereAsyncWalk`) reads the count `incompleteWalkCount()` before and
-  after each step, but that count is shared by the whole engine
-  (`boxed-expression/incomplete-walks.ts`), and another evaluation can change
-  it during an `await`. So when the part of a predicate step after its first
-  `await` walks a collection with unknown elements and still answers `True`,
-  `evaluateAsync()` can give an index where `evaluate()` gives no answer. No
-  input that shows the difference has been found: a predicate such as
-  `y ↦ AsyncOnly(y) > 0 ∧ Count(FlatMap([1, 2], x ↦ Join([x], v))) > 0`
-  (with `v` valueless) stays undecided on both routes, because the `Count`
-  stays unevaluated. A fix needs an incomplete-walk count that belongs to one
-  evaluation (its evaluation context), so that each `noteIncompleteWalk()`
-  call adds to the count of the evaluation that is current. The same count
-  would let the other asynchronous walks over lazy sources (CE-111.4) check
-  their reads across an `await`. Documented in the CHANGELOG entry of
-  `07b9f66fa`.
+  predicate meets such a collection, so that a missed element can never become a
+  "found" or "not found" answer. The asynchronous walk (`indexWhereAsyncWalk`)
+  reads the count `incompleteWalkCount()` before and after each step, but that
+  count is shared by the whole engine (`boxed-expression/incomplete-walks.ts`),
+  and another evaluation can change it during an `await`. So when the part of a
+  predicate step after its first `await` walks a collection with unknown
+  elements and still answers `True`, `evaluateAsync()` can give an index where
+  `evaluate()` gives no answer. No input that shows the difference has been
+  found: a predicate such as
+  `y ↦ AsyncOnly(y) > 0 ∧ Count(FlatMap([1, 2], x ↦ Join([x], v))) > 0` (with
+  `v` valueless) stays undecided on both routes, because the `Count` stays
+  unevaluated. A fix needs an incomplete-walk count that belongs to one
+  evaluation (its evaluation context), so that each `noteIncompleteWalk()` call
+  adds to the count of the evaluation that is current. The same count would let
+  the other asynchronous walks over lazy sources (CE-111.4) check their reads
+  across an `await`. Documented in the CHANGELOG entry of `07b9f66fa`.
 - **CE-111.4** Design needed. The elements of a lazy collection are computed
-  synchronously when they are read, also under `evaluateAsync()`. So an
-  operator that has only an `evaluateAsync` handler stays unevaluated in each
-  element. With `AsyncOnly` declared `(number) -> number` with only an
-  `evaluateAsync` handler that returns `x + 5`,
+  synchronously when they are read, also under `evaluateAsync()`. So an operator
+  that has only an `evaluateAsync` handler stays unevaluated in each element.
+  With `AsyncOnly` declared `(number) -> number` with only an `evaluateAsync`
+  handler that returns `x + 5`,
   `await Take(Apply(y ↦ AsyncOnly(y), Range(1, 100000)), 2).evaluateAsync()`
-  gives `[AsyncOnly(1), AsyncOnly(2)]`; it should give `[6, 7]`. `Apply` makes
-  a lazy `Map` for a large source or a source of unknown length
+  gives `[AsyncOnly(1), AsyncOnly(2)]`; it should give `[6, 7]`. `Apply` makes a
+  lazy `Map` for a large source or a source of unknown length
   (`applyLiteralMapped`, `library/core.ts`), and the reader computes each
   element with `evaluate()`. A small source is mapped eagerly and is awaited
-  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is `[6, 7]`). `Map` and `Filter` are
-  always lazy views, for a source of any size: `Map` has no `evaluate` or
+  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is `[6, 7]`). `Map` and `Filter` are always
+  lazy views, for a source of any size: `Map` has no `evaluate` or
   `evaluateAsync` handler, and its elements are computed when the view is read
   (`materialize()`, `boxed-function.ts`). So, at commit `80a1c36c2`,
   `await Map(AsyncOnly, [1, 2]).evaluateAsync()` and
@@ -254,33 +254,32 @@ collection through `runAsync`) already yield and honour an abort signal.
   `[AsyncOnly(1), AsyncOnly(2)]`, and `Map(y ↦ -AsyncOnly(y), [1, 2])` and
   `Map(Composition(Negate, AsyncOnly), [1, 2])` read
   `[-AsyncOnly(1), -AsyncOnly(2)]`; `Filter([1, 2, 3], y ↦ AsyncOnly(y) > 7)`
-  reads as the error "Filter predicate must return "True" or "False"". Until
-  the iterator exists, `evaluateAsync({ materialization: true })` gives the
-  awaited values for `Map` (`[6, 7]` and `[-6, -7]`), because
-  `materializeAsync()` awaits each element; it does not help `Filter`, which
-  then throws the same error, because the predicate is still applied
-  synchronously. A fix needs a way for a
-  lazy collection to give its elements asynchronously (an asynchronous
-  iterator next to `each()`, used by the asynchronous readers), or a rule
-  that a lazy collection whose element expression holds an operator with only
-  an asynchronous handler is made eager under `evaluateAsync()`. The first
-  keeps the size of a large source; the second is simple but computes every
-  element. User decision 2026-10-31: the first option, an asynchronous
-  iterator of the elements of a lazy collection, used by the asynchronous
-  readers. A one-page spec comes before the implementation: which lazy
-  operators get the iterator, which readers use it, and how an abort signal
-  and the evaluation context carry across each `await`.
-  Done 2026-11-07 (CE-767): `FlatMap` has an `evaluateAsync` twin of its
-  listing (spec section 4, item 3), which awaits the callback but still reads
-  the source and each inner result with `each()`; `Max`, `Min`, `Supremum`,
-  `Infimum` and `Sum` list a `FlatMap` operand with it. A view over the
-  `FlatMap` (`Max(Take(FlatMap(…), 3))`) and the other readers of spec
-  section 4, item 6 (`Mean`, `Median`, `Total`) still read it synchronously.
+  reads as the error "Filter predicate must return "True" or "False"". Until the
+  iterator exists, `evaluateAsync({ materialization: true })` gives the awaited
+  values for `Map` (`[6, 7]` and `[-6, -7]`), because `materializeAsync()`
+  awaits each element; it does not help `Filter`, which then throws the same
+  error, because the predicate is still applied synchronously. A fix needs a way
+  for a lazy collection to give its elements asynchronously (an asynchronous
+  iterator next to `each()`, used by the asynchronous readers), or a rule that a
+  lazy collection whose element expression holds an operator with only an
+  asynchronous handler is made eager under `evaluateAsync()`. The first keeps
+  the size of a large source; the second is simple but computes every element.
+  User decision 2026-10-31: the first option, an asynchronous iterator of the
+  elements of a lazy collection, used by the asynchronous readers. A one-page
+  spec comes before the implementation: which lazy operators get the iterator,
+  which readers use it, and how an abort signal and the evaluation context carry
+  across each `await`. Done 2026-11-07 (CE-767): `FlatMap` has an
+  `evaluateAsync` twin of its listing (spec section 4, item 3), which awaits the
+  callback but still reads the source and each inner result with `each()`;
+  `Max`, `Min`, `Supremum`, `Infimum` and `Sum` list a `FlatMap` operand with
+  it. A view over the `FlatMap` (`Max(Take(FlatMap(…), 3))`) and the other
+  readers of spec section 4, item 6 (`Mean`, `Median`, `Total`) still read it
+  synchronously.
 
 ### CE-123. A validation phase before canonicalization, so that a probe does not declare
 
-**Status:** waits for user (design); design.
-**Witness:** none; Validation phase idea, "do it when a third instance appears".
+**Status:** waits for user (design); design. **Witness:** none; Validation phase
+idea, "do it when a third instance appears".
 
 Two computations must VALIDATE an expression (decide what it is or what it would
 produce) without changing the environment. Each pays for this with a scratch
@@ -302,24 +301,26 @@ appears.
 
 ### CE-1258. A held argument is bound where it is boxed
 
-**Status:** waits for user (design); design, L. Starts after step 1 of `docs/plans/2026-11-11-bound-once-spec.md` is on main. The user asked for the design pass on 2026-11-12.
-**Witness:** plausible; eight of the eighteen defects that the reviews of step 1 found, and `issues/CE-1251.md`, are a held argument whose names are bound where it is evaluated.
+**Status:** waits for user (design); design, L. Starts after step 1 of
+`docs/plans/2026-11-11-bound-once-spec.md` is on main. The user asked for the
+design pass on 2026-11-12. **Witness:** plausible; eight of the eighteen defects
+that the reviews of step 1 found, and `issues/CE-1251.md`, are a held argument
+whose names are bound where it is evaluated.
 
-A held (not canonical) operand is the one place where a name is not bound
-in the scope the expression was boxed in: it is bound when the operand is
-evaluated, in whatever scope is current. The engine repairs this at each
-call of a hold function (it substitutes the held arguments into the body,
-replaces the caller's locals by their values, copies a scope for each
-call) and in the interpreter fallback of `compile()` (it collects the
-names of held operands apart).
+A held (not canonical) operand is the one place where a name is not bound in the
+scope the expression was boxed in: it is bound when the operand is evaluated, in
+whatever scope is current. The engine repairs this at each call of a hold
+function (it substitutes the held arguments into the body, replaces the caller's
+locals by their values, copies a scope for each call) and in the interpreter
+fallback of `compile()` (it collects the names of held operands apart).
 
-The design to examine: a held operand records the scope and the activation
-it was boxed in, as a function value does, and is evaluated there; a
-`bind` parameter supplies the value of one name for that evaluation. First
-step: a probe, with the lines it removes, the programs that change, and
-the programs of `issues/CE-1251.md` and of the list in
-`docs/plans/2026-11-11-bound-once-evidence/step1-state.md` (answers wrong
-before and after step 1).
+The design to examine: a held operand records the scope and the activation it
+was boxed in, as a function value does, and is evaluated there; a `bind`
+parameter supplies the value of one name for that evaluation. First step: a
+probe, with the lines it removes, the programs that change, and the programs of
+`issues/CE-1251.md` and of the list in
+`docs/plans/2026-11-11-bound-once-evidence/step1-state.md` (answers wrong before
+and after step 1).
 
 ## Symbolic computation
 
@@ -335,8 +336,8 @@ unevaluated, although its limit is `0`; `.N()` gives a value near `0` for it.
 
 ### CE-153. Contour integration does not certify the complex roots of most polynomials of degree 3 or more
 
-**Status:** ready; capability, small. PR #410. Approved 2026-11-01.
-**Witness:** corpus; Proposed capability with PR #410.
+**Status:** ready; capability, small. PR #410. Approved 2026-11-01. **Witness:**
+corpus; Proposed capability with PR #410.
 
 `ce.contourIntegrate()` needs every root of a denominator in exact form. For a
 polynomial of degree 3 or more that is not even, it uses `solve()`, which
@@ -372,9 +373,8 @@ changes sign, and each piece is integrated with `Abs(u)` replaced by `±u` and
 
 ### CE-168. Wester problems with no CE API: periodic decimals, real QE, matrix functions, tests
 
-**Status:** waits for user (design); capability. Decision 2026-07-05: do not alias
-Mathematica spellings.
-**Witness:** none; Wester problems with no CE API.
+**Status:** waits for user (design); capability. Decision 2026-07-05: do not
+alias Mathematica spellings. **Witness:** none; Wester problems with no CE API.
 
 These Wester problems have no CE API to express them, so they cannot be a
 `test.skip`. Each needs a naming and design decision first; then its acceptance
@@ -403,8 +403,9 @@ many heads that seem missing exist under CE names (`NthPrime`, `NPartition`,
 
 ### CE-170. Rubi: integration coverage by chapter
 
-**Status:** ready; capability. Rung history: `docs/rubi/RUBI.md` §5. Approved 2026-11-01.
-**Witness:** corpus; Proposed Rubi coverage work with benchmark scores, no wrong results.
+**Status:** ready; capability. Rung history: `docs/rubi/RUBI.md` §5. Approved
+2026-11-01. **Witness:** corpus; Proposed Rubi coverage work with benchmark
+scores, no wrong results.
 
 The shipped bundle (`src/compute-engine/rubi/rubi-rules-data.json`, through
 `@cortex-js/compute-engine/integration-rules`) holds Chapters 1 (Algebraic), 2
@@ -572,8 +573,8 @@ Open items, in priority order:
 
 **Status:** ready; capability, small. User decision 2026-10-04: until a method
 gives a value, the result stays `NaN`; do not let these integrals fall back to
-Monte Carlo. Issue #405. Approved 2026-11-01.
-**Witness:** corpus; Proposed capability with issue #405; result is an honest `NaN` by user decision.
+Monte Carlo. Issue #405. Approved 2026-11-01. **Witness:** corpus; Proposed
+capability with issue #405; result is an honest `NaN` by user decision.
 
 Both cases are in `integrateSemiInfiniteOscillatory`
 (`numerics/oscillatory-quadrature.ts`). Monte Carlo gave wrong values with small
@@ -615,25 +616,25 @@ A method that does not depend on the lobes is necessary. Possible methods:
 
 ### CE-715. The `bigint` compile mode: the shapes it declines
 
-**Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })`
-on the `javascript` target computes integer values as JavaScript `bigint`
-values (`docs/COMPILATION-MODEL.md`, "Compile modes"; spec
-`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`). The sub-items below
-are the shapes that the mode declines (the expression then runs on the
-interpreter), with a priority by how often each occurs (AGENTS.md: a decline
-is a defect). Example: with `n: integer`, `DigitSum(n)` declines with the
-diagnostic code `bigint-lane`. The reply to GitHub issue #503 is deferred by
-the user.
-**Witness:** corpus; Declines of the `bigint` mode, named for GitHub #503; check that #503 needs these shapes, else drop as declines.
+**Status:** ready; capability. The mode `compile(expr, { mode: 'bigint' })` on
+the `javascript` target computes integer values as JavaScript `bigint` values
+(`docs/COMPILATION-MODEL.md`, "Compile modes"; spec
+`docs/plans/2026-10-31-ce715-bigint-compile-mode.md`). The sub-items below are
+the shapes that the mode declines (the expression then runs on the interpreter),
+with a priority by how often each occurs (AGENTS.md: a decline is a defect).
+Example: with `n: integer`, `DigitSum(n)` declines with the diagnostic code
+`bigint-lane`. The reply to GitHub issue #503 is deferred by the user.
+**Witness:** corpus; Declines of the `bigint` mode, named for GitHub #503; check
+that #503 needs these shapes, else drop as declines.
 
-- **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound (`Sum(i, i = 1..n/2)`
-  is `3` at `n = 5`).
+- **CE-715.2** (medium) A rational `Range`/`Sum`/`Product` bound
+  (`Sum(i, i = 1..n/2)` is `3` at `n = 5`).
 - **CE-715.3** (high) Integer-typed heads not on the allow-list (`DigitSum`,
   `IntegerDigits`, `IndexOf`), boolean heads other than the comparisons and
   `IsPrime` (`IsEven`), and every string head, `String` included: the
   interpreter prints `String(n^2)` at `n = 10^15` as `"1e+30"`, and the
-  JavaScript `String` of a `bigint` prints all the digits, so `String` needs
-  a helper that prints as the interpreter does.
+  JavaScript `String` of a `bigint` prints all the digits, so `String` needs a
+  helper that prints as the interpreter does.
 - **CE-715.4** (low) A binding typed `integer | infinity` as a lane input.
 - **CE-715.5** (medium) A `bigint` output form for `broadcast()`,
   `broadcastAsync()` and the stored batch loaders.
@@ -647,10 +648,10 @@ the user.
 
 ### CE-218. Compiled absence checks need a representation of `Nothing` distinct from `Missing`
 
-**Status:** waits for user (design); capability. User decision 2026-10-20: keep refusing
-omission-capable sources. Plan:
-`docs/plans/2026-10-20-bare-tuple-record-any.md`.
-**Witness:** corpus; Lifts refusals of `Nothing`-capable sources (Tycho 332).
+**Status:** waits for user (design); capability. User decision 2026-10-20: keep
+refusing omission-capable sources. Plan:
+`docs/plans/2026-10-20-bare-tuple-record-any.md`. **Witness:** corpus; Lifts
+refusals of `Nothing`-capable sources (Tycho 332).
 
 `IsMissing(x)` and non-final operands of `Coalesce` refuse compilation when
 their types admit `nothing`, including `any`, `nothing`, and unions such as
@@ -695,8 +696,9 @@ type, and the capture of bindings (question Q11 of
 
 ### CE-233. Integer and string operators that the JavaScript target does not lower (Epsil corpus)
 
-**Status:** ready; capability. Approved 2026-11-01.
-**Witness:** corpus; Epsil corpus report counts declines from missing integer and string lowerings (`IntegerDigits` 7, ..); a corpus decline. State is proposed.
+**Status:** ready; capability. Approved 2026-11-01. **Witness:** corpus; Epsil
+corpus report counts declines from missing integer and string lowerings
+(`IntegerDigits` 7, ..); a corpus decline. State is proposed.
 
 In the Epsil corpus report (`npm run epsil:corpus-report`, run of 2026-10-06),
 46 of the 59 compile declines come from a missing lowering. Operators the corpus
@@ -715,8 +717,8 @@ over an infinite range; a `Sort` of characters; a mixed-string ordering; a
 
 ### CE-568. CSE: share a pure call across the statements of a `Block`
 
-**Status:** ready; performance. Approved 2026-11-01.
-**Witness:** corpus; Proposed performance idea names Tycho `hyvhlz4chj` but no measured cost.
+**Status:** ready; performance. Approved 2026-11-01. **Witness:** corpus;
+Proposed performance idea names Tycho `hyvhlz4chj` but no measured cost.
 
 Each statement value of a `Block` is its own CSE region, so a pure call repeated
 in two statements is computed once per statement. Tycho `hyvhlz4chj`: the body
@@ -727,8 +729,9 @@ the statements make to a symbol the call reads.
 
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
-**Status:** ready; capability. Approved 2026-11-01.
-**Witness:** corpus; Proposed optimization counts 24 corpus `Array.from` sites but no measured cost and no wrong value.
+**Status:** ready; capability. Approved 2026-11-01. **Witness:** corpus;
+Proposed optimization counts 24 corpus `Array.from` sites but no measured cost
+and no wrong value.
 
 The 24 `Array.from` range sites in the corpus are all places where the range is
 needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
@@ -746,8 +749,9 @@ or a `Filter` with a pure callback where it is, with no array
 array:
 
 - **CE-1806.4** A source whose length is a count known at run time
-  (`map(f, 1..n)`, `Repeat(x, n)`). A build refuses 2^32 elements and a loop
-  accepts 2^32 passes, so the passes take only a length known to be below 2^32.
+  (`map(f, 1..n)`, `Repeat(x, n)`, `Max(Tabulate(x ↦ x², n))` with
+  `n: integer`). A build refuses 2^32 elements and a loop accepts 2^32 passes,
+  so the passes take only a length known to be below 2^32.
   A guard operation that refuses the same count gives these views back; it
   adds an operation to `operators.ts` and `print-js.ts`.
 - **CE-1806.5** A read of one position of a `Map` of integers or booleans
@@ -762,8 +766,8 @@ array:
 
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
-**Status:** waits for user (design); capability.
-**Witness:** crafted; `g(1/w - 1/w)` with an `infinity` clause; the set declines today.
+**Status:** waits for user (design); capability. **Witness:** crafted;
+`g(1/w - 1/w)` with an `infinity` clause; the set declines today.
 
 Compiled float arithmetic does not keep a pole. The interpreter's `~oo - ~oo` is
 `~oo`; compiled, it is `Infinity - Infinity`, which is `NaN`. So a guard on a
@@ -779,8 +783,9 @@ compiler that never folds a pole into a plain JavaScript number.
 
 ### CE-269. A DAG-shared symbol value above the fold-size guard does not compile
 
-**Status:** ready; capability, low priority. Approved 2026-11-01.
-**Witness:** corpus; Tycho census: four terrain triangle rows of `art/nxlddeh5zv` decline at the fold-size guard; a corpus decline.
+**Status:** ready; capability, low priority. Approved 2026-11-01. **Witness:**
+corpus; Tycho census: four terrain triangle rows of `art/nxlddeh5zv` decline at
+the fold-size guard; a corpus decline.
 
 On the `javascript` and `interval-js` targets, a symbol's compound pure value is
 emitted once as a preamble local. The inline target (GLSL) still folds a value
@@ -810,8 +815,9 @@ The `fallback: true` route falls back to interpreted evaluation (pinned in
 ### CE-270. Compile declines in the code-generation census of CE 0.171.0
 
 **Status:** ready; capability. Plan:
-docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md (§9). Approved 2026-11-01.
-**Witness:** corpus; Census of 0.171.0 on the Tycho corpus lists declines per target (270.1 to 270.4); corpus declines.
+docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md (§9). Approved
+2026-11-01. **Witness:** corpus; Census of 0.171.0 on the Tycho corpus lists
+declines per target (270.1 to 270.4); corpus declines.
 
 Declines (distinct records) per target on the all-states Tycho corpus, CE
 0.171.0, measured 2026-10-27 (757 documents, 17,782 records): javascript 35 in
@@ -839,8 +845,9 @@ design limits, not candidates.
 
 ### CE-272. Element-wise `Which` over fixed-size collections declines on `glsl` and `interval-js`
 
-**Status:** ready; capability. Tycho item 206.
-**Witness:** corpus; 272.2: Tycho `5qn5kcrszu`, 6 javascript records decline (Tycho item 206); 272.1 (no witness) and 272.3 (zero demand) are drop.
+**Status:** ready; capability. Tycho item 206. **Witness:** corpus; 272.2: Tycho
+`5qn5kcrszu`, 6 javascript records decline (Tycho item 206); 272.1 (no witness)
+and 272.3 (zero demand) are drop.
 
 The evaluator broadcasts `Which` element-wise over collection-valued operands,
 and the `javascript` target lowers the same shape. The `glsl` and `interval-js`
@@ -876,8 +883,14 @@ that lifts the vec-width cap meets it.
 
 ### CE-280. Compile-target coverage: heads and shapes that decline on GLSL
 
-**Status:** ready; capability. Ledger: do one sub-item per session. Approved 2026-11-01. Revised 2026-11-08 for the GLSL fragment (`docs/plans/2026-11-08-glsl-fragment-spec.md`): the WGSL target is dropped, and CE-280.1 (`Integrate` on glsl) and CE-280.5 (dictionary and string-key forms of `At`) are removed, since the fragment puts quadrature, dictionaries and strings outside the target by contract. The sub-items that remain are inside the fragment.
-**Witness:** corpus; the `At` and `PointList` sub-items drop (no witness; 280.9 allowed).
+**Status:** ready; capability. Ledger: do one sub-item per session. Approved
+2026-11-01. Revised 2026-11-08 for the GLSL fragment
+(`docs/plans/2026-11-08-glsl-fragment-spec.md`): the WGSL target is dropped, and
+CE-280.1 (`Integrate` on glsl) and CE-280.5 (dictionary and string-key forms of
+`At`) are removed, since the fragment puts quadrature, dictionaries and strings
+outside the target by contract. The sub-items that remain are inside the
+fragment. **Witness:** corpus; the `At` and `PointList` sub-items drop (no
+witness; 280.9 allowed).
 
 A decline on a shader target demotes the row from GPU to CPU. Counts are from
 the same Tycho corpus as the JavaScript coverage ledger.
@@ -932,18 +945,18 @@ array-uniform loop codegen, and it needs witnesses first.
 **Witness:** plausible; the prelude function `tone` of the Tycho showcase entry
 `buddhabrot`.
 
-The GLSL and WGSL targets emit the NaN-safe helper `_gpu_max` (or `_gpu_min`)
-in place of the built-in `max` when they cannot prove that each operand is
-finite (`compileGPUElementExtremum` in
-`src/compute-engine/compilation/gpu-extrema.ts`). For
-`max(0, v)` in the body of a user function `t`, called as `t(z)` with `z`
-undeclared, the current source gives:
+The GLSL and WGSL targets emit the NaN-safe helper `_gpu_max` (or `_gpu_min`) in
+place of the built-in `max` when they cannot prove that each operand is finite
+(`compileGPUElementExtremum` in
+`src/compute-engine/compilation/gpu-extrema.ts`). For `max(0, v)` in the body of
+a user function `t`, called as `t(z)` with `z` undeclared, the current source
+gives:
 
-| How `t` is written                                   | Body emitted          |
-| ---------------------------------------------------- | --------------------- |
-| Function literal with `["Typed", "v", "'real'"]`     | `max(0.0, v)`         |
-| `t` declared `(real) -> real`                        | `_gpu_max(0.0, v)`    |
-| `t` declared `(real<-1..1>) -> real`                 | `max(0.0, v)`         |
+| How `t` is written                               | Body emitted       |
+| ------------------------------------------------ | ------------------ |
+| Function literal with `["Typed", "v", "'real'"]` | `max(0.0, v)`      |
+| `t` declared `(real) -> real`                    | `_gpu_max(0.0, v)` |
+| `t` declared `(real<-1..1>) -> real`             | `max(0.0, v)`      |
 
 A declared signature gives a parameter a finite fact only when its type has two
 finite bounds (`gpuDeclaredParameterRanges` in
@@ -956,44 +969,44 @@ quotient of it can then be NaN.
 NaN operand, and `max(0.0, +∞)` is defined. A NaN argument is outside the type
 `real`, so its compiled value is unspecified. The change: for the extremum
 helpers only, accept a parameter that the host declared `real` (or any subtype
-of `real`) in the signature, and keep the bounded-range rule for every other
-use of the finite proof. Make the Function-literal form follow the same rule,
-so that the two ways of writing `t` give the same code. Measure: the number of
+of `real`) in the signature, and keep the bounded-range rule for every other use
+of the finite proof. Make the Function-literal form follow the same rule, so
+that the two ways of writing `t` give the same code. Measure: the number of
 `_gpu_max` and `_gpu_min` helpers in the Tycho corpus before and after, and 0
 changed values.
 
 ### CE-1149. The compiler selects the lowering of a call from the definition of the call, not from its name
 
 **Status:** waits for user (approval); capability, M. Recorded by the user
-2026-11-08. Follows CE-1109 (`docs/plans/2026-11-07-ce1109-definition-identity.md`).
-**Witness:** plausible; the Epsil program
-`function Floor(x) { std::floor(x) + 1 }`, the use of `std::` that
-`src/epsil/docs/naming.md` describes.
+2026-11-08. Follows CE-1109
+(`docs/plans/2026-11-07-ce1109-definition-identity.md`). **Witness:** plausible;
+the Epsil program `function Floor(x) { std::floor(x) + 1 }`, the use of `std::`
+that `src/epsil/docs/naming.md` describes.
 
-Since CE-1109, a canonical call is bound to its definition: `std::floor(y)`
-is a `Floor` call bound to the library operator, also inside a user function
-named `Floor`. The interpreter reads that definition. The compiler does not:
-it selects the lowering of a call by the name of its head in the scope where
-the compilation runs (`lookupApplicable()` and `shadowsLibraryName()`). When
-that name reads another definition than the one of the node, the compilation
-declines and the result falls back to the interpreter
-(`compileReadsOtherDefinition()` and `shadowedLibraryLoweringError()` in
+Since CE-1109, a canonical call is bound to its definition: `std::floor(y)` is a
+`Floor` call bound to the library operator, also inside a user function named
+`Floor`. The interpreter reads that definition. The compiler does not: it
+selects the lowering of a call by the name of its head in the scope where the
+compilation runs (`lookupApplicable()` and `shadowsLibraryName()`). When that
+name reads another definition than the one of the node, the compilation declines
+and the result falls back to the interpreter (`compileReadsOtherDefinition()`
+and `shadowedLibraryLoweringError()` in
 `src/compute-engine/compilation/compile-definitions.ts`). The values are
 correct; the declines are the cost. With the current source:
 
-| Program                                                                                | Compiles | Value at `y = 2.5` |
-| -------------------------------------------------------------------------------------- | -------- | ------------------ |
-| A user `Floor` is `x ↦ std::floor(x) + 1`; compile `Floor(y)` in its scope             | no       | 3 (interpreter)    |
-| The same scope; compile `std::floor(y)`                                                | no       | 2 (interpreter)    |
-| A library `Sqrt(y)` boxed first, compiled in a scope that declares a user `Sqrt` with a `compile` handler | no | 2 at `y = 4` (interpreter) |
-| A call of that user `Sqrt`, compiled after its scope is popped                         | no       | 104 at `y = 4` (interpreter) |
+| Program                                                                                                   | Compiles | Value at `y = 2.5`           |
+| --------------------------------------------------------------------------------------------------------- | -------- | ---------------------------- |
+| A user `Floor` is `x ↦ std::floor(x) + 1`; compile `Floor(y)` in its scope                                | no       | 3 (interpreter)              |
+| The same scope; compile `std::floor(y)`                                                                   | no       | 2 (interpreter)              |
+| A library `Sqrt(y)` boxed first, compiled in a scope that declares a user `Sqrt` with a `compile` handler | no       | 2 at `y = 4` (interpreter)   |
+| A call of that user `Sqrt`, compiled after its scope is popped                                            | no       | 104 at `y = 4` (interpreter) |
 
 The change: the compiler reads `node.operatorDefinition` (or the value
 definition of a user function) to select the lowering. A call bound to the
 library operator gets the library lowering of the target (`target.functions`,
-`target.operators`, the named lowerings such as `If` and `Sum`). A call bound
-to a user operator definition gets its `compile` handler, or declines when it
-has none. A call bound to a user function compiles that function. Then
+`target.operators`, the named lowerings such as `If` and `Sum`). A call bound to
+a user operator definition gets its `compile` handler, or declines when it has
+none. A call bound to a user function compiles that function. Then
 `compileReadsOtherDefinition()` and the by-name branches of
 `shadowedLibraryLoweringError()` are removed.
 
@@ -1002,9 +1015,9 @@ The current source has 16 calls of `lookupApplicable()` and
 (`compile-expr-handlers.ts`, `compiler-core.ts`, `compile-operators.ts`,
 `compile-user-functions.ts`, `compile-protocol-dispatch.ts`,
 `builtin-callback.ts`, `compile-complexness.ts`, `compile-real-analysis.ts`,
-`compile-definitions.ts`, `javascript-target.ts`). Not each one selects a lowering: some read
-a free variable or a parameter. The first step is a census of these calls
-that sorts them into the two groups.
+`compile-definitions.ts`, `javascript-target.ts`). Not each one selects a
+lowering: some read a free variable or a parameter. The first step is a census
+of these calls that sorts them into the two groups.
 
 Measure: the four programs of the table compile on the JavaScript target with
 the interpreter's values; the number of lines removed from the compilation
@@ -1015,10 +1028,11 @@ was written), and 0 changed values.
 
 ### CE-297. The lenient grammar makes reading choices that a host cannot detect
 
-**Status:** ready; capability. User decision 2026-10-01: a parenthesized
-name is never a function head, and lenient `+-` is `±`. Plan:
+**Status:** ready; capability. User decision 2026-10-01: a parenthesized name is
+never a function head, and lenient `+-` is `±`. Plan:
 `docs/plans/2026-10-01-lenient-ambiguity-codes.md`. Approved 2026-11-01.
-**Witness:** corpus; Tycho request (repro file, Tycho reply) that "CE accepted"; the header makes a Tycho request `ready`, the label says `proposed`.
+**Witness:** corpus; Tycho request (repro file, Tycho reply) that "CE accepted";
+the header makes a Tycho request `ready`, the label says `proposed`.
 
 Goal: a host that converts pasted plain text, such as Tycho's
 `plainTextToLatex`, should not need its own parser; the lenient grammar
@@ -1059,7 +1073,8 @@ grammar on CE main reads about 210 with no signal. The full reply is in Tycho's
 
 **Status:** ready; task. User decision 2026-08-18. Plan:
 `docs/plans/2026-08-18-checkpoint-restore-design.md`. Approved 2026-11-01.
-**Witness:** corpus; User decision 2026-08-18 approves the work and the text says the stage can start; label `proposed` conflicts.
+**Witness:** corpus; User decision 2026-08-18 approves the work and the text
+says the stage can start; label `proposed` conflicts.
 
 User decision 2026-08-18 (Tycho agrees): a cross-program redefinition of types,
 protocols, conformances or same-signature clauses becomes an ERROR on the Epsil
@@ -1074,28 +1089,32 @@ removed (decision D9 of `docs/plans/2026-11-11-bound-once-spec.md`).
   changes; §5 of the plan). Tycho's requirement was met from 2026-10-16 by a
   notebook that restored the checkpoint before the first changed cell and
   replayed the cells from there (Tycho `docs/COMPUTE_ENGINE.md`, section
-  "Checkpoint / Restore"). The checkpoint API is removed since 2026-11-12:
-  how Tycho's notebook replays an edited cell is to be checked before this
-  stage starts. Until it lands, both mechanisms exist together.
+  "Checkpoint / Restore"). The checkpoint API is removed since 2026-11-12: how
+  Tycho's notebook replays an edited cell is to be checked before this stage
+  starts. Until it lands, both mechanisms exist together.
 
 ### CE-1255. One route for an Epsil program, the sites of its names, and a program runner
 
-**Status:** ready (approved 2026-11-12); capability, L. CE-1255.1 is on main; the plan of CE-1255.2 is approved (2026-11-25), and CE-1628 is delivered with it. Spec: `docs/plans/2026-11-12-program-operator-spec.md`.
-**Witness:** corpus; Tycho's prelude runner (`~/dev/tycho/src/plot-core/prelude-runner.ts`) holds a copy of the engine's scoping rules and compiles a program statement by statement by hand.
+**Status:** ready (approved 2026-11-12); capability, L. CE-1255.1 is on main;
+the plan of CE-1255.2 is approved (2026-11-25), and CE-1628 is delivered with
+it. Spec: `docs/plans/2026-11-12-program-operator-spec.md`. **Witness:** corpus;
+Tycho's prelude runner (`~/dev/tycho/src/plot-core/prelude-runner.ts`) holds a
+copy of the engine's scoping rules and compiles a program statement by statement
+by hand.
 
-Tycho does not hold a copy of the engine's scoping rules: the engine gives
-what the prelude runner derives by hand. Two pieces remain, in this order;
-the second is the one delivered to Tycho.
+Tycho does not hold a copy of the engine's scoping rules: the engine gives what
+the prelude runner derives by hand. Two pieces remain, in this order; the second
+is the one delivered to Tycho.
 
-- **CE-1255.2** The sites query: for a parsed program, each symbol site with
-  its role, its source range and the binding it resolves to, and for each
-  statement the top-level names it reads and the names it defines or
-  assigns. Spec [Program source sites](docs/plans/2026-11-19-program-sites.md).
-- **CE-1255.3** The program runner (a separate entry above `compile()`, with
-  an asynchronous form): each value statement is a compile unit, a statement
-  that declines runs in the interpreter and the run continues compiled,
-  every top-level value is returned with its static type. A spec of its own
-  first; the opinion of the compiler session is in the spec above.
+- **CE-1255.2** The sites query: for a parsed program, each symbol site with its
+  role, its source range and the binding it resolves to, and for each statement
+  the top-level names it reads and the names it defines or assigns. Spec
+  [Program source sites](docs/plans/2026-11-19-program-sites.md).
+- **CE-1255.3** The program runner (a separate entry above `compile()`, with an
+  asynchronous form): each value statement is a compile unit, a statement that
+  declines runs in the interpreter and the run continues compiled, every
+  top-level value is returned with its static type. A spec of its own first; the
+  opinion of the compiler session is in the spec above.
 
 ### CE-1664. Epsil editor completion: fewer names where few fit, better matching, richer insertion
 
@@ -1103,25 +1122,24 @@ the second is the one delivered to Tycho.
 order; CE-1664.11 last. Builds on CE-1661 (the `fit` field, the types of
 unannotated names, functions judged by signature) and CE-1663 (members after
 `.`). File: `src/epsil/completion.ts`; tests in
-`test/compute-engine/epsil-completion.test.ts`.
-**Witness:** plausible; `epsilCompletions` lists all of about 600 names at
-each position below, where the context allows a few.
+`test/compute-engine/epsil-completion.test.ts`. **Witness:** plausible;
+`epsilCompletions` lists all of about 600 names at each position below, where
+the context allows a few.
 
-`epsilCompletions` knows an expected type at a call argument and at a
-declared value; at the positions below it has none, and the menu lists every
-name of the program and the library.
+`epsilCompletions` knows an expected type at a call argument and at a declared
+value; at the positions below it has none, and the menu lists every name of the
+program and the library.
 
-- **CE-1664.8** A function found by what it does: match the library
-  description and keywords (`adjoint`, `rref`, `norm`), ranked below the name
-  matches.
-- **CE-1664.9** Order among the names that fit: common functions first
-  (`sqrt`, `sin`, `plot`, `map`), from counts of the names in Tycho's
-  documents; alphabetical today.
-- **CE-1664.10** Inferred types shown inline (`const another = 5  : integer`),
-  a new query for the host, from the same inference as CE-1661.
-- **CE-1664.11** LaTeX commands inside a `$…$` island (`$\fr` gives
-  `\frac`), from MathLive's command list. Lowest priority: the interactive
-  math editor covers LaTeX input.
+- **CE-1664.8** A function found by what it does: match the library description
+  and keywords (`adjoint`, `rref`, `norm`), ranked below the name matches.
+- **CE-1664.9** Order among the names that fit: common functions first (`sqrt`,
+  `sin`, `plot`, `map`), from counts of the names in Tycho's documents;
+  alphabetical today.
+- **CE-1664.10** Inferred types shown inline (`const another = 5  : integer`), a
+  new query for the host, from the same inference as CE-1661.
+- **CE-1664.11** LaTeX commands inside a `$…$` island (`$\fr` gives `\frac`),
+  from MathLive's command list. Lowest priority: the interactive math editor
+  covers LaTeX input.
 
 ## Performance
 
@@ -1137,8 +1155,9 @@ entry. Its asks (a time limit and event-loop turns on the asynchronous routes,
 `inline: false`, `willUsePool()`, `shippable`, and the `route` of a batch or a
 fit) are done; CE-430 is what remains of them. Plan:
 `docs/plans/2026-10-20-worker-kernel-pool.md`,
-`docs/plans/2026-10-20-findfit-global-grid.md`.
-**Witness:** corpus; Ready with user decision 2026-10-20 in status; Tycho row 441; only CE-314.1 (c) remains open.
+`docs/plans/2026-10-20-findfit-global-grid.md`. **Witness:** corpus; Ready with
+user decision 2026-10-20 in status; Tycho row 441; only CE-314.1 (c) remains
+open.
 
 A compiled function evaluated over an array of inputs, and the starts of a
 `FindFit` global search, are pure-number work that worker threads run in
@@ -1210,8 +1229,8 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 
 ### CE-350. Bignum kernels: remaining speed-ups against mpmath
 
-**Status:** ready; performance, low priority. Approved 2026-11-01.
-**Witness:** corpus; mpmath benchmark.
+**Status:** ready; performance, low priority. Approved 2026-11-01. **Witness:**
+corpus; mpmath benchmark.
 
 At 1000 digits, `ln`, `exp`, `kˣ`, `sqrt` and `Γ` are as fast as mpmath or
 within a factor of 2. The general branch of `gammalnCore` (and so `Γ`, `ln Γ`
@@ -1221,14 +1240,13 @@ at 200 and 5 times at 50, where the engine's own cost of a call dominates.
 - **CE-350.1** r-step / rectangular splitting in `fpexp`. The kernel gets about
   3× faster, but it is less than 10 % of `exp(.N())` time, so users see little
   change. Lowest priority.
-- **CE-350.2** Base-2 kernels for the other special functions. `zeta` is 1.4
-  to 6 times slower than mpmath (6 times at 50 digits, 1.4 times at 1000), and
+- **CE-350.2** Base-2 kernels for the other special functions. `zeta` is 1.4 to
+  6 times slower than mpmath (6 times at 50 digits, 1.4 times at 1000), and
   `digamma` 2 to 5 times at 50 and 200 digits (it is faster than mpmath at
   1000). `digamma`/`trigamma`/`polygamma` and `zeta` still run on base-10
   `BigDecimal` and pay for the rounding of each step. The method of
   `gammalnCore` applies: the shift product as a binary mantissa and exponent,
-  the series powers as binary floats (they fall below an absolute grid while
-  the Bernoulli coefficients grow past 10^p), the coefficients converted once
-  per grid width. The remaining factor of about 1.5 is V8 `BigInt` against
-  GMP and needs a different bigint backend (for example WASM GMP).
-
+  the series powers as binary floats (they fall below an absolute grid while the
+  Bernoulli coefficients grow past 10^p), the coefficients converted once per
+  grid width. The remaining factor of about 1.5 is V8 `BigInt` against GMP and
+  needs a different bigint backend (for example WASM GMP).
