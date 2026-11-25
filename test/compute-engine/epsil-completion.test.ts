@@ -2059,10 +2059,15 @@ describe('EPSIL COMPLETION: EXPECTED TYPES OF COMMON POSITIONS', () => {
         VARS + 'let t = 0\nfor c in s { t = t + 1 }\nt'
       ).value.json
     ).toBe(1);
-    // A comprehension over a number or a boolean is an error. (A `for` loop
-    // over one runs no iteration and reports nothing: CE-1682.)
-    expect(run('[i for i in n]')).toBe('Error');
-    expect(run('[i for i in b]')).toBe('Error');
+    // A loop or a comprehension over a number or a boolean is reported by
+    // the static check (CE-1682).
+    for (const source of [
+      '[i for i in n]',
+      '[i for i in b]',
+      'for i in n { 1 }',
+      'for i in b { 1 }',
+    ])
+      expect(codes(source)).toEqual(['incompatible-type']);
   });
 
   test('the loop variable is not offered in its own collection', () => {

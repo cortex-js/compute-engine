@@ -211,9 +211,12 @@ describe('AN ERROR VALUE OF THE SOURCE IS THE VALUE OF THE NODE', () => {
       ['Comprehension', 'x', ['Element', 'x', ['h', 1]]],
       `["Error",${ERROR},["ErrorTrace",["ErrorFrame","'Comprehension'",2]]]`,
     ],
+    // The declared result of `f`, `integer`, cannot be a collection: the
+    // domain is refused when it is boxed (CE-1682), as the source of
+    // `Dedup(f(1))` is, and the call is not evaluated.
     [
       ['Comprehension', 'x', ['Element', 'x', ['f', 1]]],
-      `["Error",["ErrorCode","'incompatible-type'","'integer'","'string'"],"'hello'",["ErrorTrace",["ErrorFrame","'Comprehension'",2]]]`,
+      `["Comprehension","x",["Element","x",["Error",["ErrorCode","'incompatible-type'","'collection'","'integer'"],["f",1]]]]`,
     ],
   ])('%j', async (input, expected) => {
     const ce = errorEngine();

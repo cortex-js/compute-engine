@@ -579,7 +579,7 @@ describe('A USE OF A LOCAL BEFORE ITS DECLARATION IS A STATIC ERROR', () => {
     // the start of the program.
     ['let u = h(1)\nfunction h(x) { x }\nu', 1],
     ['let s = 0\nfor i in tt { s = i }', 'Nothing'],
-    ['let s = 0\nfor i in 5 { s = i }', 'Nothing'],
+    ['let s = 0\nfor i in 1..5 { s = i }', 'Nothing'],
   ])('valid: %j', (source, value) => {
     const r = executeEpsil(new ComputeEngine(), source);
     expect(r.diagnostics).toEqual([]);

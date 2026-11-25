@@ -98,6 +98,15 @@
 
 ### Resolved Issues
 
+- **A `for` loop over a number, a boolean or a function is an error**
+  (CE-1682). With `let n = 5`, `for i in n { t = t + i }` ran no iteration
+  and reported nothing, so a program that meant `for i in 1..n` gave a wrong
+  result with no error. `checkEpsil()` now reports `incompatible-type`
+  ("expected `collection`, got `number`") for the domain of a loop or a
+  comprehension whose type cannot be a collection. At run time, a loop whose
+  domain has such a value (a variable of type `any` that holds `5`) stops on
+  the `incompatible-type` error, the error that a comprehension gives.
+
 - **The Jacobian matrix of a list that a function returns is correct inside
   a function with a parameter of the name of that list** (CE-1639). With
   `g := [uv, u + v]`, `F := t ↦ g` and `h := g ↦ JacobianMatrix(F(1), [u, v])`,

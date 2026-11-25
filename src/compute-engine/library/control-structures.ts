@@ -15,6 +15,7 @@ import {
 } from '../boxed-expression/binders.js';
 import {
   canonicalValueOperand,
+  isAbsentScalarSymbol,
   isUntypedAtCollectionSlot,
 } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -154,6 +155,7 @@ import {
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
+import { admissionOf } from '../boxed-expression/value-membership.js';
 import {
   runOperandSteps,
   runOperandStepsAsync,
@@ -6176,11 +6178,13 @@ function canonicalLoopLike(
         : guard.canonical;
     if (patternError !== undefined)
       return ce._fn('Element', [patternError, collCanonical]);
+    const domain =
+      nonCollectionDomainError(ce, collCanonical, 'static') ?? collCanonical;
     return ce._fn(
       'Element',
       guardCanonical === undefined
-        ? [idxCanonical, collCanonical]
-        : [idxCanonical, collCanonical, guardCanonical]
+        ? [idxCanonical, domain]
+        : [idxCanonical, domain, guardCanonical]
     );
   });
   // The body of a `Loop` is a branch: a `Declare` there is a static error.
@@ -6204,6 +6208,48 @@ function canonicalLoopLike(
   return ce._fn(head, [canonicalBody, ...canonicalIterators], {
     scope: loopScope,
   });
+}
+
+/**
+ * The `incompatible-type` error of the domain `domain` of an `Element` clause
+ * of a loop or a comprehension that cannot be a collection (a number, a
+ * boolean, a function), or `undefined`. Without it, `for i in n { … }` with
+ * `n = 5` would run no iteration and report nothing. An operand that is
+ * already an error, whose type is not known, or that is absent (`Missing`,
+ * which a collection operator propagates, `validate.ts`) is not refused.
+ *
+ * - `'static'`, for the canonical form: only a type that is not derived from
+ *   a value is read, as the refusal of a collection operand does
+ *   (`validate.ts`). A symbol can be reassigned to a collection before the
+ *   loop is evaluated, so a domain that holds a symbol whose type was
+ *   inferred (from its value or from an earlier use: `y` or `-y` with `y`
+ *   assigned `5`) is not refused here.
+ * - `'value'`, for the evaluated domain of a loop (`runNested`): the value is
+ *   read.
+ */
+function nonCollectionDomainError(
+  ce: ComputeEngine,
+  domain: Expression,
+  mode: 'static' | 'value'
+): Expression | undefined {
+  if (!domain.isValid || domain.isCollection) return undefined;
+  if (isAbsentScalarSymbol(domain)) return undefined;
+  const type = domain.type.type;
+  if (mode === 'static') {
+    if (type === 'unknown' || type === 'any' || type === 'value')
+      return undefined;
+    if (holdsInferredSymbol(domain)) return undefined;
+    if (!provablyDisjoint(type, COLLECTION_SHAPE_TYPE)) return undefined;
+  } else if (admissionOf(domain, COLLECTION_SHAPE_TYPE) !== 'refute')
+    return undefined;
+  return ce.typeError('collection', type, domain);
+}
+
+/** True when `expr` is, or has as an operand at any depth, a symbol whose
+ * type was inferred (`hasInferredType()`). */
+function holdsInferredSymbol(expr: Expression): boolean {
+  if (isSymbol(expr)) return hasInferredType(expr);
+  return isFunction(expr) && expr.ops.some(holdsInferredSymbol);
 }
 
 /**
@@ -6241,6 +6287,10 @@ interface LoopState {
    * `Comprehension` records a failed walk with it (`noteFailedWalk()`), so
    * that the error is the value of the whole comprehension. */
   domainError?: Expression;
+  /** True for the walk of a `Loop` or a `ParallelLoop` (`runLoop`): a clause
+   * domain whose value cannot be a collection is then the domain error, the
+   * `incompatible-type` error (`nonCollectionDomainError()`). */
+  loop?: boolean;
   /** For a `ParallelLoop` or a `ParallelComprehension`: the elements of the
    * first clause are passes, each with its own random frame
    * (`parallelPassValues()`). */
@@ -6430,6 +6480,7 @@ function* runLoop(
   const state: LoopState = {
     stopped: false,
     count: 0,
+    loop: true,
     parallel,
     awaitBody,
   };
@@ -7751,6 +7802,20 @@ function* runNested(
       state.domainError = embedded;
       return;
     }
+  }
+  // A loop over a value that cannot be a collection (`for i in n { … }` with
+  // `n = 5`, a boolean, a function) stops on the `incompatible-type` error,
+  // the error that a comprehension over a symbol of that value gives
+  // (`settleHeldEagerSources()`, `boxed-function.ts`). Without it, the loop
+  // ran no iteration and reported nothing.
+  const refused =
+    state.loop === true && collection !== undefined
+      ? nonCollectionDomainError(ce, collection, 'value')
+      : undefined;
+  if (refused !== undefined) {
+    state.stopped = true;
+    state.domainError = refused;
+    return;
   }
   if (!collection?.isCollection) {
     // Not a collection — nothing to iterate.

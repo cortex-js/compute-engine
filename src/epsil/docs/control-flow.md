@@ -1073,6 +1073,13 @@ is `while true` with a `let` in the body, and it is reported as a
 for x in xs { x }
 ```
 
+The domain `xs` must be a collection: a list, a range, a string, a set. A
+domain that cannot be one is an `incompatible-type` error, as for a
+comprehension. With `let n = 5`, `for i in n { … }` is reported by the static
+check ("expected `collection`, got `number`"): write `for i in 1..n`. A
+domain whose type does not show it (a variable of type `any` that holds `5`)
+ends the loop with the same error at run time, reported as a runtime error.
+
 The loop variable is a binding of the loop. An assignment to it in the body
 changes it for the rest of that iteration only: the next iteration binds it
 to the next element. Such an assignment does not write a variable outside
