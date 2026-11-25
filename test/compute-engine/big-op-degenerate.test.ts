@@ -215,6 +215,37 @@ describe('degenerate big operator: index UNUSED folds at canonicalization', () =
     expect(expr.toString()).toBe('sum_(i=5)^(5)_(j=i)^(10)(j)');
   });
 
+  test('a clause of one value stays when an Element clause reads its index (CE-1801)', () => {
+    const ce = new ComputeEngine();
+    // The collection of the `Element` clause reads `i`.
+    const limits = ['Limits', 'i', 2, 2];
+    const element = ['Element', 'j', ['Range', 1, 'i']];
+    const expr = ce.expr(['Sum', 'j', limits, element]);
+    expect(expr.json).toEqual(['Sum', 'j', limits, element]);
+    expect(expr.evaluate().json).toEqual(3);
+    // The clauses in the other order.
+    const swapped = ce.expr(['Sum', 'j', element, limits]);
+    expect(swapped.json).toEqual(['Sum', 'j', element, limits]);
+    expect(swapped.evaluate().json).toEqual(3);
+    expect(
+      ce.expr(['Product', 'j', ['Limits', 'i', 3, 3], element]).evaluate().json
+    ).toEqual(6);
+    // The condition of the `Element` clause reads `i`.
+    const filtered = ce.expr([
+      'Sum',
+      'j',
+      limits,
+      ['Element', 'j', ['Range', 1, 5], ['Less', 'j', 'i']],
+    ]);
+    expect(filtered.operator).toBe('Sum');
+    expect(filtered.nops).toBe(3);
+    expect(filtered.evaluate().json).toEqual(1);
+    // An `Element` clause that does not read `i`: the clause is dropped.
+    expect(
+      ce.expr(['Sum', 'j', limits, ['Element', 'j', ['Range', 1, 3]]]).json
+    ).toEqual(['Sum', 'j', ['Element', 'j', ['Range', 1, 3]]]);
+  });
+
   test('impure bounds are not a point (canonicalization)', () => {
     const ce = new ComputeEngine();
     // Two independent draws, not one endpoint repeated.

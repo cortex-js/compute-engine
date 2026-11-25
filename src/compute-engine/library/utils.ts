@@ -4930,9 +4930,11 @@ export function canonicalWithEscapingReturn(
  * referenced nowhere? Such a set contributes nothing: it can be dropped from
  * the big operator (see `canonicalBigop`).
  *
- * "Nowhere" means neither in `body` NOR in the bounds of any SIBLING indexing
- * set: `Σ_{i=5}^{5} Σ_{j=i}^{10} j` reads `i` in the second set's lower bound,
- * so dropping the first would strand that `i` free. The sibling test is
+ * "Nowhere" means neither in `body` NOR in an operand, other than the index,
+ * of any SIBLING indexing set: `Σ_{i=5}^{5} Σ_{j=i}^{10} j` reads `i` in the
+ * second set's lower bound, and `Sum(j, Limits(i, 2, 2), Element(j, Range(1,
+ * i)))` reads it in the collection of the second set, so dropping the first
+ * would strand that `i` free. The sibling test is
  * deliberately conservative — every other set is checked, not just the ones
  * that survive — since a set retained only by this check can itself keep
  * another alive.
@@ -4959,9 +4961,16 @@ function isVacuousIndexingSet(
   if (index === 'Nothing') return true;
   if (body.has(index)) return false;
   for (const other of siblings) {
-    if (other === set || !isFunction(other, 'Limits')) continue;
-    // Skip the sibling's own index operand: only its BOUNDS can reference us.
-    if (other.ops.slice(1).some((bound) => bound.has(index))) return false;
+    if (other === set) continue;
+    // A sibling that is not a function has no index operand to skip.
+    if (!isFunction(other)) {
+      if (other.has(index)) return false;
+      continue;
+    }
+    // Skip the sibling's own index operand: every other operand can
+    // reference us, the bounds of a `Limits` and the collection or the
+    // condition of an `Element` (`Element(j, Range(1, i))`).
+    if (other.ops.slice(1).some((x) => x.has(index))) return false;
   }
   return true;
 }

@@ -134,6 +134,15 @@
   now gives none. The value, `1`, is not changed. A call of a function that
   nothing defines (`let f = () => redraw()` alone) still gives the warning.
 
+- **A `Sum` or `Product` keeps a clause of one value that an `Element` clause
+  reads** (CE-1801). The canonical form drops a clause such as
+  `Limits(i, 2, 2)` when nothing reads its index. The test read the bounds of
+  the other `Limits` clauses, but not the collection or the condition of an
+  `Element` clause. So
+  `["Sum", "j", ["Limits", "i", 2, 2], ["Element", "j", ["Range", 1, "i"]]]`
+  lost its first clause and stayed unevaluated, with `i` free. It now keeps
+  both clauses and gives `3`, in either order of the clauses.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements
