@@ -75,6 +75,14 @@
 
 ### Resolved Issues
 
+- **The completion at the collection of an Epsil `for` no longer offers the
+  loop variable** (CE-1687). In `let xs = [1, 2]` followed by `for i in ▮ {}`,
+  `epsilCompletions()` offered `xs` and `i`, but `i` is not defined in its
+  own collection. It now offers `xs` only, and with `let i = [1]` it offers
+  the outer `i`, which the collection reads. The same holds for the
+  collection of a comprehension clause (`[i for i in ▮]`), which also does not
+  see the later clauses.
+
 - **A recursive Epsil function written with `match` gives its value**
   (CE-1731). `function fac(n) { match n { == 0 => n + 1; _ => n * fac(n - 1) } }`
   gave an `incompatible-type` error for `fac(3)`. It now gives `6`. A call of a

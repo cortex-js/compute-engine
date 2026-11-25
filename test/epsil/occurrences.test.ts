@@ -137,6 +137,28 @@ describe('EPSIL OCCURRENCES — loops and match arms', () => {
     expect(groupAt(groups, src.length - 1)).toBe(outer);
   });
 
+  test('a for binding is not visible in its own collection', () => {
+    const loop = 'for i in xs { i }';
+    const loopGroups = groupsOf(loop);
+    expect(isNameVisibleAt(loopGroups, 'i', at(loop, 'xs'))).toBe(false);
+    expect(isNameVisibleAt(loopGroups, 'i', at(loop, 'i }'))).toBe(true);
+
+    const comp = '[x + y for x in xs, y in ys if y > x]';
+    const compGroups = groupsOf(comp);
+    const visible = (name: string, needle: string) =>
+      isNameVisibleAt(compGroups, name, at(comp, needle));
+    // The body sees every clause.
+    expect(visible('x', 'x + y')).toBe(true);
+    expect(visible('y', 'x + y')).toBe(true);
+    // A collection does not see its own clause or a later one.
+    expect(visible('x', 'xs')).toBe(false);
+    expect(visible('y', 'xs')).toBe(false);
+    expect(visible('x', 'ys')).toBe(true);
+    expect(visible('y', 'ys')).toBe(false);
+    // The guard sees its own clause.
+    expect(visible('y', 'y > x')).toBe(true);
+  });
+
   test('match-arm patterns bind their variables in the arm only', () => {
     const src = 'match v { (0, y) => y\n (x, _) => x }';
     const groups = groupsOf(src);

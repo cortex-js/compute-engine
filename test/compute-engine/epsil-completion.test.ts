@@ -2065,6 +2065,29 @@ describe('EPSIL COMPLETION: EXPECTED TYPES OF COMMON POSITIONS', () => {
     expect(run('[i for i in b]')).toBe('Error');
   });
 
+  test('the loop variable is not offered in its own collection', () => {
+    const vars = (source: string) =>
+      labels(complete('let xs = [1, 2]\n' + source), 'variable');
+    expect(vars('for i in ▮ {}')).toEqual(['xs']);
+    expect(vars('parallel for i in ▮ {}')).toEqual(['xs']);
+    expect(vars('for i in [1, ▮] {}')).toEqual(['xs']);
+    expect(vars('[i for i in ▮]')).toEqual(['xs']);
+    expect(vars('[x for x in ▮, y in xs]')).toEqual(['xs']);
+    // The variable is offered in the body, in the guard and in a later
+    // clause.
+    expect(vars('for i in xs { ▮ }')).toContain('i');
+    expect(vars('[▮ for i in xs]')).toContain('i');
+    expect(vars('[i for i in xs if ▮]')).toContain('i');
+    expect(vars('[x for x in xs, y in ▮]')).toEqual(['xs', 'x']);
+    // The collection reads an outer binding of the same name.
+    expect(labels(complete('let i = [1]\nfor i in ▮ {}'), 'variable')).toEqual([
+      'i',
+    ]);
+    expect(item(complete('let i = [1]\nfor i in ▮ {}'), 'i')?.detail).toBe(
+      'list<number>'
+    );
+  });
+
   test('an operand of + with a numeric other operand expects a number', () => {
     for (const source of ['1 + ▮', '▮ + 1', '1 + 2 + ▮', 'A + ▮']) {
       const result = at(source);

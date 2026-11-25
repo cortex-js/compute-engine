@@ -100,6 +100,12 @@ export type BindingGroup = {
    * functions, types, parameters, loop and match-pattern variables are
    * visible from their scope's start. */
   visibleFrom: number;
+  /** A stretch of the scope where the binding is not visible, for a `for`
+   * binding: its collection, and in a comprehension the earlier clauses,
+   * are read outside it (`for i in i` reads an outer `i`). It runs from the
+   * start of the loop, or from the end of the comprehension's body, to the
+   * end of the clause's collection. */
+  hidden?: [number, number];
 };
 
 type Scope = {
@@ -189,7 +195,9 @@ function countWrites(ast: MathJsonExpression | null): Map<string, number> {
  *   annotations and `Tuple` destructuring patterns — bind in the function's
  *   own scope.
  * - `for` loops (`Loop` whose iterator operand is `Element`) bind the loop
- *   pattern in the loop's scope; `Match` arms bind their pattern variables
+ *   pattern in the loop's scope, except in its collection (`hidden`); the
+ *   clauses of a comprehension bind in its body, their own guard and the
+ *   later clauses; `Match` arms bind their pattern variables
  *   (spelled `_name` by the parser, at the span of `name`) in the arm.
  * - `DeclareType` / `DeclareProtocol` bind a type-tier name, visible in its
  *   whole scope. Its USES live in type text — annotations, other type
@@ -315,6 +323,19 @@ export function documentBindings(
     parent: Scope
   ): Scope {
     return { span: span ?? parent.span, bindings: new Map(), parent };
+  }
+
+  /** Mark the bindings of the fresh scope of a `for` clause as not visible
+   * from `from` to the end of the clause's `collection`. Without a span of
+   * the collection, nothing is marked. */
+  function hideIn(
+    scope: Scope,
+    from: number | undefined,
+    collection: MathJsonExpression | null
+  ): void {
+    const end = spanOf(collection)?.[1];
+    if (from === undefined || end === undefined || end <= from) return;
+    for (const group of scope.bindings.values()) group.hidden = [from, end];
   }
 
   /** The group for `name` bound in `scope`, creating it on first sight. A
@@ -824,7 +845,8 @@ export function documentBindings(
         // iterator and takes the generic path.
         const iterator = operand(node, 2);
         if (iterator !== null && operator(iterator) === 'Element') {
-          walk(operand(iterator, 2), scope);
+          const collection = operand(iterator, 2);
+          walk(collection, scope);
           const inner = childScope(spanOf(node), scope);
           bindPattern(
             operand(iterator, 1),
@@ -833,6 +855,7 @@ export function documentBindings(
             spanOf(iterator),
             inner.span[0]
           );
+          hideIn(inner, inner.span[0], collection);
           walk(operand(node, 1), inner);
           return;
         }
@@ -852,13 +875,17 @@ export function documentBindings(
         // outside the brackets.
         const ops = [...operands(node)];
         let inner = scope;
+        // The bindings are not visible from the end of the body to the end
+        // of their own collection (`hidden`).
+        const bodyEnd = spanOf(ops[0] ?? null)?.[1] ?? spanOf(node)?.[0];
         for (let i = 1; i < ops.length; i++) {
           const clause = ops[i];
           if (clause === null || operator(clause) !== 'Element') {
             walk(clause, inner);
             continue;
           }
-          walk(operand(clause, 2), inner);
+          const collection = operand(clause, 2);
+          walk(collection, inner);
           inner = childScope(spanOf(node), inner);
           bindPattern(
             operand(clause, 1),
@@ -867,6 +894,7 @@ export function documentBindings(
             spanOf(clause),
             inner.span[0]
           );
+          hideIn(inner, bodyEnd, collection);
           if (nops(clause) >= 3) walk(operand(clause, 3), inner);
         }
         walk(ops[0] ?? null, inner);
@@ -1492,7 +1520,12 @@ export function isNameVisibleAt(
       group.kind !== 'free' &&
       offset >= group.visibleFrom &&
       offset >= group.scope[0] &&
-      offset < group.scope[1]
+      offset < group.scope[1] &&
+      !(
+        group.hidden !== undefined &&
+        offset >= group.hidden[0] &&
+        offset < group.hidden[1]
+      )
   );
 }
 
