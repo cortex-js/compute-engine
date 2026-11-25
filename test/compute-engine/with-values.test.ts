@@ -411,6 +411,9 @@ describe('the snapshot of a value definition', () => {
     // The list hypothesis a recursive call reads while `_deriveSignature`
     // verifies it, set only during that pass.
     '_recursionResult',
+    // True only while a group derivation of a cycle of calls holds the
+    // definition (`signature-group.ts`).
+    '_inSignatureGroup',
     // A memo of the skeleton `_wildcardRecursiveSignature` derives a
     // signature from, keyed on the identity of the stored literal and on the
     // engine versions: a restore that changes the stored value makes it

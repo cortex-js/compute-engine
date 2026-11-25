@@ -23,14 +23,16 @@ import {
   verifiedListHypothesis,
   beginSignatureDerivation,
   endSignatureDerivation,
-  nextDerivationPhase,
-  keepSignatureInFrame,
   noteReentrantSignatureRead,
-  signatureDerivedInFrame,
   type SignatureDerivationFrame,
   withSignatureResult,
   type HomeScope,
 } from './declared-parameter-result.js';
+import {
+  groupSignature,
+  hasHomeScope,
+  type SignatureGroupMember,
+} from './signature-group.js';
 
 import type { EffectSet, Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
@@ -383,6 +385,11 @@ export class _BoxedValueDefinition
    * `undefined` outside that pass, where the re-entrant read answers the
    * recorded type unchanged. Transient, not state. */
   private _recursionResult: Type | undefined = undefined;
+
+  /** True while a group derivation of a cycle of calls holds this
+   * definition (`deriveSignatureGroup`, `signature-group.ts`). Transient,
+   * not state. */
+  private _inSignatureGroup = false;
 
   /** The skeleton that {@link _wildcardRecursiveSignature} derives the
    * signature from, with the function literal it was built for, or no
@@ -1224,6 +1231,13 @@ export class _BoxedValueDefinition
         this._engine._typeResolver
       );
     }
+    // A function of a cycle of calls is derived with the other functions of
+    // the cycle (`groupSignature`, `signature-group.ts`).
+    const member = this._signatureGroupMember();
+    if (member !== undefined) {
+      const grouped = groupSignature(this._engine, member);
+      if (grouped !== undefined) return grouped;
+    }
     const frame = beginSignatureDerivation(this);
     try {
       return this._deriveSignatureOnce(recorded, skeleton, v, frame);
@@ -1267,6 +1281,33 @@ export class _BoxedValueDefinition
    * @internal
    */
   _wildcardRecursiveSignature(): Type | undefined {
+    const skeleton = this._wildcardSkeletonType();
+    if (skeleton === undefined) return undefined;
+    const literal = this.storedValue!;
+    const derived = this._deriveSignature(skeleton, skeleton.type).type;
+    // Inside a group derivation, a read of this signature answers the
+    // candidate of the group, and the effects are read once the group is
+    // derived.
+    if (this._inSignatureGroup) return derived;
+    const own = literal.type.type;
+    if (
+      typeof derived !== 'object' ||
+      derived.kind !== 'signature' ||
+      derived.effects !== undefined ||
+      typeof own !== 'object' ||
+      own.kind !== 'signature' ||
+      own.effects === undefined
+    )
+      return derived;
+    return { ...derived, effects: own.effects };
+  }
+
+  /** The skeleton of {@link _wildcardRecursiveSignature}: one `unknown` slot
+   * per parameter of the literal (its annotation, or `unknown`) and the
+   * result `unknown`, or `undefined` when this binding is not declared
+   * with the bare `function` type, holds no function literal, or the
+   * literal does not call itself. */
+  private _wildcardSkeletonType(): BoxedType | undefined {
     if (this._fixedInitializationType) return undefined;
     const t = this._type;
     if (t === undefined || t === null || !isWildcardFunctionType(t.type))
@@ -1307,22 +1348,69 @@ export class _BoxedValueDefinition
         );
       cached.versions = versions;
     }
-    if (cached.skeleton === undefined) return undefined;
-    const derived = this._deriveSignature(
-      cached.skeleton,
-      cached.skeleton.type
-    ).type;
-    const own = literal.type.type;
+    return cached.skeleton;
+  }
+
+  /**
+   * This definition as a member of a group derivation
+   * (`signature-group.ts`), or `undefined` when its signature result is
+   * not derived from a function literal: a binding declared with a
+   * signature skeleton whose result is `unknown`, or with the bare
+   * `function` type and holding a recursive literal
+   * ({@link _wildcardRecursiveSignature}). The literal must have a home
+   * scope, where the group types its body afresh.
+   * @internal
+   */
+  _signatureGroupMember(): SignatureGroupMember | undefined {
+    if (this._fixedInitializationType) return undefined;
+    const literal = this.storedValue;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    let recorded: BoxedType | undefined;
+    if (this._signatureSkeleton !== undefined && !this.inferredType)
+      recorded = this._type ?? undefined;
+    else recorded = this._wildcardSkeletonType();
+    if (recorded === undefined || typedAs(this) !== undefined) return undefined;
+    const skeleton =
+      this._signatureSkeleton !== undefined && !this.inferredType
+        ? this._signatureSkeleton
+        : recorded.type;
     if (
-      typeof derived !== 'object' ||
-      derived.kind !== 'signature' ||
-      derived.effects !== undefined ||
-      typeof own !== 'object' ||
-      own.kind !== 'signature' ||
-      own.effects === undefined
+      typeof skeleton !== 'object' ||
+      skeleton.kind !== 'signature' ||
+      skeleton.result !== 'unknown' ||
+      !hasHomeScope(literal)
     )
-      return derived;
-    return { ...derived, effects: own.effects };
+      return undefined;
+    const rec = recorded;
+    return {
+      owner: this,
+      name: this.name,
+      literal,
+      skeleton,
+      recorded: rec,
+      enter: (candidate) => {
+        this._derivingSignature = true;
+        this._inSignatureGroup = true;
+        this._recursionResult = candidate;
+      },
+      leave: () => {
+        this._derivingSignature = false;
+        this._inSignatureGroup = false;
+        this._recursionResult = undefined;
+      },
+      build: (literalType, result) => {
+        const refined = refineDeclaredPlaceholders(
+          skeleton,
+          withSignatureResult(literalType.type, result)
+        );
+        return refined === rec.type
+          ? rec
+          : new BoxedType(refined, this._engine._typeResolver);
+      },
+      noted: (type, homes) => this._noted(type, homes),
+      freeDefinitions: () => this._freeSymbolDefinitions(literal),
+    };
   }
 
   /** True when `literal` calls the function this binding names, directly or
@@ -1446,38 +1534,12 @@ export class _BoxedValueDefinition
             this._engine._typeResolver
           );
     }
-    // A signature derived earlier in the same state of the frames below
-    // (`signatureDerivedInFrame`). The key holds what the derivation also
-    // reads: the recorded type, the skeleton, the literal, the earlier
-    // derivation that gives the hypothesis, the engine versions and the
-    // definitions of the free symbols of the body in the scope of the read.
-    // A literal whose type is in flight is left out: its type cell answers
-    // an earlier type that no frame records. So is a derivation whose result
-    // may be discarded, for the reason given where the memo is stored below.
-    const frameKey =
-      typeInFlight || this._engine._resultMayBeDiscarded()
-        ? undefined
-        : [
-            recorded,
-            skeleton,
-            v,
-            previous,
-            this._definitionsKey(),
-            declaredResultMemoKey(this._engine, v),
-            ...this._freeSymbolDefinitions(v),
-          ];
-    if (frameKey !== undefined) {
-      const kept = signatureDerivedInFrame(frame, this, frameKey);
-      if (kept !== undefined) return this._noted(kept.type, kept.calleeHomes);
-    }
-    nextDerivationPhase(frame);
     this._derivingSignature = true;
     this._recursionResult = hypothesis;
     try {
       valueType = v.type;
     } finally {
       this._derivingSignature = false;
-      nextDerivationPhase(frame);
       this._recursionResult = undefined;
     }
     // The memo keys on the value's type by CONTENT: the object is rebuilt
@@ -1496,19 +1558,8 @@ export class _BoxedValueDefinition
       memo.valueType === valueTypeKey &&
       memo.versions === declaredResultMemoKey(this._engine, v) &&
       calleeHomesDeclarationCount(memo.calleeHomes) === memo.calleeCount
-    ) {
-      // The type of the literal can depend on provisional answers too: the
-      // next read in the same state skips it.
-      if (frameKey !== undefined && !this._engine._resultMayBeDiscarded())
-        keepSignatureInFrame(
-          frame,
-          this,
-          frameKey,
-          memo.type,
-          memo.calleeHomes
-        );
+    )
       return this._noted(memo.type, memo.calleeHomes);
-    }
     // The stored literal reads its scalar parameters as `unknown`; its
     // result under the DECLARED parameter types is the accurate one to
     // report (`resultUnderDeclaredParameters`).
@@ -1520,7 +1571,6 @@ export class _BoxedValueDefinition
     // while the result is derived (`collectCalleeHomes`).
     let typedResult: Type | undefined;
     let calleeHomes: HomeScope[];
-    nextDerivationPhase(frame);
     this._derivingSignature = true;
     try {
       ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
@@ -1535,7 +1585,6 @@ export class _BoxedValueDefinition
       ));
     } finally {
       this._derivingSignature = false;
-      nextDerivationPhase(frame);
     }
     // A self-recursive body whose result is an abstract collection is
     // re-typed under the hypothesis that the result is a list, and the
@@ -1550,14 +1599,12 @@ export class _BoxedValueDefinition
       this.name,
       typedResult ?? functionResult(valueType.type),
       (candidate, thunk) => {
-        nextDerivationPhase(frame);
         this._recursionResult = candidate;
         this._derivingSignature = true;
         try {
           return thunk();
         } finally {
           this._derivingSignature = false;
-          nextDerivationPhase(frame);
           this._recursionResult = undefined;
         }
       }
@@ -1622,8 +1669,6 @@ export class _BoxedValueDefinition
         definitions: this._definitionsKey(),
         freeDefinitions: this._freeSymbolDefinitions(v),
       };
-    else if (frameKey !== undefined && !this._engine._resultMayBeDiscarded())
-      keepSignatureInFrame(frame, this, frameKey, type, calleeHomes);
     return this._noted(type, calleeHomes);
   }
 

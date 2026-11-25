@@ -994,37 +994,36 @@ the callee first gives: `R := M ↦ G(M − [0, 0, Y])` before
 `G := M ↦ [M[1], M[2], M[3]]` is typed `(M: dictionary<any> | indexed_collection<any> | value) -> vector<3>` once `G` is
 defined, where it was `(M: unknown) any -> list<unknown^3>`.
 
-This rule is simple and sound, and it loses precision in a mutual recursion
-where the call of the branch reaches the function in computation only through
-another function. With `F` and `G` declared `function`,
-`F := n ↦ If(n = 0, x > 0, G(n − 1))`, then `G := n ↦ F(n)`, the type of
-`F(m)` is `unknown`, although every value is a boolean: `G(n − 1)` is
-`unknown` only because it reads `F`, but the result type of `G` is not being
-computed. Two functions that call each other, where the first is assigned
-before the second exists, can also get wider types: the result of `ha` or
-`hb` of `test/compute-engine/ce-479-recursive-map-result-type.test.ts` is a
-subtype of `list<integer | list>`, and it can be wider than that type, for
-example `list<integer | list<unknown>>`. Each of these types holds every
-value.
+Functions that call one another in a cycle get their result types together.
+A function whose signature result is derived (declared `function`, or with a
+signature whose result is `unknown`, such as `(unknown) -> unknown`) is a
+member of the cycle when it calls the others and they call it; the cycle is
+found from the calls written in the function literals, before any type is
+computed (the strongly connected component of the call graph,
+`signature-group.ts`). A function whose result is declared is not a member: a
+call of it reads the declaration. The members are typed by a fixpoint
+iteration: each starts from `unknown` (so a call of a member is left out of
+a join, and the first round gives the base cases), and each round types every
+body afresh with the calls of the members typed by the current results,
+widening a result that the body does not fit, until a round changes none.
+Then each body fits its result, and so does every call that terminates. A
+result that grows at each round is replaced by a bare type above it
+(`list<integer | list>`), and the result is `unknown` when no such type fits.
+The type of each member is the same whichever member is read first: with
+`F` and `G` declared `function`, `F := n ↦ If(n = 0, x > 0, G(n − 1))`, then
+`G := n ↦ F(n)`, `F(m)` is `boolean`; with `f` and `g` declared
+`(unknown) -> unknown`, `f := n ↦ If(n = 0, "a", g(n − 1))` and
+`g := n ↦ If(n = 0, 2, f(n − 1))`, `f(m)` and `g(m)` are `integer | string` in
+every order of assignment and of reading. A cycle that goes through a
+function passed as a value (`F := n ↦ G(F, n)`, with `G` applying its
+argument) is not found from the calls written in the literals: each of its
+functions is typed alone, by the rule above.
 
 Known limitation: the type of an aggregate (`Sum`, `Max`, `Min`, `Mean`)
 of a declared `list<T>` assumes a finite list. An endless producer is
 admitted where `list<T>` is declared, so with `f := xs ↦ Max(xs)` and
 `xs: list<integer>`, `f(Range(1, +oo))` is typed `integer | nan` and evaluates
 to `+oo` (CE-1271, closed by user decision 2026-11-14).
-
-Known limitation: in a mutual recursion, the type of a call of the second
-function can leave out a value when the call of the first function was typed
-first. With `f` and `g` declared `(unknown) -> unknown` and `m: integer`,
-`f := n ↦ If(n = 0, "a", g(n − 1))`, then `g := n ↦ If(n = 0, 2, f(n − 1))`:
-when the type of `f(m)` is read first, `g(m)` is typed `number`, but `g(1)`
-is `"a"`. The body of `g` is typed while the result type of `f` is computed,
-with `f(n − 1)` left out of the join as a recursive call, and the type cache
-keeps that type after the computation of `f` ends. A sound fix records, for
-each cached type, the computations it depends on, in the most-used cache of
-the engine; it is done when a program from real use shows the defect. The
-analysis and the two attempts that failed are in
-`docs/plans/2026-11-08-ce1091-mutual-recursion-type-cache.md`.
 
 A use of a call at a typed parameter may refine a result that the body leaves
 `unknown`: `k := x ↦ x` used in `k(1) + 2` gets the result `real`

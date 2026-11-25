@@ -174,8 +174,8 @@ _argument_ → \[**`...`**\] _expression_
 _index-clause_ → **`[`** (_expression_)#**`,`** **`]`**
 
 _field-clause_ → **`.`** _symbol_
-&nbsp;&nbsp;&nbsp;&nbsp;— the `.` must abut the base; not after a number
-literal
+&nbsp;&nbsp;&nbsp;&nbsp;— the `.` must abut the base or start a line; not
+after a number literal
 
 _member-call-clause_ → _field-clause_ _call-clause_
 &nbsp;&nbsp;&nbsp;&nbsp;— the `(` must abut the member name; a protocol
@@ -479,6 +479,23 @@ In all three cases the `(`, `[` or `.` must directly abut the
 callee/indexed expression: whitespace before it means the form is a
 separate primary (or, for `.`, a diagnosed stray token), not a
 call/index/field — the same whitespace-sensitivity that governs operators.
+
+One exception: a line whose first token is the `.` of a field clause
+continues the expression of the line before, after any indentation. No
+statement starts with `.`, so a long chain can be broken before its dots,
+at the top level, inside brackets and in a `match` case body:
+
+```epsil
+let p = {x -> {y -> 3}}
+p
+  .x
+  .y
+// ➔ 3
+```
+
+The field binds to the last operand of the line before, as on one line:
+`a + b` followed by `.x` on the next line is `a + b.x`. A `.` after a space
+on the same line (`p .x`) is still a diagnosed stray token.
 
 ## Collections, tuples, and dictionaries
 

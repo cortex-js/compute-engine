@@ -2,6 +2,34 @@
 
 ### Improvements
 
+- **Functions that call one another in a cycle get their result types
+  together** (CE-1518). When each function of the cycle is declared
+  `function` or with a signature whose result is `unknown`, the engine finds
+  the cycle from the calls in the function literals and types the members
+  by one fixpoint iteration. With three such heads (`a_2` calls `c_2` and
+  `b_2`, `b_2` calls `c_2`, `c_2` calls `a_2`), reading the type of
+  `b_2(m)` first took about 13 s and ran about 18,000 signature
+  derivations; it now takes about 10 ms, and assigning the heads declared
+  `(unknown) -> unknown` takes about 35 ms instead of 350 ms. The type no
+  longer depends on which head is read first: the same heads declared
+  `(unknown) -> unknown` gave `b_2(m)` the type `any` when it was read
+  first, and now give `number` in every order. Two documented losses are
+  gone: with `f := n ↦ If(n = 0, "a", g(n − 1))` and
+  `g := n ↦ If(n = 0, 2, f(n − 1))` assigned in the order `g`, `f`, the type
+  of `g(m)` was `number` although `g(1)` is `"a"` (CE-1091); it is now
+  `integer | string`. With `F := n ↦ If(n = 0, x > 0, G(n − 1))` and
+  `G := n ↦ F(n)` declared `function`, `F(m)` was `unknown`; it is now
+  `boolean`.
+
+- **An Epsil chain can be broken before its dots** (CE-1775). A line whose
+  first token is the `.` of a field clause now continues the expression of
+  the line before, after any indentation, at the top level, inside brackets
+  and in a `match` case body. `b.grow(2)` followed by `  .grow(3)` on the
+  next line was an `unexpected-symbol` error (`closing-bracket-expected`
+  inside parentheses); it is now `b.grow(2).grow(3)`. No statement starts
+  with `.`, so no valid program changes meaning. A `.` after a space on the
+  same line (`p .x`) is still an error.
+
 - **A row of a list of fixed-length rows compiles on JavaScript as the
   result** (CE-1540). With `P: list<list<real^2>>`, `compile(P[i])` declined
   with "an index that can be out of range … of lists". It now gives the row,
@@ -24,6 +52,19 @@
   constant key (`d[1]`), and other operations on the dictionary (`Length`,
   `Keys`, arithmetic) still decline. GLSL and the interval mode still
   decline a dictionary.
+
+- **A compiled callback can call a helper that updates its state**
+  (CE-1776). A function literal compiled to JavaScript that calls
+  `function moveBall(dt: real) scope { ballX = ballX + dt; ballX }`, where
+  `ballX` is a declared variable of the engine, declined with "a write to a
+  name that is not a local", and a helper that only read such a variable
+  declined too. Both now compile: the helper receives the current value of
+  each variable it uses, the call writes back the new values in the order of
+  the program, and `assigns` lists the variable, so `run()` writes it to the
+  engine. `tick = (dt: real) => moveBall(dt)` gives `2.5`, then `5.5`, as
+  the interpreter does. A call of such a helper in a loop, a `Sum` or a
+  `Map`, a call that maps over a list, a recursive helper and a helper that
+  assigns a list variable still decline.
 
 - **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
   `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a

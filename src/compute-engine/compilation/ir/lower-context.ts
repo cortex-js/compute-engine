@@ -20,7 +20,14 @@ import {
   isExpression,
   isFunction,
 } from '../../boxed-expression/type-guards.js';
-import type { Builder, IRType, Lane, Region, V } from './ir.js';
+import type {
+  Assigned,
+  Builder,
+  IRType,
+  Lane,
+  Region,
+  V,
+} from './ir.js';
 import type { OperatorRow } from './operators.js';
 import { STANDARD_LIBRARIES } from '../../library/library.js';
 
@@ -423,6 +430,26 @@ export type Lowering = {
   /** The input `name` of the engine type `t`, which a function that the
    *  call `e` calls reads in the binding `def`, read at the call. */
   free(e: Fn, name: string, t: Type, def?: BoxedValueDefinition): V;
+  /** The variables of the engine that the root function literal assigns
+   *  (`Program.assigns`) and that the user function of `key` reads or
+   *  writes, itself or through the user functions that it calls
+   *  (`uses`), and those that it writes (`writes`), in the order of
+   *  `Program.assigns` (CE-1776). Both empty for a function that touches
+   *  none. */
+  stateOf(key: object): {
+    readonly uses: readonly Assigned[];
+    readonly writes: readonly string[];
+  };
+  /** The binding of the variable `name` of the engine (a name of
+   *  `Program.assigns`) that the call `e` of a user function that writes
+   *  it rebinds here, at the root or in the body of a user function. A
+   *  call in a loop, or where a local or a parameter hides the variable,
+   *  declines (CE-1776). */
+  stateWrite(e: Fn, name: string): Binding;
+  /** The record of the values `values` (`make()` of `lower-records.ts`),
+   *  and the field `k` of the record `r` (`field()`). */
+  pack(e: Expression, values: V[]): V;
+  field(r: V, k: number): V;
   /** `v` where a value of `lane` is read (a real converted to complex). */
   widen(v: V, lane: Lane): V;
   /** The lane of an input of type `number`, `unknown` or none: complex in
@@ -435,6 +462,10 @@ export type Lowering = {
   readonly fold: boolean;
   /** The name of the user function whose body is being lowered. */
   inFunction?: string;
+  /** The variables of the engine that the function whose body is being
+   *  lowered writes (`stateOf()`, CE-1776): a write of another one is not
+   *  a write of the variable (`writable()` of `lower.ts`). */
+  stateWrites?: readonly string[];
   /** The body of each user function being lowered: `nan()`, a list of NaN
    *  can stand for an absent value of it (every reader of the calls that
    *  the IR function serves reads the two alike); `read`, the lowering of

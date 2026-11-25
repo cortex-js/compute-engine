@@ -319,5 +319,5 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
     return field(r, k);
   };
 
-  return { construct, literal, dictionary, at, named };
+  return { construct, literal, dictionary, at, named, make, field };
 }

@@ -162,6 +162,103 @@ describe('parse', () => {
   });
 });
 
+//
+// CE-1775: a line whose first token is `.` (then a name, a verbatim name or
+// the `(` of a qualified field) continues the expression of the line before,
+// at the top level, inside brackets and in a `match` case body, after any
+// indentation.
+//
+describe('a chain broken before its dot', () => {
+  const CHAIN = {
+    fn: [
+      'MemberCall',
+      { fn: ['MemberCall', { sym: 'b' }, { str: 'grow' }, { num: '2' }] },
+      { str: 'grow' },
+      { num: '3' },
+    ],
+  };
+
+  test('at the top level, with spaces or a tab before the dot', () => {
+    expect(parse('b.grow(2)\n  .grow(3)')).toEqual(CHAIN);
+    expect(parse('b.grow(2)\n\t.grow(3)')).toEqual(CHAIN);
+    expect(parse('b.grow(2)\n.grow(3)')).toEqual(CHAIN);
+  });
+
+  test('inside parentheses', () => {
+    expect(parse('(b.grow(2)\n  .grow(3))')).toEqual(CHAIN);
+  });
+
+  test('across a line comment, and after a bare name', () => {
+    expect(parse('b.grow(2) // first\n  .grow(3)')).toEqual(CHAIN);
+    expect(parse('b\n  .grow(2)\n  .grow(3)')).toEqual(CHAIN);
+  });
+
+  test('a field read, a verbatim name and a qualified field', () => {
+    expect(parse('p\n  .x')).toEqual({
+      fn: ['Field', { sym: 'p' }, { str: 'x' }],
+    });
+    expect(parse('p\n  .`x`')).toEqual({
+      fn: ['Field', { sym: 'p' }, { str: 'x' }],
+    });
+    expect(parse('c\n  .(Shape.scale)(2)')).toEqual({
+      fn: [
+        'ProtocolMember',
+        { str: 'Shape' },
+        { str: 'scale' },
+        { sym: 'c' },
+        { num: '2' },
+      ],
+    });
+  });
+
+  test('the field binds to the last operand, as on one line', () => {
+    expect(parse('a + b\n  .x')).toEqual(parse('a + b.x'));
+  });
+
+  test('the next line that does not start with a dot is a new statement', () => {
+    const [ast, diags] = parseEpsil('b.grow(2)\n  .grow(3)\nc');
+    expect(diags).toEqual([]);
+    expect(operand(ast, 2)).toMatchObject({ sym: 'c' });
+  });
+
+  test('in a match case body, before the next case', () => {
+    const [ast, diags] = parseEpsil('match n {\n  1 => p\n    .x\n  _ => 0\n}');
+    expect(diags).toEqual([]);
+    const strip = JSON.parse(
+      JSON.stringify(operand(ast, 1), (k, v) =>
+        k === 'sourceOffsets' ? undefined : v
+      )
+    );
+    expect(strip.fn[2]).toEqual({
+      fn: [
+        'MatchCase',
+        { num: '1' },
+        { fn: ['Field', { sym: 'p' }, { str: 'x' }] },
+      ],
+    });
+  });
+
+  test('still an error: a space before the dot on the same line', () => {
+    const [, diags] = parseEpsil('p .x');
+    expect(diags.map((d) => d.message[0])).toEqual(['unexpected-symbol']);
+  });
+
+  test('still an error: a line-leading dot before a number or after a number', () => {
+    for (const source of ['x\n.5', '2\n.foo']) {
+      const [, diags] = parseEpsil(source);
+      expect(diags.map((d) => d.message[0])).toEqual(['unexpected-symbol']);
+    }
+  });
+
+  test('evaluates as the one-line chain', () => {
+    expect(run('c.scale(2)\n  .area()')).toEqual(run('c.scale(2).area()'));
+    expect(run('(b.scale(2)\n  .scale(3))\n  .area()')).toEqual({
+      value: '36',
+      codes: [],
+    });
+  });
+});
+
 describe('a protocol function called with the dot', () => {
   test('a nominal tuple conformer: `c.area()` is `area(c)`', () => {
     expect(run('c.area()').value).toBe('pi');

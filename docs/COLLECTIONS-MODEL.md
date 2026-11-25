@@ -159,6 +159,19 @@ branch condition evaluates the values of the operands of its relation again
 evaluates the sub-expression each time.
 The implementation is `boxed-expression/walk-invariant-values.ts`.
 
+A read of a view can evaluate its callback again: no rule says that a
+position is evaluated once. A callback with an effect is legal, and the
+effect happens at each read that evaluates the position. With a function
+`t1()` that adds 1 to `n` and returns 1, and
+`let s = map(x => x + t1(), [1, 2, 3])`, two reads of `s[2]` add 2 to `n`,
+and two reads of `sum(s)` add 6. The element memo (below) and the draw sets
+of `docs/RANDOMNESS-MODEL.md` can keep a value between two reads; a program
+does not rely on them to prevent an effect. `ListFrom(view)` gives a list,
+and a later read of the list evaluates no callback. An assignment lists a
+finite view that reads a variable (`docs/SCOPING-MODEL.md`, "Callable
+resolution"), so the callbacks of `let s = map(x => x + t1(), xs)` run at the
+assignment and not again. Decision of the user, 2026-11-25.
+
 A source that is provably not a collection is refused when the call is boxed,
 as for an eager operator: `Dedup(5)` is `Dedup(Error(incompatible-type,
 collection, 5))`, an invalid call typed `error`

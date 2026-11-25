@@ -2625,11 +2625,37 @@ booleans. These decline:
 - a variable with no value at the compilation, and a name of the `vars`,
   `symbolic` or `inputs` option: it is an input of the host;
 - a value of another lane: `n = n + 0.5` for `n: integer`;
-- a user function that the body calls and that reads the variable
-  (`let get = () => s` and `do { s = s + 1; get() }`), and one that assigns
-  it;
 - an expression that is not a function literal and assigns a variable
   (`Block(Assign(s, s + 1))`).
+
+A user function that the body calls can read and assign such a variable,
+itself or through the user functions that it calls (CE-1776):
+
+```js
+executeEpsil(ce, `let ballX: real = 0.5
+function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
+let tick = (dt: real) => moveBall(dt)`);
+const result = compile(ce.box('tick').evaluate());
+result.assigns;            // ['ballX']
+result.run(2);             // 2.5
+result.run(3);             // 5.5
+ce.box('ballX').evaluate(); // 5.5
+```
+
+The function takes the value of each such variable that it reads or writes
+at the call, and the call rebinds each variable that it writes, in the order
+of the program: two calls, a call in an arm of an `If` and a write in an arm
+of the function give the interpreter's values. A name in the body of the
+function counts only where it is the variable of the engine, not a local or
+a parameter of the same name. These decline:
+
+- a call of such a function in a `Loop`, in a `Sum`, a `Map` or another
+  construct that evaluates its body several times, and a write of the
+  variable in such a construct in the function: the loop does not carry the
+  value that the function returns;
+- a call that maps the function over a list (`moveBall([dt, dt])`);
+- a recursive function, or a cycle of functions, that assigns the variable;
+- a list variable that the function assigns.
 
 A function that only reads a variable still holds its value at the
 compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).

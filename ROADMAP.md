@@ -735,6 +735,42 @@ needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
 no site needs only a counting loop. The 7 gather sites need a gather/reduce
 fusion, which is a new lowering.
 
+### CE-1806. Compiled code builds the array of a finite `Map` or `Filter` before every read
+
+**Status:** ready; performance, L. Approved 2026-11-25. After CE-1807. Related: CE-253.
+**Witness:** plausible; the JavaScript emitted for `first(map(x => x * 2, L))` and `sum(map(x => x * 2, L))` with `L: list<real>`. No measured cost in a corpus program.
+
+The interpreter computes the positions of a view that are read. Compiled
+code builds the whole array, then reads it. `length(map(f, L))` is the one
+read that builds nothing (`_.L.length`). The values are the same; the cost is
+one array and one loop per view.
+
+This entry and CE-1807 apply one rule: a view becomes a list at a fixed set
+of places, and nowhere else. The places: the result of the program, an
+argument of a host function (CE-1807, which makes the interpreter list it
+there too), an element of a list or a tuple, and a view that is read more
+than once (a local read twice). CE-1807 comes first: it settles the host
+call, and the lowering of this entry then builds the array there.
+
+For a callback with an effect, a draw or a call of a host function, check
+each sub-item against the interpreter: a read of one position (CE-1806.2)
+then makes one call, as the interpreter does, and removes the two
+`First(Map(…))` lines of the known limitations of `docs/COMPILATION-MODEL.md`;
+a case where the order or the number of calls would differ from the
+interpreter keeps the array. Measure a corpus program before and after each
+sub-item.
+
+- **CE-1806.1** A reducer over a `Map` or a `Filter` runs in the loop of the
+  view, with no array: `sum(map(f, L))` is one loop, and
+  `sum(filter(map(f, L), p))` is one loop where it is three today. The
+  readers: `Sum`, `Product`, `Min`, `Max`, `Mean`, `Reduce`, `Any`, `All`,
+  `Length` of a `Filter` (a count).
+- **CE-1806.2** A read of one position of a `Map` applies the callback to
+  that element of the source: `first(map(f, L))` and `map(f, L)[k]` are
+  `f(L[k])` with the range check of `At`.
+- **CE-1806.3** `first(filter(L, p))` and `Find` stop at the first element
+  that the predicate keeps.
+
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
 **Status:** waits for user (design); capability.
@@ -1055,22 +1091,17 @@ removed (decision D9 of `docs/plans/2026-11-11-bound-once-spec.md`).
 
 ### CE-1255. One route for an Epsil program, the sites of its names, and a program runner
 
-**Status:** ready (approved 2026-11-12); capability, L. Starts after step 1 of `docs/plans/2026-11-11-bound-once-spec.md` is on main. Spec: `docs/plans/2026-11-12-program-operator-spec.md`.
+**Status:** ready (approved 2026-11-12); capability, L. CE-1255.1 is on main; the plan of CE-1255.2 is approved (2026-11-25), and CE-1628 is delivered with it. Spec: `docs/plans/2026-11-12-program-operator-spec.md`.
 **Witness:** corpus; Tycho's prelude runner (`~/dev/tycho/src/plot-core/prelude-runner.ts`) holds a copy of the engine's scoping rules and compiles a program statement by statement by hand.
 
 Tycho does not hold a copy of the engine's scoping rules: the engine gives
-what the prelude runner derives by hand. Three pieces, in this order; the
-third is the one delivered to Tycho.
+what the prelude runner derives by hand. Two pieces remain, in this order;
+the second is the one delivered to Tycho.
 
-- **CE-1255.1** The `Program` operator: `parseEpsil()` gives `Program(…)`, and
-  every route (the runner, the debugger, the editor, `compile()`) evaluates
-  that one expression. The spec has the rule and the answers that change.
-  First step: the count of the tests that change, shown to the user before
-  they are moved.
 - **CE-1255.2** The sites query: for a parsed program, each symbol site with
   its role, its source range and the binding it resolves to, and for each
   statement the top-level names it reads and the names it defines or
-  assigns. Draft [Program source sites](docs/plans/2026-11-19-program-sites.md).
+  assigns. Spec [Program source sites](docs/plans/2026-11-19-program-sites.md).
 - **CE-1255.3** The program runner (a separate entry above `compile()`, with
   an asynchronous form): each value statement is a compile unit, a statement
   that declines runs in the interpreter and the run continues compiled,

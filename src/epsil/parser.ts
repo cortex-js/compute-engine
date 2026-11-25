@@ -8935,6 +8935,11 @@ export class Parser {
   /**
    * A primary followed by zero or more call/index clauses (the tightest-binding
    * layer). A clause abuts its operand: `f(x)`, `xs[i]`, never `f (x)`.
+   *
+   * One exception: a field clause that starts a line continues the
+   * expression before it, at any indentation, so a chain can be broken
+   * before its dots (`b.grow(2)` then `  .grow(3)`). No statement starts
+   * with `.`, so the continuation changes no valid program.
    */
   private parsePostfix(): MathJsonExpression | null {
     let expr = this.parsePrimary();
@@ -8942,7 +8947,7 @@ export class Parser {
 
     for (;;) {
       const t = this.current;
-      if (t.precededByWhitespace) break;
+      if (t.precededByWhitespace && !this.isLeadingFieldClause(t)) break;
       if (t.type === 'OPEN_PAREN') {
         // A number callee is never a call: `2(x+1)` is invisible multiplication.
         if (isNumberNode(expr)) break;
@@ -9025,6 +9030,19 @@ export class Parser {
       ['Apply', callee, ...values] as MathJsonExpression[],
       start,
       end
+    );
+  }
+
+  /** Whether `t` is the `.` of a field clause that starts a line: a linebreak
+   * before it, and a field name, a verbatim name or the `(` of a qualified
+   * field after it. Any other token after the dot (`x` then `.5`) keeps the
+   * unexpected-symbol diagnostic. */
+  private isLeadingFieldClause(t: Token): boolean {
+    if (!t.precededByLinebreak || t.type !== 'OPERATOR' || t.text !== '.')
+      return false;
+    const next = this.peek(1).type;
+    return (
+      next === 'SYMBOL' || next === 'VERBATIM_SYMBOL' || next === 'OPEN_PAREN'
     );
   }
 
