@@ -3075,6 +3075,27 @@ function given by its name declines ("Function values"). An input of type
 `list<list<real>>` is read only by `M[i][j]` ("Lists of two run-time
 lengths"), so `Map(t ↦ 2t, M)` over such an `M` runs on the interpreter.
 
+**Where a view is a list.** The interpreter's `Map` and `Filter` are views,
+which compute the positions that are read. On JavaScript (not in the bigint
+and interval modes) a `Map` or a `Filter` is an array in the code only where
+the program needs the list: the result of the program, an argument of a
+function of the host ("Functions of the host"), an element of a list or a
+tuple, and a view read more than once (a local read twice). Where one reader
+reads it, a view whose callback has no effect and cannot fail builds no array:
+`First`, `Last` and `At` of a `Map` of reals apply the callback to that element
+of the source, with the range check of `At` and NaN out of range
+(`first(map(x => x * 2, L))`); `Sum`, `Product`, `Min`, `Max`, `Mean`,
+`Reduce` and `All` of a `Map` apply it in their loop; `Length`, `Sum`,
+`Product`, `Mean`, `Max`, `Min`, `Reduce` and `All` of a `Filter` run one loop
+over the source; and `First` of a
+`Filter`, `Find` and `Any` stop at the first element kept. The values are the
+same. A view keeps its array where its callback has an effect or can fail
+(each element is then computed, "Known limitations"), where its length is a
+count known only at run time that no list holds (`Map(f, Range(1, n))`: the
+code refuses a list of 2^32 elements), at another reader (`Sum` of a
+`Reverse`), and for `At` of a `Map` of integers or booleans
+(`compilation/ir/README.md`, "Lists").
+
 An argument on the complex lane at a parameter declared `real` declines
 with `lane-mismatch`: with `p` declared `(real) -> real`, `p(√y)` declines
 in the `complex` mode.

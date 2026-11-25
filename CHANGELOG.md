@@ -22,6 +22,21 @@
 
 ### Improvements
 
+- **Compiled JavaScript reads a `Map` or a `Filter` where it is, with no
+  array** (CE-1806). Where one reader reads a view whose callback has no
+  effect and cannot fail, the code builds no list: `first(map(x => x * 2, L))`
+  and `map(x => x * 2, L)[k]` compute one element, with the range check of
+  `At`; `Sum`, `Product`, `Min`, `Max`, `Mean`, `Reduce` and `All` of a `Map`
+  run one loop; `Length`, `Sum`, `Product`, `Mean`, `Max`, `Min`, `Reduce` and
+  `All` of a `Filter` run one loop over the source; `First` of a `Filter`, `Find` and `Any` stop at the
+  first element kept. With `L` a list of 10^6 reals, `sum(map(x => x * 2, L))`
+  takes about 0.4 ms instead of 1.6 ms,
+  `sum(filter(map(x => x * 2, L), c => c > 2))` one loop instead of three, and
+  `first(map(x => x * 2, L))` no longer builds the list. The values are the
+  same. A view stays a list as the result, as an argument of a function of the
+  host, where it is read twice, where its callback has an effect, and where
+  its length is a count known only at run time (`map(f, 1..n)`).
+
 - **Compiled JavaScript builds a list of lists whose rows have run-time
   lengths** (CE-1736, #638). With `g: list<list<integer>>`,
   `Map(r ↦ 2r, g)`, `Filter(g, r ↦ Length(r) > 1)` and

@@ -32,11 +32,14 @@
  *   No value is moved.
  * - `invariants`: an instruction of a loop body that reads nothing that the
  *   body computes is computed once, before the loop (`invariants` below).
+ * - `forward` (JavaScript, not the bigint and interval modes): a pure build
+ *   or filter that one instruction reads is read where it is, with no list
+ *   (`forward` and `filters` below).
  * - `dce`: an instruction whose values are not read (by an instruction, a
  *   yield or a type) is removed, when it is removable.
  *
- * `fold`, `hoist`, `strength`, `inline`, `cse`, `invariants` and `dce` run
- * again while
+ * `fold`, `hoist`, `strength`, `inline`, `cse`, `invariants`, `forward` and
+ * `dce` run again while
  * one of them changes the program: `cse` then merges a value moved out of
  * two loops. When the checks are on (`setPassChecks()`, on in the test
  * suite), after each pass the program is verified, and its
@@ -97,6 +100,9 @@ export type PassOptions = {
    *  interval mode with an `iterationBudget`, whose limit refuses a loop of
    *  more passes). */
   listLoops?: boolean;
+  /** `forward`: a pure build that one instruction reads is read where it
+   *  is, with no list (`forward` below). */
+  forward?: boolean;
   dce?: boolean;
 };
 
@@ -107,6 +113,7 @@ export const ALL_PASSES: PassOptions = Object.freeze({
   inline: 'loop',
   cse: true,
   invariants: true,
+  forward: true,
   dce: true,
 });
 
@@ -178,6 +185,8 @@ export function runPasses(
         run('invariants', (q, r) =>
           invariants(q, r, options.listLoops !== false)
         ) || changed;
+    if (options.forward) changed = run('forward', forward) || changed;
+    if (options.forward) changed = run('filters', filters) || changed;
     if (options.dce) changed = run('dce', dce) || changed;
     if (!changed) break;
   }
@@ -908,4 +917,593 @@ const dce: Pass = (p, rows) => {
     region(f.body);
   }
   return { changed, resolve: (v) => v };
+};
+
+/** The integer values of `p` below 2^32, which a build or a filter of that
+ *  length does not refuse: a length parameter (of a list that exists), the
+ *  count of a filter, a constant, and the least of two of them. The guard of
+ *  a loop of `n` passes refuses more than 2^32 passes, where a build of `n`
+ *  elements refuses 2^32, so `forward` reads a list at its place only where
+ *  its length is one of these: the loop that reads it then refuses what the
+ *  build refused, nothing. */
+function boundedLengths(p: Program): Set<V> {
+  const bounded = new Set<V>();
+  const walk = (r: Region) =>
+    r.body.forEach((i) => {
+      if (
+        i.k === 'const' &&
+        typeof i.value.value === 'number' &&
+        i.value.lane === 'integer' &&
+        i.value.value >= 0 &&
+        i.value.value < 2 ** 32
+      )
+        bounded.add(i.out);
+      if (i.k === 'region' && i.op === 'filter') bounded.add(i.outs[0]);
+      if (
+        i.k === 'op' &&
+        i.op === 'min.int' &&
+        i.args.every((a) => bounded.has(a))
+      )
+        bounded.add(i.out);
+      regionsOf(i).forEach(walk);
+    });
+  for (const f of p.functions) {
+    f.lengthOf.forEach((l, k) => l && bounded.add(f.body.params[k]));
+    walk(f.body);
+  }
+  return bounded;
+}
+
+/** A `build` whose body `forward` copies: one index and one element, and a
+ *  body of pure operations, conditionals and calls (no loop or region,
+ *  which `copyBody()` does not copy). */
+const forwardable = (
+  fx: ReturnType<typeof effects>,
+  i: Instr
+): i is Instr & { k: 'region' } => {
+  if (i.k !== 'region' || i.op !== 'build' || i.outs.length !== 1) return false;
+  const [r] = i.regions;
+  const flat = (x: Instr): boolean =>
+    x.k === 'op' ||
+    x.k === 'const' ||
+    x.k === 'list' ||
+    x.k === 'call' ||
+    (x.k === 'if' && regionsOf(x).every((y) => y.body.every(flat)));
+  return (
+    i.regions.length === 1 &&
+    r.params.length === 1 &&
+    r.yields.length === 1 &&
+    r.body.every((x) => flat(x) && fx.of(x) === 'pure')
+  );
+};
+
+/** The instructions of the body `r` of a build at the index `k`, each with
+ *  new values, and the copy of its element. */
+function copyBody(p: Program, r: Region, k: V): { body: Instr[]; y: V } {
+  const m = new Map<V, V>([[r.params[0], k]]);
+  const v = (x: V) => m.get(x) ?? x;
+  const out = (x: V) => m.set(x, fresh(p, mapLengths(p.types[x], v))).get(x)!;
+  const copy = (q: Region): Region => ({
+    params: [],
+    body: q.body.map((x) => {
+      const c = { ...x };
+      mapDirectArgs(c, v);
+      if (c.k === 'if') [c.then, c.else] = [copy(c.then), copy(c.else)];
+      if ('outs' in c) c.outs = c.outs.map(out);
+      else c.out = out(c.out);
+      return c;
+    }),
+    yields: q.yields.map(v),
+  });
+  const { body, yields } = copy(r);
+  return { body, y: yields[0] };
+}
+
+/** A read of a value: the instruction, and the instructions around it. */
+type Site = { i: Instr; around: Instr[] };
+
+/** The index of `p` that `forward` and `filters` read: the value of each
+ *  constant, the definition of each value, each instruction with its region
+ *  and the instructions around it, and the reads of each value; `only(v)`,
+ *  the reads of `v` when no yield reads it; `between(s, d)`, the
+ *  instructions between the region of the definition `d` and the read `s`. */
+function siteIndex(p: Program) {
+  const { uses, def } = useIndex(p);
+  const constants = new Map<V, Constant>();
+  const readers = new Map<V, Site[]>();
+  const sites = new Map<Instr, { region: Region; around: Instr[] }>();
+  const walk = (r: Region, around: Instr[]) => {
+    for (const i of r.body) {
+      if (i.k === 'const') constants.set(i.out, i.value.value);
+      sites.set(i, { region: r, around });
+      for (const a of argsOf(i)) {
+        if (!readers.has(a)) readers.set(a, []);
+        readers.get(a)!.push({ i, around });
+      }
+      regionsOf(i).forEach((x) => walk(x, [...around, i]));
+    }
+  };
+  p.functions.forEach((f) => walk(f.body, []));
+  const only = (v: V): Site[] | undefined => {
+    const s = readers.get(v) ?? [];
+    return s.length === (uses.get(v) ?? 0) ? s : undefined;
+  };
+  const between = (s: Site, d: { around: Instr[] }) =>
+    s.around.slice(d.around.length);
+  return { uses, def, constants, readers, sites, only, between };
+}
+
+/**
+ * The pass `forward` (README, "Lists", where a view is a list): the list of
+ * a pure `build` that one instruction reads is not made, and that read
+ * computes the element it reads:
+ * - `elem(b, j)` is the body of the build at `j`, where the read runs once
+ *   for each run of the build (only conditionals between them), or in the
+ *   one loop, build or filter between them whose index is `j` (a reduction
+ *   of the list, a `Map` of it), which reads each element once;
+ * - `at(b, k)` of real elements, where the read runs once for each run of
+ *   the build, is the body at the index of `k` where `k` is in range, as
+ *   `At` reads it (an integer, from 1, from the end when negative), and NaN
+ *   elsewhere, the value of `at`.
+ * The build, unread, is then removed by `dce`. A list read twice, or by
+ * another instruction (a call, a list, a yield: the result, an argument of
+ * a function of the host), stays.
+ */
+const forward: Pass = (p, rows) => {
+  const fx = effects(p, rows);
+  const bounded = boundedLengths(p);
+  const { constants, def, sites, only, between } = siteIndex(p);
+  /** The value `m` is at most `n`: `n`, the least of values one of which
+   *  is `n`, or a constant at most the constant `n`. */
+  const atMost = (m: V, n: V): boolean => {
+    const d = def.get(m);
+    const [a, b] = [constants.get(m), constants.get(n)];
+    return (
+      m === n ||
+      (d?.k === 'op' && d.op === 'min.int' && d.args.includes(n)) ||
+      (typeof a === 'number' && typeof b === 'number' && a <= b)
+    );
+  };
+  // Whether the read `i`, inside the instructions `between` from the region
+  // of its build of `n` elements, computes each element at most once per
+  // run of the build, at an index below `n`: a loop from 0 to `m - 1`, or a
+  // build or a filter of `m` elements, with `m` at most `n` (`Dot` reads its
+  // second list over the length of the first).
+  const reads = (i: Instr & { k: 'op' }, between: Instr[], n: V): boolean => {
+    const loops = between.filter((x) => x.k !== 'if');
+    if (i.op === 'at') {
+      const t = p.types[i.out];
+      return loops.length === 0 && t.lane === 'real' && t.shape.length === 0;
+    }
+    if (loops.length === 0) return true;
+    const [x] = loops;
+    const body = repeated(x);
+    if (
+      loops.length !== 1 ||
+      body === undefined ||
+      body.params[0] !== i.args[1]
+    )
+      return false;
+    if (x.k !== 'loop') return x.k === 'region' && atMost(x.args[0], n);
+    // The last index: `m - 1`, or a constant below the constant `n`.
+    const last = def.get(x.hi);
+    const [hi, top] = [constants.get(x.hi), constants.get(n)];
+    return (
+      !x.parallel &&
+      x.window === undefined &&
+      constants.get(x.lo) === 0 &&
+      ((last?.k === 'op' &&
+        last.op === 'sub.int' &&
+        constants.get(last.args[1]) === 1 &&
+        atMost(last.args[0], n)) ||
+        (typeof hi === 'number' && typeof top === 'number' && hi < top))
+    );
+  };
+  // The reads to rewrite, each with its build.
+  const plan = new Map<Instr, Instr & { k: 'region' }>();
+  for (const [i, site] of sites) {
+    if (!forwardable(fx, i) || !bounded.has(i.args[0])) continue;
+    const readers = only(i.outs[0]) ?? [];
+    const [read] = readers;
+    if (
+      read !== undefined &&
+      read.i.k === 'op' &&
+      (read.i.op === 'elem' || read.i.op === 'at') &&
+      read.i.args[0] === i.outs[0] &&
+      readers.length === 1 &&
+      reads(read.i, between(read, site), i.args[0])
+    )
+      plan.set(read.i, i);
+  }
+  if (plan.size === 0) return { changed: false, resolve: (v) => v };
+  return rewrite(p, (i, { subst }) => {
+    const build = plan.get(i);
+    if (build === undefined || i.k !== 'op') return undefined;
+    const [r] = build.regions;
+    const index = i.args[1];
+    if (i.op === 'elem') {
+      const { body, y } = copyBody(p, r, index);
+      subst.set(i.out, y);
+      return body;
+    }
+    return atElement(
+      p,
+      i.out,
+      build.args[0],
+      index,
+      constants.get(index),
+      (j) => copyBody(p, r, j)
+    );
+  });
+};
+
+/** The instructions that give `out` the value of `At` of a list of reals of
+ *  the length `n` at the index `k` (the constant `c`, when it is one):
+ *  `element(j)` at its index from 0 `j` where it is in range, and NaN
+ *  elsewhere, as `_at` of the runtime. */
+function atElement(
+  p: Program,
+  out: V,
+  n: V,
+  k: V,
+  c: Constant | undefined,
+  element: (j: V) => { body: Instr[]; y: V }
+): Instr[] {
+  const code: Instr[] = [];
+  const op = (o: string, args: V[], lane: 'boolean' | 'integer'): V => {
+    const v = fresh(p, scalarType(lane));
+    code.push({ k: 'op', out: v, op: o, args });
+    return v;
+  };
+  const nan = (v: V): Instr => ({
+    k: 'const',
+    out: v,
+    value: { lane: 'real', value: NaN },
+  });
+  let j: V;
+  let ok: V;
+  if (c !== undefined) {
+    if (typeof c !== 'number' || !Number.isInteger(c) || c === 0)
+      return [nan(out)];
+    if (c > 0) {
+      j = integer(p, c - 1, code);
+      ok = op('lt', [j, n], 'boolean');
+    } else {
+      j = op('sub.int', [n, integer(p, -c, code)], 'integer');
+      ok = op('le', [integer(p, 0, code), j], 'boolean');
+    }
+  } else {
+    // A real index is read where it is an integer (`At(L, 1.5)` is NaN).
+    let whole: V | undefined;
+    let m = k;
+    if (p.types[k].lane !== 'integer') {
+      m = op('floor', [k], 'integer');
+      whole = op('eq', [k, m], 'boolean');
+    }
+    const zero = integer(p, 0, code);
+    const one = integer(p, 1, code);
+    const positive = op('lt', [zero, m], 'boolean');
+    const [down, back] = [
+      fresh(p, scalarType('integer')),
+      fresh(p, scalarType('integer')),
+    ];
+    j = fresh(p, scalarType('integer'));
+    code.push({
+      k: 'if',
+      outs: [j],
+      cond: positive,
+      then: {
+        params: [],
+        body: [{ k: 'op', out: down, op: 'sub.int', args: [m, one] }],
+        yields: [down],
+      },
+      else: {
+        params: [],
+        body: [{ k: 'op', out: back, op: 'add.int', args: [n, m] }],
+        yields: [back],
+      },
+    });
+    const within = op(
+      'and',
+      [op('le', [zero, j], 'boolean'), op('lt', [j, n], 'boolean')],
+      'boolean'
+    );
+    ok = whole === undefined ? within : op('and', [whole, within], 'boolean');
+  }
+  const { body, y } = element(j);
+  const none = fresh(p, scalarType('real'));
+  code.push({
+    k: 'if',
+    outs: [out],
+    cond: ok,
+    then: { params: [], body, yields: [y] },
+    else: { params: [], body: [nan(none)], yields: [none] },
+  });
+  return code;
+}
+
+/**
+ * The second half of `forward`: a `filter` of a pure body whose list is
+ * not needed is a loop over its source, with no list:
+ * - a list that no instruction reads, and a count read otherwise than by
+ *   `0 < count` (`Length`, `All`), is a loop that counts the elements kept;
+ * - a list read once, by `at` of the index 1 of a real element or by the
+ *   `elem` at 0 (`First`, `Find`), where the read runs once for each run of
+ *   the filter (only conditionals between them), or not read (`Any`), and
+ *   a count read only by `0 < count`, is a loop that stops at the first
+ *   element kept: whether there is one, and its value (NaN, the value of
+ *   `at`, where there is none);
+ * - a list that one loop after it in its region reduces (from 0 to the
+ *   count less 1, reading the element at its index and nothing else at
+ *   that index, of a pure body that does not read the count: `Sum`, `Mean`,
+ *   `Max`) is that loop over the source, whose body runs where an element
+ *   is kept, and which counts them; nothing between the two reads the list
+ *   or the count.
+ * A loop over the source has as many passes as the filter; one that stops
+ * has the guard of a loop with an exit (`print-js.ts`).
+ */
+const filters: Pass = (p, rows) => {
+  const fx = effects(p, rows);
+  const bounded = boundedLengths(p);
+  const { uses, def, constants, readers, sites, only, between } = siteIndex(p);
+  /** `x` or an instruction of its regions reads `v`, yields it, or has a
+   *  value whose type names it as a length. */
+  const mentions = (x: Instr, v: V): boolean =>
+    some(
+      x,
+      (y) =>
+        argsOf(y).includes(v) ||
+        outsOf(y).some((o) => lengthValues(p.types[o]).includes(v)) ||
+        regionsOf(y).some((r) => r.yields.includes(v))
+    );
+  const op = (i: Instr, name: string): i is Instr & { k: 'op' } =>
+    i.k === 'op' && i.op === name;
+  // The instructions that replace an instruction (none: it is removed), and
+  // the value that replaces the value of a read.
+  const replaced = new Map<Instr, Instr[]>();
+  const renamed = new Map<Instr, V>();
+  /** `0`, `1`, and the index `n - 1` of the last element of `n`. */
+  const bounds = (n: V, out: Instr[]) => {
+    const zero = integer(p, 0, out);
+    const one = integer(p, 1, out);
+    const hi = fresh(p, scalarType('integer'));
+    out.push({ k: 'op', out: hi, op: 'sub.int', args: [n, one] });
+    return { zero, one, hi };
+  };
+  for (const [x, site] of sites) {
+    const { region } = site;
+    if (x.k !== 'region' || x.op !== 'filter' || x.outs.length !== 2) continue;
+    const [body] = x.regions;
+    if (
+      x.regions.length !== 1 ||
+      body.params.length !== 1 ||
+      body.yields.length !== 2 ||
+      !bounded.has(x.args[0]) ||
+      !body.body.every((y) => fx.of(y) === 'pure')
+    )
+      continue;
+    const [count, list] = x.outs;
+    const [n] = x.args;
+    const [keep, value] = body.yields;
+    // A yield of the count reads it as a value (`Length` as the result).
+    const counts = readers.get(count) ?? [];
+    const yielded = counts.length < (uses.get(count) ?? 0);
+    const lists = only(list);
+    if (lists === undefined) continue;
+    const out: Instr[] = [];
+    const t = p.types[value];
+    // The first element kept.
+    const positive = (s: Site) =>
+      op(s.i, 'lt') &&
+      s.i.args[1] === count &&
+      constants.get(s.i.args[0]) === 0;
+    const [read] = lists;
+    const first =
+      lists.length === 0 ||
+      (lists.length === 1 &&
+        between(read, site).every((y) => y.k === 'if') &&
+        t.shape.length === 0 &&
+        ((op(read.i, 'at') &&
+          t.lane === 'real' &&
+          constants.get(read.i.args[1]) === 1) ||
+          (op(read.i, 'elem') &&
+            ['real', 'integer', 'boolean'].includes(t.lane) &&
+            constants.get(read.i.args[1]) === 0)));
+    if (
+      first &&
+      !yielded &&
+      counts.every(positive) &&
+      counts.length + lists.length > 0
+    ) {
+      const { zero, hi } = bounds(n, out);
+      const no = fresh(p, scalarType('boolean'));
+      out.push({
+        k: 'const',
+        out: no,
+        value: { lane: 'boolean', value: false },
+      });
+      const [done, found] = [
+        fresh(p, scalarType('boolean')),
+        fresh(p, scalarType('boolean')),
+      ];
+      const loop: Instr & { k: 'loop' } = {
+        k: 'loop',
+        outs: [found],
+        lo: zero,
+        hi,
+        init: [no],
+        exit: 0,
+        body: {
+          params: [body.params[0], done],
+          body: body.body,
+          yields: [keep],
+        },
+      };
+      // The element kept, carried from the pass that keeps it.
+      if (read !== undefined) {
+        const none = fresh(p, t);
+        out.push({
+          k: 'const',
+          out: none,
+          value:
+            t.lane === 'boolean'
+              ? { lane: 'boolean', value: false }
+              : t.lane === 'integer'
+                ? { lane: 'integer', value: 0 }
+                : { lane: 'real', value: NaN },
+        });
+        const [held, element, next] = [fresh(p, t), fresh(p, t), fresh(p, t)];
+        loop.outs.push(element);
+        loop.init.push(none);
+        loop.body.params.push(held);
+        loop.body.body = [
+          ...body.body,
+          {
+            k: 'if',
+            outs: [next],
+            cond: keep,
+            then: { params: [], body: [], yields: [value] },
+            else: { params: [], body: [], yields: [held] },
+          },
+        ];
+        loop.body.yields.push(next);
+        renamed.set(read.i, element);
+      }
+      out.push(loop);
+      replaced.set(x, out);
+      for (const s of counts) renamed.set(s.i, found);
+      continue;
+    }
+    if (lists.length === 0 && (counts.length > 0 || yielded)) {
+      // A count.
+      const { zero, one, hi } = bounds(n, out);
+      const [c, next, more] = [
+        fresh(p, scalarType('integer')),
+        fresh(p, scalarType('integer')),
+        fresh(p, scalarType('integer')),
+      ];
+      out.push({
+        k: 'loop',
+        outs: [count],
+        lo: zero,
+        hi,
+        init: [zero],
+        body: {
+          params: [body.params[0], c],
+          body: [
+            ...body.body,
+            {
+              k: 'if',
+              outs: [next],
+              cond: keep,
+              then: {
+                params: [],
+                body: [{ k: 'op', out: more, op: 'add.int', args: [c, one] }],
+                yields: [more],
+              },
+              else: { params: [], body: [], yields: [c] },
+            },
+          ],
+          yields: [next],
+        },
+      });
+      replaced.set(x, out);
+      continue;
+    }
+    // A reduction: the loop `l` whose body reads the element at its index.
+    if (lists.length !== 1 || !op(read.i, 'elem')) continue;
+    const [l, ...ifs] = between(read, site);
+    if (
+      l === undefined ||
+      l.k !== 'loop' ||
+      !region.body.includes(l) ||
+      !ifs.every((y) => y.k === 'if') ||
+      l.passes === true ||
+      l.exit !== undefined ||
+      l.parallel === true ||
+      l.window !== undefined ||
+      l.body.params[0] !== read.i.args[1] ||
+      uses.get(read.i.args[1]) !== 1 ||
+      constants.get(l.lo) !== 0 ||
+      uses.get(l.hi) !== 1 ||
+      !l.body.body.every((y) => fx.of(y) === 'pure') ||
+      l.body.body.some((y) => mentions(y, count)) ||
+      // The loop gives the count: its initial values, its yields and its
+      // operands other than its last index do not read it.
+      argsOf(l).includes(count) ||
+      l.body.yields.includes(count) ||
+      l.outs.some((o) => lengthValues(p.types[o]).includes(count))
+    )
+      continue;
+    const last = def.get(l.hi);
+    if (
+      last === undefined ||
+      !op(last, 'sub.int') ||
+      last.args[0] !== count ||
+      constants.get(last.args[1]) !== 1 ||
+      !region.body.includes(last)
+    )
+      continue;
+    const [from, to] = [region.body.indexOf(x), region.body.indexOf(l)];
+    if (
+      region.body
+        .slice(from + 1, to)
+        .some((y) => y !== last && (mentions(y, count) || mentions(y, list)))
+    )
+      continue;
+    // Where the count is read after the loop (`Mean`, `Max`), the loop
+    // counts the elements kept.
+    const { zero, one, hi } = bounds(n, out);
+    const carried = l.body.params.slice(1);
+    const nexts = carried.map((v) => fresh(p, p.types[v]));
+    const then: Region = {
+      params: [],
+      body: [...l.body.body],
+      yields: [...l.body.yields],
+    };
+    const otherwise: Region = { params: [], body: [], yields: [...carried] };
+    const loop: Instr & { k: 'loop' } = {
+      k: 'loop',
+      outs: [...l.outs],
+      lo: zero,
+      hi,
+      init: [...l.init],
+      body: {
+        params: [body.params[0], ...carried],
+        body: [
+          ...body.body,
+          { k: 'if', outs: nexts, cond: keep, then, else: otherwise },
+        ],
+        yields: nexts,
+      },
+    };
+    if (yielded || counts.some((s) => s.i !== last)) {
+      const [c, more, next] = [
+        fresh(p, scalarType('integer')),
+        fresh(p, scalarType('integer')),
+        fresh(p, scalarType('integer')),
+      ];
+      loop.outs.push(count);
+      loop.init.push(zero);
+      loop.body.params.push(c);
+      nexts.push(next);
+      then.body.push({ k: 'op', out: more, op: 'add.int', args: [c, one] });
+      then.yields.push(more);
+      otherwise.yields.push(c);
+    }
+    out.push(loop);
+    replaced.set(x, []);
+    replaced.set(last, []);
+    replaced.set(l, out);
+    renamed.set(read.i, value);
+  }
+  if (replaced.size === 0) return { changed: false, resolve: (v) => v };
+  return rewrite(p, (i, { subst }) => {
+    const v = renamed.get(i);
+    if (v !== undefined) {
+      outsOf(i).forEach((o) => subst.set(o, v));
+      return [];
+    }
+    return replaced.get(i);
+  });
 };

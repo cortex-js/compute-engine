@@ -779,6 +779,11 @@ export function sliceProgram(
       ...(bigint
         ? { fold: false, hoist: false, inline: false, invariants: false }
         : {}),
+      // A build read where it is: JavaScript, not the bigint and interval
+      // modes (README, "Lists", where a view is a list).
+      ...(options.target !== 'javascript' || bigint || interval
+        ? { forward: false }
+        : {}),
       ...(interval
         ? { fold: passes.fold && 'lists', hoist: false, strength: false }
         : {}),

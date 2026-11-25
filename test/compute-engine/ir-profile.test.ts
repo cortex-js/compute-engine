@@ -3213,9 +3213,10 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
     sameWithout(list, [at, { ...at, D: [] }]);
     const body = entry(list);
     const regions = body.filter((i) => i.k === 'region') as unknown as { regions: { body: { k: string }[] }[] }[];
-    // Two builds (the points, their x) and the loop of the Sum are out.
-    expect([regions.length, loops(body).length]).toEqual([3, 1]);
-    expect(regions[2].regions[0].body.some((i) => i.k === 'region' || i.k === 'loop')).toBe(false);
+    // The loop of the Sum is out, and reads the points and their x where
+    // it is, with no list of them (the pass `forward`, CE-1806).
+    expect([regions.length, loops(body).length]).toEqual([1, 1]);
+    expect(regions[0].regions[0].body.some((i) => i.k === 'region' || i.k === 'loop')).toBe(false);
   });
 
   test('the interval mode: what can throw there stays in a loop of no pass', () => {
@@ -3252,14 +3253,15 @@ describe('invariants: an instruction of a loop body that reads nothing of the bo
 
   test('a loop over the length of a list made in the same body stays', () => {
     e.declare('G4', 'list<real>');
-    // The filter reads k, so its count, the bound of the inner Sum, stays.
+    // The filter reads k, so its count, the bound of the inner Sum, stays:
+    // a loop that counts (the pass `forward`, CE-1806).
     const json = ['Sum', ['Sum', 'i', ['Limits', 'i', 1, ['Length', ['Filter', 'G4', ['Function', ['Greater', 'z', 'k'], 'z']]]]], ['Limits', 'k', 1, 'n']];
     const G4 = [0.5, 1.5, 2.5, 3.5];
     againstInterpreter(e, json, [{ G4, n: 0 }, { G4, n: 3 }]);
     sameWithout(json, [{ G4, n: 0 }, { G4, n: 3 }]);
     const [outer] = loops(entry(json));
-    expect(outer.body.body.some((i) => i.k === 'region')).toBe(true);
-    expect(loops(outer.body.body as { k: string }[])).toHaveLength(1);
+    expect(outer.body.body.some((i) => i.k === 'region')).toBe(false);
+    expect(loops(outer.body.body as { k: string }[])).toHaveLength(2);
   });
 
   test('GLSL: a list and a conditional are declared before the for', () => {
