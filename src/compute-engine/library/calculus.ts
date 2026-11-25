@@ -7536,7 +7536,19 @@ volumes
         // `G := sin(x)`, `ND(x ↦ G, 1)` is `cos(1)`
         // (`literalWithFormulaValues`). A lone symbol that holds a formula is
         // read as its value: with `G := sin(x)`, `ND(G, 1)` is `cos(1)`
-        // (`loneFormulaLiteral`).
+        // (`loneFormulaLiteral`). Only a formula whose type is a number, or a
+        // bare variable (`G := x`), is read: the type of `ND(G, 1)` is
+        // `number`, so a point or a list (`G := (cos(t), sin(t))`) stays
+        // unevaluated.
+        if (isSymbol(body)) {
+          const value = loneSymbolFormula(engine, body.symbol);
+          if (
+            value !== undefined &&
+            !isSymbol(value) &&
+            derivativeValueShape(value.type.type) !== 'scalar'
+          )
+            return undefined;
+        }
         body = literalWithFormulaValues(
           engine,
           loneFormulaLiteral(engine, body) ?? body

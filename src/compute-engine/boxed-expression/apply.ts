@@ -7,8 +7,8 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import {
   BigNumericValue,
   DOUBLE_DIGITS,
+  isDoublePart,
 } from '../numeric-value/big-numeric-value.js';
-import { isOutsideNormalDoubleRange } from '../numerics/numeric.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
@@ -407,11 +407,10 @@ export function applyN(
 }
 
 /** Whether `x` is finite and not 0, and its double is 0, a subnormal
- * double or not finite. */
+ * double or not finite: the rule of `toDouble()` in `big-numeric-value.ts`. */
 function isBeyondDouble(x: BigDecimal): boolean {
   if (!x.isFinite() || x.isZero()) return false;
-  const n = x.toNumber();
-  return n === 0 || isOutsideNormalDoubleRange(n);
+  return !isDoublePart(x.toNumber(), x);
 }
 
 /**
@@ -422,7 +421,10 @@ function isBeyondDouble(x: BigDecimal): boolean {
  * a big decimal (a value made before the precision was lowered): `prec` is
  * then `DOUBLE_DIGITS`, so that the result has the digits of a double and
  * not 15 (`0.3^{0.5}` with a `0.3` made at 30 digits). The result is boxed
- * as a machine value, as the kernels of `BigNumericValue` do.
+ * as a machine value, as the kernels of `BigNumericValue` do, except a finite
+ * result other than 0 whose double is 0, subnormal or not finite: at machine
+ * precision it keeps its big decimal (`Power(10, -400.5)`), whatever the
+ * operands, as `toDouble()` does.
  */
 export function apply2(
   expr1: Expression,

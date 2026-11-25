@@ -228,12 +228,12 @@ export function loneSymbolFormula(
   if (isSymbol(value)) {
     // The chain ends at the symbol only when the symbol has no value
     // (`G := x`). A symbol that holds a value that is not a formula
-    // (`H := 5`), and a symbol already read in this chain (a cycle), give no
-    // formula for the whole chain.
+    // (`H := 5`) gives no formula for the whole chain, and so does a cycle:
+    // the `visited` test at the entry of the recursive call catches it.
     const target = engine.lookupDefinition(value.symbol);
     if (isValueDef(target) && target.value.value !== undefined)
       return loneSymbolFormula(engine, value.symbol, visited);
-    return visited.has(value.symbol) ? undefined : value;
+    return value;
   }
   return value;
 }
