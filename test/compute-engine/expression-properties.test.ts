@@ -763,6 +763,93 @@ describe('DEFINES', () => {
   });
 });
 
+// A `Program` writes its names in the caller scope. A name that a statement
+// reads after an earlier statement writes it is not an input of the program.
+describe('PROGRAM DEFINES / REFERENCES', () => {
+  it('a recursive function that the program declares is an output, not an input', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', ['Add', 'm', 10], 'm']));
+    const json = [
+      'Program',
+      [
+        'Declare',
+        'f',
+        "'unknown'",
+        [
+          'Function',
+          ['If', ['LessEqual', 'm', 0], 1, ['f', ['Add', 'm', -1]]],
+          'm',
+        ],
+      ],
+      ['f', 2],
+    ];
+    for (const program of [ce.box(json), ce.box(json, { form: 'raw' })]) {
+      expect(program.references).toEqual([]);
+      expect(program.defines).toEqual(['f']);
+      expect(program.unknowns).toEqual([]);
+    }
+    expect(ce.box(json).evaluate().json).toEqual(1);
+  });
+
+  it('a name that the program assigns before it reads it is not an input', () => {
+    // A canonical `Program` refuses an assignment to a name that no scope
+    // declares.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    const json = ['Program', ['Assign', 'a', 1], ['Add', 'a', 'b']];
+    for (const program of [ce.box(json), ce.box(json, { form: 'raw' })]) {
+      expect(program.references).toEqual(['b']);
+      expect(program.defines).toEqual(['a']);
+      expect(program.unknowns).toEqual(['b']);
+    }
+  });
+
+  it('a name that the program reads before it writes it is an input', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 7);
+    for (const json of [
+      ['Program', ['Assign', 'a', ['Add', 'a', 1]], 'a'],
+      ['Program', ['Add', 'a', 1], ['Assign', 'a', 2]],
+    ]) {
+      const program = ce.box(json);
+      expect(program.references).toEqual(['a']);
+      expect(program.defines).toEqual(['a']);
+    }
+    // A declaration whose initializer reads its own name reads the name of
+    // the caller scope.
+    const declaration = ce.box([
+      'Program',
+      ['Declare', 'y', "'real'", ['Add', 'y', 1]],
+    ]);
+    expect(declaration.references).toEqual(['y']);
+  });
+
+  it('a name that the program declares with no value is not an input', () => {
+    const program = new ComputeEngine().box([
+      'Program',
+      ['Declare', 'y', "'real'"],
+      ['Add', 'y', 1],
+    ]);
+    expect(program.references).toEqual([]);
+    expect(program.defines).toEqual(['y']);
+  });
+
+  it('a function that the program defines is not an input, at any place', () => {
+    // `canonicalProgram()` moves a `DefineFunction` before the other
+    // statements.
+    const ce = new ComputeEngine();
+    const json = [
+      'Program',
+      ['h', 'c'],
+      ['DefineFunction', 'h', ['Function', ['h', 'm'], 'm']],
+    ];
+    for (const program of [ce.box(json), ce.box(json, { form: 'raw' })]) {
+      expect(program.references).toEqual(['c']);
+      expect(program.defines).toEqual(['h']);
+    }
+  });
+});
+
 describe('REFERENCED_FUNCTIONS / REFERENCES', () => {
   // Fresh engine per test: `f`/`g`/`h` must be functions so calls parse as
   // applications rather than implicit multiplication.

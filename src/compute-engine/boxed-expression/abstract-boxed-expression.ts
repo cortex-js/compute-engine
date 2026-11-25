@@ -2313,6 +2313,10 @@ function collectReferences(
   const localVars = new Set<string>(builder?.names);
   const block = bindsStatementTargets(expr);
   if (block) addBlockLocals(expr.ops, expr.localScope, localVars, memo, mode);
+  // A `Program` runs in the caller scope: its statements write names there,
+  // on the rules of `addBlockLocals()` for a program.
+  else if (expr.operator === 'Program')
+    addBlockLocals(expr.ops, undefined, localVars, memo, mode, true, true);
   // A raw sequence may include a duplicate that canonicalization refuses.
   const declared =
     block && mode === 'references' ? new Set<string>() : undefined;
@@ -2499,6 +2503,27 @@ export function blockOuterAssignTargets(expr: Expression): string[] {
  * not a read in the second rule: `subs()` does not replace the name of a
  * call, so `Block(Assign(y, f(1)), Assign(f, g), y)` keeps `f` as a local
  * for `subs()` (`blockOuterAssignTargets()`).
+ *
+ * With `program` set, `ops` are the statements of a `Program`, which runs
+ * in the caller scope and has no scope of its own (`PROGRAM_DEFINITION`,
+ * `library/control-structures.ts`). The names of its statements are the
+ * names that the program writes in the caller scope. `canonicalProgram()`
+ * moves a `DefineFunction` statement before the statements that read or
+ * write values, so its name is a local of the program as in a block. A
+ * `Declare` statement runs at its place in the source, as an `Assign` does,
+ * so the second rule applies to its target too: in
+ * `Program(x + 1, Declare(x, real, 5))`, the first statement reads the `x`
+ * of the caller scope, and `x` is free. A read in the function literal that
+ * a `Declare` stores is not a read before the write, as for an `Assign`:
+ * the recursive
+ * `Program(Declare(f, unknown, Function(If(m ≤ 0, 1, f(m − 1)), m)), f(2))`
+ * has no free variable and no referenced function.
+ *
+ * The second rule assumes that the statement that writes the name succeeds.
+ * A `Program` continues after a statement that fails, so a later statement
+ * then reads the value of the caller scope: with `a = 7` and `b = -4`,
+ * both declared `real`, `Program(Assign(a, Sqrt(b)), a + 1)` gives `8`, and
+ * its references are `['b']` only.
  */
 function addBlockLocals(
   ops: ReadonlyArray<Expression>,
@@ -2506,12 +2531,18 @@ function addBlockLocals(
   locals: Set<string>,
   memo: ReferencesMemo,
   mode: ReferenceMode,
-  callsRead = true
+  callsRead = true,
+  program = false
 ): void {
+  // A statement that writes its target at its place in the source: an
+  // `Assign`, or in a `Program` a `Declare` too.
+  const writesInPlace = (statement: Expression): boolean =>
+    isFunction(statement, 'Assign') ||
+    (program && isDeclarationStatement(statement));
   const assigned = new Set<string>();
   for (const op of ops) {
     const names = statementDeclaredNames(op);
-    if (isFunction(typedStatement(op), 'Assign'))
+    if (writesInPlace(typedStatement(op)))
       for (const name of names) assigned.add(name);
     else for (const name of names) locals.add(name);
   }
@@ -2529,14 +2560,18 @@ function addBlockLocals(
     const statement = typedStatement(op);
     const reads = new Set<string>();
     const readFns = new Set<string>();
-    if (isFunction(statement, 'Assign')) {
+    if (writesInPlace(statement) && isFunction(statement)) {
       const written = statementDeclaredNames(op);
       // A symbol or destructuring target is written, not read. Another
       // target (`Assign(At(a, 1), v)`) reads the names it holds.
       const target = statement.ops[0];
       if (!isSymbol(target) && !isFunction(target, 'Tuple'))
         getReferences(target, reads, readFns, memo, mode);
-      for (const value of statement.ops.slice(1)) {
+      // The operands after the target, without the type of a `Declare`
+      // (`declarationOperands()`).
+      const values =
+        declarationOperands(statement) ?? statement.ops.slice(1);
+      for (const value of values) {
         if (!isFunction(value, 'Function')) {
           getReferences(value, reads, readFns, memo, mode);
           continue;
@@ -2731,7 +2766,9 @@ function definitionOnlyNames(expr: Expression): Set<string> {
 
 /**
  * Return the symbols **defined** by this expression: the target of a
- * top-level `Assign` or `Declare`, recursing through `Block` sequences.
+ * top-level `Assign` or `Declare`, recursing through `Block` and `Program`
+ * sequences. The names that a `Program` writes are names of the caller
+ * scope (`addBlockLocals()`).
  *
  * Used by the `defines` accessor. Distinct from {@link getUnknowns}: a
  * definition such as `f(x) := …` *defines* `f` while *referencing* whatever
@@ -2739,7 +2776,7 @@ function definitionOnlyNames(expr: Expression): Set<string> {
  */
 function getDefines(expr: Expression, result: Set<string>): void {
   if (!isFunction(expr)) return;
-  if (expr.operator === 'Block') {
+  if (expr.operator === 'Block' || expr.operator === 'Program') {
     for (const op of expr.ops) getDefines(op, result);
     return;
   }

@@ -98,6 +98,16 @@
 
 ### Resolved Issues
 
+- **The `references`, `defines` and `unknowns` of a `Program` follow the
+  order of its statements** (CE-1576). A `Program` that declares the
+  recursive function
+  `f := m ↦ If(m ≤ 0, 1, f(m − 1))` and then calls `f(2)` had the references
+  `['f']` and no defines, so a dependency graph took its own function for an
+  input. It now has no references and the defines `['f']`. A name that a
+  statement of the program writes (`Assign`, `Declare`, `DefineFunction`) is
+  in `defines`, and it is a reference only when a statement reads it before
+  the first write: `Program(Assign(a, a + 1), a)` still references `a`.
+
 - **`LogGamma` and `GammaLn` of a long exact rational next to a zero of
   ln|Γ| at a negative argument have all their digits** (CE-1573). At 30
   digits, the real part of
