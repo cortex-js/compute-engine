@@ -98,6 +98,17 @@
 
 ### Resolved Issues
 
+- **`LogGamma` and `GammaLn` of a long exact rational next to a zero of
+  ln|Γ| at a negative argument have all their digits** (CE-1573). At 30
+  digits, the real part of
+  `LogGamma(-245702473822080062302945414765117954323659791/10^44).N()` was
+  `1.51560344802165732168532430667e-20`, wrong from the 19th digit; it is now
+  `1.51560344802165732168564106779e-20`. The value is far below the rounding
+  error of the operand, and the computation now reads the exact operand again
+  at the higher precision of its retry. `GammaLn` at a negative argument now
+  checks this cancellation too, and stays unevaluated when the digits are
+  not reached.
+
 - **The numeric inverse of a singular matrix stays unevaluated** (CE-1542).
   `Inverse([[3, 2, 1], [1, 1, 1], [4, 3, 2]]).N()` gave entries of about
   `4.5e15`, because rounding left a small nonzero pivot in place of 0. It now

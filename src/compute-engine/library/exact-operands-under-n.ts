@@ -569,6 +569,44 @@ export function guardDigitsN(
   };
 }
 
+/**
+ * A function that approximates operand `index` of the call again, at a given
+ * number of digits, for a kernel whose result cancels by more digits than
+ * the guard digits of `guardDigitsN()` cover. Near a zero of the function,
+ * the result is many orders of magnitude below the rounding error of the
+ * operand (`LogGamma` at x ≈ −2.457), and a kernel that raises only its own
+ * precision computes with that error. `undefined` when the operand as
+ * written has no digits to read again: a float, which is exact as given, an
+ * integer, or an expression that is not exact. The function returns
+ * `undefined` when the approximation is not a real number literal.
+ */
+export function exactOperandReader(
+  options: EvaluateHandlerOptions,
+  ops: ReadonlyArray<Expression>,
+  index: number
+): ((digits: number) => BigDecimal | undefined) | undefined {
+  const { numericApproximation, engine: ce, expression } = options;
+  if (
+    !numericApproximation ||
+    !bignumPreferred(ce) ||
+    expression === undefined ||
+    !isFunction(expression) ||
+    expression.nops !== ops.length
+  )
+    return undefined;
+  const op = ops[index];
+  const original = expression.ops[index];
+  if (!isNumber(op) || op.isComplex || !needsGuardDigits(original))
+    return undefined;
+  return (digits) =>
+    ce._withTransientPrecision(digits, () => {
+      const r = original.N();
+      return isNumber(r) && !r.isComplex && r.isFinite === true
+        ? (r.bignumRe ?? ce.bignum(r.re))
+        : undefined;
+    });
+}
+
 /** `guardDigitsN` with the size rule (`Zeta`, `DirichletEta`, `Exp`). */
 export function guardDigitsSizeN(
   evaluate: Parameters<typeof guardDigitsN>[0],

@@ -145,6 +145,7 @@ import {
   bigIncompleteGammaUpper,
   bigGamma,
   bigGammaln,
+  bigLnAbsGammaNegative,
   digamma,
   trigamma,
   polygamma,
@@ -557,6 +558,7 @@ import {
   guardDigitsGammaN,
   guardDigitsN,
   guardDigitsPoleN,
+  exactOperandReader,
   guardDigitsSizeN,
   guardDigitsSizePoleN,
 } from './exact-operands-under-n.js';
@@ -10281,7 +10283,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
 
-      evaluate: guardDigitsPoleN((ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN((ops, options) => {
+        const { numericApproximation, engine } = options;
         const x = ops[0];
         // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
         // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
@@ -10297,6 +10300,32 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (!numericApproximation) {
           const exact = logGammaAtExactArgument(engine, x, 'principal');
           if (exact !== undefined) return exact;
+        }
+        // At a real x < 0, ln|Γ| cancels near its zeros (x ≈ −2.457): the
+        // kernel reads x again at the precision of its retry, and the call
+        // stays unevaluated when the digits are not reached. This is before
+        // `apply`, which would answer a declined real value with the complex
+        // kernel.
+        if (
+          shouldNumericize(numericApproximation, x) &&
+          bignumPreferred(engine) &&
+          isNumber(x) &&
+          !x.isComplex &&
+          Number.isFinite(x.re) &&
+          x.re < 0
+        ) {
+          const b = x.bignumRe ?? engine.bignum(x.re);
+          if (!b.isInteger()) {
+            const v = bigLnAbsGammaNegative(
+              engine,
+              b,
+              engine.precision,
+              exactOperandReader(options, ops, 0)
+            );
+            return v === undefined
+              ? undefined
+              : engine.number(engine._numericValue(v));
+          }
         }
         return shouldNumericize(numericApproximation, x)
           ? apply(

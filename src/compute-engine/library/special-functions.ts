@@ -130,7 +130,11 @@ import {
   expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
-import { guardDigitsN, guardDigitsPoleN } from './exact-operands-under-n.js';
+import {
+  exactOperandReader,
+  guardDigitsN,
+  guardDigitsPoleN,
+} from './exact-operands-under-n.js';
 import {
   MAX_EXACT_DEGREE,
   MAX_NUMERIC_DEGREE,
@@ -331,7 +335,9 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: guardDigitsPoleN(([z], { numericApproximation, engine }) => {
+      evaluate: guardDigitsPoleN((ops, options) => {
+        const [z] = ops;
+        const { numericApproximation, engine } = options;
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
           return engine.PositiveInfinity;
         const infinite = infiniteGammaFamilyValue(z, engine);
@@ -391,7 +397,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           const v = bigLogGammaNegative(
             engine,
             z.bignumRe ?? engine.bignum(z.re),
-            engine.precision
+            engine.precision,
+            exactOperandReader(options, ops, 0)
           );
           return v === undefined
             ? undefined

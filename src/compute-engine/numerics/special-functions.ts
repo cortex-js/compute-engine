@@ -3941,18 +3941,42 @@ export function bigHurwitzZetaComplex(
 /**
  * ln Γ(x) on the principal branch (the one continuous from the upper half
  * plane, so Im = −π⌈−x⌉) at a finite non-integer real x < 0:
- * ln|Γ(x)| from `bigGammaln` and the exact multiple of π, rounded to
- * `prec` digits. Declines (`undefined`) past |x| = 10^100, where the
- * multiple of π needs hundreds of digits of π.
+ * ln|Γ(x)| from `bigLnAbsGammaNegative` and the exact multiple of π,
+ * rounded to `prec` digits. Declines (`undefined`) past |x| = 10^100, where
+ * the multiple of π needs hundreds of digits of π.
  */
 export function bigLogGammaNegative(
   ce: ComputeEngine,
   x: BigNum,
-  prec: number
+  prec: number,
+  readAgain?: (digits: number) => BigNum | undefined
 ): { re: BigNum; im: BigNum } | undefined {
   if (!x.isFinite() || !x.isNegative() || x.isInteger()) return undefined;
   if (x.lt(LOG_GAMMA_MIN_NEGATIVE)) return undefined;
   const m = new BigDecimal(x.neg().ceil().toBigInt());
+  const re = bigLnAbsGammaNegative(ce, x, prec, readAgain);
+  if (re === undefined) return undefined;
+  const digits = prec + 4 + Math.ceil(Math.log10(Number(m.toNumber()) + 1));
+  return { re, im: BigDecimal.pi(digits).mul(m).neg().toPrecision(prec) };
+}
+
+/**
+ * ln|Γ(x)| at a finite non-integer real x < 0, rounded to `prec` digits,
+ * or `undefined` when the cancellation near a zero of ln|Γ| is not
+ * resolved.
+ *
+ * `readAgain`, when given, approximates the exact value of x at a number of
+ * digits. Near a zero of ln|Γ| the result is far below the rounding error
+ * of x, so the retry that raises the precision reads x again at that
+ * precision: with x as given, it computes ln|Γ| of the rounded x exactly.
+ */
+export function bigLnAbsGammaNegative(
+  ce: ComputeEngine,
+  x: BigNum,
+  prec: number,
+  readAgain?: (digits: number) => BigNum | undefined
+): BigNum | undefined {
+  if (!x.isFinite() || !x.isNegative() || x.isInteger()) return undefined;
   // ln|Γ(x)| = ln π − ln|sin πx| − ln Γ(1−x) cancels near its zeros (x ≈
   // −2.457, −3.144, …): the digits lost are the log10 of the largest term
   // over the result. Raise the guard once by that many; decline if still short.
@@ -3963,20 +3987,25 @@ export function bigLogGammaNegative(
     sizeOf(bigSinPi(x, 20).abs().ln(20))
   );
   let guard = SPECIAL_FN_GUARD;
-  let re: BigNum | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0 && readAgain !== undefined) {
+      // A value with another multiple of π is not the same operand: keep x.
+      const v = readAgain(prec + guard);
+      if (
+        v !== undefined &&
+        v.isFinite() &&
+        !v.isInteger() &&
+        v.ceil().eq(x.ceil())
+      )
+        x = v;
+    }
     const r = bigGammaln(ce, x, prec + guard);
     if (!r.isFinite() || r.isZero()) return undefined;
     const lost = Math.max(0, largest + 1 - bigLog10Abs(r));
-    if (lost <= guard - 8) {
-      re = r.toPrecision(prec);
-      break;
-    }
+    if (lost <= guard - 8) return r.toPrecision(prec);
     guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
   }
-  if (re === undefined) return undefined;
-  const digits = prec + 4 + Math.ceil(Math.log10(Number(m.toNumber()) + 1));
-  return { re, im: BigDecimal.pi(digits).mul(m).neg().toPrecision(prec) };
+  return undefined;
 }
 
 const LOG_GAMMA_MIN_NEGATIVE = new BigDecimal('-1e100');
