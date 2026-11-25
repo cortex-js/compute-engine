@@ -144,7 +144,10 @@ import {
   type Source,
 } from './lower-context.js';
 import { toBigint } from '../../boxed-expression/numerics.js';
-import { isHostFunctionDefinition } from '../../boxed-expression/definition-guards.js';
+import {
+  isHostFunctionDefinition,
+  isValueDef,
+} from '../../boxed-expression/definition-guards.js';
 import {
   listLowering,
   literalList,
@@ -766,12 +769,23 @@ function lowerOnce(
     { uses: readonly Assigned[]; writes: readonly string[] }
   >();
   const noState = { uses: [], writes: [] } as const;
-  // The calls of user functions that `assignedNames()` scanned: a call
-  // that the lowering makes (`Map(f, L)` calls `f(_p1)`) is not one, and
-  // a variable of `assigns` that its function reads declines (`free()`):
-  // the facts of the node that holds it do not count the read.
-  const scanned = new WeakSet<Expression>();
+  // The user functions whose bodies `assignedNames()` scanned, called or
+  // named (`Map(f, L)`, whose call `f(_p1)` the lowering makes): a
+  // variable of `assigns` that another function reads declines
+  // (`free()`): the facts of the node that holds the call do not count
+  // the read.
+  const scanned = new WeakSet<object>();
   const stateOf = (key: object) => stateUses.get(key) ?? noState;
+  /** The user function that the symbol `x` names, as an operand
+   *  (`Map(f, L)`): the binding that its call `f(…)` reads
+   *  (`operatorLiteral()` of `lower-lists.ts`). */
+  const namedUser = (x: Expression & { symbol: string }) =>
+    userBinding({
+      operator: x.symbol,
+      operatorDefinition: x.operatorDefinition,
+      valueDefinition: x.valueDefinition,
+      engine: x.engine,
+    } as never);
   // The bindings that each `Loop` around the node being lowered carries,
   // and the user function whose body has the loop (`loop()`): a write of
   // a variable of the engine by a call in the loop rebinds a carried
@@ -1270,7 +1284,17 @@ function lowerOnce(
       size: 1,
       answered: false,
     });
-    if (isSymbol(e)) return leaf(new Set([e.symbol]), true);
+    if (isSymbol(e)) {
+      // A user function named as an operand (`Map(f, L)`) reads and
+      // writes the variables of the engine that its body does (CE-1776).
+      const s = stateUses.size > 0 ? namedUser(e) : undefined;
+      const state = s === undefined ? noState : stateOf(s.key);
+      if (state.uses.length === 0) return leaf(new Set([e.symbol]), true);
+      return {
+        ...leaf(new Set([e.symbol, ...state.uses.map((x) => x.name)]), true),
+        writes: new Set(state.writes),
+      };
+    }
     // The attributes of a `Declare` read the names of their values: in a sum
     // written out, `Declare(t, {value: k})` is lowered at each term.
     if (isDictionary(e)) {
@@ -4425,12 +4449,13 @@ function lowerOnce(
     let known = lookup(name)?.binding;
     // At the root, a variable of the engine that the root function literal
     // assigns, in the binding that the function reads: its value here
-    // (CE-1776), at a call that `assignedNames()` scanned.
+    // (CE-1776), of a function that `assignedNames()` scanned.
     const state = assigns.find((x) => x.name === name);
-    if (state !== undefined && !scanned.has(e))
+    const callee = userBinding(e)?.key;
+    if (state !== undefined && (callee === undefined || !scanned.has(callee)))
       decline(
         e,
-        `a call of ${e.operator}, which reads the variable ${name} of the engine, where the function is not called by name in the source (a function given to Map or another operator)`
+        `a call of ${e.operator}, which reads the variable ${name} of the engine, where the function is not called or named in the source (a function value)`
       );
     if (
       cx.inFunction === undefined &&
@@ -7623,6 +7648,8 @@ function lowerOnce(
     // `Declare` of a `Block` around `x` binds.
     // `scope`: the innermost local scope around `x` in the body of the
     // user function `helper`.
+    // The lazy collections of the program, with the names bound around each.
+    const views: { x: Expression; bound: ReadonlySet<string> }[] = [];
     const visit = (
       x: Expression,
       bound: ReadonlySet<string>,
@@ -7631,15 +7658,18 @@ function lowerOnce(
     ): void => {
       if (isSymbol(x) && helper !== undefined && !bound.has(x.symbol))
         if (engineName(x, outer)) helper.reads.add(x.symbol);
+      // A user function named as an operand (`Map(f, L)`): its body, as
+      // for a call.
+      const named =
+        isSymbol(x) && !bound.has(x.symbol) ? namedUser(x) : undefined;
       // The attributes of a `Declare` (`let a = f(t)`): their values.
       if (isDictionary(x))
         x.values.forEach((v) => visit(v, bound, helper, outer));
-      if (!isFunction(x)) return;
-      const scope = x.localScope ?? outer;
+      if (!isFunction(x) && named === undefined) return;
       // A call of a user function: its body, once.
-      const user = userBinding(x);
+      const user = isFunction(x) ? userBinding(x) : named;
       if (user !== undefined) {
-        scanned.add(x);
+        scanned.add(user.key);
         helper?.calls.push(user.key);
         if (!touched.has(user.key)) {
           const t: Touch = { reads: new Set(), writes: new Set(), calls: [] };
@@ -7655,6 +7685,9 @@ function lowerOnce(
           );
         }
       }
+      if (!isFunction(x)) return;
+      if (x.isLazyCollection) views.push({ x, bound });
+      const scope = x.localScope ?? outer;
       const binds =
         x.operator === 'Function'
           ? x.ops.slice(1).map((p) => parameterName(p) ?? '')
@@ -7779,6 +7812,23 @@ function lowerOnce(
             writes: uses.filter((s) => writes.has(s.name)).map((s) => s.name),
           });
       }
+    // A lazy collection whose callback reads a variable of `assigns`
+    // through a user function (`map(getX, [1, 2])`, `map(i => getX(i),
+    // 1..2)`) and that reads no variable of the engine itself can stay lazy
+    // in the interpreter, which lists a view at its assignment only when it
+    // reads a variable (`readsVariable()` of `library/core.ts`;
+    // `docs/SCOPING-MODEL.md`, "Callable resolution"). It computes an
+    // element at each read, with the value of the variable then; the code
+    // builds the list where it stands.
+    for (const { x, bound } of views)
+      if (
+        reachesStateIn(x, (k) => stateUses.has(k), namedUser) &&
+        !readsVariableIn(x, bound)
+      )
+        decline(
+          x,
+          'a lazy collection whose callback reads a variable of the engine through a user function, and that reads no variable of the engine itself: the interpreter can compute each element when it is read'
+        );
     // The facts of a call count the variables that it reads and writes.
     if (stateUses.size > 0) known = new WeakMap();
     return out;
@@ -7892,6 +7942,42 @@ function lowerOnce(
  *  for a name that is not bound (the target of an `Assign`), the binding
  *  of its name in the local scope `scope` or in a scope that encloses it,
  *  as the interpreter finds it (CE-1776). */
+/** Whether `x` calls or names a user function that reads or writes a
+ *  variable of the engine (`stateUses`). */
+function reachesStateIn(
+  x: Expression,
+  has: (key: object) => boolean,
+  named: (x: Expression & { symbol: string }) => { key: object } | undefined
+): boolean {
+  if (isSymbol(x)) return has(named(x)?.key ?? {});
+  if (!isFunction(x)) return false;
+  const user = userBinding(x);
+  if (user !== undefined && has(user.key)) return true;
+  return x.ops.some((op) => reachesStateIn(op, has, named));
+}
+
+/** `readsVariable()` of `library/core.ts`, for a variable of the engine
+ *  only. A name of `bound` (a parameter or a local of the program) does
+ *  not count: the interpreter keeps a view over a local lazy, and a view
+ *  that a function returns is assigned where its parameter is not a
+ *  variable. */
+function readsVariableIn(x: Expression, bound: ReadonlySet<string>): boolean {
+  const isVariable = (name: string): boolean => {
+    if (bound.has(name)) return false;
+    const def = x.engine.lookupDefinition(name);
+    if (def === undefined) return false;
+    if (isValueDef(def)) return !def.value.isConstant;
+    return (
+      (def as { _declaredByStatement?: boolean })._declaredByStatement === true
+    );
+  };
+  const walk = (y: Expression): boolean =>
+    isSymbol(y)
+      ? isVariable(y.symbol)
+      : isFunction(y) && (isVariable(y.operator) || y.ops.some(walk));
+  return walk(x);
+}
+
 function definitionIn(
   x: Expression & { symbol: string },
   scope: Scope | undefined

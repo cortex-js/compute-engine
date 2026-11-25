@@ -4,8 +4,10 @@
  * (`CompilationResult.assigns`). The function takes each such variable as
  * an input and returns the record of its value and of the new value of each
  * variable that it writes; the call rebinds the variable, in the order of the
- * program. A call in a loop, a call that maps over a list and a recursive
- * function that writes a variable decline.
+ * program. A `Loop` carries the variables; a function given by name to an
+ * operator reads them at each application. A call in a `Sum` or a `Map`
+ * callback, a call that maps over a list and a recursive function that
+ * writes a variable decline.
  */
 
 import { compile } from '../../src/compile';
@@ -208,6 +210,47 @@ let tick = (dt: real) => f(dt) + f(1)`,
   });
 });
 
+describe('a function given by name to an operator reads the state', () => {
+  // The views read the variable `L` of the engine, so the interpreter
+  // lists them at the assignment.
+  const GET = `function getX(d: real) scope { ballX + d }
+let L = [2, 3]
+`;
+  const cases: [string, string][] = [
+    [
+      // Before CE-1776's scan followed names, the second map reused the
+      // value of the first one (6 for 10).
+      'map, with writes between',
+      `let tick = (dt: real) => do { ballX = 1; let A = map(getX, L); ballX = 5; let B = map(getX, L); A[1] + B[1] }`,
+    ],
+    [
+      'map, and a call of the same function',
+      `let tick = (dt: real) => do { ballX = 1; let A = map(getX, L); ballX = 5; let B = map(getX, L); A[1] + B[1] + getX(dt) }`,
+    ],
+    [
+      'filter and reduce',
+      `function pos(d: real) scope { d > ballX }
+function add(a: real, b: real) scope { a + b + ballX }
+let tick = (dt: real) => do { ballX = 1; let a = length(filter(L, pos)); ballX = 2; let b = reduce([dt, 1], add); a * 100 + b }`,
+    ],
+    [
+      // The interpreter lists at the assignment a view that reads a
+      // variable (`L`), so a later write does not change it.
+      'a view over a variable kept in a local, read after a write',
+      `let tick = (dt: real) => do { ballX = 1; let A = map(getX, L); let B = map((i) => getX(i) * dt, L); ballX = 5; A[2] + B[1] * 10 }`,
+    ],
+    [
+      'map in a helper that writes the state',
+      `function step(dt: real) scope { ballX = ballX + dt; map(getX, L)[1] }
+let tick = (dt: real) => step(dt) + step(1)`,
+    ],
+  ];
+  test.each(cases)('%s', (_, body) => {
+    const { code, interpreted } = both(GET + body);
+    expect(code).toEqual(interpreted);
+  });
+});
+
 describe('the cases that decline', () => {
   test('a loop that declares a local of the name after the call', () => {
     // The facts of the loop body drop the name its Block declares: the
@@ -240,31 +283,54 @@ let tick = (dt: real) => f(dt)`
     expect(
       declined(`function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
 let tick = (dt: real) => do { let s = 0; for i in 1..2 { s = s + map((x) => moveBall(x), [dt])[1] }; s }`)
-    ).toMatch('a write of the variable ballX of the engine by a user function, in a loop');
+    ).toMatch(/in a loop|a lazy collection whose callback/);
   });
 
   test('a call in a callback of map, a call that maps over a list', () => {
     expect(
       declined(`function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
 let tick = (dt: real) => map((x) => moveBall(x), [dt, dt])[1]`)
-    ).toMatch('in a loop');
+    ).toMatch(/in a loop|a lazy collection whose callback/);
     expect(
       declined(`function moveBall(dt: real) scope { ballX = ballX + dt; ballX }
 let tick = (dt: real) => moveBall([dt, dt])[1]`)
     ).toMatch('a call of moveBall that maps over a list');
   });
 
-  test('a function given by name to map reads the state', () => {
-    // The call that the lowering makes is not scanned: compiled, the second
-    // map would reuse the value of the first one (6 for 10).
+  test('a lazy view that reads the state only through a user function', () => {
+    // The interpreter keeps the view lazy and reads `ballX = 5` at `A[2]`
+    // (7); the code would build it at the `let` (3).
+    const GET = `function getX(d: real) scope { ballX + d }
+function pr(d: real) scope { d > ballX }
+function mk(d: real) scope { map(getX, [d, 1]) }
+`;
+    const why = 'a lazy collection whose callback reads a variable of the engine through a user function';
+    for (const view of [
+      'map(getX, [1, 2])',
+      'map(getX, 1..2)',
+      'tabulate(getX, 2)',
+      'map((i) => getX(i), [1, 2])',
+      'filter(1..3, pr)',
+      // A view over a local or a parameter stays lazy too.
+      'map(getX, M)',
+      'map(getX, 1..m)',
+      'map(getX, [dt, 1])',
+      'mk(dt)',
+    ])
+      expect(
+        declined(
+          GET +
+            `let tick = (dt: real) => do { ballX = 1; let M = [dt, 1]; let m = 2; let A = ${view}; ballX = 5; A[1] + M[1] + m }`
+        )
+      ).toMatch(why);
+  });
+
+  test('a writer given by name to map', () => {
+    // The callback of the map is a frame of a loop.
     expect(
-      declined(`function getX(d: real) scope { ballX + d }
-let tick = (dt: real) => do { ballX = 1; let A = map(getX, [dt]); ballX = 5; let B = map(getX, [dt]); A[1] + B[1] }`)
-    ).toMatch('which reads the variable ballX of the engine, where the function is not called by name');
-    expect(
-      declined(`function getX(d: real) scope { ballX + d }
-let tick = (dt: real) => do { ballX = 1; let A = map(getX, [dt]); ballX = 5; let B = map(getX, [dt]); A[1] + B[1] + getX(dt) }`)
-    ).toMatch('where the function is not called by name');
+      declined(`function setX(d: real) scope { ballX = ballX + d; ballX }
+let tick = (dt: real) => map(setX, [dt, dt])[1]`)
+    ).toMatch(/in a loop|a lazy collection whose callback/);
   });
 
   test('a recursive function', () => {

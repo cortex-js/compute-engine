@@ -2658,7 +2658,14 @@ The function takes the value of each such variable that it reads or writes
 at the call, and the call rebinds each variable that it writes, in the order
 of the program: two calls, a call in an arm of an `If`, a call in a `for` or
 `while` loop (with `break` too) and a write in an arm or in a loop of the
-function give the interpreter's values. A name in the body of the
+function give the interpreter's values. So does a function that reads the
+variable and is given by name to an operator (`map(getX, L)`, `filter`,
+`reduce`): the code reads the value where the operator stands. A lazy
+collection compiles so only when it reads a variable of the engine
+(`map(getX, L)` with `L` a variable of the engine), which the interpreter
+lists when it is assigned, wherever that is (`docs/SCOPING-MODEL.md`,
+"Callable resolution").
+A name in the body of the
 function counts only where it is the variable of the engine, not a local or
 a parameter of the same name. These decline:
 
@@ -2667,6 +2674,16 @@ a parameter of the same name. These decline:
   variable in such a body in the function: that body does not carry the
   value that the function returns;
 - a call that maps the function over a list (`moveBall([dt, dt])`);
+- a function that reads the variable and is given as a value, not by its
+  name (`let g = getX; map(g, L)`);
+- a lazy collection whose callback reads the variable through a user
+  function and that reads no variable of the engine itself
+  (`map(getX, [1, 2])`, `tabulate(getX, 2)`, `map(i => getX(i), 1..2)`, a
+  view over a parameter or a local, `map(getX, [dt])`): the interpreter can
+  keep it lazy and compute an element when it is read, with the value of
+  the variable then (`let A = map(getX, [1, 2]); ballX = 5; A[2]` reads 5; a
+  view over a local, or one that a function returns, stays lazy where it is
+  assigned);
 - a recursive function, or a cycle of functions, that assigns the variable;
 - a list variable that the function assigns.
 

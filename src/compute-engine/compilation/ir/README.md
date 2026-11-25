@@ -3902,7 +3902,13 @@ in `adapter.ts` (JavaScript), `adapter-glsl.ts` and `adapter-interval.ts`, and
   `arm()`), and when it writes one its IR function returns the record of the
   value of the body and of each name it writes; the call reads the fields and
   rebinds the names (`Lowering.stateWrite()`). A `Loop` carries such a name,
-  as it carries a local (`loop()`). A write in a loop frame (a `Sum`, a
+  as it carries a local (`loop()`). A function named as an operand
+  (`Map(f, L)`, `namedUser()`) is scanned as a call, and the facts of the
+  symbol count its names; a call of a function that the scan did not reach (a
+  function value) that reads such a name declines (`free()`), and so does a
+  lazy collection that reaches such a function and reads no variable of the
+  engine (`readsVariableIn()`, the interpreter's rule of listing, without
+  the names that the program binds). A write in a loop frame (a `Sum`, a
   callback of `Map`), a call that maps over a list (`mapOver()`), a recursive
   writer and a list name written by a function decline. A warning of a
   random frame is in `warnings` (`kind: 'correctness'`). `profile` is `'ir'`.

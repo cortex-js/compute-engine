@@ -85,7 +85,11 @@
   the program, and `assigns` lists the variable, so `run()` writes it to the
   engine. `tick = (dt: real) => moveBall(dt)` gives `2.5`, then `5.5`, as
   the interpreter does, also when the call or the write is in a `for` or
-  `while` loop. A call of such a helper in a `Sum` or a `Map` callback, a
+  `while` loop. A helper that reads the variable can also be given by name
+  to `map`, `filter` or `reduce` (`map(getX, L)`). A call of such a helper
+  in a `Sum` or a `Map` callback, a lazy collection that reads the variable
+  only through such a helper (`map(getX, [1, 2])`, which the interpreter
+  computes at each read), a
   call that maps over a list, a recursive helper and a helper that assigns a
   list variable still decline.
 
