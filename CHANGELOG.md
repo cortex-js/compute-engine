@@ -20,6 +20,33 @@
   `hostSum(map(x => x * 2, [1, 2]))`, `hostSum([1, 2] + 1)`, and a list
   constant) now compile, where they declined.
 
+### New Features
+
+- **`epsilProgramSites()` gives the sites of the names of an Epsil program,
+  each with the binding it resolves to** (CE-1628, CE-1255.2). It is exported
+  from `@cortex-js/compute-engine/epsil` and reads the source without running
+  it. A host that runs a program in a scope of its own, such as a notebook
+  cell over the scope of its section, reads from it which names come from
+  outside the program. Each site has its range, its `role` (`definition`,
+  `read`, `write`, `read-write`, `reference`), whether it is `deferred` (in a
+  function body) and its binding, whose `kind` is `program`, `local`,
+  `external`, `library` or `unresolved`. `externalWrites` names the outer
+  bindings that the program writes, and `statements` gives, for each
+  top-level statement, the top-level bindings that it reads, defines and
+  writes. The resolution follows the interpreter: with an outer `k`, the
+  `k` of `function g() { k }` followed by `let k = 7` is the `k` of the
+  program, and the initializer of `let k = k + 1` reads the outer `k`.
+
+  ```ts
+  ce.declare("k", "integer");
+  ce.pushScope();
+  const source = "let k = k + 1\nfor k in 1..3 { k }";
+  const { bindings, sites } = epsilProgramSites(ce, source);
+  sites.map((s) => `${s.start} ${s.role} ${bindings[s.binding].kind}`);
+  // ➔ ["4 definition program", "8 read external",
+  //    "18 definition local", "30 read local"]
+  ```
+
 ### Improvements
 
 - **Compiled JavaScript reads a `Map` or a `Filter` where it is, with no

@@ -26,6 +26,13 @@ export {
   resolveLibraryNames,
 } from './epsil/resolve-library-names.js';
 export type { BinderSite, ProgramDeclaration } from './epsil/occurrences.js';
+export { epsilProgramSites } from './epsil/program-sites.js';
+export type {
+  EpsilNameSite,
+  EpsilProgramSites,
+  EpsilSiteBinding,
+  EpsilStatementSites,
+} from './epsil/program-sites.js';
 export { checkEpsil } from './epsil/check-epsil.js';
 export { epsilDiagnosticMessage } from './epsil/diagnostic-message.js';
 export { epsilCompletions } from './epsil/completion.js';

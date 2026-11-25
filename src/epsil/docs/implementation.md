@@ -137,6 +137,95 @@ leaves a value-dependent choice undecided rather than predicting execution.
 For a host that really boxes a call after the relevant declarations have
 executed, `boxedEarly: false` allows the later-value evidence instead.
 
+### Sites of the names of a program
+
+`epsilProgramSites(ce, source)` gives each name that a program spells, with
+its range in the source, its role and the binding it resolves to. A host
+that runs a program in a scope of its own (a notebook cell over the scope
+of its section) reads from it which names come from outside the program,
+without a copy of the scoping rules. The program is parsed and not run. A
+name that the program does not bind is looked up in the current scope of
+`ce`: call the function in the scope in which the program runs.
+
+```ts
+import { ComputeEngine, epsilProgramSites } from "@cortex-js/compute-engine/epsil";
+
+const ce = new ComputeEngine();
+ce.declare("k", "integer");
+ce.assign("k", 5);
+ce.declare("total", "integer");
+ce.assign("total", 0);
+ce.pushScope();
+const source = "let k = k + 1\ntotal += k\nfor k in 1..3 { total += k }";
+const { bindings, sites, externalWrites } = epsilProgramSites(ce, source);
+for (const s of sites)
+  console.log(source.slice(s.start, s.end), s.start, s.role, bindings[s.binding].kind);
+// ➔ k 4 definition program
+// ➔ k 8 read external
+// ➔ total 14 read-write external
+// ➔ k 23 read program
+// ➔ k 29 definition local
+// ➔ total 41 read-write external
+// ➔ k 50 read local
+externalWrites;
+// ➔ ["total"]
+ce.popScope();
+```
+
+The result has four fields:
+
+- `bindings`: what the sites resolve to. The `kind` of a binding is
+  `program` (a declaration at the top level of the program), `local` (a
+  parameter, a loop or comprehension variable, a `match` binder, a `let` of
+  a block, a variable that a library call binds), `external` (a binding of
+  the engine that the program does not make), `library` (a definition of
+  the standard library; `name` is the library name, `Sum` for a site that
+  spells `sum`) or `unresolved`. A `program` or `local` binding has a
+  `form` (`variable`, `function`, `parameter`, `loop`, `pattern`, `type`).
+  An `external` binding has a `scopeDepth`: 0 for the scope the function
+  is called in, 1 for the scope around it. The indexes are those of one
+  result only.
+- `sites`: the names, in source order. A site has `start` and `end` (UTF-16
+  code units, the end excluded, the backticks of a verbatim name included),
+  the index `binding`, the index `statement` of its top-level statement, a
+  `role` and `deferred`. The role is `definition` (a variable that a
+  library call binds has none: each of its sites is a read), `read` (the
+  head of a call is a read), `write`, `read-write` (the target of `+=`, the
+  collection of `a[1] = 2` or the record of `r.x = 2`) or `reference` (a
+  name that reads no value: the label of a named argument, a type name in
+  an annotation). `deferred` is `true` in the body of a function literal
+  and in the default value of a parameter. Such a site runs when the
+  function is called, which can be in the statement itself (a function
+  given to `map`).
+- `statements`: for each top-level statement, its range and the indexes of
+  the `program` bindings that it `reads`, `defines` and `writes`, each one
+  once. The sites of a function body count.
+- `externalWrites`: the names of the `external` bindings that the program
+  writes, in a function body included.
+
+The resolution follows the rules of the interpreter. A `let` or a `const`
+binds its name in its whole block, or in the whole program at the top
+level: in `function g() { k }` followed by `let k = 7`, the `k` of the body
+is the `k` of the program. The initializer of the statement is the
+exception: `let k = k + 1` reads the outer `k`. An initializer that is a
+function literal names the binding itself, so that
+`let f = (n) => if n == 0 { 1 } else { n * f(n - 1) }` is recursive. An
+assignment declares nothing: its target is a write of the binding that is
+visible, which is an `external` binding when the program has none. The
+collection of a `for` clause is read in the scope of its loop: in
+`for n in 1..n`, the second `n` is the loop variable.
+
+A host uses the result in three ways. The `external` sites with the role
+`read` or `read-write` are what the program depends on. To run the program
+with no write to the scope around it, the host declares a local copy of
+each name of `externalWrites` first. To rename an `external` binding, the
+host replaces the text of each site of that binding, and of no other site:
+a site of a `program` or `local` binding of the same name keeps its text.
+
+The sites are those of the source, not the inputs of the compiled or
+simplified program: `v / v` has two sites. When the source has a parse
+error, the sites are those of the tree that the parser recovered.
+
 ### Execution
 
 `executeEpsil(ce, source, options?)` parses, resolves and boxes one `Program`,
@@ -1739,7 +1828,8 @@ Epsil's parser has no static dependency on the LaTeX parser: it is passed in by
 the caller, the same way the engine itself injects `LatexSyntax` rather than
 importing it directly. The functions that take an engine (`executeEpsil`,
 `executeEpsilAsync`, `checkEpsil`, `epsilCompletions`, `epsilSignatureHelp`,
-`epsilHover`, `epsilDefinition`, `epsilDebugStatements`) use the `parseLatex`
+`epsilHover`, `epsilDefinition`, `epsilDebugStatements`, `epsilProgramSites`)
+use the `parseLatex`
 option, or else `ce.parse(latex, { form: "raw" })`: the LaTeX syntax of the
 engine, with the engine-wide `ce.latexOptions` and the functions that the
 engine knows when the program is parsed. The program is parsed before its
