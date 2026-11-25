@@ -68,6 +68,11 @@ describe('IR slice: GLSL text', () => {
       'rows.at', 'rows.at.int',
       // The same input read row by row (#638).
       'rows.count', 'rows.len', 'rows.get', 'rows.get.int',
+      // The length of the rows of a matrix input, and the run-time checks
+      // of two lengths of the matrix operators.
+      'rows.width', 'rows.agree', 'rows.square',
+      // The rows of two values of the lane, in order (CE-1736).
+      'rows.join',
       // A row of it at an index known at run time.
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
       // A record and its `Nothing` field (CE-1652).

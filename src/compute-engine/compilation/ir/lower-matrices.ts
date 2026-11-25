@@ -62,14 +62,10 @@ export function matrixLowering(
   /** The list of `n` elements whose element at `k` is `f(k)`. */
   const build = (e: Fn, n: V, f: (k: V) => V): V =>
     lists.over(e, { length: n, at: (k) => k }, '', (_x, k) => f(k), false, e);
-  /** The sum from 0 of `f` at each index below `n`. */
-  const sum = (e: Fn, n: V, f: (k: V) => V): V =>
-    lists.reduce(
-      e,
-      rowOfHead(cx.rows, 'Add')!,
-      [{ length: n, at: f }],
-      integer(0)
-    );
+  /** The sum from `zero` (the integer 0, or the value 0 of a check of
+   *  `agree()`) of `f` at each index below `n`. */
+  const sum = (e: Fn, n: V, f: (k: V) => V, zero = integer(0)): V =>
+    lists.reduce(e, rowOfHead(cx.rows, 'Add')!, [{ length: n, at: f }], zero);
 
   /** The value of the operand `x` of `e`: real or integer numbers, no
    *  tuple and no list of tuples (the interpreter reads a tuple as one
@@ -175,21 +171,46 @@ export function matrixLowering(
     x === y ||
     (cx.constant(x) !== undefined && cx.constant(x) === cx.constant(y));
 
+  /** JavaScript outside the interval and the bigint modes: the target
+   *  where two lengths are compared at run time (`agree()`). */
+  const checks = cx.runtimeLengths && !cx.interval && !cx.bigint;
+
+  /** The initial value 0 of the sums of an operator that reads two
+   *  lengths `x` and `y` that must be equal: the inner lengths of
+   *  `MatrixMultiply` (`check` is `rows.agree`), the numbers of rows and of
+   *  columns of `Trace` (`rows.square`). The one place that decides what
+   *  happens when `same()` does not prove them equal: on JavaScript, the
+   *  value 0 of the check, which throws a `RangeError` where they differ,
+   *  as the interpreter's value is an error (user decision 2026-11-25). It
+   *  is made here, before the builds and the sums, once; every sum reads it
+   *  as its initial value, so that `dce` keeps it and no count or length
+   *  changes (a sum of a constant length stays written out). Elsewhere, and
+   *  where `same()` proves them equal, the constant 0, as before (a value
+   *  of the lane `rows` is JavaScript only). Two constants that differ are
+   *  the callers' decline. */
+  const agree = (
+    x: V,
+    y: V,
+    check: 'rows.agree' | 'rows.square' = 'rows.agree'
+  ): V =>
+    same(x, y) || !checks
+      ? integer(0)
+      : b.op(check, [x, y], scalarType('integer'));
+
   /** `Transpose`, `ConjugateTranspose` and `Trace` of `m`, a value of the
    *  lane `rows` of reals or integers whose rows have one length (CE-1736,
    *  `rowWidths`): the transpose, rows of the elements of a column, whose
-   *  rows have the number of rows of `m` as their length; the trace when
-   *  the number of rows and the length of the rows are one value. */
+   *  rows have the number of rows of `m` as their length; the trace, whose
+   *  number of rows and length of the rows are compared (`agree()`). */
   const table = (e: Fn, m: V): V => {
     const w = cx.rowWidths.get(m)!;
     const n = rowCount(m);
     if (e.operator === 'Trace') {
-      if (!same(n, w))
-        decline(
-          e,
-          'Trace of a matrix whose numbers of rows and of columns are not one value (it can be not square)'
-        );
-      return sum(e, n, (k) => rowsAt(m, k, k));
+      const [cn, cw] = [cx.constant(n), cx.constant(w)];
+      if (cn !== undefined && cw !== undefined && cn !== cw)
+        decline(e, 'Trace of a matrix that is not square');
+      const zero = agree(n, w, 'rows.square');
+      return sum(e, n, (k) => rowsAt(m, k, k), zero);
     }
     return build(e, w, (j) => build(e, n, (i) => rowsAt(m, i, j)));
   };
@@ -211,8 +232,10 @@ export function matrixLowering(
     // A stated inner length, when there is one, so that a short sum is
     // written out.
     const k = length(typeof ka === 'number' ? ka : kc);
+    // The check of inner lengths known at run time (`agree()`).
+    const zero = agree(length(ka), length(kc));
     const dot = (x: (p: V) => V, y: (p: V) => V): V =>
-      sum(e, k, (p) => cx.apply(e, 'Multiply', [x(p), y(p)]));
+      sum(e, k, (p) => cx.apply(e, 'Multiply', [x(p), y(p)]), zero);
     if (sa.length === 1 && sc.length === 1)
       return dot(
         (p) => at(a, p),
@@ -243,9 +266,9 @@ export function matrixLowering(
 
   /** `MatrixMultiply(A, B)` where `A` or `B` is a value of the lane `rows`
    *  whose rows have one length (CE-1736), and the other is such a value,
-   *  a matrix or a vector: only when the inner lengths are one value or
-   *  equal constants, where the interpreter's value of other lengths is
-   *  the error `incompatible-dimensions`. */
+   *  a matrix or a vector. Inner lengths that are not one value or equal
+   *  constants are compared at run time (`agree()`): the interpreter's
+   *  value of other lengths is the error `incompatible-dimensions`. */
   const tableProduct = (e: Fn, a: V, c: V): V => {
     type Table = { rows: V; columns: V; at: (i: V, j: V) => V };
     type Operand = Table | { length: V; at: (k: V) => V };
@@ -270,16 +293,15 @@ export function matrixLowering(
     const [x, y] = [operand(a), operand(c)];
     const inner = 'columns' in x ? x.columns : x.length;
     const other = 'rows' in y ? y.rows : y.length;
-    if (!same(inner, other))
-      decline(
-        e,
-        'MatrixMultiply of operands whose inner lengths are not one value (they can differ at run time)'
-      );
+    const [ci, co] = [cx.constant(inner), cx.constant(other)];
+    if (ci !== undefined && co !== undefined && ci !== co)
+      decline(e, 'MatrixMultiply of operands of two inner lengths');
     // A constant inner length, when there is one, so that a short sum is
-    // written out.
-    const k = cx.constant(inner) !== undefined ? inner : other;
+    // written out; the check of the inner lengths (`agree()`).
+    const k = ci !== undefined ? inner : other;
+    const zero = agree(inner, other);
     const dot = (f: (p: V) => V, g: (p: V) => V): V =>
-      sum(e, k, (p) => cx.apply(e, 'Multiply', [f(p), g(p)]));
+      sum(e, k, (p) => cx.apply(e, 'Multiply', [f(p), g(p)]), zero);
     if ('length' in x) {
       const m = y as Table;
       return build(e, m.columns, (j) => dot(x.at, (p) => m.at(p, j)));

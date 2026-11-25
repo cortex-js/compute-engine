@@ -328,6 +328,11 @@ export const JS: Syntax = deepFreeze({
     // The same value read row by row, at indices in range.
     'rows.count': '$0.length',
     'rows.len': '$0[$1].length',
+    // The length of the rows of a matrix, and the checks of two lengths of
+    // the matrix operators.
+    'rows.width': '($0.length === 0 ? 0 : $0[0].length)',
+    'rows.agree': { text: '_agree($0, $1)', helpers: ['_agree'] },
+    'rows.square': { text: '_square($0, $1)', helpers: ['_square'] },
     'rows.get': '$0[$1][$2]',
     'rows.get.int': '$0[$1][$2]',
     // The row at an index known at run time.
@@ -465,6 +470,13 @@ export const JS: Syntax = deepFreeze({
     _rowr:
       'const _rowr = (g, i) => { const k = i > 0 ? i - 1 : g.length + i; return Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length ? k : -1; };',
     _lenr: 'const _lenr = (g, k, absent) => (k < 0 ? absent : g[k].length);',
+    // The inner lengths of `MatrixMultiply`, and the two lengths of the
+    // matrix of `Trace`: the interpreter's value where they differ is the
+    // error `incompatible-dimensions` or `expected-square-matrix`.
+    _agree:
+      "const _agree = (a, b) => { if (a !== b) throw new RangeError(`incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (${a} and ${b})`); return 0; };",
+    _square:
+      "const _square = (a, b) => { if (a !== b) throw new RangeError(`expected-square-matrix: Trace of a matrix of ${a} rows and ${b} columns`); return 0; };",
     // `At(At(g, i), j)` of a list of rows whose lengths can differ: NaN
     // where `i` is out of range of `g` or `j` of its row.
     _atr: 'const _atr = (g, i, j) => { const k = i > 0 ? i - 1 : g.length + i; if (!(Number.isInteger(i) && i !== 0 && k >= 0 && k < g.length)) return NaN; const r = g[k]; const m = j > 0 ? j - 1 : r.length + j; return Number.isInteger(j) && j !== 0 && m >= 0 && m < r.length ? r[m] : NaN; };',

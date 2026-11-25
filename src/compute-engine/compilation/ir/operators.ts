@@ -497,6 +497,17 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // that row, each index from 0 and in range.
   row(undefined,      1,          [[['rows'], I, 'rows.count']], list),
   row(undefined,      2,          [[['rows', I], I, 'rows.len']], list),
+  // The length of the rows of a value of a matrix type (`matrix<real>`),
+  // whose rows have one length: that of its first row, 0 of no row.
+  row(undefined,      1,          [[['rows'], I, 'rows.width']], list),
+  // Two lengths that the matrix operators read, which the lowering does not
+  // prove equal (`lower-matrices.ts`, `agree()`): 0 where they are equal, a
+  // `RangeError` where they differ, the interpreter's
+  // `incompatible-dimensions` (`MatrixMultiply`) or `expected-square-matrix`
+  // (`Trace`). The value 0 is the initial value of each sum of the
+  // operator, so that the check is kept and runs once before them.
+  row(undefined,      2,          [[[I, I], I, 'rows.agree']], { ...list, effect: 'may-fail' }),
+  row(undefined,      2,          [[[I, I], I, 'rows.square']], { ...list, effect: 'may-fail' }),
   row(undefined,      3,          [[['rows', I, I], R, 'rows.get'], [['rows', I, I], I, 'rows.get.int']], list),
   // The row `At(g, i)` at an index known at run time: the index of the
   // row from 0 (from the end when `i` is negative), -1 where `i` is out of

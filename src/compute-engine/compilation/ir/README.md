@@ -941,6 +941,31 @@ the bigint and the interval modes and GLSL decline the input. The entry checks
 it as a list (a string or a typed array is refused), and a batch shares it
 between its cells.
 
+An input of a matrix type of no stated dimensions (`matrix`, `matrix<real>`,
+`matrix<integer>`; `isFreeMatrix()` of `lower-functions.ts`) is such an input
+too, in each place above (a positional parameter of a root function literal,
+a typed parameter of `Apply`, a parameter of a user function, an input that a
+user function reads, a variable of the engine that a root literal assigns),
+with one more fact: its rows have one length, the length of its first row,
+the operation `rows.width` (`$0.length === 0 ? 0 : $0[0].length`), which the
+compiled code does not test (R5: a value with rows of different lengths is
+outside the type, and the engine refuses one as its value). It is made where
+the parameter is made: in the entry body (`b.entryOp()`, which records a pure
+operation so that a later `b.op()` of the same operand is that value, as
+`before()` makes it again) or at the start of the body of a user function,
+and is the value's `rowWidths`; its `rowCounts` is `rows.count`. So every
+reader of the lane reads it, a row read by `chunks()` has that length (a `Map`
+of each element keeps the fact), and the matrix operators read it
+("Matrices"). An argument at a parameter of a matrix type, of a user function
+or of `Apply`, must have the fact: a `list<list<real>>` input, a call result
+and a join decline ("…, a matrix, whose rows can have different lengths"),
+since the interpreter gives `incompatible-type` for rows of different
+lengths. The element `number` is a real outside the mode `complex`; a matrix
+of one stated dimension (`matrix<real^2x?>`), of complex numbers or of
+booleans, GLSL and the interval and the bigint modes decline the input, with
+its type in the cause. A matrix type of stated dimensions
+(`matrix<real^2x3>`) is a list of rank 2, as before.
+
 A list of lists of real or integer numbers that the program makes, whose rows
 have a run-time length, is of the lane too, on JavaScript outside the interval
 and the bigint modes (CE-1736, #638). A `Map` (also of several lists, and a
@@ -990,8 +1015,9 @@ and constants, records "every row has this length" in the side table
 operation of equal operands is one value), and a `rows.build` records its count
 in `rowCounts`; `rowsOf()` reads both, so a `Map` of each element of such a
 value, a `Filter` of it and a local that holds it keep the fact. A join of two
-arms, a value that a loop carries, a call, a parameter, a join of lists and a
-literal have none. The matrix operators read the fact ("Matrices").
+arms, a value that a loop carries, a call, a parameter of a type other than a
+matrix type (above), a join of lists and a literal have none. The matrix
+operators read the fact ("Matrices").
 Declined: a row of the lane at an index known at run time as an element of a
 list (`Map(i ↦ At(g, i), Range(1, n))`: the interpreter gives `Missing` where
 the row is absent), elements that are booleans, complex numbers, points or
@@ -2537,13 +2563,24 @@ length (`matrix<real^2x3>`, `list<list<real^3>>`, a literal, a build): a list
 of lists of a run-time length (an input of type `list<list<real>>`, a build
 whose rows have a run-time length) is the lane `rows` ("The rows lane"), which
 the matrix operators decline (`docs/COMPILATION-MODEL.md`), except a value
-whose rows have one length (`rowWidths`): `Transpose` and `ConjugateTranspose`
-of it are the rows of its columns (`rows.get`), whose length is its number of
-rows; `Trace` of it is the sum of its diagonal when its number of rows and the
-length of its rows are one value; `MatrixMultiply` of it and such a value, a
-matrix or a list is the product when the inner lengths are one value or equal
-constants, and otherwise declines (the interpreter's `incompatible-dimensions`
-where they differ; no test at run time). The other operators decline it: their
+whose rows have one length (`rowWidths`: a build, an input or a parameter of
+a matrix type): `Transpose` and `ConjugateTranspose` of it are the rows of its
+columns (`rows.get`), whose length is its number of rows; `Trace` of it is the
+sum of its diagonal; `MatrixMultiply` of it and such a value, a matrix or a
+list is the product. Two lengths that must be equal (the inner lengths of
+`MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that
+`same()` does not prove equal (one value, or equal constants) are compared
+once at run time on JavaScript, in one place, `agree()` of
+`lower-matrices.ts` (user decision 2026-11-25): the operation `rows.agree` or
+`rows.square` (`may-fail`; `_agree`, `_square` of the JavaScript printer),
+made once before the builds, gives 0, the initial value of each sum of the
+operator, so `dce` keeps it and no count or length changes (a sum of a
+constant length stays written out), and it throws a `RangeError` (`incompatible-dimensions: …`,
+`expected-square-matrix: …`) where they differ, the interpreter's error.
+A reader that reads no element of the result (`Length` of the product) reads
+no sum, so `dce` removes the check there: a known limitation of
+`docs/COMPILATION-MODEL.md`.
+Two constants that differ decline. The other operators decline it: their
 order is known at run time only. The matrix operators (`lower-matrices.ts`) settle
 the shape of their value from the shapes of their operands; a tuple, a list of
 tuples, complex and boolean elements, a rank above 2 and another number of
@@ -2573,8 +2610,13 @@ operands decline. On JavaScript:
   product of a matrix and a list on either side, or the inner product of two
   lists: builds whose elements are sums from 0 of the products in the order of
   the inner index. Two stated inner lengths that differ decline (the
-  interpreter's `incompatible-dimensions`); lengths of a run-time value that
-  differ give an unspecified value (a throw when a row is missing).
+  interpreter's `incompatible-dimensions`); a run-time inner length is
+  compared with the other by `agree()` (above), a `RangeError` where they
+  differ; a stated inner length beside a run-time one keeps its sum
+  written out, from the 0 of the check (`MatrixMultiply(K, v)` of
+  `K: matrix<real^2x3>` and `v: list<real>`). GLSL (which has no list of rank 2 and no list of a
+  run-time length) and the bigint mode compare no run-time length: such
+  lengths that differ give an unspecified value there.
 - `Determinant`, `Inverse`, `MatrixPower` and `RowReduce` are the rows `mdet`,
   `minverse`, `mpower` and `mrowreduce`, the kernels `_SYS.matrixDeterminant`,
   `matrixInverse`, `matrixPower` and `matrixRowReduce` of `matrix-runtime.ts`:

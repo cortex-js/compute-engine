@@ -188,13 +188,16 @@ interpreter's value. A line is removed when the case declines or is fixed.
   `Transpose(T)` at `n = 0`, `m = 3` gives `[[], [], []]`, and with
   `S = Map(i ↦ Map(j ↦ i + j, Range(1, n, 1)), Range(1, n, 1))`,
   `MatrixMultiply(S, S)` at `n = 0` gives `[]`; the interpreter (of the
-  tables in `ListFrom`) leaves both unevaluated. CE-1736.
-- `javascript` (crafted): `MatrixMultiply` of two lists of rows of constant
-  lengths and run-time counts does not compare its inner lengths. With
-  `n, m: integer`,
-  `MatrixMultiply(Map(i ↦ [i, i], Range(1, n, 1)), Map(i ↦ [i], Range(1, m, 1)))`
-  at `n = 2`, `m = 3` gives `[[3], [6]]`; the interpreter (of the operands
-  in `ListFrom`) gives the error `incompatible-dimensions`. CE-1736.
+  tables in `ListFrom`) leaves both unevaluated. CE-1736. The same holds
+  for an input of a matrix type whose rows have no element: with
+  `M: matrix<real>`, `Transpose(M)` at `M = [[]]` (a `matrix` of the engine)
+  gives `[]`, and the interpreter leaves it unevaluated.
+- `javascript` (crafted), `M, A: matrix<real>`: the run-time comparison of
+  two lengths of `MatrixMultiply` or `Trace` is the start value of the
+  operator's sums, so it does not run when no element of the result is
+  read. `Length(MatrixMultiply(M, A))` at `M = [[1, 2, 3], [4, 5, 6]]`,
+  `A = [[1, 0], [0, 1]]` gives `2`, and `Map(r ↦ 1, MatrixMultiply(M, A))`
+  gives `[1, 1]`; the interpreter gives the error `incompatible-dimensions`.
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
@@ -1050,7 +1053,10 @@ host.
   helper `_at` of the code, which gives `NaN` for an index out of range and
   does not test the shape of the element it reads. With
   `h := v ↦ v[1] + 1` and `xs: list<real>`, `h(xs)` declines ("an argument
-  of h that is not tuple<real>").
+  of h that is not tuple<real>"). With `M: matrix<real>`, whose rows have
+  one length, `Transpose(M)` reads the length of the first row as the
+  length of every row: at `M = [[1, 2], [3]]` it gives
+  `[[1, 3], [2, undefined]]` on `javascript`.
 - An input that the host leaves out: the result is undefined in the same
   way. On `javascript`, `x > 0` compiles to `0 < _.x` and gives `false` for
   `run({})`, and `If(x > 0, 1, -1)` compiles to an `if` on `0 < _.x` and
@@ -1728,25 +1734,53 @@ again: at `g = [[1, 2, 3], [4]]`, `let t = g` followed by three passes of
 Range(1, 2))` gives `[[3, 4, 5], [6]]`. A write or a step that gives reals
 where the list held integers gives reals, as the interpreter's.
 
-A matrix operator reads a list of lists of run-time length only when the
-program settles that its rows have one length: a `Map` (or a `Filter` of
-one) whose row length does not depend on the element, read directly or
-through a local, a `Map` of each element of it, or a `Transpose` of it.
-`Transpose`, `ConjugateTranspose` and `MatrixMultiply` then compile, and
-`Trace` too when the number of rows and the length of the rows are one value;
-`MatrixMultiply` compiles only when its inner lengths are one value or
-equal constants, since the compiled code tests no length at run time (the
-interpreter gives `incompatible-dimensions` where they differ). At `n = 2`
+A matrix operator reads a list of lists of run-time length only when its
+rows have one length: a `Map` (or a `Filter` of one) whose row length does
+not depend on the element, read directly or through a local, a `Map` of each
+element of it, a `Transpose` of it, and an input or a parameter of a matrix
+type of no stated dimensions (`matrix`, `matrix<real>`, `matrix<integer>`).
+Such an input, a typed parameter of a root function literal or of `Apply`, a
+parameter of a user function and an input that a user function reads are the
+host's array of arrays, read in the ways above, and the compiled code takes
+the length of the first row as the length of every row: the type states it,
+and a value with rows of different lengths is outside the type (R5; the
+engine refuses one as the value of such a variable, and the interpreter gives
+`incompatible-type` for one at such a parameter, so a call whose argument is
+a `list<list<real>>` input or a call result there declines). The element type
+`number` is a real outside the mode `complex`; a matrix of one stated
+dimension (`matrix<real^2x?>`), of complex numbers or of booleans, GLSL and
+the interval and the bigint modes decline such an input. With
+`M: matrix<real>` at `M = [[1, 2, 3], [4, 5, 6]]`, `Transpose(M)` gives
+`[[1, 4], [2, 5], [3, 6]]`, `MatrixMultiply(M, Transpose(M))` gives
+`[[14, 32], [32, 77]]`, `Map(r ↦ Sum(r), M)` gives `[6, 15]` and
+`Length(M)` gives 2.
+`Transpose`, `ConjugateTranspose`, `MatrixMultiply` and `Trace` then
+compile. Two lengths that must be equal (the inner lengths of
+`MatrixMultiply`, the numbers of rows and of columns of `Trace`) and that the
+compiler does not prove equal are compared once at run time, and the compiled
+code throws a `RangeError` where they differ, where the interpreter gives
+the error `incompatible-dimensions` or `expected-square-matrix` (user
+decision 2026-11-25; a comparison of two lengths, not a test of a type). The
+comparison runs when an element of the result is read ("Known limitations"
+has the case where none is). This
+holds for a list of rows of a constant length and a run-time count too. With
+`M, A: matrix<real>`, `MatrixMultiply(M, A)` at the `M` above and
+`A = [[1, 0], [0, 1]]` throws
+`RangeError: incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (3 and 2)`,
+and `Trace(M)` throws
+`RangeError: expected-square-matrix: Trace of a matrix of 2 rows and 3 columns`;
+`MatrixMultiply(M, Transpose(M))` has nothing to compare. At `n = 2`
 and `m = 3`, `Transpose(Map(i ↦ Map(j ↦ i + 10j, Range(1, m)), Range(1, n)))`
 gives `[[11, 12], [21, 22], [31, 32]]`, and with
 `T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
 `MatrixMultiply(T, T)` gives `[[13, 18], [18, 25]]`. The other matrix
-operators (`Determinant`, `Inverse`) decline such a list: its order is known
-at run time only. An input, a value after an `If` or a `Coalesce`, a value
-that a loop carries, the result of a call, a join and a literal decline,
-since their rows can have different lengths: with `g: list<list<integer>>`,
-`Transpose(g)` and `Transpose(Map(i ↦ Range(1, i), Range(1, n)))` decline
-with `outside-profile`, so the interpreter evaluates them.
+operators (`Determinant`, `Inverse`, `Rank`, `Shape`) decline such a list:
+its order is known at run time only. A `list<list<…>>` input, a value after
+an `If` or a `Coalesce`, a value that a loop carries, the result of a call, a
+join and a literal decline, since their rows can have different lengths:
+with `g: list<list<integer>>`, `Transpose(g)` and
+`Transpose(Map(i ↦ Range(1, i), Range(1, n)))` decline with
+`outside-profile`, so the interpreter evaluates them.
 Two lists of
 run-time lengths that differ under an element-wise operation give an
 unspecified result: with

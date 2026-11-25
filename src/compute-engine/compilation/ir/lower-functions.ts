@@ -29,6 +29,7 @@ import {
   isSubLane,
   isSubType,
   sameShape,
+  scalarType,
   typeToString,
   type IRFunction,
   type IRType,
@@ -131,14 +132,31 @@ export function rowsElementLane(
   return isSubtype(x, 'real') ? 'real' : undefined;
 }
 
-/** The type of the elements of a list of lists of two lengths not stated,
- *  or `undefined`. */
+/** `t` is a matrix type whose two dimensions are not stated (`matrix`,
+ *  `matrix<real>`): a list of lists whose rows have one length, which the
+ *  compiled code does not test (R5 of `docs/COMPILATION-MODEL.md`). On
+ *  JavaScript it is of the lane `rows` (`rowsElementLane()`), with the
+ *  length of its first row as the length of every row (`rows.width`,
+ *  `rowWidths`). */
+export function isFreeMatrix(t: Type): boolean {
+  t = present(t);
+  return (
+    typeof t === 'object' &&
+    t.kind === 'list' &&
+    t.dimensions?.join() === '-1,-1'
+  );
+}
+
+/** The type of the elements of a list of lists of two lengths not stated
+ *  (also a matrix type of no stated dimensions, `isFreeMatrix()`), or
+ *  `undefined`. */
 function rowsElement(t: Type): Type | undefined {
   const free = (x: Type): x is ListType =>
     typeof x === 'object' &&
     x.kind === 'list' &&
     (x.dimensions === undefined || x.dimensions?.join() === '-1');
   t = present(t);
+  if (isFreeMatrix(t)) return present((t as ListType).elements);
   if (!free(t)) return undefined;
   const inner = present(t.elements);
   return free(inner) ? present(inner.elements) : undefined;
@@ -435,10 +453,16 @@ function signatureTypes(
     // (`listMapsAt()`).
     const t =
       typeof d === 'object' && d.kind === 'broadcastable' ? d.elements : d;
-    // A list of lists of two lengths not stated: the host's rows, whole.
+    // A list of lists of two lengths not stated: the host's rows, whole; a
+    // matrix type states that they have one length (`width`).
     const element = rowsElementLane(t, wide);
     if (element !== undefined)
-      return { lane: 'rows' as const, shape: [], element };
+      return {
+        lane: 'rows' as const,
+        shape: [],
+        element,
+        ...(isFreeMatrix(t) ? { width: true } : {}),
+      };
     const list = tupleOrInputType(t);
     const s = inputType(t, 'real', true);
     const scalar = s?.shape.length === 0;
@@ -648,6 +672,9 @@ type UserFunction = {
     taken?: string;
     /** Of the lane `rows`: the lane of the elements. */
     element?: 'integer' | 'real';
+    /** Of the lane `rows` and of a matrix type (`isFreeMatrix()`): its rows
+     *  have one length (`rowWidths`), and an argument must have the fact. */
+    width?: boolean;
     /** The type of the argument that the parameter holds (`held()`): a
      *  record, with its fields. */
     type?: IRType;
@@ -1152,6 +1179,15 @@ export function functionLowering(
     if (scope !== undefined) cx.scopes.push(scope);
     try {
       b.define(ir, () => {
+        // A parameter of a matrix type: the length of its rows, made at the
+        // start of the body so that every region of it reads one value.
+        params.forEach((t, i) => {
+          if ('width' in t && t.width === true)
+            cx.rowWidths.set(
+              values[i],
+              b.op('rows.width', [values[i]], scalarType('integer'))
+            );
+        });
         // Each variable of the engine that the body reads or writes is an
         // input from the start of the body, so that a write in an arm
         // rebinds a binding of the frame (`arm()` of `lower.ts`).
@@ -1682,6 +1718,14 @@ export function functionLowering(
           op,
           `an argument of ${e.operator} for the parameter ${i + 1}, a list of lists of two lengths not stated, that is not a list of lists of run-time length`
         );
+      // A parameter of a matrix type takes a value whose rows have one
+      // length only: the interpreter gives `incompatible-type` for rows of
+      // different lengths.
+      if (p.width === true && !cx.rowWidths.has(values[i]))
+        decline(
+          op,
+          `an argument of ${e.operator} for the parameter ${i + 1}, a matrix, whose rows can have different lengths`
+        );
       // The lane does not hold the lane of the elements: a list of lists of
       // reals at a parameter of lists of integers would put a real on the
       // integer lane (`rows.at.int`).
@@ -2038,6 +2082,12 @@ export function functionLowering(
     if (ir.lane === 'rows') {
       cx.rowsParams.add(v);
       cx.rowsElements.set(v, cx.rowsElementLane(read)!);
+      // A matrix input: the length of its rows, at the start of the body.
+      if (isFreeMatrix(read))
+        cx.rowWidths.set(
+          v,
+          b.entryOp('rows.width', [v], scalarType('integer'))
+        );
     }
     if (tupleAxis(t) === 0) cx.tuples.set(v, 0);
     fn.inputs.push(t);

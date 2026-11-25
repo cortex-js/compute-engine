@@ -428,13 +428,46 @@ describe('CE-1736: the matrix operators of a table whose rows have one length', 
     ['a value after a Loop', ['Block', ['Declare', 't', "'unknown'", nm], ['Loop', ['Assign', 't', step('t')], ['Element', 'j', count]], ['Transpose', 't']], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a call result', ['Transpose', ['square', 'n']], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
     ['a Join', ['Transpose', ['Join', nm, nm]], /Transpose of a list of lists of run-time length \(its rows can have different lengths\)/],
-    ['inner lengths not one value', ['MatrixMultiply', nm, nm], /MatrixMultiply of operands whose inner lengths are not one value/],
-    ['a table times a constant matrix', ['MatrixMultiply', nm, ['List', ['List', 1], ['List', 2], ['List', 3]]], /MatrixMultiply of operands whose inner lengths are not one value/],
-    ['Trace of a table that can be not square', ['Trace', nm], /Trace of a matrix whose numbers of rows and of columns are not one value/],
     ['Determinant', ['Determinant', census], /Determinant of a matrix whose number of rows is known at run time only/],
     ['Inverse', ['Inverse', census], /Inverse of a matrix whose number of rows is known at run time only/],
   ])('%s declines', (_, json, cause) => {
     expect(declines(json)).toMatch(cause);
+  });
+
+  // Two lengths that the lowering does not prove equal are compared once at
+  // run time (user decision 2026-11-25): the interpreter's value where they
+  // agree, a `RangeError` where it gives the error
+  // `incompatible-dimensions` or `expected-square-matrix`. The last form
+  // has rows of a constant length and run-time counts (`product()`).
+  // prettier-ignore
+  test.each([
+    ['an n × m table times itself', (w) => ['MatrixMultiply', w(nm), w(nm)]],
+    ['an n × m table times a constant matrix', (w) => ['MatrixMultiply', w(nm), ['List', ['List', 1], ['List', 2], ['List', 3]]]],
+    ['Trace of an n × m table', (w) => ['Trace', w(nm)]],
+    ['two lists of rows of constant lengths', (w) => ['MatrixMultiply', w(['Map', F(['List', 'i', 'i']), count]), w(['Map', F(['List', 'i']), ['Range', 1, 'm', 1]])]],
+  ] as [string, (w: (x: Json) => Json) => Json][])('%s: compared at run time', (_, form) => {
+    const r = compile(box(form(same)), { fallback: false });
+    expect(r.success).toBe(true);
+    let [values, throws] = [0, 0];
+    for (const p of [...SIZES, { n: 2, m: 2 }, { n: 3, m: 3 }]) {
+      const want = ce.withValues(
+        { n: ce.number(p.n), m: ce.number(p.m) } as never,
+        () => box(form(listed)).evaluate()
+      );
+      if (want.operator === 'Error') {
+        expect(() => r.run!(p as never)).toThrow(RangeError);
+        throws += 1;
+        continue;
+      }
+      const got = r.run!(p as never);
+      if (!agree(got, read(want)))
+        throw new Error(
+          `at ${JSON.stringify(p)}: ${JSON.stringify(got)}, the interpreter ${JSON.stringify(read(want))}`
+        );
+      values += 1;
+    }
+    expect(values).toBeGreaterThan(0);
+    expect(throws).toBeGreaterThan(0);
   });
 });
 

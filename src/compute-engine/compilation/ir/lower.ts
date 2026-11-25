@@ -181,6 +181,7 @@ import { prefersJetDerivative } from '../jet-derivative.js';
 import {
   functionLowering,
   inputType,
+  isFreeMatrix,
   rowsElementLane,
   tupleAxis,
   tupleOrInputType,
@@ -3389,6 +3390,14 @@ function lowerOnce(
                 a,
                 `an argument of Apply of type ${engineTypeToString(a.type.type)} for the parameter ${names[i]} of lists of integers`
               );
+            // A parameter of a matrix type binds a value whose rows have
+            // one length (`rowWidths`), which the body reads: the
+            // interpreter gives `incompatible-type` for another.
+            if (isFreeMatrix(d.t) && !rowWidths.has(raw))
+              decline(
+                a,
+                `an argument of Apply for the parameter ${names[i]}, a matrix, whose rows can have different lengths`
+              );
             return raw;
           }
           // The checks read the argument before it is widened to the lane
@@ -4726,6 +4735,14 @@ function lowerOnce(
     if (ir.lane === 'rows') {
       rowsParams.add(param);
       rowsElements.set(param, rowsElementLane(t, cx.wide)!);
+      // A matrix type states that the rows have one length (R5: no test),
+      // the length of the first row, made in the entry body so that every
+      // region reads one value (`rowWidths`).
+      if (isFreeMatrix(t))
+        rowWidths.set(
+          param,
+          b.entryOp('rows.width', [param], scalarType('integer'))
+        );
     }
     // A string is read once, as the engine boxes it (`text.in`); a list of
     // strings is read by `StringJoin` only, which conditions its elements.
@@ -8070,6 +8087,11 @@ function lowerOnce(
           const v = b.param(s.name, { lane: 'rows', shape: [] });
           rowsParams.add(v);
           rowsElements.set(v, s.lane as 'integer' | 'real');
+          if (isFreeMatrix(s.definition.type.type))
+            rowWidths.set(
+              v,
+              b.entryOp('rows.width', [v], scalarType('integer'))
+            );
           frames[0].names.set(s.name, {
             v,
             role: 'local',

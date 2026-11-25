@@ -57,11 +57,37 @@
   read such a list when the program settles that its rows have one length:
   with `T = Map(i ↦ Map(j ↦ i + j, Range(1, n)), Range(1, n))`,
   `MatrixMultiply(T, T)` at `n = 2` gives `[[13, 18], [18, 25]]`, and
-  `MatrixMultiply` declines when its inner lengths are not provably equal.
-  The matrix operators of an input or of a value whose rows can have
-  different lengths, `Determinant` and `Inverse` of such a list, elements
-  that are not real or integer numbers, GLSL, the interval target and the
-  `bigint` mode still decline.
+  inner lengths that are not provably equal are compared at run time (next
+  entry). The matrix operators of a `list<list<…>>` input or of a value
+  whose rows can have different lengths, `Determinant` and `Inverse` of
+  such a list, elements that are not real or integer numbers, GLSL, the
+  interval target and the `bigint` mode still decline.
+
+- **Compiled JavaScript reads an input of a matrix type of run-time size.**
+  An input declared `matrix`, `matrix<real>` or `matrix<integer>`, a typed
+  parameter of a function literal or of `Apply`, and a parameter of a user
+  function of such a type declined with "the input M of type matrix<real>",
+  so the program fell back to the interpreter. They now compile on
+  JavaScript: the host passes an array of arrays, and the compiled code
+  takes the length of the first row as the length of every row, as the type
+  states. With `M: matrix<real>` at `M = [[1, 2, 3], [4, 5, 6]]`,
+  `Transpose(M)` gives `[[1, 4], [2, 5], [3, 6]]`,
+  `MatrixMultiply(M, Transpose(M))` gives `[[14, 32], [32, 77]]` and
+  `Map(r ↦ Sum(r), M)` gives `[6, 15]`. Where `MatrixMultiply` or `Trace`
+  reads two lengths that the compiler does not prove equal, the compiled
+  code compares them once at run time and throws a `RangeError` where they
+  differ, as the interpreter gives an error there: with `A: matrix<real>`
+  at `A = [[1, 0], [0, 1]]`, `MatrixMultiply(M, A)` throws
+  `RangeError: incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (3 and 2)`,
+  and `Trace(M)` throws `RangeError: expected-square-matrix: …`. The
+  comparison runs when an element of the result is read. This also
+  holds for a list of rows of a run-time count, and for a stated length
+  beside a run-time one (`MatrixMultiply(K, v)` with `K: matrix<real^2x3>`
+  and `v: list<real>`), which gave an unspecified value before. A
+  `list<list<real>>` argument at a parameter of a matrix type, `Determinant`
+  and `Inverse` of a matrix of run-time size, matrices of complex numbers or
+  of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
+  the interval target and the `bigint` mode decline.
 
 ### Resolved Issues
 

@@ -731,13 +731,16 @@ export class Builder {
   }
 
   /** The operation `op` in the entry body, before the instruction being
-   *  made: the read of an input (`text.in`), which every later read uses.
-   *  Not counted in `effects` and `impure`. */
+   *  made: the read of an input (`text.in`), which every later read uses,
+   *  or a pure fact of an input (`rows.width`), which a later `op()` of
+   *  the same operands is. Not counted in `effects` and `impure`. */
   entryOp(op: string, args: V[], type: IRType): V {
     const out = this.newValue(type);
     const i: Instr & { k: 'op' } = { k: 'op', out, op, args };
     this.defs.set(out, i);
     this.open[0].body.push(i);
+    if (this.pure(op))
+      this.made.set(`o ${op} ${args}`, { v: out, region: this.open[0] });
     return out;
   }
 
