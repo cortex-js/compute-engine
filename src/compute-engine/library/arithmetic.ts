@@ -388,6 +388,7 @@ import {
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
   provablyLess as provablyLessOnTypes,
+  provablyGreater as provablyGreaterOnTypes,
   provablyGreaterEqual as provablyGreaterEqualOnTypes,
   operandNonFiniteNumber as operandNonFiniteNumberOnTypes,
   absFunctionType as absFunctionTypeOnTypes,
@@ -6069,6 +6070,59 @@ function besselResultType(
 }
 
 /**
+ * One element of an operand of a broadcastable head: the element type of a
+ * collection operand, without its sign, which describes the collection and
+ * not its elements.
+ */
+function elementDescriptor(d: OperandDescriptor): OperandDescriptor {
+  return d.facts.collection === true
+    ? { type: broadcastOperandType(d), facts: { ...d.facts, sgn: undefined } }
+    : d;
+}
+
+/**
+ * The result type of the incomplete gamma function, `Gamma(s, z)` or
+ * `Gamma(s, z0, z1)` (`Γ(s, z0) − Γ(s, z1)`). `specialFunctionType` claims
+ * `real` when every operand is real, which holds only where the value is
+ * real:
+ *
+ * - For a negative `z`, `Γ(s, z)` is complex unless `s` is a positive
+ *   integer (`Γ(1/2, −1) = √π·erfc(i) ≈ 1.77 − 2.93i`); `Γ(n, z)` of a
+ *   positive integer `n` is `(n − 1)!·e⁻ᶻ` times a polynomial in `z`, real
+ *   for every real `z`.
+ * - At `z = 0`, `Γ(s, 0) = Γ(s)`, which has a pole (`~oo`) at each
+ *   non-positive integer `s`. With two operands the claim widens to
+ *   `real | ~oo` there, as for `Γ(s)`; with three, to `number`, since the
+ *   difference of two poles is `NaN`.
+ *
+ * Otherwise the claim widens to `number`.
+ */
+function incompleteGammaType(
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): Type | undefined {
+  const t = specialFunctionType(ops);
+  if (t !== 'real') return t;
+  const [s, ...zs] = ops;
+  if (s === undefined) return 'number';
+  const order = elementDescriptor(s);
+  if (factsOf(order.type).integer && provablyGreaterOnTypes(order, 0))
+    return t;
+  const points = zs.map((z) =>
+    z === undefined ? undefined : elementDescriptor(z)
+  );
+  if (points.some((z) => z === undefined || !provablyGreaterEqualOnTypes(z, 0)))
+    return 'number';
+  if (points.every((z) => z !== undefined && provablyGreaterOnTypes(z, 0)))
+    return t;
+  return realOrPoleOnTypes(
+    t,
+    order,
+    0,
+    ops.length === 2 ? REAL_OR_COMPLEX_INFINITY_TYPE : 'number'
+  );
+}
+
+/**
  * Result type of `LambertW`. W_k(x) is real only on the real branches, for
  * an argument in their real domain: W₀ on [−1/e, ∞] and W₋₁ on [−1/e, 0).
  * Everywhere else on the real line the value is complex (`W₀(−1)`,
@@ -6086,10 +6140,7 @@ function lambertWType(
   const t = specialFunctionType(ops);
   const [x, k] = ops;
   if (t === undefined || x === undefined) return t;
-  const element: OperandDescriptor =
-    x.facts.collection === true
-      ? { type: broadcastOperandType(x), facts: { ...x.facts, sgn: undefined } }
-      : x;
+  const element = elementDescriptor(x);
   if (!isSubtype(element.type, EXTENDED_REAL_TYPE)) return t;
   const branch = k === undefined ? 0 : operandTypeValue(k);
   const isReal =
@@ -10152,14 +10203,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       ],
       nanBehavior: 'propagate',
       // Γ(z) has poles (value `~oo`) at the non-positive integers; the
-      // incomplete Γ(s, z) keeps the generic handler. A provably-NaN
-      // operand declines (`specialFunctionType` records what that buys:
-      // the derived claim stays `number` for a `number`-result head).
+      // incomplete Γ(s, z) is complex for a negative z
+      // (`incompleteGammaType`). A provably-NaN operand declines
+      // (`specialFunctionType` records what that buys: the derived claim
+      // stays `number` for a `number`-result head).
       type: (ops, context) =>
         BoxedType.forResult(
           ops.length === 1
             ? gammaPoleTypeOnTypes(ops[0])
-            : specialFunctionType(ops),
+            : incompleteGammaType(ops),
           context.engine._typeResolver
         ),
 

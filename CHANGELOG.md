@@ -66,6 +66,15 @@
 
 ### Resolved Issues
 
+- **The type of the incomplete gamma function `Gamma(s, z)` is `real` only
+  where its value is real** (CE-1619). For a negative `z`, `Γ(s, z)` is
+  complex unless `s` is a positive integer: `Gamma(1/2, -1)`, whose value is
+  `√π·erfc(i) ≈ 1.77 − 2.93i`, had the type `real` and now has the type
+  `number`. The type stays `real` for a positive `z` (`Gamma(s, 2)`) or a
+  positive integer `s` (`Gamma(2, z)` with `z: real`). When `z` can be `0`, the
+  type also admits an infinity (`infinity | real`), because `Gamma(0, 0)` is
+  `~oo`. The three-operand form `Gamma(s, z0, z1)` follows the same rules.
+
 - **`LerchPhi(z, s, a)` at a very large order `s` ends** (CE-1527).
   `ce.box(['LerchPhi', 0.5, 1e300, 2]).N()` did not end. It now stays
   `LerchPhi(0.5, 1e300, 2)` within a few milliseconds, as other large orders
