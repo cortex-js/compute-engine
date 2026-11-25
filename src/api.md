@@ -6580,6 +6580,7 @@ type OperandRole =
   | {
   kind: "clause";
   type: TypeString;
+  unordered: boolean;
 };
 ```
 
@@ -6646,7 +6647,12 @@ of the operator runs.
   `canonical` handler can narrow from the collection. The index is not a
   free variable of the expression. It is visible in its own clause, in
   the later clauses and in the operands before the first clause (the
-  body), not in an earlier clause. Consecutive `clause` operands are read as the clauses of
+  body), not in an earlier clause. With `unordered: true`, it is visible
+  in the earlier clauses of the run of consecutive `clause` operands too,
+  for an operator that evaluates its clauses in the order of their
+  dependencies, not in the written order: `Sum` and `Product`, where
+  `Sum(i·j, Element(j, Range(1, i)), Limits(i, 1, 3))` is the sum over
+  `i` of the sum over `j`. Consecutive `clause` operands are read as the clauses of
   `Sum`, with the flat spelling: in `Sum(body, k, 1, 10)` the operands
   after the symbol `k` are its bounds, not indexes. An operand that holds
   no index declares nothing. The operand is not evaluated before the
@@ -9601,15 +9607,20 @@ dotNotation: boolean;
 ```
 
 When `true`, member-access heads serialize to dot notation:
-- `First(p)` → `p.x`
-- `Second(p)` → `p.y`
-- `Third(p)` → `p.z`
+- `PointX(p)` → `p.x`
+- `PointY(p)` → `p.y`
+- `PointZ(p)` → `p.z`
 - `Real(z)` → `z.\operatorname{real}`
 - `Imaginary(z)` → `z.\operatorname{imag}`
 - `Length(L)` → `L.\operatorname{count}`
 - `Sum(L)` → `L.\operatorname{total}`
 - `Max(L)` → `L.\max`
 - `Min(L)` → `L.\min`
+- `Mean(L)` → `L.\operatorname{mean}`
+- `Median(L)` → `L.\operatorname{median}`
+- `StandardDeviation(L)` → `L.\operatorname{stdev}`
+- `Sort(L)` → `L.\operatorname{sort}`
+- `Unique(L)` → `L.\operatorname{unique}`
 
 When `false` (default), the standard function-call form is used.
 
