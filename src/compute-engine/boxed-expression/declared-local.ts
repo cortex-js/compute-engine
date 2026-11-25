@@ -1,3 +1,4 @@
+import type { Type } from '../../common/type/types.js';
 import {
   beforeDefinitionWrite,
   registerDefinitionSideTable,
@@ -14,6 +15,46 @@ export function markDeclaredLocal(def: object): void {
 /** Whether the block-local binding `def` has a declared type. */
 export function isDeclaredLocal(def: object): boolean {
   return DECLARED_LOCALS.has(def);
+}
+
+/**
+ * The block locals that hold one function literal for the whole block, and
+ * the signature of that literal once its `Declare` is canonical.
+ *
+ * Such a local has one `let` with a function literal as its value and no
+ * type (`let h = (x, y) => x - y`), and no `Assign` of the block writes it.
+ * Its type is `function` (`initializeLocalContract()`), which gives no
+ * parameter names. Because no statement gives it another function, a named
+ * call of it (`h(y: 2, x: 10)`) is matched against the parameter names of the
+ * literal (`valueCalleeSignature()`). The value of the map is `undefined`
+ * until the `Declare` is canonical. A restore point puts an entry back with
+ * its definition.
+ */
+const SINGLE_FUNCTION_LOCALS = new WeakMap<object, Type | undefined>();
+registerDefinitionSideTable(SINGLE_FUNCTION_LOCALS);
+
+/** Record that the block local `def` holds one function literal for the
+ * whole block (see `SINGLE_FUNCTION_LOCALS`). */
+export function markSingleFunctionLocal(def: object): void {
+  beforeDefinitionWrite(def);
+  SINGLE_FUNCTION_LOCALS.set(def, undefined);
+}
+
+/** Record `signature`, the type of the function literal of the local `def`,
+ * when `markSingleFunctionLocal()` marked `def`. */
+export function recordSingleFunctionSignature(
+  def: object,
+  signature: Type
+): void {
+  if (!SINGLE_FUNCTION_LOCALS.has(def)) return;
+  beforeDefinitionWrite(def);
+  SINGLE_FUNCTION_LOCALS.set(def, signature);
+}
+
+/** The signature that `recordSingleFunctionSignature()` recorded for `def`,
+ * or `undefined`. */
+export function singleFunctionSignature(def: object): Type | undefined {
+  return SINGLE_FUNCTION_LOCALS.get(def);
 }
 
 /**

@@ -85,6 +85,7 @@ import {
   withArrowEffects,
 } from './effects-inference.js';
 import { noteOverlapAdmitted } from './store-admission.js';
+import { recordSingleFunctionSignature } from './declared-local.js';
 import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { installParameterDefaults } from './parameter-defaults.js';
@@ -2517,6 +2518,11 @@ export function initializeLocalContract(
     return;
   const target = binding.value;
   if (target._fixedInitializationType) return;
+  // A local that holds one function literal for the whole block keeps the
+  // signature of the literal for its named calls: the widened type
+  // `function` gives no parameter names.
+  if (typeof type === 'object' && type.kind === 'signature')
+    recordSingleFunctionSignature(target, type);
   const next = constant ? type : widenLocalType(ce, type);
   const wasCallable = containsSignatureArm(target.type.type);
   target._setType(() => ce.type(next));

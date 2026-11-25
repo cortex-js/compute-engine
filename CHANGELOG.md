@@ -98,6 +98,14 @@
 
 ### Resolved Issues
 
+- **A function held in a `let` of a function body can be called by name**
+  (CE-1681). In `function m() { let h = (x, y) => x - y; h(y: 2, x: 10) }`,
+  the call gave the error `argument-names-unavailable`, but the same two
+  statements at the top level of a program gave `8`. The call in the body now
+  gives `8` too. When an assignment of the body writes `h`, `h` can hold a
+  function with other parameter names, and a call by name is still an error:
+  declare the type of `h` as a signature with parameter names.
+
 - **A `for` loop over a number, a boolean or a function is an error**
   (CE-1682). With `let n = 5`, `for i in n { t = t + i }` ran no iteration
   and reported nothing, so a program that meant `for i in 1..n` gave a wrong

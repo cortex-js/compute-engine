@@ -374,8 +374,9 @@ interest(rate: 0.05, 1000)              // ✘ positional after named
 The names checked are the ones the callee's **declaration** carries — a
 `function` definition's parameters, a
 [named function-type annotation](/epsil/declarations/#function-type-annotations-bind-their-parameter-names),
-an annotated lambda (including one assigned to a name,
-`f := (x: number, y: string) => x + 3` then `f(y: "ok", x: 1)`), or a
+a lambda that a `let` declares, annotated or not
+(`let f = (x: number, y: string) => x + 3` then `f(y: "ok", x: 1)`, or
+`let h = (x, y) => x - y` then `h(y: 2, x: 10)`, which is `8`), or a
 protocol member's requirement (both the bare call
 `compare(other: y, self: x)` and the qualified
 `Comparable.compare(other: y, self: x)`, which dispatch on `self`
@@ -409,10 +410,12 @@ A parameter without a declared name is positional-only, and a callee
 whose parameter names the engine cannot read cannot take named
 arguments at all: a forward reference (a call *before* the statement
 that pins the callee's signature), a value typed only as `function`,
-or an **unannotated** lambda reached through a binding —
-`h := (x, y) => …` then `h(x: 1, y: 2)` declines, because type
-inference drops the parameter names; annotate the parameters to call
-it by name. A misspelled name gets a "did you mean" pointing at the
+or a local of a function body declared with `let` and a lambda, with
+no type, when an assignment of the body writes the local — after
+`let h = (x, y) => x - y` and `h = (y, x) => x - y`, the call
+`h(x: 1, y: 2)` is an error, because the local can hold either
+lambda; declare the type of the local as a signature with parameter
+names to call it by name. A misspelled name gets a "did you mean" pointing at the
 closest declared one.
 
 A call that names any argument is a **complete** call: optional

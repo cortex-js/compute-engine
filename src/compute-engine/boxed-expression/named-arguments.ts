@@ -15,6 +15,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { isOperatorDef, isValueDef } from './utils.js';
+import { singleFunctionSignature } from './declared-local.js';
 import {
   boxParameterDefault,
   literalParameterDefault,
@@ -530,6 +531,12 @@ export function valueCalleeSignature(
     (def._programVariable && isWildcardFunctionType(type))
   )
     return isWildcardFunctionType(type) ? def.value?.type.type : type;
+  // A local of a block that holds one function literal for the whole block
+  // (`let h = (x, y) => x - y`, and no `Assign` writes `h`): its type
+  // `function` is read from that literal, not declared, and the literal
+  // gives the names (`markSingleFunctionLocal()`).
+  const literal = singleFunctionSignature(def);
+  if (literal !== undefined && isWildcardFunctionType(type)) return literal;
   const resolved = resolveTypeReference(type);
   if (resolved === undefined || typeof resolved === 'string') return null;
   // An arm of an overload set can itself be a type alias: resolve it, so

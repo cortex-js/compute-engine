@@ -1913,11 +1913,12 @@ describe('EPSIL COMPLETION: NAMED ARGUMENTS', () => {
     ]);
     expect(names(`${signature}h(1, ▮`)).toEqual([]);
     expect(labels(complete(`${signature}h(1, ▮`))).toContain('abs');
-    // A variable with no declared type. In a function body a call by name
-    // is an error; at the top level the engine reads the names of the value
-    // (CE-1681), but only a declared type counts here.
+    // A variable with no declared type. The engine reads the names of the
+    // lambda that it holds, at the top level and in a function body that
+    // does not assign it again (CE-1681), but only a declared type counts
+    // here.
     const body = 'function m() -> number {\n  let h = (x, y) => x + y\n  h(1, ';
-    expect(codes(`${body}y: 2)\n}`)).toEqual(['argument-names-unavailable']);
+    expect(codes(`${body}y: 2)\n}`)).toEqual([]);
     expect(names(`${body}▮`)).toEqual([]);
     expect(names('let h = (x, y) => x + y\nh(1, ▮')).toEqual([]);
   });

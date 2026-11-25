@@ -211,7 +211,10 @@ import {
   bindIndexAuthoritatively,
   substituteBinderValues,
 } from './utils.js';
-import { markDeclaredLocal } from '../boxed-expression/declared-local.js';
+import {
+  markDeclaredLocal,
+  markSingleFunctionLocal,
+} from '../boxed-expression/declared-local.js';
 
 /**
  * The supertype a restriction condition is checked against to be typed as a
@@ -4298,6 +4301,8 @@ export function closedLiteralType(
  *   or from an initial value that is a closed literal (`closedLiteralType()`).
  * - `explicitlyDeclared`: the names of `declaredTypes` whose type the
  *   statement declares, not read from an initial value.
+ * - `functionInitialized`: the names of a `Declare` that states no type and
+ *   whose initial value is a function literal.
  *
  * `ops` may be non-canonical (the held operands of a `Block`, or the raw
  * statements of an Epsil program boxed with `{ canonical: false }`).
@@ -4332,6 +4337,7 @@ export function staticDeclarations(
   declaredTypes: Map<string, Type>;
   explicitlyDeclared: Set<string>;
   declaredConstants: Set<string>;
+  functionInitialized: Set<string>;
 } {
   const declaredNames: string[] = [];
   // The statically-readable declared type of each `Declare(name, "type")`
@@ -4351,6 +4357,9 @@ export function staticDeclarations(
   // literal initial value (see `markDeclaredLocal`).
   const explicitlyDeclared = new Set<string>();
   const declaredConstants = new Set<string>();
+  // The names whose `Declare` states no type and has a function literal as
+  // its initial value (`let h = (x, y) => x - y`).
+  const functionInitialized = new Set<string>();
   for (const statement of ops) {
     const op = typedStatement(statement);
     if (isFunction(op, 'Declare')) {
@@ -4445,6 +4454,8 @@ export function staticDeclarations(
               : closedLiteralType(ce, valueOp);
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
+          if (isFunction(valueOp, 'Function'))
+            functionInitialized.add(nameExpr.symbol);
         }
       }
     }
@@ -4454,6 +4465,7 @@ export function staticDeclarations(
     declaredTypes,
     explicitlyDeclared,
     declaredConstants,
+    functionInitialized,
   };
 }
 
@@ -4813,7 +4825,34 @@ function canonicalSequence(
     declaredTypes,
     explicitlyDeclared,
     declaredConstants,
+    functionInitialized,
   } = staticDeclarations(ce, acceptedStatements, program);
+  // The locals of a block that hold one function literal for the whole
+  // block (`markSingleFunctionLocal()`): one `Declare` with a function
+  // literal and no type, and no `Assign` of the block, at any depth, whose
+  // target names the local. The test of the target is by spelling, so an
+  // `Assign` of a local of the same name in a nested scope also counts.
+  const singleFunctionLocals = new Set<string>();
+  if (!program && functionInitialized.size > 0) {
+    const assigned = new Set<string>();
+    const targetNames = (e: Expression): void => {
+      const name = sym(e);
+      if (name !== undefined) assigned.add(name);
+      else if (isFunction(e)) for (const x of e.ops) targetNames(x);
+    };
+    const collect = (e: Expression): void => {
+      if (!isFunction(e)) return;
+      if (e.operator === 'Assign') targetNames(e.op1);
+      for (const x of e.ops) collect(x);
+    };
+    for (const statement of ops) collect(statement);
+    for (const name of functionInitialized)
+      if (
+        !assigned.has(name) &&
+        declaredNames.filter((n) => n === name).length === 1
+      )
+        singleFunctionLocals.add(name);
+  }
   constantDeclarations = declaredConstants;
   if (program)
     for (const statement of acceptedStatements) {
@@ -4902,6 +4941,8 @@ function canonicalSequence(
         !declareHasValue(declared.ops) &&
         !functions.has(name);
       markDeclaredLocal(hoisted.value);
+      if (singleFunctionLocals.has(name) && !declaredConstants.has(name))
+        markSingleFunctionLocal(hoisted.value);
       if (explicitlyDeclared.has(name)) {
         hoisted.value._fixedInitializationType = true;
         hoisted.value.inferredType = false;
