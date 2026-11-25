@@ -81,8 +81,10 @@ export type IRType = {
    *  the arguments of a call of a function with a rest parameter
    *  (`...args`), which the interpreter binds to a `Tuple`, and `ListFrom`
    *  of them, a `List`. A record of no names made by a `Tuple` or a `List`
-   *  literal has none: its type does not say which one made it. */
-  readonly head?: 'Tuple' | 'List';
+   *  literal has none: its type does not say which one made it. A record
+   *  of the head `Dictionary` is a dictionary literal (CE-1771): its
+   *  `names` are the keys, and it is read by its keys only. */
+  readonly head?: 'Tuple' | 'List' | 'Dictionary';
 };
 
 /** A typed literal. An integer beyond the safe integers is a `bigint`

@@ -1978,7 +1978,9 @@ function lowerOnce(
       );
     if (isSymbol(e)) return symbol(e, want);
     if (isString(e)) return b.constant(e.string, 'string');
-    if (!isFunction(e)) decline(e, 'not a number, a symbol or a function');
+    if (isDictionary(e)) return records.dictionary(e);
+    if (!isFunction(e))
+      decline(e, 'not a number, a symbol, a string, a dictionary or a function');
     // An invalid sub-expression (`Sin(Tuple(w))` of a vector `w`): the
     // interpreter has no value for it.
     if (e.operator !== 'Error' && e.type.type === 'error')
@@ -2748,7 +2750,7 @@ function lowerOnce(
         // step 5).
         if (e.nops === 1 && owned !== undefined) {
           const t = type(owned.binding.v);
-          if (t.head !== undefined)
+          if (t.head === 'Tuple' || t.head === 'List')
             return b.constant(t.fields!.length, 'integer');
         }
         // Of a string (its static type): the number of its characters.

@@ -84,6 +84,8 @@ function valueTypeOf(
         TypeReference | undefined;
       return r === undefined || (r.typeParams?.length ?? 0) > 0 ? undefined : r;
     }
+    // A dictionary (CE-1771): no test is decided by its IR type.
+    if (t.head === 'Dictionary') return undefined;
     const fields = t.fields ?? [];
     const types = fields.map((f, k) => valueTypeOf(e, f, t.marks?.[k]));
     if (fields.length === 0 || !types.every((x) => x !== undefined))

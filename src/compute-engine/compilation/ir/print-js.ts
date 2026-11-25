@@ -650,6 +650,17 @@ function boxValue(
 ): Expression {
   if (t.lane === 'record') {
     const xs = x as readonly unknown[];
+    // A dictionary literal (CE-1771): the dictionary of its keys.
+    if (t.head === 'Dictionary')
+      return ce.function(
+        'Dictionary',
+        (t.fields ?? []).map((f, k) =>
+          ce.function('KeyValuePair', [
+            ce.string(t.names![k]),
+            boxValue(ce, f, t.marks?.[k], xs[k]),
+          ])
+        )
+      );
     return ce.function(
       t.nominal ?? t.head!,
       (t.fields ?? []).map((f, k) => boxValue(ce, f, t.marks?.[k], xs[k]))

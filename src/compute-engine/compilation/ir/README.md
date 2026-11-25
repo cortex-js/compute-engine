@@ -3564,6 +3564,24 @@ two types"); `admits()` refuses the lane there too.
   (`recordCycle()`): the type of a record on a cycle is a fixed point that the
   lowering does not compute, and a record that grows at each call would lower a
   new function at each.
+- **Dictionaries** (CE-1771). A dictionary literal `{w -> t, fill -> "red"}`
+  is a record of its values, in the order of its keys (`dictionary()` of
+  `lower-records.ts`): its `names` are the keys and its `head` is `Dictionary`
+  (`IRType.head`), so two dictionaries of other keys are two record types and
+  an `If` whose arms have two sets of keys declines ("arms of two types").
+  `Field(d, "w")` (`d.w`) and `At(d, "w")` (`d["w"]`) give the field of that
+  name; `At` of an index that is not a constant key (`d[1]`), `First`, `Last`
+  and `Length` of a dictionary decline, as does a key that the literal does not
+  have, and a dictionary with the key `__proto__` (an object literal of the
+  result would set the prototype). `MatchesType` of a dictionary is not decided by its IR type
+  (`valueTypeOf()` gives `undefined`). A parameter of no stated type or `any`
+  holds a dictionary as it holds another record; one whose stated or inferred
+  type is a `dictionary` or a `record` type declines ("not a scalar"). As the
+  result of the code a dictionary is an object of its keys, and at a function
+  of the host it is the engine's dictionary of its keys (`boxValue()` of
+  `print-js.ts`). The nodes in a dictionary are not in `readers`, so a list or
+  a tuple value of a dictionary is not listed (`Listed`), and a function of the
+  host that receives it declines.
 - **Protocol methods.** A call whose head is the dispatcher of a protocol member
   (`rotateAbout(c, a, p)`, and the member call `c.rotateAbout(a, p)`, which has
   the same canonical form) and whose first operand is a record of a named type

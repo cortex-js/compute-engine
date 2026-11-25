@@ -2,6 +2,19 @@
 
 ### Improvements
 
+- **A dictionary literal compiles on JavaScript** (CE-1771). A function
+  whose body holds `{w -> t, fill -> "red"}` declined with "not a number, a
+  symbol or a function", so a Tycho animation that styles a figure with an
+  options dictionary, `t => draw(circle((t, 0), 1, {fill -> "red"}))`, ran
+  interpreted. The literal is now a record of its values: `d.w` and `d["w"]`
+  read a key, a parameter of type `any` takes the dictionary, a function of
+  the host receives it as the interpreter's dictionary, and as the result of
+  the code `run()` gives an object of the keys (`{ w: 2, fill: "red" }`). A
+  read of a key that the literal does not have, an index that is not a
+  constant key (`d[1]`), and other operations on the dictionary (`Length`,
+  `Keys`, arithmetic) still decline. GLSL and the interval mode still
+  decline a dictionary.
+
 - **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
   `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a
   `Sequence` with an `unexpected-operator` error, so a row defined that way

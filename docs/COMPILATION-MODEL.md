@@ -3002,8 +3002,17 @@ interval mode decline a list local that its block writes.
 
 ### Dictionary literals
 
-A dictionary literal declines (`{a -> x + 1}`: "not a number, a symbol or
-a function"), and the interpreter computes it.
+On JavaScript a dictionary literal is a record (`compilation/ir/README.md`,
+"Records"): its values are the fields and its keys the field names.
+`d.a` and `d["a"]` read the field `a`; a key that the literal does not have,
+an index that is not a constant key (`d[1]`), and every other reader
+(`Length`, `Keys`, arithmetic, `Map`) decline. As the result of the code,
+`run()` gives an object of the keys (`{a -> x + 1}` at `x = 1`:
+`{ a: 2 }`); a function of the host receives the dictionary. A list or a
+tuple value of a dictionary given to a function of the host declines: the
+code does not know it as a `List` or a `Tuple` literal. GLSL, the interval
+mode and the `bigint` mode decline a dictionary literal ("records compile on
+javascript only").
 
 ### GPU `At`
 
