@@ -712,7 +712,14 @@ representation or the global `unknown` migration.
 
 #### Repeated reads and captured state (Q11)
 
-**Open.** R and the ban on implicit compaction do not determine the number
+**Decided 2026-11-25** (CE-91): a read of a view can evaluate its callback
+again, a callback with an effect is legal, and `ListFrom` gives a list whose
+reads evaluate no callback. The rule is in `docs/COLLECTIONS-MODEL.md`, "Lazy
+collections"; the capture rules are in `docs/SCOPING-MODEL.md`, "Callable
+resolution" and "Lazy view context lifetime". The text below is the analysis
+that led to the decision.
+
+R and the ban on implicit compaction do not determine the number
 of callback executions:
 
 ```text
@@ -880,7 +887,7 @@ fusion at an explicit omission boundary; otherwise reject compilation.
 | Q8. How should the agreed inference-marker role of `unknown` be implemented? | The role is decided: it is a placeholder, not a concrete content type | Decide unresolved-type representation, subtype API behavior, bounds, and migration from the current lattice; inventory library signatures and classify inference requests versus explicit content contracts or named generics; coordinate with Q7 |
 | Q9. How do strict parameters and chained callbacks handle `Nothing`? | Decided: bypass callbacks for `Nothing`; `Map` preserves the raw position | `Map` preserves omitted positions; `Filter` drops them; callback bypass and immediate omission typing implemented for both; ordinary strict parameter contracts remain separate |
 | Q10. How do paired reductions handle an omitted coordinate? | Decided: skip the whole observation for paired statistics; preserve alignment and use one shared set of observations | Paired statistics implemented; decide `Dot` and custom `Fold`/`Reduce` separately |
-| Q11. What do repeated view reads observe? | User leans toward capturing ordinary input values on language assignment; captured function bindings remain live. Preserve existing effect/cache rules where compatible | Specify the value-capture boundary, mutable objects and effectful callbacks; avoid eager enumeration, exactly-once promises or incidental purity restrictions |
+| Q11. What do repeated view reads observe? | Decided 2026-11-25 (see the Q11 section). Before: user leans toward capturing ordinary input values on language assignment; captured function bindings remain live. Preserve existing effect/cache rules where compatible | Specify the value-capture boundary, mutable objects and effectful callbacks; avoid eager enumeration, exactly-once promises or incidental purity restrictions |
 
 Two inherited conventions also need explicit compatibility checks:
 

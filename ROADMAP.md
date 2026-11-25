@@ -735,6 +735,42 @@ needed as a list (7 gather indices, 15 spread elements, 2 broadcast operands);
 no site needs only a counting loop. The 7 gather sites need a gather/reduce
 fusion, which is a new lowering.
 
+### CE-1806. Compiled code builds the array of a finite `Map` or `Filter` before every read
+
+**Status:** ready; performance, L. Approved 2026-11-25. After CE-1807. Related: CE-253.
+**Witness:** plausible; the JavaScript emitted for `first(map(x => x * 2, L))` and `sum(map(x => x * 2, L))` with `L: list<real>`. No measured cost in a corpus program.
+
+The interpreter computes the positions of a view that are read. Compiled
+code builds the whole array, then reads it. `length(map(f, L))` is the one
+read that builds nothing (`_.L.length`). The values are the same; the cost is
+one array and one loop per view.
+
+This entry and CE-1807 apply one rule: a view becomes a list at a fixed set
+of places, and nowhere else. The places: the result of the program, an
+argument of a host function (CE-1807, which makes the interpreter list it
+there too), an element of a list or a tuple, and a view that is read more
+than once (a local read twice). CE-1807 comes first: it settles the host
+call, and the lowering of this entry then builds the array there.
+
+For a callback with an effect, a draw or a call of a host function, check
+each sub-item against the interpreter: a read of one position (CE-1806.2)
+then makes one call, as the interpreter does, and removes the two
+`First(Map(…))` lines of the known limitations of `docs/COMPILATION-MODEL.md`;
+a case where the order or the number of calls would differ from the
+interpreter keeps the array. Measure a corpus program before and after each
+sub-item.
+
+- **CE-1806.1** A reducer over a `Map` or a `Filter` runs in the loop of the
+  view, with no array: `sum(map(f, L))` is one loop, and
+  `sum(filter(map(f, L), p))` is one loop where it is three today. The
+  readers: `Sum`, `Product`, `Min`, `Max`, `Mean`, `Reduce`, `Any`, `All`,
+  `Length` of a `Filter` (a count).
+- **CE-1806.2** A read of one position of a `Map` applies the callback to
+  that element of the source: `first(map(f, L))` and `map(f, L)[k]` are
+  `f(L[k])` with the range check of `At`.
+- **CE-1806.3** `first(filter(L, p))` and `Find` stop at the first element
+  that the predicate keeps.
+
 ### CE-264. Clause sets that dispatch on `infinity`, `nan` or `non_finite_number` do not compile
 
 **Status:** waits for user (design); capability.
