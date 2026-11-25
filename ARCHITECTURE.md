@@ -463,7 +463,11 @@ during binding against the current scope:
 - `boxed-operator-definition.ts` — `_BoxedOperatorDefinition`: a function's type
   signature, algebraic flags (`associative`, `commutative`, `idempotent`,
   `pure`, `lazy`, `broadcastable`, …), and its handlers (`canonical`,
-  `evaluate`, `evaluateAsync`, `compile`, comparison, collection).
+  `evaluate`, `evaluateAsync`, `evaluateMod`, `compile`, comparison,
+  collection). `evaluateMod` gives the residue of an application modulo an
+  integer without forming its value; `Mod` and `PowerMod` call it
+  (`evaluate-mod.ts`), and `Add`, `Multiply`, `Negate`, `Subtract` and `Power`
+  have one, so that the hooks nest.
 
 The standard library (below) is just a large table of such definitions.
 

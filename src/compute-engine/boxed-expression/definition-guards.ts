@@ -74,6 +74,7 @@ export function isReplaceableOperatorShell(
     def.canonical === undefined &&
     def.evaluate === undefined &&
     def.evaluateAsync === undefined &&
+    def.evaluateMod === undefined &&
     def.evalDimension === undefined &&
     def.derivative === undefined &&
     def.compile === undefined &&

@@ -2465,6 +2465,11 @@ function extendedOperatorDefinition(
     !('evaluateAsync' in fields) &&
     !('collection' in fields);
 
+  // A new `evaluate` replaces the meaning that the old `evaluateMod` agreed
+  // with.
+  if ('evaluate' in fields && !('evaluateMod' in fields))
+    def.evaluateMod = undefined;
+
   // An update that states nothing about purity keeps the statement of the
   // old definition (`_purityStated`). The constructor clears it for a
   // definition that has a signature with no effects, and the copy above

@@ -1,4 +1,5 @@
 import { typeWithFacts } from './constraint-subject.js';
+import { modHookAnswer } from './evaluate-mod.js';
 import { programSourceOrder } from '../statement-position.js';
 import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isIndexReadTuple } from './index-read-tuple.js';
@@ -9970,6 +9971,19 @@ export class BoxedFunction
       }
 
       //
+      // 3c/ `Mod(x, m)` whose dividend has an `evaluateMod` hook is answered
+      // by the hook, before the dividend is evaluated (`modHookAnswer()`).
+      //
+      if (
+        this._operator === 'Mod' &&
+        !numericApproximation &&
+        def._standardLibrary
+      ) {
+        const hooked = modHookAnswer(this.ops, this.engine);
+        if (hooked !== undefined) return hooked;
+      }
+
+      //
       // 4/ Evaluate the applicable operands in the current scope
       //
       // Without `materialization`: that option describes the result, and a
@@ -11555,6 +11569,16 @@ export class BoxedFunction
           lazyMapNumericApproximation(this.engine, this)
         );
         if (nLazy) return nLazy;
+      }
+
+      // 2c/ See step 3c of the synchronous route.
+      if (
+        this._operator === 'Mod' &&
+        !numericApproximation &&
+        def._standardLibrary
+      ) {
+        const hooked = modHookAnswer(this.ops, this.engine);
+        if (hooked !== undefined) return hooked;
       }
 
       //

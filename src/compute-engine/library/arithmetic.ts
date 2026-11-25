@@ -76,6 +76,13 @@ import {
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
+import {
+  addModHook,
+  multiplyModHook,
+  negateModHook,
+  powerModHook,
+  subtractModHook,
+} from '../boxed-expression/evaluate-mod.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
 
 import {
@@ -8753,6 +8760,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Add: {
+      evaluateMod: addModHook,
       description: 'Sum of two or more values.',
       wikidata: 'Q32043',
       associative: true,
@@ -11944,6 +11952,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Multiply: {
+      evaluateMod: multiplyModHook,
       description: 'Product of two or more values.',
       wikidata: 'Q40276',
       associative: true,
@@ -13124,6 +13133,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Negate: {
+      evaluateMod: negateModHook,
       description: 'Additive Inverse',
       wikidata: 'Q715358',
       complexity: 2000,
@@ -13353,6 +13363,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Power: {
+      evaluateMod: powerModHook,
       description: 'Exponentiation: raise a base to a power.',
       keywords: ['exponent', 'exponentiation'],
       wikidata: 'Q33456',
@@ -14916,6 +14927,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Subtract: {
+      evaluateMod: subtractModHook,
       description: 'Difference between two or more values.',
       wikidata: 'Q40754',
       complexity: 1350,

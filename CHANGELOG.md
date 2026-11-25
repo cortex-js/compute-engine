@@ -1,3 +1,30 @@
+## [Unreleased]
+
+### Improvements
+
+- **An operator can answer `Mod` without forming its value: the `evaluateMod`
+  handler** (#527, contributed by
+  [enumeratio](https://github.com/enumeratio)). `evaluateMod(ops, modulus,
+  context)` on an operator definition returns the residue in `[0, modulus)`
+  of an application of the operator, or `undefined` to decline. `Mod(x, m)`
+  calls it, before `x` is evaluated, when `m` is an exact integer `>= 2`, the
+  call is not under `.N()` and the operator of `x` has the handler;
+  `PowerMod(a, e, m)` calls it for its base, then raises the residue to the
+  exact non-negative `e` by square-and-multiply; `Mod(x, n, d)` reaches it
+  through `d + Mod(x - d, n)`, with `x - d` built without evaluating `x`.
+  `context.mod(y)` is the residue of an operand, through its own handler when
+  it has one, so handlers nest, and it never evaluates an operand that has
+  one. `Add`, `Multiply`, `Negate`, `Subtract` and `Power` (exact
+  non-negative integer exponent) have a handler built on `context.mod`. For
+  a declared `Huge(n)` whose `evaluate` throws and whose handler answers,
+  `Mod(Huge(10^9), 7)` is `1` where it threw, and `Mod(2 * Huge(5) + 3, 97)`
+  is `53`. A rational (`Mod(1/3, 7)` is `1/3`), a float operand, `.N()`, a
+  modulus below 2, a non-integer modulus or a list modulus keep their
+  values. The handler is read by the interpreter only: compiled code is
+  unchanged. A patch that replaces `evaluate` through
+  `ce.declare(name, …, { extend: true })` drops the old `evaluateMod`, unless
+  it gives its own.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements

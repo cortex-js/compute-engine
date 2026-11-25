@@ -65,6 +65,7 @@ import type {
   OperatorDerivative,
   EvaluateOptions,
   EvaluateHandlerOptions,
+  EvaluateModHandler,
   IComputeEngine as ComputeEngine,
   Scope,
   Sign,
@@ -192,6 +193,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'canonical',
   'evaluate',
   'evaluateAsync',
+  'evaluateMod',
   'evalDimension',
   'compile',
   'derivative',
@@ -856,6 +858,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     ops: ReadonlyArray<Expression>,
     options: EvaluateHandlerOptions
   ) => Promise<Expression | undefined>;
+
+  evaluateMod?: EvaluateModHandler;
 
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
@@ -2387,6 +2391,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
     if (def.type !== undefined) this.type = def.type;
     this.evaluateAsync = def.evaluateAsync ?? this.evaluateAsync;
+    this.evaluateMod = def.evaluateMod ?? this.evaluateMod;
     this.canonical = dropsNumericCanonical
       ? undefined
       : (def.canonical ?? this.canonical);
