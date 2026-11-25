@@ -91,6 +91,12 @@
 
 ### Resolved Issues
 
+- **The sum, the product, the maximum, the minimum and the count of a value
+  of a sorted list are found when an element is a variable** (CE-1804). With
+  `x` declared `real`, `Sum(Sort([3, x, 1]))`, `Max(Sort([3, x, 1]))` and
+  `Count(Sort([3, x, 1]), 1)` stayed unevaluated. They now give `x + 4`,
+  `Max(3, x)` and `1`, also when a symbol holds the sorted list.
+
 - **The Epsil syntax highlighting styles a `\` at the end of an unclosed
   single-line string as invalid** (CE-1782). For `let s = "C:\`,
   `epsilHighlightTokens` gave the last `\` the style `escape`, and the parser

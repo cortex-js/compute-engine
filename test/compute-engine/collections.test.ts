@@ -5257,6 +5257,70 @@ describe('PEEK THROUGH COUNT/MEMBERSHIP-PRESERVING WRAPPERS', () => {
       expect(local.expr(input).evaluate().json).toEqual(expected);
     });
   });
+
+  // A sum, a product, an extremum and the count of a value do not depend on
+  // the order of the elements. They read the source of a `Sort` that cannot
+  // order its elements, written in the call or held by a symbol.
+  describe('an operator that does not depend on the order reads the source of a Sort that cannot order its elements', () => {
+    const local = new ComputeEngine();
+    local.declare('x', 'real');
+    local.declare('L', 'list<real>');
+    const sorted: Expression = ['Sort', ['List', 3, 'x', 1]];
+    local.assign('d', local.expr(sorted));
+
+    test.each<[Expression, Expression]>([
+      [['Sum', sorted], ['Add', 'x', 4]],
+      [['Product', sorted], ['Multiply', 3, 'x']],
+      [['Max', sorted], ['Max', 3, 'x']],
+      [['Min', sorted], ['Min', 1, 'x']],
+      [['Max', sorted, 7], ['Max', 7, 'x']],
+      [['Count', sorted, 1], 1],
+      [['Count', sorted, 'x'], 1],
+      [['Count', sorted, 2], 0],
+      [['Sum', 'd'], ['Add', 'x', 4]],
+      [['Product', 'd'], ['Multiply', 3, 'x']],
+      [['Max', 'd'], ['Max', 3, 'x']],
+      [['Min', 'd'], ['Min', 1, 'x']],
+      [['Count', 'd', 1], 1],
+      // A key function does not change the elements.
+      [
+        ['Sum', ['Sort', ['List', 3, 'x', 1], ['Function', ['Negate', 'a'], 'a']]],
+        ['Add', 'x', 4],
+      ],
+    ])('%j evaluates to %j', (input, expected) => {
+      expect(local.expr(input).evaluate().json).toEqual(expected);
+    });
+
+    test('the asynchronous route gives the same values', async () => {
+      const sum = await local.expr(['Sum', sorted]).evaluateAsync();
+      expect(sum.json).toEqual(['Add', 'x', 4]);
+      const max = await local.expr(['Max', sorted]).evaluateAsync();
+      expect(max.json).toEqual(['Max', 3, 'x']);
+    });
+
+    // The source of the `Sort` has no elements to read either.
+    test.each<[Expression]>([
+      [['Sum', ['Sort', 'L']]],
+      [['Max', ['Sort', 'L']]],
+      [['Count', ['Sort', 'L'], 1]],
+    ])('%j stays unevaluated for a list with no value', (input) => {
+      expect(local.expr(input).evaluate().json).toEqual(input);
+    });
+
+    // These results depend on the order, so the `Sort` is kept.
+    test.each<[Expression]>([
+      [['First', sorted]],
+      [['At', sorted, 2]],
+      [['Reduce', sorted, 'Subtract', 0]],
+    ])('%j stays unevaluated', (input) => {
+      expect(local.expr(input).evaluate().json).toEqual(input);
+    });
+
+    test('a Sort of a set is still a type error', () => {
+      const result = local.expr(['Sum', ['Sort', ['Set', 3, 1]]]).evaluate();
+      expect(result.operator).toBe('Error');
+    });
+  });
 });
 
 describe('A collection parameter that is not yet evaluated (Tycho item 107)', () => {

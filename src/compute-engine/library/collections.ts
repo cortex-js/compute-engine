@@ -996,6 +996,25 @@ const peekMembershipPreserving = (
   op: Expression | undefined
 ): Expression | undefined => peekWrappers(op, MEMBERSHIP_PRESERVING_WRAPPERS);
 
+/**
+ * The collection that an operator reads when its result does not depend on
+ * the order of the elements (a sum, a product, an extremum, the count of a
+ * value): `value`, or the source of `value` when `value` is a `Sort`,
+ * `Reverse` or `RandomShuffle` that is not a collection.
+ *
+ * An evaluated `Sort` that cannot order its elements, `Sort([3, x, 1])` for
+ * a variable `x`, stays a `Sort` call, and that call has no elements to
+ * read. Its source has the same elements, so the sum of the source is the
+ * sum of the sorted list. A wrapper is removed under the conditions of
+ * `peekWrappers`, and only when its source is a collection: otherwise the
+ * operator keeps the call as written.
+ */
+export function orderIndependentSource(value: Expression): Expression {
+  if (value.isCollection) return value;
+  const source = peekCountPreserving(value);
+  return source !== undefined && source.isCollection ? source : value;
+}
+
 // Parsed signatures (kept in sync with the `signature:` strings on the
 // respective definitions) for the count/membership canonical handlers to
 // delegate operand validation to `validateArguments`.
@@ -14301,7 +14320,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const adjusted = validateAgainstDeclaration(ce, 'Count', stripped, true);
       return ce._fn('Count', adjusted ?? stripped);
     },
-    evaluate: ([xs, what, levels], { engine }) => {
+    evaluate: ([operand, what, levels], { engine }) => {
+      // The count of the elements and the count of a value do not depend on
+      // the order of the elements, so a `Sort` that could not order them
+      // (`Sort([3, x, 1])`, also as the value of a symbol) is read as its
+      // source. The source of the predicate form is kept: the result of a
+      // predicate that is not pure depends on the order of its calls.
+      const xs =
+        what?.isFunction === true ? operand : orderIndependentSource(operand);
       // A decided non-collection source is refused the same way `Length` is,
       // in both the 1-arg and the 2-arg form. The declared `collection<any>`
       // parameter makes `validateArguments` wrap a STATICALLY decided operand
