@@ -42,7 +42,11 @@ import type { UnitEnvironment } from './binding-unit.js';
 import type { EpsilDebugHooks, EpsilDebugRun } from './types-debug.js';
 import type { StatementSources } from '../common/debug-hook.js';
 
-import type { Expression, ExpressionInput } from './types-expression.js';
+import type {
+  Expression,
+  ExpressionInput,
+  OperatorCompileHandler,
+} from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
 import type { ContourInput, ContourIntegralResult } from './types-contour.js';
 export type * from './types-contour.js';
@@ -595,12 +599,30 @@ export type InferResult = {
  * description or a wider signature) keeps it a library operator: `D`,
  * compilation and the numeric evaluation of the library still apply to it.
  * An extension that replaces one of these handlers is treated as a user
- * definition with the same name, as a plain `ce.declare()` is.
+ * definition with the same name, as a plain `ce.declare()` is. The `compile`
+ * field of the patch (`'inherit'` or a handler) lets such an extension keep
+ * the library lowering for compilation.
  *
  * @category Definitions
  */
-export type OperatorDefinitionPatch = OperatorDefinition & {
+export type OperatorDefinitionPatch = Omit<OperatorDefinition, 'compile'> & {
   addSignature?: Type | TypeString;
+  /**
+   * How the patch treats the compiled lowering of the operator.
+   *
+   * - `'inherit'`: the new `evaluate` agrees with every call that the library
+   *   lowering compiles, so `compile()` lowers the operator as the library
+   *   does, as if `evaluate` had not been replaced.
+   * - a handler ({@link OperatorCompileHandler}): it gets the `compile` of
+   *   the extended definition as `context.inherited`, and the answer
+   *   `undefined` keeps the library lowering of that call.
+   *
+   * A patch that replaces `evaluate` and states no `compile` declines to
+   * compile the operator. Only the compiler reads this field: `D` and the
+   * canonical folds treat a definition with another `evaluate` as a user
+   * definition.
+   */
+  compile?: 'inherit' | OperatorCompileHandler;
 };
 
 export interface IComputeEngine {

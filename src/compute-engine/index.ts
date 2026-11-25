@@ -3754,6 +3754,14 @@ export class ComputeEngine implements IComputeEngine {
    *   clauses.
    * - The visible definition is not changed. An expression boxed before the
    *   extension keeps using the old definition.
+   * - A patch that replaces `evaluate` makes a definition that `compile()`
+   *   does not lower with the library tables: the call runs the handler. The
+   *   `compile` field of the patch keeps the library lowering. `'inherit'`
+   *   says that the new `evaluate` agrees with every call that the library
+   *   lowering compiles. A handler gets the `compile` handler of the extended
+   *   definition as `context.inherited`, and returns `undefined` to keep the
+   *   library lowering of that call. Neither changes how `D` and the canonical
+   *   folds see the operator. Any other value throws.
    *
    * ```ts
    * // Accept any value as the first operand of `SetMinus`, and keep its
@@ -3764,6 +3772,23 @@ export class ComputeEngine implements IComputeEngine {
    *   { extend: true }
    * );
    * ce.box(['SetMinus', 5, 2]).isValid; // ➔ true
+   *
+   * // Fix the value of `Beta` at a pole, and keep its compiled lowering
+   * ce.declare('Beta', { evaluate: betaWithPoles, compile: 'inherit' }, { extend: true });
+   *
+   * // Change only the two-operand `Zeta(s, a)`: the one-operand call keeps
+   * // the library lowering
+   * ce.declare(
+   *   'Zeta',
+   *   {
+   *     evaluate: zetaAtA,
+   *     compile: (args, compile, context) =>
+   *       args.length === 2
+   *         ? ce.function('HurwitzZeta', [args[0], args[1]])
+   *         : context.inherited?.(args, compile, context),
+   *   },
+   *   { extend: true }
+   * );
    * ```
    */
   // Two `(id, …)` overloads: a `Type`/type string in the same union as the

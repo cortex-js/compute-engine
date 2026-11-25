@@ -125,6 +125,7 @@ import type {
   OperatorDefinitionPatch,
   CollectionHandlers,
   FunctionInterface,
+  OperatorCompileHandler,
 } from './global-types.js';
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
 
@@ -167,7 +168,9 @@ import {
   extendedLibraryOperator,
   hidesLibraryBinding,
   inSerializationScope,
+  loweringLibraryOperator,
   markLibraryExtension,
+  markLoweringExtension,
 } from './library-shadowing.js';
 import { isInferredTypedParameter } from './boxed-expression/inferred-annotations.js';
 import {
@@ -2337,6 +2340,11 @@ function asBoxedType(t: unknown): BoxedType | undefined {
   return undefined;
 }
 
+/** The `context.inherited` of a handler that extends a library operator: the
+ * library lowers from its tables, and `undefined` is the answer that selects
+ * them. */
+const defersToLibrary: OperatorCompileHandler = () => undefined;
+
 /**
  * Build the definition that `ce.declare(id, patch, { extend: true })`
  * installs: the fields of the operator definition visible for `id` from
@@ -2392,6 +2400,20 @@ function asBoxedType(t: unknown): BoxedType | undefined {
  *   `library-shadowing.ts`): `D`, compilation and the canonical folds keep
  *   treating the operator as the library one.
  *
+ * - `compile` is `'inherit'` or a handler. `'inherit'` says that the new
+ *   `evaluate` agrees with every call that the library lowering compiles: the
+ *   definition keeps the `compile` of the one it extends, and the compiler
+ *   lowers its calls with the library tables, as if `evaluate` had not been
+ *   replaced. A handler gets the `compile` of the extended definition as
+ *   `context.inherited` (`undefined` when there is none), and the answer
+ *   `undefined` defers to the library lowering. Both apply to compilation
+ *   only (`markLoweringExtension()`): a definition that replaces `evaluate`
+ *   still shadows the library name for `D` and the canonical folds, which
+ *   read the library by name and would bypass the new `evaluate`. A patch
+ *   that replaces `evaluate` and states no `compile` declines to compile,
+ *   and so does `'inherit'` on an operator that extends no library
+ *   definition.
+ *
  * Throws, and installs nothing, when there is no visible operator definition,
  * when the name is a value, when the function is defined by clauses (the
  * clause list belongs to the old definition object), or when the new
@@ -2442,7 +2464,27 @@ function extendedOperatorDefinition(
       `Cannot extend "${id}": give either \`signature\` or \`addSignature\`, not both`
     );
 
-  const def: OperatorDefinition = { ...old, ...fields };
+  // `compile` is `'inherit'` (the new `evaluate` agrees with every call that
+  // the library lowering compiles) or a handler that gets the lowering of the
+  // extended definition as `context.inherited`.
+  const statedCompile = (fields as { compile?: unknown }).compile;
+  if (
+    statedCompile !== undefined &&
+    statedCompile !== 'inherit' &&
+    typeof statedCompile !== 'function'
+  )
+    throw new Error(
+      `Cannot extend "${id}": \`compile\` must be 'inherit' or a function, not ${
+        typeof statedCompile === 'string'
+          ? JSON.stringify(statedCompile)
+          : typeof statedCompile
+      }`
+    );
+  const inheritsCompile = statedCompile === 'inherit';
+  // `'inherit'` keeps the `compile` of the extended definition.
+  if (inheritsCompile) delete (fields as { compile?: unknown }).compile;
+
+  const def: OperatorDefinition = { ...old, ...fields } as OperatorDefinition;
 
   // The collection handlers of a host operator are installed wrapped
   // (`withHostCollectionHandlers`, `shared-evaluation-memo.ts`). The new
@@ -2623,7 +2665,32 @@ function extendedOperatorDefinition(
       ? old
       : extendedLibraryOperator(old);
 
+  // The library definition whose compiled lowering the extended definition
+  // has: the library definition itself, or one that an earlier extension
+  // inherited it from. A definition of no library operator has none, so
+  // `'inherit'` and a handler that defers decline as a patch of `evaluate`
+  // does.
+  const loweringLibrary =
+    systemBinding !== undefined &&
+    isOperatorDef(systemBinding) &&
+    systemBinding.operator === old
+      ? old
+      : loweringLibraryOperator(old);
+
+  if (typeof statedCompile === 'function') {
+    const handler = statedCompile as OperatorCompileHandler;
+    // The library lowers from its tables, with no handler: `undefined` is
+    // the answer that selects it.
+    const inherited: OperatorCompileHandler | undefined =
+      old.compile ??
+      (loweringLibrary !== undefined ? defersToLibrary : undefined);
+    def.compile = (args, compile, context) =>
+      handler(args, compile, { ...context, inherited });
+  }
+
   const carry = (installed: BoxedOperatorDefinition): void => {
+    if (loweringLibrary !== undefined && (inheritsCompile || statedCompile))
+      markLoweringExtension(installed, loweringLibrary);
     if (keepsPurityStatement) installed._purityStated = old._purityStated;
     if (copiesDeriver) installed._deriveEffects = old._deriveEffects;
     if (copiesSkeleton) installed._signatureSkeleton = old._signatureSkeleton;

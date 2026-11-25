@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Improvements
+
+- **An extension that replaces `evaluate` can keep the compiled lowering of
+  the operator** (#527, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+  `ce.declare(name, patch, { extend: true })` takes a `compile` field:
+  `'inherit'` says that the new `evaluate` agrees with every call that the
+  library lowering compiles, and a handler receives the `compile` handler of
+  the extended definition as `context.inherited` and answers `undefined` to
+  keep the library lowering of that call. `Beta` extended with an `evaluate`
+  that gives 0 at its poles and `compile: 'inherit'` compiles to the same
+  `_SYS.ir.beta(_.s, _.a)` as before, on `javascript` and `glsl`; without the
+  field it called the handler as a host function. A handler that lowers the
+  two-operand `Zeta(s, a)` as `HurwitzZeta(s, a)` and returns
+  `context.inherited(…)` for `Zeta(s)` keeps `_SYS.ir.zeta(_.s)`. A patch that
+  replaces `evaluate` and states no `compile` declines as before, and so does
+  `'inherit'` on an operator that extends no library definition. Any other
+  value of `compile` throws. `D` and the canonical folds still treat such an
+  operator as a user definition.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements

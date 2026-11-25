@@ -714,6 +714,12 @@ export type OperatorCompileContext = {
   /** The operand type including facts established by this compilation's local
    * bindings. The expression's type remains the target-independent contract. */
   readonly typeOf?: (expr: Expression) => Type;
+  /** Set on the handler of a definition made with
+   * `ce.declare(name, { compile }, { extend: true })`: the `compile` handler
+   * of the definition that it extends (the library's, or the handler of an
+   * earlier extension). Its answer `undefined` selects the library lowering.
+   * `undefined` when the extended definition has none. */
+  readonly inherited?: OperatorCompileHandler;
 };
 
 /**
