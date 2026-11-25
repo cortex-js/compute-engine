@@ -63,6 +63,52 @@ describe('Parser: component access', () => {
       expect(parse('L.\\min')).toEqual(['Min', 'L']);
     });
 
+    test.each([
+      ['mean', 'Mean'],
+      ['median', 'Median'],
+      ['stdev', 'StandardDeviation'],
+      ['sort', 'Sort'],
+      ['unique', 'Unique'],
+    ])('L.\\operatorname{%s} → %s(L)', (member, head) => {
+      expect(parse(`L.\\operatorname{${member}}`)).toEqual([head, 'L']);
+    });
+
+    test('a definition whose right side ends with .mean is an equation (Desmos state ifnnzttcqg)', () => {
+      expect(
+        rawParse('a=\\left[1,2,3\\right].\\operatorname{mean}')
+      ).toEqual(['Equal', 'a', ['Mean', ['List', 1, 2, 3]]]);
+      expect(
+        rawParse('S\\left(p\\right)=\\left(p+1\\right).\\operatorname{mean}')
+      ).toEqual(['Equal', ['S', 'p'], ['Mean', ['Delimiter', ['Add', 'p', 1]]]]);
+    });
+
+    test('the list members evaluate as Desmos does', () => {
+      const L = '\\left[3,1,2,1\\right]';
+      expect(ce.parse(`${L}.\\operatorname{mean}`).evaluate().json).toEqual([
+        'Rational', 7, 4,
+      ]);
+      expect(ce.parse(`${L}.\\operatorname{median}`).evaluate().json).toEqual([
+        'Rational', 3, 2,
+      ]);
+      expect(ce.parse(`${L}.\\operatorname{sort}`).evaluate().json).toEqual([
+        'List', 1, 1, 2, 3,
+      ]);
+      expect(ce.parse(`${L}.\\operatorname{unique}`).evaluate().json).toEqual([
+        'List', 3, 1, 2,
+      ]);
+      // The sample standard deviation (Desmos `stdev`), not the population one
+      // (sqrt(2/3)).
+      expect(
+        ce.parse('\\left[1,2,3\\right].\\operatorname{stdev}').evaluate().json
+      ).toEqual(1);
+    });
+
+    test('sort is an accessor: a following (...) is a factor, not an argument list', () => {
+      expect(
+        rawParse('L.\\operatorname{sort}\\left(x+1\\right)')
+      ).toEqual(['InvisibleOperator', ['Sort', 'L'], ['Delimiter', ['Add', 'x', 1]]]);
+    });
+
     test('z.\\operatorname{real} → Real(z)', () => {
       ce.declare('z', 'complex');
       expect(parse('z.\\operatorname{real}')).toEqual(['Real', 'z']);

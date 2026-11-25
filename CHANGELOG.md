@@ -2,6 +2,15 @@
 
 ### Improvements
 
+- **The Desmos list members `.mean`, `.median`, `.stdev`, `.sort` and
+  `.unique` parse** (CE-1651). `a=[1,2,3].\operatorname{mean}` gave a
+  `Sequence` with an `unexpected-operator` error, so a row defined that way
+  was not an equation. It now gives `["Equal", "a", ["Mean", ["List", 1, 2,
+  3]]]`. The members map to `Mean`, `Median`, `StandardDeviation` (the sample
+  standard deviation, as in Desmos), `Sort` and `Unique`. With the
+  `dotNotation` serialization option, a one-operand call of these operators
+  serializes back to the member form: `L.\operatorname{mean}`.
+
 - **A Document row with a range type, given as `real` by the `inputs`
   compilation option, is an input also when a function row reads it**
   (CE-1733). With the rows `k = \max(y_w, 0.01)` (type `real<0.01..>`) and

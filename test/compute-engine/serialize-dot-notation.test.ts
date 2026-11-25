@@ -38,6 +38,23 @@ describe('Serializer: dotNotation option', () => {
     expect(ce.expr(['Min', 'L']).toLatex()).toBe('L.\\min');
   });
 
+  test('on: the Desmos list members serialize with their member names and round-trip', () => {
+    const ce = new ComputeEngine();
+    ce.latexOptions = { dotNotation: true };
+    ce.declare('L', 'list<number>');
+    for (const [head, member] of [
+      ['Mean', 'mean'],
+      ['Median', 'median'],
+      ['StandardDeviation', 'stdev'],
+      ['Sort', 'sort'],
+      ['Unique', 'unique'],
+    ]) {
+      const latex = ce.expr([head, 'L']).toLatex();
+      expect(latex).toBe(`L.\\operatorname{${member}}`);
+      expect(ce.parse(latex).json).toEqual([head, 'L']);
+    }
+  });
+
   test('on: Real, Imaginary use \\operatorname form', () => {
     const ce = new ComputeEngine();
     ce.latexOptions = { dotNotation: true };
