@@ -4943,9 +4943,10 @@ export function snapshotRunVariables(
     }
     // The names this operator binds shadow each operand where they are in
     // scope (`boundVariableNamesInOperand`), as in `rewriteWithBinders`: an
-    // iterator clause's index is not in scope in an earlier clause, and the
-    // bounds of a `Limits` clause (the collection of an `Element` clause)
-    // read the ENCLOSING binding of the index (`ownIndexClauseAt`).
+    // iterator clause's index is not in scope in an earlier clause (except
+    // for the unordered clauses of `Sum` and `Product`), and the bounds of a
+    // `Limits` clause (the collection of an `Element` clause) read the
+    // ENCLOSING binding of the index (`ownIndexClauseAt`).
     const binds = boundVariableNames(e);
     const binders = binds.length > 0 ? declaredBinders(e, 'post') : undefined;
     const shadowedIn = (i: number): ReadonlySet<string> | undefined => {
@@ -7291,7 +7292,8 @@ function containsFreeSymbol(
   else {
     // A bound name shadows the operands it is IN SCOPE in
     // (`boundVariableNamesInOperand`): an iterator clause's index does not
-    // shadow an earlier clause's collection or guard.
+    // shadow an earlier clause's collection or guard, except in the
+    // unordered clauses of `Sum` and `Product`.
     const binds = boundVariableNames(expr);
     // The clause ordering is read once per node, not once per operand.
     const binders =

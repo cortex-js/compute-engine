@@ -178,6 +178,7 @@ import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   declaredBinderNamesOf,
   ownIndexClause,
+  siteVisibleFrom,
   symbolAtSite,
   replaceAtSite,
   type BindingSiteSelector,
@@ -5812,7 +5813,9 @@ function keepsLibraryProduct(
  *   clauses; the clause walk inside the handler (`canonicalIndexingSet`,
  *   `canonicalLoopLike`) declares each index in this scope just before its own
  *   clause, and the post-phase is the backstop. Only the FIRST clause's index
- *   can be declared up front — nothing is canonicalized ahead of it.
+ *   can be declared up front — nothing is canonicalized ahead of it — and
+ *   every index of an unordered clause run (`Sum`, `Product`), which is
+ *   visible from the first clause (`BindingSite.visibleFrom`).
  */
 function canonicalizeBinder(
   ce: ComputeEngine,
@@ -5840,9 +5843,10 @@ function canonicalizeBinder(
     scope.noAutoDeclare = true;
     ce.pushScope(scope);
     try {
-      // A clause-local site is visible only from its own operand onward, and
-      // the handler canonicalizes the operands in one call: all the pre-phase
-      // can declare is the first clause's index.
+      // A clause-local site is visible only from its own operand onward (or
+      // from the first clause, for an unordered clause), and the handler
+      // canonicalizes the operands in one call: all the pre-phase
+      // can declare is the index of each site visible at the first clause.
       //
       // A lazy operator without a `canonical` handler canonicalizes none of
       // its clauses: the engine canonicalizes only its `statement` operands
@@ -5864,11 +5868,14 @@ function canonicalizeBinder(
           roles !== undefined &&
           roles.every((role, i) => role !== 'statement' || i < clauseAt);
       }
+      // The index of an unordered clause (`Sum`, `Product`) is visible from
+      // the first clause (`BindingSite.visibleFrom`), so it is declared here
+      // too.
       let firstClause: number | undefined;
       for (const site of preSites) {
         if (site.clauseLocal && !everyClause) {
           firstClause ??= site.path[0];
-          if (site.path[0] !== firstClause) continue;
+          if (siteVisibleFrom(site) > firstClause) continue;
         }
         const sym = symbolAtSite(xs, site.path);
         if (sym === undefined) continue;
@@ -5953,7 +5960,8 @@ function canonicalizeBinder(
  * before the first clause — the body, which is inside every clause). An
  * earlier clause's collection referencing the name legitimately denotes the
  * ENCLOSING binding — `Comprehension(…, Element(i, [j, j+1]), Element(j, …))`
- * draws `i` from the ambient `j`.
+ * draws `i` from the ambient `j`. The index of an unordered clause (`Sum`,
+ * `Product`) is rewritten from the first clause (`BindingSite.visibleFrom`).
  */
 function bindBindingSites(
   ce: ComputeEngine,
@@ -5978,14 +5986,19 @@ function bindBindingSites(
   // and the index of the first clause — every operand before it (the body)
   // sees all the bindings.
   const visibleFrom = new Map<string, number>();
+  // The operand of the first clause that binds a name (`DeclaredBinders`,
+  // `binding-sites.ts`).
+  const boundAt = new Map<string, number>();
   let firstClause = Number.POSITIVE_INFINITY;
   for (const site of found) {
     const sym = symbolAtSite(ops, site.path);
     if (sym === undefined) continue;
     const id = sym.symbol;
-    const from = site.clauseLocal ? site.path[0] : 0;
+    const from = siteVisibleFrom(site);
+    const at = site.clauseLocal ? site.path[0] : 0;
     if (site.clauseLocal) firstClause = Math.min(firstClause, site.path[0]);
     visibleFrom.set(id, Math.min(visibleFrom.get(id) ?? from, from));
+    boundAt.set(id, Math.min(boundAt.get(id) ?? at, at));
     let binding = bound.get(id);
     if (binding === undefined) {
       // The 'post' phase is the authoritative one: a handler that reshapes
@@ -6036,7 +6049,7 @@ function bindBindingSites(
     const limit = m < firstClause ? Number.POSITIVE_INFINITY : m;
     const accept = (name: string) => (visibleFrom.get(name) ?? 0) <= limit;
     const own =
-      m >= firstClause ? ownIndexClause(name, op, m, visibleFrom) : undefined;
+      m >= firstClause ? ownIndexClause(name, op, m, boundAt) : undefined;
     const rewritten =
       own === undefined
         ? rebindToBindings(op, scope, bound, { accept })

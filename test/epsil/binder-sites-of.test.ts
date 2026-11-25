@@ -34,6 +34,15 @@ describe('binderSitesOf from the Epsil entry', () => {
     expect(sites.map((site) => site.name)).toEqual(['k']);
   });
 
+  test('an earlier clause of a sum reads the index of a later clause', () => {
+    // The clauses of `Sum` are unordered (CE-1762): the upper bound `i` of
+    // the clause of `j` is the index of the second clause.
+    expect(sitesOf('sum(i*j, j, 1, i, i, 1, 3)')).toEqual([
+      { name: 'j', operands: [0, 1, 2, 3, 4, 5, 6] },
+      { name: 'i', operands: [0, 1, 2, 3, 4, 5, 6] },
+    ]);
+  });
+
   test('a limit that writes its variable binds it in the whole call', () => {
     expect(sitesOf('limit(sin(h)/h, h, 0)')).toEqual([
       { name: 'h', operands: 'all' },

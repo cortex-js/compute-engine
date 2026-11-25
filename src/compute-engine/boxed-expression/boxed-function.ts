@@ -3709,7 +3709,8 @@ export class BoxedFunction
     // free, so the variable of `D` or `Series` is replaced, at a point (see
     // above). The names in scope in each operand follow the
     // binding-site selectors: an iterator clause's index is not in
-    // scope in an earlier clause, and the bounds of a `Limits` clause (the
+    // scope in an earlier clause (except for the unordered clauses of `Sum`
+    // and `Product`), and the bounds of a `Limits` clause (the
     // collection of an `Element` clause) of a `Sum`, `Product` or
     // `Integrate` read the enclosing binding of the index
     // (`ownIndexClauseAt`, `binding-sites.ts`).

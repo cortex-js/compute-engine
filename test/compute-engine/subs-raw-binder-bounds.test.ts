@@ -69,13 +69,15 @@ describe('RAW BINDER: BOUNDS OF THE OWN CLAUSE READ THE OUTER INDEX', () => {
     ]);
   });
 
-  test('Sum: an earlier clause reads the outer binding of a later index', () => {
+  test('Sum: an earlier clause reads the index of a later clause', () => {
+    // The clauses of `Sum` are unordered: the evaluation nests them by
+    // their dependencies (`nestDependentLimits()`).
     const e = raw(['Sum', 'x', ['Limits', 'y', 1, 'x'], ['Limits', 'x', 1, 3]]);
-    expect(e.freeVariables).toEqual(['x']);
+    expect(e.freeVariables).toEqual([]);
     expect(e.subs({ x: 2 }).json).toEqual([
       'Sum',
       'x',
-      ['Limits', 'y', 1, 2],
+      ['Limits', 'y', 1, 'x'],
       ['Limits', 'x', 1, 3],
     ]);
   });
@@ -151,12 +153,13 @@ describe('RAW BINDER: CLAUSE SPELLINGS AND POSITIONS', () => {
   });
 
   test('a bare-symbol clause after a Limits clause', () => {
+    // The `n` of the bound of the earlier clause is the index `n`.
     const e = raw(['Sum', ['Add', 'k', 'n'], ['Limits', 'k', 1, 'n'], 'n']);
-    expect(e.freeVariables).toEqual(['n']);
+    expect(e.freeVariables).toEqual([]);
     expect(e.subs({ n: 7 }).json).toEqual([
       'Sum',
       ['Add', 'k', 'n'],
-      ['Limits', 'k', 1, 7],
+      ['Limits', 'k', 1, 'n'],
       'n',
     ]);
   });
@@ -168,11 +171,12 @@ describe('RAW BINDER: CLAUSE SPELLINGS AND POSITIONS', () => {
       ['Tuple', 'k', 1, 'j'],
       ['Limits', 'j', 1, 3],
     ]);
-    expect(e.freeVariables).toEqual(['j']);
+    // The `j` of the bound of the earlier clause is the index `j`.
+    expect(e.freeVariables).toEqual([]);
     expect(e.subs({ j: 7 }).json).toEqual([
       'Sum',
       ['Multiply', 'k', 'j'],
-      ['Tuple', 'k', 1, 7],
+      ['Tuple', 'k', 1, 'j'],
       ['Limits', 'j', 1, 3],
     ]);
   });

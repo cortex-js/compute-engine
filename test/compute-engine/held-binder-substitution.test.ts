@@ -7,8 +7,9 @@
  * index shadows the parameter in the operands where it is in scope: the
  * body, its own clause and the later clauses. The bounds of a `Limits`
  * clause and the collection of an `Element` clause are outside the scope of
- * the clause's own index, and an earlier clause is outside the scope of a
- * later clause's index: there, the name denotes the parameter.
+ * the clause's own index: there, the name denotes the parameter. An earlier
+ * clause is outside the scope of a later clause's index, except in `Sum` and
+ * `Product`, whose clauses are unordered.
  *
  * Before, the index was replaced: `(k ↦ Hold(Sum(k·y, Limits(k, 1, 3))))`
  * applied to `5` gave `Hold(Sum(5·y, Limits(5, 1, 3)))`.
@@ -52,10 +53,11 @@ describe('HELD BINDER: THE INDEX SHADOWS A PARAMETER OF THE SAME NAME', () => {
     expect(released(ce, r.json)).toEqual(['Multiply', 15, 'y']);
   });
 
-  test('Sum: an earlier clause is outside the scope of a later index', () => {
+  test('Sum: an earlier clause is in the scope of a later index', () => {
     const ce = new ComputeEngine();
-    // The bound `j` of the first clause reads the parameter, the `j` of
-    // the body and of the second clause is the index of the second clause.
+    // The clauses of `Sum` are unordered (the evaluation nests them by their
+    // dependencies): the bound `j` of the first clause is the index of the
+    // second clause, as the `j` of the body is.
     const r = apply(
       ce,
       [
@@ -72,12 +74,12 @@ describe('HELD BINDER: THE INDEX SHADOWS A PARAMETER OF THE SAME NAME', () => {
       [
         'Sum',
         ['Multiply', 'i', 'j'],
-        ['Limits', 'i', 1, 5],
+        ['Limits', 'i', 1, 'j'],
         ['Limits', 'j', 1, 3],
       ],
     ]);
-    // (1 + … + 5) · (1 + 2 + 3)
-    expect(released(ce, r.json)).toEqual(90);
+    // Over j = 1..3, i = 1..j: 1 + 2·3 + 3·6
+    expect(released(ce, r.json)).toEqual(25);
   });
 
   test('Product: the index is not replaced, the bound is', () => {

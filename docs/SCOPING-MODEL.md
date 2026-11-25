@@ -517,7 +517,14 @@ operands as written. The engine creates the scope of the operator and
 declares in it the variable of each `bound` operand and the index of the first
 `clause` operand; the canonical handler declares the index of each later clause
 just before it canonicalizes that clause, so that an earlier clause does not
-see it. Then the engine canonicalizes each `statement` operand as a branch, in
+see it. The clauses of `Sum` and `Product` are an exception: their role is
+`unordered`, and the engine declares every index before the first clause, so
+that each clause sees every index. Their evaluation nests the clauses by their
+dependencies, whatever their order (`nestDependentLimits()`, `library/utils.ts`):
+in `Sum(i·j, Element(j, Range(1, i)), Limits(i, 1, 3))`, the `i` of the first
+clause is the index of the second, not the imaginary unit. The bounds of a
+clause (the collection of an `Element` clause) are still outside the scope of
+its own index. Then the engine canonicalizes each `statement` operand as a branch, in
 that scope (an assignment of a bound variable there writes the bound
 variable), and reads a bare `N` or `D` at a `value` operand of a lazy operator
 as a variable (`applyOperatorDefinition()`). Then the `canonical` handler runs.

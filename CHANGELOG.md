@@ -75,6 +75,20 @@
 
 ### Resolved Issues
 
+- **A double sum or product whose index is named `i` is correct when the inner
+  clause comes first** (CE-1762).
+  `["Sum", ["Multiply", "i", "j"], ["Element", "j", ["Range", 1, "i"]], ["Limits", "i", 1, 3]]`
+  was `6` instead of `25`: the `i` of the first clause was the imaginary unit.
+  With `["Limits", "j", 1, "i"]` in place of the `Element` clause, the sum
+  stayed unevaluated. Now each clause of a `Sum` or a `Product` sees the index
+  of every clause, as the evaluation already nested the clauses by their
+  dependencies, whatever their order. So a later index is no longer a free
+  variable of an earlier clause, and `subs()` no longer replaces it there:
+  `Sum(x, Limits(y, 1, x), Limits(x, 1, 3)).freeVariables` is `[]`, not `["x"]`.
+  The bounds of a clause still read the enclosing binding of its own index. A
+  custom binder gets the same rule with the new `unordered: true` option of the
+  `clause` operand role.
+
 - **The norm of a range that ends at the length of a filtered list is correct**
   (CE-1754). With `L = Map(k ↦ 2k, Range(1, 40))`, `P = Filter(L, k ↦ Keep(k))`
   for a host predicate `Keep`, and `c = Norm(Range(1, Length(P)))`, `c` was `1`

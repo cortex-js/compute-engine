@@ -92,7 +92,9 @@ const NO_BINDERS: readonly string[] = [];
  * `Comprehension`, `Loop`, …) binds each index from its own clause onward:
  * in `Comprehension(b, Element(i, [j, j+1]), Element(j, [10, 20]))` the first
  * clause's collection reads the ENCLOSING `j`, not the second clause's index
- * — "later clauses see earlier bindings", not the reverse — while the body
+ * — "later clauses see earlier bindings", not the reverse (the clauses of
+ * `Sum` and `Product` are unordered: each index is visible from the first
+ * clause, `BindingSite.visibleFrom`) — while the body
  * (every operand before the first clause) sees every binding. That is the
  * scope `bindBindingSites` (`box.ts`) canonicalizes against, so a
  * free-variable walk or a rewrite that treated every bound name as shadowing

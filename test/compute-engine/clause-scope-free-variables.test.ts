@@ -66,14 +66,16 @@ describe('CLAUSE SCOPE — free variables', () => {
     expect(comp.unknowns).toEqual([]);
   });
 
-  test('Sum follows the same rule', () => {
+  test('the clauses of Sum are unordered', () => {
+    // A `Sum` nests its clauses by their dependencies, whatever their order
+    // (`nestDependentLimits()`), so an earlier clause sees a later index.
     const sum = ce.box([
       'Sum',
       'k',
       ['Element', 'k', ['Range', 1, 'j']],
       ['Element', 'j', ['Range', 1, 3]],
     ]);
-    expect(sum.unknowns).toEqual(['j']);
+    expect(sum.unknowns).toEqual([]);
     const inner = ce.box([
       'Sum',
       'k',
