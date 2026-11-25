@@ -75,6 +75,13 @@
   type also admits an infinity (`infinity | real`), because `Gamma(0, 0)` is
   `~oo`. The three-operand form `Gamma(s, z0, z1)` follows the same rules.
 
+- **`evaluateAsync()` runs a host function that has only an `evaluateAsync`
+  handler when its call is a value of a dictionary** (CE-1615). With such a
+  function `g`, `ce.box(['Dictionary', ['Tuple', {str: 'a'}, ['g']]])
+  .evaluateAsync()` gave `{"a" -> g()}` and did not call `g`. It now gives
+  the value of `g()`, as for an element of a list or a tuple. The values are
+  evaluated in the order of the entries.
+
 - **`LerchPhi(z, s, a)` at a very large order `s` ends** (CE-1527).
   `ce.box(['LerchPhi', 0.5, 1e300, 2]).N()` did not end. It now stays
   `LerchPhi(0.5, 1e300, 2)` within a few milliseconds, as other large orders

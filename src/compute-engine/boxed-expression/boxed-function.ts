@@ -52,6 +52,7 @@ import {
   asyncEvaluationOf,
   beginAsyncEvaluation,
   beginTopLevelEvaluation,
+  capturedPrecisionWindow,
   contextStackLike,
   copyContextStack,
   joinAsyncEvaluation,
@@ -63,7 +64,6 @@ import {
 } from './async-only-descendants.js';
 import { callbackSlots } from './callback-slots.js';
 import { equivalentChains, scopeActivation } from './ambient-chain.js';
-import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
   bindsWholeAtInferredPointParameter,
   callResultType,
@@ -25204,22 +25204,6 @@ function hasConstantValue(x: Expression, seen: Set<Expression>): boolean {
         : x.isConstant;
   if (constant) seen.add(x);
   return constant;
-}
-
-/**
- * The precision window in force on `engine` when an asynchronous evaluation
- * starts without one in its options: the working precision when the engine
- * is inside a transient window (`_withTransientPrecision`, the window of a
- * `N(x, p)` call), and the digits requested by the enclosing `N(x, p)` call.
- * `undefined` when neither is set.
- */
-function capturedPrecisionWindow(
-  engine: ComputeEngine
-): PrecisionWindow | undefined {
-  const working = engine._atTransientPrecision ? engine.precision : undefined;
-  const requested = engine._requestedPrecision;
-  if (working === undefined && requested === undefined) return undefined;
-  return { working, requested };
 }
 
 /**
