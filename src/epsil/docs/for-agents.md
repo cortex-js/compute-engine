@@ -70,7 +70,8 @@ g(x) + f(2)
 - **Comments**: `// line` and `/* block */`. NOT `#` (that starts a pragma).
 - **Statements**: one per line, or separated by `;`. Two expressions on one
   line with no separator is a diagnostic. A line ending in an infix operator
-  continues onto the next line.
+  continues onto the next line, and so does a line that starts with `.` (a
+  chain broken before its dots: `b.grow(2)` then `  .grow(3)`).
 - **Whitespace rule**: an infix operator has spaces on both sides or neither
   (`a + b` or `a+b`; `a +b` is a diagnostic). Prefix `-x`/`!x` and postfix
   `n!` must touch their operand.

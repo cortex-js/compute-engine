@@ -2,6 +2,15 @@
 
 ### Improvements
 
+- **An Epsil chain can be broken before its dots** (CE-1775). A line whose
+  first token is the `.` of a field clause now continues the expression of
+  the line before, after any indentation, at the top level, inside brackets
+  and in a `match` case body. `b.grow(2)` followed by `  .grow(3)` on the
+  next line was an `unexpected-symbol` error (`closing-bracket-expected`
+  inside parentheses); it is now `b.grow(2).grow(3)`. No statement starts
+  with `.`, so no valid program changes meaning. A `.` after a space on the
+  same line (`p .x`) is still an error.
+
 - **A row of a list of fixed-length rows compiles on JavaScript as the
   result** (CE-1540). With `P: list<list<real^2>>`, `compile(P[i])` declined
   with "an index that can be out of range … of lists". It now gives the row,
