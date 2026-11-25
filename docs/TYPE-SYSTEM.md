@@ -649,7 +649,12 @@ machinery.
 
 A clause variable has one of two KINDS, decided by where it occurs. A
 variable that occurs only at type positions is a type variable, solved by
-joining the types of the operands it meets. A variable that occurs in a
+joining the types of the operands it meets. A symbol with no type, at a
+parameter that is a bare type variable, is narrowed to the bound of the
+variable, not to its solved type: in `Remainder(x, 3)`
+(`(T, T) -> T where T: number`), `x` is narrowed to `number`, not to
+`integer`, and in `(t) -> Insert(Range(1, 3), 1, t)` `t` keeps its type
+(`inferenceTypeWithKindsAt()`, `validate.ts`). A variable that occurs in a
 collection's length slot (`list<T^N>`, `vector<T^N>`, `matrix<T^(MxN)>`), or
 that fills a nominal type's value parameter, is a VALUE variable: it stands
 for a non-negative integer length, it is solved by equality across every position

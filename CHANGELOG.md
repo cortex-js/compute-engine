@@ -75,6 +75,16 @@
 
 ### Resolved Issues
 
+- **The type of a function that inserts its argument into a list, or writes
+  it over one element, includes the argument** (CE-1769). With
+  `ins = (u, t) -> Insert(Range(1, u), 1, t)`, the type of `ins` was
+  `(u: unknown, t: unknown) -> list<integer>`, but `ins(2, 0.5)` is
+  `[0.5, 1, 2]`. The type is now `(u: unknown, t: unknown) -> list<unknown>`,
+  and the same applies to `ReplaceAt(Range(1, u), 1, t)`. A parameter is no
+  longer given the type of the other arguments of a generic operator, so
+  `r = (t) -> Remainder(3, t)` is now typed `(t: unknown) -> number`, not
+  `(t: unknown) -> integer | nan`: `r(0.7)` is `0.2`.
+
 - **The type of the incomplete gamma function `Gamma(s, z)` is `real` only
   where its value is real** (CE-1619). For a negative `z`, `Γ(s, z)` is
   complex unless `s` is a positive integer: `Gamma(1/2, -1)`, whose value is

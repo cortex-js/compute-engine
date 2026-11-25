@@ -262,11 +262,11 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     expect(ce.box('remU').valueDefinition!.inferredType).toBe(false);
 
     // A name declared `unknown` reads the requirement of its use, as a free
-    // name does: its occurrence is the instantiated parameter `integer`.
-    expect(ce.box(['Remainder', 'remU', 3]).type.toString()).toBe('integer');
-    expect(ce.box(['Remainder', 3, 'remU']).type.toString()).toBe(
-      'integer | nan'
-    );
+    // name does: at a bare type variable that is the bound `number`, not the
+    // solved `integer` of the other operand (CE-1769): `remU` can be `0.5`,
+    // and `Remainder(0.5, 3)` is `0.5`.
+    expect(ce.box(['Remainder', 'remU', 3]).type.toString()).toBe('number');
+    expect(ce.box(['Remainder', 3, 'remU']).type.toString()).toBe('number');
     // Boxing writes nothing back to the declaration.
     expect(ce.box('remU').type.toString()).toBe('unknown');
 
@@ -277,13 +277,15 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     );
   });
 
-  test('an INFERABLE symbol contributes no bound and narrows to the solution', () => {
-    // §4.3 table, last row: the free symbol contributes nothing, `T` solves
-    // from the literal, and the symbol narrows to the instantiated parameter.
+  test('an INFERABLE symbol contributes no bound and narrows to the bound', () => {
+    // The free symbol contributes nothing, and `T` solves from the literal.
+    // The symbol narrows to the bound `number` of `T`, not to the solved
+    // `integer`, which the other operand gives and the call does not require
+    // (CE-1769).
     const ce = engine();
     const e = ce.box(['Remainder', 'remX', 3]);
-    expect(e.type.toString()).toBe('integer');
-    expect(e.op1.type.toString()).toBe('integer');
+    expect(e.type.toString()).toBe('number');
+    expect(e.op1.type.toString()).toBe('number');
   });
 
   test('the declared bound still rejects a non-number', () => {

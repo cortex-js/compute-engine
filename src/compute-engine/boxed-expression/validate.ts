@@ -105,6 +105,7 @@ import {
 } from './broadcast-lift-type.js';
 import {
   freeTypeVariables,
+  paramAt,
   parameterPositions,
   readTypeVariablesAsBounds,
   substituteTypeVariables,
@@ -4657,16 +4658,46 @@ export function validateArguments(
       ? undefined
       : displayParam(sig.variadicArg.type, varParam);
 
+  // The declared arms with each type variable read as its bound
+  // (`readTypeVariablesAsBounds()`), built on the first use.
+  let boundArms: FunctionSignature[] | undefined;
+  const armsAsBounds = (): FunctionSignature[] =>
+    (boundArms ??= declaredArms.map(
+      (arm) => readTypeVariablesAsBounds(arm) as FunctionSignature
+    ));
+
   /** The type to infer into the operand at `idx`. For a plain signature this
    * is the parameter itself; for an overload set it is the JOIN over every
    * viable arm (§4.3) — never the selected arm's parameter, which would
-   * over-constrain the symbol (§4.5). */
+   * over-constrain the symbol (§4.5).
+   *
+   * A parameter that each arm declares as a bare type variable gives the
+   * bound of the variable (no write for a variable with no bound). The
+   * instantiated parameter is the join of the types of every operand that
+   * the variable types, and it is not a requirement on this operand: in
+   * `(u, t) -> Insert(Range(1, u), 1, t)`, `T` is solved to `integer` from
+   * the source, and `t` was then typed `integer`, while `t` can be any
+   * value (`T: any`). */
   const inferenceTypeWithKindsAt = (
     idx: number,
     param: Type
   ): Type | undefined => {
     // §4.2 rule 1: never write while a parameter is still open.
     if (paramStillOpen) return undefined;
+    if (
+      declaredArms.length > 0 &&
+      declaredArms.every((arm) => {
+        const p = paramAt(arm, idx);
+        return typeof p === 'object' && p.kind === 'variable';
+      })
+    ) {
+      // A bound that names another variable (`T: list<U>`) is still open
+      // after `readTypeVariablesAsBounds()`: skip the write (§4.2 rule 1).
+      const bound = joinParamAt(armsAsBounds(), idx);
+      return bound !== undefined && freeTypeVariables(bound).size > 0
+        ? undefined
+        : bound;
+    }
     if (!viableArms) return param;
     const joined = joinParamAt(viableArms, idx);
     // BACKSTOP (§4.2). `resolveOverload` instantiates every arm before the
@@ -4720,8 +4751,6 @@ export function validateArguments(
   const genericArms = declaredArms.some(
     (arm) => (arm.typeParams?.length ?? 0) > 0
   );
-  // Built on the first list literal operand only.
-  let boundArms: FunctionSignature[] | undefined;
   const distribute = (op: Expression, idx: number, t: Type): void => {
     if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
     let d: Type | undefined = t;
@@ -4732,10 +4761,7 @@ export function validateArguments(
         )
       )
         return;
-      boundArms ??= declaredArms.map(
-        (arm) => readTypeVariablesAsBounds(arm) as FunctionSignature
-      );
-      d = joinParamAt(boundArms, idx);
+      d = joinParamAt(armsAsBounds(), idx);
     }
     if (d !== undefined) distributeLiteralElementInference(op, d);
   };

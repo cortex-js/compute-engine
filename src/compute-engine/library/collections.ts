@@ -6947,6 +6947,19 @@ function storedElementType(elements: Type, values: ReadonlyArray<Type>): Type {
 }
 
 /**
+ * The type of the list that `Insert` or `ReplaceAt` with one position gives
+ * for a collection of type `source` and a stored value typed `unknown`:
+ * `list<E | unknown>` (`storedElementType`), which reduces to
+ * `list<unknown>`. `undefined` for a source with no element type, which the
+ * signature types.
+ */
+function listWithUnknownStored(source: Type): Type | undefined {
+  const element = collectionElementType(source);
+  if (element === undefined) return undefined;
+  return { kind: 'list', elements: storedElementType(element, ['unknown']) };
+}
+
+/**
  * The result type of `Slice` over a string: `string`, and `undefined` for
  * every other value, which keeps the type that the resolver gives.
  *
@@ -19250,6 +19263,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingBehavior: 'propagate',
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T: any',
+    // The signature gives the result type, except for a value typed
+    // `unknown`: the solve of `T` drops it, so `Insert(Range(1, u), 1, t)`,
+    // with a parameter `t` whose type is not inferred, was typed
+    // `list<integer>`. The value is kept as an arm of the element type
+    // (`storedElementType`), as `Append` keeps it.
+    type: (ops, { engine: ce }) => {
+      if (ops.length !== 3 || ops[2].type !== 'unknown') return undefined;
+      const result = listWithUnknownStored(ops[0].type);
+      return result && BoxedType.forResult(result, ce._typeResolver);
+    },
     evaluate: ([xs, idx, value], { engine: ce }) => {
       const refused = unindexedCollectionOperandError(ce, 'Insert', xs);
       if (refused) return refused;
@@ -19591,9 +19614,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           .some((position) => provablyDisjoint(position.type, 'integer'))
       )
         return BoxedType.forResult('error', ce._typeResolver);
+      // With one position, the signature gives the result type when the
+      // write does not keep the list type, except for a value typed
+      // `unknown`, which the solve of `T` drops (see `Insert`).
       const result =
         ops.length === 3
-          ? listTypeKeptByWrite(source, value)
+          ? value === 'unknown'
+            ? listWithUnknownStored(source)
+            : listTypeKeptByWrite(source, value)
           : replaceAtPathType(source, ops.length - 2, value);
       return result && BoxedType.forResult(result, ce._typeResolver);
     },
