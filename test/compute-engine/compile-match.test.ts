@@ -186,6 +186,10 @@ describe('MatchesType(x, T): a constant from the static type of x', () => {
     function matchIsInteger(s: string, x: real) {
       if byMatch(s, x) is integer { 1 } else { 0 }
     }
+    function noCase(n: integer) { match n { == 0 => 1; == 1 => 2 } }
+    function noCaseIsInteger(n: integer) {
+      if noCase(n) is integer { 1 } else { 0 }
+    }
   `);
 
   test('True when the static type is a subtype of T', () => {
@@ -212,15 +216,26 @@ describe('MatchesType(x, T): a constant from the static type of x', () => {
     ));
 
   test('declines a subject whose static type comes from a Match (CE-1731)', () => {
-    // The engine types `byMatch(s, x)` as an integer, from the case `_ => 0`;
-    // its value at `"a"`, 1.25 is 2.5.
+    // The engine types `byMatch(s, x)` as `unknown`: its case `x * 2` has
+    // no type. Its value at `"a"`, 1.25 is 2.5.
     expect(
       interpreted(ce, ['matchIsInteger', 's', 'x'], { s: 'a', x: 1.25 })
     ).toBe(0);
     expectDeclines(
       ce,
       ['matchIsInteger', 's', 'x'],
-      /MatchesType of a subject whose static type comes from a Match/
+      /MatchesType of a value of type unknown, which neither proves nor excludes integer/
+    );
+  });
+
+  test('declines a Match with no case that takes every value', () => {
+    // The value of `noCase(3)` is `Error("match-no-case", 3)`, which is not
+    // an integer: the cases alone would type it `integer`.
+    expect(interpreted(ce, ['noCaseIsInteger', 'n'], { n: 3 })).toBe(0);
+    expectDeclines(
+      ce,
+      ['noCaseIsInteger', 'n'],
+      /MatchesType of a value of type unknown, which neither proves nor excludes integer/
     );
   });
 });
@@ -231,6 +246,9 @@ describe('MatchesType of a local', () => {
       let y = match p { (a, b) => a + b; _ => "none" }
       if y is string { 0 } else { 1 }
     }
+    function shadowed(n: integer, p: tuple<real, real>) {
+      match p { (n, b) => if n is integer { 1 } else { 0 }; _ => 2 }
+    }
     function m2(v: real) { match v { == 1 => "one"; _ => v } }
     function mapped(x: real) { if map(m2, [x]) is list<real> { 0 } else { 1 } }
     function declaredLet(s: string, x: real) -> boolean {
@@ -239,8 +257,8 @@ describe('MatchesType of a local', () => {
     }
   `);
 
-  test('declines a subject that reads a local (CE-1731)', () => {
-    // The engine types `y` as a string, from the case `_ => "none"`; the
+  test('declines a subject that reads a local whose value is a Match (CE-1731)', () => {
+    // The engine types `y` as `unknown`: its case `a + b` has no type. The
     // case taken is the Tuple pattern.
     expect(
       interpreted(ce, ['localIsText', ['Tuple', 'x', 2]], { x: 1.5 })
@@ -248,15 +266,23 @@ describe('MatchesType of a local', () => {
     expectDeclines(
       ce,
       ['localIsText', ['Tuple', 'x', 2]],
-      /MatchesType of a subject that reads a local, whose type can come from a Match/
+      /MatchesType of a value of type unknown, which neither proves nor excludes string/
     );
   });
+
+  test('declines a capture that has the name of a parameter of another type', () =>
+    // The capture `n` of the case is a real, not the integer parameter `n`.
+    expectDeclines(
+      ce,
+      ['shadowed', 'n', ['Tuple', 'x', 2]],
+      /MatchesType of a value of type unknown, which neither proves nor excludes integer/
+    ));
 
   test('declines a subject that calls, by name, a function whose body is a Match', () =>
     expectDeclines(
       ce,
       ['mapped', 'x'],
-      /MatchesType of a subject whose static type comes from a Match/
+      /MatchesType of a value of type list<unknown\^1>, which neither proves nor excludes list<real>/
     ));
 
   test('keeps a declared result after a let: a body that contradicts it declines', () =>
@@ -425,7 +451,7 @@ describe('Match', () => {
 });
 
 describe('MatchesType of a name whose value holds a Match', () => {
-  test('declines (CE-1731)', () => {
+  test('gives the value of the interpreter (CE-1731)', () => {
     const ce = engine('');
     ce.declare('v', 'unknown');
     ce.assign(
@@ -440,11 +466,11 @@ describe('MatchesType of a name whose value holds a Match', () => {
         ],
       ])
     );
-    expectDeclines(
-      ce,
-      ['MatchesType', 'v', { str: 'integer' }],
-      /MatchesType of a subject whose static type comes from a Match/
-    );
+    const expr = ['MatchesType', 'v', { str: 'integer' }];
+    const js = compileTo(ce, expr, 'javascript');
+    if (!js.ok) throw new Error(js.message);
+    expect(interpreted(ce, expr, {})).toBe(false);
+    expect(js.run({})).toBe(false);
   });
 });
 

@@ -59,7 +59,6 @@ import {
 import { isIndexReadTuple } from '../../boxed-expression/index-read-tuple.js';
 import { isPointParameterType } from '../../collection-utils.js';
 import { parameterName, type listLowering } from './lower-lists.js';
-import { typedByMatch } from './lower-match.js';
 
 /**
  * The IR type of an input of the engine type `t`: a real, an integer, a
@@ -363,7 +362,6 @@ function signatureTypes(
         _isLambda?: boolean;
         inferredSignature?: boolean;
         _signatureSkeleton?: Type;
-        _derivedSignature?: boolean;
         signature?: { type: Type };
       }
     | undefined;
@@ -473,34 +471,17 @@ function signatureTypes(
           any: isUntyped(t) && present(t) !== 'unknown',
         };
   });
-  // A result that the engine inferred from a body that holds a `Match` is
-  // not the type of its value (CE-1731): the body decides, as for a result
-  // of no stated type.
   // A user function declares its result as the type of its body
-  // (`Typed(body, "boolean")`, also as the last statement of a `Block`); a
-  // host declares it in the signature of its definition (not derived from
-  // the literal, `_derivedSignature`); a result written `unknown` is refined
-  // from the body.
+  // (`Typed(body, "boolean")`, also as the last statement of a `Block`).
   const typedBody =
     isFunction(literal.ops[0], 'Typed') ||
     (isFunction(literal.ops[0], 'Block') &&
       isFunction(literal.ops[0].ops.at(-1), 'Typed'));
-  const looseWritten =
-    typeof written === 'object' &&
-    written.kind === 'signature' &&
-    loose(present(written.result));
-  const inferred =
-    looseWritten ||
-    (od?._isLambda
-      ? od._derivedSignature === true && !typedBody
-      : vd === undefined || vd.inferredType === true);
   const r = implementation
     ? typedBody && typeof own === 'object' && own.kind === 'signature'
       ? present(own.result)
       : undefined
-    : inferred && typedByMatch(literal.ops[0])
-      ? undefined
-      : signature?.result && present(signature.result);
+    : signature?.result && present(signature.result);
   // A list of reals, integers or booleans: the type of the body, whose
   // length can be a value of the body; or a tuple of them (a point), whose
   // body is a tuple; or a list of points (`tuple` is the axis of the mark).

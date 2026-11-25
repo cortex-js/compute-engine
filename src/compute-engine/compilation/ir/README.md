@@ -1802,16 +1802,15 @@ lane). GLSL (no run-time length), the interval mode and the `bigint` mode
 decline such a local.
 
 A list operator that declines an effect in an element, in its function or in a
-list operand, because the interpreter evaluates fewer elements, in another
-order or lazily (each "with an effect declines" of this section, and `Zip`),
-does not count a read of a `vars` name (`Builder.changes()`): a `vars` entry is
-a value, the same at each read (the compile guide), and no instruction of the
-program writes it, so each read gives the value of the name that the
-interpreter reads once (`CountIf(L, t ↦ t > T)` with `vars: {T: …}` compiles;
-CE-1612). A draw, a write and a call of a function of the host still decline.
-The text is still read at each use, once per element evaluated; a text with an
-effect (`'_.draw()'`) runs that many times, and its result is unspecified, as
-the guide says.
+list operand, because the interpreter evaluates fewer elements, in another order
+or lazily (each "with an effect declines" of this section, and `Zip`), does not
+count a read of a `vars` name (`Builder.changes()`): a `vars` entry is a value,
+the same at each read (the compile guide), and no instruction of the program
+writes it, so each read gives the value of the name that the interpreter reads
+once (`CountIf(L, t ↦ t > T)` with `vars: {T: …}` compiles; CE-1612). A draw, a
+write and a call of a function of the host still decline. The text is still read
+at each use, once per element evaluated; a text with an effect (`'_.draw()'`)
+runs that many times, and its result is unspecified, as the guide says.
 
 `Comprehension(body, Element(i, L))` is a build of `body` over the source of `L`
 (a list, a `Range`); with a condition, `Element(i, L, cond)`, it is a `filter`
@@ -3439,19 +3438,16 @@ program whose last statement is a definition is `Nothing` and declines.
   `x: real`). The subject is held raw: its type is the type of its canonical
   form in the innermost local scope of the walk (`Lowering.scopes`: a `Block`,
   the function literal whose body is lowered, the root literal), and it is
-  lowered only for its effect. A subject whose type comes from a `Match`
-  declines (`typedByMatch()`, CE-1731), and so does a subject that reads a local
-  of a block or a capture of a case: the type of a local is the type of its
-  value, which can be a `Match`. A name that the walk binds as an input, a
-  parameter or a loop index, and a free name, are read by their type.
+  lowered only for its effect. A local of a block is read by the type of its
+  value; a capture of a case is `unknown`, also when it has the name of a
+  parameter.
 - `Element(x, S)` of a number set that `domainToType()` maps to a type
   (`Integers`, `RationalNumbers`, `RealNumbers`, `ComplexNumbers`,
   `ImaginaryNumbers`, `Numbers` and the extended sets) is decided as
   `MatchesType(x, T)` of that type (CE-1738): `n ∈ ℤ` of `n: integer` is `True`,
   `x ∈ iℝ` of `x: real` is `False`. The interpreter maps the set to the same
-  type. A subject typed `nothing`, a subject whose type comes from a `Match` or
-  that reads a local, and a type that does not decide (`x ∈ ℤ` of `x: real`) go
-  to the list operators, which decline for a set. Another set
+  type. A subject typed `nothing`, and a type that does not decide (`x ∈ ℤ` of
+  `x: real`) go to the list operators, which decline for a set. Another set
   (`NonNegativeIntegers`) is not decided. `NotElement(x, S)` is the negation of
   the same constant; when it is not decided, it declines.
 - `Match(subject, case…)`: the subject is lowered once. A case of a string or a
@@ -3473,13 +3469,15 @@ program whose last statement is a definition is `Nothing` and declines.
   (a name, `Pin`, a list, a range), a `Match` with no case that takes every
   value, and cases whose results have two shapes (`arms of two types`) decline.
   A string compiles on JavaScript only.
-- The engine types a `Match` by its case bodies that are literals (CE-1731). A
-  user function whose result is inferred, not declared, from a body that holds a
-  `Match` (or calls a function whose body holds one) takes its result from the
-  lowered body, as a result of no stated type. A declared result
-  (`function f(s: string) -> boolean { match s { … } }`, the body
-  `Typed(…, "boolean")`; a signature that the host declares) is kept, and a body
-  that contradicts it declines. `typedByMatch()` visits each node once.
+- The engine types a `Match` as the join of the types of its case bodies, which
+  are raw: a body that is not a literal makes the `Match` `unknown`, and so does
+  the lack of a case that takes every value (a wildcard with no guard), since
+  the value is then `Error("match-no-case", …)` when no case is taken. A user
+  function whose result is inferred from such a body has the result `unknown`,
+  and takes its result from the lowered body, as a result of no stated type. A
+  declared result (`function f(s: string) -> boolean { match s { … } }`, the
+  body `Typed(…, "boolean")`; a signature that the host declares) is kept, and a
+  body that contradicts it declines.
 
 ## Records
 

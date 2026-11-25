@@ -75,6 +75,19 @@
 
 ### Resolved Issues
 
+- **A recursive Epsil function written with `match` gives its value**
+  (CE-1731). `function fac(n) { match n { == 0 => n + 1; _ => n * fac(n - 1) } }`
+  gave an `incompatible-type` error for `fac(3)`. It now gives `6`. A call of a
+  function whose result type is `unknown` and whose body is a `match` was
+  typed `nothing`, so `f(3) + 1` was an error. The static type of a `match`
+  is also correct now. A case that is not a literal makes it `unknown`, and so
+  does a `match` with no case that takes every value. Before,
+  `function half(s: string, t: real) { match s { == "a" => t / 2; _ => 0 } }`
+  had the type `(s: string, t: real) -> integer`, and `half("a", 3)` is `3/2`.
+  Compiled code no longer has its own guards for a `match`: `x is T` and
+  `x ∈ S` of a value from a `match` now compile when the static type decides
+  them.
+
 - **The completion of an Epsil sum-type variant with no payload no longer
   adds a second `()`** (CE-1680). With `type light = red | green`, accepting
   `green` in `let a = gree()` gave `let a = green()()`, and after `|>`

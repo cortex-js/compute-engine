@@ -24,7 +24,6 @@ import {
   type Lowering,
 } from './lower-context.js';
 import { inputType, tupleAxis, tupleOrInputType } from './lower-functions.js';
-import { typedByMatch } from './lower-match.js';
 import {
   elementIndex,
   isSubType,
@@ -215,11 +214,6 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
         fields.push(t);
         return b.op('nothing', [], t);
       }
-      if (typedByMatch(op))
-        decline(
-          op,
-          `${what}: a value whose static type comes from a Match (CE-1731)`
-        );
       // A value of no stated type or of type `any` (a parameter that holds
       // the type of its argument, `held()` of `lower-functions.ts`): its
       // lane proves the field's type, in the function lowered for it.

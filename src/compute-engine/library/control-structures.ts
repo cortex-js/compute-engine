@@ -500,6 +500,20 @@ function untypedArm(
   );
 }
 
+/** The pattern of a `MatchCase` is a wildcard (`_`, `_x`, `__x`, `___x`, or
+ * a `Wildcard` form): it takes every value of the subject (`isWildcard()`,
+ * `pattern-utils.ts`). */
+function isWildcardPattern(pattern: OperandDescriptor): boolean {
+  const s = pattern.structureOf?.();
+  if (s?.kind === 'symbol') return s.name.startsWith('_');
+  return (
+    s?.kind === 'application' &&
+    (s.head === 'Wildcard' ||
+      s.head === 'WildcardSequence' ||
+      s.head === 'WildcardOptionalSequence')
+  );
+}
+
 /** The heads whose `unknown` type `untypedArm` does not read as the type
  * of a value given in place. */
 const NOT_A_VALUE_IN_PLACE = new Set([
@@ -1347,20 +1361,39 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // of its last child), never an operand expression.
       type: (ops, context) => {
         // Result is the widened type of the case bodies (the last operand of
-        // each `MatchCase`), mirroring `If`/`Which`. Bodies reference capture
-        // names free at this scope, so most resolve to `unknown` — widen is a
-        // best-effort hint.
+        // each `MatchCase`), mirroring `If`/`Which`. The bodies are raw, so
+        // only a literal body (a number, a string) has a type; any other
+        // body is `unknown`, and it makes the `Match` `unknown`, because
+        // `widen()` would leave it out: `match s { == "a" => t / 2; _ => 0 }`
+        // is not an `integer` (its value at `t = 3` is `3/2`). A case whose
+        // structure the descriptor does not show (a descriptor made from a
+        // type alone) is `unknown` too.
+        // Without a case that takes every value (a wildcard pattern and no
+        // guard), the value can be `Error("match-no-case", subject)`, which
+        // no case body gives, so the `Match` is `unknown`:
+        // `match n { == 0 => 1 }` is not an `integer` at `n = 3`.
         const bodyTypes: Type[] = [];
+        let takesEveryValue = false;
         for (const c of ops.slice(1)) {
           const st = c?.structureOf?.();
-          if (st?.kind !== 'application' || st.head !== 'MatchCase') continue;
-          if (st.children.length < 2) continue;
+          if (
+            st?.kind !== 'application' ||
+            st.head !== 'MatchCase' ||
+            st.children.length < 2
+          ) {
+            bodyTypes.push('unknown');
+            continue;
+          }
           bodyTypes.push(st.children[st.children.length - 1].type);
+          if (st.children.length === 2 && isWildcardPattern(st.children[0]))
+            takesEveryValue = true;
         }
         if (bodyTypes.length === 0)
           return BoxedType.forResult('nothing', context.engine._typeResolver);
         return BoxedType.forResult(
-          widen(...bodyTypes),
+          !takesEveryValue || bodyTypes.includes('unknown')
+            ? 'unknown'
+            : widen(...bodyTypes),
           context.engine._typeResolver
         );
       },
