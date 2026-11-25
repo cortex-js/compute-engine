@@ -18,7 +18,11 @@ import type {
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { isOperatorDef, isValueDef } from './definition-guards.js';
-import { ANONYMOUS_SLOT_NAMES } from './function-literal.js';
+import { isSymbol } from './type-guards.js';
+import {
+  ANONYMOUS_SLOT_NAMES,
+  isFunctionLiteralParameter,
+} from './function-literal.js';
 
 /**
  * True when `def`, the definition that the name `name` resolves to, was
@@ -167,6 +171,71 @@ export function implicitVariableCandidatesFrom(
     candidates.add(s);
   }
   return [...candidates];
+}
+
+/**
+ * The formula that the symbol `name` holds, when a lone `name` is the
+ * operand of the implicit form of a calculus operator whose variable is not
+ * written (`Limit(G, 0)`, `NLimit`, `ND`, `NIntegrate`,
+ * `Integrate(G, Limits(Nothing, 0, 1))`); otherwise `undefined`.
+ *
+ * Such an operand is read as its value, and the variable is chosen from the
+ * symbols of the value with the rule of the implicit form: with
+ * `G := sin(x)`, `Limit(G, 0)` is the limit of `sin(x)` as x → 0, and
+ * `\int_0^1 G` is `1 − cos(1)`, not `∫₀¹ G dG`.
+ *
+ * A symbol holds a formula when it is a user symbol with a value
+ * definition, is not a constant, and its value is not a function and has a
+ * candidate for the variable (`implicitVariableCandidates()`). A symbol that
+ * names a function (`Sin`, `g(t) := t^2`, a value of function type) keeps
+ * its reading: its parameter is the variable. A symbol with no value, or
+ * whose value has no candidate (`c := 5`), keeps its reading too: it is its
+ * own variable for `Integrate` and a constant for the others.
+ *
+ * A value that is itself a lone symbol is read again: with `G := H` and
+ * `H := sin(x)`, the formula of `G` is `sin(x)`; with `G := x` and `x` with
+ * no value, it is `x`. A cycle of such values (`G := H`, `H := G`) has no
+ * formula.
+ *
+ * A parameter of a function literal is not read through the argument of a
+ * running call: in `f(t) := \int_0^1 t`, the integral is `∫₀¹ t dt` at
+ * definition, and a call `f(sin(x))` does not change its variable.
+ */
+export function loneSymbolFormula(
+  engine: ComputeEngine,
+  name: string,
+  visited: Set<string> = new Set()
+): Expression | undefined {
+  if (visited.has(name)) return undefined;
+  visited.add(name);
+  const def = engine.lookupDefinition(name);
+  if (!isValueDef(def)) return undefined;
+  if (
+    def.value.isConstant ||
+    isFunctionLiteralParameter(def.value) ||
+    isLibraryDefinition(engine, name, def)
+  )
+    return undefined;
+  if (def.value.type.matches('function')) return undefined;
+  const value = def.value.value;
+  if (
+    value === undefined ||
+    value.operator === 'Function' ||
+    value.type.matches('function')
+  )
+    return undefined;
+  if (implicitVariableCandidates(value).length === 0) return undefined;
+  if (isSymbol(value)) {
+    // The chain ends at the symbol only when the symbol has no value
+    // (`G := x`). A symbol that holds a value that is not a formula
+    // (`H := 5`), and a symbol already read in this chain (a cycle), give no
+    // formula for the whole chain.
+    const target = engine.lookupDefinition(value.symbol);
+    if (isValueDef(target) && target.value.value !== undefined)
+      return loneSymbolFormula(engine, value.symbol, visited);
+    return visited.has(value.symbol) ? undefined : value;
+  }
+  return value;
 }
 
 /**

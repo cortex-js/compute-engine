@@ -6,6 +6,7 @@ import { isValueDef } from './definition-guards.js';
 import {
   implicitVariableCandidates,
   isImplicitVariableCandidate,
+  loneSymbolFormula,
 } from './implicit-variable-rule.js';
 import {
   freeAnonymousSlots,
@@ -860,7 +861,10 @@ export function bindsStatementTargets(expr: Expression): boolean {
  * function literal of the integrand that no named limit uses. A bare-symbol
  * integrand is the variable of the first such limit, unless it is not a
  * candidate (`isImplicitVariableCandidate()`): a function name, a constant
- * such as `Pi`, a library symbol, a symbol that cannot hold a number. These variables are bound in the
+ * such as `Pi`, a library symbol, a symbol that cannot hold a number, or,
+ * when no limit names a variable, a symbol that holds a formula
+ * (`loneSymbolFormula()`), which the integral reads as its value. These
+ * variables are bound in the
  * integrand only: in `Integrate(Function(x·y, x), Limits(Nothing, 0, 1))`,
  * `x` is bound and `y` is free, as in the form with `Limits(x, 0, 1)`. The
  * variable of an indefinite limit (`Limits(Nothing, Nothing, Nothing)`) is
@@ -932,6 +936,14 @@ export function implicitIntegralVariables(
     // constant (`Pi`), a library symbol and a symbol that cannot hold a
     // number are not variables.
     if (!isImplicitVariableCandidate(f.engine, f.symbol, false))
+      return undefined;
+    // A symbol that holds a formula, when no limit names a variable, is read
+    // as its value (`loneSymbolFormula()`): with `G := sin(x)`,
+    // `\int_0^1 G` integrates `sin(x)` and reads `G`, so `G` is free.
+    if (
+      limits.every((l) => l !== undefined && absent(l.index)) &&
+      loneSymbolFormula(f.engine, f.symbol) !== undefined
+    )
       return undefined;
     names = [f.symbol];
   } else if (

@@ -446,8 +446,14 @@ an occurrence of the variable's name in that value denotes the variable
 `lim_{x→0} G` is `0`; with `H := y·sin(x)`, `D(H, y)` is `sin(x)`. `ND`,
 `NIntegrate` and `NLimit` read the body of their function literal in the same
 way: `ND(x ↦ G, 1)` is `cos(1)` and `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
-(`literalWithFormulaValues()`). A bare symbol operand of an implicit form
-(`ND(G, 1)`, `∫_0^1 G`) is not read in this way (CE-1772). A symbol in
+(`literalWithFormulaValues()`). A bare symbol that holds a formula, as the
+operand of an implicit form (no variable written), is read as its value at
+evaluation, and the variable is chosen from the symbols of the value with the
+rule of the implicit form: `ND(G, 1)` is `cos(1)`, `∫_0^1 G` is `1 − cos(1)`
+and `Limit(G, 0)` is `0` (`loneSymbolFormula()`,
+`boxed-expression/implicit-variable-rule.ts`). A bare symbol that names a
+function (`Sin`, `g(t) := t^2`), and one whose value has no candidate for the
+variable (`c := 5`), keep their reading. A symbol in
 such a value is read in the same way (`K := G + 1`, `D(K, x)` is `cos(x)`). A
 constant, a value that does not mention the variable (`a := 3`, which the
 evaluation of the result reads), a value that is a function literal and a

@@ -66,6 +66,17 @@
 
 ### Resolved Issues
 
+- **An integral, a limit or a numerical derivative of a lone variable that
+  holds a formula is computed with the variable of that formula** (CE-1772).
+  After `ce.assign('G', ce.parse('\\sin(x)'))`, `\int_0^1 G` gave `0.5` (the
+  integral of `G` with respect to `G`) and now gives `1 − cos(1) ≈ 0.4597`;
+  `\int G` gave `G^2/2` and now gives `-cos(x)`. `Limit(G, 0)`, `NLimit(G, 0)`
+  and `NIntegrate(G, 0, 1)` gave `NaN`, and `ND(G, 1)` stayed unevaluated; they
+  now give `0`, `0`, `0.4597` and `cos(1) ≈ 0.5403`. The variable is chosen
+  from the symbols of the formula, as for a formula written in place. A
+  variable that names a function (`Sin`, `g(t) := t^2`), and a variable whose
+  value is a constant (`c := 5`), keep their meaning.
+
 - **In a scope with a user function named `Divide`, a reciprocal is the
   library quotient** (CE-1760). After `ce.declare('Divide', 'function')` and
   `ce.assign('Divide', ce.expr(['Function', 1000, 'u', 'v']))`,

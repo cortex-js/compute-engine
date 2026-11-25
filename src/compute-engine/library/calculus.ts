@@ -69,7 +69,10 @@ import {
   operandRolesFrom,
 } from './operand-roles.js';
 import { continuousDistributionClosedForms } from './distributions.js';
-import { isFunctionSymbolName } from '../boxed-expression/implicit-variable-rule.js';
+import {
+  isFunctionSymbolName,
+  loneSymbolFormula,
+} from '../boxed-expression/implicit-variable-rule.js';
 import {
   conditionalValue,
   restrictionParts,
@@ -6255,8 +6258,10 @@ function limitOperandNamesFunction(ce: ComputeEngine, f: Expression): boolean {
  * `canonicalFunctionLiteral()`. When the body has no candidate, the result
  * is that of `canonicalFunctionLiteral()`. A `Function` literal and a body
  * with anonymous slots (`_`) keep that result too, because they name their
- * own parameters. A bare symbol keeps it because it names a function
- * (`Limit(Sin, 0)`). A parenthesized sequence of several expressions
+ * own parameters. A bare symbol keeps it: it names a function
+ * (`Limit(Sin, 0)`), or it holds a formula, which the evaluate handler reads
+ * (`loneFormulaLiteral()`), so that a value assigned after boxing is read
+ * too. A parenthesized sequence of several expressions
  * (`(a; b)`, which becomes a `Block`) also keeps it.
  */
 function canonicalImplicitLimitFunction(
@@ -6309,6 +6314,37 @@ function canonicalImplicitLimitFunction(
       { liftedBody: true }
     ) ?? fn
   );
+}
+
+/**
+ * The function literal of the formula that the lone symbol `f` holds, when
+ * `f` is the first operand of the implicit form of `Limit`, `NLimit`, `ND`
+ * or `NIntegrate` (`loneSymbolFormula()`): with `G := sin(x)`, `Limit(G, 0)`
+ * is the limit of `x ↦ sin(x)`. The variable is chosen from the symbols of
+ * the value, as for a formula written in place
+ * (`canonicalImplicitLimitFunction()`). `undefined` when `f` is not a symbol
+ * that holds a formula.
+ *
+ * The value is read at evaluation, not at boxing, so the order of boxing and
+ * assignment does not change the result.
+ */
+function loneFormulaLiteral(
+  ce: ComputeEngine,
+  f: Expression
+): Expression | undefined {
+  if (!isSymbol(f)) return undefined;
+  const value = loneSymbolFormula(ce, f.symbol);
+  if (value === undefined) return undefined;
+  // A formula that is a symbol (`G := x`) is its own variable:
+  // `canonicalImplicitLimitFunction()` keeps a bare symbol as the name of a
+  // function, so the literal `x ↦ x` is made here.
+  const fn = isSymbol(value)
+    ? ce.function('Function', [
+        value,
+        ce.symbol(value.symbol, { canonical: false }),
+      ])
+    : canonicalImplicitLimitFunction(ce, value);
+  return isFunction(fn, 'Function') ? fn : undefined;
 }
 
 /**
@@ -7440,7 +7476,9 @@ volumes
       description: [
         'Numerical derivative evaluated at a point.',
         'The function is an expression (ND(Sin(x), 1)), a function literal or',
-        'the name of a function (ND(Sin, 1)): each gives cos(1).',
+        'the name of a function (ND(Sin, 1)): each gives cos(1). A symbol',
+        'that holds a formula is read as that formula: with G := sin(x),',
+        'ND(G, 1) is cos(1).',
       ],
       broadcastable: false,
       lazy: true,
@@ -7496,8 +7534,13 @@ volumes
         // call throws for a number argument.
         // A symbol that holds a formula in the variable is read: with
         // `G := sin(x)`, `ND(x ↦ G, 1)` is `cos(1)`
-        // (`literalWithFormulaValues`).
-        body = literalWithFormulaValues(engine, body);
+        // (`literalWithFormulaValues`). A lone symbol that holds a formula is
+        // read as its value: with `G := sin(x)`, `ND(G, 1)` is `cos(1)`
+        // (`loneFormulaLiteral`).
+        body = literalWithFormulaValues(
+          engine,
+          loneFormulaLiteral(engine, body) ?? body
+        );
         const lit = resolveDerivativeFunctionLiteral(body);
         if (lit !== undefined)
           return stencilDerivativeAt(engine, lit, xValue, 1);
@@ -7957,7 +8000,9 @@ volumes
           integrand = integrand.canonical;
 
         // A bare-symbol integrand stays bare, and the integration reads it as
-        // a value (a constant integrand). A bare `N` or `D` is then a
+        // a value (a constant integrand), or, when it holds a formula and no
+        // limit names a variable, as that formula (`loneSymbolFormula()`, in
+        // the evaluate handler). A bare `N` or `D` is then a
         // variable, not the library operator. Any other bare symbol is left
         // as it is (`devolveValueElements` canonicalizes only a name that
         // resolves to the library operator).
@@ -7989,6 +8034,29 @@ volumes
       },
 
       evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
+        // A lone symbol that holds a formula, with no limit that names a
+        // variable, is read as its value (`loneSymbolFormula()`): with
+        // `G := sin(x)`, `\int_0^1 G` is the integral of `sin(x)` over
+        // [0, 1], whose variable is chosen from the symbols of the value as
+        // for a formula written in place. It is not `∫₀¹ G dG`. The value is
+        // read here, not at boxing, so the order of boxing and assignment
+        // does not change the result.
+        if (
+          isSymbol(ops[0]) &&
+          ops
+            .slice(1)
+            .every((l) => isFunction(l, 'Limits') && sym(l.op1) === 'Nothing')
+        ) {
+          const value = loneSymbolFormula(ce, ops[0].symbol);
+          if (value !== undefined) {
+            const integral = ce.function('Integrate', [value, ...ops.slice(1)]);
+            const result = numericApproximation
+              ? integral.N()
+              : integral.evaluate();
+            return isFunction(result, 'Integrate') ? undefined : result;
+          }
+        }
+
         // A limit with only one bound (`\int^2 f\,dy`, `\int_0 f\,dy`,
         // `Limits(y, Nothing, 2)`): the integral is neither indefinite nor
         // definite, and no default is chosen for the missing bound. The
@@ -9839,8 +9907,10 @@ volumes
 
         // A symbol that holds a formula in the variable is read: with
         // `G := sin(x)`, `NIntegrate(x ↦ G, 0, 1)` is `1 − cos(1)`
-        // (`literalWithFormulaValues`).
-        f = literalWithFormulaValues(engine, f);
+        // (`literalWithFormulaValues`). A lone symbol that holds a formula is
+        // read as its value: `NIntegrate(G, 0, 1)` is `1 − cos(1)` too
+        // (`loneFormulaLiteral`).
+        f = literalWithFormulaValues(engine, loneFormulaLiteral(engine, f) ?? f);
 
         // Uses compiled JS functions (machine arithmetic). The bounds are
         // evaluated once: their values are passed on to the exact route below
@@ -10142,6 +10212,8 @@ volumes
         'Sum. A symbol with an assigned value is a candidate too, so an',
         'assignment does not change the variable. A bare symbol f names a',
         'function: Limit(Sin, a) is the limit of sin(t) as t approaches a.',
+        'A bare symbol f that holds a formula is read as that formula, and',
+        'the variable is chosen from it: with G := sin(x), Limit(G, 0) is 0.',
         'The variable is bound: it never takes the value assigned to a',
         'symbol of the same name.',
         'Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.',
@@ -10245,7 +10317,10 @@ volumes
 
         // A symbol that holds a formula in the limit variable is read: with
         // `G := sin(x)`, `lim_{x→0} G` is `0` (`literalWithFormulaValues`).
-        f = literalWithFormulaValues(engine, f);
+        // A lone symbol that holds a formula is read as its value, with the
+        // variable chosen from the symbols of the value: `Limit(G, 0)` is `0`
+        // too (`loneFormulaLiteral`).
+        f = literalWithFormulaValues(engine, loneFormulaLiteral(engine, f) ?? f);
 
         // A user function called in the body reads a symbol with the name of
         // the limit variable: `lim_{k→1} g(k)` with `g := a ↦ a·k·x`. The
@@ -10343,7 +10418,8 @@ volumes
         'NLimit(f, a) finds its variable with the same rule as Limit(f, a):',
         'the first of the symbols written in the expression f, in sorted',
         'order, also when it has an assigned value. A bare symbol f names a',
-        'function.',
+        'function, or, when it holds a formula (G := sin(x)), is read as',
+        'that formula, whose variable is chosen with the same rule.',
       ],
       complexity: 5000,
       broadcastable: false,
@@ -10364,10 +10440,11 @@ volumes
         // Uses compiled JS functions (machine arithmetic). Budgeted for the
         // same reason as Limit's numeric fallback above. A symbol that holds
         // a formula in the variable is read, as for `Limit`
-        // (`literalWithFormulaValues`).
+        // (`literalWithFormulaValues`), and so is a lone symbol that holds a
+        // formula (`loneFormulaLiteral`).
         return numericLimitValue(
           engine,
-          literalWithFormulaValues(engine, f),
+          literalWithFormulaValues(engine, loneFormulaLiteral(engine, f) ?? f),
           x,
           dir
         );
