@@ -127,3 +127,41 @@ describe('F39: SUBSCRIPT WITH SEVERAL INDICES', () => {
     expect(ce.parse(expr.latex).isSame(expr)).toBe(true);
   });
 });
+
+/**
+ * CE-1613. Inside a subscript, the parser joins a numeral and its own
+ * subscript into the name of a symbol: `x_{101010_{2}}` reads as the symbol
+ * `x_101010_2`. An index that is a numeral in another base is braced.
+ */
+describe('CE-1613: SUBSCRIPT WHOSE INDEX IS IN ANOTHER BASE', () => {
+  test.each<[MathJsonExpression, string]>([
+    [['Subscript', 'x', ['BaseForm', 42, 2]], 'x_{{101010_{2}}}'],
+    [['Subscript', 'x', ['BaseForm', ['Add', 'b', 2], 'b']], 'x_{{12_{b}}}'],
+  ])('%j is written %s and reads back', (input, latex) => {
+    const expr = ce.box(input);
+    expect(expr.latex).toBe(latex);
+    expect(ce.parse(latex).json).toEqual(expr.json);
+  });
+
+  test('An index with a letter digit reads back as the number', () => {
+    // `\text{2a}_{16}` reads back as the number 42 (CE-1400), so the index
+    // reads back as `x_42`, and not as the symbol `x_twoa_16`
+    const expr = ce.box(['Subscript', 'x', ['BaseForm', 42, 16]]);
+    expect(expr.latex).toBe('x_{{\\text{2a}_{16}}}');
+    expect(ce.parse(expr.latex).json).toEqual('x_42');
+  });
+
+  test.each<[MathJsonExpression, string]>([
+    // The functional form and a compound index already read back
+    [
+      ['Subscript', 'x', ['BaseForm', 42, 100]],
+      'x_{\\operatorname{BaseForm}(42, 100)}',
+    ],
+    [['Subscript', 'x', ['Add', ['BaseForm', 42, 2], 1]], 'x_{101010_{2}+1}'],
+    [['Subscript', 'x', ['Sequence', ['BaseForm', 42, 2], 3]], 'x_{101010_{2}, 3}'],
+  ])('%j is written %s without braces', (input, latex) => {
+    const expr = ce.box(input, { canonical: false });
+    expect(expr.latex).toBe(latex);
+    expect(ce.parse(latex).isSame(ce.box(input))).toBe(true);
+  });
+});

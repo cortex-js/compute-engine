@@ -4138,6 +4138,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         const index = indices
           ? indices.map((x) => serializer.serialize(x)).join(', ')
           : serializer.serialize(sub);
+        // An index that is a numeral in another base is braced: inside a
+        // subscript, the parser joins a numeral and its own subscript into
+        // the name of a symbol, so `x_{101010_{2}}` reads back as the symbol
+        // `x_101010_2`, and `x_{{101010_{2}}}` reads back as
+        // `Subscript(x, BaseForm(42, 2))`.
+        if (operator(sub) === 'BaseForm' && /_\{[^{}]*\}$/.test(index))
+          return `${braced ? `{${lhs}}` : lhs}_{{${index}}}`;
         return (
           (braced ? `{${lhs}}` : lhs) +
           '_{' +

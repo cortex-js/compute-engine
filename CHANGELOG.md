@@ -98,6 +98,11 @@
 
 ### Resolved Issues
 
+- **An index written in another base reads back as an index** (CE-1613).
+  `Subscript(x, BaseForm(42, 2))` was written `x_{101010_{2}}`, which reads
+  back as the symbol `x_101010_2`. It is now written `x_{{101010_{2}}}`, which
+  reads back as `Subscript(x, BaseForm(42, 2))`.
+
 - **The `references`, `defines` and `unknowns` of a `Program` follow the
   order of its statements** (CE-1576). A `Program` that declares the
   recursive function
