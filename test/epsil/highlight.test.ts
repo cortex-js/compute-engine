@@ -273,6 +273,29 @@ describe('EPSIL HIGHLIGHT', () => {
       ['\\u００４１', 'escape'],
       ['"', 'string'],
     ]);
+    // A `\` that ends the line of an unclosed single-line string is an
+    // invalid escape, as the lexer reports it, alone or before spaces
+    // (CE-1782). In a `"""` string it is a line continuation.
+    expect(styles('let s = "C:\\')).toEqual([
+      ['let', 'definitionKeyword'],
+      ['s', 'variableName'],
+      ['=', 'operator'],
+      ['"C:', 'string'],
+      ['\\', 'invalid'],
+    ]);
+    expect(styles('"C:\\  ')).toEqual([
+      ['"C:', 'string'],
+      ['\\ ', 'invalid'],
+      [' ', 'string'],
+    ]);
+    expect(styles('"""\na\\\nb\\  \n"""')).toEqual([
+      ['"""', 'string'],
+      ['a', 'string'],
+      ['\\', 'escape'],
+      ['b', 'string'],
+      ['\\  ', 'escape'],
+      ['"""', 'string'],
+    ]);
     // The lexer's token for `"x\` ends one unit past the source.
     const ranges = epsilHighlightTokens('"x\\');
     expect(Math.max(...ranges.map((r) => r.end))).toBe(3);

@@ -91,6 +91,13 @@
 
 ### Resolved Issues
 
+- **The Epsil syntax highlighting styles a `\` at the end of an unclosed
+  single-line string as invalid** (CE-1782). For `let s = "C:\`,
+  `epsilHighlightTokens` gave the last `\` the style `escape`, and the parser
+  reports `invalid-escape-sequence` for it. The style is now `invalid`, also
+  when spaces follow the `\`. In a `"""` string, a `\` that ends a line is a
+  line continuation and stays `escape`.
+
 - **An Epsil string that holds an incomplete `\u` escape ends at its closing
   quote** (CE-1781). In `let s = "a\u12" + 1`, the escape took in the `"`, so
   the string ran on to the end of the line: the parser reported

@@ -430,7 +430,7 @@ function scanStringBody(
       }
       i = j;
     } else {
-      const n = escapeLength(line, i, to);
+      const n = escapeLength(line, i, to, closer === '"""');
       push(out, i, i + n.length, n.valid ? 'escape' : 'invalid');
       i += n.length;
     }
@@ -441,17 +441,20 @@ function scanStringBody(
 }
 
 /** The length of the escape sequence at the `\` at `at`, as
- * `scanEscapeSequence` reads it. A `\` that ends a `"""` line is a line
- * continuation, styled as an escape. */
+ * `scanEscapeSequence` reads it. A `\` that ends a line of a `"""` string
+ * (`multiline`), alone or before spaces and tabs, is a line continuation,
+ * styled as an escape. In a single-line string, a `\` that ends the line is
+ * an invalid escape, and so is a `\` before a space or a tab. */
 function escapeLength(
   line: string,
   at: number,
-  to: number
+  to: number,
+  multiline: boolean
 ): { length: number; valid: boolean } {
-  if (at + 1 >= to) return { length: 1, valid: true };
+  if (at + 1 >= to) return { length: 1, valid: multiline };
   const next = line.codePointAt(at + 1)!;
   if (REVERSED_ESCAPED_CHARS.has(next)) return { length: 2, valid: true };
-  if (next === 0x20 || next === 0x09) {
+  if (multiline && (next === 0x20 || next === 0x09)) {
     let j = at + 1;
     while (line[j] === ' ' || line[j] === '\t') j += 1;
     if (j >= line.length) return { length: j - at, valid: true };
