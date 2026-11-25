@@ -777,6 +777,11 @@ describe('bound-variable post-filter + assert (follow-up item 2)', () => {
         // post-check must stay silent.
         '\\int_x^1 x \\, dx',
         '\\lim_{x \\to y} x',
+        // A domain of a set-builder reads the name of its variable: the
+        // diagnostics are kept, and the name is bound-only in the canonical
+        // result when the domain reads it as the head of a function.
+        '\\{x \\mid x \\in [0, x]\\}',
+        '\\{S \\mid S \\in S(t)\\}',
       ]) {
         new ComputeEngine().parse(latex, { diagnostics: true });
       }
