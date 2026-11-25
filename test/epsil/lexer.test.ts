@@ -371,6 +371,34 @@ describe('EPSIL LEXER — single-line strings', () => {
     ]);
   });
 
+  test('an escape stops at the end of the line or of the source', () => {
+    // A `\` at the end of the source: the token ends inside the source.
+    const atEnd = single('"C:\\');
+    expect([atEnd.start, atEnd.end, atEnd.parts]).toEqual([0, 4, ['C:\\']]);
+    expect(atEnd.diagnostics).toEqual([
+      ['invalid-escape-sequence', '\\'],
+      ['string-literal-closing-delimiter-expected', '"'],
+    ]);
+    // A `\` before a line break: the string ends at the end of its line.
+    for (const linebreak of ['\n', '\r\n']) {
+      const [str, next] = lex(`"C:\\${linebreak}x`);
+      expect([str.type, str.end, str.parts]).toEqual(['STRING', 4, ['C:\\']]);
+      expect(next.text).toBe('x');
+    }
+    // A `\u` escape does not read past the end of its line or of the source.
+    for (const source of ['"a\\u12', '"a\\u{12', '"a\\u12\nx', '"a\\u{12\nx']) {
+      const str = lex(source)[0];
+      expect(str.end).toBe(source.indexOf('2') + 1);
+      expect(str.diagnostics).toEqual([
+        ['invalid-unicode-codepoint-string', '12'],
+        ['string-literal-closing-delimiter-expected', '"'],
+      ]);
+    }
+    // An invalid escape of a character outside the BMP keeps the whole
+    // character.
+    expect(single('"\\😀"').parts).toEqual(['\\😀']);
+  });
+
   test('unterminated strings are STRING tokens with diagnostics (never throw)', () => {
     expect(() => tokenize('"start')).not.toThrow();
     expect(single('"start').diagnostics).toEqual([

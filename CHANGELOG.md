@@ -48,6 +48,14 @@
   `Tuple(3, 4)`. A function of the user named `PointList` is not read as a
   point.
 
+- **In Epsil, an unclosed string that ends with a backslash ends at the end of
+  its line** (CE-1579). In `let s = "C:\` (a Windows path without its closing
+  quote) followed by a line break, the string took in the line break and the
+  next line; it now ends before the line break. At the end of the code, the
+  range of its error was one character past the end; it now ends at the end of
+  the code. An incomplete `\u` escape (`"\u12`) also stops at the end of its
+  line.
+
 ### Performance
 
 - **The LaTeX of a product with a power to a symbolic exponent is faster to

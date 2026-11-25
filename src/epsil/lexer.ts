@@ -1012,6 +1012,10 @@ export class Lexer {
   // escape returns its source text (backslash + character) so input is not
   // silently dropped.
   //
+  // An escape never takes in a line break or reads past the end of the
+  // source, so that an unclosed single-line string ends at the end of its
+  // line and its token ends inside the source (CE-1579).
+  //
 
   private scanEscapeSequence(diagnostics: DiagnosticMessage[]): string {
     const bs = this.pos; // at the backslash
@@ -1023,14 +1027,19 @@ export class Lexer {
       return String.fromCodePoint(replacement);
     }
 
+    if (next < 0 || isLinebreak(next)) {
+      // A `\` at the end of the line or of the source (`"C:\`).
+      this.pos = bs + 1;
+      diagnostics.push(['invalid-escape-sequence', '\\']);
+      return '\\';
+    }
+
     if (next !== 0x75) {
       // Not `\u…`: an unrecognized escape such as `\z`.
-      this.pos = bs + 2;
-      diagnostics.push([
-        'invalid-escape-sequence',
-        '\\' + (next >= 0 ? String.fromCodePoint(next) : ''),
-      ]);
-      return '\\' + (next >= 0 ? String.fromCodePoint(next) : '');
+      const text = '\\' + String.fromCodePoint(next);
+      this.pos = bs + 1 + codePointLength(next);
+      diagnostics.push(['invalid-escape-sequence', text]);
+      return text;
     }
 
     // Unicode escape: `A` (exactly 4 hex digits) or `\u{41}` (0–8 digits).
@@ -1043,8 +1052,13 @@ export class Lexer {
     if (this.codeAt(i) === LBRACE_ESCAPE) {
       i += 1;
       while (!done && i < bs + 11) {
-        const c = this.codeAt(i++);
-        if (c >= 0) codepointString += String.fromCodePoint(c);
+        const c = this.codeAt(i);
+        if (c < 0 || isLinebreak(c)) {
+          invalidChar = true;
+          break;
+        }
+        i += codePointLength(c);
+        codepointString += String.fromCodePoint(c);
         invalidChar = invalidChar || !HEX_DIGITS.has(c);
         if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
         done = this.codeAt(i) === RBRACE_ESCAPE;
@@ -1052,12 +1066,17 @@ export class Lexer {
       if (done) i += 1;
     } else {
       while (!invalidChar && i <= bs + 5) {
-        const c = this.codeAt(i++);
-        if (c >= 0) codepointString += String.fromCodePoint(c);
+        const c = this.codeAt(i);
+        if (c < 0 || isLinebreak(c)) {
+          invalidChar = true;
+          break;
+        }
+        i += codePointLength(c);
+        codepointString += String.fromCodePoint(c);
         invalidChar = !HEX_DIGITS.has(c);
         if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
       }
-      done = i <= this.source.length;
+      done = true;
     }
     this.pos = i;
 

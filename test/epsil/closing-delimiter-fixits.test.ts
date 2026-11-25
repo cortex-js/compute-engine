@@ -78,6 +78,20 @@ describe('EPSIL FIXIT — unclosed string', () => {
     expect(diagnostics.length).toBeGreaterThan(0);
     for (const d of diagnostics) expect(d.fixits).toBeUndefined();
   });
+
+  test.each(['let s = "C:\\', 'let s = "C:\\\nx', 'let s = "a\\u12'])(
+    'the range of %j ends inside its line',
+    (source) => {
+      const end = source.split('\n')[0].length;
+      const diagnostics = parseEpsil(source)[1].filter(
+        (d) => d.message[0] !== 'unexpected-token'
+      );
+      expect(diagnostics.map((d) => d.message[0])).toContain(
+        'string-literal-closing-delimiter-expected'
+      );
+      for (const d of diagnostics) expect(d.range).toEqual([8, end]);
+    }
+  );
 });
 
 describe('EPSIL FIXIT — unclosed bracket', () => {

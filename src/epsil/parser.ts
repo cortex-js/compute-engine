@@ -1066,9 +1066,7 @@ export class Parser {
   ): Fixit | undefined {
     const source = this.source;
     const start = token.start;
-    // An escape at the end of the input (`"C:\`) gives the token an end one
-    // past the source (CE-1579).
-    const end = Math.min(token.end, source.length);
+    const end = token.end;
     let at = end;
     let text = delimiter;
     // The positions where the delimiter can go at the caret (`Fixit`): none
