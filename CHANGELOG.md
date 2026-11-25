@@ -66,6 +66,13 @@
 
 ### Resolved Issues
 
+- **At a high precision, the harmonic number of a complex number shows only
+  the digits that are correct** (CE-1585). With `ce.precision = 50`,
+  `HarmonicNumber(1+i)` evaluates to `1.1718659855240086 + 0.5766740474685813i`,
+  where it showed 50 digits of the real part and only the first 16 were right.
+  With a complex `n` or a complex order `r`, the value comes from machine
+  kernels, and is now computed at machine precision.
+
 - **The harmonic number of a very small number with a complex order is
   correct** (CE-1584). `HarmonicNumber(10^{-30}(1+i), 2+i)` evaluates to about
   `1.552e-30 + 3.173e-30i`, where it was `0`. A complex order `r` with

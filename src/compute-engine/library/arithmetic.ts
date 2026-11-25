@@ -7346,11 +7346,12 @@ function harmonicNumberNonpositiveOrder(
  *   continuation: H_z = ψ(z+1) + γ (DLMF 5.15.2) and, for r ≠ 1,
  *   H_z^(r) = ζ(r) − ζ(r, z+1) (DLMF 25.11.1), through `Digamma` and
  *   `HurwitzZeta` so every route and precision is theirs. A non-finite
- *   answer declines. For a real `|n| < 0.1` and a real r, where that
- *   difference cancels, the series of `harmonicNumberNearZero()` when it is
- *   short, else the continuation at a raised precision
- *   (`harmonicNumberRaised()`), which declines when it still cancels. A
- *   complex n with an integer r ≤ 0 is the exact difference of
+ *   answer declines. With a complex n or r, whose kernels are machine
+ *   kernels, the continuation is at machine precision. For a real
+ *   `|n| < 0.1` and a real r, where that difference cancels, the series of
+ *   `harmonicNumberNearZero()` when it is short, else the continuation at a
+ *   raised precision (`harmonicNumberRaised()`), which declines when it
+ *   still cancels. A complex n with an integer r ≤ 0 is the exact difference of
  *   `harmonicNumberNonpositiveOrder()`; with another real r or none, a
  *   complex `|n| < 0.1` takes the same series when it is short. A complex
  *   order with a real or complex `0 < |n| < 0.1` takes the series or the
@@ -7512,7 +7513,17 @@ function evaluateHarmonicNumber(
         engine.function('Zeta', [r!]),
         engine.function('HurwitzZeta', [r!, shifted]),
       ]);
-  const result = value.N();
+  // The kernels of a complex `n` or `r` (`Digamma`, `Zeta`, `HurwitzZeta`)
+  // are machine kernels: above machine precision, a sum with `γ` or `ζ(r)`
+  // at the working precision would show digits that are those of the
+  // constant, not of the kernel. The continuation is then at machine
+  // precision.
+  const machineKernels =
+    bignumPreferred(engine) &&
+    (n.isComplex || (r !== undefined && r.isComplex));
+  const result = machineKernels
+    ? engine._withTransientPrecision(MACHINE_PRECISION, () => value.N())
+    : value.N();
   // A pole or an unevaluated kernel is not an answer.
   if (!isNumber(result) || result.isNaN) return undefined;
   return result;

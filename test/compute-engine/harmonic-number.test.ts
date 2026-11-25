@@ -489,3 +489,66 @@ describe('HarmonicNumber NEAR 0 OF A COMPLEX ORDER (CE-1584)', () => {
     expect(v.operator).toBe('HarmonicNumber');
   });
 });
+
+describe('HarmonicNumber OF A COMPLEX n OR r ABOVE MACHINE PRECISION (CE-1585)', () => {
+  // The kernels of the continuation are machine kernels: at precision 50 the
+  // value is the machine value, not a sum that shows the digits of `γ` or
+  // `ζ(r)` past the 16th.
+  const cases: [
+    string,
+    (ce: ComputeEngine) => ReturnType<ComputeEngine['function']>,
+  ][] = [
+    [
+      'H(-2 + 1e-20i)',
+      (ce) => ce.function('HarmonicNumber', [ce.number(ce.complex(-2, 1e-20))]),
+    ],
+    [
+      'H(1 + i)',
+      (ce) => ce.function('HarmonicNumber', [ce.number(ce.complex(1, 1))]),
+    ],
+    [
+      'H(1 + i, 2)',
+      (ce) =>
+        ce.function('HarmonicNumber', [
+          ce.number(ce.complex(1, 1)),
+          ce.number(2),
+        ]),
+    ],
+    [
+      'H(2.5, 1 + i)',
+      (ce) =>
+        ce.function('HarmonicNumber', [
+          ce.number(2.5),
+          ce.number(ce.complex(1, 1)),
+        ]),
+    ],
+  ];
+  for (const [name, make] of cases) {
+    test(name, () => {
+      const machine = make(new ComputeEngine()).N();
+      const ce = new ComputeEngine();
+      ce.precision = 50;
+      const v = make(ce).N();
+      expect(v.json).toEqual(machine.json);
+      expect(v.json).toMatchObject([
+        'Complex',
+        expect.any(Number),
+        expect.any(Number),
+      ]);
+    });
+  }
+
+  test('a real n and r keep the working digits', () => {
+    const ce = new ComputeEngine();
+    ce.precision = 50;
+    // mpmath: psi(0, 3.5) + euler.
+    const v = H(ce, 2.5).N();
+    expect(
+      bigRelativeError(
+        ce,
+        v,
+        '1.6803723055467760478322024237503135305156663979462'
+      )
+    ).toBeLessThan(1e-48);
+  });
+});
