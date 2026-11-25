@@ -91,6 +91,17 @@
 
 ### Resolved Issues
 
+- **An Epsil string that holds an incomplete `\u` escape ends at its closing
+  quote** (CE-1781). In `let s = "a\u12" + 1`, the escape took in the `"`, so
+  the string ran on to the end of the line: the parser reported
+  `string-literal-closing-delimiter-expected` and the `+ 1` was text of the
+  string. The escape now ends before the first character that is not a hex
+  digit, in the `\u{…}` form too, so the string closes and only
+  `invalid-unicode-codepoint-string` is reported. That diagnostic now quotes
+  the escape as written (`\u12`, `\u{12`), where it quoted the characters
+  after `\u` (`12"`). The syntax highlighting of the editor styles the same
+  range as invalid.
+
 - **A `Declare` with a dictionary as its last operand, and a key that is not
   an attribute, is an error at the declaration** (CE-1805). A dictionary in
   that position is the attributes of the declaration (`type`, `value`,

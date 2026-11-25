@@ -1014,7 +1014,8 @@ export class Lexer {
   //
   // An escape never takes in a line break or reads past the end of the
   // source, so that an unclosed single-line string ends at the end of its
-  // line and its token ends inside the source (CE-1579).
+  // line and its token ends inside the source (CE-1579). A malformed `\u`
+  // escape never takes in the closing quote either (CE-1781).
   //
 
   private scanEscapeSequence(diagnostics: DiagnosticMessage[]): string {
@@ -1042,46 +1043,40 @@ export class Lexer {
       return text;
     }
 
-    // Unicode escape: `A` (exactly 4 hex digits) or `\u{41}` (0–8 digits).
+    // Unicode escape: `\u0041` (exactly 4 hex digits) or `\u{41}` (1 to 8
+    // hex digits).
+    //
+    // The escape takes in hex digits only, and the `}` that follows them in
+    // the braced form. A malformed escape therefore ends before the first
+    // character that is not a hex digit: the closing quote still closes the
+    // string, and a `\` still starts the next escape or interpolation. Every
+    // hex digit is one UTF-16 code unit.
     let i = bs + 2; // after `\u`
+    const braced = this.codeAt(i) === LBRACE_ESCAPE;
+    if (braced) i += 1;
+    const digitsStart = i;
+    const maxDigits = braced ? 8 : 4;
     let code = 0;
-    let invalidChar = false;
-    let done = false;
-    let codepointString = '';
-
-    if (this.codeAt(i) === LBRACE_ESCAPE) {
+    while (i - digitsStart < maxDigits) {
+      const digit = HEX_DIGITS.get(this.codeAt(i));
+      if (digit === undefined) break;
+      code = 16 * code + digit;
       i += 1;
-      while (!done && i < bs + 11) {
-        const c = this.codeAt(i);
-        if (c < 0 || isLinebreak(c)) {
-          invalidChar = true;
-          break;
-        }
-        i += codePointLength(c);
-        codepointString += String.fromCodePoint(c);
-        invalidChar = invalidChar || !HEX_DIGITS.has(c);
-        if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
-        done = this.codeAt(i) === RBRACE_ESCAPE;
-      }
-      if (done) i += 1;
-    } else {
-      while (!invalidChar && i <= bs + 5) {
-        const c = this.codeAt(i);
-        if (c < 0 || isLinebreak(c)) {
-          invalidChar = true;
-          break;
-        }
-        i += codePointLength(c);
-        codepointString += String.fromCodePoint(c);
-        invalidChar = !HEX_DIGITS.has(c);
-        if (!invalidChar) code = 16 * code + HEX_DIGITS.get(c)!;
-      }
-      done = true;
+    }
+    const count = i - digitsStart;
+    let valid = braced ? count > 0 : count === 4;
+    if (braced) {
+      if (this.codeAt(i) === RBRACE_ESCAPE) i += 1;
+      else valid = false;
     }
     this.pos = i;
 
-    if (invalidChar || !done) {
-      diagnostics.push(['invalid-unicode-codepoint-string', codepointString]);
+    if (!valid) {
+      // The message quotes the escape as written (`\u12`, `\u{`).
+      diagnostics.push([
+        'invalid-unicode-codepoint-string',
+        this.source.slice(bs, i),
+      ]);
       return '�';
     }
     if (code > 0x10ffff) {

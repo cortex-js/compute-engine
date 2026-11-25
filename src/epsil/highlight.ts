@@ -1,5 +1,6 @@
 import {
   FANCY_UNICODE,
+  HEX_DIGITS,
   REVERSED_ESCAPED_CHARS,
   ROOT_SIGN_UNICODE,
   isLinebreak,
@@ -459,38 +460,29 @@ function escapeLength(
     return { length: Math.min(next > 0xffff ? 3 : 2, to - at), valid: false };
   // `\u{1F600}` (up to 8 hex digits) or `\u0041` (exactly 4), naming a
   // Unicode scalar value: not above U+10FFFF, not a surrogate. A malformed
-  // escape covers what `scanEscapeSequence` consumes: in `\u{…}`, every
-  // character up to the one before `}` (at most 8), then the `}`; in
-  // `\uXXXX`, the characters up to and including the first that is not a hex
-  // digit.
-  const isHex = (k: number) => /^[0-9a-fA-F]$/.test(line[k] ?? '');
+  // escape covers what `scanEscapeSequence` consumes: the `\u` or `\u{`, the
+  // hex digits that follow (at most 4, or 8 in braces), and in the braced
+  // form the `}` when it comes next. It ends before any other character.
   let k = at + 2;
-  let valid = true;
-  let digits = '';
-  if (line[k] === '{') {
+  const braced = line[k] === '{' && k < to;
+  if (braced) k += 1;
+  const digitsStart = k;
+  const maxDigits = braced ? 8 : 4;
+  let code = 0;
+  while (k < to && k - digitsStart < maxDigits) {
+    const digit = HEX_DIGITS.get(line.charCodeAt(k));
+    if (digit === undefined) break;
+    code = 16 * code + digit;
     k += 1;
-    let done = false;
-    while (!done && k < at + 11 && k < to) {
-      valid = valid && isHex(k);
-      digits += line[k] ?? '';
-      k += 1;
-      done = line[k] === '}';
-    }
-    if (done) k += 1;
+  }
+  const count = k - digitsStart;
+  let valid = braced ? count > 0 : count === 4;
+  if (braced) {
+    if (k < to && line[k] === '}') k += 1;
     else valid = false;
-  } else {
-    while (valid && k <= at + 5 && k < to) {
-      valid = isHex(k);
-      digits += line[k];
-      k += 1;
-    }
-    valid = valid && digits.length === 4;
   }
-  if (valid) {
-    const code = parseInt(digits, 16);
-    valid = code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
-  }
-  return { length: Math.min(k, to) - at, valid };
+  valid = valid && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
+  return { length: k - at, valid };
 }
 
 /** Is `text` one glyph that the parser reads as an operator: a fancy-Unicode

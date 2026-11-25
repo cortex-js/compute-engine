@@ -90,7 +90,7 @@ export type DiagnosticCode =
   | 'range-pattern-empty' // %0 = lo, %1 = hi — an empty range pattern (lo > hi)
   | 'range-empty' // (warning) %0 = lo, %1 = hi — `lo..hi` with literal bounds and lo > hi has no element
   | 'invalid-escape-sequence' // %0 = escape sequence char
-  | 'invalid-unicode-codepoint-string' // %0 = codepoint string
+  | 'invalid-unicode-codepoint-string' // %0 = the escape as written
   | 'invalid-unicode-codepoint-value' // %0 = codepoint
   | 'literal-expected' // %0 = literal
   | 'multiline-string-expected'

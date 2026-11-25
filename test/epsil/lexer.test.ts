@@ -361,7 +361,7 @@ describe('EPSIL LEXER — single-line strings', () => {
       ['invalid-escape-sequence', '\\U'],
     ]);
     expect(single('"invalid \\u23ghjik escape "').diagnostics).toEqual([
-      ['invalid-unicode-codepoint-string', '23g'],
+      ['invalid-unicode-codepoint-string', '\\u23'],
     ]);
     expect(single('"invalid \\u{20ffff} escape "').diagnostics).toEqual([
       ['invalid-unicode-codepoint-value', 'U+0020FFFF'],
@@ -390,10 +390,37 @@ describe('EPSIL LEXER — single-line strings', () => {
       const str = lex(source)[0];
       expect(str.end).toBe(source.indexOf('2') + 1);
       expect(str.diagnostics).toEqual([
-        ['invalid-unicode-codepoint-string', '12'],
+        ['invalid-unicode-codepoint-string', source.slice(2).split('\n')[0]],
         ['string-literal-closing-delimiter-expected', '"'],
       ]);
     }
+    // A malformed `\u` escape ends before the first character that is not a
+    // hex digit: the closing quote closes the string (CE-1781).
+    // The diagnostic quotes the escape as written.
+    for (const [escape, malformed, rest] of [
+      ['\\u12', '\\u12', ''],
+      ['\\u{12', '\\u{12', ''],
+      ['\\u', '\\u', ''],
+      ['\\u{', '\\u{', ''],
+      ['\\u{}', '\\u{}', ''],
+      ['\\uzz', '\\u', 'zz'],
+      ['\\u{12 34}', '\\u{12', ' 34}'],
+      ['\\u{123456789}', '\\u{12345678', '9}'],
+      ['\\u123😀', '\\u123', '😀'],
+      ['\\u12\\n', '\\u12', '\n'],
+    ]) {
+      const [str, plus] = lex(`"a${escape}" + 1`);
+      expect([str.type, str.end]).toEqual(['STRING', escape.length + 3]);
+      expect(str.parts).toEqual([`a�${rest}`]);
+      expect(str.diagnostics).toEqual([
+        ['invalid-unicode-codepoint-string', malformed],
+      ]);
+      expect(plus.text).toBe('+');
+    }
+    // The interpolation after a malformed escape is still read.
+    expect(single('"a\\u12\\(x)b"').parts).toHaveLength(3);
+    // A fullwidth hex digit is a hex digit.
+    expect(single('"\\u００４１"').parts).toEqual(['A']);
     // An invalid escape of a character outside the BMP keeps the whole
     // character.
     expect(single('"\\😀"').parts).toEqual(['\\😀']);

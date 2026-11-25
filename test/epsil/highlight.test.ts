@@ -242,17 +242,36 @@ describe('EPSIL HIGHLIGHT', () => {
     expect(styles('"\\u{41}\\u{xyz}\\u{110000}\\uD800\\u0041"')).toEqual([
       ['"', 'string'],
       ['\\u{41}', 'escape'],
-      ['\\u{xyz}', 'invalid'],
+      ['\\u{', 'invalid'],
+      ['xyz}', 'string'],
       ['\\u{110000}', 'invalid'],
       ['\\uD800', 'invalid'],
       ['\\u0041', 'escape'],
       ['"', 'string'],
     ]);
-    // A malformed escape covers what the lexer consumes: here the quote.
+    // A malformed escape covers what the lexer consumes: the hex digits, not
+    // the closing quote (CE-1781).
     expect(styles('"\\u" + 2')).toEqual([
       ['"', 'string'],
-      ['\\u"', 'invalid'],
-      [' + 2', 'string'],
+      ['\\u', 'invalid'],
+      ['"', 'string'],
+      ['+', 'operator'],
+      ['2', 'number'],
+    ]);
+    expect(styles('"a\\u{12" + 2')).toEqual([
+      ['"a', 'string'],
+      ['\\u{12', 'invalid'],
+      ['"', 'string'],
+      ['+', 'operator'],
+      ['2', 'number'],
+    ]);
+    expect(styles('"\\u{}\\u123😀\\u００４１"')).toEqual([
+      ['"', 'string'],
+      ['\\u{}', 'invalid'],
+      ['\\u123', 'invalid'],
+      ['😀', 'string'],
+      ['\\u００４１', 'escape'],
+      ['"', 'string'],
     ]);
     // The lexer's token for `"x\` ends one unit past the source.
     const ranges = epsilHighlightTokens('"x\\');

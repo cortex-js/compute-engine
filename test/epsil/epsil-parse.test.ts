@@ -959,7 +959,7 @@ describe('EPSIL PARSING SINGLE-LINE STRINGS', () => {
           String,
           [
             invalid-unicode-codepoint-string,
-            23g,
+            \\u23,
           ],
         ],
       ]
@@ -972,7 +972,7 @@ describe('EPSIL PARSING SINGLE-LINE STRINGS', () => {
           String,
           [
             invalid-unicode-codepoint-string,
-            defughji,
+            \\u{def,
           ],
         ],
       ]
