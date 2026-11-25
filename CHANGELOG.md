@@ -131,6 +131,22 @@
 
 ### Resolved Issues
 
+- **A derivative, an integral or a limit with no variable written, of a
+  formula that reads a variable that holds a formula, is computed with the
+  variable of that formula** (CE-1787). After
+  `ce.assign('G', ce.parse('\\sin(x)'))`, `ND(2G, 1)` gave `2` (the
+  derivative with respect to `G`) and now gives `2cos(1) ≈ 1.0806`;
+  `\int_0^1 G + x` gave `x + 1/2` and now gives `3/2 − cos(1)`; `\int G + x`
+  gave `G^2/2 + G·x` and now gives `x^2/2 − cos(x)`; `D(G^2)` gave `2G` and
+  now gives `2sin(x)cos(x)`. A variable that holds a formula is not chosen
+  as the variable: the variable is chosen from the symbols of its formula
+  and the other symbols of the expression. This applies to `D`, `Series`,
+  `Integrate`, `Limit`, `NLimit`, `ND` and `NIntegrate`, when the formula is
+  assigned before the expression is parsed or boxed. The integral of a
+  function literal with a limit that names no variable reads such a formula
+  too: `Integrate(Function(G + a, x), Limits(Nothing, 0, 1))` gave
+  `a + sin(x)` and now gives `a + 1 − cos(1)`.
+
 - **The numeric inverse of a singular matrix with complex entries stays
   unevaluated** (CE-1803).
   `Inverse([[3 + i, 2, 1], [1, 1, 1], [4 + i, 3, 2]]).N()` gave entries of

@@ -451,7 +451,13 @@ operand of an implicit form (no variable written), is read as its value at
 evaluation, and the variable is chosen from the symbols of the value with the
 rule of the implicit form: `ND(G, 1)` is `cos(1)`, `∫_0^1 G` is `1 − cos(1)`
 and `Limit(G, 0)` is `0` (`loneSymbolFormula()`,
-`boxed-expression/implicit-variable-rule.ts`). A bare symbol that names a
+`boxed-expression/implicit-variable-rule.ts`). A symbol that holds a formula
+is not a candidate for the variable of an implicit form; the candidates of
+its formula are (`implicitVariableCandidates()`): the variable of `ND(2G, 1)`
+and of `∫_0^1 G + x` is `x`, so they are `2cos(1)` and `3/2 − cos(1)`. The
+formula is known only when the symbol holds it: an implicit form that is
+boxed before `G := sin(x)` and is not a bare symbol keeps the variable `G`.
+A bare symbol that names a
 function (`Sin`, `g(t) := t^2`), and one whose value has no candidate for the
 variable (`c := 5`), keep their reading. A symbol in
 such a value is read in the same way (`K := G + 1`, `D(K, x)` is `cos(x)`). A

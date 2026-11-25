@@ -121,6 +121,19 @@ export function isImplicitVariableCandidate(
  * candidate either: with `L := [1, 2, 3]`, the variable of `Total(L)·t` is
  * `t`.
  *
+ * A symbol that holds a formula (`loneSymbolFormula()`) is not a candidate:
+ * the candidates of its formula are, and a symbol of that formula that
+ * holds a formula is read in the same way. With `G := sin(x)`, the
+ * candidate of `2G` is `x`, and the candidates of `G + t` are `t` and `x`.
+ * So the variable of a formula does not change when a part of the formula
+ * is given a name. A symbol whose value reaches the symbol again
+ * (`P := Q + 1` and `Q := P + 1`) is a candidate where the value reaches
+ * it.
+ *
+ * Limitation: a formula is known only when the symbol holds it. An
+ * expression that is boxed before `G := sin(x)` has the candidate `G` for
+ * `2G`, and a canonical form made then keeps `G` as its variable.
+ *
  * Limitation: the type of a symbol with no declaration is known only when
  * it gets a value. So the two orders can still give different variables for
  * a symbol that is not declared and gets a value that is not a number after
@@ -132,15 +145,73 @@ export function isImplicitVariableCandidate(
 export function implicitVariableCandidates(
   ...exprs: ReadonlyArray<Expression>
 ): string[] {
+  return [...candidatesOfExpressions(exprs, newFormulaRead())].sort();
+}
+
+/**
+ * The candidates of `implicitVariableCandidates()` for `exprs` when no
+ * symbol is read as its formula: a symbol that holds a formula is a
+ * candidate itself. For a caller that knows that the names of `exprs` do
+ * not denote the definitions of the engine: a name that an Epsil program
+ * binds (`resolve-library-names.ts`) can have the name of a symbol that
+ * holds a formula in the engine.
+ */
+export function implicitVariableCandidatesAsWritten(
+  ...exprs: ReadonlyArray<Expression>
+): string[] {
+  return [...candidatesOfExpressions(exprs, undefined)].sort();
+}
+
+/**
+ * The state of one read of the formulas that symbols hold
+ * (`formulaAndCandidates()`):
+ *
+ * - `reading`: the symbols whose formulas are being read. A symbol in it
+ *   holds no formula, so the read of a value that reaches its own symbol
+ *   again ends.
+ * - `cycles`: how many times the read reached a symbol of `reading`.
+ * - `known`: the result for each symbol whose read reached no symbol of
+ *   `reading`. Such a result does not depend on the path of the read, so a
+ *   symbol that several formulas read is read once. A symbol whose read
+ *   reaches a cycle of values has no known result and is read once for
+ *   each path, so the cost grows with the number of paths to the cycle
+ *   (`A1 := A2`, …, `An := A1` costs 2^n reads).
+ */
+type FormulaRead = {
+  reading: Set<string>;
+  cycles: number;
+  known: Map<string, HeldFormula | undefined>;
+};
+
+/** The formula that a symbol holds and the candidates of that formula. */
+type HeldFormula = { formula: Expression; candidates: ReadonlySet<string> };
+
+function newFormulaRead(): FormulaRead {
+  return { reading: new Set(), cycles: 0, known: new Map() };
+}
+
+/**
+ * The candidates of `implicitVariableCandidates()` for `exprs`, not sorted.
+ * `read` is the state of the read of the formulas; with `undefined`, no
+ * symbol is read as its formula.
+ */
+function candidatesOfExpressions(
+  exprs: ReadonlyArray<Expression>,
+  read: FormulaRead | undefined
+): Set<string> {
   const candidates = new Set<string>();
   for (const e of exprs)
-    for (const s of implicitVariableCandidatesFrom(e.engine, {
-      unknowns: e.unknowns,
-      references: e.references,
-      referencedFunctions: e.referencedFunctions,
-    }))
+    for (const s of candidatesFromWalks(
+      e.engine,
+      {
+        unknowns: e.unknowns,
+        references: e.references,
+        referencedFunctions: e.referencedFunctions,
+      },
+      read
+    ))
       candidates.add(s);
-  return [...candidates].sort();
+  return candidates;
 }
 
 /**
@@ -153,12 +224,24 @@ export function implicitVariableCandidates(
  */
 export function implicitVariableCandidatesFrom(
   engine: ComputeEngine,
-  walks: {
-    unknowns: Iterable<string>;
-    references: Iterable<string>;
-    referencedFunctions: Iterable<string>;
-  }
+  walks: CandidateWalks
 ): string[] {
+  return [...candidatesFromWalks(engine, walks, newFormulaRead())];
+}
+
+/** The walks of an expression that give its candidates
+ * (`implicitVariableCandidatesFrom()`). */
+type CandidateWalks = {
+  unknowns: Iterable<string>;
+  references: Iterable<string>;
+  referencedFunctions: Iterable<string>;
+};
+
+function candidatesFromWalks(
+  engine: ComputeEngine,
+  walks: CandidateWalks,
+  read: FormulaRead | undefined
+): Set<string> {
   const functions = new Set(walks.referencedFunctions);
   const unknowns = new Set(walks.unknowns);
   const candidates = new Set<string>();
@@ -168,9 +251,17 @@ export function implicitVariableCandidatesFrom(
     // symbols and symbols that cannot hold a number are excluded
     // (`isImplicitVariableCandidate()`).
     if (!isImplicitVariableCandidate(engine, s, unknowns.has(s))) continue;
-    candidates.add(s);
+    // A symbol that holds a formula gives the candidates of the formula:
+    // with `G := sin(x)`, the candidate of `2G` is `x`. An unknown has no
+    // value, so it holds no formula.
+    const held =
+      read === undefined || unknowns.has(s)
+        ? undefined
+        : formulaAndCandidates(engine, s, read);
+    if (held === undefined) candidates.add(s);
+    else for (const v of held.candidates) candidates.add(v);
   }
-  return [...candidates];
+  return candidates;
 }
 
 /**
@@ -203,11 +294,44 @@ export function implicitVariableCandidatesFrom(
  */
 export function loneSymbolFormula(
   engine: ComputeEngine,
-  name: string,
-  visited: Set<string> = new Set()
+  name: string
 ): Expression | undefined {
-  if (visited.has(name)) return undefined;
-  visited.add(name);
+  return formulaAndCandidates(engine, name, newFormulaRead())?.formula;
+}
+
+/**
+ * The formula that the symbol `name` holds (`loneSymbolFormula()`) and the
+ * candidates of that formula (`implicitVariableCandidates()`), or
+ * `undefined` when `name` holds no formula.
+ *
+ * A symbol whose formula is being read (`read.reading`) holds no formula. A
+ * symbol is removed from `read.reading` when its read ends, so a symbol
+ * that two parts of a formula read (`G` in `G + K` with `K := G + 1`) holds
+ * its formula in each part.
+ */
+function formulaAndCandidates(
+  engine: ComputeEngine,
+  name: string,
+  read: FormulaRead
+): HeldFormula | undefined {
+  if (read.reading.has(name)) {
+    read.cycles += 1;
+    return undefined;
+  }
+  if (read.known.has(name)) return read.known.get(name);
+  const cycles = read.cycles;
+  const held = readFormulaAndCandidates(engine, name, read);
+  if (read.cycles === cycles) read.known.set(name, held);
+  return held;
+}
+
+/** The read of `formulaAndCandidates()` for a symbol that is not being
+ * read and has no known result. */
+function readFormulaAndCandidates(
+  engine: ComputeEngine,
+  name: string,
+  read: FormulaRead
+): HeldFormula | undefined {
   const def = engine.lookupDefinition(name);
   if (!isValueDef(def)) return undefined;
   if (
@@ -224,18 +348,24 @@ export function loneSymbolFormula(
     value.type.matches('function')
   )
     return undefined;
-  if (implicitVariableCandidates(value).length === 0) return undefined;
-  if (isSymbol(value)) {
-    // The chain ends at the symbol only when the symbol has no value
-    // (`G := x`). A symbol that holds a value that is not a formula
-    // (`H := 5`) gives no formula for the whole chain, and so does a cycle:
-    // the `visited` test at the entry of the recursive call catches it.
-    const target = engine.lookupDefinition(value.symbol);
-    if (isValueDef(target) && target.value.value !== undefined)
-      return loneSymbolFormula(engine, value.symbol, visited);
-    return value;
+  read.reading.add(name);
+  try {
+    const candidates = candidatesOfExpressions([value], read);
+    if (candidates.size === 0) return undefined;
+    if (isSymbol(value)) {
+      // The chain ends at the symbol only when the symbol has no value
+      // (`G := x`). A symbol that holds a value that is not a formula
+      // (`H := 5`) gives no formula for the whole chain, and so does a
+      // cycle: the test at the entry of `formulaAndCandidates()` catches
+      // it.
+      const target = engine.lookupDefinition(value.symbol);
+      if (isValueDef(target) && target.value.value !== undefined)
+        return formulaAndCandidates(engine, value.symbol, read);
+    }
+    return { formula: value, candidates };
+  } finally {
+    read.reading.delete(name);
   }
-  return value;
 }
 
 /**
