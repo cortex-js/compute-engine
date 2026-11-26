@@ -667,16 +667,16 @@ The [Combinatorics reference](/epsil/reference/combinatorics/) has the full desc
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `bellNumber` | `BellNumber` | `(integer, number?) -> number` | Compute the Bell number B(n), the number of partitions of a set of n elements. |
-| `binomial` | `Binomial` | `(complex \| infinity, complex \| infinity) -> number` | Compute the binomial coefficient C(n, k) = n! / (k! |
+| `bellNumber` | `BellNumber` | `(n: integer, x: number?) -> number` | Compute the Bell number B(n), the number of partitions of a set of n elements. |
+| `binomial` | `Binomial` | `(n: complex \| infinity, k: complex \| infinity) -> number` | Compute the binomial coefficient C(n, k) = n! / (k! |
 | `cartesianProduct` | `CartesianProduct` | `(set<any>+) -> set` | Return the Cartesian product of input sets. |
 | `choose` | `Choose` | `(n: complex \| infinity, m: complex \| infinity) -> number` | Binomial coefficient: number of ways to choose k items from n. |
-| `combinations` | `Combinations` | `((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)` | Return all k-element combinations of a collection. |
-| `fibonacci` | `Fibonacci` | `(integer, number?) -> number` | Compute the nth Fibonacci number. |
-| `integerPartitions` | `IntegerPartitions` | `(integer, any?, list<integer>?, integer?) -> list<list<integer>>` | Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. |
+| `combinations` | `Combinations` | `((xs: S, k: integer) -> list<string> where S: string) & ((xs: collection, k: integer) -> list<list>)` | Return all k-element combinations of a collection. |
+| `fibonacci` | `Fibonacci` | `(n: integer, x: number?) -> number` | Compute the nth Fibonacci number. |
+| `integerPartitions` | `IntegerPartitions` | `(n: integer, k: any?, parts: list<integer>?, count: integer?) -> list<list<integer>>` | Return the partitions of n, each a list of its positive parts in non-increasing order, in reverse lexicographic order. |
 | `multinomial` | `Multinomial` | `(integer+) -> integer` | Compute the multinomial coefficient for multiple integers. |
-| `permutations` | `Permutations` | `((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)` | Return all permutations of length k (default full length) of a collection. |
-| `pochhammer` | `Pochhammer` | `(complex \| infinity, complex \| infinity) -> number` | Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1). |
+| `permutations` | `Permutations` | `((xs: S, k: integer?) -> list<string> where S: string) & ((n: integer<0..>, k: integer?) -> list<list<integer>>) & ((xs: collection, k: integer?) -> list<list>)` | Return all permutations of length k (default full length) of a collection. |
+| `pochhammer` | `Pochhammer` | `(x: complex \| infinity, n: complex \| infinity) -> number` | Rising factorial (Pochhammer symbol) (x)_n = x(x+1)…(x+n-1). |
 | `powerSet` | `PowerSet` | `(set<any>) -> set` | Return the power set of a set (set of all subsets). |
 | `subfactorial` | `Subfactorial` | `(integer) -> integer` | Compute the number of derangements (subfactorial) of n items. |
 

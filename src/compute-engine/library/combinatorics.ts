@@ -786,6 +786,19 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Choose: {
       description:
         'Binomial coefficient: number of ways to choose k items from n. Agrees with Binomial for all defined values.',
+      examples: ['Choose(5, 2)', 'Choose(-3, 2)'],
+      parameters: {
+        n: {
+          description:
+            'The size of the pool; a negative or non-integer value extends the coefficient through the Gamma function.',
+          sample: '5',
+        },
+        m: {
+          description:
+            'The number of items chosen; with a non-negative integer `n`, the result is 0 for a negative integer or an integer greater than `n`.',
+          sample: '2',
+        },
+      },
       complexity: 1200,
       // The same carrier as `Binomial`: the two names share `evaluateBinomial`
       // and are documented to agree, so they must also admit the same
@@ -806,7 +819,20 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the nth Fibonacci number. With a second operand, `Fibonacci(n, x)` is the Fibonacci polynomial `F_n(x)`, with `F_n(1) = Fibonacci(n)`.',
       wikidata: 'Q47577',
-      signature: '(integer, number?) -> number',
+      examples: ['Fibonacci(10)', 'Fibonacci(5, x)'],
+      signature: '(n: integer, x: number?) -> number',
+      parameters: {
+        n: {
+          description:
+            'The index; `Fibonacci(0)` is 0, and a negative index follows `F_{-n} = (-1)^{n+1} F_n`.',
+          sample: '10',
+        },
+        x: {
+          description:
+            'The variable of the Fibonacci polynomial; without it the result is the Fibonacci number.',
+          sample: '2',
+        },
+      },
       // An integer without the polynomial argument.
       type: ([, x], context) =>
         BoxedType.forResult(
@@ -873,7 +899,20 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // per-call sharpness. There is no `canonical` handler, so a proven
       // off-carrier operand is rejected at BOXING; with every numeric point
       // in the carrier, that seam only ever sees a non-number.
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature: '(n: complex | infinity, k: complex | infinity) -> number',
+      examples: ['Binomial(10, 3)', 'Binomial(n, 2)'],
+      parameters: {
+        n: {
+          description:
+            'The size of the pool; a negative or non-integer value extends the coefficient through the Gamma function.',
+          sample: '10',
+        },
+        k: {
+          description:
+            'The number of items chosen; with a non-negative integer `n`, the result is 0 for a negative integer or an integer greater than `n`.',
+          sample: '3',
+        },
+      },
       broadcastable: true,
       nanBehavior: 'propagate',
       type: ([n, k], context) =>
@@ -882,15 +921,24 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     },
     Pochhammer: {
       description:
-        'Rising factorial (Pochhammer symbol) (a)_k = a(a+1)…(a+k-1).',
+        'Rising factorial (Pochhammer symbol) (x)_n = x(x+1)…(x+n-1).',
       wikidata: 'Q2339261',
+      examples: ['Pochhammer(3, 4)', 'Pochhammer(x, 3)'],
+      parameters: {
+        x: { description: 'The first factor of the product.', sample: '3' },
+        n: {
+          description:
+            'The number of factors; 0 gives 1, and a negative or non-integer value extends the product through the Gamma function.',
+          sample: '4',
+        },
+      },
       // Both slots take the Γ-family carrier, as `Binomial` does: every
       // finite complex point has a value (the poles of `Γ(a)` and `Γ(a+k)`
       // included) and every infinity is in the carrier with the values
       // `pochhammerValueAtInfinity` gives, so a point with no limit answers
       // `NaN` rather than a boxing error. `NaN` propagates (explicit: the
       // carrier is not a subtype of `complex`).
-      signature: '(complex | infinity, complex | infinity) -> number',
+      signature: '(x: complex | infinity, n: complex | infinity) -> number',
       broadcastable: true,
       nanBehavior: 'propagate',
       // (a)_k with a provably non-negative integer k is a finite product of
@@ -935,6 +983,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     },
     CartesianProduct: {
       description: 'Return the Cartesian product of input sets.',
+      examples: ['Count(CartesianProduct({1, 2}, {"a", "b", "c"}))'],
+      parameters: [
+        {
+          description:
+            'A factor of the product; each element of the result is a tuple with one component from each factor.',
+          sample: '{1, 2}',
+        },
+      ],
       // Aka the product set, the set direct product or cross product
       // Notation: \times
       wikidata: 'Q173740',
@@ -1003,6 +1059,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     PowerSet: {
       description: 'Return the power set of a set (set of all subsets).',
+      examples: ['Count(PowerSet({1, 2, 3}))'],
+      parameters: [
+        {
+          description:
+            'The set whose subsets are listed; the power set of the empty set holds the empty set alone.',
+          sample: '{1, 2, 3}',
+        },
+      ],
       wikidata: 'Q205170',
       signature: '(set<any>) -> set',
       collection: {
@@ -1076,6 +1140,24 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Return all permutations of length k (default full length) of a collection. `Permutations(n)` for a non-negative integer n is the permutations of `Range(1, n)`, as lists, and `Permutations(n, k)` its arrangements of length k.',
       keywords: ['nPr'],
+      examples: ['Permutations([1, 2, 3])', 'Permutations(3, 2)'],
+      parameters: {
+        xs: {
+          description:
+            'The collection to arrange; the elements of a string are its characters, and each arrangement is a string.',
+          sample: '[1, 2, 3]',
+        },
+        n: {
+          description:
+            'A non-negative integer that stands for the collection `Range(1, n)`.',
+          sample: '3',
+        },
+        k: {
+          description:
+            'The length of each arrangement, the whole length by default; 0 gives one empty arrangement, and a length past the size of the collection none.',
+          sample: '2',
+        },
+      },
       // The LEADING arm is the string rule: an arrangement of a string's own
       // characters is itself a string, so `Permutations("ab")` is
       // `["ab","ba"]` rather than `[["a","b"],["b","a"]]` (ruling D9(b),
@@ -1087,7 +1169,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // The integer arm is the permutations of `Range(1, n)`; it is bounded
       // below by 0 so that a negative `n` stays a type error.
       signature:
-        '((S, integer?) -> list<string> where S: string) & ((integer<0..>, integer?) -> list<list<integer>>) & ((collection, integer?) -> list<list>)',
+        '((xs: S, k: integer?) -> list<string> where S: string) & ((n: integer<0..>, k: integer?) -> list<list<integer>>) & ((xs: collection, k: integer?) -> list<list>)',
       // A lazy indexed collection (like `CartesianProduct`/`PowerSet`): the
       // result has `P(n, k)` elements — factorially many — so it is NEVER
       // materialized up front. `.count` is the closed form `n·(n-1)···(n-k+1)`
@@ -1164,6 +1246,19 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
     Combinations: {
       description: 'Return all k-element combinations of a collection.',
       wikidata: 'Q202805',
+      examples: ['Combinations([1, 2, 3, 4], 2)', 'Combinations("abc", 2)'],
+      parameters: {
+        xs: {
+          description:
+            'The collection to choose from, in its order; the elements of a string are its characters, and each combination is a string.',
+          sample: '[1, 2, 3, 4]',
+        },
+        k: {
+          description:
+            'The number of elements of each combination; 0 gives one empty combination, and a number past the size of the collection none.',
+          sample: '2',
+        },
+      },
       // The LEADING arm is the string rule: a combination of a string's own
       // characters is itself a string, so `Combinations("abc", 2)` is
       // `["ab","ac","bc"]` (ruling D9(b), 2026-08-16; see `innerRun` in
@@ -1172,7 +1267,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       // `any`-typed operand refutes no arm, so a ground `string` parameter
       // would win most-specific-wins on every untyped operand.
       signature:
-        '((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)',
+        '((xs: S, k: integer) -> list<string> where S: string) & ((xs: collection, k: integer) -> list<list>)',
       // Lazy indexed collection: `C(n, k)` elements, never materialized up
       // front. `.count` is the closed form `P(n, k) / k!`; elements stream from
       // `iterator`, and `at(i)` yields only the first `i` combinations (after
@@ -1246,7 +1341,27 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Count(IntegerPartitions(100, 100, [1, 5, 10, 25, 50]))  // 292',
       ],
       signature:
-        '(integer, any?, list<integer>?, integer?) -> list<list<integer>>',
+        '(n: integer, k: any?, parts: list<integer>?, count: integer?) -> list<list<integer>>',
+      parameters: {
+        n: {
+          description:
+            'The integer to partition; a negative one has no partition, and 0 has one, the empty list.',
+          sample: '4',
+        },
+        k: {
+          description:
+            'The number of parts: `k` keeps the partitions of at most k parts, `[k]` exactly k, `[kmin, kmax]` or `[kmin, kmax, step]` a range, and `All` sets no limit.',
+          sample: '2',
+        },
+        parts: {
+          description: 'The positive integers that the parts are drawn from.',
+          sample: '[1, 5, 10]',
+        },
+        count: {
+          description: 'The number of partitions kept, the first ones.',
+          sample: '3',
+        },
+      },
       // A lazy indexed collection, like `Combinations`: it has `p(n)`
       // elements, so it is never materialized up front. The count is
       // `NPartition(n)` when the partitions are not restricted, and a
@@ -1285,6 +1400,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
 
     Multinomial: {
       description: 'Compute the multinomial coefficient for multiple integers.',
+      examples: ['Multinomial(2, 1, 1)'],
+      parameters: [
+        {
+          description:
+            'The size of one group; the result is `(k1 + k2 + ...)! / (k1! k2! ...)`, and it stays unevaluated when a size is negative.',
+          sample: '2',
+        },
+      ],
       wikidata: 'Q20820114',
       signature: '(integer+) -> integer',
       evaluate: floatResultIfFloatOperand((ops, { engine: ce }) => {
@@ -1321,6 +1444,14 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
+      examples: ['Subfactorial(4)'],
+      parameters: [
+        {
+          description:
+            'The number of items; `Subfactorial(0)` is 1, and a negative integer stays unevaluated.',
+          sample: '4',
+        },
+      ],
       signature: '(integer) -> integer',
       broadcastable: true,
       evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
@@ -1353,7 +1484,20 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description:
         'Compute the Bell number B(n), the number of partitions of a set of n elements. With a second operand, `BellNumber(n, x)` is the Bell (Touchard) polynomial `B_n(x)`, with `B_n(1) = BellNumber(n)`.',
       wikidata: 'Q816063',
-      signature: '(integer, number?) -> number',
+      examples: ['BellNumber(5)', 'BellNumber(3, x)'],
+      signature: '(n: integer, x: number?) -> number',
+      parameters: {
+        n: {
+          description:
+            'The number of elements of the set; `BellNumber(0)` is 1, and a negative integer stays unevaluated.',
+          sample: '5',
+        },
+        x: {
+          description:
+            'The variable of the Bell polynomial; without it the result is the Bell number.',
+          sample: '2',
+        },
+      },
       // An integer without the polynomial argument.
       type: ([, x], context) =>
         BoxedType.forResult(
