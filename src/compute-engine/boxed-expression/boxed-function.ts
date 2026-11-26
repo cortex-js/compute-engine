@@ -6654,6 +6654,10 @@ export class BoxedFunction
    * found constant (`hasConstantValue()`). */
   _hasConstantValue(seen: Set<Expression>): boolean {
     if (this._numericStore !== undefined) return this.isPure;
+    // Written-out data (`_isLiteralData()`, decided once per node) holds no
+    // symbol, so its value never changes, and a read of a lazy view over
+    // such a list tests no element (CE-1831).
+    if (this._isLiteralData()) return this.isPure;
     const binding = this._def;
     if (
       !binding ||

@@ -923,6 +923,17 @@ export function rewriteWithBinders(
 
   if (!isFunction(expr) && !isDictionary(expr)) return expr;
 
+  // Written-out data (`_isLiteralData()`, decided once per node) holds no
+  // symbol and binds nothing, so only `visitApplication` could change it.
+  // The test keeps the read of a variable that holds a lazy view over a long
+  // list from visiting every element (CE-1831).
+  if (
+    visitApplication === undefined &&
+    isFunction(expr) &&
+    expr._isLiteralData()
+  )
+    return expr;
+
   // A dictionary binds nothing, so the root treatment does not apply to it:
   // it is memoized under the plain shadowing key like any inner node.
   const memoKey =

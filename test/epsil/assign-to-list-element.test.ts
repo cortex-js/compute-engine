@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { BoxedFunction } from '../../src/compute-engine/boxed-expression/boxed-function';
 import { checkSource } from '../../src/cli/check';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -327,6 +328,40 @@ describe('a write that does not give a list is an error, and the variable keeps 
     expect(chainDepth(xs)).toBe(40);
     expect(xs.at(40)?.re).toBe(0);
     expect(xs.at(41)?.re).toBe(41);
+  });
+
+  // After each write, the read of the variable walked the whole stored
+  // value, the list included, to find the names it reads: 2000 writes to a
+  // list of 20 000 elements took 2.3 s, and take 0.9 s. The count of reads
+  // of the operands of the list is the same for 10 and 30 writes (fewer
+  // than 33, so the chain is not copied into a new list); it grew by 3 at
+  // each write.
+  test('a write to a long list does not walk the list (CE-1831)', () => {
+    const proto = BoxedFunction.prototype;
+    const ops = Object.getOwnPropertyDescriptor(proto, 'ops')!;
+    let reads = 0;
+    Object.defineProperty(proto, 'ops', {
+      configurable: true,
+      get(this: BoxedFunction) {
+        const result = ops.get!.call(this) as ReadonlyArray<unknown>;
+        if (this.operator === 'List' && result.length >= 5000) reads += 1;
+        return result;
+      },
+    });
+    const readsFor = (writes: number): number => {
+      reads = 0;
+      const { value, diagnostics } = run(
+        `let fb: list<integer> = [0 for k in 1..5000]\nfor k in 1..${writes} { fb[k] = k }\nfb[${writes}]`
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.re).toBe(writes);
+      return reads;
+    };
+    try {
+      expect(readsFor(30)).toBe(readsFor(10));
+    } finally {
+      Object.defineProperty(proto, 'ops', ops);
+    }
   });
 
   test('a write to an element of an undeclared list is assignment-to-undeclared-variable', () => {

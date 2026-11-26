@@ -366,6 +366,15 @@
   lost its first clause and stayed unevaluated, with `i` free. It now keeps
   both clauses and gives `3`, in either order of the clauses.
 
+### Performance
+
+- **A loop that writes the elements of a long list is faster** (CE-1831).
+  After each write, the next read of the variable went through every element
+  of the list. With `let fb: list<integer> = [0 for k in 1..20000]`, the loop
+  `for k in 1..2000 { fb[k] = k % 256 }` took about 2.3 seconds and takes
+  about 0.9 seconds; with 20,000 writes, it took about 42 seconds and takes
+  about 6.5 seconds. The value is the same.
+
 ## 0.201.5 _2026-11-25_
 
 ### Improvements
