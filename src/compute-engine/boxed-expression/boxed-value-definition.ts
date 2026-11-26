@@ -2394,34 +2394,40 @@ export function inferTypeFromValue(
 ): BoxedType {
   if (!value) return ce.type('unknown');
 
+  // The type is read once. The type of a symbol that holds a formula is
+  // computed from its value at each read (`declaredType`), so a chain of
+  // symbols that each hold the previous one would multiply the reads at each
+  // level.
+  const type = value.type;
+
   // Note: the order of the checks is important, we want to promote the type
   // to the most specific type possible based on the value's type.
 
-  if (value.type.matches('integer')) {
+  if (type.matches('integer')) {
     // An integer value, ranged or not, promotes to the bare tier `integer`:
     // x = 2 => integer
     return ce.type('integer');
   }
 
-  if (value.type.matches('rational')) {
+  if (type.matches('rational')) {
     // If the value matches a rational number, we promote the type to `real`
     // x = 1/2 => real
     return ce.type('real');
   }
 
-  if (value.type.matches('real')) {
+  if (type.matches('real')) {
     // If the value matches a real number, we promote the type to `real`
     // x = 3.14 => real
     return ce.type('real');
   }
 
-  if (value.type.matches('complex')) {
+  if (type.matches('complex')) {
     // If the value is complex (3+2i) or imaginary (-4i), we promote the type to `number`
     // x = 3+2i => number
     return ce.type('number');
   }
 
-  if (value.type.matches('infinity')) {
+  if (type.matches('infinity')) {
     // An infinite value is not a real number and not a complex number, so it
     // reaches none of the rungs above. It promotes to its own tier, which
     // keeps every infinity assignable to the same symbol.
@@ -2429,7 +2435,7 @@ export function inferTypeFromValue(
     return ce.type('infinity');
   }
 
-  if (value.type.matches('nan')) {
+  if (type.matches('nan')) {
     // NaN promotes to its own tier as well. The wider `number` would admit
     // every finite value too, and so would hide the fact that the symbol
     // holds the not-a-number marker.
@@ -2437,7 +2443,7 @@ export function inferTypeFromValue(
     return ce.type('nan');
   }
 
-  if (value.type.matches('boolean')) {
+  if (type.matches('boolean')) {
     // A boolean value type widens to `boolean` for the reason given at
     // `widenAssignedType`: the proof it records may be retracted later.
     // x = (a < b) => boolean
@@ -2445,7 +2451,7 @@ export function inferTypeFromValue(
   }
   // No promotion for other types.
   // @todo: could consider promoting `list<T>` to `list` or...?
-  return value.type;
+  return type;
 }
 
 /** True when the two lists hold the same definitions, in the same order. */

@@ -555,6 +555,12 @@
   `for k in 1..2000 { fb[k] = k % 256 }` took about 2.3 seconds and takes
   about 0.9 seconds; with 20,000 writes, it took about 42 seconds and takes
   about 6.5 seconds. The value is the same.
+- **A chain of variables that each hold the previous one no longer takes a
+  time that multiplies with each variable** (CE-1830). The type of a variable
+  that holds another variable was computed several times at each level of the
+  chain. With `A0 := sin(x)` and `A1 := A0`, `A2 := A1`, and so on, the
+  assignments of seven variables took about 16 seconds, and nine did not
+  finish in 60 seconds; 40 variables now take about 15 milliseconds.
 
 ## 0.201.5 _2026-11-25_
 
