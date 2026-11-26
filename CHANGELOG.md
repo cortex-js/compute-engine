@@ -253,6 +253,16 @@
 
 ### Resolved Issues
 
+- **A function that is declared with a signature and has no body refuses a
+  list whose elements cannot fit a parameter** (CE-1839). With
+  `ce.declare('k', '(real, string) -> real')`,
+  `ce.box(['k', 1, ['List', 1, 2]])` was valid, with the type
+  `vector<real^2>`. It now has an `incompatible-type` error at the list and
+  the type `error`, as `k(1, 2)` has. A list with an element that can fit is
+  still mapped: `k(1, ["a", "b"])` has the type `vector<real^2>`. A function
+  with a body is not changed: its application reports an error for each
+  element that does not fit.
+
 - **In Epsil, a function that uses a variable declared below it reads the
   variable when a library function has the same name** (CE-1826). In
   `let h = () => mean(3)`, `let mean = (x) => x + 4`, `h()`, the body of

@@ -197,6 +197,7 @@ import {
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import {
   markBinderVariable,
+  readsActivation,
   rebindToBindings,
   rewriteWithBinders,
 } from './binders.js';
@@ -4524,6 +4525,17 @@ function makeCanonicalFunctionCore(
           // accepted at its numeric parameters (`acceptsNaNArgument`,
           // `validate.ts`).
           userFunction: true,
+          // A function that is declared with a signature and holds no value
+          // is never applied: a list whose elements cannot fit a parameter
+          // is refused here (`liftedOperandCannotFit`, `validate.ts`). A
+          // variable of a program, a local and a parameter hold no value
+          // while the program is boxed, and receive a function when the
+          // program runs: their calls keep the check of each element by
+          // the application.
+          calleeHasNoBody:
+            heldLiteral === undefined &&
+            !def.value._programVariable &&
+            !readsActivation(def),
           // An absent argument at an annotated parameter of a pinned
           // literal is refused, as at the call of a `function` definition
           // (`refusesAbsentArgument`, `validate.ts`).
