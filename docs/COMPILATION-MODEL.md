@@ -1269,9 +1269,21 @@ A declared union of shapes
 (`real | list<real>`) is a type: it is not named in `unsupported`, and the
 compilation declines (R4). A parameter of a
 function literal, of a user function or of the root function is not an input
-and is not refused: `t ↦ 2t` compiles, and a list passed to its untyped
-parameter is a value outside the type that the body implies (`2t` reads a
-number), so the result is unspecified. A transparent alias of `unknown` or
+and is not refused for its type alone: `t ↦ 2t` compiles, and a list passed
+to its untyped parameter is a value outside the type that the body implies
+(`2t` reads a number), so the result is unspecified. The same holds for a
+positional parameter of a root function literal whose uses give it a number
+type (`x ↦ Sin(x)`, `(x, y) ↦ x + y`) or no type (`unknown`: `x ↦ x`,
+`x ↦ f(x)` with `f` a user function of an untyped parameter). When its uses
+give it a type that admits a list, the compilation declines with
+`'untyped-input'` and the name of the parameter in `unsupported`, as for an
+input: `A ↦ Transpose(A)` (`A` is `value`) and `v ↦ Norm(v)` (a union of a
+number and a tensor) decline, where the code read a list there as a number
+(`v ↦ Norm(v)` gave `NaN` for `[3, 4]`; the interpreter applies the function
+to each element of a list passed to an untyped parameter and gives
+`[3, 4]`). The host declares the parameter:
+`(A: matrix<real>) ↦ Transpose(A)` compiles and gives `[[1, 3], [2, 4]]`
+for `[[1, 2], [3, 4]]`. A transparent alias of `unknown` or
 `any` (`ce.declareType("U", "unknown", { alias: true })`) is that type, so
 an input declared `U` declines. A local of a block or of a function body
 (a name that it declares, or assigns first at its own level) is not an

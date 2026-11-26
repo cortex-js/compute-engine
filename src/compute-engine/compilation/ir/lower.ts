@@ -199,8 +199,17 @@ import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
 import { protocolLowering } from './lower-protocols.js';
 import { recordConstructor, recordLowering } from './lower-records.js';
+import { UNTYPED_INPUT_CODE } from '../diagnostics.js';
 
 export { Decline } from './lower-context.js';
+
+/** A positional parameter of a root function literal of no declared type
+ *  whose uses give it a type that admits a list: refused as an input of no
+ *  type is (`untyped-input`), with its name in `unsupported`. */
+const UNTYPED_PARAMETER: DeclineReason = {
+  code: UNTYPED_INPUT_CODE,
+  kind: 'correctness',
+};
 
 /** The heads of the walk's constructs, and those that are loops. */
 const CONSTRUCTS = new Set([
@@ -4662,8 +4671,9 @@ function lowerOnce(
   /** The input `name` of the engine type `t`: a parameter of the entry (a
    *  positional one: of a root function literal). A list of run-time length
    *  has its length as a parameter before it. A positional one of no
-   *  declared type is a real; one declared `any` declines (it is not an
-   *  input that `program()` refuses). */
+   *  declared type is a real (the root function literal declines one whose
+   *  uses give it a type that admits a list); one declared `any` declines
+   *  (it is not an input that `program()` refuses). */
   const input = (
     e: Expression,
     name: string,
@@ -8074,6 +8084,32 @@ function lowerOnce(
           decline(
             root,
             `the parameter ${name} of no declared type, read as ${engineTypeToString(read)}`
+          );
+        // A parameter of no declared type whose uses give it a type that
+        // admits a list (`A ↦ Transpose(A)`: `value`; `v ↦ Norm(v)`: a
+        // union of a number and a tensor) declines, as an untyped input
+        // does (rule R1): a list passed there, a value of that type, would
+        // be read as a number. One of a number type is a real (`x ↦
+        // Sin(x)`), and so is one whose uses give it no type (`unknown`:
+        // `x ↦ f(x)` with `f` a user function), where a list is outside
+        // the type that the body implies.
+        // The type is the parameter's own (its definition, which every use
+        // in the body shares): no walk of the body, which would also meet
+        // an inner binder of the same name.
+        const param =
+          declared === 'unknown' && isSymbol(p) ? p.type.type : undefined;
+        const inferred =
+          param !== undefined &&
+          param !== 'unknown' &&
+          typesOverlap(param, 'list')
+            ? param
+            : undefined;
+        if (inferred !== undefined)
+          throw new Decline(
+            name!,
+            `the parameter ${name} of no declared type (its uses give it the type ${engineTypeToString(inferred)}): declare its type, as \`(${name}: matrix<real>) ↦ …\` or \`(${name}: list<real>) ↦ …\``,
+            undefined,
+            UNTYPED_PARAMETER
           );
         input(p, name, declared, true);
       });

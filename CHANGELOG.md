@@ -181,6 +181,20 @@
 
 ### Resolved Issues
 
+- **A compiled function literal whose untyped parameter can be a list
+  declines** (CE-1837). A parameter of no declared type of a function
+  literal compiled to JavaScript was read as a number, also where the body
+  gives it a type that admits a list: `v ↦ Norm(v)` gave `NaN` for
+  `[3, 4]`, with `success: true`, where the interpreter applies the function
+  to each element and gives `[3, 4]`. Such a parameter is now refused as an
+  input of no type is: the diagnostic has the code `'untyped-input'`, the
+  name of the parameter is in `unsupported`, and with the fallback the
+  result is the interpreter's. `A ↦ Transpose(A)` and `v ↦ Norm(v)`
+  decline; `x ↦ Sin(x)` and `(x, y) ↦ x + y`, whose uses give the parameter
+  a number type, compile as before. Declare the parameter to compile it:
+  `(A: matrix<real>) ↦ Transpose(A)` gives `[[1, 3], [2, 4]]` for
+  `[[1, 2], [3, 4]]`.
+
 - **A named call of `Slice` selects its arm** (CE-1838). In Epsil,
   `slice([1, 2, 3, 4, 5], start: 2, end: 4)` gave an `unexpected-argument`
   error, and now gives `[2, 3, 4]`, as the positional call does;

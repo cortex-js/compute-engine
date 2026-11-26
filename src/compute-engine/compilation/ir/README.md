@@ -400,7 +400,10 @@ another reason, by the type of the name where it is read), and the statistics of
 the switch count it `declined`. A name with a value, a local, an index, a
 parameter of a user function and a parameter of a root function literal are not
 inputs: a parameter of no declared type is a real, and one declared `any` or
-`value` declines, as an argument of type `any` does. A name that only a branch
+`value` declines, as an argument of type `any` does. A positional parameter of a
+root function literal of no declared type whose uses give it a type that admits
+a list (`A ↦ Transpose(A)`: `value`) declines with `untyped-input` and its name
+(CE-1837). A name that only a branch
 dropped at compile time reads is an input too (`If(2 < 3, 0, z)` with `z`
 undeclared is refused). A scalar of type `number` is a real in the `strict` mode
 and a complex in the `complex` mode; a scalar `complex` input is on the complex
