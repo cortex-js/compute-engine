@@ -371,7 +371,6 @@ describe('A VALUE OF A NOMINAL PIXEL TYPE', () => {
     `type alias Byte = integer<0..255>
 type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
 type Quad = tuple<w: Byte, x: Byte, y: Byte, z: Byte>
-type P2 = tuple<x: real, y: real>
 function invert(p: Pixel) -> Pixel { Pixel(min(max(255 - p.r, 0), 255), min(max(255 - p.g, 0), 255), min(max(255 - p.b, 0), 255), p.a) }
 function rgba(r: real, g: real, b: real, a: real) -> Pixel { Pixel(min(max(round(r), 0), 255), min(max(round(g), 0), 255), min(max(round(b), 0), 255), min(max(round(a), 0), 255)) }
 function green(p) { p.g }
@@ -572,11 +571,6 @@ function opaque() -> Pixel { (1, 2, 3, 4) }
       'a Pixel read by position (an error in the interpreter)',
       ['At', ['At', 'src', 'i'], 2],
       'a sub-expression of the static type error',
-    ],
-    [
-      'another nominal tuple type (CE-1870)',
-      ['Field', ['P2', 'v', 'v'], "'x'"],
-      'P2(v, v): a value of the type P2, a record: records compile on javascript only',
     ],
     ['an input declared Pixel (CE-1871)', ['Field', 'q', "'g'"], 'the input q of type Pixel'],
     [

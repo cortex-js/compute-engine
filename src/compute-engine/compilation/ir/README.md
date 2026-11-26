@@ -3848,11 +3848,20 @@ scalar of a lane (a colour, a string), a list or a tuple of stated lengths, a
 record, or the unit type `nothing`: a field whose value is `Nothing`. On
 JavaScript a record is the array of its fields (a `list` instruction of the
 record type), a `nothing` field `null` (the operation `nothing`). Records
-compile on JavaScript only (user decision Q3 of the plan of CE-1652): on GLSL,
-in the interval mode and in the `bigint` mode a constructor declines ("records
+compile on JavaScript only (user decision Q3 of the plan of CE-1652): in the
+interval mode and in the `bigint` mode a constructor declines ("records
 compile on javascript only"), also when a field read would fold the record away,
 and a `Tuple` or a `List` of several lanes is lowered as before ("elements of
-two types"); `admits()` refuses the lane there too.
+two types"); `admits()` refuses the lane there too. GLSL (CE-1870) holds a
+vector only: the record of a nominal tuple type of two to four fields, each
+declared a real or an integer (`vectorRecord()` of `ir.ts`). The constructor
+of another nominal type declines with the cause (`notVector()` of
+`lower-records.ts`, `recordLowering(cx, javascript, vectors)`), `admits()`
+refuses every other record (`Profile.vectorRecords`), and the printer spells
+the record `vecN`, its `list` instruction `vecN(…)` and a `field` as an
+element. The rest is the lowering of records of JavaScript: the nominal
+name in `sameFields()`, the equality of the fields of one nominal type, the
+declines of a record against a tuple, the discharges of `absent()`.
 
 - **Making a record.** The constructor of a nominal tuple type that
   `type P = tuple<…>` declares (`recordConstructor()`; not a parameterized or an
@@ -4186,13 +4195,9 @@ real lane, spelled alike), a tuple cell one `arr.get4` (a list of four
 integers, one texel; the verifier knows its type), an element of it an
 `elem` of that read, and the count `arr.len`. For a tuple cell of a nominal
 type the `arr.get4` is the record of that type (four integer fields, the
-name and the field names), and so is the constructor of such a type on GLSL
-(`recordLowering(cx, javascript, pixels)`; every other constructor declines):
-the profile admits the lane `record` for that record only (`vectorRecords`,
-`vectorRecord()` of `ir.ts`), the printer spells it `vec4` and a `field` as
-an element, and the lowering of records keeps its rules (the nominal name
-in `sameFields()`, the equality of the fields of one nominal type, the
-declines of a record against a tuple and of the discharges in `absent()`). After the passes,
+name and the field names), a vector of GLSL ("Records"); the verifier
+requires its name to be the tag of the cell, and `absent()` declines a
+discharge of it. After the passes,
 `holdArrays()` (`index.ts`) gives each array input the texture of its cells
 in `IRType.storage` when it is not the default one (`isampler2D` for signed
 integer cells, `sampler2D` for the names of the option `storage`, bytes in a

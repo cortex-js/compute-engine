@@ -150,6 +150,20 @@
     unnamed tuple (`src[i] == (255, 255, 255, 255)`, which the interpreter
     gives as `False`), the discharges, an input declared `Pixel`, a list of
     pixels and other nominal tuple types still decline on GLSL.
+  - **A nominal tuple type of two to four numbers is a vector on GLSL.** A
+    value of a nominal tuple type whose two to four fields are each a real or
+    an integer (`type P2 = tuple<x: real, y: real>`,
+    `type C3 = tuple<r: real, g: real, b: real>`) is a `vec2`, a `vec3` or a
+    `vec4`, with the same uses as a pixel: the constructor, a field read, a
+    parameter and the result of a user function, a local, the arms of an
+    `If`, the result of the program, and `==` and `!=` of two values of one
+    type. With `function mid(a: P2, b: P2) -> P2 { … }`,
+    `mid(P2(x, y), P2(y, x))` compiles to
+    `vec2 _fn_ir_u0_mid(vec2 v4, vec2 v5)` and `P2(x, y) == P2(y, x)` to
+    `((x == y) && (y == x))`. Two nominal types of the same fields stay two
+    types: their comparison declines, as does a comparison with an unnamed
+    tuple. A record with a field that is not a number, of one field or of
+    more than four declines with its cause.
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.

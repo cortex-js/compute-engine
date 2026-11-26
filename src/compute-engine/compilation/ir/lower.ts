@@ -8111,8 +8111,8 @@ function lowerOnce(
   // `bigint` mode).
   const javascript = options.javascript === true && !bigint && !interval;
   const fns = functionLowering(cx, lists, javascript);
-  // On GLSL, the records of a nominal type that is a tuple cell of four
-  // bytes, as for the arrays below.
+  // On GLSL, the records of a nominal tuple type of two to four numbers
+  // (vectors), in the default mode as for the arrays below.
   const records = recordLowering(
     cx,
     javascript,

@@ -107,8 +107,8 @@ export type Profile = {
    *  list of points). */
   readonly vectorArrays?: boolean;
   /** Of the lane `record`, only a record that is a vector
-   *  (`vectorRecord()`): on GLSL a `vec4`, the value of a nominal type that
-   *  is a tuple cell of four bytes. */
+   *  (`vectorRecord()`): on GLSL a `vec2` to a `vec4`, the value of a
+   *  nominal tuple type of two to four numbers. */
   readonly vectorRecords?: boolean;
   /** The operations whose value is admitted only as the result of the
    *  entry, each with the cause of a refusal elsewhere: on GLSL a colour is

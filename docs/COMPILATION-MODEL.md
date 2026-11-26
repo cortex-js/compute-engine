@@ -3093,8 +3093,9 @@ compiled colour. A `Tuple` or a `List` of elements of several lanes
 at a constant position only (`p.x`; `q[1]` of a record with no names). Two
 records of one engine type whose fields have different shapes (a filled and
 an unfilled `Figure`) are two shapes, so an `If` with a run-time condition
-whose arms give them declines (R3). GLSL, `interval-js` and the `bigint` mode
-decline a record (user decision). These decline too:
+whose arms give them declines (R3). `interval-js` and the `bigint` mode
+decline a record (user decision), and so does GLSL, but for a vector ("On
+GLSL" below). These decline too:
 
 - a field of a run-time length (user decision): Tycho's
   `dash(self, pattern: list<real>)` stores `N(pattern, 15)`, so
@@ -3105,6 +3106,48 @@ decline a record (user decision). These decline too:
 - a list of strings in a field, also as a literal: Tycho's invalid figure,
   `figureOf("invalid", ["message"])`;
 - a recursive function whose parameter or result is a record.
+
+**On GLSL.** A value of a nominal tuple type of two to four fields, each
+declared a real or an integer number (`type P2 = tuple<x: real, y: real>`,
+`type C3 = tuple<r: real, g: real, b: real>`, a field type through a
+transparent alias, an integer of any range, as for an integer input), is a
+`vec2`, a `vec3` or a `vec4`. The fields can mix integers and reals, as an
+unnamed tuple `(i, x)` is one `vec2`. The constructor is the vector of its
+operands, a field read by name is one element, and a parameter or the result
+of a user function (typed or not), a block local and the two arms of an `If`
+of one type are the vector; the result of such a program is a `vecN`
+(`returnType` of the slice). `Equal` and `NotEqual` of two values of one
+type compare the elements. A real field of such a value is never NaN in the
+interpreter (`P2(NaN, 1)` is an `incompatible-type` error), so `IsMissing`
+of it is `false` and `Coalesce` and `AssertPresent` give it, as on
+JavaScript. The value keeps its type: `Equal`, `NotEqual` or an `If` of two
+nominal types, also of the same fields (`P2` and
+`type V2 = tuple<x: real, y: real>`: "Equal of P2(x: real, y: real),
+V2(x: real, y: real)"), or of such a value and an unnamed tuple ("Equal of a
+tuple: its value on a tuple is not its value on a list", "arms of two
+types") decline, as on JavaScript, and so do arithmetic on a whole value
+(`p + 1`, an `incompatible-type` error in the interpreter), a list of such
+values ("a list of records"), an input declared with the type (CE-1871) and a
+dictionary. Every other constructor declines with its cause: with
+`type B2 = tuple<x: boolean, y: boolean>`, `B2(c, c)` gives "a value of the
+type B2, a record whose field x is of type boolean, not a real or an integer
+number: on glsl a record is a value of a nominal tuple type of two to four
+real or integer numbers (a vec2 to a vec4)"; a string, a list, an array, a
+complex number or a record in a field, and one field or more than four,
+alike. The nominal pixel of an array is one such type ("Arrays", "On GLSL").
+
+```js
+// type P2 = tuple<x: real, y: real>
+// function mid(a: P2, b: P2) -> P2 { P2((a.x + b.x) / 2, (a.y + b.y) / 2) }
+const r = compile(ce.box(['mid', ['P2', 'x', 'y'], ['P2', 'y', 'x']]), { to: 'glsl' });
+r.preamble;
+// vec2 _fn_ir_u0_mid(vec2 v4, vec2 v5) {
+//   return vec2((0.5 * (v4[int(0.0)] + v5[int(0.0)])), (0.5 * (v4[int(1.0)] + v5[int(1.0)])));
+// }
+r.code;
+// vec2 v18 = _fn_ir_u0_mid(vec2(x, y), vec2(y, x));
+// return v18;
+```
 
 **Parameters.** A parameter of a user function of no stated type, of type
 `any` or of a named tuple type takes a record (one of no stated type or `any`
@@ -3715,11 +3758,9 @@ A field of a tuple cell of a nominal type (`P[i].g` with
 
 A value of a nominal type that is a tuple cell of four bytes
 (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>` with
-`type alias Byte = integer<0..255>`) is a `vec4` on GLSL: the read of a
-whole cell (the texel, one fetch), the constructor `Pixel(r, g, b, a)` (the
-`vec4` of its operands), a block local, the two arms of an `If` that are
-both `Pixel` values, and a parameter and the result of a user function, with
-a declared type or none. A field read by name is one element. An operand of
+`type alias Byte = integer<0..255>`) is a `vec4` on GLSL, by the rule of
+vectors ("Records", "On GLSL"); the read of a whole cell is that `vec4`
+(the texel, one fetch). An operand of
 the constructor must prove `Byte`, as on JavaScript:
 `Pixel(min(max(round(v), 0), 255), 2, 3, 255)` compiles, and
 `Pixel(x % 256, 1, 2, 3)` declines ("the field r of Pixel: a value of type
@@ -3757,9 +3798,9 @@ declared (each an error in the interpreter); `IsMissing`, `Coalesce` and
 `AssertPresent` of a `Pixel` value; arithmetic on a whole `Pixel`
 (`p + 1`) and `p[2]` (the interpreter gives `incompatible-type`); a list of
 `Pixel` values ("a list of records"); an input declared `Pixel` (CE-1871);
-and every other record, also a value of another nominal tuple type
-(`type P2 = tuple<x: real, y: real>`: "a value of the type P2, a record:
-records compile on javascript only", CE-1870).
+and every record that is not a vector ("Records", "On GLSL"). Unlike the
+other vectors, a `Pixel` can be an out-of-range read, so its discharges
+decline.
 
 These decline on GLSL, each with a message that names it: a name whose value
 is an array, a read with a range or a list as the index, a store, `AddTo` of

@@ -51,7 +51,8 @@ export function isVectorArray(t: IRType): boolean {
  *  the kind of the storage (`sampler2D`); an array the sampler of its
  *  texture (`highp usampler2D` for integer cells and tuple cells,
  *  `highp sampler2D` for `real` cells, or that of `IRType.storage`); a
- *  record of a nominal type of four integers a `vec4` (`vectorRecord()`). */
+ *  record of a nominal type of two to four numbers a `vec2` to a `vec4`
+ *  (`vectorRecord()`). */
 export function typeName(t: IRType): string {
   if (t.lane === 'array')
     return `highp ${
