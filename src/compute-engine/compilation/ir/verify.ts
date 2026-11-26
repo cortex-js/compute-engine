@@ -23,6 +23,7 @@ import {
   sameShape,
   scalarType,
   typeToString,
+  vectorRecord,
   type IRFunction,
   type IRType,
   type Instr,
@@ -224,10 +225,14 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           if (!operandFits(row, signature[0], k, type(a), isSubLane))
             fail(`${i.op}: operand ${k} is ${typeToString(type(a))}`);
         });
-        // The read of a tuple cell on GLSL: its four bytes.
+        // The read of a tuple cell on GLSL: its four bytes, or the record
+        // of the nominal type of the cell (`vectorRecord()`).
         const r: IRType =
           i.op === 'arr.get4'
-            ? { lane: 'integer', shape: [4] }
+            ? vectorRecord(type(i.out)) === 4 &&
+              type(i.out).nominal === type(i.args[0]).array?.tuple?.tag
+              ? type(i.out)
+              : { lane: 'integer', shape: [4] }
             : (resultType(found.signature, i.args.map(type), same) ??
               fail(`${i.op}: lists of two shapes`));
         if (!equal(type(i.out), r))

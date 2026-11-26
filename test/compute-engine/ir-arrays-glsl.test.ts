@@ -144,6 +144,13 @@ describe('THE READ OF A CELL (acceptance case 15)', () => {
     );
   });
 
+  test('a whole cell of a nominal tuple type: the vec4 of the texel', () => {
+    const r = glsl(['At', 'P', 'i']);
+    expect(r.code).toBe(
+      `vec4 v2 = ${read('P', '_gpu_ir_cell4_u', `vec4(${NAN})`)};\nreturn v2;`
+    );
+  });
+
   test('a constant index other than 0 has the run-time test', () => {
     const r = glsl(['At', 'A', 3]);
     expect(r.code).toBe(
@@ -342,12 +349,6 @@ describe('THE DECLINES', () => {
       'a call of u0_at2 with arrays in two kinds of texture on glsl',
     ],
     [
-      'a whole cell of a nominal tuple type (a record)',
-      ['At', 'P', 'i'],
-      {},
-      'the lane record on glsl',
-    ],
-    [
       'the complex mode',
       ['At', 'A', 'i'],
       { mode: 'complex' },
@@ -355,5 +356,278 @@ describe('THE DECLINES', () => {
     ],
   ])('%s', (_, json, options, message) => {
     expect(() => glsl(json, options)).toThrow(message);
+  });
+});
+
+/** The values of a nominal type that is a tuple cell of four bytes are a
+ *  `vec4` on GLSL: the constructor, the read of a cell, a parameter and a
+ *  result of a user function, and `Equal` of two values of the type. The
+ *  value keeps its type: with an unnamed tuple or another nominal type it
+ *  declines, as on JavaScript. */
+describe('A VALUE OF A NOMINAL PIXEL TYPE', () => {
+  const pe = new ComputeEngine();
+  const source = executeEpsil(
+    pe,
+    `type alias Byte = integer<0..255>
+type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>
+type Quad = tuple<w: Byte, x: Byte, y: Byte, z: Byte>
+type P2 = tuple<x: real, y: real>
+function invert(p: Pixel) -> Pixel { Pixel(min(max(255 - p.r, 0), 255), min(max(255 - p.g, 0), 255), min(max(255 - p.b, 0), 255), p.a) }
+function rgba(r: real, g: real, b: real, a: real) -> Pixel { Pixel(min(max(round(r), 0), 255), min(max(round(g), 0), 255), min(max(round(b), 0), 255), min(max(round(a), 0), 255)) }
+function green(p) { p.g }
+function tup(t: tuple<Byte, Byte, Byte, Byte>) { t[1] }
+function opaque() -> Pixel { (1, 2, 3, 4) }
+`
+  );
+  if (source.diagnostics.some((d) => d.severity === 'error'))
+    throw new Error('the Epsil source has an error');
+  pe.declare('src', 'array<Pixel>');
+  pe.declare('i', 'integer');
+  pe.declare('x', 'integer');
+  pe.declare('y', 'integer');
+  pe.declare('v', 'real');
+  pe.declare('c', 'boolean');
+  pe.declare('q', 'Pixel');
+  const shader = (json: unknown) =>
+    compile(pe.box(json as never), { to: 'glsl', fallback: false } as never);
+  const cell = read('src', '_gpu_ir_cell4_u', `vec4(${NAN})`);
+  const texel = helper('_gpu_ir_cell4_u', 'vec4', 'usampler2D', 'vec4($)');
+  const round = `float _gpu_ir_round(float x) {
+  float a = abs(x);
+  float r = floor(a);
+  if (a - r >= 0.5) r += 1.0;
+  return x < 0.0 ? -r : r;
+}`;
+  const white = ['Pixel', 255, 255, 255, 255];
+  const byteOf = (k: number, p: string) => `${p}[int(${k}.0)]`;
+  const equal = (p: string, q: (k: number) => string) =>
+    `((((${byteOf(0, p)} == ${q(0)}) && (${byteOf(1, p)} == ${q(1)})) && (${byteOf(2, p)} == ${q(2)})) && (${byteOf(3, p)} == ${q(3)}))`;
+
+  test('the constructor is the vec4 of its operands, each proved a Byte', () => {
+    const r = shader([
+      'Pixel',
+      ['Min', ['Max', ['Round', 'v'], 0], 255],
+      2,
+      3,
+      255,
+    ]);
+    expect(r.preamble).toBe(round);
+    expect(r.code).toBe(
+      'vec4(min(max(_gpu_ir_round(v), 0.0), 255.0), 2.0, 3.0, 255.0)'
+    );
+  });
+
+  test('the read of a cell is the vec4 of one fetch, as a result and a local', () => {
+    const expected = `vec4 v2 = ${cell};\nreturn v2;`;
+    expect(shader(['At', 'src', 'i']).code).toBe(expected);
+    // `do { let p = src[i]; p }`
+    expect(
+      shader([
+        'Block',
+        [
+          'Declare',
+          'p',
+          ['Dictionary', ['KeyValuePair', { str: 'value' }, ['At', 'src', 'i']]],
+        ],
+        'p',
+      ]).code
+    ).toBe(expected);
+    // A field read by name is one element of the vec4.
+    expect(shader(['Field', ['At', 'src', 'i'], "'g'"]).code).toBe(
+      `vec4 v2 = ${cell};\nreturn v2[int(1.0)];`
+    );
+  });
+
+  test('an If whose two arms are Pixel values is a vec4', () => {
+    expect(
+      shader(['If', 'c', ['At', 'src', 'i'], ['Pixel', 1, 2, 3, 4]]).code
+    ).toBe(
+      [
+        'vec4 v9;',
+        'if (c) {',
+        `  vec4 v3 = ${cell};`,
+        '  v9 = v3;',
+        '} else {',
+        '  v9 = vec4(1.0, 2.0, 3.0, 4.0);',
+        '}',
+        'return v9;',
+      ].join('\n')
+    );
+  });
+
+  test('a user function Pixel -> Pixel takes and returns a vec4', () => {
+    const r = shader(['invert', ['At', 'src', 'i']]);
+    const channel = (k: number) =>
+      `min(max(((-v3[int(${k}.0)]) + 255.0), 0.0), 255.0)`;
+    expect(r.preamble).toBe(
+      [
+        texel,
+        'vec4 _fn_ir_u0_invert(vec4 v3) {',
+        `  return vec4(${channel(0)}, ${channel(1)}, ${channel(2)}, v3[int(3.0)]);`,
+        '}',
+      ].join('\n')
+    );
+    expect(r.code).toBe(
+      `vec4 v2 = ${cell};\nvec4 v26 = _fn_ir_u0_invert(v2);\nreturn v26;`
+    );
+  });
+
+  test('a function that makes a Pixel of its numbers, and one of no type that reads a field', () => {
+    const r = shader(['rgba', 'x', 'y', 0, 255]);
+    const channel = (k: number) =>
+      `min(max(_gpu_ir_round(v${k}), 0.0), 255.0)`;
+    expect(r.preamble).toBe(
+      [
+        round,
+        'vec4 _fn_ir_u0_rgba(float v0, float v1, float v2, float v3) {',
+        `  return vec4(${[0, 1, 2, 3].map(channel).join(', ')});`,
+        '}',
+      ].join('\n')
+    );
+    expect(r.code).toBe(
+      'vec4 v23 = _fn_ir_u0_rgba(x, y, 0.0, 255.0);\nreturn v23;'
+    );
+    expect(shader(['green', ['At', 'src', 'i']]).preamble).toBe(
+      `${texel}\nfloat _fn_ir_u0_green(vec4 v3) {\n  return v3[int(1.0)];\n}`
+    );
+  });
+
+  test('Equal and NotEqual of two Pixel values: the equality of the four bytes', () => {
+    const constant = () => '255.0';
+    expect(shader(['Equal', ['At', 'src', 'i'], white]).code).toBe(
+      `vec4 v2 = ${cell};\nreturn ${equal('v2', constant)};`
+    );
+    expect(shader(['NotEqual', ['At', 'src', 'i'], white]).code).toBe(
+      `vec4 v2 = ${cell};\nreturn (!${equal('v2', constant)});`
+    );
+  });
+
+  test.each([
+    [
+      'an operand that does not prove a Byte',
+      ['Pixel', ['Mod', 'x', 256], 1, 2, 3],
+      'Mod(x, 256): the field r of Pixel: a value of type integer, which does not prove Byte',
+    ],
+    [
+      'Equal of a Pixel and an unnamed tuple (False in the interpreter)',
+      ['Equal', ['At', 'src', 'i'], ['Tuple', 255, 255, 255, 255]],
+      'Equal of a tuple: its value on a tuple is not its value on a list',
+    ],
+    [
+      'NotEqual of a Pixel and an unnamed tuple',
+      ['NotEqual', ['At', 'src', 'i'], ['Tuple', 255, 255, 255, 255]],
+      'Equal of a tuple: its value on a tuple is not its value on a list',
+    ],
+    [
+      'Equal of two nominal types',
+      ['Equal', ['At', 'src', 'i'], ['Quad', 255, 255, 255, 255]],
+      'Equal of Pixel(r: integer, g: integer, b: integer, a: integer), Quad(w: integer, x: integer, y: integer, z: integer)',
+    ],
+    [
+      'an If of a Pixel arm and a tuple arm',
+      ['If', 'c', ['At', 'src', 'i'], ['Tuple', 1, 2, 3, 4]],
+      'arms of two types',
+    ],
+    [
+      'an If of two nominal types',
+      ['If', 'c', ['At', 'src', 'i'], ['Quad', 1, 2, 3, 4]],
+      'arms of two types',
+    ],
+    [
+      'a Pixel for a parameter declared tuple (an error in the interpreter)',
+      ['tup', ['At', 'src', 'i']],
+      'a scalar argument of tup for the parameter 1, a list or a point',
+    ],
+    [
+      'a tuple for a parameter declared Pixel (an error in the interpreter)',
+      ['invert', ['Tuple', 1, 2, 3, 4]],
+      'Field(p, "r"): Field of a value that is not a record',
+    ],
+    [
+      'a tuple returned where Pixel is declared (an error in the interpreter)',
+      ['opaque'],
+      'the result of opaque is not a scalar (Pixel)',
+    ],
+    [
+      'IsMissing (an out-of-range read is a tuple of NaN)',
+      ['IsMissing', ['At', 'src', 'i']],
+      'IsMissing of a value of a nominal type that is a tuple cell (array<Pixel>): the read of such a cell out of range is a tuple of NaN, which compiled code does not test',
+    ],
+    [
+      'Coalesce',
+      ['Coalesce', ['At', 'src', 'i'], ['Pixel', 0, 0, 0, 0]],
+      'Coalesce of a value of a nominal type that is a tuple cell (array<Pixel>)',
+    ],
+    [
+      'AssertPresent',
+      ['AssertPresent', ['At', 'src', 'i']],
+      'AssertPresent of a value of a nominal type that is a tuple cell (array<Pixel>)',
+    ],
+    [
+      'arithmetic on a whole Pixel (an error in the interpreter)',
+      ['Add', ['At', 'src', 'i'], 1],
+      'a sub-expression of the static type error',
+    ],
+    [
+      'a Pixel read by position (an error in the interpreter)',
+      ['At', ['At', 'src', 'i'], 2],
+      'a sub-expression of the static type error',
+    ],
+    [
+      'another nominal tuple type (CE-1870)',
+      ['Field', ['P2', 'v', 'v'], "'x'"],
+      'P2(v, v): a value of the type P2, a record: records compile on javascript only',
+    ],
+    ['an input declared Pixel (CE-1871)', ['Field', 'q', "'g'"], 'the input q of type Pixel'],
+    [
+      'a list of Pixel values',
+      ['List', ['Pixel', 1, 2, 3, 4], ['Pixel', 5, 6, 7, 8]],
+      'a list of records',
+    ],
+  ])('%s declines', (_, json, message) => {
+    expect(() => shader(json)).toThrow(message);
+  });
+
+  // The same functions compile on JavaScript, with the interpreter's
+  // values (an out-of-range read of `invert` is an error in the
+  // interpreter, outside the comparison).
+  test('on javascript the same pixel functions give the interpreter\'s values', () => {
+    executeEpsil(
+      pe,
+      `let px = arrayFrom([Pixel(1, 2, 3, 4), Pixel(255, 255, 255, 255)], "Pixel")
+let inverted = (i: integer) => invert(px[i])
+let made = (x: integer, y: integer) => rgba(x, y, 0, 255)
+let isWhite = (i: integer) => px[i] == Pixel(255, 255, 255, 255)`
+    );
+    const run = (name: string, ...args: number[]) => {
+      const r = compile(pe.box(name).evaluate(), { fallback: false });
+      expect(r.success).toBe(true);
+      return r.run!(...args);
+    };
+    const interpreted = (call: string) => {
+      const x = executeEpsil(pe, call).value!;
+      return x.operator === 'Pixel' ? x.ops!.map((y) => y.re) : x.symbol;
+    };
+    const bytes = (p: { r: number; g: number; b: number; a: number }) => [
+      p.r,
+      p.g,
+      p.b,
+      p.a,
+    ];
+    for (const i of [1, 2])
+      expect(bytes(run('inverted', i) as never)).toEqual(
+        interpreted(`inverted(${i})`)
+      );
+    for (const [x, y] of [
+      [3, 300],
+      [-5, 128],
+    ])
+      expect(bytes(run('made', x, y) as never)).toEqual(
+        interpreted(`made(${x}, ${y})`)
+      );
+    for (const i of [1, 2, 3, -1])
+      expect(run('isWhite', i) ? 'True' : 'False').toBe(
+        interpreted(`isWhite(${i})`)
+      );
   });
 });

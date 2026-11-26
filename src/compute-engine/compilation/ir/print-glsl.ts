@@ -14,7 +14,7 @@
  * `scalarize` pass runs first.
  */
 
-import { entryOf, type IRType, type Program } from './ir.js';
+import { entryOf, vectorRecord, type IRType, type Program } from './ir.js';
 import { GLSL_ZETA_HELPERS } from './glsl-zeta-helpers.js';
 import { GLSL_COMPLEX_SPECIAL_HELPERS } from './glsl-complex-special-helpers.js';
 import { deepFreeze, type OperatorRow } from './operators.js';
@@ -50,7 +50,8 @@ export function isVectorArray(t: IRType): boolean {
  *  list of such vectors an array of vectors (`vec2[3]`); a list in storage
  *  the kind of the storage (`sampler2D`); an array the sampler of its
  *  texture (`highp usampler2D` for integer cells and tuple cells,
- *  `highp sampler2D` for `real` cells, or that of `IRType.storage`). */
+ *  `highp sampler2D` for `real` cells, or that of `IRType.storage`); a
+ *  record of a nominal type of four integers a `vec4` (`vectorRecord()`). */
 export function typeName(t: IRType): string {
   if (t.lane === 'array')
     return `highp ${
@@ -59,6 +60,8 @@ export function typeName(t: IRType): string {
   if (t.storage !== undefined) return t.storage;
   if (t.lane === 'color' && t.shape.length === 0) return 'vec3';
   if (t.lane === 'complex' && t.shape.length === 0) return 'vec2';
+  const fields = vectorRecord(t);
+  if (fields !== undefined) return `vec${fields}`;
   const scalar = t.lane === 'boolean' ? 'bool' : 'float';
   const n = t.shape[0];
   if (isVectorArray(t))
@@ -740,6 +743,7 @@ export const GLSL: Syntax = deepFreeze({
     ...LOGIC,
     'boole': '($0 ? 1.0 : 0.0)',
     'elem': '$0[int($1)]',
+    'field': '$0[int($1)]',
     'isnan': 'isnan($0)',
     // `At`: from 1, from the end when negative, NaN for an index that is 0,
     // not an integer or out of range; the arm that reads is taken only in

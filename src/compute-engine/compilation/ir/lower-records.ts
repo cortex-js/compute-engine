@@ -10,6 +10,7 @@
 import type { Type, TypeReference } from '../../../common/type/types.js';
 import { sumVariantInfo } from '../../sum-representation.js';
 import { isSubtype } from '../../../common/type/subtype.js';
+import { arrayStorageKind } from '../../../common/type/array-storage.js';
 import { typeToString as engineTypeToString } from '../../../common/type/serialize.js';
 import { isSymbol } from '../../boxed-expression/type-guards.js';
 import type { DictionaryInterface, Expression } from '../../global-types.js';
@@ -96,8 +97,15 @@ export function laneProves(t: IRType, marked: boolean, d: Type): boolean {
 /** `javascript`: the target holds records (JavaScript, not the interval
  *  or the `bigint` mode). Elsewhere a constructor declines and a `Tuple`
  *  or a `List` of several lanes is lowered as before (user decision Q3 of
- *  the plan of CE-1652). */
-export function recordLowering(cx: Lowering, javascript: boolean) {
+ *  the plan of CE-1652). `pixels`: the target holds the records of a
+ *  nominal type that is a tuple cell of four bytes
+ *  (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) and no other
+ *  (GLSL in the default mode, where such a record is a `vec4`). */
+export function recordLowering(
+  cx: Lowering,
+  javascript: boolean,
+  pixels = false
+) {
   const { b, type, tuples } = cx;
   /** The values of the fields of each record made in this lowering: a
    *  read of a field of one is that value (a constant stays a constant). */
@@ -201,7 +209,7 @@ export function recordLowering(cx: Lowering, javascript: boolean) {
    *  `nothing`. */
   const construct = (e: Fn): V => {
     const c = recordConstructor(e)!;
-    if (!javascript)
+    if (!javascript && !(pixels && arrayStorageKind(e.type.type).tuple))
       decline(
         e,
         `a value of the type ${c.nominal}, a record: records compile on javascript only`

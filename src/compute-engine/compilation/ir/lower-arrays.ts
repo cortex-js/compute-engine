@@ -383,19 +383,26 @@ export function arrayLowering(
         [a, i],
         scalarType(cells.lane)
       );
-    // On GLSL, the texel of four channels, read once.
-    const texel = glsl
-      ? b.op('arr.get4', [a, i], { lane: 'integer', shape: [4] })
-      : undefined;
-    if (texel !== undefined && cells.tuple.tag === 'Tuple') {
-      cx.tuples.set(texel, 0);
-      return texel;
+    // On GLSL, the texel of four channels, read once, is the value: a
+    // tuple of the code, or a record of the nominal type (a `vec4` both).
+    if (glsl) {
+      const { tag, names } = cells.tuple;
+      if (tag === 'Tuple') {
+        const texel = b.op('arr.get4', [a, i], { lane: 'integer', shape: [4] });
+        cx.tuples.set(texel, 0);
+        return texel;
+      }
+      const r = b.op('arr.get4', [a, i], {
+        lane: 'record',
+        shape: [],
+        fields: [0, 1, 2, 3].map(() => scalarType('integer')),
+        nominal: tag,
+        ...(names === undefined ? {} : { names }),
+      });
+      recordReads.add(r);
+      return r;
     }
-    const bytes = [0, 1, 2, 3].map((j) =>
-      texel === undefined
-        ? byte(a, i, j)
-        : b.op('elem', [texel, b.constant(j, 'integer')], scalarType('integer'))
-    );
+    const bytes = [0, 1, 2, 3].map((j) => byte(a, i, j));
     if (cells.tuple.tag === 'Tuple') {
       const v = b.list(bytes, { lane: 'integer', shape: [4] });
       cx.tuples.set(v, 0);

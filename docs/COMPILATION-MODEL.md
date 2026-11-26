@@ -3677,8 +3677,55 @@ A cell of an integer type is a float on GLSL, exact within -16,777,216 to
 where an integer is exact within -16777216 to 16777216 only"), so a pixel
 packed in one number does not compile and a tuple cell of four bytes does.
 A field of a tuple cell of a nominal type (`P[i].g` with
-`P: array<Pixel>`) is an element of the texel; the whole cell of a nominal
-type is a record, which GLSL declines.
+`P: array<Pixel>`) is an element of the texel.
+
+A value of a nominal type that is a tuple cell of four bytes
+(`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>` with
+`type alias Byte = integer<0..255>`) is a `vec4` on GLSL: the read of a
+whole cell (the texel, one fetch), the constructor `Pixel(r, g, b, a)` (the
+`vec4` of its operands), a block local, the two arms of an `If` that are
+both `Pixel` values, and a parameter and the result of a user function, with
+a declared type or none. A field read by name is one element. An operand of
+the constructor must prove `Byte`, as on JavaScript:
+`Pixel(min(max(round(v), 0), 255), 2, 3, 255)` compiles, and
+`Pixel(x % 256, 1, 2, 3)` declines ("the field r of Pixel: a value of type
+integer, which does not prove Byte"). `Equal` and `NotEqual` of two values
+of the type compare the four elements; a read out of range is a `vec4` of
+NaN, which equals nothing, as the interpreter's tuple of NaN equals no
+pixel. The result of such a program is a `vec4`, as for an unnamed tuple of
+four numbers (`returnType` of the slice).
+
+```js
+// type Pixel = …; function invert(p: Pixel) -> Pixel {
+//   Pixel(min(max(255 - p.r, 0), 255), min(max(255 - p.g, 0), 255),
+//         min(max(255 - p.b, 0), 255), p.a) }
+ce.declare('src', 'array<Pixel>');
+ce.declare('i', 'integer');
+const r = compile(ce.box(['invert', ['At', 'src', 'i']]), { to: 'glsl' });
+r.preamble; // …
+// vec4 _fn_ir_u0_invert(vec4 v3) {
+//   return vec4(min(max(((-v3[int(0.0)]) + 255.0), 0.0), 255.0), min(max(((-v3[int(1.0)]) + 255.0), 0.0), 255.0), min(max(((-v3[int(2.0)]) + 255.0), 0.0), 255.0), v3[int(3.0)]);
+// }
+r.code;
+// vec4 v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(src_count) ? _gpu_ir_cell4_u(src, i > 0.0 ? int(i) - 1 : src_count + int(i)) : vec4(uintBitsToFloat(0x7fc00000u)));
+// vec4 v26 = _fn_ir_u0_invert(v2);
+// return v26;
+```
+
+The value keeps its type, and these decline, as on JavaScript: `Equal` or
+`NotEqual` of a `Pixel` and an unnamed tuple (the interpreter gives `False`
+for `px[i] == (255, 255, 255, 255)`, CE-1872: "Equal of a tuple: its value on
+a tuple is not its value on a list") or of two nominal types; an `If` of a
+`Pixel` arm and a tuple arm, or of two nominal types ("arms of two types");
+a `Pixel` for a parameter declared `tuple<…>`, a tuple for a parameter
+declared `Pixel`, a tuple returned or held in a local where `Pixel` is
+declared (each an error in the interpreter); `IsMissing`, `Coalesce` and
+`AssertPresent` of a `Pixel` value; arithmetic on a whole `Pixel`
+(`p + 1`) and `p[2]` (the interpreter gives `incompatible-type`); a list of
+`Pixel` values ("a list of records"); an input declared `Pixel` (CE-1871);
+and every other record, also a value of another nominal tuple type
+(`type P2 = tuple<x: real, y: real>`: "a value of the type P2, a record:
+records compile on javascript only", CE-1870).
 
 These decline on GLSL, each with a message that names it: a name whose value
 is an array, a read with a range or a list as the index, a store, `AddTo` of

@@ -8067,7 +8067,13 @@ function lowerOnce(
   // `bigint` mode).
   const javascript = options.javascript === true && !bigint && !interval;
   const fns = functionLowering(cx, lists, javascript);
-  const records = recordLowering(cx, javascript);
+  // On GLSL, the records of a nominal type that is a tuple cell of four
+  // bytes, as for the arrays below.
+  const records = recordLowering(
+    cx,
+    javascript,
+    options.glsl === true && cx.wide !== 'complex'
+  );
   const matches = matchLowering(cx, records);
   const protocols = protocolLowering(cx);
   // The program reads or makes an enclosure (`Program.valueKinds`).

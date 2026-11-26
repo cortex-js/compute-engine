@@ -4132,7 +4132,15 @@ only: `lower-arrays.ts` declines every other use (`readOnly()`,
 A cell of one number is `arr.get` or `arr.get.int` (`.r` for an index on the
 real lane, spelled alike), a tuple cell one `arr.get4` (a list of four
 integers, one texel; the verifier knows its type), an element of it an
-`elem` of that read, and the count `arr.len`. After the passes,
+`elem` of that read, and the count `arr.len`. For a tuple cell of a nominal
+type the `arr.get4` is the record of that type (four integer fields, the
+name and the field names), and so is the constructor of such a type on GLSL
+(`recordLowering(cx, javascript, pixels)`; every other constructor declines):
+the profile admits the lane `record` for that record only (`vectorRecords`,
+`vectorRecord()` of `ir.ts`), the printer spells it `vec4` and a `field` as
+an element, and the lowering of records keeps its rules (the nominal name
+in `sameFields()`, the equality of the fields of one nominal type, the
+declines of a record against a tuple and of the discharges in `absent()`). After the passes,
 `holdArrays()` (`index.ts`) gives each array input the texture of its cells
 in `IRType.storage` when it is not the default one (`isampler2D` for signed
 integer cells, `sampler2D` for the names of the option `storage`, bytes in a

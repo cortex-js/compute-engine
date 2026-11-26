@@ -136,6 +136,20 @@
     A store, `Swap`, `ArrayFrom`, `ListFrom`, a name whose value is an
     array, an array result, and integer cells whose range is outside
     -16,777,216 to 16,777,216 decline on GLSL.
+  - **A pixel of a nominal type is a `vec4` on GLSL.** A value of a nominal
+    type that is a tuple cell of four bytes
+    (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) compiles on
+    `glsl`: the read of a whole cell `src[i]`, the constructor
+    `Pixel(r, g, b, a)`, a parameter and the result of a user function, a
+    local, the arms of an `If`, and `==` and `!=` of two such values, the
+    comparison of the four bytes. The same pixel function compiles on both
+    targets: with `src` declared `array<Pixel>`,
+    `invert(src[i])` of `function invert(p: Pixel) -> Pixel { … }` is a
+    function `vec4 _fn_ir_u0_invert(vec4 v3)` and
+    `src[i] == Pixel(255, 255, 255, 255)` a `bool`. A comparison with an
+    unnamed tuple (`src[i] == (255, 255, 255, 255)`, which the interpreter
+    gives as `False`), the discharges, an input declared `Pixel`, a list of
+    pixels and other nominal tuple types still decline on GLSL.
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.

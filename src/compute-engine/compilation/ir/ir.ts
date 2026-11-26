@@ -505,6 +505,27 @@ export function joinType(a: IRType, b: IRType): IRType | undefined {
   return widensTo(b.lane, a.lane) ? a : undefined;
 }
 
+/** The number of fields of a record of the type `t` that GLSL holds as a
+ *  vector (`vec4`): a record of a nominal type of four scalar integers,
+ *  with no tuple mark (the read of a tuple cell of four bytes, or its
+ *  constructor; `lower-records.ts`). `undefined` for any other type. */
+export function vectorRecord(t: IRType): number | undefined {
+  const f = t.fields ?? [];
+  return t.lane === 'record' &&
+    t.nominal !== undefined &&
+    t.head === undefined &&
+    f.length === 4 &&
+    f.every(
+      (x, k) =>
+        x.lane === 'integer' &&
+        x.shape.length === 0 &&
+        x.fields === undefined &&
+        t.marks?.[k] === undefined
+    )
+    ? f.length
+    : undefined;
+}
+
 /** The index from 0 of the element `k` (from 1, or from the end when
  *  negative) of a list of the length `n`, when `n` is stated and `k` is an
  *  integer in range; else `undefined`. */
