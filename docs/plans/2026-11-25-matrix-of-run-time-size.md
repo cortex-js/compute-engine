@@ -1,7 +1,7 @@
 # A matrix of run-time size as a shape of the IR
 
 Status: approved by the user 2026-11-25, with Q1 (a), Q2 (yes) and Q3
-(yes) of section 6; steps 1 and 2 are done (section 8), steps 3 to 6 are
+(yes) of section 6; steps 1 to 3 are done (section 8), steps 4 to 6 are
 not started. Scope: the `javascript` target of the IR
 compiler (`src/compute-engine/compilation/ir/`), outside the interval and
 `bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834 (by
@@ -296,3 +296,19 @@ function whose value is one gives its rows.
   `rows.agree` of the flat lists). Reads of
   `rowWidths` and `rowCounts`: 9 before, 11 after (`asMatrix()`). Both go
   down in step 4.
+
+
+**Step 3.** No change of the lowering: the acceptance holds since step 2,
+and the build keeps its region `rows.build`. A build of rows of one proved
+length cannot be typed `[{v: n}, {v: w}]` where it is made: the length of a
+row is most often a value made in the region of the build (the count of the
+inner `Range` of a `Tabulate`), which `over()` makes again after the region
+(`before()`), and the type of the element of a `build` names the value of
+the region, which is not visible outside it. So the shape is given where
+the build is read (`rows.matrix`, step 2), which names the value made
+after the region.
+
+- Acceptance: `Tabulate(f, n, m) + 1`, `Sin(Tabulate(f, n, n))`,
+  `Sin(Map(i ↦ Map(j ↦ i·j, K), L))` and a table plus its transpose compile
+  with the interpreter's values.
+- Tests: 5 added to `ir-matrix-input.test.ts`; no other test changes.

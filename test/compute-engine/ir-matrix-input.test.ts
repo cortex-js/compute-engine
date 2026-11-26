@@ -480,6 +480,18 @@ describe('a matrix input: operations on its elements', () => {
     expect(declines(json)).toMatch(message);
   });
 
+  // Step 3 of the plan: a table that the program builds, whose rows have
+  // one length that is known at run time only.
+  test.each([
+    ['Tabulate plus a scalar', ['Add', ['Tabulate', F(['Multiply', 'i', 'j'], 'i', 'j'), 'n', ['Length', 'v']], 1]],
+    ['a function of each element of a Tabulate', ['Sin', ['Tabulate', F(['Add', 'i', 'j'], 'i', 'j'), 'n', 'n']]],
+    ['a function of each element of a Map of a Map', ['Sin', ['Map', F(['Map', F(['Multiply', 'p', 'q'], 'q'), 'v'], 'p'), 'v']]],
+    ['two tables of one size', ['Add', table, ['Transpose', table]]],
+    ['a table of rows of a stated length', ['Add', ['Tabulate', F(['Multiply', 'i', 'j'], 'i', 'j'), 'n', 3], 1]],
+  ])('a table: %s', (_, json) => {
+    expect(check(json).errors).toBe(0);
+  });
+
   // A known limitation of `docs/COMPILATION-MODEL.md`: the comparison of a
   // length runs when that length or an element is read.
   test('Length of a sum of matrices whose rows have two lengths', () => {
