@@ -484,6 +484,9 @@ export function evaluateQuantifierOverDomain(
  * - **Maximum 20 variables**: Expressions with more than 20 distinct boolean
  *   variables will return the unevaluated `IsSatisfiable` expression rather
  *   than attempting evaluation (to prevent blocking the thread).
+ * - **Propositional formulas only**: an expression that `extractVariables()`
+ *   does not accept (it holds a comparison, a quantifier or a function call)
+ *   returns the unevaluated `IsSatisfiable` expression.
  *
  * ## Future Improvements
  *
@@ -499,6 +502,7 @@ export function evaluateQuantifierOverDomain(
  */
 export function isSatisfiable(expr: Expression, ce: ComputeEngine): Expression {
   const variables = extractVariables(expr);
+  if (variables === undefined) return ce._fn('IsSatisfiable', [expr]);
 
   // Handle constant expressions
   if (variables.length === 0) {
@@ -548,6 +552,9 @@ export function isSatisfiable(expr: Expression, ce: ComputeEngine): Expression {
  * - **Maximum 20 variables**: Expressions with more than 20 distinct boolean
  *   variables will return the unevaluated `IsTautology` expression rather
  *   than attempting evaluation (to prevent blocking the thread).
+ * - **Propositional formulas only**: an expression that `extractVariables()`
+ *   does not accept (it holds a comparison, a quantifier or a function call)
+ *   returns the unevaluated `IsTautology` expression.
  *
  * ## Future Improvements
  *
@@ -561,6 +568,7 @@ export function isSatisfiable(expr: Expression, ce: ComputeEngine): Expression {
  */
 export function isTautology(expr: Expression, ce: ComputeEngine): Expression {
   const variables = extractVariables(expr);
+  if (variables === undefined) return ce._fn('IsTautology', [expr]);
 
   // Handle constant expressions
   if (variables.length === 0) {
@@ -612,6 +620,9 @@ export function isTautology(expr: Expression, ce: ComputeEngine): Expression {
  *   variables will return the unevaluated `TruthTable` expression. This
  *   stricter limit (compared to `IsSatisfiable`/`IsTautology`) accounts for
  *   the memory required to store all rows.
+ * - **Propositional formulas only**: an expression that `extractVariables()`
+ *   does not accept (it holds a comparison, a quantifier or a function call)
+ *   returns the unevaluated `TruthTable` expression.
  *
  * @param expr - A boolean expression to generate a truth table for
  * @param ce - The ComputeEngine instance
@@ -625,7 +636,7 @@ export function generateTruthTable(
   const variables = extractVariables(expr);
 
   // Limit the number of variables to prevent explosion
-  if (variables.length > 10) {
+  if (variables === undefined || variables.length > 10) {
     // Too many rows to generate
     return ce._fn('TruthTable', [expr]);
   }
@@ -740,10 +751,14 @@ function termToString(term: QMTerm): string {
  * ## Limits
  *
  * - **Maximum 12 variables**: Larger expressions return unevaluated.
+ * - **Propositional formulas only**: an expression that `extractVariables()`
+ *   does not accept returns unevaluated. This also holds for
+ *   `findPrimeImplicates()`, `minimalDNF()` and `minimalCNF()`.
  *
  * @param expr - A boolean expression
  * @param ce - The ComputeEngine instance
- * @returns A Set of expressions representing prime implicants
+ * @returns The prime implicants, or `null` when the expression stays
+ *          unevaluated
  */
 export function findPrimeImplicants(
   expr: Expression,
@@ -752,7 +767,7 @@ export function findPrimeImplicants(
   const variables = extractVariables(expr);
 
   // Limit variables to prevent explosion
-  if (variables.length > 12) {
+  if (variables === undefined || variables.length > 12) {
     return null;
   }
 
@@ -808,7 +823,7 @@ export function findPrimeImplicates(
   const variables = extractVariables(expr);
 
   // Limit variables to prevent explosion
-  if (variables.length > 12) {
+  if (variables === undefined || variables.length > 12) {
     return null;
   }
 
@@ -982,7 +997,8 @@ function qmTermToClause(
  *
  * @param expr - A boolean expression
  * @param ce - The ComputeEngine instance
- * @returns The minimal DNF, or null if too many variables
+ * @returns The minimal DNF, or null if too many variables or not a
+ *          propositional formula
  */
 export function minimalDNF(
   expr: Expression,
@@ -990,7 +1006,7 @@ export function minimalDNF(
 ): Expression | null {
   const variables = extractVariables(expr);
 
-  if (variables.length > 12) {
+  if (variables === undefined || variables.length > 12) {
     return null;
   }
 
@@ -1034,7 +1050,8 @@ export function minimalDNF(
  *
  * @param expr - A boolean expression
  * @param ce - The ComputeEngine instance
- * @returns The minimal CNF, or null if too many variables
+ * @returns The minimal CNF, or null if too many variables or not a
+ *          propositional formula
  */
 export function minimalCNF(
   expr: Expression,
@@ -1042,7 +1059,7 @@ export function minimalCNF(
 ): Expression | null {
   const variables = extractVariables(expr);
 
-  if (variables.length > 12) {
+  if (variables === undefined || variables.length > 12) {
     return null;
   }
 

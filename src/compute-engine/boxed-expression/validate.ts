@@ -9,6 +9,7 @@ import {
   listMixesPointsAndLists,
   pointArgumentMayMixDepths,
   isPointParameterType,
+  isTupleShapedType,
   isTupleWithListCoordinate,
   typeCouldBeCollection,
   typeCouldBeNumericCollection,
@@ -438,7 +439,10 @@ function checkThreadableOperand(
 ): Expression {
   if (internals?.checkNumericCollections)
     return validateThreadableOperand(ce, op, param, displayParam);
-  if (internals?.userFunction && liftedOperandCannotFit(op, param))
+  if (
+    internals?.userFunction &&
+    liftedOperandCannotFit(op, param, internals.calleeHasNoBody === true)
+  )
     return ce.typeError(displayParam ?? param, op.type, op);
   return op;
 }
@@ -456,17 +460,63 @@ function checkThreadableOperand(
  * the application maps over its elements and reports an error for each
  * element that does not fit, with the position of that element.
  *
+ * A function that is declared with a signature and has no body
+ * (`calleeHasNoBody`) is never applied, so nothing reports those elements:
+ * such a collection is refused here when none of its elements can fit
+ * (`heldElementsCannotFit`). With `k: (real, string) -> real`,
+ * `k(1, [1, 2])` is refused as `k(1, 2)` is.
+ *
  * The test of a finite collection comes last, after the tests of the types,
  * which decide most calls. For a lazy view it can evaluate a source: the
  * count of `Range(1, Length(P))` evaluates `P`, with each of its elements.
  */
-function liftedOperandCannotFit(op: Expression, param: Type): boolean {
+function liftedOperandCannotFit(
+  op: Expression,
+  param: Type,
+  calleeHasNoBody: boolean
+): boolean {
   const t = op.type.type;
   if (typesOverlap(t, param)) return false;
   const element = collectionElementType(t);
   if (element === undefined || typesOverlap(element, param)) return false;
   if (typesOverlap(broadcastCellTypeOf(t), param)) return false;
+  // A lazy view is tested first and is not walked: its finiteness and its
+  // elements can evaluate a source. The elements that a symbol holds are not
+  // read either: a later assignment can replace them, and the refusal would
+  // stay in the call.
+  if (calleeHasNoBody && !op.isLazyCollection && !isSymbol(op))
+    return !isFiniteIndexedCollection(op) || heldElementsCannotFit(op, param);
   return !isFiniteIndexedCollection(op);
+}
+
+/**
+ * True when the finite collection `op` holds at least one element and no
+ * element can be an argument at the threadable parameter `param`, whole or
+ * by its own elements. The elements are read, not the element type of `op`:
+ * the type of `[v]` with an untyped `v` is a list of numbers, and `v` can
+ * still hold a string. The empty list is not refused: it has no element that
+ * does not fit.
+ */
+function heldElementsCannotFit(op: Expression, param: Type): boolean {
+  let empty = true;
+  for (const x of op.each()) {
+    empty = false;
+    const t = x.type.type;
+    if (typesOverlap(t, param) || typesOverlap(broadcastCellTypeOf(t), param))
+      return false;
+    // `NaN` and the absent value are accepted at a numeric parameter of a
+    // user function, alone (`k(NaN, "a")`) and as an element.
+    if (acceptsNaNArgument(x, param, { userFunction: true })) return false;
+    // A tuple at a scalar parameter is mapped over its components
+    // (`isScalarParameterTuple`), and is not judged here.
+    if (isTupleShapedType(t)) return false;
+    if (
+      collectionElementType(t) !== undefined &&
+      !liftedOperandCannotFit(x, param, true)
+    )
+      return false;
+  }
+  return !empty;
 }
 
 /**
@@ -4022,6 +4072,13 @@ export interface ValidateArgumentsInternals {
    * that is not numeric, and a collection of numbers, are checked as usual. Library operators
    * leave this unset: their `NaN` policy is `nanPolicyAt`. */
   userFunction?: boolean;
+  /** The callee is a user function (`userFunction`) that is declared with a
+   * signature and holds no value: no body is applied, so no application
+   * reports an element that does not fit its parameter. A collection whose
+   * elements share no value with a threadable parameter is refused when the
+   * call is boxed, also when the collection holds its elements
+   * (`liftedOperandCannotFit`). */
+  calleeHasNoBody?: boolean;
   /** The callee is a function literal whose parameter annotations are
    * enforced when it is applied (`enforcesParameterAnnotations`,
    * `boxed-operator-definition.ts`). An argument that is absent, or that

@@ -75,7 +75,7 @@ type Records = {
     nominal?: { nominal?: string; names?: readonly string[] },
     fields?: (IRType | undefined)[]
   ): V;
-  field(r: V, k: number): V;
+  field(e: Expression, r: V, k: number): V;
 };
 
 /** The cells of the array type `t` of machine cells, a string that names why
@@ -487,7 +487,7 @@ export function arrayLowering(
         t.nominal === cells.tuple.tag &&
         t.fields?.length === 4 &&
         t.fields.every((f) => f.lane === 'integer' && f.shape.length === 0)
-        ? [0, 1, 2, 3].map((k) => records.field(v, k))
+        ? [0, 1, 2, 3].map((k) => records.field(e, v, k))
         : undefined
       : t.lane === 'integer' &&
           t.shape.length === 1 &&

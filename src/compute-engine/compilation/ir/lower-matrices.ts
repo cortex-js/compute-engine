@@ -194,24 +194,19 @@ export function matrixLowering(
   /** The initial value 0 of the sums of an operator that reads two
    *  lengths `x` and `y` that must be equal: the inner lengths of
    *  `MatrixMultiply` (`check` is `rows.agree`), the numbers of rows and of
-   *  columns of `Trace` (`rows.square`). The one place that decides what
-   *  happens when `same()` does not prove them equal: on JavaScript, the
-   *  value 0 of the check, which throws a `RangeError` where they differ,
-   *  as the interpreter's value is an error (user decision 2026-11-25). It
-   *  is made here, before the builds and the sums, once; every sum reads it
-   *  as its initial value, so that `dce` keeps it and no count or length
-   *  changes (a sum of a constant length stays written out). Elsewhere, and
-   *  where `same()` proves them equal, the constant 0, as before (a value
-   *  of the lane `rows` is JavaScript only). Two constants that differ are
-   *  the callers' decline. */
+   *  columns of `Trace` (`rows.square`). Where `same()` does not prove them
+   *  equal, on JavaScript, the value 0 of the check of `agree()` of
+   *  `lower-lists.ts`, made here, before the builds and the sums, once;
+   *  every sum reads it as its initial value, so that `dce` keeps it and no
+   *  count or length changes (a sum of a constant length stays written
+   *  out). Elsewhere, and where `same()` proves them equal, the constant 0,
+   *  as before (a value of the lane `rows` is JavaScript only). Two
+   *  constants that differ are the callers' decline. */
   const agree = (
     x: V,
     y: V,
     check: 'rows.agree' | 'rows.square' = 'rows.agree'
-  ): V =>
-    same(x, y) || !checks
-      ? integer(0)
-      : b.op(check, [x, y], scalarType('integer'));
+  ): V => lists.agree(x, y, check)?.zero ?? integer(0);
 
   /** `Transpose`, `ConjugateTranspose`, `Trace`, `Rank` and `Shape` of `m`,
    *  a value of the lane `rows` of reals or integers whose rows have one

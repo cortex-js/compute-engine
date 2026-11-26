@@ -229,7 +229,9 @@ describe('If and Which of a list condition on JavaScript', () => {
 
   test('lists of two run-time lengths give a list, never an arm whole (CE-1238)', () => {
     // The interpreter gives `incompatible-dimensions`: the compiled value
-    // is unspecified, a list as long as the first condition.
+    // of conditions of two lengths is unspecified, a list as long as the
+    // first condition. A comparison of two lists compares their lengths
+    // first (a `RangeError`).
     const r = js([
       'Which',
       ['Less', 3, 'L'],
@@ -241,8 +243,8 @@ describe('If and Which of a list condition on JavaScript', () => {
     ]);
     expect(r.run!({ L: [2, 5, 1], K: [-1, 1] } as never)).toHaveLength(3);
     const s = js(['Which', ['Less', 'K', 'L'], 1, 'True', 0]);
-    expect(Array.isArray(s.run!({ L: [2, 5], K: [3, 3, 3] } as never))).toBe(
-      true
+    expect(() => s.run!({ L: [2, 5], K: [3, 3, 3] } as never)).toThrow(
+      RangeError
     );
   });
 

@@ -566,10 +566,12 @@ export function floorModDouble(a: number, b: number): number {
  *
  * Every double beyond the range is an integer, but it is the rounding of
  * the value that produced it: `2^60 + 1` is held as `2^60`. An operation
- * that reads the exact digits of its operand (a remainder, a common
- * divisor) answers a different number for such an operand than for the
- * value the interpreter holds, so the compiled code refuses the operand
- * instead (`integerOperand` in `compilation/javascript-runtime.ts`).
+ * that reads the prime factors of its operand (`Totient`, `MoebiusMu`,
+ * `PrimeNu`, `PrimeOmega`) answers a different number for such an operand
+ * than for the value the interpreter holds, so the compiled code refuses
+ * the operand instead (`integerOperand` in
+ * `compilation/javascript-runtime.ts`). A compiled remainder or common
+ * divisor (`Mod`, `Remainder`, `GCD`, `LCM`) has no such check.
  */
 export function isBeyondSafeInteger(x: number): boolean {
   return x > Number.MAX_SAFE_INTEGER || x < -Number.MAX_SAFE_INTEGER;
@@ -1069,8 +1071,13 @@ export function limit(
     // Approach from both sides
     const left = limit(f, x, -1, deadline);
     const right = limit(f, x, 1, deadline);
-    if (left === undefined || right === undefined) return NaN;
-    if (Math.abs(left - right) > 1e-5) return NaN;
+    // Two infinite limits agree when they have the same sign.
+    if (!Number.isFinite(left) || !Number.isFinite(right))
+      return left === right ? left : NaN;
+    // Each side is accepted with a relative error of up to 1e-6, so the two
+    // sides of a large limit can differ by twice that.
+    const magnitude = Math.max(Math.abs(left), Math.abs(right));
+    if (Math.abs(left - right) > Math.max(1e-5, 2e-6 * magnitude)) return NaN;
     return (left + right) / 2;
   }
 

@@ -375,7 +375,14 @@ describe('CE-1549: every other use of the rows gives the interpreter value or de
       if (/internal|verifier/i.test(message)) throw x;
       return undefined;
     }
-    return { value: r.run!(p as never) };
+    try {
+      return { value: r.run!(p as never) };
+    } catch (x) {
+      // The run-time comparison of two lengths (rows of two lengths added)
+      // throws a `RangeError`, where the interpreter gives an error.
+      if (!(x instanceof RangeError)) throw x;
+      return { value: x as unknown };
+    }
   };
   afterAll(() => {
     // The sweep reaches the uses that compile, with and without the passes.

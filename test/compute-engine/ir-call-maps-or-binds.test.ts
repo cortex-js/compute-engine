@@ -165,8 +165,11 @@ const CASES: Case[] = [
     expr: ['k', 'B', 'L'],
     inputs: { B, L: [10, 20] },
     interpreted: '[11,23]',
-    js: undefined,
+    // The two run-time lengths are compared once (`agree()`), a
+    // `RangeError` where they differ; the interval mode compares none.
+    js: [11, 23],
     glsl: false,
+    intervalDeclines: true,
   },
   {
     name: 'a list at a parameter typed list<real> beside a point parameter binds whole',

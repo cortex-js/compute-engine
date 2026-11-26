@@ -47,8 +47,9 @@ export type SnapshotBudget = { used: number; max: number };
 /**
  * True when the `count` of the collection `x` is known without a walk of its
  * elements: a collection that is not lazy (a `List`, a `Set`, a string), a
- * `Range`, a `Linspace`, or a list-producing `Map` whose sources have such a
- * count. Any other lazy collection can have a count that walks its elements
+ * `Range`, a `Linspace`, a `Tabulate` whose dimensions are pure, or a
+ * list-producing `Map` whose sources have such a count. Any other lazy
+ * collection can have a count that walks its elements
  * and calls its callbacks: the count of a `Filter` calls the predicate on
  * each element, and the count of a set-producing `Map` (a `Map` over a
  * `Set`) counts the DISTINCT results by walking `each()`, which calls the
@@ -59,6 +60,16 @@ export type SnapshotBudget = { used: number; max: number };
 export function hasConstantTimeCount(x: Expression): boolean {
   if (!x.isLazyCollection) return true;
   if (isFunction(x, 'Range') || isFunction(x, 'Linspace')) return true;
+  // The count of a `Tabulate` is its outer dimension (`tabulateCount()`,
+  // `library/collections.ts`), and reading it never calls the callback. That
+  // count evaluates a dimension that is not a number literal (`n` in
+  // `tabulate(f, n)`), so each dimension must be transitively pure: the walk
+  // evaluates it again. Without this case, a `Tabulate` whose callback has
+  // an effect (`[tabulate(i => random(), 3)]`) had no callback-free bound
+  // (`listingCountUpperBound`) and stayed a view inside a list literal,
+  // printed as its recipe.
+  if (isFunction(x, 'Tabulate') && x.nops >= 2)
+    return x.ops.slice(1).every((dimension) => isTransitivelyPure(dimension));
   if (isFunction(x, 'Map') && x.nops >= 2)
     return (
       !producesSet(x) &&

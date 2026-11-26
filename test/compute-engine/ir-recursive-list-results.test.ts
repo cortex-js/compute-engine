@@ -373,27 +373,27 @@ describe('CE-1471: a recursive call of a declared list or point result', () => {
     const at = { k: 3 };
     const options = { inputs: { k: 'real' } };
     // A body of a constant length where the recursive call takes a list
-    // of a run-time length.
-    expect(
-      failure(() =>
-        compileTo(
-          {
-            decl: { k: 'real', F: '(real) -> list<real>' },
-            fns: F(
-              which(
-                ['LessEqual', 'j', 0],
-                ['List', 0, 0],
-                ['Add', prev, ['List', 1, 'j']]
-              )
-            ),
-            json: ['F', 'k'],
-            options,
-            at,
-          },
-          'javascript'
+    // of a run-time length: the sum of the call and a list of a constant
+    // length has a run-time length, whose check (`agree()` of
+    // `lower-lists.ts`) compares the two lengths, so the body is a list of
+    // a run-time length and compiles.
+    const sum = {
+      decl: { k: 'real', F: '(real) -> list<real>' },
+      fns: F(
+        which(
+          ['LessEqual', 'j', 0],
+          ['List', 0, 0],
+          ['Add', prev, ['List', 1, 'j']]
         )
-      )
-    ).toMatch(/of a constant length, where its recursive call/);
+      ),
+      json: ['F', 'k'],
+      options,
+      at,
+    };
+    check(sum);
+    expect(failure(() => compileTo(sum, 'interval-js'))).toMatch(
+      /of a constant length, where its recursive call/
+    );
     // A tuple of elements of no stated type.
     expect(
       failure(() =>

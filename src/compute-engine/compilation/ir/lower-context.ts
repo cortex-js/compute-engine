@@ -489,9 +489,12 @@ export type Lowering = {
    *  variable, declines (CE-1776). */
   stateWrite(e: Fn, name: string): Binding;
   /** The record of the values `values` (`make()` of `lower-records.ts`),
-   *  and the field `k` of the record `r` (`field()`). */
+   *  and the field `k` of the record `r`, read at `e` (`field()`). */
   pack(e: Expression, values: V[]): V;
-  field(r: V, k: number): V;
+  field(e: Expression, r: V, k: number): V;
+  /** The list of no element of the lane `lane`, made at `e`: a build of no
+   *  element. */
+  emptyList(e: Expression, lane: Lane): V;
   /** `v` where a value of `lane` is read (a real converted to complex). */
   widen(v: V, lane: Lane): V;
   /** The lane of an input of type `number`, `unknown` or none: complex in

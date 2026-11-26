@@ -233,7 +233,17 @@ interpreter's value. A line is removed when the case declines or is fixed.
   is read by the kernel and by the lengths of its result, so it does not
   run where neither is read: `Rank(Inverse(M))` gives `2` and
   `Block(Determinant(M), 5)` gives `5` at that `M`, where the interpreter
-  gives `expected-square-matrix`.
+  gives `expected-square-matrix`. The comparison of the lengths of two lists
+  (`D, E: list<real>`) is read by the length of the result, so it does not
+  run where nothing reads the result: `Block(D + E, 5)` at `D = [1, 2]`,
+  `E = [1, 2, 3]` gives `5`, where the interpreter gives
+  `incompatible-dimensions`.
+- `javascript` (crafted): a selection at each position compares the lengths
+  of the lists of an element-wise arm once, before it selects. With
+  `L, M: list<real>`, `If(L > 0, L·M, 0)` at `L = [-1, -2]`, `M = [3, 4, 5]`
+  throws `RangeError: incompatible-dimensions: lists of lengths 2 and 3`;
+  no position selects the arm, and the interpreter gives `[0, 0]`
+  (`Sum(If(L > 0, L·M, 0))` gives `0`).
 - `javascript` (crafted): a structural tree that holds calls of one name
   boxed in two scopes. With `g(t) = t + 1` outside and `g(t) = 10t` in a
   pushed scope, `Add` (structural) of `g(x + 0.5)` boxed in each scope gives
@@ -525,10 +535,6 @@ interpreter's value. A line is removed when the case declines or is fixed.
   the length of its first element: at `D = [1, 2, 3]` it gives `[[1, 2, 3], 3]`
   where a tuple of two elements has length 2. `ce.box()` of JSON never shares
   nodes.
-- `javascript` (crafted): `Add(Range(1, 2), List(1, 2, 3))`
-  gives `[2, 4]`; the interpreter gives the error `incompatible-dimensions`.
-  The length of a `Range` is a value for the compiler, and it does not
-  compare a length value with a stated length.
 - `javascript` and `interval-js` (crafted), `x: real`:
   `Block(Declare(s, 'unknown', x), Declare(t, 'real', Add(s, 1)))`, whose
   static type is `nothing`, gives `3` at `x = 2` (the point `[3, 3]` on
@@ -970,12 +976,13 @@ judged by its cost. An operation that costs one or a few machine operations
 of an element) gets no check that the interpreter's value does not require:
 the check would be most of the cost of the operation. An operation that
 already costs a loop over its operand (a matrix product, a determinant, an
-inverse) may compare two lengths once, outside its loops, where that removes
-a decline: with `M, A: matrix<real>`, `MatrixMultiply(M, A)` compares the
-row length of `M` with the number of rows of `A` once and throws a
-`RangeError` where they differ ("Lists of two run-time lengths"). Such a
-check compares values of a settled shape; it never chooses between two
-shapes.
+inverse, an element-wise operation of two lists) may compare two lengths
+once, outside its loops, where that removes a decline or a wrong value: with
+`M, A: matrix<real>`, `MatrixMultiply(M, A)` compares the row length of `M`
+with the number of rows of `A` once and throws a `RangeError` where they
+differ, and with `L, M: list<real>`, so do `L + M` and `Dot(L, M)` with the
+lengths of `L` and `M` ("Lists of two run-time lengths"). Such a check
+compares values of a settled shape; it never chooses between two shapes.
 
 **R1. Every input has a type.** An input is a free symbol of the compiled
 code, as `freeSymbols` lists it. An input whose static type is `unknown` or
@@ -1839,7 +1846,7 @@ has the case where none is). This
 holds for a list of rows of a constant length and a run-time count too. With
 `M, A: matrix<real>`, `MatrixMultiply(M, A)` at the `M` above and
 `A = [[1, 0], [0, 1]]` throws
-`RangeError: incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (3 and 2)`,
+`RangeError: incompatible-dimensions: lists of lengths 3 and 2`,
 and `Trace(M)` throws
 `RangeError: expected-square-matrix: Trace of a matrix of 2 rows and 3 columns`;
 `MatrixMultiply(M, Transpose(M))` has nothing to compare. At `n = 2`
@@ -1866,14 +1873,25 @@ join and a literal decline, since their rows can have different lengths:
 with `g: list<list<integer>>`, `Transpose(g)` and
 `Transpose(Map(i ↦ Range(1, i), Range(1, n)))` decline with
 `outside-profile`, so the interpreter evaluates them.
-Two lists of
-run-time lengths that differ under an element-wise operation give an
-unspecified result: with
-`L, M: list<real>`, `L + M` at `L = [1, 2]`, `M = [1, 2, 3]` gives
-`[2, 4]` on `javascript`. The same holds for lists of points of run-time
-lengths (`P, Q: list<tuple<real, real>>`): `P + Q` at lengths that differ
-gives a list as long as `P` on `javascript`, or throws a `TypeError` when `Q`
-is the shorter list.
+Two flat lists that an operation reads at each index, whose lengths the
+compiler does not prove equal (one value, or equal constants), are compared
+the same way on `javascript` (not in the bigint and interval modes): an
+element-wise operation (`L + M`, `L < M`, `Arctan2(L, M)`, `L + [1, 2, 3]`),
+`Dot(L, M)`, and a user function of scalar parameters mapped over two lists
+(`h(L, M)`). The comparison runs once, before the loops of the operation,
+also where a reduction reads its result (`Sum((L − M)^2)`, `Mean(L·M)`), and
+the later operations on the two lists read it again: `(L + M)·(L − M)`
+compares the lengths once, `L + M + N` twice. With `L, M: list<real>`,
+`L + M` at `L = [1, 2]`, `M = [1, 2, 3]` throws
+`RangeError: incompatible-dimensions: lists of lengths 2 and 3`, where the
+interpreter gives `incompatible-dimensions`, and at `M = [3, 4]` gives
+`[4, 6]`. A length proved equal to a constant by a comparison is that
+constant: `[1, 2, 3]·D + [4, 5]` declines, as two stated lengths do.
+`Map((x, y) ↦ x + y, L, M)` is over the shorter list, as the interpreter's,
+and compares nothing. In the interval mode, and for lists of points of
+run-time lengths (`P, Q: list<tuple<real, real>>`), the result is
+unspecified: `P + Q` at lengths that differ gives a list as long as `P` on
+`javascript`, or throws a `TypeError` when `Q` is the shorter list.
 
 Compiled `Equal` and `NotEqual` on numeric operands are the IEEE 754
 comparison (`===` on JavaScript, `==` on the shader targets), with no
@@ -2878,6 +2896,20 @@ a parameter of the same name. These decline:
 A function that only reads a variable still holds its value at the
 compilation as a literal (`pure = (t: real) => s + t` gives `0.5 + a0`).
 
+On `javascript`, a variable whose value is the empty list compiles too
+(CE-1808). `[]` has no type of its own, so it takes the type of its place:
+the declared type of the variable when that is a list of integers, reals,
+booleans or strings of no stated length (`let x: list<string> = []`), the
+type of its position in a tuple (`let fig = ("circle", [])`, read with
+`fig[2]`), or the type of its field in a value of a named tuple type
+(`Figure("circle", [])`). With no stated element type (`let pts = []`) it is
+an empty list of integers: `length(pts)` and `[...pts, t]` compile, and
+`[...pts, "a"]` declines, since the two lists are of two types. An empty
+list of points (`let x: list<tuple<real, real>> = []`), one at a union type
+(`list<string> | nothing`) and a `[]` that the program writes as an argument
+of a function still decline ("an empty list"), and so do GLSL and
+`interval-js`.
+
 ### Functions of the host
 
 Compiled JavaScript calls a function that the host declared with
@@ -2997,8 +3029,8 @@ would compute it there. An argument stays as it is in the interpreter when it is
 its count is not known (`1..oo`), when it has more than
 `ce.maxCollectionSize` elements (10,000 by default), when it is a set or a
 dictionary, when it is a view with an effect whose count has no bound
-without a call of its callback (`tabulate(i => tick(i), 3)`), and when the
-function is `lazy` (it receives its operands as written). A view nested in the
+without a call that has an effect (`tabulate(i => tick(i), tick(3))`), and
+when the function is `lazy` (it receives its operands as written). A view nested in the
 argument follows the rule of a list literal: a `Range` element stays a range.
 So the code takes a list that the interpreter can hold as a lazy collection
 only at the top of an argument, of scalars, and of a length known when the
@@ -3341,9 +3373,11 @@ On JavaScript a dictionary literal is a record (`compilation/ir/README.md`,
 an index that is not a constant key (`d[1]`), and every other reader
 (`Length`, `Keys`, arithmetic, `Map`) decline. As the result of the code,
 `run()` gives an object of the keys (`{a -> x + 1}` at `x = 1`:
-`{ a: 2 }`); a function of the host receives the dictionary. A list or a
-tuple value of a dictionary given to a function of the host declines: the
-code does not know it as a `List` or a `Tuple` literal. GLSL, the interval
+`{ a: 2 }`); a function of the host receives the dictionary. A value of the
+dictionary that is a `List` or a `Tuple` literal reaches the host as that
+literal (`figureDraw({p -> (t, 1)})`); a value that the interpreter can hold
+as a lazy collection (`{p -> Range(1, 3)}`, `{p -> [t, 1] + 1}`) declines, as
+it does in a tuple given to a function of the host. GLSL, the interval
 mode and the `bigint` mode decline a dictionary literal ("records compile on
 javascript only").
 

@@ -21,6 +21,15 @@ const PRELUDE = `
   function width(o: any) { o.w * 2 }
 `;
 
+/** Functions that give a function of the host a dictionary with a tuple
+ *  value. They are declared after `figureDraw`. */
+const HOST_PRELUDE = `
+  function options(t: real) { {p -> (t, 1)} }
+  function drawWith(t: real) { let q = (t, 1); figureDraw({p -> q}) }
+  function drawOf(t: real) { let d = {p -> (t, 1)}; figureDraw(d) }
+  function drawValue(t: real) { let d = {p -> (t, 1), w -> t}; figureDraw((d.p, d.w)) }
+`;
+
 /** An engine with the prelude, the function `f` of `body` (a function of
  *  `t: real`), and a function of the host, `figureDraw`, that records each
  *  argument it receives in `received`. */
@@ -37,7 +46,7 @@ function engine(body: string) {
   });
   const errors = executeEpsil(
     ce,
-    `${PRELUDE}\nfunction f(t: real) { ${body} }`
+    `${PRELUDE}${HOST_PRELUDE}\nfunction f(t: real) { ${body} }`
   ).diagnostics.filter((d) => d.severity === 'error');
   if (errors.length > 0)
     throw new Error(`prelude: ${JSON.stringify(errors[0].message)}`);
@@ -127,6 +136,19 @@ describe('a function of the host', () => {
     'figureDraw(styled((t, 0), {fill -> "red", w -> t}))',
     // The dictionary itself.
     'figureDraw({w -> t, fill -> "red"})',
+    // A tuple, a list, a tuple of tuples and a dictionary as values
+    // (CE-1802).
+    'figureDraw({p -> (t, 1)})',
+    'figureDraw({dash -> [t, 4, 2]})',
+    'figureDraw({bounds -> ((t, 0), (1, t)), fill -> "red"})',
+    'figureDraw({style -> {dash -> (4, t)}, w -> t})',
+    // A local that holds the tuple, and one that holds the dictionary.
+    'drawWith(t)',
+    'drawOf(t)',
+    // A user function that makes the dictionary.
+    'figureDraw(options(t))',
+    // A value of a dictionary, read by its key.
+    'drawValue(t)',
   ])('%s receives the value of the interpreter', (call) => {
     const { ce, received, f, result } = hostProgram(call);
     expect(result.hostCalls).toEqual(['figureDraw']);
@@ -163,12 +185,39 @@ describe('a dictionary declines', () => {
       /a dictionary with the key __proto__/
     ));
 
-  test('a tuple value of a dictionary given to a function of the host', () => {
+  // The interpreter can hold such a value as a lazy collection, where the
+  // code holds the array of its elements.
+  test.each([
+    'figureDraw({p -> Range(1, 3)})',
+    'figureDraw({p -> [t, 1] + 1})',
+    'figureDraw({p -> Reverse([t, 1])})',
+  ])('%s: a value that is not a List or a Tuple literal', (call) => {
     const { ce } = engine('t');
-    const f = executeEpsil(ce, '(t: real) => figureDraw({p -> (t, 1)})').value!;
+    const f = executeEpsil(ce, `(t: real) => ${call}`).value!;
     expect(() =>
       compile(f as any, { to: 'javascript', fallback: false } as any)
     ).toThrow(/does not know as a List or a Tuple literal/);
+  });
+
+  // A list of NaN does not stand for the absent list of an `If` with no
+  // else where a dictionary holds it: a reader of the key could tell them
+  // apart.
+  test('an If with no else of a list arm as a value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real');
+    const arm = ce.box(['If', ['Less', 0, 't'], ['List', 't', 1]] as any);
+    // The same boxed `If` is also the result of the program, a place that
+    // takes the list of NaN.
+    const program = ce.function('Block', [
+      ce.function('At', [
+        ce.box(['Dictionary', ['Tuple', { str: 'p' }, arm]] as any),
+        ce.string('p'),
+      ]),
+      arm,
+    ]);
+    expect(() =>
+      compile(program as any, { to: 'javascript', fallback: false } as any)
+    ).toThrow(/an If with no else of a list arm/);
   });
 
   test('the bigint mode', () => {

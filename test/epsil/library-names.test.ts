@@ -7,6 +7,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { STANDARD_LIBRARIES } from '../../src/compute-engine/library/library';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { describeName } from '../../src/cli/doc';
+import { epsilCompletions } from '../../src/epsil/completion';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import {
   ENGINE_INTERNAL_NAMES,
@@ -50,6 +51,13 @@ function strip(node: MathJsonExpression): unknown {
 /** The value of `source` as text, on a fresh engine unless one is given. */
 function run(source: string, ce = new ComputeEngine()): string {
   return executeEpsil(ce, source).value.toString();
+}
+
+/** The codes of the diagnostics of `source` on a fresh engine. */
+function codes(source: string): string[] {
+  return executeEpsil(new ComputeEngine(), source).diagnostics.map(
+    (d) => String(d.message[3])
+  );
 }
 
 /** The value of `source` as a symbol name (`True`, `False`), or `undefined`
@@ -314,12 +322,12 @@ describe('the resolution pass', () => {
     ).toBe('3');
     expect(run('match (0, 3) { (0, count) => count }')).toBe('3');
     expect(run('if let count = 5 { count }')).toBe('5');
-    // A `let` after a use: the use above reads the library, as it would with
-    // any outer binding.
+    // A `let` binds its name in the whole program: the use above it names
+    // the variable, and is a read before the declaration.
     expect(resolved('mean; let mean = 1')).toEqual({
       fn: [
         'Program',
-        { sym: 'Mean' },
+        { sym: 'mean' },
         {
           fn: [
             'Declare',
@@ -332,6 +340,57 @@ describe('the resolution pass', () => {
             },
           ],
         },
+      ],
+    });
+  });
+
+  test('a `let` binds its name in the whole block (CE-1826)', () => {
+    // A function body above the `let` reads the variable, as the
+    // interpreter does for a name that the library does not have.
+    expect(run('let h = () => mean\nlet mean = 7\nh()')).toBe('7');
+    expect(run('function g() { mean }\nlet mean = 7\ng()')).toBe('7');
+    expect(run('let h = () => mean(3)\nlet mean = (x) => x + 4\nh()')).toBe(
+      '7'
+    );
+    expect(run('let h = () => pi\nconst pi = 3\nh()')).toBe('3');
+    expect(
+      run('let h = () => mean + max\nlet (mean, max) = (1, 2)\nh()')
+    ).toBe('3');
+    // In a block and in a function body too.
+    expect(
+      run('do { let h = () => mean(3); let mean = (x) => x + 4; h() }')
+    ).toBe('7');
+    expect(
+      run(
+        'function f() { let r = () => mean(3); let mean = (x) => x + 4; r() }\nf()'
+      )
+    ).toBe('7');
+    // The call of a library binder above a `let` of its name is a call of
+    // the variable, and binds nothing.
+    expect(
+      run('let h = () => sum(k, k in 1..3)\nlet sum = (a, b) => 7\nh()')
+    ).toBe('7');
+    // The initializer reads the library, except in a function literal,
+    // which names the binding itself.
+    expect(run('let mean = mean([1, 3])\nmean')).toBe('2');
+    expect(
+      run('let mean = (n) => if n <= 0 { 0 } else { mean(n - 1) }\nmean(2)')
+    ).toBe('0');
+    // A statement above the `let` is a use before the declaration, as for
+    // any name.
+    expect(codes('let a = pi\nlet pi = 3')).toEqual([
+      'read-before-declaration',
+    ]);
+    expect(codes('let a = q\nlet q = 3')).toEqual(['read-before-declaration']);
+    // An assignment declares nothing: its target keeps its name, and the
+    // reads name the library.
+    expect(codes('mean = 5')).toEqual(['assignment-to-undeclared-variable']);
+    expect(codes('mean += 1')).toEqual(['assignment-to-undeclared-variable']);
+    expect(resolved('mean = 5; mean')).toEqual({
+      fn: [
+        'Program',
+        { fn: ['Assign', { sym: 'mean' }, { num: '5' }] },
+        { sym: 'Mean' },
       ],
     });
   });
@@ -841,6 +900,58 @@ describe('the tools', () => {
     expect(describeName(ce, 'Sin')?.epsilName).toBe('sin');
     expect(describeName(ce, 'Add')?.epsilName).toBeUndefined();
     expect(describeName(ce, 'add')).toBeUndefined();
+  });
+
+  // CE-1811: a library description can write a paragraph as several
+  // wrapped lines. The editor shows the first paragraph as the summary of a
+  // name, so the lines are joined.
+  test('the wrapped lines of a library description are one paragraph', () => {
+    const findRoot = describeName(ce, 'FindRoot')?.description ?? [];
+    expect(findRoot[0]).toMatch(
+      /^FindRoot\(equations, params\): numerically find parameter values that zero the residuals\. .* iterations\}\.$/
+    );
+    expect(findRoot).toHaveLength(4);
+    // One paragraph per element is kept.
+    expect(describeName(ce, 'Join')?.description).toHaveLength(4);
+    expect(describeName(ce, 'N')?.description).toHaveLength(3);
+    expect(describeName(ce, 'Random')?.description).toHaveLength(4);
+    // A string is one paragraph.
+    expect(describeName(ce, 'Sin')?.description).toHaveLength(1);
+
+    const item = epsilCompletions(ce, 'findRoo', 7).items.find(
+      (i) => i.label === 'findRoot'
+    );
+    expect(item?.documentation).toBe(item?.description?.[0]);
+    expect(item?.documentation).toMatch(/iterations\}\.$/);
+  });
+
+  // The rule that joins the lines reads the end of each line, so the lines
+  // of the definitions are checked: a line break after `:` or `)` inside a
+  // sentence would split a paragraph, and an item with no end punctuation
+  // would be joined to the next item.
+  test('the lines of a library description give the intended paragraphs', () => {
+    const split: string[] = [];
+    const merged: string[] = [];
+    for (const [name, def] of ce.contextStack[0].lexicalScope.bindings) {
+      const base = 'operator' in def ? def.operator : def.value;
+      const lines = base?.description;
+      if (!Array.isArray(lines)) continue;
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trimEnd();
+        const next = lines[i + 1];
+        if (/[:)]$/.test(line) && /^[a-z`(]/.test(next)) split.push(name);
+        // An item starts with a form of the call and a colon
+        // (`N(expr, precision): …`).
+        if (
+          !/[.:!?)]$/.test(line) &&
+          next.startsWith(`${name}(`) &&
+          /^\w+\(.*?\)+: /.test(next)
+        )
+          merged.push(name);
+      }
+    }
+    expect(split).toEqual([]);
+    expect(merged).toEqual([]);
   });
 
   test('the generated library page lists both spellings', () => {

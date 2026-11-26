@@ -4212,35 +4212,49 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     Dimension: {
       examples: ['Dimension([[1, 2, 3], [4, 5, 6]])'],
       description:
-        'Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, or the product of the dimensions of the two objects of a `Hom`.',
+        'Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, the product of the dimensions of the two objects of a `Hom`, or the number of basis vectors of a `Kernel` written as the argument.',
       complexity: 8200,
       signature: '(value) -> integer',
       parameters: [
         {
           description:
-            'The vector, matrix or tensor whose number of elements is returned, or a `Hom(V, W)`, whose dimension is the product of the dimensions of V and W; a scalar gives 1.',
+            'The vector, matrix or tensor whose number of elements is returned, a `Hom(V, W)`, whose dimension is the product of the dimensions of V and W, or a `Kernel(M)`, whose dimension is the number of vectors of its basis; a scalar gives 1. A variable that holds the basis of a kernel is a matrix, and gives its number of elements.',
           sample: '[[1, 2, 3], [4, 5, 6]]',
         },
       ],
       sgn: (): Sign => 'non-negative',
-      evaluate: ([object], { engine: ce }) => {
+      // A `Kernel` operand is held: evaluated, it is the list of its basis
+      // vectors, which cannot be told from a matrix of the same rows, and the
+      // number of its elements is not the dimension of the kernel
+      // (`Dimension(Kernel([[1, 2], [2, 4]]))` was 2, the kernel has
+      // dimension 1). The role depends on the operand as written, so a
+      // variable that holds a kernel basis is a `value`, and counts as a
+      // matrix does.
+      operands: (ops) => [
+        ops[0] !== undefined && isFunction(ops[0], 'Kernel')
+          ? { kind: 'held' }
+          : { kind: 'value' },
+      ],
+      evaluate: ([object], { engine: ce, numericApproximation }) => {
+        if (isFunction(object, 'Kernel')) {
+          // The basis of `Kernel` is a `List` with one element for each
+          // basis vector (`[]` for a kernel of dimension 0).
+          const basis = object.evaluate({ numericApproximation });
+          if (isFunction(basis, 'List')) return ce.number(basis.ops.length);
+          // An error of `Kernel` (a tensor of rank 3) is the result. A
+          // `Kernel` that stays unevaluated keeps its evaluated operand.
+          if (basis.operator === 'Error') return basis;
+          return basis.isSame(object)
+            ? undefined
+            : ce._fn('Dimension', [basis]);
+        }
+
         // A `Range` row is a row of its integers (`listedLazyRows`).
         const op = listedLazyRows(ce, object);
         if (op === undefined) return undefined;
 
-        // Structural check on the *unevaluated* expression: we pattern-match
-        // on the literal Kernel(...) / Hom(...) form so that
-        // Dimension(Kernel(M)) can compute the nullity directly from the
-        // kernel basis.  If the kernel was computed earlier and stored in a
-        // symbol this branch won't fire, which is acceptable — the generic
-        // finiteDimension path below will handle it.
-        if (isFunction(object, 'Kernel')) {
-          const kernelDim = kernelBasisDimension(op);
-          if (kernelDim !== undefined) return ce.number(kernelDim);
-        }
-
         // dim(Hom(V, W)) = dim(V) * dim(W) for finite-dimensional objects.
-        // Same structural matching caveat as Kernel above.
+        // `Hom` evaluates to a `Hom`, so the evaluated operand shows it.
         if (isFunction(object, 'Hom') && object.ops.length >= 2) {
           const domainDim = finiteDimension(object.ops[0]);
           const codomainDim = finiteDimension(object.ops[1]);
@@ -9898,23 +9912,6 @@ function finiteDimension(value: Expression): number | undefined {
     for (const _ of value.each()) count += 1;
     return count;
   }
-
-  return undefined;
-}
-
-/**
- * Infer the dimension of a kernel basis representation.
- */
-function kernelBasisDimension(value: Expression): number | undefined {
-  if (isFunction(value, 'List')) {
-    if (value.ops.length === 0) return 0;
-    if (value.ops.every((op) => isFunction(op, 'List'))) {
-      return value.ops.length;
-    }
-  }
-
-  if (isTensorValue(value) && (value.rank === 1 || value.rank === 2))
-    return value.shape[0];
 
   return undefined;
 }

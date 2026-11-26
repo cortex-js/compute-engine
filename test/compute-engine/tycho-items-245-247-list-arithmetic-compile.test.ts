@@ -90,9 +90,10 @@ describe('Tycho item 245 — point arithmetic the interpreter rejects fails clos
     }
   });
 
-  test('a comprehension whose binder shadows the list it iterates fails closed', () => {
-    // Emitted `for (const P of P)`: a temporal-dead-zone read of the loop
-    // variable. The interpreter leaves the form inert.
+  test('a comprehension whose binder has the name of the list it iterates reads the outer list', () => {
+    // The list of a clause is outside the scope of its index (CE-1827): the
+    // second `P` is the input, as in the interpreter. The emitted loop reads
+    // `_.P` by position, so no loop variable shadows the input.
     const r = compile(
       ce.box([
         'Comprehension',
@@ -101,8 +102,8 @@ describe('Tycho item 245 — point arithmetic the interpreter rejects fails clos
       ] as never),
       { to: 'javascript' }
     );
-    expect(r.success).toBe(false);
-    expect(r.error).toMatch(/the input P of type collection/);
+    expect(r.success).toBe(true);
+    expect(r.run({ P })).toEqual([2, 4]);
     // A source whose own lambda reuses the binder's name binds it afresh
     // and never reads the loop variable: it keeps compiling.
     const shadowed = compile(

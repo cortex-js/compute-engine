@@ -153,13 +153,17 @@ describe('CE-1531: list operators, the interpreter value', () => {
     ['Insert past the last', ['Insert', 'L6', 7, 'x'], POINTS],
     ['Insert at a run-time index', ['Insert', 'L6', 'n', 'x'], POINTS],
     ['Insert of a real in integers', ['Insert', 'J', 1, 'x'], POINTS],
-    // Slice: an index below 1 from the end; the end at most the length.
+    // Slice: a negative index from the end; the start at least 1, the end at
+    // least 0 and at most the length.
     ['Slice', ['Slice', 'L', 2, 3], POINTS],
     ['Slice from the end', ['Slice', 'L', -2, -1], POINTS],
-    ['Slice from 0 (past the end)', ['Slice', 'L', 0, 2], POINTS],
-    ['Slice to 0 (the last)', ['Slice', 'L', 2, 0], POINTS],
+    ['Slice from 0 (the first)', ['Slice', 'L', 0, 2], POINTS],
+    ['Slice to 0 (empty)', ['Slice', 'L', 2, 0], POINTS],
+    ['Slice from 0 to 0 (empty)', ['Slice', 'L', 0, 0], POINTS],
     ['Slice past the end', ['Slice', 'L', 2, 9], POINTS],
     ['Slice from before the start', ['Slice', 'L', -9, 2], POINTS],
+    ['Slice to before the start (empty)', ['Slice', 'L', 1, -9], POINTS],
+    ['Slice from a run-time 0', ['Slice', 'L', ['Subtract', 'n', 'n'], 2], POINTS],
     ['Slice empty', ['Slice', 'L', 3, 2], POINTS],
     ['Slice of rounded reals', ['Slice', 'L', 1.5, 3.5], POINTS],
     ['Slice of run-time reals', ['Slice', 'L', 'x', 'y'], POINTS],
@@ -378,7 +382,7 @@ describe('CE-1531: declines', () => {
   test('on GLSL, a constant index of a list of a stated length is written out', () => {
     for (const json of [
       ['DeleteAt', 'L6', 2],
-      ['Slice', 'L6', 2, 0],
+      ['Slice', 'L6', 2, -1],
       ['Tabulate', ['Function', ['Multiply', 'k', 'k'], 'k'], 5],
     ])
       expect(js(json, { to: 'glsl' })).toMatchObject({ success: true });

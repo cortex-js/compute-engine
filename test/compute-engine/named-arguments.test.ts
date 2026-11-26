@@ -318,6 +318,67 @@ describe('library signatures', () => {
     expect(bad.toString()).toContain('declared parameter names: `order`');
   });
 
+  test('`Complex` accepts its named parts, in any order (CE-1689)', () => {
+    // `Complex` becomes a number literal when it is boxed, before the
+    // normalization of the other operators: that step reads its operands by
+    // position.
+    const ce = new ComputeEngine();
+    const calls: any[] = [
+      ['Complex', N('real', 1), N('imaginary', 2)],
+      ['Complex', N('imaginary', 2), N('real', 1)],
+      ['Complex', 1, N('imaginary', 2)],
+    ];
+    for (const call of calls) {
+      const z = ce.box(call);
+      expect(z.json).toEqual(['Complex', 1, 2]);
+      expect(z.isSame(ce.box(['Complex', 1, 2]))).toBe(true);
+    }
+    // The canonical form of a call that was boxed raw.
+    expect(ce.box(calls[1], { form: 'raw' }).canonical.json).toEqual([
+      'Complex',
+      1,
+      2,
+    ]);
+    // Parts that are not number literals.
+    expect(
+      ce
+        .box(['Complex', N('imaginary', 'x'), N('real', 'y')] as any)
+        .isSame(ce.box(['Complex', 'y', 'x']))
+    ).toBe(true);
+    // An operand of another call.
+    expect(
+      ce.box(['Add', 1, ['Complex', N('imaginary', 2), N('real', 1)]] as any)
+        .json
+    ).toEqual(['Complex', 2, 2]);
+
+    for (const source of [
+      'complex(real: 1, imaginary: 2)',
+      'complex(1, imaginary: 2)',
+      'complex(imaginary: 2, real: 1)',
+    ])
+      expect(executeEpsil(new ComputeEngine(), source).value.json).toEqual([
+        'Complex',
+        1,
+        2,
+      ]);
+  });
+
+  test('a named call of `Complex` that does not match its signature is an error (CE-1689)', () => {
+    const ce = new ComputeEngine();
+    const codes = (call: any): string[] => errorCodes(ce.box(call));
+    expect(codes(['Complex', N('imaginary', 2)])).toEqual(['missing']);
+    expect(codes(['Complex', N('real', 2)])).toEqual(['missing']);
+    expect(codes(['Complex', N('re', 1), N('imaginary', 2)])).toEqual([
+      'argument-name-unknown',
+    ]);
+    expect(codes(['Complex', N('real', 1), 2])).toEqual([
+      'argument-order-invalid',
+    ]);
+    expect(codes(['Complex', N('real', 1), N('real', 2)])).toEqual([
+      'argument-name-duplicate',
+    ]);
+  });
+
   test('a builtin that declares no parameter names says so', () => {
     // `Add` and `List` are variadic with unnamed parameters, so a named call
     // to either is an unknown NAME, not a shape the fast paths may swallow:

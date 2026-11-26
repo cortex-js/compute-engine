@@ -42,7 +42,9 @@ import type { SourceSpan, Token } from './tokens.js';
 // their meaning before a program runs (`documentBindings()` with the binder
 // sites of `resolveLibraryNames()`): a name that the source binds is that
 // binding, also when it shadows a library name, and a free name is read as
-// the library-name resolution pass reads it.
+// the library-name resolution pass reads it. One case differs: a name in a
+// function body above the `let` that declares it is free here, and is the
+// variable for the resolution pass (CE-1866).
 //
 
 /** What the name at an offset of an Epsil source is. */
@@ -286,7 +288,9 @@ function nameAt(
   const members: ReadonlyMap<string, ProtocolFunctionMember> =
     ast === null ? new Map() : protocolFunctionMembers(ast);
   // The scope model of the library-name resolution pass: a variable that a
-  // library call binds (`sum(k^2, k, 1, 3)`) is a binding of that call.
+  // library call binds (`sum(k^2, k, 1, 3)`) is a binding of that call. The
+  // walk is the editor's: a `let` is visible from the end of its statement,
+  // where the resolution pass binds it in its whole block (CE-1866).
   const groups = documentBindings(ast, source, {
     binderSites: (node, isBound, declaration) =>
       binderSitesOf(ce, node, source, members, isBound, declaration),

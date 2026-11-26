@@ -262,21 +262,15 @@ export function documentBindings(
      *   names the binding itself (a recursive `let f = (n) => … f(n - 1)`);
      * - an assignment never declares: a target with no visible binding is a
      *   `write` of a free name;
-     * - the collection of a `for` clause is read in the scope of its loop:
-     *   in `for n in 1..n`, the second `n` is the loop variable;
      * - the target of `+=`, and the collection or record of an indexed or
      *   field target (`a[1] = 2`, `r.x = 2`), is a `write`.
      *
      * `defined(name)` is true when the engine or the library binds `name`
-     * outside the program. `library(name, start)` is true when the
-     * occurrence of `name` at the offset `start` names the library whatever
-     * the program binds: no binding of the program is visible there, and a
-     * call with that head binds its variables. A group made at the top
-     * level of the program has `topLevel` set.
+     * outside the program. A group made at the top level of the program
+     * has `topLevel` set.
      */
     engineRules?: {
       defined: (name: string) => boolean;
-      library?: (name: string, start: number) => boolean;
     };
   }
 ): BindingGroup[] {
@@ -898,7 +892,7 @@ export function documentBindings(
         const iterator = operand(node, 2);
         if (iterator !== null && operator(iterator) === 'Element') {
           const collection = operand(iterator, 2);
-          if (rules === undefined) walk(collection, scope);
+          walk(collection, scope);
           const inner = childScope(spanOf(node), scope);
           bindPattern(
             operand(iterator, 1),
@@ -907,11 +901,7 @@ export function documentBindings(
             spanOf(iterator),
             inner.span[0]
           );
-          // Under `engineRules`, the collection is read in the scope of
-          // the loop, as the interpreter does: in `for n in 1..n`, the
-          // second `n` is the loop variable.
-          if (rules === undefined) hideIn(inner, inner.span[0], collection);
-          else walk(collection, inner);
+          hideIn(inner, inner.span[0], collection);
           walk(operand(node, 1), inner);
           return;
         }
@@ -941,7 +931,7 @@ export function documentBindings(
             continue;
           }
           const collection = operand(clause, 2);
-          if (rules === undefined) walk(collection, inner);
+          walk(collection, inner);
           inner = childScope(spanOf(node), inner);
           bindPattern(
             operand(clause, 1),
@@ -950,10 +940,7 @@ export function documentBindings(
             spanOf(clause),
             inner.span[0]
           );
-          // Under `engineRules`, a clause reads its collection in its own
-          // scope, as for a loop.
-          if (rules === undefined) hideIn(inner, bodyEnd, collection);
-          else walk(collection, inner);
+          hideIn(inner, bodyEnd, collection);
           if (nops(clause) >= 3) walk(operand(clause, 3), inner);
         }
         walk(ops[0] ?? null, inner);
@@ -1225,7 +1212,6 @@ export function documentBindings(
     name: string,
     offset: number
   ): BindingGroup | undefined {
-    if (rules?.library?.(name, offset) === true) return undefined;
     // The binding of a `let` whose initializer holds the occurrence
     // (`engineRules`).
     let own: BindingGroup | undefined;

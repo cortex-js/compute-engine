@@ -1,6 +1,7 @@
 import { Complex } from 'complex.js';
 import { getSupertype, makeTensorField } from './tensor-fields.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import { numberMatrixInverse } from '../numerics/linear-algebra.js';
 import { complexMatrixInverse } from '../numerics/linear-algebra-complex.js';
 import type {
@@ -868,6 +869,27 @@ export abstract class AbstractTensor<
       });
     }
 
+    // A matrix of number literals with an inexact entry that is not a
+    // matrix of machine numbers (`[[1/3, 2.5], [1, 1]]`: an exact entry next
+    // to a decimal one, or decimals of more digits than a machine number).
+    if (this.dtype === 'expression') {
+      const cells = this.data as Expression[];
+      if (
+        cells.every((x) => isNumber(x)) &&
+        cells.some((x) => x.isExact === false) &&
+        cells.every((x) => machineModulus(x) !== undefined)
+      ) {
+        const inverseData = this.inexactInverse();
+        if (inverseData === undefined) return undefined;
+        return makeTensor(this.ce, {
+          dtype: this.dtype,
+          holdsFloat: this.holdsFloat,
+          shape: [n, n],
+          data: inverseData,
+        });
+      }
+    }
+
     if (m === 2) {
       const [a, b, c, d] = this.data;
       const det = this.determinant();
@@ -948,6 +970,87 @@ export abstract class AbstractTensor<
       shape: [n, n],
       data: inverseData,
     });
+  }
+
+  /**
+   * The cells of the inverse of a square matrix of number literals of which
+   * one is inexact, or `undefined` when the matrix is singular. The caller
+   * checks that every cell has a machine modulus (`machineModulus()`).
+   *
+   * This is the elimination of `complexMatrixInverse()` of
+   * `numerics/linear-algebra-complex.ts`, with the arithmetic of the field,
+   * which keeps the working precision of the engine: partial pivoting, and
+   * a pivot that is a residue of the rounding is not a pivot. A test of a
+   * pivot for an exact 0 does not see the residue that the rounding leaves
+   * in a singular matrix: `[[1/3, 2.5, 1], [1, 1, 1], [4/3, 3.5, 2]]` gave
+   * entries of about 3.5e20.
+   *
+   * A cell of the elimination is a residue when its modulus is at most
+   * `1024ε` times its running bound (the sum of the bounds of the terms that
+   * made it, which is at least the sum of their moduli). `ε` is the rounding
+   * unit of the arithmetic: `10^(1 − p)` at a precision of `p` digits, and
+   * the `ε` of a double at machine precision.
+   * The moduli and the bounds are machine numbers. A cell of the
+   * elimination whose modulus is outside the range of a double is refused
+   * as a pivot, and the matrix can then have no result though it is regular.
+   */
+  private inexactInverse(): undefined | DataTypeMap[DT][] {
+    const n = this.shape[0];
+    const field = this.field;
+    const precision = this.ce.precision;
+    const epsilon =
+      precision > MACHINE_PRECISION ? 10 ** (1 - precision) : Number.EPSILON;
+    const tiny = 1024 * epsilon;
+    const modulus = (x: DataTypeMap[DT]): number =>
+      machineModulus(x as Expression) ?? NaN;
+
+    const aug: DataTypeMap[DT][][] = [];
+    for (let i = 0; i < n; i++) {
+      const row = this.data.slice(i * n, (i + 1) * n);
+      for (let j = 0; j < n; j++) row.push(i === j ? field.one : field.zero);
+      aug.push(row);
+    }
+    const bound = aug.map((row) => row.slice(0, n).map(modulus));
+
+    for (let k = 0; k < n; k++) {
+      // The pivot: the largest candidate that is not a residue. A modulus
+      // or a bound that is NaN fails both comparisons.
+      let pivotRow = -1;
+      let pivotSize = 0;
+      for (let r = k; r < n; r++) {
+        const size = modulus(aug[r][k]);
+        if (size > pivotSize && size > tiny * bound[r][k]) {
+          pivotRow = r;
+          pivotSize = size;
+        }
+      }
+      if (pivotRow === -1) return undefined;
+      if (pivotRow !== k) {
+        [aug[k], aug[pivotRow]] = [aug[pivotRow], aug[k]];
+        [bound[k], bound[pivotRow]] = [bound[pivotRow], bound[k]];
+      }
+      const pivot = aug[k][k];
+      for (let j = 0; j < 2 * n; j++) aug[k][j] = field.div(aug[k][j], pivot);
+      for (let j = 0; j < n; j++) bound[k][j] = bound[k][j] / pivotSize;
+      for (let i = 0; i < n; i++) {
+        if (i === k) continue;
+        const factor = aug[i][k];
+        if (field.isZero(factor)) continue;
+        // The bound of the factor, not its modulus: a factor that is a
+        // residue writes a residue in each cell of the row, also in a cell
+        // that was 0, and that cell must not be a pivot later.
+        const factorBound = bound[i][k];
+        for (let j = 0; j < 2 * n; j++)
+          aug[i][j] = field.sub(aug[i][j], field.mul(factor, aug[k][j]));
+        for (let j = 0; j < n; j++)
+          bound[i][j] = bound[i][j] + factorBound * bound[k][j];
+      }
+    }
+
+    const result: DataTypeMap[DT][] = [];
+    for (let i = 0; i < n; i++)
+      for (let j = n; j < 2 * n; j++) result.push(aug[i][j]);
+    return result;
   }
 
   // A^+ is the Moore-Penrose pseudoinverse of A. https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
@@ -1178,6 +1281,20 @@ export abstract class AbstractTensor<
     }
     return this.data.every((x, i) => eq(x, rhs.data[i]));
   }
+}
+
+/**
+ * The modulus of the number literal `x` as a machine number, or `undefined`
+ * when `x` is not a number literal, when a part of `x` is infinite or NaN,
+ * or when the modulus is outside the range of a double (`1e-400` gives 0,
+ * `1e400` gives `Infinity`).
+ */
+function machineModulus(x: Expression): number | undefined {
+  if (!isNumber(x)) return undefined;
+  const size = Math.hypot(x.re, x.im);
+  if (!Number.isFinite(size)) return undefined;
+  if (size === 0 && !x.isSame(0)) return undefined;
+  return size;
 }
 
 function getStrides(shape: number[]): number[] {

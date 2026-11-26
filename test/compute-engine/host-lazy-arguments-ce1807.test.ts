@@ -137,11 +137,16 @@ describe('a finite lazy collection given to a function of the host', () => {
     });
   });
 
-  test('a Tabulate with an effect stays a view; compiled, declines', () => {
-    // Its count has no bound without a call of the callback
-    // (`listingCountUpperBound()`), so the interpreter does not list it.
+  test('a Tabulate callback with an effect: interpreted, called before the handler; compiled, declines', () => {
+    // Its count is its outer dimension, read with no call of the callback
+    // (`hasConstantTimeCount()`), so the interpreter lists it (CE-1809).
     const src = 'hostSum(tabulate(i => tick(i), 3))';
-    expect(interpreted(src)[0]).toMatch(/^hostSum Tabulate /);
+    expect(interpreted(src)).toEqual([
+      'tick 1',
+      'tick 2',
+      'tick 3',
+      'hostSum List ["List",1,2,3]',
+    ]);
     expect(compiled(src)).toEqual({
       declined: expect.stringMatching(/Tabulate with an effect/),
     });

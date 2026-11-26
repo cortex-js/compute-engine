@@ -137,6 +137,7 @@ import {
   type DeclineReason,
   STATIC_TYPE_ERROR,
   text,
+  tupleBody,
   TUPLE_RULES,
   UNSETTLED_SHAPE,
   UntypedInputs,
@@ -882,17 +883,19 @@ function lowerOnce(
     return r;
   };
   const inputLengths = new Set<V>();
-  // The calls of the program that have each call or each symbol as an
-  // operand, with the position of the operand. One boxed expression in two
-  // places (`If(IsMissing(r), K, r)`) has one entry for each place. Each
-  // node is visited once.
-  const readers = new Map<Expression, [reader: Fn, position: number][]>([
-    [root, []],
-  ]);
+  // The calls of the program that have each call, each symbol or each
+  // dictionary as an operand, with the position of the operand, and the
+  // dictionaries that have it as a value, with the position of the value
+  // (`{p -> (t, 1)}`: the `Tuple` is a node of the program). One boxed
+  // expression in two places (`If(IsMissing(r), K, r)`) has one entry for
+  // each place. Each node is visited once.
+  const readers = new Map<Expression, [reader: Expression, position: number][]>(
+    [[root, []]]
+  );
   const reach = (e: Expression): void => {
-    if (!isFunction(e)) return;
-    e.ops.forEach((op, i) => {
-      if (!isFunction(op) && !isSymbol(op)) return;
+    const parts = isFunction(e) ? e.ops : isDictionary(e) ? e.values : [];
+    parts.forEach((op, i) => {
+      if (!isFunction(op) && !isSymbol(op) && !isDictionary(op)) return;
       const known = readers.get(op);
       if (known !== undefined) return void known.push([e, i]);
       readers.set(op, [[e, i]]);
@@ -934,10 +937,10 @@ function lowerOnce(
   //   that the program reaches has the name (`heldAsAbsent()`); the places
   //   in the value are known once the value is lowered.
   // Any other place (a binding, an argument of a function, an element of a
-  // list or of a tuple, another list operator) can give the value to a
-  // reader that tells an absent list from a list of NaN. Another node that
-  // is not in the program (an expression of a compile handler) has no known
-  // reader.
+  // list or of a tuple, a value of a dictionary, another list operator) can
+  // give the value to a reader that tells an absent list from a list of
+  // NaN. Another node that is not in the program (an expression of a
+  // compile handler) has no known reader.
   const bodies = new Map<Expression, { nan: () => boolean; read: boolean }>();
   // For each held value that `expression()` lowers, the names that hold it,
   // and whether one of them is read other than by a node of the program
@@ -987,6 +990,7 @@ function lowerOnce(
     const h = holders.get(e);
     known =
       (readers.get(e) ?? (body || h ? [] : undefined))?.every(([reader, i]) => {
+        if (!isFunction(reader)) return false;
         if (reader === root && reader.operator === 'Function') return i === 0;
         if (!isLibrary(reader)) return false;
         switch (reader.operator) {
@@ -1648,6 +1652,42 @@ function lowerOnce(
       });
       const t = resultType(signature, operands.map(type), same);
       if (t === undefined) decline(node, 'lists of different lengths or ranks');
+      // Flat lists whose lengths are not one value or equal constants: on
+      // JavaScript, a build of the operation at each index, whose length
+      // reads the check of their lengths (`agree()` of `lower-lists.ts`);
+      // the interpreter's value of two lengths is `incompatible-dimensions`.
+      // Elsewhere, and of lists of points, the result has the shape of the
+      // first list (`resultType()`).
+      const flat = given.filter((v) => type(v).shape.length > 0);
+      if (
+        lists.checks &&
+        r.threads &&
+        !lanes.includes('list') &&
+        tuple === undefined &&
+        flat.length > 1 &&
+        flat.every((v) => type(v).shape.length === 1) &&
+        flat.some((v) => !same(type(v).shape, type(flat[0]).shape))
+      ) {
+        const sources = flat.map((v) => lists.listSource(v));
+        // Two constants that a check proved the lengths equal to.
+        const known = new Set(
+          sources
+            .map((s) => lists.knownLength(s.length))
+            .filter((n) => n !== undefined)
+        );
+        if (known.size > 1)
+          decline(node, 'lists of different lengths or ranks');
+        let length = sources[0].length;
+        for (const s of sources.slice(1))
+          length = lists.agreedLength(node, length, s.length)!;
+        const at = (k: V) =>
+          operation(
+            given.map((v) => (type(v).shape.length > 0 ? elementAt(v, k) : v))
+          );
+        const out = lists.built(node, length, at);
+        elementsOf.set(out, at);
+        return out;
+      }
       const out = b.op(signature[2], operands, t);
       return tuple === undefined
         ? out
@@ -1656,6 +1696,39 @@ function lowerOnce(
     if (typeof r.arity === 'number' || r.arity === 'chain')
       return operation(args);
     return args.slice(1).reduce((x, y) => operation([x, y]), args[0]);
+  };
+
+  /** The element at each index of a build of `apply()` of lists whose
+   *  lengths are compared at run time (`agree()` of `lower-lists.ts`). */
+  const elementsOf = new Map<V, (k: V) => V>();
+  /** The element at the index `k` of the flat list `v`, an operand of such
+   *  a build: of an element-wise operation of lists of its length (a row
+   *  that threads, with no effect), or of such a build, the operation on
+   *  the elements at `k`, so that the build computes each element once, as
+   *  one element-wise operation does with the operations of its shape that
+   *  it reads (`fuses()` of `print.ts`); of another list, its element. */
+  const elementAt = (v: V, k: V): V => {
+    const made = elementsOf.get(v);
+    if (made !== undefined) return made(k);
+    const d = b.defs.get(v);
+    const row = d === undefined ? undefined : rowOfOp(rows, d.op)?.row;
+    if (
+      d === undefined ||
+      row?.threads !== true ||
+      row.effect !== 'pure' ||
+      tuples.has(v) ||
+      !d.args.every(
+        (a) =>
+          type(a).shape.length === 0 ||
+          (!tuples.has(a) && same(type(a).shape, type(v).shape))
+      )
+    )
+      return lists.listSource(v).at(k);
+    return b.op(
+      d.op,
+      d.args.map((a) => (type(a).shape.length > 0 ? elementAt(a, k) : a)),
+      elementType(type(v))
+    );
   };
 
   /** `x` is a string and `y` a value that the interpreter never finds
@@ -1711,7 +1784,10 @@ function lowerOnce(
     )
       return s.fields!
         .map((_, k) =>
-          apply(node, 'Equal', [records.field(x, k), records.field(y, k)])
+          apply(node, 'Equal', [
+            records.field(node, x, k),
+            records.field(node, y, k),
+          ])
         )
         .reduce((a, b) => apply(node, 'And', [a, b]));
     if (s.shape.length === 0 || t.shape.length === 0) {
@@ -1996,7 +2072,11 @@ function lowerOnce(
     rowsNode = admitted ? e : undefined;
     // The root `Tuple` is lowered where it is (`rootParts`).
     const shared =
-      want && isFunction(e) && e !== rootTuple && facts(e).writes.size === 0;
+      want &&
+      isFunction(e) &&
+      e !== rootTuple &&
+      facts(e).writes.size === 0 &&
+      !emptyLanes.has(e);
     const id = shared ? idOf(e) : 0;
     if (shared) {
       const m = memo.get(id);
@@ -2335,6 +2415,8 @@ function lowerOnce(
       case 'List': {
         // A list, or a record of elements of several lanes; a list of
         // lists of run-time length is of the lane `rows` (CE-1736).
+        const empty = e.nops === 0 ? emptyLanes.get(e) : undefined;
+        if (empty != null) return emptyList(e, empty);
         const elements = e.ops.map((op) => value(op)!);
         // (JavaScript only, outside the interval and the bigint modes:
         // `rowLane()` declines elsewhere).
@@ -3166,6 +3248,10 @@ function lowerOnce(
         const t = v === undefined ? undefined : type(v);
         if (t?.head === 'List') return v;
         if (t?.head === 'Tuple') {
+          // No value has a stated length of 0 (`field()` of
+          // `lower-records.ts`).
+          if (t.fields!.some((f) => f.shape.includes(0)))
+            decline(e, 'ListFrom of arguments with an empty list');
           const l = b.list(
             t.fields!.map((f, k) =>
               b.op('field', [v!, b.constant(k, 'integer')], {
@@ -4488,8 +4574,23 @@ function lowerOnce(
           ? `a symbol whose colour value is not ${r.head} of three real numbers`
           : 'a symbol with a value that is not a number or a list of numbers (or a tuple of numbers), or a colour of three numbers'
       );
-    // After `expression()`: a decline in it leaves no capture behind.
-    const x = literal ? undefined : expression(e, name, v);
+    // After `expression()`: a decline in it leaves no capture behind. A
+    // `List()` of `v` has the lane of its place in the type of the name
+    // while `v` is lowered (`placeEmptyLists()`).
+    const placed = new Map<Expression, Lane | null>();
+    if (!literal) placeEmptyLists(v, e.type.type, placed);
+    const before = [...placed.keys()].map(
+      (k) => [k, emptyLanes.get(k)] as const
+    );
+    for (const [k, lane] of placed) emptyLanes.set(k, lane);
+    let x: V | undefined;
+    try {
+      x = literal ? undefined : expression(e, name, v);
+    } finally {
+      for (const [k, lane] of before)
+        if (lane === undefined) emptyLanes.delete(k);
+        else emptyLanes.set(k, lane);
+    }
     if (!library) b.captures.add(name);
     if (x !== undefined) return x;
     // The interval mode: a constant of the library whose value is not exact
@@ -5435,18 +5536,46 @@ function lowerOnce(
       decline(node, 'a selection at each position that writes a name');
     // The length of the mask, which exists: below 2^32.
     const masked = type(first).shape[0];
+    // The value 0 of a check of lengths (`agree()` of `lower-lists.ts`), and
+    // the length `n` without such values added (`agreedLength()`).
+    const isZero = (z: V): boolean => {
+      const d = b.defs.get(z);
+      return (
+        d !== undefined &&
+        (d.op === 'rows.agree' ||
+          d.op === 'rows.square' ||
+          (d.op === 'add.int' && d.args.every(isZero)))
+      );
+    };
+    const unchecked = (n: Length): Length => {
+      if (typeof n === 'number') return n;
+      let v = n.v;
+      let d = b.defs.get(v);
+      while (d?.op === 'add.int' && isZero(d.args[1]))
+        d = b.defs.get((v = d.args[0]));
+      return v === n.v ? n : (constant(v) ?? { v });
+    };
     // `x` lowered, which declines when it emits an instruction that is not
-    // pure, other than a `build` of a length that `safe()` accepts: a build
-    // fails only for a length of 2^32 or more.
-    const eager = (x: Expression, safe: (n: Length, v: V) => boolean): V => {
+    // pure, other than a `build` of a length that `safe()` accepts (a build
+    // fails only for a length of 2^32 or more), and a check of two lengths
+    // that an element-wise operation reads: made once before the selection,
+    // it throws where they differ also where no position selects the arm
+    // (`docs/COMPILATION-MODEL.md`, the known limitations).
+    // `checked`: the length of the build reads such a check.
+    const eager = (
+      x: Expression,
+      safe: (n: Length, v: V, checked: boolean) => boolean
+    ): V => {
       const start = b.impure.length;
       const v = value(x)!;
+      const ok = (n: Length) => safe(unchecked(n), v, unchecked(n) !== n);
       for (const i of b.impure.slice(start))
         if (
-          i.k !== 'region' ||
-          i.op !== 'build' ||
-          masked === undefined ||
-          !safe(type(i.outs[0]).shape[0], v)
+          !(i.k === 'op' && i.op === 'rows.agree') &&
+          (i.k !== 'region' ||
+            i.op !== 'build' ||
+            masked === undefined ||
+            !ok(type(i.outs[0]).shape[0]))
         )
           decline(
             node,
@@ -5479,7 +5608,7 @@ function lowerOnce(
     const arm = (a: Expression): V => {
       // A `Range` of number literals is a literal list of a stated length.
       if (!isFunction(a, 'Range') || !isLibrary(a) || a.ops.every(isNumber))
-        return eager(a, (n) => same([n], [masked!]));
+        return eager(a, (n, _v, checked) => checked || same([n], [masked!]));
       const start = b.impure.length;
       const s = lists.source(a);
       // The type of an element, from a read in a region that is not
@@ -5587,6 +5716,28 @@ function lowerOnce(
       )!;
     };
     const masks = lists.listSource(conds[0]);
+    // An arm whose length reads a check of the lengths of its lists
+    // (`agree()` of `lower-lists.ts`), of another length than the mask: on
+    // JavaScript its length and the mask's are compared too, before the
+    // selection, and the length of the selection reads that check; the
+    // interpreter's value of an arm of another length is an error where a
+    // position selects it. Not for a restriction, which zips them.
+    let length = masks.length;
+    if (!restriction)
+      for (const v of values) {
+        const n = type(v).shape[0];
+        if (
+          !listed(v) ||
+          typeof n === 'number' ||
+          unchecked(n) === n ||
+          same([unchecked(n)], [masked!])
+        )
+          continue;
+        const [k, m] = [lists.knownLength(length), lists.knownLength(n.v)];
+        if (k !== undefined && m !== undefined && k !== m)
+          decline(node, 'lists of two lengths in a selection at each position');
+        length = lists.agreedLength(node, length, n.v) ?? length;
+      }
     return lists.over(
       node as Fn,
       restriction
@@ -5597,7 +5748,7 @@ function lowerOnce(
               lists.listSource(arms[0]),
             ]),
           }
-        : masks,
+        : { ...masks, length },
       '',
       (_x, k) => pick(0, k),
       false,
@@ -7634,16 +7785,72 @@ function lowerOnce(
     return ir.lane === 'integer' || ir.lane === 'real' ? ir.lane : undefined;
   };
 
+  /** The lane of each `List()` in the value of a free name that
+   *  `captured()` is lowering (`placeEmptyLists()`), and `null` for each
+   *  node that holds one: the memo of `value()`, whose key does not have
+   *  the place of a node, takes none of them. */
+  const emptyLanes = new Map<Expression, Lane | null>();
+
+  /** Adds to `out` each `List()` of `v`, the value of a free name of the
+   *  type `t`, with the lane of its place, and each node that holds one
+   *  with `null`; returns whether it added one. The places: `v` where `t`
+   *  is a list of rank
+   *  1 of no stated length, of integers, reals, booleans or strings
+   *  (`let x: list<string> = []`); an operand of a `Tuple` at the type of
+   *  its position in a tuple type `t`, and an operand of the constructor of
+   *  a nominal tuple type at the type of its field (`Figure("circle", [])`).
+   *  A list of no stated element type (`let pts = []`, `list<unknown>`)
+   *  takes the integer lane, as a conditional whose arms are all `List()`
+   *  does: it has no element that an operator can read. In any other place,
+   *  on a target with no run-time length and in the interval mode, `List()`
+   *  declines. */
+  const placeEmptyLists = (
+    v: Expression,
+    t: Type,
+    out: Map<Expression, Lane | null>
+  ): boolean => {
+    if (interval || !options.runtimeLengths || !isFunction(v)) return false;
+    if (isEmptyList(v)) {
+      if (typeof t !== 'object' || t.kind !== 'list') return false;
+      if (t.dimensions !== undefined) return false;
+      const open = t.elements === 'unknown' || t.elements === 'never';
+      const ir = inputType(t, cx.wide, true);
+      const lane = open ? 'integer' : ir?.shape.length === 1 ? ir.lane : null;
+      if (
+        lane === 'integer' ||
+        lane === 'real' ||
+        lane === 'boolean' ||
+        lane === 'string'
+      )
+        out.set(v, lane);
+      return out.has(v);
+    }
+    const fields =
+      recordConstructor(v)?.types ??
+      (!isFunction(v, 'Tuple')
+        ? undefined
+        : typeof t === 'object' && t.kind === 'tuple'
+          ? t.elements.map((x) => x.type)
+          : tupleBody(t)?.map((x) => x.type));
+    if (fields?.length !== v.nops) return false;
+    const held = v.ops.map((op, k) => placeEmptyLists(op, fields[k], out));
+    if (held.includes(true)) out.set(v, null);
+    return out.has(v);
+  };
+
   /** The list of no element of the lane `lane`: a build of no element (a
    *  stated length is at least 1). `element` makes the element of the
    *  build from the zero of the lane (a point of zeros for a list of
    *  points). */
   const emptyList = (
-    e: Fn,
+    e: Expression,
     lane: Lane,
     element: (zero: V) => V = (zero) => zero
   ): V => {
-    const zero = b.constant(lane === 'boolean' ? false : 0, lane);
+    const zero = b.constant(
+      lane === 'boolean' ? false : lane === 'string' ? '' : 0,
+      lane
+    );
     const k = b.newValue(scalarType('integer'));
     return region(
       'build',
@@ -7824,7 +8031,8 @@ function lowerOnce(
     stateWrite: (e, name) => stateWrite(e, name),
     // `records` is made after this context, before any lowering.
     pack: (e, values) => records.make(e, values),
-    field: (r, k) => records.field(r, k),
+    field: (e, r, k) => records.field(e, r, k),
+    emptyList: (e, lane) => emptyList(e, lane),
     widen,
     wide: options.mode === 'complex' ? 'complex' : 'real',
     interval,
@@ -7943,9 +8151,10 @@ function lowerOnce(
       places.length > 0 &&
       places.every(
         ([r, i]) =>
-          (r === root && r.operator === 'Function' && i === 0) ||
-          (r.operator === 'Block' && i === r.nops - 1 && nothingPlace(r)) ||
-          (r.operator === 'Typed' && i === 0 && nothingPlace(r))
+          isFunction(r) &&
+          ((r === root && r.operator === 'Function' && i === 0) ||
+            (r.operator === 'Block' && i === r.nops - 1 && nothingPlace(r)) ||
+            (r.operator === 'Typed' && i === 0 && nothingPlace(r)))
       )
     );
   };
@@ -7962,9 +8171,10 @@ function lowerOnce(
     if (places.length === 0) return cx.inFunction !== undefined && x !== root;
     return places.every(
       ([r, i]) =>
-        (r.operator === 'Function' && i === 0) ||
-        (r.operator === 'Block' && i === r.nops - 1 && swapPlace(r)) ||
-        (r.operator === 'Typed' && i === 0 && swapPlace(r))
+        isFunction(r) &&
+        ((r.operator === 'Function' && i === 0) ||
+          (r.operator === 'Block' && i === r.nops - 1 && swapPlace(r)) ||
+          (r.operator === 'Typed' && i === 0 && swapPlace(r)))
     );
   };
 

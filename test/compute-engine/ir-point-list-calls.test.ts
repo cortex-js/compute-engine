@@ -45,6 +45,8 @@ type Case = {
   js: Value | undefined;
   /** The cause of the decline on JavaScript. */
   cause?: RegExp;
+  /** The interval mode declines where JavaScript compiles. */
+  intervalDeclines?: true;
 };
 
 /** `name` declared of the signature `sig` (none: not declared) and
@@ -354,8 +356,10 @@ const CASES: Case[] = [
     expr: ['f', 'P', 'Q'],
     inputs: { P: B, Q: C },
     interpreted: '[21,43]',
-    js: undefined,
-    cause: /whose lengths are not one value/,
+    // The two run-time lengths are compared once (`agree()`), a
+    // `RangeError` where they differ; the interval mode compares none.
+    js: [21, 43],
+    intervalDeclines: true,
   },
   {
     name: 'a list result (a list of lists)',
@@ -452,6 +456,10 @@ describe('CE-1477: a call with a list of points at a point parameter maps', () =
 
     // The interval mode compiles (the same lowering), and each interval
     // holds the value.
+    if (c.intervalDeclines) {
+      expect(typeof compiled(c, 'interval-js')).toBe('string');
+      return;
+    }
     const iv = compiled(c, 'interval-js');
     expect(typeof iv).not.toBe('string');
     const out = iv.run(c.inputs ?? {});

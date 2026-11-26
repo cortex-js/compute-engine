@@ -197,6 +197,7 @@ import {
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import {
   markBinderVariable,
+  readsActivation,
   rebindToBindings,
   rewriteWithBinders,
 } from './binders.js';
@@ -1023,7 +1024,27 @@ function boxFunctionInternal(
     //
     // Complex
     //
-    if (name === 'Complex') {
+    // A call that names its arguments (`Complex(imaginary: 2, real: 1)`) is
+    // put in declaration order first: the fold reads its operands by
+    // position. When the names do not match the signature, the operands
+    // keep their carriers, the fold is skipped, and the generic route below
+    // reports the error.
+    if (name === 'Complex' && hasNamedArguments(ops)) {
+      const def = lookupApplicable(
+        name,
+        options.scope ?? ce.context.lexicalScope,
+        ce
+      );
+      if (def !== undefined && !isValueDef(def)) {
+        const normalized = normalizeNamedArguments(
+          ce,
+          splitNamedArguments(ops),
+          def.operator.signature.type
+        );
+        if (normalized.kind === 'ok') ops = normalized.ops;
+      }
+    }
+    if (name === 'Complex' && !hasNamedArguments(ops)) {
       if (ops.length === 1) {
         // If single argument, assume it's imaginary
         const imOp =
@@ -4524,6 +4545,17 @@ function makeCanonicalFunctionCore(
           // accepted at its numeric parameters (`acceptsNaNArgument`,
           // `validate.ts`).
           userFunction: true,
+          // A function that is declared with a signature and holds no value
+          // is never applied: a list whose elements cannot fit a parameter
+          // is refused here (`liftedOperandCannotFit`, `validate.ts`). A
+          // variable of a program, a local and a parameter hold no value
+          // while the program is boxed, and receive a function when the
+          // program runs: their calls keep the check of each element by
+          // the application.
+          calleeHasNoBody:
+            heldLiteral === undefined &&
+            !def.value._programVariable &&
+            !readsActivation(def),
           // An absent argument at an annotated parameter of a pinned
           // literal is refused, as at the call of a `function` definition
           // (`refusesAbsentArgument`, `validate.ts`).
@@ -6131,20 +6163,20 @@ function withOwnBoundsUnbound(
   accept: (name: string) => boolean
 ): Expression {
   if (!isFunction(op)) return op;
-  const name = own.name;
-  const binding = bound.get(name)?.valueDefinition;
-  let enclosing: Expression | undefined;
-  const enclosingSymbol = (): Expression => {
-    if (enclosing !== undefined) return enclosing;
+  const names = own.names;
+  const enclosing = new Map<string, Expression>();
+  const enclosingSymbol = (name: string): Expression => {
+    let result = enclosing.get(name);
+    if (result !== undefined) return result;
     // A chain of scopes can end with `undefined` rather than `null`.
     for (let s = scope.parent; s !== null && s !== undefined; s = s.parent) {
       if (!s.bindings.has(name)) continue;
-      enclosing = ce._bindingSymbol(name, s);
-      if (enclosing !== undefined) return enclosing;
+      result = ce._bindingSymbol(name, s);
       break;
     }
-    enclosing = ce._inScope(scope.parent ?? undefined, () => ce.symbol(name));
-    return enclosing;
+    result ??= ce._inScope(scope.parent ?? undefined, () => ce.symbol(name));
+    enclosing.set(name, result);
+    return result;
   };
   let changed = false;
   const ops = op.ops.map((b, j) => {
@@ -6154,13 +6186,15 @@ function withOwnBoundsUnbound(
       return rebound;
     }
     const rebound = rebindToBindings(b, scope, bound, {
-      accept: (n) => n !== name && accept(n),
+      accept: (n) => !names.includes(n) && accept(n),
     });
     const result = rewriteWithBinders(rebound, (s, shadowed) => {
-      if (s.symbol !== name || shadowed?.has(name)) return s;
+      const name = s.symbol;
+      if (!names.includes(name) || shadowed?.has(name)) return s;
       const def = s.valueDefinition;
-      if (def !== undefined && def !== binding) return s;
-      return enclosingSymbol();
+      if (def !== undefined && def !== bound.get(name)?.valueDefinition)
+        return s;
+      return enclosingSymbol(name);
     });
     if (result !== b) changed = true;
     return result;

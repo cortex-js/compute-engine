@@ -864,6 +864,52 @@ describe('SLICE facet coherence over infinite/unknown sources (2026-07-19)', () 
   });
 });
 
+// CE-1843. A negative bound counts from the end, and the result is the part
+// of `start..end` that is in the collection. A bound of 0 was read as counted
+// from the end: a start of 0 gave an empty result and an end of 0 gave the
+// elements through the last one.
+describe('SLICE with a bound of 0 or before the first element', () => {
+  const xs: Expression = ['List', 10, 20, 30, 40, 50];
+  test.each([
+    ['a start of 0 is the first element', 0, 2, '["List", 10, 20]'],
+    ['a start before the first element', -9, 2, '["List", 10, 20]'],
+    ['an end of 0 is empty', 1, 0, '["List"]'],
+    ['an end before the first element is empty', 1, -9, '["List"]'],
+    ['both bounds 0', 0, 0, '["List"]'],
+    ['a start of 0, an end from the end', 0, -2, '["List", 10, 20, 30, 40]'],
+    ['bounds from the end', -2, -1, '["List", 40, 50]'],
+    ['an end past the last element', 4, 9, '["List", 40, 50]'],
+  ])('%s', (_name, start, end, expected) =>
+    expect(evaluate(['Slice', xs, start, end])).toBe(expected)
+  );
+
+  test('the count and the elements agree', () => {
+    const fromZero = engine.box(['Slice', xs, 0, 2]);
+    expect(fromZero.count).toBe(2);
+    expect(fromZero.at(1)?.json).toBe(10);
+    expect(fromZero.at(-1)?.json).toBe(20);
+    const toZero = engine.box(['Slice', xs, 1, 0]);
+    expect(toZero.count).toBe(0);
+    expect(toZero.isEmptyCollection).toBe(true);
+    expect(toZero.at(1)).toBeUndefined();
+  });
+
+  test('a string', () => {
+    expect(evaluate(['Slice', { str: 'abcde' }, 0, 2])).toBe(
+      evaluate({ str: 'ab' })
+    );
+    expect(evaluate(['Slice', { str: 'abcde' }, 2, 0])).toBe(
+      evaluate({ str: '' })
+    );
+  });
+
+  test('an infinite source', () => {
+    const inf: Expression = ['Range', 1, 'PositiveInfinity'];
+    expect(engine.box(['Slice', inf, 0, 3]).count).toBe(3);
+    expect(engine.box(['Slice', inf, 2, 0]).count).toBe(0);
+  });
+});
+
 describe('SLICE (2,3)', () => {
   test('empty list', () =>
     expect(evaluate(['Slice', emptyList, 2, 3])).toMatchInlineSnapshot(

@@ -157,32 +157,52 @@ describe('EPSIL PROGRAM SITES — the sites of an external binding', () => {
     }
   });
 
-  test('the collection of a `for` clause is read in the scope of the loop', () => {
-    // The interpreter reads the loop variable there (CE-1827).
-    expect(external(sitesOf('for k in 1..k { k }'), 'k')).toEqual([]);
-    expect(external(sitesOf('[k for k in 1..k]'), 'k')).toEqual([]);
-    // The collection of an earlier clause reads the outer binding.
+  test('the collection of a `for` clause is read outside the loop', () => {
+    // The loop reads its collection once, before the first pass, so a name
+    // there is the binding around the loop, not the loop variable.
+    const loop = 'let s = 0\nfor k in 1..k { s += k }\ns';
+    expect(external(sitesOf(loop), 'k')).toEqual(['22 read']);
+    expect(run(loop).value).toBe(15);
+    const list = '[k for k in 1..k]';
+    expect(external(sitesOf(list), 'k')).toEqual(['15 read']);
+    expect(run(list).value).toEqual(['List', 1, 2, 3, 4, 5]);
+    // The names of a destructuring pattern follow the same rule.
+    const pattern = '[p + q for (p, q) in [(1, p), (q, 5)]]';
+    expect(external(sitesOf(pattern), 'p')).toEqual(['26 read']);
+    expect(external(sitesOf(pattern), 'q')).toEqual(['31 read']);
+    expect(run(pattern).value).toEqual(['List', 6, 12]);
+    // The collection of an earlier clause reads the outer binding, and the
+    // collection of a later clause reads the variable of an earlier one.
     const source = '[a + k for a in 1..k, k in 1..2]';
     expect(external(sitesOf(source), 'k')).toEqual(['19 read']);
     expect((run(source).value as unknown[]).length).toBe(11);
+    const later = '[k for k in 1..2, k in 1..k]';
+    expect(external(sitesOf(later), 'k')).toEqual([]);
+    expect(run(later).value).toEqual(['List', 1, 1, 2]);
   });
 
-  test('a library spelling that the interpreter rewrites is `library`', () => {
-    // The interpreter calls the library function in a body above the `let`
-    // of that name (CE-1826).
-    const source = 'let h = () => mean([1, 3])\nlet mean = (x) => 7\nh()';
+  test('a library spelling that a later `let` binds is `program`', () => {
+    // The interpreter calls the variable in a body above the `let` of that
+    // name (CE-1826).
+    const source = 'let h = () => mean(3)\nlet mean = (x) => x + 4\nh()';
     expect(shape(source, sitesOf(source))).toEqual([
       'h@4 definition program h',
-      'mean@14 read deferred library Mean',
-      'mean@31 definition program mean',
-      'x@39 definition local x',
-      'h@47 read program h',
+      'mean@14 read deferred program mean',
+      'mean@26 definition program mean',
+      'x@34 definition local x',
+      'x@40 read deferred local x',
+      'h@46 read program h',
     ]);
-    expect(run(source).value).toBe(2);
-    // Such a call binds its variable, as the library function does.
-    const binder = 'function g() { sum(k^2, k in 1..3) }\nlet sum = 5\ng()';
-    expect(external(sitesOf(binder), 'k')).toEqual([]);
-    expect(run(binder).value).toBe(14);
+    expect(run(source).value).toBe(7);
+    // Such a call is a call of the variable: it binds nothing, so its `k`
+    // is the name outside the program.
+    const binder =
+      'function g() { sum(k^2, k in 1..3) }\nlet sum = (a, b) => 7\ng()';
+    expect(external(sitesOf(binder), 'k')).toEqual([
+      '19 read deferred',
+      '24 read deferred',
+    ]);
+    expect(run(binder).value).toBe(7);
     const after = 'let mean = 7\nmean';
     expect(shape(after, sitesOf(after))).toEqual([
       'mean@4 definition program mean',
@@ -266,6 +286,13 @@ describe('EPSIL PROGRAM SITES — the external bindings a program writes', () =>
     const result = sitesOf(source);
     expect(shape(source, result)).toEqual(['zz@0 write unresolved zz']);
     expect(result.externalWrites).toEqual([]);
+    // Also for a library spelling: the target keeps its name, and a read
+    // names the library.
+    const library = 'mean = 9\nmean';
+    expect(shape(library, sitesOf(library))).toEqual([
+      'mean@0 write unresolved mean',
+      'mean@9 read library Mean',
+    ]);
   });
 });
 

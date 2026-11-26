@@ -940,25 +940,28 @@ function isMask(i: unknown[]): boolean {
 
 /**
  * `x`, checked as an operand of a compiled operation that reads every digit
- * of its operand: the floored remainder (`Mod`), the remainder (`Remainder`)
- * and the common divisor and multiple (`GCD`, `LCM`).
+ * of its integer operand: `Totient`, and `MoebiusMu`, `PrimeNu` and
+ * `PrimeOmega` (`primeFactorExponents()`), which read the prime factors of
+ * an integer, and `IsPrime` of an infinite operand (`isPrimeRuntime()`; the
+ * runtime's `isprime` answers `false` for a finite double of 2^53 or more,
+ * which is even).
  *
  * Compiled arithmetic is machine arithmetic, and a double beyond
  * `±(2^53 − 1)` is the rounding of the value that produced it: `2^60 + 1`
- * is held as `2^60`, and a sum that overflows the double range is
- * `Infinity`. The interpreter computes these operations on the exact
- * integer, so a remainder or a divisor of the rounded double is a different
- * number, not a less precise one: compiled `Mod(2^60 + 1, 10)` would answer
- * `6` where the interpreter answers `7`, and `Mod` of an overflowed sum
- * would answer `NaN`. Such an operand throws a `RangeError` that names the
- * operation and the value, as the compiled list operations do for an
- * invalid index. `NaN` is returned unchanged, so it
- * propagates as it does through the other compiled arithmetic.
+ * is held as `2^60`. The interpreter computes these operations on the exact
+ * integer, so a value computed from the factors of the rounded double is a
+ * different number, not a less precise one: compiled `PrimeNu(2^60 + 1)`
+ * would count the one prime factor of `2^60`, not those of `2^60 + 1`. Such
+ * an operand throws a `RangeError` that names the operation and the value,
+ * as the compiled list operations do for an invalid index. `NaN` is
+ * returned unchanged, so it propagates as it does through the other
+ * compiled arithmetic.
  *
- * The throw applies to every operand type, an infinite dividend included
- * (`Mod(1/x, 2)` at `x = 0`): the interpreter gives a type error for
- * `Mod(+oo, 10)`, and a `NaN` would stand for a value the operation does
- * not have. A plot host that samples a compiled kernel catches the error at
+ * An infinite operand reaches the check from `IsPrime` only (the other
+ * callers give `NaN` for an operand that is not an integer first), and
+ * throws: the interpreter gives a type error for an infinite operand of
+ * `IsPrime`, and a `NaN` would stand for a value the operation does not
+ * have. A plot host that samples a compiled kernel catches the error at
  * that sample and draws a gap, as it does for any other thrown sample.
  */
 function integerOperand(operator: string, x: number): number {

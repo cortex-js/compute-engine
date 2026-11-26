@@ -273,16 +273,36 @@ function keyDocOf(name: string, doc: OptionKeyDocumentation): KeyDoc {
   };
 }
 
+/** The paragraphs of the description of a definition of the standard
+ * library. Such a definition can write a paragraph as several elements, the
+ * lines of the paragraph wrapped at about 72 columns (`library/core.ts`,
+ * `FindRoot`). An element that does not end a sentence (no `.`, `:`, `!`,
+ * `?` or `)` at its end) continues in the next element: the two are joined
+ * with a space. An element that ends a sentence ends the paragraph, so a
+ * definition that writes one paragraph per element keeps its paragraphs. */
+export function libraryParagraphs(lines: readonly string[]): string[] {
+  const result: string[] = [];
+  let current = '';
+  for (const line of lines) {
+    current = current === '' ? line : `${current} ${line}`;
+    if (/[.:!?)]$/.test(line.trimEnd())) {
+      result.push(current);
+      current = '';
+    }
+  }
+  if (current !== '') result.push(current);
+  return result;
+}
+
 /** The documentation of a definition: its description without its tag
  * lines, and its parameters and examples. The `parameters` and `examples`
  * fields of the definition come first and the tags after them (a tag fills
  * what the field leaves out).
  *
- * The description of a definition of the standard library is kept as the
- * definition writes it: a list of lines that the reference generator joins
- * (`scripts/build-library-reference.ts`), or one string. The description of
- * another definition, a `///` comment, is split into its paragraphs
- * (`paragraphsOf()`) when `library` is not set. */
+ * The description of a definition of the standard library (`library` is
+ * set) is one string or a list of lines, which are joined into paragraphs
+ * (`libraryParagraphs()`). The description of another definition, a `///`
+ * comment, is split into its paragraphs (`paragraphsOf()`). */
 export function definitionDocs(
   def: {
     description?: string | string[];
@@ -321,8 +341,9 @@ export function definitionDocs(
     for (const [name, tags] of split.parameters)
       parameters.set(name, mergeParameterDocs(parameters.get(name), tags)!);
   }
+  const joined = library ? libraryParagraphs(description) : description;
   return {
-    ...(description.length === 0 ? {} : { description }),
+    ...(joined.length === 0 ? {} : { description: joined }),
     parameters,
     positional: positionalDocsOf(def.parameters),
     examples,

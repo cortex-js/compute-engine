@@ -15167,9 +15167,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     description: [
       'Return the collection where each element has been transformed by the mapping function.',
       'With a single collection, equivalent to `[f(x) for x in xs]`. With',
-      'multiple collections, combines them element-wise (like `zipWith`): ',
-      '`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the',
-      'shortest input.',
+      // A line that ends with `:` or `)` ends its paragraph
+      // (`libraryParagraphs()`), so the line break is not after the colon.
+      'multiple collections, combines them element-wise (like',
+      '`zipWith`): `Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the',
+      'length of the shortest input.',
       'The mapping function is the first argument, because `Map` takes any number of collections after it. Most other operations that take a function, such as `Filter`, `FlatMap` and `Reduce`, take one collection and put it first: `Filter(xs, p)`. `Map(xs, f)` is an `incompatible-type` error.',
     ],
     complexity: 8200,
@@ -19819,7 +19821,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Slice([10, 20, 30, 40, 50], 2, 4)'],
     description: [
       'Return a contiguous run of elements from an indexed collection.',
-      'Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.',
+      'Given `start` and `end` (1-based, inclusive), a negative index is counted from the end. The result is the part of `start` to `end` that is in the collection: a `start` of 0 or before the first element is the first element, and an `end` of 0 or before the first element gives an empty result.',
       'Given a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `Slice(xs, r)` is `Slice(xs, First(r), Last(r))`.',
     ],
     complexity: 8200,
@@ -19874,12 +19876,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       },
       start: {
         description:
-          'The 1-based index of the first element; a negative index counts from the end (`-1` is the last element).',
+          'The 1-based index of the first element; a negative index counts from the end (`-1` is the last element), and 0 or an index before the first element is the first element.',
         sample: '2',
       },
       end: {
         description:
-          'The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` gives an empty result.',
+          'The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` (0 included) gives an empty result.',
         sample: '4',
       },
     },
@@ -29296,21 +29298,26 @@ function computeSliceBounds(
   if (startParam === null || endParam === null) return undefined;
   let start = startParam ?? 1;
   // A source count that is not a safe integer (a `bigint`) is larger than
-  // every safe integer bound. Explicit positive bounds then need no clamp and
-  // give the slice directly. A bound that counts from the end, or an omitted
-  // end, would give a position that is not a safe integer: no bounds.
+  // every safe integer bound. Explicit bounds that are not negative then need
+  // no clamp at the end of the source. A bound that counts from the end, or
+  // an omitted end, would give a position that is not a safe integer: no
+  // bounds.
   if (typeof count === 'bigint') {
-    if (start < 1 || endParam === undefined || endParam < 1) return undefined;
-    return { start, end: endParam };
+    if (start < 0 || endParam === undefined || endParam < 0) return undefined;
+    return { start: Math.max(start, 1), end: endParam };
   }
-  if (start < 1) {
+  // A negative bound counts from the end. The window is then the part of
+  // `start..end` that is inside `1..count`: a start before the first element
+  // (0 included) is the first element, and an end before the first element
+  // (0 included) gives the empty window `start..0`.
+  if (start < 0) {
     if (!Number.isFinite(count)) return undefined;
     start = count + 1 + start;
   }
   if (start < 1) start = 1;
   let end = endParam ?? count;
-  if (end < 1) end = count + 1 + end;
-  if (end < 1) end = 1;
+  if (end < 0) end = count + 1 + end;
+  if (end < 0) end = 0;
   if (end > count) end = count;
   return { start, end };
 }

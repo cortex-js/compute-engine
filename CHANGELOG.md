@@ -276,6 +276,25 @@
 
 ### Improvements
 
+- **A dictionary with a list or a tuple value compiles as the argument of a
+  custom function** (CE-1802). With `figureDraw` declared with `ce.declare()`
+  and an `evaluate` handler, `(t) => figureDraw({p -> (t, 1)})` declined with
+  "an argument that holds a list or a tuple … that the code does not know as
+  a List or a Tuple literal", so it ran interpreted. It now compiles to
+  JavaScript, and the function receives the same dictionary as in the
+  interpreter, here `{p -> (2, 1)}` at `t = 2`. So do a list value
+  (`{dash -> [t, 4, 2]}`), a tuple of tuples and a dictionary in a
+  dictionary. A value that can be a lazy collection (`{p -> Range(1, 3)}`)
+  still declines.
+
+- **A function that reads a variable whose value is the empty list compiles
+  to JavaScript** (CE-1808). With `let x: list<string> = []`, the function
+  `f(t: real) = length(x) + t` declined with "an empty list" and now
+  compiles; so do a read of `fig[2]` with `let fig = ("circle", [])`, and a
+  read of a variable with no stated type, `let pts = []`. The element type
+  is the declared one (integers, reals, booleans or strings), and integers
+  when none is stated. An empty list of points and GLSL still decline.
+
 - **Compiled JavaScript reads a `Map` or a `Filter` where it is, with no
   array** (CE-1806). Where one reader reads a view whose callback has no
   effect and cannot fail, the code builds no list: `first(map(x => x * 2, L))`
@@ -339,7 +358,7 @@
   code compares them once at run time and throws a `RangeError` where they
   differ, as the interpreter gives an error there: with `A: matrix<real>`
   at `A = [[1, 0], [0, 1]]`, `MatrixMultiply(M, A)` throws
-  `RangeError: incompatible-dimensions: MatrixMultiply of operands whose inner lengths differ (3 and 2)`,
+  `RangeError: incompatible-dimensions: lists of lengths 3 and 2`,
   and `Trace(M)` throws `RangeError: expected-square-matrix: …`. The
   comparison runs when an element of the result is read. This also
   holds for a list of rows of a run-time count, and for a stated length
@@ -363,7 +382,139 @@
   of booleans, a matrix of one stated dimension (`matrix<real^2x?>`), GLSL,
   the interval target and the `bigint` mode decline.
 
+- **Compiled JavaScript compares the lengths of two lists of run-time
+  length.** With `L, M: list<real>`, a user function of scalar parameters
+  called with both lists, `h(L, M)`, declined with "list arguments of h
+  whose lengths are not one value", so the program fell back to the
+  interpreter; and at `L = [1, 2]`, `M = [1, 2, 3]`, where the interpreter
+  gives the error `incompatible-dimensions`, `L + M` gave `[2, 4]`,
+  `Sum((L − M)^2)` gave `0`, `Mean(L·M)` gave `2.5` and `Dot(L, M)` gave
+  `5`. The compiled code now compares the two lengths once, before the loop
+  of the operation, and throws
+  `RangeError: incompatible-dimensions: lists of lengths 2 and 3` where
+  they differ: an element-wise operation of two lists (`L + M`, `L < M`,
+  `L + [1, 2, 3]`, `And` of two lists of booleans, `Rgb(L, M, 0.5)`),
+  `Dot(L, M)` and `h(L, M)`, which now compiles. At equal lengths the
+  values are the interpreter's: at `M = [3, 4]`, `L + M` gives `[4, 6]`.
+  Later operations on the same lists read the first comparison:
+  `(L + M)·(L − M)` compares once. Lengths that the compiler proves equal
+  (`L + L`, `Dot(L, L)`, `h(L, L)`) compare nothing, and their code is
+  unchanged. Lists of points, GLSL, the interval target and the `bigint`
+  mode compare no length.
+
+### Behavior Changes
+
+- **`Slice` reads a bound of 0 as a position before the first element, not
+  as a position counted from the end** (CE-1843). Only a negative bound
+  counts from the end, and the result is the part of `start` to `end` that
+  is in the collection. `Slice([10, 20, 30, 40, 50], 0, 2)` was `[]` and is
+  now `[10, 20]`; `Slice("abcde", 0, 2)` was `""` and is now `"ab"`. An end
+  of 0, or an end before the first element, gives an empty result:
+  `Slice([10, 20, 30, 40, 50], 1, 0)` was the whole list and
+  `Slice([10, 20, 30, 40, 50], 1, -9)` was `[10]`; both are now `[]`. Write
+  an end of `-1` for the last element. Compiled code gives the same values.
+
+- **`Dimension` of a `Kernel` is the dimension of the kernel: the number of
+  vectors of its basis** (CE-1849). It was the number of cells of the basis.
+  `Dimension(Kernel([[1, 2], [2, 4]]))` was 2 and is now 1, for the basis
+  `[[-2, 1]]`. This applies to a
+  `Kernel` written as the argument (`\dim(\ker M)`). A variable that holds
+  the basis of a kernel is a matrix, and `Dimension` still gives its number
+  of elements: use `Length` for the number of basis vectors.
+
 ### Resolved Issues
+
+- **A call of `Complex` that names its arguments gives the complex number**
+  (CE-1689). `Complex(imaginary: 2, real: 1)`, and `complex(real: 1,
+  imaginary: 2)` or `complex(1, imaginary: 2)` in Epsil, gave an
+  `argument-order-invalid` or `argument-names-unavailable` error. They now
+  give `1 + 2i`, as `Complex(1, 2)` does. A name that is not `real` or
+  `imaginary` is still an `argument-name-unknown` error. The Epsil
+  completion offers the names `real` and `imaginary` in a call of `complex`.
+
+- **The numeric value of a `Limit` with no direction is the two-sided
+  limit** (CE-1852). `Limit(Abs(x)/x, 0).N()` gave `1`, the limit from
+  above, and `Limit(Floor(x), 2).N()` gave `2`. Both now give `NaN`: the
+  limits from above and from below differ. A side on which the function has
+  no real value is not counted, so `Limit(x * Ln(x), 0).N()` is still `0`.
+  A limit with a direction and a limit at `±Infinity` are not changed, and
+  `NLimit` with no direction is still the limit from above. `NLimit` with
+  the direction `0` now compares the two sides with a relative tolerance
+  when the limit is large.
+
+- **`IsSatisfiable`, `IsTautology`, `TruthTable`, `PrimeImplicants`,
+  `PrimeImplicates`, `MinimalDNF` and `MinimalCNF` stay unevaluated for a
+  formula that holds a comparison** (CE-1850). These functions tried `True`
+  and `False` for each symbol, also for a symbol that is a number:
+  `IsSatisfiable(x > 0)` gave `False`, and `IsTautology(x > 0 || x <= 0)`
+  gave `False`. Both now stay unevaluated, and so does a formula with any
+  operand other than `True`, `False`, a symbol and the connectives `And`,
+  `Or`, `Not`, `Implies`, `Equivalent`, `Xor`, `Nand` and `Nor` (a
+  quantifier, a function call). The operand is evaluated first, so a
+  comparison with a known value is still analyzed:
+  `IsSatisfiable(P && 1 < 2)` is `True`.
+
+- **A function that is declared with a signature and has no body refuses a
+  list whose elements cannot fit a parameter** (CE-1839). With
+  `ce.declare('k', '(real, string) -> real')`,
+  `ce.box(['k', 1, ['List', 1, 2]])` was valid, with the type
+  `vector<real^2>`. It now has an `incompatible-type` error at the list and
+  the type `error`, as `k(1, 2)` has. A list with an element that can fit is
+  still mapped: `k(1, ["a", "b"])` has the type `vector<real^2>`. A function
+  with a body is not changed: its application reports an error for each
+  element that does not fit.
+
+- **In Epsil, a function that uses a variable declared below it reads the
+  variable when a library function has the same name** (CE-1826). In
+  `let h = () => mean(3)`, `let mean = (x) => x + 4`, `h()`, the body of
+  `h` called the library function `Mean`, and the program gave `3`. A `let`
+  or a `const` binds its name in its whole block, as it did for a name that
+  the library does not have, so the body now calls the variable, and the
+  program gives `7`. A recursive `let mean = (n) => … mean(n - 1)` now calls
+  itself, where it called the library function. A statement above the `let`
+  that reads the name (`let a = mean`, then `let mean = 7`) read the library
+  function and is now an error (`read-before-declaration`), as for any other
+  name. The
+  initializer still reads the library: `let mean = mean(xs)` is not changed.
+  `epsilProgramSites()` reports such a name as the `program` binding.
+
+- **The Epsil editor functions give whole paragraphs for the description of
+  a library function** (CE-1811). For `findRoot`, `limit`, `map`, `solve` and
+  about twenty other names, each element of the `description` of
+  `epsilCompletions()`, `epsilHover()` and `epsilSignatureHelp()` was one
+  line of a wrapped paragraph, and the `documentation` stopped in the middle
+  of a sentence: for `solve`, "Solve(equation, unknown): the list of
+  solutions of an equation for the". Each element is now a paragraph, and
+  the `documentation` is the first paragraph. `epsil doc solve` prints the
+  same paragraphs.
+
+- **A list that holds a `Tabulate` of random numbers holds the numbers**
+  (CE-1809). A `Tabulate` whose function has an effect (a random draw, a
+  call of an impure function) stayed unevaluated as an element of a list or
+  a tuple: in Epsil, `[tabulate(i => random(), 3)]` gave
+  `[Tabulate(i ↦ Random(), 3)]` and now gives a list of three numbers, as
+  `[map(x => random(), [1, 2, 3])]` does. The function is called once for
+  each element, in order. A custom function that is not `lazy` now receives
+  the `List` of the elements of such an argument too. A `Tabulate` of more
+  than `ce.maxCollectionSize` elements stays as it is, and so does one
+  whose dimension has an effect.
+
+- **A loop whose variable has the name of a variable of its collection
+  runs** (CE-1827). The collection of a clause of `Loop`, `Comprehension`,
+  `ParallelLoop` and `ParallelComprehension` is read before the clause binds
+  its variable, so a name in it is the variable around the loop, as in the
+  bound of `Sum(n, Limits(n, 1, n))`. In Epsil, with `let n = 3`,
+  `[n for n in 1..n]` stayed unevaluated and now gives `[1, 2, 3]`, and
+  `for n in 1..n { s += n }` ran no pass and now runs three. The names of a
+  destructuring pattern follow the same rule: with `p = 10` and `q = 20`,
+  `[p + q for (p, q) in [(1, p), (q, 5)]]` gave `[p + 1, q + 5]` and now
+  gives `[11, 25]`. The `freeVariables` of
+  `Comprehension(n, Element(n, Range(1, n)))` are now `["n"]`, and
+  `subs({n: 3})` replaces the `n` of the range. The collection of a later
+  clause still reads the variables of the earlier clauses, and a quantifier
+  (`ForAll`, `Exists`) is not changed. Compiled JavaScript already read the
+  outer variable; `Comprehension(PointX(P) + 1, Element(P, P))` declined and
+  now compiles.
 
 - **`minimalDNF` and `minimalCNF` give the fewest terms** (CE-1858). After
   the terms that every cover needs, the remaining terms were chosen
@@ -476,6 +627,20 @@
   ill-conditioned also stays unevaluated. A matrix of complex machine numbers
   with an infinite or `NaN` entry stays unevaluated too.
 
+- **The inverse of a singular matrix with exact and decimal entries stays
+  unevaluated** (CE-1822).
+  `Inverse([[1/3, 2.5, 1], [1, 1, 1], [4/3, 3.5, 2]])` gave entries of about
+  `3.5e20` with `evaluate()` and with `N()`, because rounding at the
+  precision of the engine left a small nonzero pivot in place of 0. It now
+  stays unevaluated. The same holds for a matrix with `i` next to a decimal
+  entry, for `PseudoInverse` and for `MatrixPower` with a negative exponent.
+  The inverse of a matrix of numbers with an inexact entry that is not a
+  matrix of machine numbers now uses partial pivoting, and a pivot is zero
+  when it is very small relative to the entries at the precision of the
+  engine, so a regular matrix that is very ill-conditioned also stays
+  unevaluated. The last digits of the inverse of a regular matrix can
+  change.
+
 - **The sum, the product, the maximum, the minimum and the count of a value
   of a sorted list are found when an element is a variable** (CE-1804). With
   `x` declared `real`, `Sum(Sort([3, x, 1]))`, `Max(Sort([3, x, 1]))` and
@@ -549,6 +714,12 @@
   `for k in 1..2000 { fb[k] = k % 256 }` took about 2.3 seconds and takes
   about 0.9 seconds; with 20,000 writes, it took about 42 seconds and takes
   about 6.5 seconds. The value is the same.
+- **A chain of variables that each hold the previous one no longer takes a
+  time that multiplies with each variable** (CE-1830). The type of a variable
+  that holds another variable was computed several times at each level of the
+  chain. With `A0 := sin(x)` and `A1 := A0`, `A2 := A1`, and so on, the
+  assignments of seven variables took about 16 seconds, and nine did not
+  finish in 60 seconds; 40 variables now take about 15 milliseconds.
 
 ## 0.201.5 _2026-11-25_
 
