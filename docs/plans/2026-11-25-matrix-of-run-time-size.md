@@ -1,6 +1,7 @@
 # A matrix of run-time size as a shape of the IR
 
-Status: design, not approved. Scope: the `javascript` target of the IR
+Status: approved by the user 2026-11-25, with Q1 (a), Q2 (yes) and Q3
+(yes) of section 6; not started. Scope: the `javascript` target of the IR
 compiler (`src/compute-engine/compilation/ir/`), outside the interval and
 `bigint` modes. GLSL keeps stated sizes. Issues it resolves: CE-1834.
 Related: CE-1837 (an untyped parameter inferred `unknown`).
@@ -143,7 +144,7 @@ Each step lands alone, with its tests, and keeps every existing value.
 Each step reports the emitted code of the witnesses before and after, and the
 number of changed tests.
 
-## 6. Choices for the user
+## 6. Choices (decided)
 
 - **Q1. The run-time form.** (a) The host's array of arrays, flattened only
   for a kernel, as today (recommended: no copy at the entry, the host's
