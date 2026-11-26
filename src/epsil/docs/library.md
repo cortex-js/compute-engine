@@ -642,24 +642,24 @@ The [Polynomials reference](/epsil/reference/polynomials/) has the full descript
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `algebraicGenerator` | `AlgebraicGenerator` | `(list<number>) -> number` | Deprecated: `AlgebraicGenerator(List(c₀, …, cₙ))` is `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root of an irreducible polynomial with no complex embedding selected. |
-| `apart` | `Apart` | `(value, symbol?) -> value` | Alias for PartialFraction. |
-| `cancel` | `Cancel` | `(value, symbol?) -> value` | Cancel common polynomial factors in the numerator and denominator of a rational expression. |
-| `coefficientList` | `CoefficientList` | `(value, symbol?) -> list<value>` | Return the list of coefficients of a polynomial, from highest to lowest degree. |
-| `discriminant` | `Discriminant` | `(value, symbol?) -> value` | Return the discriminant of a polynomial. |
-| `distribute` | `Distribute` | `(value) -> value` | Distribute multiplication over addition |
-| `expand` | `Expand` | `(value) -> value` | Expand out products and positive integer powers |
-| `expandAll` | `ExpandAll` | `(value) -> value` | Recursively expand out products and positive integer powers |
-| `factor` | `Factor` | `(value, symbol?, value?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
-| `partialFraction` | `PartialFraction` | `(value, symbol?) -> value` | Decompose a rational expression into partial fractions. |
+| `apart` | `Apart` | `(expr: value, variable: symbol?) -> value` | Alias for PartialFraction. |
+| `cancel` | `Cancel` | `(expr: value, variable: symbol?) -> value` | Cancel common polynomial factors in the numerator and denominator of a rational expression. |
+| `coefficientList` | `CoefficientList` | `(polynomial: value, variable: symbol?) -> list<value>` | Return the list of coefficients of a polynomial, from highest to lowest degree. |
+| `discriminant` | `Discriminant` | `(polynomial: value, variable: symbol?) -> value` | Return the discriminant of a polynomial of degree 2, 3 or 4; another degree stays unevaluated. |
+| `distribute` | `Distribute` | `(value) -> value` | Distribute multiplication over addition. |
+| `expand` | `Expand` | `(value) -> value` | Expand out products and positive integer powers. |
+| `expandAll` | `ExpandAll` | `(value) -> value` | Recursively expand out products and positive integer powers, including those in the arguments of other functions. |
+| `factor` | `Factor` | `(expr: value, variable: symbol?, generator: value?) -> value` | Factor a polynomial expression into a product of irreducible factors. |
+| `partialFraction` | `PartialFraction` | `(expr: value, variable: symbol?) -> value` | Decompose a rational expression into partial fractions. |
 | `piecewiseExpand` | `PiecewiseExpand` | `(value) -> value` | `piecewiseExpand(expr)` rewrites `abs`, `sign`, `min`, `max` and `heaviside`, wherever they occur in `expr`, into a conditional value `Which(c1, v1, …, True, vd)`. |
-| `polynomial` | `Polynomial` | `(list<value>, symbol) -> value` | Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. |
-| `polynomialDegree` | `PolynomialDegree` | `(value, symbol?) -> integer` | Return the degree of a polynomial with respect to a variable. |
-| `polynomialGCD` | `PolynomialGCD` | `(a: value, b: value, variable: symbol?) -> value` | Return the greatest common divisor of two polynomials. |
+| `polynomial` | `Polynomial` | `(coefficients: list<value>, variable: symbol) -> value` | Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. |
+| `polynomialDegree` | `PolynomialDegree` | `(polynomial: value, variable: symbol?) -> integer` | Return the degree of a polynomial with respect to a variable. |
+| `polynomialGCD` | `PolynomialGCD` | `(a: value, b: value, variable: symbol?) -> value` | Return the greatest common divisor of two polynomials, with leading coefficient 1. |
 | `polynomialQuotient` | `PolynomialQuotient` | `(dividend: value, divisor: value, variable: symbol?) -> value` | Return the quotient of polynomial division of dividend by divisor. |
 | `polynomialRemainder` | `PolynomialRemainder` | `(dividend: value, divisor: value, variable: symbol?) -> value` | Return the remainder of polynomial division of dividend by divisor. |
-| `polynomialRoots` | `PolynomialRoots` | `(value, symbol?) -> set<value>` | Return the roots of a polynomial expression. |
+| `polynomialRoots` | `PolynomialRoots` | `(polynomial: value, variable: symbol?) -> set<value>` | Return the set of the roots of a polynomial expression. |
 | `resultant` | `Resultant` | `(a: value, b: value, variable: symbol?) -> value` | Return the resultant of two polynomials with respect to a variable. |
-| `together` | `Together` | `(value) -> value` | Combine rational expressions into a single fraction |
+| `together` | `Together` | `(value) -> value` | Combine rational expressions into a single fraction over a common denominator. |
 
 ## Combinatorics
 

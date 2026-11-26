@@ -866,8 +866,7 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
       'With an index, `PolynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. ' +
       'It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. ' +
       'The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `PolynomialRoot` until `N()`. ' +
-      'Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. ' +
-      'Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2',
+      'Without an index, `PolynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it.',
     // The polynomial is kept as written, its variable is bound, the index is a value.
     operands: () => [{ kind: 'held' }, { kind: 'clause' }, { kind: 'value' }],
     signature: '(polynomial: any, variable: any, index: integer?) -> number',
@@ -889,6 +888,7 @@ export const ALGEBRAIC_NUMBERS_LIBRARY: SymbolDefinitions = {
     examples: [
       'PolynomialRoot(x^2 - 2, x, 2)  // sqrt(2)',
       'N(PolynomialRoot(x^3 - x - 1, x, 1))  // 1.324717957244746',
+      'PolynomialRoot(x^2 + x + 1, x, 1)  // 1/2 * (-1 - sqrt(3) * i)',
     ],
     evaluate: (
       ops: readonly Expression[],

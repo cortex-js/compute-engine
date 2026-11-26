@@ -153,7 +153,14 @@ function evaluateTensorProduct(x: Expression): Expression {
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
     Expand: {
-      description: 'Expand out products and positive integer powers',
+      description: [
+        'Expand out products and positive integer powers.',
+        'The arguments of other functions are left as they are: `ExpandAll` expands them too.',
+      ],
+      examples: ['Expand((x + 1) * (x - 2))', 'Expand((a + b)^3)'],
+      parameters: [
+        { description: 'The expression to expand.', sample: '(x + 1)^2' },
+      ],
       lazy: true,
       // Transformers report on the expression they are given: an invalid
       // operand is rewritten in place (the embedded `Error` survives), it is
@@ -169,8 +176,16 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     },
 
     ExpandAll: {
-      description:
-        'Recursively expand out products and positive integer powers',
+      description: [
+        'Recursively expand out products and positive integer powers, including those in the arguments of other functions.',
+      ],
+      examples: ['ExpandAll(Sin((x + 1)^2))'],
+      parameters: [
+        {
+          description: 'The expression to expand.',
+          sample: 'sin((x + 1)^2)',
+        },
+      ],
       lazy: true,
       inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
@@ -185,6 +200,13 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'PiecewiseExpand(Max(x, y))',
         'PiecewiseExpand(Heaviside(x) + Max(x, 1))',
       ],
+      parameters: [
+        {
+          description:
+            'The expression whose absolute values, signs, minimums, maximums and Heaviside steps are rewritten.',
+          sample: 'max(x, 0)',
+        },
+      ],
       lazy: true,
       inspectsErrors: true, // see `Expand`
       signature: '(value) -> value',
@@ -194,6 +216,14 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     AlgebraicGenerator: {
       description:
         'Deprecated: `AlgebraicGenerator(List(c₀, …, cₙ))` is `PolynomialRoot(c₀ + c₁t + … + cₙtⁿ, t)`, the abstract root of an irreducible polynomial with no complex embedding selected.',
+      examples: ['AlgebraicGenerator([-2, 0, 1])'],
+      parameters: [
+        {
+          description:
+            'The rational coefficients of an irreducible polynomial, from the constant term to the leading coefficient; a reducible polynomial is an error.',
+          sample: '[-2, 0, 1]',
+        },
+      ],
       lazy: true,
       signature: '(list<number>) -> number',
       // The canonical list of coefficients is exact. It is also the form
@@ -225,11 +255,31 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         'Factor a polynomial expression into a product of irreducible factors. ' +
         'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. ' +
         'Without a variable, a factor common to every term of a sum is taken out, a term that is not a polynomial (such as sin(t)) is treated as a variable, and like terms are collected. ' +
-        'An optional third argument selects the generator of an exact number field. ' +
-        'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
+        'An optional third argument selects the generator of an exact number field.',
+      examples: [
+        'Factor(x^2 + 5x + 6)',
+        'Factor(x^4 - 1, x)',
+        'Factor(x^2 - 2, x, Sqrt(2))',
+      ],
+      parameters: {
+        expr: {
+          description: 'The expression to factor.',
+          sample: 'x^2 + 5x + 6',
+        },
+        variable: {
+          description:
+            'The variable of the polynomial; without it, the expression is factored in all its unknowns.',
+          sample: 'x',
+        },
+        generator: {
+          description:
+            'An algebraic number whose field the factors may use, such as `sqrt(2)` or `i`; it requires a variable, and without it the factors are over the rationals.',
+          sample: 'sqrt(2)',
+        },
+      },
       lazy: true,
       inspectsErrors: true, // see `Expand`
-      signature: '(value, symbol?, value?) -> value',
+      signature: '(expr: value, variable: symbol?, generator: value?) -> value',
       evaluate: ([x, varExpr, generator], { expression }) => {
         if (!x) return x;
 
@@ -286,7 +336,16 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Together: {
-      description: 'Combine rational expressions into a single fraction',
+      description: [
+        'Combine rational expressions into a single fraction over a common denominator.',
+      ],
+      examples: ['Together(1 / x + 1 / (x + 1))'],
+      parameters: [
+        {
+          description: 'The sum of fractions to combine.',
+          sample: '1 / x + 1 / y',
+        },
+      ],
       lazy: true,
       inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
@@ -305,7 +364,17 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     },
 
     Distribute: {
-      description: 'Distribute multiplication over addition',
+      description: [
+        'Distribute multiplication over addition.',
+        'Powers of sums are not expanded: `Expand` does that.',
+      ],
+      examples: ['Distribute((a + b) * (c + d))'],
+      parameters: [
+        {
+          description: 'The product to distribute.',
+          sample: 'x * (y + z)',
+        },
+      ],
       lazy: true,
       inspectsErrors: true, // see `Expand`
       signature: '(value)-> value',
@@ -320,9 +389,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     PolynomialDegree: {
       description:
         'Return the degree of a polynomial with respect to a variable. ' +
-        'Example: PolynomialDegree(x³ + 2x + 1, x) → 3',
+        'A constant, `0` included, has degree 0; an expression that is not a polynomial in the variable stays unevaluated.',
+      examples: [
+        'PolynomialDegree(x^3 + 2x + 1, x)',
+        'PolynomialDegree(x^2 * y^3, y)',
+      ],
+      parameters: {
+        polynomial: {
+          description: 'The polynomial.',
+          sample: 'x^3 + 2x + 1',
+        },
+        variable: {
+          description:
+            'The variable of the polynomial; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> integer',
+      signature: '(polynomial: value, variable: symbol?) -> integer',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
         const resolved = polynomialOperands(varExpr, poly);
@@ -337,9 +421,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     CoefficientList: {
       description:
         'Return the list of coefficients of a polynomial, from highest to lowest degree. ' +
-        'Example: CoefficientList(x³ + 2x + 1, x) → [1, 0, 2, 1]',
+        'A missing power has the coefficient 0, and the other unknowns go into the coefficients.',
+      examples: [
+        'CoefficientList(x^3 + 2x + 1, x)',
+        'CoefficientList(x^2 * y + y, y)',
+      ],
+      parameters: {
+        polynomial: {
+          description: 'The polynomial.',
+          sample: 'x^3 + 2x + 1',
+        },
+        variable: {
+          description:
+            'The variable of the polynomial; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> list<value>',
+      signature: '(polynomial: value, variable: symbol?) -> list<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
         const resolved = polynomialOperands(varExpr, poly);
@@ -354,8 +453,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialQuotient: {
       description:
-        'Return the quotient of polynomial division of dividend by divisor. ' +
-        'Example: PolynomialQuotient(x³ - 1, x - 1, x) → x² + x + 1',
+        'Return the quotient of polynomial division of dividend by divisor.',
+      examples: ['PolynomialQuotient(x^3 - 1, x - 1, x)'],
+      parameters: {
+        dividend: {
+          description: 'The polynomial to divide.',
+          sample: 'x^3 - 1',
+        },
+        divisor: {
+          description:
+            'The polynomial to divide by; a zero divisor leaves the call unevaluated.',
+          sample: 'x - 1',
+        },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
       signature:
         '(dividend: value, divisor: value, variable: symbol?) -> value',
@@ -372,8 +487,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialRemainder: {
       description:
-        'Return the remainder of polynomial division of dividend by divisor. ' +
-        'Example: PolynomialRemainder(x³ + 2x + 1, x + 1, x) → -2',
+        'Return the remainder of polynomial division of dividend by divisor.',
+      examples: ['PolynomialRemainder(x^3 + 2x + 1, x + 1, x)'],
+      parameters: {
+        dividend: {
+          description: 'The polynomial to divide.',
+          sample: 'x^3 + 2x + 1',
+        },
+        divisor: {
+          description:
+            'The polynomial to divide by; a zero divisor leaves the call unevaluated.',
+          sample: 'x + 1',
+        },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
       signature:
         '(dividend: value, divisor: value, variable: symbol?) -> value',
@@ -390,8 +521,17 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialGCD: {
       description:
-        'Return the greatest common divisor of two polynomials. ' +
-        'Example: PolynomialGCD(x² - 1, x - 1, x) → x - 1',
+        'Return the greatest common divisor of two polynomials, with leading coefficient 1.',
+      examples: ['PolynomialGCD(x^2 - 1, x^2 + 2x + 1, x)'],
+      parameters: {
+        a: { description: 'The first polynomial.', sample: 'x^2 - 1' },
+        b: { description: 'The second polynomial.', sample: 'x^2 + 2x + 1' },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
@@ -407,8 +547,20 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Resultant: {
       description:
         'Return the resultant of two polynomials with respect to a variable. ' +
-        'It is zero iff the polynomials share a common factor. ' +
-        'Example: Resultant(x² - 1, x - 1, x) → 0',
+        'It is zero iff the polynomials share a common factor.',
+      examples: [
+        'Resultant(x^2 - 1, x - 1, x)',
+        'Resultant(x^2 + y, x - y, x)',
+      ],
+      parameters: {
+        a: { description: 'The first polynomial.', sample: 'x^2 - 1' },
+        b: { description: 'The second polynomial.', sample: 'x - 2' },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
@@ -423,10 +575,21 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     Cancel: {
       description:
-        'Cancel common polynomial factors in the numerator and denominator of a rational expression. ' +
-        'Example: Cancel((x² - 1)/(x - 1), x) → x + 1',
+        'Cancel common polynomial factors in the numerator and denominator of a rational expression.',
+      examples: ['Cancel((x^2 - 1) / (x - 1), x)'],
+      parameters: {
+        expr: {
+          description: 'The rational expression.',
+          sample: '(x^2 - 1) / (x - 1)',
+        },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> value',
+      signature: '(expr: value, variable: symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
         const resolved = polynomialOperands(varExpr, expr);
@@ -449,9 +612,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     PartialFraction: {
       description:
         'Decompose a rational expression into partial fractions. ' +
-        'Example: PartialFraction(1/((x+1)(x+2)), x) → 1/(x+1) - 1/(x+2)',
+        'A denominator that does not factor over the rationals stays as it is.',
+      examples: [
+        'PartialFraction(1 / ((x + 1) * (x + 2)), x)',
+        'PartialFraction((x^3 + 1) / (x^2 - 1), x)',
+      ],
+      parameters: {
+        expr: {
+          description: 'The rational expression.',
+          sample: '1 / ((x + 1) * (x + 2))',
+        },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> value',
+      signature: '(expr: value, variable: symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
         const resolved = polynomialOperands(varExpr, expr);
@@ -465,8 +643,20 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Apart: {
       description:
         'Alias for PartialFraction. Decompose a rational expression into partial fractions.',
+      examples: ['Apart((x + 3) / ((x + 1) * (x + 2)), x)'],
+      parameters: {
+        expr: {
+          description: 'The rational expression.',
+          sample: '1 / ((x + 1) * (x + 2))',
+        },
+        variable: {
+          description:
+            'The variable of the polynomials; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> value',
+      signature: '(expr: value, variable: symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
         const resolved = polynomialOperands(varExpr, expr);
@@ -479,10 +669,25 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     PolynomialRoots: {
       description:
-        'Return the roots of a polynomial expression. ' +
-        'Example: PolynomialRoots(x² - 5x + 6, x) → {2, 3}',
+        'Return the set of the roots of a polynomial expression. ' +
+        'A repeated root appears once, a root with no exact form found is a numeric approximation, and a polynomial with no root stays unevaluated.',
+      examples: [
+        'PolynomialRoots(x^2 - 5x + 6, x)',
+        'PolynomialRoots(x^2 + 1, x)',
+      ],
+      parameters: {
+        polynomial: {
+          description: 'The polynomial.',
+          sample: 'x^2 - 5x + 6',
+        },
+        variable: {
+          description:
+            'The variable of the polynomial; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> set<value>',
+      signature: '(polynomial: value, variable: symbol?) -> set<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
         const resolved = polynomialOperands(varExpr, poly);
@@ -497,10 +702,24 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     Discriminant: {
       description:
-        'Return the discriminant of a polynomial. ' +
-        'Example: Discriminant(x² - 5x + 6, x) → 1',
+        'Return the discriminant of a polynomial of degree 2, 3 or 4; another degree stays unevaluated.',
+      examples: [
+        'Discriminant(x^2 - 5x + 6, x)',
+        'Discriminant(a * x^2 + b * x + c, x)',
+      ],
+      parameters: {
+        polynomial: {
+          description: 'The polynomial.',
+          sample: 'x^2 - 5x + 6',
+        },
+        variable: {
+          description:
+            'The variable of the polynomial; without it, the variable is the only unknown, or `x` among several.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(value, symbol?) -> value',
+      signature: '(polynomial: value, variable: symbol?) -> value',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
         const resolved = polynomialOperands(varExpr, poly);
@@ -567,10 +786,21 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
     Polynomial: {
       description:
-        'Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable. ' +
-        'Example: Polynomial([1, 0, 2, 1], x) → x³ + 2x + 1',
+        'Construct a polynomial from a list of coefficients (highest to lowest degree) and a variable.',
+      examples: ['Polynomial([1, 0, 2, 1], x)', 'Polynomial([a, b, c], t)'],
+      parameters: {
+        coefficients: {
+          description:
+            'The coefficients, from the highest degree to the constant term; an empty list leaves the call unevaluated.',
+          sample: '[1, 0, 2, 1]',
+        },
+        variable: {
+          description: 'The variable of the polynomial.',
+          sample: 'x',
+        },
+      },
       lazy: true,
-      signature: '(list<value>, symbol) -> value',
+      signature: '(coefficients: list<value>, variable: symbol) -> value',
       evaluate: ([coeffList, varExpr]) => {
         if (!coeffList || !varExpr) return undefined;
         const variable = sym(varExpr.canonical);

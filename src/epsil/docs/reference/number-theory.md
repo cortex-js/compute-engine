@@ -848,7 +848,7 @@ MathJSON `PolynomialRoot` · `(polynomial: any, variable: any, index: integer?) 
 - `variable` — The variable of the polynomial, bound by the call. Sample: `x`.
 - `index` — Which root, from 1 to the degree; without it, the abstract root of an irreducible polynomial. Sample: `1`.
 
-The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `polynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `polynomialRoot` until `N()`. Without an index, `polynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it. Example: PolynomialRoot(x² + x + 1, x, 1) → (−1 − i√3)/2
+The root of the polynomial p in the variable x (bound, as in Wolfram's Root[Function[x, p], k]). With an index, `polynomialRoot(p, x, k)` is the k-th root: real roots first in increasing order, then complex roots by increasing real part, each conjugate pair together with the lower one first, and the pairs that share a real part by increasing |imaginary part|, as Mathematica does. It is a numbered embedding, a particular complex number, the one `N()` gives, and its other roots are other numbers; a root that cannot be numbered with certainty stays unevaluated. The root of a polynomial of degree 1 or 2 is a rational or a radical; past that it stays `polynomialRoot` until `N()`. Without an index, `polynomialRoot(p, x)` is the abstract root of the irreducible polynomial p, with no complex embedding selected: it has no numeric value, and its other roots are indistinguishable from it.
 
 ```epsil
 polynomialRoot(x^2 - 2, x, 2)
@@ -858,6 +858,11 @@ polynomialRoot(x^2 - 2, x, 2)
 ```epsil
 N(polynomialRoot(x^3 - x - 1, x, 1))
 // ➔ 1.32471795724474602596
+```
+
+```epsil
+polynomialRoot(x^2 + x + 1, x, 1)
+// ➔ 1/2 * (-1 - sqrt(3) * i)
 ```
 
 ### powerMod
