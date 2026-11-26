@@ -53,16 +53,16 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Annotated` | `(expression, dictionary<any>) -> expression` | Attach metadata or style annotations to an expression. |
 | `apply` | `Apply` | `(name: any, arguments: any*) -> unknown` | Apply a function to a list of arguments |
 | `applyWhole` | `ApplyWhole` | `(name: any, arguments: any*) -> unknown` | Apply a function to arguments, each bound whole (engine-internal). |
-| `arbitraryConstant` | `ArbitraryConstant` | `(integer) -> number` | ArbitraryConstant(k): an arbitrary number, the k-th of a result: a |
-| `arbitraryInteger` | `ArbitraryInteger` | `(integer) -> integer` | ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the |
+| `arbitraryConstant` | `ArbitraryConstant` | `(integer) -> number` | ArbitraryConstant(k): an arbitrary number, the k-th of a result: a constant of integration, the free parameter of an identity. |
+| `arbitraryInteger` | `ArbitraryInteger` | `(integer) -> integer` | ArbitraryInteger(k): an arbitrary integer, the k-th of a result: the parameter of a family of roots, of a diophantine or a congruence solution. |
 | `arc` | `Arc` | `(any+) -> number` | Arc / wide-hat accent measure (`\widehat{ABC}`) — opaque typed head; not evaluated. |
 | — | `AssertPresent` | `(any) -> unknown` | Assert that a value is present: return it unchanged, or an `expected-present` error when it is ABSENT (`missing`, `NaN`, or a point whose coordinates are all `NaN`). |
 | — | `Assign` | `(expression \| symbol, any) scope -> any` | Assign a value to a symbol or define a sequence. |
 | `assume` | `Assume` | `(any) scope -> string` | Record an assumption about a symbol. |
-| `baseForm` | `BaseForm` | `(x: T, base: (number \| string)?) -> T where T: number` | BaseForm(x, base): the number `x` unchanged, marked to be written in |
+| `baseForm` | `BaseForm` | `(x: T, base: (number \| string)?) -> T where T: number` | BaseForm(x, base): the number `x` unchanged, marked to be written in `base` (10 by default). |
 | — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
-| `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
+| `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression. |
 | `caseFold` | `CaseFold` | `(character \| string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `caseFold(a) == caseFold(b)` tests equality ignoring case. |
 | `characterFrom` | `CharacterFrom` | `(character \| string) -> character` | CharacterFrom(s): the character `s` denotes. |
 | `characters` | `Characters` | `(character \| string) -> list<character>` | Characters(s): split a string into a list of user-perceived characters (grapheme clusters). |
@@ -82,13 +82,13 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `ErrorCode` | `(string, any*) -> error` | Structured error code with optional arguments. |
 | `evaluate` | `Evaluate` | `(any) -> unknown` | Evaluate an expression. |
 | `evaluateAt` | `EvaluateAt` | `(f: function, lower: expression, upper: expression?) -> unknown` | Evaluate a function at one point or between two bounds. |
-| `findRoot` | `FindRoot` | `(equations: any, params: any, options: dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
+| `findRoot` | `FindRoot` | `(equations: any, params: any, options: dictionary?) -> dictionary` | FindRoot(equations, params): numerically find parameter values that zero the residuals. |
 | — | `Function` | `(expression, (function \| symbol)*) -> function` | Function(body, param1, param2, …): a function literal. |
 | `geometricVector` | `GeometricVector` | `(start: any, end: any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
 | `graphemeClusters` | `GraphemeClusters` | `(character \| string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `head` | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
 | — | `Hold` | `(any) -> unknown` | Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it |
-| — | `HoldValues` | `(any, any?) -> expression` | HoldValues(body): evaluate `body` with its assigned free symbols |
+| — | `HoldValues` | `(any, any?) -> expression` | HoldValues(body): evaluate `body` with its assigned free symbols shielded — each such symbol becomes a pure symbol (its declared type and in-scope assumptions apply, its assigned value does NOT) for the duration. |
 | — | `HorizontalSpacing` | `(number) -> nothing` | Horizontal spacing annotation. |
 | `identity` | `Identity` | `(T) -> T where T` | Return the argument unchanged |
 | — | `IndexedSequence` | `(any, symbol, any, any?) -> expression` | Indexed sequence `\{a_n\}_{n=1}^{\infty}` — inert head `IndexedSequence(term, index, lower, upper?)`; not evaluated. |
@@ -102,14 +102,14 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `MatchesType` | `(subject: any, type: string \| type) -> boolean` | True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. |
 | `missing` | `Missing` | variable `missing` | A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type. |
 | — | `Module` | `(symbol) -> unknown` | The definition of a name in the standard library, also where a local definition shadows the name |
-| — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression |
+| — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression. |
 | `nSolve` | `NSolve` | `(any, any*) -> list` | NSolve(equation, unknown): the solutions of an equation as floats. |
-| — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
+| — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil surface syntax: `f(rate: 0.05)`). |
 | `nothing` | `Nothing` | variable `nothing` | The value of an empty block or of a statement with no value; the sole member of the unit type. |
 | `numberFrom` | `NumberFrom` | `(s: character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
-| — | `Optional` | `(any, any) -> nothing` | Optional(param, default): a parameter of a function literal with a |
+| — | `Optional` | `(any, any) -> nothing` | Optional(param, default): a parameter of a function literal with a default value (Epsil surface syntax: `(x, k = 2) => x * k`). |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
 | `padEnd` | `PadEnd` | `(s: character \| string, n: integer, pad: (character \| string)?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
 | `padStart` | `PadStart` | `(s: character \| string, n: integer, pad: (character \| string)?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
@@ -129,16 +129,16 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `randomChoice` | `RandomChoice` | `((T, k: number) random -> T where T: string) & ((collection<any> \| set<real>, k: number) random -> list<any>)` | RandomChoice(domain, k): a list of k independent draws from `domain`, with replacement. |
 | `randomExpression` | `RandomExpression` | `() entropy -> expression` | Generate a random expression. |
 | — | `ReleaseHold` | `(any) -> unknown` | Release an expression held by `Hold` |
-| `replaceAll` | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, |
+| `replaceAll` | `ReplaceAll` | `(any, any+) -> any` | ReplaceAll(expr, rules): apply one or more replacement rules to `expr`, then evaluate the result (Mathematica `expr /. rules`). |
 | — | `Rule` | `(match: expression, replace: expression, predicate: function?) -> expression` | Pattern replacement rule. |
 | — | `RuntimeError` | `(expression<ErrorCode> \| string) -> never` | Construct an error value when evaluated: the runtime counterpart of a written `Error(…)`, which is a static diagnostic node. |
 | `segment` | `Segment` | `(any+) -> expression` | Segment primitive — opaque typed head. |
 | — | `Sequence` | `function` | Ordered sequence of expressions. |
 | — | `Signature` | `(symbol) -> nothing \| string` | Return the signature string of an operator. |
 | `simplify` | `Simplify` | `(any, assumptions: any?) -> expression` | Simplify(expr): simplify an expression. |
-| `solve` | `Solve` | `(any, any*) -> list` | Solve(equation, unknown): the list of solutions of an equation for the |
+| `solve` | `Solve` | `(any, any*) -> list` | Solve(equation, unknown): the list of solutions of an equation for the unknown. |
 | `sphere` | `Sphere` | `(any+) -> expression` | Sphere primitive — opaque typed head. |
-| — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing |
+| — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing argument list (Epsil surface syntax: `f(...t)`). |
 | — | `String` | `(any*) -> string` | A string created by joining its arguments. |
 | `stringCompare` | `StringCompare` | `(character \| string, character \| string) -> integer` | StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. |
 | `stringFrom` | `StringFrom` | `(any, format: string?) -> string` | StringFrom(value, format?): create a string from `value`. |
@@ -169,7 +169,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Wildcard` | `(symbol) -> symbol` | Single-expression pattern wildcard. |
 | — | `WildcardOptionalSequence` | `(symbol) -> symbol` | Pattern wildcard matching zero or more expressions. |
 | — | `WildcardSequence` | `(symbol) -> symbol` | Pattern wildcard matching one or more expressions. |
-| `withRandomSeed` | `WithRandomSeed` | `(seed: real \| string, body: any) -> expression` | WithRandomSeed(seed, body): evaluate `body` with a random seed frame |
+| `withRandomSeed` | `WithRandomSeed` | `(seed: real \| string, body: any) -> expression` | WithRandomSeed(seed, body): evaluate `body` with a random seed frame seeded by `seed` (a finite real or a string). |
 
 ## Control structures
 
@@ -211,8 +211,8 @@ The [Logic reference](/epsil/reference/logic/) has the full description and the 
 | `isSatisfiable` | `IsSatisfiable` | `(boolean) -> boolean` | Return `True` when some assignment of truth values to the variables of a boolean expression makes it true, `False` otherwise. |
 | `isTautology` | `IsTautology` | `(boolean) -> boolean` | Return `True` when a boolean expression is true for every assignment of truth values to its variables, `False` otherwise. |
 | `kroneckerDelta` | `KroneckerDelta` | `(value+) -> integer` | Return 1 if the arguments are equal, 0 otherwise. |
-| `minimalCNF` | `MinimalCNF` | `(boolean) -> boolean` | Return a conjunctive normal form (CNF) of a boolean expression built from its prime implicates: an AND of ORs, usually with few clauses. |
-| `minimalDNF` | `MinimalDNF` | `(boolean) -> boolean` | Return a disjunctive normal form (DNF) of a boolean expression built from its prime implicants: an OR of ANDs, usually with few terms. |
+| `minimalCNF` | `MinimalCNF` | `(boolean) -> boolean` | Return a minimal conjunctive normal form (CNF) of a boolean expression: an AND of ORs of its prime implicates with the fewest clauses (for a large expression, the search for the fewest can stop at a budget and give a few more). |
+| `minimalDNF` | `MinimalDNF` | `(boolean) -> boolean` | Return a minimal disjunctive normal form (DNF) of a boolean expression: an OR of ANDs of its prime implicants with the fewest terms (for a large expression, the search for the fewest can stop at a budget and give a few more). |
 | `nand` | `Nand` | `(boolean+) -> boolean` | Logical NAND: the negation of AND (n-ary). |
 | `nor` | `Nor` | `(boolean+) -> boolean` | Logical NOR: the negation of OR (n-ary). |
 | — | `Not` | `(boolean) -> boolean` | Logical negation (NOT). |
@@ -621,7 +621,7 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |
 | `integrate` | `Integrate` | `(function, limits+) -> list<tuple> \| number \| tensor \| tuple` | Symbolic integral with optional bounds. |
 | `interpolatingFunction` | `InterpolatingFunction` | `(list<any>, number?) -> number` | Piecewise-quartic dense-output interpolant of a numeric ODE solution (produced by `ndSolveFunction`). |
-| `jacobianMatrix` | `JacobianMatrix` | `(fs: any, variables: any?) -> value` | JacobianMatrix(fs, variables): the matrix of partial derivatives |
+| `jacobianMatrix` | `JacobianMatrix` | `(fs: any, variables: any?) -> value` | JacobianMatrix(fs, variables): the matrix of partial derivatives ∂fᵢ/∂xⱼ, one row per function and one column per variable. |
 | `limit` | `Limit` | `(function, point: number, direction: number?) -> number` | Limit of a function. |
 | — | `Limits` | `(index: symbol, lower: value, upper: value, step: value?) -> tuple` | Limits of a function |
 | `nd` | `ND` | `(function, at: number) -> list<number> \| number \| tuple` | Numerical derivative evaluated at a point. |
@@ -805,7 +805,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `det` | `Det` | `(matrix) -> number` | `det` is an alias for `determinant`, which is the preferred name. |
 | `determinant` | `Determinant` | `(matrix) -> number` | Determinant of a square matrix. |
 | `diagonal` | `Diagonal` | `(value) -> value` | Extract a matrix diagonal or build a diagonal matrix. |
-| `dimension` | `Dimension` | `(value) -> integer` | Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, or the product of the dimensions of the two objects of a `hom`. |
+| `dimension` | `Dimension` | `(value) -> integer` | Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, the product of the dimensions of the two objects of a `hom`, or the number of basis vectors of a `kernel` written as the argument. |
 | `dot` | `Dot` | `(list<tuple> \| matrix \| tuple \| vector, list<tuple> \| matrix \| tuple \| vector) -> value` | Dot product (vector inner product) or matrix product. |
 | `eigen` | `Eigen` | `(matrix) -> tuple` | Eigenvalue-eigenvector decomposition of a square matrix. |
 | `eigenvalues` | `Eigenvalues` | `(matrix) -> list` | Eigenvalues of a square matrix. |

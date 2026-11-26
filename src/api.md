@@ -589,6 +589,52 @@ can serve several engines, and it is read at each call.
 
 <MemberCard>
 
+##### ComputeEngine.arrayAllocation {#arrayallocation-1}
+
+```ts
+arrayAllocation: ((count, bytesPerCell) => boolean) | undefined;
+```
+
+The permission to allocate the storage of a mutable array, asked once
+by `ArrayFrom` when the count of cells is known and before the engine
+allocates the storage. `bytesPerCell` is the size of one cell: 1, 2, 4
+or 8 for a machine cell, 4 for a tuple cell, 8 for an expression cell.
+A result of `false`, an exception thrown by the function, and a failure
+of the JavaScript allocation give the error `array-allocation-refused`.
+It is a permission: the engine reports no release. It is not called for
+the storage of an array that the host gives. With no function, the
+engine refuses a storage of more than 2 GiB (2^31 bytes) for one array.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ComputeEngine.arrayCreated {#arraycreated-1}
+
+```ts
+arrayCreated: ((array) => void) | undefined;
+```
+
+A function called with each array that `ArrayFrom` made, after the
+construction succeeded: not for a construction that failed, and not for
+an array that the host made with [array](#array). The prelude code that
+makes a raster gives the host no other reference to it, so a host that
+limits the bytes alive holds a weak reference to each array here:
+
+```ts
+const alive = new Set<WeakRef<object>>();
+ce.arrayCreated = (array) => alive.add(new WeakRef(array));
+```
+
+The engine does not catch an exception that the function throws: it
+propagates out of the evaluation. A `TypeError`, a `RangeError` and a
+`ReferenceError` are the exception: as from the handler of any
+operator, they become the error `internal-error` of `ArrayFrom`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.trace {#trace-1}
 
 ```ts
@@ -803,6 +849,7 @@ parses one.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1035,6 +1082,82 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
+##### ComputeEngine.array() {#array-1}
+
+```ts
+array(storage, cellType?): Expression & ArrayInterface
+```
+
+**`Experimental`**
+
+A new mutable array that adopts the typed array `storage` as its cells,
+with no pass over the cells and no copy: `ce.array(s).cells === s`.
+
+Without `cellType`, the cell type is the full range of the storage kind:
+`integer<0..255>` for a `Uint8Array`, `integer<-128..127>` for an
+`Int8Array`, `integer<0..65535>` for a `Uint16Array`,
+`integer<-32768..32767>` for an `Int16Array`, `integer<0..4294967295>`
+for a `Uint32Array`, `integer<-2147483648..2147483647>` for an
+`Int32Array` and `real` for a `Float64Array`.
+
+A `cellType` must select the storage kind of `storage`. A tuple of four
+bytes (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) takes a
+`Uint8Array` with four bytes for each cell, and the count is
+`storage.length / 4`. The bytes of an `ImageData` are shared with:
+
+```ts
+const image = ce.array(new Uint8Array(data.data.buffer), 'Pixel');
+```
+
+The cells are not checked: each must hold a value of the cell type (see
+`ArrayInterface`). `ce.arrayAllocation` and `ce.arrayCreated` are not
+called.
+
+Throws a `TypeError` for a value that is not a typed array, for a typed
+array of a kind that has no cell type (`Float32Array`, `BigInt64Array`,
+`BigUint64Array`, `Uint8ClampedArray`), for a view of a
+`SharedArrayBuffer` or of a resizable `ArrayBuffer`, for a `cellType`
+with expression cells or of
+another storage kind, and for a tuple cell type with a length that is
+not a multiple of 4.
+
+####### storage
+
+  \| `Uint8Array`\<`ArrayBufferLike`\>
+  \| `Int8Array`\<`ArrayBufferLike`\>
+  \| `Uint16Array`\<`ArrayBufferLike`\>
+  \| `Int16Array`\<`ArrayBufferLike`\>
+  \| `Uint32Array`\<`ArrayBufferLike`\>
+  \| `Int32Array`\<`ArrayBufferLike`\>
+  \| `Float64Array`\<`ArrayBufferLike`\>
+
+####### cellType?
+
+  \| `string`
+  \| [`RecordType`](#recordtype)
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.expr() {#expr-3}
 
 ```ts
@@ -1256,7 +1379,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### form?
 
@@ -1329,7 +1452,7 @@ ce.number({ re: 2.5, im: 3 }).isExact;
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### canonical?
 
@@ -1380,7 +1503,7 @@ ce.number('1152921504606846976').isExact;
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### canonical?
 
@@ -1408,7 +1531,7 @@ symbol(sym, options?): Expression
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### autoDeclare?
 
@@ -1430,7 +1553,7 @@ string(s, metadata?): Expression
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 </MemberCard>
 
@@ -1454,7 +1577,7 @@ it reports a diagnostic instead.
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 </MemberCard>
 
@@ -1588,6 +1711,7 @@ type(type): BoxedType
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1690,6 +1814,7 @@ createScope(bindings?, parent?): InspectableScope
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1813,6 +1938,7 @@ declareType(name, type, options?): void
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1887,6 +2013,7 @@ declare(id, type, scope?): IComputeEngine
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1966,6 +2093,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -1986,6 +2114,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -2017,6 +2146,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -2027,6 +2157,8 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `parameters`:   \| `Readonly`\<`Record`\<`string`, [`ParameterDocumentation`](#parameterdocumentation)\>\>
+     \| readonly [`ParameterDocumentation`](#parameterdocumentation)[];
   `inferredSignature`: `boolean`;
   `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
   `isPositive`: `boolean`;
@@ -2069,6 +2201,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -2100,6 +2233,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -2110,6 +2244,8 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `parameters`:   \| `Readonly`\<`Record`\<`string`, [`ParameterDocumentation`](#parameterdocumentation)\>\>
+     \| readonly [`ParameterDocumentation`](#parameterdocumentation)[];
   `inferredSignature`: `boolean`;
   `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
   `isPositive`: `boolean`;
@@ -3535,6 +3671,183 @@ and `CircularReference` markers).
 
 <MemberCard>
 
+### ArrayCells {#arraycells}
+
+```ts
+type ArrayCells = 
+  | Uint8Array
+  | Int8Array
+  | Uint16Array
+  | Int16Array
+  | Uint32Array
+  | Int32Array
+  | Float64Array
+  | Expression[];
+```
+
+The storage of the cells of a mutable array: a typed array for machine
+cells (four bytes for each cell of a tuple of four bytes), an array of
+evaluated expressions for every other cell type.
+
+</MemberCard>
+
+### ArrayInterface {#arrayinterface}
+
+Narrowed interface for a **mutable array**, a value of type `array<T>`.
+
+Obtained via `isMutableArray()`, or made by the host with `ce.array()`. As
+for an object, the instance is the array: two arrays are equal only when
+they are the same instance, and the hash does not change when a cell
+changes.
+
+A host reads and writes the cells through [cells](#cells):
+
+```ts
+const a = ce.array(new Uint8Array(4 * width * height), 'Pixel');
+const bytes = a.cells as Uint8Array;
+bytes[0] = 255; // the red byte of the first pixel
+a.noteStore();
+```
+
+The engine does not check what the host guarantees, and the result is
+unspecified when one of these does not hold:
+
+- one typed array, or two views that overlap, are the cells of one array
+  only;
+- every cell of a storage that the host adopted or wrote holds a value of
+  the cell type;
+- the host calls [noteStore](#notestore) after it writes through `cells`, before
+  any code of the engine reads the array;
+- a storage keeps its length while it is the cells of an array: the host
+  does not detach or transfer its buffer.
+
+Design: `docs/plans/2026-11-25-mutable-arrays-spec.md`.
+
+<MemberCard>
+
+##### ArrayInterface.cells {#cells}
+
+```ts
+readonly cells: 
+  | Uint8Array<ArrayBufferLike>
+  | Int8Array<ArrayBufferLike>
+  | Uint16Array<ArrayBufferLike>
+  | Int16Array<ArrayBufferLike>
+  | Uint32Array<ArrayBufferLike>
+  | Int32Array<ArrayBufferLike>
+  | Float64Array<ArrayBufferLike>
+  | readonly Expression[];
+```
+
+The storage, by reference. A typed array for machine cells, with four
+bytes for each cell of a tuple of four bytes (its length is then
+`4 × count`), and a read-only array of expressions for expression cells.
+
+The storage is valid until the array changes its length, or
+`swapCells()` or `Swap` runs. Read `cells` at each use, and keep no copy
+of the reference between two calls.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArrayInterface.version {#version}
+
+```ts
+readonly version: number;
+```
+
+The change signal: two reads at the same version saw the same cells. A
+larger version does not prove that a cell changed.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArrayInterface.count {#count-4}
+
+```ts
+readonly count: number;
+```
+
+The number of cells.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArrayInterface.cellType {#celltype}
+
+```ts
+readonly cellType: BoxedType;
+```
+
+The cell type: `T` for an `array<T>`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArrayInterface.noteStore() {#notestore}
+
+```ts
+noteStore(): void
+```
+
+A host that wrote cells through [cells](#cells) calls it once after its
+writes. It does what a store does after its write: it increments the
+version, invalidates the results that the engine computed from the
+array, and reports one state event.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArrayInterface.swapCells() {#swapcells}
+
+```ts
+swapCells<S>(storage): S
+```
+
+Take the typed array `storage` as the cells, and return the cells that
+the array had. `storage` has the storage kind and the length of the
+current cells. It counts as a store (the version, the results of the
+engine, one state event). A host that computes a frame in a second
+buffer exchanges the two with no copy:
+
+```ts
+let back = new Uint8Array(frame.cells.length);
+// ... write the next frame in `back`
+back = frame.swapCells(back);
+```
+
+The result has the type of `storage`, so that the exchange above
+type-checks. The value is the typed array that the array held: when
+`storage` is an instance of a subclass (a Node `Buffer`), the cells
+returned are a plain typed array of the same kind, not an instance of
+that subclass.
+
+Throws a `TypeError` for a storage of another kind or another length,
+for an array of expression cells, for a view of a `SharedArrayBuffer`,
+and for a view of a resizable `ArrayBuffer`.
+
+• S extends 
+  \| `Uint8Array`\<`ArrayBufferLike`\>
+  \| `Int8Array`\<`ArrayBufferLike`\>
+  \| `Uint16Array`\<`ArrayBufferLike`\>
+  \| `Int16Array`\<`ArrayBufferLike`\>
+  \| `Uint32Array`\<`ArrayBufferLike`\>
+  \| `Int32Array`\<`ArrayBufferLike`\>
+  \| `Float64Array`\<`ArrayBufferLike`\>
+
+####### storage
+
+`S`
+
+</MemberCard>
+
+<MemberCard>
+
 ### ReplaceOptions {#replaceoptions}
 
 ```ts
@@ -3605,7 +3918,7 @@ Controls how expressions are created.
 
 <MemberCard>
 
-### Metadata {#metadata-1}
+### Metadata {#metadata}
 
 ```ts
 type Metadata = {
@@ -4954,6 +5267,7 @@ type(type): BoxedType
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -5103,6 +5417,54 @@ When the application is a number and an argument that depends on `v` is
 a list or a point (a function declared `(list<number>) -> number`), the
 partial derivative is a gradient and the product is never correct: the
 derivative of the application stays unevaluated, whatever the key gives.
+
+</MemberCard>
+
+<MemberCard>
+
+### ParameterDocumentation {#parameterdocumentation}
+
+```ts
+type ParameterDocumentation = 
+  | string
+  | {
+  description: string;
+  sample: string;
+  keys: Readonly<Record<string, OptionKeyDocumentation>>;
+};
+```
+
+The documentation of one parameter of an operator
+(`OperatorDefinition.parameters`): a description in Markdown, a sample
+value, and for a parameter that takes a dictionary of options, the
+documentation of each key. A string is the description alone.
+
+A sample is one line of Epsil source in the Epsil spelling (`[1, 2, 3]`,
+`x => x^2`, `"crimson"`), of the type of its parameter. An editor shows
+it as faint text in an empty argument; it is not part of the
+description.
+
+</MemberCard>
+
+<MemberCard>
+
+### OptionKeyDocumentation {#optionkeydocumentation}
+
+```ts
+type OptionKeyDocumentation = 
+  | string
+  | {
+  type: string;
+  description: string;
+  sample: string;
+  default: string;
+};
+```
+
+The documentation of one key of a parameter that takes a dictionary of
+options (`ParameterDocumentation.keys`). A string is the description
+alone. `type` is a type string (`tuple<real, real>`); `sample` and
+`default` are Epsil source.
 
 </MemberCard>
 
@@ -6194,6 +6556,7 @@ resultType(operator, operandTypes):
   | SetType
   | BroadcastableType
   | ObjectType
+  | ArrayType
   | DictionaryType
   | TupleType
   | SymbolType
@@ -6749,6 +7112,21 @@ operator.
 
 - [`BoxedBaseDefinition`](#boxedbasedefinition)
 - [`OperatorDefinitionFlags`](#operatordefinitionflags)
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.parameters? {#parameters-1}
+
+```ts
+parameters?: 
+  | Readonly<Record<string, ParameterDocumentation>>
+  | readonly ParameterDocumentation[];
+```
+
+The documentation of the parameters, keyed by parameter name or by
+position (`OperatorDefinition.parameters`).
+
+</MemberCard>
 
 <MemberCard>
 
@@ -11729,6 +12107,8 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   signature:   | Type
      | TypeString
      | BoxedType;
+  parameters:   | Readonly<Record<string, ParameterDocumentation>>
+     | ReadonlyArray<ParameterDocumentation>;
   inferredSignature: boolean;
   sgn: (ops, options) => Sign | undefined;
   isPositive: boolean;
@@ -11819,6 +12199,39 @@ when it is canonicalized: `Scaled(3)` is the same expression as
 `Scaled(3, 2)`, and the `evaluate` handler, the `type` handler and the
 compiler see two operands. The default is inserted only when every
 required parameter has an argument. The signature prints the default.
+
+#### OperatorDefinition.parameters?
+
+```ts
+parameters?: 
+  | Readonly<Record<string, ParameterDocumentation>>
+| ReadonlyArray<ParameterDocumentation>;
+```
+
+The documentation of the parameters, keyed by the parameter names of
+the `signature`, so that the arms of an overload set share it. A
+string is the description of the parameter alone. The editor
+services show it in the signature help and in the completion of a
+named argument (`epsilSignatureHelp()`, `epsilCompletions()`).
+
+A list documents the parameters by position instead, for a signature
+whose parameters have no name (`(complex | quantity) -> number`): the
+entry `i` documents the parameter `i` of each arm of the signature. An
+empty string leaves a parameter undocumented.
+
+```js
+parameters: [{ description: 'The angle, in radians.', sample: 'pi / 4' }]
+```
+
+```js
+parameters: {
+  count: { description: 'The number of elements to keep.', sample: '2' },
+  options: {
+    description: 'The options of the plot.',
+    keys: { x: { type: 'tuple<real, real>', description: 'The x range.', sample: '(-5, 5)' } },
+  },
+}
+```
 
 #### OperatorDefinition.inferredSignature?
 
@@ -11992,6 +12405,20 @@ When the handler is invoked, the arguments have been evaluated, except
 if the `lazy` option is set to `true`.
 
 It is not necessary to further simplify or evaluate the arguments.
+
+A function of the host (a handler that is a JavaScript function, of a
+definition that is not `lazy`) receives a `List` for an argument that
+evaluates to a finite lazy indexed collection: `f(1..3)` receives
+`List(1, 2, 3)`, not `Range(1, 3, 1)`, and `f(map(x => 2x, [1, 2]))`
+receives `List(2, 4)`, with the callback called for each element
+before the handler. Compiled JavaScript passes the same `List`. An
+endless collection, one whose count is not known, one of more than
+`ce.maxCollectionSize` elements, a set, a dictionary and a view with
+an effect whose count is not known without a call that has an effect
+(`Tabulate(f, g())` where `f` and `g` have an effect) are passed as
+they are. A handler that needs the collection as written (to read the
+bounds of a `Range`, or to read only some elements) declares the
+function `lazy: true` and evaluates the operand itself.
 
 If performing numerical calculations and `options.numericalApproximation`
 is `false` return an exact numeric value, for example return a rational
@@ -13262,6 +13689,52 @@ can serve several engines, and it is read at each call.
 
 <MemberCard>
 
+##### IComputeEngine.arrayAllocation {#arrayallocation}
+
+```ts
+arrayAllocation: ((count, bytesPerCell) => boolean) | undefined;
+```
+
+The permission to allocate the storage of a mutable array, asked once
+by `ArrayFrom` when the count of cells is known and before the engine
+allocates the storage. `bytesPerCell` is the size of one cell: 1, 2, 4
+or 8 for a machine cell, 4 for a tuple cell, 8 for an expression cell.
+A result of `false`, an exception thrown by the function, and a failure
+of the JavaScript allocation give the error `array-allocation-refused`.
+It is a permission: the engine reports no release. It is not called for
+the storage of an array that the host gives. With no function, the
+engine refuses a storage of more than 2 GiB (2^31 bytes) for one array.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.arrayCreated {#arraycreated}
+
+```ts
+arrayCreated: ((array) => void) | undefined;
+```
+
+A function called with each array that `ArrayFrom` made, after the
+construction succeeded: not for a construction that failed, and not for
+an array that the host made with [array](#array). The prelude code that
+makes a raster gives the host no other reference to it, so a host that
+limits the bytes alive holds a weak reference to each array here:
+
+```ts
+const alive = new Set<WeakRef<object>>();
+ce.arrayCreated = (array) => alive.add(new WeakRef(array));
+```
+
+The engine does not catch an exception that the function throws: it
+propagates out of the evaluation. A `TypeError`, a `RangeError` and a
+`ReferenceError` are the exception: as from the handler of any
+operator, they become the error `internal-error` of `ArrayFrom`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.trace {#trace}
 
 ```ts
@@ -13476,6 +13949,7 @@ parses one.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -13708,6 +14182,82 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
+##### IComputeEngine.array() {#array}
+
+```ts
+array(storage, cellType?): Expression & ArrayInterface
+```
+
+**`Experimental`**
+
+A new mutable array that adopts the typed array `storage` as its cells,
+with no pass over the cells and no copy: `ce.array(s).cells === s`.
+
+Without `cellType`, the cell type is the full range of the storage kind:
+`integer<0..255>` for a `Uint8Array`, `integer<-128..127>` for an
+`Int8Array`, `integer<0..65535>` for a `Uint16Array`,
+`integer<-32768..32767>` for an `Int16Array`, `integer<0..4294967295>`
+for a `Uint32Array`, `integer<-2147483648..2147483647>` for an
+`Int32Array` and `real` for a `Float64Array`.
+
+A `cellType` must select the storage kind of `storage`. A tuple of four
+bytes (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) takes a
+`Uint8Array` with four bytes for each cell, and the count is
+`storage.length / 4`. The bytes of an `ImageData` are shared with:
+
+```ts
+const image = ce.array(new Uint8Array(data.data.buffer), 'Pixel');
+```
+
+The cells are not checked: each must hold a value of the cell type (see
+`ArrayInterface`). `ce.arrayAllocation` and `ce.arrayCreated` are not
+called.
+
+Throws a `TypeError` for a value that is not a typed array, for a typed
+array of a kind that has no cell type (`Float32Array`, `BigInt64Array`,
+`BigUint64Array`, `Uint8ClampedArray`), for a view of a
+`SharedArrayBuffer` or of a resizable `ArrayBuffer`, for a `cellType`
+with expression cells or of
+another storage kind, and for a tuple cell type with a length that is
+not a multiple of 4.
+
+####### storage
+
+  \| `Uint8Array`\<`ArrayBufferLike`\>
+  \| `Int8Array`\<`ArrayBufferLike`\>
+  \| `Uint16Array`\<`ArrayBufferLike`\>
+  \| `Int16Array`\<`ArrayBufferLike`\>
+  \| `Uint32Array`\<`ArrayBufferLike`\>
+  \| `Int32Array`\<`ArrayBufferLike`\>
+  \| `Float64Array`\<`ArrayBufferLike`\>
+
+####### cellType?
+
+  \| `string`
+  \| [`RecordType`](#recordtype)
+  \| [`AlgebraicType`](#algebraictype)
+  \| [`NegationType`](#negationtype)
+  \| [`CollectionType`](#collectiontype)
+  \| [`ListType`](#listtype)
+  \| [`SetType`](#settype)
+  \| [`BroadcastableType`](#broadcastabletype)
+  \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
+  \| [`DictionaryType`](#dictionarytype)
+  \| [`TupleType`](#tupletype)
+  \| [`SymbolType`](#symboltype)
+  \| [`ExpressionType`](#expressiontype)
+  \| [`NumericType`](#numerictype)
+  \| [`FunctionSignature`](#functionsignature)
+  \| [`ValueType`](#valuetype)
+  \| [`TypeVariable`](#typevariable)
+  \| [`TypeReference`](#typereference)
+  \| [`BoxedType`](#boxedtype)
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.expr() {#expr-2}
 
 ```ts
@@ -13929,7 +14479,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### form?
 
@@ -14002,7 +14552,7 @@ ce.number({ re: 2.5, im: 3 }).isExact;
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### canonical?
 
@@ -14053,7 +14603,7 @@ ce.number('1152921504606846976').isExact;
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### canonical?
 
@@ -14081,7 +14631,7 @@ symbol(sym, options?): Expression
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 ####### autoDeclare?
 
@@ -14103,7 +14653,7 @@ string(s, metadata?): Expression
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 </MemberCard>
 
@@ -14127,7 +14677,7 @@ it reports a diagnostic instead.
 
 ####### metadata?
 
-[`Metadata`](#metadata-1)
+[`Metadata`](#metadata)
 
 </MemberCard>
 
@@ -14261,6 +14811,7 @@ type(type): BoxedType
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -14363,6 +14914,7 @@ createScope(bindings?, parent?): InspectableScope
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -14486,6 +15038,7 @@ declareType(name, type, options?): void
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -14560,6 +15113,7 @@ declare(id, type, scope?): IComputeEngine
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -14639,6 +15193,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -14659,6 +15214,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -14690,6 +15246,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -14700,6 +15257,8 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `parameters`:   \| `Readonly`\<`Record`\<`string`, [`ParameterDocumentation`](#parameterdocumentation)\>\>
+     \| readonly [`ParameterDocumentation`](#parameterdocumentation)[];
   `inferredSignature`: `boolean`;
   `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
   `isPositive`: `boolean`;
@@ -14742,6 +15301,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -14773,6 +15333,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`SetType`](#settype)
      \| [`BroadcastableType`](#broadcastabletype)
      \| [`ObjectType`](#objecttype)
+     \| [`ArrayType`](#arraytype)
      \| [`DictionaryType`](#dictionarytype)
      \| [`TupleType`](#tupletype)
      \| [`SymbolType`](#symboltype)
@@ -14783,6 +15344,8 @@ declare(arg1, arg2?, arg3?): IComputeEngine
      \| [`TypeVariable`](#typevariable)
      \| [`TypeReference`](#typereference)
      \| [`BoxedType`](#boxedtype);
+  `parameters`:   \| `Readonly`\<`Record`\<`string`, [`ParameterDocumentation`](#parameterdocumentation)\>\>
+     \| readonly [`ParameterDocumentation`](#parameterdocumentation)[];
   `inferredSignature`: `boolean`;
   `sgn`: (`ops`, `options`) => [`Sign`](#sign) \| `undefined`;
   `isPositive`: `boolean`;
@@ -16105,9 +16668,12 @@ Use `{ digits: 'auto' }` to round arbitrary-precision
 numbers to `ce.precision` significant digits. The default
 (`'max'`) emits all available digits with no rounding.
 
+Use `{ objects }` to write a MathJSON expression of your own in place of
+each object and mutable array (see `JsonSerializationOptions.objects`).
+
 ####### options?
 
-`Readonly`\<`Partial`\<[`JsonSerializationOptions`](#jsonserializationoptions)\>\>
+`Readonly`\<`Partial`\<`JsonSerializationOptions`\<[`Expression`](#expression-5)\>\>\>
 
 </MemberCard>
 
@@ -17930,7 +18496,7 @@ declared types.
 
 <MemberCard>
 
-##### Expression.array {#array-1}
+##### Expression.array {#array-3}
 
 ```ts
 readonly array: readonly number[] | undefined;
@@ -18732,6 +19298,7 @@ set type(type:
   | SetType
   | BroadcastableType
   | ObjectType
+  | ArrayType
   | DictionaryType
   | TupleType
   | SymbolType
@@ -19033,19 +19600,15 @@ controlled by the `notation` / `avoidExponentsInRange` options.
 ### JsonSerializationOptions {#jsonserializationoptions}
 
 ```ts
-type JsonSerializationOptions = {
-  prettify: boolean;
-  inferredAnnotations: boolean;
-  exclude: string[];
-  shorthands: ("all" | "number" | "symbol" | "function" | "string" | "dictionary")[];
-  metadata: ("all" | "wikidata" | "latex" | "sourceOffsets")[];
-  repeatingDecimal: boolean;
-  digits: DisplayDigits;
-};
+type JsonSerializationOptions<T> = KernelJsonSerializationOptions<T>;
 ```
 
 Options to control serialization to MathJSON when using
 `Expression.toMathJson()`.
+
+#### Type Parameters
+
+• T = [`Expression`](#expression-5)
 
 </MemberCard>
 
@@ -19710,7 +20273,7 @@ readonly expression: Expression;
 
 <MemberCard>
 
-##### Tensor.array {#array}
+##### Tensor.array {#array-2}
 
 ```ts
 readonly array: NestedArray<DataTypeMap[DT]>;
@@ -20152,6 +20715,7 @@ new BoxedType(type, typeResolver?): BoxedType
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20451,6 +21015,7 @@ Box an ordinary type, sharing immutable type values within a resolver.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20511,6 +21076,7 @@ Normalization is shared only for immutable input types.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20547,6 +21113,7 @@ Normalization is shared only for immutable input types.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20626,6 +21193,7 @@ polymorphic one.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20658,6 +21226,7 @@ is(other): boolean
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20704,6 +21273,7 @@ Throws if `other` is a string that is not a valid type.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -20782,6 +21352,7 @@ Throws if `other` is a string that is not a valid type.
   \| [`SetType`](#settype)
   \| [`BroadcastableType`](#broadcastabletype)
   \| [`ObjectType`](#objecttype)
+  \| [`ArrayType`](#arraytype)
   \| [`DictionaryType`](#dictionarytype)
   \| [`TupleType`](#tupletype)
   \| [`SymbolType`](#symboltype)
@@ -21035,6 +21606,7 @@ type PrimitiveType =
   | "dictionary"
   | "record"
   | "object"
+  | "array"
   | "tuple"
   | "value"
   | "scalar"
@@ -21098,6 +21670,8 @@ A primitive type is a simple type that represents a concrete value.
              e.g. `tuple<number, boolean>`, `tuple<x: number, y: boolean>`.
           - `string`: a string of characters, i.e. an indexed collection of
              `character`. A sibling of `list<character>`, not a subtype.
+   - `array`: a mutable array, e.g. `array<integer<0..255>>`. Not a
+      collection.
 
 </MemberCard>
 
@@ -21519,6 +22093,35 @@ and the lattice bullet of "The rest of the system" (ruling B6).
 
 <MemberCard>
 
+### ArrayType {#arraytype}
+
+```ts
+type ArrayType = {
+  kind: "array";
+  elements: Type;
+};
+```
+
+`array<T>` is the type of a mutable array whose cells hold values of type
+`T`.
+
+Every cell is a read/write position, so the cell type is **invariant**, as
+the field type of an object is: `array<S>` is a subtype of `array<T>` only
+when `S` and `T` are mutual subtypes, and a type variable in the cell type
+verifies only as `inout`. Every `array<T>` is a subtype of the bare
+primitive `'array'`; `array<any>` is one more invariant instance, not the
+bare type.
+
+An array type is disjoint from every collection type and from `object`: an
+array is not a collection and is never broadcast over. The cell type alone
+selects the storage (`arrayStorageKind()`).
+
+Spec: `docs/plans/2026-11-25-mutable-arrays-spec.md`, sections 2 and 3.
+
+</MemberCard>
+
+<MemberCard>
+
 ### DictionaryType {#dictionarytype}
 
 ```ts
@@ -21770,6 +22373,7 @@ type Type =
   | BroadcastableType
   | RecordType
   | ObjectType
+  | ArrayType
   | DictionaryType
   | TupleType
   | SymbolType

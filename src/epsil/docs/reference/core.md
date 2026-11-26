@@ -513,7 +513,9 @@ MathJSON `CanonicalForm` · `(any, symbol*) -> any`
 - argument 1 — The expression, as written; with no form, its full canonical form is returned. Sample: `1 + x`.
 - arguments 2, … — A canonical form to apply: "InvisibleOperator", "Number", "Multiply", "Add", "Power", "Divide", "Flatten" or "Order".
 
-Return the canonical form of an expression Can be used to sort arguments of an expression.
+Return the canonical form of an expression.
+
+Can be used to sort arguments of an expression.
 
 Sorting arguments of commutative functions is a weak form of canonicalization that can be useful in some cases, for example to accept "x+1" and "1+x" while rejecting "x+1" and "2x-x+1"
 
@@ -1052,7 +1054,11 @@ apply(Module(Floor), 2.5)
 
 `(any, (integer | list<number>)?) -> unknown`
 
-N(expr): numerically evaluate an expression N(expr, precision): evaluate to `precision` significant digits N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal
+N(expr): numerically evaluate an expression.
+
+N(expr, precision): evaluate to `precision` significant digits.
+
+N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal.
 
 ```epsil
 N(pi)
@@ -1078,9 +1084,7 @@ MathJSON `NSolve` · `(any, any*) -> list`
 
 NSolve(equation, unknown): the solutions of an equation as floats.
 
-It is Mathematica `nSolve`: it takes the same operands as `solve`, including domain specs and systems of equations, and gives the `N` of each solution of `solve`:
-
-`nSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `solve` finds no solution set, `nSolve` stays unevaluated: for a polynomial `solve` already gives numeric roots when there is no closed form, and `findRoot` gives one local root from a start value.
+It is Mathematica `nSolve`: it takes the same operands as `solve`, including domain specs and systems of equations, and gives the `N` of each solution of `solve`, so `nSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `solve` finds no solution set, `nSolve` stays unevaluated: for a polynomial `solve` already gives numeric roots when there is no closed form, and `findRoot` gives one local root from a start value.
 
 ```epsil
 nSolve(x^2 == 2, x)
@@ -1093,9 +1097,7 @@ nSolve(x^2 == 2, x)
 
 NamedArgument(name, value): one named argument of a call (Epsil surface syntax: `f(rate: 0.05)`).
 
-A parse-level carrier, like `Spread`, but one that never survives:
-
-the enclosing call consumes it at canonicalization, permuting the written arguments into the order its callee declares.
+A parse-level carrier, like `Spread`, but one that never survives: the enclosing call consumes it at canonicalization, permuting the written arguments into the order its callee declares.
 
 Reaching this definition therefore means the carrier was NOT consumed — the callee supplied no parameter names to match — which is the `argument-names-unavailable` error.
 
@@ -1381,7 +1383,9 @@ Random(): non-deterministic real in [0, 1)
 
 Random(Interval(a, b)): a real in [a, b) (endpoint markers ignored)
 
-Random(Range(...)): an element of the range Random(xs): an element of the finite collection `xs`
+Random(Range(...)): an element of the range.
+
+Random(xs): an element of the finite collection `xs`.
 
 ```epsil
 random()
@@ -1530,9 +1534,7 @@ Solve(equation, unknown): the list of solutions of an equation for the unknown. 
 
 The unknown may be omitted: it defaults to the equation's single free variable, or to `x` when there are several and one of them is `x`.
 
-Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each solution is a tuple of values in the order of the variable list, e.g.
-
-Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].
+Solve([eq1, eq2, …], [x, y, …]): solve a system of equations; each solution is a tuple of values in the order of the variable list, e.g. Solve([x + y == 3, x - y == 1], [x, y]) → [(2, 1)].
 
 ```epsil
 solve(x^2 - 1 == 0, x)

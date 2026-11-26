@@ -424,9 +424,9 @@ diagonal([1, 2, 3])
 
 MathJSON `Dimension` · `(value) -> integer`
 
-- argument 1 — The vector, matrix or tensor whose number of elements is returned, or a `Hom(V, W)`, whose dimension is the product of the dimensions of V and W; a scalar gives 1. Sample: `[[1, 2, 3], [4, 5, 6]]`.
+- argument 1 — The vector, matrix or tensor whose number of elements is returned, a `Hom(V, W)`, whose dimension is the product of the dimensions of V and W, or a `Kernel(M)`, whose dimension is the number of vectors of its basis; a scalar gives 1. A variable that holds the basis of a kernel is a matrix, and gives its number of elements. Sample: `[[1, 2, 3], [4, 5, 6]]`.
 
-Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, or the product of the dimensions of the two objects of a `hom`.
+Return the dimension of a vector space: the number of elements of a vector, matrix or tensor, the product of the dimensions of the two objects of a `hom`, or the number of basis vectors of a `kernel` written as the argument.
 
 ```epsil
 dimension([[1, 2, 3], [4, 5, 6]])

@@ -145,7 +145,7 @@ implies(False, x)
 
 MathJSON `IsSatisfiable` · `(boolean) -> boolean`
 
-- argument 1 — The boolean expression; with more than 20 variables the result stays unevaluated. Sample: `p && !q`.
+- argument 1 — The boolean expression; with more than 20 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `p && !q`.
 
 Return `True` when some assignment of truth values to the variables of a boolean expression makes it true, `False` otherwise.
 
@@ -165,7 +165,7 @@ isSatisfiable(And(p, Or(q, Not(p))))
 
 MathJSON `IsTautology` · `(boolean) -> boolean`
 
-- argument 1 — The boolean expression; with more than 20 variables the result stays unevaluated. Sample: `p || !p`.
+- argument 1 — The boolean expression; with more than 20 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `p || !p`.
 
 Return `True` when a boolean expression is true for every assignment of truth values to its variables, `False` otherwise.
 
@@ -203,9 +203,9 @@ kroneckerDelta(2, 3)
 
 MathJSON `MinimalCNF` · `(boolean) -> boolean`
 
-- argument 1 — The boolean expression to minimize; with more than 12 variables the result stays unevaluated. Sample: `(a || b) && (a || !b)`.
+- argument 1 — The boolean expression to minimize; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `(a || b) && (a || !b)`.
 
-Return a conjunctive normal form (CNF) of a boolean expression built from its prime implicates: an AND of ORs, usually with few clauses.
+Return a minimal conjunctive normal form (CNF) of a boolean expression: an AND of ORs of its prime implicates with the fewest clauses (for a large expression, the search for the fewest can stop at a budget and give a few more).
 
 Uses the Quine-McCluskey algorithm, at most 12 variables.
 
@@ -218,9 +218,9 @@ minimalCNF(And(Or(a, b), Or(a, Not(b))))
 
 MathJSON `MinimalDNF` · `(boolean) -> boolean`
 
-- argument 1 — The boolean expression to minimize; with more than 12 variables the result stays unevaluated. Sample: `(a && b) || (a && !b) || (!a && b)`.
+- argument 1 — The boolean expression to minimize; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `(a && b) || (a && !b) || (!a && b)`.
 
-Return a disjunctive normal form (DNF) of a boolean expression built from its prime implicants: an OR of ANDs, usually with few terms.
+Return a minimal disjunctive normal form (DNF) of a boolean expression: an OR of ANDs of its prime implicants with the fewest terms (for a large expression, the search for the fewest can stop at a budget and give a few more).
 
 Uses the Quine-McCluskey algorithm, at most 12 variables.
 
@@ -315,7 +315,7 @@ Apply a predicate to arguments, returning a boolean
 
 MathJSON `PrimeImplicants` · `(boolean) -> list`
 
-- argument 1 — The boolean expression; with more than 12 variables the result stays unevaluated. Sample: `(a && b) || (a && !b)`.
+- argument 1 — The boolean expression; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `(a && b) || (a && !b)`.
 
 Return the list of the prime implicants of a boolean expression: the minimal conjunctions of literals that imply it.
 
@@ -330,7 +330,7 @@ primeImplicants(Or(And(a, b), And(Not(a), c), And(b, c)))
 
 MathJSON `PrimeImplicates` · `(boolean) -> list`
 
-- argument 1 — The boolean expression; with more than 12 variables the result stays unevaluated. Sample: `a && b`.
+- argument 1 — The boolean expression; with more than 12 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `a && b`.
 
 Return the list of the prime implicates of a boolean expression: the minimal disjunctions of literals that it implies.
 
@@ -382,7 +382,7 @@ The boolean truth value true.
 
 MathJSON `TruthTable` · `(boolean) -> list`
 
-- argument 1 — The boolean expression; with more than 10 variables the result stays unevaluated. Sample: `p && q`.
+- argument 1 — The boolean expression; with more than 10 variables, or with an operand that is not a symbol or a connective (a comparison such as `x > 0`), the result stays unevaluated. Sample: `p && q`.
 
 Return the truth table of a boolean expression, as a list of rows.
 

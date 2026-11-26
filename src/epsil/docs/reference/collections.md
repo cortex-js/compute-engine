@@ -1185,9 +1185,7 @@ MathJSON `Map` · `(mapping: (T) any -> U, collection<T>+) -> indexed_collection
 
 Return the collection where each element has been transformed by the mapping function.
 
-With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): 
-
-`Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input.
+With a single collection, equivalent to `[f(x) for x in xs]`. With multiple collections, combines them element-wise (like `zipWith`): `Map(f, xs, ys) = [f(x1, y1), f(x2, y2), …]`, with the length of the shortest input.
 
 The mapping function is the first argument, because `map` takes any number of collections after it. Most other operations that take a function, such as `filter`, `flatMap` and `reduce`, take one collection and put it first: `filter(xs, p)`. `map(xs, f)` is an `incompatible-type` error.
 
@@ -1851,12 +1849,12 @@ MathJSON `Slice` · `((value: T, span: range) -> T where T: string) & ((value: T
 
 - `value` — The collection to slice; a string gives a string. Sample: `[10, 20, 30, 40, 50]`.
 - `span` — An ascending range of 1-based indices; the indices past the end are left out. Sample: `2..4`.
-- `start` — The 1-based index of the first element; a negative index counts from the end (`-1` is the last element). Sample: `2`.
-- `end` — The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` gives an empty result. Sample: `4`.
+- `start` — The 1-based index of the first element; a negative index counts from the end (`-1` is the last element), and 0 or an index before the first element is the first element. Sample: `2`.
+- `end` — The 1-based index of the last element, included; a negative index counts from the end, an index past the end is the end, and an `end` before `start` (0 included) gives an empty result. Sample: `4`.
 
 Return a contiguous run of elements from an indexed collection.
 
-Given `start` and `end` (1-based, inclusive), a negative index is counted from the end and out-of-bounds indices are clamped.
+Given `start` and `end` (1-based, inclusive), a negative index is counted from the end. The result is the part of `start` to `end` that is in the collection: a `start` of 0 or before the first element is the first element, and an `end` of 0 or before the first element gives an empty result.
 
 Given a `range` (an ascending index span such as `2..4`), returns the elements at those indices: `slice(xs, r)` is `slice(xs, first(r), last(r))`.
 
