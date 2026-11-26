@@ -567,18 +567,20 @@ let ok = (i: integer) => a[i] + 1
     );
   });
 
+  // GLSL reads an array input only (`ir-arrays-glsl.test.ts`): a name
+  // whose value is an array declines there.
+  const mode =
+    /an array \(array<T>\), which compiles on javascript and glsl in the default mode only/;
   test.each([
-    [{ to: 'interval-js' }],
-    [{ to: 'javascript', mode: 'bigint' }],
-    [{ to: 'javascript', mode: 'complex' }],
-    [{ to: 'glsl' }],
-  ])('%p declines an array', (options) => {
+    [{ to: 'interval-js' }, mode],
+    [{ to: 'javascript', mode: 'bigint' }, mode],
+    [{ to: 'javascript', mode: 'complex' }, mode],
+    [{ to: 'glsl' }, /the name a, which holds an array value .* on glsl/],
+  ])('%p declines an array', (options, message) => {
     const { ce } = engine(source);
     const result = compile(fn(ce, 'ok'), { ...(options as object) } as never);
     expect(result.success).toBe(false);
-    expect(result.diagnostic?.message).toMatch(
-      /an array \(array<T>\), which compiles on javascript in the default mode only/
-    );
+    expect(result.diagnostic?.message).toMatch(message);
   });
 });
 

@@ -488,6 +488,9 @@ export type LowerOptions = {
    *  JavaScript spells, such as the numeric derivative of a derivative with
    *  no closed form and the string lane. */
   readonly javascript?: boolean;
+  /** The GLSL target: an array is an input that the code reads
+   *  (`lower-arrays.ts`). */
+  readonly glsl?: boolean;
   /** JavaScript (not the interval mode) and GLSL: the closed form of a
    *  definite integral in place of the quadrature. */
   readonly closedIntegrals?: boolean;
@@ -4661,6 +4664,7 @@ function lowerOnce(
    *  (`ArrayUse.names`, not a capture); in a function body, an input of the
    *  function that each call passes. */
   const namedArray = (e: Expression, name: string): V => {
+    arrays.heldValue(e, name);
     const h = held(name)!;
     if (cx.inFunction === undefined)
       return arrays.named(e, name, h.definition, h.value!);
@@ -7862,15 +7866,17 @@ function lowerOnce(
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));
   // The mutable arrays of the engine (`lower-arrays.ts`): JavaScript in the
-  // default mode. The function literals that are operands, where a read or
-  // a store declines, are found at the first read or store.
+  // default mode, and the read of an input on GLSL. The function literals
+  // that are operands, where a read or a store declines, are found at the
+  // first read or store.
   let callbackSites: ReturnType<typeof callbackScan> | undefined;
   const arrays = arrayLowering(
     cx,
     lists,
     records,
     javascript && cx.wide !== 'complex',
-    () => (callbackSites ??= callbackScan(root, userBinding, namedUser))
+    () => (callbackSites ??= callbackScan(root, userBinding, namedUser)),
+    options.glsl === true && cx.wide !== 'complex'
   );
 
   /** The result of the entry, `v` or its parts: a row at an index known at

@@ -81,8 +81,8 @@
     where the interpreter gives `out-of-range`, and a value outside the cell
     type is written as JavaScript writes it in the typed array. An array of
     expression cells, an array as the result of the code, a read or a store
-    in a callback (`map(k => a[k], 1..n)`), GLSL and `interval-js` decline.
-    Such code is not `shippable`.
+    in a callback (`map(k => a[k], 1..n)`) and `interval-js` decline. Such
+    code is not `shippable`.
   - **A compiled function that assigns a variable can call the host.** For a
     variable that is a number, a boolean or an array, the code writes its
     value to the engine before each call of a function of the host and reads
@@ -106,6 +106,36 @@
     A list variable in such a function declines, as before, and so does a
     call of the host in a `Sum` or a callback of `Map`, and a recursive
     function that calls the host.
+  - **A GLSL program reads an array input.** `At(A, i)` and `Length(A)`
+    compile on `glsl` when `A` is an input of an array type of machine
+    cells: a name declared `array<T>` with no value, or a name of the option
+    `inputs`. The host binds two uniforms: a sampler named `A`, with one
+    cell per texel, row by row from texel (0, 0), and an `int` named
+    `A_count`, the count of the cells. The sampler is `highp usampler2D` for
+    unsigned integer cells and for tuple cells of four bytes (`R8UI`,
+    `R16UI`, `R32UI`, `RGBA8UI`), `highp isampler2D` for signed integer
+    cells and `highp sampler2D` for `real` cells (`R32F`). With
+    `storage: { A: 'sampler2D' }`, cells of a `Uint8Array` are read from a
+    normalized texture (`R8`, `RGBA8`). `freeSymbolTypes.A.lowered` is the
+    sampler type, and the new field `freeSymbolTypes.A.count` is the name of
+    the count uniform. A read gives NaN (a `vec4` of NaN for a tuple cell)
+    for an index that is 0, not an integer or out of range.
+
+    ```js
+    ce.declare('A', 'array<integer<0..255>>');
+    ce.declare('i', 'integer');
+    const r = compile(ce.box(['At', 'A', 'i']), { to: 'glsl' });
+    r.code;
+    // float v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(A_count) ? _gpu_ir_cell_u(A, i > 0.0 ? int(i) - 1 : A_count + int(i)) : uintBitsToFloat(0x7fc00000u));
+    // return v2;
+    r.freeSymbolTypes.A;
+    // { type: 'array<integer<0..255>>', lowered: 'highp usampler2D',
+    //   provenance: 'declared', count: 'A_count' }
+    ```
+
+    A store, `Swap`, `ArrayFrom`, `ListFrom`, a name whose value is an
+    array, an array result, and integer cells whose range is outside
+    -16,777,216 to 16,777,216 decline on GLSL.
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.

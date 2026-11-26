@@ -133,7 +133,9 @@ export type Syntax = {
    *  host reads it (`README.md`, "Records"), or `undefined` when the value
    *  is returned as it is. */
   record?(value: string, type: IRType): string | undefined;
-  call(fn: string, args: string[]): string;
+  /** `types`: the type of each argument (GLSL passes an array as a
+   *  sampler and its count). */
+  call(fn: string, args: string[], types?: IRType[]): string;
   /** A function other than the entry. */
   fn(
     name: string,
@@ -443,7 +445,7 @@ export function printProgram(
       case 'list':
         return syntax.list(i.args.map(use), type(i.out));
       case 'call':
-        return syntax.call(i.fn, i.args.map(use));
+        return syntax.call(i.fn, i.args.map(use), i.args.map(type));
       case 'op': {
         const shape = type(i.out);
         // A read of a list in storage is spelled `<op>.<storage kind>`.

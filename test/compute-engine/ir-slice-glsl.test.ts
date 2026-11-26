@@ -86,9 +86,10 @@ describe('IR slice: GLSL text', () => {
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
       // A record and its `Nothing` field (CE-1652).
       'field', 'nothing',
-      // The array lane: the cells of a mutable array are read and written
-      // on JavaScript only.
-      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('arr.')),
+      // The array lane: the cells of a mutable array are written on
+      // JavaScript only; GLSL reads a cell and the count of an input.
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('arr.') &&
+        !['arr.get', 'arr.get.int', 'arr.get.r', 'arr.get.int.r', 'arr.len', 'arr.get4'].includes(op)),
       // The string lane (CE-1530), and `ColorToString` (CE-1548).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',
@@ -104,12 +105,19 @@ describe('IR slice: GLSL text', () => {
         'cdigamma'].includes(f))]);
     // The floor division of integers, which only the bigint mode makes.
     const bigintOnly = new Set<string>(['floordiv.int']);
+    // The read of a tuple cell of an array as one texel of four channels.
+    const glslOnly = new Set<string>(['arr.get4']);
     for (const row of OPERATORS)
       for (const [, , op] of row.signatures) {
         if (bigintOnly.has(op)) {
           expect(spellingOf(JS_BIGINT, op)).toBeDefined();
           expect(spellingOf(JS, op)).toBeUndefined();
           expect(spellingOf(GLSL, op)).toBeUndefined();
+          continue;
+        }
+        if (glslOnly.has(op)) {
+          expect(spellingOf(GLSL, op)).toBeDefined();
+          expect(spellingOf(JS, op)).toBeUndefined();
           continue;
         }
         expect(spellingOf(JS, op)).toBeDefined();

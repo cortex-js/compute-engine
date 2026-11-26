@@ -517,7 +517,9 @@ export type FreeSymbolType = {
    *   (`float[5]`; for a list of tuples of 2 to 4 real numbers an array of
    *   points, `vec2[3]`). A matrix of 2 to 4 columns is the array of its
    *   rows (`vec2[3]` for 3 rows of 2 numbers, `M[0]` its first row); no
-   *   `matN` is emitted.
+   *   `matN` is emitted. A mutable array (`array<T>`) is a sampler:
+   *   `highp usampler2D`, `highp isampler2D` or `highp sampler2D` (see
+   *   `count`).
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
    *   numbers of a fixed width), `color`, `array` (a list), `mutable-array`
@@ -532,6 +534,13 @@ export type FreeSymbolType = {
    * of `a` is `color | string | tuple`, but a shader reads a `vec3`.
    */
   lowered: string;
+
+  /**
+   * `glsl`, for an array input (`array<T>`), whose `lowered` is its sampler
+   * (`highp usampler2D`): the name of the `int` uniform of its count of
+   * cells (`A_count`), which the host binds beside the sampler.
+   */
+  count?: string;
 
   /**
    * `'declared'` when the symbol has an explicit declaration (`ce.declare`),

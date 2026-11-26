@@ -224,9 +224,12 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           if (!operandFits(row, signature[0], k, type(a), isSubLane))
             fail(`${i.op}: operand ${k} is ${typeToString(type(a))}`);
         });
-        const r =
-          resultType(found.signature, i.args.map(type), same) ??
-          fail(`${i.op}: lists of two shapes`);
+        // The read of a tuple cell on GLSL: its four bytes.
+        const r: IRType =
+          i.op === 'arr.get4'
+            ? { lane: 'integer', shape: [4] }
+            : (resultType(found.signature, i.args.map(type), same) ??
+              fail(`${i.op}: lists of two shapes`));
         if (!equal(type(i.out), r))
           fail(`${i.op} v${i.out}: the result is not ${typeToString(r)}`);
         return;

@@ -442,8 +442,10 @@ export const OPERATORS: readonly OperatorRow[] = Object.freeze([
   // `ArrayUse.makers`). Every operation that reads or writes the storage or
   // the count, and every construction, is effectful (decision C6): it keeps
   // its place, its count and its order. The verifier reads the type of an
-  // array result, not these signatures.
-  row(undefined,      2,          [[['array', R], R, 'arr.get'], [['array', R], I, 'arr.get.int'], [['array', R], R, 'arr.get.r'], [['array', R], I, 'arr.get.int.r']], { ...list, effect: 'effectful' }),
+  // array result, not these signatures. On GLSL a tuple cell is read whole,
+  // one texel of four channels (`arr.get4`, a list of four integers, or
+  // four NaN where the index names no cell).
+  row(undefined,      2,          [[['array', R], R, 'arr.get'], [['array', R], I, 'arr.get.int'], [['array', R], R, 'arr.get.r'], [['array', R], I, 'arr.get.int.r'], [['array', R], I, 'arr.get4']], { ...list, effect: 'effectful' }),
   row(undefined,      3,          [[['array', R, R], R, 'arr.set'], [['array', R, I], I, 'arr.set.int'], [['array', R, R], R, 'arr.set.r'], [['array', R, I], I, 'arr.set.int.r']], { ...list, effect: 'effectful' }),
   row(undefined,      3,          [[['array', R, I], I, 'arr.byte'], [['array', R, I], I, 'arr.byte.r']], { ...list, effect: 'effectful' }),
   row(undefined,      4,          [[['array', R, I, I], I, 'arr.setbyte'], [['array', R, I, I], I, 'arr.setbyte.r']], { ...list, effect: 'effectful' }),

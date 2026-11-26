@@ -70,6 +70,9 @@ export type Length = number | { readonly v: V };
 /** `storage`: a list that the host holds in a storage of that kind (the
  *  option `storage` of `compile()`), set after the passes; it is read only
  *  by `elem` and `at` and passed to calls (`holdStorage()` of `index.ts`).
+ *  On GLSL, an array whose texture is not the one of its cells by default
+ *  (`holdArrays()` of `index.ts`): `isampler2D` for signed integer cells,
+ *  `sampler2D` for cells of `Uint8Array` in a normalized texture.
  *
  *  A value of the lane `record` (shape `[]`) is a record of settled fields
  *  (`README.md`, "Records"): `fields` is the IR type of each field, in
@@ -80,7 +83,7 @@ export type Length = number | { readonly v: V };
 export type IRType = {
   readonly lane: Lane;
   readonly shape: readonly Length[];
-  readonly storage?: 'sampler2D';
+  readonly storage?: 'sampler2D' | 'isampler2D';
   readonly fields?: readonly IRType[];
   readonly marks?: readonly (number | undefined)[];
   readonly nominal?: string;

@@ -731,7 +731,13 @@ unsigned integer framebuffer does not guarantee in OpenGL ES 3.0. The result
 of a pixel function is a tuple of values from 0 to 255: the shader of the
 host divides it by 255 before it writes a normalized framebuffer. The host
 chooses between the two. Tycho's session asked for this choice on 2026-11-25
-and did not check it in a browser; stage 5 checks it.
+and did not check it in a browser. Stage 5 checked it on 2026-11-26
+(`scripts/repros/2026-11-26-array-glsl-texel-read.mjs`, headless Chromium
+with SwiftShader): the shader reads the cells of every format, and an
+`RGBA8` framebuffer is read back as the bytes. An `RGBA8UI` framebuffer is
+not read with `RGBA`, `UNSIGNED_BYTE` (`INVALID_OPERATION`); it is read with
+`RGBA_INTEGER`, `UNSIGNED_INT`, as 32-bit words. The sampler types that the
+code reports carry `highp`, `highp sampler2D` included.
 
 ## 12. Other targets and modes
 

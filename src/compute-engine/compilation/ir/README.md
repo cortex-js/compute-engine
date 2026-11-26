@@ -4006,8 +4006,8 @@ two types"); `admits()` refuses the lane there too.
 ## Arrays
 
 A mutable array of machine cells (`array<T>`, `docs/COMPILATION-MODEL.md`,
-"Arrays") is a value of the lane `array`, on JavaScript in the default mode
-only (`lower-arrays.ts`). Its IR type holds the cell: `IRType.array = { cell,
+"Arrays") is a value of the lane `array`, on JavaScript in the default mode,
+and read as an input on GLSL (`lower-arrays.ts`). Its IR type holds the cell: `IRType.array = { cell,
 type, lane, tuple? }`, the storage kind of `arrayStorageKind()`, the lane of a
 cell (`integer` or `real`) and, for a tuple cell, its tag and field names. An
 array has no length in its type: it is one shape whatever its count.
@@ -4057,6 +4057,35 @@ The scan `callbackScan()` declines a read or a store in the body of a
 function literal that is an operand or a value. `absent()` declines a
 discharge of a record of a nominal type that is a tuple cell. The entry plan
 of such code has `arrays: true`, and `restoreEntryPlan()` refuses it.
+
+On GLSL (`LowerOptions.glsl`) an array is an input of the entry and is read
+only: `lower-arrays.ts` declines every other use (`readOnly()`,
+`heldValue()`), and integer cells whose range is outside ±2^24 (`exact()`).
+A cell of one number is `arr.get` or `arr.get.int` (`.r` for an index on the
+real lane, spelled alike), a tuple cell one `arr.get4` (a list of four
+integers, one texel; the verifier knows its type), an element of it an
+`elem` of that read, and the count `arr.len`. After the passes,
+`holdArrays()` (`index.ts`) gives each array input the texture of its cells
+in `IRType.storage` when it is not the default one (`isampler2D` for signed
+integer cells, `sampler2D` for the names of the option `storage`, bytes in a
+normalized texture) and, to a fixed point, to the parameters of the
+functions it is passed to; it refuses an array that is not a parameter, a
+yield, a read by another operation than an `arr.*`, and a parameter that two
+calls give two textures. The printer spells `<op>.<storage>` as for a list
+in storage: one helper per texture (`_gpu_ir_cell_f`, `_gpu_ir_cell_u`,
+`_gpu_ir_cell_i`, `_gpu_ir_cell_n`, `_gpu_ir_cell4_u`, `_gpu_ir_cell4_n`),
+with the index test of `at` against the uniform `$0_count`. An array
+parameter is declared as its sampler and its count
+(`highp usampler2D A, int A_count`), and a call passes both (`Syntax.call`
+takes the types of the arguments); `GlslResult.parameters` lists the
+sampler, then the count (`{ input: 'A', name: 'A_count', type: 'int',
+count: true }`), in the order of the parameters of `f`. `holdStorage()`
+leaves an array to `holdArrays()` on GLSL only; the JavaScript slice keeps
+its refusal of a `storage` hint on an array. `adapter-glsl.ts` reports
+`lowered` (the sampler: `highp usampler2D`, `highp isampler2D` or
+`highp sampler2D`) and `count` in `freeSymbolTypes`, and declines a constant
+index that is 0 or not an integer, another input spelled as the sampler or
+the count of an array, and a `vars` entry of an array.
 
 ## How to add
 

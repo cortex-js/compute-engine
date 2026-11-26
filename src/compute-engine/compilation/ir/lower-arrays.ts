@@ -18,6 +18,11 @@
  * of a name (a reference of the program, `ArrayUse.refs`), or from
  * `ArrayFrom` (a construction of the engine, `ArrayUse.makers`). What the
  * code does not compile declines, with a message that names the case.
+ *
+ * On GLSL (spec section 11) an array is an input of the program, which the
+ * host binds as a sampler and a count (`holdArrays()` of `index.ts`), and
+ * the code reads it with `At` and `Length` only: a tuple cell is one texel
+ * of four channels (`arr.get4`). Every other use declines.
  */
 
 import type { Type } from '../../../common/type/types.js';
@@ -251,6 +256,9 @@ function valueUse(root: Expression, name: string): boolean {
   return walk(root);
 }
 
+/** The largest magnitude of an integer that a GLSL float holds exactly. */
+const GLSL_EXACT = 16_777_216;
+
 export function arrayLowering(
   cx: Lowering,
   lists: ReturnType<typeof listLowering>,
@@ -258,7 +266,10 @@ export function arrayLowering(
   /** The target holds arrays (JavaScript in the default mode). */
   javascript: boolean,
   /** The places where a read or a store declines (`callbackScan()`). */
-  callbacks: () => { nodes: Set<Expression>; functions: Set<string> }
+  callbacks: () => { nodes: Set<Expression>; functions: Set<string> },
+  /** The target is GLSL in the default mode, where an array is an input
+   *  that the code reads (spec section 11): every other use declines. */
+  glsl = false
 ) {
   const { b, type } = cx;
   const names: {
@@ -284,14 +295,44 @@ export function arrayLowering(
   const cellsOf = (e: Expression, t: Type): ArrayCells | undefined => {
     const cells = arrayCells(t);
     if (cells === undefined) return undefined;
-    if (!javascript)
+    if (!javascript && !glsl)
       decline(
         e,
-        'an array (array<T>), which compiles on javascript in the default mode only (not interval-js, the bigint and the complex modes, GLSL)'
+        'an array (array<T>), which compiles on javascript and glsl in the default mode only (not interval-js, the bigint and the complex modes)'
       );
     if (typeof cells === 'string') decline(e, cells);
+    if (glsl) exact(e, cells);
     used = true;
     return cells;
+  };
+
+  /** On GLSL, where an integer is exact within 2^24, integer cells whose
+   *  declared range is wider decline. */
+  const exact = (e: Expression, cells: ArrayCells): void => {
+    const c = cells.type;
+    if (
+      cells.lane === 'integer' &&
+      typeof c === 'object' &&
+      c.kind === 'numeric' &&
+      !(
+        (c.lower ?? -Infinity) >= -GLSL_EXACT &&
+        (c.upper ?? Infinity) <= GLSL_EXACT
+      )
+    )
+      decline(
+        e,
+        `an array<${cells.cell}> on glsl, where an integer is exact within -16777216 to 16777216 only: declare a narrower range, or a tuple cell of four bytes for a pixel`
+      );
+  };
+
+  /** On GLSL, the decline of `what`, which is not a read of an array
+   *  input. */
+  const readOnly = (e: Expression, what: string): void => {
+    if (glsl)
+      decline(
+        e,
+        `${what} on glsl, where an array is an input of the program that the code reads with At and Length`
+      );
   };
 
   /** A read or a store of the array at `e` in a body where it declines. */
@@ -342,7 +383,19 @@ export function arrayLowering(
         [a, i],
         scalarType(cells.lane)
       );
-    const bytes = [0, 1, 2, 3].map((j) => byte(a, i, j));
+    // On GLSL, the texel of four channels, read once.
+    const texel = glsl
+      ? b.op('arr.get4', [a, i], { lane: 'integer', shape: [4] })
+      : undefined;
+    if (texel !== undefined && cells.tuple.tag === 'Tuple') {
+      cx.tuples.set(texel, 0);
+      return texel;
+    }
+    const bytes = [0, 1, 2, 3].map((j) =>
+      texel === undefined
+        ? byte(a, i, j)
+        : b.op('elem', [texel, b.constant(j, 'integer')], scalarType('integer'))
+    );
     if (cells.tuple.tag === 'Tuple') {
       const v = b.list(bytes, { lane: 'integer', shape: [4] });
       cx.tuples.set(v, 0);
@@ -360,6 +413,7 @@ export function arrayLowering(
 
   /** The list of the cells at the indexes of `s` (from 1). */
   const gather = (e: Fn, a: V, s: Source, filter?: Source): V => {
+    readOnly(e, 'a range or a list as the index of an array');
     const cells = cellsOfValue(e, a);
     if (cells.tuple !== undefined)
       decline(
@@ -469,6 +523,13 @@ export function arrayLowering(
     return type(a).lane === 'array' ? a : undefined;
   };
 
+  /** On GLSL, the decline of the name `name`, whose value is an array. */
+  const heldValue = (e: Expression, name: string): void =>
+    readOnly(
+      e,
+      `the name ${name}, which holds an array value (not an input: a name declared with an array type and no value, or a name of the inputs option)`
+    );
+
   return {
     /** The program's arrays, or `undefined` when it touches none. */
     use: (): ArrayUse | undefined =>
@@ -479,6 +540,8 @@ export function arrayLowering(
       x !== undefined && bindings.has(x),
 
     note: (x: Binding) => bindings.add(x),
+
+    heldValue,
 
     cellsOf,
 
@@ -491,6 +554,7 @@ export function arrayLowering(
       definition: BoxedValueDefinition,
       value: Expression
     ): V => {
+      heldValue(e, name);
       const known = inputs.get(name);
       if (known !== undefined) return known.v;
       const cells = cellsOf(e, value.type.type)!;
@@ -506,6 +570,7 @@ export function arrayLowering(
     /** The array `x` that a value of a name holds: a reference of the
      *  program (`arr.ref`). */
     ref: (x: Expression): V => {
+      readOnly(x, 'an array in the value of a name (a field of a named tuple)');
       const cells = cellsOf(x, x.type.type)!;
       let k = refs.indexOf(x);
       if (k < 0) k = refs.push(x) - 1;
@@ -548,6 +613,15 @@ export function arrayLowering(
           `${typeof k === 'string' ? `the field ${k}` : `the element ${k}`} of a tuple cell of array<${cells.cell}>, which it does not have`
         );
       site(e);
+      if (glsl)
+        return b.op(
+          'elem',
+          [
+            b.op('arr.get4', [a, index(e, x)], { lane: 'integer', shape: [4] }),
+            b.constant(j, 'integer'),
+          ],
+          scalarType('integer')
+        );
       return byte(a, index(e, x), j);
     },
 
@@ -589,6 +663,7 @@ export function arrayLowering(
 
     /** `ListFrom(a)`: a copy of the cells, in the list carrier of the code. */
     listFrom: (e: Fn, a: V): V => {
+      readOnly(e, 'ListFrom of an array');
       const cells = cellsOfValue(e, a);
       if (cells.tuple !== undefined)
         decline(
@@ -608,6 +683,7 @@ export function arrayLowering(
       const target = e.ops[0];
       const a = base(target);
       if (a === undefined) return undefined;
+      readOnly(e, 'a store to a cell of an array');
       const i = index(e, (target as Fn).ops[1]);
       return put(e, a, i, cx.value(e.ops[1])!);
     },
@@ -619,6 +695,7 @@ export function arrayLowering(
       const target = e.ops[0];
       const a = base(target);
       if (a === undefined) return undefined;
+      readOnly(e, 'AddTo of a cell of an array');
       if (cellsOfValue(e, a).tuple !== undefined)
         decline(e, 'AddTo of a tuple cell (a tuple is not a number)');
       const i = index(e, (target as Fn).ops[1]);
@@ -629,6 +706,7 @@ export function arrayLowering(
 
     /** `Swap(a, b)` of two arrays of one cell type. */
     swap: (e: Fn): V => {
+      readOnly(e, 'Swap of two arrays');
       if (e.nops !== 2) decline(e, 'Swap of other than two arrays');
       const [x, y] = e.ops.map((op) => cx.value(op)!);
       const [s, t] = [cellsOfValue(e.ops[0], x), cellsOfValue(e.ops[1], y)];
@@ -645,6 +723,7 @@ export function arrayLowering(
     /** `ArrayFrom(xs, type)`: one call of the engine (`ArrayUse.makers`), of
      *  a list of numbers that the code holds, a `Repeat(v, n)` or an array. */
     from: (e: Fn): V => {
+      readOnly(e, 'ArrayFrom (a construction)');
       const cells = cellsOf(e, e.type.type);
       if (cells === undefined)
         decline(e, `ArrayFrom whose type ${engineTypeToString(e.type.type)} is not an array type`);

@@ -179,6 +179,13 @@ once, or an issue file.
 One line each: the target, the program, the compiled value, the
 interpreter's value. A line is removed when the case declines or is fixed.
 
+- `glsl` (crafted): an array input of more than 16,777,216 cells. The index
+  is a float, exact only to that count: with `A: array<integer<0..255>>` of
+  16,777,218 cells, `At(A, i)` at `i = 16777217` reads the cell 16,777,216;
+  the interpreter gives the cell 16,777,217. The host guarantees the count,
+  and uses JavaScript for a longer array. Not run: it follows from the
+  arithmetic of 32-bit floats.
+
 - `plausible?` — `javascript`, `x: real`: the CDF of a gamma or chi-square
   distribution at a symbolic point compiles as `1 - GammaRegularized(α, x/θ)`,
   which cancels in the lower tail: `CDF(GammaDistribution(2, 1), x)` at
@@ -3352,6 +3359,13 @@ with `P: tuple<real, real>`, `At(P, 3)` declines ("the index 3 of At is
 outside the 2 elements of its list on glsl"), so that a host can key a retry
 on the refusal (`compilation/ir/README.md`, "Options and results").
 
+`At(A, i)` of an array input `A` (`array<T>`, "Arrays" below) follows the
+same rule, with the count of the cells from the uniform `A_count` in place
+of a stated length: the test runs in floats, before the conversion to
+`int`. A constant index that is 0 or not an integer declines ("the index 0
+of At of an array, which names no cell, on glsl"); every other constant
+index gets the run-time test, since the count is known at run time only.
+
 ## Color values
 
 A color VALUE on the JavaScript target is a flat object that carries the color
@@ -3460,7 +3474,8 @@ type lattice.
 Compiled code has no tagged representation of a sum: an input whose type is
 a union of shapes declines (`real | string`: `outside-profile`; R4). Mutable
 boxed objects do not cross into compiled code: a field read and a field
-store of an object decline. A mutable array does ("Arrays" below).
+store of an object decline. A mutable array does on JavaScript, and an
+array input is read on GLSL ("Arrays" below).
 
 ## Arrays
 
@@ -3557,8 +3572,9 @@ list; a host call whose result is an array; a read or a store in the body
 of a function literal that is an operand or a value
 (`map(k => a[k], 1..n)`: write a loop, or take `listFrom(a)`); a discharge
 (`IsMissing`, `Coalesce`, `AssertPresent`) of a value of a declared type that
-is a tuple cell; a list of arrays; an array in a `parallel for`; GLSL,
-`interval-js`, and the `bigint` and `complex` modes. `runAsync()` of such
+is a tuple cell; a list of arrays; an array in a `parallel for`;
+`interval-js`, and the `bigint` and `complex` modes (GLSL reads an input
+only, see "On GLSL" below). `runAsync()` of such
 code runs on the calling thread.
 
 The code is not `shippable`, and `load()` refuses it: it reads or writes
@@ -3576,6 +3592,67 @@ code declines. Declare the type: `let board: array<integer<0..1>> = …`.
 Measured on the M5 Max (`scripts/repros/2026-11-26-array-compiled-store-cost.mts`,
 the box lock held, load average 2.8): 64,000 stores take 0.09 ms, of which
 the version increment is 0.02 ms.
+
+**On GLSL.** A fragment shader has no store to a cell, so an array is an
+input that the code reads: a name declared with an array type and no value,
+or a name of the option `inputs`. `At(A, i)` and `Length(A)` compile, and so
+does an array given to a user function as an argument (the function takes
+the sampler and the count as two parameters).
+
+```js
+ce.declare('A', 'array<integer<0..255>>');
+ce.declare('i', 'integer');
+compile(ce.box(['At', 'A', 'i']), { to: 'glsl' }).code;
+// float v2 = (i == floor(i) && i != 0.0 && abs(i) <= float(A_count) ? _gpu_ir_cell_u(A, i > 0.0 ? int(i) - 1 : A_count + int(i)) : uintBitsToFloat(0x7fc00000u));
+// return v2;
+```
+
+The host binds two uniforms for `A`:
+
+- a sampler named `A` (`freeSymbolTypes.A.lowered`): `highp usampler2D` for
+  `Uint8Array`, `Uint16Array` and `Uint32Array` cells and for a tuple cell of
+  four bytes, `highp isampler2D` for the signed ones, `highp sampler2D` for
+  `real` cells. The texture holds one cell in each texel, row by row from
+  texel (0, 0), read at level 0 with no filtering: the red channel for a cell
+  of one number (`R8UI`, `R16UI`, `R32UI`, `R8I`, `R16I`, `R32I`, `R32F`),
+  the four channels for a tuple cell (`RGBA8UI`), whose read is one fetch and
+  one index test and gives a `vec4`. The width is read in the shader
+  (`textureSize`), so the host chooses it; the host pads the last row, and
+  uploads 8-bit and 16-bit cells with `UNPACK_ALIGNMENT` 1 and `real` cells
+  converted to a `Float32Array`. It uploads again when `version` changed.
+- an `int` named `A_count` (`freeSymbolTypes.A.count`), the count of the
+  cells. Another input spelled `A` or `A_count` (by its name or by the first
+  name of its `vars` text) declines: with `vars: { x: 'A_count' }`,
+  `At(A, i) + x` gives "the input x, spelled A_count, which is the name of
+  the count of the array A, on glsl".
+
+With `storage: { A: 'sampler2D' }`, an array of `Uint8Array` cells (bytes,
+or the tuple of four bytes) is read from a normalized texture (`R8`,
+`RGBA8`): the cell is `floor(255 × channel + 0.5)`, which is exact. A
+framebuffer of `RGBA8` is read back as the bytes of the cells (`readPixels`
+with `RGBA`, `UNSIGNED_BYTE`); an `RGBA8UI` framebuffer is not: WebGL 2
+refuses that read (`INVALID_OPERATION`) and reads it only with
+`RGBA_INTEGER`, `UNSIGNED_INT`, as 32-bit words
+(`scripts/repros/2026-11-26-array-glsl-texel-read.mjs`, run one time on
+headless Chromium with SwiftShader). A pixel function whose result is a
+tuple of bytes is divided by 255 before it writes a normalized framebuffer.
+
+A cell of an integer type is a float on GLSL, exact within -16,777,216 to
+16,777,216: integer cells whose declared range is wider decline
+(`array<integer<0..4294967295>>`: "an array<integer<0..4294967295>> on glsl,
+where an integer is exact within -16777216 to 16777216 only"), so a pixel
+packed in one number does not compile and a tuple cell of four bytes does.
+A field of a tuple cell of a nominal type (`P[i].g` with
+`P: array<Pixel>`) is an element of the texel; the whole cell of a nominal
+type is a record, which GLSL declines.
+
+These decline on GLSL, each with a message that names it: a name whose value
+is an array, a read with a range or a list as the index, a store, `AddTo` of
+a cell, `Swap`, `ArrayFrom`, `ListFrom`, an array as a value (a result, an
+arm of an `If`, a local assigned in a loop), an array in a record, a `vars`
+entry for an array, another input spelled as the sampler or the count,
+`storage: 'sampler2D'` on cells that are not bytes, a function called with
+arrays in two kinds of texture, and the `complex` mode.
 
 ## Value kinds
 

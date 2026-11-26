@@ -48,8 +48,14 @@ export function isVectorArray(t: IRType): boolean {
 /** `float`, `bool`; a list of 2 to 4 elements is a vector (`vec2`,
  *  `bvec3`: a point of the host), another list an array (`float[5]`), a
  *  list of such vectors an array of vectors (`vec2[3]`); a list in storage
- *  the kind of the storage (`sampler2D`). */
+ *  the kind of the storage (`sampler2D`); an array the sampler of its
+ *  texture (`highp usampler2D` for integer cells and tuple cells,
+ *  `highp sampler2D` for `real` cells, or that of `IRType.storage`). */
 export function typeName(t: IRType): string {
+  if (t.lane === 'array')
+    return `highp ${
+      t.storage ?? (t.array?.lane === 'real' ? 'sampler2D' : 'usampler2D')
+    }`;
   if (t.storage !== undefined) return t.storage;
   if (t.lane === 'color' && t.shape.length === 0) return 'vec3';
   if (t.lane === 'complex' && t.shape.length === 0) return 'vec2';
@@ -66,8 +72,10 @@ export function typeName(t: IRType): string {
   return `${scalar}[${n}]`;
 }
 
-/** A declarator: `float x` or `float x[3]`. */
+/** A declarator: `float x` or `float x[3]`; for an array, its sampler and
+ *  its count (`highp usampler2D A, int A_count`). */
 function declarator(t: IRType, name: string): string {
+  if (t.lane === 'array') return `${typeName(t)} ${name}, int ${name}_count`;
   const [base, length] = typeName(t).split('[');
   return length === undefined ? `${base} ${name}` : `${base} ${name}[${length}`;
 }
@@ -503,6 +511,21 @@ const helperCall = (name: string, n: number) => ({
 const at = (read: (k: string) => string) =>
   `($1 == floor($1) && $1 != 0.0 && abs($1) <= float($#0) ? ${read('$1 > 0.0 ? int($1) - 1 : $#0 + int($1)')} : ${NAN})`;
 
+/** `At` of an array (`$0`, a sampler): the rule of `at`, with the count
+ *  of the cells in the uniform `$0_count`; the texel `k` from 0 read by
+ *  the helper `helper`, of a `float` (`nan` the NaN of its value). */
+const cellAt = (helper: string, nan = NAN) => ({
+  text: `($1 == floor($1) && $1 != 0.0 && abs($1) <= float($0_count) ? ${helper}($0, $1 > 0.0 ? int($1) - 1 : $0_count + int($1)) : ${nan})`,
+  helpers: [helper],
+});
+
+/** The spellings of the read of a cell of an array, of an index on each
+ *  lane (`.r`: the test is the same). */
+const cellReads = (op: string, helper: string) => ({
+  [op]: cellAt(helper),
+  [op.replace(/^arr\.get(\.int)?/, (x) => `${x}.r`)]: cellAt(helper),
+});
+
 export const GLSL: Syntax = deepFreeze({
   ops: {
     ...ARITHMETIC,
@@ -735,6 +758,20 @@ export const GLSL: Syntax = deepFreeze({
       text: at((k) => `_gpu_ir_texel($0, ${k})`),
       helpers: ['_gpu_ir_texel'],
     },
+    // An array input (`holdArrays()` of `index.ts`): a cell is a texel, row
+    // by row from texel (0, 0), the red channel of a cell of one number and
+    // the four channels of a tuple cell; the suffix of an operation is the
+    // texture of its array when it is not the one of its cells (signed
+    // integers in an `isampler2D`, bytes in a normalized `sampler2D`).
+    ...cellReads('arr.get', '_gpu_ir_cell_f'),
+    ...cellReads('arr.get.int', '_gpu_ir_cell_u'),
+    ...cellReads('arr.get.int.isampler2D', '_gpu_ir_cell_i'),
+    ...cellReads('arr.get.int.sampler2D', '_gpu_ir_cell_n'),
+    'arr.get4': cellAt('_gpu_ir_cell4_u', `vec4(${NAN})`),
+    'arr.get4.sampler2D': cellAt('_gpu_ir_cell4_n', `vec4(${NAN})`),
+    'arr.len': 'float($0_count)',
+    'arr.len.isampler2D': 'float($0_count)',
+    'arr.len.sampler2D': 'float($0_count)',
     'rangestep': '($1 >= $0 ? 1.0 : -1.0)',
     ...calls('', ['trunc', 'sign', 'fract', 'atan']),
     // Odd: the builtin loses `x + sqrt(x^2 + 1)` for a negative `x`.
@@ -1847,6 +1884,29 @@ export const GLSL: Syntax = deepFreeze({
   int w = textureSize(v, 0).x;
   return texelFetch(v, ivec2(k % w, k / w), 0).r;
 }`,
+    // The cell `k` (from 0) of an array (README, "Arrays"): `real` cells
+    // (`R32F`), unsigned and signed integer cells (`R8UI` to `R32UI`, `R8I`
+    // to `R32I`), bytes in a normalized texture (`R8`), and a tuple cell of
+    // four bytes (`RGBA8UI`, or the normalized `RGBA8`). A normalized
+    // channel is `byte / 255`, which `floor(255 * c + 0.5)` gives back.
+    ...Object.fromEntries(
+      (
+        [
+          ['_gpu_ir_cell_f', 'float', 'sampler2D', '$.r'],
+          ['_gpu_ir_cell_u', 'float', 'usampler2D', 'float($.r)'],
+          ['_gpu_ir_cell_i', 'float', 'isampler2D', 'float($.r)'],
+          ['_gpu_ir_cell_n', 'float', 'sampler2D', 'floor(255.0 * $.r + 0.5)'],
+          ['_gpu_ir_cell4_u', 'vec4', 'usampler2D', 'vec4($)'],
+          ['_gpu_ir_cell4_n', 'vec4', 'sampler2D', 'floor(255.0 * $ + 0.5)'],
+        ] as const
+      ).map(([name, result, sampler, value]) => [
+        name,
+        `${result} ${name}(highp ${sampler} v, int k) {
+  int w = textureSize(v, 0).x;
+  return ${value.replace('$', 'texelFetch(v, ivec2(k % w, k / w), 0)')};
+}`,
+      ])
+    ),
   },
   regions: {},
   // A complex constant is a `vec2` (re, im).
@@ -1874,7 +1934,13 @@ export const GLSL: Syntax = deepFreeze({
   // A helper is named `_gpu_ir_…` and a user function `_fn_ir_…`: a host
   // that joins two compilations in one shader renames by `_gpu_` and `_fn_`,
   // and the `ir_` keeps them apart from the names of other GLSL code.
-  call: (fn, args) => `_fn_ir_${fn}(${args.join(', ')})`,
+  // An array argument is its sampler and its count.
+  call: (fn, args, types) =>
+    `_fn_ir_${fn}(${args
+      .map((a, k) =>
+        types?.[k]?.lane === 'array' ? `${a}, ${a}_count` : a
+      )
+      .join(', ')})`,
   fn: (name, params, result, body) =>
     [
       `${typeName(result)} _fn_ir_${name}(${params.map((p) => declarator(p.type, p.name)).join(', ')}) {`,
@@ -1887,8 +1953,14 @@ export type GlslResult = {
   /** The helper functions, the other functions and the definition of the
    *  function `f`. */
   readonly code: string;
-  /** The parameters, in order: the input, the GLSL name, the GLSL type. */
-  readonly parameters: { input: string; name: string; type: string }[];
+  /** The parameters, in order: the input, the GLSL name, the GLSL type;
+   *  an array input is its sampler, then its count (`count`, an `int`). */
+  readonly parameters: {
+    input: string;
+    name: string;
+    type: string;
+    count?: true;
+  }[];
   readonly returnType: string;
   readonly printed: Printed;
 };
@@ -1900,14 +1972,20 @@ export function printGlsl(
 ): GlslResult {
   const printed = printProgram(p, syntax, rows);
   const entry = entryOf(p);
-  const parameters = entry.body.params.map((v, k) => ({
-    input: entry.paramNames[k],
-    name: syntax.input(entry.paramNames[k], k),
-    type: typeName(p.types[v]),
-  }));
+  // An array is two parameters, its sampler and its count (`declarator()`).
+  const parameters: GlslResult['parameters'] = entry.body.params.flatMap(
+    (v, k) => {
+      const name = syntax.input(entry.paramNames[k], k);
+      const input = entry.paramNames[k];
+      const own = { input, name, type: typeName(p.types[v]) };
+      return p.types[v].lane === 'array'
+        ? [own, { input, name: `${name}_count`, type: 'int', count: true }]
+        : [own];
+    }
+  );
   const returnType = typeName(entry.results[0]);
   const params = entry.body.params.map((v, k) =>
-    declarator(p.types[v], parameters[k].name)
+    declarator(p.types[v], syntax.input(entry.paramNames[k], k))
   );
   const code = [
     ...printed.helpers,
