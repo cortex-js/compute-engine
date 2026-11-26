@@ -505,15 +505,29 @@ argument of a host function: the host receives the engine's value, the same
 reference as in the interpreter.
 
 A tuple cell compiles: a read is a tuple of the code (an array of four
-numbers), a read of one element (`a[i].r`, `a[i][2]`) is one read of the
-typed array with no tuple built, and a store of a tuple writes its four
-bytes. A tuple that the code builds and stores (`a[i] = Pixel(r, g, b, 255)`)
+numbers), a read of one element (`a[i].r`, and `a[i][2]` for a tuple type
+with no name: a value of a named tuple type is not read by position) is one
+read of the typed array with no tuple built, and a store of a tuple writes
+its four bytes. A tuple that the code builds and stores (`a[i] = Pixel(r, g, b, 255)`)
 allocates nothing.
 
 A user function called by its name reads and writes an array that it takes
 as a parameter or that a name holds, whatever the form of its definition
 (`function set(r, x, y, p) { … }`, `let at = (x, y) => …` called as
 `at(…)`): the helpers `get` and `set` of a prelude compile.
+
+A root function literal whose body ends in a store, or in a loop
+(`t => do { for k in 1..n { screen[k] = t } }`), compiles: its value is
+`Nothing`, which the code gives as `NaN`, as for a body that ends in a call
+of a host function of result `nothing`. This holds for every root function
+literal, with or without an array.
+
+A function that is declared in a program before the global array that it
+writes is bound when that global is initialized by a call of `arrayFrom` or
+is declared with its type. A global given an array by another call
+(`let board = makeBoard(n)`) has no type when the function is checked, and
+the calls of the function are then not bound in a function literal: the
+program declares the type (`let board: array<integer<0..1>> = …`).
 
 ### 10.4 The values
 
@@ -529,7 +543,9 @@ as a parameter or that a name holds, whatever the form of its definition
   for each under "Caveats of compiled code".
 - A value of another lane declines with `lane-mismatch`: a real for integer
   cells, a boolean or a complex number for any cell. An integer for `real`
-  cells compiles.
+  cells compiles. A parameter with no type is a real in compiled code, so a
+  helper that stores its parameter in integer cells declares it:
+  `function set(r: Raster, x: integer, y: integer, p: integer) { … }`.
 - `AddTo(At(a, i), e)` evaluates `i` once, before `e`.
 - The code reads the storage and the length from the array at each use, not
   once for the unit. An exchange of two storages between two uses needs no
@@ -559,7 +575,13 @@ or throws, not at each store.
   (`docs/COMPILATION-MODEL.md`, "Variables that a function assigns", has the
   same decline for a variable). The program writes a loop or takes
   `listFrom(a)`.
-- A list of arrays, and an array in a `parallel for` or in `runAsync()`.
+- A list of arrays, and an array in a `parallel for`. `runAsync()` of code
+  that holds an array runs on the calling thread, with no worker.
+- A discharge (`IsMissing`, `Coalesce`, `AssertPresent`) of a value of a
+  declared type that is a tuple cell (`isMissing(px[i])` with `px` an
+  `array<Pixel>`): the read of such a cell out of range is a tuple of `NaN`,
+  which the interpreter reads as absent and the code does not test. A
+  discharge of a number cell and of a tuple cell with no name compiles.
 - `interval-js` and the `bigint` mode.
 
 The code is not `shippable`, and `load()` refuses it: it holds values of the
@@ -861,7 +883,10 @@ expected type into a call, and invariance refuses the conversion afterwards.
 The interpreter drops a store that changes nothing, as a field store does;
 compiled code does not compare. Alternative: once for each array when the
 unit returns; it needs the set of the arrays stored to, which the code does
-not know statically. Measured in stage 4.
+not know statically. Measured in stage 4 (the M5 Max, the box lock held,
+load average 2.8): a compiled loop of 64,000 stores takes 0.090 ms with the
+increment and 0.069 ms without it, so the increment is 0.021 ms of a frame of
+320 × 200.
 
 **C5. Phase 4 of the objects plan is not on the path.** Taken: section 10.8.
 Alternative of the ruling list: compile object fields on JavaScript with the
@@ -1083,7 +1108,10 @@ interpreter and compiled JavaScript.
     compiled function that reads `cur` is seen by the next call. Each
     decline of section 10.7 declines with its message.
 13. **Compiled speed** (measured, the M5 Max). A compiled loop of 64,000
-    stores to an array parameter takes less than 2 ms, and Tycho's instrument
+    stores to an array parameter takes less than 2 ms (measured in stage 4
+    with `scripts/repros/2026-11-26-array-compiled-store-cost.mts`: 0.09 ms,
+    and 0.09 to 0.11 ms for a frame of 320 × 200 written through a helper
+    `set(r, x, y, p)` on tuple cells of four bytes), and Tycho's instrument
     (`~/dev/tycho/scripts/repros/2026-11-24-epsil-raster-host-call-cost.mts`)
     gets the array route.
 14. **Declines.** Each case of section 10.6 declines with a message that

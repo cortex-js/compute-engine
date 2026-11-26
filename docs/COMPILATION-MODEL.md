@@ -142,6 +142,13 @@ when it compiles. A difference that this list does not name is a defect.
   input left out, or for an error that the static type does not show.
   "Shapes are settled at compile time" (R5) and "Fail closed" below list
   these cases.
+- A store to a cell of a mutable array that the interpreter refuses
+  ("Arrays" below). A store at an index that is 0, not an integer or out of
+  range writes nothing, where the interpreter gives `out-of-range`. A store
+  of a value outside the cell type writes what JavaScript writes in the
+  typed array (a `Uint8Array` cell keeps the low 8 bits of 300), where the
+  interpreter gives `incompatible-type`. Both are errors that the static
+  type does not show, and the code makes no test for them.
 
 **Not allowed.** For a program with inputs of their declared types, a finite
 number that differs from the interpreter's by more than the precision of the
@@ -3416,7 +3423,108 @@ type lattice.
 
 Compiled code has no tagged representation of a sum: an input whose type is
 a union of shapes declines (`real | string`: `outside-profile`; R4). Mutable
-boxed objects do not cross into compiled code.
+boxed objects do not cross into compiled code: a field read and a field
+store of an object decline. A mutable array does ("Arrays" below).
+
+## Arrays
+
+A mutable array (`array<T>`, `docs/plans/2026-11-25-mutable-arrays-spec.md`)
+whose cells are machine cells compiles on `javascript`, in the default mode.
+Machine cells are a bounded integer type (`integer<0..255>`), `real`, and a
+tuple of four bytes; an array of any other cell type declines.
+
+```js
+executeEpsil(ce, `let screen = arrayFrom(repeat(0, 64000), "integer<0..255>")
+let frame = (t: integer) => do {
+  for k in 1..64000 { screen[k] = (k + t) % 256 }
+  hostDraw(screen)
+}`);
+const result = compile(ce.box('frame').evaluate());
+result.arrays;             // ['screen']
+result.run(1);             // writes the cells of the engine's array
+```
+
+**One storage.** The cells exist once: the interpreter, the code and the
+host read and write the same typed array. `run()` copies no cell. The code
+reads the storage and the count from the array at each use, so an exchange
+of two storages (`Swap`, the host's `swapCells()`) between two uses is seen.
+
+**How an array reaches the code.**
+
+- A parameter of the root function literal declared `array<T>`: the host
+  passes the engine's array value. The entry refuses another value with a
+  `TypeError`.
+- A name whose value is an array: `run()` reads the array that the name
+  holds at each call, so an assignment of the name between two calls needs
+  no new compilation. The name is in `arrays`, not in `symbolDeps`.
+- A name whose value holds an array (a named tuple with an array field):
+  the code holds the reference that the value has when it is compiled; the
+  name is in `symbolDeps`.
+- A parameter declared `array<T>` of a user function called by its name, a
+  field of a record, a block local, and the two arms of an `If` of one cell
+  type. An array is one shape whatever its length.
+- `ArrayFrom(xs, type)`: one call into the engine, which makes the engine's
+  array, so the allocation function of the host is asked.
+
+**What compiles.** `At(a, i)`, the store `Assign(At(a, i), v)`,
+`AddTo(At(a, i), e)`, `Swap(a, b)`, `Length(a)`, `ListFrom(a)`, `At` with a
+range, a list of indexes or a list of booleans (cells of one number), and an
+array, or a record or a list literal that holds one, as an argument of a
+function of the host, which receives the engine's value. A tuple cell is read
+as a record of its type (`px[i].g` is one read of a byte) and written from a
+tuple that the code builds, with no allocation.
+
+**The values.**
+
+- A read gives the interpreter's value for every index: from 1, from the
+  end when negative, `NaN` for an index that is 0, not an integer or out of
+  range. The code makes no range test: a read outside the cells of a typed
+  array is `undefined`, which it converts to a number.
+- A store maps a negative index from the end and makes no other test (see
+  "Caveats of compiled code"). An index on the real lane is tested for an
+  integer, since `n + i` can round to one.
+- A value of another lane declines with `lane-mismatch`: a real for integer
+  cells, a boolean or a complex number. A parameter with no type is a real,
+  so a helper that stores its parameter in integer cells declares it
+  (`p: integer`).
+- Each store increments the version of its array. A unit that stores
+  registers one state event before each call of a function of the host and
+  when `run()` returns or throws.
+
+A root function literal whose body ends in a store or in a loop
+(`t => do { for k in 1..n { screen[k] = t } }`) compiles, and `run()` gives
+`NaN`, the value `Nothing`, as for a body that ends in an assignment of a
+variable of the engine or in a call of a host function of result `nothing`.
+This holds with no array too (`n => do { for k in 1..n { hostDraw(k) } }`).
+The loop or the store is the body or the last statement of its block: a
+body that ends in an `If` whose arm is a loop
+(`do { if t > 1 { for … } }`) declines.
+
+**These decline:** an array of expression cells, and a value typed bare
+`array`; an array as the result of the code, alone or in a record or a
+list; a host call whose result is an array; a read or a store in the body
+of a function literal that is an operand or a value
+(`map(k => a[k], 1..n)`: write a loop, or take `listFrom(a)`); a discharge
+(`IsMissing`, `Coalesce`, `AssertPresent`) of a value of a declared type that
+is a tuple cell; a list of arrays; an array in a `parallel for`; GLSL,
+`interval-js`, and the `bigint` and `complex` modes. `runAsync()` of such
+code runs on the calling thread.
+
+The code is not `shippable`, and `load()` refuses it: it reads or writes
+values of the engine. The engine's own compilations (`Map`, the quadrature)
+interpret a function that reads or writes an array.
+
+A function declared before a global array that it writes
+(`function step() { board[k] = 1 }` above `let board = arrayFrom(…)`) is
+bound when the global is initialized by a call of `arrayFrom` or is declared
+with its type. A global given an array by another call
+(`let board = makeBoard(n)`) has no type when the function is checked: the
+calls of the function are then not bound in a function literal, and the
+code declines. Declare the type: `let board: array<integer<0..1>> = …`.
+
+Measured on the M5 Max (`scripts/repros/2026-11-26-array-compiled-store-cost.mts`,
+the box lock held, load average 2.8): 64,000 stores take 0.09 ms, of which
+the version increment is 0.02 ms.
 
 ## Value kinds
 

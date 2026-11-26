@@ -83,6 +83,9 @@ describe('IR slice: GLSL text', () => {
       'rows.row', 'rows.rowlen', 'rows.rowlen.nan',
       // A record and its `Nothing` field (CE-1652).
       'field', 'nothing',
+      // The array lane: the cells of a mutable array are read and written
+      // on JavaScript only.
+      ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('arr.')),
       // The string lane (CE-1530), and `ColorToString` (CE-1548).
       ...OPERATORS.flatMap((r) => r.signatures.map(([, , op]) => op)).filter((op) => op.startsWith('text.') || op.startsWith('colortostring.')),
       ...Object.keys(REAL_FUNCTIONS).filter((f) => !['fract', 'atan2', 'root', 'coth', 'gcd', 'fresnelc', 'fresnels', 'sinc', 'chop',

@@ -4339,6 +4339,47 @@ export function closedLiteralType(
 }
 
 /**
+ * The type of the initial value `value` (not canonical) when it is a call
+ * of the library `ArrayFrom`, which makes an array whatever its operands
+ * are: `array<T>` when the cell type operand is a string that names the
+ * type `T`, else `array`. `undefined` for any other value, and when a
+ * statement of `ops` declares the name `ArrayFrom`.
+ *
+ * The function statements of a program are canonicalized before its `let`
+ * initializers, and a body that stores to a cell of the array that a `let`
+ * holds (`a[2] = 1`) is judged with the type of the hoisted binding: with
+ * no type, the store may be the element write of a list, which needs the
+ * `scope` effect (`cellStoreLabels()`, `effects-of.ts`), so the clause is
+ * not installed at canonicalization and the calls canonicalized before the
+ * statement runs have no definition.
+ */
+function arrayInitializerType(
+  ce: ComputeEngine,
+  value: Expression,
+  ops: ReadonlyArray<Expression>
+): Type | undefined {
+  if (!isFunction(value, 'ArrayFrom') || value.nops < 1 || value.nops > 2)
+    return undefined;
+  if (!resolvesToSystemBinding(ce, 'ArrayFrom')) return undefined;
+  if (
+    ops.some((statement) => {
+      const op = typedStatement(statement);
+      return isFunction(op) && sym(op.op1) === 'ArrayFrom';
+    })
+  )
+    return undefined;
+  const cell = value.ops[1];
+  if (cell === undefined || !isString(cell)) return 'array';
+  try {
+    const parsed = parseType(cell.string, ce._typeResolver);
+    if (isValidType(parsed)) return { kind: 'array', elements: parsed };
+  } catch {
+    // Not a type: the `ArrayFrom` canonical handler reports it.
+  }
+  return 'array';
+}
+
+/**
  * The names that the `Declare` statements of the statement list `ops`
  * introduce, read without canonicalizing the statements, with the type of
  * each one when the statement states it.
@@ -4501,7 +4542,8 @@ export function staticDeclarations(
           const literalType =
             program && isFunction(valueOp, 'Function')
               ? 'function'
-              : closedLiteralType(ce, valueOp);
+              : (closedLiteralType(ce, valueOp) ??
+                arrayInitializerType(ce, valueOp, ops));
           if (literalType !== undefined)
             declaredTypes.set(nameExpr.symbol, literalType);
           if (isFunction(valueOp, 'Function'))

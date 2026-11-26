@@ -59,7 +59,8 @@ import { realPowerReconstructionDigits } from '../../numerics/real-power.js';
 import { ALL_PASSES } from './passes.js';
 import { Decline, UntypedInputs } from './lower-context.js';
 import { compileSlice, type Extension, type Warning } from './index.js';
-import { runtimeOf, type JavaScriptResult } from './print-js.js';
+import { arrayNote, runtimeOf, type JavaScriptResult } from './print-js.js';
+import { arrayEntryCheck } from './lower-arrays.js';
 import type { Outline } from './outline.js';
 import {
   argumentIndex,
@@ -271,6 +272,14 @@ function complexLike(t: IRType): boolean {
   );
 }
 
+/** The error of a batch of code that reads or writes an array of the
+ *  engine (`lower-arrays.ts`): a batch shares no array of the engine. */
+function arrayBroadcastError(): Error {
+  return new TypeError(
+    'Code that reads or writes an array of the engine cannot be broadcast: call `run()` for each value.'
+  );
+}
+
 /** The error of a batch of code whose result is a record (README,
  *  "Records"): a batch writes numbers only. */
 function recordBroadcastError(): Error {
@@ -301,6 +310,8 @@ export function runnerLowered(
         ? p.types[entry.body.params[k]]
         : scalarType(reads.get(name) ?? 'real');
     if (t.shape.length > 0) return isTupleShapedType(type) ? 'point' : 'array';
+    // The engine's array (`lower-arrays.ts`), not the array of a list.
+    if (t.lane === 'array') return 'mutable-array';
     if (t.lane === 'real' || t.lane === 'integer')
       return interval ? 'interval' : 'number';
     return t.lane;
@@ -539,11 +550,18 @@ function compileIr(
       'a record of fields named re and im as the result, which the result convention reads as a complex number'
     );
   const literal = entry.literal === true;
+  // The names whose value is an array, which `run()` gives the code from
+  // the engine at each call (`ArrayUse.names`): not inputs of the host.
+  const arrays = p.arrays;
+  const arrayNames = new Set((arrays?.names ?? []).map((x) => x.name));
   // A tuple read part by part is one input, at its first part.
   const inputs = entryInputs(
     p,
     options,
-    (k) => !entry.lengthOf[k] && (entry.partOf?.[k] ?? 0) === 0
+    (k) =>
+      !entry.lengthOf[k] &&
+      (entry.partOf?.[k] ?? 0) === 0 &&
+      !arrayNames.has(entry.paramNames[k])
   );
 
   // The entry plan of a loader of stored code (`checkEntry()` of
@@ -564,6 +582,10 @@ function compileIr(
     booleans: [] as Key[],
     bigints: [] as Key[],
     bigintLists: [] as Key[],
+    // An array parameter or input: the engine's array of its cells
+    // (`arrayEntryCheck()`). The stored plan of code that uses an array
+    // (`arrays: true` below) is not loaded.
+    kinds: new Map<Key, { label: string; check: (x: unknown) => boolean }>(),
   };
   const bigint = mode === 'bigint';
   const checks = options?.entryChecks !== false;
@@ -581,6 +603,18 @@ function compileIr(
     const i = argumentIndex(entry, k);
     const key = literal ? i : name;
     if (entry.lengthOf[k]) return;
+    if (t.lane === 'array') {
+      if (arrayNames.has(name)) return;
+      if (checks)
+        plan.kinds.set(key, {
+          label: literal ? `argument ${i + 1}` : `"${name}"`,
+          check: arrayEntryCheck(
+            t.array!,
+            literal ? `argument ${i + 1}` : `"${name}"`
+          ),
+        });
+      return;
+    }
     // A tuple read part by part (`partOf`) is an array input, checked once,
     // at its first part; a string part is checked by its read (`text.in`).
     const part = entry.partOf?.[k];
@@ -613,7 +647,6 @@ function compileIr(
   });
   const entryPlan = plan as EntryPlan;
   const batchPlan = { ...plan, lists: shared } as EntryPlan;
-  const f = slice.run as (...args: unknown[]) => unknown;
   // The construction of `load()`: the entry plan, then the result
   // convention of every stored kernel (`normalizeRunResult()`). A call
   // with no input to check skips the check.
@@ -621,8 +654,46 @@ function compileIr(
     plan.real.length +
       plan.complex.length +
       plan.lists.length +
-      plan.bigints.length ===
+      plan.bigints.length +
+      plan.kinds.size ===
     0;
+  const raw = slice.run as (...args: unknown[]) => unknown;
+  // The arrays of the program (`ArrayUse`): the array that each name holds
+  // now, read from its definition at each call and checked as an input of
+  // its cells, given to the code in the inputs object; and, for a unit that
+  // stores, the store epoch and the state event when the call returns or
+  // throws (`arrayNote()`; before each call of the host, `hostCaller()`).
+  const note = arrays?.stores === true ? arrayNote(expr.engine) : undefined;
+  const named = (arrays?.names ?? []).map((x) => ({
+    ...x,
+    check: arrayEntryCheck(x.cells, `The variable "${x.name}"`),
+  }));
+  const f: (...args: unknown[]) => unknown =
+    arrays === undefined
+      ? raw
+      : (...args) => {
+          try {
+            if (named.length === 0) return raw(...args);
+            const given: Record<string, unknown> = {};
+            for (const x of named) {
+              const v = x.definition.value;
+              x.check(v);
+              given[x.name] = v;
+            }
+            if (literal) {
+              const n = argumentIndex(entry, entry.positional ?? 0);
+              return raw(...args.slice(0, n), given);
+            }
+            const vars = args[0];
+            return raw(
+              typeof vars === 'object' && vars !== null
+                ? { ...vars, ...given }
+                : given
+            );
+          } finally {
+            note?.();
+          }
+        };
   const run = literal
     ? (...args: unknown[]) =>
         inDigits(() =>
@@ -653,6 +724,7 @@ function compileIr(
   const shippable =
     assigns.length === 0 &&
     hostCalls.length === 0 &&
+    arrays === undefined &&
     !strings &&
     !rows &&
     !records &&
@@ -683,7 +755,13 @@ function compileIr(
     ...(once === '' ? {} : { preambleOnce: once }),
     reconstructionDigits,
     calling: literal ? 'lambda' : 'expression',
-    entryPlan: storeEntryPlan(entryPlan),
+    // Code that reads or writes an array of the engine (a parameter, a
+    // name, a reference, a construction), whatever `entryChecks` is: the
+    // loaders refuse it (`restoreEntryPlan()`).
+    entryPlan: {
+      ...storeEntryPlan(entryPlan),
+      ...(arrays !== undefined ? { arrays: true as const } : {}),
+    },
     run: (assigns.length > 0
       ? assigningRun(
           expr,
@@ -697,6 +775,7 @@ function compileIr(
     freeSymbolTypes: report.freeSymbolTypes,
     ...(assigns.length > 0 ? { assigns: assigns.map((x) => x.name) } : {}),
     ...(hostCalls.length > 0 ? { hostCalls } : {}),
+    ...(arrays !== undefined ? { arrays: [...arrayNames] } : {}),
     unsupported: [],
     mode,
     ...(strings ? { strings } : {}),
@@ -714,6 +793,7 @@ function compileIr(
   const outputs = entry.tuple ? 1 : broadcastStrideOfType(expr.type.type);
   if (outputs > 1) result.broadcastOutputs = outputs;
   const inFrame = <T>(g: () => T): T => {
+    if (arrays !== undefined) throw arrayBroadcastError();
     if (bigint) throw bigintBroadcastError();
     if (strings) throw stringBroadcastError();
     if (rows) throw rowsBroadcastError();
@@ -751,7 +831,9 @@ function compileIr(
       ),
     workers: () => engine.workers,
   };
-  result.broadcastAsync = bigint
+  result.broadcastAsync = arrays !== undefined
+    ? () => Promise.reject(arrayBroadcastError())
+    : bigint
     ? () => Promise.reject(bigintBroadcastError())
     : strings
       ? () => Promise.reject(stringBroadcastError())
@@ -761,7 +843,7 @@ function compileIr(
           ? () => Promise.reject(recordBroadcastError())
           : makeBroadcastAsync(asyncSpec);
   result.willUsePool =
-    bigint || strings || rows || records
+    bigint || strings || rows || records || arrays !== undefined
       ? () => false
       : makeWillUsePool(asyncSpec);
   // The pool loops (`outline()`): each worker program as a stored lambda,

@@ -537,3 +537,84 @@ for x in 1..3 { cur[cell(x, 2)] = 1 }`);
     }
   });
 });
+
+describe('A CALL OF A FUNCTION THAT STORES TO A CELL', () => {
+  // The function statements of a program are canonicalized before its `let`
+  // initializers. The hoisted binding of `a` has the type of an `arrayFrom`
+  // initializer, so the store in the body is judged as the store of a cell
+  // (`state`), the clause is installed at canonicalization, and the call in
+  // the function literal `t` is bound to it.
+
+  /** Whether the call of `name` in the value that `t` holds has an
+   * operator definition, and the diagnostics of the program. */
+  function callBound(source: string, name = 'z'): [boolean, unknown[]] {
+    const result = executeEpsil(ce, source);
+    const find = (e: Expression | undefined): Expression | undefined => {
+      if (e === undefined) return undefined;
+      if (e.operator === name) return e;
+      for (const op of e.ops ?? []) {
+        const found = find(op);
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+    const def = ce.lookupDefinition('t');
+    const stored =
+      def !== undefined && 'value' in def ? def.value.value : undefined;
+    const call = find(stored);
+    expect(call).toBeDefined();
+    return [call?.operatorDefinition !== undefined, result.diagnostics];
+  }
+
+  const literal = 'let t = (u: real) => do { z(); 1 }';
+  const grid = 'let a = arrayFrom(repeat(0, 25), "integer<0..1>")';
+
+  test.each([
+    ['a function of no argument', `${grid}\nfunction z() { a[2] = 1 }\n${literal}`],
+    [
+      'a function of one argument',
+      `${grid}\nfunction z(k: integer) { a[k] = 1 }\nlet t = (u: real) => do { z(2); 1 }`,
+    ],
+    ['a compound assignment', `${grid}\nfunction z() { a[2] += 1 }\n${literal}`],
+    [
+      'an array of no cell type operand',
+      `let a = arrayFrom(repeat(0, 3))\nfunction z() { a[2] = 1 }\n${literal}`,
+    ],
+    [
+      'swap',
+      `${grid}\nlet b = arrayFrom(repeat(1, 25), "integer<0..1>")\nfunction z() { swap(a, b) }\n${literal}`,
+    ],
+    [
+      'a store through a field',
+      `type P = object{pixels: array<integer>}\nlet p = P(pixels: arrayFrom([1, 2, 3], "integer"))\nfunction z() { p.pixels[2] = 7 }\n${literal}`,
+    ],
+    [
+      'a store to a field of an object',
+      `type P = object{x: integer}\nlet p = P(x: 1)\nfunction z() { p.x = 5 }\n${literal}`,
+    ],
+    [
+      'a write of a declared scope',
+      `let s: real = 0\nfunction z() scope { s = s + 1 }\n${literal}`,
+    ],
+    ['print', `function z() { print("x") }\n${literal}`],
+  ])('%s', (_, source) => {
+    expect(callBound(source)).toEqual([true, []]);
+  });
+
+  test('the store runs when the literal is called', () => {
+    expect(
+      show(`${grid}\nfunction z(k: integer) { a[k] = 1 }
+let t = (u: real) => do { z(3); 1 }
+t(0)
+listFrom(a[1..4])`)
+    ).toBe('[0,0,1,0]');
+  });
+
+  test('an element write of a list still needs the scope effect', () => {
+    const result = executeEpsil(
+      ce,
+      `let a = [0, 0, 0]\nfunction z() { a[2] = 1 }\n${literal}`
+    );
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+  });
+});

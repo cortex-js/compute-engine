@@ -38,6 +38,7 @@ import {
   type V,
 } from './ir.js';
 import { functionEffects, type Effect } from './effects.js';
+import { arrayCells } from './lower-arrays.js';
 import {
   coversListed,
   decline,
@@ -464,6 +465,10 @@ function signatureTypes(
         element,
         ...(isFreeMatrix(t) ? { width: true } : {}),
       };
+    // An array type: the parameter takes an array of those cells
+    // (`held()`; `lower-arrays.ts`).
+    if (arrayCells(t) !== undefined)
+      return { lane: 'real' as const, shape: [], array: t };
     const list = tupleOrInputType(t);
     const s = inputType(t, 'real', true);
     const scalar = s?.shape.length === 0;
@@ -837,6 +842,21 @@ export function functionLowering(
   ): IRType | undefined => {
     if (v === undefined) return undefined;
     const t = type(v);
+    // A parameter of an array type takes an array of its cells only; one of
+    // no stated type or of type `any` takes any array (`lower-arrays.ts`).
+    if ('array' in p && p.array !== undefined) {
+      const cells = arrayCells(p.array);
+      if (typeof cells === 'string') decline(op ?? cx.root, cells);
+      if (t.lane !== 'array' || t.array?.cell !== cells?.cell)
+        decline(
+          op ?? cx.root,
+          `an argument of type ${typeToString(t)} for a parameter of type ${engineTypeToString(p.array)}`,
+          LANE_MISMATCH
+        );
+      return t;
+    }
+    if (t.lane === 'array')
+      return 'record' in p && p.record === true ? t : undefined;
     const text =
       javascript &&
       t.lane === 'string' &&
@@ -963,6 +983,8 @@ export function functionLowering(
       // or a colour): the parameter has the type of the argument, and the
       // function is lowered once per such type (`laneKey()`).
       const h = held(declared, args?.[i], e.ops[i], `${e.operator}#${i}`);
+      if (h === undefined && 'array' in declared && declared.array)
+        decline(e, `the parameter ${names[i]} of an array type, with no array`);
       if (h !== undefined) {
         // A parameter of a nominal tuple type takes a record of that type
         // only, or of a type that the static type of the argument proves
@@ -2047,14 +2069,16 @@ export function functionLowering(
    *  being lowered reads, as the type `read` (`readAs()` of `lower.ts`), in
    *  the binding `def`: a parameter after its own, which each call passes.
    *  `hidden`: a parameter of the function has the name, so the input is
-   *  not a name of the body's frame (`UserFunction.hidden`). */
+   *  not a name of the body's frame (`UserFunction.hidden`). `given`: the
+   *  IR type of the input, an array that a name holds (`lower-arrays.ts`). */
   const capture = (
     e: Expression,
     name: string,
     t: Type,
     read = t,
     def?: BoxedValueDefinition,
-    hidden = false
+    hidden = false,
+    given?: IRType
   ): V => {
     const fn = pending.get(cx.inFunction!)!;
     const known = hidden ? fn.hidden.get(name) : undefined;
@@ -2069,9 +2093,10 @@ export function functionLowering(
     // `rows`, as a parameter of that type; the entry's input, which each
     // call passes, declines it on a target or in a mode without the lane).
     const ir =
-      !cx.interval && !cx.bigint && cx.rowsElementLane(read) !== undefined
+      given ??
+      (!cx.interval && !cx.bigint && cx.rowsElementLane(read) !== undefined
         ? { lane: 'rows' as const, shape: [] }
-        : tupleOrInputType(isUntyped(read) ? 'unknown' : read, cx.wide);
+        : tupleOrInputType(isUntyped(read) ? 'unknown' : read, cx.wide));
     if (
       ir === undefined ||
       ir.shape.length > 1 ||

@@ -26,6 +26,7 @@ list literal.
 | `lower-lists.ts`               | List sources (an input, a `Range`, a build), reductions, `Max` and `Min`, the list operators |                                          |
 | `lower-functions.ts`           | User functions by definition, signatures, the fixed point of their effects                   |                                          |
 | `lower-matrices.ts`            | The matrix operators ("Matrices"): builds of the elements, or a kernel of the runtime        |                                          |
+| `lower-arrays.ts`             | The mutable arrays ("Arrays"): the cells, the store, `Swap`, `ArrayFrom`, the names that hold one |                                          |
 | `lower-context.ts`             | The types the three lowering files share; `Decline`                                          |                                          |
 | `ir.ts`                        | Types, instructions, functions, the builder, the def-use index                               | Know a target                            |
 | `effects.ts`                   | The effect of an instruction and of a function; the eligibility queries; trace               |                                          |
@@ -4001,6 +4002,51 @@ two types"); `admits()` refuses the lane there too.
   `nothing` field is `null`, a colour keeps its run-time object, and a record
   with no names stays an array. A record result has no batch: `broadcast()` and
   `broadcastAsync()` throw.
+
+## Arrays
+
+A mutable array of machine cells (`array<T>`, `docs/COMPILATION-MODEL.md`,
+"Arrays") is a value of the lane `array`, on JavaScript in the default mode
+only (`lower-arrays.ts`). Its IR type holds the cell: `IRType.array = { cell,
+type, lane, tuple? }`, the storage kind of `arrayStorageKind()`, the lane of a
+cell (`integer` or `real`) and, for a tuple cell, its tag and field names. An
+array has no length in its type: it is one shape whatever its count.
+
+The value is the engine's `BoxedArray`. The code reads its fields at each
+use: `_cells` (the typed array), `_count`, `_version`. So every operation of
+the lane is `effectful` (`arr.get`, `arr.set`, `arr.byte`, `arr.setbyte`,
+`arr.len`, `arr.touch`, `arr.swap`, `arr.from.*`; the forms `.int` for an
+integer cell and `.r` for an index on the real lane, which is tested for an
+integer): they keep their place, count and order, and no pass moves a read
+across a store, a `Swap` or a call of the host. `arr.ref`, the reference of
+an array that a value of the program holds, is pure.
+
+How an array reaches the code (`lower-arrays.ts`, `adapter.ts`):
+
+- a parameter of the root function literal: an entry parameter with a check
+  of the cell type (`arrayEntryCheck`);
+- a name whose value is an array: an input `_.name` that the wrapper of
+  `run()` reads in the engine at each call, from the definition of the name
+  at the compilation, and checks; the name is in the result's `arrays`, not
+  in `captures`;
+- an array inside a value that a name holds (a named tuple): `_SYS.arrays.refs[k]`,
+  bound in `runtimeOf()` as `_SYS.hosts` is, with the name in `captures`;
+- `ArrayFrom`: a call of `_SYS.arrays.make[k]`, which evaluates the engine's
+  `ArrayFrom` with the binding of the node.
+
+A read is `+a._cells[i > 0 ? i - 1 : a._cells.length + i]`: outside the
+cells a typed array gives `undefined`, and the unary plus makes it `NaN`, the
+interpreter's value. A store is `(a._version++, a._cells[…] = v)`, with no
+range test. A tuple cell is four bytes at `4k` to `4k + 3`: the read of one
+field is one `arr.byte`, and the read of the cell is a record of its nominal
+type (or a tuple of the code for a type with no name). A unit that holds a
+store calls `arrayNote` (the store epoch of the engine and one state event)
+before each `call.host<k>` and in a `finally` of `run()`.
+
+The scan `callbackScan()` declines a read or a store in the body of a
+function literal that is an operand or a value. `absent()` declines a
+discharge of a record of a nominal type that is a tuple cell. The entry plan
+of such code has `arrays: true`, and `restoreEntryPlan()` refuses it.
 
 ## How to add
 

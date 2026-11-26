@@ -3102,6 +3102,13 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
 }
 
 function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
+  // The arrays of the engine that the code reads or writes are given by the
+  // `run()` that compiled it, with the store epoch and the state event of
+  // its stores.
+  if (stored.arrays === true)
+    throw new Error(
+      'The stored code reads or writes a mutable array of the engine (array<T>): it cannot be loaded. Run it with the `run()` of the compilation result.'
+    );
   // A binding of a kind type is checked by a function of the host that
   // compiled the code (`KindEntry`), which stored code does not carry: code
   // that needs that check is not run without it.

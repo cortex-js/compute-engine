@@ -65,6 +65,7 @@ import {
   freeBinding,
   isDictionary,
   isFunction,
+  isMutableArray,
   isNumber,
   isString,
   isSymbol,
@@ -84,6 +85,8 @@ import {
 import {
   Builder,
   elementIndex,
+  entryOf,
+  sameFields,
   elementType,
   isSubLane,
   isSubType,
@@ -199,6 +202,13 @@ import { MATRIX_HEADS, matrixLowering } from './lower-matrices.js';
 import { matchLowering } from './lower-match.js';
 import { protocolLowering } from './lower-protocols.js';
 import { recordConstructor, recordLowering } from './lower-records.js';
+import {
+  arrayCells,
+  arrayIRType,
+  arrayLowering,
+  callbackScan,
+  holdsArray,
+} from './lower-arrays.js';
 import { UNTYPED_INPUT_CODE } from '../diagnostics.js';
 
 export { Decline } from './lower-context.js';
@@ -1670,6 +1680,24 @@ function lowerOnce(
    *  that are booleans, complex numbers, strings or colours. */
   const equality = (node: Expression, x: V, y: V): V | undefined => {
     const [s, t] = [type(x), type(y)];
+    // Two values of one named tuple type whose fields are numbers (a pixel,
+    // the read of a tuple cell of an array): the equality of each field.
+    if (
+      s.lane === 'record' &&
+      t.lane === 'record' &&
+      s.nominal !== undefined &&
+      s.nominal === t.nominal &&
+      s.fields?.length === t.fields?.length &&
+      [...s.fields!, ...t.fields!].every(
+        (f) => f.shape.length === 0 && isSubLane(f.lane, 'real')
+      ) &&
+      [...(s.marks ?? []), ...(t.marks ?? [])].every((m) => m === undefined)
+    )
+      return s.fields!
+        .map((_, k) =>
+          apply(node, 'Equal', [records.field(x, k), records.field(y, k)])
+        )
+        .reduce((a, b) => apply(node, 'And', [a, b]));
     if (s.shape.length === 0 || t.shape.length === 0) {
       if (
         s.lane !== 'boolean' ||
@@ -1812,6 +1840,52 @@ function lowerOnce(
       isFunction(root, 'Function') && isLibrary(root) ? root.ops[0] : root;
     while (isFunction(r, 'Block') && r.nops === 1) r = r.ops[0];
     return r === e;
+  };
+
+  /** The value of `x` when it is an array (`lower-arrays.ts`), lowered
+   *  only where its lowering has no effect that a second lowering would
+   *  repeat: `x` of an array type, a name that holds an array or binds
+   *  one, or a field of a record that holds an array. `undefined` for
+   *  another `x`, which the caller lowers as before. */
+  const arrayBase = (x: Expression): V | undefined => {
+    let array = arrayCells(x.type.type) !== undefined;
+    if (!array && isSymbol(x)) {
+      const k = lookup(x.symbol);
+      array =
+        k !== undefined
+          ? type(k.binding.v).lane === 'array'
+          : isMutableArray(own(x));
+    }
+    if (
+      !array &&
+      isFunction(x, 'Field') &&
+      isSymbol(x.ops[0]) &&
+      isString(x.ops[1])
+    ) {
+      const k = lookup(x.ops[0].symbol);
+      const t = k === undefined ? undefined : type(k.binding.v);
+      const j = t?.names?.indexOf(x.ops[1].string) ?? -1;
+      array = j >= 0 && t!.fields![j].lane === 'array';
+    }
+    if (!array) return undefined;
+    const v = value(x)!;
+    return type(v).lane === 'array' ? v : undefined;
+  };
+
+  /** `Field(At(x, i), name)` (`k` a string) or `At(At(x, i), k)` of an array
+   *  `x` of tuple cells: the one byte read (`lower-arrays.ts`); `undefined`
+   *  for another node. */
+  const tupleElement = (
+    e: Expression,
+    cell: Expression,
+    k: number | string | undefined
+  ): V | undefined => {
+    if (!isFunction(cell, 'At') || cell.nops !== 2) return undefined;
+    const a = arrayBase(cell.ops[0]);
+    if (a === undefined || !arrays.tupleCells(a)) return undefined;
+    if (k === undefined)
+      decline(e, 'an element of a tuple cell of an array at an index that is not a constant');
+    return arrays.element(e, a, cell.ops[1], k);
   };
 
   /** `At(l, i)` of a list or a tuple `l` and a scalar index `i`. */
@@ -2079,6 +2153,8 @@ function lowerOnce(
     if (isSymbol(e)) return symbol(e, want);
     if (isString(e)) return b.constant(e.string, 'string');
     if (isDictionary(e)) return records.dictionary(e);
+    // An array that a value of a name holds: a reference of the program.
+    if (isMutableArray(e)) return arrays.ref(e);
     if (!isFunction(e))
       decline(
         e,
@@ -2340,6 +2416,16 @@ function lowerOnce(
         return replaceAt(e);
       case 'At': {
         if (e.nops !== 2) decline(e, 'At with an index for each level');
+        // A mutable array: a cell, or the cells at a range or a list of
+        // indexes; an element of a tuple cell (`lower-arrays.ts`).
+        const element = tupleElement(
+          e,
+          e.ops[0],
+          isNumber(e.ops[1]) && e.ops[1].im === 0 ? e.ops[1].re : undefined
+        );
+        if (element !== undefined) return element;
+        const array = arrayBase(e.ops[0]);
+        if (array !== undefined) return arrays.at(e, array);
         // An element of a list of rows whose lengths can differ (an input
         // or a parameter of the lane `rows`): `At(At(g, i), j)`, NaN where
         // an index is out of range of the list or of its row, as `At` of a
@@ -2870,6 +2956,9 @@ function lowerOnce(
         ]);
       }
       case 'Length': {
+        // The count of the cells of an array.
+        const array = e.nops === 1 ? arrayBase(e.ops[0]) : undefined;
+        if (array !== undefined) return arrays.length(e, array);
         // The length of a list local written in place: no write changes it.
         const owned = isSymbol(e.ops[0]) ? lookup(e.ops[0].symbol) : undefined;
         if (e.nops === 1 && owned?.binding.role === 'list') {
@@ -3052,6 +3141,8 @@ function lowerOnce(
         return lists.build(e, e.ops[1], e.ops[0], false);
       // Every list of the slice is listed: `ListFrom(L)` is `L`.
       case 'ListFrom': {
+        const array = e.nops === 1 ? arrayBase(e.ops[0]) : undefined;
+        if (array !== undefined) return arrays.listFrom(e, array);
         const v = e.nops === 1 ? value(e.ops[0])! : undefined;
         // The arguments of a rest parameter (a record, `IRType.head`), a
         // `Tuple`: the `List` of its fields, a record that only a function
@@ -3599,13 +3690,31 @@ function lowerOnce(
       case 'MatchesType':
         return matches.matchesType(e);
       // `lower-records.ts`.
-      case 'Field':
+      case 'Field': {
         if (e.nops !== 2) break;
+        const element = tupleElement(
+          e,
+          e.ops[0],
+          isString(e.ops[1]) ? e.ops[1].string : undefined
+        );
+        if (element !== undefined) return element;
         return records.named(
           e,
           value(e.ops[0])!,
           isString(e.ops[1]) ? e.ops[1].string : undefined
         );
+      }
+      // The mutable arrays (`lower-arrays.ts`): the exchange of the cells of
+      // two arrays, whose value `Nothing` the code does not read, and a
+      // construction of the engine.
+      case 'Swap': {
+        if (want && !swapPlace(e))
+          decline(e, 'the value of Swap (Nothing) read', POSSIBLE_NOTHING);
+        const v = arrays.swap(e);
+        return want ? v : undefined;
+      }
+      case 'ArrayFrom':
+        return arrays.from(e);
       case 'Match':
         return matches.match(e, want);
       case 'Declare':
@@ -4418,6 +4527,8 @@ function lowerOnce(
       return undefined;
     }
     const known = lookup(name);
+    // A name whose value is an array (`namedArray()`).
+    if (arrays.isNamed(known?.binding)) return known!.binding.v;
     // An input has one type: an occurrence of another type (a body boxed
     // where the name had another declaration) declines.
     if (
@@ -4499,6 +4610,7 @@ function lowerOnce(
     // another name with a value declines; an input is a parameter that
     // each call passes.
     const v = own(e);
+    if (isMutableArray(v)) return namedArray(e, name);
     if (v !== undefined) return captured(e, name, v);
     if (cx.inFunction === undefined) return input(e, name, e.type.type);
     if (
@@ -4531,12 +4643,44 @@ function lowerOnce(
    *  not hide (`capture()`, CE-1502). A positional input of that name at
    *  the entry, another binding (a `vars` name) or a name with a value
    *  declines. */
+  /** A name whose value is an array (spec section 10.2): at the entry, the
+   *  input that `run()` reads from the definition of the name at each call
+   *  (`ArrayUse.names`, not a capture); in a function body, an input of the
+   *  function that each call passes. */
+  const namedArray = (e: Expression, name: string): V => {
+    const h = held(name)!;
+    if (cx.inFunction === undefined)
+      return arrays.named(e, name, h.definition, h.value!);
+    const cells = arrays.cellsOf(e, h.value!.type.type)!;
+    const v = fns.capture(
+      e,
+      name,
+      h.value!.type.type,
+      h.value!.type.type,
+      h.definition,
+      false,
+      { lane: 'array', shape: [], array: cells }
+    );
+    arrays.note(frames[0].names.get(name)!);
+    return v;
+  };
+
   const free = (
     e: Fn,
     name: string,
     t: Type,
     def?: BoxedValueDefinition
   ): V => {
+    // A name whose value is an array, which a function that `e` calls reads.
+    const array = held(name);
+    if (
+      isMutableArray(array?.value) &&
+      (def === undefined || def === array.definition)
+    ) {
+      const own = lookup(name)?.binding;
+      if (own === undefined || arrays.isNamed(own))
+        return own?.v ?? namedArray(e, name);
+    }
     let known = lookup(name)?.binding;
     // At the root, a variable of the engine that the root function literal
     // assigns, in the binding that the function reads: its value here
@@ -4659,6 +4803,7 @@ function lowerOnce(
 
   /** `ir`, the type of an input, is the IR type of the engine type `t`. */
   const sameInput = (ir: IRType, t: Type): boolean => {
+    if (ir.lane === 'array') return arrayIRType(t)?.array?.cell === ir.array?.cell;
     const x = inputIR(t) ?? rowsInput(t);
     return (
       x !== undefined &&
@@ -4694,6 +4839,15 @@ function lowerOnce(
     if (!positional) {
       note(name, t, def);
       given(name, t);
+    }
+    // An array (spec section 10.2): the host gives the engine's array, which
+    // the entry checks (`arrayEntryCheck()`).
+    if (arrayCells(t) !== undefined) {
+      const cells = arrays.cellsOf(e, t)!;
+      const v = b.param(name, { lane: 'array', shape: [], array: cells });
+      if (positional) b.positional += 1;
+      frames[0].names.set(name, { v, role: positional ? 'index' : 'input' });
+      return v;
     }
     const ir = positional
       ? (textInput(t) ?? tupleOrInputType(t, cx.wide) ?? rowsInput(t))
@@ -5614,6 +5768,22 @@ function lowerOnce(
   const absent = (node: Expression, operand: Expression, v: V): V => {
     const t = type(v);
     if (t.lane === 'nothing') decline(node, `${node.operator} of Nothing`);
+    // Out of range, the read of a tuple cell of a nominal type is the
+    // interpreter's tuple of four NaN, which is absent; the record of four
+    // NaN that the code reads is not.
+    // A record of such a type that a user function returns, or that an arm
+    // of an `If` gives, can be that read too: every record of a type that is
+    // a tuple cell declines.
+    if (
+      arrays.recordCell(v) ||
+      (t.lane === 'record' &&
+        (arrays.tupleCellType(operand.type.type) ||
+          arrays.tupleCellNominal(node.engine, t.nominal)))
+    )
+      decline(
+        node,
+        `${node.operator} of a value of a nominal type that is a tuple cell (array<${t.nominal ?? operand.type.toString()}>): the read of such a cell out of range is a tuple of NaN, which compiled code does not test`
+      );
     const nan = (x: V) => apply(node, ofOp('isnan'), [x]);
     // The NaN of `MaxBy` and `MinBy` stands for a form that the interpreter
     // leaves unevaluated, which is not absent.
@@ -5750,6 +5920,10 @@ function lowerOnce(
    *  tuples. */
   const list = (e: Fn, elements: V[]): V => {
     if (elements.length === 0) decline(e, 'an empty list');
+    // An array is one value of the engine, which a list of the code does
+    // not hold (spec section 10.6).
+    if (elements.some((v) => type(v).lane === 'array'))
+      decline(e, 'a list or a tuple of arrays');
     if (elements.some((v) => tuples.get(v) !== tuples.get(elements[0])))
       decline(e, 'a list of tuples and lists');
     let t: IRType | undefined = type(elements[0]);
@@ -6045,6 +6219,20 @@ function lowerOnce(
             rebuilt && !scalarLocal
               ? tupleOrInputType(ce.type(typeName).type)
               : undefined;
+          // A local of an array type: an array of those cells, which a write
+          // replaces with another (`assign()`).
+          if (!scalarLocal && arrayCells(ce.type(typeName).type) !== undefined) {
+            const cells = arrays.cellsOf(s, ce.type(typeName).type)!;
+            const v = cx.value(value)!;
+            if (type(v).array?.cell !== cells.cell)
+              decline(
+                s,
+                `a value of type ${typeToString(type(v))} for a local declared ${typeName}`,
+                LANE_MISMATCH
+              );
+            bindLocal(s, i, name.symbol, v, value, 'unknown', constant);
+            return;
+          }
           if (!scalarLocal && listType === undefined && wholeType === undefined)
             decline(s, `a local of type ${typeName}`);
           // A constant list that a later statement writes declines (the
@@ -6282,7 +6470,9 @@ function lowerOnce(
       const k = b.newValue(scalarType('integer'));
       const params = carried.flatMap((x) => {
         if (x.whole === undefined) {
-          const p = b.newValue(scalarType(x.lane!));
+          const p = b.newValue(
+            x.lane === 'array' ? type(x.v) : scalarType(x.lane!)
+          );
           // A list of lists of run-time length (CE-1736): the lane of its
           // elements is that of the local.
           if (x.rows !== undefined) {
@@ -6813,6 +7003,11 @@ function lowerOnce(
   const assign = (e: Fn, want: boolean): V | undefined => {
     const name = e.ops[0];
     if (isFunction(name, 'Tuple')) return parallelAssign(e, name, want);
+    // `Assign(At(x, i), v)`: the store of a cell of an array.
+    if (isFunction(name, 'At')) {
+      const stored = arrays.store(e);
+      if (stored !== undefined) return stored;
+    }
     const owned = isSymbol(name) ? lookup(name.symbol) : undefined;
     if (owned?.binding.role === 'list') {
       // `Assign(L, ReplaceAt(L, i, v))`, the only write of `L` that
@@ -6876,6 +7071,18 @@ function lowerOnce(
       // (`wholeOnly()`): a statement gives none.
       return want ? x : undefined;
     }
+    // A local that holds an array: another array of the same cells.
+    if (binding.lane === 'array') {
+      const x = value(e.ops[1])!;
+      if (!sameFields(type(x), type(binding.v)))
+        decline(
+          e,
+          `a value of type ${typeToString(type(x))} written to a local that holds an ${typeToString(type(binding.v))}`,
+          LANE_MISMATCH
+        );
+      binding.v = x;
+      return x;
+    }
     // The rows of `Chunk` or `Partition` are the result only.
     if (binding.lane === 'rows')
       decline(
@@ -6925,6 +7132,11 @@ function lowerOnce(
       const owned = isSymbol(target.ops[0])
         ? lookup(target.ops[0].symbol)
         : undefined;
+      // A cell of an array (`lower-arrays.ts`).
+      if (owned?.binding.whole === undefined && owned?.binding.role !== 'list') {
+        const stored = arrays.addTo(e);
+        if (stored !== undefined) return stored;
+      }
       // A list local written whole (a list variable of the engine that the
       // function assigns, CE-1662): `Assign(L, ReplaceAt(L, i, L[i] + v))`,
       // `i` evaluated once, before `v`, as the interpreter does. A write
@@ -7615,6 +7827,17 @@ function lowerOnce(
   // The program reads or makes an enclosure (`Program.valueKinds`).
   let enclosure = false;
   const enclosures = enclosureLowering(cx, () => (enclosure = true));
+  // The mutable arrays of the engine (`lower-arrays.ts`): JavaScript in the
+  // default mode. The function literals that are operands, where a read or
+  // a store declines, are found at the first read or store.
+  let callbackSites: ReturnType<typeof callbackScan> | undefined;
+  const arrays = arrayLowering(
+    cx,
+    lists,
+    records,
+    javascript && cx.wide !== 'complex',
+    () => (callbackSites ??= callbackScan(root, userBinding, namedUser))
+  );
 
   /** The result of the entry, `v` or its parts: a row at an index known at
    *  run time declines, since out of range it is a list of no element where
@@ -7638,12 +7861,25 @@ function lowerOnce(
       );
     const names = [...seen].filter((name) => !typed.has(name));
     if (names.length > 0) throw new UntypedInputs(names);
+    const used = arrays.use();
+    if (used !== undefined) {
+      // An array is a reference of the engine, which a pool loop and the
+      // result of the code do not hold (spec section 10.6).
+      if (parallel !== undefined)
+        decline(parallel, 'an array in a parallel for');
+      if (entryOf(p).results.some(holdsArray))
+        decline(
+          root,
+          'an array as the result of the compiled code, alone or in a record or a list (the result holds no reference of the engine)'
+        );
+    }
     return {
       ...p,
       inputs,
       ...(enclosure ? { valueKinds: ['enclosure'] } : {}),
       ...(assigns.length > 0 ? { assigns } : {}),
       ...(hosts.length > 0 ? { hosts } : {}),
+      ...(used !== undefined ? { arrays: used } : {}),
     };
   };
   // The names of the scope of the compilation that a root function literal
@@ -7671,6 +7907,24 @@ function lowerOnce(
     );
   };
 
+  /** Whether the value `Nothing` of `Swap(a, b)` (`x`) is read only where
+   *  the code does not compute with it: a place of `nothingPlace()`, or the
+   *  value of the body of a function literal (a user function of no declared
+   *  result whose body ends in the exchange, `let step = () => do { …;
+   *  swap(cur, next) }`), where the code gives NaN, which the caveats admit
+   *  for `Nothing`. The body of a user function has no reader in the
+   *  program. */
+  const swapPlace = (x: Expression): boolean => {
+    const places = readers.get(x) ?? [];
+    if (places.length === 0) return cx.inFunction !== undefined && x !== root;
+    return places.every(
+      ([r, i]) =>
+        (r.operator === 'Function' && i === 0) ||
+        (r.operator === 'Block' && i === r.nops - 1 && swapPlace(r)) ||
+        (r.operator === 'Typed' && i === 0 && swapPlace(r))
+    );
+  };
+
   /** Why a value of the IR type `t` (of the tuple mark `mark`) cannot be
    *  the argument of a function of the host, or `undefined`: a scalar of
    *  the lane `real`, `integer`, `boolean` or `string`; on JavaScript with
@@ -7689,6 +7943,8 @@ function lowerOnce(
     if (t.shape.length === 0 && mark === undefined && scalars.includes(t.lane))
       return undefined;
     if (!javascript) return 'not a real, an integer, a boolean or a string';
+    // An array of the engine: the host receives the same reference.
+    if (t.lane === 'array') return undefined;
     if (t.lane === 'record') {
       if (t.nominal === undefined && t.head === undefined)
         return 'a record of no names (a Tuple or a List of several types, which the code does not tell apart)';
@@ -7947,6 +8203,14 @@ function lowerOnce(
       const targets = isFunction(target, 'Tuple') ? target.ops : [target];
       for (const t of targets) {
         if (!isSymbol(t) || inner.has(t.symbol)) continue;
+        // `AddTo(At(a, i), v)` of a name that holds an array stores to a
+        // cell: the name is not assigned.
+        if (
+          x.operator === 'AddTo' &&
+          target !== x.ops[0] &&
+          isMutableArray(held(t.symbol)?.value)
+        )
+          continue;
         if (helper !== undefined && !engineName(t, scope)) continue;
         const why = (reason: string) =>
           decline(x, `an assignment of ${t.symbol}, ${reason}`);
@@ -8138,9 +8402,25 @@ function lowerOnce(
         input(p, name, declared, true);
       });
       const states = assignedNames(root);
+      // A body that is a Loop, or a block that ends in a Loop, an assignment
+      // or a declaration, is `Nothing`, which the code gives as NaN
+      // (`nothingPlace()`): `do { s = s + 1 }`, `do { a[k] = t }`,
+      // `do { for k in 1..4 { a[k] = t } }`.
+      const body = root.ops[0];
+      const last = isFunction(body, 'Block') ? body.ops.at(-1) : undefined;
+      const want = !(
+        body.operator === 'Loop' ||
+        ['Assign', 'Declare', 'DefineFunction', 'Loop'].includes(
+          last?.operator ?? ''
+        )
+      );
       // The result is read whole: a list of lists of run-time length is the
       // host's array of arrays (CE-1736).
-      if (states.length === 0) return result(wholeRows(root.ops[0]));
+      if (states.length === 0) {
+        if (want) return result(wholeRows(body));
+        value(body, false);
+        return b.constant(NaN, 'real');
+      }
       // Each name is a local whose value is a positional parameter after
       // the arguments, and the code returns the value of the body and the
       // value of each name after it (`Program.assigns`). The stored value
@@ -8189,13 +8469,6 @@ function lowerOnce(
       }
       assigns = states;
       const hidden = Object.fromEntries(states.map((s) => [s.name, true]));
-      // A body that ends in an assignment is `Nothing`, which the code gives
-      // as NaN: `do { s = s + 1 }`.
-      const body = root.ops[0];
-      const last = isFunction(body, 'Block') ? body.ops.at(-1) : undefined;
-      const want = !['Assign', 'Declare', 'DefineFunction'].includes(
-        last?.operator ?? ''
-      );
       const v = withVarsValuesHidden(root, hidden, () =>
         want ? wholeRows(body) : value(body, false)
       );

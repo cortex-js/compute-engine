@@ -104,12 +104,15 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           'rows',
           'record',
           'nothing',
+          'array',
         ].includes(t.lane)
       )
         fail(`v${v}: lane ${t.lane}`);
-      // A record is not an element of a list.
+      // A record is not an element of a list, nor is an array.
       if (t.lane === 'record' && t.shape.length > 0)
         fail(`v${v}: a list of records`);
+      if ((t.lane === 'array') !== (t.array !== undefined) || (t.lane === 'array' && t.shape.length > 0))
+        fail(`v${v}: an array of no cells, or a list of arrays`);
       for (const n of t.shape)
         if (typeof n === 'number' ? !(Number.isInteger(n) && n > 0) : false)
           fail(`v${v}: shape ${JSON.stringify(t.shape)}`);
@@ -198,6 +201,18 @@ export function verify(p: Program, rows: readonly OperatorRow[]): void {
           const r = scalarType(h.result === 'nothing' ? 'real' : h.result);
           if (!equal(type(i.out), r))
             fail(`${i.op} v${i.out}: the result is not ${typeToString(r)}`);
+          return;
+        }
+        // An array (`arr.ref`, a construction): the verifier reads the
+        // cells from its type, which the signature does not state.
+        if (rowOfOp(rows, i.op)?.signature[1] === 'array') {
+          if (type(i.out).lane !== 'array')
+            fail(`${i.op} v${i.out}: the result is not an array`);
+          i.args.forEach((a, k) => {
+            const row = rowOfOp(rows, i.op)!;
+            if (!operandFits(row.row, row.signature[0], k, type(a), isSubLane))
+              fail(`${i.op}: operand ${k} is ${typeToString(type(a))}`);
+          });
           return;
         }
         const found =

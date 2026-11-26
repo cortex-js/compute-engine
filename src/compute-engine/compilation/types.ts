@@ -520,7 +520,9 @@ export type FreeSymbolType = {
    *   `matN` is emitted.
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
-   *   numbers of a fixed width), `color`, `array` (a list), or `function`.
+   *   numbers of a fixed width), `color`, `array` (a list), `mutable-array`
+   *   (the engine's array of an `array<T>` input, a `BoxedArray`), or
+   *   `function`.
    * - `interval-js`: `interval` for a real number (a number or a
    *   `{ lo, hi }` interval), else as for `javascript`.
    *
@@ -792,6 +794,10 @@ export type StoredEntryPlan = {
    * the host. Stored data cannot carry that function, so a runtime refuses to
    * load a plan that lists one. */
   kinds?: (string | number)[];
+  /** The code reads or writes a mutable array of the engine (`array<T>`),
+   * which only the `run()` of the compilation result gives it: a runtime
+   * refuses to load a plan that has the flag. */
+  arrays?: true;
   /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
    * reads an empty array for one as an empty column. */
   booleans?: (string | number)[];
@@ -1303,6 +1309,19 @@ export type CompilationResult<
    * Absent when the code calls no function of the host.
    */
   hostCalls?: string[];
+
+  /**
+   * JavaScript only. Present when the code reads or writes a mutable array
+   * of the engine (`array<T>`): the names whose value is an array, which
+   * `run()` reads from the engine at each call (an assignment of the name
+   * between two calls needs no new compilation), in the order the code
+   * first reads them; empty when the code reaches its arrays otherwise (a
+   * parameter, a field of a value, `ArrayFrom`).
+   *
+   * Such a result is not `shippable`, `load()` refuses it, a batch throws,
+   * and the engine's own compilations interpret such a function.
+   */
+  arrays?: string[];
 
   /**
    * Operator heads in the expression that this target cannot lower — they have

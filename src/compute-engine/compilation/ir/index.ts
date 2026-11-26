@@ -127,6 +127,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
       'rows',
       'record',
       'nothing',
+      'array',
     ],
     rank: Infinity,
     runtimeLengths: true,
@@ -134,7 +135,7 @@ export const TARGETS: Readonly<Record<Target, Profile>> = deepFreeze({
     frames: true,
     recursion: true,
     elementwise: true,
-    scalarLanes: ['rows', 'record', 'nothing'],
+    scalarLanes: ['rows', 'record', 'nothing', 'array'],
     resultOnly: Object.fromEntries(
       ['rows.chunk', 'rows.partition', 'rows.pair'].map((op) => [
         op,
@@ -187,7 +188,7 @@ export function admits(
       return { cause: `${what}: the lane ${t.lane}` };
     if (profile.scalarLanes.includes(t.lane) && t.shape.length > 0)
       return {
-        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : t.lane === 'record' ? 'records' : t.lane === 'nothing' ? 'Nothing' : 'complex numbers'}`,
+        cause: `${what}: a list of ${t.lane === 'color' ? 'colours' : t.lane === 'string' ? 'strings' : t.lane === 'rows' ? 'lists of rows' : t.lane === 'record' ? 'records' : t.lane === 'nothing' ? 'Nothing' : t.lane === 'array' ? 'arrays' : 'complex numbers'}`,
       };
     if (
       t.shape.length > profile.rank &&

@@ -77,6 +77,9 @@ function settledType(d: Type, wide: 'real' | 'complex'): IRType | undefined {
  *  `d`. A list, a tuple and a record do not prove a type here. */
 export function laneProves(t: IRType, marked: boolean, d: Type): boolean {
   if (t.shape.length > 0 || marked) return false;
+  // An array: its type, of its cells (`lower-arrays.ts`).
+  if (t.array !== undefined)
+    return isSubtype({ kind: 'array', elements: t.array.type }, d);
   const lanes: Partial<Record<IRType['lane'], Type>> = {
     string: 'string',
     color: 'color',
