@@ -517,13 +517,24 @@ function listedLazyRows(
  *   total, or a row has a count that is not known, the result is
  *   `undefined`: the operator then stays unevaluated.
  *
- * The result is `xs` itself when `xs` has no lazy row.
+ * An operand that is itself a lazy indexed collection (`Reverse`, `Rest`,
+ * `Take`, `Range`, `Map`, ...) is first listed as the eager `List` of its
+ * elements (`listedLazyOperand()`), and its rows are then listed as above:
+ * the tensor kernels read only an eager `List`.
+ *
+ * The result is `xs` itself when neither `xs` nor a row of it is lazy.
  */
 function rangeRowsAsMatrix(
   ce: ComputeEngine,
   xs: Expression,
   param: Type
 ): Expression | undefined {
+  const operand = xs;
+  xs = listedLazyOperand(ce, xs);
+  const budget = {
+    remaining:
+      MAX_LAZY_SHAPE_ELEMENTS - (xs === operand ? 0 : (smallCount(xs) ?? 0)),
+  };
   if (!isFunction(xs, 'List') || xs.shape.length > 0) return xs;
   if (
     xs.ops.some(
@@ -534,10 +545,37 @@ function rangeRowsAsMatrix(
     )
   )
     return ce.typeError(param, xs.type, xs);
-  const listed = listedLazyRows(ce, xs);
+  const listed = listedLazyRows(ce, xs, budget);
   if (listed === undefined || listed === xs) return listed;
   if (listed.shape.length !== 2) return ce.typeError(param, xs.type, xs);
   return listed;
+}
+
+/**
+ * The operand `xs` as the eager `List` of its elements when it is a finite
+ * lazy indexed collection of at most `MAX_LAZY_SHAPE_ELEMENTS` elements:
+ * `Reverse([1, 3, 4])` gives `[4, 3, 1]`. Otherwise `xs` itself: an eager
+ * value, an infinite collection, a collection whose count is not known, a
+ * collection with no positions (a set), or a larger collection. Each of
+ * these leaves the operator as it was before: the handler reads the operand
+ * as it is.
+ */
+function listedLazyOperand(ce: ComputeEngine, xs: Expression): Expression {
+  if (
+    isFunction(xs, 'List') ||
+    !xs.isLazyCollection ||
+    xs.isIndexedCollection !== true
+  )
+    return xs;
+  const count = smallCount(xs);
+  if (
+    count === undefined ||
+    !Number.isFinite(count) ||
+    count > MAX_LAZY_SHAPE_ELEMENTS ||
+    !isFiniteIndexedCollection(xs)
+  )
+    return xs;
+  return ce.function('List', [...xs.each()]);
 }
 
 /**
@@ -583,7 +621,25 @@ function withRangeRowsListed(def: OperatorDefinition): OperatorDefinition {
           listedOps[i] = listed;
         }
       }
-      return evaluate(listedOps ?? ops, options);
+      if (listedOps === undefined) return evaluate(ops, options);
+      const result = evaluate(listedOps, options);
+      // An application that stays unevaluated holds the operands as they
+      // were written, not their listed copy: with `v: vector<3>`,
+      // `Dot(Reverse([1, 3, 4]), v)` is `MatrixMultiply(Reverse([1, 3, 4]),
+      // v)`, not `MatrixMultiply([4, 3, 1], v)`.
+      if (
+        result === undefined ||
+        !isFunction(result) ||
+        !result.ops.some((x) => listedOps!.includes(x))
+      )
+        return result;
+      return options.engine._fn(
+        result.operator,
+        result.ops.map((x) => {
+          const i = listedOps!.indexOf(x);
+          return i < 0 || listedOps![i] === ops[i] ? x : ops[i];
+        })
+      );
     },
   };
 }

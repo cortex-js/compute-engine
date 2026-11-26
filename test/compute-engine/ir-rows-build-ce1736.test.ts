@@ -349,10 +349,9 @@ describe('CE-1736: what declines', () => {
 });
 
 // Step 4: a table whose rows have one length (`rowWidths`), read by
-// `Transpose`, `MatrixMultiply` and `Trace`. The interpreter leaves these
-// operators of a lazy `Map` unevaluated, so its value is that of the form
-// whose tables and vectors are listed (`ListFrom`); of an empty table it
-// has none.
+// `Transpose`, `MatrixMultiply` and `Trace`, compared with the interpreter's
+// value of the form whose tables and vectors are listed (`ListFrom`); of an
+// empty table it has none.
 ce.declare('m', 'integer');
 const listed = (x: Json) => ['ListFrom', x];
 const same = (x: Json) => x;

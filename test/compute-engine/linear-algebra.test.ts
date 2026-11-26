@@ -3653,6 +3653,118 @@ describe('Dot / Cross', () => {
     );
   });
 
+  // CE-1451: an operand that is a lazy view (`Reverse`, `Rest`, `Take`,
+  // `Range`, `Map`) is listed before the product, as a `Sort` operand is.
+  describe('a lazy view operand is listed (CE-1451)', () => {
+    const L: Expression = ['List', 1, 3, 4];
+    const table: Expression = [
+      'Map',
+      [
+        'Function',
+        ['Map', ['Function', ['Add', 'i', 'j'], 'j'], ['Range', 1, 3]],
+        'i',
+      ],
+      ['Range', 1, 2],
+    ];
+    const square: Expression = [
+      'Map',
+      [
+        'Function',
+        [
+          'Map',
+          ['Function', ['Add', 'i', ['Power', 'j', 2]], 'j'],
+          ['Range', 1, 2],
+        ],
+        'i',
+      ],
+      ['Range', 1, 2],
+    ];
+    test.each([
+      ['Reverse', ['Dot', ['Reverse', L], L], '17'],
+      ['Rest', ['Dot', ['Rest', L], ['List', 1, 2]], '11'],
+      ['Take', ['Dot', ['Take', L, 2], ['List', 1, 2]], '7'],
+      ['Range', ['Dot', ['Range', 1, 3], L], '19'],
+      [
+        'Map',
+        ['Dot', ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], L], L],
+        '52',
+      ],
+      ['Sort', ['Dot', ['Sort', L], L], '26'],
+      [
+        'two views',
+        ['Dot', ['Reverse', L], ['Rest', ['List', 0, 1, 3, 4]]],
+        '17',
+      ],
+      [
+        'a Map table',
+        ['Dot', table, ['Transpose', table]],
+        '[[29,38],[38,50]]',
+      ],
+      [
+        'MatrixMultiply of a Map table',
+        ['MatrixMultiply', table, ['Transpose', table]],
+        '[[29,38],[38,50]]',
+      ],
+      [
+        'Trace of a product of Map tables',
+        ['Trace', ['MatrixMultiply', table, ['Transpose', table]]],
+        '79',
+      ],
+      ['Determinant of a Map table', ['Determinant', square], '-3'],
+      ['Norm of a view', ['Norm', ['Reverse', ['List', 3, 4]]], '5'],
+      [
+        'a view of points',
+        [
+          'Dot',
+          ['Reverse', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+          ['Tuple', 1, 1],
+        ],
+        '[7,3]',
+      ],
+    ] as [string, Expression, string][])('%s', (_, json, value) => {
+      expect(ce.expr(json).evaluate().toString()).toBe(value);
+    });
+
+    it('checks the lengths of a listed view', () => {
+      expect(
+        ce
+          .expr(['Dot', ['Reverse', ['List', 1, 2]], ['List', 1, 2, 3]])
+          .evaluate()
+          .toString()
+      ).toBe('Error("incompatible-dimensions", "2 vs 3")');
+    });
+
+    it('gives the error of a Map table that is not square', () => {
+      expect(ce.expr(['Trace', table]).evaluate().toString()).toBe(
+        'Error("expected-square-matrix", "[[2,3,4],[3,4,5]]")'
+      );
+    });
+
+    it('leaves an infinite or a very large view unevaluated', () => {
+      expect(
+        ce
+          .expr(['Dot', ['Range', 1, 'PositiveInfinity'], ['List', 1, 2]])
+          .evaluate()
+          .toString()
+      ).toBe('MatrixMultiply(Range(1, +oo), [1,2])');
+      expect(
+        ce
+          .expr(['Dot', ['Range', 1, 200000], ['Range', 1, 200000]])
+          .evaluate()
+          .toString()
+      ).toBe('MatrixMultiply(Range(1, 200000), Range(1, 200000))');
+    });
+
+    it('keeps the written operand in an unevaluated application', () => {
+      const engine = new ComputeEngine();
+      engine.declare('v', 'vector<3>');
+      const e = engine.box(['Dot', ['Reverse', L], 'v']);
+      expect(e.evaluate().toString()).toBe(
+        'MatrixMultiply(Reverse([1,3,4]), v)'
+      );
+    });
+  });
+
   it('computes the cross product of two 3-vectors', () => {
     expect(
       ce

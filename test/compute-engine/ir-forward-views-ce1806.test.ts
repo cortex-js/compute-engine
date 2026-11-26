@@ -271,18 +271,18 @@ describe('CE-1806.4 and CE-1806.7: a view of a length known at run time', () => 
 
   test('a loop that reads two views of the same count keeps one list', () => {
     // The loop reads the length of one `listlen`, which refuses the count
-    // once: the second build stays, and refuses it where it was. (The
-    // interpreter leaves `Dot` of two views unevaluated, CE-1451.)
+    // once: the second build stays, and refuses it where it was.
     const ce = new ComputeEngine();
     ce.declare('n', 'integer');
-    const result = compile(
-      ce.box([
-        'Dot',
-        ['Map', square, ['Range', 1, 'n']],
-        ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], ['Range', 1, 'n']],
-      ] as any),
-      { to: 'javascript', fallback: false } as any
-    );
+    const expr = ce.box([
+      'Dot',
+      ['Map', square, ['Range', 1, 'n']],
+      ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], ['Range', 1, 'n']],
+    ] as any);
+    const result = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+    } as any);
     expect(arrays(result.code)).toBe(1);
     expect(loops(result.code)).toBe(2);
     // The sum of `2x^3` over `Range(1, n)`, which counts down from 1.
@@ -291,8 +291,13 @@ describe('CE-1806.4 and CE-1806.7: a view of a length known at run time', () => 
       [1, 2],
       [0, 2],
       [-2, -16],
-    ])
+    ]) {
       expect(result.run!({ n })).toBe(expected);
+      // The interpreter's value (CE-1451).
+      expect(
+        ce.withValues({ n: ce.number(n) } as never, () => expr.evaluate().re)
+      ).toBe(expected);
+    }
     expect(() => result.run!({ n: 2 ** 32 })).toThrow(refused);
   });
 

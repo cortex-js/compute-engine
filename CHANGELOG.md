@@ -181,6 +181,19 @@
 
 ### Resolved Issues
 
+- **The linear-algebra operators evaluate an operand that is a lazy
+  collection** (CE-1451). `Dot`, `MatrixMultiply`, `Trace`, `Determinant`,
+  `Norm` and the other matrix operators left their application unevaluated
+  when an operand was a `Reverse`, `Rest`, `Take`, `Range` or `Map`:
+  `Dot(Reverse([1, 3, 4]), [1, 3, 4])` gave
+  `MatrixMultiply(Reverse([1, 3, 4]), [1, 3, 4])` and now gives `17`, and
+  with `T = Map(i ↦ Map(j ↦ i + j, Range(1, 3)), Range(1, 2))`,
+  `MatrixMultiply(T, Transpose(T))` now gives `[[29, 38], [38, 50]]`. An
+  infinite collection, or one of more than 100,000 elements, still leaves
+  the application unevaluated. A lazy table whose rows have different
+  lengths, or have no end, gives an `incompatible-type` error, as the same
+  table written as a list does.
+
 - **A function that returns a pair, applied to a value whose type says
   nothing about its depth, is typed with a type that holds a ragged result**
   (CE-1290, CE-1514). With `P := a ↦ (a, a)` and `L: list<unknown>`,
