@@ -439,7 +439,14 @@ may be any number, so the result does not take the tier of the other operand
 does not hold a point or a ragged list that comes through such an operand: if
 `f` returns `(1, 2)`, `f(x) + f(y)` is the point `(2, 4)`. This is the rule
 that a use of an unknown symbol follows: the use requires a number of the
-symbol.
+symbol. The result of a signature declared with the result `unknown` is
+computed from the body with a parameter declared `any` read as `unknown`, so
+the signature follows this rule too: with `g: (x: T) -> tuple<T, T>` and
+`h: (v: any) -> unknown` assigned `v ↦ g(v)`, `h` is typed
+`(v: any) -> tuple<unknown, unknown>`, while `h([[1, 2], [3]])` is
+`[[(1, 1), (2, 2)], [(3, 3)]]`. The type of a call is computed from its
+operands and holds that value. Reading the parameter as `any` would type
+`x ↦ x + 1` under `(any) -> unknown` as `(any) -> any`.
 
 The subtype relation does not depend on these rules: a list with dimensions is
 read by its cells, whatever its cell type. A stricter rule, under which every

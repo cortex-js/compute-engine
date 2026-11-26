@@ -3529,7 +3529,7 @@ export function openTriggerBroadcastType(
   // holds a list of any depth in `broadcastable<R>` (`R | list<R>`), and it
   // is kept. The join below is neutral in `unknown`, and it would drop the
   // scalar arm of such a result.
-  if (!cannotHoldAList(broadcastCellTypeOf(elements)))
+  if (broadcastableHoldsListsOfAnyDepth(elements))
     return broadcastableOf(elements);
   // A point is a value of the operand at any depth: an element of a list
   // can be a point too (`2·L[1]` for `L := [[(1, 2)]]` is `[(2, 4)]`), so
@@ -3540,6 +3540,33 @@ export function openTriggerBroadcastType(
     kind: 'list',
     elements: widen(cell, { kind: 'list', elements: 'any' }),
   });
+}
+
+/**
+ * Whether `broadcastable<R>` (`R | list<R>` when `R` can hold a list) holds
+ * a list of any depth and shape, so that a broadcast with the per-element
+ * result `R` over an operand of open depth can be typed `broadcastable<R>`:
+ * the innermost cell of `R`, under its list and `broadcastable` wrappers,
+ * can be a list (`unknown`, `list<unknown>`). A tuple is one cell here, as
+ * it is for broadcasting. `broadcastCellTypeOf` reads a tuple through its
+ * components, and gives `unknown` for `tuple<unknown, unknown>` and for
+ * `list<tuple<unknown, unknown>>`, but `broadcastable<tuple<unknown,
+ * unknown>>` holds only points and tensors of points, not the ragged
+ * `[(1, 1), [(2, 2)]]`, and `broadcastable<list<tuple<unknown, unknown>>>`
+ * holds at most two list levels of points (CE-1290, CE-1514).
+ */
+export function broadcastableHoldsListsOfAnyDepth(r: Type): boolean {
+  let t = resolveTypeAlias(r);
+  // The guard stops an alias that names a list of itself.
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (
+      typeof t === 'string' ||
+      (t.kind !== 'list' && t.kind !== 'broadcastable')
+    )
+      break;
+    t = resolveTypeAlias(t.elements);
+  }
+  return !cannotHoldAList(t);
 }
 
 /**

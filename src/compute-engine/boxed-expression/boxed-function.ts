@@ -155,6 +155,7 @@ import {
   broadcastableOf,
   topTypeOfTriggers,
   openTriggerBroadcastType,
+  broadcastableHoldsListsOfAnyDepth,
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
   isFixedShapeCollectionTypeOf,
@@ -15880,14 +15881,17 @@ function lambdaBroadcastType(
         ? t
         : (abstractCollectionCell(t)?.cell ?? t);
     });
-    // A result whose cells can be lists (`list<unknown>`, `any`) already
-    // holds a list of any depth in `broadcastable<R>`, and it is kept.
+    // A result that is a list whose cells can be lists (`list<unknown>`,
+    // `any`) already holds a list of any depth in `broadcastable<R>`, and it
+    // is kept. A tuple result whose components can be lists
+    // (`tuple<unknown, unknown>`) is not such a result
+    // (`broadcastableHoldsListsOfAnyDepth`).
     const listOfAnyDepth = (): Type =>
       widen(perElementResult, {
         kind: 'list',
         elements: widen(perElementResult, { kind: 'list', elements: 'any' }),
       });
-    if (cannotHoldAList(broadcastCellTypeOf(perElementResult))) {
+    if (!broadcastableHoldsListsOfAnyDepth(perElementResult)) {
       if (!cannotHoldAList(perElementResult))
         return (
           tensorValuedBroadcastType(triggerTypes, perElementResult) ??

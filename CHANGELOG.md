@@ -178,6 +178,15 @@
 
 ### Resolved Issues
 
+- **A function that returns a pair, applied to a value whose type says
+  nothing about its depth, is typed with a type that holds a ragged result**
+  (CE-1290, CE-1514). With `P := a ↦ (a, a)` and `L: list<unknown>`,
+  `P(L[1])` was typed `broadcastable<tuple<unknown, unknown>>`, a point or a
+  tensor of points, while for `L := [[1, (1, 2), [2, 3]]]` its value is the
+  ragged `[(1, 1), ((1, 2), (1, 2)), [(2, 2), (3, 3)]]`. It is now typed
+  `list<list<any> | tuple<unknown, unknown>> | tuple<unknown, unknown>`. The
+  same holds for such a function applied to a symbol declared `any`.
+
 - **A loop that writes the elements of a list of more than 10,000 elements
   gives its value** (CE-1796). With
   `let fb: list<integer> = [0 for k in 1..20000]`, the loop
