@@ -1705,6 +1705,23 @@ export class ComputeEngine implements IComputeEngine {
   workers: KernelPool | undefined = undefined;
 
   /**
+   * The permission to allocate the storage of a mutable array, asked once
+   * by `ArrayFrom` when the count of cells is known and before the engine
+   * allocates the storage. `bytesPerCell` is the size of one cell: 1, 2, 4
+   * or 8 for a machine cell, 4 for a tuple cell, 8 for an expression cell.
+   * A result of `false`, an exception thrown by the function, and a failure
+   * of the JavaScript allocation give the error `array-allocation-refused`.
+   * It is a permission: the engine reports no release. It is not called for
+   * the storage of an array that the host gives. With no function, every
+   * allocation is permitted.
+   *
+   * @experimental
+   */
+  arrayAllocation:
+    | undefined
+    | ((count: number, bytesPerCell: number) => boolean) = undefined;
+
+  /**
    * Return symbol tables suitable for the specified categories, or `"all"`
    * for all categories (`"arithmetic"`, `"algebra"`, etc...).
    *

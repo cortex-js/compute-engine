@@ -27,7 +27,10 @@ import {
   resultOverRunLocals,
 } from '../function-utils.js';
 import type { CallbackSupply } from '../boxed-expression/callback-arity.js';
-import { canonicalCallbackOperand } from './collections.js';
+import {
+  canonicalCallbackOperand,
+  immutableCellAssignmentError,
+} from './collections.js';
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
 import {
   canonicalBranch,
@@ -172,6 +175,7 @@ import {
   isAbsentSymbol,
   isDictionary,
   isFunction,
+  isMutableArray,
   isNumber,
   isSymbol,
   isString,
@@ -1036,8 +1040,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Compound assignment: `AddTo(s, e)` is `Assign(s, Add(s, e))`, and ' +
         '`AddTo(At(L, i, …), e)` is `Assign(L, ReplaceAt(L, i, …, ' +
         'Add(At(L, i, …), e)))`, with each position evaluated once, before ' +
-        '`e`. In the body of a `ParallelLoop`, it adds a contribution to an ' +
-        'accumulator, a variable declared outside the loop.',
+        '`e`. When the base of the element is an array, the sum is stored ' +
+        'in the cell. In the body of a `ParallelLoop`, it adds a ' +
+        'contribution to an accumulator, a variable declared outside the loop.',
       lazy: true,
       // A write that outlives the application, as `Assign` is.
       signature: '(expression, any) scope -> any',
@@ -1087,6 +1092,21 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           const assign = equivalentAssign(ce, target, undefined, v);
           if (!assign.isValid) return assign;
           return ce._fn('AddTo', [target.canonical, v]);
+        }
+        // An element of a computed base, `AddTo(At(Field(p, "pixels"), i),
+        // v)`: the store of a cell when the base is an array. The long form
+        // `Assign(At(…), Add(At(…), v))` gives the static errors.
+        if (isFunction(target, 'At') && target.nops >= 2) {
+          const ops = target.ops.map((x) => x.canonical);
+          const v = value.canonical;
+          const raw = (h: string, xs: Expression[]): Expression =>
+            ce._fn(h, xs, { canonical: false });
+          const assign = ce.function('Assign', [
+            raw('At', ops),
+            raw('Add', [raw('At', ops), v]),
+          ]);
+          if (!assign.isValid) return assign;
+          return ce._fn('AddTo', [ce._fn('At', ops), v]);
         }
         return null;
       },
@@ -6664,13 +6684,82 @@ function* addToSteps(
   value: Expression | undefined
 ): OperandSteps<Expression | undefined> {
   if (target === undefined || value === undefined) return undefined;
+  // An element of a computed base (`AddTo(At(Field(p, "pixels"), i), v)`):
+  // the base, then each position, are evaluated once; the base must be an
+  // array, else the error `immutable-value-assignment`, before the value is
+  // evaluated. Then the cell is read, the value evaluated, and the sum
+  // stored (`cellAssignSteps()`, `library/core.ts`).
+  if (isFunction(target, 'At') && target.nops >= 2 && !isSymbol(target.op1)) {
+    let base = yield target.op1;
+    if (base.operator === 'Error') return base;
+    const positions = target.ops.slice(1);
+    let last: Expression | undefined;
+    for (const [j, p] of positions.entries()) {
+      const v = yield p;
+      if (v.operator === 'Error') return v;
+      if (j === positions.length - 1) last = v;
+      else {
+        base = yield ce._fn('At', [base, v]);
+        if (base.operator === 'Error') return base;
+      }
+    }
+    if (!isMutableArray(base)) return immutableCellAssignmentError(ce, base);
+    const cell = yield ce._fn('At', [base, last!]);
+    const increment = yield value;
+    if (increment.operator === 'Error') return increment;
+    return yield ce._fn('Assign', [
+      ce._fn('At', [base, last!]),
+      ce._fn('Add', [cell, increment]),
+    ]);
+  }
   if (isFunction(target, 'At') && isSymbol(target.op1)) {
     const list = target.op1;
+    // The array that `list` holds now, read with no effect before the
+    // positions are evaluated: the base of a store is read first, as for
+    // `Assign` (`cellAssignSteps()`, `library/core.ts`).
+    const held = list.value;
+    const array = held !== undefined && isMutableArray(held) ? held : undefined;
     const positions: Expression[] = [];
     for (const p of target.ops.slice(1)) {
       const v = yield p;
       if (v.operator === 'Error') return v;
       positions.push(v);
+    }
+    // The store of a cell: the base of the cell (the array that `list`
+    // holds, read above, or `At(list, p1, …, p(k−1))`) is read once, before
+    // the increment. When it is an array, the cell is read, the increment
+    // evaluated, and the sum stored in that array at the last position, so
+    // an increment that replaces the base (`a[1, 1] += do { a[1] = b; 2 }`)
+    // does not move the store. A list keeps the element write below. The
+    // name is evaluated, and the bases after the first are read, only when
+    // the type of `list` lets one of them be an array: a name whose type
+    // proves a list takes the path below with no other read, and a name
+    // that holds an expression whose value is an array (a host that
+    // assigned it a symbol) stores to that array.
+    if (
+      array !== undefined ||
+      typePathMayMeetArray(list.type.type, positions.length)
+    ) {
+      let base = array ?? (yield list);
+      let metArray = isMutableArray(base);
+      for (const p of positions.slice(0, -1)) {
+        base = yield ce._fn('At', [base, p]);
+        // The error of a read through an array is the result, as for
+        // `Assign`. On a path of lists, the element write below reports it.
+        if (base.operator === 'Error' && metArray) return base;
+        if (isMutableArray(base)) metArray = true;
+      }
+      const last = positions[positions.length - 1];
+      if (isMutableArray(base)) {
+        const cell = yield ce._fn('At', [base, last]);
+        const increment = yield value;
+        if (increment.operator === 'Error') return increment;
+        return yield ce._fn('Assign', [
+          ce._fn('At', [base, last]),
+          ce._fn('Add', [cell, increment]),
+        ]);
+      }
+      if (metArray) return immutableCellAssignmentError(ce, base);
     }
     const element = yield ce._fn('At', [list, ...positions]);
     // An increment that can write a binding or an object (its effects
@@ -6715,6 +6804,21 @@ function* addToSteps(
   const increment = yield value;
   if (increment.operator === 'Error') return increment;
   return yield ce._fn('Assign', [target, ce._fn('Add', [current, increment])]);
+}
+
+/**
+ * True when a base of the cell at `depth` positions in a value of the static
+ * type `t` can be an array: the value, or an element on the path before the
+ * last position, has a type that is not provably disjoint from `array`, or
+ * an element type that is not known.
+ */
+function typePathMayMeetArray(t: Type, depth: number): boolean {
+  let level: Type | undefined = t;
+  for (let j = 0; j < depth; j++) {
+    if (level === undefined || !provablyDisjoint(level, 'array')) return true;
+    if (j < depth - 1) level = collectionElementType(level);
+  }
+  return false;
 }
 
 /**

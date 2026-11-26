@@ -22,15 +22,58 @@
 
 ### New Features
 
-- **`array<T>` is a type: the type of a mutable array.** The type parses,
-  prints and takes part in the type checks; no operator makes an array yet.
-  The cell type is invariant: an `array<integer>` is not an `array<number>`,
-  because a store of `1.5` through the wider type would break the narrower
-  one. Every `array<T>` is a subtype of bare `array`, the type of an array of
-  any cell type. An array type is not a collection type: it is not a subtype
-  of `list`, `collection` or `indexed_collection`, and it is never broadcast
-  over. `array` is now the name of a primitive type, and an array type has
-  the new kind `'array'` in a type read by its `kind`.
+- **Mutable arrays: the type `array<T>`, `ArrayFrom` and a store to a cell.**
+  An array is a sequence of cells that a program reads and writes in place.
+  It has identity: two names can hold one array, a store through one shows
+  through the other, and `==` is true only for the same array. A store costs
+  the same for every length (measured: 20,000 interpreted stores take 350 ms
+  on an array of 100 cells and 356 ms on one of 1,000,000 cells).
+
+  ```epsil
+  let a = arrayFrom(repeat(0, 5), "integer<0..255>")
+  a[2] = 7
+  a[2] += 1
+  let b = a
+  b[1] = 9
+  listFrom(a)       // [9, 8, 0, 0, 0]
+  ```
+
+  - `ArrayFrom(xs)` and `ArrayFrom(xs, type)` (`arrayFrom`) make an array
+    from a finite collection or from another array. `type` is a string that
+    names the cell type. The cell type selects the storage: a typed array of
+    JavaScript for a bounded integer type (`integer<0..255>` is a
+    `Uint8Array`), for `real` (a `Float64Array`, so `1/3` is stored as
+    `0.3333333333333333`) and for a tuple of four bytes; evaluated
+    expressions for every other type. Without `type`, a list of numbers gives
+    an `array<number>`, whose cells are expressions.
+  - `a[i]` reads a cell, `a[m..n]` and `a[[i, j]]` give a list of cells,
+    `length(a)` the count and `listFrom(a)` a list of the cells now. The
+    index is that of a list: from 1, a negative index counts from the end,
+    and a read out of range is `NaN`.
+  - `a[i] = v` and `a[i] += v` store to a cell, also through a field
+    (`p.pixels[i] = v`) and through a list of arrays (`m[i][j] = v`). A store
+    out of range is the error `out-of-range`, and a value outside the cell
+    type is `incompatible-type`. A constant that holds an array accepts a
+    store. A store has the effect `state`.
+  - `Swap(a, b)` (`swap`) exchanges the cells of two arrays of one cell type,
+    with no copy.
+  - The cell type is invariant: an `array<integer>` is not an
+    `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
+    `a + 1` are refused, and a program takes `listFrom(a)`.
+  - `ce.arrayAllocation`, a function `(count, bytesPerCell) => boolean`, is
+    called before the engine allocates the cells of a new array; when it
+    returns `false`, the construction is the error
+    `array-allocation-refused`.
+  - The MathJSON of an element write of a name whose type does not prove a
+    list (an untyped parameter, a name typed `any`) has the canonical form
+    `Assign(At(a, i), v)`; a name whose type proves a list keeps
+    `Assign(a, ReplaceAt(a, i, v))`. `Assign(At(L, i), v)` is now accepted as
+    the element write of a list variable.
+  - `s.px[2] = 9`, with `px` a list field of an object, is the error
+    `immutable-value-assignment` (CE-1797): it was "expected `symbol`, got
+    `integer`".
+  - `array` is now the name of a primitive type, and an array type has the
+    new kind `'array'` in a type read by its `kind`.
 
 - **The Epsil editor functions document each parameter, and the keys of an
   options dictionary** (CE-1812). A parameter of `epsilSignatureHelp()` has

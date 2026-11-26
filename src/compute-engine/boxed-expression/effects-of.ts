@@ -10,11 +10,18 @@ import {
   unionEffectSets,
 } from '../../common/type/effects.js';
 import {
+  collectionElementType,
   functionResult,
   signatureArms,
   signatureEffects,
 } from '../../common/type/utils.js';
-import { isObjectType, objectLayoutOfType } from '../../common/type/subtype.js';
+import {
+  isObjectType,
+  isSubtype,
+  objectLayoutOfType,
+} from '../../common/type/subtype.js';
+import { arrayCellType } from '../../common/type/array-storage.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import { overloadArms, resolveOverload } from './overload.js';
 
@@ -1376,6 +1383,25 @@ function mutationEffects(
       );
     return effects;
   }
+  // The store of a cell, `Assign(At(x, p…), v)` or `AddTo(At(x, p…), e)`.
+  if (
+    (expr.operator === 'Assign' || expr.operator === 'AddTo') &&
+    isFunction(expr.ops[0], 'At') &&
+    expr.ops[0].nops >= 2
+  ) {
+    const target = expr.ops[0];
+    const root = target.ops[0];
+    const name = sym(root);
+    let rootType: Type | undefined;
+    if (name !== undefined) {
+      const def = nodeDefinition(root, name);
+      rootType = def !== undefined && 'value' in def ? def.value.type.type : undefined;
+    } else rootType = root.type.type;
+    const labels = cellStoreLabels(rootType, target.nops - 1, name !== undefined);
+    let effects = labels.scope ? declared : subtractEffects(declared, ['scope']);
+    if (labels.state) effects = unionComputedEffects(effects, ['state']);
+    return effects;
+  }
   const store = propertyStoreTarget(expr);
   if (store === undefined) return declared;
   // A store is not a binding write, so `scope` is REPLACED rather than joined:
@@ -1407,6 +1433,65 @@ function mutationEffects(
       protocolAccessorEffects(expr.engine, store.name, 'set', store.protocol)
     );
   return effects;
+}
+
+/**
+ * The static type of the name `name` of the canonical symbol `node`, from
+ * the definition of the scope that the node was boxed in
+ * (`homeResolution()`): the type of a local or a parameter of a function
+ * literal, as `mutationEffects()` reads it for the store of a cell. No read
+ * is recorded. `undefined` when the node records no value definition.
+ */
+export function homeValueType(node: Expression, name: string): Type | undefined {
+  const def = homeResolution(node, name);
+  if (def === NO_HOME || def === undefined || !('value' in def)) return undefined;
+  return def.value.type.type;
+}
+
+/**
+ * The labels of the store of a cell, `Assign(At(x, p1, …, pk), v)` or
+ * `AddTo(At(x, p1, …, pk), e)`, with `rootType` the static type of `x`
+ * (`undefined` when it is not known), `depth` the number of positions `k`,
+ * and `rootIsName` true when `x` is a name. The one rule of both effect
+ * channels (`Walker` in `effects-inference.ts` decides the static one).
+ *
+ * - The base is an array (`x` for `k` 1, `At(x, p1, …, p(k−1))` otherwise):
+ *   `state`, and not `scope`, since no binding is written.
+ * - `x` is a name and the types prove that every base on the path is a list
+ *   (an indexed collection): `scope`, the element write of a list variable.
+ * - Otherwise the types do not decide: `state`, and `scope` when `x` is a
+ *   name, which an element write of a list rebinds (spec
+ *   `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 6, "Rules").
+ */
+export function cellStoreLabels(
+  rootType: Type | undefined,
+  depth: number,
+  rootIsName: boolean
+): { state: boolean; scope: boolean } {
+  let t = rootType;
+  let provesList = rootIsName;
+  for (let level = 0; level < depth; level++) {
+    const last = level === depth - 1;
+    if (
+      t !== undefined &&
+      t !== 'never' &&
+      t !== 'error' &&
+      isSubtype(t, 'array')
+    ) {
+      if (last) return { state: true, scope: false };
+      provesList = false;
+      t = arrayCellType(t);
+      continue;
+    }
+    if (t === undefined || !isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) {
+      provesList = false;
+      t = undefined;
+      continue;
+    }
+    if (!last) t = collectionElementType(t);
+  }
+  if (provesList) return { state: false, scope: true };
+  return { state: true, scope: rootIsName };
 }
 
 /**

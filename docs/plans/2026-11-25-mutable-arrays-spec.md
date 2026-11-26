@@ -57,8 +57,10 @@ of each.
 - An array type is disjoint from `list`, `tuple`, `record`, `dictionary`,
   `object`, `collection` and `indexed_collection`. An array is not a
   collection in this version (decision U4): the operators of sections 4 to 6
-  read and write it, and every other operator refuses it with
-  `incompatible-type`. A program that needs a collection takes `ListFrom(a)`.
+  read and write it. Every other operator gives no value for it: it refuses
+  it with `incompatible-type` where its signature states a collection or a
+  number, and otherwise leaves the expression unevaluated. A program that
+  needs a collection takes `ListFrom(a)`.
 - An array is never broadcast over: `a + 1` is `incompatible-type`.
 - An array has one dimension and its type states no length. A grid is
   arithmetic on the index, written by the program (`(y - 1) * w + x`).
@@ -161,19 +163,30 @@ literal and no variadic constructor (Appendix B, "Construction").
   leaves `ArrayFrom` unevaluated. A source with no element gives an array of
   no cell. The count of `Repeat(v, n)` is the count that `ListFrom` reads.
 - `type` is a string literal that names the cell type. An operand that is
-  not a string literal, or a string that is not a type, is the error that
-  `Typed` gives for such a type.
-- Without `type`, the cell type is the element type of the type that
-  `let L = xs` gives `L` (`docs/TYPE-SYSTEM.md`, "Initialization-defined
-  Program and Block contracts"), and `any` when that type states no element
-  type (an empty list, a list of two kinds of elements with no common type).
+  not a string literal, or a string that is not a type, is the error
+  `invalid-type-declaration`, as for `Declare` (`Typed` gives no error for
+  such a string).
+- Without `type`, the cell type comes from the static type of `xs`, not
+  from its value, so that the type of the expression is the type of the
+  array: it is the element type of the type that `let L = xs` gives `L`
+  (`docs/TYPE-SYSTEM.md`, "Initialization-defined Program and Block
+  contracts"), and `any` when that type states no element type (an empty
+  list, a list of two kinds of elements with no common type, an untyped
+  parameter).
   A list of numbers gives `number`, so `ArrayFrom([0, 0])` is an
   `array<number>` of expression cells: a program gets machine cells only
-  where it names them (`arrayFrom(repeat(0, n), "integer<0..255>")`). With an
-  array as `xs` and no `type`, the cell type is that of `xs`.
+  where it names them (`arrayFrom(repeat(0, n), "integer<0..255>")`). With
+  `xs` of an array type and no `type`, the cell type is that of `xs`.
+- A source that is a name of an array type with no value yet leaves
+  `ArrayFrom` unevaluated, and so does `ListFrom`.
 - Each element is checked and converted as the value of a store is. One
   element that fails makes the construction an error, and no array is made.
-- `ArrayFrom(Repeat(v, n), type)` fills the storage and builds no list.
+- `ArrayFrom(Repeat(v, n), type)` with `n` above `ce.maxCollectionSize`
+  (10,000 by default) fills the storage and builds no list: `Repeat` stays
+  unevaluated above that count, and the construction reads `v` and `n` from
+  it. Up to that count, `Repeat` gives its list first, as for every other
+  operator. The source is an ordinary operand: it is evaluated before the
+  construction, also under `evaluateAsync`.
 - Each evaluation makes a new array. The construction has the effect `state`.
 - When the count is known and before the storage is allocated, the
   allocation function of the host (section 9) is called once. When it
@@ -199,7 +212,10 @@ type once with a type alias (`type alias Byte = integer<0..255>`).
 The index is that of a list: from 1, and a negative index counts from the
 end. An index that is 0, not an integer or out of range gives what `At` gives
 for a list of that element type (`NaN` for a number cell). A list read out of
-range is `NaN` today, not an error (probed at the commit above).
+range is `NaN` today, not an error (probed at the commit above). The static
+type of a read is that of the same read of a list of the cell type: it
+carries the absence value where a list read does. `Length` and every read
+record a dependency on the version of the array, also a read of no cell.
 
 `At(a, p1, …, pk)` is `At(…At(a, p1)…, pk)`: one index at each step, each
 step by the rule of its base (an array, a list, a tuple).
@@ -259,8 +275,9 @@ already read as "the element write of `a`" by the interpreter
 (`docs/COMPILATION-MODEL.md`, "List updates"). Its canonical form depends on
 the static type of `a`, and of `At(a, p1, …, p(k−1))` when `k` is 2 or more:
 
-- The types prove that every base on the path is a list: the canonical form
-  is the element-write form, as today.
+- The types prove that every base on the path is an indexed collection (a
+  list, and also a tuple or a string, which keep the write that they have
+  today): the canonical form is the element-write form, as today.
 - Otherwise (a base is an array, or its type does not decide: an untyped
   parameter, `any`, a union): the canonical form is
   `Assign(At(a, p1, …, pk), v)`.
@@ -809,9 +826,9 @@ before each host call (the state event), at the same place.
 section 6. The MathJSON that the parser writes for a list write does not
 change, and the user's decision of 2026-11-06 on that form stands. The
 canonical form changes for one case: an element write of a name whose type
-does not prove a list (an untyped parameter) becomes `Assign(At(…), v)`. The
-number of tests and snapshots that this changes is not measured; stage 2
-measures it first. Alternative (a) of the ruling list: the parser gives
+does not prove a list (an untyped parameter) becomes `Assign(At(…), v)`.
+Measured in stage 2b with the full suite: 4 tests changed (they pinned the
+canonical form or the refusal of an `At` target) and no snapshot. Alternative (a) of the ruling list: the parser gives
 `Assign(At(a, i), v)` for every target; the element-write form is read in 19
 source files and named in 19 test files (counted with `grep` at the commit
 above). Alternative (b): a store only through a field or a method.
@@ -986,8 +1003,11 @@ interpreter and compiled JavaScript.
    the interpreter.
 6. **The forms of a store.** `a[i] = v` of a name declared an array has the
    canonical form `Assign(At(a, i), v)` and the effect `state`. In a function
-   with an untyped parameter, `a[i] = v` works for a list argument and for an
-   array argument, and has the effects `scope` and `state`. `p.pixels[i] += v`
+   with an untyped parameter, `a[i] = v` stores for an array argument and has
+   the effects `scope` and `state`; a list argument is mapped over, as it is
+   today for every function with an untyped parameter. A local declared
+   `any` that holds a list keeps its element write, and one that holds an
+   array stores. `p.pixels[i] += v`
    parses and stores. `m[i][j] = v` with `m` a list of arrays stores to
    `m[i]`. `s.px[2] = 9` with `px` a list field, and `a[i][j] = v` with `a`
    an `array<list<integer>>`, are `immutable-value-assignment`.

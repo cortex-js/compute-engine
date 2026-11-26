@@ -24,8 +24,13 @@ describe('a block local declared any', () => {
     const ce = new ComputeEngine();
     const expr = ce.box(block(['Declare', 'xs', "'any'"]) as any);
     expect(expr.type.toString()).toBe('any');
+    // An element write of a name typed `any` is the store of a cell
+    // `Assign(At(xs, 2), "z")`, which is the element write of the list
+    // when `xs` holds one (`docs/plans/2026-11-25-mutable-arrays-spec.md`,
+    // section 6).
     const update = expr.ops![1];
-    expect(update.ops![1].ops![0].type.toString()).toBe('any');
+    expect(update.ops![0].operator).toBe('At');
+    expect(update.ops![0].ops![0].type.toString()).toBe('any');
     const value = expr.evaluate();
     expect(value.toString()).toBe('["a","z","c"]');
     expect(value.type.matches(expr.type)).toBe(true);

@@ -149,6 +149,7 @@ import { interval, literalIntervalEndpoints } from '../numerics/interval.js';
 import {
   fieldAssignmentVerdict,
   fieldStoreRefusal,
+  immutableCellAssignmentError,
   objectLayoutOwnsField,
   objectFieldStoreTarget,
   storeObjectField,
@@ -230,7 +231,10 @@ import type {
 import type { EvaluateHandlerOptions } from '../types-definitions.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import type { EffectHandlers } from '../types-effects.js';
-import type { FunctionInterface } from '../types-expression.js';
+import type {
+  ArrayInterface,
+  FunctionInterface,
+} from '../types-expression.js';
 import type {
   Type,
   TypeParameter,
@@ -405,6 +409,7 @@ import {
   isMissingValue,
   isAbsentSymbol,
   hasInferredType,
+  isMutableArray,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -8223,6 +8228,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // same order the unqualified spelling uses.
         if (isFunction(lhs, 'ProtocolProperty')) return ce._fn('Assign', args);
 
+        // A STORE OF A CELL — `p.pixels[i] = v`, `Assign(At(a, i), v)`: the
+        // store when the base evaluates to an array (`cellAssignSteps()`).
+        if (isFunction(lhs, 'At') && lhs.nops >= 2)
+          return canonicalCellAssign(ce, lhs.ops[0], lhs.ops.slice(1), args[1]);
+
         // A PROPERTY STORE — `p.age = 43`. Assignment through a `Field` target
         // is a store into a mutable object and is legal on nothing else
         // (Appendix B, "Assigning to a property"), so a `Field` LHS never
@@ -8303,6 +8313,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             (def !== undefined && isValueDef(def) ? def.value : undefined);
           if (target !== undefined) markAssignedLocal(target);
         }
+        // The ELEMENT WRITE `a[i] = v`, `Assign(a, ReplaceAt(a, i, v))`, of
+        // a name whose types let a base on the path be an array (an untyped
+        // parameter, `any`, a union with an array, an array) has the
+        // canonical form `Assign(At(a, i), v)`, so that a name that can hold
+        // an array is never given a list type by `ReplaceAt` (spec
+        // `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 6, decision
+        // C1). A nested `ReplaceAt(ReplaceAt(a, 1, x), 2, y)` keeps its form,
+        // and so does the write of a name whose type is disjoint from `array`
+        // (a list, a dictionary, a record, a number).
+        if (
+          symbolName !== undefined &&
+          isFunction(args[1], 'ReplaceAt') &&
+          args[1].nops >= 3 &&
+          sym(args[1].op1) === symbolName &&
+          elementPathMayMeetArray(ce, symbolName, args[1].nops - 2)
+        )
+          return canonicalCellAssign(
+            ce,
+            symbol,
+            args[1].ops.slice(1, -1),
+            args[1].ops[args[1].nops - 1]
+          );
         // A function value is checked against the type of the local BEFORE
         // the retype below writes the type `function` on the local:
         // `Block(Assign(a, 1), Assign(a, Function(x, x)), a)` is a static
@@ -15300,6 +15332,16 @@ function* assignSteps(
       .evaluate({ numericApproximation });
   }
 
+  // A store of a cell, `Assign(At(x, p…), v)` (`cellAssignSteps()`).
+  if (isFunction(op1, 'At') && op1.nops >= 2)
+    return yield* cellAssignSteps(
+      ce,
+      op1.ops[0],
+      op1.ops.slice(1),
+      op2,
+      numericApproximation
+    );
+
   if (isFunction(op1, 'Field')) {
     // The RECEIVER is evaluated exactly once, here, and the same value is
     // handed to every route tried below. A receiver is an arbitrary
@@ -15387,6 +15429,29 @@ function* assignSteps(
   // evaluated once, as any other value, and a write that failed is not
   // stored (`elementRebindingFailure()`).
   const rebinding = isElementRebinding(op2, symbolName);
+  // The element-write form `a = ReplaceAt(a, p…, v)` of a name that holds
+  // an array (a structural form, or a name whose type changed after the
+  // canonical form was made) is the store of a cell: the array that the
+  // name holds now is the root, read with no effect before anything is
+  // evaluated, and the positions and the value are evaluated once each, in
+  // that order (`cellAssignSteps()`). `a` is not rebound.
+  if (
+    rebinding &&
+    isFunction(op2, 'ReplaceAt') &&
+    op2.nops >= 3 &&
+    isSymbol(op2.op1)
+  ) {
+    const held = op2.op1.value;
+    if (held !== undefined && isMutableArray(held))
+      return yield* cellAssignSteps(
+        ce,
+        op2.op1,
+        op2.ops.slice(1, -1),
+        op2.ops[op2.nops - 1],
+        numericApproximation,
+        held
+      );
+  }
   // `c = "a"` where `c` was declared `character` — see
   // `narrowDeclaredCharacter`. The narrowed character IS the assigned
   // value, so it replaces the evaluation of the operand. The `isString`
@@ -15470,6 +15535,175 @@ function isElementRebinding(value: Expression, name: string): boolean {
     node = node.op1;
   }
   return false;
+}
+
+/**
+ * The static type of the name `name` where an assignment canonicalizes: the
+ * type of the parameter of the function literal that binds it, or of its
+ * value definition. `undefined` for a name with no value definition.
+ */
+function staticTypeOfName(ce: ComputeEngine, name: string): Type | undefined {
+  const parameter = ce._isFunctionLiteralParameter(name)
+    ? ce.symbol(name).valueDefinition
+    : undefined;
+  const def = parameter === undefined ? ce.lookupDefinition(name) : undefined;
+  const target =
+    parameter ?? (def !== undefined && isValueDef(def) ? def.value : undefined);
+  return target?.type.type;
+}
+
+/**
+ * True when a base of the element write of `name` with `depth` positions
+ * can be an array: `name`, or for `depth` 2 or more an element of an
+ * indexed collection on the path, has a type that is not provably disjoint
+ * from `array` (an untyped name, `any`, a union with an array, an array). A
+ * base whose type is disjoint from `array` and is not an indexed collection
+ * (a dictionary, a record, an object, a number) ends the path: the write
+ * keeps the element-write form `Assign(x, ReplaceAt(x, …))`, with the static
+ * error that `ReplaceAt` gives it.
+ */
+function elementPathMayMeetArray(
+  ce: ComputeEngine,
+  name: string,
+  depth: number
+): boolean {
+  let t = staticTypeOfName(ce, name);
+  for (let level = 0; level < depth; level++) {
+    if (t === undefined || !provablyDisjoint(t, 'array')) return true;
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+    if (level < depth - 1) t = collectionElementType(t);
+  }
+  return false;
+}
+
+/**
+ * The canonical form of `Assign(At(x, p1, …, pk), value)`, the store of a
+ * cell (`cellAssignSteps()`), with `x` (`root`), the positions and `value`
+ * as written.
+ *
+ * With `x` a name: an assignment to a name that no scope declares is the
+ * static error `assignment-to-undeclared-variable`, as for `x = v`, and when
+ * no base on the path can be an array (`elementPathMayMeetArray()`), the
+ * canonical form is the element write `Assign(x, ReplaceAt(x, p1, …, pk,
+ * value))`: of a list variable when the types prove that every base is a
+ * list, so that one form of a list write reaches the static checks, the
+ * effects and the compiler, and otherwise with the static error of that form
+ * (`d["x"] = 5` with `d` a dictionary).
+ */
+function canonicalCellAssign(
+  ce: ComputeEngine,
+  root: Expression,
+  positions: ReadonlyArray<Expression>,
+  value: Expression
+): Expression {
+  const name = sym(root);
+  if (name !== undefined) {
+    if (
+      name !== 'Nothing' &&
+      isInBodyOrBranch() &&
+      !isDeclaredForAssignment(ce, name) &&
+      !ce._isShadowedParameter(name)
+    )
+      return ce.error(['assignment-to-undeclared-variable', name]);
+    if (!elementPathMayMeetArray(ce, name, positions.length))
+      return ce.function('Assign', [
+        root,
+        ce._fn('ReplaceAt', [root, ...positions, value], { canonical: false }),
+      ]);
+  }
+  // The last position names one cell: a range or a list of indexes, which
+  // a read takes, is `incompatible-type` here, as for a list variable.
+  const ops = positions.map((p) => p.canonical);
+  const last = ops[ops.length - 1];
+  if (
+    last.isValid &&
+    !isString(last) &&
+    isSubtype(last.type.type, INDEXED_COLLECTION_SHAPE_TYPE)
+  )
+    ops[ops.length - 1] = ce.typeError('integer', last.type, last);
+  return ce._fn('Assign', [
+    ce.function('At', [root, ...ops]),
+    value.canonical,
+  ]);
+}
+
+/**
+ * The evaluation of `Assign(At(x, p1, …, pk), value)`, the store of a cell
+ * (spec `docs/plans/2026-11-25-mutable-arrays-spec.md`, section 6, "The base
+ * of a store"). The base is `x` when `k` is 1 and `At(x, p1, …, p(k−1))`
+ * otherwise; `x`, each position and the value are evaluated once, in that
+ * order, the value last.
+ *
+ * - The base is an array: the value is stored at `pk` (`BoxedArray._store()`),
+ *   and the value of the assignment is the value given. An index that is 0,
+ *   not an integer or out of range is the error `out-of-range`, and a value
+ *   that the cell type does not hold is `incompatible-type`.
+ * - `x` is a name and no base on the path is an array: the element write of
+ *   a list variable, `Assign(x, ReplaceAt(x, p1, …, pk, value))`, as the
+ *   element-write form evaluates, with its errors.
+ * - Otherwise: the error `immutable-value-assignment` (`s.px[2] = 9` with
+ *   `px` a list field, `a[i][j] = v` with `a` an `array<list<integer>>`).
+ *
+ * `rootValue`, when given, is the value of `x`, read by the caller, and `x`
+ * is not evaluated.
+ */
+function* cellAssignSteps(
+  ce: ComputeEngine,
+  root: Expression,
+  positions: ReadonlyArray<Expression>,
+  value: Expression,
+  numericApproximation: boolean | undefined,
+  rootValue?: Expression
+): OperandSteps<Expression | undefined> {
+  const k = positions.length;
+  let base = rootValue ?? (yield root);
+  if (base.operator === 'Error') return base;
+  let metArray = isMutableArray(base);
+  const indexes: Expression[] = [];
+  for (let j = 0; j < k; j++) {
+    const index = yield positions[j];
+    if (index.operator === 'Error') return index;
+    indexes.push(index);
+    if (j === k - 1) break;
+    base = yield ce._fn('At', [base, index]);
+    if (base.operator === 'Error') return base;
+    if (isMutableArray(base)) metArray = true;
+  }
+  if (isMutableArray(base))
+    return storeCell(ce, base, indexes[k - 1], assignedValue(ce, yield value));
+  if (isSymbol(root) && !metArray)
+    return yield* assignSteps(
+      ce,
+      root,
+      ce._fn('ReplaceAt', [root, ...indexes, value]),
+      numericApproximation
+    );
+  return immutableCellAssignmentError(ce, base);
+}
+
+/**
+ * The store of the evaluated value `v` in the cell at the evaluated `index`
+ * of the array `base` (`cellAssignSteps()`): the value given, or the error of
+ * the value, of an index that names no cell, or of a value that the cell type
+ * does not hold.
+ */
+function storeCell(
+  ce: ComputeEngine,
+  base: Expression & ArrayInterface,
+  index: Expression,
+  v: Expression
+): Expression {
+  if (!v.isValid) return v;
+  if (index.isCollection) return ce.typeError('integer', index.type, index);
+  if (!isNumber(index) || index.im !== 0)
+    return ce.error([
+      'out-of-range',
+      base.count === 0
+        ? 'an index of a non-empty array'
+        : `an index in 1..${base.count} or -${base.count}..-1`,
+      index.toString(),
+    ]);
+  return base._store(index.re, v) ?? v;
 }
 
 /**
