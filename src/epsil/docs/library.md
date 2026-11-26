@@ -207,12 +207,12 @@ The [Logic reference](/epsil/reference/logic/) has the full description and the 
 | `existsUnique` | `ExistsUnique` | `(value, boolean) -> boolean` | Unique existential quantifier (there exists exactly one value satisfying the predicate). |
 | — | `False` | constant `boolean` | The boolean truth value false. |
 | `forAll` | `ForAll` | `(value, boolean) -> boolean` | Universal quantifier (for all): true when the predicate holds for every value. |
-| `implies` | `Implies` | `(boolean, boolean) -> boolean` | Logical implication: false only when the antecedent is true and the consequent is false. |
-| `isSatisfiable` | `IsSatisfiable` | `(boolean) -> boolean` | Check satisfiability using brute-force enumeration. |
-| `isTautology` | `IsTautology` | `(boolean) -> boolean` | Check if expression is a tautology using brute-force enumeration. |
+| `implies` | `Implies` | `(antecedent: boolean, consequent: boolean) -> boolean` | Logical implication: false only when the antecedent is true and the consequent is false. |
+| `isSatisfiable` | `IsSatisfiable` | `(boolean) -> boolean` | Return `True` when some assignment of truth values to the variables of a boolean expression makes it true, `False` otherwise. |
+| `isTautology` | `IsTautology` | `(boolean) -> boolean` | Return `True` when a boolean expression is true for every assignment of truth values to its variables, `False` otherwise. |
 | `kroneckerDelta` | `KroneckerDelta` | `(value+) -> integer` | Return 1 if the arguments are equal, 0 otherwise. |
-| `minimalCNF` | `MinimalCNF` | `(boolean) -> boolean` | Convert to minimal CNF using Quine-McCluskey. |
-| `minimalDNF` | `MinimalDNF` | `(boolean) -> boolean` | Convert to minimal DNF using Quine-McCluskey. |
+| `minimalCNF` | `MinimalCNF` | `(boolean) -> boolean` | Return a conjunctive normal form (CNF) of a boolean expression built from its prime implicates: an AND of ORs, usually with few clauses. |
+| `minimalDNF` | `MinimalDNF` | `(boolean) -> boolean` | Return a disjunctive normal form (DNF) of a boolean expression built from its prime implicants: an OR of ANDs, usually with few terms. |
 | `nand` | `Nand` | `(boolean+) -> boolean` | Logical NAND: the negation of AND (n-ary). |
 | `nor` | `Nor` | `(boolean+) -> boolean` | Logical NOR: the negation of OR (n-ary). |
 | — | `Not` | `(boolean) -> boolean` | Logical negation (NOT). |
@@ -220,12 +220,12 @@ The [Logic reference](/epsil/reference/logic/) has the full description and the 
 | `notForAll` | `NotForAll` | `(value, boolean) -> boolean` | Negated universal quantifier (not for all): true when the predicate fails for at least one value. |
 | — | `Or` | `(boolean+) -> boolean` | Logical disjunction (OR): true when at least one operand is true. |
 | — | `Predicate` | `(symbol, value+) -> boolean` | Apply a predicate to arguments, returning a boolean |
-| `primeImplicants` | `PrimeImplicants` | `(boolean) -> list` | Find all prime implicants using Quine-McCluskey. |
-| `primeImplicates` | `PrimeImplicates` | `(boolean) -> list` | Find all prime implicates using Quine-McCluskey. |
+| `primeImplicants` | `PrimeImplicants` | `(boolean) -> list` | Return the list of the prime implicants of a boolean expression: the minimal conjunctions of literals that imply it. |
+| `primeImplicates` | `PrimeImplicates` | `(boolean) -> list` | Return the list of the prime implicates of a boolean expression: the minimal disjunctions of literals that it implies. |
 | `toCNF` | `ToCNF` | `(boolean) -> boolean` | Convert a boolean expression to conjunctive normal form (CNF), an AND of ORs. |
 | `toDNF` | `ToDNF` | `(boolean) -> boolean` | Convert a boolean expression to disjunctive normal form (DNF), an OR of ANDs. |
 | — | `True` | constant `boolean` | The boolean truth value true. |
-| `truthTable` | `TruthTable` | `(boolean) -> list` | Generate truth table for expression. |
+| `truthTable` | `TruthTable` | `(boolean) -> list` | Return the truth table of a boolean expression, as a list of rows. |
 | `xor` | `Xor` | `(boolean+) -> boolean` | Exclusive or: true when an odd number of operands are true |
 
 ## Collections

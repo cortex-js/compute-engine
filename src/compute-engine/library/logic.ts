@@ -8,6 +8,7 @@ import type {
   Scope,
   EvaluateHandlerOptions,
   EvaluateOptions,
+  ParameterDocumentation,
 } from '../global-types.js';
 import {
   acEquivalentBoolean,
@@ -65,6 +66,19 @@ import {
  * (`docs/SCOPING-MODEL.md` stage 8).
  */
 const QUANTIFIER_OPERANDS = operandRolesFrom([CLAUSE_ROLE], RAW_ROLE);
+
+/** The documentation of the two parameters of a quantifier. */
+const QUANTIFIER_PARAMETERS: ReadonlyArray<ParameterDocumentation> = [
+  {
+    description:
+      'The bound variable, or an `Element` clause that gives it a domain; over a finite domain the quantifier tests each value, otherwise it stays unevaluated unless the predicate decides it.',
+    sample: 'x in [1, 2, 3]',
+  },
+  {
+    description: 'The predicate on the bound variable.',
+    sample: 'x > 0',
+  },
+];
 
 /**
  * The quantifiers are `lazy`, so their operands arrive RAW — unbound and
@@ -599,6 +613,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateNot,
   },
   Equivalent: {
+    examples: ['Equivalent(True, False)', 'Equivalent(p, p)'],
     type: (ops, context) =>
       BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
@@ -607,6 +622,10 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     broadcastable: true,
     complexity: 10200,
     signature: '(boolean, boolean) -> boolean',
+    parameters: [
+      { description: 'The first proposition.', sample: 'x > 0' },
+      { description: 'The second proposition.', sample: 'x >= 1' },
+    ],
     // As for `And`/`Or`/`Not`: a possibly-absent operand (`boolean |
     // missing`) validates through the strip-before-validate gate, and an
     // absent operand reads as `False` (see `evaluateEquivalent`).
@@ -629,6 +648,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateEquivalent,
   },
   Implies: {
+    examples: ['Implies(True, False)', 'Implies(False, x)'],
     type: (ops, context) =>
       BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
@@ -644,7 +664,18 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     lazy: true,
     invokes: false,
     complexity: 10200,
-    signature: '(boolean, boolean) -> boolean',
+    signature: '(antecedent: boolean, consequent: boolean) -> boolean',
+    parameters: {
+      antecedent: {
+        description:
+          'The condition; when it is `False`, the result is `True` and the consequent is not evaluated.',
+        sample: 'x > 1',
+      },
+      consequent: {
+        description: 'The proposition that must hold when the antecedent does.',
+        sample: 'x > 0',
+      },
+    },
     // Selects among its operands, so an error in an operand it does not
     // choose does not bubble (`docs/ERROR-MODEL.md` §3).
     selectsOperands: true,
@@ -657,6 +688,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     ),
   },
   Xor: {
+    examples: ['Xor(True, False)', 'Xor(True, False, True)'],
     type: (ops, context) =>
       BoxedType.forResult(
         connectiveType('Xor', ops),
@@ -669,6 +701,12 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     commutative: true,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    parameters: [
+      {
+        description: 'A proposition; an absent operand reads as `False`.',
+        sample: 'x > 0',
+      },
+    ],
     // As for `And`/`Or`/`Not`: a possibly-absent operand (`boolean |
     // missing`) validates through the strip-before-validate gate, and an
     // absent operand reads as `False` (see `evaluateXor`).
@@ -676,6 +714,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluate: evaluateXor,
   },
   Nand: {
+    examples: ['Nand(True, True)', 'Nand(True, False)'],
     type: (ops, context) =>
       BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
@@ -693,6 +732,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    parameters: [
+      {
+        description:
+          'A proposition; the operands after the first one that is `False` are not evaluated.',
+        sample: 'x > 0',
+      },
+    ],
     // Selects among its operands, so an error in an operand it does not
     // choose does not bubble (`docs/ERROR-MODEL.md` §3).
     selectsOperands: true,
@@ -701,6 +747,7 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     evaluateAsync: evaluateShortCircuitAsync('Nand', decideNand, evaluateNand),
   },
   Nor: {
+    examples: ['Nor(False, False)', 'Nor(False, True)'],
     type: (ops, context) =>
       BoxedType.forResult('boolean', context.engine._typeResolver),
     description:
@@ -716,6 +763,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 10200,
     signature: '(boolean+) -> boolean',
+    parameters: [
+      {
+        description:
+          'A proposition; the operands after the first one that is `True` are not evaluated.',
+        sample: 'x > 0',
+      },
+    ],
     // Selects among its operands, so an error in an operand it does not
     // choose does not bubble (`docs/ERROR-MODEL.md` §3).
     selectsOperands: true,
@@ -729,18 +783,22 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   // - a symbol (e.g., "x") for symbolic quantification
   // - an Element expression (e.g., ["Element", "x", ["Set", 1, 2, 3]]) for finite domain evaluation
   Exists: {
+    examples: ['Exists(Element(x, [1, 2, 3]), x > 2)'],
     description:
       'Existential quantifier (there exists): true when the predicate holds for at least one value.',
     signature: '(value, boolean) -> boolean',
+    parameters: QUANTIFIER_PARAMETERS,
     lazy: true,
     operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('Exists'),
     evaluate: evaluateExists,
   },
   NotExists: {
+    examples: ['NotExists(Element(x, [1, 2, 3]), x > 5)'],
     description:
       'Negated existential quantifier (there does not exist): true when the predicate holds for no value.',
     signature: '(value, boolean) -> boolean',
+    parameters: QUANTIFIER_PARAMETERS,
     lazy: true,
     operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('NotExists'),
@@ -754,27 +812,39 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
     },
   },
   ExistsUnique: {
+    examples: [
+      'ExistsUnique(Element(x, [1, 2, 3]), x > 2)',
+      'ExistsUnique(Element(x, [1, 2, 3]), x > 1)',
+    ],
     description:
       'Unique existential quantifier (there exists exactly one value satisfying the predicate).',
     signature: '(value, boolean) -> boolean',
+    parameters: QUANTIFIER_PARAMETERS,
     lazy: true,
     operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('ExistsUnique'),
     evaluate: evaluateExistsUnique,
   },
   ForAll: {
+    examples: [
+      'ForAll(Element(x, [1, 2, 3]), x > 0)',
+      'ForAll(Element(n, Range(1, 10)), n^2 >= n)',
+    ],
     description:
       'Universal quantifier (for all): true when the predicate holds for every value.',
     signature: '(value, boolean) -> boolean',
+    parameters: QUANTIFIER_PARAMETERS,
     lazy: true,
     operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('ForAll'),
     evaluate: evaluateForAll,
   },
   NotForAll: {
+    examples: ['NotForAll(Element(x, [1, 2, 3]), x > 1)'],
     description:
       'Negated universal quantifier (not for all): true when the predicate fails for at least one value.',
     signature: '(value, boolean) -> boolean',
+    parameters: QUANTIFIER_PARAMETERS,
     lazy: true,
     operands: QUANTIFIER_OPERANDS,
     canonical: canonicalQuantifier('NotForAll'),
@@ -809,10 +879,18 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
   },
 
   KroneckerDelta: {
+    examples: ['KroneckerDelta(2, 2)', 'KroneckerDelta(2, 3)'],
     description:
       'Return 1 if the arguments are equal, 0 otherwise. With a single ' +
       'argument n, this is δ_{n,0}: 1 if n = 0, 0 otherwise.',
     signature: '(value+) -> integer',
+    parameters: [
+      {
+        description:
+          'A value compared with the others; the result stays unevaluated when the difference of two values is not a constant.',
+        sample: '2',
+      },
+    ],
     evaluate: (args, { engine: ce }) => {
       // Three-valued equality of two arguments: 1 if equal, 0 if their
       // difference is a non-zero *constant*, and symbolic if the difference
@@ -857,9 +935,17 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
 
   // Iverson bracket
   Boole: {
+    examples: ['Boole(3 > 2)', 'Boole([True, False, True])'],
     description:
       'Return 1 if the argument is true, 0 otherwise. Also known as the Iverson bracket',
     signature: '(boolean) -> integer',
+    parameters: [
+      {
+        description:
+          'The proposition; one that is neither `True` nor `False` leaves the result unevaluated.',
+        sample: 'x > 0',
+      },
+    ],
     // `Boole([True, False])` is `[1, 0]`: the bracket applies to each
     // element of a list of booleans. No other operator reads a boolean as a
     // number.
@@ -1118,9 +1204,16 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Example: (A ∨ B) ∧ (¬A ∨ C)
    */
   ToCNF: {
+    examples: ['ToCNF(Or(And(a, b), c))', 'ToCNF(Implies(p, q))'],
     description:
       'Convert a boolean expression to conjunctive normal form (CNF), an AND of ORs.',
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description: 'The boolean expression to convert.',
+        sample: '(a && b) || c',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return toCNF(expr.evaluate(), ce);
@@ -1135,9 +1228,16 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Example: (A ∧ B) ∨ (¬A ∧ C)
    */
   ToDNF: {
+    examples: ['ToDNF(And(Or(a, b), c))'],
     description:
       'Convert a boolean expression to disjunctive normal form (DNF), an OR of ANDs.',
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description: 'The boolean expression to convert.',
+        sample: '(a || b) && c',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return toDNF(expr.evaluate(), ce);
@@ -1155,9 +1255,22 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Expressions with 15+ variables may take noticeable time (~10ms+).
    */
   IsSatisfiable: {
-    description:
-      'Check satisfiability using brute-force enumeration. O(2^n) complexity, max 20 variables.',
+    examples: [
+      'IsSatisfiable(And(p, Not(p)))',
+      'IsSatisfiable(And(p, Or(q, Not(p))))',
+    ],
+    description: [
+      'Return `True` when some assignment of truth values to the variables of a boolean expression makes it true, `False` otherwise.',
+      'The search tries every assignment: O(2^n) for n variables, at most 20 variables.',
+    ],
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description:
+          'The boolean expression; with more than 20 variables the result stays unevaluated.',
+        sample: 'p && !q',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return isSatisfiable(expr, ce);
@@ -1175,9 +1288,19 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Expressions with 15+ variables may take noticeable time (~10ms+).
    */
   IsTautology: {
-    description:
-      'Check if expression is a tautology using brute-force enumeration. O(2^n) complexity, max 20 variables.',
+    examples: ['IsTautology(Or(p, Not(p)))', 'IsTautology(Or(p, q))'],
+    description: [
+      'Return `True` when a boolean expression is true for every assignment of truth values to its variables, `False` otherwise.',
+      'The search tries every assignment: O(2^n) for n variables, at most 20 variables.',
+    ],
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description:
+          'The boolean expression; with more than 20 variables the result stays unevaluated.',
+        sample: 'p || !p',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return isTautology(expr, ce);
@@ -1204,9 +1327,20 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    *  ["List", True, True, True]]
    */
   TruthTable: {
-    description:
-      'Generate truth table for expression. O(2^n) complexity, max 10 variables.',
+    examples: ['TruthTable(And(p, q))'],
+    description: [
+      'Return the truth table of a boolean expression, as a list of rows.',
+      'The first row holds the names of the variables and `"Result"`; each other row holds one assignment of truth values and the value of the expression.',
+      'O(2^n) rows for n variables, at most 10 variables.',
+    ],
     signature: '(boolean) -> list',
+    parameters: [
+      {
+        description:
+          'The boolean expression; with more than 10 variables the result stays unevaluated.',
+        sample: 'p && q',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       return generateTruthTable(expr, ce);
@@ -1226,9 +1360,19 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * → [A] (both AB and A¬B simplify to just A)
    */
   PrimeImplicants: {
-    description:
-      'Find all prime implicants using Quine-McCluskey. Max 12 variables.',
+    examples: ['PrimeImplicants(Or(And(a, b), And(Not(a), c), And(b, c)))'],
+    description: [
+      'Return the list of the prime implicants of a boolean expression: the minimal conjunctions of literals that imply it.',
+      'Uses the Quine-McCluskey algorithm, at most 12 variables.',
+    ],
     signature: '(boolean) -> list',
+    parameters: [
+      {
+        description:
+          'The boolean expression; with more than 12 variables the result stays unevaluated.',
+        sample: '(a && b) || (a && !b)',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       const result = findPrimeImplicants(expr, ce);
@@ -1252,9 +1396,19 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * → [A, B] (the expression implies both A and B separately)
    */
   PrimeImplicates: {
-    description:
-      'Find all prime implicates using Quine-McCluskey. Max 12 variables.',
+    examples: ['PrimeImplicates(And(Or(a, b), Or(Not(a), c)))'],
+    description: [
+      'Return the list of the prime implicates of a boolean expression: the minimal disjunctions of literals that it implies.',
+      'Uses the Quine-McCluskey algorithm, at most 12 variables.',
+    ],
     signature: '(boolean) -> list',
+    parameters: [
+      {
+        description:
+          'The boolean expression; with more than 12 variables the result stays unevaluated.',
+        sample: 'a && b',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       const result = findPrimeImplicates(expr, ce);
@@ -1269,8 +1423,9 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Convert a boolean expression to minimal Disjunctive Normal Form (DNF).
    *
    * Uses the Quine-McCluskey algorithm to find prime implicants, then
-   * selects a minimal cover. The result is a disjunction of conjunctions
-   * of literals with the fewest terms possible.
+   * selects a cover. The result is a disjunction of conjunctions
+   * of literals built from the prime implicants, usually with few terms (the
+   * cover after the essential primes is chosen greedily).
    *
    * **Performance**: O(3^n) worst case, limited to 12 variables.
    *
@@ -1279,9 +1434,19 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * → ["Or", "A", "B"] (simplified from 3 terms to 2)
    */
   MinimalDNF: {
-    description:
-      'Convert to minimal DNF using Quine-McCluskey. Max 12 variables.',
+    examples: ['MinimalDNF(Or(And(a, b), And(a, Not(b)), And(Not(a), b)))'],
+    description: [
+      'Return a disjunctive normal form (DNF) of a boolean expression built from its prime implicants: an OR of ANDs, usually with few terms.',
+      'Uses the Quine-McCluskey algorithm, at most 12 variables.',
+    ],
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description:
+          'The boolean expression to minimize; with more than 12 variables the result stays unevaluated.',
+        sample: '(a && b) || (a && !b) || (!a && b)',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       const result = minimalDNF(expr, ce);
@@ -1296,8 +1461,9 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * Convert a boolean expression to minimal Conjunctive Normal Form (CNF).
    *
    * Uses the Quine-McCluskey algorithm to find prime implicates, then
-   * selects a minimal cover. The result is a conjunction of disjunctions
-   * of literals with the fewest clauses possible.
+   * selects a cover. The result is a conjunction of disjunctions
+   * of literals built from the prime implicates, usually with few clauses (the
+   * cover after the essential primes is chosen greedily).
    *
    * **Performance**: O(3^n) worst case, limited to 12 variables.
    *
@@ -1306,9 +1472,19 @@ export const LOGIC_FUNCTION_LIBRARY: SymbolDefinitions = {
    * → A (the expression simplifies to just A)
    */
   MinimalCNF: {
-    description:
-      'Convert to minimal CNF using Quine-McCluskey. Max 12 variables.',
+    examples: ['MinimalCNF(And(Or(a, b), Or(a, Not(b))))'],
+    description: [
+      'Return a conjunctive normal form (CNF) of a boolean expression built from its prime implicates: an AND of ORs, usually with few clauses.',
+      'Uses the Quine-McCluskey algorithm, at most 12 variables.',
+    ],
     signature: '(boolean) -> boolean',
+    parameters: [
+      {
+        description:
+          'The boolean expression to minimize; with more than 12 variables the result stays unevaluated.',
+        sample: '(a || b) && (a || !b)',
+      },
+    ],
     evaluate: ([expr], { engine: ce }) => {
       if (!expr) return undefined;
       const result = minimalCNF(expr, ce);
