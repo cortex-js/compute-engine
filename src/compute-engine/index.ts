@@ -50,6 +50,8 @@ import type {
   AssignValue,
   AssumeResult,
   InferResult,
+  ArrayCells,
+  ArrayInterface,
   Expression,
   BoxedRule,
   BoxedRuleSet,
@@ -166,8 +168,10 @@ import {
 import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
 import {
+  hostArray,
   makeArray,
   type ArraySource,
+  type BoxedArray,
 } from './boxed-expression/boxed-array.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
@@ -1720,6 +1724,21 @@ export class ComputeEngine implements IComputeEngine {
   arrayAllocation:
     | undefined
     | ((count: number, bytesPerCell: number) => boolean) = undefined;
+
+  /**
+   * A function called with each array that `ArrayFrom` made, after the
+   * construction succeeded: not for a construction that failed, and not for
+   * an array that the host made with `ce.array()`. A host that limits the
+   * bytes alive holds a weak reference to each array. The engine does not
+   * catch an exception that the function throws, except a `TypeError`, a
+   * `RangeError` and a `ReferenceError`, which become the error
+   * `internal-error` of `ArrayFrom` as from the handler of any operator.
+   *
+   * @experimental
+   */
+  arrayCreated:
+    | undefined
+    | ((array: Expression & ArrayInterface) => void) = undefined;
 
   /**
    * Return symbol tables suitable for the specified categories, or `"all"`
@@ -5156,6 +5175,17 @@ export class ComputeEngine implements IComputeEngine {
     pinnedType?: BoxedType
   ): Expression {
     return makeObject(this, typeName, slots, metadata, pinnedType);
+  }
+
+  /**
+   * A new mutable array that adopts the typed array `storage` as its cells,
+   * with no pass over them and no copy. See {@link IComputeEngine.array}.
+   */
+  array(
+    storage: Exclude<ArrayCells, Expression[]>,
+    cellType?: Type | TypeString | BoxedType
+  ): BoxedArray {
+    return hostArray(this, storage, cellType);
   }
 
   /**

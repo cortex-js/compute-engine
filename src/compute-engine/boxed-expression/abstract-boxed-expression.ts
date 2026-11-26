@@ -790,6 +790,19 @@ export abstract class _BoxedExpression implements Expression {
       shorthands: defaultOptions.shorthands,
       metadata: defaultOptions.metadata,
     };
+    // The public `objects` function is asked at each object and array, by
+    // the internal hook of the walk: it first, then the display rule of a
+    // caller that passes one (`.latex`). When both are present, an
+    // expression that `objects` returns for a value wins.
+    const objects = options?.objects;
+    if (objects !== undefined) {
+      const display = (options as DisplayJsonSerializationOptions)
+        ._referenceJson;
+      (opts as DisplayJsonSerializationOptions)._referenceJson =
+        display === undefined
+          ? objects
+          : (value) => objects(value) ?? display(value);
+    }
 
     return _serializeJson(this.engine, this, opts);
   }

@@ -44,6 +44,7 @@ import type { StatementSources } from '../common/debug-hook.js';
 
 import type {
   ArrayCells,
+  ArrayInterface,
   Expression,
   ExpressionInput,
 } from './types-expression.js';
@@ -2010,6 +2011,64 @@ export interface IComputeEngine {
   arrayAllocation:
     | undefined
     | ((count: number, bytesPerCell: number) => boolean);
+
+  /**
+   * A function called with each array that `ArrayFrom` made, after the
+   * construction succeeded: not for a construction that failed, and not for
+   * an array that the host made with {@link array}. The prelude code that
+   * makes a raster gives the host no other reference to it, so a host that
+   * limits the bytes alive holds a weak reference to each array here:
+   *
+   * ```ts
+   * const alive = new Set<WeakRef<object>>();
+   * ce.arrayCreated = (array) => alive.add(new WeakRef(array));
+   * ```
+   *
+   * The engine does not catch an exception that the function throws: it
+   * propagates out of the evaluation. A `TypeError`, a `RangeError` and a
+   * `ReferenceError` are the exception: as from the handler of any
+   * operator, they become the error `internal-error` of `ArrayFrom`.
+   */
+  arrayCreated: undefined | ((array: Expression & ArrayInterface) => void);
+
+  /**
+   * A new mutable array that adopts the typed array `storage` as its cells,
+   * with no pass over the cells and no copy: `ce.array(s).cells === s`.
+   *
+   * Without `cellType`, the cell type is the full range of the storage kind:
+   * `integer<0..255>` for a `Uint8Array`, `integer<-128..127>` for an
+   * `Int8Array`, `integer<0..65535>` for a `Uint16Array`,
+   * `integer<-32768..32767>` for an `Int16Array`, `integer<0..4294967295>`
+   * for a `Uint32Array`, `integer<-2147483648..2147483647>` for an
+   * `Int32Array` and `real` for a `Float64Array`.
+   *
+   * A `cellType` must select the storage kind of `storage`. A tuple of four
+   * bytes (`type Pixel = tuple<r: Byte, g: Byte, b: Byte, a: Byte>`) takes a
+   * `Uint8Array` with four bytes for each cell, and the count is
+   * `storage.length / 4`. The bytes of an `ImageData` are shared with:
+   *
+   * ```ts
+   * const image = ce.array(new Uint8Array(data.data.buffer), 'Pixel');
+   * ```
+   *
+   * The cells are not checked: each must hold a value of the cell type (see
+   * `ArrayInterface`). `ce.arrayAllocation` and `ce.arrayCreated` are not
+   * called.
+   *
+   * Throws a `TypeError` for a value that is not a typed array, for a typed
+   * array of a kind that has no cell type (`Float32Array`, `BigInt64Array`,
+   * `BigUint64Array`, `Uint8ClampedArray`), for a view of a
+   * `SharedArrayBuffer` or of a resizable `ArrayBuffer`, for a `cellType`
+   * with expression cells or of
+   * another storage kind, and for a tuple cell type with a length that is
+   * not a multiple of 4.
+   *
+   * @experimental
+   */
+  array(
+    storage: Exclude<ArrayCells, Expression[]>,
+    cellType?: Type | TypeString | BoxedType
+  ): Expression & ArrayInterface;
 
   expr(
     expr: NumericValue | ExpressionInput,

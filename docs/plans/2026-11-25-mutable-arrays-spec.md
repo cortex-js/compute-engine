@@ -371,7 +371,9 @@ increments it at each store (section 10.5).
 - `toMathJSON()` takes an option `objects`, a function from an object or an
   array to the MathJSON written in its place, or `undefined` for the default.
   A host that sends a figure to another thread writes a reference of its own
-  there and sends the storage beside it. The values `'record'` and `'reject'`
+  there and sends the storage beside it. The function builds its MathJSON
+  itself: it does not serialize, evaluate or box an expression of the
+  engine. The values `'record'` and `'reject'`
   of Phase 3 of the objects plan are not part of this spec.
 - A display (`print`, the Epsil form of a value, the text of a result,
   `toString()`, and `.latex`, also for a value that holds the array) writes
@@ -421,8 +423,11 @@ are this spec's choice.
   `ArrayFrom` made, after the construction, from the interpreter and from
   compiled code. A host that limits the bytes alive holds a weak reference to
   each array: the prelude code that makes a raster gives the host no other
-  reference. The engine does not catch an exception that this function
-  throws.
+  reference. An exception that this function throws is an exception of
+  the operator `ArrayFrom`: the engine's rule for a handler that throws
+  applies (a `TypeError`, a `RangeError` or a `ReferenceError` becomes the
+  error `internal-error` of the construction; another exception
+  propagates).
 
 **What the host guarantees.** The engine does not check these, and the result
 is unspecified when one does not hold:
@@ -433,6 +438,9 @@ is unspecified when one does not hold:
   the cell type.
 - The host calls `noteStore()` after it writes through `cells`, before any
   code of the engine reads the array.
+- A storage keeps its length while it is the cells of an array: the host
+  does not detach or transfer its buffer. `ce.array()` and `swapCells()`
+  refuse a view of a resizable buffer.
 
 The storage that `cells` gives is valid until the array changes its length
 (section 13), or `swapCells()` or `Swap` runs. A host reads `cells` at each use and

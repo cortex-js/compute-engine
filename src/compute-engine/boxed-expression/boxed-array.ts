@@ -14,7 +14,7 @@ import type {
   Substitution,
 } from '../global-types.js';
 
-import type { Type } from '../../common/type/types.js';
+import type { Type, TypeString } from '../../common/type/types.js';
 
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -469,6 +469,55 @@ export class BoxedArray extends _BoxedExpression implements ArrayInterface {
     return true;
   }
 
+  /**
+   * After a host wrote cells through {@link cells}: what a store does after
+   * its write, once for all the writes (the version, the store epoch of the
+   * engine and one state event).
+   */
+  noteStore(): void {
+    this._beforeChange();
+    this._afterChange();
+  }
+
+  /**
+   * Take the typed array `storage`, of the storage kind and the length of
+   * the current cells, as the cells, and return the cells the array had. It
+   * counts as a store. Throws a `TypeError` for an array of expression
+   * cells, for a storage of another kind or another length, and for a view
+   * of a `SharedArrayBuffer` or of a resizable `ArrayBuffer`.
+   */
+  swapCells<S extends MachineCells>(storage: S): S {
+    const spec = this._spec;
+    if (spec.storage === 'expression')
+      throw new TypeError(
+        `swapCells(): an array<${spec.cellType.toString()}> has expression cells, which a typed array cannot hold`
+      );
+    if (!isStorageOf(storage, spec.storage))
+      throw new TypeError(
+        `swapCells(): the storage of an array<${spec.cellType.toString()}> must be ${storageName(spec.storage)}, not ${describeStorage(storage)}`
+      );
+    if (isSharedView(storage))
+      throw new TypeError(
+        `swapCells(): the storage is a view of a SharedArrayBuffer, which an array cannot take as its cells`
+      );
+    if (isResizableView(storage))
+      throw new TypeError(
+        `swapCells(): the storage is a view of a resizable ArrayBuffer, whose length can change, which an array cannot take as its cells`
+      );
+    if (storage.length !== this._cells.length)
+      throw new TypeError(
+        `swapCells(): the storage must have the length of the cells, ${this._cells.length}, not ${storage.length}`
+      );
+    this._beforeChange();
+    // The cells that the array held have the storage kind of `storage`
+    // (checked above), which is what `S` states for a host that passes a
+    // typed array and not an instance of a subclass.
+    const cells = this._cells as S;
+    this._cells = storage;
+    this._afterChange();
+    return cells;
+  }
+
   /** The overflow guard of `BoxedObject._store()`, before a write. */
   private _beforeChange(): void {
     if (this._version >= COUNTER_LIMIT) {
@@ -516,14 +565,9 @@ export function makeArray(
 
   if ('adopt' in source) {
     const cells = source.adopt;
-    if (!isStorageOf(cells, spec.storage))
-      throw new Error(
-        `The storage of an array<${cellType.toString()}> must be ${storageName(spec.storage)}`
-      );
-    if (spec.tuple && cells.length % 4 !== 0)
-      throw new Error(
-        `The storage of an array<${cellType.toString()}> must hold 4 bytes for each cell`
-      );
+    checkAdoptable(cellType, spec.storage, spec.tuple, cells, (message) => {
+      throw new TypeError(message);
+    });
     const count = spec.tuple ? cells.length / 4 : cells.length;
     return new BoxedArray(ce, spec, cells, count, type);
   }
@@ -752,25 +796,157 @@ function allocate(spec: CellSpec, count: number): ArrayCells {
 }
 
 /** Is `cells` a storage of the kind `storage`? */
-function isStorageOf(cells: ArrayCells, storage: ArrayStorage): boolean {
-  switch (storage) {
-    case 'uint8':
-      return cells instanceof Uint8Array;
-    case 'int8':
-      return cells instanceof Int8Array;
-    case 'uint16':
-      return cells instanceof Uint16Array;
-    case 'int16':
-      return cells instanceof Int16Array;
-    case 'uint32':
-      return cells instanceof Uint32Array;
-    case 'int32':
-      return cells instanceof Int32Array;
-    case 'float64':
-      return cells instanceof Float64Array;
-    case 'expression':
-      return Array.isArray(cells);
-  }
+function isStorageOf(cells: unknown, storage: ArrayStorage): boolean {
+  if (storage === 'expression') return Array.isArray(cells);
+  return machineStorageOf(cells) === storage;
+}
+
+/** The storage kind of each typed array that can be the cells of an array,
+ * by its brand (`Object.prototype.toString`). */
+const STORAGE_BRANDS: ReadonlyMap<string, ArrayStorage> = new Map([
+  ['[object Uint8Array]', 'uint8'],
+  ['[object Int8Array]', 'int8'],
+  ['[object Uint16Array]', 'uint16'],
+  ['[object Int16Array]', 'int16'],
+  ['[object Uint32Array]', 'uint32'],
+  ['[object Int32Array]', 'int32'],
+  ['[object Float64Array]', 'float64'],
+]);
+
+/**
+ * The storage kind of the typed array `x`, or `undefined` when `x` is not a
+ * typed array of a kind of the storage table. The test is the brand of `x`,
+ * not `instanceof`: a view made in another realm (an iframe, a Node `vm`
+ * context) has other constructors, and has its kind all the same.
+ */
+function machineStorageOf(x: unknown): ArrayStorage | undefined {
+  if (!ArrayBuffer.isView(x)) return undefined;
+  return STORAGE_BRANDS.get(Object.prototype.toString.call(x));
+}
+
+/**
+ * Calls `fail` with a message unless `cells` can be adopted as the cells of
+ * an `array<cellType>` whose storage kind is `storage`: a storage of that
+ * kind, with 4 bytes for each cell of a tuple cell. The rule of `ce.array()`
+ * (`hostArray()`) and of the `adopt` source of `makeArray()`.
+ */
+function checkAdoptable(
+  cellType: BoxedType,
+  storage: ArrayStorage,
+  tuple: boolean,
+  cells: ArrayCells,
+  fail: (message: string) => never
+): void {
+  if (!isStorageOf(cells, storage))
+    fail(
+      `the storage of an array<${cellType.toString()}> must be ${storageName(storage)}, not ${describeStorage(cells)}`
+    );
+  if (tuple && cells.length % 4 !== 0)
+    fail(
+      `the storage of an array<${cellType.toString()}> holds 4 bytes for each cell: its length, ${cells.length}, is not a multiple of 4`
+    );
+}
+
+/** A storage of machine cells: a typed array of a kind of the storage table
+ * (spec section 3). */
+type MachineCells = Exclude<ArrayCells, Expression[]>;
+
+/** The cell type of an array that adopts a storage of each kind when the
+ * host gives no cell type: the full range of the kind. */
+const DEFAULT_CELL_TYPES: Readonly<
+  Record<Exclude<ArrayStorage, 'expression'>, string>
+> = {
+  uint8: 'integer<0..255>',
+  int8: 'integer<-128..127>',
+  uint16: 'integer<0..65535>',
+  int16: 'integer<-32768..32767>',
+  uint32: 'integer<0..4294967295>',
+  int32: 'integer<-2147483648..2147483647>',
+  float64: 'real',
+};
+
+/**
+ * The array that `ce.array(storage, cellType)` makes: it adopts the typed
+ * array `storage` as its cells, with no pass over them and no copy (spec
+ * section 9). Without `cellType`, the cell type is the full range of the
+ * storage kind.
+ *
+ * Throws a `TypeError` for a value that is not a typed array, a typed array
+ * of a kind that the storage table does not list, a view of a
+ * `SharedArrayBuffer` or of a resizable `ArrayBuffer`, a `cellType` with
+ * expression cells or of another storage kind, and a tuple cell type with a length that is not a multiple
+ * of 4.
+ */
+export function hostArray(
+  ce: ComputeEngine,
+  storage: unknown,
+  cellType: Type | TypeString | BoxedType | undefined
+): BoxedArray {
+  const fail = (message: string): never => {
+    throw new TypeError(`ce.array(): ${message}`);
+  };
+  // The kind is read from the brand, so that a view of another realm is
+  // adopted, and refused, as one of this realm (`machineStorageOf()`).
+  const brand = Object.prototype.toString.call(storage);
+  if (!ArrayBuffer.isView(storage) || brand === '[object DataView]')
+    fail(
+      `the storage must be a Uint8Array, an Int8Array, a Uint16Array, an Int16Array, a Uint32Array, an Int32Array or a Float64Array, not ${describeStorage(storage)}`
+    );
+  const view = storage as ArrayBufferView;
+  if (brand === '[object Uint8ClampedArray]')
+    fail(
+      `a Uint8ClampedArray is not a storage of an array: pass new Uint8Array(data.buffer, data.byteOffset, data.byteLength), which shares its bytes`
+    );
+  const kind = machineStorageOf(view);
+  if (kind === undefined || kind === 'expression')
+    fail(
+      `${describeStorage(view)} is not a storage of an array: the storage is a Uint8Array, an Int8Array, a Uint16Array, an Int16Array, a Uint32Array, an Int32Array or a Float64Array`
+    );
+  if (isSharedView(view))
+    fail(
+      `the storage is a view of a SharedArrayBuffer, which an array cannot adopt`
+    );
+  if (isResizableView(view))
+    fail(
+      `the storage is a view of a resizable ArrayBuffer, whose length can change, which an array cannot adopt`
+    );
+  const cells = view as MachineCells;
+  const type = ce.type(
+    cellType ?? DEFAULT_CELL_TYPES[kind as Exclude<ArrayStorage, 'expression'>]
+  );
+  const { storage: wanted, tuple } = arrayStorageKind(type.type);
+  if (wanted === 'expression')
+    fail(
+      `the cell type ${type.toString()} has expression cells, which a typed array cannot hold`
+    );
+  checkAdoptable(type, wanted, tuple, cells, fail);
+  return makeArray(ce, type, { adopt: cells }) as BoxedArray;
+}
+
+/** Is `storage` a view of a `SharedArrayBuffer`? Read from the tag of the
+ * buffer, so that it holds where `SharedArrayBuffer` is not defined. */
+function isSharedView(storage: ArrayBufferView): boolean {
+  return (
+    Object.prototype.toString.call(storage.buffer) ===
+    '[object SharedArrayBuffer]'
+  );
+}
+
+/** Is `storage` a view of a resizable `ArrayBuffer`? A length-tracking view
+ * of one changes its length when the buffer is resized, and the count of an
+ * array is fixed. O(1). */
+function isResizableView(storage: ArrayBufferView): boolean {
+  return (storage.buffer as { resizable?: boolean }).resizable === true;
+}
+
+/** `a Float32Array`, `an Int8Array`, `a number`: the kind of `x`, for a
+ * message. */
+function describeStorage(x: unknown): string {
+  if (x === null) return 'null';
+  if (Array.isArray(x)) return 'an array of JavaScript';
+  if (typeof x !== 'object') return `a ${typeof x}`;
+  const name = (x as object).constructor?.name ?? 'object';
+  return `${/^[AEIO]/.test(name) ? 'an' : 'a'} ${name}`;
 }
 
 function storageName(storage: ArrayStorage): string {

@@ -60,10 +60,38 @@
   - The cell type is invariant: an `array<integer>` is not an
     `array<number>`. An array is not a collection: `Sum(a)`, `Map(a, f)` and
     `a + 1` are refused, and a program takes `listFrom(a)`.
+  - A host reads and writes the cells with no copy. On an array value
+    (`isMutableArray(x)`), `cells` is the storage by reference (a typed array
+    for machine cells), `count` the number of cells, `cellType` the cell type
+    and `version` a number that increases at each store. A host that wrote
+    through `cells` calls `noteStore()`. `swapCells(storage)` gives the array
+    another typed array of the same kind and length as its cells and returns
+    the one it had, so a frame computed in a second buffer is exchanged with
+    no copy.
+
+    ```ts
+    const pixels = ce.array(new Uint8Array(4 * width * height));
+    ce.assign('screen', pixels);
+    // ... the program stores to screen[i]
+    if (pixels.version !== shown) upload(pixels.cells);
+    ```
+
+    `ce.array(storage, cellType?)` adopts a typed array as the cells of a new
+    array, with no pass over them. It refuses a `Uint8ClampedArray` (pass
+    `new Uint8Array(data.buffer, data.byteOffset, data.byteLength)`), a
+    `Float32Array`, a view of a `SharedArrayBuffer` and a view of a resizable
+    buffer.
   - `ce.arrayAllocation`, a function `(count, bytesPerCell) => boolean`, is
     called before the engine allocates the cells of a new array; when it
     returns `false`, the construction is the error
-    `array-allocation-refused`.
+    `array-allocation-refused`. `ce.arrayCreated`, a function `(array) =>
+    void`, is called with each array that `ArrayFrom` made.
+  - `toMathJson({ objects })` takes a function from an object or an array to
+    the MathJSON written in its place: a host that sends a value to another
+    thread writes a reference of its own, and no cell is read. `.json` of an
+    array is `["Object", ["List", …cells], "'array<T>'"]`. A display (`print`,
+    `toString()`, `.latex`) writes an array of more than 16 cells as its type
+    and count, `array<integer<0..255>> of 64000`.
   - The MathJSON of an element write of a name whose type does not prove a
     list (an untyped parameter, a name typed `any`) has the canonical form
     `Assign(At(a, i), v)`; a name whose type proves a list keeps

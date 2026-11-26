@@ -1081,6 +1081,15 @@ function beforeArrayAllocation(
   }
 }
 
+/** Report to the host, `ce.arrayCreated` (spec section 9), the array that a
+ * construction made: nothing when `result` is the error of a construction
+ * that failed. It catches no exception that the function throws (the
+ * handler rule of the evaluation still turns a `TypeError`, a `RangeError`
+ * or a `ReferenceError` into `internal-error`). */
+function afterArrayCreated(ce: ComputeEngine, result: Expression): void {
+  if (isMutableArray(result)) ce.arrayCreated?.(result);
+}
+
 /** The size of one cell in the storage of the cell type `t`: 4 bytes for a
  * tuple cell, 8 for expression cells (spec section 9). */
 function bytesPerCell(t: Type): number {
@@ -1170,12 +1179,15 @@ function evaluateArrayFrom(
   const count = 'fill' in source ? source.count : source.elements.length;
   if (!beforeArrayAllocation(ce, count, bytesPerCell(cellType)))
     return arrayAllocationRefused(ce, count);
+  let result: Expression;
   try {
-    return ce._array(cellType, source);
+    result = ce._array(cellType, source);
   } catch (e) {
     if (e instanceof RangeError) return arrayAllocationRefused(ce, count);
     throw e;
   }
+  afterArrayCreated(ce, result);
+  return result;
 }
 
 // The index type of `AT_SIGNATURE`, reported as the expected type when an
